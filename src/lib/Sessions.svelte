@@ -1,0 +1,336 @@
+<script>
+  import { listSessions, listPanes, newSession, killSession } from './ws.js';
+
+  let { openTerminal } = $props();
+
+  let sessions = $state([]);
+  let expanded = $state({});
+  let panes = $state({});
+  let error = $state('');
+  let newName = $state('');
+
+  async function refresh() {
+    try {
+      sessions = await listSessions();
+      error = '';
+    } catch (e) {
+      error = e.message;
+    }
+  }
+
+  async function toggleSession(name) {
+    if (expanded[name]) {
+      expanded[name] = false;
+      return;
+    }
+    try {
+      panes[name] = await listPanes(name);
+      expanded[name] = true;
+    } catch (e) {
+      error = e.message;
+    }
+  }
+
+  async function createSession() {
+    if (!newName.trim()) return;
+    try {
+      await newSession(newName.trim());
+      newName = '';
+      await refresh();
+    } catch (e) {
+      error = e.message;
+    }
+  }
+
+  async function removeSession(name) {
+    try {
+      await killSession(name);
+      await refresh();
+    } catch (e) {
+      error = e.message;
+    }
+  }
+
+  refresh();
+</script>
+
+<div class="sessions">
+  <div class="header">
+    <h2>Sessions</h2>
+    <button class="refresh" onclick={refresh} aria-label="Refresh sessions">↻</button>
+  </div>
+
+  {#if error}
+    <div class="error">{error}</div>
+  {/if}
+
+  <div class="list">
+    {#each sessions as s}
+      <div class="session" class:expanded={expanded[s.name]}>
+        <div class="session-row" role="button" tabindex="0" onclick={() => toggleSession(s.name)} onkeydown={(e) => e.key === 'Enter' && toggleSession(s.name)}>
+          <div class="session-info">
+            <span class="indicator" class:attached={s.attached}></span>
+            <span class="name">{s.name}</span>
+          </div>
+          <div class="session-meta">
+            <span class="badge">{s.windows} {s.windows === 1 ? 'window' : 'windows'}</span>
+            <button class="kill" onclick={(e) => { e.stopPropagation(); removeSession(s.name); }} aria-label="Kill session">
+              <span class="kill-icon">✕</span>
+            </button>
+          </div>
+        </div>
+        {#if expanded[s.name] && panes[s.name]}
+          <div class="pane-list">
+            {#each panes[s.name] as p}
+              <button class="pane" onclick={() => openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`)}>
+                <span class="pane-id">:{p.window}.{p.pane}</span>
+                <span class="pane-cmd">{p.current_command}</span>
+                <span class="pane-size">{p.width}×{p.height}</span>
+                <span class="pane-arrow">→</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/each}
+  </div>
+
+  <div class="new-session">
+    <input type="text" bind:value={newName} placeholder="New session name…" onkeydown={(e) => e.key === 'Enter' && createSession()} />
+    <button onclick={createSession} disabled={!newName.trim()}>
+      <span>+</span>
+    </button>
+  </div>
+</div>
+
+<style>
+  .sessions {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    overflow-y: auto;
+    flex: 1;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  h2 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 700;
+    color: #e2e8f0;
+    letter-spacing: -0.5px;
+  }
+
+  .refresh {
+    width: 34px; height: 34px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: rgba(226, 232, 240, 0.5);
+    font-size: 16px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    -webkit-tap-highlight-color: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .refresh:active {
+    background: rgba(0, 212, 255, 0.1);
+    color: #00d4ff;
+    transform: rotate(90deg);
+  }
+
+  .list { display: flex; flex-direction: column; gap: 8px; }
+
+  .session {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 14px;
+    overflow: hidden;
+    transition: all 0.2s ease;
+  }
+  .session:active { transform: scale(0.99); }
+  .session.expanded {
+    border-color: rgba(0, 212, 255, 0.15);
+    box-shadow: 0 0 20px rgba(0, 212, 255, 0.05);
+  }
+
+  .session-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 14px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+
+  .session-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .indicator {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    flex-shrink: 0;
+    transition: all 0.2s ease;
+  }
+  .indicator.attached {
+    background: #00d4ff;
+    box-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
+  }
+
+  .name {
+    font-weight: 600;
+    font-size: 15px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .session-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .badge {
+    font-size: 11px;
+    font-weight: 500;
+    color: rgba(226, 232, 240, 0.35);
+    background: rgba(255, 255, 255, 0.04);
+    padding: 3px 8px;
+    border-radius: 6px;
+  }
+
+  .kill {
+    width: 26px; height: 26px;
+    background: transparent;
+    border: none;
+    color: rgba(226, 232, 240, 0.2);
+    cursor: pointer;
+    border-radius: 7px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .kill:active {
+    background: rgba(255, 80, 80, 0.15);
+    color: #ff5050;
+  }
+  .kill-icon { font-size: 11px; }
+
+  .pane-list {
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+  }
+
+  .pane {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 12px 14px 12px 32px;
+    background: none;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    color: #e2e8f0;
+    cursor: pointer;
+    text-align: left;
+    font-size: 13px;
+    transition: background 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .pane:active { background: rgba(0, 212, 255, 0.06); }
+  .pane:last-child { border-bottom: none; }
+
+  .pane-id {
+    font-family: 'SF Mono', Menlo, monospace;
+    color: #00d4ff;
+    font-weight: 500;
+    font-size: 12px;
+    min-width: 36px;
+  }
+  .pane-cmd {
+    color: rgba(226, 232, 240, 0.45);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pane-size {
+    font-family: 'SF Mono', Menlo, monospace;
+    color: rgba(226, 232, 240, 0.2);
+    font-size: 11px;
+  }
+  .pane-arrow {
+    color: rgba(0, 212, 255, 0.4);
+    font-size: 12px;
+  }
+
+  .new-session {
+    display: flex;
+    gap: 8px;
+  }
+  .new-session input {
+    flex: 1;
+    padding: 11px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    color: #e2e8f0;
+    font-size: 14px;
+    outline: none;
+    transition: all 0.2s ease;
+    -webkit-appearance: none;
+  }
+  .new-session input:focus {
+    border-color: rgba(0, 212, 255, 0.3);
+    box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.06);
+  }
+  .new-session input::placeholder { color: rgba(226, 232, 240, 0.2); }
+
+  .new-session button {
+    width: 44px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    background: rgba(0, 212, 255, 0.08);
+    color: #00d4ff;
+    font-size: 20px;
+    font-weight: 300;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    -webkit-tap-highlight-color: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .new-session button:active:not(:disabled) {
+    background: rgba(0, 212, 255, 0.15);
+    transform: scale(0.95);
+  }
+  .new-session button:disabled { opacity: 0.3; cursor: default; }
+
+  .error {
+    color: #ff5050;
+    font-size: 13px;
+    padding: 10px 14px;
+    background: rgba(255, 80, 80, 0.06);
+    border: 1px solid rgba(255, 80, 80, 0.12);
+    border-radius: 10px;
+  }
+</style>

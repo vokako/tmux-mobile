@@ -1,0 +1,1 @@
+/Users/clawd/work/project/260226_tmux_mobile/target/debug/tmux-mobile: /Users/clawd/work/project/260226_tmux_mobile/src/main.rs /Users/clawd/work/project/260226_tmux_mobile/src/server.rs /Users/clawd/work/project/260226_tmux_mobile/src/tmux.rs
