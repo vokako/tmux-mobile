@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tmux-mobile WS Test Client</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: -apple-system, sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 16px; }
+  h2 { color: #53d8fb; font-size: 18px; margin-bottom: 12px; }
+  .row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  input { padding: 8px; border: 1px solid #0f3460; border-radius: 6px; background: #16213e; color: #e0e0e0; font-size: 14px; }
+  button { padding: 8px 14px; border: none; border-radius: 6px; background: #0f3460; color: #53d8fb; cursor: pointer; font-size: 13px; }
+  button:hover { background: #1a4a8a; }
+  button:disabled { opacity: .4; cursor: default; }
+  #log { background: #0d1117; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 13px; white-space: pre-wrap; max-height: 50vh; overflow-y: auto; margin-top: 12px; line-height: 1.5; }
+  .send { color: #4ade80; }
+  .recv { color: #53d8fb; }
+  .err { color: #ff6b6b; }
+  .info { color: #888; }
+  #pane-output { background: #0d1117; border-radius: 8px; padding: 12px; font-family: monospace; font-size: 12px; white-space: pre-wrap; max-height: 30vh; overflow-y: auto; margin-top: 8px; color: #c9d1d9; display: none; }
+  section { margin-bottom: 16px; }
+</style>
+</head>
+<body>
+
+<h2>tmux-mobile WS Test Client</h2>
+
+<section>
+  <div class="row">
+    <input id="host" value="127.0.0.1" placeholder="host" style="width:120px">
+    <input id="port" value="9876" placeholder="port" style="width:70px">
+    <input id="token" placeholder="token" style="width:260px">
+    <button id="btnConnect" onclick="doConnect()">Connect</button>
+    <button id="btnDisconnect" onclick="doDisconnect()" disabled>Disconnect</button>
+  </div>
+</section>
+
+<section>
+  <div class="row">
+    <button onclick="send('list_sessions')" class="api">list_sessions</button>
+    <button onclick="sendWithPrompt('list_panes', 'session')" class="api">list_panes</button>
+    <button onclick="sendWithPrompt('capture_pane', 'target')" class="api">capture_pane</button>
+    <button onclick="sendCommand()" class="api">send_command</button>
+    <button onclick="doSubscribe()" class="api">subscribe</button>
+    <button onclick="doUnsubscribe()" class="api">unsubscribe</button>
+  </div>
+</section>
+
+<div id="pane-output"></div>
+<div id="log"></div>
+
+<script>
+let ws = null;
+let reqId = 0;
+const log = document.getElementById('log');
+const paneEl = document.getElementById('pane-output');
+
+function appendLog(cls, prefix, text) {
+  const line = document.createElement('div');
+  line.className = cls;
+  line.textContent = `${prefix} ${text}`;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+function doConnect() {
+  const host = document.getElementById('host').value;
+  const port = document.getElementById('port').value;
+  const token = document.getElementById('token').value;
+  try {
+    ws = new WebSocket(`ws://${host}:${port}`);
+  } catch(e) {
+    appendLog('err', '✗', e.message);
+    return;
+  }
+
+  ws.onopen = () => {
+    appendLog('info', '●', 'Connected, authenticating...');
+    ws.send(JSON.stringify({ method: 'auth', params: { token } }));
+  };
+
+  ws.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    appendLog('recv', '←', JSON.stringify(data, null, 2));
+
+    // Handle subscribe push
+    if (data.method === 'pane_output') {
+      paneEl.style.display = 'block';
+      paneEl.textContent = data.params.content;
+      paneEl.scrollTop = paneEl.scrollHeight;
+    }
+  };
+
+  ws.onclose = () => {
+    appendLog('info', '●', 'Disconnected');
+    document.getElementById('btnConnect').disabled = false;
+    document.getElementById('btnDisconnect').disabled = true;
+  };
+
+  ws.onerror = () => appendLog('err', '✗', 'Connection error');
+
+  document.getElementById('btnConnect').disabled = true;
+  document.getElementById('btnDisconnect').disabled = false;
+}
+
+function doDisconnect() {
+  ws?.close();
+  ws = null;
+}
+
+function rawSend(obj) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    appendLog('err', '✗', 'Not connected');
+    return;
+  }
+  const text = JSON.stringify(obj);
+  appendLog('send', '→', text);
+  ws.send(text);
+}
+
+function send(method, params = {}) {
+  rawSend({ id: ++reqId, method, params });
+}
+
+function sendWithPrompt(method, paramName) {
+  const val = prompt(`${paramName}:`);
+  if (val != null) send(method, { [paramName]: val });
+}
+
+function sendCommand() {
+  const target = prompt('target (e.g. main:0.0):');
+  if (!target) return;
+  const command = prompt('command:');
+  if (command != null) send('send_command', { target, command });
+}
+
+function doSubscribe() {
+  const target = prompt('subscribe target (e.g. main:0.0):');
+  if (target) rawSend({ method: 'subscribe', params: { target } });
+}
+
+function doUnsubscribe() {
+  const target = prompt('unsubscribe target:');
+  if (target) rawSend({ method: 'unsubscribe', params: { target } });
+}
+</script>
+</body>
+</html>
