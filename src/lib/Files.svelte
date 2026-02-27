@@ -1,6 +1,12 @@
 <script>
+  import { marked } from 'marked';
+  import katex from 'katex';
+  import 'katex/dist/katex.min.css';
+  import mermaid from 'mermaid';
   import Icon from './Icon.svelte';
   import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsUpload } from './ws.js';
+
+  mermaid.initialize({ startOnLoad: false, theme: 'dark' });
 
   let { session = '' } = $props();
 
@@ -238,17 +244,44 @@
   }
 
   function renderMarkdown(text) {
-    return text
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-      .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.+?)\*/g, '<em>$1</em>')
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-      .replace(/^- (.+)$/gm, '<li>$1</li>')
-      .replace(/\n/g, '<br>');
+    // KaTeX: replace $$ blocks and $ inline before marked processes them
+    let processed = text
+      .replace(/\$\$([^$]+?)\$\$/g, (_, math) => {
+        try { return katex.renderToString(math.trim(), { displayMode: true, throwOnError: false }); }
+        catch { return `<pre>${math}</pre>`; }
+      })
+      .replace(/\$([^$\n]+?)\$/g, (_, math) => {
+        try { return katex.renderToString(math.trim(), { displayMode: false, throwOnError: false }); }
+        catch { return `<code>${math}</code>`; }
+      });
+
+    return marked.parse(processed, { breaks: true, gfm: true });
   }
+
+  let mermaidId = 0;
+  async function renderMermaidBlocks(container) {
+    if (!container) return;
+    const blocks = container.querySelectorAll('code.language-mermaid');
+    for (const block of blocks) {
+      const pre = block.parentElement;
+      const id = `mermaid-${++mermaidId}`;
+      const div = document.createElement('div');
+      div.className = 'mermaid-block';
+      try {
+        const { svg } = await mermaid.render(id, block.textContent);
+        div.innerHTML = svg;
+      } catch { div.textContent = block.textContent; }
+      pre.replaceWith(div);
+    }
+  }
+
+  let previewEl;
+  $effect(() => {
+    if (view === 'preview' && mimeCategory(currentFile?.stat?.mime_hint) === 'markdown' && previewEl) {
+      // tick then render mermaid
+      setTimeout(() => renderMermaidBlocks(previewEl), 50);
+    }
+  });
 
   function renderCsv(text) {
     const lines = text.trim().split('\n');
@@ -378,7 +411,7 @@
     </div>
     <div class="preview-body">
       {#if mimeCategory(currentFile.stat?.mime_hint) === 'markdown'}
-        <div class="md-render">{@html renderMarkdown(currentFile.content)}</div>
+        <div class="md-render" bind:this={previewEl}>{@html renderMarkdown(currentFile.content)}</div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'csv'}
         <div class="csv-render">{@html renderCsv(currentFile.content)}</div>
       {:else}
@@ -538,13 +571,31 @@
     margin: 0; font-family: 'SF Mono', Menlo, monospace; font-size: 13px;
     line-height: 1.5; color: #e2e8f0; white-space: pre-wrap; word-break: break-all;
   }
-  .md-render { font-size: 14px; line-height: 1.6; color: #e2e8f0; }
-  .md-render :global(h1) { font-size: 20px; margin: 12px 0 8px; color: #00d4ff; }
-  .md-render :global(h2) { font-size: 17px; margin: 10px 0 6px; color: #00d4ff; }
-  .md-render :global(h3) { font-size: 15px; margin: 8px 0 4px; color: #00d4ff; }
-  .md-render :global(code) { background: rgba(255,255,255,0.08); padding: 2px 5px; border-radius: 3px; font-size: 12px; }
+  .md-render { font-size: 14px; line-height: 1.6; color: #e2e8f0; overflow-wrap: break-word; }
+  .md-render :global(h1) { font-size: 22px; margin: 16px 0 8px; color: #00d4ff; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 6px; }
+  .md-render :global(h2) { font-size: 18px; margin: 14px 0 6px; color: #00d4ff; }
+  .md-render :global(h3) { font-size: 16px; margin: 10px 0 4px; color: #00d4ff; }
+  .md-render :global(h4), .md-render :global(h5), .md-render :global(h6) { font-size: 14px; margin: 8px 0 4px; color: rgba(0,212,255,0.7); }
+  .md-render :global(p) { margin: 8px 0; }
+  .md-render :global(code) { background: rgba(255,255,255,0.08); padding: 2px 5px; border-radius: 3px; font-size: 12px; font-family: 'SF Mono', Menlo, monospace; }
+  .md-render :global(pre) { background: rgba(255,255,255,0.05); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 8px 0; }
+  .md-render :global(pre code) { background: none; padding: 0; font-size: 12px; line-height: 1.5; }
   .md-render :global(strong) { color: #fff; }
-  .md-render :global(li) { margin-left: 16px; }
+  .md-render :global(em) { color: rgba(226,232,240,0.8); }
+  .md-render :global(a) { color: #00d4ff; text-decoration: none; }
+  .md-render :global(a:hover) { text-decoration: underline; }
+  .md-render :global(ul), .md-render :global(ol) { padding-left: 20px; margin: 6px 0; }
+  .md-render :global(li) { margin: 3px 0; }
+  .md-render :global(blockquote) { border-left: 3px solid rgba(0,212,255,0.4); margin: 8px 0; padding: 4px 12px; color: rgba(226,232,240,0.6); }
+  .md-render :global(hr) { border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 12px 0; }
+  .md-render :global(img) { max-width: 100%; border-radius: 6px; }
+  .md-render :global(table) { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 13px; }
+  .md-render :global(th), .md-render :global(td) { padding: 8px 12px; border: 1px solid rgba(255,255,255,0.1); text-align: left; }
+  .md-render :global(th) { background: rgba(255,255,255,0.06); color: #00d4ff; font-weight: 600; }
+  .md-render :global(input[type="checkbox"]) { margin-right: 6px; }
+  .md-render :global(.katex-display) { overflow-x: auto; margin: 8px 0; }
+  .md-render :global(.mermaid-block) { background: rgba(255,255,255,0.03); border-radius: 8px; padding: 12px; margin: 8px 0; overflow-x: auto; }
+  .md-render :global(.mermaid-block svg) { max-width: 100%; }
   .csv-render { overflow: auto; }
   .csv-render :global(table) { border-collapse: collapse; font-size: 12px; width: 100%; }
   .csv-render :global(th), .csv-render :global(td) {
