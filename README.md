@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/⌘_tmux-mobile-00d4ff?style=for-the-badge&labelColor=0a0a0f&color=00d4ff" alt="tmux-mobile">
+  <img src="assets/logo.svg" width="320" alt="⌘ tmux-mobile">
 </p>
 
 <p align="center">
