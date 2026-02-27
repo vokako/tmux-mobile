@@ -72,6 +72,7 @@
   let newType = $state(''); // 'file' or 'dir'
   let renaming = $state(null); // path being renamed
   let renameValue = $state('');
+  let bcPathEl;
 
   // Breadcrumb parts
   let breadcrumbs = $derived.by(() => {
@@ -84,6 +85,11 @@
   });
 
   let isEdited = $derived(view === 'edit' && editContent !== editOriginal);
+
+  $effect(() => {
+    cwd;
+    setTimeout(() => { if (bcPathEl) bcPathEl.scrollLeft = bcPathEl.scrollWidth; }, 0);
+  });
 
   // Init: get session CWD
   $effect(() => {
@@ -369,7 +375,7 @@
     <div class="breadcrumb">
       <button class="bc-btn" onclick={goHome}><Icon name="home" size={14} /></button>
       <button class="bc-btn" onclick={goUp}><Icon name="folder-up" size={14} /></button>
-      <div class="bc-path">
+      <div class="bc-path" bind:this={bcPathEl}>
         <button class="bc-seg" onclick={() => loadDir('/')}>/</button>
         {#each breadcrumbs as bc}
           <button class="bc-seg" onclick={() => loadDir(bc.path)}>{bc.name}</button>
