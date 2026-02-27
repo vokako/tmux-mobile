@@ -162,7 +162,7 @@
     background: transparent;
     color: rgba(226, 232, 240, 0.5);
     cursor: pointer;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
     transition: all 0.2s ease;
     -webkit-tap-highlight-color: transparent;
