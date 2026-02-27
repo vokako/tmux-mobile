@@ -1,4 +1,6 @@
-<h1 align="center">⌘ tmux-mobile</h1>
+<p align="center">
+  <img src="https://img.shields.io/badge/⌘_tmux-mobile-00d4ff?style=for-the-badge&labelColor=0a0a0f&color=00d4ff" alt="tmux-mobile">
+</p>
 
 <p align="center">
   <strong>Remotely monitor and control your coding agents from your phone.</strong><br>
