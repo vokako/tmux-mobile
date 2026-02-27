@@ -16,9 +16,10 @@ const kiroParser = {
   name: 'kiro-cli',
 
   // Detect if this pane is running kiro-cli
-  detect(raw) {
+  detect(raw, command = '') {
+    if (/kiro/i.test(command)) return true;
     const clean = stripAnsi(raw);
-    return clean.includes('kiro-cli') || clean.includes('kiro') || /\d+%\s*!?\s*>/.test(clean);
+    return /\d+%\s*!?\s*>/.test(clean);
   },
 
   // Insert semantic markers using ANSI color codes before stripping
@@ -111,8 +112,8 @@ const kiroParser = {
 
 const parsers = [kiroParser];
 
-export function detectParser(raw) {
-  return parsers.find(p => p.detect(raw)) || null;
+export function detectParser(raw, command = '') {
+  return parsers.find(p => p.detect(raw, command)) || null;
 }
 
 // ─── Generic message builder (works with any parser) ───

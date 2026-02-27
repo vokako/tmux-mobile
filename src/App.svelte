@@ -9,6 +9,7 @@
   let connected = $state(false);
   let terminalTarget = $state('');
   let terminalSession = $state('');
+  let terminalCommand = $state('');
   let viewMode = $state('terminal');
   let chatSupported = $state(false);
 
@@ -26,9 +27,10 @@
     page = 'sessions';
   }
 
-  function openTerminal(session, target) {
+  function openTerminal(session, target, command = '') {
     terminalSession = session;
     terminalTarget = target;
+    terminalCommand = command;
     page = 'terminal';
     viewMode = 'terminal';
   }
@@ -89,7 +91,7 @@
     {/if}
     {#if terminalTarget}
       <div class="page-layer" class:hidden={page !== 'terminal'}>
-        <Terminal target={terminalTarget} session={terminalSession} {viewMode} onChatSupported={(v) => chatSupported = v} />
+        <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {viewMode} onChatSupported={(v) => chatSupported = v} />
       </div>
     {/if}
   </div>
