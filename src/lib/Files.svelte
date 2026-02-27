@@ -481,9 +481,15 @@
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'html'}
         <iframe class="html-preview" srcdoc={currentFile.content} sandbox="allow-scripts allow-same-origin" title="HTML Preview"></iframe>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'code'}
-        <pre class="code-preview"><code>{@html highlightCode(currentFile.content, currentFile.stat?.mime_hint)}</code></pre>
+        <div class="code-lined">
+          <div class="line-nums">{@html currentFile.content.split('\n').map((_, i) => i + 1).join('\n')}</div>
+          <pre class="code-preview"><code>{@html highlightCode(currentFile.content, currentFile.stat?.mime_hint)}</code></pre>
+        </div>
       {:else}
-        <pre class="code-preview">{currentFile.content}</pre>
+        <div class="code-lined">
+          <div class="line-nums">{@html currentFile.content.split('\n').map((_, i) => i + 1).join('\n')}</div>
+          <pre class="code-preview">{currentFile.content}</pre>
+        </div>
       {/if}
     </div>
 
@@ -497,14 +503,20 @@
         <button class="act-btn save" onclick={saveFile} disabled={!isEdited}><Icon name="save" size={14} /></button>
       </div>
     </div>
-    <textarea
-      class="editor"
-      value={editContent}
-      oninput={onEditInput}
-      spellcheck="false"
-      autocapitalize="off"
-      autocomplete="off"
-    ></textarea>
+    <div class="editor-wrap">
+      <div class="editor-nums">{@html editContent.split('\n').map((_, i) => i + 1).join('\n')}</div>
+      <div class="editor-layer">
+        <pre class="editor-highlight" aria-hidden="true"><code>{@html highlightCode(editContent, currentFile?.stat?.mime_hint)}</code>{'\n'}</pre>
+        <textarea
+          class="editor"
+          value={editContent}
+          oninput={onEditInput}
+          spellcheck="false"
+          autocapitalize="off"
+          autocomplete="off"
+        ></textarea>
+      </div>
+    </div>
 
   {:else if view === 'info'}
     <!-- File info -->
@@ -637,9 +649,17 @@
   .preview-body { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 12px; }
   .code-preview {
     margin: 0; font-family: 'SF Mono', Menlo, monospace; font-size: 13px;
-    line-height: 1.5; color: #e2e8f0; white-space: pre-wrap; word-break: break-all;
+    line-height: 1.5; color: #e2e8f0; white-space: pre-wrap; word-break: break-all; flex: 1;
   }
   .code-preview :global(code) { font-family: inherit; background: none; padding: 0; }
+  .code-lined {
+    display: flex; flex: 1; overflow: auto; -webkit-overflow-scrolling: touch;
+  }
+  .line-nums {
+    padding: 0 8px; text-align: right; color: rgba(226,232,240,0.2); font-family: 'SF Mono', Menlo, monospace;
+    font-size: 13px; line-height: 1.5; white-space: pre; user-select: none; flex-shrink: 0;
+    border-right: 1px solid rgba(255,255,255,0.06);
+  }
   .html-preview {
     flex: 1; width: 100%; border: none; background: #fff; border-radius: 4px;
   }
@@ -677,10 +697,26 @@
   .csv-render :global(td) { color: #e2e8f0; }
 
   /* Editor */
+  .editor-wrap {
+    flex: 1; display: flex; overflow: auto; -webkit-overflow-scrolling: touch; min-height: 0;
+  }
+  .editor-nums {
+    padding: 12px 8px; text-align: right; color: rgba(226,232,240,0.2); font-family: 'SF Mono', Menlo, monospace;
+    font-size: 13px; line-height: 1.5; white-space: pre; user-select: none; flex-shrink: 0;
+    border-right: 1px solid rgba(255,255,255,0.06);
+  }
+  .editor-layer { position: relative; flex: 1; min-width: 0; }
+  .editor-highlight {
+    margin: 0; padding: 12px; font-family: 'SF Mono', Menlo, monospace; font-size: 13px;
+    line-height: 1.5; white-space: pre-wrap; word-break: break-all; color: #e2e8f0;
+    pointer-events: none;
+  }
+  .editor-highlight :global(code) { font-family: inherit; background: none; padding: 0; }
   .editor {
-    flex: 1; width: 100%; padding: 12px; border: none; resize: none;
-    background: #0a0a0f; color: #e2e8f0; font-family: 'SF Mono', Menlo, monospace;
-    font-size: 13px; line-height: 1.5; outline: none;
+    position: absolute; inset: 0; width: 100%; height: 100%; padding: 12px; border: none; resize: none;
+    background: transparent; color: transparent; caret-color: #e2e8f0;
+    font-family: 'SF Mono', Menlo, monospace; font-size: 13px; line-height: 1.5; outline: none;
+    white-space: pre-wrap; word-break: break-all;
   }
 
   /* Info */
