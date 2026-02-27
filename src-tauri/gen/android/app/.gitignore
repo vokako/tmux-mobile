@@ -1,4 +1,4 @@
-/src/main/java/com/tmux_mobile/app/generated
+/src/main/java/com/tmuxmobile/dev/generated
 /src/main/jniLibs/**/*.so
 /src/main/assets/tauri.conf.json
 /tauri.build.gradle.kts

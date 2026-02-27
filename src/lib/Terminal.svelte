@@ -2,13 +2,32 @@
   import { subscribe, unsubscribe, setOnPaneOutput, sendCommand, sendKeys } from './ws.js';
   import { Terminal } from '@xterm/xterm';
   import { FitAddon } from '@xterm/addon-fit';
+  import ChatView from './ChatView.svelte';
+  import Icon from './Icon.svelte';
+  import { detectParser } from './parsers.js';
 
-  let { target, session } = $props();
+  let { target, session, viewMode = 'terminal', onChatSupported = () => {} } = $props();
 
   let input = $state('');
+  let paneContent = $state('');
   let termEl;
   let term;
   let fitAddon;
+  let termAtBottom = $state(true);
+
+  let parser = $derived(detectParser(paneContent));
+
+  $effect(() => { if (paneContent) onChatSupported(!!parser); });
+
+  let waitingForInput = $derived.by(() => {
+    if (!paneContent || !parser) return false;
+    return parser.isWaitingForInput(paneContent);
+  });
+
+  let statusInfo = $derived.by(() => {
+    if (!paneContent || !parser) return null;
+    return parser.extractStatus(paneContent);
+  });
 
   $effect(() => {
     term = new Terminal({
@@ -47,6 +66,11 @@
     term.loadAddon(fitAddon);
     term.open(termEl);
 
+    term.onScroll(() => {
+      const buf = term.buffer.active;
+      termAtBottom = buf.viewportY >= buf.baseY;
+    });
+
     requestAnimationFrame(() => fitAddon.fit());
 
     const onResize = () => fitAddon.fit();
@@ -54,8 +78,16 @@
 
     setOnPaneOutput((t, content) => {
       if (t === target) {
+        paneContent = content;
+        const buf = term.buffer.active;
+        const atBottom = buf.viewportY >= buf.baseY;
+        const prevViewport = buf.viewportY;
         term.reset();
-        term.write(content);
+        term.write(content, () => {
+          if (!atBottom) {
+            term.scrollToLine(Math.min(prevViewport, term.buffer.active.baseY));
+          }
+        });
       }
     });
 
@@ -69,19 +101,34 @@
     };
   });
 
+  $effect(() => {
+    if (viewMode === 'terminal' && fitAddon) {
+      requestAnimationFrame(() => fitAddon.fit());
+    }
+  });
+
   async function handleSubmit() {
     if (!input.trim()) return;
     try {
       await sendCommand(target, input);
       input = '';
+      // Reset textarea height
+      const ta = document.querySelector('.chat-input-bar textarea');
+      if (ta) ta.style.height = 'auto';
     } catch (_) {}
   }
 
   async function handleKeydown(e) {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       await handleSubmit();
     }
+  }
+
+  function autoResize(e) {
+    const el = e.target;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
   }
 
   async function sendSpecial(key) {
@@ -92,33 +139,76 @@
 </script>
 
 <div class="terminal">
-  <div class="xterm-wrap" bind:this={termEl}></div>
+  <div class="term-wrap" class:hidden={viewMode !== 'terminal'}>
+    <div class="xterm-wrap" bind:this={termEl}></div>
+    {#if !termAtBottom}
+      <button class="scroll-btn" onclick={() => term?.scrollToBottom()}><Icon name="arrow-down" size={16} /></button>
+    {/if}
+  </div>
+  {#if viewMode === 'chat'}
+    {#if statusInfo?.pct !== null || statusInfo?.tool}
+      <div class="status-line">
+        {#if statusInfo.tool}
+          <span class="status-tool">{statusInfo.tool}</span>
+        {/if}
+        {#if statusInfo.pct !== null}
+          <span class="status-pct">
+            <span class="pct-bar"><span class="pct-fill" style="width:{statusInfo.pct}%;background:{statusInfo.pct < 50 ? '#4ade80' : statusInfo.pct < 80 ? '#fbbf24' : '#ff5050'}"></span></span>
+            <span style="color:{statusInfo.pct < 50 ? '#4ade80' : statusInfo.pct < 80 ? '#fbbf24' : '#ff5050'}">{statusInfo.pct}%</span>
+          </span>
+        {/if}
+      </div>
+    {/if}
+    <ChatView content={paneContent} />
+  {/if}
 
   <div class="input-area">
-    <div class="input-bar">
-      <div class="shortcuts">
-        <button onclick={() => sendSpecial('C-c')}>⌃C</button>
-        <button onclick={() => sendSpecial('C-d')}>⌃D</button>
-        <button onclick={() => sendSpecial('C-z')}>⌃Z</button>
-        <button onclick={() => sendSpecial('Tab')}>⇥</button>
-        <button onclick={() => sendSpecial('Up')}>↑</button>
-        <button onclick={() => sendSpecial('Down')}>↓</button>
+    {#if viewMode === 'terminal'}
+      <div class="input-bar">
+        <div class="shortcuts">
+          <button onclick={() => sendSpecial('C-c')}>⌃C</button>
+          <button onclick={() => sendSpecial('C-d')}>⌃D</button>
+          <button onclick={() => sendSpecial('C-z')}>⌃Z</button>
+          <button onclick={() => sendSpecial('Tab')}>⇥</button>
+          <button onclick={() => sendSpecial('Up')}>↑</button>
+          <button onclick={() => sendSpecial('Down')}>↓</button>
+        </div>
+        <div class="cmd-row">
+          <span class="prompt">❯</span>
+          <input
+            type="text"
+            bind:value={input}
+            onkeydown={handleKeydown}
+            placeholder="command…"
+            autocapitalize="off"
+            autocomplete="off"
+            autocorrect="off"
+            spellcheck="false"
+          />
+          <button class="send" onclick={handleSubmit}><Icon name="send" size={14} /></button>
+        </div>
       </div>
-      <div class="cmd-row">
-        <span class="prompt">❯</span>
-        <input
-          type="text"
-          bind:value={input}
-          onkeydown={handleKeydown}
-          placeholder="command…"
-          autocapitalize="off"
-          autocomplete="off"
-          autocorrect="off"
-          spellcheck="false"
-        />
-        <button class="send" onclick={handleSubmit}>⏎</button>
+    {:else}
+      <div class="input-bar chat-input-bar">
+        <div class="cmd-row">
+          {#if !waitingForInput}
+            <button class="stop-btn" onclick={() => sendSpecial('C-c')} aria-label="Interrupt"><Icon name="stop" size={12} /></button>
+          {/if}
+          <textarea
+            bind:value={input}
+            onkeydown={handleKeydown}
+            oninput={autoResize}
+            placeholder="message…"
+            autocapitalize="off"
+            autocomplete="off"
+            autocorrect="off"
+            spellcheck="false"
+            rows="1"
+          ></textarea>
+          <button class="send" onclick={handleSubmit}><Icon name="send" size={14} /></button>
+        </div>
       </div>
-    </div>
+    {/if}
   </div>
 </div>
 
@@ -131,18 +221,97 @@
     background: #0a0a0f;
   }
 
-  .xterm-wrap {
+  .status-line {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 20px;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    font-size: 12px;
+    color: rgba(226, 232, 240, 0.45);
+  }
+  .status-tool {
+    font-weight: 600;
+    color: #c084fc;
+    font-family: 'SF Mono', Menlo, monospace;
+  }
+  .status-pct {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-family: 'SF Mono', Menlo, monospace;
+    font-weight: 500;
+    font-size: 12px;
+    margin-left: auto;
+  }
+  .pct-bar {
+    width: 48px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .pct-fill {
+    display: block;
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.3s ease, background 0.3s ease;
+  }
+
+  .term-wrap {
     flex: 1;
     min-height: 0;
+    position: relative;
+  }
+  .term-wrap.hidden {
+    position: absolute;
+    left: -9999px;
+    visibility: hidden;
+  }
+
+  .xterm-wrap {
+    height: 100%;
     padding: 4px 6px;
+    touch-action: pan-y;
   }
   .xterm-wrap :global(.xterm) {
     height: 100%;
   }
+  .xterm-wrap :global(.xterm-viewport) {
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  .xterm-wrap :global(.xterm-screen) {
+    touch-action: pan-y;
+  }
+
+  .scroll-btn {
+    position: absolute;
+    bottom: 12px;
+    right: 16px;
+    width: 36px; height: 36px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 50%;
+    background: rgba(12, 12, 20, 0.85);
+    backdrop-filter: blur(10px);
+    color: #00d4ff;
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 5;
+    -webkit-tap-highlight-color: transparent;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
+  .scroll-btn:active { transform: scale(0.9); }
 
   .input-area {
     flex-shrink: 0;
     padding: 0 10px 10px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
   }
 
   .input-bar {
@@ -218,6 +387,46 @@
     -webkit-appearance: none;
   }
   .cmd-row input::placeholder { color: rgba(226, 232, 240, 0.2); }
+
+  .cmd-row textarea {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 0;
+    border: none;
+    background: transparent;
+    color: #e2e8f0;
+    font-family: 'SF Mono', Menlo, monospace;
+    font-size: 15px;
+    outline: none;
+    -webkit-appearance: none;
+    resize: none;
+    max-height: 120px;
+    overflow-y: auto;
+    line-height: 1.4;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.1) transparent;
+  }
+  .cmd-row textarea::placeholder { color: rgba(226, 232, 240, 0.2); }
+
+  .stop-btn {
+    width: 34px; height: 34px;
+    border: none;
+    border-radius: 9px;
+    background: rgba(255, 80, 80, 0.12);
+    color: #ff5050;
+    font-size: 12px;
+    cursor: pointer;
+    flex-shrink: 0;
+    -webkit-tap-highlight-color: transparent;
+    transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .stop-btn:active {
+    background: rgba(255, 80, 80, 0.25);
+    transform: scale(0.92);
+  }
 
   .send {
     width: 34px; height: 34px;

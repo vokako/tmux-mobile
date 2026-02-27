@@ -1,5 +1,6 @@
 <script>
   import { connect } from './ws.js';
+  import Icon from './Icon.svelte';
 
   let { onConnected } = $props();
 
@@ -29,7 +30,7 @@
 <div class="wrapper">
   <div class="card">
     <div class="card-header">
-      <div class="icon">⌘</div>
+      <div class="icon"><Icon name="command" size={36} /></div>
       <h2>tmux<span class="accent">mobile</span></h2>
       <p class="subtitle">Connect to your tmux server</p>
     </div>
@@ -49,7 +50,7 @@
       <label>
         <span class="label-text">Token</span>
         <div class="token-wrap">
-          <span class="token-icon">🔑</span>
+          <span class="token-icon"><Icon name="key" size={13} /></span>
           <input type="password" bind:value={token} placeholder="auth token" />
         </div>
       </label>

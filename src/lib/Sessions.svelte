@@ -1,7 +1,8 @@
 <script>
   import { listSessions, listPanes, newSession, killSession } from './ws.js';
+  import Icon from './Icon.svelte';
 
-  let { openTerminal } = $props();
+  let { openTerminal, activeTarget = '' } = $props();
 
   let sessions = $state([]);
   let expanded = $state({});
@@ -11,8 +12,23 @@
 
   async function refresh() {
     try {
-      sessions = await listSessions();
+      let list = await listSessions();
+      // Active session first, then attached, then rest
+      const activeSession = activeTarget.split(':')[0];
+      sessions = list.sort((a, b) => {
+        if (a.name === activeSession) return -1;
+        if (b.name === activeSession) return 1;
+        return (b.attached ? 1 : 0) - (a.attached ? 1 : 0);
+      });
       error = '';
+      for (const s of sessions) {
+        if (!expanded[s.name]) {
+          try {
+            panes[s.name] = await listPanes(s.name);
+            expanded[s.name] = true;
+          } catch (_) {}
+        }
+      }
     } catch (e) {
       error = e.message;
     }
@@ -42,7 +58,15 @@
     }
   }
 
+  let confirmKill = $state(null);
+
   async function removeSession(name) {
+    if (confirmKill !== name) {
+      confirmKill = name;
+      setTimeout(() => { if (confirmKill === name) confirmKill = null; }, 3000);
+      return;
+    }
+    confirmKill = null;
     try {
       await killSession(name);
       await refresh();
@@ -55,9 +79,11 @@
 </script>
 
 <div class="sessions">
-  <div class="header">
-    <h2>Sessions</h2>
-    <button class="refresh" onclick={refresh} aria-label="Refresh sessions">↻</button>
+  <div class="new-session">
+    <input type="text" bind:value={newName} placeholder="New session name…" onkeydown={(e) => e.key === 'Enter' && createSession()} />
+    <button onclick={createSession} disabled={!newName.trim()}>
+      <span>+</span>
+    </button>
   </div>
 
   {#if error}
@@ -66,7 +92,7 @@
 
   <div class="list">
     {#each sessions as s}
-      <div class="session" class:expanded={expanded[s.name]}>
+      <div class="session" class:expanded={expanded[s.name]} class:active-session={activeTarget.startsWith(s.name + ':')}>
         <div class="session-row" role="button" tabindex="0" onclick={() => toggleSession(s.name)} onkeydown={(e) => e.key === 'Enter' && toggleSession(s.name)}>
           <div class="session-info">
             <span class="indicator" class:attached={s.attached}></span>
@@ -74,15 +100,19 @@
           </div>
           <div class="session-meta">
             <span class="badge">{s.windows} {s.windows === 1 ? 'window' : 'windows'}</span>
-            <button class="kill" onclick={(e) => { e.stopPropagation(); removeSession(s.name); }} aria-label="Kill session">
-              <span class="kill-icon">✕</span>
+            <button class="kill" class:confirm={confirmKill === s.name} onclick={(e) => { e.stopPropagation(); removeSession(s.name); }} aria-label="Kill session">
+              {#if confirmKill === s.name}
+                <span class="kill-text">tap to kill</span>
+              {:else}
+                <span class="kill-icon"><Icon name="x" size={11} /></span>
+              {/if}
             </button>
           </div>
         </div>
         {#if expanded[s.name] && panes[s.name]}
           <div class="pane-list">
             {#each panes[s.name] as p}
-              <button class="pane" onclick={() => openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`)}>
+              <button class="pane" class:active-pane={activeTarget === `${p.session}:${p.window}.${p.pane}`} onclick={() => openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`)}>
                 <span class="pane-id">:{p.window}.{p.pane}</span>
                 <span class="pane-cmd">{p.current_command}</span>
                 <span class="pane-size">{p.width}×{p.height}</span>
@@ -93,13 +123,6 @@
         {/if}
       </div>
     {/each}
-  </div>
-
-  <div class="new-session">
-    <input type="text" bind:value={newName} placeholder="New session name…" onkeydown={(e) => e.key === 'Enter' && createSession()} />
-    <button onclick={createSession} disabled={!newName.trim()}>
-      <span>+</span>
-    </button>
   </div>
 </div>
 
@@ -112,40 +135,6 @@
     overflow-y: auto;
     flex: 1;
     -webkit-overflow-scrolling: touch;
-  }
-
-  .header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  h2 {
-    margin: 0;
-    font-size: 20px;
-    font-weight: 700;
-    color: #e2e8f0;
-    letter-spacing: -0.5px;
-  }
-
-  .refresh {
-    width: 34px; height: 34px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    color: rgba(226, 232, 240, 0.5);
-    font-size: 16px;
-    border-radius: 10px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    -webkit-tap-highlight-color: transparent;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .refresh:active {
-    background: rgba(0, 212, 255, 0.1);
-    color: #00d4ff;
-    transform: rotate(90deg);
   }
 
   .list { display: flex; flex-direction: column; gap: 8px; }
@@ -161,6 +150,10 @@
   .session.expanded {
     border-color: rgba(0, 212, 255, 0.15);
     box-shadow: 0 0 20px rgba(0, 212, 255, 0.05);
+  }
+  .session.active-session {
+    border-color: rgba(0, 212, 255, 0.25);
+    background: rgba(0, 212, 255, 0.03);
   }
 
   .session-row {
@@ -232,6 +225,16 @@
     background: rgba(255, 80, 80, 0.15);
     color: #ff5050;
   }
+  .kill.confirm {
+    background: rgba(255, 80, 80, 0.15);
+    color: #ff5050;
+    width: auto;
+    padding: 0 8px;
+  }
+  .kill-text {
+    font-size: 11px;
+    font-weight: 600;
+  }
   .kill-icon { font-size: 11px; }
 
   .pane-list {
@@ -255,6 +258,7 @@
     -webkit-tap-highlight-color: transparent;
   }
   .pane:active { background: rgba(0, 212, 255, 0.06); }
+  .pane.active-pane { background: rgba(0, 212, 255, 0.08); }
   .pane:last-child { border-bottom: none; }
 
   .pane-id {

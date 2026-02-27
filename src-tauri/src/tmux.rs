@@ -65,6 +65,7 @@ pub fn list_sessions() -> Result<Vec<TmuxSession>, String> {
 pub fn list_panes(session: &str) -> Result<Vec<TmuxPane>, String> {
     let output = run_tmux(&[
         "list-panes",
+        "-s",
         "-t",
         session,
         "-F",
@@ -90,7 +91,7 @@ pub fn list_panes(session: &str) -> Result<Vec<TmuxPane>, String> {
     Ok(panes)
 }
 
-/// 捕获 pane 内容（屏幕输出）
+/// 捕获 pane 内容（屏幕输出，保留 ANSI 转义序列）
 pub fn capture_pane(target: &str, lines: Option<usize>) -> Result<String, String> {
     let start_line = lines.map(|n| format!("-{}", n)).unwrap_or("-200".to_string());
     run_tmux(&[
@@ -98,6 +99,8 @@ pub fn capture_pane(target: &str, lines: Option<usize>) -> Result<String, String
         "-t",
         target,
         "-p",           // 输出到 stdout
+        "-e",           // 保留 ANSI escape sequences (颜色/粗体等)
+        "-J",           // 合并屏幕宽度导致的自动换行
         "-S",
         &start_line,    // 从多少行前开始
     ])
