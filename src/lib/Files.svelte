@@ -395,9 +395,9 @@
       <button class="tool-btn" onclick={handleUpload}>
         <Icon name="upload" size={12} /> Upload
       </button>
-      <label class="tool-toggle">
-        <input type="checkbox" bind:checked={showHidden} onchange={() => loadDir(cwd)} /> Hidden
-      </label>
+      <button class="tool-btn" class:tool-active={showHidden} onclick={() => { showHidden = !showHidden; loadDir(cwd); }}>
+        <Icon name="eye" size={12} /> Hidden
+      </button>
     </div>
 
     <!-- New item input -->
@@ -584,11 +584,7 @@
     font-size: 12px; display: flex; align-items: center; gap: 4px; -webkit-tap-highlight-color: transparent;
   }
   .tool-btn:active { background: rgba(0,212,255,0.1); color: #00d4ff; }
-  .tool-toggle {
-    margin-left: auto; font-size: 11px; color: rgba(226,232,240,0.4);
-    display: flex; align-items: center; gap: 4px;
-  }
-  .tool-toggle input { width: 14px; height: 14px; }
+  .tool-btn.tool-active { background: rgba(0,212,255,0.12); color: #00d4ff; border-color: rgba(0,212,255,0.2); }
 
   /* New item / rename */
   .new-item {
