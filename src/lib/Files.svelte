@@ -74,7 +74,7 @@
   }
 
   async function openEntry(entry) {
-    if (entry.file_type === 'dir') {
+    if (entry.type === 'dir') {
       loadDir(entry.path);
       return;
     }
@@ -226,7 +226,7 @@
   }
 
   function fileIcon(entry) {
-    return entry.file_type === 'dir' ? 'folder' : 'file';
+    return entry.type === 'dir' ? 'folder' : 'file';
   }
 
   function mimeCategory(mime) {
@@ -341,13 +341,13 @@
           <div class="file-row">
             <button class="file-main" onclick={() => openEntry(entry)}>
               <Icon name={fileIcon(entry)} size={16} />
-              <span class="file-name" class:dir-name={entry.file_type === 'dir'}>{entry.name}</span>
-              {#if entry.file_type !== 'dir'}
+              <span class="file-name" class:dir-name={entry.type === 'dir'}>{entry.name}</span>
+              {#if entry.type !== 'dir'}
                 <span class="file-size">{formatSize(entry.size)}</span>
               {/if}
             </button>
             <div class="file-actions">
-              {#if entry.file_type !== 'dir'}
+              {#if entry.type !== 'dir'}
                 <button class="act-btn" onclick={() => handleDownload(entry.path)} title="Download"><Icon name="download" size={12} /></button>
               {/if}
               <button class="act-btn" onclick={() => { renaming = entry.path; renameValue = entry.name; }} title="Rename"><Icon name="edit" size={12} /></button>
