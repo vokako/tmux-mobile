@@ -162,17 +162,6 @@
     <div class="status-bar">{target}{#if command} · <span class:kiro={/^kiro/i.test(command)}>{command}</span>{/if}</div>
   </div>
   {#if viewMode === 'chat'}
-    {#if statusInfo?.pct !== null || statusInfo?.tool}
-      <div class="status-line">
-        <span class="status-left">{target}{#if command} · <span class:kiro={/^kiro/i.test(command)}>{command}</span>{/if}</span>
-        {#if statusInfo.pct !== null}
-          <span class="status-pct">
-            <span class="pct-bar"><span class="pct-fill" style="width:{statusInfo.pct}%;background:{statusInfo.pct < 50 ? '#4ade80' : statusInfo.pct < 80 ? '#fbbf24' : '#ff5050'}"></span></span>
-            <span style="color:{statusInfo.pct < 50 ? '#4ade80' : statusInfo.pct < 80 ? '#fbbf24' : '#ff5050'}">{statusInfo.pct}%</span>
-          </span>
-        {/if}
-      </div>
-    {/if}
     <ChatView content={paneContent} />
   {/if}
 
@@ -204,6 +193,15 @@
       </div>
     {:else}
       <div class="input-bar chat-input-bar">
+        <div class="input-status">
+          <span class="status-left">{target}{#if command} · <span class:kiro={/^kiro/i.test(command)}>{command}</span>{/if}</span>
+          {#if statusInfo?.pct !== null}
+            <span class="status-pct">
+              <span class="pct-bar"><span class="pct-fill" style="width:{statusInfo.pct}%;background:{statusInfo.pct < 50 ? '#4ade80' : statusInfo.pct < 80 ? '#fbbf24' : '#ff5050'}"></span></span>
+              <span style="color:{statusInfo.pct < 50 ? '#4ade80' : statusInfo.pct < 80 ? '#fbbf24' : '#ff5050'}">{statusInfo.pct}%</span>
+            </span>
+          {/if}
+        </div>
         <div class="cmd-row">
           {#if !waitingForInput}
             <button class="stop-btn" onclick={() => sendSpecial('C-c')} aria-label="Interrupt"><Icon name="stop" size={12} /></button>
@@ -235,19 +233,15 @@
     background: #0a0a0f;
   }
 
-  .status-line {
+  .input-status {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 6px 20px;
-    flex-shrink: 0;
-    background: rgba(255, 255, 255, 0.02);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-    font-size: 12px;
-    color: rgba(226, 232, 240, 0.45);
+    gap: 8px;
+    padding: 2px 12px;
+    font-size: 11px;
+    color: rgba(226, 232, 240, 0.4);
   }
   .status-left .kiro { color: #c084fc; }
-  .status-tool { color: #c084fc; }
   .status-left {
     font-family: 'SF Mono', Menlo, monospace;
     white-space: nowrap;
