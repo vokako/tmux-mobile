@@ -1,4 +1,4 @@
-package com.tmux_mobile.app
+package com.tmuxmobile.dev
 
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge

@@ -2,12 +2,19 @@
   import Settings from './lib/Settings.svelte';
   import Sessions from './lib/Sessions.svelte';
   import Terminal from './lib/Terminal.svelte';
-  import { isConnected, disconnect, setOnDisconnect } from './lib/ws.js';
+  import Icon from './lib/Icon.svelte';
+  import { connect, isConnected, disconnect, setOnDisconnect } from './lib/ws.js';
 
   let page = $state('settings');
   let connected = $state(false);
   let terminalTarget = $state('');
   let terminalSession = $state('');
+  let viewMode = $state('terminal');
+  let chatSupported = $state(false);
+
+  $effect(() => {
+    if (!chatSupported && viewMode === 'chat') viewMode = 'terminal';
+  });
 
   setOnDisconnect(() => {
     connected = false;
@@ -23,6 +30,7 @@
     terminalSession = session;
     terminalTarget = target;
     page = 'terminal';
+    viewMode = 'terminal';
   }
 
   function doDisconnect() {
@@ -30,6 +38,18 @@
     connected = false;
     page = 'settings';
   }
+
+  // Auto-reconnect on page load if credentials are saved
+  $effect(() => {
+    const host = localStorage.getItem('tmux_host');
+    const port = localStorage.getItem('tmux_port');
+    const token = localStorage.getItem('tmux_token');
+    if (host && port && token && !connected) {
+      connect(host, parseInt(port), token).then(() => {
+        onConnected();
+      }).catch(() => {});
+    }
+  });
 </script>
 
 <main>
@@ -37,19 +57,26 @@
     {#if connected}
       <div class="nav-pills">
         <button class:active={page === 'sessions'} onclick={() => page = 'sessions'}>
-          <span class="nav-icon">⬡</span> Sessions
+          <Icon name="sessions" size={13} /> Sessions
         </button>
-        <button class:active={page === 'terminal'} onclick={() => page = 'terminal'} disabled={!terminalTarget}>
-          <span class="nav-icon">⏣</span> Terminal
-        </button>
+        {#if terminalTarget}
+          <button class:active={page === 'terminal' && viewMode === 'terminal'} onclick={() => { page = 'terminal'; viewMode = 'terminal'; }}>
+            <Icon name="terminal" size={13} /> Terminal
+          </button>
+        {/if}
+        {#if terminalTarget && chatSupported}
+          <button class:active={page === 'terminal' && viewMode === 'chat'} onclick={() => { page = 'terminal'; viewMode = 'chat'; }}>
+            <Icon name="chat" size={13} /> Chat
+          </button>
+        {/if}
       </div>
       <div class="nav-right">
         <span class="status-dot"></span>
-        <button class="disconnect" onclick={doDisconnect}>✕</button>
+        <button class="disconnect" onclick={doDisconnect}><Icon name="x" size={12} /></button>
       </div>
     {:else}
       <div class="brand">
-        <span class="logo">⌘</span>
+        <span class="logo"><Icon name="command" size={20} /></span>
         <span class="brand-text">tmux<span class="brand-accent">mobile</span></span>
       </div>
     {/if}
@@ -59,9 +86,12 @@
     {#if page === 'settings'}
       <Settings {onConnected} />
     {:else if page === 'sessions'}
-      <Sessions {openTerminal} />
-    {:else if page === 'terminal'}
-      <Terminal target={terminalTarget} session={terminalSession} />
+      <Sessions {openTerminal} activeTarget={terminalTarget} />
+    {/if}
+    {#if terminalTarget}
+      <div class="page-layer" class:hidden={page !== 'terminal'}>
+        <Terminal target={terminalTarget} session={terminalSession} {viewMode} onChatSupported={(v) => chatSupported = v} />
+      </div>
     {/if}
   </div>
 </main>
@@ -74,7 +104,12 @@
     color: #e2e8f0;
     overflow: hidden;
     height: 100vh;
+    height: 100dvh;
     -webkit-font-smoothing: antialiased;
+    position: fixed;
+    width: 100%;
+    top: 0;
+    left: 0;
   }
   :global(*) { box-sizing: border-box; }
   :global(::selection) { background: rgba(0, 212, 255, 0.25); }
@@ -83,7 +118,9 @@
     display: flex;
     flex-direction: column;
     height: 100vh;
+    height: 100dvh;
     max-width: 100vw;
+    overflow: hidden;
     background: linear-gradient(180deg, #0a0a0f 0%, #0f0f18 50%, #12121a 100%);
   }
 
@@ -130,7 +167,6 @@
     box-shadow: 0 0 12px rgba(0, 212, 255, 0.1);
   }
   .nav-pills button:disabled { opacity: 0.3; cursor: default; }
-  .nav-icon { font-size: 11px; }
 
   .nav-right {
     display: flex;
@@ -194,6 +230,18 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
+    position: relative;
   }
   .page-terminal { background: #0a0a0f; }
+  .page-layer {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    z-index: 1;
+  }
+  .page-layer.hidden {
+    visibility: hidden;
+    pointer-events: none;
+  }
 </style>

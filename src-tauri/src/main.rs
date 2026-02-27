@@ -1,19 +1,12 @@
-use tmux_mobile::server;
+use tmux_mobile::{config::Config, server};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|_app| {
-            let host = std::env::var("HOST").unwrap_or("0.0.0.0".to_string());
-            let port: u16 = std::env::var("PORT")
-                .ok()
-                .and_then(|p| p.parse().ok())
-                .unwrap_or(9876);
-            let token = std::env::var("TOKEN")
-                .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
-
+            let cfg = Config::load();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = server::start(&host, port, &token).await {
+                if let Err(e) = server::start(&cfg.host, cfg.port, &cfg.token).await {
                     eprintln!("❌ Server error: {}", e);
                 }
             });
