@@ -1,253 +1,176 @@
-# tmux-mobile
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIwIiBoZWlnaHQ9IjEyMCIgdmlld0JveD0iMCAwIDEyMCAxMjAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxMjAiIHJ4PSIyOCIgZmlsbD0iIzBhMGEwZiIvPgogIDxyZWN0IHg9IjIiIHk9IjIiIHdpZHRoPSIxMTYiIGhlaWdodD0iMTE2IiByeD0iMjYiIHN0cm9rZT0iIzAwZDRmZiIgc3Ryb2tlLW9wYWNpdHk9IjAuMiIgc3Ryb2tlLXdpZHRoPSIxIi8+CiAgPHBhdGggZD0iTTM1IDQ1aDUwTTM1IDYwaDUwTTM1IDc1aDMwIiBzdHJva2U9IiMwMGQ0ZmYiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2Utb3BhY2l0eT0iMC42Ii8+CiAgPGNpcmNsZSBjeD0iODUiIGN5PSI0MCIgcj0iMTIiIGZpbGw9IiMwMGQ0ZmYiIGZpbGwtb3BhY2l0eT0iMC4xNSIgc3Ryb2tlPSIjMDBkNGZmIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDxwYXRoIGQ9Ik04MSAzOGw0IDQtNC00IiBzdHJva2U9IiMwMGQ0ZmYiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KPC9zdmc+">
+    <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIwIiBoZWlnaHQ9IjEyMCIgdmlld0JveD0iMCAwIDEyMCAxMjAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxMjAiIHJ4PSIyOCIgZmlsbD0iIzBhMGEwZiIvPgogIDxyZWN0IHg9IjIiIHk9IjIiIHdpZHRoPSIxMTYiIGhlaWdodD0iMTE2IiByeD0iMjYiIHN0cm9rZT0iIzAwZDRmZiIgc3Ryb2tlLW9wYWNpdHk9IjAuMiIgc3Ryb2tlLXdpZHRoPSIxIi8+CiAgPHBhdGggZD0iTTM1IDQ1aDUwTTM1IDYwaDUwTTM1IDc1aDMwIiBzdHJva2U9IiMwMGQ0ZmYiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2Utb3BhY2l0eT0iMC42Ii8+CiAgPGNpcmNsZSBjeD0iODUiIGN5PSI0MCIgcj0iMTIiIGZpbGw9IiMwMGQ0ZmYiIGZpbGwtb3BhY2l0eT0iMC4xNSIgc3Ryb2tlPSIjMDBkNGZmIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDxwYXRoIGQ9Ik04MSAzOGw0IDQtNC00IiBzdHJva2U9IiMwMGQ0ZmYiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KPC9zdmc+" width="80" alt="tmux-mobile logo">
+  </picture>
+</p>
 
-Remote tmux session management over WebSocket. Control your Mac's tmux sessions from any device — phone, tablet, or another computer.
+<h1 align="center">tmux-mobile</h1>
 
-Built with Tauri 2 (Rust backend) + Svelte 5 (frontend) + xterm.js (terminal rendering).
+<p align="center">
+  <strong>Remotely monitor and control your coding agents from your phone.</strong><br>
+  Connect to tmux sessions running on your Mac over WebSocket — view terminal output, chat with AI agents, and send commands from any device.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Tauri_2-Rust-orange?style=flat-square" alt="Tauri 2">
+  <img src="https://img.shields.io/badge/Svelte_5-Frontend-ff3e00?style=flat-square" alt="Svelte 5">
+  <img src="https://img.shields.io/badge/xterm.js-Terminal-00d4ff?style=flat-square" alt="xterm.js">
+</p>
+
+---
+
+## What is this?
+
+You're running [Kiro CLI](https://kiro.dev), Claude Code, or any coding agent in a tmux session on your Mac. You walk away from your desk. **tmux-mobile** lets you keep watching and interacting from your phone:
+
+- **Terminal view** — full xterm.js rendering with ANSI colors, scrollback, and special keys
+- **Chat view** — AI agent conversations rendered as chat bubbles (like WhatsApp), with syntax-highlighted code blocks, collapsible tool calls, and diff rendering
+- **Sessions** — browse all tmux sessions/windows/panes, create or kill sessions
+
+The server runs on your Mac, the UI runs in any browser or as a native app.
 
 ## Quick Start
 
 ```bash
 npm install
+
+# Option 1: Desktop app (Tauri window + WS server)
 npm run tauri:dev
+
+# Option 2: Server + browser
+cd src-tauri && cargo run --bin server   # starts WS server on :9876
+npm run dev                               # starts web UI on :5173
 ```
 
-The app opens a desktop window and starts the WebSocket server on `ws://0.0.0.0:9876` with a generated auth token printed to the console.
+On first launch, a token is auto-generated and saved to `~/.config/tmux-mobile/config.toml`. The token persists across restarts.
 
-### Server-only mode (no GUI)
+Open `http://<your-mac-ip>:5173` on your phone, enter the host/port/token, and you're in.
+
+## Configuration
+
+Config file: `~/.config/tmux-mobile/config.toml`
+
+```toml
+token = "auto-generated-uuid"
+host = "0.0.0.0"    # optional
+port = 9876          # optional
+```
+
+Environment variables override the config file:
 
 ```bash
-cd src-tauri && cargo run --bin server
+TOKEN=my-secret PORT=8080 npm run tauri:dev
 ```
 
-### Frontend dev (without Tauri)
+## Chat View
 
-Start the WS server in one terminal, Vite dev server in another:
+The Chat view auto-detects supported CLI tools (currently Kiro CLI) and renders their output as a messaging UI:
 
-```bash
-cd src-tauri && TOKEN=mytoken cargo run --bin server
-# in another terminal:
-npm run dev
-# open http://localhost:5173
-```
+- User messages → right-aligned blue bubbles
+- Agent responses → left-aligned bubbles with bot avatar
+- Code blocks → syntax-highlighted cards with language labels
+- Tool calls → collapsible cards showing tool name and output
+- Diffs → red/green line-by-line rendering
+- System output (`/usage`, `/context`) → full-width cards preserving terminal formatting
+- Thinking state → spinner animation
+- ANSI colors preserved throughout
+- Markdown rendering (tables, bold, italic, inline code, links, lists)
 
-### Browser test client
-
-Open `test.html` in a browser to exercise all WebSocket methods interactively.
-
-### Desktop build
-
-```bash
-npm run tauri:build
-```
-
-Produces `.app` and `.dmg` in `src-tauri/target/release/bundle/`.
-
-### Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `HOST` | `0.0.0.0` | Bind address |
-| `PORT` | `9876` | Listen port |
-| `TOKEN` | auto-generated UUID | Auth token |
-
-```bash
-TOKEN=my-secret-token PORT=8080 npm run tauri:dev
-```
+The parser architecture is pluggable — add new CLI tools in `src/lib/parsers.js`.
 
 ## npm Scripts
 
 | Script | Description |
 |--------|-------------|
-| `npm run dev` | Vite dev server only (frontend) |
-| `npm run build` | Vite production build |
-| `npm run tauri:dev` | Tauri dev mode (desktop window + WS server + Vite) |
-| `npm run tauri:build` | Tauri production build (desktop bundles) |
-| `npm run tauri:android` | Tauri Android dev mode |
-| `npm run tauri:android:build` | Tauri Android production build |
+| `npm run dev` | Vite dev server (web UI on 0.0.0.0:5173) |
+| `npm run build` | Production build |
+| `npm run tauri:dev` | Desktop app + WS server |
+| `npm run tauri:build` | Desktop production build |
+| `npm run tauri:android` | Android dev mode |
+| `npm run tauri:android:build` | Android production build |
 
 ## Mobile Targets
 
-### Android — Ready
-
-Android project initialized in `src-tauri/gen/android/`. To build:
+### Android
 
 ```bash
-# Install Rust Android targets (one-time)
-rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
-
-# Dev on connected device/emulator
-npm run tauri:android
-
-# Production build
-npm run tauri:android:build
+rustup target add aarch64-linux-android
+npm run tauri:android:build -- --target aarch64
 ```
 
-Requires: Android SDK, NDK, Java 17+. Set `ANDROID_HOME` and `JAVA_HOME`.
+Cleartext WebSocket (`ws://`) is enabled for both debug and release builds.
 
-### iOS — Manual Setup Required
+Requires: Android SDK, NDK, Java 17+.
 
-iOS target not yet initialized. To set up:
+### iOS
 
 ```bash
-# Install xcodegen (required by Tauri)
 brew install xcodegen
-
-# Install Rust iOS targets
 rustup target add aarch64-apple-ios aarch64-apple-ios-sim
-
-# Initialize iOS project
 npx tauri ios init
-
-# Dev on simulator
 npx tauri ios dev
-
-# Build
-npx tauri ios build
 ```
 
-Requires: Xcode (full install, not just Command Line Tools), Apple Developer account for device builds.
-
-## App Pages
-
-- **Settings** — Enter server host, port, and token to connect
-- **Sessions** — View all tmux sessions, expand to see panes, create/kill sessions
-- **Terminal** — Real-time pane output via xterm.js with ANSI color support, send commands and special keys (Ctrl-C, Tab, arrows)
+Requires: Xcode, Apple Developer account for device builds.
 
 ## Project Structure
 
 ```
-├── src/                  # Svelte 5 frontend
-│   ├── App.svelte        # Main app with page routing
-│   ├── lib/
-│   │   ├── Settings.svelte   # Connection settings page
-│   │   ├── Sessions.svelte   # Session list page
-│   │   ├── Terminal.svelte    # Terminal view (xterm.js)
-│   │   └── ws.js             # WebSocket client library
-│   └── main.js
-├── src-tauri/            # Rust backend (Tauri 2)
-│   ├── src/
-│   │   ├── lib.rs        # Library crate (tmux + server modules)
-│   │   ├── main.rs       # Tauri entry + tests
-│   │   ├── bin/server.rs # Standalone WS server binary
-│   │   ├── server.rs     # WebSocket server (JSON-RPC + auth + subscribe)
-│   │   └── tmux.rs       # tmux CLI wrapper
-│   ├── gen/android/      # Generated Android project
-│   ├── tauri.conf.json
-│   └── Cargo.toml
-├── test.html             # Browser-based WS test client
-├── index.html
-├── package.json
-└── vite.config.js
+src/
+├── App.svelte              # Main app, routing, nav
+├── lib/
+│   ├── Settings.svelte     # Connection settings
+│   ├── Sessions.svelte     # Session/pane browser
+│   ├── Terminal.svelte     # Terminal + Chat container
+│   ├── ChatView.svelte     # Chat bubble renderer
+│   ├── Icon.svelte         # SVG icon system
+│   ├── parsers.js          # Pluggable CLI output parsers
+│   └── ws.js               # WebSocket client
+src-tauri/
+├── src/
+│   ├── server.rs           # WebSocket server (JSON-RPC + auth + subscribe)
+│   ├── tmux.rs             # tmux CLI wrapper
+│   ├── config.rs           # Config file loader
+│   ├── main.rs             # Tauri entry
+│   └── bin/server.rs       # Standalone server binary
+├── tauri.conf.json
+└── Cargo.toml
 ```
 
 ## WebSocket Protocol
 
-JSON-RPC style messages over WebSocket. Every request/response is a JSON object.
-
-### Authentication
-
-The first message on any connection **must** be an auth request. The server closes the connection on failure.
+JSON-RPC over WebSocket. First message must authenticate:
 
 ```json
-→ {"method": "auth", "params": {"token": "your-token"}}
-← {"id": null, "result": {"authenticated": true}}
+→ {"method": "auth", "params": {"token": "..."}}
+← {"result": {"authenticated": true}}
 ```
 
 ### Methods
 
-All methods require authentication first.
-
-#### list_sessions
-
-```json
-→ {"id": 1, "method": "list_sessions"}
-← {"id": 1, "result": [{"name": "main", "windows": 2, "attached": true, "created": "..."}]}
-```
-
-#### list_panes
-
-```json
-→ {"id": 2, "method": "list_panes", "params": {"session": "main"}}
-← {"id": 2, "result": [{"session": "main", "window": 0, "pane": 0, "width": 80, "height": 24, "current_command": "zsh"}]}
-```
-
-#### capture_pane
-
-```json
-→ {"id": 3, "method": "capture_pane", "params": {"target": "main:0.0", "lines": 50}}
-← {"id": 3, "result": {"output": "$ ls\nfile1.txt\nfile2.txt\n"}}
-```
-
-`lines` is optional (defaults to 200).
-
-#### send_keys
-
-```json
-→ {"id": 4, "method": "send_keys", "params": {"target": "main:0.0", "keys": "ls -la", "literal": true}}
-← {"id": 4, "result": {"ok": true}}
-```
-
-Set `literal: true` for text input, `false` for special keys like `Enter`, `C-c`, etc.
-
-#### send_command
-
-Sends text + Enter in one call.
-
-```json
-→ {"id": 5, "method": "send_command", "params": {"target": "main:0.0", "command": "ls -la"}}
-← {"id": 5, "result": {"ok": true}}
-```
-
-#### new_session / kill_session
-
-```json
-→ {"id": 6, "method": "new_session", "params": {"name": "dev"}}
-→ {"id": 7, "method": "kill_session", "params": {"name": "dev"}}
-```
-
-### Real-time Pane Output (Subscribe)
-
-Subscribe to a pane to receive content updates pushed from the server every 200ms (only when content changes).
-
-```json
-→ {"method": "subscribe", "params": {"target": "main:0.0"}}
-← {"id": null, "result": {"subscribed": "main:0.0"}}
-
-// Server pushes when pane content changes:
-← {"id": null, "method": "pane_output", "params": {"target": "main:0.0", "content": "full pane content..."}}
-```
-
-Unsubscribe:
-
-```json
-→ {"method": "unsubscribe", "params": {"target": "main:0.0"}}
-```
-
-### Error Codes
-
-| Code | Meaning |
-|------|---------|
-| -32700 | Parse error (invalid JSON) |
-| -32601 | Method not found |
-| -32602 | Invalid params (missing required field) |
-| -32603 | Internal error (tmux command failed) |
-| -32000 | Auth error |
+| Method | Params | Description |
+|--------|--------|-------------|
+| `list_sessions` | — | List all tmux sessions |
+| `list_panes` | `session` | List all panes across all windows |
+| `capture_pane` | `target`, `lines?` | Capture pane content with ANSI colors |
+| `send_keys` | `target`, `keys`, `literal` | Send keystrokes |
+| `send_command` | `target`, `command` | Send text + Enter |
+| `new_session` | `name?` | Create session |
+| `kill_session` | `name` | Kill session |
+| `subscribe` | `target` | Stream pane updates (200ms polling) |
+| `unsubscribe` | `target` | Stop streaming |
 
 ## Prerequisites
 
-- macOS with tmux installed and running
-- Rust toolchain
-- Node.js
-- For Android: Android SDK + NDK + Java 17
-- For iOS: Xcode + xcodegen
+- macOS with tmux installed
+- Rust toolchain + Node.js
+- Recommended: `set-option -g history-limit 50000` in tmux config
 
 ## Testing
 
 ```bash
-# Ensure tmux is running with at least one session
 tmux new-session -d -s test
-
-# Run tests (must be serial due to shared tmux state)
 cd src-tauri && cargo test -- --test-threads=1
 ```
 

@@ -2,7 +2,7 @@
   import { listSessions, listPanes, newSession, killSession } from './ws.js';
   import Icon from './Icon.svelte';
 
-  let { openTerminal, activeTarget = '' } = $props();
+  let { openTerminal, activeTarget = '', onDisconnect = () => {} } = $props();
 
   let sessions = $state([]);
   let expanded = $state({});
@@ -59,6 +59,7 @@
   }
 
   let confirmKill = $state(null);
+  let confirmDisconnect = $state(false);
 
   async function removeSession(name) {
     if (confirmKill !== name) {
@@ -124,6 +125,13 @@
       </div>
     {/each}
   </div>
+
+  <button class="disconnect-btn" class:confirm={confirmDisconnect} onclick={() => {
+    if (confirmDisconnect) { onDisconnect(); confirmDisconnect = false; }
+    else { confirmDisconnect = true; setTimeout(() => confirmDisconnect = false, 3000); }
+  }}>
+    {confirmDisconnect ? 'tap to disconnect' : 'Disconnect'}
+  </button>
 </div>
 
 <style>
@@ -336,5 +344,26 @@
     background: rgba(255, 80, 80, 0.06);
     border: 1px solid rgba(255, 80, 80, 0.12);
     border-radius: 10px;
+  }
+
+  .disconnect-btn {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(226, 232, 240, 0.4);
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+    margin-top: auto;
+  }
+  .disconnect-btn:active { background: rgba(255, 80, 80, 0.08); }
+  .disconnect-btn.confirm {
+    background: rgba(255, 80, 80, 0.1);
+    border-color: rgba(255, 80, 80, 0.2);
+    color: #ff5050;
+    font-weight: 600;
   }
 </style>

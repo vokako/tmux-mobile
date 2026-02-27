@@ -72,7 +72,6 @@
       </div>
       <div class="nav-right">
         <span class="status-dot"></span>
-        <button class="disconnect" onclick={doDisconnect}><Icon name="x" size={12} /></button>
       </div>
     {:else}
       <div class="brand">
@@ -86,7 +85,7 @@
     {#if page === 'settings'}
       <Settings {onConnected} />
     {:else if page === 'sessions'}
-      <Sessions {openTerminal} activeTarget={terminalTarget} />
+      <Sessions {openTerminal} activeTarget={terminalTarget} onDisconnect={doDisconnect} />
     {/if}
     {#if terminalTarget}
       <div class="page-layer" class:hidden={page !== 'terminal'}>
@@ -185,25 +184,6 @@
   @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }
-  }
-
-  .disconnect {
-    width: 28px; height: 28px;
-    border: none;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.05);
-    color: rgba(226, 232, 240, 0.4);
-    cursor: pointer;
-    font-size: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s ease;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .disconnect:active {
-    background: rgba(255, 80, 80, 0.15);
-    color: #ff5050;
   }
 
   .brand {
