@@ -63,9 +63,6 @@
           <Icon name="sessions" size={13} /> Sessions
         </button>
         {#if terminalTarget}
-          <button class:active={page === 'files'} onclick={() => page = 'files'}>
-            <Icon name="files" size={13} /> Files
-          </button>
           <button class:active={page === 'terminal' && viewMode === 'terminal'} onclick={() => { page = 'terminal'; viewMode = 'terminal'; }}>
             <Icon name="terminal" size={13} /> Terminal
           </button>
@@ -73,6 +70,11 @@
         {#if terminalTarget && chatSupported}
           <button class:active={page === 'terminal' && viewMode === 'chat'} onclick={() => { page = 'terminal'; viewMode = 'chat'; }}>
             <Icon name="chat" size={13} /> Chat
+          </button>
+        {/if}
+        {#if terminalTarget}
+          <button class:active={page === 'files'} onclick={() => page = 'files'}>
+            <Icon name="files" size={13} /> Files
           </button>
         {/if}
       </div>
