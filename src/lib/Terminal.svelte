@@ -159,12 +159,12 @@
     {#if !termAtBottom}
       <button class="scroll-btn" onclick={() => term?.scrollToBottom()}><Icon name="arrow-down" size={16} /></button>
     {/if}
-    <div class="status-bar">{target}{command ? ' · ' + command : ''}</div>
+    <div class="status-bar">{target}{#if command} · <span class:kiro={/^kiro/i.test(command)}>{command}</span>{/if}</div>
   </div>
   {#if viewMode === 'chat'}
     {#if statusInfo?.pct !== null || statusInfo?.tool}
       <div class="status-line">
-        <span class="status-left">{target}{statusInfo.tool ? ' · ' + statusInfo.tool : ''}</span>
+        <span class="status-left">{target}{#if command} · <span class:kiro={/^kiro/i.test(command)}>{command}</span>{/if}</span>
         {#if statusInfo.pct !== null}
           <span class="status-pct">
             <span class="pct-bar"><span class="pct-fill" style="width:{statusInfo.pct}%;background:{statusInfo.pct < 50 ? '#4ade80' : statusInfo.pct < 80 ? '#fbbf24' : '#ff5050'}"></span></span>
@@ -246,6 +246,8 @@
     font-size: 12px;
     color: rgba(226, 232, 240, 0.45);
   }
+  .status-left .kiro { color: #c084fc; }
+  .status-tool { color: #c084fc; }
   .status-left {
     font-family: 'SF Mono', Menlo, monospace;
     white-space: nowrap;
@@ -264,6 +266,7 @@
     background: rgba(10, 10, 15, 0.7);
     pointer-events: none;
   }
+  .status-bar .kiro { color: #c084fc; }
   .status-pct {
     display: flex;
     align-items: center;
