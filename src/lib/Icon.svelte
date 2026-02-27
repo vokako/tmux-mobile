@@ -20,7 +20,7 @@
   {:else if name === 'key'}
     <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
   {:else if name === 'send'}
-    <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+    <circle cx="12" cy="12" r="10"/><polyline points="12 16 12 8"/><polyline points="8 12 12 8 16 12"/>
   {:else if name === 'stop'}
     <rect x="6" y="6" width="12" height="12" rx="1" fill="currentColor" stroke="none"/>
   {:else if name === 'arrow-down'}
