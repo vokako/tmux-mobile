@@ -137,7 +137,11 @@
     try {
       const stat = await fsStat(entry.path);
       currentFile = { path: entry.path, name: entry.name, stat };
-      if (stat.is_text && stat.size <= 512 * 1024) {
+      if (stat.mime_hint === 'application/pdf') {
+        const r = await fsDownload(entry.path);
+        currentFile.dataUrl = `data:application/pdf;base64,${r.data}`;
+        view = 'preview';
+      } else if (stat.is_text && stat.size <= 512 * 1024) {
         const r = await fsRead(entry.path);
         currentFile.content = r.content;
         view = 'preview';
@@ -290,6 +294,7 @@
     if (mime === 'text/markdown') return 'markdown';
     if (mime === 'text/csv') return 'csv';
     if (mime === 'text/html') return 'html';
+    if (mime === 'application/pdf') return 'pdf';
     if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/toml' || mime === 'application/yaml') return 'code';
     return 'other';
   }
@@ -486,6 +491,8 @@
         <div class="csv-render">{@html renderCsv(currentFile.content)}</div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'html'}
         <iframe class="html-preview" srcdoc={currentFile.content} sandbox="allow-scripts allow-same-origin" title="HTML Preview"></iframe>
+      {:else if mimeCategory(currentFile.stat?.mime_hint) === 'pdf'}
+        <iframe class="html-preview" src={currentFile.dataUrl} title="PDF Preview"></iframe>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'code'}
         <div class="code-lined">
           <div class="line-nums">{@html currentFile.content.split('\n').map((_, i) => i + 1).join('\n')}</div>
