@@ -1,15 +1,8 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIwIiBoZWlnaHQ9IjEyMCIgdmlld0JveD0iMCAwIDEyMCAxMjAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxMjAiIHJ4PSIyOCIgZmlsbD0iIzBhMGEwZiIvPgogIDxyZWN0IHg9IjIiIHk9IjIiIHdpZHRoPSIxMTYiIGhlaWdodD0iMTE2IiByeD0iMjYiIHN0cm9rZT0iIzAwZDRmZiIgc3Ryb2tlLW9wYWNpdHk9IjAuMiIgc3Ryb2tlLXdpZHRoPSIxIi8+CiAgPHBhdGggZD0iTTM1IDQ1aDUwTTM1IDYwaDUwTTM1IDc1aDMwIiBzdHJva2U9IiMwMGQ0ZmYiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2Utb3BhY2l0eT0iMC42Ii8+CiAgPGNpcmNsZSBjeD0iODUiIGN5PSI0MCIgcj0iMTIiIGZpbGw9IiMwMGQ0ZmYiIGZpbGwtb3BhY2l0eT0iMC4xNSIgc3Ryb2tlPSIjMDBkNGZmIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDxwYXRoIGQ9Ik04MSAzOGw0IDQtNC00IiBzdHJva2U9IiMwMGQ0ZmYiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KPC9zdmc+">
-    <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIwIiBoZWlnaHQ9IjEyMCIgdmlld0JveD0iMCAwIDEyMCAxMjAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPHJlY3Qgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxMjAiIHJ4PSIyOCIgZmlsbD0iIzBhMGEwZiIvPgogIDxyZWN0IHg9IjIiIHk9IjIiIHdpZHRoPSIxMTYiIGhlaWdodD0iMTE2IiByeD0iMjYiIHN0cm9rZT0iIzAwZDRmZiIgc3Ryb2tlLW9wYWNpdHk9IjAuMiIgc3Ryb2tlLXdpZHRoPSIxIi8+CiAgPHBhdGggZD0iTTM1IDQ1aDUwTTM1IDYwaDUwTTM1IDc1aDMwIiBzdHJva2U9IiMwMGQ0ZmYiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2Utb3BhY2l0eT0iMC42Ii8+CiAgPGNpcmNsZSBjeD0iODUiIGN5PSI0MCIgcj0iMTIiIGZpbGw9IiMwMGQ0ZmYiIGZpbGwtb3BhY2l0eT0iMC4xNSIgc3Ryb2tlPSIjMDBkNGZmIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDxwYXRoIGQ9Ik04MSAzOGw0IDQtNC00IiBzdHJva2U9IiMwMGQ0ZmYiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KPC9zdmc+" width="80" alt="tmux-mobile logo">
-  </picture>
-</p>
-
-<h1 align="center">tmux-mobile</h1>
+<h1 align="center">⌘ tmux-mobile</h1>
 
 <p align="center">
   <strong>Remotely monitor and control your coding agents from your phone.</strong><br>
-  Connect to tmux sessions running on your Mac over WebSocket — view terminal output, chat with AI agents, and send commands from any device.
+  <sub>Connect to tmux sessions running on your Mac over WebSocket — view terminal output, chat with AI agents, and send commands from any device.</sub>
 </p>
 
 <p align="center">
