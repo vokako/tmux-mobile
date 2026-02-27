@@ -98,6 +98,18 @@ export const sendCommand = (target, command) => call('send_command', { target, c
 export const newSession = (name) => call('new_session', { name });
 export const killSession = (name) => call('kill_session', { name });
 
+// File system
+export const fsCwd = (session) => call('fs_cwd', { session });
+export const fsList = (path, show_hidden = false) => call('fs_list', { path, show_hidden });
+export const fsStat = (path) => call('fs_stat', { path });
+export const fsRead = (path) => call('fs_read', { path });
+export const fsWrite = (path, content) => call('fs_write', { path, content });
+export const fsMkdir = (path) => call('fs_mkdir', { path });
+export const fsDelete = (path) => call('fs_delete', { path });
+export const fsRename = (from, to) => call('fs_rename', { from, to });
+export const fsDownload = (path) => call('fs_download', { path });
+export const fsUpload = (path, data) => call('fs_upload', { path, data });
+
 export function subscribe(target) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ method: 'subscribe', params: { target } }));

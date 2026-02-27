@@ -1,4 +1,5 @@
 use crate::tmux;
+use crate::fs as rfs;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -137,6 +138,129 @@ fn handle_request(req: &Request) -> Response {
                 Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
             };
             match tmux::kill_session(name) {
+                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
+                Err(e) => Response::err(id, ERR_INTERNAL, e),
+            }
+        }
+
+        "fs_cwd" => {
+            let session = match require_str(p, "session") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            match rfs::get_cwd(session) {
+                Ok(path) => Response::ok(id, serde_json::json!({ "path": path })),
+                Err(e) => Response::err(id, ERR_INTERNAL, e),
+            }
+        }
+
+        "fs_list" => {
+            let path = match require_str(p, "path") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            let show_hidden = p.get("show_hidden").and_then(|v| v.as_bool()).unwrap_or(false);
+            match rfs::list_dir(path, show_hidden) {
+                Ok(entries) => Response::ok(id, serde_json::json!({ "entries": entries, "path": path })),
+                Err(e) => Response::err(id, ERR_INTERNAL, e),
+            }
+        }
+
+        "fs_stat" => {
+            let path = match require_str(p, "path") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            match rfs::stat_file(path) {
+                Ok(stat) => Response::ok(id, serde_json::to_value(&stat).unwrap()),
+                Err(e) => Response::err(id, ERR_INTERNAL, e),
+            }
+        }
+
+        "fs_read" => {
+            let path = match require_str(p, "path") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            match rfs::read_file(path) {
+                Ok(content) => Response::ok(id, serde_json::json!({ "content": content })),
+                Err(e) => Response::err(id, ERR_INTERNAL, e),
+            }
+        }
+
+        "fs_write" => {
+            let path = match require_str(p, "path") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            let content = match require_str(p, "content") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            match rfs::write_file(path, content) {
+                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
+                Err(e) => Response::err(id, ERR_INTERNAL, e),
+            }
+        }
+
+        "fs_mkdir" => {
+            let path = match require_str(p, "path") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            match rfs::create_dir(path) {
+                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
+                Err(e) => Response::err(id, ERR_INTERNAL, e),
+            }
+        }
+
+        "fs_delete" => {
+            let path = match require_str(p, "path") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            match rfs::delete_path(path) {
+                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
+                Err(e) => Response::err(id, ERR_INTERNAL, e),
+            }
+        }
+
+        "fs_rename" => {
+            let from = match require_str(p, "from") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            let to = match require_str(p, "to") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            match rfs::rename_path(from, to) {
+                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
+                Err(e) => Response::err(id, ERR_INTERNAL, e),
+            }
+        }
+
+        "fs_download" => {
+            let path = match require_str(p, "path") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            match rfs::download_file(path) {
+                Ok((name, data)) => Response::ok(id, serde_json::json!({ "name": name, "data": data })),
+                Err(e) => Response::err(id, ERR_INTERNAL, e),
+            }
+        }
+
+        "fs_upload" => {
+            let path = match require_str(p, "path") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            let data = match require_str(p, "data") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            match rfs::upload_file(path, data) {
                 Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
                 Err(e) => Response::err(id, ERR_INTERNAL, e),
             }
