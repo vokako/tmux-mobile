@@ -6,7 +6,7 @@
   import Icon from './Icon.svelte';
   import { detectParser } from './parsers.js';
 
-  let { target, session, viewMode = 'terminal', onChatSupported = () => {} } = $props();
+  let { target, session, command = '', viewMode = 'terminal', onChatSupported = () => {} } = $props();
 
   let input = $state('');
   let paneContent = $state('');
@@ -15,7 +15,7 @@
   let fitAddon;
   let termAtBottom = $state(true);
 
-  let parser = $derived(detectParser(paneContent));
+  let parser = $derived(detectParser(paneContent, command));
 
   $effect(() => { if (paneContent) onChatSupported(!!parser); });
 
@@ -159,13 +159,12 @@
     {#if !termAtBottom}
       <button class="scroll-btn" onclick={() => term?.scrollToBottom()}><Icon name="arrow-down" size={16} /></button>
     {/if}
+    <div class="status-bar">{target}{command ? ' · ' + command : ''}</div>
   </div>
   {#if viewMode === 'chat'}
     {#if statusInfo?.pct !== null || statusInfo?.tool}
       <div class="status-line">
-        {#if statusInfo.tool}
-          <span class="status-tool">{statusInfo.tool}</span>
-        {/if}
+        <span class="status-left">{target}{statusInfo.tool ? ' · ' + statusInfo.tool : ''}</span>
         {#if statusInfo.pct !== null}
           <span class="status-pct">
             <span class="pct-bar"><span class="pct-fill" style="width:{statusInfo.pct}%;background:{statusInfo.pct < 50 ? '#4ade80' : statusInfo.pct < 80 ? '#fbbf24' : '#ff5050'}"></span></span>
@@ -247,10 +246,23 @@
     font-size: 12px;
     color: rgba(226, 232, 240, 0.45);
   }
-  .status-tool {
-    font-weight: 600;
-    color: #c084fc;
+  .status-left {
     font-family: 'SF Mono', Menlo, monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .status-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 2px 8px;
+    font-family: 'SF Mono', Menlo, monospace;
+    font-size: 10px;
+    color: rgba(226, 232, 240, 0.3);
+    background: rgba(10, 10, 15, 0.7);
+    pointer-events: none;
   }
   .status-pct {
     display: flex;

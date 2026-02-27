@@ -113,7 +113,7 @@
         {#if expanded[s.name] && panes[s.name]}
           <div class="pane-list">
             {#each panes[s.name] as p}
-              <button class="pane" class:active-pane={activeTarget === `${p.session}:${p.window}.${p.pane}`} onclick={() => openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`)}>
+              <button class="pane" class:active-pane={activeTarget === `${p.session}:${p.window}.${p.pane}`} onclick={() => openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command)}>
                 <span class="pane-id">:{p.window}.{p.pane}</span>
                 <span class="pane-cmd">{p.current_command}</span>
                 <span class="pane-size">{p.width}×{p.height}</span>
