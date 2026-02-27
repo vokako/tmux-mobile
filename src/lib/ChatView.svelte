@@ -160,6 +160,18 @@
 
   let collapsedTools = $state({});
   function toggleTool(id) { collapsedTools[id] = !collapsedTools[id]; }
+
+  let copyMsg = $state(null);
+  let copyTimer;
+  function handleBubbleTap(mi, text) {
+    copyMsg = copyMsg === mi ? null : mi;
+    clearTimeout(copyTimer);
+    if (copyMsg !== null) copyTimer = setTimeout(() => copyMsg = null, 3000);
+  }
+  async function doCopy(text) {
+    try { await navigator.clipboard.writeText(text); } catch {}
+    copyMsg = null;
+  }
 </script>
 
 <div class="chat-wrap">
@@ -180,7 +192,8 @@
             <pre class="system-pre">{@html ansiToHtml(msg.rawText)}</pre>
           </div>
         {:else}
-        <div class="bubble" class:user-bubble={msg.role === 'user'} class:agent-bubble={msg.role === 'agent'}>
+        <div class="bubble-wrap">
+          <div class="bubble" class:user-bubble={msg.role === 'user'} class:agent-bubble={msg.role === 'agent'} onclick={() => handleBubbleTap(mi, msg.text)}>
           {#each parseBlocks(msg.text, msg.rawText) as block, bi}
             {#if block.type === 'text'}
               {#if msg.role === 'user'}
@@ -213,6 +226,12 @@
               </div>
             {/if}
           {/each}
+        </div>
+          {#if copyMsg === mi}
+            <button class="copy-btn" onclick={(e) => { e.stopPropagation(); doCopy(msg.text); }}>
+              <Icon name="copy" size={13} /> Copy
+            </button>
+          {/if}
         </div>
         {/if}
       </div>
@@ -306,10 +325,42 @@
     font-size: 14px;
     line-height: 1.5;
     min-width: 40px;
+    max-width: 100%;
+    overflow: hidden;
     overflow-wrap: break-word;
     display: flex;
     flex-direction: column;
     gap: 8px;
+  }
+
+  .bubble-wrap {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .msg.user .bubble-wrap { align-items: flex-end; }
+
+  .copy-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+    padding: 4px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    background: rgba(12, 12, 20, 0.9);
+    backdrop-filter: blur(10px);
+    color: rgba(226, 232, 240, 0.6);
+    font-size: 12px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .copy-btn:active {
+    background: rgba(0, 212, 255, 0.1);
+    color: #00d4ff;
   }
 
   .user-bubble {
