@@ -149,26 +149,27 @@
 
   .nav-pills {
     display: flex;
-    gap: 4px;
+    gap: 2px;
     background: rgba(255, 255, 255, 0.04);
     border-radius: 10px;
-    padding: 3px;
+    padding: 2px;
   }
 
   .nav-pills button {
-    padding: 6px 14px;
+    padding: 6px 8px;
     border: none;
     border-radius: 8px;
     background: transparent;
     color: rgba(226, 232, 240, 0.5);
     cursor: pointer;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 500;
     transition: all 0.2s ease;
     -webkit-tap-highlight-color: transparent;
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 4px;
+    white-space: nowrap;
   }
   .nav-pills button:active { transform: scale(0.97); }
   .nav-pills button.active {
