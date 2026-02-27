@@ -2,6 +2,7 @@
   import Settings from './lib/Settings.svelte';
   import Sessions from './lib/Sessions.svelte';
   import Terminal from './lib/Terminal.svelte';
+  import Files from './lib/Files.svelte';
   import Icon from './lib/Icon.svelte';
   import { connect, isConnected, disconnect, setOnDisconnect } from './lib/ws.js';
 
@@ -62,6 +63,9 @@
           <Icon name="sessions" size={13} /> Sessions
         </button>
         {#if terminalTarget}
+          <button class:active={page === 'files'} onclick={() => page = 'files'}>
+            <Icon name="files" size={13} /> Files
+          </button>
           <button class:active={page === 'terminal' && viewMode === 'terminal'} onclick={() => { page = 'terminal'; viewMode = 'terminal'; }}>
             <Icon name="terminal" size={13} /> Terminal
           </button>
@@ -88,6 +92,8 @@
       <Settings {onConnected} />
     {:else if page === 'sessions'}
       <Sessions {openTerminal} activeTarget={terminalTarget} onDisconnect={doDisconnect} />
+    {:else if page === 'files'}
+      <Files session={terminalSession} />
     {/if}
     {#if terminalTarget}
       <div class="page-layer" class:hidden={page !== 'terminal'}>
