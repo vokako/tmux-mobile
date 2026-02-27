@@ -109,8 +109,11 @@
     width: 100%;
     top: 0;
     left: 0;
+    overscroll-behavior: none;
+    -webkit-overflow-scrolling: touch;
   }
   :global(*) { box-sizing: border-box; }
+  :global(html) { overscroll-behavior: none; }
   :global(::selection) { background: rgba(0, 212, 255, 0.25); }
 
   main {

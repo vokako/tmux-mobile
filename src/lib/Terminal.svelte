@@ -66,6 +66,21 @@
     term.loadAddon(fitAddon);
     term.open(termEl);
 
+    // Mobile touch scrolling — proxy touch events to xterm's viewport scrollTop
+    const viewport = termEl.querySelector('.xterm-viewport');
+    if (viewport) {
+      let touchY = 0;
+      termEl.addEventListener('touchstart', (e) => {
+        touchY = e.touches[0].clientY;
+      }, { passive: true });
+      termEl.addEventListener('touchmove', (e) => {
+        const dy = touchY - e.touches[0].clientY;
+        touchY = e.touches[0].clientY;
+        viewport.scrollTop += dy;
+        e.preventDefault();
+      }, { passive: false });
+    }
+
     term.onScroll(() => {
       const buf = term.buffer.active;
       termAtBottom = buf.viewportY >= buf.baseY;
@@ -274,17 +289,9 @@
   .xterm-wrap {
     height: 100%;
     padding: 4px 6px;
-    touch-action: pan-y;
   }
   .xterm-wrap :global(.xterm) {
     height: 100%;
-  }
-  .xterm-wrap :global(.xterm-viewport) {
-    overflow-y: auto !important;
-    -webkit-overflow-scrolling: touch;
-  }
-  .xterm-wrap :global(.xterm-screen) {
-    touch-action: pan-y;
   }
 
   .scroll-btn {
