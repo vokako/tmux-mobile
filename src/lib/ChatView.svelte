@@ -113,7 +113,17 @@
   let parser = $derived(detectParser(content));
   let parsed = $derived(parser ? parseMessages(content, parser) : { messages: [], isThinking: false });
   let messages = $derived(parsed.messages);
-  let isThinking = $derived(parsed.isThinking);
+  let showThinking = $state(false);
+  let thinkingTimer;
+  $effect(() => {
+    const raw = parsed.isThinking;
+    if (raw) {
+      clearTimeout(thinkingTimer);
+      showThinking = true;
+    } else {
+      thinkingTimer = setTimeout(() => showThinking = false, 600);
+    }
+  });
 
   let isAtBottom = $state(true);
 
@@ -236,7 +246,7 @@
         {/if}
       </div>
     {/each}
-    {#if isThinking}
+    {#if showThinking}
       <div class="msg agent">
         <div class="avatar"><Icon name="bot" size={14} /></div>
         <div class="bubble agent-bubble thinking-bubble">
