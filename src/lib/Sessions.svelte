@@ -2,13 +2,16 @@
   import { listSessions, listPanes, newSession, killSession } from './ws.js';
   import Icon from './Icon.svelte';
 
-  let { openTerminal, activeTarget = '', onDisconnect = () => {} } = $props();
+  let { openTerminal, activeTarget = '', onDisconnect = () => {}, visible = false } = $props();
 
   let sessions = $state([]);
   let expanded = $state({});
   let panes = $state({});
   let error = $state('');
   let newName = $state('');
+
+  // Refresh when page becomes visible
+  $effect(() => { if (visible) refresh(); });
 
   async function refresh() {
     try {
@@ -75,8 +78,6 @@
       error = e.message;
     }
   }
-
-  refresh();
 </script>
 
 <div class="sessions">
@@ -85,6 +86,7 @@
     <button onclick={createSession} disabled={!newName.trim()}>
       <span>+</span>
     </button>
+    <button class="refresh-btn" onclick={refresh}><Icon name="refresh" size={14} /></button>
   </div>
 
   {#if error}
@@ -336,6 +338,17 @@
     transform: scale(0.95);
   }
   .new-session button:disabled { opacity: 0.3; cursor: default; }
+  .refresh-btn {
+    width: 44px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(226, 232, 240, 0.4);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .refresh-btn:active { background: rgba(0, 212, 255, 0.1); color: #00d4ff; }
 
   .error {
     color: #ff5050;

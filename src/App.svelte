@@ -93,11 +93,12 @@
     {#if page === 'settings'}
       <Settings {onConnected} />
     {:else if page === 'sessions'}
-      <Sessions {openTerminal} activeTarget={terminalTarget} onDisconnect={doDisconnect} />
-    {:else if page === 'files'}
-      <Files session={terminalSession} />
+      <Sessions {openTerminal} activeTarget={terminalTarget} onDisconnect={doDisconnect} visible={page === 'sessions'} />
     {/if}
     {#if terminalTarget}
+      <div class="page-layer" class:hidden={page !== 'files'}>
+        <Files session={terminalSession} />
+      </div>
       <div class="page-layer" class:hidden={page !== 'terminal'}>
         <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {viewMode} onChatSupported={(v) => chatSupported = v} />
       </div>

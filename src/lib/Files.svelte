@@ -141,6 +141,10 @@
         const r = await fsDownload(entry.path);
         currentFile.dataUrl = `data:application/pdf;base64,${r.data}`;
         view = 'preview';
+      } else if (stat.mime_hint.startsWith('image/')) {
+        const r = await fsDownload(entry.path);
+        currentFile.dataUrl = `data:${stat.mime_hint};base64,${r.data}`;
+        view = 'preview';
       } else if (stat.is_text && stat.size <= 512 * 1024) {
         const r = await fsRead(entry.path);
         currentFile.content = r.content;
@@ -380,6 +384,7 @@
     <div class="breadcrumb">
       <button class="bc-btn" onclick={goHome}><Icon name="home" size={14} /></button>
       <button class="bc-btn" onclick={goUp}><Icon name="folder-up" size={14} /></button>
+      <button class="bc-btn" onclick={() => loadDir(cwd)}><Icon name="refresh" size={14} /></button>
       <div class="bc-path" bind:this={bcPathEl}>
         <button class="bc-seg" onclick={() => loadDir('/')}>/</button>
         {#each breadcrumbs as bc}
@@ -460,7 +465,11 @@
               {/if}
               <button class="act-btn" onclick={() => { renaming = entry.path; renameValue = entry.name; }} title="Rename"><Icon name="edit" size={12} /></button>
               <button class="act-btn del" class:confirm={confirmDelete === entry.path} onclick={() => handleDelete(entry.path)} title="Delete">
-                <Icon name="trash" size={12} />
+                {#if confirmDelete === entry.path}
+                  <span class="del-text">del</span>
+                {:else}
+                  <Icon name="trash" size={12} />
+                {/if}
               </button>
             </div>
           </div>
@@ -493,6 +502,8 @@
         <iframe class="html-preview" srcdoc={currentFile.content} sandbox="allow-scripts allow-same-origin" title="HTML Preview"></iframe>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'pdf'}
         <iframe class="html-preview" src={currentFile.dataUrl} title="PDF Preview"></iframe>
+      {:else if mimeCategory(currentFile.stat?.mime_hint) === 'image'}
+        <div class="image-preview"><img src={currentFile.dataUrl} alt={currentFile.name} /></div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'code'}
         <div class="code-lined">
           <div class="line-nums">{@html currentFile.content.split('\n').map((_, i) => i + 1).join('\n')}</div>
@@ -634,6 +645,7 @@
   }
   .act-btn:active { color: #00d4ff; }
   .act-btn.del:active, .act-btn.del.confirm { color: #ff5050; }
+  .del-text { font-size: 10px; font-weight: 600; }
   .act-btn.save { color: #4ade80; }
   .act-btn.save:disabled { color: rgba(226,232,240,0.15); }
   .act-btn:disabled { color: rgba(226,232,240,0.15); }
@@ -672,6 +684,10 @@
   .html-preview {
     flex: 1; width: 100%; border: none; background: #fff; border-radius: 4px;
   }
+  .image-preview {
+    flex: 1; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 12px;
+  }
+  .image-preview img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; }
   .md-render { font-size: 14px; line-height: 1.6; color: #e2e8f0; overflow-wrap: break-word; }
   .md-render :global(h1) { font-size: 22px; margin: 16px 0 8px; color: #00d4ff; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 6px; }
   .md-render :global(h2) { font-size: 18px; margin: 14px 0 6px; color: #00d4ff; }

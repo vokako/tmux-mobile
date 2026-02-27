@@ -239,7 +239,7 @@
         </div>
           {#if copyMsg === mi}
             <button class="copy-btn" onclick={(e) => { e.stopPropagation(); doCopy(msg.text); }}>
-              <Icon name="copy" size={13} /> Copy
+              <Icon name="copy" size={11} />
             </button>
           {/if}
         </div>
@@ -354,22 +354,24 @@
   .msg.user .bubble-wrap { align-items: flex-end; }
 
   .copy-btn {
+    position: absolute;
+    top: -4px;
+    right: -4px;
     display: flex;
     align-items: center;
-    gap: 4px;
-    margin-top: 4px;
-    padding: 4px 10px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    background: rgba(12, 12, 20, 0.9);
+    padding: 4px 6px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    background: rgba(12, 12, 20, 0.95);
     backdrop-filter: blur(10px);
     color: rgba(226, 232, 240, 0.6);
-    font-size: 12px;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
+    z-index: 2;
   }
+  .msg.user .copy-btn { right: auto; left: -4px; }
   .copy-btn:active {
-    background: rgba(0, 212, 255, 0.1);
+    background: rgba(0, 212, 255, 0.15);
     color: #00d4ff;
   }
 
