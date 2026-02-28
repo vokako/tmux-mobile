@@ -96,7 +96,14 @@
     });
 
     // Update xterm theme when light/dark changes
-    const obs = new MutationObserver(() => { term.options.theme = getTermTheme(); });
+    function syncTermBg() {
+      const t = getTermTheme();
+      term.options.theme = t;
+      termEl.style.background = t.background;
+      termEl.closest('.terminal').style.background = t.background;
+    }
+    syncTermBg();
+    const obs = new MutationObserver(syncTermBg);
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
     requestAnimationFrame(() => fitAddon.fit());
@@ -308,10 +315,13 @@
 
   .xterm-wrap {
     height: 100%;
-    padding: 0;
+    padding: 4px 6px;
   }
   .xterm-wrap :global(.xterm) {
     height: 100%;
+  }
+  .xterm-wrap :global(.xterm-viewport) {
+    background-color: transparent !important;
   }
 
   .scroll-btn {
