@@ -526,7 +526,7 @@
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'html'}
         <iframe class="html-preview" srcdoc={currentFile.content} sandbox="allow-scripts allow-same-origin" title="HTML Preview"></iframe>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'pdf'}
-        <div class="pdf-container" bind:this={pdfContainer}></div>
+        <div class="pdf-container" bind:this={pdfContainer} style="margin: -12px; padding: 0;"></div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'image'}
         <div class="image-preview"><img src={currentFile.dataUrl} alt={currentFile.name} /></div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'code'}
@@ -692,7 +692,7 @@
   .preview-actions { display: flex; gap: 4px; }
 
   /* Preview body */
-  .preview-body { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 12px; }
+  .preview-body { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 12px; display: flex; flex-direction: column; min-height: 0; }
   .code-preview {
     margin: 0; font-family: 'SF Mono', Menlo, monospace; font-size: 13px;
     line-height: 1.5; color: #e2e8f0; white-space: pre-wrap; word-break: break-all; flex: 1;
