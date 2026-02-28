@@ -2,7 +2,7 @@
   import { detectParser, parseMessages, stripAnsi } from './parsers.js';
   import Icon from './Icon.svelte';
 
-  let { content = '', onSendKeys = null } = $props();
+  let { content = '', onSendKeys = null, command = '' } = $props();
 
   let chatEl;
 
@@ -110,7 +110,7 @@
     return blocks;
   }
 
-  let parser = $derived(detectParser(content));
+  let parser = $derived(detectParser(content, command));
   let parsed = $derived(parser ? parseMessages(content, parser) : { messages: [], isThinking: false });
   let messages = $derived(parsed.messages);
   let showThinking = $state(false);
