@@ -184,7 +184,7 @@
   }
 
   async function selectModel(targetIdx, currentIdx) {
-    if (!onSendKeys || targetIdx === currentIdx) return;
+    if (!onSendKeys) return;
     const diff = targetIdx - currentIdx;
     const key = diff > 0 ? 'Down' : 'Up';
     for (let i = 0; i < Math.abs(diff); i++) {
