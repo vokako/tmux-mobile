@@ -11,7 +11,10 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "tauri:android": "tauri android dev",
-    "tauri:android:build": "tauri android build"
+    "tauri:android:build": "tauri android build",
+    "build:all": "npm run build && npm run tauri:build && npx tauri android build --target aarch64",
+    "build:mac": "npm run tauri:build",
+    "build:android": "npx tauri android build --target aarch64"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5",
@@ -24,6 +27,7 @@
     "@xterm/xterm": "^6.0.0",
     "highlight.js": "^11.11.1",
     "katex": "^0.16.33",
+    "lucide-svelte": "^0.575.0",
     "marked": "^17.0.3",
     "mermaid": "^11.12.3"
   }
