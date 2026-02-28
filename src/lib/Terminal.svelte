@@ -29,6 +29,36 @@
     return parser.extractStatus(paneContent);
   });
 
+  const darkTheme = {
+    background: '#0a0a0f', foreground: '#c9d1d9', cursor: '#00d4ff',
+    selectionBackground: 'rgba(0, 212, 255, 0.18)',
+    black: '#0a0a0f', brightBlack: '#484848',
+    red: '#ff5050', brightRed: '#ff6b6b',
+    green: '#4ade80', brightGreen: '#6ee7a0',
+    yellow: '#fbbf24', brightYellow: '#fcd34d',
+    blue: '#00d4ff', brightBlue: '#38bdf8',
+    magenta: '#c084fc', brightMagenta: '#d8b4fe',
+    cyan: '#22d3ee', brightCyan: '#67e8f9',
+    white: '#c9d1d9', brightWhite: '#f1f5f9',
+  };
+  const lightTheme = {
+    background: '#f5f5f7', foreground: '#1a1a2e', cursor: '#0088cc',
+    selectionBackground: 'rgba(0, 136, 204, 0.18)',
+    black: '#1a1a2e', brightBlack: '#6b7280',
+    red: '#dc2626', brightRed: '#ef4444',
+    green: '#16a34a', brightGreen: '#22c55e',
+    yellow: '#ca8a04', brightYellow: '#eab308',
+    blue: '#0088cc', brightBlue: '#2563eb',
+    magenta: '#9333ea', brightMagenta: '#a855f7',
+    cyan: '#0891b2', brightCyan: '#06b6d4',
+    white: '#e2e8f0', brightWhite: '#f8fafc',
+  };
+
+  function getTermTheme() {
+    const el = document.documentElement.getAttribute('data-theme');
+    return el === 'light' ? lightTheme : darkTheme;
+  }
+
   $effect(() => {
     term = new Terminal({
       cursorBlink: false,
@@ -36,28 +66,7 @@
       disableStdin: true,
       fontSize: 14,
       fontFamily: "'SF Mono', Menlo, 'Courier New', monospace",
-      theme: {
-        background: '#0a0a0f',
-        foreground: '#c9d1d9',
-        cursor: '#00d4ff',
-        selectionBackground: 'rgba(0, 212, 255, 0.18)',
-        black: '#0a0a0f',
-        brightBlack: '#484848',
-        red: '#ff5050',
-        brightRed: '#ff6b6b',
-        green: '#4ade80',
-        brightGreen: '#6ee7a0',
-        yellow: '#fbbf24',
-        brightYellow: '#fcd34d',
-        blue: '#00d4ff',
-        brightBlue: '#38bdf8',
-        magenta: '#c084fc',
-        brightMagenta: '#d8b4fe',
-        cyan: '#22d3ee',
-        brightCyan: '#67e8f9',
-        white: '#c9d1d9',
-        brightWhite: '#f1f5f9',
-      },
+      theme: getTermTheme(),
       scrollback: 1000,
       convertEol: true,
     });
@@ -85,6 +94,10 @@
       const buf = term.buffer.active;
       termAtBottom = buf.viewportY >= buf.baseY;
     });
+
+    // Update xterm theme when light/dark changes
+    const obs = new MutationObserver(() => { term.options.theme = getTermTheme(); });
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
     requestAnimationFrame(() => fitAddon.fit());
 
