@@ -469,7 +469,7 @@
     width: 34px; height: 34px;
     border: none;
     border-radius: 9px;
-    background: linear-gradient(135deg, #00d4ff 0%, #0099cc 100%);
+    background: var(--accent);
     color: #000;
     font-size: 15px;
     cursor: pointer;
