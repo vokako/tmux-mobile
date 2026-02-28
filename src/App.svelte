@@ -14,6 +14,7 @@
   let viewMode = $state('terminal');
   let chatSupported = $state(false);
   let theme = $state(localStorage.getItem('tmux_theme') || 'system');
+  let showSettings = $state(false);
 
   function setTheme(t) {
     theme = t;
@@ -99,7 +100,7 @@
         {/if}
       </div>
       <div class="nav-right">
-        <span class="status-dot"></span>
+        <button class="gear-btn" onclick={() => showSettings = !showSettings}><Icon name="gear" size={16} /></button>
       </div>
     {:else}
       <div class="brand">
@@ -109,11 +110,30 @@
     {/if}
   </nav>
 
+  {#if showSettings}
+    <div class="settings-panel">
+      <div class="sp-section">
+        <div class="sp-label">Connection</div>
+        <div class="sp-info">{localStorage.getItem('tmux_host')}:{localStorage.getItem('tmux_port')}</div>
+      </div>
+      <div class="sp-section">
+        <div class="sp-label">Theme</div>
+        <div class="sp-btns">
+          <button class:active={theme === 'system'} onclick={() => setTheme('system')}>Auto</button>
+          <button class:active={theme === 'light'} onclick={() => setTheme('light')}>Light</button>
+          <button class:active={theme === 'dark'} onclick={() => setTheme('dark')}>Dark</button>
+        </div>
+      </div>
+      <button class="sp-disconnect" onclick={() => { showSettings = false; doDisconnect(); }}>Disconnect</button>
+    </div>
+    <button class="sp-overlay" onclick={() => showSettings = false}></button>
+  {/if}
+
   <div class="page" class:page-terminal={page === 'terminal'}>
     {#if page === 'settings'}
       <Settings {onConnected} />
     {:else if page === 'sessions'}
-      <Sessions {openTerminal} activeTarget={terminalTarget} onDisconnect={doDisconnect} visible={page === 'sessions'} {theme} onThemeChange={setTheme} />
+      <Sessions {openTerminal} activeTarget={terminalTarget} visible={page === 'sessions'} />
     {/if}
     {#if terminalTarget}
       <div class="page-layer" class:hidden={page !== 'files'}>
@@ -241,6 +261,43 @@
   @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }
+  }
+
+  .gear-btn {
+    padding: 6px; border: none; border-radius: 8px; background: none;
+    color: var(--text3); cursor: pointer; display: flex;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .gear-btn:active { color: var(--accent); }
+
+  .sp-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 20;
+    border: none; cursor: default;
+  }
+  .settings-panel {
+    position: absolute; top: 48px; right: 8px; z-index: 21;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 12px; padding: 12px; min-width: 220px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+  }
+  .sp-section { padding: 8px 0; border-bottom: 1px solid var(--border2); }
+  .sp-section:last-of-type { border-bottom: none; }
+  .sp-label { font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .sp-info { font-size: 13px; font-family: 'SF Mono', Menlo, monospace; color: var(--text2); }
+  .sp-btns {
+    display: flex; gap: 4px; background: var(--pill-bg); border-radius: 8px; padding: 2px;
+  }
+  .sp-btns button {
+    padding: 5px 12px; border: none; border-radius: 6px; background: transparent;
+    color: var(--text3); font-size: 12px; font-weight: 500; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .sp-btns button.active { background: var(--accent-bg); color: var(--accent); }
+  .sp-disconnect {
+    width: 100%; margin-top: 8px; padding: 10px; border: 1px solid var(--danger);
+    border-radius: 8px; background: var(--danger-bg); color: var(--danger);
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
   }
 
   .brand {
