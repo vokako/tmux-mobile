@@ -39,6 +39,15 @@
     if (!chatSupported && viewMode === 'chat') viewMode = 'terminal';
   });
 
+  // Persist nav state for restore on reload
+  $effect(() => {
+    if (connected && terminalTarget) {
+      localStorage.setItem('tmux_state', JSON.stringify({
+        page, viewMode, terminalTarget, terminalSession, terminalCommand
+      }));
+    }
+  });
+
   setOnDisconnect(() => {
     connected = false;
     page = 'settings';
@@ -61,16 +70,34 @@
     disconnect();
     connected = false;
     page = 'settings';
+    localStorage.removeItem('tmux_state');
   }
 
-  // Auto-reconnect on page load if credentials are saved
+  // Auto-reconnect and restore state
   $effect(() => {
     const host = localStorage.getItem('tmux_host');
     const port = localStorage.getItem('tmux_port');
     const token = localStorage.getItem('tmux_token');
     if (host && port && token && !connected) {
       connect(host, parseInt(port), token).then(() => {
-        onConnected();
+        connected = true;
+        const saved = localStorage.getItem('tmux_state');
+        if (saved) {
+          try {
+            const s = JSON.parse(saved);
+            if (s.terminalTarget) {
+              terminalTarget = s.terminalTarget;
+              terminalSession = s.terminalSession || '';
+              terminalCommand = s.terminalCommand || '';
+              page = s.page || 'terminal';
+              viewMode = s.viewMode || 'terminal';
+            } else {
+              page = 'sessions';
+            }
+          } catch { page = 'sessions'; }
+        } else {
+          page = 'sessions';
+        }
       }).catch(() => {});
     }
   });
