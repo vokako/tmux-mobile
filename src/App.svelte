@@ -16,6 +16,29 @@
   let theme = $state(localStorage.getItem('tmux_theme') || 'system');
   let showSettings = $state(false);
 
+  // Android keyboard height
+  $effect(() => {
+    const handler = (e) => {
+      document.documentElement.style.setProperty('--keyboard-height', (e.detail?.height || 0) + 'px');
+    };
+    window.addEventListener('androidKeyboardHeight', handler);
+    // Fallback: visualViewport for iOS/browser
+    const vv = window.visualViewport;
+    if (vv) {
+      let initH = vv.height;
+      const onResize = () => {
+        if (vv.height > initH) initH = vv.height;
+        const kb = Math.max(0, initH - vv.height);
+        if (!window.__ANDROID_KEYBOARD_HEIGHT__) {
+          document.documentElement.style.setProperty('--keyboard-height', (kb > 50 ? kb : 0) + 'px');
+        }
+      };
+      vv.addEventListener('resize', onResize);
+      return () => { window.removeEventListener('androidKeyboardHeight', handler); vv.removeEventListener('resize', onResize); };
+    }
+    return () => window.removeEventListener('androidKeyboardHeight', handler);
+  });
+
   function setTheme(t) {
     theme = t;
     localStorage.setItem('tmux_theme', t);
@@ -191,7 +214,7 @@
     -webkit-overflow-scrolling: touch;
   }
   :global(*) { box-sizing: border-box; }
-  :global(html) { overscroll-behavior: none; }
+  :global(html) { overscroll-behavior: none; --sat: env(safe-area-inset-top); --sab: env(safe-area-inset-bottom); --keyboard-height: 0px; }
   :global(html[data-theme="dark"]) {
     --bg: #0a0a0f; --bg2: #0f0f18; --bg3: #12121a;
     --text: #e2e8f0; --text2: rgba(226,232,240,0.5); --text3: rgba(226,232,240,0.3);
@@ -223,6 +246,7 @@
     height: 100dvh;
     max-width: 100vw;
     overflow: hidden;
+    padding-bottom: var(--keyboard-height);
     background: linear-gradient(180deg, var(--bg) 0%, var(--bg2) 50%, var(--bg3) 100%);
   }
 
@@ -231,6 +255,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 8px 12px;
+    padding-top: calc(8px + var(--sat));
     background: var(--nav-bg);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
