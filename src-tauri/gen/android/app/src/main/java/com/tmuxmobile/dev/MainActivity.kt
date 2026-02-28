@@ -1,7 +1,6 @@
 package com.tmuxmobile.dev
 
 import android.os.Bundle
-import android.view.ViewTreeObserver
 import android.graphics.Rect
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
@@ -13,36 +12,37 @@ class MainActivity : TauriActivity() {
     super.onCreate(savedInstanceState)
 
     val rootView = window.decorView.rootView
+    val density = resources.displayMetrics.density
 
-    // Send status bar + navigation bar insets to WebView
-    ViewCompat.setOnApplyWindowInsetsListener(rootView) { view, insets ->
+    // Send status bar + navigation bar insets to WebView (convert to CSS px)
+    ViewCompat.setOnApplyWindowInsetsListener(rootView) { _, insets ->
       val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+      val satCss = (systemBars.top / density).toInt()
+      val sabCss = (systemBars.bottom / density).toInt()
       val webView = findWebView(rootView)
       webView?.evaluateJavascript("""
-        document.documentElement.style.setProperty('--sat', '${systemBars.top}px');
-        document.documentElement.style.setProperty('--sab', '${systemBars.bottom}px');
+        document.documentElement.style.setProperty('--sat', '${satCss}px');
+        document.documentElement.style.setProperty('--sab', '${sabCss}px');
       """.trimIndent(), null)
       insets
     }
 
-    // Keyboard height detection
+    // Keyboard height detection (convert to CSS px)
+    var lastKeyboardCss = 0
     rootView.viewTreeObserver.addOnGlobalLayoutListener {
       val rect = Rect()
       rootView.getWindowVisibleDisplayFrame(rect)
       val screenHeight = rootView.height
-      val keyboardHeight = screenHeight - rect.bottom
+      val keyboardPx = screenHeight - rect.bottom
+      val keyboardCss = (keyboardPx / density).toInt()
+      if (keyboardCss == lastKeyboardCss) return@addOnGlobalLayoutListener
+      lastKeyboardCss = keyboardCss
       val webView = findWebView(rootView)
-      if (keyboardHeight > 150) {
-        webView?.evaluateJavascript("""
-          window.__ANDROID_KEYBOARD_HEIGHT__ = $keyboardHeight;
-          window.dispatchEvent(new CustomEvent('androidKeyboardHeight', { detail: { height: $keyboardHeight } }));
-        """.trimIndent(), null)
-      } else {
-        webView?.evaluateJavascript("""
-          window.__ANDROID_KEYBOARD_HEIGHT__ = 0;
-          window.dispatchEvent(new CustomEvent('androidKeyboardHeight', { detail: { height: 0 } }));
-        """.trimIndent(), null)
-      }
+      val height = if (keyboardCss > 80) keyboardCss else 0
+      webView?.evaluateJavascript("""
+        window.__ANDROID_KEYBOARD_HEIGHT__ = $height;
+        window.dispatchEvent(new CustomEvent('androidKeyboardHeight', { detail: { height: $height } }));
+      """.trimIndent(), null)
     }
   }
 
