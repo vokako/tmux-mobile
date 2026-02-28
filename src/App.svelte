@@ -107,32 +107,31 @@
     const host = localStorage.getItem('tmux_host');
     const port = localStorage.getItem('tmux_port');
     const token = localStorage.getItem('tmux_token');
-    if (host && port && token) {
-      autoConnectAttempted = true;
-      connect(host, parseInt(port), token).then(() => {
-        connected = true;
-        const saved = localStorage.getItem('tmux_state');
-        if (saved) {
-          try {
-            const s = JSON.parse(saved);
-            if (s.terminalTarget) {
-              terminalTarget = s.terminalTarget;
-              terminalSession = s.terminalSession || '';
-              terminalCommand = s.terminalCommand || '';
-              page = s.page || 'terminal';
-              viewMode = s.viewMode || 'terminal';
-            } else {
-              page = 'sessions';
-            }
-          } catch { page = 'sessions'; }
+    if (!host || !port || !token) return;
+    autoConnectAttempted = true;
+
+    // Timeout: if connect takes > 5s, give up
+    const timeout = setTimeout(() => { page = 'settings'; }, 5000);
+
+    connect(host, parseInt(port), token).then(() => {
+      clearTimeout(timeout);
+      connected = true;
+      try {
+        const s = JSON.parse(localStorage.getItem('tmux_state') || '{}');
+        if (s.terminalTarget) {
+          terminalTarget = s.terminalTarget;
+          terminalSession = s.terminalSession || '';
+          terminalCommand = s.terminalCommand || '';
+          page = s.page || 'terminal';
+          viewMode = s.viewMode || 'terminal';
         } else {
           page = 'sessions';
         }
-      }).catch(() => {
-        autoConnectAttempted = false;
-        // Stay on settings, credentials might be wrong
-      });
-    }
+      } catch { page = 'sessions'; }
+    }).catch(() => {
+      clearTimeout(timeout);
+      page = 'settings';
+    });
   });
 </script>
 
