@@ -46,7 +46,7 @@ impl Config {
 
         Config {
             host: std::env::var("HOST").ok().or(file_cfg.host).unwrap_or("0.0.0.0".into()),
-            port: std::env::var("PORT").ok().and_then(|p| p.parse().ok()).or(file_cfg.port).unwrap_or(9876),
+            port: std::env::var("PORT").ok().and_then(|p| p.parse().ok()).or(file_cfg.port).unwrap_or(9899),
             token,
         }
     }

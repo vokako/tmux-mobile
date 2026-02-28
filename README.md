@@ -34,7 +34,7 @@ npm install
 npm run tauri:dev
 
 # Option 2: Server + browser
-cd src-tauri && cargo run --bin server   # starts WS server on :9876
+cd src-tauri && cargo run --bin server   # starts WS server on :9899
 npm run dev                               # starts web UI on :5173
 ```
 
@@ -49,7 +49,7 @@ Config file: `~/.config/tmux-mobile/config.toml`
 ```toml
 token = "auto-generated-uuid"
 host = "0.0.0.0"    # optional
-port = 9876          # optional
+port = 9899          # optional
 ```
 
 Environment variables override the config file:

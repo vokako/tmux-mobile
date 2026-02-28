@@ -24,7 +24,7 @@ npm run tauri:dev
 This will:
 - Build frontend (Vite)
 - Build Rust backend
-- Start WebSocket server on ws://0.0.0.0:9876
+- Start WebSocket server on ws://0.0.0.0:9899
 - Open desktop window
 
 Look for the console output:
@@ -75,7 +75,7 @@ npx serve . -l 8888
 
 **Port already in use:**
 ```bash
-lsof -ti:9876 | xargs kill
+lsof -ti:9899 | xargs kill
 ```
 
 **iOS build fails:**

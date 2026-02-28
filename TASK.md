@@ -6,7 +6,7 @@
 ## 当前状态
 已完成基础验证代码：
 - `src/tmux.rs` — tmux CLI 封装层（list sessions/panes、capture、send keys 等），7 个单元测试全通过
-- `src/server.rs` — WebSocket server（JSON-RPC 风格 API，端口 9876）
+- `src/server.rs` — WebSocket server（JSON-RPC 风格 API，端口 9899）
 - `src/main.rs` — 入口 + 测试
 
 ## 你的任务
