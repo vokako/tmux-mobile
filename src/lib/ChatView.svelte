@@ -514,8 +514,8 @@
   .model-done {
     display: flex; align-items: center; gap: 8px;
     padding: 10px 14px; border-radius: 10px;
-    background: rgba(74, 222, 128, 0.08); border: 1px solid rgba(74, 222, 128, 0.15);
-    color: #4ade80; font-size: 13px;
+    background: rgba(0, 212, 255, 0.08); border: 1px solid rgba(0, 212, 255, 0.15);
+    color: #00d4ff; font-size: 13px;
   }
   .model-done-name { font-family: 'SF Mono', Menlo, monospace; font-weight: 500; }
   .md-block :global(strong) { font-weight: 600; }
