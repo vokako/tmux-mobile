@@ -17,9 +17,7 @@ const kiroParser = {
 
   // Detect if this pane is running kiro-cli
   detect(raw, command = '') {
-    if (/kiro/i.test(command)) return true;
-    const clean = stripAnsi(raw);
-    return /\d+%\s*!?\s*>/.test(clean);
+    return /kiro/i.test(command);
   },
 
   // Insert semantic markers using ANSI color codes before stripping

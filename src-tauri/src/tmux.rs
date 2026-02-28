@@ -91,6 +91,12 @@ pub fn list_panes(session: &str) -> Result<Vec<TmuxPane>, String> {
     Ok(panes)
 }
 
+/// Get current command of a pane
+pub fn pane_command(target: &str) -> Result<String, String> {
+    run_tmux(&["display-message", "-t", target, "-p", "#{pane_current_command}"])
+        .map(|s| s.trim().to_string())
+}
+
 /// 捕获 pane 内容（屏幕输出，保留 ANSI 转义序列）
 pub fn capture_pane(target: &str, lines: Option<usize>) -> Result<String, String> {
     let start_line = lines.map(|n| format!("-{}", n)).unwrap_or("-200".to_string());
