@@ -17,16 +17,9 @@ const kiroParser = {
 
   // Detect if this pane is running kiro-cli
   detect(raw, command = '') {
+    if (/kiro/i.test(command)) return true;
     const clean = stripAnsi(raw);
-    // Primary: kiro prompt pattern in last 500 chars
-    const tail = clean.slice(-500);
-    if (/\d+%\s*!?\s*>/.test(tail)) return true;
-    // Kiro thinking/loading state (no prompt yet but kiro is running)
-    if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*Thinking/i.test(tail)) return true;
-    if (/loaded in/.test(tail) || /is disabled/.test(tail)) return true;
-    // Fallback: command hint only when pane has very little content (just started)
-    if (/kiro/i.test(command) && clean.length < 300) return true;
-    return false;
+    return /\d+%\s*!?\s*>/.test(clean);
   },
 
   // Insert semantic markers using ANSI color codes before stripping
