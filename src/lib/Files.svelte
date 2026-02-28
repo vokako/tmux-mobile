@@ -82,7 +82,7 @@
     if (!pdfContainer) return;
     pdfContainer.innerHTML = '';
     const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
-    const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+    const pdf = await pdfjsLib.getDocument({ data: bytes, verbosity: 0 }).promise;
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const scale = (pdfContainer.clientWidth || 360) / page.getViewport({ scale: 1 }).width;
