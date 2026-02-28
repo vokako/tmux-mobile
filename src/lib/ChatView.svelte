@@ -201,7 +201,7 @@
     <div class="empty">No conversation detected. Waiting for CLI output…</div>
   {:else}
     {#each messages as msg, mi}
-      <div class="msg" class:user={msg.role === 'user'} class:agent={msg.role === 'agent'} class:system={msg.role === 'system' || msg.role === 'compact' || msg.role === 'model'}>
+      <div class="msg" class:user={msg.role === 'user'} class:agent={msg.role === 'agent'} class:system={msg.role === 'system' || msg.role === 'compact' || msg.role === 'model' || msg.role === 'model_done'}>
         {#if msg.role === 'agent'}
           <div class="avatar"><Icon name="bot" size={14} /></div>
         {/if}
@@ -232,6 +232,11 @@
                 <span class="model-credits">{credits}</span>
               </button>
             {/each}
+          </div>
+        {:else if msg.role === 'model_done'}
+          <div class="model-done">
+            <Icon name="check" size={14} />
+            <span class="model-done-name">{msg.text}</span>
           </div>
         {:else}
         <div class="bubble-wrap">
@@ -505,6 +510,14 @@
   .model-item.model-selected { background: rgba(0, 212, 255, 0.08); color: #00d4ff; }
   .model-name { font-family: 'SF Mono', Menlo, monospace; font-size: 12px; }
   .model-credits { font-size: 11px; color: rgba(226,232,240,0.3); }
+
+  .model-done {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px; border-radius: 10px;
+    background: rgba(74, 222, 128, 0.08); border: 1px solid rgba(74, 222, 128, 0.15);
+    color: #4ade80; font-size: 13px;
+  }
+  .model-done-name { font-family: 'SF Mono', Menlo, monospace; font-weight: 500; }
   .md-block :global(strong) { font-weight: 600; }
   .md-block :global(em) { font-style: italic; }
   .md-block :global(code) {

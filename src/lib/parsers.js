@@ -50,7 +50,9 @@ const kiroParser = {
 
     // Model selector
     if (/^Select model/.test(trimmed)) return { type: 'model_header' };
-    if (/^Using\s+\S/.test(trimmed)) return { type: 'skip' };
+    if (/^Using\s+(\S+)/.test(trimmed)) {
+      return { type: 'model_confirmed', text: trimmed.replace(/^Using\s+/, '').trim() };
+    }
     if (/^>\s*\*?\s*\S+.*credits/i.test(trimmed)) return { type: 'model_selected', text: trimmed };
     if (/^\s{2,}\S+.*credits/i.test(trimmed)) return { type: 'model_item', text: trimmed };
 
@@ -180,6 +182,11 @@ export function parseMessages(raw, parser) {
       case 'model_header':
         isThinking = false; started = true; flush();
         current = { role: 'model', lines: [], rawLines: [] };
+        continue;
+      case 'model_confirmed':
+        isThinking = false; started = true; flush();
+        current = { role: 'model_done', lines: [cls.text], rawLines: [rawLine] };
+        flush();
         continue;
       case 'model_selected':
       case 'model_item':
