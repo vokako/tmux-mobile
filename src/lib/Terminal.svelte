@@ -127,18 +127,12 @@
     try {
       await sendCommand(target, input);
       input = '';
-      // Reset textarea height
-      const ta = document.querySelector('.chat-input-bar textarea');
-      if (ta) ta.style.height = 'auto';
+      // Reset textarea heights
+      document.querySelectorAll('.input-bar textarea').forEach(ta => ta.style.height = 'auto');
     } catch (_) {}
   }
 
   async function handleKeydown(e) {
-    if (e.key === 'Enter' && e.shiftKey && viewMode === 'terminal') {
-      e.preventDefault();
-      try { await sendKeys(target, 'Enter', false); } catch {}
-      return;
-    }
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       await handleSubmit();
@@ -183,16 +177,17 @@
         </div>
         <div class="cmd-row">
           <span class="prompt">❯</span>
-          <input
-            type="text"
+          <textarea
             bind:value={input}
             onkeydown={handleKeydown}
+            oninput={autoResize}
             placeholder="command…"
             autocapitalize="off"
             autocomplete="off"
             autocorrect="off"
             spellcheck="false"
-          />
+            rows="1"
+          ></textarea>
           <button class="send" onclick={handleSubmit}><Icon name="send" size={14} /></button>
         </div>
       </div>
