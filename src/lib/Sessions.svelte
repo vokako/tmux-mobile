@@ -159,20 +159,20 @@
   .list { display: flex; flex-direction: column; gap: 8px; }
 
   .session {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 14px;
     overflow: hidden;
     transition: all 0.2s ease;
   }
   .session:active { transform: scale(0.99); }
   .session.expanded {
-    border-color: rgba(0, 212, 255, 0.15);
+    border-color: var(--accent);
     box-shadow: 0 0 20px rgba(0, 212, 255, 0.05);
   }
   .session.active-session {
-    border-color: rgba(0, 212, 255, 0.25);
-    background: rgba(0, 212, 255, 0.03);
+    border-color: var(--accent);
+    background: var(--accent-bg);
   }
 
   .session-row {
@@ -194,7 +194,7 @@
   .indicator {
     width: 8px; height: 8px;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.15);
+    background: var(--text3);
     flex-shrink: 0;
     transition: all 0.2s ease;
   }
@@ -221,8 +221,8 @@
   .badge {
     font-size: 11px;
     font-weight: 500;
-    color: rgba(226, 232, 240, 0.35);
-    background: rgba(255, 255, 255, 0.04);
+    color: var(--text3);
+    background: var(--input-bg);
     padding: 3px 8px;
     border-radius: 6px;
   }
@@ -231,7 +231,7 @@
     width: 26px; height: 26px;
     background: transparent;
     border: none;
-    color: rgba(226, 232, 240, 0.2);
+    color: var(--text3);
     cursor: pointer;
     border-radius: 7px;
     display: flex;
@@ -241,12 +241,12 @@
     -webkit-tap-highlight-color: transparent;
   }
   .kill:active {
-    background: rgba(255, 80, 80, 0.15);
-    color: #ff5050;
+    background: var(--danger-bg);
+    color: var(--danger);
   }
   .kill.confirm {
-    background: rgba(255, 80, 80, 0.15);
-    color: #ff5050;
+    background: var(--danger-bg);
+    color: var(--danger);
     width: auto;
     padding: 0 8px;
   }
@@ -257,7 +257,7 @@
   .kill-icon { font-size: 11px; }
 
   .pane-list {
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    border-top: 1px solid var(--border2);
   }
 
   .pane {
@@ -268,27 +268,27 @@
     padding: 12px 14px 12px 32px;
     background: none;
     border: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-    color: #e2e8f0;
+    border-bottom: 1px solid var(--border2);
+    color: var(--text);
     cursor: pointer;
     text-align: left;
     font-size: 13px;
     transition: background 0.15s ease;
     -webkit-tap-highlight-color: transparent;
   }
-  .pane:active { background: rgba(0, 212, 255, 0.06); }
-  .pane.active-pane { background: rgba(0, 212, 255, 0.08); }
+  .pane:active { background: var(--accent-bg); }
+  .pane.active-pane { background: var(--accent-bg); }
   .pane:last-child { border-bottom: none; }
 
   .pane-id {
     font-family: 'SF Mono', Menlo, monospace;
-    color: #00d4ff;
+    color: var(--accent);
     font-weight: 500;
     font-size: 12px;
     min-width: 36px;
   }
   .pane-cmd {
-    color: rgba(226, 232, 240, 0.45);
+    color: var(--text2);
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -296,11 +296,11 @@
   }
   .pane-size {
     font-family: 'SF Mono', Menlo, monospace;
-    color: rgba(226, 232, 240, 0.2);
+    color: var(--text3);
     font-size: 11px;
   }
   .pane-arrow {
-    color: rgba(0, 212, 255, 0.4);
+    color: var(--accent);
     font-size: 12px;
   }
 
@@ -311,27 +311,27 @@
   .new-session input {
     flex: 1;
     padding: 11px 14px;
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border);
     border-radius: 12px;
-    background: rgba(255, 255, 255, 0.03);
-    color: #e2e8f0;
+    background: var(--surface);
+    color: var(--text);
     font-size: 14px;
     outline: none;
     transition: all 0.2s ease;
     -webkit-appearance: none;
   }
   .new-session input:focus {
-    border-color: rgba(0, 212, 255, 0.3);
+    border-color: var(--accent);
     box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.06);
   }
-  .new-session input::placeholder { color: rgba(226, 232, 240, 0.2); }
+  .new-session input::placeholder { color: var(--text3); }
 
   .new-session button {
     width: 44px;
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border);
     border-radius: 12px;
-    background: rgba(0, 212, 255, 0.08);
-    color: #00d4ff;
+    background: var(--accent-bg);
+    color: var(--accent);
     font-size: 20px;
     font-weight: 300;
     cursor: pointer;
@@ -343,28 +343,28 @@
     flex-shrink: 0;
   }
   .new-session button:active:not(:disabled) {
-    background: rgba(0, 212, 255, 0.15);
+    background: var(--accent-bg);
     transform: scale(0.95);
   }
   .new-session button:disabled { opacity: 0.3; cursor: default; }
   .refresh-btn {
     width: 44px;
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border);
     border-radius: 12px;
-    background: rgba(255, 255, 255, 0.03);
-    color: rgba(226, 232, 240, 0.4);
+    background: var(--surface);
+    color: var(--text3);
     cursor: pointer;
     display: flex; align-items: center; justify-content: center; flex-shrink: 0;
     -webkit-tap-highlight-color: transparent;
   }
-  .refresh-btn:active { background: rgba(0, 212, 255, 0.1); color: #00d4ff; }
+  .refresh-btn:active { background: var(--accent-bg); color: var(--accent); }
 
   .error {
-    color: #ff5050;
+    color: var(--danger);
     font-size: 13px;
     padding: 10px 14px;
-    background: rgba(255, 80, 80, 0.06);
-    border: 1px solid rgba(255, 80, 80, 0.12);
+    background: var(--danger-bg);
+    border: 1px solid var(--danger);
     border-radius: 10px;
   }
 
@@ -384,7 +384,7 @@
   .disconnect-btn:active { background: var(--danger-bg); }
   .disconnect-btn.confirm {
     background: var(--danger-bg);
-    border-color: rgba(255, 80, 80, 0.2);
+    border-color: var(--danger);
     color: var(--danger);
     font-weight: 600;
   }

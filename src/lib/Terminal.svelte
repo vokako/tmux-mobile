@@ -230,7 +230,7 @@
     flex-direction: column;
     flex: 1;
     min-height: 0;
-    background: #0a0a0f;
+    background: var(--bg);
   }
 
   .input-status {
@@ -239,7 +239,7 @@
     gap: 8px;
     padding: 2px 12px;
     font-size: 11px;
-    color: rgba(226, 232, 240, 0.4);
+    color: var(--text3);
   }
   .status-left .kiro { color: #c084fc; }
   .status-left {
@@ -256,7 +256,7 @@
     padding: 2px 8px;
     font-family: 'SF Mono', Menlo, monospace;
     font-size: 10px;
-    color: rgba(226, 232, 240, 0.3);
+    color: var(--text3);
     background: rgba(10, 10, 15, 0.7);
     pointer-events: none;
   }
@@ -273,7 +273,7 @@
   .pct-bar {
     width: 48px;
     height: 4px;
-    background: rgba(255, 255, 255, 0.12);
+    background: var(--surface2);
     border-radius: 2px;
     overflow: hidden;
   }
@@ -308,11 +308,11 @@
     bottom: 12px;
     right: 16px;
     width: 36px; height: 36px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--input-border);
     border-radius: 50%;
     background: rgba(12, 12, 20, 0.85);
     backdrop-filter: blur(10px);
-    color: #00d4ff;
+    color: var(--accent);
     font-size: 16px;
     cursor: pointer;
     display: flex;
@@ -331,10 +331,10 @@
   }
 
   .input-bar {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--input-bg);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.07);
+    border: 1px solid var(--border);
     border-radius: 14px;
     padding: 8px 10px;
     display: flex;
@@ -353,10 +353,10 @@
 
   .shortcuts button {
     padding: 5px 10px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--input-border);
     border-radius: 7px;
-    background: rgba(255, 255, 255, 0.04);
-    color: rgba(226, 232, 240, 0.45);
+    background: var(--input-bg);
+    color: var(--text2);
     font-size: 12px;
     font-family: 'SF Mono', Menlo, monospace;
     font-weight: 500;
@@ -368,9 +368,9 @@
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
   }
   .shortcuts button:active {
-    background: rgba(0, 212, 255, 0.12);
-    color: #00d4ff;
-    border-color: rgba(0, 212, 255, 0.2);
+    background: var(--accent-bg);
+    color: var(--accent);
+    border-color: var(--accent);
     transform: translateY(1px);
     box-shadow: none;
   }
@@ -382,7 +382,7 @@
   }
 
   .prompt {
-    color: #00d4ff;
+    color: var(--accent);
     font-family: 'SF Mono', Menlo, monospace;
     font-size: 15px;
     font-weight: 600;
@@ -396,13 +396,13 @@
     padding: 8px 0;
     border: none;
     background: transparent;
-    color: #e2e8f0;
+    color: var(--text);
     font-family: 'SF Mono', Menlo, monospace;
     font-size: 15px;
     outline: none;
     -webkit-appearance: none;
   }
-  .cmd-row input::placeholder { color: rgba(226, 232, 240, 0.2); }
+  .cmd-row input::placeholder { color: var(--text3); }
 
   .cmd-row textarea {
     flex: 1;
@@ -410,7 +410,7 @@
     padding: 8px 0;
     border: none;
     background: transparent;
-    color: #e2e8f0;
+    color: var(--text);
     font-family: 'SF Mono', Menlo, monospace;
     font-size: 15px;
     outline: none;
@@ -422,14 +422,14 @@
     scrollbar-width: thin;
     scrollbar-color: rgba(255,255,255,0.1) transparent;
   }
-  .cmd-row textarea::placeholder { color: rgba(226, 232, 240, 0.2); }
+  .cmd-row textarea::placeholder { color: var(--text3); }
 
   .stop-btn {
     width: 34px; height: 34px;
     border: none;
     border-radius: 9px;
-    background: rgba(255, 80, 80, 0.12);
-    color: #ff5050;
+    background: var(--danger-bg);
+    color: var(--danger);
     font-size: 12px;
     cursor: pointer;
     flex-shrink: 0;
@@ -440,7 +440,7 @@
     justify-content: center;
   }
   .stop-btn:active {
-    background: rgba(255, 80, 80, 0.25);
+    background: var(--danger-bg);
     transform: scale(0.92);
   }
 
