@@ -166,15 +166,20 @@
         <span class="logo"><Icon name="command" size={20} /></span>
         <span class="brand-text">tmux<span class="brand-accent">mobile</span></span>
       </div>
+      <div class="nav-right">
+        <button class="gear-btn" onclick={() => showSettings = !showSettings}><Icon name="gear" size={16} /></button>
+      </div>
     {/if}
   </nav>
 
   {#if showSettings}
     <div class="settings-panel">
-      <div class="sp-section">
-        <div class="sp-label">Connection</div>
-        <div class="sp-info">{localStorage.getItem('tmux_host')}:{localStorage.getItem('tmux_port')}</div>
-      </div>
+      {#if connected}
+        <div class="sp-section">
+          <div class="sp-label">Connection</div>
+          <div class="sp-info">{localStorage.getItem('tmux_host')}:{localStorage.getItem('tmux_port')}</div>
+        </div>
+      {/if}
       <div class="sp-section">
         <div class="sp-label">Theme</div>
         <div class="sp-btns">
@@ -183,7 +188,9 @@
           <button class:active={theme === 'dark'} onclick={() => setTheme('dark')}>Dark</button>
         </div>
       </div>
+      {#if connected}
       <button class="sp-disconnect" onclick={() => { showSettings = false; doDisconnect(); }}>Disconnect</button>
+      {/if}
     </div>
     <button class="sp-overlay" onclick={() => showSettings = false}></button>
   {/if}
