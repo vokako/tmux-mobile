@@ -1,15 +1,16 @@
 <script>
-  import { subscribe, unsubscribe, setOnPaneOutput, sendCommand, sendKeys } from './ws.js';
+  import { subscribe, unsubscribe, setOnPaneOutput, sendCommand, sendKeys, paneCommand } from './ws.js';
   import { Terminal } from '@xterm/xterm';
   import { FitAddon } from '@xterm/addon-fit';
   import ChatView from './ChatView.svelte';
   import Icon from './Icon.svelte';
   import { detectParser } from './parsers.js';
 
-  let { target, session, command = '', viewMode = 'terminal', onChatSupported = () => {} } = $props();
+  let { target, session, command: initialCommand = '', viewMode = 'terminal', onChatSupported = () => {} } = $props();
 
   let input = $state('');
   let paneContent = $state('');
+  let command = $state(initialCommand);
   let termEl;
   let term;
   let fitAddon;
@@ -17,7 +18,15 @@
 
   let parser = $derived(detectParser(paneContent, command));
 
-  $effect(() => { if (paneContent) onChatSupported(!!parser); });
+  $effect(() => { onChatSupported(!!parser); });
+
+  // Poll pane command every 3s to detect kiro start/exit
+  $effect(() => {
+    const id = setInterval(() => {
+      paneCommand(target).then(r => { command = r.command || ''; }).catch(() => {});
+    }, 3000);
+    return () => clearInterval(id);
+  });
 
   let waitingForInput = $derived.by(() => {
     if (!paneContent || !parser) return false;

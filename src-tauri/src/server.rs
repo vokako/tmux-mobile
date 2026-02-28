@@ -143,6 +143,17 @@ fn handle_request(req: &Request) -> Response {
             }
         }
 
+        "pane_command" => {
+            let target = match require_str(p, "target") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            match tmux::pane_command(target) {
+                Ok(cmd) => Response::ok(id, serde_json::json!({ "command": cmd })),
+                Err(e) => Response::err(id, ERR_INTERNAL, e),
+            }
+        }
+
         "fs_cwd" => {
             let session = match require_str(p, "session") {
                 Ok(s) => s,

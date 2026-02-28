@@ -105,6 +105,7 @@ export const sendKeys = (target, keys, literal = true) => call('send_keys', { ta
 export const sendCommand = (target, command) => call('send_command', { target, command });
 export const newSession = (name) => call('new_session', { name });
 export const killSession = (name) => call('kill_session', { name });
+export const paneCommand = (target) => call('pane_command', { target });
 
 // File system
 export const fsCwd = (session) => call('fs_cwd', { session });
