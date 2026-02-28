@@ -17,9 +17,13 @@ const kiroParser = {
 
   // Detect if this pane is running kiro-cli
   detect(raw, command = '') {
-    if (/kiro/i.test(command)) return true;
     const clean = stripAnsi(raw);
-    return /\d+%\s*!?\s*>/.test(clean);
+    // Check last 500 chars for kiro prompt pattern
+    const tail = clean.slice(-500);
+    if (/\d+%\s*!?\s*>/.test(tail)) return true;
+    // Command hint as fallback for early detection before first prompt
+    if (/kiro/i.test(command) && !tail.trim().endsWith('$') && !tail.trim().endsWith(')')) return true;
+    return false;
   },
 
   // Insert semantic markers using ANSI color codes before stripping
@@ -35,7 +39,8 @@ const kiroParser = {
   // Types: 'skip', 'user', 'agent', 'system', 'tool', 'tool_result', 'thinking', 'turn_end', 'empty', 'continuation'
   classifyLine(trimmed, rawLine) {
     // Init/status lines
-    if (/^[○⠋]/.test(trimmed) || trimmed === 'kiro-cli' || /^✓.*loaded in/.test(trimmed)) return { type: 'skip' };
+    if (/^[○⠋]/.test(trimmed) || /^✓.*loaded in/.test(trimmed)) return { type: 'skip' };
+    if (trimmed === 'kiro-cli') return { type: 'reset' };
     if (/^--More--$/.test(trimmed)) return { type: 'skip' };
     if (/^Warning:/.test(trimmed)) return { type: 'skip' };
 
@@ -171,6 +176,9 @@ export function parseMessages(raw, parser) {
 
     switch (cls.type) {
       case 'skip': continue;
+      case 'reset':
+        flush(); messages.length = 0; current = null; started = false; isThinking = false;
+        continue;
       case 'thinking': isThinking = true; continue;
       case 'turn_end': isThinking = false; flush(); continue;
       case 'compact_start':
