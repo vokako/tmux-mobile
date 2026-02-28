@@ -50,6 +50,7 @@ const kiroParser = {
 
     // Model selector
     if (/^Select model/.test(trimmed)) return { type: 'model_header' };
+    if (/^Using\s+\S/.test(trimmed)) return { type: 'skip' };
     if (/^>\s*\*?\s*\S+.*credits/i.test(trimmed)) return { type: 'model_selected', text: trimmed };
     if (/^\s{2,}\S+.*credits/i.test(trimmed)) return { type: 'model_item', text: trimmed };
 
@@ -65,9 +66,13 @@ const kiroParser = {
       return { type: 'user', text, rawText: raw };
     }
 
-    // Agent marker (via color marker)
+    // Agent marker (via color marker) — but check if it's a model selector line
     if (trimmed.includes('\x00AGENT\x00')) {
-      const text = trimmed.replace(/^.*\x00AGENT\x00\s*/, '').trim();
+      const afterMarker = trimmed.replace(/^.*\x00AGENT\x00\s*/, '').trim();
+      if (/^\*?\s*\S+.*\d+\.\d+x\s*credits/i.test(afterMarker)) {
+        return { type: 'model_selected', text: '> ' + afterMarker };
+      }
+      const text = afterMarker;
       const raw = rawLine.replace(/^.*\x00AGENT\x00\s*/, '');
       return { type: 'agent', text, rawText: raw };
     }
@@ -77,6 +82,11 @@ const kiroParser = {
     if (userMatch) {
       const text = userMatch[1].trim();
       return text ? { type: 'user', text, rawText: rawLine } : { type: 'skip' };
+    }
+
+    // Model selector items (non-selected)
+    if (/^\S+.*\d+\.\d+x\s*credits/i.test(trimmed) && /\.\.$/.test(trimmed)) {
+      return { type: 'model_item', text: '  ' + trimmed };
     }
 
     // Empty line
