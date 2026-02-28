@@ -142,16 +142,15 @@
   .list { display: flex; flex-direction: column; gap: 8px; }
 
   .session {
-    background: var(--surface);
-    border: 1px solid var(--border);
+    background: transparent;
+    border: 1px solid var(--border2);
     border-radius: 14px;
     overflow: hidden;
     transition: all 0.2s ease;
   }
   .session:active { transform: scale(0.99); }
   .session.expanded {
-    border-color: var(--accent);
-    box-shadow: 0 0 20px rgba(0, 212, 255, 0.05);
+    border-color: var(--border);
   }
   .session.active-session {
     border-color: var(--accent);
