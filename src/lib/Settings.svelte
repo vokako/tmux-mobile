@@ -99,10 +99,10 @@
   .card {
     width: 100%;
     max-width: 380px;
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--surface);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border);
     border-radius: 16px;
     padding: 32px 24px;
     display: flex;
@@ -121,7 +121,7 @@
 
   .icon {
     font-size: 36px;
-    color: #00d4ff;
+    color: var(--accent);
     filter: drop-shadow(0 0 12px rgba(0, 212, 255, 0.4));
     margin-bottom: 4px;
   }
@@ -130,15 +130,15 @@
     margin: 0;
     font-size: 22px;
     font-weight: 700;
-    color: #e2e8f0;
+    color: var(--text);
     letter-spacing: -0.5px;
   }
-  .accent { color: #00d4ff; }
+  .accent { color: var(--accent); }
 
   .subtitle {
     margin: 0;
     font-size: 13px;
-    color: rgba(226, 232, 240, 0.35);
+    color: var(--text3);
   }
 
   .fields {
@@ -163,7 +163,7 @@
   .label-text {
     font-size: 12px;
     font-weight: 500;
-    color: rgba(226, 232, 240, 0.4);
+    color: var(--text3);
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
@@ -171,21 +171,21 @@
   input {
     width: 100%;
     padding: 11px 14px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--input-border);
     border-radius: 10px;
-    background: rgba(255, 255, 255, 0.04);
-    color: #e2e8f0;
+    background: var(--input-bg);
+    color: var(--text);
     font-size: 15px;
     outline: none;
     transition: all 0.2s ease;
     -webkit-appearance: none;
   }
   input:focus {
-    border-color: rgba(0, 212, 255, 0.4);
-    background: rgba(0, 212, 255, 0.04);
+    border-color: var(--accent);
+    background: var(--accent-bg);
     box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.08);
   }
-  input::placeholder { color: rgba(226, 232, 240, 0.2); }
+  input::placeholder { color: var(--text3); }
 
   .token-wrap {
     position: relative;
@@ -201,10 +201,10 @@
   .token-wrap input { padding-left: 36px; padding-right: 36px; }
   .eye-btn {
     position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
-    background: none; border: none; color: rgba(226,232,240,0.3); cursor: pointer;
+    background: none; border: none; color: var(--text3); cursor: pointer;
     padding: 4px; display: flex; -webkit-tap-highlight-color: transparent;
   }
-  .eye-btn:active { color: #00d4ff; }
+  .eye-btn:active { color: var(--accent); }
 
   .connect-btn {
     width: 100%;
@@ -243,10 +243,10 @@
   @keyframes spin { to { transform: rotate(360deg); } }
 
   .error {
-    color: #ff5050;
+    color: var(--danger);
     font-size: 13px;
     padding: 10px 14px;
-    background: rgba(255, 80, 80, 0.08);
+    background: var(--danger-bg);
     border: 1px solid rgba(255, 80, 80, 0.15);
     border-radius: 10px;
   }
