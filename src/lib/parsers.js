@@ -185,6 +185,8 @@ export function parseMessages(raw, parser) {
         continue;
       case 'model_confirmed':
         isThinking = false; started = true; flush();
+        // Remove preceding model selector card
+        while (messages.length && messages[messages.length - 1].role === 'model') messages.pop();
         current = { role: 'model_done', lines: [cls.text], rawLines: [rawLine] };
         flush();
         continue;
