@@ -5,7 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-const MAX_READ_SIZE: u64 = 10 * 1024 * 1024; // 10MB
+const MAX_READ_SIZE: u64 = 50 * 1024 * 1024; // 50MB
 const MAX_PREVIEW_SIZE: u64 = 512 * 1024; // 512KB for text preview
 
 #[derive(Debug, Clone, Serialize)]

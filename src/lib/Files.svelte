@@ -1,4 +1,6 @@
 <script>
+  import * as pdfjsLib from 'pdfjs-dist';
+  import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
   import { marked } from 'marked';
   import katex from 'katex';
   import 'katex/dist/katex.min.css';
@@ -50,6 +52,7 @@
   });
 
   mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
   let { session = '' } = $props();
 
@@ -73,6 +76,26 @@
   let renaming = $state(null); // path being renamed
   let renameValue = $state('');
   let bcPathEl;
+  let pdfContainer;
+
+  async function renderPdf(data) {
+    if (!pdfContainer) return;
+    pdfContainer.innerHTML = '';
+    const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
+    const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const scale = (pdfContainer.clientWidth || 360) / page.getViewport({ scale: 1 }).width;
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      canvas.style.width = '100%';
+      canvas.style.marginBottom = '4px';
+      pdfContainer.appendChild(canvas);
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    }
+  }
 
   // Breadcrumb parts
   let breadcrumbs = $derived.by(() => {
@@ -139,7 +162,7 @@
       currentFile = { path: entry.path, name: entry.name, stat };
       if (stat.mime_hint === 'application/pdf') {
         const r = await fsDownload(entry.path);
-        currentFile.dataUrl = `data:application/pdf;base64,${r.data}`;
+        currentFile.pdfData = r.data;
         view = 'preview';
       } else if (stat.mime_hint.startsWith('image/')) {
         const r = await fsDownload(entry.path);
@@ -357,8 +380,10 @@
   let previewEl;
   $effect(() => {
     if (view === 'preview' && mimeCategory(currentFile?.stat?.mime_hint) === 'markdown' && previewEl) {
-      // tick then render mermaid
       setTimeout(() => renderMermaidBlocks(previewEl), 50);
+    }
+    if (view === 'preview' && currentFile?.pdfData && pdfContainer) {
+      setTimeout(() => renderPdf(currentFile.pdfData), 50);
     }
   });
 
@@ -501,7 +526,7 @@
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'html'}
         <iframe class="html-preview" srcdoc={currentFile.content} sandbox="allow-scripts allow-same-origin" title="HTML Preview"></iframe>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'pdf'}
-        <iframe class="html-preview" src={currentFile.dataUrl} title="PDF Preview"></iframe>
+        <div class="pdf-container" bind:this={pdfContainer}></div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'image'}
         <div class="image-preview"><img src={currentFile.dataUrl} alt={currentFile.name} /></div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'code'}
@@ -683,6 +708,10 @@
   }
   .html-preview {
     flex: 1; width: 100%; border: none; background: #fff; border-radius: 4px;
+  }
+  .pdf-container {
+    flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 4px;
+    background: rgba(255,255,255,0.03);
   }
   .image-preview {
     flex: 1; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 12px;
