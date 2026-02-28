@@ -18,8 +18,12 @@ export function connect(host, port, token) {
       return;
     }
 
+    const timeout = setTimeout(() => {
+      ws?.close();
+      reject(new Error('connection timeout'));
+    }, 5000);
+
     ws.onopen = () => {
-      // Authenticate immediately
       const msg = JSON.stringify({ method: 'auth', params: { token } });
       ws.send(msg);
     };
@@ -31,9 +35,11 @@ export function connect(host, port, token) {
 
       if (!authed) {
         if (data.result?.authenticated) {
+          clearTimeout(timeout);
           authed = true;
           resolve();
         } else {
+          clearTimeout(timeout);
           reject(new Error(data.error?.message || 'auth failed'));
         }
         return;
@@ -58,12 +64,14 @@ export function connect(host, port, token) {
     };
 
     ws.onclose = () => {
+      clearTimeout(timeout);
       authed = false;
       ws = null;
       onDisconnect?.();
     };
 
     ws.onerror = () => {
+      clearTimeout(timeout);
       if (!authed) reject(new Error('connection failed'));
     };
   });
