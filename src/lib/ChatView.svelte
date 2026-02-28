@@ -413,7 +413,7 @@
   }
 
   .user-bubble {
-    background: linear-gradient(135deg, #00d4ff 0%, #0099cc 100%);
+    background: var(--accent);
     color: #000;
     border-bottom-right-radius: 4px;
   }
