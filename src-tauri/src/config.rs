@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use serde_json;
 use std::path::PathBuf;
 
 #[derive(Deserialize, Default)]
@@ -66,4 +67,14 @@ fn save_token(token: &str) -> std::io::Result<()> {
     }
     content.push_str(&format!("token = \"{}\"\n", token));
     std::fs::write(&path, content)
+}
+
+/// Tauri command: return config for frontend auto-fill
+pub fn get_config_json() -> serde_json::Value {
+    let cfg = Config::load();
+    serde_json::json!({
+        "host": cfg.host,
+        "port": cfg.port,
+        "token": cfg.token,
+    })
 }

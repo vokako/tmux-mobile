@@ -9,6 +9,20 @@
   let token = $state(localStorage.getItem('tmux_token') || '');
   let error = $state('');
   let connecting = $state(false);
+  let showToken = $state(false);
+
+  // Auto-fill from local config in Tauri desktop app
+  $effect(() => {
+    if (window.__TAURI__) {
+      window.__TAURI__.core.invoke('get_local_config').then(cfg => {
+        if (!localStorage.getItem('tmux_token')) {
+          host = cfg.host === '0.0.0.0' ? '127.0.0.1' : cfg.host;
+          port = String(cfg.port);
+          token = cfg.token;
+        }
+      }).catch(() => {});
+    }
+  });
 
   async function doConnect() {
     error = '';
@@ -51,7 +65,10 @@
         <span class="label-text">Token</span>
         <div class="token-wrap">
           <span class="token-icon"><Icon name="key" size={13} /></span>
-          <input type="password" bind:value={token} placeholder="auth token" />
+          <input type={showToken ? 'text' : 'password'} bind:value={token} placeholder="auth token" />
+          <button class="eye-btn" type="button" onclick={() => showToken = !showToken}>
+            <Icon name={showToken ? 'eye-off' : 'eye'} size={14} />
+          </button>
         </div>
       </label>
     </div>
@@ -181,7 +198,13 @@
     font-size: 13px;
     pointer-events: none;
   }
-  .token-wrap input { padding-left: 36px; }
+  .token-wrap input { padding-left: 36px; padding-right: 36px; }
+  .eye-btn {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    background: none; border: none; color: rgba(226,232,240,0.3); cursor: pointer;
+    padding: 4px; display: flex; -webkit-tap-highlight-color: transparent;
+  }
+  .eye-btn:active { color: #00d4ff; }
 
   .connect-btn {
     width: 100%;

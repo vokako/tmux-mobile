@@ -5,9 +5,15 @@ pub mod fs;
 
 use config::Config;
 
+#[tauri::command]
+fn get_local_config() -> serde_json::Value {
+    config::get_config_json()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![get_local_config])
         .setup(|_app| {
             let cfg = Config::load();
             tauri::async_runtime::spawn(async move {
