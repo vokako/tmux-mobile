@@ -18,11 +18,14 @@ const kiroParser = {
   // Detect if this pane is running kiro-cli
   detect(raw, command = '') {
     const clean = stripAnsi(raw);
-    // Check last 500 chars for kiro prompt pattern
+    // Primary: kiro prompt pattern in last 500 chars
     const tail = clean.slice(-500);
     if (/\d+%\s*!?\s*>/.test(tail)) return true;
-    // Command hint as fallback for early detection before first prompt
-    if (/kiro/i.test(command) && !tail.trim().endsWith('$') && !tail.trim().endsWith(')')) return true;
+    // Kiro thinking/loading state (no prompt yet but kiro is running)
+    if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*Thinking/i.test(tail)) return true;
+    if (/loaded in/.test(tail) || /is disabled/.test(tail)) return true;
+    // Fallback: command hint only when pane has very little content (just started)
+    if (/kiro/i.test(command) && clean.length < 300) return true;
     return false;
   },
 
