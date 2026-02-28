@@ -251,12 +251,13 @@
     align-items: center;
     gap: 8px;
     padding: 2px 12px;
-    font-size: 11px;
+    font-size: 10px;
     color: var(--text3);
   }
   .status-left .kiro { color: #c084fc; }
   .status-left {
     font-family: 'SF Mono', Menlo, monospace;
+    font-size: 10px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
