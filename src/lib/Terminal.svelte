@@ -134,7 +134,7 @@
   }
 
   async function handleKeydown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       await handleSubmit();
     }
