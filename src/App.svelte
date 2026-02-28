@@ -61,21 +61,23 @@
 
   setOnDisconnect(() => {
     connected = false;
-    if (!manualDisconnect) {
-      // Network disconnect — try auto-reconnect after delay
-      setTimeout(() => {
-        const host = localStorage.getItem('tmux_host');
-        const port = localStorage.getItem('tmux_port');
-        const token = localStorage.getItem('tmux_token');
-        if (host && port && token && !connected) {
-          connect(host, parseInt(port), token).then(() => {
-            connected = true;
-          }).catch(() => { page = 'settings'; });
-        }
-      }, 1000);
+    if (manualDisconnect) {
+      manualDisconnect = false;
+      return; // doDisconnect already handles page/state
+    }
+    // Network disconnect — auto-reconnect immediately
+    const host = localStorage.getItem('tmux_host');
+    const port = localStorage.getItem('tmux_port');
+    const token = localStorage.getItem('tmux_token');
+    if (host && port && token) {
+      connect(host, parseInt(port), token).then(() => {
+        connected = true;
+        // Stay on current page, just restore connection
+      }).catch(() => {
+        page = 'settings';
+      });
     } else {
       page = 'settings';
-      manualDisconnect = false;
     }
   });
 
