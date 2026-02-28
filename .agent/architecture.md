@@ -61,5 +61,12 @@ Tauri 2 cross-platform app (Rust backend + Svelte 5 frontend + xterm.js) that ex
 - [x] SVG icon system
 - [x] Mobile web support (viewport, touch, auto-reconnect)
 - [x] Android build config (cleartext ws://)
+- [x] File browser (browse, preview, edit, upload/download)
+- [x] Light/Dark/System theme with CSS variables
+- [x] PDF preview (pdf.js), image preview, syntax highlighting
+- [x] /model interactive selector, /compact summary card
+- [x] Settings panel (gear button → theme, connection, disconnect)
+- [x] Tauri desktop auto-fills config from local file
+- [x] Signed Android APK + macOS .dmg builds
 - [ ] iOS target (needs Xcode + xcodegen)
 - [ ] Terminal touch scrolling inertia (bug)
