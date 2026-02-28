@@ -16,26 +16,12 @@
   let theme = $state(localStorage.getItem('tmux_theme') || 'system');
   let showSettings = $state(false);
 
-  // Android keyboard height
+  // Android keyboard height — only from native Tauri event, not browser
   $effect(() => {
     const handler = (e) => {
       document.documentElement.style.setProperty('--keyboard-height', (e.detail?.height || 0) + 'px');
     };
     window.addEventListener('androidKeyboardHeight', handler);
-    // Fallback: visualViewport for iOS/browser
-    const vv = window.visualViewport;
-    if (vv) {
-      let initH = vv.height;
-      const onResize = () => {
-        if (vv.height > initH) initH = vv.height;
-        const kb = Math.max(0, initH - vv.height);
-        if (!window.__ANDROID_KEYBOARD_HEIGHT__) {
-          document.documentElement.style.setProperty('--keyboard-height', (kb > 50 ? kb : 0) + 'px');
-        }
-      };
-      vv.addEventListener('resize', onResize);
-      return () => { window.removeEventListener('androidKeyboardHeight', handler); vv.removeEventListener('resize', onResize); };
-    }
     return () => window.removeEventListener('androidKeyboardHeight', handler);
   });
 
