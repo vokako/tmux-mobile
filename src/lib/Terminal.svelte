@@ -308,7 +308,7 @@
 
   .xterm-wrap {
     height: 100%;
-    padding: 4px 6px;
+    padding: 0;
   }
   .xterm-wrap :global(.xterm) {
     height: 100%;
