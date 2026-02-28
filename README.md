@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icon.svg" width="64" alt="tmuxmobile"><br>
+  <img src="assets/icon.svg" width="128" alt="tmuxmobile"><br>
   <img src="assets/logo.svg" width="220" alt="tmuxmobile">
 </p>
 
