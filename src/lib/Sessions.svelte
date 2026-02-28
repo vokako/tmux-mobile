@@ -2,7 +2,7 @@
   import { listSessions, listPanes, newSession, killSession } from './ws.js';
   import Icon from './Icon.svelte';
 
-  let { openTerminal, activeTarget = '', onDisconnect = () => {}, visible = false, theme = 'system', onThemeChange = () => {} } = $props();
+  let { openTerminal, activeTarget = '', visible = false } = $props();
 
   let sessions = $state([]);
   let expanded = $state({});
@@ -62,7 +62,6 @@
   }
 
   let confirmKill = $state(null);
-  let confirmDisconnect = $state(false);
 
   async function removeSession(name) {
     if (confirmKill !== name) {
@@ -127,22 +126,6 @@
       </div>
     {/each}
   </div>
-
-  <div class="theme-row">
-    <span class="theme-label">Theme</span>
-    <div class="theme-btns">
-      <button class:active={theme === 'system'} onclick={() => onThemeChange('system')}>Auto</button>
-      <button class:active={theme === 'light'} onclick={() => onThemeChange('light')}>Light</button>
-      <button class:active={theme === 'dark'} onclick={() => onThemeChange('dark')}>Dark</button>
-    </div>
-  </div>
-
-  <button class="disconnect-btn" class:confirm={confirmDisconnect} onclick={() => {
-    if (confirmDisconnect) { onDisconnect(); confirmDisconnect = false; }
-    else { confirmDisconnect = true; setTimeout(() => confirmDisconnect = false, 3000); }
-  }}>
-    {confirmDisconnect ? 'tap to disconnect' : 'Disconnect'}
-  </button>
 </div>
 
 <style>
@@ -368,43 +351,4 @@
     border-radius: 10px;
   }
 
-  .disconnect-btn {
-    width: 100%;
-    padding: 12px;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    background: var(--surface);
-    color: var(--text3);
-    font-size: 14px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    -webkit-tap-highlight-color: transparent;
-    margin-top: auto;
-  }
-  .disconnect-btn:active { background: var(--danger-bg); }
-  .disconnect-btn.confirm {
-    background: var(--danger-bg);
-    border-color: var(--danger);
-    color: var(--danger);
-    font-weight: 600;
-  }
-
-  .theme-row {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 0;
-  }
-  .theme-label { font-size: 13px; color: var(--text2); }
-  .theme-btns {
-    display: flex; gap: 4px; background: var(--pill-bg, rgba(255,255,255,0.04));
-    border-radius: 8px; padding: 2px;
-  }
-  .theme-btns button {
-    padding: 5px 12px; border: none; border-radius: 6px; background: transparent;
-    color: var(--text3); font-size: 12px; font-weight: 500; cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .theme-btns button.active {
-    background: var(--accent-bg, rgba(0,212,255,0.12));
-    color: var(--accent, #00d4ff);
-  }
 </style>
