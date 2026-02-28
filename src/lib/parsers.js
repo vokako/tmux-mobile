@@ -42,6 +42,17 @@ const kiroParser = {
     // Thinking spinner
     if (/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*Thinking/i.test(trimmed)) return { type: 'thinking' };
 
+    // Compact summary borders
+    if (/^═{4,}/.test(trimmed)) return { type: 'skip' };
+    if (/^CONVERSATION SUMMARY$/.test(trimmed)) return { type: 'skip' };
+    if (/^✔\s*Conversation compacted/.test(trimmed)) return { type: 'compact_start' };
+    if (/conversation history has been replaced/.test(trimmed)) return { type: 'compact_end' };
+
+    // Model selector
+    if (/^Select model/.test(trimmed)) return { type: 'model_header' };
+    if (/^>\s*\*?\s*\S+.*credits/i.test(trimmed)) return { type: 'model_selected', text: trimmed };
+    if (/^\s{2,}\S+.*credits/i.test(trimmed)) return { type: 'model_item', text: trimmed };
+
     // Credits = end of turn
     if (/^▸\s*Credits:/.test(trimmed)) return { type: 'turn_end' };
 
@@ -150,6 +161,20 @@ export function parseMessages(raw, parser) {
       case 'skip': continue;
       case 'thinking': isThinking = true; continue;
       case 'turn_end': isThinking = false; flush(); continue;
+      case 'compact_start':
+        isThinking = false; started = true; flush();
+        current = { role: 'compact', lines: [], rawLines: [] };
+        continue;
+      case 'compact_end':
+        flush(); continue;
+      case 'model_header':
+        isThinking = false; started = true; flush();
+        current = { role: 'model', lines: [], rawLines: [] };
+        continue;
+      case 'model_selected':
+      case 'model_item':
+        if (current?.role === 'model') { current.lines.push(cls.text); current.rawLines.push(rawLine); }
+        continue;
       case 'user':
         isThinking = false; started = true; flush();
         current = { role: 'user', lines: [cls.text], rawLines: [cls.rawText] };
