@@ -171,7 +171,6 @@
     {#if !termAtBottom}
       <button class="scroll-btn" onclick={() => term?.scrollToBottom()}><Icon name="arrow-down" size={16} /></button>
     {/if}
-    <div class="status-bar">{target}{#if command} · <span class:kiro={/^kiro/i.test(command)}>{command}</span>{/if}</div>
   </div>
   {#if viewMode === 'chat'}
     <ChatView content={paneContent} onSendKeys={(keys) => sendKeys(target, keys, false)} />
@@ -181,6 +180,7 @@
     {#if viewMode === 'terminal'}
       <div class="input-bar">
         <div class="shortcuts">
+          <span class="shortcut-status">{target}{#if command} · <span class:kiro={/^kiro/i.test(command)}>{command}</span>{/if}</span>
           <button onclick={() => sendSpecial('C-c')}>⌃C</button>
           <button onclick={() => sendSpecial('C-d')}>⌃D</button>
           <button onclick={() => sendSpecial('C-z')}>⌃Z</button>
@@ -261,19 +261,16 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .status-bar {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    padding: 2px 8px;
+  .shortcut-status {
     font-family: 'SF Mono', Menlo, monospace;
     font-size: 10px;
     color: var(--text3);
-    background: rgba(10, 10, 15, 0.7);
-    pointer-events: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-right: auto;
   }
-  .status-bar .kiro { color: #c084fc; }
+  .shortcut-status .kiro { color: #c084fc; }
   .status-pct {
     display: flex;
     align-items: center;
