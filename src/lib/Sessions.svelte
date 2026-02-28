@@ -2,7 +2,7 @@
   import { listSessions, listPanes, newSession, killSession } from './ws.js';
   import Icon from './Icon.svelte';
 
-  let { openTerminal, activeTarget = '', onDisconnect = () => {}, visible = false } = $props();
+  let { openTerminal, activeTarget = '', onDisconnect = () => {}, visible = false, theme = 'system', onThemeChange = () => {} } = $props();
 
   let sessions = $state([]);
   let expanded = $state({});
@@ -126,6 +126,15 @@
         {/if}
       </div>
     {/each}
+  </div>
+
+  <div class="theme-row">
+    <span class="theme-label">Theme</span>
+    <div class="theme-btns">
+      <button class:active={theme === 'system'} onclick={() => onThemeChange('system')}>Auto</button>
+      <button class:active={theme === 'light'} onclick={() => onThemeChange('light')}>Light</button>
+      <button class:active={theme === 'dark'} onclick={() => onThemeChange('dark')}>Dark</button>
+    </div>
   </div>
 
   <button class="disconnect-btn" class:confirm={confirmDisconnect} onclick={() => {
@@ -362,21 +371,40 @@
   .disconnect-btn {
     width: 100%;
     padding: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border);
     border-radius: 12px;
-    background: rgba(255, 255, 255, 0.03);
-    color: rgba(226, 232, 240, 0.4);
+    background: var(--surface);
+    color: var(--text3);
     font-size: 14px;
     cursor: pointer;
     transition: all 0.15s ease;
     -webkit-tap-highlight-color: transparent;
     margin-top: auto;
   }
-  .disconnect-btn:active { background: rgba(255, 80, 80, 0.08); }
+  .disconnect-btn:active { background: var(--danger-bg); }
   .disconnect-btn.confirm {
-    background: rgba(255, 80, 80, 0.1);
+    background: var(--danger-bg);
     border-color: rgba(255, 80, 80, 0.2);
-    color: #ff5050;
+    color: var(--danger);
     font-weight: 600;
+  }
+
+  .theme-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 0;
+  }
+  .theme-label { font-size: 13px; color: var(--text2); }
+  .theme-btns {
+    display: flex; gap: 4px; background: var(--pill-bg, rgba(255,255,255,0.04));
+    border-radius: 8px; padding: 2px;
+  }
+  .theme-btns button {
+    padding: 5px 12px; border: none; border-radius: 6px; background: transparent;
+    color: var(--text3); font-size: 12px; font-weight: 500; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .theme-btns button.active {
+    background: var(--accent-bg, rgba(0,212,255,0.12));
+    color: var(--accent, #00d4ff);
   }
 </style>
