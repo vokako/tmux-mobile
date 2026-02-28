@@ -189,7 +189,7 @@
     {/if}
   </div>
   {#if viewMode === 'chat'}
-    <ChatView content={paneContent} onSendKeys={(keys) => sendKeys(target, keys, false)} />
+    <ChatView content={paneContent} {command} onSendKeys={(keys) => sendKeys(target, keys, false)} />
   {/if}
 
   <div class="input-area">
