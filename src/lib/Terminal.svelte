@@ -162,7 +162,7 @@
     <div class="status-bar">{target}{#if command} · <span class:kiro={/^kiro/i.test(command)}>{command}</span>{/if}</div>
   </div>
   {#if viewMode === 'chat'}
-    <ChatView content={paneContent} />
+    <ChatView content={paneContent} onSendKeys={(keys) => sendKeys(target, keys, false)} />
   {/if}
 
   <div class="input-area">

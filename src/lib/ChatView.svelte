@@ -2,7 +2,7 @@
   import { detectParser, parseMessages, stripAnsi } from './parsers.js';
   import Icon from './Icon.svelte';
 
-  let { content = '' } = $props();
+  let { content = '', onSendKeys = null } = $props();
 
   let chatEl;
 
@@ -182,6 +182,17 @@
     try { await navigator.clipboard.writeText(text); } catch {}
     copyMsg = null;
   }
+
+  async function selectModel(targetIdx, currentIdx) {
+    if (!onSendKeys || targetIdx === currentIdx) return;
+    const diff = targetIdx - currentIdx;
+    const key = diff > 0 ? 'Down' : 'Up';
+    for (let i = 0; i < Math.abs(diff); i++) {
+      await onSendKeys(key);
+      await new Promise(r => setTimeout(r, 50));
+    }
+    await onSendKeys('Enter');
+  }
 </script>
 
 <div class="chat-wrap">
@@ -209,15 +220,17 @@
         {:else if msg.role === 'model'}
           <div class="model-bubble">
             <div class="model-header"><Icon name="gear" size={13} /> Select Model</div>
-            {#each msg.text.split('\n').filter(l => l.trim()) as item}
+            {#each msg.text.split('\n').filter(l => l.trim()) as item, idx}
+              {@const allItems = msg.text.split('\n').filter(l => l.trim())}
+              {@const currentIdx = allItems.findIndex(l => /^>/.test(l.trim()))}
               {@const selected = /^>/.test(item.trim())}
               {@const name = item.replace(/^>\s*\*?\s*/, '').replace(/\s+\d+\.\d+x.*/, '').trim()}
               {@const credits = item.match(/(\d+\.\d+x\s*credits)/)?.[1] || ''}
               {@const active = /\*/.test(item)}
-              <div class="model-item" class:model-selected={selected}>
+              <button class="model-item" class:model-selected={selected} onclick={() => selectModel(idx, currentIdx)}>
                 <span class="model-name">{name}{#if active} *{/if}</span>
                 <span class="model-credits">{credits}</span>
-              </div>
+              </button>
             {/each}
           </div>
         {:else}
@@ -482,11 +495,13 @@
     background: rgba(255, 255, 255, 0.02); border-bottom: 1px solid rgba(255,255,255,0.06);
   }
   .model-item {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 8px 14px; font-size: 13px; color: rgba(226,232,240,0.5);
-    border-bottom: 1px solid rgba(255,255,255,0.03);
+    display: flex; justify-content: space-between; align-items: center; width: 100%;
+    padding: 10px 14px; font-size: 13px; color: rgba(226,232,240,0.5);
+    border: none; background: none; border-bottom: 1px solid rgba(255,255,255,0.03);
+    cursor: pointer; -webkit-tap-highlight-color: transparent; text-align: left;
   }
   .model-item:last-child { border-bottom: none; }
+  .model-item:active { background: rgba(0, 212, 255, 0.06); }
   .model-item.model-selected { background: rgba(0, 212, 255, 0.08); color: #00d4ff; }
   .model-name { font-family: 'SF Mono', Menlo, monospace; font-size: 12px; }
   .model-credits { font-size: 11px; color: rgba(226,232,240,0.3); }
