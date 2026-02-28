@@ -1,5 +1,6 @@
 <p align="center">
-  <img src="assets/logo.svg" width="320" alt="⌘ tmux-mobile">
+  <img src="assets/logo.svg" width="320" alt="⌘ tmux-mobile"><br>
+  <strong>tmux<span>mobile</span></strong>
 </p>
 
 <p align="center">
