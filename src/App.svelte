@@ -71,9 +71,26 @@
     }
   });
 
+  let manualDisconnect = false;
+
   setOnDisconnect(() => {
     connected = false;
-    page = 'settings';
+    if (!manualDisconnect) {
+      // Network disconnect — try auto-reconnect after delay
+      setTimeout(() => {
+        const host = localStorage.getItem('tmux_host');
+        const port = localStorage.getItem('tmux_port');
+        const token = localStorage.getItem('tmux_token');
+        if (host && port && token && !connected) {
+          connect(host, parseInt(port), token).then(() => {
+            connected = true;
+          }).catch(() => { page = 'settings'; });
+        }
+      }, 1000);
+    } else {
+      page = 'settings';
+      manualDisconnect = false;
+    }
   });
 
   function onConnected() {
@@ -90,18 +107,22 @@
   }
 
   function doDisconnect() {
+    manualDisconnect = true;
     disconnect();
     connected = false;
     page = 'settings';
     localStorage.removeItem('tmux_state');
   }
 
-  // Auto-reconnect and restore state
+  // Auto-reconnect and restore state on page load
+  let autoConnectAttempted = false;
   $effect(() => {
+    if (autoConnectAttempted || connected) return;
     const host = localStorage.getItem('tmux_host');
     const port = localStorage.getItem('tmux_port');
     const token = localStorage.getItem('tmux_token');
-    if (host && port && token && !connected) {
+    if (host && port && token) {
+      autoConnectAttempted = true;
       connect(host, parseInt(port), token).then(() => {
         connected = true;
         const saved = localStorage.getItem('tmux_state');
@@ -121,7 +142,10 @@
         } else {
           page = 'sessions';
         }
-      }).catch(() => {});
+      }).catch(() => {
+        autoConnectAttempted = false;
+        // Stay on settings, credentials might be wrong
+      });
     }
   });
 </script>
