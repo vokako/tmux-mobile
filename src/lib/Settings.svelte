@@ -5,7 +5,7 @@
   let { onConnected } = $props();
 
   let host = $state(localStorage.getItem('tmux_host') || '127.0.0.1');
-  let port = $state(localStorage.getItem('tmux_port') || '9876');
+  let port = $state(localStorage.getItem('tmux_port') || '9899');
   let token = $state(localStorage.getItem('tmux_token') || '');
   let error = $state('');
   let connecting = $state(false);
@@ -43,7 +43,7 @@
         </label>
         <label class="port-field">
           <span class="label-text">Port</span>
-          <input type="text" bind:value={port} placeholder="9876" />
+          <input type="text" bind:value={port} placeholder="9899" />
         </label>
       </div>
 
