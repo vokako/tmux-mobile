@@ -180,12 +180,12 @@
     --bg: #f5f5f7; --bg2: #eeeef0; --bg3: #e8e8ec;
     --text: #1a1a2e; --text2: rgba(26,26,46,0.55); --text3: rgba(26,26,46,0.35);
     --border: rgba(0,0,0,0.08); --border2: rgba(0,0,0,0.05);
-    --surface: rgba(0,0,0,0.03); --surface2: rgba(0,0,0,0.06);
-    --accent: #0088cc; --accent-bg: rgba(0,136,204,0.1); --accent-glow: rgba(0,136,204,0.08);
-    --danger: #e53e3e; --danger-bg: rgba(229,62,62,0.08);
-    --nav-bg: rgba(245,245,247,0.9); --pill-bg: rgba(0,0,0,0.04);
-    --input-bg: rgba(0,0,0,0.03); --input-border: rgba(0,0,0,0.1);
-    --code-bg: rgba(0,0,0,0.04);
+    --surface: rgba(0,0,0,0.02); --surface2: rgba(0,0,0,0.04);
+    --accent: #0088cc; --accent-bg: rgba(0,136,204,0.08); --accent-glow: rgba(0,136,204,0.06);
+    --danger: #e53e3e; --danger-bg: rgba(229,62,62,0.06);
+    --nav-bg: rgba(245,245,247,0.9); --pill-bg: rgba(0,0,0,0.03);
+    --input-bg: rgba(0,0,0,0.02); --input-border: rgba(0,0,0,0.08);
+    --code-bg: rgba(0,0,0,0.03);
   }
   :global(::selection) { background: rgba(0, 212, 255, 0.25); }
 
