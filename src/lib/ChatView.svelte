@@ -190,7 +190,7 @@
     <div class="empty">No conversation detected. Waiting for CLI output…</div>
   {:else}
     {#each messages as msg, mi}
-      <div class="msg" class:user={msg.role === 'user'} class:agent={msg.role === 'agent'} class:system={msg.role === 'system'}>
+      <div class="msg" class:user={msg.role === 'user'} class:agent={msg.role === 'agent'} class:system={msg.role === 'system' || msg.role === 'compact' || msg.role === 'model'}>
         {#if msg.role === 'agent'}
           <div class="avatar"><Icon name="bot" size={14} /></div>
         {/if}
@@ -200,6 +200,25 @@
         {#if msg.role === 'system'}
           <div class="system-bubble">
             <pre class="system-pre">{@html ansiToHtml(msg.rawText)}</pre>
+          </div>
+        {:else if msg.role === 'compact'}
+          <div class="compact-bubble">
+            <div class="compact-header"><Icon name="info" size={13} /> Conversation Summary</div>
+            <div class="compact-body">{@html renderMarkdown(stripAnsi(msg.text))}</div>
+          </div>
+        {:else if msg.role === 'model'}
+          <div class="model-bubble">
+            <div class="model-header"><Icon name="gear" size={13} /> Select Model</div>
+            {#each msg.text.split('\n').filter(l => l.trim()) as item}
+              {@const selected = /^>/.test(item.trim())}
+              {@const name = item.replace(/^>\s*\*?\s*/, '').replace(/\s+\d+\.\d+x.*/, '').trim()}
+              {@const credits = item.match(/(\d+\.\d+x\s*credits)/)?.[1] || ''}
+              {@const active = /\*/.test(item)}
+              <div class="model-item" class:model-selected={selected}>
+                <span class="model-name">{name}{#if active} *{/if}</span>
+                <span class="model-credits">{credits}</span>
+              </div>
+            {/each}
           </div>
         {:else}
         <div class="bubble-wrap">
@@ -428,6 +447,49 @@
     white-space: pre-wrap;
     word-break: break-word;
   }
+
+  .compact-bubble {
+    width: 100%;
+    border-radius: 12px;
+    background: rgba(0, 212, 255, 0.04);
+    border: 1px solid rgba(0, 212, 255, 0.15);
+    overflow: hidden;
+  }
+  .compact-header {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 14px; font-size: 12px; font-weight: 600; color: #00d4ff;
+    background: rgba(0, 212, 255, 0.06); border-bottom: 1px solid rgba(0, 212, 255, 0.1);
+  }
+  .compact-body {
+    padding: 10px 14px; font-size: 13px; line-height: 1.6; color: rgba(226,232,240,0.8);
+  }
+  .compact-body :global(h2) { font-size: 13px; font-weight: 700; color: #00d4ff; margin: 10px 0 4px; }
+  .compact-body :global(ul), .compact-body :global(ol) { padding-left: 16px; margin: 4px 0; }
+  .compact-body :global(li) { margin: 2px 0; }
+  .compact-body :global(p) { margin: 4px 0; }
+  .compact-body :global(code) { background: rgba(255,255,255,0.08); padding: 1px 4px; border-radius: 3px; font-size: 11px; }
+
+  .model-bubble {
+    width: 100%;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+  }
+  .model-header {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 14px; font-size: 12px; font-weight: 600; color: rgba(226,232,240,0.5);
+    background: rgba(255, 255, 255, 0.02); border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .model-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 14px; font-size: 13px; color: rgba(226,232,240,0.5);
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+  }
+  .model-item:last-child { border-bottom: none; }
+  .model-item.model-selected { background: rgba(0, 212, 255, 0.08); color: #00d4ff; }
+  .model-name { font-family: 'SF Mono', Menlo, monospace; font-size: 12px; }
+  .model-credits { font-size: 11px; color: rgba(226,232,240,0.3); }
   .md-block :global(strong) { font-weight: 600; }
   .md-block :global(em) { font-style: italic; }
   .md-block :global(code) {
