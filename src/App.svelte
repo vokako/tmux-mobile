@@ -13,6 +13,26 @@
   let terminalCommand = $state('');
   let viewMode = $state('terminal');
   let chatSupported = $state(false);
+  let theme = $state(localStorage.getItem('tmux_theme') || 'system');
+
+  function setTheme(t) {
+    theme = t;
+    localStorage.setItem('tmux_theme', t);
+    applyTheme();
+  }
+
+  function applyTheme() {
+    const isDark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+  }
+
+  $effect(() => {
+    applyTheme();
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = () => { if (theme === 'system') applyTheme(); };
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  });
 
   $effect(() => {
     if (!chatSupported && viewMode === 'chat') viewMode = 'terminal';
@@ -93,7 +113,7 @@
     {#if page === 'settings'}
       <Settings {onConnected} />
     {:else if page === 'sessions'}
-      <Sessions {openTerminal} activeTarget={terminalTarget} onDisconnect={doDisconnect} visible={page === 'sessions'} />
+      <Sessions {openTerminal} activeTarget={terminalTarget} onDisconnect={doDisconnect} visible={page === 'sessions'} {theme} onThemeChange={setTheme} />
     {/if}
     {#if terminalTarget}
       <div class="page-layer" class:hidden={page !== 'files'}>
@@ -110,8 +130,8 @@
   :global(body) {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
-    background: #0a0a0f;
-    color: #e2e8f0;
+    background: var(--bg);
+    color: var(--text);
     overflow: hidden;
     height: 100vh;
     height: 100dvh;
@@ -125,6 +145,28 @@
   }
   :global(*) { box-sizing: border-box; }
   :global(html) { overscroll-behavior: none; }
+  :global(html[data-theme="dark"]) {
+    --bg: #0a0a0f; --bg2: #0f0f18; --bg3: #12121a;
+    --text: #e2e8f0; --text2: rgba(226,232,240,0.5); --text3: rgba(226,232,240,0.3);
+    --border: rgba(255,255,255,0.06); --border2: rgba(255,255,255,0.04);
+    --surface: rgba(255,255,255,0.03); --surface2: rgba(255,255,255,0.06);
+    --accent: #00d4ff; --accent-bg: rgba(0,212,255,0.12); --accent-glow: rgba(0,212,255,0.1);
+    --danger: #ff5050; --danger-bg: rgba(255,80,80,0.08);
+    --nav-bg: rgba(12,12,20,0.8); --pill-bg: rgba(255,255,255,0.04);
+    --input-bg: rgba(255,255,255,0.04); --input-border: rgba(255,255,255,0.08);
+    --code-bg: rgba(255,255,255,0.05);
+  }
+  :global(html[data-theme="light"]) {
+    --bg: #f5f5f7; --bg2: #eeeef0; --bg3: #e8e8ec;
+    --text: #1a1a2e; --text2: rgba(26,26,46,0.55); --text3: rgba(26,26,46,0.35);
+    --border: rgba(0,0,0,0.08); --border2: rgba(0,0,0,0.05);
+    --surface: rgba(0,0,0,0.03); --surface2: rgba(0,0,0,0.06);
+    --accent: #0088cc; --accent-bg: rgba(0,136,204,0.1); --accent-glow: rgba(0,136,204,0.08);
+    --danger: #e53e3e; --danger-bg: rgba(229,62,62,0.08);
+    --nav-bg: rgba(245,245,247,0.9); --pill-bg: rgba(0,0,0,0.04);
+    --input-bg: rgba(0,0,0,0.03); --input-border: rgba(0,0,0,0.1);
+    --code-bg: rgba(0,0,0,0.04);
+  }
   :global(::selection) { background: rgba(0, 212, 255, 0.25); }
 
   main {
@@ -134,7 +176,7 @@
     height: 100dvh;
     max-width: 100vw;
     overflow: hidden;
-    background: linear-gradient(180deg, #0a0a0f 0%, #0f0f18 50%, #12121a 100%);
+    background: linear-gradient(180deg, var(--bg) 0%, var(--bg2) 50%, var(--bg3) 100%);
   }
 
   nav {
@@ -142,10 +184,10 @@
     align-items: center;
     justify-content: space-between;
     padding: 8px 12px;
-    background: rgba(12, 12, 20, 0.8);
+    background: var(--nav-bg);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid var(--border);
     flex-shrink: 0;
     z-index: 10;
   }
@@ -153,7 +195,7 @@
   .nav-pills {
     display: flex;
     gap: 2px;
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--pill-bg);
     border-radius: 10px;
     padding: 2px;
   }
@@ -163,7 +205,7 @@
     border: none;
     border-radius: 8px;
     background: transparent;
-    color: rgba(226, 232, 240, 0.5);
+    color: var(--text2);
     cursor: pointer;
     font-size: 13px;
     font-weight: 500;
@@ -176,9 +218,9 @@
   }
   .nav-pills button:active { transform: scale(0.97); }
   .nav-pills button.active {
-    background: rgba(0, 212, 255, 0.12);
-    color: #00d4ff;
-    box-shadow: 0 0 12px rgba(0, 212, 255, 0.1);
+    background: var(--accent-bg);
+    color: var(--accent);
+    box-shadow: 0 0 12px var(--accent-glow);
   }
   .nav-pills button:disabled { opacity: 0.3; cursor: default; }
 
@@ -191,8 +233,8 @@
   .status-dot {
     width: 7px; height: 7px;
     border-radius: 50%;
-    background: #00d4ff;
-    box-shadow: 0 0 8px rgba(0, 212, 255, 0.6);
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent-glow);
     animation: pulse 2s ease-in-out infinite;
   }
 
@@ -209,7 +251,7 @@
   }
   .logo {
     font-size: 20px;
-    color: #00d4ff;
+    color: var(--accent);
     filter: drop-shadow(0 0 6px rgba(0, 212, 255, 0.4));
   }
   .brand-text {
@@ -227,7 +269,7 @@
     flex-direction: column;
     position: relative;
   }
-  .page-terminal { background: #0a0a0f; }
+  .page-terminal { background: var(--bg); }
   .page-layer {
     position: absolute;
     inset: 0;
