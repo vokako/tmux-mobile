@@ -137,8 +137,8 @@
 <main>
   <nav>
     {#if connected}
+      <img class="nav-icon" src="/assets/icon.svg" alt="" width="24" height="24" />
       <div class="nav-pills">
-        <img class="nav-icon" src="/assets/icon.svg" alt="" width="18" height="18" />
         <button class:active={page === 'sessions'} onclick={() => page = 'sessions'}>
           Sessions
         </button>
@@ -288,7 +288,7 @@
     border-radius: 10px;
     padding: 2px;
   }
-  .nav-icon { margin: 0 4px 0 6px; }
+  .nav-icon { margin-right: 6px; flex-shrink: 0; }
 
   .nav-pills button {
     padding: 7px 10px;
