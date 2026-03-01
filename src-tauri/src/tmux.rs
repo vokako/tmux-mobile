@@ -161,15 +161,19 @@ pub fn send_command(target: &str, command: &str) -> Result<(), String> {
 /// 创建新 session
 pub fn new_session(name: &str, path: Option<&str>, command: Option<&str>) -> Result<(), String> {
     let mut args = vec!["new-session", "-d", "-s", name];
+    let resolved;
     if let Some(p) = path {
         if !p.is_empty() {
+            resolved = crate::fs::resolve(p);
             args.push("-c");
-            args.push(p);
+            args.push(&resolved);
         }
     }
     run_tmux(&args)?;
     if let Some(cmd) = command {
         if !cmd.is_empty() {
+            // Small delay to let shell initialize
+            std::thread::sleep(std::time::Duration::from_millis(200));
             send_command(&format!("{}:0", name), cmd)?;
         }
     }
