@@ -32,7 +32,18 @@
     }
   });
 
-  let termHtml = $derived((theme === 'light' ? lightConvert : darkConvert).toHtml(paneContent));
+  let termHtml = $derived.by(() => {
+    let html = (theme === 'light' ? lightConvert : darkConvert).toHtml(paneContent);
+    if (theme === 'light') {
+      // Remap light/white foreground colors to dark for readability
+      html = html.replace(/color:#(fff|ffffff|eee|eeeeee|ddd|dddddd|ccc|cccccc|bbb|bbbbbb|aaa|aaaaaa|AAA|FFF)\b/gi,
+        'color:#4b5563');
+      // Strip black/dark backgrounds
+      html = html.replace(/background-color:#(000|000000)\b/gi,
+        'background-color:transparent');
+    }
+    return html;
+  });
 
   let parser = $derived(detectParser(paneContent, command));
 
@@ -264,9 +275,6 @@
     color: var(--text);
     scrollbar-width: thin;
     scrollbar-color: rgba(255,255,255,0.1) transparent;
-  }
-  :global([data-theme="light"]) .ansi-output :global(span[style*="background-color:#000"]) {
-    background-color: transparent !important;
   }
 
   .scroll-btn {
