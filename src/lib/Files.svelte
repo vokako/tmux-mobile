@@ -450,7 +450,7 @@
       <button class="tool-btn" onclick={goUp}><Icon name="folder-up" size={15} /></button>
       <button class="tool-btn" onclick={() => loadDir(cwd)}><Icon name="refresh" size={15} /></button>
       <button class="tool-btn" onclick={() => { newType = 'file'; newName = ''; }}><Icon name="plus" size={15} /></button>
-      <button class="tool-btn" onclick={() => { newType = 'dir'; newName = ''; }}><Icon name="folder" size={15} /></button>
+      <button class="tool-btn" onclick={() => { newType = 'dir'; newName = ''; }}><Icon name="folder-plus" size={15} /></button>
       <button class="tool-btn" onclick={handleUpload}><Icon name="upload" size={15} /></button>
       <button class="tool-btn" class:tool-active={showHidden} onclick={() => { showHidden = !showHidden; loadDir(cwd); }}>
         <Icon name="eye" size={15} />
