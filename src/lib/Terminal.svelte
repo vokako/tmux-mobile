@@ -100,11 +100,13 @@
   });
 
   async function handleSubmit() {
-    if (!input.trim()) return;
+    if (!input.trim()) {
+      await sendKeys(target, 'Enter', false).catch(() => {});
+      return;
+    }
     try {
       await sendCommand(target, input);
       input = '';
-      // Reset textarea heights
       document.querySelectorAll('.input-bar textarea').forEach(ta => ta.style.height = 'auto');
     } catch (_) {}
   }
