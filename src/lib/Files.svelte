@@ -687,9 +687,11 @@
     flex: 1; display: flex; align-items: center; gap: 6px;
     padding: 8px 0; border: none; background: none; color: var(--text);
     font-size: 12px; font-family: 'SF Mono', Menlo, monospace;
-    cursor: pointer; text-align: left; overflow: hidden;
-    white-space: nowrap; text-overflow: ellipsis;
+    cursor: pointer; text-align: left; overflow-x: auto;
+    white-space: nowrap; scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
   }
+  .bm-path::-webkit-scrollbar { display: none; }
   .bm-path:active { color: var(--accent); }
   .bm-del {
     padding: 4px; border: none; border-radius: 4px; background: none;
