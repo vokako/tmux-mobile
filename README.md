@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Tauri_2-Rust-orange?style=flat-square" alt="Tauri 2">
   <img src="https://img.shields.io/badge/Svelte_5-Frontend-ff3e00?style=flat-square" alt="Svelte 5">
-  <img src="https://img.shields.io/badge/xterm.js-Terminal-00d4ff?style=flat-square" alt="xterm.js">
+  <img src="https://img.shields.io/badge/ansi--to--html-Terminal-00d4ff?style=flat-square" alt="Terminal">
 </p>
 
 ---
@@ -20,9 +20,9 @@
 
 You're running [Kiro CLI](https://kiro.dev), Claude Code, or any coding agent in a tmux session on your Mac. You walk away from your desk. **tmux-mobile** lets you keep watching and interacting from your phone:
 
-- **Terminal view** — full xterm.js rendering with ANSI colors, scrollback, and special keys
+- **Terminal view** — ANSI-rendered output with theme-aware colors, native scrolling, shortcut keys
 - **Chat view** — AI agent conversations rendered as chat bubbles, with syntax-highlighted code blocks, collapsible tool calls, diff rendering, `/model` selector, and `/compact` summary cards
-- **File browser** — browse, preview, edit, upload/download files from the server's filesystem
+- **File browser** — browse, preview, edit, upload/download files with bookmarks
 - **Sessions** — browse all tmux sessions/windows/panes, create or kill sessions
 - **Light/Dark theme** — system-following or manual toggle, applies to all views including terminal
 
@@ -43,7 +43,7 @@ npm run dev                               # starts web UI on :5173
 
 On first launch, a token is auto-generated and saved to `~/.config/tmux-mobile/config.toml`. The Tauri desktop app auto-fills connection settings from this config.
 
-Open `http://<your-mac-ip>:5173` on your phone, enter the host/port/token, and you're in.
+Open `http://<your-mac-ip>:5173` on your phone, enter the address (`ws://host:port`) and token, and you're in.
 
 ## Configuration
 
@@ -53,6 +53,7 @@ Config file: `~/.config/tmux-mobile/config.toml`
 token = "auto-generated-uuid"
 host = "0.0.0.0"    # optional
 port = 9899          # optional
+tmux_socket = ""     # optional, -S path
 ```
 
 Environment variables override the config file:
@@ -63,6 +64,16 @@ TOKEN=my-secret PORT=8080 npm run tauri:dev
 
 ## Features
 
+### Terminal
+
+- ANSI-to-HTML rendering with theme-aware color mapping (light/dark)
+- Native CSS scrolling with inertia (no xterm.js flicker)
+- Shortcut buttons (^C, ^D, ^Z, Tab, Up, Down)
+- Empty send = Enter key (return arrow icon)
+- Multi-line input (Shift+Enter for newline)
+- IME-aware (composing Enter doesn't send)
+- Status bar inside input bar showing session:pane and command
+
 ### Chat View
 
 Auto-detects supported CLI tools (currently Kiro CLI) and renders output as a messaging UI:
@@ -70,13 +81,14 @@ Auto-detects supported CLI tools (currently Kiro CLI) and renders output as a me
 - User messages → right-aligned bubbles with copy button
 - Agent responses → left-aligned bubbles with bot avatar
 - Code blocks → syntax-highlighted cards
-- Tool calls → collapsible cards showing tool name and output
+- Tool calls → compact collapsible cards
 - Diffs → red/green line-by-line rendering
 - `/compact` → styled summary card with markdown rendering
 - `/model` → interactive model selector (tap to switch models)
 - Thinking state → debounced spinner animation
 - ANSI colors preserved throughout
 - Markdown rendering (tables, bold, italic, inline code, links, lists)
+- Immediate chat detection on session open
 
 The parser architecture is pluggable — add new CLI tools in `src/lib/parsers.js`.
 
@@ -84,21 +96,23 @@ The parser architecture is pluggable — add new CLI tools in `src/lib/parsers.j
 
 Browse the server's filesystem starting from the session's working directory:
 
-- Directory navigation with breadcrumbs, home, parent, refresh
+- Unified toolbar: all actions in one compact icon row
+- Directory navigation with breadcrumbs on separate path row
+- Bookmarks: star current directory, bookmark panel with scrollable paths
 - File preview: Markdown (rendered), CSV (table), code (syntax highlighted), HTML (iframe), PDF (pdf.js), images
 - Text file editor with syntax highlighting, undo stack, save
-- File operations: create, rename, delete, upload, download
+- File operations: create file/folder, rename, delete, upload, download
 - File info: path, type, size, modified, permissions
 - Show/hide hidden files
+- Swipe right from left edge to go back
 
-### Terminal
+### Connection
 
-- Full xterm.js with ANSI 256-color support
-- Light and dark terminal themes
-- Shortcut buttons (⌃C, ⌃D, ⌃Z, Tab, ↑, ↓)
-- Multi-line input (Shift+Enter for newline)
-- IME-aware (composing Enter doesn't send)
-- Status bar overlay showing session:pane and command
+- Address field: `ws://host:port` or `wss://host:port`
+- Address history: cached recent connections for quick switching
+- Auto-reconnect on network disconnect
+- State restore on reload (page, session, view mode)
+- tmux socket support (`-S` path)
 
 ## npm Scripts
 
@@ -147,11 +161,11 @@ Requires: Xcode, Apple Developer account for device builds.
 src/
 ├── App.svelte              # Main app, routing, nav, settings panel, theme
 ├── lib/
-│   ├── Settings.svelte     # Connection form (auto-fills in Tauri desktop)
+│   ├── Settings.svelte     # Connection form with address history
 │   ├── Sessions.svelte     # Session/pane browser with refresh
-│   ├── Terminal.svelte     # Terminal + Chat container, status bar
+│   ├── Terminal.svelte     # ANSI terminal + Chat container, input bar
 │   ├── ChatView.svelte     # Chat bubble renderer (messages, model, compact)
-│   ├── Files.svelte        # File browser, preview, editor
+│   ├── Files.svelte        # File browser, preview, editor, bookmarks
 │   ├── Icon.svelte         # SVG icon system (Lucide-based)
 │   ├── parsers.js          # Pluggable CLI output parsers
 │   └── ws.js               # WebSocket client (tmux + filesystem RPC)
@@ -159,9 +173,9 @@ src-tauri/
 ├── src/
 │   ├── lib.rs              # Library crate, Tauri commands, mobile entry point
 │   ├── server.rs           # WebSocket server (JSON-RPC + auth + subscribe + fs)
-│   ├── tmux.rs             # tmux CLI wrapper
+│   ├── tmux.rs             # tmux CLI wrapper with socket support
 │   ├── fs.rs               # Filesystem operations (list, read, write, upload, download)
-│   ├── config.rs           # Config file loader + Tauri command
+│   ├── config.rs           # Config file loader, bookmarks
 │   ├── main.rs             # Desktop entry point
 │   └── bin/server.rs       # Standalone server binary
 ├── tauri.conf.json
@@ -170,7 +184,7 @@ src-tauri/
 
 ## WebSocket Protocol
 
-JSON-RPC over WebSocket. First message must authenticate:
+JSON-RPC over WebSocket. Connect with `ws://` or `wss://`. First message must authenticate:
 
 ```json
 → {"method": "auth", "params": {"token": "..."}}
@@ -190,6 +204,10 @@ JSON-RPC over WebSocket. First message must authenticate:
 | `kill_session` | `name` | Kill session |
 | `subscribe` | `target` | Stream pane updates (200ms polling) |
 | `unsubscribe` | `target` | Stop streaming |
+| `pane_command` | `target` | Get current command running in pane |
+| `set_socket` | `path` | Set tmux socket path at runtime |
+| `get_bookmarks` | — | Get saved directory bookmarks |
+| `save_bookmarks` | `bookmarks` | Save directory bookmarks |
 | `fs_cwd` | `session` | Get session working directory |
 | `fs_list` | `path`, `show_hidden?` | List directory contents |
 | `fs_stat` | `path` | File metadata |
@@ -214,7 +232,7 @@ If you have Tailscale, serve the web UI over HTTPS:
 ```bash
 tailscale serve --bg 5173
 # Access from any device: https://your-machine.tailnet-name.ts.net/
-# WebSocket: use Tailscale IP + port 9899
+# WebSocket: use wss:// with Tailscale domain or ws:// with Tailscale IP:9899
 ```
 
 ## Testing
