@@ -96,15 +96,19 @@
     await saveBookmarks(bookmarks).catch(() => {});
   }
 
-  // Swipe right to go up a directory
+  // Swipe right to go back
   let swipeStartX = 0;
   function onTouchStart(e) { swipeStartX = e.touches[0].clientX; }
   function onTouchEnd(e) {
     const dx = e.changedTouches[0].clientX - swipeStartX;
-    if (dx > 60 && swipeStartX < 40) {
-      if (view !== 'list') { view = 'list'; currentFile = null; }
-      else goUp();
-    }
+    if (dx > 60 && swipeStartX < 40) goBack();
+  }
+
+  function goBack() {
+    if (view === 'edit') { view = 'preview'; }
+    else if (view === 'info') { view = currentFile?.content != null ? 'preview' : 'list'; }
+    else if (view === 'preview') { view = 'list'; currentFile = null; }
+    else goUp();
   }
 
   async function renderPdf(data) {
@@ -336,8 +340,13 @@
     input.click();
   }
 
+  let copyToast = $state(false);
+  let copyTimer;
   async function copyPath(path) {
     try { await navigator.clipboard.writeText(path); } catch {}
+    clearTimeout(copyTimer);
+    copyToast = true;
+    copyTimer = setTimeout(() => copyToast = false, 1200);
   }
 
   function formatSize(bytes) {
@@ -565,7 +574,7 @@
       <button class="back-btn" onclick={backToList}><Icon name="chevron-left" size={16} /></button>
       <span class="preview-name">{currentFile.name}</span>
       <div class="preview-actions">
-        {#if currentFile.stat?.writable}
+        {#if currentFile.stat?.is_text && currentFile.stat?.writable}
           <button class="act-btn" onclick={startEdit}><Icon name="edit" size={14} /></button>
         {/if}
         <button class="act-btn" onclick={() => handleDownload(currentFile.path)}><Icon name="download" size={14} /></button>
@@ -644,6 +653,9 @@
         <div class="info-row"><span class="info-label">Text file</span><span class="info-val">{currentFile.stat.is_text ? 'Yes' : 'No'}</span></div>
       {/if}
     </div>
+  {/if}
+  {#if copyToast}
+    <div class="copy-toast">Copied</div>
   {/if}
 </div>
 
@@ -861,4 +873,17 @@
     display: flex; align-items: center; gap: 4px; -webkit-tap-highlight-color: transparent;
   }
   .info-path:active { color: var(--accent); }
+
+  /* Copy toast */
+  .copy-toast {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: var(--surface2); color: var(--accent); padding: 8px 20px;
+    border-radius: 8px; font-size: 13px; font-weight: 500;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3); pointer-events: none;
+    animation: toast-fade 1.2s ease forwards;
+  }
+  @keyframes toast-fade {
+    0%, 60% { opacity: 1; }
+    100% { opacity: 0; }
+  }
 </style>
