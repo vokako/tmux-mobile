@@ -138,22 +138,23 @@
   <nav>
     {#if connected}
       <div class="nav-pills">
+        <img class="nav-icon" src="/assets/icon.svg" alt="" width="18" height="18" />
         <button class:active={page === 'sessions'} onclick={() => page = 'sessions'}>
-          <Icon name="sessions" size={13} /> Sessions
+          Sessions
         </button>
         {#if terminalTarget}
           <button class:active={page === 'terminal' && viewMode === 'terminal'} onclick={() => { page = 'terminal'; viewMode = 'terminal'; }}>
-            <Icon name="terminal" size={13} /> Terminal
+            Terminal
           </button>
         {/if}
         {#if terminalTarget && chatSupported}
           <button class:active={page === 'terminal' && viewMode === 'chat'} onclick={() => { page = 'terminal'; viewMode = 'chat'; }}>
-            <Icon name="chat" size={13} /> Chat
+            Chat
           </button>
         {/if}
         {#if terminalTarget}
           <button class:active={page === 'files'} onclick={() => page = 'files'}>
-            <Icon name="files" size={13} /> Files
+            Files
           </button>
         {/if}
       </div>
@@ -281,11 +282,13 @@
 
   .nav-pills {
     display: flex;
-    gap: 2px;
+    align-items: center;
+    gap: 1px;
     background: var(--pill-bg);
     border-radius: 10px;
     padding: 2px;
   }
+  .nav-icon { margin: 0 4px 0 6px; }
 
   .nav-pills button {
     padding: 6px 8px;
@@ -294,13 +297,12 @@
     background: transparent;
     color: var(--text2);
     cursor: pointer;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 500;
     transition: all 0.2s ease;
     -webkit-tap-highlight-color: transparent;
     display: flex;
     align-items: center;
-    gap: 4px;
     white-space: nowrap;
   }
   .nav-pills button:active { transform: scale(0.97); }
