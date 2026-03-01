@@ -1,5 +1,5 @@
-use crate::tmux;
 use crate::fs as rfs;
+use crate::tmux;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -43,10 +43,18 @@ const ERR_AUTH: i32 = -32000;
 
 impl Response {
     fn ok(id: Option<u64>, result: serde_json::Value) -> Self {
-        Self { id, result: Some(result), error: None }
+        Self {
+            id,
+            result: Some(result),
+            error: None,
+        }
     }
     fn err(id: Option<u64>, code: i32, message: String) -> Self {
-        Self { id, result: None, error: Some(ErrorInfo { code, message }) }
+        Self {
+            id,
+            result: None,
+            error: Some(ErrorInfo { code, message }),
+        }
     }
 }
 
@@ -54,7 +62,8 @@ impl Response {
 type Subscriptions = Arc<Mutex<HashMap<String, String>>>;
 
 fn require_str<'a>(params: &'a serde_json::Value, key: &str) -> Result<&'a str, String> {
-    params.get(key)
+    params
+        .get(key)
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| format!("missing required param: {}", key))
@@ -126,7 +135,9 @@ fn handle_request(req: &Request) -> Response {
 
         "new_session" => {
             let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("untitled");
-            match tmux::new_session(name) {
+            let path = p.get("path").and_then(|v| v.as_str());
+            let command = p.get("command").and_then(|v| v.as_str());
+            match tmux::new_session(name, path, command) {
                 Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
                 Err(e) => Response::err(id, ERR_INTERNAL, e),
             }
@@ -155,7 +166,10 @@ fn handle_request(req: &Request) -> Response {
         }
 
         "set_socket" => {
-            let socket = p.get("socket").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let socket = p
+                .get("socket")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             tmux::set_socket(socket);
             Response::ok(id, serde_json::json!({ "ok": true }))
         }
@@ -166,9 +180,14 @@ fn handle_request(req: &Request) -> Response {
         }
 
         "save_bookmarks" => {
-            let bookmarks: Vec<String> = p.get("bookmarks")
+            let bookmarks: Vec<String> = p
+                .get("bookmarks")
                 .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
                 .unwrap_or_default();
             match crate::config::save_bookmarks(&bookmarks) {
                 Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
@@ -192,9 +211,14 @@ fn handle_request(req: &Request) -> Response {
                 Ok(s) => s,
                 Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
             };
-            let show_hidden = p.get("show_hidden").and_then(|v| v.as_bool()).unwrap_or(false);
+            let show_hidden = p
+                .get("show_hidden")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             match rfs::list_dir(path, show_hidden) {
-                Ok(entries) => Response::ok(id, serde_json::json!({ "entries": entries, "path": path })),
+                Ok(entries) => {
+                    Response::ok(id, serde_json::json!({ "entries": entries, "path": path }))
+                }
                 Err(e) => Response::err(id, ERR_INTERNAL, e),
             }
         }
@@ -279,7 +303,9 @@ fn handle_request(req: &Request) -> Response {
                 Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
             };
             match rfs::download_file(path) {
-                Ok((name, data)) => Response::ok(id, serde_json::json!({ "name": name, "data": data })),
+                Ok((name, data)) => {
+                    Response::ok(id, serde_json::json!({ "name": name, "data": data }))
+                }
                 Err(e) => Response::err(id, ERR_INTERNAL, e),
             }
         }
@@ -299,15 +325,21 @@ fn handle_request(req: &Request) -> Response {
             }
         }
 
-        _ => Response::err(id, ERR_METHOD_NOT_FOUND, format!("unknown method: {}", req.method)),
+        _ => Response::err(
+            id,
+            ERR_METHOD_NOT_FOUND,
+            format!("unknown method: {}", req.method),
+        ),
     }
 }
 
 // Subscription polling task: captures pane content and sends diffs
 async fn subscription_loop(
-    sender: Arc<Mutex<futures_util::stream::SplitSink<
-        tokio_tungstenite::WebSocketStream<TcpStream>, Message
-    >>>,
+    sender: Arc<
+        Mutex<
+            futures_util::stream::SplitSink<tokio_tungstenite::WebSocketStream<TcpStream>, Message>,
+        >,
+    >,
     subs: Subscriptions,
 ) {
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(200));
@@ -322,17 +354,18 @@ async fn subscription_loop(
         }
         for (target, prev) in targets {
             let t = target.clone();
-            let new_content = match tokio::task::spawn_blocking(move || {
-                tmux::capture_pane(&t, None)
-            }).await {
-                Ok(Ok(c)) => c,
-                _ => continue,
-            };
+            let new_content =
+                match tokio::task::spawn_blocking(move || tmux::capture_pane(&t, None)).await {
+                    Ok(Ok(c)) => c,
+                    _ => continue,
+                };
             if new_content == prev {
                 continue;
             }
             // Update stored content
-            subs.lock().await.insert(target.clone(), new_content.clone());
+            subs.lock()
+                .await
+                .insert(target.clone(), new_content.clone());
             // Push update to client
             let msg = serde_json::json!({
                 "id": null,
@@ -401,12 +434,17 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<Strin
                         // Auth gate: first message must be "auth"
                         if !authenticated {
                             if req.method == "auth" {
-                                let provided = req.params.get("token")
+                                let provided = req
+                                    .params
+                                    .get("token")
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("");
                                 if provided == token.as_str() {
                                     authenticated = true;
-                                    Response::ok(req.id, serde_json::json!({ "authenticated": true }))
+                                    Response::ok(
+                                        req.id,
+                                        serde_json::json!({ "authenticated": true }),
+                                    )
                                 } else {
                                     let r = Response::err(req.id, ERR_AUTH, "invalid token".into());
                                     let json = serde_json::to_string(&r).unwrap();
@@ -433,11 +471,15 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<Strin
                                     let mut map = subs.lock().await;
                                     handle_unsubscribe(&req.params, &mut map)
                                 }
-                                _ => {
-                                    tokio::task::spawn_blocking(move || handle_request(&req))
-                                        .await
-                                        .unwrap_or_else(|e| Response::err(None, ERR_INTERNAL, format!("task panic: {}", e)))
-                                }
+                                _ => tokio::task::spawn_blocking(move || handle_request(&req))
+                                    .await
+                                    .unwrap_or_else(|e| {
+                                        Response::err(
+                                            None,
+                                            ERR_INTERNAL,
+                                            format!("task panic: {}", e),
+                                        )
+                                    }),
                             }
                         }
                     }
@@ -467,7 +509,12 @@ pub async fn start(host: &str, port: u16, token: &str) -> Result<(), Box<dyn std
     start_with_socket(host, port, token, None).await
 }
 
-pub async fn start_with_socket(host: &str, port: u16, token: &str, socket: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn start_with_socket(
+    host: &str,
+    port: u16,
+    token: &str,
+    socket: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
     tmux::set_socket(socket);
     let addr = format!("{}:{}", host, port);
     let listener = TcpListener::bind(&addr).await?;

@@ -103,7 +103,7 @@ export const listPanes = (session) => call('list_panes', { session });
 export const capturePane = (target, lines) => call('capture_pane', { target, lines });
 export const sendKeys = (target, keys, literal = true) => call('send_keys', { target, keys, literal });
 export const sendCommand = (target, command) => call('send_command', { target, command });
-export const newSession = (name) => call('new_session', { name });
+export const newSession = (name, path, command) => call('new_session', { name, path, command });
 export const killSession = (name) => call('kill_session', { name });
 export const paneCommand = (target) => call('pane_command', { target });
 export const setSocket = (socket) => call('set_socket', { socket });

@@ -113,22 +113,30 @@ pub fn list_panes(session: &str) -> Result<Vec<TmuxPane>, String> {
 
 /// Get current command of a pane
 pub fn pane_command(target: &str) -> Result<String, String> {
-    run_tmux(&["display-message", "-t", target, "-p", "#{pane_current_command}"])
-        .map(|s| s.trim().to_string())
+    run_tmux(&[
+        "display-message",
+        "-t",
+        target,
+        "-p",
+        "#{pane_current_command}",
+    ])
+    .map(|s| s.trim().to_string())
 }
 
 /// 捕获 pane 内容（屏幕输出，保留 ANSI 转义序列）
 pub fn capture_pane(target: &str, lines: Option<usize>) -> Result<String, String> {
-    let start_line = lines.map(|n| format!("-{}", n)).unwrap_or("-200".to_string());
+    let start_line = lines
+        .map(|n| format!("-{}", n))
+        .unwrap_or("-200".to_string());
     run_tmux(&[
         "capture-pane",
         "-t",
         target,
-        "-p",           // 输出到 stdout
-        "-e",           // 保留 ANSI escape sequences (颜色/粗体等)
-        "-J",           // 合并屏幕宽度导致的自动换行
+        "-p", // 输出到 stdout
+        "-e", // 保留 ANSI escape sequences (颜色/粗体等)
+        "-J", // 合并屏幕宽度导致的自动换行
         "-S",
-        &start_line,    // 从多少行前开始
+        &start_line, // 从多少行前开始
     ])
 }
 
@@ -151,8 +159,20 @@ pub fn send_command(target: &str, command: &str) -> Result<(), String> {
 }
 
 /// 创建新 session
-pub fn new_session(name: &str) -> Result<(), String> {
-    run_tmux(&["new-session", "-d", "-s", name])?;
+pub fn new_session(name: &str, path: Option<&str>, command: Option<&str>) -> Result<(), String> {
+    let mut args = vec!["new-session", "-d", "-s", name];
+    if let Some(p) = path {
+        if !p.is_empty() {
+            args.push("-c");
+            args.push(p);
+        }
+    }
+    run_tmux(&args)?;
+    if let Some(cmd) = command {
+        if !cmd.is_empty() {
+            send_command(&format!("{}:0", name), cmd)?;
+        }
+    }
     Ok(())
 }
 

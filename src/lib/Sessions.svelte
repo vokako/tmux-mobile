@@ -9,6 +9,9 @@
   let panes = $state({});
   let error = $state('');
   let newName = $state('');
+  let newPath = $state('');
+  let newCmd = $state('');
+  let showNew = $state(false);
 
   // Refresh when page becomes visible
   $effect(() => { if (visible) refresh(); });
@@ -53,8 +56,8 @@
   async function createSession() {
     if (!newName.trim()) return;
     try {
-      await newSession(newName.trim());
-      newName = '';
+      await newSession(newName.trim(), newPath.trim() || undefined, newCmd.trim() || undefined);
+      newName = ''; newPath = ''; newCmd = ''; showNew = false;
       await refresh();
     } catch (e) {
       error = e.message;
@@ -80,13 +83,19 @@
 </script>
 
 <div class="sessions">
-  <div class="new-session">
-    <input type="text" bind:value={newName} placeholder="New session name…" onkeydown={(e) => e.key === 'Enter' && createSession()} />
-    <button onclick={createSession} disabled={!newName.trim()}>
-      <span>+</span>
-    </button>
-    <button class="refresh-btn" onclick={refresh}><Icon name="refresh" size={14} /></button>
+  <div class="top-bar">
+    <button class="top-btn" onclick={() => showNew = !showNew}><Icon name="plus" size={14} /></button>
+    <button class="top-btn" onclick={refresh}><Icon name="refresh" size={14} /></button>
   </div>
+
+  {#if showNew}
+    <div class="new-form">
+      <input type="text" bind:value={newName} placeholder="Session name" onkeydown={(e) => e.key === 'Enter' && createSession()} autocapitalize="off" />
+      <input type="text" bind:value={newPath} placeholder="Working directory (optional)" autocapitalize="off" />
+      <input type="text" bind:value={newCmd} placeholder="Command, e.g. kiro-cli chat (optional)" autocapitalize="off" />
+      <button class="create-btn" onclick={createSession} disabled={!newName.trim()}>Create</button>
+    </div>
+  {/if}
 
   {#if error}
     <div class="error">{error}</div>
@@ -286,60 +295,38 @@
     font-size: 12px;
   }
 
-  .new-session {
-    display: flex;
-    gap: 8px;
+  .top-bar {
+    display: flex; gap: 8px; justify-content: flex-end;
   }
-  .new-session input {
-    flex: 1;
-    padding: 11px 14px;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    background: var(--surface);
-    color: var(--text);
-    font-size: 14px;
-    outline: none;
-    transition: all 0.2s ease;
-    -webkit-appearance: none;
+  .top-btn {
+    width: 40px; height: 40px;
+    border: 1px solid var(--border); border-radius: 12px;
+    background: var(--surface); color: var(--text2); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    -webkit-tap-highlight-color: transparent;
   }
-  .new-session input:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.06);
-  }
-  .new-session input::placeholder { color: var(--text3); }
+  .top-btn:active { background: var(--accent-bg); color: var(--accent); }
 
-  .new-session button {
-    width: 44px;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    background: var(--accent-bg);
-    color: var(--accent);
-    font-size: 20px;
-    font-weight: 300;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    -webkit-tap-highlight-color: transparent;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
+  .new-form {
+    display: flex; flex-direction: column; gap: 8px;
+    padding: 12px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px;
   }
-  .new-session button:active:not(:disabled) {
-    background: var(--accent-bg);
-    transform: scale(0.95);
+  .new-form input {
+    padding: 10px 12px; border: 1px solid var(--border2); border-radius: 10px;
+    background: var(--input-bg); color: var(--text); font-size: 14px;
+    outline: none; -webkit-appearance: none;
   }
-  .new-session button:disabled { opacity: 0.3; cursor: default; }
-  .refresh-btn {
-    width: 44px;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    background: var(--surface);
-    color: var(--text3);
-    cursor: pointer;
-    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  .new-form input:focus { border-color: var(--accent); }
+  .new-form input::placeholder { color: var(--text3); }
+  .create-btn {
+    padding: 10px; border: none; border-radius: 10px;
+    background: var(--accent-bg); color: var(--accent);
+    font-size: 14px; font-weight: 600; cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
-  .refresh-btn:active { background: var(--accent-bg); color: var(--accent); }
+  .create-btn:active:not(:disabled) { opacity: 0.8; }
+  .create-btn:disabled { opacity: 0.3; cursor: default; }
 
   .error {
     color: var(--danger);
