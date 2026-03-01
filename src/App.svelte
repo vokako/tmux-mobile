@@ -165,7 +165,7 @@
       </div>
     {:else}
       <div class="brand">
-        <span class="logo"><Icon name="command" size={20} /></span>
+        <img class="logo" src="/assets/icon.svg" alt="" width="24" height="24" />
         <span class="brand-text">tmux<span class="brand-accent">mobile</span></span>
       </div>
       <div class="nav-right">
@@ -377,8 +377,7 @@
     padding: 2px 0;
   }
   .logo {
-    font-size: 20px;
-    color: var(--accent);
+    width: 24px; height: 24px;
     filter: drop-shadow(0 0 6px rgba(0, 212, 255, 0.4));
   }
   .brand-text {
