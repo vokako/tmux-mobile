@@ -20,9 +20,9 @@
 
   // Poll pane command every 3s to detect kiro start/exit
   $effect(() => {
-    const id = setInterval(() => {
-      paneCommand(target).then(r => { command = r.command || ''; }).catch(() => {});
-    }, 3000);
+    const poll = () => paneCommand(target).then(r => { command = r.command || ''; }).catch(() => {});
+    poll();
+    const id = setInterval(poll, 3000);
     return () => clearInterval(id);
   });
 
