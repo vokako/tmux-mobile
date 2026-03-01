@@ -77,6 +77,18 @@
   let renameValue = $state('');
   let bcPathEl;
   let pdfContainer;
+  let filesEl;
+
+  // Swipe right to go up a directory
+  let swipeStartX = 0;
+  function onTouchStart(e) { swipeStartX = e.touches[0].clientX; }
+  function onTouchEnd(e) {
+    const dx = e.changedTouches[0].clientX - swipeStartX;
+    if (dx > 60 && swipeStartX < 40) {
+      if (view !== 'list') { view = 'list'; currentFile = null; }
+      else goUp();
+    }
+  }
 
   async function renderPdf(data) {
     if (!pdfContainer) return;
@@ -274,29 +286,39 @@
       const blob = new Blob([bytes]);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = r.name; a.click();
-      URL.revokeObjectURL(url);
+      a.href = url; a.download = r.name;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
     } catch (e) { error = e.message; }
   }
 
   async function handleUpload() {
     const input = document.createElement('input');
     input.type = 'file';
+    input.multiple = true;
+    document.body.appendChild(input);
     input.onchange = async () => {
-      const file = input.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const b64 = reader.result.split(',')[1];
-        const path = cwd.replace(/\/$/, '') + '/' + file.name;
-        try {
-          await fsUpload(path, b64);
-          loadDir(cwd);
-        } catch (e) { error = e.message; }
-      };
-      reader.readAsDataURL(file);
+      for (const file of Array.from(input.files || [])) {
+        const reader = new FileReader();
+        await new Promise((resolve) => {
+          reader.onload = async () => {
+            const b64 = reader.result.split(',')[1];
+            const path = cwd.replace(/\/$/, '') + '/' + file.name;
+            try { await fsUpload(path, b64); } catch (e) { error = e.message; }
+            resolve();
+          };
+          reader.readAsDataURL(file);
+        });
+      }
+      document.body.removeChild(input);
+      loadDir(cwd);
     };
     input.click();
+  }
+
+  async function copyPath(path) {
+    try { await navigator.clipboard.writeText(path); } catch {}
   }
 
   function formatSize(bytes) {
@@ -403,7 +425,7 @@
   }
 </script>
 
-<div class="files">
+<div class="files" bind:this={filesEl} ontouchstart={onTouchStart} ontouchend={onTouchEnd}>
   {#if view === 'list'}
     <!-- Breadcrumb -->
     <div class="breadcrumb">
@@ -515,6 +537,7 @@
           <button class="act-btn" onclick={startEdit}><Icon name="edit" size={14} /></button>
         {/if}
         <button class="act-btn" onclick={() => handleDownload(currentFile.path)}><Icon name="download" size={14} /></button>
+        <button class="act-btn" onclick={() => copyPath(currentFile.path)}><Icon name="copy" size={14} /></button>
         <button class="act-btn" onclick={() => { view = 'info'; }}><Icon name="info" size={14} /></button>
       </div>
     </div>
@@ -574,11 +597,12 @@
       <span class="preview-name">{currentFile?.name}</span>
       <div class="preview-actions">
         <button class="act-btn" onclick={() => handleDownload(currentFile.path)}><Icon name="download" size={14} /></button>
+        <button class="act-btn" onclick={() => copyPath(currentFile.path)}><Icon name="copy" size={14} /></button>
       </div>
     </div>
     <div class="info-body">
       {#if currentFile?.stat}
-        <div class="info-row"><span class="info-label">Path</span><span class="info-val">{currentFile.stat.path}</span></div>
+        <div class="info-row"><span class="info-label">Path</span><button class="info-path" onclick={() => copyPath(currentFile.stat.path)}>{currentFile.stat.path} <Icon name="copy" size={11} /></button></div>
         <div class="info-row"><span class="info-label">Type</span><span class="info-val">{currentFile.stat.mime_hint}</span></div>
         <div class="info-row"><span class="info-label">Size</span><span class="info-val">{formatSize(currentFile.stat.size)}</span></div>
         <div class="info-row"><span class="info-label">Modified</span><span class="info-val">{formatDate(currentFile.stat.modified)}</span></div>
@@ -655,7 +679,7 @@
     display: flex; align-items: center; border-bottom: 1px solid var(--border2);
   }
   .file-main {
-    flex: 1; display: flex; align-items: center; gap: 10px; padding: 12px 12px;
+    flex: 1; display: flex; align-items: center; gap: 10px; padding: 14px 12px;
     border: none; background: none; color: var(--text); cursor: pointer; text-align: left;
     font-size: 14px; min-width: 0; -webkit-tap-highlight-color: transparent;
   }
@@ -781,4 +805,10 @@
   .info-label { width: 100px; flex-shrink: 0; color: var(--text3); font-size: 12px; }
   .info-val { flex: 1; font-size: 13px; word-break: break-all; }
   .info-val.mono { font-family: 'SF Mono', Menlo, monospace; }
+  .info-path {
+    flex: 1; font-size: 13px; word-break: break-all; text-align: left;
+    background: none; border: none; color: var(--text); cursor: pointer; padding: 0;
+    display: flex; align-items: center; gap: 4px; -webkit-tap-highlight-color: transparent;
+  }
+  .info-path:active { color: var(--accent); }
 </style>
