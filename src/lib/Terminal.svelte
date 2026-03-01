@@ -224,7 +224,7 @@
       <div class="input-bar chat-input-bar">
         <div class="input-status">
           <span class="status-left">{target}{#if command} · <span class:kiro={/^kiro/i.test(command)}>{command}</span>{/if}</span>
-          {#if statusInfo?.pct !== null}
+          {#if statusInfo?.pct != null}
             <span class="status-pct">
               <span class="pct-bar"><span class="pct-fill" style="width:{statusInfo.pct}%;background:{statusInfo.pct < 50 ? '#4ade80' : statusInfo.pct < 80 ? '#fbbf24' : '#ff5050'}"></span></span>
               <span style="color:{statusInfo.pct < 50 ? '#4ade80' : statusInfo.pct < 80 ? '#fbbf24' : '#ff5050'}">{statusInfo.pct}%</span>
