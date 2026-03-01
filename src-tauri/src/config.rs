@@ -72,6 +72,25 @@ fn save_token(token: &str) -> std::io::Result<()> {
     std::fs::write(&path, content)
 }
 
+/// Bookmarks: read/write ~/.config/tmux-mobile/bookmarks.json
+fn bookmarks_path() -> std::path::PathBuf {
+    dirs_next().join("bookmarks.json")
+}
+
+pub fn get_bookmarks() -> Vec<String> {
+    std::fs::read_to_string(bookmarks_path())
+        .ok()
+        .and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_bookmarks(bookmarks: &[String]) -> Result<(), String> {
+    let dir = dirs_next();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string(bookmarks).map_err(|e| e.to_string())?;
+    std::fs::write(bookmarks_path(), json).map_err(|e| e.to_string())
+}
+
 /// Tauri command: return config for frontend auto-fill
 pub fn get_config_json() -> serde_json::Value {
     let cfg = Config::load();

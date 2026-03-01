@@ -107,6 +107,8 @@ export const newSession = (name) => call('new_session', { name });
 export const killSession = (name) => call('kill_session', { name });
 export const paneCommand = (target) => call('pane_command', { target });
 export const setSocket = (socket) => call('set_socket', { socket });
+export const getBookmarks = () => call('get_bookmarks');
+export const saveBookmarks = (bookmarks) => call('save_bookmarks', { bookmarks });
 
 // File system
 export const fsCwd = (session) => call('fs_cwd', { session });

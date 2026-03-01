@@ -22,7 +22,7 @@
   import 'highlight.js/styles/github-dark.min.css';
   import mermaid from 'mermaid';
   import Icon from './Icon.svelte';
-  import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsUpload } from './ws.js';
+  import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsUpload, getBookmarks, saveBookmarks } from './ws.js';
 
   hljs.registerLanguage('javascript', javascript);
   hljs.registerLanguage('js', javascript);
@@ -78,6 +78,23 @@
   let bcPathEl;
   let pdfContainer;
   let filesEl;
+  let bookmarks = $state([]);
+  let showBookmarks = $state(false);
+
+  $effect(() => {
+    getBookmarks().then(r => { bookmarks = r.bookmarks || []; }).catch(() => {});
+  });
+
+  function isBookmarked(path) { return bookmarks.includes(path); }
+
+  async function toggleBookmark(path) {
+    if (isBookmarked(path)) {
+      bookmarks = bookmarks.filter(b => b !== path);
+    } else {
+      bookmarks = [...bookmarks, path];
+    }
+    await saveBookmarks(bookmarks).catch(() => {});
+  }
 
   // Swipe right to go up a directory
   let swipeStartX = 0;
@@ -439,7 +456,26 @@
           <span class="bc-sep">/</span>
         {/each}
       </div>
+      <button class="bc-btn" class:bc-starred={isBookmarked(cwd)} onclick={() => toggleBookmark(cwd)} title="Bookmark">
+        <Icon name={isBookmarked(cwd) ? 'star-filled' : 'star'} size={14} />
+      </button>
+      <button class="bc-btn" onclick={() => showBookmarks = !showBookmarks} title="Bookmarks">
+        <Icon name="files" size={14} />
+      </button>
     </div>
+
+    {#if showBookmarks && bookmarks.length}
+      <div class="bookmarks-panel">
+        {#each bookmarks as bm}
+          <div class="bm-row">
+            <button class="bm-path" onclick={() => { loadDir(bm); showBookmarks = false; }}>
+              <Icon name="folder" size={13} />{bm}
+            </button>
+            <button class="bm-del" onclick={() => toggleBookmark(bm)}><Icon name="x" size={12} /></button>
+          </div>
+        {/each}
+      </div>
+    {/if}
 
     <!-- Toolbar -->
     <div class="toolbar">
