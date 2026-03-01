@@ -92,7 +92,10 @@
     <div class="new-form">
       <input type="text" bind:value={newName} placeholder="Session name" onkeydown={(e) => e.key === 'Enter' && createSession()} autocapitalize="off" />
       <input type="text" bind:value={newPath} placeholder="Working directory (optional)" autocapitalize="off" />
-      <input type="text" bind:value={newCmd} placeholder="Command, e.g. kiro-cli chat (optional)" autocapitalize="off" />
+      <div class="cmd-row-new">
+        <input type="text" bind:value={newCmd} placeholder="Command (optional)" autocapitalize="off" />
+        <button class="preset-btn" class:active={newCmd === 'kiro-cli chat'} onclick={() => newCmd = newCmd === 'kiro-cli chat' ? '' : 'kiro-cli chat'}>Kiro</button>
+      </div>
       <button class="create-btn" onclick={createSession} disabled={!newName.trim()}>Create</button>
     </div>
   {/if}
@@ -319,6 +322,15 @@
   }
   .new-form input:focus { border-color: var(--accent); }
   .new-form input::placeholder { color: var(--text3); }
+  .cmd-row-new { display: flex; gap: 8px; }
+  .cmd-row-new input { flex: 1; min-width: 0; }
+  .preset-btn {
+    padding: 0 12px; border: 1px solid var(--border2); border-radius: 10px;
+    background: var(--input-bg); color: var(--text2); font-size: 13px;
+    font-weight: 600; cursor: pointer; white-space: nowrap;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .preset-btn.active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
   .create-btn {
     padding: 10px; border: none; border-radius: 10px;
     background: var(--accent-bg); color: var(--accent);
