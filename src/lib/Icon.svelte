@@ -25,6 +25,12 @@
     <rect x="6" y="6" width="12" height="12" rx="1" fill="currentColor" stroke="none"/>
   {:else if name === 'arrow-down'}
     <polyline points="6 9 12 15 18 9"/>
+  {:else if name === 'arrow-up'}
+    <polyline points="18 15 12 9 6 15"/>
+  {:else if name === 'arrow-left'}
+    <polyline points="15 18 9 12 15 6"/>
+  {:else if name === 'arrow-right'}
+    <polyline points="9 18 15 12 9 6"/>
   {:else if name === 'command'}
     <path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/>
   {:else if name === 'chevron-right'}

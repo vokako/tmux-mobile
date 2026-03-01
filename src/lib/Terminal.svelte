@@ -149,12 +149,14 @@
           <span class="status-left">{target}{#if command} · <span class:kiro={/^kiro/i.test(command)}>{command}</span>{/if}</span>
         </div>
         <div class="shortcuts">
-          <button onclick={() => sendSpecial('C-c')}>⌃C</button>
-          <button onclick={() => sendSpecial('C-d')}>⌃D</button>
-          <button onclick={() => sendSpecial('C-z')}>⌃Z</button>
-          <button onclick={() => sendSpecial('Tab')}>⇥</button>
-          <button onclick={() => sendSpecial('Up')}>↑</button>
-          <button onclick={() => sendSpecial('Down')}>↓</button>
+          <button onclick={() => sendSpecial('C-c')}>^C</button>
+          <button onclick={() => sendSpecial('C-d')}>^D</button>
+          <button onclick={() => sendSpecial('C-z')}>^Z</button>
+          <button onclick={() => sendSpecial('Tab')}>Tab</button>
+          <button onclick={() => sendSpecial('Left')}><Icon name="arrow-left" size={13} /></button>
+          <button onclick={() => sendSpecial('Down')}><Icon name="arrow-down" size={13} /></button>
+          <button onclick={() => sendSpecial('Up')}><Icon name="arrow-up" size={13} /></button>
+          <button onclick={() => sendSpecial('Right')}><Icon name="arrow-right" size={13} /></button>
         </div>
         <div class="cmd-row">
           <span class="prompt">❯</span>
