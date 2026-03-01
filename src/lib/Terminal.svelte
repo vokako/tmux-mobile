@@ -151,7 +151,6 @@
         <div class="shortcuts">
           <button onclick={() => sendSpecial('C-c')}>^C</button>
           <button onclick={() => sendSpecial('C-d')}>^D</button>
-          <button onclick={() => sendSpecial('C-z')}>^Z</button>
           <button onclick={() => sendSpecial('Tab')}>Tab</button>
           <button onclick={() => sendSpecial('Left')}><Icon name="arrow-left" size={13} /></button>
           <button onclick={() => sendSpecial('Down')}><Icon name="arrow-down" size={13} /></button>
