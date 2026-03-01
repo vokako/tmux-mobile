@@ -52,7 +52,7 @@
 <div class="wrapper">
   <div class="card">
     <div class="card-header">
-      <div class="icon"><img src="/assets/icon.svg" alt="" width="48" height="48" /></div>
+      <div class="icon"><img src="/assets/icon.svg" alt="" width="72" height="72" /></div>
       <h2>tmux<span class="accent">mobile</span></h2>
       <p class="subtitle">Connect to your tmux server</p>
     </div>
