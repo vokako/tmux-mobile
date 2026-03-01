@@ -12,7 +12,27 @@
   let command = $state(initialCommand);
   let termEl;
   let termAtBottom = $state(true);
-  const convert = new Convert({ newline: true, escapeXML: true });
+  let theme = $state(document.documentElement.getAttribute('data-theme') || 'dark');
+
+  $effect(() => {
+    const obs = new MutationObserver(() => {
+      theme = document.documentElement.getAttribute('data-theme') || 'dark';
+    });
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => obs.disconnect();
+  });
+
+  const darkConvert = new Convert({ newline: true, escapeXML: true });
+  const lightConvert = new Convert({ newline: true, escapeXML: true,
+    colors: {
+      0: '#1a1a2e', 1: '#dc2626', 2: '#16a34a', 3: '#ca8a04',
+      4: '#2563eb', 5: '#9333ea', 6: '#0891b2', 7: '#4b5563',
+      8: '#6b7280', 9: '#ef4444', 10: '#22c55e', 11: '#eab308',
+      12: '#3b82f6', 13: '#a855f7', 14: '#06b6d4', 15: '#1a1a2e',
+    }
+  });
+
+  let termHtml = $derived((theme === 'light' ? lightConvert : darkConvert).toHtml(paneContent));
 
   let parser = $derived(detectParser(paneContent, command));
 
@@ -35,8 +55,6 @@
     if (!paneContent || !parser) return null;
     return parser.extractStatus(paneContent);
   });
-
-  let termHtml = $derived(convert.toHtml(paneContent));
 
   function checkAtBottom() {
     if (!termEl) return;
@@ -246,6 +264,9 @@
     color: var(--text);
     scrollbar-width: thin;
     scrollbar-color: rgba(255,255,255,0.1) transparent;
+  }
+  :global([data-theme="light"]) .ansi-output :global(span[style*="background-color:#000"]) {
+    background-color: transparent !important;
   }
 
   .scroll-btn {
