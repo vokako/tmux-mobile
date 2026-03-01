@@ -155,10 +155,19 @@ export function parseMessages(raw, parser) {
   function flush() {
     if (current && current.lines.some(l => l.trim())) {
       lastRole = current.role;
+      // Remove leading/trailing empty lines, collapse internal empty lines for user messages
+      let lines = current.lines;
+      let rawLines = current.rawLines;
+      if (current.role === 'user') {
+        lines = lines.filter(l => l.trim());
+        rawLines = rawLines.filter((_, i) => current.lines[i]?.trim());
+      }
       messages.push({
         ...current,
-        text: current.lines.join('\n').trim(),
-        rawText: current.rawLines.join('\n').trim(),
+        lines,
+        rawLines,
+        text: lines.join('\n').trim(),
+        rawText: rawLines.join('\n').trim(),
       });
     }
     current = null;
