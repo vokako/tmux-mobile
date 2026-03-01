@@ -256,7 +256,7 @@
             {:else if block.type === 'tool'}
               <div class="tool-card">
                 <button class="tool-header" onclick={() => toggleTool(`${mi}-${bi}`)}>
-                  <span class="tool-icon"><Icon name="gear" size={12} /></span>
+                  <span class="tool-icon"><Icon name="gear" size={10} /></span>
                   <span class="tool-label">{block.label}</span>
                   <span class="tool-chevron" class:open={!collapsedTools[`${mi}-${bi}`]}>▸</span>
                 </button>
@@ -599,21 +599,21 @@
   .tool-header {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
     width: 100%;
-    padding: 8px 10px;
+    padding: 5px 8px;
     background: var(--surface);
     border: none;
     color: var(--text2);
     cursor: pointer;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 500;
     text-align: left;
     -webkit-tap-highlight-color: transparent;
   }
   .tool-header:active { background: var(--surface2); }
   .tool-label { flex: 1; }
-  .tool-icon { font-size: 13px; }
+  .tool-icon { font-size: 11px; }
   .tool-chevron {
     transition: transform 0.15s ease;
     font-size: 10px;
