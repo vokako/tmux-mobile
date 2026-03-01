@@ -41,6 +41,9 @@ const kiroParser = {
     // Thinking spinner
     if (/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*Thinking/i.test(trimmed)) return { type: 'thinking' };
 
+    // Summarizing spinner
+    if (/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*Creating summary/i.test(trimmed)) return { type: 'summarizing' };
+
     // Compact summary borders
     if (/^═{4,}/.test(trimmed)) return { type: 'skip' };
     if (/^CONVERSATION SUMMARY$/.test(trimmed)) return { type: 'skip' };
@@ -141,7 +144,7 @@ export function detectParser(raw, command = '') {
 // ─── Generic message builder (works with any parser) ───
 
 export function parseMessages(raw, parser) {
-  if (!raw || !parser) return { messages: [], isThinking: false };
+  if (!raw || !parser) return { messages: [], isThinking: false, isSummarizing: false };
 
   const marked = parser.insertMarkers(raw);
   const rawLines = marked.split('\n');
@@ -149,6 +152,7 @@ export function parseMessages(raw, parser) {
   const messages = [];
   let current = null;
   let isThinking = false;
+  let isSummarizing = false;
   let started = false;
   let lastRole = null;
 
@@ -182,10 +186,11 @@ export function parseMessages(raw, parser) {
     switch (cls.type) {
       case 'skip': continue;
       case 'reset':
-        flush(); messages.length = 0; current = null; started = false; isThinking = false;
+        flush(); messages.length = 0; current = null; started = false; isThinking = false; isSummarizing = false;
         continue;
       case 'thinking': isThinking = true; continue;
-      case 'turn_end': isThinking = false; flush(); continue;
+      case 'summarizing': isSummarizing = true; continue;
+      case 'turn_end': isThinking = false; isSummarizing = false; flush(); continue;
       case 'compact_start':
         isThinking = false; started = true; flush();
         current = { role: 'compact', lines: [], rawLines: [] };
@@ -246,7 +251,7 @@ export function parseMessages(raw, parser) {
     }
   }
   flush();
-  return { messages, isThinking };
+  return { messages, isThinking, isSummarizing };
 }
 
 export { stripAnsi };

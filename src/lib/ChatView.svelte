@@ -111,10 +111,12 @@
   }
 
   let parser = $derived(detectParser(content, command));
-  let parsed = $derived(parser ? parseMessages(content, parser) : { messages: [], isThinking: false });
+  let parsed = $derived(parser ? parseMessages(content, parser) : { messages: [], isThinking: false, isSummarizing: false });
   let messages = $derived(parsed.messages);
   let showThinking = $state(false);
+  let showSummarizing = $state(false);
   let thinkingTimer;
+  let summarizingTimer;
   $effect(() => {
     const raw = parsed.isThinking;
     if (raw) {
@@ -122,6 +124,15 @@
       showThinking = true;
     } else {
       thinkingTimer = setTimeout(() => showThinking = false, 600);
+    }
+  });
+  $effect(() => {
+    const raw = parsed.isSummarizing;
+    if (raw) {
+      clearTimeout(summarizingTimer);
+      showSummarizing = true;
+    } else {
+      summarizingTimer = setTimeout(() => showSummarizing = false, 600);
     }
   });
 
@@ -289,6 +300,15 @@
         <div class="bubble agent-bubble thinking-bubble">
           <span class="thinking-spinner"></span>
           <span class="thinking-text">Thinking…</span>
+        </div>
+      </div>
+    {/if}
+    {#if showSummarizing}
+      <div class="msg agent">
+        <div class="avatar"><Icon name="bot" size={14} /></div>
+        <div class="bubble agent-bubble thinking-bubble">
+          <span class="thinking-spinner"></span>
+          <span class="thinking-text">Creating summary…</span>
         </div>
       </div>
     {/if}
