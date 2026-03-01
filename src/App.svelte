@@ -283,7 +283,7 @@
   .nav-pills {
     display: flex;
     align-items: center;
-    gap: 1px;
+    gap: 2px;
     background: var(--pill-bg);
     border-radius: 10px;
     padding: 2px;
@@ -291,13 +291,13 @@
   .nav-icon { margin: 0 4px 0 6px; }
 
   .nav-pills button {
-    padding: 6px 8px;
+    padding: 7px 10px;
     border: none;
     border-radius: 8px;
     background: transparent;
     color: var(--text2);
     cursor: pointer;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
     transition: all 0.2s ease;
     -webkit-tap-highlight-color: transparent;
