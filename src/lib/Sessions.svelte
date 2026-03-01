@@ -36,6 +36,18 @@
     loadPicker(parent);
   }
 
+  let pickerBreadcrumbs = $derived.by(() => {
+    if (!pickerPath) return [];
+    const parts = pickerPath.split('/').filter(Boolean);
+    return parts.map((name, i) => ({ name, path: '/' + parts.slice(0, i + 1).join('/') }));
+  });
+
+  let pickerPathEl;
+  $effect(() => {
+    pickerPath;
+    setTimeout(() => { if (pickerPathEl) pickerPathEl.scrollLeft = pickerPathEl.scrollWidth; }, 0);
+  });
+
   function pickerSelect() {
     newPath = pickerPath;
     showPicker = false;
@@ -127,7 +139,13 @@
         <div class="picker">
           <div class="picker-header">
             <button class="picker-btn" onclick={pickerUp}><Icon name="folder-up" size={13} /></button>
-            <span class="picker-path">{pickerPath}</span>
+            <div class="picker-path" bind:this={pickerPathEl}>
+              <button class="picker-seg" onclick={() => loadPicker('/')}>/</button>
+              {#each pickerBreadcrumbs as bc}
+                <button class="picker-seg" onclick={() => loadPicker(bc.path)}>{bc.name}</button>
+                <span class="picker-sep">/</span>
+              {/each}
+            </div>
             <button class="picker-btn pick-ok" onclick={pickerSelect}><Icon name="check" size={13} /></button>
           </div>
           <div class="picker-list">
@@ -392,10 +410,20 @@
     border-bottom: 1px solid var(--border2);
   }
   .picker-path {
-    flex: 1; font-size: 12px; font-family: 'SF Mono', Menlo, monospace;
-    color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    direction: rtl; text-align: left;
+    flex: 1; display: flex; align-items: center; gap: 1px;
+    overflow-x: auto; scrollbar-width: none;
+    font-family: 'SF Mono', Menlo, monospace; font-size: 12px;
+    -webkit-overflow-scrolling: touch;
   }
+  .picker-path::-webkit-scrollbar { display: none; }
+  .picker-seg {
+    padding: 2px 3px; border: none; background: none; color: var(--text2);
+    cursor: pointer; white-space: nowrap; font-size: 12px; font-family: inherit;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .picker-seg:last-of-type { color: var(--accent); }
+  .picker-seg:active { color: var(--accent); }
+  .picker-sep { color: var(--text3); font-size: 11px; }
   .picker-btn {
     padding: 5px; border: none; border-radius: 6px; background: var(--surface2);
     color: var(--text2); cursor: pointer; display: flex;
