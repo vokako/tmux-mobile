@@ -1,5 +1,5 @@
 <script>
-  import { listSessions, listPanes, newSession, killSession } from './ws.js';
+  import { listSessions, listPanes, newSession, killSession, fsList } from './ws.js';
   import Icon from './Icon.svelte';
 
   let { openTerminal, activeTarget = '', visible = false } = $props();
@@ -12,6 +12,34 @@
   let newPath = $state('');
   let newCmd = $state('');
   let showNew = $state(false);
+
+  // Folder picker
+  let showPicker = $state(false);
+  let pickerPath = $state('');
+  let pickerEntries = $state([]);
+
+  async function openPicker() {
+    showPicker = true;
+    await loadPicker(newPath || '~');
+  }
+
+  async function loadPicker(path) {
+    try {
+      const r = await fsList(path, false);
+      pickerPath = path;
+      pickerEntries = r.entries.filter(e => e.type === 'dir').sort((a, b) => a.name.localeCompare(b.name));
+    } catch {}
+  }
+
+  function pickerUp() {
+    const parent = pickerPath.replace(/\/[^/]+\/?$/, '') || '/';
+    loadPicker(parent);
+  }
+
+  function pickerSelect() {
+    newPath = pickerPath;
+    showPicker = false;
+  }
 
   // Refresh when page becomes visible
   $effect(() => { if (visible) refresh(); });
@@ -91,7 +119,29 @@
   {#if showNew}
     <div class="new-form">
       <input type="text" bind:value={newName} placeholder="Session name" onkeydown={(e) => e.key === 'Enter' && createSession()} autocapitalize="off" />
-      <input type="text" bind:value={newPath} placeholder="Working directory (optional)" autocapitalize="off" />
+      <div class="cmd-row-new">
+        <input type="text" bind:value={newPath} placeholder="Working directory (optional)" autocapitalize="off" />
+        <button class="preset-btn" onclick={openPicker}><Icon name="folder" size={14} /></button>
+      </div>
+      {#if showPicker}
+        <div class="picker">
+          <div class="picker-header">
+            <button class="picker-btn" onclick={pickerUp}><Icon name="folder-up" size={13} /></button>
+            <span class="picker-path">{pickerPath}</span>
+            <button class="picker-btn pick-ok" onclick={pickerSelect}><Icon name="check" size={13} /></button>
+          </div>
+          <div class="picker-list">
+            {#each pickerEntries as e}
+              <button class="picker-item" onclick={() => loadPicker(e.path)}>
+                <Icon name="folder" size={13} /> {e.name}
+              </button>
+            {/each}
+            {#if !pickerEntries.length}
+              <div class="picker-empty">No subdirectories</div>
+            {/if}
+          </div>
+        </div>
+      {/if}
       <div class="cmd-row-new">
         <input type="text" bind:value={newCmd} placeholder="Command (optional)" autocapitalize="off" />
         <button class="preset-btn" class:active={newCmd === 'kiro-cli chat'} onclick={() => newCmd = newCmd === 'kiro-cli chat' ? '' : 'kiro-cli chat'}>Kiro</button>
@@ -329,8 +379,40 @@
     background: var(--input-bg); color: var(--text2); font-size: 13px;
     font-weight: 600; cursor: pointer; white-space: nowrap;
     -webkit-tap-highlight-color: transparent;
+    display: flex; align-items: center;
   }
   .preset-btn.active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+
+  .picker {
+    border: 1px solid var(--border2); border-radius: 10px; overflow: hidden;
+    background: var(--input-bg);
+  }
+  .picker-header {
+    display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+    border-bottom: 1px solid var(--border2);
+  }
+  .picker-path {
+    flex: 1; font-size: 12px; font-family: 'SF Mono', Menlo, monospace;
+    color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    direction: rtl; text-align: left;
+  }
+  .picker-btn {
+    padding: 5px; border: none; border-radius: 6px; background: var(--surface2);
+    color: var(--text2); cursor: pointer; display: flex;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .picker-btn:active { color: var(--accent); }
+  .pick-ok { background: var(--accent-bg); color: var(--accent); }
+  .picker-list { max-height: 180px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .picker-item {
+    display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px;
+    border: none; border-bottom: 1px solid var(--border2); background: none;
+    color: var(--accent); font-size: 13px; cursor: pointer; text-align: left;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .picker-item:active { background: var(--accent-bg); }
+  .picker-item:last-child { border-bottom: none; }
+  .picker-empty { padding: 12px; text-align: center; color: var(--text3); font-size: 12px; }
   .create-btn {
     padding: 10px; border: none; border-radius: 10px;
     background: var(--accent-bg); color: var(--accent);
