@@ -9,10 +9,10 @@ let onDisconnect = null;
 export function setOnPaneOutput(cb) { onPaneOutput = cb; }
 export function setOnDisconnect(cb) { onDisconnect = cb; }
 
-export function connect(host, port, token) {
+export function connect(url, token) {
   return new Promise((resolve, reject) => {
     try {
-      ws = new WebSocket(`ws://${host}:${port}`);
+      ws = new WebSocket(url);
     } catch (e) {
       reject(e);
       return;

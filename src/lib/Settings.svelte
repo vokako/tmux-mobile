@@ -4,7 +4,7 @@
 
   let { onConnected } = $props();
 
-  let address = $state(localStorage.getItem('tmux_address') || '127.0.0.1:9899');
+  let address = $state(localStorage.getItem('tmux_address') || 'ws://127.0.0.1:9899');
   let token = $state(localStorage.getItem('tmux_token') || '');
   let socket = $state(localStorage.getItem('tmux_socket') || '');
   let error = $state('');
@@ -19,9 +19,12 @@
     const oldHost = localStorage.getItem('tmux_host');
     const oldPort = localStorage.getItem('tmux_port');
     if (oldHost && !localStorage.getItem('tmux_address')) {
-      address = `${oldHost}:${oldPort || '9899'}`;
+      address = `ws://${oldHost}:${oldPort || '9899'}`;
       localStorage.removeItem('tmux_host');
       localStorage.removeItem('tmux_port');
+    }
+    if (address && !address.startsWith('ws')) {
+      address = `ws://${address}`;
     }
   });
 
@@ -31,7 +34,7 @@
       window.__TAURI__.core.invoke('get_local_config').then(cfg => {
         if (!localStorage.getItem('tmux_token')) {
           const h = cfg.host === '0.0.0.0' ? '127.0.0.1' : cfg.host;
-          address = `${h}:${cfg.port}`;
+          address = `ws://${h}:${cfg.port}`;
           token = cfg.token;
           if (cfg.tmux_socket) socket = cfg.tmux_socket;
         }
@@ -39,11 +42,10 @@
     }
   });
 
-  function parseAddress(addr) {
-    const parts = addr.trim().split(':');
-    const host = parts[0] || '127.0.0.1';
-    const port = parseInt(parts[1]) || 9899;
-    return { host, port };
+  function normalizeAddress(addr) {
+    let a = addr.trim();
+    if (!a.startsWith('ws://') && !a.startsWith('wss://')) a = 'ws://' + a;
+    return a;
   }
 
   function saveHistory(addr) {
@@ -56,13 +58,13 @@
     error = '';
     connecting = true;
     try {
-      const { host, port } = parseAddress(address);
-      localStorage.setItem('tmux_address', address.trim());
+      const url = normalizeAddress(address);
+      localStorage.setItem('tmux_address', url);
       localStorage.setItem('tmux_token', token);
       if (socket.trim()) localStorage.setItem('tmux_socket', socket.trim());
       else localStorage.removeItem('tmux_socket');
-      saveHistory(address);
-      await connect(host, port, token);
+      saveHistory(url);
+      await connect(url, token);
       if (socket.trim()) {
         const { setSocket } = await import('./ws.js');
         await setSocket(socket.trim()).catch(() => {});
@@ -88,7 +90,7 @@
       <label>
         <span class="label-text">Address</span>
         <div class="addr-wrap">
-          <input type="text" bind:value={address} placeholder="host:port" autocapitalize="off" autocomplete="off" />
+          <input type="text" bind:value={address} placeholder="ws://host:port" autocapitalize="off" autocomplete="off" />
           {#if history.length > 1}
             <button class="hist-btn" onclick={() => showHistory = !showHistory}><Icon name="arrow-down" size={13} /></button>
           {/if}

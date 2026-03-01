@@ -69,8 +69,7 @@
     const addr = localStorage.getItem('tmux_address');
     const token = localStorage.getItem('tmux_token');
     if (addr && token) {
-      const [h, p] = addr.split(':');
-      connect(h || '127.0.0.1', parseInt(p) || 9899, token).then(() => {
+      connect(addr, token).then(() => {
         connected = true;
         // Stay on current page, just restore connection
       }).catch(() => {
@@ -111,10 +110,9 @@
     if (!addr || !token) return;
     autoConnectAttempted = true;
 
-    const [h, p] = addr.split(':');
     const timeout = setTimeout(() => { page = 'settings'; }, 5000);
 
-    connect(h || '127.0.0.1', parseInt(p) || 9899, token).then(() => {
+    connect(addr, token).then(() => {
       clearTimeout(timeout);
       connected = true;
       try {
