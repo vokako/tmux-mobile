@@ -169,14 +169,14 @@ pub fn new_session(name: &str, path: Option<&str>, command: Option<&str>) -> Res
             args.push(&resolved);
         }
     }
-    run_tmux(&args)?;
+    let cmd_str;
     if let Some(cmd) = command {
         if !cmd.is_empty() {
-            // Small delay to let shell initialize
-            std::thread::sleep(std::time::Duration::from_millis(200));
-            send_command(&format!("{}:0", name), cmd)?;
+            cmd_str = cmd.to_string();
+            args.push(&cmd_str);
         }
     }
+    run_tmux(&args)?;
     Ok(())
 }
 
