@@ -1,7 +1,6 @@
 <script>
   import { subscribe, unsubscribe, setOnPaneOutput, sendCommand, sendKeys, paneCommand } from './ws.js';
-  import { Terminal } from '@xterm/xterm';
-  import { FitAddon } from '@xterm/addon-fit';
+  import Convert from 'ansi-to-html';
   import ChatView from './ChatView.svelte';
   import Icon from './Icon.svelte';
   import { detectParser } from './parsers.js';
@@ -12,9 +11,8 @@
   let paneContent = $state('');
   let command = $state(initialCommand);
   let termEl;
-  let term;
-  let fitAddon;
   let termAtBottom = $state(true);
+  const convert = new Convert({ newline: true, escapeXML: true });
 
   let parser = $derived(detectParser(paneContent, command));
 
@@ -38,118 +36,38 @@
     return parser.extractStatus(paneContent);
   });
 
-  const darkTheme = {
-    background: '#0a0a0f', foreground: '#c9d1d9', cursor: '#00d4ff',
-    selectionBackground: 'rgba(0, 212, 255, 0.18)',
-    black: '#0a0a0f', brightBlack: '#484848',
-    red: '#ff5050', brightRed: '#ff6b6b',
-    green: '#4ade80', brightGreen: '#6ee7a0',
-    yellow: '#fbbf24', brightYellow: '#fcd34d',
-    blue: '#00d4ff', brightBlue: '#38bdf8',
-    magenta: '#c084fc', brightMagenta: '#d8b4fe',
-    cyan: '#22d3ee', brightCyan: '#67e8f9',
-    white: '#c9d1d9', brightWhite: '#f1f5f9',
-  };
-  const lightTheme = {
-    background: '#f5f5f7', foreground: '#1a1a2e', cursor: '#0088cc',
-    selectionBackground: 'rgba(0, 136, 204, 0.18)',
-    black: '#1a1a2e', brightBlack: '#6b7280',
-    red: '#dc2626', brightRed: '#ef4444',
-    green: '#16a34a', brightGreen: '#22c55e',
-    yellow: '#ca8a04', brightYellow: '#eab308',
-    blue: '#0088cc', brightBlue: '#2563eb',
-    magenta: '#9333ea', brightMagenta: '#a855f7',
-    cyan: '#0891b2', brightCyan: '#06b6d4',
-    white: '#e2e8f0', brightWhite: '#f8fafc',
-  };
+  let termHtml = $derived(convert.toHtml(paneContent));
 
-  function getTermTheme() {
-    const el = document.documentElement.getAttribute('data-theme');
-    return el === 'light' ? lightTheme : darkTheme;
+  function checkAtBottom() {
+    if (!termEl) return;
+    const el = termEl;
+    termAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 30;
   }
 
+  function scrollToBottom() {
+    if (termEl) termEl.scrollTop = termEl.scrollHeight;
+  }
+
+  // Auto-scroll when new content arrives and user is at bottom
   $effect(() => {
-    term = new Terminal({
-      cursorBlink: false,
-      cursorStyle: 'bar',
-      disableStdin: true,
-      fontSize: 14,
-      fontFamily: "'SF Mono', Menlo, 'Courier New', monospace",
-      theme: getTermTheme(),
-      scrollback: 1000,
-      convertEol: true,
-    });
+    termHtml; // track
+    if (termAtBottom) requestAnimationFrame(scrollToBottom);
+  });
 
-    fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-    term.open(termEl);
-
-    // Mobile touch scrolling — proxy touch events to xterm's viewport scrollTop
-    const viewport = termEl.querySelector('.xterm-viewport');
-    if (viewport) {
-      let touchY = 0;
-      termEl.addEventListener('touchstart', (e) => {
-        touchY = e.touches[0].clientY;
-      }, { passive: true });
-      termEl.addEventListener('touchmove', (e) => {
-        const dy = touchY - e.touches[0].clientY;
-        touchY = e.touches[0].clientY;
-        viewport.scrollTop += dy;
-        e.preventDefault();
-      }, { passive: false });
-    }
-
-    term.onScroll(() => {
-      const buf = term.buffer.active;
-      termAtBottom = buf.viewportY >= buf.baseY;
-    });
-
-    // Update xterm theme when light/dark changes
-    function syncTermBg() {
-      const t = getTermTheme();
-      term.options.theme = t;
-      termEl.style.background = t.background;
-      termEl.closest('.terminal').style.background = t.background;
-    }
-    syncTermBg();
-    const obs = new MutationObserver(syncTermBg);
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-
-    requestAnimationFrame(() => fitAddon.fit());
-
-    const onResize = () => fitAddon.fit();
-    window.addEventListener('resize', onResize);
-
+  $effect(() => {
     let lastContent = '';
     setOnPaneOutput((t, content) => {
       if (t !== target || content === lastContent) return;
       lastContent = content;
       paneContent = content;
-      const buf = term.buffer.active;
-      const atBottom = buf.viewportY >= buf.baseY;
-      const prevViewport = buf.viewportY;
-      term.reset();
-      term.write(content, () => {
-        if (!atBottom) {
-          term.scrollToLine(Math.min(prevViewport, term.buffer.active.baseY));
-        }
-      });
     });
 
     subscribe(target);
 
     return () => {
-      window.removeEventListener('resize', onResize);
       unsubscribe(target);
       setOnPaneOutput(null);
-      term.dispose();
     };
-  });
-
-  $effect(() => {
-    if (viewMode === 'terminal' && fitAddon) {
-      requestAnimationFrame(() => fitAddon.fit());
-    }
   });
 
   async function handleSubmit() {
@@ -184,9 +102,9 @@
 
 <div class="terminal">
   <div class="term-wrap" class:hidden={viewMode !== 'terminal'}>
-    <div class="xterm-wrap" bind:this={termEl}></div>
+    <div class="ansi-output" bind:this={termEl} onscroll={checkAtBottom}>{@html termHtml}</div>
     {#if !termAtBottom}
-      <button class="scroll-btn" onclick={() => term?.scrollToBottom()}><Icon name="arrow-down" size={16} /></button>
+      <button class="scroll-btn" onclick={scrollToBottom}><Icon name="arrow-down" size={16} /></button>
     {/if}
   </div>
   {#if viewMode === 'chat'}
@@ -312,15 +230,19 @@
     visibility: hidden;
   }
 
-  .xterm-wrap {
+  .ansi-output {
     height: 100%;
-    padding: 4px 6px;
-  }
-  .xterm-wrap :global(.xterm) {
-    height: 100%;
-  }
-  .xterm-wrap :global(.xterm-viewport) {
-    background-color: transparent !important;
+    padding: 8px 10px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    font-family: 'SF Mono', Menlo, 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.35;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: var(--text);
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.1) transparent;
   }
 
   .scroll-btn {
