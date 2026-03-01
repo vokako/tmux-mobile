@@ -193,10 +193,18 @@
   {/if}
 
   <div class="input-area">
+    <div class="input-status">
+      <span class="status-left">{target}{#if command} · <span class:kiro={/^kiro/i.test(command)}>{command}</span>{/if}</span>
+      {#if viewMode === 'chat' && statusInfo?.pct != null}
+        <span class="status-pct">
+          <span class="pct-bar"><span class="pct-fill" style="width:{statusInfo.pct}%;background:{statusInfo.pct < 50 ? '#4ade80' : statusInfo.pct < 80 ? '#fbbf24' : '#ff5050'}"></span></span>
+          <span style="color:{statusInfo.pct < 50 ? '#4ade80' : statusInfo.pct < 80 ? '#fbbf24' : '#ff5050'}">{statusInfo.pct}%</span>
+        </span>
+      {/if}
+    </div>
     {#if viewMode === 'terminal'}
       <div class="input-bar">
         <div class="shortcuts">
-          <span class="shortcut-status">{target}{#if command} · <span class:kiro={/^kiro/i.test(command)}>{command}</span>{/if}</span>
           <button onclick={() => sendSpecial('C-c')}>⌃C</button>
           <button onclick={() => sendSpecial('C-d')}>⌃D</button>
           <button onclick={() => sendSpecial('C-z')}>⌃Z</button>
@@ -222,15 +230,6 @@
       </div>
     {:else}
       <div class="input-bar chat-input-bar">
-        <div class="input-status">
-          <span class="status-left">{target}{#if command} · <span class:kiro={/^kiro/i.test(command)}>{command}</span>{/if}</span>
-          {#if statusInfo?.pct != null}
-            <span class="status-pct">
-              <span class="pct-bar"><span class="pct-fill" style="width:{statusInfo.pct}%;background:{statusInfo.pct < 50 ? '#4ade80' : statusInfo.pct < 80 ? '#fbbf24' : '#ff5050'}"></span></span>
-              <span style="color:{statusInfo.pct < 50 ? '#4ade80' : statusInfo.pct < 80 ? '#fbbf24' : '#ff5050'}">{statusInfo.pct}%</span>
-            </span>
-          {/if}
-        </div>
         <div class="cmd-row">
           {#if !waitingForInput}
             <button class="stop-btn" onclick={() => sendSpecial('C-c')} aria-label="Interrupt"><Icon name="stop" size={12} /></button>
@@ -278,16 +277,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .shortcut-status {
-    font-family: 'SF Mono', Menlo, monospace;
-    font-size: 10px;
-    color: var(--text3);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    margin-right: auto;
-  }
-  .shortcut-status .kiro { color: #c084fc; }
   .status-pct {
     display: flex;
     align-items: center;
