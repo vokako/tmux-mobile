@@ -444,24 +444,33 @@
 
 <div class="files" bind:this={filesEl} ontouchstart={onTouchStart} ontouchend={onTouchEnd}>
   {#if view === 'list'}
-    <!-- Breadcrumb -->
-    <div class="breadcrumb">
-      <button class="bc-btn" onclick={goHome}><Icon name="home" size={14} /></button>
-      <button class="bc-btn" onclick={goUp}><Icon name="folder-up" size={14} /></button>
-      <button class="bc-btn" onclick={() => loadDir(cwd)}><Icon name="refresh" size={14} /></button>
-      <div class="bc-path" bind:this={bcPathEl}>
-        <button class="bc-seg" onclick={() => loadDir('/')}>/</button>
-        {#each breadcrumbs as bc}
-          <button class="bc-seg" onclick={() => loadDir(bc.path)}>{bc.name}</button>
-          <span class="bc-sep">/</span>
-        {/each}
-      </div>
-      <button class="bc-btn" class:bc-starred={isBookmarked(cwd)} onclick={() => toggleBookmark(cwd)} title="Bookmark">
-        <Icon name={isBookmarked(cwd) ? 'star-filled' : 'star'} size={14} />
+    <!-- Toolbar: all buttons in one row -->
+    <div class="toolbar">
+      <button class="tool-btn" onclick={goHome}><Icon name="home" size={13} /></button>
+      <button class="tool-btn" onclick={goUp}><Icon name="folder-up" size={13} /></button>
+      <button class="tool-btn" onclick={() => loadDir(cwd)}><Icon name="refresh" size={13} /></button>
+      <button class="tool-btn" onclick={() => { newType = 'file'; newName = ''; }}><Icon name="plus" size={13} /></button>
+      <button class="tool-btn" onclick={() => { newType = 'dir'; newName = ''; }}><Icon name="folder" size={13} /></button>
+      <button class="tool-btn" onclick={handleUpload}><Icon name="upload" size={13} /></button>
+      <button class="tool-btn" class:tool-active={showHidden} onclick={() => { showHidden = !showHidden; loadDir(cwd); }}>
+        <Icon name="eye" size={13} />
       </button>
-      <button class="bc-btn" onclick={() => showBookmarks = !showBookmarks} title="Bookmarks">
-        <Icon name="files" size={14} />
+      <div style="flex:1"></div>
+      <button class="tool-btn" class:starred={isBookmarked(cwd)} onclick={() => toggleBookmark(cwd)} title="Bookmark">
+        <Icon name={isBookmarked(cwd) ? 'star-filled' : 'star'} size={13} />
       </button>
+      <button class="tool-btn" class:tool-active={showBookmarks} onclick={() => showBookmarks = !showBookmarks} title="Bookmarks">
+        <Icon name="files" size={13} />
+      </button>
+    </div>
+
+    <!-- Path -->
+    <div class="bc-path-row" bind:this={bcPathEl}>
+      <button class="bc-seg" onclick={() => loadDir('/')}>/</button>
+      {#each breadcrumbs as bc}
+        <button class="bc-seg" onclick={() => loadDir(bc.path)}>{bc.name}</button>
+        <span class="bc-sep">/</span>
+      {/each}
     </div>
 
     {#if showBookmarks && bookmarks.length}
@@ -476,22 +485,6 @@
         {/each}
       </div>
     {/if}
-
-    <!-- Toolbar -->
-    <div class="toolbar">
-      <button class="tool-btn" onclick={() => { newType = 'file'; newName = ''; }}>
-        <Icon name="plus" size={12} /> File
-      </button>
-      <button class="tool-btn" onclick={() => { newType = 'dir'; newName = ''; }}>
-        <Icon name="folder" size={12} /> Folder
-      </button>
-      <button class="tool-btn" onclick={handleUpload}>
-        <Icon name="upload" size={12} /> Upload
-      </button>
-      <button class="tool-btn" class:tool-active={showHidden} onclick={() => { showHidden = !showHidden; loadDir(cwd); }}>
-        <Icon name="eye" size={12} /> Hidden
-      </button>
-    </div>
 
     <!-- New item input -->
     {#if newType}
@@ -654,40 +647,55 @@
 <style>
   .files { display: flex; flex-direction: column; flex: 1; min-height: 0; background: var(--bg); }
 
-  /* Breadcrumb */
-  .breadcrumb {
-    display: flex; align-items: center; gap: 4px; padding: 8px 10px;
+  /* Toolbar */
+  .toolbar {
+    display: flex; align-items: center; gap: 4px; padding: 6px 10px;
     border-bottom: 1px solid var(--border); flex-shrink: 0;
   }
-  .bc-btn {
-    padding: 6px; border: none; border-radius: 6px; background: var(--surface2);
-    color: var(--text2); cursor: pointer; display: flex; -webkit-tap-highlight-color: transparent;
+  .tool-btn {
+    padding: 6px; border: none; border-radius: 6px;
+    background: var(--surface2); color: var(--text2); cursor: pointer;
+    font-size: 12px; display: flex; align-items: center; gap: 4px; -webkit-tap-highlight-color: transparent;
   }
-  .bc-btn:active { background: var(--accent-bg); color: var(--accent); }
-  .bc-path {
-    display: flex; align-items: center; gap: 1px; overflow-x: auto; flex: 1;
-    font-size: 12px; font-family: 'SF Mono', Menlo, monospace; scrollbar-width: none;
+  .tool-btn:active { background: var(--accent-bg); color: var(--accent); }
+  .tool-btn.tool-active { background: var(--accent-bg); color: var(--accent); }
+  .tool-btn.starred { color: var(--accent); }
+
+  /* Path row */
+  .bc-path-row {
+    display: flex; align-items: center; gap: 1px; padding: 4px 10px;
+    overflow-x: auto; font-size: 12px; font-family: 'SF Mono', Menlo, monospace;
+    scrollbar-width: none; border-bottom: 1px solid var(--border2); flex-shrink: 0;
   }
-  .bc-path::-webkit-scrollbar { display: none; }
+  .bc-path-row::-webkit-scrollbar { display: none; }
   .bc-seg {
-    padding: 3px 4px; border: none; background: none; color: var(--text2);
+    padding: 2px 4px; border: none; background: none; color: var(--text2);
     cursor: pointer; white-space: nowrap; font-size: 12px; font-family: inherit;
   }
   .bc-seg:last-of-type { color: var(--accent); }
   .bc-sep { color: var(--text3); font-size: 11px; }
 
-  /* Toolbar */
-  .toolbar {
-    display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+  /* Bookmarks panel */
+  .bookmarks-panel {
     border-bottom: 1px solid var(--border2); flex-shrink: 0;
   }
-  .tool-btn {
-    padding: 5px 10px; border: 1px solid var(--input-border); border-radius: 6px;
-    background: var(--input-bg); color: var(--text2); cursor: pointer;
-    font-size: 12px; display: flex; align-items: center; gap: 4px; -webkit-tap-highlight-color: transparent;
+  .bm-row {
+    display: flex; align-items: center; padding: 0 10px;
+    border-bottom: 1px solid var(--border2);
   }
-  .tool-btn:active { background: var(--accent-bg); color: var(--accent); }
-  .tool-btn.tool-active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+  .bm-path {
+    flex: 1; display: flex; align-items: center; gap: 6px;
+    padding: 8px 0; border: none; background: none; color: var(--text);
+    font-size: 12px; font-family: 'SF Mono', Menlo, monospace;
+    cursor: pointer; text-align: left; overflow: hidden;
+    white-space: nowrap; text-overflow: ellipsis;
+  }
+  .bm-path:active { color: var(--accent); }
+  .bm-del {
+    padding: 4px; border: none; border-radius: 4px; background: none;
+    color: var(--text3); cursor: pointer; display: flex;
+  }
+  .bm-del:active { color: var(--danger); }
 
   /* New item / rename */
   .new-item {
