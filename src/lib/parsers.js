@@ -150,9 +150,11 @@ export function parseMessages(raw, parser) {
   let current = null;
   let isThinking = false;
   let started = false;
+  let lastRole = null;
 
   function flush() {
     if (current && current.lines.some(l => l.trim())) {
+      lastRole = current.role;
       messages.push({
         ...current,
         text: current.lines.join('\n').trim(),
@@ -198,10 +200,12 @@ export function parseMessages(raw, parser) {
         continue;
       case 'user':
         isThinking = false; started = true; flush();
+        lastRole = null;
         current = { role: 'user', lines: [cls.text], rawLines: [cls.rawText] };
         continue;
       case 'agent':
         isThinking = false; started = true; flush();
+        lastRole = null;
         current = { role: 'agent', lines: cls.text ? [cls.text] : [], rawLines: cls.text ? [cls.rawText] : [] };
         continue;
       case 'empty':
@@ -223,6 +227,9 @@ export function parseMessages(raw, parser) {
         if (!started) continue;
         if (current) {
           current.lines.push(line); current.rawLines.push(rawLine);
+        } else if (lastRole === 'user') {
+          // Multi-line user input with blank lines — re-open user bubble
+          current = { role: 'user', lines: [line], rawLines: [rawLine] };
         } else {
           current = { role: 'system', lines: [line], rawLines: [rawLine] };
         }
