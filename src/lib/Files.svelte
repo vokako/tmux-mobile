@@ -302,9 +302,19 @@
     } catch (e) { error = e.message; }
   }
 
+  let downloadToast = $state('');
+
   async function handleDownload(path) {
     try {
       const r = await fsDownload(path);
+      // In Tauri app: save to Downloads via Rust
+      if (window.__TAURI__) {
+        const saved = await window.__TAURI__.core.invoke('save_download', { name: r.name, data: r.data });
+        downloadToast = saved;
+        setTimeout(() => downloadToast = '', 2500);
+        return;
+      }
+      // Browser fallback
       const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
       const blob = new Blob([bytes]);
       const url = URL.createObjectURL(blob);
@@ -656,6 +666,9 @@
   {/if}
   {#if copyToast}
     <div class="copy-toast">Copied</div>
+  {/if}
+  {#if downloadToast}
+    <div class="copy-toast">Saved to {downloadToast}</div>
   {/if}
 </div>
 
