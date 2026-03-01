@@ -120,19 +120,20 @@
     const onResize = () => fitAddon.fit();
     window.addEventListener('resize', onResize);
 
+    let lastContent = '';
     setOnPaneOutput((t, content) => {
-      if (t === target) {
-        paneContent = content;
-        const buf = term.buffer.active;
-        const atBottom = buf.viewportY >= buf.baseY;
-        const prevViewport = buf.viewportY;
-        term.reset();
-        term.write(content, () => {
-          if (!atBottom) {
-            term.scrollToLine(Math.min(prevViewport, term.buffer.active.baseY));
-          }
-        });
-      }
+      if (t !== target || content === lastContent) return;
+      lastContent = content;
+      paneContent = content;
+      const buf = term.buffer.active;
+      const atBottom = buf.viewportY >= buf.baseY;
+      const prevViewport = buf.viewportY;
+      term.reset();
+      term.write(content, () => {
+        if (!atBottom) {
+          term.scrollToLine(Math.min(prevViewport, term.buffer.active.baseY));
+        }
+      });
     });
 
     subscribe(target);
