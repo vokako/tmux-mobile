@@ -4,21 +4,34 @@
 
   let { onConnected } = $props();
 
-  let host = $state(localStorage.getItem('tmux_host') || '127.0.0.1');
-  let port = $state(localStorage.getItem('tmux_port') || '9899');
+  let address = $state(localStorage.getItem('tmux_address') || '127.0.0.1:9899');
   let token = $state(localStorage.getItem('tmux_token') || '');
   let socket = $state(localStorage.getItem('tmux_socket') || '');
   let error = $state('');
   let connecting = $state(false);
   let showToken = $state(false);
+  let showHistory = $state(false);
+
+  let history = $state(JSON.parse(localStorage.getItem('tmux_address_history') || '[]'));
+
+  // Migrate old host+port
+  $effect(() => {
+    const oldHost = localStorage.getItem('tmux_host');
+    const oldPort = localStorage.getItem('tmux_port');
+    if (oldHost && !localStorage.getItem('tmux_address')) {
+      address = `${oldHost}:${oldPort || '9899'}`;
+      localStorage.removeItem('tmux_host');
+      localStorage.removeItem('tmux_port');
+    }
+  });
 
   // Auto-fill from local config in Tauri desktop app
   $effect(() => {
     if (window.__TAURI__) {
       window.__TAURI__.core.invoke('get_local_config').then(cfg => {
         if (!localStorage.getItem('tmux_token')) {
-          host = cfg.host === '0.0.0.0' ? '127.0.0.1' : cfg.host;
-          port = String(cfg.port);
+          const h = cfg.host === '0.0.0.0' ? '127.0.0.1' : cfg.host;
+          address = `${h}:${cfg.port}`;
           token = cfg.token;
           if (cfg.tmux_socket) socket = cfg.tmux_socket;
         }
@@ -26,16 +39,30 @@
     }
   });
 
+  function parseAddress(addr) {
+    const parts = addr.trim().split(':');
+    const host = parts[0] || '127.0.0.1';
+    const port = parseInt(parts[1]) || 9899;
+    return { host, port };
+  }
+
+  function saveHistory(addr) {
+    const trimmed = addr.trim();
+    history = [trimmed, ...history.filter(h => h !== trimmed)].slice(0, 8);
+    localStorage.setItem('tmux_address_history', JSON.stringify(history));
+  }
+
   async function doConnect() {
     error = '';
     connecting = true;
     try {
-      localStorage.setItem('tmux_host', host);
-      localStorage.setItem('tmux_port', port);
+      const { host, port } = parseAddress(address);
+      localStorage.setItem('tmux_address', address.trim());
       localStorage.setItem('tmux_token', token);
       if (socket.trim()) localStorage.setItem('tmux_socket', socket.trim());
       else localStorage.removeItem('tmux_socket');
-      await connect(host, parseInt(port), token);
+      saveHistory(address);
+      await connect(host, port, token);
       if (socket.trim()) {
         const { setSocket } = await import('./ws.js');
         await setSocket(socket.trim()).catch(() => {});
@@ -58,16 +85,22 @@
     </div>
 
     <div class="fields">
-      <div class="field-row">
-        <label>
-          <span class="label-text">Host</span>
-          <input type="text" bind:value={host} placeholder="127.0.0.1" />
-        </label>
-        <label class="port-field">
-          <span class="label-text">Port</span>
-          <input type="text" bind:value={port} placeholder="9899" />
-        </label>
-      </div>
+      <label>
+        <span class="label-text">Address</span>
+        <div class="addr-wrap">
+          <input type="text" bind:value={address} placeholder="host:port" autocapitalize="off" autocomplete="off" />
+          {#if history.length > 1}
+            <button class="hist-btn" onclick={() => showHistory = !showHistory}><Icon name="arrow-down" size={13} /></button>
+          {/if}
+        </div>
+        {#if showHistory && history.length}
+          <div class="hist-list">
+            {#each history as h}
+              <button class="hist-item" onclick={() => { address = h; showHistory = false; }}>{h}</button>
+            {/each}
+          </div>
+        {/if}
+      </label>
 
       <label>
         <span class="label-text">Token</span>
@@ -160,12 +193,28 @@
     gap: 14px;
   }
 
-  .field-row {
-    display: flex;
-    gap: 10px;
+  .addr-wrap { position: relative; }
+  .addr-wrap input { padding-right: 36px; }
+  .hist-btn {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    background: none; border: none; color: var(--text3); cursor: pointer;
+    padding: 4px; display: flex; -webkit-tap-highlight-color: transparent;
   }
-  .field-row label { flex: 1; }
-  .port-field { max-width: 90px; }
+  .hist-btn:active { color: var(--accent); }
+  .hist-list {
+    display: flex; flex-direction: column;
+    border: 1px solid var(--input-border); border-radius: 8px;
+    overflow: hidden; margin-top: 2px;
+  }
+  .hist-item {
+    padding: 9px 14px; border: none; background: var(--input-bg);
+    color: var(--text); font-size: 14px; text-align: left; cursor: pointer;
+    font-family: 'SF Mono', Menlo, monospace;
+    border-bottom: 1px solid var(--border2);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .hist-item:last-child { border-bottom: none; }
+  .hist-item:active { background: var(--accent-bg); color: var(--accent); }
 
   label {
     display: flex;

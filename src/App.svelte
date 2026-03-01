@@ -66,11 +66,11 @@
       return; // doDisconnect already handles page/state
     }
     // Network disconnect — auto-reconnect immediately
-    const host = localStorage.getItem('tmux_host');
-    const port = localStorage.getItem('tmux_port');
+    const addr = localStorage.getItem('tmux_address');
     const token = localStorage.getItem('tmux_token');
-    if (host && port && token) {
-      connect(host, parseInt(port), token).then(() => {
+    if (addr && token) {
+      const [h, p] = addr.split(':');
+      connect(h || '127.0.0.1', parseInt(p) || 9899, token).then(() => {
         connected = true;
         // Stay on current page, just restore connection
       }).catch(() => {
@@ -106,16 +106,15 @@
   let autoConnectAttempted = false;
   $effect(() => {
     if (autoConnectAttempted || connected) return;
-    const host = localStorage.getItem('tmux_host');
-    const port = localStorage.getItem('tmux_port');
+    const addr = localStorage.getItem('tmux_address');
     const token = localStorage.getItem('tmux_token');
-    if (!host || !port || !token) return;
+    if (!addr || !token) return;
     autoConnectAttempted = true;
 
-    // Timeout: if connect takes > 5s, give up
+    const [h, p] = addr.split(':');
     const timeout = setTimeout(() => { page = 'settings'; }, 5000);
 
-    connect(host, parseInt(port), token).then(() => {
+    connect(h || '127.0.0.1', parseInt(p) || 9899, token).then(() => {
       clearTimeout(timeout);
       connected = true;
       try {
@@ -179,7 +178,7 @@
       {#if connected}
         <div class="sp-section">
           <div class="sp-label">Connection</div>
-          <div class="sp-info">{localStorage.getItem('tmux_host')}:{localStorage.getItem('tmux_port')}</div>
+          <div class="sp-info">{localStorage.getItem('tmux_address')}</div>
         </div>
       {/if}
       <div class="sp-section">
