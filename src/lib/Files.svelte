@@ -176,6 +176,8 @@
     loadDir(parent);
   }
 
+  function scrollEnd(el) { el.scrollLeft = el.scrollWidth; }
+
   function goHome() {
     fsCwd(session).then(r => loadDir(r.path)).catch(() => loadDir('/'));
   }
@@ -477,8 +479,9 @@
       <div class="bookmarks-panel">
         {#each bookmarks as bm}
           <div class="bm-row">
-            <button class="bm-path" onclick={() => { loadDir(bm); showBookmarks = false; }}>
-              <Icon name="folder" size={13} />{bm}
+            <span class="bm-icon"><Icon name="folder" size={13} /></span>
+            <button class="bm-path" onclick={() => { loadDir(bm); showBookmarks = false; }} use:scrollEnd>
+              {bm}
             </button>
             <button class="bm-del" onclick={() => toggleBookmark(bm)}><Icon name="x" size={12} /></button>
           </div>
@@ -680,11 +683,12 @@
     border-bottom: 1px solid var(--border2); flex-shrink: 0;
   }
   .bm-row {
-    display: flex; align-items: center; padding: 0 10px;
+    display: flex; align-items: center; gap: 6px; padding: 0 10px;
     border-bottom: 1px solid var(--border2);
   }
+  .bm-icon { color: var(--text3); display: flex; flex-shrink: 0; }
   .bm-path {
-    flex: 1; display: flex; align-items: center; gap: 6px;
+    flex: 1; display: block;
     padding: 8px 0; border: none; background: none; color: var(--text);
     font-size: 12px; font-family: 'SF Mono', Menlo, monospace;
     cursor: pointer; text-align: left; overflow-x: auto;
