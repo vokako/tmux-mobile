@@ -31,3 +31,5 @@ tauri = { version = "2", features = [] }
 toml = "1.0.3"
 base64 = "0.22"
 dirs = "5"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"

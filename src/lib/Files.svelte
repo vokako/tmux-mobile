@@ -307,10 +307,14 @@
   async function handleDownload(path) {
     try {
       const r = await fsDownload(path);
-      // In Tauri app: save to Downloads via Rust
       if (window.__TAURI__) {
-        const saved = await window.__TAURI__.core.invoke('save_download', { name: r.name, data: r.data });
-        downloadToast = saved;
+        const { save } = window.__TAURI__.dialog;
+        const { writeFile } = window.__TAURI__.fs;
+        const savePath = await save({ defaultPath: r.name });
+        if (!savePath) return;
+        const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
+        await writeFile(savePath, bytes);
+        downloadToast = savePath;
         setTimeout(() => downloadToast = '', 2500);
         return;
       }
@@ -327,6 +331,23 @@
   }
 
   async function handleUpload() {
+    if (window.__TAURI__) {
+      const { open } = window.__TAURI__.dialog;
+      const { readFile } = window.__TAURI__.fs;
+      const selected = await open({ multiple: true });
+      if (!selected) return;
+      const files = Array.isArray(selected) ? selected : [selected];
+      for (const filePath of files) {
+        const name = String(filePath).split('/').pop().split('\\').pop();
+        const bytes = await readFile(filePath);
+        const b64 = btoa(String.fromCharCode(...new Uint8Array(bytes)));
+        const dest = cwd.replace(/\/$/, '') + '/' + name;
+        try { await fsUpload(dest, b64); } catch (e) { error = e.message; }
+      }
+      loadDir(cwd);
+      return;
+    }
+    // Browser fallback
     const input = document.createElement('input');
     input.type = 'file';
     input.multiple = true;
