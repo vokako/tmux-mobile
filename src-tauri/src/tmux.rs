@@ -21,9 +21,29 @@ pub struct TmuxPane {
     pub current_command: String,
 }
 
+use std::sync::{OnceLock, RwLock};
+
+static TMUX_SOCKET: OnceLock<RwLock<Option<String>>> = OnceLock::new();
+
+fn socket_lock() -> &'static RwLock<Option<String>> {
+    TMUX_SOCKET.get_or_init(|| RwLock::new(None))
+}
+
+pub fn set_socket(socket: Option<String>) {
+    *socket_lock().write().unwrap() = socket;
+}
+
+pub fn get_socket() -> Option<String> {
+    socket_lock().read().unwrap().clone()
+}
+
 /// 执行 tmux 命令，返回 stdout
 fn run_tmux(args: &[&str]) -> Result<String, String> {
-    let output = Command::new("tmux")
+    let mut cmd = Command::new("tmux");
+    if let Some(socket) = get_socket() {
+        cmd.args(["-S", &socket]);
+    }
+    let output = cmd
         .args(args)
         .output()
         .map_err(|e| format!("Failed to run tmux: {}", e))?;

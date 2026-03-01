@@ -106,6 +106,7 @@ export const sendCommand = (target, command) => call('send_command', { target, c
 export const newSession = (name) => call('new_session', { name });
 export const killSession = (name) => call('kill_session', { name });
 export const paneCommand = (target) => call('pane_command', { target });
+export const setSocket = (socket) => call('set_socket', { socket });
 
 // File system
 export const fsCwd = (session) => call('fs_cwd', { session });
