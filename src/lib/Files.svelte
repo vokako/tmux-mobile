@@ -446,21 +446,21 @@
   {#if view === 'list'}
     <!-- Toolbar: all buttons in one row -->
     <div class="toolbar">
-      <button class="tool-btn" onclick={goHome}><Icon name="home" size={13} /></button>
-      <button class="tool-btn" onclick={goUp}><Icon name="folder-up" size={13} /></button>
-      <button class="tool-btn" onclick={() => loadDir(cwd)}><Icon name="refresh" size={13} /></button>
-      <button class="tool-btn" onclick={() => { newType = 'file'; newName = ''; }}><Icon name="plus" size={13} /></button>
-      <button class="tool-btn" onclick={() => { newType = 'dir'; newName = ''; }}><Icon name="folder" size={13} /></button>
-      <button class="tool-btn" onclick={handleUpload}><Icon name="upload" size={13} /></button>
+      <button class="tool-btn" onclick={goHome}><Icon name="home" size={15} /></button>
+      <button class="tool-btn" onclick={goUp}><Icon name="folder-up" size={15} /></button>
+      <button class="tool-btn" onclick={() => loadDir(cwd)}><Icon name="refresh" size={15} /></button>
+      <button class="tool-btn" onclick={() => { newType = 'file'; newName = ''; }}><Icon name="plus" size={15} /></button>
+      <button class="tool-btn" onclick={() => { newType = 'dir'; newName = ''; }}><Icon name="folder" size={15} /></button>
+      <button class="tool-btn" onclick={handleUpload}><Icon name="upload" size={15} /></button>
       <button class="tool-btn" class:tool-active={showHidden} onclick={() => { showHidden = !showHidden; loadDir(cwd); }}>
-        <Icon name="eye" size={13} />
+        <Icon name="eye" size={15} />
       </button>
       <div style="flex:1"></div>
       <button class="tool-btn" class:starred={isBookmarked(cwd)} onclick={() => toggleBookmark(cwd)} title="Bookmark">
-        <Icon name={isBookmarked(cwd) ? 'star-filled' : 'star'} size={13} />
+        <Icon name={isBookmarked(cwd) ? 'star-filled' : 'star'} size={15} />
       </button>
       <button class="tool-btn" class:tool-active={showBookmarks} onclick={() => showBookmarks = !showBookmarks} title="Bookmarks">
-        <Icon name="files" size={13} />
+        <Icon name="files" size={15} />
       </button>
     </div>
 
@@ -653,7 +653,7 @@
     border-bottom: 1px solid var(--border); flex-shrink: 0;
   }
   .tool-btn {
-    padding: 6px; border: none; border-radius: 6px;
+    padding: 8px; border: none; border-radius: 6px;
     background: var(--surface2); color: var(--text2); cursor: pointer;
     font-size: 12px; display: flex; align-items: center; gap: 4px; -webkit-tap-highlight-color: transparent;
   }
