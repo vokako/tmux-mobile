@@ -7,12 +7,14 @@ struct FileConfig {
     host: Option<String>,
     port: Option<u16>,
     token: Option<String>,
+    tmux_socket: Option<String>,
 }
 
 pub struct Config {
     pub host: String,
     pub port: u16,
     pub token: String,
+    pub tmux_socket: Option<String>,
 }
 
 fn config_path() -> PathBuf {
@@ -49,6 +51,7 @@ impl Config {
             host: std::env::var("HOST").ok().or(file_cfg.host).unwrap_or("0.0.0.0".into()),
             port: std::env::var("PORT").ok().and_then(|p| p.parse().ok()).or(file_cfg.port).unwrap_or(9899),
             token,
+            tmux_socket: std::env::var("TMUX_SOCKET").ok().or(file_cfg.tmux_socket),
         }
     }
 }
@@ -76,5 +79,6 @@ pub fn get_config_json() -> serde_json::Value {
         "host": cfg.host,
         "port": cfg.port,
         "token": cfg.token,
+        "tmux_socket": cfg.tmux_socket,
     })
 }

@@ -154,6 +154,12 @@ fn handle_request(req: &Request) -> Response {
             }
         }
 
+        "set_socket" => {
+            let socket = p.get("socket").and_then(|v| v.as_str()).map(|s| s.to_string());
+            tmux::set_socket(socket);
+            Response::ok(id, serde_json::json!({ "ok": true }))
+        }
+
         "fs_cwd" => {
             let session = match require_str(p, "session") {
                 Ok(s) => s,
@@ -442,6 +448,11 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<Strin
 }
 
 pub async fn start(host: &str, port: u16, token: &str) -> Result<(), Box<dyn std::error::Error>> {
+    start_with_socket(host, port, token, None).await
+}
+
+pub async fn start_with_socket(host: &str, port: u16, token: &str, socket: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+    tmux::set_socket(socket);
     let addr = format!("{}:{}", host, port);
     let listener = TcpListener::bind(&addr).await?;
     let token = Arc::new(token.to_string());

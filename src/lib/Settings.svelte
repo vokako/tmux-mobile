@@ -7,6 +7,7 @@
   let host = $state(localStorage.getItem('tmux_host') || '127.0.0.1');
   let port = $state(localStorage.getItem('tmux_port') || '9899');
   let token = $state(localStorage.getItem('tmux_token') || '');
+  let socket = $state(localStorage.getItem('tmux_socket') || '');
   let error = $state('');
   let connecting = $state(false);
   let showToken = $state(false);
@@ -19,6 +20,7 @@
           host = cfg.host === '0.0.0.0' ? '127.0.0.1' : cfg.host;
           port = String(cfg.port);
           token = cfg.token;
+          if (cfg.tmux_socket) socket = cfg.tmux_socket;
         }
       }).catch(() => {});
     }
@@ -31,7 +33,13 @@
       localStorage.setItem('tmux_host', host);
       localStorage.setItem('tmux_port', port);
       localStorage.setItem('tmux_token', token);
+      if (socket.trim()) localStorage.setItem('tmux_socket', socket.trim());
+      else localStorage.removeItem('tmux_socket');
       await connect(host, parseInt(port), token);
+      if (socket.trim()) {
+        const { setSocket } = await import('./ws.js');
+        await setSocket(socket.trim()).catch(() => {});
+      }
       onConnected();
     } catch (e) {
       error = e.message;
@@ -70,6 +78,11 @@
             <Icon name={showToken ? 'eye-off' : 'eye'} size={14} />
           </button>
         </div>
+      </label>
+
+      <label>
+        <span class="label-text">tmux Socket <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional, -S path)</span></span>
+        <input type="text" bind:value={socket} placeholder="/tmp/tmux-1000/default" autocapitalize="off" autocomplete="off" />
       </label>
     </div>
 
