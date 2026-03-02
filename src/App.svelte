@@ -4,7 +4,7 @@
   import Terminal from './lib/Terminal.svelte';
   import Files from './lib/Files.svelte';
   import Icon from './lib/Icon.svelte';
-  import { connect, isConnected, disconnect, setOnDisconnect } from './lib/ws.js';
+  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe } from './lib/ws.js';
 
   let page = $state('settings');
   let connected = $state(false);
@@ -67,22 +67,23 @@
     connected = false;
     if (manualDisconnect) {
       manualDisconnect = false;
-      return; // doDisconnect already handles page/state
+      return;
     }
-    // Network disconnect — auto-reconnect immediately
-    const addr = localStorage.getItem('tmux_address');
-    const token = localStorage.getItem('tmux_token');
-    if (addr && token) {
-      connect(addr, token).then(() => {
-        connected = true;
-        // Stay on current page, just restore connection
-      }).catch(() => {
-        page = 'settings';
-      });
-    } else {
-      page = 'settings';
-    }
+    // Network disconnect — auto-reconnect
+    tryReconnect();
   });
+
+  function tryReconnect() {
+    const addr = localStorage.getItem('tmux_address');
+    const token = localStorage.getItem('tmux_token') || '';
+    if (!addr) { page = 'settings'; return; }
+    connect(addr, token).then(() => {
+      connected = true;
+      if (terminalTarget) wsSubscribe(terminalTarget);
+    }).catch(() => {
+      page = 'settings';
+    });
+  }
 
   function onConnected() {
     connected = true;
@@ -108,6 +109,19 @@
 
   // Auto-reconnect and restore state on page load
   let autoConnectAttempted = false;
+
+  // Detect app resume (Android background → foreground)
+  $effect(() => {
+    const handler = () => {
+      if (document.visibilityState === 'visible' && !isConnected() && connected) {
+        connected = false;
+        tryReconnect();
+      }
+    };
+    document.addEventListener('visibilitychange', handler);
+    return () => document.removeEventListener('visibilitychange', handler);
+  });
+
   $effect(() => {
     if (autoConnectAttempted || connected) return;
     const addr = localStorage.getItem('tmux_address');
