@@ -163,6 +163,37 @@
     window.addEventListener('popstate', handler);
     return () => window.removeEventListener('popstate', handler);
   });
+  // Swipe left/right to switch tabs
+  const tabs = $derived(() => {
+    const t = ['sessions'];
+    if (terminalTarget) {
+      t.push('terminal');
+      if (chatSupported) t.push('chat');
+      t.push('files');
+    }
+    return t;
+  });
+
+  let swipeX = 0;
+  let swipeY = 0;
+  function onPageTouchStart(e) { swipeX = e.touches[0].clientX; swipeY = e.touches[0].clientY; }
+  function onPageTouchEnd(e) {
+    const dx = e.changedTouches[0].clientX - swipeX;
+    const dy = Math.abs(e.changedTouches[0].clientY - swipeY);
+    if (Math.abs(dx) < 80 || dy > Math.abs(dx) * 0.7) return;
+    // Don't swipe if started from left edge (Files back gesture)
+    if (page === 'files' && dx > 0 && swipeX < 40) return;
+
+    const t = tabs();
+    const cur = page === 'terminal' ? (viewMode === 'chat' ? 'chat' : 'terminal') : page;
+    const idx = t.indexOf(cur);
+    if (idx < 0) return;
+    const next = dx < 0 ? t[idx + 1] : t[idx - 1];
+    if (!next) return;
+    if (next === 'chat') { page = 'terminal'; viewMode = 'chat'; }
+    else if (next === 'terminal') { page = 'terminal'; viewMode = 'terminal'; }
+    else { page = next; }
+  }
 </script>
 
 <main>
@@ -226,7 +257,7 @@
     <button class="sp-overlay" onclick={() => showSettings = false}></button>
   {/if}
 
-  <div class="page" class:page-terminal={page === 'terminal'}>
+  <div class="page" class:page-terminal={page === 'terminal'} ontouchstart={onPageTouchStart} ontouchend={onPageTouchEnd}>
     {#if page === 'settings'}
       <Settings {onConnected} />
     {:else if page === 'sessions'}
