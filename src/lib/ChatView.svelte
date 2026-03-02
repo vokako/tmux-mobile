@@ -187,6 +187,20 @@
     return html;
   }
 
+  // Memoize expensive render functions
+  const _ansiCache = new Map();
+  function cachedAnsiToHtml(s) {
+    let r = _ansiCache.get(s);
+    if (r === undefined) { r = ansiToHtml(s); _ansiCache.set(s, r); if (_ansiCache.size > 500) _ansiCache.delete(_ansiCache.keys().next().value); }
+    return r;
+  }
+  const _mdCache = new Map();
+  function cachedRenderMarkdown(s) {
+    let r = _mdCache.get(s);
+    if (r === undefined) { r = renderMarkdown(s); _mdCache.set(s, r); if (_mdCache.size > 200) _mdCache.delete(_mdCache.keys().next().value); }
+    return r;
+  }
+
   let collapsedTools = $state({});
   function toggleTool(id) { collapsedTools[id] = !collapsedTools[id]; }
 
@@ -219,7 +233,7 @@
     {#if messages.length === 0}
     <div class="empty">No conversation detected. Waiting for CLI output…</div>
   {:else}
-    {#each messages as msg, mi}
+    {#each messages as msg, mi (mi)}
       <div class="msg" class:user={msg.role === 'user'} class:agent={msg.role === 'agent'} class:system={msg.role === 'system' || msg.role === 'compact' || msg.role === 'model' || msg.role === 'model_done'}>
         {#if msg.role === 'agent'}
           <div class="avatar"><Icon name="bot" size={14} /></div>
@@ -229,12 +243,12 @@
         {/if}
         {#if msg.role === 'system'}
           <div class="system-bubble">
-            <pre class="system-pre">{@html ansiToHtml(msg.rawText)}</pre>
+            <pre class="system-pre">{@html cachedAnsiToHtml(msg.rawText)}</pre>
           </div>
         {:else if msg.role === 'compact'}
           <div class="compact-bubble">
             <div class="compact-header"><Icon name="info" size={13} /> Conversation Summary</div>
-            <div class="compact-body">{@html renderMarkdown(stripAnsi(msg.text))}</div>
+            <div class="compact-body">{@html cachedRenderMarkdown(stripAnsi(msg.text))}</div>
           </div>
         {:else if msg.role === 'model'}
           <div class="model-bubble">
@@ -263,14 +277,14 @@
           {#each parseBlocks(msg.text, msg.rawText) as block, bi}
             {#if block.type === 'text'}
               {#if msg.role === 'user'}
-                <div class="md-block">{@html renderMarkdown(stripAnsi(block.content))}</div>
+                <div class="md-block">{@html cachedRenderMarkdown(stripAnsi(block.content))}</div>
               {:else}
-                <div class="md-block">{@html ansiToHtml(block.content)}</div>
+                <div class="md-block">{@html cachedAnsiToHtml(block.content)}</div>
               {/if}
             {:else if block.type === 'code'}
               <div class="code-block">
                 <div class="code-header">{block.lang}</div>
-                <pre><code>{@html ansiToHtml(block.content)}</code></pre>
+                <pre><code>{@html cachedAnsiToHtml(block.content)}</code></pre>
               </div>
             {:else if block.type === 'tool'}
               <div class="tool-card">
@@ -280,14 +294,14 @@
                   <span class="tool-chevron" class:open={!collapsedTools[`${mi}-${bi}`]}>▸</span>
                 </button>
                 {#if !collapsedTools[`${mi}-${bi}`]}
-                  <pre class="tool-body">{@html ansiToHtml(block.content)}</pre>
+                  <pre class="tool-body">{@html cachedAnsiToHtml(block.content)}</pre>
                 {/if}
               </div>
             {:else if block.type === 'diff'}
               <div class="diff-block">
                 {#each block.content.split('\n') as dline}
                   {@const clean = stripAnsi(dline)}
-                  <div class="diff-line" class:diff-add={/^\+/.test(clean.trim())} class:diff-del={/^-/.test(clean.trim())} class:diff-ctx={/^\s+\d+,/.test(clean)}>{@html ansiToHtml(dline)}</div>
+                  <div class="diff-line" class:diff-add={/^\+/.test(clean.trim())} class:diff-del={/^-/.test(clean.trim())} class:diff-ctx={/^\s+\d+,/.test(clean)}>{@html cachedAnsiToHtml(dline)}</div>
                 {/each}
               </div>
             {/if}
@@ -342,6 +356,7 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
+    contain: layout style;
   }
 
   .scroll-btn {
