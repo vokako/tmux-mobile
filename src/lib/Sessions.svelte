@@ -123,11 +123,46 @@
 </script>
 
 <div class="sessions">
-  <div class="top-bar">
-    <span class="top-title">Sessions</span>
-    <button class="top-btn" onclick={() => showNew = !showNew}><Icon name="plus" size={15} /></button>
-    <button class="top-btn" onclick={refresh}><Icon name="refresh" size={15} /></button>
+  {#if error}
+    <div class="error">{error}</div>
+  {/if}
+
+  <div class="list">
+    {#each sessions as s}
+      <div class="session" class:expanded={expanded[s.name]} class:active-session={activeTarget.startsWith(s.name + ':')}>
+        <div class="session-row" role="button" tabindex="0" onclick={() => toggleSession(s.name)} onkeydown={(e) => e.key === 'Enter' && toggleSession(s.name)}>
+          <div class="session-info">
+            <span class="indicator" class:attached={s.attached}></span>
+            <span class="name">{s.name}</span>
+          </div>
+          <div class="session-meta">
+            <span class="badge">{s.windows} {s.windows === 1 ? 'window' : 'windows'}</span>
+            <button class="kill" class:confirm={confirmKill === s.name} onclick={(e) => { e.stopPropagation(); removeSession(s.name); }} aria-label="Kill session">
+              {#if confirmKill === s.name}
+                <span class="kill-text">tap to kill</span>
+              {:else}
+                <span class="kill-icon"><Icon name="x" size={11} /></span>
+              {/if}
+            </button>
+          </div>
+        </div>
+        {#if expanded[s.name] && panes[s.name]}
+          <div class="pane-list">
+            {#each panes[s.name] as p}
+              <button class="pane" class:active-pane={activeTarget === `${p.session}:${p.window}.${p.pane}`} onclick={() => openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command)}>
+                <span class="pane-id">:{p.window}.{p.pane}</span>
+                <span class="pane-cmd">{p.current_command}</span>
+                <span class="pane-size">{p.width}×{p.height}</span>
+                <span class="pane-arrow">→</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/each}
   </div>
+
+  <button class="refresh-btn" onclick={refresh}><Icon name="refresh" size={14} /></button>
 
   {#if showNew}
     <div class="new-form">
@@ -169,44 +204,9 @@
     </div>
   {/if}
 
-  {#if error}
-    <div class="error">{error}</div>
-  {/if}
-
-  <div class="list">
-    {#each sessions as s}
-      <div class="session" class:expanded={expanded[s.name]} class:active-session={activeTarget.startsWith(s.name + ':')}>
-        <div class="session-row" role="button" tabindex="0" onclick={() => toggleSession(s.name)} onkeydown={(e) => e.key === 'Enter' && toggleSession(s.name)}>
-          <div class="session-info">
-            <span class="indicator" class:attached={s.attached}></span>
-            <span class="name">{s.name}</span>
-          </div>
-          <div class="session-meta">
-            <span class="badge">{s.windows} {s.windows === 1 ? 'window' : 'windows'}</span>
-            <button class="kill" class:confirm={confirmKill === s.name} onclick={(e) => { e.stopPropagation(); removeSession(s.name); }} aria-label="Kill session">
-              {#if confirmKill === s.name}
-                <span class="kill-text">tap to kill</span>
-              {:else}
-                <span class="kill-icon"><Icon name="x" size={11} /></span>
-              {/if}
-            </button>
-          </div>
-        </div>
-        {#if expanded[s.name] && panes[s.name]}
-          <div class="pane-list">
-            {#each panes[s.name] as p}
-              <button class="pane" class:active-pane={activeTarget === `${p.session}:${p.window}.${p.pane}`} onclick={() => openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command)}>
-                <span class="pane-id">:{p.window}.{p.pane}</span>
-                <span class="pane-cmd">{p.current_command}</span>
-                <span class="pane-size">{p.width}×{p.height}</span>
-                <span class="pane-arrow">→</span>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    {/each}
-  </div>
+  <button class="new-btn" onclick={() => showNew = !showNew}>
+    <Icon name="plus" size={16} /> New Session
+  </button>
 </div>
 
 <style>
@@ -367,20 +367,22 @@
     font-size: 12px;
   }
 
-  .top-bar {
-    display: flex; align-items: center; gap: 8px;
-  }
-  .top-title {
-    flex: 1; font-size: 18px; font-weight: 700; color: var(--text);
-  }
-  .top-btn {
-    width: 36px; height: 36px;
-    border: none; border-radius: 10px;
-    background: var(--surface2); color: var(--text2); cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
+  .refresh-btn {
+    align-self: center; padding: 8px 20px;
+    border: 1px solid var(--border2); border-radius: 10px;
+    background: none; color: var(--text3); font-size: 12px;
+    cursor: pointer; display: flex; align-items: center; gap: 6px;
     -webkit-tap-highlight-color: transparent;
   }
-  .top-btn:active { background: var(--accent-bg); color: var(--accent); }
+  .refresh-btn:active { color: var(--accent); }
+
+  .new-btn {
+    padding: 12px; border: 1px dashed var(--border); border-radius: 14px;
+    background: none; color: var(--text2); font-size: 14px; font-weight: 500;
+    cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .new-btn:active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
 
   .new-form {
     display: flex; flex-direction: column; gap: 8px;
