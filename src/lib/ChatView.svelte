@@ -454,9 +454,8 @@
   }
 
   .user-bubble {
-    background: var(--accent-bg);
-    color: var(--text);
-    border: 1px solid var(--accent);
+    background: #0a5a7a;
+    color: #e2e8f0;
     border-bottom-right-radius: 4px;
   }
 
