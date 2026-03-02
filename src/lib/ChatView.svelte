@@ -454,8 +454,9 @@
   }
 
   .user-bubble {
-    background: var(--accent);
-    color: #fff;
+    background: var(--accent-bg);
+    color: var(--text);
+    border: 1px solid var(--accent);
     border-bottom-right-radius: 4px;
   }
 
@@ -597,13 +598,13 @@
     border-top: 1px solid var(--border);
     margin: 8px 0;
   }
-  .user-bubble .md-block :global(code) { background: rgba(0, 0, 0, 0.15); }
-  .user-bubble .md-block :global(a) { color: rgba(255, 255, 255, 0.7); }
-  .user-bubble .md-block :global(strong) { color: #fff; }
-  .user-bubble .md-block :global(em) { color: rgba(255, 255, 255, 0.85); }
+  .user-bubble .md-block :global(code) { background: var(--surface2); }
+  .user-bubble .md-block :global(a) { color: var(--accent); }
+  .user-bubble .md-block :global(strong) { color: var(--text); }
+  .user-bubble .md-block :global(em) { color: var(--text2); }
   .user-bubble .md-block :global(th),
-  .user-bubble .md-block :global(td) { border-color: rgba(0, 0, 0, 0.15); }
-  .user-bubble .md-block :global(th) { background: rgba(0, 0, 0, 0.08); }
+  .user-bubble .md-block :global(td) { border-color: var(--border); }
+  .user-bubble .md-block :global(th) { background: var(--surface2); }
 
   .code-block {
     border-radius: 10px;
