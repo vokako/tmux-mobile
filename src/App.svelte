@@ -136,6 +136,36 @@
       page = 'settings';
     });
   });
+  // Android back gesture: push history state on navigation, handle popstate
+  let filesGoBack = $state(null);
+
+  function pushNav() { history.pushState({ nav: true }, ''); }
+
+  $effect(() => {
+    // Push initial state
+    pushNav();
+    const handler = (e) => {
+      // Try Files goBack first
+      if (page === 'files' && filesGoBack) {
+        const handled = filesGoBack();
+        if (handled) { pushNav(); return; }
+      }
+      // Navigate between pages
+      if (page === 'files' || (page === 'terminal' && viewMode === 'chat')) {
+        viewMode = 'terminal'; page = 'terminal'; pushNav(); return;
+      }
+      if (page === 'terminal') {
+        page = 'sessions'; pushNav(); return;
+      }
+      if (showSettings) {
+        showSettings = false; pushNav(); return;
+      }
+      // At root — push state again to prevent exit
+      pushNav();
+    };
+    window.addEventListener('popstate', handler);
+    return () => window.removeEventListener('popstate', handler);
+  });
 </script>
 
 <main>
@@ -207,7 +237,7 @@
     {/if}
     {#if terminalTarget}
       <div class="page-layer" class:hidden={page !== 'files'}>
-        <Files session={terminalSession} />
+        <Files session={terminalSession} onGoBack={(fn) => filesGoBack = fn} />
       </div>
       <div class="page-layer" class:hidden={page !== 'terminal'}>
         <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {viewMode} onChatSupported={(v) => chatSupported = v} />

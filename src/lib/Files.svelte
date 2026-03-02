@@ -54,7 +54,18 @@
   mermaid.initialize({ startOnLoad: false, theme: 'dark' });
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
-  let { session = '' } = $props();
+  let { session = '', onGoBack = null } = $props();
+
+  // Register goBack for Android back gesture
+  $effect(() => {
+    if (onGoBack) onGoBack(() => {
+      if (view === 'edit') { view = 'preview'; return true; }
+      if (view === 'info') { view = currentFile?.content != null ? 'preview' : 'list'; return true; }
+      if (view === 'preview') { view = 'list'; currentFile = null; return true; }
+      if (cwd !== '/') { goUp(); return true; }
+      return false;
+    });
+  });
 
   // State
   let cwd = $state('');
