@@ -177,7 +177,7 @@
         <div class="input-status">
           <span class="status-left">{target}{#if command} · <span class:kiro={/^kiro/i.test(command)}>{command}</span>{/if}</span>
         </div>
-        <div class="shortcuts">
+        <div class="shortcuts" onmousedown={(e) => e.preventDefault()} ontouchstart={(e) => e.preventDefault()}>
           <button onclick={() => sendSpecial('Tab')}>Tab</button>
           <button onclick={() => sendSpecial('C-c')}>^C</button>
           <button onclick={() => sendSpecial('C-a')}><Icon name="skip-left" size={13} /></button>
