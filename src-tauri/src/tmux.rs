@@ -38,8 +38,23 @@ pub fn get_socket() -> Option<String> {
 }
 
 /// 执行 tmux 命令，返回 stdout
+fn find_tmux() -> String {
+    for path in &[
+        "/opt/homebrew/bin/tmux",
+        "/usr/local/bin/tmux",
+        "/usr/bin/tmux",
+        "/bin/tmux",
+        "/opt/local/bin/tmux",
+    ] {
+        if std::path::Path::new(path).exists() {
+            return path.to_string();
+        }
+    }
+    "tmux".to_string()
+}
+
 fn run_tmux(args: &[&str]) -> Result<String, String> {
-    let mut cmd = Command::new("tmux");
+    let mut cmd = Command::new(find_tmux());
     if let Some(socket) = get_socket() {
         cmd.args(["-S", &socket]);
     }
