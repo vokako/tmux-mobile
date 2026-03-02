@@ -87,6 +87,15 @@
     if (termAtBottom) requestAnimationFrame(scrollToBottom);
   });
 
+  // Scroll to bottom when keyboard opens/closes
+  $effect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const handler = () => { if (termAtBottom) requestAnimationFrame(scrollToBottom); };
+    vv.addEventListener('resize', handler);
+    return () => vv.removeEventListener('resize', handler);
+  });
+
   $effect(() => {
     let lastContent = '';
     setOnPaneOutput((t, content) => {

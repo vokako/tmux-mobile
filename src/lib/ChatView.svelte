@@ -160,6 +160,15 @@
     if (isAtBottom && chatEl) requestAnimationFrame(() => { chatEl.scrollTop = chatEl.scrollHeight; });
   });
 
+  // Scroll to bottom when keyboard opens/closes
+  $effect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const handler = () => { if (isAtBottom) scrollToBottom(); };
+    vv.addEventListener('resize', handler);
+    return () => vv.removeEventListener('resize', handler);
+  });
+
   function renderMarkdown(text) {
     let html = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     html = html.replace(/((?:^|\n)\|.+\|(?:\n\|.+\|)+)/g, (match) => {
