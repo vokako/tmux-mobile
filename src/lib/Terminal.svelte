@@ -201,7 +201,7 @@
             spellcheck="false"
             rows="1"
           ></textarea>
-          <button class="send" onclick={handleSubmit}><Icon name={input.trim() ? "arrow-right" : "send"} size={14} /></button>
+          <button class="send" ontouchstart={(e) => { if (input.trim()) e.preventDefault(); }} onmousedown={(e) => { if (input.trim()) e.preventDefault(); }} onclick={handleSubmit}><Icon name={input.trim() ? "arrow-right" : "send"} size={14} /></button>
         </div>
       </div>
     {:else}
