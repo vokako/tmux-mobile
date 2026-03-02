@@ -32,17 +32,21 @@
     }
   });
 
-  let termHtml = $derived.by(() => {
-    let html = (theme === 'light' ? lightConvert : darkConvert).toHtml(paneContent);
-    if (theme === 'light') {
-      // Remap light/white foreground colors to dark for readability
+  let termHtml = $state('');
+  let lastRendered = '';
+  $effect(() => {
+    const content = paneContent;
+    const t = theme;
+    if (content === lastRendered) return;
+    lastRendered = content;
+    let html = (t === 'light' ? lightConvert : darkConvert).toHtml(content);
+    if (t === 'light') {
       html = html.replace(/color:#(fff|ffffff|eee|eeeeee|ddd|dddddd|ccc|cccccc|bbb|bbbbbb|aaa|aaaaaa|AAA|FFF)\b/gi,
         'color:#4b5563');
-      // Strip black/dark backgrounds
       html = html.replace(/background-color:#(000|000000)\b/gi,
         'background-color:transparent');
     }
-    return html;
+    termHtml = html;
   });
 
   let parser = $derived(detectParser(paneContent, command));

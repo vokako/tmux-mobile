@@ -111,7 +111,15 @@
   }
 
   let parser = $derived(detectParser(content, command));
-  let parsed = $derived(parser ? parseMessages(content, parser) : { messages: [], isThinking: false, isSummarizing: false });
+  let parsed = $state({ messages: [], isThinking: false, isSummarizing: false });
+  let lastParsedContent = '';
+  $effect(() => {
+    const p = parser;
+    const c = content;
+    if (!p || c === lastParsedContent) return;
+    lastParsedContent = c;
+    parsed = parseMessages(c, p);
+  });
   let messages = $derived(parsed.messages);
   let showThinking = $state(false);
   let showSummarizing = $state(false);
