@@ -382,10 +382,10 @@
   .brand-text {
     font-weight: 600;
     font-size: 15px;
-    color: rgba(226, 232, 240, 0.7);
+    color: var(--text2);
     letter-spacing: -0.3px;
   }
-  .brand-accent { color: #00d4ff; }
+  .brand-accent { color: var(--accent); }
 
   .page {
     flex: 1;
