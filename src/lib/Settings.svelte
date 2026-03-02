@@ -147,9 +147,7 @@
   .card {
     width: 100%;
     max-width: 380px;
-    background: var(--surface);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    background: var(--bg);
     border: 1px solid var(--border);
     border-radius: 16px;
     padding: 32px 24px;

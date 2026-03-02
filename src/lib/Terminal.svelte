@@ -124,8 +124,10 @@
 
   function autoResize(e) {
     const el = e.target;
-    el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+    requestAnimationFrame(() => {
+      el.style.height = 'auto';
+      el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+    });
   }
 
   async function sendSpecial(key) {
@@ -282,6 +284,7 @@
     color: var(--text);
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
+    contain: content;
   }
 
   .scroll-btn {
@@ -289,10 +292,9 @@
     bottom: 12px;
     right: 16px;
     width: 36px; height: 36px;
+    background: var(--bg);
     border: 1px solid var(--input-border);
     border-radius: 50%;
-    background: rgba(12, 12, 20, 0.85);
-    backdrop-filter: blur(10px);
     color: var(--accent);
     font-size: 16px;
     cursor: pointer;
@@ -312,9 +314,7 @@
   }
 
   .input-bar {
-    background: var(--input-bg);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    background: var(--bg);
     border: 1px solid var(--border);
     border-radius: 14px;
     padding: 8px 10px;

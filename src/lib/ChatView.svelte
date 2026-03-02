@@ -351,8 +351,7 @@
     width: 36px; height: 36px;
     border: 1px solid var(--input-border);
     border-radius: 50%;
-    background: rgba(12, 12, 20, 0.85);
-    backdrop-filter: blur(10px);
+    background: var(--bg);
     color: var(--accent);
     font-size: 16px;
     cursor: pointer;
@@ -427,8 +426,7 @@
     padding: 4px 6px;
     border: 1px solid var(--input-border);
     border-radius: 6px;
-    background: rgba(12, 12, 20, 0.95);
-    backdrop-filter: blur(10px);
+    background: var(--bg);
     color: var(--text2);
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;

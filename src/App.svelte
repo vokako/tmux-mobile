@@ -242,7 +242,7 @@
     --surface: rgba(255,255,255,0.03); --surface2: rgba(255,255,255,0.06);
     --accent: #00d4ff; --accent-bg: rgba(0,212,255,0.12); --accent-glow: rgba(0,212,255,0.1);
     --danger: #ff5050; --danger-bg: rgba(255,80,80,0.08);
-    --nav-bg: rgba(12,12,20,0.8); --pill-bg: rgba(255,255,255,0.04);
+    --nav-bg: rgba(12,12,20,0.95); --pill-bg: rgba(255,255,255,0.04);
     --input-bg: rgba(255,255,255,0.04); --input-border: rgba(255,255,255,0.08);
     --code-bg: rgba(255,255,255,0.05);
   }
@@ -253,7 +253,7 @@
     --surface: rgba(0,0,0,0.02); --surface2: rgba(0,0,0,0.04);
     --accent: #0088cc; --accent-bg: rgba(0,136,204,0.08); --accent-glow: rgba(0,136,204,0.06);
     --danger: #e53e3e; --danger-bg: rgba(229,62,62,0.06);
-    --nav-bg: rgba(245,245,247,0.9); --pill-bg: rgba(0,0,0,0.03);
+    --nav-bg: rgba(245,245,247,0.95); --pill-bg: rgba(0,0,0,0.03);
     --input-bg: rgba(0,0,0,0.02); --input-border: rgba(0,0,0,0.08);
     --code-bg: rgba(0,0,0,0.03);
   }
@@ -277,8 +277,6 @@
     padding: 8px 12px;
     padding-top: calc(8px + var(--sat));
     background: var(--nav-bg);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
     z-index: 10;
