@@ -104,7 +104,12 @@
     }
   }
 
-  let confirmKill = $state(null);
+  let refreshing = $state(false);
+  async function doRefresh() {
+    refreshing = true;
+    await refresh();
+    setTimeout(() => refreshing = false, 600);
+  }
 
   async function removeSession(name) {
     if (confirmKill !== name) {
@@ -162,8 +167,6 @@
     {/each}
   </div>
 
-  <button class="refresh-btn" onclick={refresh}><Icon name="refresh" size={14} /></button>
-
   {#if showNew}
     <div class="new-form">
       <input type="text" bind:value={newName} placeholder="Session name" onkeydown={(e) => e.key === 'Enter' && createSession()} autocapitalize="off" />
@@ -204,9 +207,12 @@
     </div>
   {/if}
 
-  <button class="new-btn" onclick={() => showNew = !showNew}>
-    <Icon name="plus" size={16} /> New Session
-  </button>
+  <div class="bottom-bar">
+    <button class="new-btn" onclick={() => showNew = !showNew}>
+      <Icon name="plus" size={16} /> New Session
+    </button>
+    <button class="refresh-icon" class:spinning={refreshing} onclick={doRefresh}><Icon name="refresh" size={16} /></button>
+  </div>
 </div>
 
 <style>
@@ -367,22 +373,23 @@
     font-size: 12px;
   }
 
-  .refresh-btn {
-    align-self: center; padding: 8px 20px;
-    border: 1px solid var(--border2); border-radius: 10px;
-    background: none; color: var(--text3); font-size: 12px;
-    cursor: pointer; display: flex; align-items: center; gap: 6px;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .refresh-btn:active { color: var(--accent); }
-
+  .bottom-bar { display: flex; gap: 8px; }
   .new-btn {
-    padding: 12px; border: 1px dashed var(--border); border-radius: 14px;
+    flex: 1; padding: 12px; border: 1px dashed var(--border); border-radius: 14px;
     background: none; color: var(--text2); font-size: 14px; font-weight: 500;
     cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;
     -webkit-tap-highlight-color: transparent;
   }
   .new-btn:active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+  .refresh-icon {
+    width: 46px; border: 1px solid var(--border); border-radius: 14px;
+    background: none; color: var(--text2); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    -webkit-tap-highlight-color: transparent; transition: color 0.2s;
+  }
+  .refresh-icon:active { color: var(--accent); }
+  .refresh-icon.spinning { color: var(--accent); animation: spin 0.6s ease; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
   .new-form {
     display: flex; flex-direction: column; gap: 8px;
