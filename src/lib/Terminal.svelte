@@ -104,13 +104,25 @@
   });
 
   async function handleSubmit() {
+    if (viewMode === 'chat') {
+      // Chat: always send text + Enter
+      if (!input.trim()) return;
+      try {
+        await sendCommand(target, input);
+        input = '';
+        document.querySelectorAll('.input-bar textarea').forEach(ta => ta.style.height = 'auto');
+      } catch (_) {}
+      return;
+    }
+    // Terminal mode
     if (!input.trim()) {
-      // Empty: send Enter
+      // Empty: send Enter, blur to dismiss keyboard
       await sendKeys(target, 'Enter', false).catch(() => {});
+      document.activeElement?.blur();
       return;
     }
     try {
-      // Has text: send as literal keys, no Enter
+      // Has text: send as literal keys, no Enter, keep keyboard open
       await sendKeys(target, input, true);
       input = '';
       document.querySelectorAll('.input-bar textarea').forEach(ta => ta.style.height = 'auto');
@@ -208,7 +220,7 @@
             spellcheck="false"
             rows="1"
           ></textarea>
-          <button class="send" onclick={handleSubmit}><Icon name={input.trim() ? "arrow-right" : "send"} size={14} /></button>
+          <button class="send" onclick={handleSubmit}><Icon name="send" size={14} /></button>
         </div>
       </div>
     {/if}
