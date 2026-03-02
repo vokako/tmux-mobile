@@ -158,6 +158,7 @@
           <button onclick={() => sendSpecial('C-c')}>^C</button>
           <button onclick={() => sendSpecial('C-d')}>^D</button>
           <button onclick={() => sendSpecial('Tab')}>Tab</button>
+          <button onclick={() => sendSpecial('BSpace')}><Icon name="delete" size={13} /></button>
           <button onclick={() => sendSpecial('Left')}><Icon name="arrow-left" size={13} /></button>
           <button onclick={() => sendSpecial('Down')}><Icon name="arrow-down" size={13} /></button>
           <button onclick={() => sendSpecial('Up')}><Icon name="arrow-up" size={13} /></button>
@@ -325,7 +326,7 @@
 
   .shortcuts {
     display: flex;
-    gap: 5px;
+    gap: 3px;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
@@ -333,7 +334,7 @@
   .shortcuts::-webkit-scrollbar { display: none; }
 
   .shortcuts button {
-    padding: 5px 10px;
+    padding: 5px 8px;
     border: 1px solid var(--input-border);
     border-radius: 7px;
     background: var(--input-bg);

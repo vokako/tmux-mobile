@@ -25,6 +25,8 @@
     <rect x="6" y="6" width="12" height="12" rx="1" fill="currentColor" stroke="none"/>
   {:else if name === 'arrow-down'}
     <polyline points="6 9 12 15 18 9"/>
+  {:else if name === 'delete'}
+    <path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/>
   {:else if name === 'arrow-up'}
     <polyline points="18 15 12 9 6 15"/>
   {:else if name === 'arrow-left'}
