@@ -125,7 +125,7 @@
       <div class="error">{error}</div>
     {/if}
 
-    <button class="connect-btn" onclick={doConnect} disabled={connecting || !token}>
+    <button class="connect-btn" onclick={doConnect} disabled={connecting || !address}>
       {#if connecting}
         <span class="spinner"></span> Connecting…
       {:else}
