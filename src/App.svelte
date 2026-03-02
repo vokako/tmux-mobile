@@ -31,10 +31,14 @@
     applyTheme();
   }
 
+  let isDark = $state(true);
+
   function applyTheme() {
-    const isDark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    isDark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
     document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
   }
+
+  let iconSrc = $derived(isDark ? '/assets/icon-dark.svg' : '/assets/icon-light.svg');
 
   $effect(() => {
     applyTheme();
@@ -137,7 +141,7 @@
 <main>
   <nav>
     {#if connected}
-      <img class="nav-icon" src="/assets/icon.svg" alt="" width="28" height="28" />
+      <img class="nav-icon" src={iconSrc} alt="" width="28" height="28" />
       <div class="nav-pills">
         <button class:active={page === 'sessions'} onclick={() => page = 'sessions'}>
           Sessions
@@ -163,7 +167,7 @@
       </div>
     {:else}
       <div class="brand">
-        <img class="logo" src="/assets/icon.svg" alt="" width="24" height="24" />
+        <img class="logo" src={iconSrc} alt="" width="24" height="24" />
         <span class="brand-text">tmux<span class="brand-accent">mobile</span></span>
       </div>
       <div class="nav-right">
@@ -289,9 +293,6 @@
     padding: 2px;
   }
   .nav-icon { margin-right: 6px; flex-shrink: 0; margin-top: -2px; margin-bottom: -2px; }
-  :global(html[data-theme="light"]) .nav-icon {
-    filter: brightness(0.65) saturate(1.2);
-  }
 
   .nav-pills button {
     padding: 7px 10px;
@@ -381,9 +382,6 @@
   .logo {
     width: 24px; height: 24px;
     filter: drop-shadow(0 0 6px rgba(0, 212, 255, 0.4));
-  }
-  :global(html[data-theme="light"]) .logo {
-    filter: brightness(0.65) saturate(1.2);
   }
   :global(html[data-theme="light"]) .logo {
     filter: brightness(0.7) drop-shadow(0 0 4px rgba(0, 136, 204, 0.3));

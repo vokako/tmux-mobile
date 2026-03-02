@@ -81,7 +81,7 @@
 <div class="wrapper">
   <div class="card">
     <div class="card-header">
-      <div class="icon"><img src="/assets/icon.svg" alt="" width="72" height="72" /></div>
+      <div class="icon"><img class="icon-dark" src="/assets/icon-dark.svg" alt="" width="72" height="72" /><img class="icon-light" src="/assets/icon-light.svg" alt="" width="72" height="72" /></div>
       <h2>tmux<span class="accent">mobile</span></h2>
       <p class="subtitle">Connect to your tmux server</p>
     </div>
@@ -173,9 +173,9 @@
     filter: drop-shadow(0 0 12px var(--accent-glow));
     margin-bottom: 4px;
   }
-  :global(html[data-theme="light"]) .icon img {
-    filter: brightness(0.65) saturate(1.2);
-  }
+  .icon-light { display: none; }
+  :global(html[data-theme="light"]) .icon-dark { display: none; }
+  :global(html[data-theme="light"]) .icon-light { display: inline; }
 
   h2 {
     margin: 0;
