@@ -124,8 +124,9 @@
 
 <div class="sessions">
   <div class="top-bar">
-    <button class="top-btn" onclick={() => showNew = !showNew}><Icon name="plus" size={14} /></button>
-    <button class="top-btn" onclick={refresh}><Icon name="refresh" size={14} /></button>
+    <span class="top-title">Sessions</span>
+    <button class="top-btn" onclick={() => showNew = !showNew}><Icon name="plus" size={15} /></button>
+    <button class="top-btn" onclick={refresh}><Icon name="refresh" size={15} /></button>
   </div>
 
   {#if showNew}
@@ -261,8 +262,8 @@
     transition: all 0.2s ease;
   }
   .indicator.attached {
-    background: #00d4ff;
-    box-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent-glow);
   }
 
   .name {
@@ -367,12 +368,15 @@
   }
 
   .top-bar {
-    display: flex; gap: 8px; justify-content: flex-end;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .top-title {
+    flex: 1; font-size: 18px; font-weight: 700; color: var(--text);
   }
   .top-btn {
-    width: 40px; height: 40px;
-    border: 1px solid var(--border); border-radius: 12px;
-    background: var(--surface); color: var(--text2); cursor: pointer;
+    width: 36px; height: 36px;
+    border: none; border-radius: 10px;
+    background: var(--surface2); color: var(--text2); cursor: pointer;
     display: flex; align-items: center; justify-content: center;
     -webkit-tap-highlight-color: transparent;
   }
