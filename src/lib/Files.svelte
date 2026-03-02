@@ -941,7 +941,7 @@
 
   /* Copy toast */
   .copy-toast {
-    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%);
     background: var(--surface2); color: var(--accent); padding: 8px 20px;
     border-radius: 8px; font-size: 13px; font-weight: 500;
     box-shadow: 0 4px 16px rgba(0,0,0,0.3); pointer-events: none;
