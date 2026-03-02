@@ -247,7 +247,7 @@
     --text: #1a1a2e; --text2: rgba(26,26,46,0.55); --text3: rgba(26,26,46,0.35);
     --border: rgba(0,0,0,0.08); --border2: rgba(0,0,0,0.05);
     --surface: rgba(0,0,0,0.02); --surface2: rgba(0,0,0,0.04);
-    --accent: #00d4ff; --accent-bg: rgba(0,212,255,0.08); --accent-glow: rgba(0,212,255,0.06);
+    --accent: #0088cc; --accent-bg: rgba(0,136,204,0.08); --accent-glow: rgba(0,136,204,0.06);
     --danger: #e53e3e; --danger-bg: rgba(229,62,62,0.06);
     --nav-bg: rgba(245,245,247,0.9); --pill-bg: rgba(0,0,0,0.03);
     --input-bg: rgba(0,0,0,0.02); --input-border: rgba(0,0,0,0.08);
@@ -289,6 +289,9 @@
     padding: 2px;
   }
   .nav-icon { margin-right: 6px; flex-shrink: 0; margin-top: -2px; margin-bottom: -2px; }
+  :global(html[data-theme="light"]) .nav-icon {
+    filter: brightness(0.65) saturate(1.2);
+  }
 
   .nav-pills button {
     padding: 7px 10px;
@@ -378,6 +381,12 @@
   .logo {
     width: 24px; height: 24px;
     filter: drop-shadow(0 0 6px rgba(0, 212, 255, 0.4));
+  }
+  :global(html[data-theme="light"]) .logo {
+    filter: brightness(0.65) saturate(1.2);
+  }
+  :global(html[data-theme="light"]) .logo {
+    filter: brightness(0.7) drop-shadow(0 0 4px rgba(0, 136, 204, 0.3));
   }
   .brand-text {
     font-weight: 600;

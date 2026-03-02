@@ -170,8 +170,11 @@
   .icon {
     font-size: 36px;
     color: var(--accent);
-    filter: drop-shadow(0 0 12px rgba(0, 212, 255, 0.4));
+    filter: drop-shadow(0 0 12px var(--accent-glow));
     margin-bottom: 4px;
+  }
+  :global(html[data-theme="light"]) .icon img {
+    filter: brightness(0.65) saturate(1.2);
   }
 
   h2 {
