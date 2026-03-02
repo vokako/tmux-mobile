@@ -314,6 +314,13 @@
   }
 
   let downloadToast = $state('');
+  let downloadedPath = $state('');
+
+  async function openDownloaded() {
+    if (!downloadedPath || !window.__TAURI__) return;
+    try { await window.__TAURI__.opener.openPath(downloadedPath); } catch {}
+    downloadToast = ''; downloadedPath = '';
+  }
 
   async function handleDownload(path) {
     try {
@@ -325,8 +332,9 @@
         if (!savePath) return;
         const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
         await writeFile(savePath, bytes);
+        downloadedPath = savePath;
         downloadToast = 'Saved';
-        setTimeout(() => downloadToast = '', 2000);
+        setTimeout(() => { downloadToast = ''; downloadedPath = ''; }, 5000);
         return;
       }
       // Browser fallback
@@ -702,7 +710,12 @@
     <div class="copy-toast">Copied</div>
   {/if}
   {#if downloadToast}
-    <div class="copy-toast">Saved to {downloadToast}</div>
+    <div class="copy-toast download-toast">
+      {downloadToast}
+      {#if downloadedPath}
+        <button class="toast-open" onclick={openDownloaded}>Open</button>
+      {/if}
+    </div>
   {/if}
 </div>
 
@@ -928,6 +941,15 @@
     border-radius: 8px; font-size: 13px; font-weight: 500;
     box-shadow: 0 4px 16px rgba(0,0,0,0.3); pointer-events: none;
     animation: toast-fade 1.2s ease forwards;
+  }
+  .download-toast {
+    pointer-events: auto; display: flex; align-items: center; gap: 12px;
+    animation: none;
+  }
+  .toast-open {
+    padding: 4px 12px; border: 1px solid var(--accent); border-radius: 6px;
+    background: var(--accent-bg); color: var(--accent); font-size: 12px;
+    font-weight: 600; cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
   @keyframes toast-fade {
     0%, 60% { opacity: 1; }
