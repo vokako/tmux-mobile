@@ -140,15 +140,13 @@
   let filesGoBack = $state(null);
 
   $effect(() => {
-    // Seed history so popstate fires
-    history.replaceState({ app: true }, '');
-    history.pushState({ app: true }, '');
+    // Seed: push enough entries so back always has somewhere to go
+    for (let i = 0; i < 20; i++) history.pushState({ app: i }, '');
 
     const handler = (e) => {
-      // Always re-push so next back works
-      setTimeout(() => history.pushState({ app: true }, ''), 0);
+      // Re-push to keep stack deep
+      history.pushState({ app: 'back' }, '');
 
-      // Try Files goBack first
       if (page === 'files' && filesGoBack) {
         if (filesGoBack()) return;
       }
