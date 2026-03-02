@@ -538,8 +538,8 @@
     color: var(--accent); font-size: 13px;
   }
   .model-done-name { font-family: 'SF Mono', Menlo, monospace; font-weight: 500; }
-  .md-block :global(strong) { font-weight: 600; }
-  .md-block :global(em) { font-style: italic; }
+  .md-block :global(strong) { font-weight: 600; color: var(--text); }
+  .md-block :global(em) { font-style: italic; color: var(--text2); }
   .md-block :global(code) {
     font-family: 'SF Mono', Menlo, monospace;
     font-size: 12px;
@@ -578,6 +578,8 @@
   }
   .user-bubble .md-block :global(code) { background: rgba(0, 0, 0, 0.15); }
   .user-bubble .md-block :global(a) { color: rgba(255, 255, 255, 0.7); }
+  .user-bubble .md-block :global(strong) { color: #fff; }
+  .user-bubble .md-block :global(em) { color: rgba(255, 255, 255, 0.85); }
   .user-bubble .md-block :global(th),
   .user-bubble .md-block :global(td) { border-color: rgba(0, 0, 0, 0.15); }
   .user-bubble .md-block :global(th) { background: rgba(0, 0, 0, 0.08); }

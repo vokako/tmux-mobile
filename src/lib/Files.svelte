@@ -847,7 +847,7 @@
   .md-render :global(pre) { background: var(--code-bg); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 8px 0; }
   .md-render :global(pre code) { background: none; padding: 0; font-size: 12px; line-height: 1.5; }
   .md-render :global(strong) { color: var(--text); }
-  .md-render :global(em) { color: rgba(226,232,240,0.8); }
+  .md-render :global(em) { color: var(--text2); }
   .md-render :global(a) { color: var(--accent); text-decoration: none; }
   .md-render :global(a:hover) { text-decoration: underline; }
   .md-render :global(ul), .md-render :global(ol) { padding-left: 20px; margin: 6px 0; }
