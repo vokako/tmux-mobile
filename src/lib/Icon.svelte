@@ -85,6 +85,8 @@
     <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="currentColor"/>
   {:else if name === 'check'}
     <polyline points="20 6 9 17 4 12"/>
+  {:else if name === 'check-filled'}
+    <circle cx="12" cy="12" r="10" fill="currentColor" stroke="none"/><polyline points="17 8 10 15 7 12" stroke="var(--bg)" stroke-width="2.5" fill="none"/>
   {/if}
 </svg>
 

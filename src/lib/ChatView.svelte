@@ -321,7 +321,7 @@
         </div>
           {#if copyMsg === mi}
             <button class="copy-btn" class:copied={copiedMsg === mi} onclick={(e) => { e.stopPropagation(); doCopy(msg.text); }}>
-              <Icon name={copiedMsg === mi ? "check" : "copy"} size={16} /> {copiedMsg === mi ? 'Copied' : 'Copy'}
+              <Icon name={copiedMsg === mi ? "check-filled" : "copy"} size={16} /> Copy
             </button>
           {/if}
         </div>
