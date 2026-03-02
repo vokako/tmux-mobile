@@ -4,7 +4,7 @@
 
 <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
   {#if name === 'bot'}
-    <rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="9" cy="16" r="1"/><circle cx="15" cy="16" r="1"/><path d="M12 2v5"/><path d="M6 11V8a6 6 0 0 1 12 0v3"/>
+    <rect x="4" y="8" width="16" height="12" rx="3"/><circle cx="9.5" cy="14" r="1.5" fill="currentColor" stroke="none"/><circle cx="14.5" cy="14" r="1.5" fill="currentColor" stroke="none"/><line x1="12" y1="3" x2="12" y2="8"/><circle cx="12" cy="2.5" r="1.5" fill="currentColor" stroke="none"/><line x1="2" y1="13" x2="4" y2="13"/><line x1="20" y1="13" x2="22" y2="13"/>
   {:else if name === 'user'}
     <circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/>
   {:else if name === 'sessions'}
