@@ -139,29 +139,32 @@
   // Android back gesture: push history state on navigation, handle popstate
   let filesGoBack = $state(null);
 
-  function pushNav() { history.pushState({ nav: true }, ''); }
+  function pushNav() {
+    // Always keep 2 entries so popstate always fires
+    history.pushState({ nav: 1 }, '');
+    history.pushState({ nav: 2 }, '');
+  }
 
   $effect(() => {
-    // Push initial state
     pushNav();
     const handler = (e) => {
+      // Re-push immediately so next back gesture works
+      history.pushState({ nav: 2 }, '');
+
       // Try Files goBack first
       if (page === 'files' && filesGoBack) {
-        const handled = filesGoBack();
-        if (handled) { pushNav(); return; }
+        if (filesGoBack()) return;
       }
       // Navigate between pages
       if (page === 'files' || (page === 'terminal' && viewMode === 'chat')) {
-        viewMode = 'terminal'; page = 'terminal'; pushNav(); return;
+        viewMode = 'terminal'; page = 'terminal'; return;
       }
       if (page === 'terminal') {
-        page = 'sessions'; pushNav(); return;
+        page = 'sessions'; return;
       }
       if (showSettings) {
-        showSettings = false; pushNav(); return;
+        showSettings = false; return;
       }
-      // At root — push state again to prevent exit
-      pushNav();
     };
     window.addEventListener('popstate', handler);
     return () => window.removeEventListener('popstate', handler);
