@@ -105,6 +105,7 @@
   }
 
   let refreshing = $state(false);
+  let confirmKill = $state(null);
   async function doRefresh() {
     refreshing = true;
     await refresh();
