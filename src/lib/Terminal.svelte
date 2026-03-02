@@ -223,7 +223,7 @@
     font-size: 10px;
     color: var(--text3);
   }
-  .status-left .kiro { color: #c084fc; }
+  .status-left .kiro { color: var(--accent); }
   .status-left {
     font-family: 'SF Mono', Menlo, monospace;
     font-size: 10px;
@@ -277,7 +277,7 @@
     word-break: break-all;
     color: var(--text);
     scrollbar-width: thin;
-    scrollbar-color: rgba(255,255,255,0.1) transparent;
+    scrollbar-color: var(--border) transparent;
   }
 
   .scroll-btn {
@@ -397,7 +397,7 @@
     overflow-y: auto;
     line-height: 1.4;
     scrollbar-width: thin;
-    scrollbar-color: rgba(255,255,255,0.1) transparent;
+    scrollbar-color: var(--border) transparent;
   }
   .cmd-row textarea::placeholder { color: var(--text3); }
 
@@ -426,7 +426,7 @@
     border: none;
     border-radius: 9px;
     background: var(--accent);
-    color: #000;
+    color: var(--bg);
     font-size: 15px;
     cursor: pointer;
     flex-shrink: 0;

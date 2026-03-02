@@ -276,7 +276,7 @@
     border: none;
     border-radius: 10px;
     background: var(--accent);
-    color: #000;
+    color: var(--bg);
     font-size: 15px;
     font-weight: 600;
     cursor: pointer;
@@ -300,7 +300,7 @@
   .spinner {
     width: 16px; height: 16px;
     border: 2px solid rgba(0, 0, 0, 0.2);
-    border-top-color: #000;
+    border-top-color: var(--accent);
     border-radius: 50%;
     animation: spin 0.6s linear infinite;
   }

@@ -434,7 +434,7 @@
 
   .user-bubble {
     background: var(--accent);
-    color: #000;
+    color: var(--bg);
     border-bottom-right-radius: 4px;
   }
 
@@ -454,7 +454,7 @@
   .thinking-spinner {
     width: 16px; height: 16px;
     border: 2px solid var(--input-border);
-    border-top-color: #c084fc;
+    border-top-color: var(--accent);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
     flex-shrink: 0;
@@ -547,7 +547,7 @@
     padding: 1px 5px;
     border-radius: 4px;
   }
-  .md-block :global(a) { color: #38bdf8; text-decoration: underline; }
+  .md-block :global(a) { color: var(--accent); text-decoration: underline; }
   .md-block :global(table) {
     width: 100%;
     border-collapse: collapse;
@@ -577,7 +577,7 @@
     margin: 8px 0;
   }
   .user-bubble .md-block :global(code) { background: rgba(0, 0, 0, 0.15); }
-  .user-bubble .md-block :global(a) { color: #003d5c; }
+  .user-bubble .md-block :global(a) { color: rgba(0, 0, 0, 0.6); }
   .user-bubble .md-block :global(th),
   .user-bubble .md-block :global(td) { border-color: rgba(0, 0, 0, 0.15); }
   .user-bubble .md-block :global(th) { background: rgba(0, 0, 0, 0.08); }
@@ -607,7 +607,7 @@
   }
   .code-block code {
     font-family: 'SF Mono', Menlo, monospace;
-    color: #c9d1d9;
+    color: var(--text);
   }
 
   .tool-card {
@@ -667,11 +667,11 @@
   }
   .diff-add {
     background: rgba(74, 222, 128, 0.1);
-    border-left: 3px solid #4ade80;
+    border-left: 3px solid var(--accent);
   }
   .diff-del {
     background: var(--danger-bg);
-    border-left: 3px solid #ff5050;
+    border-left: 3px solid var(--danger);
   }
   .diff-ctx {
     color: var(--text3);

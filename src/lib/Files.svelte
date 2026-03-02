@@ -791,7 +791,7 @@
   .act-btn:active { color: var(--accent); }
   .act-btn.del:active, .act-btn.del.confirm { color: var(--danger); }
   .del-text { font-size: 10px; font-weight: 600; }
-  .act-btn.save { color: #4ade80; }
+  .act-btn.save { color: var(--accent); }
   .act-btn.save:disabled { color: rgba(226,232,240,0.15); }
   .act-btn:disabled { color: rgba(226,232,240,0.15); }
   .empty, .loading { padding: 40px; text-align: center; color: var(--text3); font-size: 14px; }
@@ -838,22 +838,22 @@
   }
   .image-preview img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; }
   .md-render { font-size: 14px; line-height: 1.6; color: var(--text); overflow-wrap: break-word; }
-  .md-render :global(h1) { font-size: 22px; margin: 16px 0 8px; color: var(--accent); border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 6px; }
+  .md-render :global(h1) { font-size: 22px; margin: 16px 0 8px; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 6px; }
   .md-render :global(h2) { font-size: 18px; margin: 14px 0 6px; color: var(--accent); }
   .md-render :global(h3) { font-size: 16px; margin: 10px 0 4px; color: var(--accent); }
-  .md-render :global(h4), .md-render :global(h5), .md-render :global(h6) { font-size: 14px; margin: 8px 0 4px; color: rgba(0,212,255,0.7); }
+  .md-render :global(h4), .md-render :global(h5), .md-render :global(h6) { font-size: 14px; margin: 8px 0 4px; color: var(--accent); }
   .md-render :global(p) { margin: 8px 0; }
   .md-render :global(code) { background: var(--surface2); padding: 2px 5px; border-radius: 3px; font-size: 12px; font-family: 'SF Mono', Menlo, monospace; }
   .md-render :global(pre) { background: var(--code-bg); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 8px 0; }
   .md-render :global(pre code) { background: none; padding: 0; font-size: 12px; line-height: 1.5; }
-  .md-render :global(strong) { color: #fff; }
+  .md-render :global(strong) { color: var(--text); }
   .md-render :global(em) { color: rgba(226,232,240,0.8); }
   .md-render :global(a) { color: var(--accent); text-decoration: none; }
   .md-render :global(a:hover) { text-decoration: underline; }
   .md-render :global(ul), .md-render :global(ol) { padding-left: 20px; margin: 6px 0; }
   .md-render :global(li) { margin: 3px 0; }
-  .md-render :global(blockquote) { border-left: 3px solid rgba(0,212,255,0.4); margin: 8px 0; padding: 4px 12px; color: var(--text2); }
-  .md-render :global(hr) { border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 12px 0; }
+  .md-render :global(blockquote) { border-left: 3px solid var(--accent); margin: 8px 0; padding: 4px 12px; color: var(--text2); }
+  .md-render :global(hr) { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
   .md-render :global(img) { max-width: 100%; border-radius: 6px; }
   .md-render :global(table) { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 13px; }
   .md-render :global(th), .md-render :global(td) { padding: 8px 12px; border: 1px solid var(--input-border); text-align: left; }
