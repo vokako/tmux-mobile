@@ -179,18 +179,20 @@
         </div>
         <div class="shortcut-rows" onmousedown={(e) => e.preventDefault()} ontouchstart={(e) => e.preventDefault()}>
           <div class="shortcuts">
-            <button onclick={() => sendKeys(target, '/', true).catch(() => {})}>/</button>
             <button onclick={() => sendSpecial('Tab')}>Tab</button>
             <button onclick={() => sendSpecial('C-c')}>^C</button>
             <button onclick={() => sendSpecial('C-a')}><Icon name="skip-left" size={13} /></button>
+            <button onclick={() => sendSpecial('Up')}><Icon name="arrow-up" size={13} /></button>
             <button onclick={() => sendSpecial('C-e')}><Icon name="skip-right" size={13} /></button>
             <button onclick={() => sendSpecial('BSpace')}><Icon name="delete" size={13} /></button>
           </div>
           <div class="shortcuts">
+            <button onclick={() => sendKeys(target, '/', true).catch(() => {})}>/</button>
+            <button class="sk-empty"></button>
             <button onclick={() => sendSpecial('Left')}><Icon name="arrow-left" size={13} /></button>
-            <button onclick={() => sendSpecial('Up')}><Icon name="arrow-up" size={13} /></button>
             <button onclick={() => sendSpecial('Down')}><Icon name="arrow-down" size={13} /></button>
             <button onclick={() => sendSpecial('Right')}><Icon name="arrow-right" size={13} /></button>
+            <button class="sk-empty"></button>
           </div>
         </div>
         <div class="cmd-row">
@@ -362,14 +364,12 @@
   .shortcuts {
     display: flex;
     gap: 3px;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
   }
   .shortcuts::-webkit-scrollbar { display: none; }
 
   .shortcuts button {
-    padding: 5px 8px;
+    flex: 1;
+    padding: 5px 0;
     border: 1px solid var(--input-border);
     border-radius: 7px;
     background: var(--input-bg);
@@ -378,11 +378,12 @@
     font-family: 'SF Mono', Menlo, monospace;
     font-weight: 500;
     cursor: pointer;
-    white-space: nowrap;
-    flex-shrink: 0;
     -webkit-tap-highlight-color: transparent;
-    transition: all 0.15s ease;
+    display: flex; align-items: center; justify-content: center;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  }
+  .shortcuts button.sk-empty {
+    visibility: hidden;
   }
   .shortcuts button:active {
     background: var(--accent-bg);
