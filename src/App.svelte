@@ -95,6 +95,7 @@
     terminalCommand = command;
     page = 'terminal';
     viewMode = 'terminal';
+    navPush();
   }
 
   function doDisconnect() {
@@ -136,31 +137,31 @@
       page = 'settings';
     });
   });
-  // Android back gesture: intercept popstate
+  // Android back gesture via history API
+  // Every navigation push a state, back pops it naturally
   let filesGoBack = $state(null);
 
+  function navPush() { history.pushState({ app: true }, ''); }
+
   $effect(() => {
-    // Seed: push enough entries so back always has somewhere to go
-    for (let i = 0; i < 20; i++) history.pushState({ app: i }, '');
-
     const handler = (e) => {
-      // Re-push to keep stack deep
-      history.pushState({ app: 'back' }, '');
-
-      if (page === 'files' && filesGoBack) {
-        if (filesGoBack()) return;
+      if (!e.state?.app) {
+        // Reached bottom of our stack, re-push to prevent exit
+        navPush();
+        return;
       }
+      if (page === 'files' && filesGoBack && filesGoBack()) return;
       if (page === 'files' || (page === 'terminal' && viewMode === 'chat')) {
         viewMode = 'terminal'; page = 'terminal'; return;
       }
-      if (page === 'terminal') {
-        page = 'sessions'; return;
-      }
-      if (showSettings) {
-        showSettings = false; return;
-      }
+      if (page === 'terminal') { page = 'sessions'; return; }
+      if (showSettings) { showSettings = false; return; }
+      // At sessions root, re-push to prevent exit
+      navPush();
     };
     window.addEventListener('popstate', handler);
+    // Seed one entry
+    navPush();
     return () => window.removeEventListener('popstate', handler);
   });
   // Swipe left/right to switch tabs
@@ -193,6 +194,7 @@
     if (next === 'chat') { page = 'terminal'; viewMode = 'chat'; }
     else if (next === 'terminal') { page = 'terminal'; viewMode = 'terminal'; }
     else { page = next; }
+    navPush();
   }
 </script>
 
@@ -201,21 +203,21 @@
     {#if connected}
       <img class="nav-icon" src={iconSrc} alt="" width="28" height="28" />
       <div class="nav-pills">
-        <button class:active={page === 'sessions'} onclick={() => page = 'sessions'}>
+        <button class:active={page === 'sessions'} onclick={() => { page = 'sessions'; navPush(); }}>
           Sessions
         </button>
         {#if terminalTarget}
-          <button class:active={page === 'terminal' && viewMode === 'terminal'} onclick={() => { page = 'terminal'; viewMode = 'terminal'; }}>
+          <button class:active={page === 'terminal' && viewMode === 'terminal'} onclick={() => { page = 'terminal'; viewMode = 'terminal'; navPush(); }}>
             Terminal
           </button>
         {/if}
         {#if terminalTarget && chatSupported}
-          <button class:active={page === 'terminal' && viewMode === 'chat'} onclick={() => { page = 'terminal'; viewMode = 'chat'; }}>
+          <button class:active={page === 'terminal' && viewMode === 'chat'} onclick={() => { page = 'terminal'; viewMode = 'chat'; navPush(); }}>
             Chat
           </button>
         {/if}
         {#if terminalTarget}
-          <button class:active={page === 'files'} onclick={() => page = 'files'}>
+          <button class:active={page === 'files'} onclick={() => { page = 'files'; navPush(); }}>
             Files
           </button>
         {/if}

@@ -56,6 +56,8 @@
 
   let { session = '', onGoBack = null } = $props();
 
+  function navPush() { history.pushState({ app: true }, ''); }
+
   // Register goBack for Android back gesture
   $effect(() => {
     if (onGoBack) onGoBack(() => {
@@ -199,6 +201,7 @@
 
   async function openEntry(entry) {
     if (entry.type === 'dir') {
+      navPush();
       loadDir(entry.path);
       return;
     }
@@ -206,6 +209,7 @@
     try {
       const stat = await fsStat(entry.path);
       currentFile = { path: entry.path, name: entry.name, stat };
+      navPush();
       if (stat.mime_hint === 'application/pdf') {
         const r = await fsDownload(entry.path);
         currentFile.pdfData = r.data;
@@ -232,6 +236,7 @@
     editOriginal = currentFile.content;
     undoStack = [];
     view = 'edit';
+    navPush();
   }
 
   function undo() {
@@ -631,7 +636,7 @@
         {/if}
         <button class="act-btn" onclick={() => handleDownload(currentFile.path)}><Icon name="download" size={14} /></button>
         <button class="act-btn" onclick={() => copyPath(currentFile.path)}><Icon name="copy" size={14} /></button>
-        <button class="act-btn" onclick={() => { view = 'info'; }}><Icon name="info" size={14} /></button>
+        <button class="act-btn" onclick={() => { view = 'info'; navPush(); }}><Icon name="info" size={14} /></button>
       </div>
     </div>
     <div class="preview-body">
