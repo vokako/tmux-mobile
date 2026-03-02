@@ -41,15 +41,21 @@ impl Config {
             .ok()
             .or(file_cfg.token)
             .unwrap_or_else(|| {
-                // Auto-generate and persist
-                let t = uuid::Uuid::new_v4().to_string();
-                let _ = save_token(&t);
-                t
+                // Default empty token (no auth required)
+                let _ = save_token("");
+                String::new()
             });
 
         Config {
-            host: std::env::var("HOST").ok().or(file_cfg.host).unwrap_or("0.0.0.0".into()),
-            port: std::env::var("PORT").ok().and_then(|p| p.parse().ok()).or(file_cfg.port).unwrap_or(9899),
+            host: std::env::var("HOST")
+                .ok()
+                .or(file_cfg.host)
+                .unwrap_or("0.0.0.0".into()),
+            port: std::env::var("PORT")
+                .ok()
+                .and_then(|p| p.parse().ok())
+                .or(file_cfg.port)
+                .unwrap_or(9899),
             token,
             tmux_socket: std::env::var("TMUX_SOCKET").ok().or(file_cfg.tmux_socket),
         }
