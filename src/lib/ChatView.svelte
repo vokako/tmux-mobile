@@ -471,8 +471,8 @@
   .system-bubble {
     width: 100%;
     border-radius: 12px;
-    background: rgba(192, 132, 252, 0.06);
-    border: 1px solid rgba(192, 132, 252, 0.12);
+    background: var(--accent-bg);
+    border: 1px solid var(--accent);
     padding: 10px 14px;
     overflow-x: auto;
   }
@@ -499,7 +499,7 @@
     background: var(--accent-bg); border-bottom: 1px solid var(--accent);
   }
   .compact-body {
-    padding: 10px 14px; font-size: 13px; line-height: 1.6; color: rgba(226,232,240,0.8);
+    padding: 10px 14px; font-size: 13px; line-height: 1.6; color: var(--text2);
   }
   .compact-body :global(h2) { font-size: 13px; font-weight: 700; color: var(--accent); margin: 10px 0 4px; }
   .compact-body :global(ul), .compact-body :global(ol) { padding-left: 16px; margin: 4px 0; }
@@ -577,7 +577,7 @@
     margin: 8px 0;
   }
   .user-bubble .md-block :global(code) { background: rgba(0, 0, 0, 0.15); }
-  .user-bubble .md-block :global(a) { color: rgba(0, 0, 0, 0.6); }
+  .user-bubble .md-block :global(a) { color: rgba(255, 255, 255, 0.7); }
   .user-bubble .md-block :global(th),
   .user-bubble .md-block :global(td) { border-color: rgba(0, 0, 0, 0.15); }
   .user-bubble .md-block :global(th) { background: rgba(0, 0, 0, 0.08); }
@@ -585,7 +585,7 @@
   .code-block {
     border-radius: 10px;
     overflow: hidden;
-    background: rgba(0, 0, 0, 0.4);
+    background: var(--code-bg);
     border: 1px solid var(--border);
   }
   .code-header {
@@ -614,7 +614,7 @@
     border-radius: 10px;
     overflow: hidden;
     border: 1px solid var(--border);
-    background: rgba(0, 0, 0, 0.2);
+    background: var(--surface);
   }
   .tool-header {
     display: flex;
