@@ -214,15 +214,18 @@
   function toggleTool(id) { collapsedTools[id] = !collapsedTools[id]; }
 
   let copyMsg = $state(null);
+  let copiedMsg = $state(null);
   let copyTimer;
   function handleBubbleTap(mi, text) {
     copyMsg = copyMsg === mi ? null : mi;
+    copiedMsg = null;
     clearTimeout(copyTimer);
     if (copyMsg !== null) copyTimer = setTimeout(() => copyMsg = null, 3000);
   }
   async function doCopy(text) {
     try { await navigator.clipboard.writeText(text); } catch {}
-    copyMsg = null;
+    copiedMsg = copyMsg;
+    setTimeout(() => { copiedMsg = null; copyMsg = null; }, 1000);
   }
 
   async function selectModel(targetIdx, currentIdx) {
@@ -317,8 +320,8 @@
           {/each}
         </div>
           {#if copyMsg === mi}
-            <button class="copy-btn" onclick={(e) => { e.stopPropagation(); doCopy(msg.text); }}>
-              <Icon name="copy" size={16} /> Copy
+            <button class="copy-btn" class:copied={copiedMsg === mi} onclick={(e) => { e.stopPropagation(); doCopy(msg.text); }}>
+              <Icon name={copiedMsg === mi ? "check" : "copy"} size={16} /> {copiedMsg === mi ? 'Copied' : 'Copy'}
             </button>
           {/if}
         </div>
@@ -462,6 +465,11 @@
   .copy-btn:active {
     background: var(--accent-bg);
     color: var(--accent);
+  }
+  .copy-btn.copied {
+    background: var(--accent-bg);
+    color: var(--accent);
+    border-color: var(--accent);
   }
 
   .user-bubble {
