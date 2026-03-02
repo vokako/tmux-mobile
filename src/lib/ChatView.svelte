@@ -321,7 +321,7 @@
         </div>
           {#if copyMsg === mi}
             <button class="copy-btn" class:copied={copiedMsg === mi} onclick={(e) => { e.stopPropagation(); doCopy(msg.text); }}>
-              <Icon name={copiedMsg === mi ? "check-filled" : "copy"} size={16} /> Copy
+              <Icon name={copiedMsg === mi ? "check" : "copy"} size={16} /> Copy
             </button>
           {/if}
         </div>
@@ -467,8 +467,8 @@
     color: var(--accent);
   }
   .copy-btn.copied {
-    background: var(--accent-bg);
-    color: var(--accent);
+    background: var(--accent);
+    color: #fff;
     border-color: var(--accent);
   }
 
