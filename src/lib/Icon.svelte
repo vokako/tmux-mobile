@@ -38,9 +38,9 @@
   {:else if name === 'chevron-right'}
     <polyline points="9 18 15 12 9 6"/>
   {:else if name === 'skip-left'}
-    <polyline points="13 19 7 12 13 5"/><line x1="17" y1="5" x2="17" y2="19"/>
+    <line x1="7" y1="5" x2="7" y2="19"/><polyline points="17 5 11 12 17 19"/>
   {:else if name === 'skip-right'}
-    <polyline points="11 5 17 12 11 19"/><line x1="7" y1="5" x2="7" y2="19"/>
+    <line x1="17" y1="5" x2="17" y2="19"/><polyline points="7 19 13 12 7 5"/>
   {:else if name === 'copy'}
     <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
   {:else if name === 'folder'}

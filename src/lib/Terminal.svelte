@@ -178,8 +178,8 @@
           <span class="status-left">{target}{#if command} · <span class:kiro={/^kiro/i.test(command)}>{command}</span>{/if}</span>
         </div>
         <div class="shortcuts">
-          <button onclick={() => sendSpecial('C-c')}>^C</button>
           <button onclick={() => sendSpecial('Tab')}>Tab</button>
+          <button onclick={() => sendSpecial('C-c')}>^C</button>
           <button onclick={() => sendSpecial('C-a')}><Icon name="skip-left" size={13} /></button>
           <button onclick={() => sendSpecial('Left')}><Icon name="arrow-left" size={13} /></button>
           <button onclick={() => sendSpecial('Down')}><Icon name="arrow-down" size={13} /></button>
