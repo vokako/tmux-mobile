@@ -314,8 +314,8 @@
         if (!savePath) return;
         const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
         await writeFile(savePath, bytes);
-        downloadToast = savePath;
-        setTimeout(() => downloadToast = '', 2500);
+        downloadToast = 'Saved';
+        setTimeout(() => downloadToast = '', 2000);
         return;
       }
       // Browser fallback
@@ -327,6 +327,8 @@
       document.body.appendChild(a);
       a.click();
       setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+      downloadToast = 'Downloaded';
+      setTimeout(() => downloadToast = '', 2000);
     } catch (e) { error = e.message; }
   }
 
