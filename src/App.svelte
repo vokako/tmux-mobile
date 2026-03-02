@@ -136,26 +136,22 @@
       page = 'settings';
     });
   });
-  // Android back gesture: push history state on navigation, handle popstate
+  // Android back gesture: intercept popstate
   let filesGoBack = $state(null);
 
-  function pushNav() {
-    // Always keep 2 entries so popstate always fires
-    history.pushState({ nav: 1 }, '');
-    history.pushState({ nav: 2 }, '');
-  }
-
   $effect(() => {
-    pushNav();
+    // Seed history so popstate fires
+    history.replaceState({ app: true }, '');
+    history.pushState({ app: true }, '');
+
     const handler = (e) => {
-      // Re-push immediately so next back gesture works
-      history.pushState({ nav: 2 }, '');
+      // Always re-push so next back works
+      setTimeout(() => history.pushState({ app: true }, ''), 0);
 
       // Try Files goBack first
       if (page === 'files' && filesGoBack) {
         if (filesGoBack()) return;
       }
-      // Navigate between pages
       if (page === 'files' || (page === 'terminal' && viewMode === 'chat')) {
         viewMode = 'terminal'; page = 'terminal'; return;
       }
