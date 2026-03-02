@@ -39,15 +39,26 @@ pub fn get_socket() -> Option<String> {
 
 /// 执行 tmux 命令，返回 stdout
 fn find_tmux() -> String {
-    for path in &[
-        "/opt/homebrew/bin/tmux",
-        "/usr/local/bin/tmux",
-        "/usr/bin/tmux",
-        "/bin/tmux",
-        "/opt/local/bin/tmux",
-    ] {
+    // Try PATH first via `which`
+    if let Ok(output) = Command::new("which").arg("tmux").output() {
+        if output.status.success() {
+            let p = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !p.is_empty() { return p; }
+        }
+    }
+    // Fallback: common locations
+    let home = std::env::var("HOME").unwrap_or_default();
+    let candidates = [
+        format!("{}/.local/bin/tmux", home),
+        "/opt/homebrew/bin/tmux".into(),
+        "/usr/local/bin/tmux".into(),
+        "/usr/bin/tmux".into(),
+        "/bin/tmux".into(),
+        "/opt/local/bin/tmux".into(),
+    ];
+    for path in &candidates {
         if std::path::Path::new(path).exists() {
-            return path.to_string();
+            return path.clone();
         }
     }
     "tmux".to_string()
