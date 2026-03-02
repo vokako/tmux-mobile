@@ -105,11 +105,13 @@
 
   async function handleSubmit() {
     if (!input.trim()) {
+      // Empty: send Enter
       await sendKeys(target, 'Enter', false).catch(() => {});
       return;
     }
     try {
-      await sendCommand(target, input);
+      // Has text: send as literal keys, no Enter
+      await sendKeys(target, input, true);
       input = '';
       document.querySelectorAll('.input-bar textarea').forEach(ta => ta.style.height = 'auto');
     } catch (_) {}
@@ -177,7 +179,7 @@
             spellcheck="false"
             rows="1"
           ></textarea>
-          <button class="send" onclick={handleSubmit}><Icon name="send" size={14} /></button>
+          <button class="send" onclick={handleSubmit}><Icon name={input.trim() ? "arrow-right" : "send"} size={14} /></button>
         </div>
       </div>
     {:else}
@@ -206,7 +208,7 @@
             spellcheck="false"
             rows="1"
           ></textarea>
-          <button class="send" onclick={handleSubmit}><Icon name="send" size={14} /></button>
+          <button class="send" onclick={handleSubmit}><Icon name={input.trim() ? "arrow-right" : "send"} size={14} /></button>
         </div>
       </div>
     {/if}
