@@ -12,6 +12,14 @@
     "fs:default",
     "fs:allow-write",
     "fs:allow-read",
-    "opener:default"
+    "opener:default",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [{ "path": "**" }]
+    },
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "content:*" }]
+    }
   ]
 }

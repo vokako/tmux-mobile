@@ -330,7 +330,7 @@
       } else {
         await window.__TAURI__.opener.openPath(downloadedPath);
       }
-    } catch {}
+    } catch (e) { error = 'Open failed: ' + e.message; }
     dismissDownload();
   }
 
