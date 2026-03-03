@@ -324,8 +324,14 @@
 
   async function openDownloaded() {
     if (!downloadedPath || !window.__TAURI__) return;
-    try { await window.__TAURI__.opener.openPath(downloadedPath); } catch {}
-    downloadToast = ''; downloadedPath = '';
+    try {
+      if (downloadedPath.startsWith('content://')) {
+        await window.__TAURI__.opener.openUrl(downloadedPath);
+      } else {
+        await window.__TAURI__.opener.openPath(downloadedPath);
+      }
+    } catch {}
+    dismissDownload();
   }
 
   function dismissDownload() {
@@ -345,9 +351,11 @@
         const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
         await writeFile(savePath, bytes);
         downloading = '';
-        downloadedPath = savePath;
-        downloadToast = savePath;
-        setTimeout(() => { if (downloadToast === savePath) dismissDownload(); }, 10000);
+        downloadedPath = String(savePath);
+        // Show friendly name, not content URI
+        const displayName = downloadedPath.includes('content://') ? name : downloadedPath;
+        downloadToast = displayName;
+        setTimeout(() => { if (downloadToast === displayName) dismissDownload(); }, 10000);
         return;
       }
       // Browser fallback
@@ -731,7 +739,7 @@
     </div>
   {:else if downloadToast}
     <div class="copy-toast download-toast">
-      <span class="dl-path">{downloadToast}</span>
+      Saved: <span class="dl-path">{downloadToast}</span>
       {#if downloadedPath}
         <button class="toast-open" onclick={openDownloaded}>Open</button>
       {/if}
