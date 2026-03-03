@@ -325,11 +325,7 @@
   async function openDownloaded() {
     if (!downloadedPath || !window.__TAURI__) return;
     try {
-      if (downloadedPath.startsWith('content://')) {
-        await window.__TAURI__.opener.openUrl(downloadedPath);
-      } else {
-        await window.__TAURI__.opener.openPath(downloadedPath);
-      }
+      await window.__TAURI__.opener.openPath(downloadedPath);
     } catch (e) { error = 'Open failed: ' + e.message; }
     dismissDownload();
   }
@@ -342,6 +338,26 @@
     const name = path.split('/').pop();
     try {
       if (window.__TAURI__) {
+        // Check if Android (no native save dialog that returns usable path)
+        const isAndroid = navigator.userAgent.includes('Android');
+        if (isAndroid) {
+          // Download to app cache, then open with system
+          downloading = name;
+          const r = await fsDownload(path);
+          const { appCacheDir } = window.__TAURI__.path;
+          const { writeFile, mkdir, exists } = window.__TAURI__.fs;
+          const cacheDir = await appCacheDir();
+          const filePath = cacheDir + 'downloads/' + r.name;
+          try { await mkdir(cacheDir + 'downloads', { recursive: true }); } catch {}
+          const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
+          await writeFile(filePath, bytes);
+          downloading = '';
+          downloadedPath = filePath;
+          downloadToast = name;
+          setTimeout(() => { if (downloadToast === name) dismissDownload(); }, 10000);
+          return;
+        }
+        // macOS / desktop: use save dialog
         const { save } = window.__TAURI__.dialog;
         const { writeFile } = window.__TAURI__.fs;
         const savePath = await save({ defaultPath: name });
@@ -352,10 +368,8 @@
         await writeFile(savePath, bytes);
         downloading = '';
         downloadedPath = String(savePath);
-        // Show friendly name, not content URI
-        const displayName = downloadedPath.includes('content://') ? name : downloadedPath;
-        downloadToast = displayName;
-        setTimeout(() => { if (downloadToast === displayName) dismissDownload(); }, 10000);
+        downloadToast = downloadedPath;
+        setTimeout(() => { if (downloadToast === downloadedPath) dismissDownload(); }, 10000);
         return;
       }
       // Browser fallback
