@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-utils/schema.json",
-  "productName": "tmux-mobile",
+  "productName": "TmuxMobile",
   "version": "0.1.0",
   "identifier": "com.tmuxmobile.dev",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "tmux-mobile",
+        "title": "TmuxMobile",
         "width": 420,
         "height": 720
       }
