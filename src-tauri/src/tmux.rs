@@ -43,7 +43,9 @@ fn find_tmux() -> String {
     if let Ok(output) = Command::new("which").arg("tmux").output() {
         if output.status.success() {
             let p = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !p.is_empty() { return p; }
+            if !p.is_empty() {
+                return p;
+            }
         }
     }
     // Fallback: common locations
@@ -186,6 +188,10 @@ pub fn send_command(target: &str, command: &str) -> Result<(), String> {
 
 /// 创建新 session
 pub fn new_session(name: &str, path: Option<&str>, command: Option<&str>) -> Result<(), String> {
+    // Check if session name already exists to prevent grouped sessions
+    if run_tmux(&["has-session", "-t", name]).is_ok() {
+        return Err(format!("session '{}' already exists", name));
+    }
     let mut args = vec!["new-session", "-d", "-s", name];
     let resolved;
     if let Some(p) = path {
