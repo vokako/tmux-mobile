@@ -63,25 +63,36 @@
 
   let manualDisconnect = false;
 
+  let reconnecting = $state(false);
+
   setOnDisconnect(() => {
-    connected = false;
     if (manualDisconnect) {
       manualDisconnect = false;
+      connected = false;
       return;
     }
-    // Network disconnect — auto-reconnect
+    // Don't reset page, just show reconnecting
+    connected = false;
+    reconnecting = true;
     tryReconnect();
   });
 
-  function tryReconnect() {
+  function tryReconnect(attempt = 0) {
     const addr = localStorage.getItem('tmux_address');
     const token = localStorage.getItem('tmux_token') || '';
-    if (!addr) { page = 'settings'; return; }
+    if (!addr) { reconnecting = false; page = 'settings'; return; }
     connect(addr, token).then(() => {
       connected = true;
+      reconnecting = false;
       if (terminalTarget) wsSubscribe(terminalTarget);
     }).catch(() => {
-      page = 'settings';
+      if (attempt < 20) {
+        const delay = Math.min(1000 * (attempt + 1), 5000);
+        setTimeout(() => tryReconnect(attempt + 1), delay);
+      } else {
+        reconnecting = false;
+        page = 'settings';
+      }
     });
   }
 
@@ -113,8 +124,9 @@
   // Detect app resume (Android background → foreground)
   $effect(() => {
     const handler = () => {
-      if (document.visibilityState === 'visible' && !isConnected() && connected) {
+      if (document.visibilityState === 'visible' && !isConnected() && !reconnecting) {
         connected = false;
+        reconnecting = true;
         tryReconnect();
       }
     };
@@ -271,6 +283,12 @@
       {/if}
     </div>
     <button class="sp-overlay" onclick={() => showSettings = false}></button>
+  {/if}
+
+  {#if reconnecting}
+    <div class="reconnect-bar">
+      <span class="reconnect-spinner"></span> Reconnecting...
+    </div>
   {/if}
 
   <div class="page" class:page-terminal={page === 'terminal'} ontouchstart={onPageTouchStart} ontouchend={onPageTouchEnd}>
@@ -465,6 +483,18 @@
     letter-spacing: -0.3px;
   }
   .brand-accent { color: var(--accent); }
+
+  .reconnect-bar {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 6px; background: var(--accent-bg); color: var(--accent);
+    font-size: 12px; font-weight: 500; flex-shrink: 0;
+  }
+  .reconnect-spinner {
+    width: 12px; height: 12px; border: 2px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: reconnect-spin 0.6s linear infinite;
+  }
+  @keyframes reconnect-spin { to { transform: rotate(360deg); } }
 
   .page {
     flex: 1;
