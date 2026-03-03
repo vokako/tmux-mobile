@@ -43,8 +43,14 @@
     if (t === 'light') {
       html = html.replace(/color:#(fff|ffffff|eee|eeeeee|ddd|dddddd|ccc|cccccc|bbb|bbbbbb|aaa|aaaaaa|AAA|FFF)\b/gi,
         'color:#4b5563');
-      html = html.replace(/background-color:#(000|000000)\b/gi,
+      // Strip all dark backgrounds
+      html = html.replace(/background-color:#[0-4][0-9a-f]{5}\b/gi,
         'background-color:transparent');
+      html = html.replace(/background-color:#[0-9a-f]{3}\b/gi, (m) => {
+        const hex = m.split('#')[1];
+        const r = parseInt(hex[0], 16), g = parseInt(hex[1], 16), b = parseInt(hex[2], 16);
+        return (r + g + b < 24) ? 'background-color:transparent' : m;
+      });
     }
     termHtml = html;
   });
@@ -98,10 +104,12 @@
 
   $effect(() => {
     let lastContent = '';
+    let first = true;
     setOnPaneOutput((t, content) => {
       if (t !== target || content === lastContent) return;
       lastContent = content;
       paneContent = content;
+      if (first) { first = false; requestAnimationFrame(scrollToBottom); }
     });
 
     subscribe(target);
