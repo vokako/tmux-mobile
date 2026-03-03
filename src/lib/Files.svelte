@@ -320,6 +320,7 @@
 
   let downloadToast = $state('');
   let downloadedPath = $state('');
+  let downloading = $state('');
 
   async function openDownloaded() {
     if (!downloadedPath || !window.__TAURI__) return;
@@ -327,22 +328,32 @@
     downloadToast = ''; downloadedPath = '';
   }
 
+  function dismissDownload() {
+    downloadToast = ''; downloadedPath = ''; downloading = '';
+  }
+
   async function handleDownload(path) {
+    const name = path.split('/').pop();
     try {
-      const r = await fsDownload(path);
       if (window.__TAURI__) {
         const { save } = window.__TAURI__.dialog;
         const { writeFile } = window.__TAURI__.fs;
-        const savePath = await save({ defaultPath: r.name });
+        const savePath = await save({ defaultPath: name });
         if (!savePath) return;
+        downloading = name;
+        const r = await fsDownload(path);
         const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
         await writeFile(savePath, bytes);
+        downloading = '';
         downloadedPath = savePath;
-        downloadToast = 'Saved';
-        setTimeout(() => { downloadToast = ''; downloadedPath = ''; }, 5000);
+        downloadToast = savePath;
+        setTimeout(() => { if (downloadToast === savePath) dismissDownload(); }, 10000);
         return;
       }
       // Browser fallback
+      downloading = name;
+      const r = await fsDownload(path);
+      downloading = '';
       const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
       const blob = new Blob([bytes]);
       const url = URL.createObjectURL(blob);
@@ -714,12 +725,17 @@
   {#if copyToast}
     <div class="copy-toast">Copied</div>
   {/if}
-  {#if downloadToast}
+  {#if downloading}
     <div class="copy-toast download-toast">
-      {downloadToast}
+      <span class="dl-spinner"></span> Downloading {downloading}...
+    </div>
+  {:else if downloadToast}
+    <div class="copy-toast download-toast">
+      <span class="dl-path">{downloadToast}</span>
       {#if downloadedPath}
         <button class="toast-open" onclick={openDownloaded}>Open</button>
       {/if}
+      <button class="toast-close" onclick={dismissDownload}><Icon name="x" size={12} /></button>
     </div>
   {/if}
 </div>
@@ -948,13 +964,29 @@
     animation: toast-fade 1.2s ease forwards;
   }
   .download-toast {
-    pointer-events: auto; display: flex; align-items: center; gap: 12px;
-    animation: none;
+    pointer-events: auto; display: flex; align-items: center; gap: 8px;
+    animation: none; max-width: 90%; font-size: 12px;
   }
+  .dl-path {
+    flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    direction: rtl; text-align: left; min-width: 0;
+    font-family: 'SF Mono', Menlo, monospace; font-size: 11px; color: var(--text2);
+  }
+  .dl-spinner {
+    width: 14px; height: 14px; border: 2px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin 0.6s linear infinite; flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .toast-open {
     padding: 4px 12px; border: 1px solid var(--accent); border-radius: 6px;
     background: var(--accent-bg); color: var(--accent); font-size: 12px;
     font-weight: 600; cursor: pointer; -webkit-tap-highlight-color: transparent;
+    flex-shrink: 0;
+  }
+  .toast-close {
+    padding: 2px; border: none; background: none; color: var(--text3);
+    cursor: pointer; display: flex; flex-shrink: 0;
   }
   @keyframes toast-fade {
     0%, 60% { opacity: 1; }
