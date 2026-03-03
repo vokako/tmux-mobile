@@ -192,7 +192,7 @@
         </div>
         <div class="shortcuts">
           <button onclick={() => sendKeys(target, '/', true).catch(() => {})}>/</button>
-          <button class="sk-empty"></button>
+          <button onclick={() => sendSpecial('C-d')}>^D</button>
           <button onclick={() => sendSpecial('Left')}><Icon name="arrow-left" size={13} /></button>
           <button onclick={() => sendSpecial('Down')}><Icon name="arrow-down" size={13} /></button>
           <button onclick={() => sendSpecial('Right')}><Icon name="arrow-right" size={13} /></button>
