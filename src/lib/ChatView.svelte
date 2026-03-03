@@ -163,10 +163,15 @@
   // Scroll to bottom when keyboard opens/closes
   $effect(() => {
     const vv = window.visualViewport;
-    if (!vv) return;
-    const handler = () => { if (isAtBottom) scrollToBottom(); };
-    vv.addEventListener('resize', handler);
-    return () => vv.removeEventListener('resize', handler);
+    const scrollIfBottom = () => {
+      if (isAtBottom) setTimeout(scrollToBottom, 100);
+    };
+    if (vv) vv.addEventListener('resize', scrollIfBottom);
+    window.addEventListener('resize', scrollIfBottom);
+    return () => {
+      if (vv) vv.removeEventListener('resize', scrollIfBottom);
+      window.removeEventListener('resize', scrollIfBottom);
+    };
   });
 
   function renderMarkdown(text) {

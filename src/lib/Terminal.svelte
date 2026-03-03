@@ -96,10 +96,17 @@
   // Scroll to bottom when keyboard opens/closes
   $effect(() => {
     const vv = window.visualViewport;
-    if (!vv) return;
-    const handler = () => { if (termAtBottom) requestAnimationFrame(scrollToBottom); };
-    vv.addEventListener('resize', handler);
-    return () => vv.removeEventListener('resize', handler);
+    const scrollIfBottom = () => {
+      if (termAtBottom) setTimeout(scrollToBottom, 100);
+    };
+    // visualViewport resize (works in browsers)
+    if (vv) vv.addEventListener('resize', scrollIfBottom);
+    // focus/blur on window (works in Tauri WebView)
+    window.addEventListener('resize', scrollIfBottom);
+    return () => {
+      if (vv) vv.removeEventListener('resize', scrollIfBottom);
+      window.removeEventListener('resize', scrollIfBottom);
+    };
   });
 
   $effect(() => {
