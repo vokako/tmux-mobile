@@ -156,7 +156,7 @@ pub fn capture_pane(target: &str, lines: Option<usize>) -> Result<String, String
     let start_line = lines
         .map(|n| format!("-{}", n))
         .unwrap_or("-200".to_string());
-    run_tmux(&[
+    let output = run_tmux(&[
         "capture-pane",
         "-t",
         target,
@@ -165,7 +165,9 @@ pub fn capture_pane(target: &str, lines: Option<usize>) -> Result<String, String
         "-J", // 合并屏幕宽度导致的自动换行
         "-S",
         &start_line, // 从多少行前开始
-    ])
+    ])?;
+    // Trim trailing empty lines
+    Ok(output.trim_end().to_string())
 }
 
 /// 向 pane 发送按键

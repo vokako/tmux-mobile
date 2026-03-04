@@ -339,6 +339,7 @@
     height: 100%;
     padding: 8px 10px;
     overflow-y: auto;
+    overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
     font-family: 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: 13px;
