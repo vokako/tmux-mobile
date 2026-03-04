@@ -53,6 +53,10 @@
     showPicker = false;
   }
 
+  function scrollIntoView(el) {
+    setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'end' }), 50);
+  }
+
   // Refresh when page becomes visible
   $effect(() => { if (visible) refresh(); });
 
@@ -192,7 +196,7 @@
   </div>
 
   {#if showNew}
-    <div class="new-form">
+    <div class="new-form" use:scrollIntoView>
       <input type="text" bind:value={newName} placeholder="Session name" onkeydown={(e) => e.key === 'Enter' && createSession()} autocapitalize="off" />
       <div class="cmd-row-new">
         <input type="text" bind:value={newPath} placeholder="Working directory (optional)" autocapitalize="off" />
