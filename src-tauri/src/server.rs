@@ -154,6 +154,28 @@ fn handle_request(req: &Request) -> Response {
             }
         }
 
+        "new_window" => {
+            let session = match require_str(p, "session") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            match tmux::new_window(session) {
+                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
+                Err(e) => Response::err(id, ERR_INTERNAL, e),
+            }
+        }
+
+        "kill_window" => {
+            let target = match require_str(p, "target") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            match tmux::kill_window(target) {
+                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
+                Err(e) => Response::err(id, ERR_INTERNAL, e),
+            }
+        }
+
         "pane_command" => {
             let target = match require_str(p, "target") {
                 Ok(s) => s,

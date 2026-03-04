@@ -218,6 +218,18 @@ pub fn kill_session(name: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 创建新 window
+pub fn new_window(session: &str) -> Result<(), String> {
+    run_tmux(&["new-window", "-t", session])?;
+    Ok(())
+}
+
+/// 关闭 window
+pub fn kill_window(target: &str) -> Result<(), String> {
+    run_tmux(&["kill-window", "-t", target])?;
+    Ok(())
+}
+
 /// 检查 tmux server 是否运行
 pub fn is_server_running() -> bool {
     run_tmux(&["list-sessions"]).is_ok()

@@ -1,5 +1,5 @@
 <script>
-  import { listSessions, listPanes, newSession, killSession, fsList } from './ws.js';
+  import { listSessions, listPanes, newSession, killSession, newWindow, killWindow, fsList } from './ws.js';
   import Icon from './Icon.svelte';
 
   let { openTerminal, activeTarget = '', visible = false } = $props();
@@ -155,13 +155,19 @@
         {#if expanded[s.name] && panes[s.name]}
           <div class="pane-list">
             {#each panes[s.name] as p}
-              <button class="pane" class:active-pane={activeTarget === `${p.session}:${p.window}.${p.pane}`} onclick={() => openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command)}>
-                <span class="pane-id">:{p.window}.{p.pane}</span>
-                <span class="pane-cmd">{p.current_command}</span>
-                <span class="pane-size">{p.width}×{p.height}</span>
-                <span class="pane-arrow">→</span>
-              </button>
+              <div class="pane-row">
+                <button class="pane" class:active-pane={activeTarget === `${p.session}:${p.window}.${p.pane}`} onclick={() => openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command)}>
+                  <span class="pane-id">:{p.window}.{p.pane}</span>
+                  <span class="pane-cmd">{p.current_command}</span>
+                  <span class="pane-size">{p.width}×{p.height}</span>
+                  <span class="pane-arrow">→</span>
+                </button>
+                <button class="pane-kill" onclick={async () => { await killWindow(`${s.name}:${p.window}`); panes[s.name] = await listPanes(s.name); }}><Icon name="x" size={10} /></button>
+              </div>
             {/each}
+            <button class="pane-add" onclick={async () => { await newWindow(s.name); panes[s.name] = await listPanes(s.name); }}>
+              <Icon name="plus" size={12} /> Window
+            </button>
           </div>
         {/if}
       </div>
@@ -349,6 +355,24 @@
   .pane:active { background: var(--accent-bg); }
   .pane.active-pane { background: var(--accent-bg); }
   .pane:last-child { border-bottom: none; }
+  .pane-row {
+    display: flex; align-items: center;
+    border-bottom: 1px solid var(--border2);
+  }
+  .pane-row:last-of-type { border-bottom: none; }
+  .pane-row .pane { border-bottom: none; }
+  .pane-kill {
+    padding: 8px; border: none; background: none; color: var(--text3);
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  .pane-kill:active { color: var(--danger); }
+  .pane-add {
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+    width: 100%; padding: 8px; border: none; border-top: 1px solid var(--border2);
+    background: none; color: var(--text3); font-size: 12px; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .pane-add:active { color: var(--accent); }
 
   .pane-id {
     font-family: 'SF Mono', Menlo, monospace;
