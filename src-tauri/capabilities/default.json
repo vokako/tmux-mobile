@@ -13,6 +13,9 @@
     "fs:allow-write",
     "fs:allow-read",
     "fs:allow-mkdir",
+    "fs:scope-appcache-recursive",
+    "fs:allow-appcache-write-recursive",
+    "fs:allow-appcache-read-recursive",
     "opener:default",
     {
       "identifier": "opener:allow-open-path",
@@ -22,6 +25,6 @@
       "identifier": "opener:allow-open-url",
       "allow": [{ "url": "content:*" }]
     },
-    "path:default"
+    "core:path:default"
   ]
 }
