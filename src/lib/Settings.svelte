@@ -125,13 +125,18 @@
       <div class="error">{error}</div>
     {/if}
 
-    <button class="connect-btn" onclick={doConnect} disabled={connecting || !address}>
-      {#if connecting}
-        <span class="spinner"></span> Connecting…
-      {:else}
+    {#if connecting}
+      <div class="connect-row">
+        <button class="connect-btn connecting" disabled>
+          <span class="spinner"></span> Connecting…
+        </button>
+        <button class="cancel-btn" onclick={() => { disconnect(); connecting = false; }}>Cancel</button>
+      </div>
+    {:else}
+      <button class="connect-btn" onclick={doConnect} disabled={!address}>
         Connect
-      {/if}
-    </button>
+      </button>
+    {/if}
   </div>
 </div>
 
@@ -296,6 +301,13 @@
   .connect-btn:disabled {
     opacity: 0.4;
     cursor: default;
+  }
+  .connect-row { display: flex; gap: 8px; }
+  .connect-row .connect-btn { flex: 1; }
+  .cancel-btn {
+    padding: 13px 20px; border: 1px solid var(--border); border-radius: 10px;
+    background: none; color: var(--text2); font-size: 14px; font-weight: 600;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
 
   .spinner {

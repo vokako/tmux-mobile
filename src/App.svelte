@@ -64,6 +64,7 @@
   let manualDisconnect = false;
 
   let reconnecting = $state(false);
+  let reconnectTimer = null;
 
   setOnDisconnect(() => {
     if (manualDisconnect) {
@@ -71,24 +72,33 @@
       connected = false;
       return;
     }
-    // Don't reset page, just show reconnecting
     connected = false;
     reconnecting = true;
     tryReconnect();
   });
 
+  function cancelReconnect() {
+    reconnecting = false;
+    clearTimeout(reconnectTimer);
+    disconnect();
+    page = 'settings';
+  }
+
   function tryReconnect(attempt = 0) {
+    if (!reconnecting) return;
     const addr = localStorage.getItem('tmux_address');
     const token = localStorage.getItem('tmux_token') || '';
     if (!addr) { reconnecting = false; page = 'settings'; return; }
     connect(addr, token).then(() => {
+      if (!reconnecting) return;
       connected = true;
       reconnecting = false;
       if (terminalTarget) wsSubscribe(terminalTarget);
     }).catch(() => {
+      if (!reconnecting) return;
       if (attempt < 20) {
         const delay = Math.min(1000 * (attempt + 1), 5000);
-        setTimeout(() => tryReconnect(attempt + 1), delay);
+        reconnectTimer = setTimeout(() => tryReconnect(attempt + 1), delay);
       } else {
         reconnecting = false;
         page = 'settings';
@@ -285,9 +295,10 @@
     <button class="sp-overlay" onclick={() => showSettings = false}></button>
   {/if}
 
-  {#if reconnecting}
+  {#if reconnecting && page !== 'settings'}
     <div class="reconnect-bar">
       <span class="reconnect-spinner"></span> Reconnecting...
+      <button class="reconnect-cancel" onclick={cancelReconnect}>Cancel</button>
     </div>
   {/if}
 
@@ -495,6 +506,11 @@
     animation: reconnect-spin 0.6s linear infinite;
   }
   @keyframes reconnect-spin { to { transform: rotate(360deg); } }
+  .reconnect-cancel {
+    margin-left: auto; padding: 2px 10px; border: 1px solid var(--accent);
+    border-radius: 6px; background: none; color: var(--accent); font-size: 11px;
+    font-weight: 600; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
 
   .page {
     flex: 1;
