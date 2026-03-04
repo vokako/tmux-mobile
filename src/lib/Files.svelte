@@ -347,8 +347,8 @@
           const { appCacheDir } = window.__TAURI__.path;
           const { writeFile, mkdir, exists } = window.__TAURI__.fs;
           const cacheDir = await appCacheDir();
-          const filePath = cacheDir + 'downloads/' + r.name;
-          try { await mkdir(cacheDir + 'downloads', { recursive: true }); } catch {}
+          const filePath = cacheDir + 'TmuxMobile/' + r.name;
+          try { await mkdir(cacheDir + 'TmuxMobile', { recursive: true }); } catch {}
           const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
           await writeFile(filePath, bytes);
           downloading = '';
