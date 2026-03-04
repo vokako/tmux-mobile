@@ -94,18 +94,22 @@
   });
 
   // Scroll to bottom when keyboard opens/closes
+  function scheduleScroll() {
+    if (!termAtBottom) return;
+    // Multiple attempts to catch layout changes
+    for (const ms of [50, 150, 300, 500]) setTimeout(scrollToBottom, ms);
+  }
   $effect(() => {
     const vv = window.visualViewport;
-    const scrollIfBottom = () => {
-      if (termAtBottom) setTimeout(scrollToBottom, 100);
-    };
-    // visualViewport resize (works in browsers)
-    if (vv) vv.addEventListener('resize', scrollIfBottom);
-    // focus/blur on window (works in Tauri WebView)
-    window.addEventListener('resize', scrollIfBottom);
+    if (vv) vv.addEventListener('resize', scheduleScroll);
+    window.addEventListener('resize', scheduleScroll);
+    // Also listen for focus on any textarea in this component
+    const onFocus = (e) => { if (e.target.tagName === 'TEXTAREA') scheduleScroll(); };
+    document.addEventListener('focusin', onFocus);
     return () => {
-      if (vv) vv.removeEventListener('resize', scrollIfBottom);
-      window.removeEventListener('resize', scrollIfBottom);
+      if (vv) vv.removeEventListener('resize', scheduleScroll);
+      window.removeEventListener('resize', scheduleScroll);
+      document.removeEventListener('focusin', onFocus);
     };
   });
 

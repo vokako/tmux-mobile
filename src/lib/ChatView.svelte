@@ -161,16 +161,20 @@
   });
 
   // Scroll to bottom when keyboard opens/closes
+  function scheduleScroll() {
+    if (!isAtBottom) return;
+    for (const ms of [50, 150, 300, 500]) setTimeout(scrollToBottom, ms);
+  }
   $effect(() => {
     const vv = window.visualViewport;
-    const scrollIfBottom = () => {
-      if (isAtBottom) setTimeout(scrollToBottom, 100);
-    };
-    if (vv) vv.addEventListener('resize', scrollIfBottom);
-    window.addEventListener('resize', scrollIfBottom);
+    if (vv) vv.addEventListener('resize', scheduleScroll);
+    window.addEventListener('resize', scheduleScroll);
+    const onFocus = (e) => { if (e.target.tagName === 'TEXTAREA') scheduleScroll(); };
+    document.addEventListener('focusin', onFocus);
     return () => {
-      if (vv) vv.removeEventListener('resize', scrollIfBottom);
-      window.removeEventListener('resize', scrollIfBottom);
+      if (vv) vv.removeEventListener('resize', scheduleScroll);
+      window.removeEventListener('resize', scheduleScroll);
+      document.removeEventListener('focusin', onFocus);
     };
   });
 
