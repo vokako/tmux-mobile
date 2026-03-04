@@ -105,7 +105,19 @@
   }
 
   let refreshing = $state(false);
+  let confirmKillWindow = $state(null);
   let confirmKill = $state(null);
+
+  async function removeWindow(target, session) {
+    if (confirmKillWindow !== target) {
+      confirmKillWindow = target;
+      setTimeout(() => { if (confirmKillWindow === target) confirmKillWindow = null; }, 3000);
+      return;
+    }
+    confirmKillWindow = null;
+    await killWindow(target);
+    panes[session] = await listPanes(session);
+  }
   async function doRefresh() {
     refreshing = true;
     await refresh();
@@ -160,9 +172,14 @@
                   <span class="pane-id">:{p.window}.{p.pane}</span>
                   <span class="pane-cmd">{p.current_command}</span>
                   <span class="pane-size">{p.width}×{p.height}</span>
-                  <span class="pane-arrow">→</span>
                 </button>
-                <button class="pane-kill" onclick={async () => { await killWindow(`${s.name}:${p.window}`); panes[s.name] = await listPanes(s.name); }}><Icon name="x" size={10} /></button>
+                <button class="pane-kill" class:confirm={confirmKillWindow === `${s.name}:${p.window}`} onclick={() => removeWindow(`${s.name}:${p.window}`, s.name)}>
+                  {#if confirmKillWindow === `${s.name}:${p.window}`}
+                    <span class="kill-text">del</span>
+                  {:else}
+                    <Icon name="x" size={10} />
+                  {/if}
+                </button>
               </div>
             {/each}
             <button class="pane-add" onclick={async () => { await newWindow(s.name); panes[s.name] = await listPanes(s.name); }}>
@@ -366,6 +383,7 @@
     cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
   .pane-kill:active { color: var(--danger); }
+  .pane-kill.confirm { color: var(--danger); }
   .pane-add {
     display: flex; align-items: center; justify-content: center; gap: 4px;
     width: 100%; padding: 8px; border: none; border-top: 1px solid var(--border2);
