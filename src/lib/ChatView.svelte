@@ -155,15 +155,21 @@
     if (chatEl) { chatEl.scrollTop = chatEl.scrollHeight; isAtBottom = true; }
   }
 
+  // Scroll on mount and new messages
   $effect(() => {
     messages;
-    if (isAtBottom && chatEl) requestAnimationFrame(() => { chatEl.scrollTop = chatEl.scrollHeight; });
+    requestAnimationFrame(() => {
+      if (isAtBottom) scrollToBottom();
+      checkAtBottom();
+    });
   });
 
   // Scroll to bottom when keyboard opens/closes
   function scheduleScroll() {
-    if (!isAtBottom) return;
-    for (const ms of [50, 150, 300, 500]) setTimeout(scrollToBottom, ms);
+    for (const ms of [50, 150, 300, 500]) setTimeout(() => {
+      scrollToBottom();
+      checkAtBottom();
+    }, ms);
   }
   $effect(() => {
     const vv = window.visualViewport;

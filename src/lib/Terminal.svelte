@@ -84,20 +84,33 @@
   }
 
   function scrollToBottom() {
-    if (termEl) termEl.scrollTop = termEl.scrollHeight;
+    if (termEl) {
+      termEl.scrollTop = termEl.scrollHeight;
+      termAtBottom = true;
+    }
   }
+
+  // Scroll to bottom on tab switch or first render
+  $effect(() => {
+    viewMode; // track tab switches
+    requestAnimationFrame(scrollToBottom);
+  });
 
   // Auto-scroll when new content arrives and user is at bottom
   $effect(() => {
     termHtml; // track
     if (termAtBottom) requestAnimationFrame(scrollToBottom);
+    // Also recheck atBottom after content change
+    requestAnimationFrame(checkAtBottom);
   });
 
   // Scroll to bottom when keyboard opens/closes
   function scheduleScroll() {
-    if (!termAtBottom) return;
-    // Multiple attempts to catch layout changes
-    for (const ms of [50, 150, 300, 500]) setTimeout(scrollToBottom, ms);
+    // Always scroll + recheck, keyboard changes layout so old atBottom is stale
+    for (const ms of [50, 150, 300, 500]) setTimeout(() => {
+      scrollToBottom();
+      checkAtBottom();
+    }, ms);
   }
   $effect(() => {
     const vv = window.visualViewport;
