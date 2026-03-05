@@ -19,14 +19,15 @@
   let resizeTimer;
 
   function doResize() {
-    if (!termEl || !measureEl) return;
+    if (!measureEl) return;
     const charW = measureEl.getBoundingClientRect().width;
     if (!charW) return;
-    // termEl has 10px padding on each side (padding: 8px 10px)
-    const innerW = termEl.clientWidth - 20;
-    const innerH = termEl.clientHeight - 16;
-    const cols = Math.max(40, Math.floor(innerW / charW));
-    const rows = Math.max(10, Math.floor(innerH / (13 * 1.35))); // font-size 13 × line-height 1.35
+    // Use visualViewport for accurate mobile dimensions (accounts for keyboard, notch, etc.)
+    const vp = window.visualViewport;
+    const vpW = vp ? vp.width : window.innerWidth;
+    const vpH = vp ? vp.height : window.innerHeight;
+    const cols = Math.max(20, Math.floor((vpW - 20) / charW)); // 20px total horizontal padding
+    const rows = Math.max(10, Math.floor(vpH / (13 * 1.35)));  // font-size 13 × line-height 1.35
     resizePane(target, cols, rows).catch(() => {});
   }
 
