@@ -172,17 +172,27 @@ const claudeCodeParser = {
   },
 
   classifyLine(trimmed, rawLine) {
-    // Banner / reset — Claude Code header
-    if (/^Claude Code v[\d.]+/.test(trimmed)) return { type: 'reset' };
-    // ASCII art logo lines (orange blocks)
-    if (/^[▐▝▘▜▛█]+/.test(trimmed) && trimmed.length < 30) return { type: 'skip' };
+    // Banner / reset — Claude Code header (both plain and box formats)
+    // Plain: "Claude Code v2.1.69"
+    // Box:   "╭─── Claude Code v2.1.69 ───╮"
+    if (/Claude Code v[\d.]+/.test(trimmed)) return { type: 'reset' };
+    // Box border lines (╭╮╰╯│)
+    if (/^[╭╰]─/.test(trimmed) || /^│/.test(trimmed)) return { type: 'skip' };
+    // ASCII art logo lines (orange blocks) — both standalone and inside box
+    if (/[▐▝▘▜▛█]{2,}/.test(trimmed) && !/\x00CC/.test(trimmed)) return { type: 'skip' };
     // Welcome line
-    if (/^Welcome to\s/.test(trimmed)) return { type: 'skip' };
+    if (/^Welcome (to|back)\b/.test(trimmed)) return { type: 'skip' };
+    // Hint lines
+    if (/^\/model to try\b/.test(trimmed)) return { type: 'skip' };
+    if (/^Tips for getting/.test(trimmed)) return { type: 'skip' };
+    if (/^(Run \/init|No recent activity|Recent activity)/.test(trimmed)) return { type: 'skip' };
+    // Accept edits status
+    if (/^⏵/.test(trimmed)) return { type: 'skip' };
 
     // Separator lines (gray ─── )
-    if (/^─{4,}$/.test(trimmed)) return { type: 'skip' };
+    if (/^─{4,}/.test(trimmed)) return { type: 'skip' };
     // Dashed separator (╌╌╌)
-    if (/^╌{4,}$/.test(trimmed)) return { type: 'skip' };
+    if (/^╌{4,}/.test(trimmed)) return { type: 'skip' };
 
     // Ghost suggestion / empty prompt — has reverse video \x1b[7m, NO bg color
     // These show up as: ❯ <text> after ANSI stripping, but raw has \x1b[7m
