@@ -6,11 +6,11 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
-    "withGlobalTauri": true,
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "TmuxMobile",
