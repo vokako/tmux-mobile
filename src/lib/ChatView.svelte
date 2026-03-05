@@ -63,6 +63,15 @@
     return /^[+\-]\s+\d+\s*:/.test(line) || /^\s+\d+,\s*\d+\s*:/.test(line);
   }
 
+  // Detect if a line starts a tool call block
+  // Kiro: "(using tool: X)", "Searching...", "Reading..."
+  // Claude Code: "Searched for N", "Read N file", "Update(file)", "Wrote to", "Ran ...", "Created", "Edited"
+  function isToolLine(line) {
+    return /\(using tool:/.test(line)
+      || /^(Searching|Reading|Looking up|Search |Found \d|Searching for)/.test(line)
+      || /^(Searched|Read \d|Wrote |Update\(|Ran |Created |Deleted |Edited )/.test(line);
+  }
+
   function parseBlocks(text, rawText) {
     const blocks = [];
     const lines = text.split('\n');
@@ -78,14 +87,18 @@
         blocks.push({ type: 'code', lang: lang || 'text', content: codeLines.join('\n') });
         i++; continue;
       }
-      if (/\(using tool:/.test(trimmed) || /^(Searching|Reading|Looking up|Search |Found \d|Searching for)/.test(trimmed)) {
+      if (isToolLine(trimmed)) {
         const toolRaw = [rawLines[i]]; i++;
         while (i < lines.length) {
           const next = lines[i].trim();
-          if (/^[✓❗]/.test(next) || /Completed in/.test(next) || /^\d+ (files|entries|of \d)/.test(next)) { toolRaw.push(rawLines[i]); i++; }
+          if (/^[✓❗⎿]/.test(next) || /Completed in/.test(next) || /^\d+ (files|entries|of \d)/.test(next)
+            || /^User rejected/.test(next) || /^\d+\s+[+\-]/.test(next)) { toolRaw.push(rawLines[i]); i++; }
           else break;
         }
-        const label = trimmed.match(/\(using tool:\s*(\w+)\)/)?.[1] || 'tool';
+        // Extract label: Kiro "(using tool: X)" or Claude Code action word
+        const label = trimmed.match(/\(using tool:\s*(\w+)\)/)?.[1]
+          || trimmed.match(/^(Searched|Read|Wrote|Update|Ran|Created|Deleted|Edited)\b/)?.[1]?.toLowerCase()
+          || 'tool';
         blocks.push({ type: 'tool', label, content: toolRaw.join('\n') });
         continue;
       }
@@ -101,7 +114,7 @@
       const textRaw = [rawLines[i]]; i++;
       while (i < lines.length) {
         const next = lines[i].trim();
-        if (/^```/.test(next) || /\(using tool:/.test(next) || isDiffLine(next) || /^(Searching|Reading|Looking up|Search |Found \d|Searching for)/.test(next)) break;
+        if (/^```/.test(next) || isToolLine(next) || isDiffLine(next)) break;
         textRaw.push(rawLines[i]); i++;
       }
       const t = textRaw.join('\n').trim();
