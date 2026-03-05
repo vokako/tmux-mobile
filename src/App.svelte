@@ -470,7 +470,7 @@
   .sp-btns button.active { background: var(--accent-bg); color: var(--accent); }
   .sp-disconnect {
     width: 100%; margin-top: 8px; padding: 10px; border: 1px solid var(--danger);
-    border-radius: 8px; background: var(--danger-bg); color: var(--danger);
+    border-radius: 8px; background: var(--bg2); color: var(--danger);
     font-size: 13px; font-weight: 600; cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
@@ -498,7 +498,7 @@
 
   .reconnect-bar {
     display: flex; align-items: center; justify-content: center; gap: 8px;
-    padding: 6px; background: var(--accent-bg); color: var(--accent);
+    padding: 6px; background: var(--bg2); border-bottom: 1px solid var(--accent); color: var(--accent);
     font-size: 12px; font-weight: 500; flex-shrink: 0;
   }
   .reconnect-spinner {

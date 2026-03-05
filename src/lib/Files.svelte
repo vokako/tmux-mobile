@@ -927,8 +927,8 @@
   }
 
   .error {
-    padding: 8px 12px; background: rgba(255,50,50,0.1); color: var(--danger);
-    font-size: 12px; border-bottom: 1px solid rgba(255,50,50,0.2);
+    padding: 8px 12px; background: var(--bg2); color: var(--danger);
+    font-size: 12px; border-bottom: 1px solid var(--danger);
   }
 
   /* File list */
