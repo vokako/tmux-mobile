@@ -621,7 +621,7 @@
       <div class="bookmarks-panel">
         {#each bookmarks as bm}
           <div class="bm-row">
-            <span class="bm-icon"><Icon name="folder" size={13} /></span>
+            <span class="bm-icon"><Icon name="star-filled" size={13} /></span>
             <button class="bm-path" onclick={() => { loadDir(bm); showBookmarks = false; }} use:scrollEnd>
               {bm}
             </button>
@@ -868,7 +868,7 @@
     display: flex; align-items: center; gap: 6px; padding: 0 10px;
     border-bottom: 1px solid var(--border2);
   }
-  .bm-icon { color: var(--text3); display: flex; flex-shrink: 0; }
+  .bm-icon { color: var(--accent); display: flex; flex-shrink: 0; }
   .bm-path {
     flex: 1; display: block;
     padding: 8px 0; border: none; background: none; color: var(--text);
