@@ -420,14 +420,10 @@ export function parseMessages(raw, parser) {
         continue;
       case 'agent':
         isThinking = false; started = true;
-        // If already in an agent bubble (e.g. tool→agent), merge instead of splitting
-        if (current?.role === 'agent') {
-          if (cls.text) { current.lines.push(cls.text); current.rawLines.push(cls.rawText); }
-        } else {
-          flush();
-          lastRole = null;
-          current = { role: 'agent', lines: cls.text ? [cls.text] : [], rawLines: cls.text ? [cls.rawText] : [] };
-        }
+        // Each white ⏺ is a separate bubble
+        flush();
+        lastRole = null;
+        current = { role: 'agent', lines: cls.text ? [cls.text] : [], rawLines: cls.text ? [cls.rawText] : [] };
         continue;
       case 'empty':
         if (!started) continue;
