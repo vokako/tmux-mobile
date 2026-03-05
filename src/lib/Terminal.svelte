@@ -1,11 +1,11 @@
 <script>
-  import { subscribe, unsubscribe, setOnPaneOutput, sendCommand, sendKeys, paneCommand } from './ws.js';
+  import { subscribe, unsubscribe, setOnPaneOutput, sendCommand, sendKeys, paneCommand, listPanes } from './ws.js';
   import Convert from 'ansi-to-html';
   import ChatView from './ChatView.svelte';
   import Icon from './Icon.svelte';
   import { detectParser } from './parsers.js';
 
-  let { target, session, command: initialCommand = '', viewMode = 'terminal', onChatSupported = () => {} } = $props();
+  let { target, session, command: initialCommand = '', viewMode = 'terminal', onChatSupported = () => {}, onSwitchPane = null } = $props();
 
   let input = $state('');
   let paneContent = $state('');
@@ -75,6 +75,28 @@
   let statusInfo = $derived.by(() => {
     if (!paneContent || !parser) return null;
     return parser.extractStatus(paneContent);
+  });
+
+  // Window switcher
+  let windowPanes = $state([]);
+  let showWindowCmd = $state(false);
+  let currentWindow = $derived(target.split(':')[1]?.split('.')[0] || '');
+
+  // Group panes by window
+  let windows = $derived.by(() => {
+    const map = new Map();
+    for (const p of windowPanes) {
+      if (!map.has(p.window)) map.set(p.window, p);
+    }
+    return [...map.values()];
+  });
+
+  $effect(() => {
+    if (!session) return;
+    const load = () => listPanes(session).then(p => { windowPanes = p; }).catch(() => {});
+    load();
+    const id = setInterval(load, 5000);
+    return () => clearInterval(id);
   });
 
   function checkAtBottom() {
@@ -193,6 +215,20 @@
 </script>
 
 <div class="terminal">
+  {#if windows.length > 1}
+    <div class="win-switcher" class:expanded={showWindowCmd} onclick={() => showWindowCmd = !showWindowCmd}>
+      {#each windows as w}
+        <button
+          class="win-tab"
+          class:active={String(w.window) === currentWindow}
+          onclick={(e) => { e.stopPropagation(); if (onSwitchPane) onSwitchPane(`${w.session}:${w.window}.${w.pane}`, w.current_command); }}
+        >
+          <span class="win-num">{w.window}</span>
+          {#if showWindowCmd}<span class="win-cmd">{w.current_command}</span>{/if}
+        </button>
+      {/each}
+    </div>
+  {/if}
   <div class="term-wrap" class:hidden={viewMode !== 'terminal'}>
     <div class="ansi-output" bind:this={termEl} onscroll={checkAtBottom}>{@html termHtml}</div>
     {#if !termAtBottom}
@@ -283,7 +319,30 @@
     flex: 1;
     min-height: 0;
     background: var(--bg);
+    position: relative;
   }
+
+  /* Window switcher */
+  .win-switcher {
+    position: absolute; top: 8px; right: 8px; z-index: 10;
+    display: flex; flex-direction: column; gap: 2px;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 2px; opacity: 0.85;
+    max-height: 50%; overflow-y: auto;
+  }
+  .win-switcher.expanded { opacity: 1; }
+  .win-tab {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 8px; border: none; border-radius: 6px;
+    background: none; color: var(--text2); font-size: 11px;
+    cursor: pointer; white-space: nowrap;
+    -webkit-tap-highlight-color: transparent;
+    font-family: 'SF Mono', Menlo, monospace;
+  }
+  .win-tab.active { background: var(--accent-bg); color: var(--accent); }
+  .win-tab:active { background: var(--surface2); }
+  .win-num { font-weight: 600; min-width: 14px; text-align: center; }
+  .win-cmd { color: var(--text3); font-size: 10px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
 
   .input-status {
     display: flex;
