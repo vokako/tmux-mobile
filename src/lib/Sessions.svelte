@@ -42,7 +42,7 @@
     return parts.map((name, i) => ({ name, path: '/' + parts.slice(0, i + 1).join('/') }));
   });
 
-  let pickerPathEl;
+  let pickerPathEl = $state(null);
   $effect(() => {
     pickerPath;
     setTimeout(() => { if (pickerPathEl) pickerPathEl.scrollLeft = pickerPathEl.scrollWidth; }, 0);
@@ -414,10 +414,6 @@
     font-family: 'SF Mono', Menlo, monospace;
     color: var(--text3);
     font-size: 11px;
-  }
-  .pane-arrow {
-    color: var(--accent);
-    font-size: 12px;
   }
 
   .bottom-bar { display: flex; gap: 8px; }

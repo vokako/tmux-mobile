@@ -263,7 +263,7 @@
   input:focus {
     border-color: var(--accent);
     background: var(--accent-bg);
-    box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.08);
+    box-shadow: 0 0 0 3px var(--accent-glow);
   }
   input::placeholder { color: var(--text3); }
 

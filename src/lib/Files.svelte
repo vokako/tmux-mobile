@@ -154,9 +154,9 @@
   let newType = $state(''); // 'file' or 'dir'
   let renaming = $state(null); // path being renamed
   let renameValue = $state('');
-  let bcPathEl;
-  let pdfContainer;
-  let filesEl;
+  let bcPathEl = $state(null);
+  let pdfContainer = $state(null);
+  let filesEl = $state(null);
   let bookmarks = $state([]);
   let showBookmarks = $state(false);
 
@@ -449,7 +449,7 @@
       setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
       downloadToast = 'Downloaded';
       setTimeout(() => downloadToast = '', 2000);
-    } catch (e) { error = e.message; }
+    } catch (e) { downloading = ''; error = e.message; }
   }
 
   async function handleUpload() {
@@ -460,8 +460,12 @@
       const files = Array.isArray(selected) ? selected : [selected];
       for (const filePath of files) {
         const name = String(filePath).split('/').pop().split('\\').pop();
-        const bytes = await tauriFs.readFile(filePath);
-        const b64 = btoa(String.fromCharCode(...new Uint8Array(bytes)));
+        const bytes = new Uint8Array(await tauriFs.readFile(filePath));
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 8192) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+        }
+        const b64 = btoa(binary);
         const dest = cwd.replace(/\/$/, '') + '/' + name;
         try { await fsUpload(dest, b64); } catch (e) { error = e.message; }
       }
@@ -579,7 +583,13 @@
     }
   }
 
-  let previewEl;
+  let previewEl = $state(null);
+
+  function mimeFromName(name) {
+    const ext = name.split('.').pop()?.toLowerCase();
+    const map = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif' };
+    return map[ext] || 'image/png';
+  }
 
   async function resolveImages(container) {
     if (!container) return;
@@ -592,7 +602,7 @@
       const fullPath = src.startsWith('/') ? src : dir + '/' + src;
       try {
         const r = await fsDownload(fullPath);
-        const mime = currentFile?.stat?.mime_hint || 'image/png';
+        const mime = mimeFromName(r.name || src);
         img.src = `data:${mime};base64,${r.data}`;
       } catch { img.alt = `[${src}]`; }
     }
@@ -623,6 +633,7 @@
   }
 </script>
 
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="files" bind:this={filesEl} ontouchstart={onTouchStart} ontouchend={onTouchEnd}>
   {#if view === 'list'}
     <!-- Toolbar: all buttons in one row -->
@@ -760,7 +771,7 @@
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'csv'}
         <div class="csv-render">{@html renderCsv(currentFile.content)}</div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'html'}
-        <iframe class="html-preview" srcdoc={currentFile.content} sandbox="allow-scripts allow-same-origin" title="HTML Preview"></iframe>
+        <iframe class="html-preview" srcdoc={currentFile.content} sandbox="allow-same-origin" title="HTML Preview"></iframe>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'pdf'}
         <div class="pdf-container" bind:this={pdfContainer} style="margin: -12px; padding: 0;"></div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'image'}
@@ -967,8 +978,8 @@
   .act-btn.del:active, .act-btn.del.confirm { color: var(--danger); }
   .del-text { font-size: 10px; font-weight: 600; }
   .act-btn.save { color: var(--accent); }
-  .act-btn.save:disabled { color: rgba(226,232,240,0.15); }
-  .act-btn:disabled { color: rgba(226,232,240,0.15); }
+  .act-btn.save:disabled { color: var(--text3); opacity: 0.5; }
+  .act-btn:disabled { color: var(--text3); opacity: 0.5; }
   .empty, .loading { padding: 40px; text-align: center; color: var(--text3); font-size: 14px; }
 
   /* Preview header */

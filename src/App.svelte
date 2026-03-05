@@ -121,6 +121,8 @@
   }
 
   function doDisconnect() {
+    reconnecting = false;
+    clearTimeout(reconnectTimer);
     manualDisconnect = true;
     disconnect();
     connected = false;
@@ -292,7 +294,7 @@
       <button class="sp-disconnect" onclick={() => { showSettings = false; doDisconnect(); }}>Disconnect</button>
       {/if}
     </div>
-    <button class="sp-overlay" onclick={() => showSettings = false}></button>
+    <button class="sp-overlay" onclick={() => showSettings = false} aria-label="Close settings"></button>
   {/if}
 
   {#if reconnecting && page !== 'settings'}
@@ -302,6 +304,7 @@
     </div>
   {/if}
 
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="page" class:page-terminal={page === 'terminal'} ontouchstart={onPageTouchStart} ontouchend={onPageTouchEnd}>
     {#if page === 'settings'}
       <Settings {onConnected} />
@@ -345,6 +348,7 @@
     --surface: rgba(255,255,255,0.03); --surface2: rgba(255,255,255,0.06);
     --accent: #00d4ff; --accent-bg: rgba(0,212,255,0.12); --accent-glow: rgba(0,212,255,0.1);
     --danger: #ff5050; --danger-bg: rgba(255,80,80,0.08);
+    --status-ok: #4ade80; --status-warn: #fbbf24; --status-danger: #ff5050;
     --nav-bg: rgba(12,12,20,0.95); --pill-bg: rgba(255,255,255,0.04);
     --input-bg: rgba(255,255,255,0.04); --input-border: rgba(255,255,255,0.08);
     --code-bg: rgba(255,255,255,0.05);
@@ -356,6 +360,7 @@
     --surface: rgba(0,0,0,0.02); --surface2: rgba(0,0,0,0.04);
     --accent: #0088cc; --accent-bg: rgba(0,136,204,0.08); --accent-glow: rgba(0,136,204,0.06);
     --danger: #e53e3e; --danger-bg: rgba(229,62,62,0.06);
+    --status-ok: #16a34a; --status-warn: #ca8a04; --status-danger: #e53e3e;
     --nav-bg: rgba(245,245,247,0.95); --pill-bg: rgba(0,0,0,0.03);
     --input-bg: rgba(0,0,0,0.02); --input-border: rgba(0,0,0,0.08);
     --code-bg: rgba(0,0,0,0.03);
@@ -423,19 +428,6 @@
     align-items: center;
     gap: 10px;
     margin-left: auto;
-  }
-
-  .status-dot {
-    width: 7px; height: 7px;
-    border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 8px var(--accent-glow);
-    animation: pulse 2s ease-in-out infinite;
-  }
-
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
   }
 
   .gear-btn {
