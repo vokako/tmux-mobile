@@ -19,11 +19,12 @@ class MainActivity : TauriActivity() {
     val density = resources.displayMetrics.density
 
     // Add JS interface for opening files (retry until WebView is in hierarchy)
+    var attachAttempts = 0
     fun attachFileOpener() {
       val webView = findWebView(rootView)
       if (webView != null) {
         webView.addJavascriptInterface(FileOpener(), "AndroidFileOpener")
-      } else {
+      } else if (++attachAttempts < 50) {
         rootView.postDelayed(::attachFileOpener, 100)
       }
     }
