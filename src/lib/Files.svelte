@@ -1073,7 +1073,7 @@
   /* Copy toast */
   .copy-toast {
     position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%);
-    background: var(--surface2); color: var(--accent); padding: 8px 20px;
+    background: var(--bg); border: 1px solid var(--border); color: var(--accent); padding: 8px 20px;
     border-radius: 8px; font-size: 13px; font-weight: 500;
     box-shadow: 0 4px 16px rgba(0,0,0,0.3); pointer-events: none;
     animation: toast-fade 1.2s ease forwards;
