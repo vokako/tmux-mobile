@@ -604,7 +604,7 @@
         <Icon name={isBookmarked(cwd) ? 'star-filled' : 'star'} size={15} />
       </button>
       <button class="tool-btn" class:tool-active={showBookmarks} onclick={() => showBookmarks = !showBookmarks} title="Bookmarks">
-        <Icon name="files" size={15} />
+        <Icon name="folder-star" size={15} />
       </button>
     </div>
 
