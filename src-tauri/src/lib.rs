@@ -18,15 +18,19 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![get_local_config])
         .setup(|_app| {
-            let cfg = Config::load();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) =
-                    server::start_with_socket(&cfg.host, cfg.port, &cfg.token, cfg.tmux_socket)
-                        .await
-                {
-                    eprintln!("Server error: {}", e);
-                }
-            });
+            // Only start server on desktop, not on mobile
+            #[cfg(desktop)]
+            {
+                let cfg = Config::load();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) =
+                        server::start_with_socket(&cfg.host, cfg.port, &cfg.token, cfg.tmux_socket)
+                            .await
+                    {
+                        eprintln!("Server error: {}", e);
+                    }
+                });
+            }
             Ok(())
         })
         .run(tauri::generate_context!())
