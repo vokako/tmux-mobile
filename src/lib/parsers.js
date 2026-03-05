@@ -186,7 +186,11 @@ const claudeCodeParser = {
 
     // Ghost suggestion / empty prompt — has reverse video \x1b[7m, NO bg color
     // These show up as: ❯ <text> after ANSI stripping, but raw has \x1b[7m
-    if (/^❯\s/.test(trimmed) && /\x1b\[7m/.test(rawLine) && !/\x1b\[48;2;55;55;55m/.test(rawLine)) {
+    if (/^❯(\s|$)/.test(trimmed) && /\x1b\[7m/.test(rawLine) && !/\x1b\[48;2;55;55;55m/.test(rawLine)) {
+      return { type: 'skip' };
+    }
+    // Bare ❯ without any ANSI (scrollback artifact)
+    if (/^❯\s*$/.test(trimmed) && !/\x1b\[48;2;55;55;55m/.test(rawLine)) {
       return { type: 'skip' };
     }
 
@@ -254,6 +258,12 @@ const claudeCodeParser = {
       const text = trimmed.replace(/^.*\x00CCTOOLFAIL\x00\s*/, '').trim();
       const raw = rawLine.replace(/^.*\x00CCTOOLFAIL\x00\s*/, '');
       return { type: 'tool', text, rawText: raw };
+    }
+
+    // Model confirmation after /model command (⎿  Kept model as... / Set model to...)
+    if (/^⎿\s+(Kept model as|Set model to)\s/.test(trimmed)) {
+      const m = trimmed.match(/(Kept model as|Set model to)\s+([\w.-]+)/);
+      return { type: 'model_confirmed', text: m ? m[2] : 'model' };
     }
 
     // Tool sub-items (⎿ indented lines)
