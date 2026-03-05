@@ -1,88 +1,83 @@
-# Lessons Learned: Terminal Output → Chat UI Parsing
+# Lessons Learned
 
-## Core Challenge
-Parsing raw terminal output (with ANSI escape sequences) from a tmux pane into structured chat messages. The terminal is a flat stream of characters — no semantic structure, no API, just rendered text.
+## 1. Terminal Output → Chat UI Parsing
 
-## Key Insights
+### ANSI Colors Are the Best Semantic Markers
+Text-only parsing (regex on stripped text) is fragile. A `>` character appears in code, markdown quotes, and actual prompts.
 
-### 1. ANSI Colors Are the Best Semantic Markers
-**Problem**: Text-only parsing (regex on stripped text) is fragile. A `>` character appears in code, markdown quotes, and actual prompts.
-
-**Solution**: Use ANSI color codes as semantic delimiters BEFORE stripping them.
+Use ANSI color codes as semantic delimiters BEFORE stripping them:
 - Kiro CLI colors `>` differently: color 93 (purple) for user prompt, color 141 (light purple) for agent response
-- Insert `\x00AGENT\x00` / `\x00UPROMPT\x00` markers using color-specific regex, then strip ANSI for text parsing
-- This cleanly separates "user typed this" from "agent said this" from "code contains >"
+- Insert marker tokens using color-specific regex, then strip ANSI for text parsing
 
-**Gotcha**: The color reset `\e[39m` after `>` is NOT always present. Sometimes the next color starts immediately (e.g., `\e[38;5;93m> \e[38;5;240mhint text`). Make the reset optional in the regex: `(\x1b\[39m)?`
+**Gotcha**: The color reset `\e[39m` after `>` is NOT always present. Make the reset optional in regex.
 
-### 2. Soft-Wrapped Lines vs Real Newlines
-**Problem**: tmux `capture-pane` wraps output at screen width. A single long user message becomes multiple lines, breaking message boundary detection.
+### Soft-Wrapped Lines
+Use `capture-pane -J` flag to join soft-wrapped lines. Without it, messages get split at screen width and lines get misclassified.
 
-**Solution**: Use `capture-pane -J` flag to join soft-wrapped lines. This gives the original line breaks, not screen-width artifacts.
+### System Hints vs User Input
+Kiro CLI shows placeholder hints at the prompt. Real user-typed text has NO ANSI codes. System hints are always colored — check if raw text starts with `\x1b[`.
 
-**Impact**: Without `-J`, a user message like "帮我分析一下这个项目" gets split into 3 lines, and lines 2-3 get misclassified as system output.
+### Thinking Spinner
+Filter braille spinner lines (`/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*Thinking/i`), show CSS animation instead.
 
-### 3. System Hints vs User Input
-**Problem**: Kiro CLI shows a placeholder hint at the prompt (`5% > Need help with features?`). This has the user prompt marker but isn't real user input.
+## 2. Tauri + Android Platform
 
-**Solution**: After extracting text following the UPROMPT marker, check if the raw text starts with an ANSI escape (`\x1b[`). Real user-typed text has NO ANSI codes. System hints are always colored.
+### tauri-plugin-opener Is Broken on Android
+`openPath()` fails with `OpenArgs` deserialization error. Use a custom `@JavascriptInterface` in `MainActivity.kt` with `FileProvider.getUriForFile()` + `Intent.ACTION_VIEW`.
 
-### 4. Preamble Skipping
-**Problem**: Before the first conversation, the terminal shows shell prompts, `kiro-cli` header, MCP init lines, warnings. These shouldn't appear in chat.
+### WebView JS Interface Timing
+`addJavascriptInterface` via `rootView.post` can fail if the WebView isn't in the hierarchy yet. Use a retry loop with `postDelayed` (with a max retry limit to avoid infinite loops).
 
-**Solution**: `started` flag — skip all lines until the first `user` or `agent` classification. Also explicitly skip known patterns: `○`, `⠋`, `kiro-cli`, `Warning:`, `--More--`.
+### Frontend Must Wait for JS Interface
+Add a `waitForFileOpener()` helper that polls for `window.AndroidFileOpener` (up to 2s) before attempting to open files. Never fall through to broken Tauri plugin APIs.
 
-### 5. Message Boundary Detection
-**Problem**: When does one message end and the next begin?
+### Tauri Plugin Readiness
+Always `await tauriReady` (the Promise.all of plugin imports) before using any Tauri plugin. Dynamic imports are async.
 
-**Kiro CLI pattern**:
-- `XX% !> text` = user input (percentage + optional `!` + `>` + text)
-- `>` or `> text` (color 141) = agent response start — each `>` is a NEW bubble
-- `▸ Credits: X.XX • Time: Xs` = end of turn
-- Empty line after user message = user message complete
-- Lines without markers after user = continuation (tmux word wrap)
-- Lines without markers after flush = system output (slash command results)
-
-### 6. Thinking Spinner Handling
-**Problem**: `⠋ Thinking...` / `⠸ Thinking...` lines with braille spinners cause chat bubbles to flicker as the spinner character changes every frame.
-
-**Solution**: Filter spinner lines (`/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*Thinking/i`), track `isThinking` state, show a CSS spinner animation instead. Reset `isThinking` when real content appears.
-
-### 7. ANSI Color Rendering in Chat Bubbles
-**Problem**: Agent responses contain colored text (file paths in purple, tool names in gray, etc.). Stripping ANSI loses this information.
-
-**Solution**: Keep raw ANSI in message `rawText`, convert to HTML spans at render time with `ansiToHtml()`. Support full 256-color palette. Apply `ensureReadable()` to brighten dark colors (luminance < 25%) for readability on dark backgrounds.
-
-### 8. Diff Block Detection
-**Problem**: Kiro CLI shows file diffs with `+ NNN:` and `- NNN:` format. These look similar to markdown lists (`- item`).
-
-**Solution**: Require `:` after the line number: `/^[+\-]\s+\d+\s*:/`. This prevents `- 100dvh 放在...` from being misclassified as a diff line.
-
-## Parser Architecture for Extensibility
-
-Each parser implements:
+### Platform Detection
 ```js
-{
-  name: 'kiro-cli',
-  detect(raw) {},           // Does this pane run this tool?
-  insertMarkers(raw) {},    // Replace ANSI color markers with semantic tokens
-  classifyLine(trimmed, rawLine) {},  // Classify each line by type
-  extractStatus(raw) {},    // Extract status bar info (context %, tool name)
-  isWaitingForInput(raw) {} // Is the prompt visible?
+const isTauri = !!(window.__TAURI__ || window.__TAURI_INTERNALS__);
+const isAndroid = /android/i.test(navigator.userAgent);
+```
+Always check `isAndroid` before falling back to generic Tauri APIs — some don't work on Android.
+
+## 3. WebSocket Client Robustness
+
+### Clean Up on Disconnect
+- Reject all pending promises in `onclose` handler (otherwise callers hang forever)
+- Close existing WebSocket before creating new one in `connect()` (prevents socket leaks on rapid reconnect)
+- Wrap `JSON.parse` in try-catch in `onmessage` (malformed messages crash the handler)
+
+### Manual Disconnect Must Cancel Reconnect
+`doDisconnect()` must clear `reconnecting` flag and `clearTimeout(reconnectTimer)`, otherwise a pending reconnect timer fires after manual disconnect.
+
+### Optional Chaining on Server Push Params
+Use `data.params?.target` not `data.params.target` — malformed server messages can have missing params.
+
+## 4. File Handling
+
+### Base64 Encoding Stack Overflow
+`btoa(String.fromCharCode(...new Uint8Array(bytes)))` crashes on files >100KB (JS argument limit). Chunk into 8192-byte segments:
+```js
+let binary = '';
+for (let i = 0; i < bytes.length; i += 8192) {
+  binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
 }
+const b64 = btoa(binary);
 ```
 
-The generic `parseMessages(raw, parser)` function handles the state machine (flush, started, isThinking) — parser only classifies individual lines.
+### Path Traversal in Local Downloads
+Filenames from remote servers can contain `../`. Always sanitize with `Path::file_name()` in Rust before joining to the download directory.
 
-To add a new CLI tool (e.g., Claude Code):
-1. Create a new parser object with the 5 methods
-2. Add to `const parsers = [kiroParser, newParser]`
-3. No changes needed in ChatView.svelte or Terminal.svelte
+### Markdown Image MIME Type
+When resolving relative image paths in markdown preview, infer MIME from the image's filename extension — NOT from the parent markdown file's mime_hint.
 
-## Common Pitfalls
-- **Don't strip ANSI too early** — you lose semantic information
-- **Don't assume `\e[39m` reset** — colors can chain without reset
-- **Test with real tmux output** — `tmux capture-pane -p -e` to see actual ANSI codes, `cat -v` to inspect
+### iframe Sandbox
+Never combine `allow-scripts` + `allow-same-origin` — it negates the sandbox entirely. For HTML preview, `allow-same-origin` alone is sufficient (CSS/fonts work, no JS execution).
+
+## 5. Common Pitfalls
+- **Don't strip ANSI too early** — you lose semantic information needed for chat parsing
+- **Test with real tmux output** — `tmux capture-pane -p -e` to see actual ANSI codes
 - **Account for tmux screen width** — use `-J` flag or messages get split
-- **Empty lines matter** — they're message boundaries, not just whitespace
-- **Scrollback can lose colors** — always have text-only fallback parsing
+- **Error state cleanup** — always reset loading/spinner states in catch blocks (e.g., `downloading = ''`)
+- **Android gen/ files** — `MainActivity.kt`, `AndroidManifest.xml` etc. are in `src-tauri/gen/android/` and survive `tauri android init` only if backed up
