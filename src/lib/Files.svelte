@@ -24,6 +24,16 @@
   import Icon from './Icon.svelte';
   import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsUpload, getBookmarks, saveBookmarks } from './ws.js';
 
+  // Tauri plugin imports (tree-shaken in browser builds)
+  let tauriFs, tauriDialog, tauriOpener, tauriPath;
+  const isTauri = typeof window !== 'undefined' && !!(window.__TAURI__ || window.__TAURI_INTERNALS__);
+  if (isTauri) {
+    import('@tauri-apps/plugin-fs').then(m => tauriFs = m);
+    import('@tauri-apps/plugin-dialog').then(m => tauriDialog = m);
+    import('@tauri-apps/plugin-opener').then(m => tauriOpener = m);
+    import('@tauri-apps/api/path').then(m => tauriPath = m);
+  }
+
   hljs.registerLanguage('javascript', javascript);
   hljs.registerLanguage('js', javascript);
   hljs.registerLanguage('typescript', typescript);
@@ -82,32 +92,25 @@
 
   // Android local files
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
-  const isTauri = typeof window !== 'undefined' && !!(window.__TAURI__ || window.__TAURI_INTERNALS__);
   let localFiles = $state([]);
   let localDir = $state('');
 
   async function getLocalDir() {
-    if (!isTauri) return '';
+    if (!isTauri || !tauriPath) return '';
     try {
-      const dir = await window.__TAURI__.core.invoke('plugin:path|resolve_directory', { directory: 'AppCache' });
+      const dir = await tauriPath.appCacheDir();
       return dir + '/TmuxMobile/';
     } catch {
-      // Fallback: try path API
-      try {
-        const dir = await window.__TAURI__.path.appCacheDir();
-        return dir + 'TmuxMobile/';
-      } catch {
-        return '';
-      }
+      return '';
     }
   }
 
   async function openLocalFiles() {
     try {
       const dir = await getLocalDir();
-      const { readDir, mkdir } = window.__TAURI__.fs;
-      try { await mkdir(dir, { recursive: true }); } catch {}
-      const items = await readDir(dir);
+      if (!dir) { error = 'Cannot resolve local dir'; return; }
+      try { await tauriFs.mkdir(dir, { recursive: true }); } catch {}
+      const items = await tauriFs.readDir(dir);
       localFiles = items.sort((a, b) => a.name.localeCompare(b.name));
       localDir = dir;
       view = 'local';
@@ -117,14 +120,13 @@
 
   async function openLocalFile(name) {
     try {
-      await window.__TAURI__.opener.openPath(localDir + name);
+      await tauriOpener.openPath(localDir + name);
     } catch (e) { error = 'Open failed: ' + e.message; }
   }
 
   async function deleteLocalFile(name) {
     try {
-      const { remove } = window.__TAURI__.fs;
-      await remove(localDir + name);
+      await tauriFs.remove(localDir + name);
       localFiles = localFiles.filter(f => f.name !== name);
     } catch (e) { error = e.message; }
   }
@@ -373,9 +375,9 @@
   let downloading = $state('');
 
   async function openDownloaded() {
-    if (!downloadedPath || !window.__TAURI__) return;
+    if (!downloadedPath || !tauriOpener) return;
     try {
-      await window.__TAURI__.opener.openPath(downloadedPath);
+      await tauriOpener.openPath(downloadedPath);
     } catch (e) { error = 'Open failed: ' + e.message; }
     dismissDownload();
   }
@@ -387,19 +389,15 @@
   async function handleDownload(path) {
     const name = path.split('/').pop();
     try {
-      if (window.__TAURI__) {
-        // Check if Android (no native save dialog that returns usable path)
-        const isAndroid = navigator.userAgent.includes('Android');
+      if (isTauri && tauriFs) {
         if (isAndroid) {
-          // Download to app cache, then open with system
           downloading = name;
           const r = await fsDownload(path);
-          const { writeFile, mkdir } = window.__TAURI__.fs;
-          const localDir = await getLocalDir();
-          const filePath = localDir + r.name;
-          try { await mkdir(localDir, { recursive: true }); } catch {}
+          const dlDir = await getLocalDir();
+          const filePath = dlDir + r.name;
+          try { await tauriFs.mkdir(dlDir, { recursive: true }); } catch {}
           const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
-          await writeFile(filePath, bytes);
+          await tauriFs.writeFile(filePath, bytes);
           downloading = '';
           downloadedPath = filePath;
           downloadToast = name;
@@ -407,14 +405,12 @@
           return;
         }
         // macOS / desktop: use save dialog
-        const { save } = window.__TAURI__.dialog;
-        const { writeFile } = window.__TAURI__.fs;
-        const savePath = await save({ defaultPath: name });
+        const savePath = await tauriDialog.save({ defaultPath: name });
         if (!savePath) return;
         downloading = name;
         const r = await fsDownload(path);
         const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
-        await writeFile(savePath, bytes);
+        await tauriFs.writeFile(savePath, bytes);
         downloading = '';
         downloadedPath = String(savePath);
         downloadToast = downloadedPath;
@@ -439,15 +435,13 @@
   }
 
   async function handleUpload() {
-    if (window.__TAURI__) {
-      const { open } = window.__TAURI__.dialog;
-      const { readFile } = window.__TAURI__.fs;
-      const selected = await open({ multiple: true });
+    if (isTauri && tauriDialog && tauriFs) {
+      const selected = await tauriDialog.open({ multiple: true });
       if (!selected) return;
       const files = Array.isArray(selected) ? selected : [selected];
       for (const filePath of files) {
         const name = String(filePath).split('/').pop().split('\\').pop();
-        const bytes = await readFile(filePath);
+        const bytes = await tauriFs.readFile(filePath);
         const b64 = btoa(String.fromCharCode(...new Uint8Array(bytes)));
         const dest = cwd.replace(/\/$/, '') + '/' + name;
         try { await fsUpload(dest, b64); } catch (e) { error = e.message; }
