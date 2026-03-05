@@ -522,6 +522,7 @@
   }
 
   .md-block { line-height: 1.6; }
+  .agent-bubble .md-block { white-space: pre-wrap; }
 
   .system-bubble {
     width: 100%;
