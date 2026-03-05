@@ -133,9 +133,175 @@ const kiroParser = {
   },
 };
 
+// ─── Claude Code parser ───
+
+const claudeCodeParser = {
+  name: 'claude-code',
+
+  // Detect if this pane is running Claude Code
+  detect(raw, command = '') {
+    if (/claude/i.test(command)) return true;
+    // Fallback: check for Claude Code banner in content
+    if (/Claude Code v\d/.test(stripAnsi(raw))) return true;
+    return false;
+  },
+
+  // Insert semantic markers using RGB true-color ANSI codes before stripping
+  //   User prompt: gray ❯ on bg #373737 with white text
+  //     \x1b[38;2;80;80;80m\x1b[48;2;55;55;55m❯ \x1b[38;2;255;255;255m<text>
+  //   Ghost suggestion (NOT real input): ❯ \x1b[7m<char>\x1b[0;2m<rest>
+  //   Agent response: \x1b[38;2;255;255;255m⏺ (white)
+  //   Tool completed:  \x1b[38;2;78;186;101m⏺ (green)
+  //   Tool in-progress: \x1b[38;2;153;153;153m⏺ (gray) — often while reading/searching
+  //   Tool rejected:   \x1b[38;2;255;107;128m⏺ (red/pink)
+  insertMarkers(raw) {
+    let marked = raw;
+    // Mark real user prompts (must have bg color 48;2;55;55;55 to distinguish from ghost)
+    marked = marked.replace(/\x1b\[38;2;80;80;80m\x1b\[48;2;55;55;55m❯\s?\x1b\[38;2;255;255;255m/g, '\x00CCUSER\x00');
+    // Mark agent text responses (white ⏺)
+    marked = marked.replace(/\x1b\[38;2;255;255;255m⏺\x1b\[39m/g, '\x00CCAGENT\x00');
+    // Mark tool completed (green ⏺)
+    marked = marked.replace(/\x1b\[38;2;78;186;101m⏺\x1b\[39m/g, '\x00CCTOOL\x00');
+    // Mark tool in-progress (gray ⏺) — treat same as tool
+    marked = marked.replace(/\x1b\[38;2;153;153;153m⏺?\x1b\[39m/g, (m) => {
+      return m.includes('⏺') ? '\x00CCTOOL\x00' : m;
+    });
+    // Mark tool rejected/error (red ⏺)
+    marked = marked.replace(/\x1b\[38;2;255;107;128m⏺\x1b\[39m/g, '\x00CCTOOLFAIL\x00');
+    return marked;
+  },
+
+  classifyLine(trimmed, rawLine) {
+    // Banner / reset — Claude Code header
+    if (/^Claude Code v[\d.]+/.test(trimmed)) return { type: 'reset' };
+    // ASCII art logo lines (orange blocks)
+    if (/^[▐▝▘▜▛█]+/.test(trimmed) && trimmed.length < 30) return { type: 'skip' };
+    // Welcome line
+    if (/^Welcome to\s/.test(trimmed)) return { type: 'skip' };
+
+    // Separator lines (gray ─── )
+    if (/^─{4,}$/.test(trimmed)) return { type: 'skip' };
+    // Dashed separator (╌╌╌)
+    if (/^╌{4,}$/.test(trimmed)) return { type: 'skip' };
+
+    // Ghost suggestion / empty prompt — has reverse video \x1b[7m, NO bg color
+    // These show up as: ❯ <text> after ANSI stripping, but raw has \x1b[7m
+    if (/^❯\s/.test(trimmed) && /\x1b\[7m/.test(rawLine) && !/\x1b\[48;2;55;55;55m/.test(rawLine)) {
+      return { type: 'skip' };
+    }
+
+    // Bottom status lines
+    if (/^\?\s*(for shortcuts|for help)/.test(trimmed)) return { type: 'skip' };
+    if (/^esc\s+to\s+interrupt/.test(trimmed)) return { type: 'skip' };
+    if (/^Enter to confirm/.test(trimmed)) return { type: 'skip' };
+    if (/^Esc to cancel/.test(trimmed)) return { type: 'skip' };
+
+    // Thinking/Simmering — orange star symbols ✳✶✻ (during processing)
+    if (/^[✳✶✷✸✹✺]\s*(Simmering|Thinking|Brewing|Steeping)/i.test(trimmed)) return { type: 'thinking' };
+
+    // Turn end — "✻ Cooked for Ns" (gray, after completion)
+    if (/^✻\s*Cooked\b/.test(trimmed)) return { type: 'turn_end' };
+
+    // Model selector
+    if (/^Select model$/.test(trimmed)) return { type: 'model_header' };
+    // Model selector description/items/effort bar — skip all lines within selector
+    if (/^Switch between Claude models/.test(trimmed)) return { type: 'model_item', text: trimmed };
+    if (/^\d+\.\s+(Default|Sonnet|Opus|Haiku)\b/.test(trimmed)) return { type: 'model_item', text: trimmed };
+    if (/^❯\s*\d+\.\s+/.test(trimmed)) return { type: 'model_selected', text: trimmed };
+    if (/^▌/.test(trimmed)) return { type: 'model_item', text: trimmed }; // effort bar
+    if (/^(← →|For other)/.test(trimmed)) return { type: 'model_item', text: trimmed };
+
+    // Permission prompt (edit confirmation)
+    if (/^Do you want to make this edit/.test(trimmed)) return { type: 'skip' };
+    if (/^❯\s*\d+\.\s*(Yes|No)/.test(trimmed)) return { type: 'skip' };
+    if (/^\d+\.\s*(Yes|No)/.test(trimmed)) return { type: 'skip' };
+    if (/^Edit file$/.test(trimmed)) return { type: 'skip' };
+
+    // User input (via marker — real submitted input with bg color)
+    if (trimmed.includes('\x00CCUSER\x00')) {
+      let text = trimmed.replace(/^.*\x00CCUSER\x00\s*/, '').trim();
+      let raw = rawLine.replace(/^.*\x00CCUSER\x00\s*/, '');
+      // Strip trailing reset codes and bg artifacts
+      text = stripAnsi(text).trim();
+      // Skip /model commands (handled as model_header)
+      if (/^\/model\b/.test(text)) return { type: 'skip' };
+      if (!text) return { type: 'skip' };
+      return { type: 'user', text, rawText: raw };
+    }
+    // User input continuation (white on dark bg, no ❯) — second line of multi-line input
+    if (/\x1b\[38;2;255;255;255m\x1b\[48;2;55;55;55m/.test(rawLine) && !trimmed.includes('\x00CC')) {
+      const text = stripAnsi(trimmed).trim();
+      if (!text) return { type: 'skip' };
+      return { type: 'user_continuation', text, rawText: rawLine };
+    }
+
+    // Agent text response (white ⏺)
+    if (trimmed.includes('\x00CCAGENT\x00')) {
+      const text = trimmed.replace(/^.*\x00CCAGENT\x00\s*/, '').trim();
+      const raw = rawLine.replace(/^.*\x00CCAGENT\x00\s*/, '');
+      return { type: 'agent', text, rawText: raw };
+    }
+
+    // Tool call — completed (green ⏺) or in-progress (gray ⏺)
+    if (trimmed.includes('\x00CCTOOL\x00')) {
+      const text = trimmed.replace(/^.*\x00CCTOOL\x00\s*/, '').trim();
+      const raw = rawLine.replace(/^.*\x00CCTOOL\x00\s*/, '');
+      return { type: 'tool', text, rawText: raw };
+    }
+
+    // Tool rejected/error (red ⏺)
+    if (trimmed.includes('\x00CCTOOLFAIL\x00')) {
+      const text = trimmed.replace(/^.*\x00CCTOOLFAIL\x00\s*/, '').trim();
+      const raw = rawLine.replace(/^.*\x00CCTOOLFAIL\x00\s*/, '');
+      return { type: 'tool', text, rawText: raw };
+    }
+
+    // Tool sub-items (⎿ indented lines)
+    if (/^⎿\s/.test(trimmed)) return { type: 'tool_result' };
+    // Indented lines after tool rejection (User rejected...)
+    if (/^User rejected/.test(trimmed)) return { type: 'tool_result' };
+
+    // Diff lines within tool results (numbered: " N +..." or " N  ...")
+    if (/^\d+\s+[+\-]/.test(trimmed)) return { type: 'tool_result' };
+
+    // Empty line
+    if (!trimmed) return { type: 'empty' };
+
+    // Model/price info lines (in model selector context)
+    if (/\$[\d.]+\/\$[\d.]+\s+per\s+Mtok/.test(trimmed)) return { type: 'model_item', text: trimmed };
+    if (/per\s+Mtok$/.test(trimmed)) return { type: 'model_item', text: trimmed };
+
+    return { type: 'continuation' };
+  },
+
+  // Extract status info from pane content
+  extractStatus(raw) {
+    const clean = stripAnsi(raw);
+    // Check if thinking/simmering
+    if (/[✳✶✷✸✹✺]\s*(Simmering|Thinking|Brewing)/i.test(clean)) {
+      return { thinking: true, tool: 'claude-code' };
+    }
+    return { tool: 'claude-code' };
+  },
+
+  // Detect if pane is waiting for user input
+  isWaitingForInput(raw) {
+    const tail = raw.slice(-500);
+    // Idle prompt: ❯ with \x1b[7m (reverse video cursor) or ? for shortcuts
+    if (/\?\s*for shortcuts/.test(stripAnsi(tail))) return true;
+    // Check for the prompt ❯ at end without thinking indicator
+    const clean = stripAnsi(tail);
+    const lines = clean.split('\n').filter(l => l.trim());
+    const last = lines.at(-1)?.trim() || '';
+    if (/^❯\s*$/.test(last)) return true;
+    if (/^\?\s*for shortcuts/.test(last)) return true;
+    return false;
+  },
+};
+
 // ─── Parser registry ───
 
-const parsers = [kiroParser];
+const parsers = [claudeCodeParser, kiroParser];
 
 export function detectParser(raw, command = '') {
   return parsers.find(p => p.detect(raw, command)) || null;
@@ -149,6 +315,8 @@ export function parseMessages(raw, parser) {
   const marked = parser.insertMarkers(raw);
   const rawLines = marked.split('\n');
   const cleanLines = rawLines.map(l => stripAnsi(l));
+  // Strip semantic markers from lines for display (markers are only used by classifyLine)
+  function cleanMarkers(s) { return s.replace(/\x00\w+\x00/g, ''); }
   const messages = [];
   let current = null;
   let isThinking = false;
@@ -225,9 +393,15 @@ export function parseMessages(raw, parser) {
         current = { role: 'user', lines: [cls.text], rawLines: [cls.rawText] };
         continue;
       case 'agent':
-        isThinking = false; started = true; flush();
-        lastRole = null;
-        current = { role: 'agent', lines: cls.text ? [cls.text] : [], rawLines: cls.text ? [cls.rawText] : [] };
+        isThinking = false; started = true;
+        // If already in an agent bubble (e.g. tool→agent), merge instead of splitting
+        if (current?.role === 'agent') {
+          if (cls.text) { current.lines.push(cls.text); current.rawLines.push(cls.rawText); }
+        } else {
+          flush();
+          lastRole = null;
+          current = { role: 'agent', lines: cls.text ? [cls.text] : [], rawLines: cls.text ? [cls.rawText] : [] };
+        }
         continue;
       case 'empty':
         if (!started) continue;
@@ -238,21 +412,28 @@ export function parseMessages(raw, parser) {
         isThinking = false;
         if (!started) continue;
         if (!current || current.role !== 'agent') { flush(); current = { role: 'agent', lines: [], rawLines: [] }; }
-        current.lines.push(line); current.rawLines.push(rawLine);
+        current.lines.push(cls.text != null ? cls.text : cleanMarkers(line));
+        current.rawLines.push(cls.rawText != null ? cls.rawText : cleanMarkers(rawLine));
+        continue;
+      case 'user_continuation':
+        if (current?.role === 'user') { current.lines.push(cls.text || cleanMarkers(line)); current.rawLines.push(cls.rawText || cleanMarkers(rawLine)); }
         continue;
       case 'tool_result':
-        if (current?.role === 'agent') { current.lines.push(line); current.rawLines.push(rawLine); }
+        if (current?.role === 'agent') {
+          current.lines.push(cls.text != null ? cls.text : cleanMarkers(line));
+          current.rawLines.push(cls.rawText != null ? cls.rawText : cleanMarkers(rawLine));
+        }
         continue;
       case 'continuation':
         isThinking = false;
         if (!started) continue;
         if (current) {
-          current.lines.push(line); current.rawLines.push(rawLine);
+          current.lines.push(cleanMarkers(line)); current.rawLines.push(cleanMarkers(rawLine));
         } else if (lastRole === 'user') {
           // Multi-line user input with blank lines — re-open user bubble
-          current = { role: 'user', lines: [line], rawLines: [rawLine] };
+          current = { role: 'user', lines: [cleanMarkers(line)], rawLines: [cleanMarkers(rawLine)] };
         } else {
-          current = { role: 'system', lines: [line], rawLines: [rawLine] };
+          current = { role: 'system', lines: [cleanMarkers(line)], rawLines: [cleanMarkers(rawLine)] };
         }
         continue;
     }

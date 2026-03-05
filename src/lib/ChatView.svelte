@@ -32,7 +32,7 @@
   }
 
   function ansiToHtml(s) {
-    s = s.replace(/\x00(AGENT|UPROMPT)\x00/g, '');
+    s = s.replace(/\x00(AGENT|UPROMPT|CCUSER|CCAGENT|CCTOOL|CCTOOLFAIL)\x00/g, '');
     let html = '', fg = null, bold = false;
     const parts = s.split(/(\x1b\[[\?]?[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07)/);
     for (const part of parts) {
@@ -300,7 +300,7 @@
           </div>
         {:else}
         <div class="bubble-wrap">
-          <div class="bubble" class:user-bubble={msg.role === 'user'} class:agent-bubble={msg.role === 'agent'} onclick={() => handleBubbleTap(mi, msg.text)}>
+          <div class="bubble" class:user-bubble={msg.role === 'user'} class:agent-bubble={msg.role === 'agent'} role="button" tabindex="-1" onclick={() => handleBubbleTap(mi, msg.text)} onkeydown={(e) => { if (e.key === 'Enter') handleBubbleTap(mi, msg.text); }}>
           {#each parseBlocks(msg.text, msg.rawText) as block, bi}
             {#if block.type === 'text'}
               {#if msg.role === 'user'}
@@ -712,7 +712,7 @@
     border-radius: 10px;
     overflow: hidden;
     border: 1px solid var(--border);
-    background: rgba(0, 0, 0, 0.3);
+    background: var(--code-bg);
     font-family: 'SF Mono', Menlo, monospace;
     font-size: 12px;
     line-height: 1.5;
