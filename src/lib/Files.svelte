@@ -100,6 +100,7 @@
     await tauriReady;
     try {
       const dir = await tauriPath.appCacheDir();
+      console.log('[TmuxMobile] Local dir:', dir + '/TmuxMobile/');
       return dir + '/TmuxMobile/';
     } catch {
       return '';
@@ -401,10 +402,11 @@
           try { await tauriFs.mkdir(dlDir, { recursive: true }); } catch {}
           const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
           await tauriFs.writeFile(filePath, bytes);
+          console.log('[TmuxMobile] Downloaded to:', filePath);
           downloading = '';
           downloadedPath = filePath;
-          downloadToast = name;
-          setTimeout(() => { if (downloadToast === name) dismissDownload(); }, 10000);
+          downloadToast = filePath;
+          setTimeout(() => { if (downloadToast === filePath) dismissDownload(); }, 10000);
           return;
         }
         // macOS / desktop: use save dialog
