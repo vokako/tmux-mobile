@@ -376,7 +376,7 @@
   nav {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 8px;
     padding: 8px 12px;
     padding-top: calc(8px + var(--sat));
     background: var(--nav-bg);
@@ -422,6 +422,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
+    margin-left: auto;
   }
 
   .status-dot {
