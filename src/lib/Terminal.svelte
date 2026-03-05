@@ -216,12 +216,16 @@
 
 <div class="terminal">
   {#if windows.length > 1}
-    <div class="win-switcher" class:expanded={showWindowCmd} onclick={() => showWindowCmd = !showWindowCmd}>
+    <div class="win-switcher" class:expanded={showWindowCmd}>
       {#each windows as w}
         <button
           class="win-tab"
           class:active={String(w.window) === currentWindow}
-          onclick={(e) => { e.stopPropagation(); if (onSwitchPane) onSwitchPane(`${w.session}:${w.window}.${w.pane}`, w.current_command); }}
+          onclick={(e) => {
+            e.stopPropagation();
+            if (String(w.window) === currentWindow) { showWindowCmd = !showWindowCmd; }
+            else if (onSwitchPane) { onSwitchPane(`${w.session}:${w.window}.${w.pane}`, w.current_command); showWindowCmd = false; }
+          }}
         >
           <span class="win-num">{w.window}</span>
           {#if showWindowCmd}<span class="win-cmd">{w.current_command}</span>{/if}
