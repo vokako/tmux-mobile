@@ -88,9 +88,18 @@
 
   async function getLocalDir() {
     if (!isTauri) return '';
-    const { appCacheDir } = window.__TAURI__.path;
-    const dir = await appCacheDir();
-    return dir + 'TmuxMobile/';
+    try {
+      const dir = await window.__TAURI__.core.invoke('plugin:path|resolve_directory', { directory: 'AppCache' });
+      return dir + '/TmuxMobile/';
+    } catch {
+      // Fallback: try path API
+      try {
+        const dir = await window.__TAURI__.path.appCacheDir();
+        return dir + 'TmuxMobile/';
+      } catch {
+        return '';
+      }
+    }
   }
 
   async function openLocalFiles() {
@@ -385,11 +394,10 @@
           // Download to app cache, then open with system
           downloading = name;
           const r = await fsDownload(path);
-          const { appCacheDir } = window.__TAURI__.path;
-          const { writeFile, mkdir, exists } = window.__TAURI__.fs;
-          const cacheDir = await appCacheDir();
-          const filePath = cacheDir + 'TmuxMobile/' + r.name;
-          try { await mkdir(cacheDir + 'TmuxMobile', { recursive: true }); } catch {}
+          const { writeFile, mkdir } = window.__TAURI__.fs;
+          const localDir = await getLocalDir();
+          const filePath = localDir + r.name;
+          try { await mkdir(localDir, { recursive: true }); } catch {}
           const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
           await writeFile(filePath, bytes);
           downloading = '';
