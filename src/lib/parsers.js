@@ -211,15 +211,21 @@ const claudeCodeParser = {
     // Model selector description/items/effort bar — skip all lines within selector
     if (/^Switch between Claude models/.test(trimmed)) return { type: 'model_item', text: trimmed };
     if (/^\d+\.\s+(Default|Sonnet|Opus|Haiku)\b/.test(trimmed)) return { type: 'model_item', text: trimmed };
-    if (/^❯\s*\d+\.\s+/.test(trimmed)) return { type: 'model_selected', text: trimmed };
+    if (/^❯\s*\d+\.\s+(Default|Sonnet|Opus|Haiku)\b/.test(trimmed)) return { type: 'model_selected', text: trimmed };
     if (/^▌/.test(trimmed)) return { type: 'model_item', text: trimmed }; // effort bar
     if (/^(← →|For other)/.test(trimmed)) return { type: 'model_item', text: trimmed };
 
-    // Permission prompt (edit confirmation)
-    if (/^Do you want to make this edit/.test(trimmed)) return { type: 'skip' };
-    if (/^❯\s*\d+\.\s*(Yes|No)/.test(trimmed)) return { type: 'skip' };
-    if (/^\d+\.\s*(Yes|No)/.test(trimmed)) return { type: 'skip' };
-    if (/^Edit file$/.test(trimmed)) return { type: 'skip' };
+    // Permission prompt (edit/bash/tool confirmation)
+    if (/^Do you want to (proceed|make this edit)/.test(trimmed)) return { type: 'permission_header', text: trimmed };
+    if (/^This command requires approval/.test(trimmed)) return { type: 'skip' };
+    if (/^(Bash command|Edit file)$/.test(trimmed)) return { type: 'skip' };
+    // Permission options — ❯ N. selected or N. unselected
+    {
+      const selM = trimmed.match(/^❯\s*(\d+)\.\s+(.+)/);
+      if (selM) return { type: 'permission_selected', index: parseInt(selM[1]), text: selM[2].trim() };
+      const optM = trimmed.match(/^(\d+)\.\s+(Yes\b|No\b|Yes,).*/);
+      if (optM) return { type: 'permission_option', index: parseInt(optM[1]), text: optM[0].replace(/^\d+\.\s+/, '').trim() };
+    }
 
     // User input (via marker — real submitted input with bg color)
     if (trimmed.includes('\x00CCUSER\x00')) {
@@ -396,6 +402,16 @@ export function parseMessages(raw, parser) {
       case 'model_selected':
       case 'model_item':
         if (current?.role === 'model') { current.lines.push(cls.text); current.rawLines.push(rawLine); }
+        continue;
+      case 'permission_header':
+        isThinking = false; started = true; flush();
+        current = { role: 'permission', lines: [cls.text], rawLines: [rawLine], options: [] };
+        continue;
+      case 'permission_selected':
+      case 'permission_option':
+        if (current?.role === 'permission') {
+          current.options.push({ index: cls.index, text: cls.text, selected: cls.type === 'permission_selected' });
+        }
         continue;
       case 'user':
         isThinking = false; started = true; flush();

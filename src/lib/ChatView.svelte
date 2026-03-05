@@ -266,6 +266,11 @@
     }
     await onSendKeys('Enter');
   }
+
+  async function selectPermission(index) {
+    if (!onSendKeys) return;
+    await onSendKeys(String(index));
+  }
 </script>
 
 <div class="chat-wrap">
@@ -274,14 +279,24 @@
     <div class="empty">No conversation detected. Waiting for CLI output…</div>
   {:else}
     {#each messages as msg, mi (mi)}
-      <div class="msg" class:user={msg.role === 'user'} class:agent={msg.role === 'agent'} class:system={msg.role === 'system' || msg.role === 'compact' || msg.role === 'model' || msg.role === 'model_done'}>
+      <div class="msg" class:user={msg.role === 'user'} class:agent={msg.role === 'agent'} class:system={msg.role === 'system' || msg.role === 'compact' || msg.role === 'model' || msg.role === 'model_done' || msg.role === 'permission'}>
         {#if msg.role === 'agent'}
           <div class="avatar"><Icon name="bot" size={14} /></div>
         {/if}
         {#if msg.role === 'user'}
           <div class="avatar user-avatar"><Icon name="user" size={14} /></div>
         {/if}
-        {#if msg.role === 'system'}
+        {#if msg.role === 'permission'}
+          <div class="permission-bubble">
+            <div class="permission-header"><Icon name="info" size={13} /> {msg.text}</div>
+            {#each msg.options || [] as opt}
+              <button class="permission-item" class:permission-selected={opt.selected} onclick={() => selectPermission(opt.index)}>
+                <span class="permission-index">{opt.index}.</span>
+                <span class="permission-text">{opt.text}</span>
+              </button>
+            {/each}
+          </div>
+        {:else if msg.role === 'system'}
           <div class="system-bubble">
             <pre class="system-pre">{@html cachedAnsiToHtml(msg.rawText)}</pre>
           </div>
@@ -607,6 +622,30 @@
     color: var(--accent); font-size: 13px;
   }
   .model-done-name { font-family: 'SF Mono', Menlo, monospace; font-weight: 500; }
+
+  .permission-bubble {
+    width: 100%;
+    border-radius: 12px;
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    overflow: hidden;
+  }
+  .permission-header {
+    display: flex; align-items: center; gap: 6px;
+    padding: 10px 14px; font-size: 13px; font-weight: 600; color: var(--accent);
+    background: var(--accent-bg); border-bottom: 1px solid var(--accent);
+  }
+  .permission-item {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 12px 14px; font-size: 14px; color: var(--text);
+    border: none; background: none; border-bottom: 1px solid var(--border2);
+    cursor: pointer; -webkit-tap-highlight-color: transparent; text-align: left;
+  }
+  .permission-item:last-child { border-bottom: none; }
+  .permission-item:active { background: var(--accent-bg); }
+  .permission-item.permission-selected { background: var(--accent-bg); color: var(--accent); }
+  .permission-index { font-weight: 600; color: var(--text3); min-width: 20px; }
+  .permission-text { flex: 1; }
   .md-block :global(strong) { font-weight: 600; color: var(--text); }
   .md-block :global(em) { font-style: italic; color: var(--text2); }
   .md-block :global(code) {
