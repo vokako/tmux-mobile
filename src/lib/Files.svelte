@@ -27,12 +27,12 @@
   // Tauri plugin imports (tree-shaken in browser builds)
   let tauriFs, tauriDialog, tauriOpener, tauriPath;
   const isTauri = typeof window !== 'undefined' && !!(window.__TAURI__ || window.__TAURI_INTERNALS__);
-  if (isTauri) {
-    import('@tauri-apps/plugin-fs').then(m => tauriFs = m);
-    import('@tauri-apps/plugin-dialog').then(m => tauriDialog = m);
-    import('@tauri-apps/plugin-opener').then(m => tauriOpener = m);
-    import('@tauri-apps/api/path').then(m => tauriPath = m);
-  }
+  const tauriReady = isTauri ? Promise.all([
+    import('@tauri-apps/plugin-fs').then(m => tauriFs = m),
+    import('@tauri-apps/plugin-dialog').then(m => tauriDialog = m),
+    import('@tauri-apps/plugin-opener').then(m => tauriOpener = m),
+    import('@tauri-apps/api/path').then(m => tauriPath = m),
+  ]) : Promise.resolve();
 
   hljs.registerLanguage('javascript', javascript);
   hljs.registerLanguage('js', javascript);
@@ -96,7 +96,8 @@
   let localDir = $state('');
 
   async function getLocalDir() {
-    if (!isTauri || !tauriPath) return '';
+    if (!isTauri) return '';
+    await tauriReady;
     try {
       const dir = await tauriPath.appCacheDir();
       return dir + '/TmuxMobile/';
@@ -375,7 +376,8 @@
   let downloading = $state('');
 
   async function openDownloaded() {
-    if (!downloadedPath || !tauriOpener) return;
+    if (!downloadedPath || !isTauri) return;
+    await tauriReady;
     try {
       await tauriOpener.openPath(downloadedPath);
     } catch (e) { error = 'Open failed: ' + e.message; }
@@ -390,6 +392,7 @@
     const name = path.split('/').pop();
     try {
       if (isTauri && tauriFs) {
+        await tauriReady;
         if (isAndroid) {
           downloading = name;
           const r = await fsDownload(path);
@@ -435,7 +438,8 @@
   }
 
   async function handleUpload() {
-    if (isTauri && tauriDialog && tauriFs) {
+    if (isTauri) {
+      await tauriReady;
       const selected = await tauriDialog.open({ multiple: true });
       if (!selected) return;
       const files = Array.isArray(selected) ? selected : [selected];
