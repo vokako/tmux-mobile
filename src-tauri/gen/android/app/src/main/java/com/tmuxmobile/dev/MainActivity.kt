@@ -24,9 +24,6 @@ class MainActivity : TauriActivity() {
       webView?.addJavascriptInterface(FileOpener(), "AndroidFileOpener")
     }
 
-    val rootView = window.decorView.rootView
-    val density = resources.displayMetrics.density
-
     // Send status bar + navigation bar insets to WebView (convert to CSS px)
     ViewCompat.setOnApplyWindowInsetsListener(rootView) { _, insets ->
       val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
