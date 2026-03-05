@@ -141,8 +141,11 @@ const claudeCodeParser = {
   // Detect if this pane is running Claude Code
   detect(raw, command = '') {
     if (/claude/i.test(command)) return true;
+    const clean = stripAnsi(raw);
     // Fallback: check for Claude Code banner in content
-    if (/Claude Code v\d/.test(stripAnsi(raw))) return true;
+    if (/Claude Code v\d/.test(clean)) return true;
+    // Fallback: ⏺ marker is Claude Code's unique prompt character
+    if (/^⏺/m.test(clean)) return true;
     return false;
   },
 
@@ -158,16 +161,18 @@ const claudeCodeParser = {
     let marked = raw;
     // Mark real user prompts (must have bg color 48;2;55;55;55 to distinguish from ghost)
     marked = marked.replace(/\x1b\[38;2;80;80;80m\x1b\[48;2;55;55;55m❯\s?\x1b\[38;2;255;255;255m/g, '\x00CCUSER\x00');
+    // Match ⏺ with optional preceding reset/bold codes (more permissive)
+    const esc = '(?:\\x1b\\[[0-9;]*m)*'; // optional preceding ANSI codes
     // Mark agent text responses (white ⏺)
-    marked = marked.replace(/\x1b\[38;2;255;255;255m⏺\x1b\[39m/g, '\x00CCAGENT\x00');
+    marked = marked.replace(new RegExp(esc + '\\x1b\\[38;2;255;255;255m⏺\\x1b\\[39m', 'g'), '\x00CCAGENT\x00');
     // Mark tool completed (green ⏺)
-    marked = marked.replace(/\x1b\[38;2;78;186;101m⏺\x1b\[39m/g, '\x00CCTOOL\x00');
+    marked = marked.replace(new RegExp(esc + '\\x1b\\[38;2;78;186;101m⏺\\x1b\\[39m', 'g'), '\x00CCTOOL\x00');
     // Mark tool in-progress (gray ⏺) — treat same as tool
     marked = marked.replace(/\x1b\[38;2;153;153;153m⏺?\x1b\[39m/g, (m) => {
       return m.includes('⏺') ? '\x00CCTOOL\x00' : m;
     });
     // Mark tool rejected/error (red ⏺)
-    marked = marked.replace(/\x1b\[38;2;255;107;128m⏺\x1b\[39m/g, '\x00CCTOOLFAIL\x00');
+    marked = marked.replace(new RegExp(esc + '\\x1b\\[38;2;255;107;128m⏺\\x1b\\[39m', 'g'), '\x00CCTOOLFAIL\x00');
     return marked;
   },
 
@@ -296,6 +301,13 @@ const claudeCodeParser = {
     // Model/price info lines (in model selector context)
     if (/\$[\d.]+\/\$[\d.]+\s+per\s+Mtok/.test(trimmed)) return { type: 'model_item', text: trimmed };
     if (/per\s+Mtok$/.test(trimmed)) return { type: 'model_item', text: trimmed };
+
+    // Fallback: ⏺ at line start without a color marker (e.g. terminal without RGB true-color support,
+    // or banner has scrolled out of view so detect() fell through to ⏺ detection)
+    if (/^⏺/.test(trimmed)) {
+      const text = trimmed.replace(/^⏺\s*/, '').trim();
+      return { type: 'agent', text, rawText: rawLine.replace(/^.*⏺\s*/, '') };
+    }
 
     return { type: 'continuation' };
   },
