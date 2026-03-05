@@ -111,15 +111,18 @@
     } catch (e) { error = e.message; }
   }
 
+  function openFileNative(path) {
+    if (window.AndroidFileOpener) {
+      const result = window.AndroidFileOpener.openFile(path);
+      if (result !== 'ok') throw new Error(result);
+    } else {
+      throw new Error('No file opener available');
+    }
+  }
+
   async function openLocalFile(name) {
     try {
-      if (window.AndroidFileOpener) {
-        const result = window.AndroidFileOpener.openFile(localDir + name);
-        if (result !== 'ok') error = 'Open failed: ' + result;
-      } else {
-        await tauriReady;
-        await tauriOpener.openPath(localDir + name);
-      }
+      openFileNative(localDir + name);
     } catch (e) { error = 'Open failed: ' + (e.message || e); }
   }
 
@@ -378,8 +381,7 @@
     if (!downloadedPath) return;
     try {
       if (window.AndroidFileOpener) {
-        const result = window.AndroidFileOpener.openFile(downloadedPath);
-        if (result !== 'ok') error = 'Open failed: ' + result;
+        openFileNative(downloadedPath);
       } else if (isTauri) {
         await tauriReady;
         await tauriOpener.openPath(downloadedPath);
