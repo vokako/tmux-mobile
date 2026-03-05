@@ -232,6 +232,20 @@ pub fn kill_window(target: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Resize a pane to given cols × rows
+pub fn resize_pane(target: &str, cols: usize, rows: usize) -> Result<(), String> {
+    run_tmux(&[
+        "resize-pane",
+        "-t",
+        target,
+        "-x",
+        &cols.to_string(),
+        "-y",
+        &rows.to_string(),
+    ])?;
+    Ok(())
+}
+
 /// 检查 tmux server 是否运行
 pub fn is_server_running() -> bool {
     run_tmux(&["list-sessions"]).is_ok()

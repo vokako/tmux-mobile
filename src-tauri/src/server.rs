@@ -133,6 +133,19 @@ fn handle_request(req: &Request) -> Response {
             }
         }
 
+        "resize_pane" => {
+            let target = match require_str(p, "target") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            let cols = p.get("cols").and_then(|v| v.as_u64()).unwrap_or(80) as usize;
+            let rows = p.get("rows").and_then(|v| v.as_u64()).unwrap_or(24) as usize;
+            match tmux::resize_pane(target, cols, rows) {
+                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
+                Err(e) => Response::err(id, ERR_INTERNAL, e),
+            }
+        }
+
         "new_session" => {
             let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("untitled");
             let path = p.get("path").and_then(|v| v.as_str());

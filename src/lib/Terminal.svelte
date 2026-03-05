@@ -1,5 +1,5 @@
 <script>
-  import { subscribe, unsubscribe, setOnPaneOutput, sendCommand, sendKeys, paneCommand, listPanes } from './ws.js';
+  import { subscribe, unsubscribe, setOnPaneOutput, sendCommand, sendKeys, paneCommand, listPanes, resizePane } from './ws.js';
   import Convert from 'ansi-to-html';
   import ChatView from './ChatView.svelte';
   import Icon from './Icon.svelte';
@@ -9,9 +9,31 @@
 
   let input = $state('');
   let paneContent = $state('');
-  let command = $state(initialCommand);
+  let command = $state('');
+  $effect(() => { command = initialCommand; });
   let termEl;
   let termAtBottom = $state(true);
+  let measureEl;
+
+  // Debounce timer for resize
+  let resizeTimer;
+
+  function doResize() {
+    if (!termEl || !measureEl) return;
+    const charW = measureEl.getBoundingClientRect().width;
+    if (!charW) return;
+    // termEl has 10px padding on each side (padding: 8px 10px)
+    const innerW = termEl.clientWidth - 20;
+    const innerH = termEl.clientHeight - 16;
+    const cols = Math.max(40, Math.floor(innerW / charW));
+    const rows = Math.max(10, Math.floor(innerH / (13 * 1.35))); // font-size 13 × line-height 1.35
+    resizePane(target, cols, rows).catch(() => {});
+  }
+
+  function scheduleResize() {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(doResize, 300);
+  }
   let theme = $state(document.documentElement.getAttribute('data-theme') || 'dark');
 
   $effect(() => {
@@ -148,6 +170,25 @@
     };
   });
 
+  // Resize pane when target changes or on viewport resize
+  $effect(() => {
+    target; // track target changes (switching panes)
+    // Initial resize after mount — wait for layout
+    const t = setTimeout(doResize, 200);
+    return () => clearTimeout(t);
+  });
+
+  $effect(() => {
+    const vv = window.visualViewport;
+    const onVpResize = () => scheduleResize();
+    if (vv) vv.addEventListener('resize', onVpResize);
+    else window.addEventListener('resize', onVpResize);
+    return () => {
+      if (vv) vv.removeEventListener('resize', onVpResize);
+      else window.removeEventListener('resize', onVpResize);
+    };
+  });
+
   $effect(() => {
     let lastContent = '';
     let first = true;
@@ -233,6 +274,9 @@
       {/each}
     </div>
   {/if}
+  <!-- Hidden span to measure monospace character width -->
+  <span class="char-measure" bind:this={measureEl} aria-hidden="true">M</span>
+
   <div class="term-wrap" class:hidden={viewMode !== 'terminal'}>
     <div class="ansi-output" bind:this={termEl} onscroll={checkAtBottom}>{@html termHtml}</div>
     {#if !termAtBottom}
@@ -245,6 +289,7 @@
 
   <div class="input-area">
     {#if viewMode === 'terminal'}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="shortcut-rows" onmousedown={(e) => e.preventDefault()} ontouchstart={(e) => e.preventDefault()}>
         <div class="shortcuts">
           <button onclick={() => sendSpecial('Tab')}>Tab</button>
@@ -260,7 +305,7 @@
           <button onclick={() => sendSpecial('Left')}><Icon name="arrow-left" size={13} /></button>
           <button onclick={() => sendSpecial('Down')}><Icon name="arrow-down" size={13} /></button>
           <button onclick={() => sendSpecial('Right')}><Icon name="arrow-right" size={13} /></button>
-          <button class="sk-empty"></button>
+          <button class="sk-empty" aria-hidden="true"></button>
         </div>
       </div>
       <div class="input-bar">
@@ -289,8 +334,8 @@
           <span class="status-left">{target}{#if command} · <span class:kiro={/^kiro/i.test(command)}>{command}</span>{/if}</span>
           {#if statusInfo?.pct != null}
             <span class="status-pct">
-              <span class="pct-bar"><span class="pct-fill" style="width:{statusInfo.pct}%;background:{statusInfo.pct < 50 ? '#4ade80' : statusInfo.pct < 80 ? '#fbbf24' : '#ff5050'}"></span></span>
-              <span style="color:{statusInfo.pct < 50 ? '#4ade80' : statusInfo.pct < 80 ? '#fbbf24' : '#ff5050'}">{statusInfo.pct}%</span>
+              <span class="pct-bar"><span class="pct-fill pct-{statusInfo.pct < 50 ? 'ok' : statusInfo.pct < 80 ? 'warn' : 'danger'}" style="width:{statusInfo.pct}%"></span></span>
+              <span class="pct-{statusInfo.pct < 50 ? 'ok' : statusInfo.pct < 80 ? 'warn' : 'danger'}">{statusInfo.pct}%</span>
             </span>
           {/if}
         </div>
@@ -386,6 +431,12 @@
     border-radius: 2px;
     transition: width 0.3s ease, background 0.3s ease;
   }
+  .pct-ok { color: var(--status-ok); }
+  .pct-warn { color: var(--status-warn); }
+  .pct-danger { color: var(--status-danger); }
+  .pct-fill.pct-ok { background: var(--status-ok); }
+  .pct-fill.pct-warn { background: var(--status-warn); }
+  .pct-fill.pct-danger { background: var(--status-danger); }
 
   .term-wrap {
     flex: 1;
@@ -396,6 +447,16 @@
     position: absolute;
     left: -9999px;
     visibility: hidden;
+  }
+
+  .char-measure {
+    position: absolute;
+    visibility: hidden;
+    pointer-events: none;
+    font-family: 'SF Mono', Menlo, 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.35;
+    white-space: pre;
   }
 
   .ansi-output {
@@ -501,22 +562,8 @@
     font-size: 15px;
     font-weight: 600;
     flex-shrink: 0;
-    filter: drop-shadow(0 0 4px rgba(0, 212, 255, 0.3));
+    filter: drop-shadow(0 0 4px var(--accent-glow));
   }
-
-  .cmd-row input {
-    flex: 1;
-    min-width: 0;
-    padding: 8px 0;
-    border: none;
-    background: transparent;
-    color: var(--text);
-    font-family: 'SF Mono', Menlo, monospace;
-    font-size: 15px;
-    outline: none;
-    -webkit-appearance: none;
-  }
-  .cmd-row input::placeholder { color: var(--text3); }
 
   .cmd-row textarea {
     flex: 1;

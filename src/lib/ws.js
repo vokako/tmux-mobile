@@ -9,7 +9,20 @@ let onDisconnect = null;
 export function setOnPaneOutput(cb) { onPaneOutput = cb; }
 export function setOnDisconnect(cb) { onDisconnect = cb; }
 
+function rejectAllPending() {
+  const err = new Error('disconnected');
+  for (const { reject: rej } of pending.values()) rej(err);
+  pending.clear();
+}
+
 export function connect(url, token) {
+  // Close any existing connection before creating a new one
+  if (ws) {
+    try { ws.onclose = null; ws.onerror = null; ws.close(); } catch {}
+    ws = null;
+    rejectAllPending();
+  }
+
   return new Promise((resolve, reject) => {
     try {
       ws = new WebSocket(url);
@@ -31,7 +44,8 @@ export function connect(url, token) {
     let authed = false;
 
     ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
+      let data;
+      try { data = JSON.parse(event.data); } catch { return; }
 
       if (!authed) {
         if (data.result?.authenticated) {
@@ -47,7 +61,7 @@ export function connect(url, token) {
 
       // Server push (subscribe)
       if (data.method === 'pane_output') {
-        onPaneOutput?.(data.params.target, data.params.content);
+        onPaneOutput?.(data.params?.target, data.params?.content);
         return;
       }
 
@@ -65,9 +79,11 @@ export function connect(url, token) {
 
     ws.onclose = () => {
       clearTimeout(timeout);
+      const wasAuthed = authed;
       authed = false;
       ws = null;
-      onDisconnect?.();
+      rejectAllPending();
+      if (wasAuthed) onDisconnect?.();
     };
 
     ws.onerror = () => {
@@ -108,6 +124,7 @@ export const killSession = (name) => call('kill_session', { name });
 export const newWindow = (session) => call('new_window', { session });
 export const killWindow = (target) => call('kill_window', { target });
 export const paneCommand = (target) => call('pane_command', { target });
+export const resizePane = (target, cols, rows) => call('resize_pane', { target, cols, rows });
 export const setSocket = (socket) => call('set_socket', { socket });
 export const getBookmarks = () => call('get_bookmarks');
 export const saveBookmarks = (bookmarks) => call('save_bookmarks', { bookmarks });
