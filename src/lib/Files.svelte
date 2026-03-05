@@ -589,7 +589,6 @@
     <!-- Toolbar: all buttons in one row -->
     <div class="toolbar">
       <button class="tool-btn" onclick={goHome}><Icon name="home" size={15} /></button>
-      <button class="tool-btn" onclick={goUp}><Icon name="folder-up" size={15} /></button>
       <button class="tool-btn" onclick={() => loadDir(cwd)}><Icon name="refresh" size={15} /></button>
       <button class="tool-btn" onclick={() => { newType = 'file'; newName = ''; }}><Icon name="plus" size={15} /></button>
       <button class="tool-btn" onclick={() => { newType = 'dir'; newName = ''; }}><Icon name="folder-plus" size={15} /></button>
