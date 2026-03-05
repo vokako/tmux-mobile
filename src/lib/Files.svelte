@@ -97,24 +97,15 @@
 
   async function getLocalDir() {
     if (!isTauri) return '';
-    await tauriReady;
-    try {
-      const dir = await tauriPath.appCacheDir();
-      console.log('[TmuxMobile] Local dir:', dir + '/TmuxMobile/');
-      return dir + '/TmuxMobile/';
-    } catch {
-      return '';
-    }
+    return '/storage/emulated/0/Download/TmuxMobile/';
   }
 
   async function openLocalFiles() {
     try {
-      const dir = await getLocalDir();
-      if (!dir) { error = 'Cannot resolve local dir'; return; }
-      try { await tauriFs.mkdir(dir, { recursive: true }); } catch {}
-      const items = await tauriFs.readDir(dir);
-      localFiles = items.sort((a, b) => a.name.localeCompare(b.name));
-      localDir = dir;
+      const { invoke } = await import('@tauri-apps/api/core');
+      const files = await invoke('list_downloads');
+      localFiles = files.map(name => ({ name }));
+      localDir = '/storage/emulated/0/Download/TmuxMobile/';
       view = 'local';
       navPush();
     } catch (e) { error = e.message; }
@@ -122,13 +113,20 @@
 
   async function openLocalFile(name) {
     try {
-      await tauriOpener.openPath(localDir + name);
-    } catch (e) { error = 'Open failed: ' + e.message; }
+      if (window.AndroidFileOpener) {
+        const result = window.AndroidFileOpener.openFile(localDir + name);
+        if (result !== 'ok') error = 'Open failed: ' + result;
+      } else {
+        await tauriReady;
+        await tauriOpener.openPath(localDir + name);
+      }
+    } catch (e) { error = 'Open failed: ' + (e.message || e); }
   }
 
   async function deleteLocalFile(name) {
     try {
-      await tauriFs.remove(localDir + name);
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('delete_download', { name });
       localFiles = localFiles.filter(f => f.name !== name);
     } catch (e) { error = e.message; }
   }
@@ -377,11 +375,16 @@
   let downloading = $state('');
 
   async function openDownloaded() {
-    if (!downloadedPath || !isTauri) return;
-    await tauriReady;
+    if (!downloadedPath) return;
     try {
-      await tauriOpener.openPath(downloadedPath);
-    } catch (e) { error = 'Open failed: ' + e.message; }
+      if (window.AndroidFileOpener) {
+        const result = window.AndroidFileOpener.openFile(downloadedPath);
+        if (result !== 'ok') error = 'Open failed: ' + result;
+      } else if (isTauri) {
+        await tauriReady;
+        await tauriOpener.openPath(downloadedPath);
+      }
+    } catch (e) { error = 'Open failed: ' + (e.message || e); }
     dismissDownload();
   }
 
@@ -397,11 +400,8 @@
         if (isAndroid) {
           downloading = name;
           const r = await fsDownload(path);
-          const dlDir = await getLocalDir();
-          const filePath = dlDir + r.name;
-          try { await tauriFs.mkdir(dlDir, { recursive: true }); } catch {}
-          const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
-          await tauriFs.writeFile(filePath, bytes);
+          const { invoke } = await import('@tauri-apps/api/core');
+          const filePath = await invoke('save_to_downloads', { name: r.name, data: r.data });
           console.log('[TmuxMobile] Downloaded to:', filePath);
           downloading = '';
           downloadedPath = filePath;
