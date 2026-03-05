@@ -81,8 +81,8 @@
   let view = $state('list');
 
   // Android local files
-  const isAndroid = typeof navigator !== 'undefined' && navigator.userAgent.includes('Android');
-  const isTauri = typeof window !== 'undefined' && !!window.__TAURI__;
+  const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
+  const isTauri = typeof window !== 'undefined' && !!(window.__TAURI__ || window.__TAURI_INTERNALS__);
   let localFiles = $state([]);
   let localDir = $state('');
 
@@ -597,7 +597,7 @@
         <Icon name="eye" size={15} />
       </button>
       <div style="flex:1"></div>
-      {#if isAndroid && isTauri}
+      {#if isTauri}
         <button class="tool-btn" onclick={openLocalFiles} title="Local files"><Icon name="download" size={15} /></button>
       {/if}
       <button class="tool-btn" class:starred={isBookmarked(cwd)} onclick={() => toggleBookmark(cwd)} title="Bookmark">
