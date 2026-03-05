@@ -64,12 +64,25 @@
   }
 
   // Detect if a line starts a tool call block
-  // Kiro: "(using tool: X)", "Searching...", "Reading..."
-  // Claude Code: "Searched for N", "Read N file", "Update(file)", "Wrote to", "Ran ...", "Created", "Edited"
+  // Must be specific to avoid false positives on explanatory text
   function isToolLine(line) {
-    return /\(using tool:/.test(line)
-      || /^(Searching|Reading|Looking up|Search |Found \d|Searching for)/.test(line)
-      || /^(Searched|Read \d|Wrote |Update\(|Ran |Created |Deleted |Edited )/.test(line);
+    // Kiro: must start with the tool syntax
+    if (/^\(using tool:\s*\w+\)/.test(line)) return true;
+    // Kiro in-progress: require specific suffixes (not bare words)
+    if (/^Searching in \d/.test(line)) return true;
+    if (/^Reading file/.test(line)) return true;
+    if (/^Looking up definition/.test(line)) return true;
+    if (/^Found \d+ (result|match|file|reference)/.test(line)) return true;
+    // Claude Code: specific action + argument patterns
+    if (/^Searched for \d+/.test(line)) return true;
+    if (/^Read \d+ file/.test(line)) return true;
+    if (/^(Update|Bash|Write|Edit)\(\S+/.test(line)) return true;
+    if (/^Wrote to \S/.test(line)) return true;
+    if (/^Ran /.test(line)) return true;
+    if (/^Created \S/.test(line)) return true;
+    if (/^Deleted \S/.test(line)) return true;
+    if (/^Edited \S/.test(line)) return true;
+    return false;
   }
 
   function parseBlocks(text, rawText) {
@@ -95,11 +108,13 @@
             || /^User rejected/.test(next) || /^\d+\s+[+\-]/.test(next)) { toolRaw.push(rawLines[i]); i++; }
           else break;
         }
-        // Extract label: Kiro "(using tool: X)" or Claude Code action word
+        // Extract label: Kiro "(using tool: X)" or Claude Code "Action(args)"
         const label = trimmed.match(/\(using tool:\s*(\w+)\)/)?.[1]
-          || trimmed.match(/^(Searched|Read|Wrote|Update|Ran|Created|Deleted|Edited)\b/)?.[1]?.toLowerCase()
+          || trimmed.match(/^(Searched|Read|Wrote|Update|Bash|Ran|Created|Deleted|Edited)\b/)?.[1]?.toLowerCase()
           || 'tool';
-        blocks.push({ type: 'tool', label, content: toolRaw.join('\n') });
+        const toolText = toolRaw.join('\n');
+        const isError = /Interrupted|User rejected|failed|error/i.test(toolText);
+        blocks.push({ type: 'tool', label, content: toolText, isError });
         continue;
       }
       // Diff block: consecutive lines matching diff pattern
@@ -342,9 +357,9 @@
                 <pre><code>{@html cachedAnsiToHtml(block.content)}</code></pre>
               </div>
             {:else if block.type === 'tool'}
-              <div class="tool-card">
+              <div class="tool-card" class:tool-error={block.isError}>
                 <button class="tool-header" onclick={() => toggleTool(`${mi}-${bi}`)}>
-                  <span class="tool-icon"><Icon name="gear" size={10} /></span>
+                  <span class="tool-icon"><Icon name={block.isError ? "x" : "gear"} size={10} /></span>
                   <span class="tool-label">{block.label}</span>
                   <span class="tool-chevron" class:open={!collapsedTools[`${mi}-${bi}`]}>▸</span>
                 </button>
@@ -726,6 +741,12 @@
     border: 1px solid var(--border);
     background: var(--surface);
   }
+  .tool-card.tool-error {
+    border-color: var(--danger);
+    background: var(--danger-bg);
+  }
+  .tool-card.tool-error .tool-header { background: var(--danger-bg); color: var(--danger); }
+  .tool-card.tool-error .tool-body { color: var(--danger); }
   .tool-header {
     display: flex;
     align-items: center;
