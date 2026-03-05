@@ -64,6 +64,7 @@
       if (view === 'edit') { view = 'preview'; return true; }
       if (view === 'info') { view = currentFile?.content != null ? 'preview' : 'list'; return true; }
       if (view === 'preview') { view = 'list'; currentFile = null; return true; }
+      if (view === 'local') { view = 'list'; return true; }
       if (cwd !== '/') { goUp(); return true; }
       return false;
     });
@@ -76,8 +77,48 @@
   let loading = $state(false);
   let error = $state('');
 
-  // View modes: 'list', 'preview', 'edit', 'info'
+  // View modes: 'list', 'preview', 'edit', 'info', 'local'
   let view = $state('list');
+
+  // Android local files
+  const isAndroid = typeof navigator !== 'undefined' && navigator.userAgent.includes('Android');
+  const isTauri = typeof window !== 'undefined' && !!window.__TAURI__;
+  let localFiles = $state([]);
+  let localDir = $state('');
+
+  async function getLocalDir() {
+    if (!isTauri) return '';
+    const { appCacheDir } = window.__TAURI__.path;
+    const dir = await appCacheDir();
+    return dir + 'TmuxMobile/';
+  }
+
+  async function openLocalFiles() {
+    try {
+      const dir = await getLocalDir();
+      const { readDir, mkdir } = window.__TAURI__.fs;
+      try { await mkdir(dir, { recursive: true }); } catch {}
+      const items = await readDir(dir);
+      localFiles = items.sort((a, b) => a.name.localeCompare(b.name));
+      localDir = dir;
+      view = 'local';
+      navPush();
+    } catch (e) { error = e.message; }
+  }
+
+  async function openLocalFile(name) {
+    try {
+      await window.__TAURI__.opener.openPath(localDir + name);
+    } catch (e) { error = 'Open failed: ' + e.message; }
+  }
+
+  async function deleteLocalFile(name) {
+    try {
+      const { remove } = window.__TAURI__.fs;
+      await remove(localDir + name);
+      localFiles = localFiles.filter(f => f.name !== name);
+    } catch (e) { error = e.message; }
+  }
   let currentFile = $state(null); // { path, name, stat, content }
   let editContent = $state('');
   let editOriginal = $state('');
@@ -557,6 +598,9 @@
         <Icon name="eye" size={15} />
       </button>
       <div style="flex:1"></div>
+      {#if isAndroid && isTauri}
+        <button class="tool-btn" onclick={openLocalFiles} title="Local files"><Icon name="download" size={15} /></button>
+      {/if}
       <button class="tool-btn" class:starred={isBookmarked(cwd)} onclick={() => toggleBookmark(cwd)} title="Bookmark">
         <Icon name={isBookmarked(cwd) ? 'star-filled' : 'star'} size={15} />
       </button>
@@ -719,6 +763,30 @@
           autocomplete="off"
         ></textarea>
       </div>
+    </div>
+
+  {:else if view === 'local'}
+    <!-- Local downloaded files -->
+    <div class="preview-header">
+      <button class="back-btn" onclick={() => { view = 'list'; }}><Icon name="chevron-left" size={16} /></button>
+      <span class="preview-name">Downloads</span>
+      <div class="preview-actions">
+        <button class="act-btn" onclick={openLocalFiles}><Icon name="refresh" size={14} /></button>
+      </div>
+    </div>
+    <div class="file-list">
+      {#each localFiles as f}
+        <div class="file-row">
+          <button class="file-main" onclick={() => openLocalFile(f.name)}>
+            <Icon name="file" size={16} />
+            <span class="file-name">{f.name}</span>
+          </button>
+          <button class="act-btn del" onclick={() => deleteLocalFile(f.name)}><Icon name="trash" size={12} /></button>
+        </div>
+      {/each}
+      {#if !localFiles.length}
+        <div class="empty">No downloaded files</div>
+      {/if}
     </div>
 
   {:else if view === 'info'}
