@@ -1,5 +1,5 @@
 <script>
-  import { connect } from './ws.js';
+  import { connect, disconnect } from './ws.js';
   import Icon from './Icon.svelte';
 
   let { onConnected } = $props();
@@ -54,9 +54,12 @@
     localStorage.setItem('tmux_address_history', JSON.stringify(history));
   }
 
+  let cancelled = false;
+
   async function doConnect() {
     error = '';
     connecting = true;
+    cancelled = false;
     try {
       const url = normalizeAddress(address);
       localStorage.setItem('tmux_address', url);
@@ -65,16 +68,23 @@
       else localStorage.removeItem('tmux_socket');
       saveHistory(url);
       await connect(url, token);
+      if (cancelled) return;
       if (socket.trim()) {
         const { setSocket } = await import('./ws.js');
         await setSocket(socket.trim()).catch(() => {});
       }
       onConnected();
     } catch (e) {
-      error = e.message;
+      if (!cancelled) error = e.message;
     } finally {
       connecting = false;
     }
+  }
+
+  function cancelConnect() {
+    cancelled = true;
+    connecting = false;
+    disconnect();
   }
 </script>
 
@@ -130,7 +140,7 @@
         <button class="connect-btn connecting" disabled>
           <span class="spinner"></span> Connecting…
         </button>
-        <button class="cancel-btn" onclick={() => { disconnect(); connecting = false; }}>Cancel</button>
+        <button class="cancel-btn" onclick={cancelConnect}>Cancel</button>
       </div>
     {:else}
       <button class="connect-btn" onclick={doConnect} disabled={!address}>
