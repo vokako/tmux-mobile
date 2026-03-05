@@ -624,16 +624,16 @@
       <button class="tool-btn" class:tool-active={showHidden} onclick={() => { showHidden = !showHidden; loadDir(cwd); }}>
         <Icon name="eye" size={15} />
       </button>
-      <div style="flex:1"></div>
-      {#if isTauri}
-        <button class="tool-btn" onclick={openLocalFiles} title="Local files"><Icon name="download" size={15} /></button>
-      {/if}
       <button class="tool-btn" class:starred={isBookmarked(cwd)} onclick={() => toggleBookmark(cwd)} title="Bookmark">
         <Icon name={isBookmarked(cwd) ? 'star-filled' : 'star'} size={15} />
       </button>
       <button class="tool-btn" class:tool-active={showBookmarks} onclick={() => showBookmarks = !showBookmarks} title="Bookmarks">
         <Icon name="folder-star" size={15} />
       </button>
+      <div style="flex:1"></div>
+      {#if isTauri}
+        <button class="tool-btn" onclick={openLocalFiles} title="Local files"><Icon name="download" size={15} /></button>
+      {/if}
     </div>
 
     <!-- Path -->
