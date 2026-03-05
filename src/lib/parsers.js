@@ -166,12 +166,19 @@ export function parseMessages(raw, parser) {
         lines = lines.filter(l => l.trim());
         rawLines = rawLines.filter((_, i) => current.lines[i]?.trim());
       }
+      // For user messages, join single newlines as spaces (tmux line wrapping)
+      const text = current.role === 'user'
+        ? lines.join(' ').replace(/\s+/g, ' ').trim()
+        : lines.join('\n').trim();
+      const rawText = current.role === 'user'
+        ? rawLines.join(' ').replace(/\s+/g, ' ').trim()
+        : rawLines.join('\n').trim();
       messages.push({
         ...current,
         lines,
         rawLines,
-        text: lines.join('\n').trim(),
-        rawText: rawLines.join('\n').trim(),
+        text,
+        rawText,
       });
     }
     current = null;
