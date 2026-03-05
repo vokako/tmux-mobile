@@ -111,7 +111,18 @@
     } catch (e) { error = e.message; }
   }
 
-  function openFileNative(path) {
+  async function waitForFileOpener(maxWait = 2000) {
+    if (window.AndroidFileOpener) return true;
+    const start = Date.now();
+    while (Date.now() - start < maxWait) {
+      await new Promise(r => setTimeout(r, 100));
+      if (window.AndroidFileOpener) return true;
+    }
+    return false;
+  }
+
+  async function openFileNative(path) {
+    if (!window.AndroidFileOpener) await waitForFileOpener();
     if (window.AndroidFileOpener) {
       const result = window.AndroidFileOpener.openFile(path);
       if (result !== 'ok') throw new Error(result);
@@ -122,7 +133,7 @@
 
   async function openLocalFile(name) {
     try {
-      openFileNative(localDir + name);
+      await openFileNative(localDir + name);
     } catch (e) { error = 'Open failed: ' + (e.message || e); }
   }
 
@@ -380,8 +391,8 @@
   async function openDownloaded() {
     if (!downloadedPath) return;
     try {
-      if (window.AndroidFileOpener) {
-        openFileNative(downloadedPath);
+      if (isAndroid) {
+        await openFileNative(downloadedPath);
       } else if (isTauri) {
         await tauriReady;
         await tauriOpener.openPath(downloadedPath);

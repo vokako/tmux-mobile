@@ -18,11 +18,16 @@ class MainActivity : TauriActivity() {
     val rootView = window.decorView.rootView
     val density = resources.displayMetrics.density
 
-    // Add JS interface for opening files
-    rootView.post {
+    // Add JS interface for opening files (retry until WebView is in hierarchy)
+    fun attachFileOpener() {
       val webView = findWebView(rootView)
-      webView?.addJavascriptInterface(FileOpener(), "AndroidFileOpener")
+      if (webView != null) {
+        webView.addJavascriptInterface(FileOpener(), "AndroidFileOpener")
+      } else {
+        rootView.postDelayed(::attachFileOpener, 100)
+      }
     }
+    rootView.post(::attachFileOpener)
 
     // Send status bar + navigation bar insets to WebView (convert to CSS px)
     ViewCompat.setOnApplyWindowInsetsListener(rootView) { _, insets ->
