@@ -561,9 +561,27 @@
   }
 
   let previewEl;
+
+  async function resolveImages(container) {
+    if (!container) return;
+    const dir = currentFile?.path?.replace(/\/[^/]+$/, '') || '';
+    const imgs = container.querySelectorAll('img[src]');
+    for (const img of imgs) {
+      const src = img.getAttribute('src');
+      if (!src || src.startsWith('data:') || src.startsWith('http')) continue;
+      // Resolve relative path
+      const fullPath = src.startsWith('/') ? src : dir + '/' + src;
+      try {
+        const r = await fsDownload(fullPath);
+        const mime = currentFile?.stat?.mime_hint || 'image/png';
+        img.src = `data:${mime};base64,${r.data}`;
+      } catch { img.alt = `[${src}]`; }
+    }
+  }
+
   $effect(() => {
     if (view === 'preview' && mimeCategory(currentFile?.stat?.mime_hint) === 'markdown' && previewEl) {
-      setTimeout(() => renderMermaidBlocks(previewEl), 50);
+      setTimeout(() => { renderMermaidBlocks(previewEl); resolveImages(previewEl); }, 50);
     }
     if (view === 'preview' && currentFile?.pdfData && pdfContainer) {
       setTimeout(() => renderPdf(currentFile.pdfData), 50);
