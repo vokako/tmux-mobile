@@ -10,13 +10,26 @@ fn get_local_config() -> serde_json::Value {
     config::get_config_json()
 }
 
+fn sanitize_filename(name: &str) -> Result<String, String> {
+    // Extract just the filename, stripping any directory components
+    let fname = std::path::Path::new(name)
+        .file_name()
+        .and_then(|f| f.to_str())
+        .ok_or_else(|| "invalid filename".to_string())?;
+    if fname.is_empty() || fname == "." || fname == ".." {
+        return Err("invalid filename".to_string());
+    }
+    Ok(fname.to_string())
+}
+
 #[tauri::command]
 fn save_to_downloads(name: String, data: String) -> Result<String, String> {
+    let safe_name = sanitize_filename(&name)?;
     let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &data)
         .map_err(|e| format!("base64: {}", e))?;
     let dir = std::path::PathBuf::from("/storage/emulated/0/Download/TmuxMobile");
     std::fs::create_dir_all(&dir).ok();
-    let path = dir.join(&name);
+    let path = dir.join(&safe_name);
     std::fs::write(&path, &bytes).map_err(|e| format!("write: {}", e))?;
     Ok(path.to_string_lossy().to_string())
 }
@@ -41,13 +54,15 @@ fn list_downloads() -> Result<Vec<String>, String> {
 
 #[tauri::command]
 fn delete_download(name: String) -> Result<(), String> {
-    let path = std::path::PathBuf::from("/storage/emulated/0/Download/TmuxMobile").join(&name);
+    let safe_name = sanitize_filename(&name)?;
+    let path = std::path::PathBuf::from("/storage/emulated/0/Download/TmuxMobile").join(&safe_name);
     std::fs::remove_file(&path).map_err(|e| format!("delete: {}", e))
 }
 
 #[tauri::command]
-fn get_download_path(name: String) -> String {
-    format!("/storage/emulated/0/Download/TmuxMobile/{}", name)
+fn get_download_path(name: String) -> Result<String, String> {
+    let safe_name = sanitize_filename(&name)?;
+    Ok(format!("/storage/emulated/0/Download/TmuxMobile/{}", safe_name))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

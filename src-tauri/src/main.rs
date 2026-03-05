@@ -6,9 +6,9 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use tmux_mobile::tmux;
     use std::thread;
     use std::time::Duration;
+    use tmux_mobile::tmux;
 
     const TEST_SESSION: &str = "_tmux_mobile_test";
 
@@ -27,7 +27,10 @@ mod tests {
         let sessions = tmux::list_sessions().expect("Failed to list sessions");
         println!("✅ Found {} sessions:", sessions.len());
         for s in &sessions {
-            println!("   - {} ({} windows, attached={})", s.name, s.windows, s.attached);
+            println!(
+                "   - {} ({} windows, attached={})",
+                s.name, s.windows, s.attached
+            );
         }
         assert!(!sessions.is_empty(), "No sessions found");
     }
@@ -37,12 +40,18 @@ mod tests {
         cleanup();
         tmux::new_session(TEST_SESSION).expect("Failed to create session");
         let sessions = tmux::list_sessions().unwrap();
-        assert!(sessions.iter().any(|s| s.name == TEST_SESSION), "Test session not found");
+        assert!(
+            sessions.iter().any(|s| s.name == TEST_SESSION),
+            "Test session not found"
+        );
         println!("✅ Created session: {}", TEST_SESSION);
 
         tmux::kill_session(TEST_SESSION).expect("Failed to kill session");
         let sessions = tmux::list_sessions().unwrap();
-        assert!(!sessions.iter().any(|s| s.name == TEST_SESSION), "Test session still exists");
+        assert!(
+            !sessions.iter().any(|s| s.name == TEST_SESSION),
+            "Test session still exists"
+        );
         println!("✅ Killed session: {}", TEST_SESSION);
     }
 
@@ -53,7 +62,10 @@ mod tests {
         let panes = tmux::list_panes(TEST_SESSION).expect("Failed to list panes");
         println!("✅ Session {} has {} pane(s):", TEST_SESSION, panes.len());
         for p in &panes {
-            println!("   - window:{} pane:{} ({}x{}) cmd={}", p.window, p.pane, p.width, p.height, p.current_command);
+            println!(
+                "   - window:{} pane:{} ({}x{}) cmd={}",
+                p.window, p.pane, p.width, p.height, p.current_command
+            );
         }
         assert!(!panes.is_empty(), "No panes found");
         cleanup();
@@ -103,7 +115,11 @@ mod tests {
         tmux::new_session(TEST_SESSION).unwrap();
         thread::sleep(Duration::from_millis(200));
 
-        tmux::send_command(TEST_SESSION, "for i in $(seq 1 100); do echo \"line_$i\"; done").unwrap();
+        tmux::send_command(
+            TEST_SESSION,
+            "for i in $(seq 1 100); do echo \"line_$i\"; done",
+        )
+        .unwrap();
         thread::sleep(Duration::from_millis(1000));
 
         let output = tmux::capture_pane(TEST_SESSION, Some(50)).unwrap();
