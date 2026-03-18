@@ -3,11 +3,17 @@ use crate::tmux;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
+
+// Brute-force protection: track failed auth attempts per IP
+type AuthTracker = Arc<Mutex<HashMap<IpAddr, (u32, tokio::time::Instant)>>>;
+
+const MAX_AUTH_FAILURES: u32 = 5;
+const AUTH_LOCKOUT_SECS: u64 = 60;
 
 // JSON-RPC style request/response
 
@@ -370,11 +376,7 @@ fn handle_request(req: &Request) -> Response {
 
 // Subscription polling task: captures pane content and sends diffs
 async fn subscription_loop(
-    sender: Arc<
-        Mutex<
-            futures_util::stream::SplitSink<tokio_tungstenite::WebSocketStream<TcpStream>, Message>,
-        >,
-    >,
+    sender: Arc<Mutex<dyn futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Send + Unpin>>,
     subs: Subscriptions,
 ) {
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(200));
@@ -462,8 +464,19 @@ fn handle_unsubscribe(params: &serde_json::Value, subs: &mut HashMap<String, Str
     Response::ok(None, serde_json::json!({ "unsubscribed": target }))
 }
 
-async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>) {
+async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>, auth_tracker: AuthTracker) {
     println!("📱 Client connected: {}", addr);
+
+    // Check if IP is locked out
+    {
+        let tracker = auth_tracker.lock().await;
+        if let Some((fails, since)) = tracker.get(&addr.ip()) {
+            if *fails >= MAX_AUTH_FAILURES && since.elapsed().as_secs() < AUTH_LOCKOUT_SECS {
+                eprintln!("🚫 Rejected {} (locked out, {} failures)", addr, fails);
+                return;
+            }
+        }
+    }
 
     let ws_stream = match accept_async(stream).await {
         Ok(ws) => ws,
@@ -473,8 +486,26 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<Strin
         }
     };
 
+    handle_connection_ws(ws_stream, addr, token, auth_tracker).await;
+}
+
+async fn handle_connection_ws<S>(ws_stream: tokio_tungstenite::WebSocketStream<S>, addr: SocketAddr, token: Arc<String>, auth_tracker: AuthTracker)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    // Check if IP is locked out
+    {
+        let tracker = auth_tracker.lock().await;
+        if let Some((fails, since)) = tracker.get(&addr.ip()) {
+            if *fails >= MAX_AUTH_FAILURES && since.elapsed().as_secs() < AUTH_LOCKOUT_SECS {
+                eprintln!("🚫 Rejected {} (locked out, {} failures)", addr, fails);
+                return;
+            }
+        }
+    }
+
     let (ws_sender, mut receiver) = ws_stream.split();
-    let sender = Arc::new(Mutex::new(ws_sender));
+    let sender: Arc<Mutex<dyn futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Send + Unpin>> = Arc::new(Mutex::new(ws_sender));
     let subs: Subscriptions = Arc::new(Mutex::new(HashMap::new()));
     let mut authenticated = false;
 
@@ -504,11 +535,23 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<Strin
                                     .unwrap_or("");
                                 if provided == token.as_str() {
                                     authenticated = true;
+                                    // Clear failures on success
+                                    auth_tracker.lock().await.remove(&addr.ip());
                                     Response::ok(
                                         req.id,
                                         serde_json::json!({ "authenticated": true }),
                                     )
                                 } else {
+                                    // Track failure
+                                    let mut tracker = auth_tracker.lock().await;
+                                    let entry = tracker.entry(addr.ip()).or_insert((0, tokio::time::Instant::now()));
+                                    if entry.1.elapsed().as_secs() >= AUTH_LOCKOUT_SECS {
+                                        *entry = (0, tokio::time::Instant::now());
+                                    }
+                                    entry.0 += 1;
+                                    let fails = entry.0;
+                                    drop(tracker);
+                                    eprintln!("🚫 Auth failed from {} (attempt {})", addr, fails);
                                     let r = Response::err(req.id, ERR_AUTH, "invalid token".into());
                                     let json = serde_json::to_string(&r).unwrap();
                                     let mut tx = sender.lock().await;
@@ -569,7 +612,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<Strin
 }
 
 pub async fn start(host: &str, port: u16, token: &str) -> Result<(), Box<dyn std::error::Error>> {
-    start_with_socket(host, port, token, None).await
+    start_with_socket(host, port, token, None, None, None).await
 }
 
 pub async fn start_with_socket(
@@ -577,19 +620,64 @@ pub async fn start_with_socket(
     port: u16,
     token: &str,
     socket: Option<String>,
+    tls_cert: Option<String>,
+    tls_key: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     tmux::set_socket(socket);
     let addr = format!("{}:{}", host, port);
     let listener = TcpListener::bind(&addr).await?;
     let token = Arc::new(token.to_string());
+    let auth_tracker: AuthTracker = Arc::new(Mutex::new(HashMap::new()));
 
-    println!("🚀 tmux-mobile server listening on ws://{}", addr);
+    // Load TLS config if cert+key provided
+    let tls_acceptor = match (&tls_cert, &tls_key) {
+        (Some(cert_path), Some(key_path)) => {
+            let cert_data = std::fs::read(cert_path)
+                .map_err(|e| format!("Failed to read TLS cert {}: {}", cert_path, e))?;
+            let key_data = std::fs::read(key_path)
+                .map_err(|e| format!("Failed to read TLS key {}: {}", key_path, e))?;
+
+            let certs: Vec<_> = rustls_pemfile::certs(&mut &cert_data[..])
+                .filter_map(|r| r.ok())
+                .collect();
+            let key = rustls_pemfile::private_key(&mut &key_data[..])
+                .map_err(|e| format!("Failed to parse TLS key: {}", e))?
+                .ok_or("No private key found in key file")?;
+
+            let config = tokio_rustls::rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(certs, key)
+                .map_err(|e| format!("TLS config error: {}", e))?;
+            Some(tokio_rustls::TlsAcceptor::from(Arc::new(config)))
+        }
+        _ => None,
+    };
+
+    let scheme = if tls_acceptor.is_some() { "wss" } else { "ws" };
+    println!("🚀 tmux-mobile server listening on {}://{}", scheme, addr);
     println!("🔑 Token: {}", token);
     println!("   Methods: auth, list_sessions, list_panes, capture_pane, send_keys, send_command, new_session, kill_session, subscribe, unsubscribe");
 
     loop {
         let (stream, addr) = listener.accept().await?;
         let token = token.clone();
-        tokio::spawn(handle_connection(stream, addr, token));
+        let auth_tracker = auth_tracker.clone();
+        if let Some(ref acceptor) = tls_acceptor {
+            let acceptor = acceptor.clone();
+            tokio::spawn(async move {
+                match acceptor.accept(stream).await {
+                    Ok(tls_stream) => {
+                        let ws_stream = match tokio_tungstenite::accept_async(tls_stream).await {
+                            Ok(ws) => ws,
+                            Err(e) => { eprintln!("❌ WSS handshake failed for {}: {}", addr, e); return; }
+                        };
+                        handle_connection_ws(ws_stream, addr, token, auth_tracker).await;
+                    }
+                    Err(e) => eprintln!("❌ TLS handshake failed for {}: {}", addr, e),
+                }
+            });
+        } else {
+            tokio::spawn(handle_connection(stream, addr, token, auth_tracker));
+        }
     }
 }

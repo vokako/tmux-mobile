@@ -79,7 +79,7 @@ pub fn run() {
                 let cfg = Config::load();
                 tauri::async_runtime::spawn(async move {
                     if let Err(e) =
-                        server::start_with_socket(&cfg.host, cfg.port, &cfg.token, cfg.tmux_socket)
+                        server::start_with_socket(&cfg.host, cfg.port, &cfg.token, cfg.tmux_socket, cfg.tls_cert, cfg.tls_key)
                             .await
                     {
                         eprintln!("Server error: {}", e);

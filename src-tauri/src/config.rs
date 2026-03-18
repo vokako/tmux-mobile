@@ -8,6 +8,8 @@ struct FileConfig {
     port: Option<u16>,
     token: Option<String>,
     tmux_socket: Option<String>,
+    tls_cert: Option<String>,
+    tls_key: Option<String>,
 }
 
 pub struct Config {
@@ -15,6 +17,8 @@ pub struct Config {
     pub port: u16,
     pub token: String,
     pub tmux_socket: Option<String>,
+    pub tls_cert: Option<String>,
+    pub tls_key: Option<String>,
 }
 
 fn config_path() -> PathBuf {
@@ -58,6 +62,8 @@ impl Config {
                 .unwrap_or(9899),
             token,
             tmux_socket: std::env::var("TMUX_SOCKET").ok().or(file_cfg.tmux_socket),
+            tls_cert: std::env::var("TLS_CERT").ok().or(file_cfg.tls_cert),
+            tls_key: std::env::var("TLS_KEY").ok().or(file_cfg.tls_key),
         }
     }
 }
