@@ -122,9 +122,12 @@ fn is_text_file(path: &Path, name: &str) -> bool {
         return true;
     }
     // Check first 512 bytes for binary content
-    if let Ok(bytes) = fs::read(path) {
-        let check = &bytes[..bytes.len().min(512)];
-        return !check.iter().any(|&b| b == 0);
+    if let Ok(mut f) = std::fs::File::open(path) {
+        use std::io::Read;
+        let mut buf = [0u8; 512];
+        if let Ok(n) = f.read(&mut buf) {
+            return !buf[..n].contains(&0);
+        }
     }
     false
 }

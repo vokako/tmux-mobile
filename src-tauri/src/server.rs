@@ -378,6 +378,7 @@ async fn subscription_loop(
     subs: Subscriptions,
 ) {
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(200));
+    let mut fail_counts: HashMap<String, u32> = HashMap::new();
     loop {
         interval.tick().await;
         let targets: Vec<(String, String)> = {
@@ -391,14 +392,26 @@ async fn subscription_loop(
             let t = target.clone();
             let t2 = target.clone();
             let (new_content, cursor) = match tokio::task::spawn_blocking(move || {
-                let content = tmux::capture_pane(&t, None)?;
                 let cursor = tmux::cursor_info(&t2).unwrap_or((0, 0, 24, 80));
+                let content = tmux::capture_pane_with_width(&t, None, cursor.3)?;
                 Ok::<_, String>((content, cursor))
             })
             .await
             {
-                Ok(Ok(v)) => v,
-                _ => continue,
+                Ok(Ok(v)) => {
+                    fail_counts.remove(&target);
+                    v
+                }
+                _ => {
+                    let count = fail_counts.entry(target.clone()).or_insert(0);
+                    *count += 1;
+                    if *count >= 15 {
+                        // ~3s of failures, pane likely gone
+                        subs.lock().await.remove(&target);
+                        fail_counts.remove(&target);
+                    }
+                    continue;
+                }
             };
             let state_key = format!("{}\x00{},{},{},{}", new_content, cursor.0, cursor.1, cursor.2, cursor.3);
             if state_key == prev {

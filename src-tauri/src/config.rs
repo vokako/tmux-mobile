@@ -41,9 +41,9 @@ impl Config {
             .ok()
             .or(file_cfg.token)
             .unwrap_or_else(|| {
-                // Default empty token (no auth required)
-                let _ = save_token("");
-                String::new()
+                let t = uuid::Uuid::new_v4().to_string();
+                let _ = save_token(&t);
+                t
             });
 
         Config {

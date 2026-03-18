@@ -173,6 +173,15 @@ pub fn cursor_info(target: &str) -> Result<(usize, usize, usize, usize), String>
 /// wrapping where tmux doesn't set the WRAPPED flag (last column left
 /// empty because a 2-cell character didn't fit).
 pub fn capture_pane(target: &str, lines: Option<usize>) -> Result<String, String> {
+    capture_pane_with_width(target, lines, 0)
+}
+
+/// Capture with a known pane width (avoids extra tmux call).
+pub fn capture_pane_with_width(
+    target: &str,
+    lines: Option<usize>,
+    width: usize,
+) -> Result<String, String> {
     let start_line = lines
         .map(|n| format!("-{}", n))
         .unwrap_or("-200".to_string());
@@ -186,11 +195,6 @@ pub fn capture_pane(target: &str, lines: Option<usize>) -> Result<String, String
         "-S",
         &start_line, // 从多少行前开始
     ])?;
-
-    let width = run_tmux(&["display-message", "-t", target, "-p", "#{pane_width}"])
-        .ok()
-        .and_then(|s| s.trim().parse::<usize>().ok())
-        .unwrap_or(0);
 
     let trimmed = output.trim_end();
     if width == 0 {

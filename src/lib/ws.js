@@ -109,7 +109,14 @@ function call(method, params = {}) {
       return;
     }
     const id = ++requestId;
-    pending.set(id, { resolve, reject });
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      reject(new Error('request timeout'));
+    }, 10000);
+    pending.set(id, {
+      resolve: (v) => { clearTimeout(timer); resolve(v); },
+      reject: (e) => { clearTimeout(timer); reject(e); },
+    });
     ws.send(JSON.stringify({ id, method, params }));
   });
 }
