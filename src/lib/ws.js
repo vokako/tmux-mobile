@@ -61,7 +61,7 @@ export function connect(url, token) {
 
       // Server push (subscribe)
       if (data.method === 'pane_output') {
-        onPaneOutput?.(data.params?.target, data.params?.content);
+        onPaneOutput?.(data.params?.target, data.params?.content, data.params?.cursor);
         return;
       }
 

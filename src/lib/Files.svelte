@@ -89,6 +89,7 @@
 
   // View modes: 'list', 'preview', 'edit', 'info', 'local'
   let view = $state('list');
+  let previewZoom = $state(100);
 
   // Android local files
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
@@ -756,6 +757,11 @@
     <div class="preview-header">
       <button class="back-btn" onclick={backToList}><Icon name="chevron-left" size={16} /></button>
       <span class="preview-name">{currentFile.name}</span>
+      <div class="zoom-ctl">
+        <button class="act-btn" onclick={() => previewZoom = Math.max(50, previewZoom - 10)}>−</button>
+        <span class="zoom-pct">{previewZoom}%</span>
+        <button class="act-btn" onclick={() => previewZoom = Math.min(200, previewZoom + 10)}>+</button>
+      </div>
       <div class="preview-actions">
         {#if currentFile.stat?.is_text && currentFile.stat?.writable}
           <button class="act-btn" onclick={startEdit}><Icon name="edit" size={14} /></button>
@@ -765,7 +771,7 @@
         <button class="act-btn" onclick={() => { view = 'info'; navPush(); }}><Icon name="info" size={14} /></button>
       </div>
     </div>
-    <div class="preview-body">
+    <div class="preview-body" style="zoom:{previewZoom / 100}">
       {#if mimeCategory(currentFile.stat?.mime_hint) === 'markdown'}
         <div class="md-render" bind:this={previewEl}>{@html renderMarkdown(currentFile.content)}</div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'csv'}
@@ -996,6 +1002,8 @@
     text-overflow: ellipsis; white-space: nowrap;
   }
   .preview-actions { display: flex; gap: 4px; }
+  .zoom-ctl { display: flex; align-items: center; gap: 2px; }
+  .zoom-pct { font-size: 11px; color: var(--text3); min-width: 32px; text-align: center; }
 
   /* Preview body */
   .preview-body { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 12px; display: flex; flex-direction: column; min-height: 0; }

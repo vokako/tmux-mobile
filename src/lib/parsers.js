@@ -223,22 +223,26 @@ const claudeCodeParser = {
 
     // Model selector
     if (/^Select model$/.test(trimmed)) return { type: 'model_header' };
-    // Model selector description/items/effort bar — skip all lines within selector
-    if (/^Switch between Claude models/.test(trimmed)) return { type: 'model_item', text: trimmed };
-    if (/^\d+\.\s+(Default|Sonnet|Opus|Haiku)\b/.test(trimmed)) return { type: 'model_item', text: trimmed };
-    if (/^❯\s*\d+\.\s+(Default|Sonnet|Opus|Haiku)\b/.test(trimmed)) return { type: 'model_selected', text: trimmed };
-    if (/^▌/.test(trimmed)) return { type: 'model_item', text: trimmed }; // effort bar
-    if (/^(← →|For other)/.test(trimmed)) return { type: 'model_item', text: trimmed };
+    // Model selector — skip all non-item lines
+    if (/^Switch between Claude models/.test(trimmed)) return { type: 'skip' };
+    if (/^Code sessions\./.test(trimmed)) return { type: 'skip' };
+    if (/^▌/.test(trimmed)) return { type: 'skip' }; // effort bar
+    if (/^←/.test(trimmed)) return { type: 'skip' };
+    // Price/description continuation lines (indented ·, Mtok, etc.) — skip
+    if (/^·\s*\$/.test(trimmed) || /^Mtok$/.test(trimmed) || /per\s+Mtok$/.test(trimmed)) return { type: 'skip' };
+    // Model numbered items: "N. Name..." or "❯ N. Name..." (any model name)
+    if (/^\d+\.\s+\S/.test(trimmed)) return { type: 'model_item', text: trimmed };
+    if (/^❯\s*\d+\.\s+\S/.test(trimmed)) return { type: 'model_selected', text: trimmed };
 
     // Permission prompt (edit/bash/tool confirmation)
     if (/^Do you want to (proceed|make this edit)/.test(trimmed)) return { type: 'permission_header', text: trimmed };
     if (/^This command requires approval/.test(trimmed)) return { type: 'skip' };
     if (/^(Bash command|Edit file)$/.test(trimmed)) return { type: 'skip' };
-    // Permission options — ❯ N. selected or N. unselected
+    // Permission options — ❯ N. selected or N. unselected (only Yes/No/Allow style options)
     {
-      const selM = trimmed.match(/^❯\s*(\d+)\.\s+(.+)/);
+      const selM = trimmed.match(/^❯\s*(\d+)\.\s+(Yes\b|No\b|Yes,|Allow\b|Deny\b|Skip\b).*/);
       if (selM) return { type: 'permission_selected', index: parseInt(selM[1]), text: selM[2].trim() };
-      const optM = trimmed.match(/^(\d+)\.\s+(Yes\b|No\b|Yes,).*/);
+      const optM = trimmed.match(/^(\d+)\.\s+(Yes\b|No\b|Yes,|Allow\b|Deny\b|Skip\b).*/);
       if (optM) return { type: 'permission_option', index: parseInt(optM[1]), text: optM[0].replace(/^\d+\.\s+/, '').trim() };
     }
 
@@ -297,10 +301,6 @@ const claudeCodeParser = {
 
     // Empty line
     if (!trimmed) return { type: 'empty' };
-
-    // Model/price info lines (in model selector context)
-    if (/\$[\d.]+\/\$[\d.]+\s+per\s+Mtok/.test(trimmed)) return { type: 'model_item', text: trimmed };
-    if (/per\s+Mtok$/.test(trimmed)) return { type: 'model_item', text: trimmed };
 
     // Fallback: ⏺ at line start without a color marker (e.g. terminal without RGB true-color support,
     // or banner has scrolled out of view so detect() fell through to ⏺ detection)

@@ -165,7 +165,7 @@
           terminalSession = s.terminalSession || '';
           terminalCommand = s.terminalCommand || '';
           page = s.page || 'terminal';
-          viewMode = s.viewMode || 'terminal';
+          viewMode = 'terminal';
         } else {
           page = 'sessions';
         }
@@ -202,7 +202,7 @@
     navPush();
     return () => window.removeEventListener('popstate', handler);
   });
-  // Swipe left/right to switch tabs
+  // Swipe left/right to switch tabs with slide animation
   const tabs = $derived(() => {
     const t = ['sessions'];
     if (terminalTarget) {
@@ -215,24 +215,56 @@
 
   let swipeX = 0;
   let swipeY = 0;
-  function onPageTouchStart(e) { swipeX = e.touches[0].clientX; swipeY = e.touches[0].clientY; }
+  let swipeDir = 0;
+  let slideAnim = $state('');
+
+  function curTabIdx() {
+    const t = tabs();
+    const cur = page === 'terminal' ? (viewMode === 'chat' ? 'chat' : 'terminal') : page;
+    return t.indexOf(cur);
+  }
+
+  function onPageTouchStart(e) {
+    if (slideAnim) return;
+    swipeX = e.touches[0].clientX;
+    swipeY = e.touches[0].clientY;
+    swipeDir = 0;
+  }
+
   function onPageTouchEnd(e) {
+    if (slideAnim) return;
     const dx = e.changedTouches[0].clientX - swipeX;
     const dy = Math.abs(e.changedTouches[0].clientY - swipeY);
-    if (Math.abs(dx) < 80 || dy > Math.abs(dx) * 0.7) return;
-    // Don't swipe if started from left edge (Files back gesture)
+    if (Math.abs(dx) < 120 || dy > Math.abs(dx) * 0.7) return;
     if (page === 'files' && dx > 0 && swipeX < 40) return;
 
     const t = tabs();
-    const cur = page === 'terminal' ? (viewMode === 'chat' ? 'chat' : 'terminal') : page;
-    const idx = t.indexOf(cur);
-    if (idx < 0) return;
-    const next = dx < 0 ? t[idx + 1] : t[idx - 1];
+    const idx = curTabIdx();
+    const dir = dx < 0 ? 1 : -1;
+    const next = t[idx + dir];
     if (!next) return;
-    if (next === 'chat') { page = 'terminal'; viewMode = 'chat'; }
-    else if (next === 'terminal') { page = 'terminal'; viewMode = 'terminal'; }
-    else { page = next; }
+    switchTab(next);
+  }
+
+  function switchTab(target) {
+    if (slideAnim) return;
+    const t = tabs();
+    const curName = page === 'terminal' ? (viewMode === 'chat' ? 'chat' : 'terminal') : page;
+    if (target === curName) return;
+    const fromIdx = t.indexOf(curName);
+    const toIdx = t.indexOf(target);
+    // Apply page change immediately
+    if (target === 'chat') { page = 'terminal'; viewMode = 'chat'; }
+    else if (target === 'terminal') { page = 'terminal'; viewMode = 'terminal'; }
+    else { page = target; }
     navPush();
+    // Single slide-in animation from the correct direction
+    if (fromIdx >= 0 && toIdx >= 0) {
+      slideAnim = toIdx > fromIdx ? 'slide-in-right' : 'slide-in-left';
+      requestAnimationFrame(() => {
+        setTimeout(() => { slideAnim = ''; }, 120);
+      });
+    }
   }
 </script>
 
@@ -241,21 +273,21 @@
     {#if connected}
       <img class="nav-icon" src={iconSrc} alt="" width="28" height="28" />
       <div class="nav-pills">
-        <button class:active={page === 'sessions'} onclick={() => { page = 'sessions'; navPush(); }}>
+        <button class:active={page === 'sessions'} onclick={() => switchTab('sessions')}>
           Sessions
         </button>
         {#if terminalTarget}
-          <button class:active={page === 'terminal' && viewMode === 'terminal'} onclick={() => { page = 'terminal'; viewMode = 'terminal'; navPush(); }}>
+          <button class:active={page === 'terminal' && viewMode === 'terminal'} onclick={() => switchTab('terminal')}>
             Terminal
           </button>
         {/if}
         {#if terminalTarget && chatSupported}
-          <button class:active={page === 'terminal' && viewMode === 'chat'} onclick={() => { page = 'terminal'; viewMode = 'chat'; navPush(); }}>
+          <button class:active={page === 'terminal' && viewMode === 'chat'} onclick={() => switchTab('chat')}>
             Chat
           </button>
         {/if}
         {#if terminalTarget}
-          <button class:active={page === 'files'} onclick={() => { page = 'files'; navPush(); }}>
+          <button class:active={page === 'files'} onclick={() => switchTab('files')}>
             Files
           </button>
         {/if}
@@ -305,7 +337,8 @@
   {/if}
 
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="page" class:page-terminal={page === 'terminal'} ontouchstart={onPageTouchStart} ontouchend={onPageTouchEnd}>
+  <div class="page {slideAnim}" class:page-terminal={page === 'terminal'}
+    ontouchstart={onPageTouchStart} ontouchend={onPageTouchEnd}>
     {#if page === 'settings'}
       <Settings {onConnected} />
     {:else if page === 'sessions'}
@@ -513,6 +546,13 @@
     position: relative;
   }
   .page-terminal { background: var(--bg); }
+
+  /* Swipe transition animations */
+  .page { will-change: transform; }
+  .page.slide-in-left   { animation: slideInLeft 0.12s linear; }
+  .page.slide-in-right  { animation: slideInRight 0.12s linear; }
+  @keyframes slideInLeft  { from { transform: translateX(-40%); } to { transform: none; } }
+  @keyframes slideInRight { from { transform: translateX(40%); } to { transform: none; } }
   .page-layer {
     position: absolute;
     inset: 0;

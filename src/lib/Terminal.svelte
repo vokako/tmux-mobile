@@ -1,5 +1,5 @@
 <script>
-  import { subscribe, unsubscribe, setOnPaneOutput, sendCommand, sendKeys, paneCommand, listPanes, resizePane } from './ws.js';
+  import { subscribe, unsubscribe, setOnPaneOutput, sendCommand, sendKeys, paneCommand, listPanes, capturePane } from './ws.js';
   import Convert from 'ansi-to-html';
   import ChatView from './ChatView.svelte';
   import Icon from './Icon.svelte';
@@ -9,32 +9,13 @@
 
   let input = $state('');
   let paneContent = $state('');
-  let command = $state('');
+  let command = $state(initialCommand);
+  let directMode = $state(false);
   $effect(() => { command = initialCommand; });
   let termEl;
   let termAtBottom = $state(true);
   let measureEl;
 
-  // Debounce timer for resize
-  let resizeTimer;
-
-  function doResize() {
-    if (!measureEl) return;
-    const charW = measureEl.getBoundingClientRect().width;
-    if (!charW) return;
-    // Use visualViewport for accurate mobile dimensions (accounts for keyboard, notch, etc.)
-    const vp = window.visualViewport;
-    const vpW = vp ? vp.width : window.innerWidth;
-    const vpH = vp ? vp.height : window.innerHeight;
-    const cols = Math.max(20, Math.floor((vpW - 20) / charW)); // 20px total horizontal padding
-    const rows = Math.max(10, Math.floor(vpH / (13 * 1.35)));  // font-size 13 × line-height 1.35
-    resizePane(target, cols, rows).catch(() => {});
-  }
-
-  function scheduleResize() {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(doResize, 300);
-  }
   let theme = $state(document.documentElement.getAttribute('data-theme') || 'dark');
 
   $effect(() => {
@@ -53,6 +34,17 @@
       8: '#6b7280', 9: '#ef4444', 10: '#22c55e', 11: '#eab308',
       12: '#3b82f6', 13: '#a855f7', 14: '#06b6d4', 15: '#1a1a2e',
     }
+  });
+
+  // Compute cursor pixel position for overlay
+  let cursorStyle = $derived.by(() => {
+    if (!cursorPos || viewMode !== 'terminal') return 'display:none';
+    const lines = paneContent.split('\n');
+    const lineIdx = lines.length - cursorPos.h + cursorPos.y;
+    if (lineIdx < 0) return 'display:none';
+    const charW = measureEl?.getBoundingClientRect().width || 7.8;
+    const lineH = 13 * 1.35;
+    return `top:${8 + lineIdx * lineH}px;left:${10 + cursorPos.x * charW}px;width:${charW}px;height:${lineH}px`;
   });
 
   let termHtml = $state('');
@@ -171,36 +163,26 @@
     };
   });
 
-  // Resize pane when target changes or on viewport resize
-  $effect(() => {
-    target; // track target changes (switching panes)
-    // Initial resize after mount — wait for layout
-    const t = setTimeout(doResize, 200);
-    return () => clearTimeout(t);
-  });
-
-  $effect(() => {
-    const vv = window.visualViewport;
-    const onVpResize = () => scheduleResize();
-    if (vv) vv.addEventListener('resize', onVpResize);
-    else window.addEventListener('resize', onVpResize);
-    return () => {
-      if (vv) vv.removeEventListener('resize', onVpResize);
-      else window.removeEventListener('resize', onVpResize);
-    };
-  });
+  let cursorPos = $state(null);
 
   $effect(() => {
     let lastContent = '';
     let first = true;
-    setOnPaneOutput((t, content) => {
-      if (t !== target || content === lastContent) return;
-      lastContent = content;
-      paneContent = content;
-      if (first) { first = false; requestAnimationFrame(scrollToBottom); }
+    setOnPaneOutput((t, content, cursor) => {
+      if (t !== target) return;
+      cursorPos = cursor || null;
+      if (content != null && content !== lastContent) {
+        lastContent = content;
+        paneContent = content;
+        if (first) { first = false; requestAnimationFrame(scrollToBottom); }
+      }
     });
 
     subscribe(target);
+    // Immediately fetch initial content (don't wait for 200ms poll)
+    capturePane(target).then(r => {
+      if (r.content) { paneContent = r.content; }
+    }).catch(() => {});
 
     return () => {
       unsubscribe(target);
@@ -254,6 +236,52 @@
       await sendKeys(target, key, false);
     } catch (_) {}
   }
+
+  // Direct mode: hidden textarea for IME support, keydown for special/ctrl keys
+  let directEl;
+
+  $effect(() => {
+    if (!directMode || viewMode !== 'terminal') return;
+    if (directEl) directEl.focus();
+
+    const handler = (e) => {
+      if (e.isComposing) return;
+      // Ctrl+key → send as tmux C-x
+      if (e.ctrlKey && e.key.length === 1) {
+        e.preventDefault();
+        sendKeys(target, `C-${e.key}`, false).catch(() => {});
+        return;
+      }
+      // Alt+key → send as tmux M-x
+      if (e.altKey && e.key.length === 1) {
+        e.preventDefault();
+        sendKeys(target, `M-${e.key}`, false).catch(() => {});
+        return;
+      }
+      // Let Cmd combos through to browser
+      if (e.metaKey) return;
+      const keyMap = {
+        Enter: 'Enter', Backspace: 'BSpace', Tab: 'Tab', Escape: 'Escape',
+        ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+        Delete: 'DC', Home: 'Home', End: 'End', PageUp: 'PPage', PageDown: 'NPage',
+      };
+      if (keyMap[e.key]) {
+        e.preventDefault();
+        sendKeys(target, keyMap[e.key], false).catch(() => {});
+      }
+      // Single chars handled via oninput on the hidden textarea (for IME support)
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  });
+
+  function directInput(e) {
+    const text = e.target.value;
+    if (text) {
+      sendKeys(target, text, true).catch(() => {});
+      e.target.value = '';
+    }
+  }
 </script>
 
 <div class="terminal">
@@ -279,7 +307,10 @@
   <span class="char-measure" bind:this={measureEl} aria-hidden="true">M</span>
 
   <div class="term-wrap" class:hidden={viewMode !== 'terminal'}>
-    <div class="ansi-output" bind:this={termEl} onscroll={checkAtBottom}>{@html termHtml}</div>
+    <div class="ansi-output" bind:this={termEl} onscroll={checkAtBottom}>
+      {@html termHtml}
+      <span class="term-cursor" style={cursorStyle}></span>
+    </div>
     {#if !termAtBottom}
       <button class="scroll-btn" onclick={scrollToBottom}><Icon name="arrow-down" size={16} /></button>
     {/if}
@@ -290,29 +321,30 @@
 
   <div class="input-area">
     {#if viewMode === 'terminal'}
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="shortcut-rows" onmousedown={(e) => e.preventDefault()} ontouchstart={(e) => e.preventDefault()}>
-        <div class="shortcuts">
-          <button onclick={() => sendSpecial('Tab')}>Tab</button>
-          <button onclick={() => sendSpecial('C-c')}>^C</button>
-          <button onclick={() => sendSpecial('C-a')}><Icon name="skip-left" size={13} /></button>
-          <button onclick={() => sendSpecial('Up')}><Icon name="arrow-up" size={13} /></button>
-          <button onclick={() => sendSpecial('C-e')}><Icon name="skip-right" size={13} /></button>
-          <button onclick={() => sendSpecial('BSpace')}><Icon name="delete" size={13} /></button>
-        </div>
-        <div class="shortcuts">
-          <button onclick={() => sendKeys(target, '/', true).catch(() => {})}>/</button>
-          <button onclick={() => sendSpecial('C-d')}>^D</button>
-          <button onclick={() => sendSpecial('Left')}><Icon name="arrow-left" size={13} /></button>
-          <button onclick={() => sendSpecial('Down')}><Icon name="arrow-down" size={13} /></button>
-          <button onclick={() => sendSpecial('Right')}><Icon name="arrow-right" size={13} /></button>
-          <button class="sk-empty" aria-hidden="true"></button>
-        </div>
-      </div>
       <div class="input-bar">
         <div class="input-status">
           <span class="status-left">{target}{#if command} · <span class:kiro={/^kiro/i.test(command)}>{command}</span>{/if}</span>
         </div>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="shortcut-rows" onmousedown={(e) => e.preventDefault()} ontouchstart={(e) => e.preventDefault()}>
+          <div class="shortcuts">
+            <button onclick={() => sendSpecial('Tab')}>Tab</button>
+            <button onclick={() => sendSpecial('C-c')}>^C</button>
+            <button onclick={() => sendSpecial('C-a')}><Icon name="skip-left" size={13} /></button>
+            <button onclick={() => sendSpecial('Up')}><Icon name="arrow-up" size={13} /></button>
+            <button onclick={() => sendSpecial('C-e')}><Icon name="skip-right" size={13} /></button>
+            <button onclick={() => sendSpecial('BSpace')}><Icon name="delete" size={13} /></button>
+          </div>
+          <div class="shortcuts">
+            <button onclick={() => sendKeys(target, '/', true).catch(() => {})}>/</button>
+            <button onclick={() => sendSpecial('C-d')}>^D</button>
+            <button onclick={() => sendSpecial('Left')}><Icon name="arrow-left" size={13} /></button>
+            <button onclick={() => sendSpecial('Down')}><Icon name="arrow-down" size={13} /></button>
+            <button onclick={() => sendSpecial('Right')}><Icon name="arrow-right" size={13} /></button>
+            <button class:sk-active={directMode} onclick={() => directMode = !directMode}><Icon name="zap" size={13} /></button>
+          </div>
+        </div>
+        {#if !directMode}
         <div class="cmd-row">
           <span class="prompt">❯</span>
           <textarea
@@ -328,6 +360,9 @@
           ></textarea>
           <button class="send" ontouchstart={(e) => { if (input.trim()) e.preventDefault(); }} onmousedown={(e) => { if (input.trim()) e.preventDefault(); }} onclick={handleSubmit}><Icon name={input.trim() ? "arrow-right" : "send"} size={14} /></button>
         </div>
+        {:else}
+        <textarea class="direct-ime" bind:this={directEl} oninput={directInput} autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
+        {/if}
       </div>
     {:else}
       <div class="input-bar chat-input-bar">
@@ -461,6 +496,7 @@
   }
 
   .ansi-output {
+    position: relative;
     height: 100%;
     padding: 8px 10px;
     overflow-y: auto;
@@ -475,6 +511,18 @@
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
     contain: content;
+  }
+
+  .term-cursor {
+    position: absolute;
+    background: var(--text);
+    opacity: 0.7;
+    border-radius: 1px;
+    animation: blink 1s step-end infinite;
+    pointer-events: none;
+  }
+  @keyframes blink {
+    50% { opacity: 0; }
   }
 
   .scroll-btn {
@@ -542,6 +590,19 @@
   }
   .shortcuts button.sk-empty {
     visibility: hidden;
+  }
+  .shortcuts button.sk-active {
+    background: var(--accent-bg);
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  .direct-ime {
+    position: absolute;
+    opacity: 0;
+    height: 0;
+    padding: 0;
+    border: none;
+    pointer-events: none;
   }
   .shortcuts button:active {
     background: var(--accent-bg);

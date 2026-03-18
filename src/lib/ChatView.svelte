@@ -60,14 +60,14 @@
 
   // Detect if a line is part of a diff block (Kiro CLI format: "+  NNN:" or "- NNN  :" or "  NNN, NNN:")
   function isDiffLine(line) {
-    return /^[+\-]\s+\d+\s*:/.test(line) || /^\s+\d+,\s*\d+\s*:/.test(line);
+    return /^[+\-]\s+\d+\s*:/.test(line) || /^\s*\d+,\s*\d+\s*:/.test(line);
   }
 
   // Detect if a line starts a tool call block
   // Must be specific to avoid false positives on explanatory text
   function isToolLine(line) {
-    // Kiro: must start with the tool syntax
-    if (/^\(using tool:\s*\w+\)/.test(line)) return true;
+    // Kiro: tool syntax anywhere in line (e.g. "I'll modify ... (using tool: write)")
+    if (/\(using tool:\s*\w+\)/.test(line)) return true;
     // Kiro in-progress: require specific suffixes (not bare words)
     if (/^Searching in \d/.test(line)) return true;
     if (/^Reading file/.test(line)) return true;
@@ -371,7 +371,7 @@
               <div class="diff-block">
                 {#each block.content.split('\n') as dline}
                   {@const clean = stripAnsi(dline)}
-                  <div class="diff-line" class:diff-add={/^\+/.test(clean.trim())} class:diff-del={/^-/.test(clean.trim())} class:diff-ctx={/^\s+\d+,/.test(clean)}>{@html cachedAnsiToHtml(dline)}</div>
+                  <div class="diff-line" class:diff-add={/^\+/.test(clean.trim())} class:diff-del={/^-/.test(clean.trim())} class:diff-ctx={/^\s*\d+,\s*\d+\s*:/.test(clean)}>{@html cachedAnsiToHtml(dline)}</div>
                 {/each}
               </div>
             {/if}

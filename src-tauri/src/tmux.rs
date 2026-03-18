@@ -151,7 +151,25 @@ pub fn pane_command(target: &str) -> Result<String, String> {
     .map(|s| s.trim().to_string())
 }
 
+/// Get cursor position (x, y), pane height and pane width
+pub fn cursor_info(target: &str) -> Result<(usize, usize, usize, usize), String> {
+    let out = run_tmux(&[
+        "display-message",
+        "-t",
+        target,
+        "-p",
+        "#{cursor_x},#{cursor_y},#{pane_height},#{pane_width}",
+    ])?;
+    let parts: Vec<&str> = out.trim().split(',').collect();
+    let x = parts.get(0).unwrap_or(&"0").parse().unwrap_or(0);
+    let y = parts.get(1).unwrap_or(&"0").parse().unwrap_or(0);
+    let h = parts.get(2).unwrap_or(&"24").parse().unwrap_or(24);
+    let w = parts.get(3).unwrap_or(&"80").parse().unwrap_or(80);
+    Ok((x, y, h, w))
+}
+
 /// 捕获 pane 内容（屏幕输出，保留 ANSI 转义序列）
+/// Uses -J to join tmux-wrapped lines.
 pub fn capture_pane(target: &str, lines: Option<usize>) -> Result<String, String> {
     let start_line = lines
         .map(|n| format!("-{}", n))
@@ -166,7 +184,6 @@ pub fn capture_pane(target: &str, lines: Option<usize>) -> Result<String, String
         "-S",
         &start_line, // 从多少行前开始
     ])?;
-    // Trim trailing empty lines
     Ok(output.trim_end().to_string())
 }
 
@@ -232,10 +249,11 @@ pub fn kill_window(target: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Resize a pane to given cols × rows
+/// Resize the window containing target pane to given cols × rows.
+/// Only effective when no terminal client is attached to the session.
 pub fn resize_pane(target: &str, cols: usize, rows: usize) -> Result<(), String> {
     run_tmux(&[
-        "resize-pane",
+        "resize-window",
         "-t",
         target,
         "-x",

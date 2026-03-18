@@ -389,24 +389,39 @@ async fn subscription_loop(
         }
         for (target, prev) in targets {
             let t = target.clone();
-            let new_content =
-                match tokio::task::spawn_blocking(move || tmux::capture_pane(&t, None)).await {
-                    Ok(Ok(c)) => c,
-                    _ => continue,
-                };
-            if new_content == prev {
+            let t2 = target.clone();
+            let (new_content, cursor) = match tokio::task::spawn_blocking(move || {
+                let content = tmux::capture_pane(&t, None)?;
+                let cursor = tmux::cursor_info(&t2).unwrap_or((0, 0, 24, 80));
+                Ok::<_, String>((content, cursor))
+            })
+            .await
+            {
+                Ok(Ok(v)) => v,
+                _ => continue,
+            };
+            let state_key = format!("{}\x00{},{},{},{}", new_content, cursor.0, cursor.1, cursor.2, cursor.3);
+            if state_key == prev {
                 continue;
             }
-            // Update stored content
             subs.lock()
                 .await
-                .insert(target.clone(), new_content.clone());
-            // Push update to client
-            let msg = serde_json::json!({
-                "id": null,
-                "method": "pane_output",
-                "params": { "target": target, "content": new_content }
-            });
+                .insert(target.clone(), state_key);
+            let content_changed = !prev.is_empty()
+                && prev.split('\x00').next().unwrap_or("") != new_content;
+            let msg = if content_changed || prev.is_empty() {
+                serde_json::json!({
+                    "id": null,
+                    "method": "pane_output",
+                    "params": { "target": target, "content": new_content, "cursor": { "x": cursor.0, "y": cursor.1, "h": cursor.2, "w": cursor.3 } }
+                })
+            } else {
+                serde_json::json!({
+                    "id": null,
+                    "method": "pane_output",
+                    "params": { "target": target, "cursor": { "x": cursor.0, "y": cursor.1, "h": cursor.2, "w": cursor.3 } }
+                })
+            };
             let text = serde_json::to_string(&msg).unwrap();
             let mut tx = sender.lock().await;
             if tx.send(Message::Text(text.into())).await.is_err() {
