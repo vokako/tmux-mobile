@@ -169,7 +169,9 @@ pub fn cursor_info(target: &str) -> Result<(usize, usize, usize, usize), String>
 }
 
 /// 捕获 pane 内容（屏幕输出，保留 ANSI 转义序列）
-/// Uses -J to join tmux-wrapped lines.
+/// Uses -J to join tmux-wrapped lines, then fixes CJK double-width
+/// wrapping where tmux doesn't set the WRAPPED flag (last column left
+/// empty because a 2-cell character didn't fit).
 pub fn capture_pane(target: &str, lines: Option<usize>) -> Result<String, String> {
     let start_line = lines
         .map(|n| format!("-{}", n))
@@ -184,7 +186,84 @@ pub fn capture_pane(target: &str, lines: Option<usize>) -> Result<String, String
         "-S",
         &start_line, // 从多少行前开始
     ])?;
-    Ok(output.trim_end().to_string())
+
+    let width = run_tmux(&["display-message", "-t", target, "-p", "#{pane_width}"])
+        .ok()
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+
+    let trimmed = output.trim_end();
+    if width == 0 {
+        return Ok(trimmed.to_string());
+    }
+
+    // Fix CJK double-width wrap: when visible width is pane_width or
+    // pane_width-1 (gap left by wide char that didn't fit), join next line.
+    let raw_lines: Vec<&str> = trimmed.split('\n').collect();
+    let mut result = String::with_capacity(trimmed.len());
+    let mut i = 0;
+    while i < raw_lines.len() {
+        if !result.is_empty() {
+            result.push('\n');
+        }
+        result.push_str(raw_lines[i]);
+        // Keep joining while line fills the pane width (or width-1 for CJK gap)
+        while i + 1 < raw_lines.len() {
+            let vlen = visible_width(raw_lines[i]);
+            // Only join if line is exactly at pane width or width-1 (CJK gap).
+            // Lines already wider than pane (from -J joining) should not trigger further joins.
+            if (vlen == width || vlen == width - 1) && !raw_lines[i + 1].is_empty() {
+                i += 1;
+                result.push_str(raw_lines[i]);
+            } else {
+                break;
+            }
+        }
+        i += 1;
+    }
+    Ok(result)
+}
+
+/// Count visible character width, skipping ANSI escapes, counting CJK as 2.
+fn visible_width(s: &str) -> usize {
+    let mut w = 0;
+    let mut in_esc = false;
+    for c in s.chars() {
+        if in_esc {
+            if c.is_ascii_alphabetic() {
+                in_esc = false;
+            }
+        } else if c == '\x1b' {
+            in_esc = true;
+        } else {
+            w += if is_wide_char(c) { 2 } else { 1 };
+        }
+    }
+    w
+}
+
+fn is_wide_char(c: char) -> bool {
+    let cp = c as u32;
+    matches!(cp,
+        0x1100..=0x115F | 0x231A..=0x231B | 0x2329..=0x232A |
+        0x23E9..=0x23F3 | 0x23F8..=0x23FA | 0x25FD..=0x25FE |
+        0x2614..=0x2615 | 0x2648..=0x2653 | 0x267F | 0x2693 |
+        0x26A1 | 0x26AA..=0x26AB | 0x26BD..=0x26BE |
+        0x26C4..=0x26C5 | 0x26CE | 0x26D4 | 0x26EA |
+        0x26F2..=0x26F3 | 0x26F5 | 0x26FA | 0x26FD |
+        0x2702 | 0x2705 | 0x2708..=0x270D | 0x270F |
+        0x2712 | 0x2714 | 0x2716 | 0x271D | 0x2721 |
+        0x2728 | 0x2733..=0x2734 | 0x2744 | 0x2747 |
+        0x274C | 0x274E | 0x2753..=0x2755 | 0x2757 |
+        0x2763..=0x2764 | 0x2795..=0x2797 | 0x27A1 |
+        0x27B0 | 0x27BF | 0x2934..=0x2935 |
+        0x2B05..=0x2B07 | 0x2B1B..=0x2B1C | 0x2B50 | 0x2B55 |
+        0x2E80..=0x303E | 0x3040..=0x33BF | 0x3400..=0x4DBF |
+        0x4E00..=0x9FFF | 0xA000..=0xA4CF | 0xA960..=0xA97F |
+        0xAC00..=0xD7AF | 0xF900..=0xFAFF | 0xFE10..=0xFE6F |
+        0xFF01..=0xFF60 | 0xFFE0..=0xFFE6 |
+        0x1F000..=0x1FAFF | 0x20000..=0x2FA1F | 0x30000..=0x3134F
+    )
 }
 
 /// 向 pane 发送按键
