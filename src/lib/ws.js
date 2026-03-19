@@ -106,35 +106,38 @@ export function connect(url, token) {
       // Step 1: Receive server_nonce
       if (!authed && !serverNonce && data?.server_nonce) {
         serverNonce = hexToBytes(data.server_nonce);
-        // Generate client_nonce, compute proof, send auth
-        const clientNonce = crypto.getRandomValues(new Uint8Array(16));
-        const proof = await computeProof(token, serverNonce, clientNonce);
-        const key = await deriveKey(token, serverNonce, clientNonce);
-        sessionCipher = { key, sendCounter: 0, recvCounter: 0 };
-        ws.send(JSON.stringify({
-          method: 'auth',
-          params: { client_nonce: bytesToHex(clientNonce), proof: bytesToHex(proof) }
-        }));
+        if (crypto.subtle) {
+          // Encrypted auth
+          const clientNonce = crypto.getRandomValues(new Uint8Array(16));
+          const proof = await computeProof(token, serverNonce, clientNonce);
+          const key = await deriveKey(token, serverNonce, clientNonce);
+          sessionCipher = { key, sendCounter: 0, recvCounter: 0 };
+          ws.send(JSON.stringify({
+            method: 'auth',
+            params: { client_nonce: bytesToHex(clientNonce), proof: bytesToHex(proof) }
+          }));
+        } else {
+          // Fallback: plain token auth (http:// context, no Web Crypto)
+          ws.send(JSON.stringify({ method: 'auth', params: { token } }));
+        }
         return;
       }
 
-      // Step 2: Receive encrypted auth response
-      if (!authed && sessionCipher) {
-        try {
-          const pt = await decryptMsg(event.data);
-          const resp = JSON.parse(pt);
-          if (resp.result?.authenticated) {
-            clearTimeout(timeout);
-            authed = true;
-            resolve();
-            return;
-          }
-        } catch {}
-        // Decryption failed — wrong token
-        clearTimeout(timeout);
-        sessionCipher = null;
-        reject(new Error('auth failed'));
-        return;
+      // Step 2: Auth response
+      if (!authed && serverNonce) {
+        if (sessionCipher) {
+          // Encrypted response
+          try {
+            const pt = await decryptMsg(event.data);
+            const resp = JSON.parse(pt);
+            if (resp.result?.authenticated) { clearTimeout(timeout); authed = true; resolve(); return; }
+          } catch {}
+          clearTimeout(timeout); sessionCipher = null; reject(new Error('auth failed')); return;
+        } else {
+          // Plain response
+          if (data?.result?.authenticated) { clearTimeout(timeout); authed = true; resolve(); return; }
+          clearTimeout(timeout); reject(new Error(data?.error?.message || 'auth failed')); return;
+        }
       }
 
       // Post-auth: decrypt all messages
