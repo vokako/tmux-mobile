@@ -229,7 +229,7 @@
       {/if}
       <div class="cmd-row-new">
         <input type="text" bind:value={newCmd} placeholder="Command (optional)" autocapitalize="off" />
-        <button class="preset-btn" class:active={newCmd === 'kiro-cli chat'} onclick={() => newCmd = newCmd === 'kiro-cli chat' ? '' : 'kiro-cli chat'}>Kiro</button>
+        <button class="preset-btn" class:active={newCmd === 'kiro-cli-chat chat -a'} onclick={() => newCmd = newCmd === 'kiro-cli-chat chat -a' ? '' : 'kiro-cli-chat chat -a'}><img src="/assets/kiro.svg" alt="Kiro" width="16" height="16" /></button>
       </div>
       <button class="create-btn" onclick={createSession} disabled={!newName.trim()}>Create</button>
     </div>
