@@ -393,10 +393,10 @@ async fn subscription_loop(
         for (target, prev) in targets {
             let t = target.clone();
             let t2 = target.clone();
-            let (new_content, cursor, raw_lines) = match tokio::task::spawn_blocking(move || {
+            let (new_content, cursor, trailing_trimmed) = match tokio::task::spawn_blocking(move || {
                 let cursor = tmux::cursor_info(&t2).unwrap_or((0, 0, 24, 80));
-                let (content, raw_lines) = tmux::capture_pane_with_width(&t, None, cursor.3)?;
-                Ok::<_, String>((content, cursor, raw_lines))
+                let (content, trailing_trimmed) = tmux::capture_pane_with_width(&t, None, cursor.3)?;
+                Ok::<_, String>((content, cursor, trailing_trimmed))
             })
             .await
             {
@@ -423,8 +423,14 @@ async fn subscription_loop(
                 .insert(target.clone(), state_key);
             let content_changed = !prev.is_empty()
                 && prev.split('\x00').next().unwrap_or("") != new_content;
-            // cursor_line: absolute line index in the (joined) content where cursor sits
-            let cursor_line = raw_lines as i64 - cursor.2 as i64 + cursor.1 as i64;
+            // Cursor position: compute from the end of output.
+            // cursor_y is 0-indexed within visible area, pane_height = visible lines.
+            // Lines below cursor are empty and don't get joined by -J or CJK join.
+            // trim_end may have removed some of those trailing empty lines.
+            let from_end_raw = cursor.2.saturating_sub(1).saturating_sub(cursor.1); // pane_height-1-cursor_y
+            let from_end = from_end_raw.saturating_sub(trailing_trimmed);
+            let total = new_content.matches('\n').count() + 1;
+            let cursor_line = (total - 1).saturating_sub(from_end) as i64;
             let msg = if content_changed || prev.is_empty() {
                 serde_json::json!({
                     "id": null,

@@ -177,7 +177,7 @@ pub fn capture_pane(target: &str, lines: Option<usize>) -> Result<String, String
 }
 
 /// Capture with a known pane width (avoids extra tmux call).
-/// Returns (content, raw_line_count) where raw_line_count is before CJK joining.
+/// Returns (content, lines_trimmed_from_end).
 pub fn capture_pane_with_width(
     target: &str,
     lines: Option<usize>,
@@ -197,11 +197,18 @@ pub fn capture_pane_with_width(
         &start_line,
     ])?;
 
+    // Count trailing empty lines before trimming
+    let trailing_empty = output
+        .bytes()
+        .rev()
+        .take_while(|&b| b == b'\n' || b == b' ')
+        .filter(|&b| b == b'\n')
+        .count();
+
     let trimmed = output.trim_end();
-    let raw_line_count = trimmed.split('\n').count();
 
     if width == 0 {
-        return Ok((trimmed.to_string(), raw_line_count));
+        return Ok((trimmed.to_string(), trailing_empty));
     }
 
     let raw_lines: Vec<&str> = trimmed.split('\n').collect();
@@ -223,7 +230,7 @@ pub fn capture_pane_with_width(
         }
         i += 1;
     }
-    Ok((result, raw_line_count))
+    Ok((result, trailing_empty))
 }
 
 /// Count visible character width, skipping ANSI escapes, counting CJK as 2.
