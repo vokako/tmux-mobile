@@ -92,7 +92,7 @@ pub fn list_sessions() -> Result<Vec<TmuxSession>, String> {
         "#{session_name}|#{session_windows}|#{session_attached}|#{session_activity}",
     ])?;
 
-    let sessions = output
+    let mut sessions: Vec<TmuxSession> = output
         .lines()
         .filter(|l| !l.is_empty())
         .map(|line| {
@@ -101,10 +101,17 @@ pub fn list_sessions() -> Result<Vec<TmuxSession>, String> {
                 name: parts.get(0).unwrap_or(&"").to_string(),
                 windows: parts.get(1).unwrap_or(&"0").parse().unwrap_or(0),
                 attached: parts.get(2).unwrap_or(&"0") == &"1",
-                created: parts.get(3).unwrap_or(&"").to_string(),
+                created: parts.get(3).unwrap_or(&"0").to_string(),
             }
         })
         .collect();
+
+    // Sort by activity timestamp descending (most recent first)
+    sessions.sort_by(|a, b| {
+        let ta: u64 = b.created.parse().unwrap_or(0);
+        let tb: u64 = a.created.parse().unwrap_or(0);
+        ta.cmp(&tb)
+    });
 
     Ok(sessions)
 }
