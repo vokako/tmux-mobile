@@ -37,11 +37,9 @@
   });
 
   // Compute cursor pixel position for overlay
-  let lineCount = $derived(paneContent.split('\n').length);
-
   let cursorStyle = $derived.by(() => {
-    if (!cursorPos || viewMode !== 'terminal') return 'display:none';
-    const lineIdx = lineCount - cursorPos.h + cursorPos.y;
+    if (!cursorPos || cursorPos.line == null || viewMode !== 'terminal') return 'display:none';
+    const lineIdx = cursorPos.line;
     if (lineIdx < 0) return 'display:none';
     const charW = measureEl?.getBoundingClientRect().width || 7.8;
     const lineH = 13 * 1.35;

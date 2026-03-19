@@ -173,15 +173,16 @@ pub fn cursor_info(target: &str) -> Result<(usize, usize, usize, usize), String>
 /// wrapping where tmux doesn't set the WRAPPED flag (last column left
 /// empty because a 2-cell character didn't fit).
 pub fn capture_pane(target: &str, lines: Option<usize>) -> Result<String, String> {
-    capture_pane_with_width(target, lines, 0)
+    capture_pane_with_width(target, lines, 0).map(|(content, _)| content)
 }
 
 /// Capture with a known pane width (avoids extra tmux call).
+/// Returns (content, raw_line_count) where raw_line_count is before CJK joining.
 pub fn capture_pane_with_width(
     target: &str,
     lines: Option<usize>,
     width: usize,
-) -> Result<String, String> {
+) -> Result<(String, usize), String> {
     let start_line = lines
         .map(|n| format!("-{}", n))
         .unwrap_or("-200".to_string());
@@ -189,20 +190,20 @@ pub fn capture_pane_with_width(
         "capture-pane",
         "-t",
         target,
-        "-p", // 输出到 stdout
-        "-e", // 保留 ANSI escape sequences (颜色/粗体等)
-        "-J", // 合并屏幕宽度导致的自动换行
+        "-p",
+        "-e",
+        "-J",
         "-S",
-        &start_line, // 从多少行前开始
+        &start_line,
     ])?;
 
     let trimmed = output.trim_end();
+    let raw_line_count = trimmed.split('\n').count();
+
     if width == 0 {
-        return Ok(trimmed.to_string());
+        return Ok((trimmed.to_string(), raw_line_count));
     }
 
-    // Fix CJK double-width wrap: when visible width is pane_width or
-    // pane_width-1 (gap left by wide char that didn't fit), join next line.
     let raw_lines: Vec<&str> = trimmed.split('\n').collect();
     let mut result = String::with_capacity(trimmed.len());
     let mut i = 0;
@@ -211,11 +212,8 @@ pub fn capture_pane_with_width(
             result.push('\n');
         }
         result.push_str(raw_lines[i]);
-        // Keep joining while line fills the pane width (or width-1 for CJK gap)
         while i + 1 < raw_lines.len() {
             let vlen = visible_width(raw_lines[i]);
-            // Only join if line is exactly at pane width or width-1 (CJK gap).
-            // Lines already wider than pane (from -J joining) should not trigger further joins.
             if (vlen == width || vlen == width - 1) && !raw_lines[i + 1].is_empty() {
                 i += 1;
                 result.push_str(raw_lines[i]);
@@ -225,7 +223,7 @@ pub fn capture_pane_with_width(
         }
         i += 1;
     }
-    Ok(result)
+    Ok((result, raw_line_count))
 }
 
 /// Count visible character width, skipping ANSI escapes, counting CJK as 2.

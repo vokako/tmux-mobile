@@ -393,10 +393,10 @@ async fn subscription_loop(
         for (target, prev) in targets {
             let t = target.clone();
             let t2 = target.clone();
-            let (new_content, cursor) = match tokio::task::spawn_blocking(move || {
+            let (new_content, cursor, raw_lines) = match tokio::task::spawn_blocking(move || {
                 let cursor = tmux::cursor_info(&t2).unwrap_or((0, 0, 24, 80));
-                let content = tmux::capture_pane_with_width(&t, None, cursor.3)?;
-                Ok::<_, String>((content, cursor))
+                let (content, raw_lines) = tmux::capture_pane_with_width(&t, None, cursor.3)?;
+                Ok::<_, String>((content, cursor, raw_lines))
             })
             .await
             {
@@ -408,7 +408,6 @@ async fn subscription_loop(
                     let count = fail_counts.entry(target.clone()).or_insert(0);
                     *count += 1;
                     if *count >= 15 {
-                        // ~3s of failures, pane likely gone
                         subs.lock().await.remove(&target);
                         fail_counts.remove(&target);
                     }
@@ -424,17 +423,19 @@ async fn subscription_loop(
                 .insert(target.clone(), state_key);
             let content_changed = !prev.is_empty()
                 && prev.split('\x00').next().unwrap_or("") != new_content;
+            // cursor_line: absolute line index in the (joined) content where cursor sits
+            let cursor_line = raw_lines as i64 - cursor.2 as i64 + cursor.1 as i64;
             let msg = if content_changed || prev.is_empty() {
                 serde_json::json!({
                     "id": null,
                     "method": "pane_output",
-                    "params": { "target": target, "content": new_content, "cursor": { "x": cursor.0, "y": cursor.1, "h": cursor.2, "w": cursor.3 } }
+                    "params": { "target": target, "content": new_content, "cursor": { "x": cursor.0, "line": cursor_line, "w": cursor.3 } }
                 })
             } else {
                 serde_json::json!({
                     "id": null,
                     "method": "pane_output",
-                    "params": { "target": target, "cursor": { "x": cursor.0, "y": cursor.1, "h": cursor.2, "w": cursor.3 } }
+                    "params": { "target": target, "cursor": { "x": cursor.0, "line": cursor_line, "w": cursor.3 } }
                 })
             };
             let text = serde_json::to_string(&msg).unwrap();
