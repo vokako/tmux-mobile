@@ -5,9 +5,68 @@ let requestId = 0;
 const pending = new Map();
 let onPaneOutput = null;
 let onDisconnect = null;
+let sessionCipher = null; // {key, sendCounter, recvCounter}
 
 export function setOnPaneOutput(cb) { onPaneOutput = cb; }
 export function setOnDisconnect(cb) { onDisconnect = cb; }
+
+// --- Crypto helpers (Web Crypto API) ---
+
+function hexToBytes(hex) {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+  return bytes;
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function deriveKey(token, serverNonce, clientNonce) {
+  const salt = new Uint8Array(32);
+  salt.set(serverNonce, 0);
+  salt.set(clientNonce, 16);
+  const ikm = new TextEncoder().encode(token);
+  const baseKey = await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt, info: new TextEncoder().encode('tmux-mobile-e2e') }, baseKey, 256);
+  return crypto.subtle.importKey('raw', bits, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+}
+
+async function computeProof(token, serverNonce, clientNonce) {
+  const salt = new Uint8Array(32);
+  salt.set(serverNonce, 0);
+  salt.set(clientNonce, 16);
+  const ikm = new TextEncoder().encode(token);
+  const baseKey = await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits']);
+  const keyBits = await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt, info: new TextEncoder().encode('tmux-mobile-e2e') }, baseKey, 256);
+  const hmacKey = await crypto.subtle.importKey('raw', keyBits, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', hmacKey, serverNonce);
+  return new Uint8Array(sig);
+}
+
+function makeNonce(counter) {
+  const n = new Uint8Array(12);
+  const view = new DataView(n.buffer);
+  // counter in bytes 4-11 (big-endian u64)
+  view.setUint32(4, Math.floor(counter / 0x100000000));
+  view.setUint32(8, counter >>> 0);
+  return n;
+}
+
+async function encryptMsg(text) {
+  if (!sessionCipher) return text;
+  const nonce = makeNonce(sessionCipher.sendCounter++);
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, sessionCipher.key, new TextEncoder().encode(text));
+  return btoa(String.fromCharCode(...new Uint8Array(ct)));
+}
+
+async function decryptMsg(b64) {
+  if (!sessionCipher) return b64;
+  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  const nonce = makeNonce(sessionCipher.recvCounter++);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, sessionCipher.key, bytes);
+  return new TextDecoder().decode(pt);
+}
 
 function rejectAllPending() {
   const err = new Error('disconnected');
@@ -22,6 +81,7 @@ export function connect(url, token) {
     ws = null;
     rejectAllPending();
   }
+  sessionCipher = null;
 
   return new Promise((resolve, reject) => {
     try {
@@ -36,44 +96,66 @@ export function connect(url, token) {
       reject(new Error('connection timeout'));
     }, 5000);
 
-    ws.onopen = () => {
-      const msg = JSON.stringify({ method: 'auth', params: { token } });
-      ws.send(msg);
-    };
-
     let authed = false;
+    let serverNonce = null;
 
-    ws.onmessage = (event) => {
+    ws.onmessage = async (event) => {
       let data;
-      try { data = JSON.parse(event.data); } catch { return; }
+      try { data = JSON.parse(event.data); } catch {}
 
-      if (!authed) {
-        if (data.result?.authenticated) {
-          clearTimeout(timeout);
-          authed = true;
-          resolve();
-        } else {
-          clearTimeout(timeout);
-          reject(new Error(data.error?.message || 'auth failed'));
-        }
+      // Step 1: Receive server_nonce
+      if (!authed && !serverNonce && data?.server_nonce) {
+        serverNonce = hexToBytes(data.server_nonce);
+        // Generate client_nonce, compute proof, send auth
+        const clientNonce = crypto.getRandomValues(new Uint8Array(16));
+        const proof = await computeProof(token, serverNonce, clientNonce);
+        const key = await deriveKey(token, serverNonce, clientNonce);
+        sessionCipher = { key, sendCounter: 0, recvCounter: 0 };
+        ws.send(JSON.stringify({
+          method: 'auth',
+          params: { client_nonce: bytesToHex(clientNonce), proof: bytesToHex(proof) }
+        }));
         return;
       }
 
-      // Server push (subscribe)
+      // Step 2: Receive encrypted auth response
+      if (!authed && sessionCipher) {
+        try {
+          const pt = await decryptMsg(event.data);
+          const resp = JSON.parse(pt);
+          if (resp.result?.authenticated) {
+            clearTimeout(timeout);
+            authed = true;
+            resolve();
+            return;
+          }
+        } catch {}
+        // Decryption failed — wrong token
+        clearTimeout(timeout);
+        sessionCipher = null;
+        reject(new Error('auth failed'));
+        return;
+      }
+
+      // Post-auth: decrypt all messages
+      if (authed && sessionCipher) {
+        let pt;
+        try { pt = await decryptMsg(event.data); } catch { return; }
+        try { data = JSON.parse(pt); } catch { return; }
+      }
+
+      if (!data) return;
+
       if (data.method === 'pane_output') {
         onPaneOutput?.(data.params?.target, data.params?.content, data.params?.cursor);
         return;
       }
 
-      // Response to a request
       if (data.id != null && pending.has(data.id)) {
         const { resolve: res, reject: rej } = pending.get(data.id);
         pending.delete(data.id);
-        if (data.error) {
-          rej(new Error(data.error.message));
-        } else {
-          res(data.result);
-        }
+        if (data.error) rej(new Error(data.error.message));
+        else res(data.result);
       }
     };
 
@@ -82,6 +164,7 @@ export function connect(url, token) {
       const wasAuthed = authed;
       authed = false;
       ws = null;
+      sessionCipher = null;
       rejectAllPending();
       if (wasAuthed) onDisconnect?.();
     };
@@ -117,7 +200,8 @@ function call(method, params = {}) {
       resolve: (v) => { clearTimeout(timer); resolve(v); },
       reject: (e) => { clearTimeout(timer); reject(e); },
     });
-    ws.send(JSON.stringify({ id, method, params }));
+    const msg = JSON.stringify({ id, method, params });
+    encryptMsg(msg).then(out => ws?.send(out)).catch(() => {});
   });
 }
 
@@ -150,10 +234,12 @@ export const fsUpload = (path, data) => call('fs_upload', { path, data });
 
 export function subscribe(target) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({ method: 'subscribe', params: { target } }));
+  const msg = JSON.stringify({ method: 'subscribe', params: { target } });
+  encryptMsg(msg).then(out => ws?.send(out)).catch(() => {});
 }
 
 export function unsubscribe(target) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({ method: 'unsubscribe', params: { target } }));
+  const msg = JSON.stringify({ method: 'unsubscribe', params: { target } });
+  encryptMsg(msg).then(out => ws?.send(out)).catch(() => {});
 }
