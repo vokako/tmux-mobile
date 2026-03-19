@@ -109,6 +109,7 @@
   function onConnected() {
     connected = true;
     page = 'sessions';
+    localStorage.removeItem('tmux_disconnected');
   }
 
   function openTerminal(session, target, command = '') {
@@ -128,6 +129,7 @@
     connected = false;
     page = 'settings';
     localStorage.removeItem('tmux_state');
+    localStorage.setItem('tmux_disconnected', '1');
   }
 
   // Auto-reconnect and restore state on page load
@@ -151,6 +153,7 @@
     const addr = localStorage.getItem('tmux_address');
     const token = localStorage.getItem('tmux_token');
     if (!addr || !token) return;
+    if (localStorage.getItem('tmux_disconnected')) return;
     autoConnectAttempted = true;
 
     const timeout = setTimeout(() => { page = 'settings'; }, 5000);
