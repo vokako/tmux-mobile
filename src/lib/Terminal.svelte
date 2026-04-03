@@ -298,7 +298,7 @@
         selectionRange = null;
         // Temporarily disable stdin so this tap doesn't open the keyboard
         term.options.disableStdin = true;
-        setTimeout(() => { if (term) term.options.disableStdin = isMobile ? true : directMode; }, 300);
+        setTimeout(() => { if (term) term.options.disableStdin = directMode; }, 300);
         endTouchScroll();
         return;
       }
@@ -618,13 +618,11 @@
     if (directMode && inputEl) requestAnimationFrame(() => inputEl.focus());
   }
 
-  // On mobile: always disable xterm stdin — use our input box instead.
-  // xterm.js's hidden textarea causes accumulated input on mobile keyboards
-  // (the full textarea value is sent via onData instead of just the delta).
-  // On desktop: disable stdin only when input box is open.
+  // When input box opens: disable xterm stdin (so its hidden textarea is removed)
+  // and focus our textarea. When closed: re-enable xterm stdin.
   $effect(() => {
     if (!term) return;
-    term.options.disableStdin = isMobile ? true : directMode;
+    term.options.disableStdin = directMode;
     if (directMode && inputEl) {
       requestAnimationFrame(() => inputEl.focus());
     }
