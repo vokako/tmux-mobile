@@ -91,6 +91,8 @@
     <circle cx="12" cy="12" r="10" fill="currentColor" stroke="none"/><polyline points="17 8 10 15 7 12" stroke="var(--bg)" stroke-width="2.5" fill="none"/>
   {:else if name === 'zap'}
     <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+  {:else if name === 'keyboard'}
+    <rect x="2" y="4" width="20" height="16" rx="2"/><line x1="6" y1="8" x2="6" y2="8"/><line x1="10" y1="8" x2="10" y2="8"/><line x1="14" y1="8" x2="14" y2="8"/><line x1="18" y1="8" x2="18" y2="8"/><line x1="6" y1="12" x2="6" y2="12"/><line x1="10" y1="12" x2="10" y2="12"/><line x1="14" y1="12" x2="14" y2="12"/><line x1="18" y1="12" x2="18" y2="12"/><line x1="8" y1="16" x2="16" y2="16"/>
   {/if}
 </svg>
 

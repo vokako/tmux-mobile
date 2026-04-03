@@ -525,20 +525,20 @@
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div class="shortcut-rows" onmousedown={(e) => e.preventDefault()} ontouchstart={(e) => e.preventDefault()}>
           <div class="shortcuts">
-            <button onclick={() => sendSpecial('Tab')}>Tab</button>
-            <button onclick={() => sendSpecial('C-c')}>^C</button>
+            <button onclick={() => sendSpecial('Escape')}>Esc</button>
+            <button onclick={() => sendSpecial('C-d')}>^D</button>
             <button onclick={() => sendSpecial('C-a')}><Icon name="skip-left" size={13} /></button>
             <button onclick={() => sendSpecial('Up')}><Icon name="arrow-up" size={13} /></button>
             <button onclick={() => sendSpecial('C-e')}><Icon name="skip-right" size={13} /></button>
             <button onclick={() => sendSpecial('BSpace')}><Icon name="delete" size={13} /></button>
           </div>
           <div class="shortcuts">
-            <button onclick={() => sendKeys(target, '/', true).catch(() => {})}>/</button>
-            <button onclick={() => sendSpecial('C-d')}>^D</button>
+            <button onclick={() => sendSpecial('Tab')}>Tab</button>
+            <button onclick={() => sendSpecial('C-c')}>^C</button>
             <button onclick={() => sendSpecial('Left')}><Icon name="arrow-left" size={13} /></button>
             <button onclick={() => sendSpecial('Down')}><Icon name="arrow-down" size={13} /></button>
             <button onclick={() => sendSpecial('Right')}><Icon name="arrow-right" size={13} /></button>
-            <button class:sk-active={directMode} onclick={() => directMode = !directMode}><Icon name="zap" size={13} /></button>
+            <button class:sk-active={directMode} onclick={() => directMode = !directMode}><Icon name="chat" size={13} /></button>
           </div>
         </div>
         {#if directMode}

@@ -171,10 +171,17 @@
         {#if expanded[s.name] && panes[s.name]}
           <div class="pane-list">
             {#each panes[s.name] as p}
+              {@const info = (p.pane_title || '') + ' ' + (p.current_command || '')}
+              {@const aiTag = info.match(/kiro/i) ? 'Kiro' : info.match(/claude/i) ? 'Claude' : ''}
               <div class="pane-row">
                 <button class="pane" class:active-pane={activeTarget === `${p.session}:${p.window}.${p.pane}`} onclick={() => openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command)}>
                   <span class="pane-id">:{p.window}.{p.pane}</span>
                   <span class="pane-cmd">{p.current_command}</span>
+                  {#if aiTag === 'Kiro'}
+                    <img class="pane-ai-icon" src="/assets/kiro.svg" alt="Kiro" />
+                  {:else if aiTag === 'Claude'}
+                    <span class="pane-tag">Claude</span>
+                  {/if}
                   <span class="pane-size">{p.width}×{p.height}</span>
                 </button>
                 <button class="pane-kill" class:confirm={confirmKillWindow === `${s.name}:${p.window}`} onclick={() => removeWindow(`${s.name}:${p.window}`, s.name)}>
@@ -362,7 +369,7 @@
     align-items: center;
     gap: 10px;
     width: 100%;
-    padding: 12px 14px 12px 32px;
+    padding: 12px 14px 12px 16px;
     background: none;
     border: none;
     border-bottom: 1px solid var(--border2);
@@ -374,16 +381,17 @@
     -webkit-tap-highlight-color: transparent;
   }
   .pane:active { background: var(--accent-bg); }
-  .pane.active-pane { background: var(--accent-bg); }
+  .pane.active-pane { background: transparent; }
   .pane:last-child { border-bottom: none; }
   .pane-row {
     display: flex; align-items: center;
     border-bottom: 1px solid var(--border2);
   }
+  .pane-row:has(.active-pane) { background: var(--accent-bg); }
   .pane-row:last-of-type { border-bottom: none; }
   .pane-row .pane { border-bottom: none; }
   .pane-kill {
-    padding: 8px; border: none; background: none; color: var(--text3);
+    padding: 8px 12px; border: none; background: transparent; color: var(--text3);
     cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
   .pane-kill:active { color: var(--danger); }
@@ -409,6 +417,21 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .pane-tag {
+    font-size: 9px;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--accent-bg);
+    color: var(--accent);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .pane-ai-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
   }
   .pane-size {
     font-family: 'SF Mono', Menlo, monospace;
