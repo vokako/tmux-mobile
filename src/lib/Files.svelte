@@ -565,8 +565,14 @@
   }
 
   function renderMarkdown(text) {
-    // KaTeX: replace $$ blocks and $ inline before marked processes them
-    let processed = text
+    // Protect code blocks/inline code from KaTeX processing
+    const codeHoles = [];
+    let safe = text
+      .replace(/```[\s\S]*?```/g, m => { codeHoles.push(m); return `\x00CODE${codeHoles.length - 1}\x00`; })
+      .replace(/`[^`]+`/g, m => { codeHoles.push(m); return `\x00CODE${codeHoles.length - 1}\x00`; });
+
+    // KaTeX: replace $$ blocks and $ inline
+    safe = safe
       .replace(/\$\$([^$]+?)\$\$/g, (_, math) => {
         try { return katex.renderToString(math.trim(), { displayMode: true, throwOnError: false }); }
         catch { return `<pre>${math}</pre>`; }
@@ -576,7 +582,10 @@
         catch { return `<code>${math}</code>`; }
       });
 
-    return marked.parse(processed, { breaks: true, gfm: true });
+    // Restore code blocks
+    safe = safe.replace(/\x00CODE(\d+)\x00/g, (_, i) => codeHoles[i]);
+
+    return marked.parse(safe, { breaks: true, gfm: true });
   }
 
   let mermaidId = 0;
