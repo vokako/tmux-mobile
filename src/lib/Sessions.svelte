@@ -180,7 +180,7 @@
                   {#if aiTag === 'Kiro'}
                     <img class="pane-ai-icon" src="/assets/kiro.svg" alt="Kiro" />
                   {:else if aiTag === 'Claude'}
-                    <img class="pane-ai-icon" src="/assets/claude.svg" alt="Claude" />
+                    <img class="pane-ai-icon claude" src="/assets/claude.svg" alt="Claude" />
                   {/if}
                   <span class="pane-size">{p.width}×{p.height}</span>
                 </button>
@@ -237,6 +237,7 @@
       <div class="cmd-row-new">
         <input type="text" bind:value={newCmd} placeholder="Command (optional)" autocapitalize="off" />
         <button class="preset-btn" class:active={newCmd === 'kiro-cli-chat chat -a'} onclick={() => newCmd = newCmd === 'kiro-cli-chat chat -a' ? '' : 'kiro-cli-chat chat -a'}><img src="/assets/kiro.svg" alt="Kiro" width="16" height="16" /></button>
+        <button class="preset-btn" class:active={newCmd === 'claude --dangerously-skip-permissions'} onclick={() => newCmd = newCmd === 'claude --dangerously-skip-permissions' ? '' : 'claude --dangerously-skip-permissions'}><img src="/assets/claude.svg" alt="Claude" width="18" height="18" /></button>
       </div>
       <button class="create-btn" onclick={createSession} disabled={!newName.trim()}>Create</button>
     </div>
@@ -422,6 +423,10 @@
     width: 14px;
     height: 14px;
     flex-shrink: 0;
+  }
+  .pane-ai-icon.claude {
+    width: 18px;
+    height: 18px;
   }
   .pane-size {
     font-family: 'SF Mono', Menlo, monospace;
