@@ -220,8 +220,12 @@
     // Forward keyboard input to tmux — skip when input box is open
     term.onData(data => {
       if (directMode && inputEl) return;
-      // Filter xterm.js device attribute responses (DA1/DA2/DA3)
-      if (/^\x1b\[[\?>=]?[\d;]*c$/.test(data)) return;
+      // Filter xterm.js terminal response sequences that leak through onData.
+      // These are generated when pane content contains query sequences (e.g. \x1b[6n).
+      // Without filtering, they create a feedback loop: response→tmux→capture→xterm→response.
+      if (/^\x1b\[[\?>=]?[\d;]*c$/.test(data)) return; // DA1/DA2/DA3
+      if (/^\x1b\[\d+;\d+R$/.test(data)) return;        // DSR cursor position
+      if (/^\x1b\[\d+n$/.test(data)) return;             // DSR device status
       sendKeys(target, data, true).catch(() => {});
     });
     // Block xterm from processing keys when input box is open
@@ -294,7 +298,7 @@
         selectionRange = null;
         // Temporarily disable stdin so this tap doesn't open the keyboard
         term.options.disableStdin = true;
-        setTimeout(() => { if (term) term.options.disableStdin = directMode; }, 300);
+        setTimeout(() => { if (term) term.options.disableStdin = isMobile ? true : directMode; }, 300);
         endTouchScroll();
         return;
       }
@@ -596,11 +600,31 @@
     } catch (_) {}
   }
 
-  // When input box opens: disable xterm stdin (so its hidden textarea is removed)
-  // and focus our textarea. When closed: re-enable xterm stdin.
+  // Long-press repeat for shortcut keys
+  let repeatTimer = null;
+  let repeatInterval = null;
+  function startRepeat(key) {
+    sendSpecial(key);
+    repeatTimer = setTimeout(() => {
+      repeatInterval = setInterval(() => sendSpecial(key), 80);
+    }, 400); // 400ms delay before repeat starts, then 80ms interval
+  }
+  function stopRepeat() {
+    clearTimeout(repeatTimer);
+    clearInterval(repeatInterval);
+    repeatTimer = null;
+    repeatInterval = null;
+    // Re-focus input box if open (prevents keyboard dismissal from button focus)
+    if (directMode && inputEl) requestAnimationFrame(() => inputEl.focus());
+  }
+
+  // On mobile: always disable xterm stdin — use our input box instead.
+  // xterm.js's hidden textarea causes accumulated input on mobile keyboards
+  // (the full textarea value is sent via onData instead of just the delta).
+  // On desktop: disable stdin only when input box is open.
   $effect(() => {
     if (!term) return;
-    term.options.disableStdin = directMode;
+    term.options.disableStdin = isMobile ? true : directMode;
     if (directMode && inputEl) {
       requestAnimationFrame(() => inputEl.focus());
     }
@@ -656,21 +680,21 @@
     {#if viewMode === 'terminal' && isMobile}
       <div class="input-bar">
         <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="shortcut-rows" onmousedown={(e) => e.preventDefault()} ontouchstart={(e) => e.preventDefault()}>
+        <div class="shortcut-rows" onmousedown={(e) => e.preventDefault()} ontouchstart={(e) => e.preventDefault()} ontouchend={(e) => { e.preventDefault(); stopRepeat(); }} onmouseup={stopRepeat}>
           <div class="shortcuts">
-            <button onclick={() => sendSpecial('Escape')}>Esc</button>
-            <button onclick={() => sendSpecial('C-d')}>^D</button>
-            <button onclick={() => sendSpecial('C-a')}><Icon name="skip-left" size={13} /></button>
-            <button onclick={() => sendSpecial('Up')}><Icon name="arrow-up" size={13} /></button>
-            <button onclick={() => sendSpecial('C-e')}><Icon name="skip-right" size={13} /></button>
-            <button onclick={() => sendSpecial('BSpace')}><Icon name="delete" size={13} /></button>
+            <button ontouchstart={() => startRepeat('Escape')} onclick={() => {}} >Esc</button>
+            <button ontouchstart={() => startRepeat('C-d')} onclick={() => {}}>^D</button>
+            <button ontouchstart={() => startRepeat('C-a')} onclick={() => {}}><Icon name="skip-left" size={13} /></button>
+            <button ontouchstart={() => startRepeat('Up')} onclick={() => {}}><Icon name="arrow-up" size={13} /></button>
+            <button ontouchstart={() => startRepeat('C-e')} onclick={() => {}}><Icon name="skip-right" size={13} /></button>
+            <button ontouchstart={() => startRepeat('BSpace')} onclick={() => {}}><Icon name="delete" size={13} /></button>
           </div>
           <div class="shortcuts">
-            <button onclick={() => sendSpecial('Tab')}>Tab</button>
-            <button onclick={() => sendSpecial('C-c')}>^C</button>
-            <button onclick={() => sendSpecial('Left')}><Icon name="arrow-left" size={13} /></button>
-            <button onclick={() => sendSpecial('Down')}><Icon name="arrow-down" size={13} /></button>
-            <button onclick={() => sendSpecial('Right')}><Icon name="arrow-right" size={13} /></button>
+            <button ontouchstart={() => startRepeat('Tab')} onclick={() => {}}>Tab</button>
+            <button ontouchstart={() => startRepeat('C-c')} onclick={() => {}}>^C</button>
+            <button ontouchstart={() => startRepeat('Left')} onclick={() => {}}><Icon name="arrow-left" size={13} /></button>
+            <button ontouchstart={() => startRepeat('Down')} onclick={() => {}}><Icon name="arrow-down" size={13} /></button>
+            <button ontouchstart={() => startRepeat('Right')} onclick={() => {}}><Icon name="arrow-right" size={13} /></button>
             <button class:sk-active={directMode} ontouchstart={(e) => e.stopPropagation()} onmousedown={(e) => e.stopPropagation()} onclick={() => { directMode = !directMode; if (directMode) requestAnimationFrame(() => inputEl?.focus()); }}><Icon name="chat" size={13} /></button>
           </div>
         </div>
