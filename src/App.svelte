@@ -15,6 +15,20 @@
   let chatSupported = $state(false);
   let theme = $state(localStorage.getItem('tmux_theme') || 'system');
   let showSettings = $state(false);
+  let debugMode = $state(!!localStorage.getItem('tmux_debug'));
+  let debugEl = $state(null);
+
+  // Global debug log — writes directly to DOM to avoid reactivity issues
+  window.__dbg = (msg) => {
+    if (!debugEl) return;
+    const ts = new Date().toLocaleTimeString('en', { hour12: false, fractionalSecondDigits: 2 });
+    const div = document.createElement('div');
+    div.textContent = `${ts} ${msg}`;
+    debugEl.appendChild(div);
+    // Keep max 40 lines
+    while (debugEl.children.length > 40) debugEl.removeChild(debugEl.firstChild);
+    debugEl.scrollTop = debugEl.scrollHeight;
+  };
 
   // Keyboard height detection
   $effect(() => {
@@ -354,6 +368,14 @@
           <button class:active={theme === 'dark'} onclick={() => setTheme('dark')}>Dark</button>
         </div>
       </div>
+      <div class="sp-section">
+        <div class="sp-label">Debug</div>
+        <div class="sp-btns">
+          <button class:active={debugMode} onclick={() => { debugMode = !debugMode; localStorage.setItem('tmux_debug', debugMode ? '1' : ''); }}>
+            {debugMode ? 'On' : 'Off'}
+          </button>
+        </div>
+      </div>
       {#if connected}
       <button class="sp-disconnect" onclick={() => { showSettings = false; doDisconnect(); }}>Disconnect</button>
       {/if}
@@ -385,9 +407,81 @@
       </div>
     {/if}
   </div>
+
+  {#if debugMode}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="debug-overlay"
+      ontouchstart={(e) => {
+        const el = e.currentTarget;
+        // Only drag from the header area (top 24px)
+        const rect = el.getBoundingClientRect();
+        const ty = e.touches[0].clientY - rect.top;
+        if (ty > 24) return; // let content scroll/select normally
+        e.preventDefault();
+        const startX = e.touches[0].clientX - el.offsetLeft;
+        const startY = e.touches[0].clientY - el.offsetTop;
+        const onMove = (ev) => { el.style.left = (ev.touches[0].clientX - startX) + 'px'; el.style.top = (ev.touches[0].clientY - startY) + 'px'; };
+        const onEnd = () => { document.removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onEnd); };
+        document.addEventListener('touchmove', onMove, { passive: false });
+        document.addEventListener('touchend', onEnd);
+      }}
+    >
+      <div class="debug-header">DEBUG <button onclick={() => { if (debugEl) debugEl.innerHTML = ''; }}>clear</button></div>
+      <div class="debug-content" bind:this={debugEl}></div>
+    </div>
+  {/if}
 </main>
 
 <style>
+  .debug-overlay {
+    position: fixed;
+    top: 50px;
+    left: 4px;
+    width: 65vw;
+    max-height: 40vh;
+    display: flex;
+    flex-direction: column;
+    background: rgba(0, 0, 0, 0.85);
+    color: #0f0;
+    font-family: 'SF Mono', Menlo, monospace;
+    font-size: 9px;
+    line-height: 1.3;
+    border-radius: 6px;
+    z-index: 9999;
+    border: 1px solid rgba(0, 255, 0, 0.2);
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  .debug-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 8px;
+    font-weight: bold;
+    font-size: 10px;
+    color: #0f0;
+    cursor: grab;
+    border-bottom: 1px solid rgba(0, 255, 0, 0.15);
+    flex-shrink: 0;
+    touch-action: none;
+  }
+  .debug-header button {
+    background: none;
+    border: 1px solid rgba(0, 255, 0, 0.3);
+    color: #0f0;
+    font-size: 9px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  .debug-content {
+    padding: 4px 6px;
+    overflow-y: auto;
+    word-break: break-all;
+    flex: 1;
+    min-height: 0;
+    -webkit-overflow-scrolling: touch;
+  }
   :global(body) {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;

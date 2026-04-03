@@ -16,6 +16,7 @@
   let term;
   let termAtBottom = $state(true);
   let toastMsg = $state('');
+  let inputEl;
   const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
   function showToast(msg) {
@@ -183,6 +184,7 @@
 
   // xterm.js setup + subscription
   $effect(() => {
+    touchScrolling = false; // reset on pane switch
     term = new Terminal({
       cursorBlink: true,
       cursorStyle: 'block',
@@ -198,10 +200,13 @@
 
     term.open(termEl);
 
-    // Forward keyboard input to tmux (works on desktop; mobile uses input bar)
+    // Forward keyboard input to tmux — skip when input box is open
     term.onData(data => {
+      if (directMode && inputEl) return;
       sendKeys(target, data, true).catch(() => {});
     });
+    // Block xterm from processing keys when input box is open
+    term.attachCustomKeyEventHandler(() => !directMode);
 
     // Mobile touch: scrolling with momentum + long-press to copy
     let touchY = 0, touchStartY = 0, accumulatedDy = 0, longPressTimer = null, didScroll = false;
@@ -443,47 +448,16 @@
     } catch (_) {}
   }
 
-  // Direct mode: hidden textarea for IME support, keydown for special/ctrl keys
-  let directEl;
-
+  // When input box opens: disable xterm stdin (so its hidden textarea is removed)
+  // and focus our textarea. When closed: re-enable xterm stdin.
   $effect(() => {
-    if (!directMode || viewMode !== 'terminal') return;
-    if (directEl) directEl.focus();
-
-    const handler = (e) => {
-      if (e.isComposing) return;
-      if (e.ctrlKey && e.key.length === 1) {
-        e.preventDefault();
-        sendKeys(target, `C-${e.key}`, false).catch(() => {});
-        return;
-      }
-      if (e.altKey && e.key.length === 1) {
-        e.preventDefault();
-        sendKeys(target, `M-${e.key}`, false).catch(() => {});
-        return;
-      }
-      if (e.metaKey) return;
-      const keyMap = {
-        Enter: 'Enter', Backspace: 'BSpace', Tab: 'Tab', Escape: 'Escape',
-        ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
-        Delete: 'DC', Home: 'Home', End: 'End', PageUp: 'PPage', PageDown: 'NPage',
-      };
-      if (keyMap[e.key]) {
-        e.preventDefault();
-        sendKeys(target, keyMap[e.key], false).catch(() => {});
-      }
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
+    if (!term) return;
+    term.options.disableStdin = directMode;
+    if (directMode && inputEl) {
+      requestAnimationFrame(() => inputEl.focus());
+    }
   });
 
-  function directInput(e) {
-    const text = e.target.value;
-    if (text) {
-      sendKeys(target, text, true).catch(() => {});
-      e.target.value = '';
-    }
-  }
 </script>
 
 <div class="terminal">
@@ -499,7 +473,15 @@
           onclick={(e) => {
             e.stopPropagation();
             if (String(w.window) === currentWindow) { showWindowCmd = !showWindowCmd; }
-            else if (onSwitchPane) { onSwitchPane(`${w.session}:${w.window}.${w.pane}`, w.current_command); showWindowCmd = false; }
+            else if (onSwitchPane) {
+              // Dismiss keyboard, reset layout and scroll state before switching pane
+              document.activeElement?.blur();
+              document.documentElement.style.setProperty('--app-height', '100dvh');
+              document.documentElement.classList.remove('keyboard-open');
+              touchScrolling = false;
+              onSwitchPane(`${w.session}:${w.window}.${w.pane}`, w.current_command);
+              showWindowCmd = false;
+            }
           }}
         >
           <span class="win-num">{w.window}</span>
@@ -538,7 +520,7 @@
             <button onclick={() => sendSpecial('Left')}><Icon name="arrow-left" size={13} /></button>
             <button onclick={() => sendSpecial('Down')}><Icon name="arrow-down" size={13} /></button>
             <button onclick={() => sendSpecial('Right')}><Icon name="arrow-right" size={13} /></button>
-            <button class:sk-active={directMode} onclick={() => directMode = !directMode}><Icon name="chat" size={13} /></button>
+            <button class:sk-active={directMode} ontouchstart={(e) => e.stopPropagation()} onmousedown={(e) => e.stopPropagation()} onclick={() => { directMode = !directMode; if (directMode) requestAnimationFrame(() => inputEl?.focus()); }}><Icon name="chat" size={13} /></button>
           </div>
         </div>
         {#if directMode}
@@ -546,6 +528,7 @@
           <span class="prompt">❯</span>
           <textarea
             bind:value={input}
+            bind:this={inputEl}
             onkeydown={handleKeydown}
             oninput={autoResize}
             placeholder="command…"
