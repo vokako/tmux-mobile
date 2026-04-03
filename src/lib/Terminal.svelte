@@ -206,7 +206,9 @@
       cursorStyle: 'block',
       disableStdin: false,
       fontSize,
-      fontFamily: "'SF Mono', Menlo, 'Courier New', monospace",
+      fontFamily: "'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace",
+      fontWeight: 300,
+      fontWeightBold: 600,
       theme: getTermTheme(),
       scrollback: 500,
       convertEol: true,
@@ -648,7 +650,7 @@
     background: none; color: var(--text2); font-size: 11px;
     cursor: pointer; white-space: nowrap;
     -webkit-tap-highlight-color: transparent;
-    font-family: 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
   }
   .win-tab.active { background: var(--accent-bg); color: var(--accent); }
   .win-tab:active { background: var(--surface2); }
@@ -665,7 +667,7 @@
   }
   .status-left .kiro { color: var(--accent); }
   .status-left {
-    font-family: 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
     font-size: 10px;
     white-space: nowrap;
     overflow: hidden;
@@ -675,7 +677,7 @@
     display: flex;
     align-items: center;
     gap: 5px;
-    font-family: 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
     font-weight: 500;
     font-size: 12px;
     margin-left: auto;
@@ -805,7 +807,7 @@
     background: var(--input-bg);
     color: var(--text2);
     font-size: 12px;
-    font-family: 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
     font-weight: 500;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
@@ -836,7 +838,7 @@
 
   .prompt {
     color: var(--accent);
-    font-family: 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
     font-size: 15px;
     font-weight: 600;
     flex-shrink: 0;
@@ -850,7 +852,7 @@
     border: none;
     background: transparent;
     color: var(--text);
-    font-family: 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
     font-size: 15px;
     outline: none;
     -webkit-appearance: none;
