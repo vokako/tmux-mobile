@@ -400,6 +400,25 @@
   let downloadToast = $state('');
   let downloadedPath = $state('');
   let downloading = $state('');
+  let dlProgress = $state(0);
+  let dlProgressTimer = null;
+
+  // Simulate gradual progress while waiting for download RPC
+  function startDlProgress() {
+    dlProgress = 5;
+    let target = 80; // simulate up to 80%, rest is real stages
+    dlProgressTimer = setInterval(() => {
+      if (dlProgress < target) {
+        // Slow down as we approach target
+        const remaining = target - dlProgress;
+        dlProgress += Math.max(0.5, remaining * 0.06);
+      }
+    }, 100);
+  }
+  function stopDlProgress() {
+    clearInterval(dlProgressTimer);
+    dlProgressTimer = null;
+  }
 
   async function openDownloaded() {
     if (!downloadedPath) return;
@@ -415,20 +434,24 @@
   }
 
   function dismissDownload() {
-    downloadToast = ''; downloadedPath = ''; downloading = '';
+    downloadToast = ''; downloadedPath = ''; downloading = ''; dlProgress = 0;
   }
 
   async function handleDownload(path) {
     const name = path.split('/').pop();
     try {
+      downloading = name;
+      startDlProgress();
       if (isTauri && tauriFs) {
         await tauriReady;
         if (isAndroid) {
-          downloading = name;
           const r = await fsDownload(path);
+          stopDlProgress(); dlProgress = 85;
           const { invoke } = await import('@tauri-apps/api/core');
+          dlProgress = 90;
           const filePath = await invoke('save_to_downloads', { name: r.name, data: r.data });
-          console.log('[TmuxMobile] Downloaded to:', filePath);
+          dlProgress = 100;
+          await new Promise(r => setTimeout(r, 300));
           downloading = '';
           downloadedPath = filePath;
           downloadToast = filePath;
@@ -437,11 +460,14 @@
         }
         // macOS / desktop: use save dialog
         const savePath = await tauriDialog.save({ defaultPath: name });
-        if (!savePath) return;
-        downloading = name;
+        if (!savePath) { stopDlProgress(); downloading = ''; dlProgress = 0; return; }
         const r = await fsDownload(path);
+        stopDlProgress(); dlProgress = 85;
         const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
+        dlProgress = 90;
         await tauriFs.writeFile(savePath, bytes);
+        dlProgress = 100;
+        await new Promise(r => setTimeout(r, 300));
         downloading = '';
         downloadedPath = String(savePath);
         downloadToast = downloadedPath;
@@ -449,9 +475,8 @@
         return;
       }
       // Browser fallback
-      downloading = name;
       const r = await fsDownload(path);
-      downloading = '';
+      stopDlProgress(); dlProgress = 90;
       const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
       const blob = new Blob([bytes]);
       const url = URL.createObjectURL(blob);
@@ -459,10 +484,13 @@
       a.href = url; a.download = r.name;
       document.body.appendChild(a);
       a.click();
+      dlProgress = 100;
+      await new Promise(r => setTimeout(r, 300));
       setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+      downloading = '';
       downloadToast = 'Downloaded';
       setTimeout(() => downloadToast = '', 2000);
-    } catch (e) { downloading = ''; error = e.message; }
+    } catch (e) { stopDlProgress(); downloading = ''; dlProgress = 0; error = e.message; }
   }
 
   async function handleUpload() {
@@ -893,7 +921,15 @@
   {/if}
   {#if downloading}
     <div class="copy-toast download-toast">
-      <span class="dl-spinner"></span> Downloading {downloading}...
+      <svg class="dl-ring" width="28" height="28" viewBox="0 0 28 28">
+        <circle cx="14" cy="14" r="11" fill="none" stroke="var(--border)" stroke-width="2.5" />
+        <circle cx="14" cy="14" r="11" fill="none" stroke="var(--accent)" stroke-width="2.5"
+          stroke-linecap="round" transform="rotate(-90 14 14)"
+          stroke-dasharray={2 * Math.PI * 11}
+          stroke-dashoffset={2 * Math.PI * 11 * (1 - dlProgress / 100)} />
+      </svg>
+      <span class="dl-pct">{Math.round(dlProgress)}%</span>
+      <span class="dl-name">{downloading}</span>
     </div>
   {:else if downloadToast}
     <div class="copy-toast download-toast">
@@ -1140,12 +1176,15 @@
     direction: rtl; text-align: left; min-width: 0;
     font-family: 'SF Mono', Menlo, monospace; font-size: 11px; color: var(--text2);
   }
-  .dl-spinner {
-    width: 14px; height: 14px; border: 2px solid var(--border);
-    border-top-color: var(--accent); border-radius: 50%;
-    animation: spin 0.6s linear infinite; flex-shrink: 0;
+  .dl-ring { flex-shrink: 0; }
+  .dl-ring circle:last-child { transition: stroke-dashoffset 0.3s ease; }
+  .dl-pct {
+    font-family: 'SF Mono', Menlo, monospace; font-size: 11px;
+    font-weight: 600; color: var(--accent); min-width: 30px;
   }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  .dl-name {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+  }
   .toast-open {
     padding: 4px 12px; border: 1px solid var(--accent); border-radius: 6px;
     background: var(--accent-bg); color: var(--accent); font-size: 12px;
