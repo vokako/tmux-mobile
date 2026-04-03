@@ -226,6 +226,15 @@
       if (/^\x1b\[[\?>=]?[\d;]*c$/.test(data)) return; // DA1/DA2/DA3
       if (/^\x1b\[\d+;\d+R$/.test(data)) return;        // DSR cursor position
       if (/^\x1b\[\d+n$/.test(data)) return;             // DSR device status
+      // Mobile: force-clear xterm's hidden textarea after each input to prevent
+      // accumulation. Auto-paired quotes (typing " inserts "" with cursor in middle)
+      // break xterm.js's textarea clearing, causing subsequent chars to accumulate.
+      if (isMobile) {
+        requestAnimationFrame(() => {
+          const ta = termEl?.querySelector('.xterm-helper-textarea');
+          if (ta && ta.value) ta.value = '';
+        });
+      }
       sendKeys(target, data, true).catch(() => {});
     });
     // Block xterm from processing keys when input box is open
