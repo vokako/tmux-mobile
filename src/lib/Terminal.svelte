@@ -270,7 +270,7 @@
         touchScrolling = true;
         term.scrollLines(lines);
         accumulatedDy -= lines * lh;
-        e.preventDefault();
+        if (e.cancelable) e.preventDefault();
       }
     };
     const onTouchEnd = () => {
