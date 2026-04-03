@@ -57,6 +57,7 @@ class MainActivity : TauriActivity() {
       val height = if (keyboardCss > 80) keyboardCss else 0
       webView?.evaluateJavascript("""
         window.__ANDROID_KEYBOARD_HEIGHT__ = $height;
+        window.__dbg?.('android kb: keyboardPx=$keyboardPx keyboardCss=$keyboardCss height=$height screenH=${screenHeight} rectB=${rect.bottom} density=$density');
         window.dispatchEvent(new CustomEvent('androidKeyboardHeight', { detail: { height: $height } }));
       """.trimIndent(), null)
     }

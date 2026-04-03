@@ -175,8 +175,8 @@
         cursorSeq = `\x1b[${row};${cursor.x + 1}H`;
       }
     }
-    // Clear screen (keep scrollback for touch scrolling), write content, position cursor
-    term.write('\x1b[?25l\x1b[2J\x1b[H' + content + padLines + cursorSeq + '\x1b[?25h', () => {
+    // Clear screen + scrollback, write content, position cursor
+    term.write('\x1b[?25l\x1b[2J\x1b[3J\x1b[H' + content + padLines + cursorSeq + '\x1b[?25h', () => {
       // Skip scroll adjustment if user is touch-scrolling (async callback race)
       if (touchScrolling) return;
       if (atBottom) {
@@ -190,7 +190,6 @@
   // xterm.js setup + subscription
   $effect(() => {
     touchScrolling = false; // reset on pane switch
-    maxContainerH = 0; // reset for new pane
     // Pre-calculate initial size before terminal opens (avoids race with keyboard auto-focus)
     const fontSize = 14;
     const estCellW = fontSize * 0.6;
@@ -221,10 +220,19 @@
     // Forward keyboard input to tmux — skip when input box is open
     term.onData(data => {
       if (directMode && inputEl) return;
+      // Filter xterm.js device attribute responses (DA1/DA2/DA3)
+      if (/^\x1b\[[\?>=]?[\d;]*c$/.test(data)) return;
       sendKeys(target, data, true).catch(() => {});
     });
     // Block xterm from processing keys when input box is open
     term.attachCustomKeyEventHandler(() => !directMode);
+
+    let lastContent = '';
+    let lastCursor = null;
+    function endTouchScroll() {
+      touchScrolling = false;
+      if (lastContent) writeToXterm(lastContent, lastCursor);
+    }
 
     // Mobile touch: scrolling with momentum + long-press to copy
     let touchY = 0, touchStartY = 0, accumulatedDy = 0, longPressTimer = null, didScroll = false;
@@ -297,7 +305,7 @@
       }
     };
     const onTouchEnd = () => {
-      if (onScrollbar) { onScrollbar = false; setTimeout(() => { touchScrolling = false; }, 500); return; }
+      if (onScrollbar) { onScrollbar = false; setTimeout(endTouchScroll, 500); return; }
       if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
       if (touchScrolling && Math.abs(velocity) > 0.05) {
         // Momentum: cap by both speed and swipe distance
@@ -311,8 +319,7 @@
         const coast = () => {
           v *= 0.97; // friction
           acc += v;
-          const lh = lineHeight();
-          const lines = Math.trunc(acc / 1); // 1 line threshold
+          const lines = Math.trunc(acc);
           if (lines !== 0) {
             term.scrollLines(lines);
             acc -= lines;
@@ -321,17 +328,24 @@
             momentumId = requestAnimationFrame(coast);
           } else {
             momentumId = null;
-            setTimeout(() => { touchScrolling = false; }, 200);
+            setTimeout(endTouchScroll, 200);
           }
         };
         momentumId = requestAnimationFrame(coast);
       } else if (touchScrolling) {
-        setTimeout(() => { touchScrolling = false; }, 500);
+        setTimeout(endTouchScroll, 500);
       }
+    };
+    const onTouchCancel = () => {
+      if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+      onScrollbar = false;
+      stopMomentum();
+      setTimeout(endTouchScroll, 100);
     };
     termEl.addEventListener('touchstart', onTouchStart, { passive: true });
     termEl.addEventListener('touchmove', onTouchMove, { passive: false });
     termEl.addEventListener('touchend', onTouchEnd, { passive: true });
+    termEl.addEventListener('touchcancel', onTouchCancel, { passive: true });
 
     term.onScroll(() => {
       const buf = term.buffer.active;
@@ -390,8 +404,6 @@
     };
     window.addEventListener('terminal-refit', onRefit);
 
-    let lastContent = '';
-    let lastCursor = null;
     setOnPaneOutput((t, content, cursor) => {
       if (t !== target) return;
       if (cursor) lastCursor = cursor;
@@ -417,6 +429,7 @@
 
     subscribe(target);
     capturePane(target).then(r => {
+      if (lastContent) return; // subscription already delivered content
       const c = r.output || r.content;
       if (c) {
         paneContent = c;
@@ -434,6 +447,7 @@
       termEl.removeEventListener('touchstart', onTouchStart);
       termEl.removeEventListener('touchmove', onTouchMove);
       termEl.removeEventListener('touchend', onTouchEnd);
+      termEl.removeEventListener('touchcancel', onTouchCancel);
       // Server kills the control-mode client on WS disconnect → tmux auto-restores size
       unsubscribe(target);
       setOnPaneOutput(null);
@@ -657,7 +671,7 @@
   .win-num { font-weight: 600; min-width: 14px; text-align: center; }
   .win-cmd { color: var(--text3); font-size: 10px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
 
-  .input-status, .input-status-standalone {
+  .input-status {
     display: flex;
     align-items: center;
     gap: 8px;
