@@ -1,5 +1,3 @@
-# CLAUDE.md
-
 ## Project Overview
 
 tmux-mobile: Tauri 2 cross-platform app (Rust + Svelte 5) for remotely monitoring and controlling tmux sessions from a phone. WebSocket JSON-RPC protocol with token auth.
