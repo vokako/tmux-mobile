@@ -180,7 +180,7 @@
                   {#if aiTag === 'Kiro'}
                     <img class="pane-ai-icon" src="/assets/kiro.svg" alt="Kiro" />
                   {:else if aiTag === 'Claude'}
-                    <span class="pane-tag">Claude</span>
+                    <img class="pane-ai-icon" src="/assets/claude.svg" alt="Claude" />
                   {/if}
                   <span class="pane-size">{p.width}×{p.height}</span>
                 </button>
@@ -417,16 +417,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .pane-tag {
-    font-size: 9px;
-    font-weight: 600;
-    padding: 1px 5px;
-    border-radius: 4px;
-    background: var(--accent-bg);
-    color: var(--accent);
-    white-space: nowrap;
-    flex-shrink: 0;
   }
   .pane-ai-icon {
     width: 14px;
