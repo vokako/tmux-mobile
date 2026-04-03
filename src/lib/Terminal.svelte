@@ -136,6 +136,9 @@
 
   let touchScrolling = false; // set by touch handler, pauses content updates
 
+  // Count lines without allocating a split array
+  function countLines(s) { let n = 1; for (let i = 0; i < s.length; i++) if (s[i] === '\n') n++; return n; }
+
   // Write content + position cursor in xterm.js
   function writeToXterm(content, cursor) {
     if (!term || touchScrolling) return;
@@ -154,7 +157,7 @@
     let cursorSeq = '';
     let padLines = '';
     if (cursor) {
-      const N = content.split('\n').length;
+      const N = countLines(content);
       const trailing = cursor.t || 0;
       const paneStart = Math.max(0, N + trailing - cursor.h);
       const cursorLine = paneStart + cursor.y; // 0-indexed content line
@@ -356,8 +359,8 @@
         const trackH = termEl.clientHeight;
         const totalScroll = term.buffer.active.baseY;
         if (totalScroll > 0 && trackH > 0) {
-          const target = scrollbarStartViewport + (deltaY / trackH) * totalScroll;
-          term.scrollToLine(Math.max(0, Math.min(totalScroll, Math.round(target))));
+          const scrollTarget = scrollbarStartViewport + (deltaY / trackH) * totalScroll;
+          term.scrollToLine(Math.max(0, Math.min(totalScroll, Math.round(scrollTarget))));
         }
         if (e.cancelable) e.preventDefault();
         return;
@@ -515,7 +518,7 @@
         writeToXterm(content, lastCursor);
       } else if (cursor && term && lastContent) {
         // Cursor-only update — use same row calculation as writeToXterm
-        const N = lastContent.split('\n').length;
+        const N = countLines(lastContent);
         const trailing = cursor.t || 0;
         const paneStart = Math.max(0, N + trailing - cursor.h);
         const cursorLine = paneStart + cursor.y;
@@ -686,7 +689,6 @@
   <div class="input-area">
     {#if viewMode === 'terminal' && isMobile}
       <div class="input-bar">
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div class="shortcut-rows" ontouchend={(e) => { e.preventDefault(); stopRepeat(); }} onmouseup={stopRepeat}>
           <div class="shortcuts">
@@ -948,9 +950,6 @@
     -webkit-tap-highlight-color: transparent;
     display: flex; align-items: center; justify-content: center;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
-  }
-  .shortcuts button.sk-empty {
-    visibility: hidden;
   }
   .shortcuts button.sk-active {
     background: var(--accent-bg);
