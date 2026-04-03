@@ -17,6 +17,12 @@ use tokio_tungstenite::{accept_async, tungstenite::Message};
 // Brute-force protection: track failed auth attempts per IP
 type AuthTracker = Arc<Mutex<HashMap<IpAddr, (u32, tokio::time::Instant)>>>;
 
+// Track which windows each connection has resized, so we can restore on disconnect.
+// Key = conn_id, Value = set of "session:window" targets that were resized.
+type ResizeTracker = Arc<std::sync::Mutex<HashMap<u64, std::collections::HashSet<String>>>>;
+
+static CONN_ID_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 const MAX_AUTH_FAILURES: u32 = 5;
 const AUTH_LOCKOUT_SECS: u64 = 60;
 
@@ -205,18 +211,8 @@ fn handle_request(req: &Request) -> Response {
             }
         }
 
-        "resize_pane" => {
-            let target = match require_str(p, "target") {
-                Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
-            };
-            let cols = p.get("cols").and_then(|v| v.as_u64()).unwrap_or(80) as usize;
-            let rows = p.get("rows").and_then(|v| v.as_u64()).unwrap_or(24) as usize;
-            match tmux::resize_pane(target, cols, rows) {
-                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
-                Err(e) => Response::err(id, ERR_INTERNAL, e),
-            }
-        }
+        // resize_pane is handled in the connection message loop (needs per-connection state)
+        "resize_pane" => Response::err(id, ERR_INTERNAL, "resize_pane handled elsewhere".into()),
 
         "new_session" => {
             let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("untitled");
@@ -462,8 +458,8 @@ async fn subscription_loop(
             let t2 = target.clone();
             let (new_content, cursor, trailing_trimmed) = match tokio::task::spawn_blocking(move || {
                 let cursor = tmux::cursor_info(&t2).unwrap_or((0, 0, 24, 80));
-                let (content, trailing_trimmed) = tmux::capture_pane_with_width(&t, None, cursor.3)?;
-                Ok::<_, String>((content, cursor, trailing_trimmed))
+                let (content, trailing) = tmux::capture_pane_with_width(&t, None, cursor.3)?;
+                Ok::<_, String>((content, cursor, trailing))
             })
             .await
             {
@@ -490,25 +486,19 @@ async fn subscription_loop(
                 .insert(target.clone(), state_key);
             let content_changed = !prev.is_empty()
                 && prev.split('\x00').next().unwrap_or("") != new_content;
-            // Cursor position: compute from the end of output.
-            // cursor_y is 0-indexed within visible area, pane_height = visible lines.
-            // Lines below cursor are empty and don't get joined by -J or CJK join.
-            // trim_end may have removed some of those trailing empty lines.
-            let from_end_raw = cursor.2.saturating_sub(1).saturating_sub(cursor.1); // pane_height-1-cursor_y
-            let from_end = from_end_raw.saturating_sub(trailing_trimmed);
-            let total = new_content.matches('\n').count() + 1;
-            let cursor_line = (total - 1).saturating_sub(from_end) as i64;
+            // Send raw tmux cursor position + trailing trimmed count for xterm.js row mapping
+            let cursor_obj = serde_json::json!({ "x": cursor.0, "y": cursor.1, "w": cursor.3, "h": cursor.2, "t": trailing_trimmed });
             let msg = if content_changed || prev.is_empty() {
                 serde_json::json!({
                     "id": null,
                     "method": "pane_output",
-                    "params": { "target": target, "content": new_content, "cursor": { "x": cursor.0, "line": cursor_line, "w": cursor.3 } }
+                    "params": { "target": target, "content": new_content, "cursor": cursor_obj }
                 })
             } else {
                 serde_json::json!({
                     "id": null,
                     "method": "pane_output",
-                    "params": { "target": target, "cursor": { "x": cursor.0, "line": cursor_line, "w": cursor.3 } }
+                    "params": { "target": target, "cursor": cursor_obj }
                 })
             };
             let text = serde_json::to_string(&msg).unwrap();
@@ -547,7 +537,7 @@ fn handle_unsubscribe(params: &serde_json::Value, subs: &mut HashMap<String, Str
     Response::ok(None, serde_json::json!({ "unsubscribed": target }))
 }
 
-async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>, auth_tracker: AuthTracker) {
+async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker) {
     println!("📱 Client connected: {}", addr);
 
     // Check if IP is locked out
@@ -569,10 +559,10 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<Strin
         }
     };
 
-    handle_connection_ws(ws_stream, addr, token, auth_tracker).await;
+    handle_connection_ws(ws_stream, addr, token, auth_tracker, resize_tracker).await;
 }
 
-async fn handle_connection_ws<S>(ws_stream: tokio_tungstenite::WebSocketStream<S>, addr: SocketAddr, token: Arc<String>, auth_tracker: AuthTracker)
+async fn handle_connection_ws<S>(ws_stream: tokio_tungstenite::WebSocketStream<S>, addr: SocketAddr, token: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker)
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
@@ -590,6 +580,7 @@ where
     let (ws_sender, mut receiver) = ws_stream.split();
     let sender: Arc<Mutex<dyn futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Send + Unpin>> = Arc::new(Mutex::new(ws_sender));
     let subs: Subscriptions = Arc::new(Mutex::new(HashMap::new()));
+    let conn_id = CONN_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut authenticated = false;
     let shared_cipher: Arc<Mutex<Option<SessionCipher>>> = Arc::new(Mutex::new(None));
 
@@ -730,6 +721,27 @@ where
                                     let mut map = subs.lock().await;
                                     handle_unsubscribe(&req.params, &mut map)
                                 }
+                                "resize_pane" => {
+                                    let id = req.id;
+                                    let p = &req.params;
+                                    let target = p.get("target").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                    let cols = p.get("cols").and_then(|v| v.as_u64()).unwrap_or(80) as usize;
+                                    let rows = p.get("rows").and_then(|v| v.as_u64()).unwrap_or(24) as usize;
+                                    let tracker = resize_tracker.clone();
+                                    tokio::task::spawn_blocking(move || {
+                                        match tmux::resize_pane(&target, cols, rows) {
+                                            Ok(()) => {
+                                                let win = target.split('.').next().unwrap_or(&target).to_string();
+                                                let session = target.split(':').next().unwrap_or(&target);
+                                                // Set tmux hook so next real client auto-restores size
+                                                let _ = tmux::set_resize_hook(session);
+                                                tracker.lock().unwrap().entry(conn_id).or_default().insert(win);
+                                                Response::ok(id, serde_json::json!({ "ok": true }))
+                                            }
+                                            Err(e) => Response::err(id, ERR_INTERNAL, e),
+                                        }
+                                    }).await.unwrap_or_else(|e| Response::err(None, ERR_INTERNAL, format!("task panic: {}", e)))
+                                }
                                 _ => tokio::task::spawn_blocking(move || handle_request(&req))
                                     .await
                                     .unwrap_or_else(|e| {
@@ -770,7 +782,17 @@ where
     }
 
     sub_handle.abort();
-    println!("👋 Client disconnected: {}", addr);
+    // Restore any windows this connection resized (tmux auto-fits to remaining clients)
+    {
+        let mut tracker = resize_tracker.lock().unwrap();
+        if let Some(windows) = tracker.remove(&conn_id) {
+            for win in &windows {
+                let _ = tmux::run_resize_window_auto(win);
+                eprintln!("📐 Restored window '{}' to auto-size", win);
+            }
+        }
+    }
+    println!("👋 Client disconnected: {} (conn_id={})", addr, conn_id);
 }
 
 pub async fn start(host: &str, port: u16, token: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -790,6 +812,7 @@ pub async fn start_with_socket(
     let listener = TcpListener::bind(&addr).await?;
     let token = Arc::new(token.to_string());
     let auth_tracker: AuthTracker = Arc::new(Mutex::new(HashMap::new()));
+    let resize_tracker: ResizeTracker = Arc::new(std::sync::Mutex::new(HashMap::new()));
 
     // Load TLS config if cert+key provided
     let tls_acceptor = match (&tls_cert, &tls_key) {
@@ -824,6 +847,7 @@ pub async fn start_with_socket(
         let (stream, addr) = listener.accept().await?;
         let token = token.clone();
         let auth_tracker = auth_tracker.clone();
+        let control_mgr = resize_tracker.clone();
         if let Some(ref acceptor) = tls_acceptor {
             let acceptor = acceptor.clone();
             tokio::spawn(async move {
@@ -833,13 +857,13 @@ pub async fn start_with_socket(
                             Ok(ws) => ws,
                             Err(e) => { eprintln!("❌ WSS handshake failed for {}: {}", addr, e); return; }
                         };
-                        handle_connection_ws(ws_stream, addr, token, auth_tracker).await;
+                        handle_connection_ws(ws_stream, addr, token, auth_tracker, control_mgr).await;
                     }
                     Err(e) => eprintln!("❌ TLS handshake failed for {}: {}", addr, e),
                 }
             });
         } else {
-            tokio::spawn(handle_connection(stream, addr, token, auth_tracker));
+            tokio::spawn(handle_connection(stream, addr, token, auth_tracker, control_mgr));
         }
     }
 }

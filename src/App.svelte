@@ -16,13 +16,42 @@
   let theme = $state(localStorage.getItem('tmux_theme') || 'system');
   let showSettings = $state(false);
 
-  // Android keyboard height — only from native Tauri event, not browser
+  // Keyboard height detection
   $effect(() => {
-    const handler = (e) => {
-      document.documentElement.style.setProperty('--keyboard-height', (e.detail?.height || 0) + 'px');
+    // Android Tauri app: native event provides exact keyboard height
+    const nativeHandler = (e) => {
+      const kbh = e.detail?.height || 0;
+      const h = kbh > 0 ? (window.innerHeight - kbh) + 'px' : '100dvh';
+      document.documentElement.style.setProperty('--app-height', h);
     };
-    window.addEventListener('androidKeyboardHeight', handler);
-    return () => window.removeEventListener('androidKeyboardHeight', handler);
+    window.addEventListener('androidKeyboardHeight', nativeHandler);
+
+    // Mobile browser: track visualViewport height so main always fits
+    // the visible area (keyboard doesn't push nav off screen).
+    const vv = window.visualViewport;
+    const vpHandler = () => {
+      if (!vv) return;
+      // Set main height to exactly the visible viewport
+      document.documentElement.style.setProperty('--app-height', vv.height + 'px');
+      // Toggle keyboard-open class (keyboard shrinks viewport by > 100px)
+      const kbOpen = (window.innerHeight - vv.height) > 100;
+      document.documentElement.classList.toggle('keyboard-open', kbOpen);
+      // Prevent browser from scrolling the page up
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+    };
+    if (vv) {
+      vv.addEventListener('resize', vpHandler);
+      vv.addEventListener('scroll', vpHandler);
+    }
+
+    return () => {
+      window.removeEventListener('androidKeyboardHeight', nativeHandler);
+      if (vv) {
+        vv.removeEventListener('resize', vpHandler);
+        vv.removeEventListener('scroll', vpHandler);
+      }
+    };
   });
 
   function setTheme(t) {
@@ -349,7 +378,7 @@
     {/if}
     {#if terminalTarget}
       <div class="page-layer" class:hidden={page !== 'files'}>
-        <Files session={terminalSession} onGoBack={(fn) => filesGoBack = fn} />
+        <Files session={terminalSession} visible={page === 'files'} onGoBack={(fn) => filesGoBack = fn} />
       </div>
       <div class="page-layer" class:hidden={page !== 'terminal'}>
         <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {viewMode} onChatSupported={(v) => chatSupported = v} onSwitchPane={(t, cmd) => { terminalTarget = t; terminalCommand = cmd || ''; }} />
@@ -365,8 +394,7 @@
     background: var(--bg);
     color: var(--text);
     overflow: hidden;
-    height: 100vh;
-    height: 100dvh;
+    height: var(--app-height, 100dvh);
     -webkit-font-smoothing: antialiased;
     position: fixed;
     width: 100%;
@@ -376,7 +404,7 @@
     -webkit-overflow-scrolling: touch;
   }
   :global(*) { box-sizing: border-box; }
-  :global(html) { overscroll-behavior: none; --sat: env(safe-area-inset-top); --sab: env(safe-area-inset-bottom); --keyboard-height: 0px; }
+  :global(html) { overflow: hidden; overscroll-behavior: none; --sat: env(safe-area-inset-top); --sab: env(safe-area-inset-bottom); --app-height: 100dvh; }
   :global(html[data-theme="dark"]) {
     --bg: #0a0a0f; --bg2: #0f0f18; --bg3: #12121a;
     --text: #e2e8f0; --text2: rgba(226,232,240,0.5); --text3: rgba(226,232,240,0.3);
@@ -406,11 +434,9 @@
   main {
     display: flex;
     flex-direction: column;
-    height: 100vh;
-    height: 100dvh;
+    height: var(--app-height, 100dvh);
     max-width: 100vw;
     overflow: hidden;
-    padding-bottom: var(--keyboard-height);
     background: linear-gradient(180deg, var(--bg) 0%, var(--bg2) 50%, var(--bg3) 100%);
   }
 

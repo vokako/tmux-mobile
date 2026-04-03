@@ -19,6 +19,8 @@ pub struct TmuxPane {
     pub width: usize,
     pub height: usize,
     pub current_command: String,
+    pub window_name: String,
+    pub pane_title: String,
 }
 
 use std::sync::{OnceLock, RwLock};
@@ -124,7 +126,7 @@ pub fn list_panes(session: &str) -> Result<Vec<TmuxPane>, String> {
         "-t",
         session,
         "-F",
-        "#{session_name}|#{window_index}|#{pane_index}|#{pane_width}|#{pane_height}|#{pane_current_command}",
+        "#{session_name}|#{window_index}|#{pane_index}|#{pane_width}|#{pane_height}|#{pane_current_command}|#{window_name}|#{pane_title}",
     ])?;
 
     let panes = output
@@ -139,6 +141,8 @@ pub fn list_panes(session: &str) -> Result<Vec<TmuxPane>, String> {
                 width: parts.get(3).unwrap_or(&"0").parse().unwrap_or(0),
                 height: parts.get(4).unwrap_or(&"0").parse().unwrap_or(0),
                 current_command: parts.get(5).unwrap_or(&"").to_string(),
+                window_name: parts.get(6).unwrap_or(&"").to_string(),
+                pane_title: parts.get(7).unwrap_or(&"").to_string(),
             }
         })
         .collect();
@@ -204,15 +208,20 @@ pub fn capture_pane_with_width(
         &start_line,
     ])?;
 
-    // Count trailing empty lines before trimming
-    let trailing_empty = output
+    let trimmed = output.trim_end();
+
+    // Count trailing empty pane rows that were removed by trim_end.
+    // tmux terminates EVERY line with \n (including the last non-empty one),
+    // so we subtract 1 to avoid counting that terminator as an empty line.
+    let trailing_newlines = output[trimmed.len()..]
         .bytes()
-        .rev()
-        .take_while(|&b| b == b'\n' || b == b' ')
         .filter(|&b| b == b'\n')
         .count();
-
-    let trimmed = output.trim_end();
+    let trailing_empty = if trimmed.is_empty() {
+        trailing_newlines
+    } else {
+        trailing_newlines.saturating_sub(1)
+    };
 
     if width == 0 {
         return Ok((trimmed.to_string(), trailing_empty));
@@ -241,7 +250,7 @@ pub fn capture_pane_with_width(
 }
 
 /// Count visible character width, skipping ANSI escapes, counting CJK as 2.
-fn visible_width(s: &str) -> usize {
+pub fn visible_width(s: &str) -> usize {
     let mut w = 0;
     let mut in_esc = false;
     for c in s.chars() {
@@ -356,6 +365,24 @@ pub fn resize_pane(target: &str, cols: usize, rows: usize) -> Result<(), String>
         "-y",
         &rows.to_string(),
     ])?;
+    Ok(())
+}
+
+/// Restore a window to auto-size based on attached clients.
+pub fn run_resize_window_auto(target: &str) -> Result<(), String> {
+    run_tmux(&["resize-window", "-t", target, "-A"])?;
+    Ok(())
+}
+
+/// Set a tmux hook so the next client that attaches to this session auto-resizes windows.
+pub fn set_resize_hook(session: &str) -> Result<(), String> {
+    // client-session-changed fires when a client switches to this session.
+    // The hook runs resize-window -A (auto-fit) then removes itself (one-shot).
+    let hook_cmd = format!(
+        "resize-window -A ; set-hook -u -t {} client-session-changed",
+        session
+    );
+    run_tmux(&["set-hook", "-t", session, "client-session-changed", &hook_cmd])?;
     Ok(())
 }
 

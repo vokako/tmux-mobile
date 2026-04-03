@@ -64,7 +64,7 @@
   mermaid.initialize({ startOnLoad: false, theme: 'dark' });
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
-  let { session = '', onGoBack = null } = $props();
+  let { session = '', onGoBack = null, visible = false } = $props();
 
   function navPush() { history.pushState({ app: true }, ''); }
 
@@ -225,6 +225,18 @@
   $effect(() => {
     cwd;
     setTimeout(() => { if (bcPathEl) bcPathEl.scrollLeft = bcPathEl.scrollWidth; }, 0);
+  });
+
+  // Sync CWD from terminal session when Files tab becomes visible
+  $effect(() => {
+    if (session && visible) {
+      fsCwd(session).then(r => {
+        if (r.path !== cwd) {
+          cwd = r.path;
+          loadDir(r.path);
+        }
+      }).catch(() => {});
+    }
   });
 
   // Init: get session CWD

@@ -44,7 +44,11 @@
 
   function normalizeAddress(addr) {
     let a = addr.trim();
-    if (!a.startsWith('ws://') && !a.startsWith('wss://')) a = 'ws://' + a;
+    if (!a.startsWith('ws://') && !a.startsWith('wss://')) {
+      // Auto-detect: HTTPS page requires wss://, otherwise ws://
+      const secure = location.protocol === 'https:';
+      a = (secure ? 'wss://' : 'ws://') + a;
+    }
     return a;
   }
 

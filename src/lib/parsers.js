@@ -138,14 +138,8 @@ const kiroParser = {
 const claudeCodeParser = {
   name: 'claude-code',
 
-  // Detect if this pane is running Claude Code
+  // Detect if this pane is running Claude Code (disabled — use terminal mode)
   detect(raw, command = '') {
-    if (/claude/i.test(command)) return true;
-    const clean = stripAnsi(raw);
-    // Fallback: check for Claude Code banner in content
-    if (/Claude Code v\d/.test(clean)) return true;
-    // Fallback: ⏺ marker is Claude Code's unique prompt character
-    if (/^⏺/m.test(clean)) return true;
     return false;
   },
 

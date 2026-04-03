@@ -1,6 +1,6 @@
 <script>
-  import { subscribe, unsubscribe, setOnPaneOutput, sendCommand, sendKeys, paneCommand, listPanes, capturePane } from './ws.js';
-  import Convert from 'ansi-to-html';
+  import { subscribe, unsubscribe, setOnPaneOutput, sendCommand, sendKeys, paneCommand, listPanes, capturePane, resizePane } from './ws.js';
+  import { Terminal } from '@xterm/xterm';
   import ChatView from './ChatView.svelte';
   import Icon from './Icon.svelte';
   import { detectParser } from './parsers.js';
@@ -13,8 +13,15 @@
   let directMode = $state(false);
   $effect(() => { command = initialCommand; });
   let termEl;
+  let term;
   let termAtBottom = $state(true);
-  let measureEl;
+  let toastMsg = $state('');
+  const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+  function showToast(msg) {
+    toastMsg = msg;
+    setTimeout(() => { toastMsg = ''; }, 1500);
+  }
 
   let theme = $state(document.documentElement.getAttribute('data-theme') || 'dark');
 
@@ -26,47 +33,43 @@
     return () => obs.disconnect();
   });
 
-  const darkConvert = new Convert({ newline: true, escapeXML: true });
-  const lightConvert = new Convert({ newline: true, escapeXML: true,
-    colors: {
-      0: '#1a1a2e', 1: '#dc2626', 2: '#16a34a', 3: '#ca8a04',
-      4: '#2563eb', 5: '#9333ea', 6: '#0891b2', 7: '#4b5563',
-      8: '#6b7280', 9: '#ef4444', 10: '#22c55e', 11: '#eab308',
-      12: '#3b82f6', 13: '#a855f7', 14: '#06b6d4', 15: '#1a1a2e',
-    }
-  });
+  const darkTheme = {
+    background: '#0a0a0f', foreground: '#c9d1d9', cursor: '#00d4ff',
+    selectionBackground: 'rgba(0, 212, 255, 0.18)',
+    black: '#0a0a0f', brightBlack: '#484848',
+    red: '#ff5050', brightRed: '#ff6b6b',
+    green: '#4ade80', brightGreen: '#6ee7a0',
+    yellow: '#fbbf24', brightYellow: '#fcd34d',
+    blue: '#00d4ff', brightBlue: '#38bdf8',
+    magenta: '#c084fc', brightMagenta: '#d8b4fe',
+    cyan: '#22d3ee', brightCyan: '#67e8f9',
+    white: '#c9d1d9', brightWhite: '#f1f5f9',
+  };
+  const lightTheme = {
+    background: '#f5f5f7', foreground: '#1a1a2e', cursor: '#0088cc',
+    selectionBackground: 'rgba(0, 136, 204, 0.18)',
+    black: '#1a1a2e', brightBlack: '#6b7280',
+    red: '#dc2626', brightRed: '#ef4444',
+    green: '#16a34a', brightGreen: '#22c55e',
+    yellow: '#ca8a04', brightYellow: '#eab308',
+    blue: '#0088cc', brightBlue: '#2563eb',
+    magenta: '#9333ea', brightMagenta: '#a855f7',
+    cyan: '#0891b2', brightCyan: '#06b6d4',
+    white: '#e2e8f0', brightWhite: '#f8fafc',
+  };
 
-  // Compute cursor pixel position for overlay
-  let cursorStyle = $derived.by(() => {
-    if (!cursorPos || cursorPos.line == null || viewMode !== 'terminal') return 'display:none';
-    const lineIdx = cursorPos.line;
-    if (lineIdx < 0) return 'display:none';
-    const charW = measureEl?.getBoundingClientRect().width || 7.8;
-    const lineH = 13 * 1.35;
-    return `top:${8 + lineIdx * lineH}px;left:${10 + cursorPos.x * charW}px;width:${charW}px;height:${lineH}px`;
-  });
+  function getTermTheme() {
+    return theme === 'light' ? lightTheme : darkTheme;
+  }
 
-  let termHtml = $state('');
-  let lastRendered = '';
+  // Sync theme when light/dark changes
   $effect(() => {
-    const content = paneContent;
-    const t = theme;
-    if (content === lastRendered) return;
-    lastRendered = content;
-    let html = (t === 'light' ? lightConvert : darkConvert).toHtml(content);
-    if (t === 'light') {
-      html = html.replace(/color:#(fff|ffffff|eee|eeeeee|ddd|dddddd|ccc|cccccc|bbb|bbbbbb|aaa|aaaaaa|AAA|FFF)\b/gi,
-        'color:#4b5563');
-      // Strip all dark backgrounds
-      html = html.replace(/background-color:#[0-4][0-9a-f]{5}\b/gi,
-        'background-color:transparent');
-      html = html.replace(/background-color:#[0-9a-f]{3}\b/gi, (m) => {
-        const hex = m.split('#')[1];
-        const r = parseInt(hex[0], 16), g = parseInt(hex[1], 16), b = parseInt(hex[2], 16);
-        return (r + g + b < 24) ? 'background-color:transparent' : m;
-      });
+    if (!term) return;
+    const t = getTermTheme();
+    term.options.theme = t;
+    if (termEl) {
+      termEl.style.background = t.background;
     }
-    termHtml = html;
   });
 
   let parser = $derived(detectParser(paneContent, command));
@@ -113,85 +116,291 @@
     return () => clearInterval(id);
   });
 
-  function checkAtBottom() {
-    if (!termEl) return;
-    const el = termEl;
-    termAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 30;
+  // Calculate optimal cols/rows from xterm container size
+  function calcFit() {
+    if (!term || !termEl) return null;
+    const core = term._core;
+    const cellW = core?._renderService?.dimensions?.css?.cell?.width || (term.options.fontSize * 0.6);
+    const cellH = core?._renderService?.dimensions?.css?.cell?.height || (term.options.fontSize * 1.2);
+    const w = termEl.clientWidth;
+    const h = termEl.clientHeight;
+    if (!w || !h || !cellW || !cellH) return null;
+    return { cols: Math.max(2, Math.floor(w / cellW)), rows: Math.max(1, Math.floor(h / cellH)) };
   }
 
-  function scrollToBottom() {
-    if (termEl) {
-      termEl.scrollTop = termEl.scrollHeight;
-      termAtBottom = true;
+  let touchScrolling = false; // set by touch handler, pauses content updates
+
+  // Write content + position cursor in xterm.js
+  function writeToXterm(content, cursor) {
+    if (!term || touchScrolling) return;
+    // Sync xterm cols/rows when pane size changes (tmux controls the size)
+    if (cursor?.w && cursor?.h && (term.cols !== cursor.w || term.rows !== cursor.h)) {
+      term.resize(cursor.w, cursor.h);
     }
+    const buf = term.buffer.active;
+    const atBottom = buf.viewportY >= buf.baseY;
+    const prevViewport = buf.viewportY;
+    // Compute correct xterm screen row for cursor:
+    // Content includes scrollback (-S -200) + visible pane (trimmed).
+    // cursor.y is relative to the visible pane, not the content.
+    // We map: paneStart = N + trailing - paneHeight, cursorLine = paneStart + cursor.y
+    // Then adjust for xterm scrollback overflow.
+    let cursorSeq = '';
+    let padLines = '';
+    if (cursor) {
+      const N = content.split('\n').length;
+      const trailing = cursor.t || 0;
+      const paneStart = Math.max(0, N + trailing - cursor.h);
+      const cursorLine = paneStart + cursor.y; // 0-indexed content line
+      // Pad so cursor line exists in content
+      let pad = Math.max(0, cursorLine + 1 - N);
+      // Recompute row with padding; add more if cursor row exceeds screen
+      let total = N + pad;
+      let sb = Math.max(0, total - term.rows);
+      let row = cursorLine - sb + 1; // 1-indexed screen row
+      if (row > term.rows) {
+        pad += row - term.rows;
+        total = N + pad;
+        sb = Math.max(0, total - term.rows);
+        row = cursorLine - sb + 1;
+      }
+      if (pad > 0) padLines = '\n'.repeat(pad);
+      if (row > 0 && row <= term.rows) {
+        cursorSeq = `\x1b[${row};${cursor.x + 1}H`;
+      }
+    }
+    // Clear screen (keep scrollback for touch scrolling), write content, position cursor
+    term.write('\x1b[?25l\x1b[2J\x1b[H' + content + padLines + cursorSeq + '\x1b[?25h', () => {
+      // Skip scroll adjustment if user is touch-scrolling (async callback race)
+      if (touchScrolling) return;
+      if (atBottom) {
+        term.scrollToBottom();
+      } else {
+        term.scrollToLine(Math.min(prevViewport, term.buffer.active.baseY));
+      }
+    });
   }
 
-  // Scroll to bottom on tab switch or first render
+  // xterm.js setup + subscription
   $effect(() => {
-    viewMode; // track tab switches
-    requestAnimationFrame(scrollToBottom);
-  });
+    term = new Terminal({
+      cursorBlink: true,
+      cursorStyle: 'block',
+      disableStdin: false,
+      fontSize: 14,
+      fontFamily: "'SF Mono', Menlo, 'Courier New', monospace",
+      theme: getTermTheme(),
+      scrollback: 500,
+      convertEol: true,
+      allowTransparency: false,
+      scrollbar: { showScrollbar: true, width: isMobile ? 20 : 14 },
+    });
 
-  // Auto-scroll when new content arrives and user is at bottom
-  $effect(() => {
-    termHtml; // track
-    if (termAtBottom) requestAnimationFrame(scrollToBottom);
-    // Also recheck atBottom after content change
-    requestAnimationFrame(checkAtBottom);
-  });
+    term.open(termEl);
 
-  // Scroll to bottom when keyboard opens/closes
-  function scheduleScroll() {
-    // Always scroll + recheck, keyboard changes layout so old atBottom is stale
-    for (const ms of [50, 150, 300, 500]) setTimeout(() => {
-      scrollToBottom();
-      checkAtBottom();
-    }, ms);
-  }
-  $effect(() => {
-    const vv = window.visualViewport;
-    if (vv) vv.addEventListener('resize', scheduleScroll);
-    window.addEventListener('resize', scheduleScroll);
-    // Also listen for focus on any textarea in this component
-    const onFocus = (e) => { if (e.target.tagName === 'TEXTAREA') scheduleScroll(); };
-    document.addEventListener('focusin', onFocus);
-    return () => {
-      if (vv) vv.removeEventListener('resize', scheduleScroll);
-      window.removeEventListener('resize', scheduleScroll);
-      document.removeEventListener('focusin', onFocus);
+    // Forward keyboard input to tmux (works on desktop; mobile uses input bar)
+    term.onData(data => {
+      sendKeys(target, data, true).catch(() => {});
+    });
+
+    // Mobile touch: scrolling with momentum + long-press to copy
+    let touchY = 0, touchStartY = 0, accumulatedDy = 0, longPressTimer = null, didScroll = false;
+    let velocity = 0, lastMoveTime = 0, momentumId = null, totalDist = 0;
+    const lineHeight = () => (termEl?.clientHeight || 384) / (term?.rows || 24);
+
+    let onScrollbar = false;
+    const stopMomentum = () => { if (momentumId) { cancelAnimationFrame(momentumId); momentumId = null; } };
+
+    const onTouchStart = (e) => {
+      stopMomentum();
+      // Check if touch is on the scrollbar area (right edge)
+      const rect = termEl.getBoundingClientRect();
+      const touchX = e.touches[0].clientX;
+      onScrollbar = (rect.right - touchX) < 30;
+      if (onScrollbar) { touchScrolling = true; return; }
+
+      touchY = e.touches[0].clientY;
+      touchStartY = touchY;
+      accumulatedDy = 0;
+      velocity = 0;
+      totalDist = 0;
+      lastMoveTime = Date.now();
+      touchScrolling = false;
+      didScroll = false;
+      // Long press: 500ms hold without scroll → blur keyboard + copy text
+      longPressTimer = setTimeout(() => {
+        if (!didScroll && term) {
+          const textarea = termEl.querySelector('.xterm-helper-textarea');
+          if (textarea) textarea.blur();
+          const buf = term.buffer.active;
+          const lines = [];
+          for (let i = buf.viewportY; i < buf.viewportY + term.rows; i++) {
+            const line = buf.getLine(i);
+            if (line) lines.push(line.translateToString(true).trimEnd());
+          }
+          const text = lines.join('\n').trimEnd();
+          if (text) {
+            navigator.clipboard.writeText(text).then(() => {
+              showToast('Copied to clipboard');
+            }).catch(() => {
+              term.selectAll();
+              showToast('Text selected — use browser copy');
+            });
+          }
+        }
+      }, 500);
     };
-  });
+    const onTouchMove = (e) => {
+      if (!term || onScrollbar) return;
+      const now = Date.now();
+      const y = e.touches[0].clientY;
+      const dy = touchY - y;
+      const dt = Math.max(1, now - lastMoveTime);
+      touchY = y;
+      lastMoveTime = now;
+      accumulatedDy += dy;
+      totalDist += Math.abs(dy);
+      // Track velocity (lines per frame at 60fps)
+      const lh = lineHeight();
+      velocity = (dy / lh) / dt * 16;
+      const lines = Math.trunc(accumulatedDy / lh);
+      if (lines !== 0) {
+        didScroll = true;
+        if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+        touchScrolling = true;
+        term.scrollLines(lines);
+        accumulatedDy -= lines * lh;
+        e.preventDefault();
+      }
+    };
+    const onTouchEnd = () => {
+      if (onScrollbar) { onScrollbar = false; setTimeout(() => { touchScrolling = false; }, 500); return; }
+      if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+      if (touchScrolling && Math.abs(velocity) > 0.05) {
+        // Momentum: cap by both speed and swipe distance
+        // Short swipe (< 30px) gets minimal momentum regardless of speed
+        const lh = lineHeight();
+        const distLines = totalDist / lh;
+        const distCap = Math.min(6, distLines * 0.5); // half the swiped distance as max
+        const speedV = Math.max(-6, Math.min(6, velocity * 16));
+        let v = Math.sign(speedV) * Math.min(Math.abs(speedV), distCap);
+        let acc = 0;
+        const coast = () => {
+          v *= 0.97; // friction
+          acc += v;
+          const lh = lineHeight();
+          const lines = Math.trunc(acc / 1); // 1 line threshold
+          if (lines !== 0) {
+            term.scrollLines(lines);
+            acc -= lines;
+          }
+          if (Math.abs(v) > 0.05) {
+            momentumId = requestAnimationFrame(coast);
+          } else {
+            momentumId = null;
+            setTimeout(() => { touchScrolling = false; }, 200);
+          }
+        };
+        momentumId = requestAnimationFrame(coast);
+      } else if (touchScrolling) {
+        setTimeout(() => { touchScrolling = false; }, 500);
+      }
+    };
+    termEl.addEventListener('touchstart', onTouchStart, { passive: true });
+    termEl.addEventListener('touchmove', onTouchMove, { passive: false });
+    termEl.addEventListener('touchend', onTouchEnd, { passive: true });
 
-  let cursorPos = $state(null);
+    term.onScroll(() => {
+      const buf = term.buffer.active;
+      termAtBottom = buf.viewportY >= buf.baseY;
+    });
 
-  $effect(() => {
+    // Resize tmux pane to fit screen (server spawns a control-mode client)
+    let lastFitCols = 0, lastFitRows = 0;
+    function doResize() {
+      const fit = calcFit();
+      if (!fit || (fit.cols === lastFitCols && fit.rows === lastFitRows)) return;
+      lastFitCols = fit.cols;
+      lastFitRows = fit.rows;
+      resizePane(target, fit.cols, fit.rows).catch(() => {});
+      term.resize(fit.cols, fit.rows);
+    }
+    requestAnimationFrame(doResize);
+
+    // Debounced resize — only on real window size changes, not keyboard open/close.
+    // Track window.innerWidth/Height (stable when keyboard opens) instead of
+    // visualViewport (shrinks when keyboard opens, causing double-shift).
+    let lastWinW = window.innerWidth, lastWinH = window.innerHeight;
+    let resizeTimer = null;
+    const onResize = () => {
+      const ww = window.innerWidth, wh = window.innerHeight;
+      // Skip if only height changed (likely keyboard open/close on mobile)
+      if (isMobile && ww === lastWinW && wh !== lastWinH) return;
+      lastWinW = ww; lastWinH = wh;
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(doResize, 300);
+    };
+    window.addEventListener('resize', onResize);
+
     let lastContent = '';
-    let first = true;
+    let lastCursor = null;
     setOnPaneOutput((t, content, cursor) => {
       if (t !== target) return;
-      cursorPos = cursor || null;
+      if (cursor) lastCursor = cursor;
       if (content != null && content !== lastContent) {
         lastContent = content;
         paneContent = content;
-        if (first) { first = false; requestAnimationFrame(scrollToBottom); }
+        writeToXterm(content, lastCursor);
+      } else if (cursor && term && lastContent) {
+        // Cursor-only update — use same row calculation as writeToXterm
+        const N = lastContent.split('\n').length;
+        const trailing = cursor.t || 0;
+        const paneStart = Math.max(0, N + trailing - cursor.h);
+        const cursorLine = paneStart + cursor.y;
+        const pad = Math.max(0, cursorLine + 1 - N);
+        const total = N + pad;
+        const sb = Math.max(0, total - term.rows);
+        let row = cursorLine - sb + 1;
+        if (row > 0 && row <= term.rows) {
+          term.write(`\x1b[${row};${cursor.x + 1}H`);
+        }
       }
     });
 
     subscribe(target);
-    // Immediately fetch initial content (don't wait for 200ms poll)
     capturePane(target).then(r => {
-      if (r.content) { paneContent = r.content; }
+      const c = r.output || r.content;
+      if (c) {
+        paneContent = c;
+        lastContent = c;
+        writeToXterm(c, lastCursor);
+      }
     }).catch(() => {});
 
     return () => {
+      clearTimeout(resizeTimer);
+      stopMomentum();
+      window.removeEventListener('resize', onResize);
+      termEl.removeEventListener('touchstart', onTouchStart);
+      termEl.removeEventListener('touchmove', onTouchMove);
+      termEl.removeEventListener('touchend', onTouchEnd);
+      // Server kills the control-mode client on WS disconnect → tmux auto-restores size
       unsubscribe(target);
       setOnPaneOutput(null);
+      term.dispose();
+      term = null;
     };
+  });
+
+  // Re-sync size when switching to terminal tab
+  $effect(() => {
+    if (viewMode === 'terminal' && term) {
+      requestAnimationFrame(() => term.refresh(0, term.rows - 1));
+    }
   });
 
   async function handleSubmit() {
     if (viewMode === 'chat') {
-      // Chat: always send text + Enter
       if (!input.trim()) return;
       try {
         await sendCommand(target, input);
@@ -202,13 +411,11 @@
     }
     // Terminal mode
     if (!input.trim()) {
-      // Empty: send Enter, blur to dismiss keyboard
       await sendKeys(target, 'Enter', false).catch(() => {});
       document.activeElement?.blur();
       return;
     }
     try {
-      // Has text: send as literal keys, no Enter, keep keyboard open
       await sendKeys(target, input, true);
       input = '';
       document.querySelectorAll('.input-bar textarea').forEach(ta => ta.style.height = 'auto');
@@ -245,19 +452,16 @@
 
     const handler = (e) => {
       if (e.isComposing) return;
-      // Ctrl+key → send as tmux C-x
       if (e.ctrlKey && e.key.length === 1) {
         e.preventDefault();
         sendKeys(target, `C-${e.key}`, false).catch(() => {});
         return;
       }
-      // Alt+key → send as tmux M-x
       if (e.altKey && e.key.length === 1) {
         e.preventDefault();
         sendKeys(target, `M-${e.key}`, false).catch(() => {});
         return;
       }
-      // Let Cmd combos through to browser
       if (e.metaKey) return;
       const keyMap = {
         Enter: 'Enter', Backspace: 'BSpace', Tab: 'Tab', Escape: 'Escape',
@@ -268,7 +472,6 @@
         e.preventDefault();
         sendKeys(target, keyMap[e.key], false).catch(() => {});
       }
-      // Single chars handled via oninput on the hidden textarea (for IME support)
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
@@ -284,6 +487,9 @@
 </script>
 
 <div class="terminal">
+  {#if toastMsg}
+    <div class="toast">{toastMsg}</div>
+  {/if}
   {#if windows.length > 1}
     <div class="win-switcher" class:expanded={showWindowCmd}>
       {#each windows as w}
@@ -302,16 +508,11 @@
       {/each}
     </div>
   {/if}
-  <!-- Hidden span to measure monospace character width -->
-  <span class="char-measure" bind:this={measureEl} aria-hidden="true">M</span>
 
   <div class="term-wrap" class:hidden={viewMode !== 'terminal'}>
-    <div class="ansi-output" bind:this={termEl} onscroll={checkAtBottom}>
-      {@html termHtml}
-      <span class="term-cursor" style={cursorStyle}></span>
-    </div>
+    <div class="xterm-wrap" bind:this={termEl}></div>
     {#if !termAtBottom}
-      <button class="scroll-btn" onclick={scrollToBottom}><Icon name="arrow-down" size={16} /></button>
+      <button class="scroll-btn" onclick={() => term?.scrollToBottom()}><Icon name="arrow-down" size={16} /></button>
     {/if}
   </div>
   {#if viewMode === 'chat'}
@@ -319,11 +520,8 @@
   {/if}
 
   <div class="input-area">
-    {#if viewMode === 'terminal'}
+    {#if viewMode === 'terminal' && isMobile}
       <div class="input-bar">
-        <div class="input-status">
-          <span class="status-left">{target}{#if command} · <span class:kiro={/^kiro/i.test(command)}>{command}</span>{/if}</span>
-        </div>
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div class="shortcut-rows" onmousedown={(e) => e.preventDefault()} ontouchstart={(e) => e.preventDefault()}>
           <div class="shortcuts">
@@ -343,7 +541,7 @@
             <button class:sk-active={directMode} onclick={() => directMode = !directMode}><Icon name="zap" size={13} /></button>
           </div>
         </div>
-        {#if !directMode}
+        {#if directMode}
         <div class="cmd-row">
           <span class="prompt">❯</span>
           <textarea
@@ -359,10 +557,10 @@
           ></textarea>
           <button class="send" ontouchstart={(e) => { if (input.trim()) e.preventDefault(); }} onmousedown={(e) => { if (input.trim()) e.preventDefault(); }} onclick={handleSubmit}><Icon name={input.trim() ? "arrow-right" : "send"} size={14} /></button>
         </div>
-        {:else}
-        <textarea class="direct-ime" bind:this={directEl} oninput={directInput} autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
         {/if}
       </div>
+    {:else if viewMode === 'terminal'}
+      <!-- Desktop: no input bar, keyboard goes directly to xterm.js -->
     {:else}
       <div class="input-bar chat-input-bar">
         <div class="input-status">
@@ -428,7 +626,7 @@
   .win-num { font-weight: 600; min-width: 14px; text-align: center; }
   .win-cmd { color: var(--text3); font-size: 10px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
 
-  .input-status {
+  .input-status, .input-status-standalone {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -476,6 +674,7 @@
   .term-wrap {
     flex: 1;
     min-height: 0;
+    overflow: hidden;
     position: relative;
   }
   .term-wrap.hidden {
@@ -484,44 +683,34 @@
     visibility: hidden;
   }
 
-  .char-measure {
+  .toast {
     position: absolute;
-    visibility: hidden;
-    pointer-events: none;
-    font-family: 'SF Mono', Menlo, 'Courier New', monospace;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0, 0, 0, 0.8);
+    color: #fff;
+    padding: 8px 20px;
+    border-radius: 8px;
     font-size: 13px;
-    line-height: 1.35;
-    white-space: pre;
+    z-index: 20;
+    pointer-events: none;
   }
 
-  .ansi-output {
-    position: relative;
+  .xterm-wrap {
     height: 100%;
-    padding: 8px 10px;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    -webkit-overflow-scrolling: touch;
-    font-family: 'SF Mono', Menlo, 'Courier New', monospace;
-    font-size: 13px;
-    line-height: 1.35;
-    white-space: pre-wrap;
-    word-break: break-all;
-    color: var(--text);
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
-    contain: content;
   }
-
-  .term-cursor {
-    position: absolute;
-    background: var(--text);
-    opacity: 0.7;
-    border-radius: 1px;
-    animation: blink 1s step-end infinite;
-    pointer-events: none;
+  /* Keep xterm scrollbar always visible and touch-friendly on mobile */
+  .xterm-wrap :global(.xterm-scrollable-element > .invisible) {
+    opacity: 0.6 !important;
+    pointer-events: auto !important;
   }
-  @keyframes blink {
-    50% { opacity: 0; }
+  .xterm-wrap :global(.xterm-scrollable-element > .visible) {
+    opacity: 1 !important;
+  }
+  .xterm-wrap :global(.slider) {
+    min-height: 40px !important;
+    border-radius: 4px !important;
   }
 
   .scroll-btn {
@@ -549,6 +738,7 @@
     padding: 0 10px 10px;
     padding-bottom: max(10px, env(safe-area-inset-bottom));
   }
+  :global(html.keyboard-open) .input-area { padding: 0 4px 2px; }
 
   .input-bar {
     background: var(--bg);
@@ -558,6 +748,11 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+  }
+  :global(html.keyboard-open) .input-bar {
+    border-radius: 8px;
+    padding: 4px 6px;
+    gap: 4px;
   }
 
   .shortcut-rows {
