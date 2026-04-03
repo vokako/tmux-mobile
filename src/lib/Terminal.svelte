@@ -234,21 +234,80 @@
       if (lastContent) writeToXterm(lastContent, lastCursor);
     }
 
-    // Mobile touch: scrolling with momentum + long-press to copy
+    // Helper: convert touch coordinates to terminal cell (col, row in viewport)
+    function touchToCell(clientX, clientY) {
+      const rect = termEl.getBoundingClientRect();
+      const core = term._core;
+      const cellW = core?._renderService?.dimensions?.css?.cell?.width || (term.options.fontSize * 0.6);
+      const cellH = core?._renderService?.dimensions?.css?.cell?.height || (term.options.fontSize * 1.2);
+      return {
+        col: Math.min(term.cols - 1, Math.max(0, Math.floor((clientX - rect.left) / cellW))),
+        row: Math.min(term.rows - 1, Math.max(0, Math.floor((clientY - rect.top) / cellH))),
+      };
+    }
+
+    // Helper: find word boundaries at buffer row + col
+    function wordBoundsAt(bufRow, col) {
+      const line = term.buffer.active.getLine(bufRow);
+      if (!line) return { start: col, end: col + 1 };
+      const text = line.translateToString(false);
+      if (col >= text.length || /\s/.test(text[col])) return { start: col, end: col + 1 };
+      let start = col, end = col;
+      while (start > 0 && !/\s/.test(text[start - 1])) start--;
+      while (end < text.length - 1 && !/\s/.test(text[end + 1])) end++;
+      return { start, end: end + 1 };
+    }
+
+    // Mobile touch: scrolling, scrollbar drag, long-press word selection
     let touchY = 0, touchStartY = 0, accumulatedDy = 0, longPressTimer = null, didScroll = false;
     let velocity = 0, lastMoveTime = 0, momentumId = null, totalDist = 0;
     const lineHeight = () => (termEl?.clientHeight || 384) / (term?.rows || 24);
 
-    let onScrollbar = false;
+    let onScrollbar = false, scrollbarStartY = 0, scrollbarStartViewport = 0;
+    let isSelecting = false, selectionAnchor = null, selectionRange = null;
     const stopMomentum = () => { if (momentumId) { cancelAnimationFrame(momentumId); momentumId = null; } };
 
     const onTouchStart = (e) => {
       stopMomentum();
-      // Check if touch is on the scrollbar area (right edge)
+      // Tap while selection active → copy if on selection, else just clear
+      if (isSelecting) {
+        const cell = touchToCell(e.touches[0].clientX, e.touches[0].clientY);
+        const bufRow = term.buffer.active.viewportY + cell.row;
+        // Hit-test: is tap within selected area?
+        let onSel = false;
+        if (selectionRange) {
+          const { sRow, sCol, eRow, eCol } = selectionRange;
+          if (bufRow >= sRow && bufRow <= eRow) {
+            if (sRow === eRow) onSel = cell.col >= sCol && cell.col <= eCol;
+            else if (bufRow === sRow) onSel = cell.col >= sCol;
+            else if (bufRow === eRow) onSel = cell.col <= eCol;
+            else onSel = true;
+          }
+        }
+        if (onSel && term.hasSelection()) {
+          const sel = term.getSelection();
+          if (sel) navigator.clipboard.writeText(sel).then(() => showToast('Copied')).catch(() => {});
+        }
+        term.clearSelection();
+        isSelecting = false;
+        selectionAnchor = null;
+        selectionRange = null;
+        // Temporarily disable stdin so this tap doesn't open the keyboard
+        term.options.disableStdin = true;
+        setTimeout(() => { if (term) term.options.disableStdin = directMode; }, 300);
+        endTouchScroll();
+        return;
+      }
+      // Scrollbar drag
       const rect = termEl.getBoundingClientRect();
       const touchX = e.touches[0].clientX;
       onScrollbar = (rect.right - touchX) < 30;
-      if (onScrollbar) { touchScrolling = true; return; }
+      if (onScrollbar) {
+        touchScrolling = true;
+        scrollbarStartY = e.touches[0].clientY;
+        scrollbarStartViewport = term.buffer.active.viewportY;
+        return;
+      }
 
       touchY = e.touches[0].clientY;
       touchStartY = touchY;
@@ -258,31 +317,58 @@
       lastMoveTime = Date.now();
       touchScrolling = false;
       didScroll = false;
-      // Long press: 500ms hold without scroll → blur keyboard + copy text
+      // Long press: 500ms hold without scroll → select word at touch point
+      const startCX = e.touches[0].clientX;
+      const startCY = e.touches[0].clientY;
       longPressTimer = setTimeout(() => {
         if (!didScroll && term) {
           const textarea = termEl.querySelector('.xterm-helper-textarea');
           if (textarea) textarea.blur();
-          const buf = term.buffer.active;
-          const lines = [];
-          for (let i = buf.viewportY; i < buf.viewportY + term.rows; i++) {
-            const line = buf.getLine(i);
-            if (line) lines.push(line.translateToString(true).trimEnd());
-          }
-          const text = lines.join('\n').trimEnd();
-          if (text) {
-            navigator.clipboard.writeText(text).then(() => {
-              showToast('Copied to clipboard');
-            }).catch(() => {
-              term.selectAll();
-              showToast('Text selected — use browser copy');
-            });
-          }
+          const cell = touchToCell(startCX, startCY);
+          const bufRow = term.buffer.active.viewportY + cell.row;
+          const bounds = wordBoundsAt(bufRow, cell.col);
+          term.select(bounds.start, bufRow, bounds.end - bounds.start);
+          isSelecting = true;
+          selectionAnchor = { col: bounds.start, endCol: bounds.end, bufRow };
+          selectionRange = { sRow: bufRow, sCol: bounds.start, eRow: bufRow, eCol: bounds.end - 1 };
+          touchScrolling = true; // pause content updates during selection
         }
       }, 500);
     };
     const onTouchMove = (e) => {
-      if (!term || onScrollbar) return;
+      if (!term) return;
+      // Scrollbar drag: map touch delta proportionally to scroll position
+      if (onScrollbar) {
+        const deltaY = e.touches[0].clientY - scrollbarStartY;
+        const trackH = termEl.clientHeight;
+        const totalScroll = term.buffer.active.baseY;
+        if (totalScroll > 0 && trackH > 0) {
+          const target = scrollbarStartViewport + (deltaY / trackH) * totalScroll;
+          term.scrollToLine(Math.max(0, Math.min(totalScroll, Math.round(target))));
+        }
+        if (e.cancelable) e.preventDefault();
+        return;
+      }
+      // Selection drag: extend from anchor word to current cell
+      if (isSelecting && selectionAnchor) {
+        const cell = touchToCell(e.touches[0].clientX, e.touches[0].clientY);
+        const bufRow = term.buffer.active.viewportY + cell.row;
+        let sCol, sRow, eCol, eRow, len;
+        if (bufRow < selectionAnchor.bufRow || (bufRow === selectionAnchor.bufRow && cell.col < selectionAnchor.col)) {
+          sCol = cell.col; sRow = bufRow;
+          eCol = selectionAnchor.endCol - 1; eRow = selectionAnchor.bufRow;
+          len = (eRow - sRow) * term.cols + (selectionAnchor.endCol - cell.col);
+        } else {
+          sCol = selectionAnchor.col; sRow = selectionAnchor.bufRow;
+          eCol = cell.col; eRow = bufRow;
+          len = (eRow - sRow) * term.cols + (cell.col + 1 - selectionAnchor.col);
+        }
+        term.select(sCol, sRow, Math.max(1, len));
+        selectionRange = { sRow, sCol, eRow, eCol };
+        if (e.cancelable) e.preventDefault();
+        return;
+      }
+      // Normal content scroll
       const now = Date.now();
       const y = e.touches[0].clientY;
       const dy = touchY - y;
@@ -291,7 +377,6 @@
       lastMoveTime = now;
       accumulatedDy += dy;
       totalDist += Math.abs(dy);
-      // Track velocity (lines per frame at 60fps)
       const lh = lineHeight();
       velocity = (dy / lh) / dt * 16;
       const lines = Math.trunc(accumulatedDy / lh);
@@ -307,17 +392,18 @@
     const onTouchEnd = () => {
       if (onScrollbar) { onScrollbar = false; setTimeout(endTouchScroll, 500); return; }
       if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+      // Selection active → keep visible, tap on it to copy
+      if (isSelecting) return;
       if (touchScrolling && Math.abs(velocity) > 0.05) {
         // Momentum: cap by both speed and swipe distance
-        // Short swipe (< 30px) gets minimal momentum regardless of speed
         const lh = lineHeight();
         const distLines = totalDist / lh;
-        const distCap = Math.min(6, distLines * 0.5); // half the swiped distance as max
+        const distCap = Math.min(6, distLines * 0.5);
         const speedV = Math.max(-6, Math.min(6, velocity * 16));
         let v = Math.sign(speedV) * Math.min(Math.abs(speedV), distCap);
         let acc = 0;
         const coast = () => {
-          v *= 0.97; // friction
+          v *= 0.97;
           acc += v;
           const lines = Math.trunc(acc);
           if (lines !== 0) {
@@ -339,6 +425,9 @@
     const onTouchCancel = () => {
       if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
       onScrollbar = false;
+      isSelecting = false;
+      selectionAnchor = null;
+      selectionRange = null;
       stopMomentum();
       setTimeout(endTouchScroll, 100);
     };
