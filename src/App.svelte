@@ -35,22 +35,50 @@
     // Android Tauri app: native event provides exact keyboard height
     const nativeHandler = (e) => {
       const kbh = e.detail?.height || 0;
-      const h = kbh > 0 ? (window.innerHeight - kbh) + 'px' : '100dvh';
+      if (kbh === 0 && window.innerHeight > fullHeight) fullHeight = window.innerHeight;
+      const h = kbh > 0 ? (fullHeight - kbh) + 'px' : fullHeight + 'px';
       document.documentElement.style.setProperty('--app-height', h);
+      document.documentElement.classList.toggle('keyboard-open', kbh > 0);
+      // After layout updates, shift terminal and log
+      requestAnimationFrame(() => {
+        window.dispatchEvent(new CustomEvent('keyboard-shift', { detail: { kbHeight: kbh > 0 ? kbh : 0 } }));
+        const main = document.querySelector('main');
+        const termWrap = document.querySelector('.term-wrap');
+        window.__dbg?.(`androidKb: kbh=${kbh} appH=${h} mainH=${main?.clientHeight} termH=${termWrap?.clientHeight} bodyH=${document.body.clientHeight}`);
+      });
+      if (kbh === 0) {
+        setTimeout(() => window.dispatchEvent(new Event('terminal-refit')), 100);
+      }
     };
     window.addEventListener('androidKeyboardHeight', nativeHandler);
+
+    // Track the max known height (= full screen without keyboard)
+    let fullHeight = window.innerHeight;
+    window.__fullHeight = () => fullHeight;
 
     // Mobile browser: track visualViewport height so main always fits
     // the visible area (keyboard doesn't push nav off screen).
     const vv = window.visualViewport;
     const vpHandler = () => {
       if (!vv) return;
-      // Set main height to exactly the visible viewport
-      document.documentElement.style.setProperty('--app-height', vv.height + 'px');
-      // Toggle keyboard-open class (keyboard shrinks viewport by > 100px)
-      const kbOpen = (window.innerHeight - vv.height) > 100;
+      const h = vv.height;
+      // Update full height when viewport grows (keyboard closing)
+      if (h > fullHeight) fullHeight = h;
+      const kbOpen = h < fullHeight - 100;
+      const wasKbOpen = document.documentElement.classList.contains('keyboard-open');
+      window.__dbg?.(`vpResize: vv.h=${h.toFixed(0)} fullH=${fullHeight} kbOpen=${kbOpen}${kbOpen !== wasKbOpen ? (kbOpen ? ' ⌨️OPEN' : ' ⌨️CLOSE') : ''}`);
+      document.documentElement.style.setProperty('--app-height', h + 'px');
       document.documentElement.classList.toggle('keyboard-open', kbOpen);
-      // Prevent browser from scrolling the page up
+      // After layout, shift terminal so cursor stays visible
+      requestAnimationFrame(() => {
+        const kbShift = kbOpen ? (fullHeight - h) : 0;
+        window.dispatchEvent(new CustomEvent('keyboard-shift', { detail: { kbHeight: kbShift } }));
+      });
+      // When keyboard closes, terminal needs to re-fit to the larger container
+      if (wasKbOpen && !kbOpen) {
+        window.__dbg?.('⌨️CLOSE → dispatching terminal-refit');
+        setTimeout(() => window.dispatchEvent(new Event('terminal-refit')), 100);
+      }
       window.scrollTo(0, 0);
       document.documentElement.scrollTop = 0;
     };
@@ -59,8 +87,16 @@
       vv.addEventListener('scroll', vpHandler);
     }
 
+    // Log focus/blur on inputs (keyboard open/close trigger)
+    const onFocusIn = (e) => window.__dbg?.(`focusIn: ${e.target?.tagName}[${e.target?.className?.slice(0,20)}] activeEl=${document.activeElement?.tagName}`);
+    const onFocusOut = (e) => window.__dbg?.(`focusOut: ${e.target?.tagName}[${e.target?.className?.slice(0,20)}]`);
+    document.addEventListener('focusin', onFocusIn);
+    document.addEventListener('focusout', onFocusOut);
+
     return () => {
       window.removeEventListener('androidKeyboardHeight', nativeHandler);
+      document.removeEventListener('focusin', onFocusIn);
+      document.removeEventListener('focusout', onFocusOut);
       if (vv) {
         vv.removeEventListener('resize', vpHandler);
         vv.removeEventListener('scroll', vpHandler);
@@ -426,7 +462,7 @@
         document.addEventListener('touchend', onEnd);
       }}
     >
-      <div class="debug-header">DEBUG <button onclick={() => { if (debugEl) debugEl.innerHTML = ''; }}>clear</button></div>
+      <div class="debug-header">DEBUG <button onclick={() => { if (debugEl) { navigator.clipboard.writeText(debugEl.innerText).catch(() => {}); } }}>copy</button> <button onclick={() => { if (debugEl) debugEl.innerHTML = ''; }}>clear</button></div>
       <div class="debug-content" bind:this={debugEl}></div>
     </div>
   {/if}
@@ -464,6 +500,8 @@
     border-bottom: 1px solid rgba(0, 255, 0, 0.15);
     flex-shrink: 0;
     touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
   }
   .debug-header button {
     background: none;
@@ -473,6 +511,8 @@
     padding: 1px 6px;
     border-radius: 3px;
     cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
   }
   .debug-content {
     padding: 4px 6px;

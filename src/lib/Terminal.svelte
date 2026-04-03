@@ -117,14 +117,19 @@
     return () => clearInterval(id);
   });
 
-  // Calculate optimal cols/rows from xterm container size
+  // Calculate optimal cols/rows — on mobile, use max observed container height
+  // (not keyboard-shrunk height) to keep terminal size stable across keyboard open/close
+  let maxContainerH = 0;
   function calcFit() {
     if (!term || !termEl) return null;
     const core = term._core;
     const cellW = core?._renderService?.dimensions?.css?.cell?.width || (term.options.fontSize * 0.6);
     const cellH = core?._renderService?.dimensions?.css?.cell?.height || (term.options.fontSize * 1.2);
     const w = termEl.clientWidth;
-    const h = termEl.clientHeight;
+    const clientH = termEl.clientHeight;
+    if (clientH > maxContainerH) maxContainerH = clientH;
+    // On mobile, use max seen height so keyboard doesn't shrink the terminal
+    const h = isMobile ? Math.max(clientH, maxContainerH) : clientH;
     if (!w || !h || !cellW || !cellH) return null;
     return { cols: Math.max(2, Math.floor(w / cellW)), rows: Math.max(1, Math.floor(h / cellH)) };
   }
@@ -185,11 +190,22 @@
   // xterm.js setup + subscription
   $effect(() => {
     touchScrolling = false; // reset on pane switch
+    maxContainerH = 0; // reset for new pane
+    // Pre-calculate initial size before terminal opens (avoids race with keyboard auto-focus)
+    const fontSize = 14;
+    const estCellW = fontSize * 0.6;
+    const estCellH = fontSize * 1.2;
+    const containerW = termEl?.clientWidth || 300;
+    const containerH = termEl?.clientHeight || 400;
+    const initCols = Math.max(2, Math.floor(containerW / estCellW));
+    const initRows = Math.max(1, Math.floor(containerH / estCellH));
     term = new Terminal({
+      cols: initCols,
+      rows: initRows,
       cursorBlink: true,
       cursorStyle: 'block',
       disableStdin: false,
-      fontSize: 14,
+      fontSize,
       fontFamily: "'SF Mono', Menlo, 'Courier New', monospace",
       theme: getTermTheme(),
       scrollback: 500,
@@ -320,7 +336,7 @@
       termAtBottom = buf.viewportY >= buf.baseY;
     });
 
-    // Resize tmux pane to fit screen (server spawns a control-mode client)
+    // Resize tmux pane to fit screen
     let lastFitCols = 0, lastFitRows = 0;
     function doResize() {
       const fit = calcFit();
@@ -346,6 +362,31 @@
       resizeTimer = setTimeout(doResize, 300);
     };
     window.addEventListener('resize', onResize);
+
+    // Shift xterm up when keyboard opens so cursor (at bottom) stays visible
+    const onKbShift = (e) => {
+      if (!termEl || !term) return;
+      const kbh = e.detail?.kbHeight || 0;
+      if (kbh > 0) {
+        // Calculate how much the terminal canvas overflows the shrunk container
+        const containerH = termEl.parentElement?.clientHeight || 0; // .term-wrap height
+        const core = term._core;
+        const cellH = core?._renderService?.dimensions?.css?.cell?.height || (term.options.fontSize * 1.2);
+        const terminalH = term.rows * cellH; // actual canvas height
+        const overflow = terminalH - containerH;
+        termEl.style.marginTop = overflow > 0 ? `-${overflow}px` : '0';
+      } else {
+        termEl.style.marginTop = '0';
+      }
+    };
+    window.addEventListener('keyboard-shift', onKbShift);
+
+    // Re-fit when keyboard closes (container grows back, terminal needs to match)
+    const onRefit = () => {
+      lastFitCols = 0; lastFitRows = 0; // force recalc
+      doResize();
+    };
+    window.addEventListener('terminal-refit', onRefit);
 
     let lastContent = '';
     let lastCursor = null;
@@ -386,6 +427,8 @@
       clearTimeout(resizeTimer);
       stopMomentum();
       window.removeEventListener('resize', onResize);
+      window.removeEventListener('terminal-refit', onRefit);
+      window.removeEventListener('keyboard-shift', onKbShift);
       termEl.removeEventListener('touchstart', onTouchStart);
       termEl.removeEventListener('touchmove', onTouchMove);
       termEl.removeEventListener('touchend', onTouchEnd);
@@ -476,9 +519,12 @@
             else if (onSwitchPane) {
               // Dismiss keyboard, reset layout and scroll state before switching pane
               document.activeElement?.blur();
-              document.documentElement.style.setProperty('--app-height', '100dvh');
-              document.documentElement.classList.remove('keyboard-open');
+              directMode = false;
               touchScrolling = false;
+              // Use saved full height (not current innerHeight which may be keyboard-shrunk)
+              const fh = window.__fullHeight?.() || window.innerHeight;
+              document.documentElement.style.setProperty('--app-height', fh + 'px');
+              document.documentElement.classList.remove('keyboard-open');
               onSwitchPane(`${w.session}:${w.window}.${w.pane}`, w.current_command);
               showWindowCmd = false;
             }
@@ -682,6 +728,7 @@
 
   .xterm-wrap {
     height: 100%;
+    transition: margin-top 0.15s ease;
   }
   /* Keep xterm scrollbar always visible and touch-friendly on mobile */
   .xterm-wrap :global(.xterm-scrollable-element > .invisible) {
@@ -772,14 +819,6 @@
     background: var(--accent-bg);
     color: var(--accent);
     border-color: var(--accent);
-  }
-  .direct-ime {
-    position: absolute;
-    opacity: 0;
-    height: 0;
-    padding: 0;
-    border: none;
-    pointer-events: none;
   }
   .shortcuts button:active {
     background: var(--accent-bg);
