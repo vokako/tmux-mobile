@@ -413,37 +413,33 @@
   {#if showSettings}
     <div class="settings-panel">
       {#if connected}
-        <div class="sp-section">
-          <div class="sp-label">Connection</div>
-          <div class="sp-info">{serverInfo.hostname || 'unknown'}</div>
-          <div class="sp-info sp-sub">{localStorage.getItem('tmux_address')}</div>
-          <div class="sp-info sp-sub">ID: {serverInfo.machineId?.slice(0, 8) || '—'}</div>
+        <div class="sp-conn">
+          <div class="sp-conn-host">{serverInfo.hostname || 'unknown'}</div>
+          <div class="sp-conn-addr">{localStorage.getItem('tmux_address')}</div>
+          <div class="sp-conn-id">{serverInfo.machineId?.slice(0, 8) || '—'}</div>
         </div>
       {/if}
       <div class="sp-section">
         <div class="sp-label">Theme</div>
         <div class="sp-btns">
           <button class:active={theme === 'system'} onclick={() => setTheme('system')}>Auto</button>
-          <button class:active={theme === 'light'} onclick={() => setTheme('light')}>Light</button>
-          <button class:active={theme === 'dark'} onclick={() => setTheme('dark')}>Dark</button>
+          <button class:active={theme === 'light'} onclick={() => setTheme('light')}>☀</button>
+          <button class:active={theme === 'dark'} onclick={() => setTheme('dark')}>☾</button>
         </div>
       </div>
       <div class="sp-section">
-        <div class="sp-row">
-          <div>
-            <div class="sp-label">Font Size</div>
-            <div class="sp-font-row">
-              <button class="sp-font-btn" onclick={() => { fontSize = Math.max(8, fontSize - 1); localStorage.setItem('tmux_fontsize', fontSize); }}>−</button>
-              <span class="sp-font-val">{fontSize}px</span>
-              <button class="sp-font-btn" onclick={() => { fontSize = Math.min(24, fontSize + 1); localStorage.setItem('tmux_fontsize', fontSize); }}>+</button>
-            </div>
+        <div class="sp-inline">
+          <div class="sp-label">Font</div>
+          <div class="sp-font-row">
+            <button class="sp-font-btn" onclick={() => { fontSize = Math.max(8, fontSize - 1); localStorage.setItem('tmux_fontsize', fontSize); }}>−</button>
+            <span class="sp-font-val">{fontSize}</span>
+            <button class="sp-font-btn" onclick={() => { fontSize = Math.min(24, fontSize + 1); localStorage.setItem('tmux_fontsize', fontSize); }}>+</button>
           </div>
-          <div>
-            <div class="sp-label">Debug</div>
-            <div class="sp-font-row">
-              <button class="sp-font-btn" style="font-size:11px" class:active={debugMode} onclick={() => { debugMode = !debugMode; localStorage.setItem('tmux_debug', debugMode ? '1' : ''); }}>{debugMode ? 'On' : 'Off'}</button>
-            </div>
-          </div>
+          <div style="flex:1"></div>
+          <div class="sp-label">Debug</div>
+          <button class="sp-toggle" class:on={debugMode} onclick={() => { debugMode = !debugMode; localStorage.setItem('tmux_debug', debugMode ? '1' : ''); }}>
+            <span class="sp-toggle-dot"></span>
+          </button>
         </div>
       </div>
       {#if connected}
@@ -679,45 +675,70 @@
   .settings-panel {
     position: absolute; top: 48px; right: 8px; z-index: 21;
     background: var(--bg); border: 1px solid var(--border);
-    border-radius: 12px; padding: 12px; min-width: 220px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+    border-radius: 14px; padding: 6px; min-width: 240px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.35);
     animation: sp-in 0.15s ease;
   }
   @keyframes sp-in { from { opacity: 0; transform: translateY(-8px) scale(0.95); } to { opacity: 1; transform: none; } }
-  .sp-section { padding: 8px 0; border-bottom: 1px solid var(--border2); }
+  .sp-conn {
+    padding: 12px 14px; border-bottom: 1px solid var(--border2);
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  .sp-conn-host {
+    font-size: 14px; font-weight: 600; color: var(--text);
+  }
+  .sp-conn-addr {
+    font-size: 11px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    color: var(--text3);
+  }
+  .sp-conn-id {
+    font-size: 10px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    color: var(--text3); opacity: 0.6;
+  }
+  .sp-section { padding: 10px 14px; border-bottom: 1px solid var(--border2); }
   .sp-section:last-of-type { border-bottom: none; }
-  .sp-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border2); }
-  .sp-row > div { display: flex; flex-direction: column; gap: 6px; }
-  .sp-label { font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
-  .sp-info { font-size: 13px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; color: var(--text2); }
-  .sp-sub { font-size: 11px; color: var(--text3); margin-top: 2px; }
+  .sp-label { font-size: 10px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .sp-inline { display: flex; align-items: center; gap: 10px; }
+  .sp-inline .sp-label { margin-bottom: 0; }
   .sp-btns {
-    display: flex; gap: 4px; background: var(--pill-bg); border-radius: 8px; padding: 2px;
+    display: flex; gap: 2px; background: var(--pill-bg); border-radius: 8px; padding: 2px;
   }
   .sp-btns button {
-    padding: 5px 12px; border: none; border-radius: 6px; background: transparent;
+    padding: 6px 14px; border: none; border-radius: 6px; background: transparent;
     color: var(--text3); font-size: 12px; font-weight: 500; cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
+    -webkit-tap-highlight-color: transparent; transition: all 0.15s;
   }
   .sp-btns button.active { background: var(--accent-bg); color: var(--accent); }
   .sp-font-row {
-    display: flex; align-items: center; gap: 8px;
+    display: flex; align-items: center; gap: 4px;
   }
   .sp-font-btn {
-    width: 32px; height: 32px; border: 1px solid var(--border); border-radius: 8px;
-    background: var(--pill-bg); color: var(--text); font-size: 16px; font-weight: 600;
+    width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 7px;
+    background: var(--pill-bg); color: var(--text); font-size: 15px; font-weight: 600;
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     -webkit-tap-highlight-color: transparent;
   }
   .sp-font-btn:active { background: var(--accent-bg); color: var(--accent); }
-  .sp-font-btn.active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
   .sp-font-val {
-    font-size: 13px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; color: var(--text);
-    min-width: 40px; text-align: center;
+    font-size: 13px; font-weight: 600; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; color: var(--text);
+    min-width: 24px; text-align: center;
   }
+  .sp-toggle {
+    width: 38px; height: 22px; border-radius: 11px; border: none;
+    background: var(--surface2); position: relative; cursor: pointer;
+    transition: background 0.2s; -webkit-tap-highlight-color: transparent; padding: 0; flex-shrink: 0;
+  }
+  .sp-toggle.on { background: var(--accent); }
+  .sp-toggle-dot {
+    position: absolute; top: 3px; left: 3px;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: #fff; transition: transform 0.2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  }
+  .sp-toggle.on .sp-toggle-dot { transform: translateX(16px); }
   .sp-disconnect {
-    width: 100%; margin-top: 8px; padding: 10px; border: 1px solid var(--danger);
-    border-radius: 8px; background: var(--bg2); color: var(--danger);
+    width: calc(100% - 12px); margin: 6px; padding: 10px; border: 1px solid var(--danger);
+    border-radius: 8px; background: none; color: var(--danger);
     font-size: 13px; font-weight: 600; cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }

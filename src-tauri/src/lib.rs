@@ -3,6 +3,7 @@ pub mod fs;
 pub mod server;
 pub mod tmux;
 
+#[cfg(desktop)]
 use config::Config;
 
 #[tauri::command]
