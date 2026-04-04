@@ -77,6 +77,19 @@
         const { setSocket } = await import('./ws.js');
         await setSocket(socket.trim()).catch(() => {});
       }
+      // Save machine_id → address mapping
+      try {
+        const { getMachineId } = await import('./ws.js');
+        const mid = getMachineId?.();
+        if (mid) {
+          const map = JSON.parse(localStorage.getItem('tmux_machines') || '{}');
+          const addrs = map[mid] || [];
+          if (!addrs.includes(url)) addrs.push(url);
+          map[mid] = addrs.slice(-8);
+          localStorage.setItem('tmux_machines', JSON.stringify(map));
+          localStorage.setItem('tmux_machine_id', mid);
+        }
+      } catch {}
       onConnected();
     } catch (e) {
       if (!cancelled) error = e.message;

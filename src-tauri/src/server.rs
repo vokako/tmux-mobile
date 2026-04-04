@@ -561,7 +561,7 @@ fn handle_unsubscribe(params: &serde_json::Value, subs: &mut HashMap<String, Str
     Response::ok(None, serde_json::json!({ "unsubscribed": target }))
 }
 
-async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker) {
+async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker) {
     println!("📱 Client connected: {}", addr);
 
     // Check if IP is locked out
@@ -583,10 +583,10 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<Strin
         }
     };
 
-    handle_connection_ws(ws_stream, addr, token, auth_tracker, resize_tracker).await;
+    handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, resize_tracker).await;
 }
 
-async fn handle_connection_ws<S>(ws_stream: tokio_tungstenite::WebSocketStream<S>, addr: SocketAddr, token: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker)
+async fn handle_connection_ws<S>(ws_stream: tokio_tungstenite::WebSocketStream<S>, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker)
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
@@ -605,6 +605,7 @@ where
     let sender: Arc<Mutex<dyn futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Send + Unpin>> = Arc::new(Mutex::new(ws_sender));
     let subs: Subscriptions = Arc::new(Mutex::new(HashMap::new()));
     let conn_id = CONN_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let hostname = gethostname::gethostname().to_string_lossy().to_string();
     let mut authenticated = false;
     let shared_cipher: Arc<Mutex<Option<SessionCipher>>> = Arc::new(Mutex::new(None));
 
@@ -681,7 +682,7 @@ where
                                         authenticated = true;
                                         auth_tracker.lock().await.remove(&addr.ip());
                                         let mut sc = SessionCipher::new(&key);
-                                        let resp = serde_json::to_string(&serde_json::json!({"result":{"authenticated":true}})).unwrap();
+                                        let resp = serde_json::to_string(&serde_json::json!({"result":{"authenticated":true,"machine_id":*machine_id,"hostname":&hostname}})).unwrap();
                                         let ct = sc.encrypt(resp.as_bytes());
                                         use base64::Engine;
                                         let b64 = base64::engine::general_purpose::STANDARD.encode(&ct);
@@ -708,7 +709,7 @@ where
                                     // Legacy plain token auth (for wss:// or local connections)
                                     authenticated = true;
                                     auth_tracker.lock().await.remove(&addr.ip());
-                                    Response::ok(req.id, serde_json::json!({ "authenticated": true }))
+                                    Response::ok(req.id, serde_json::json!({ "authenticated": true, "machine_id": *machine_id, "hostname": &hostname }))
                                 } else {
                                     // Track failure
                                     let mut tracker = auth_tracker.lock().await;
@@ -820,13 +821,14 @@ where
 }
 
 pub async fn start(host: &str, port: u16, token: &str) -> Result<(), Box<dyn std::error::Error>> {
-    start_with_socket(host, port, token, None, None, None).await
+    start_with_socket(host, port, token, "unknown", None, None, None).await
 }
 
 pub async fn start_with_socket(
     host: &str,
     port: u16,
     token: &str,
+    machine_id: &str,
     socket: Option<String>,
     tls_cert: Option<String>,
     tls_key: Option<String>,
@@ -835,6 +837,7 @@ pub async fn start_with_socket(
     let addr = format!("{}:{}", host, port);
     let listener = TcpListener::bind(&addr).await?;
     let token = Arc::new(token.to_string());
+    let machine_id = Arc::new(machine_id.to_string());
     let auth_tracker: AuthTracker = Arc::new(Mutex::new(HashMap::new()));
     let resize_tracker: ResizeTracker = Arc::new(std::sync::Mutex::new(HashMap::new()));
 
@@ -870,6 +873,7 @@ pub async fn start_with_socket(
     loop {
         let (stream, addr) = listener.accept().await?;
         let token = token.clone();
+        let machine_id = machine_id.clone();
         let auth_tracker = auth_tracker.clone();
         let control_mgr = resize_tracker.clone();
         if let Some(ref acceptor) = tls_acceptor {
@@ -881,13 +885,13 @@ pub async fn start_with_socket(
                             Ok(ws) => ws,
                             Err(e) => { eprintln!("❌ WSS handshake failed for {}: {}", addr, e); return; }
                         };
-                        handle_connection_ws(ws_stream, addr, token, auth_tracker, control_mgr).await;
+                        handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, control_mgr).await;
                     }
                     Err(e) => eprintln!("❌ TLS handshake failed for {}: {}", addr, e),
                 }
             });
         } else {
-            tokio::spawn(handle_connection(stream, addr, token, auth_tracker, control_mgr));
+            tokio::spawn(handle_connection(stream, addr, token, machine_id, auth_tracker, control_mgr));
         }
     }
 }

@@ -98,6 +98,12 @@ export function connect(url, token) {
 
     let authed = false;
     let serverNonce = null;
+    let machineId = null;
+    let hostname = null;
+
+    // Expose getters
+    ws._getMachineId = () => machineId;
+    ws._getHostname = () => hostname;
 
     ws.onmessage = async (event) => {
       let data;
@@ -130,12 +136,12 @@ export function connect(url, token) {
           try {
             const pt = await decryptMsg(event.data);
             const resp = JSON.parse(pt);
-            if (resp.result?.authenticated) { clearTimeout(timeout); authed = true; resolve(); return; }
+            if (resp.result?.authenticated) { clearTimeout(timeout); authed = true; machineId = resp.result.machine_id; hostname = resp.result.hostname; resolve(machineId); return; }
           } catch {}
           clearTimeout(timeout); sessionCipher = null; reject(new Error('auth failed')); return;
         } else {
           // Plain response
-          if (data?.result?.authenticated) { clearTimeout(timeout); authed = true; resolve(); return; }
+          if (data?.result?.authenticated) { clearTimeout(timeout); authed = true; machineId = data.result.machine_id; hostname = data.result.hostname; resolve(machineId); return; }
           clearTimeout(timeout); reject(new Error(data?.error?.message || 'auth failed')); return;
         }
       }
@@ -186,6 +192,14 @@ export function disconnect() {
 
 export function isConnected() {
   return ws?.readyState === WebSocket.OPEN;
+}
+
+export function getMachineId() {
+  return ws?._getMachineId?.();
+}
+
+export function getHostname() {
+  return ws?._getHostname?.();
 }
 
 function call(method, params = {}) {

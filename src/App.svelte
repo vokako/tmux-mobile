@@ -4,7 +4,7 @@
   import Terminal from './lib/Terminal.svelte';
   import Files from './lib/Files.svelte';
   import Icon from './lib/Icon.svelte';
-  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe } from './lib/ws.js';
+  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, getMachineId, getHostname } from './lib/ws.js';
 
   let page = $state('settings');
   let connected = $state(false);
@@ -16,6 +16,7 @@
   let theme = $state(localStorage.getItem('tmux_theme') || 'system');
   let fontSize = $state(parseInt(localStorage.getItem('tmux_fontsize')) || 14);
   let showSettings = $state(false);
+  let serverInfo = $state({ hostname: '', machineId: '' });
   let debugMode = $state(!!localStorage.getItem('tmux_debug'));
   let debugEl = $state(null);
 
@@ -164,15 +165,33 @@
     page = 'settings';
   }
 
+  function getAltAddresses() {
+    const mid = localStorage.getItem('tmux_machine_id');
+    const primary = localStorage.getItem('tmux_address');
+    if (!mid) return [];
+    try {
+      const map = JSON.parse(localStorage.getItem('tmux_machines') || '{}');
+      return (map[mid] || []).filter(a => a !== primary);
+    } catch { return []; }
+  }
+
   function tryReconnect(attempt = 0) {
     if (!reconnecting) return;
     const addr = localStorage.getItem('tmux_address');
     const token = localStorage.getItem('tmux_token') || '';
     if (!addr) { reconnecting = false; page = 'settings'; return; }
-    connect(addr, token).then(() => {
+
+    // After 3 failures on primary, try alternate addresses
+    const useAddr = (attempt >= 3 && attempt % 2 === 1)
+      ? (getAltAddresses()[(attempt - 3) >> 1] || addr)
+      : addr;
+
+    connect(useAddr, token).then(() => {
       if (!reconnecting) return;
       connected = true;
       reconnecting = false;
+      serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
+      if (useAddr !== addr) localStorage.setItem('tmux_address', useAddr);
       if (terminalTarget) wsSubscribe(terminalTarget);
     }).catch(() => {
       if (!reconnecting) return;
@@ -188,6 +207,7 @@
 
   function onConnected() {
     connected = true;
+    serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
     page = 'sessions';
     localStorage.removeItem('tmux_disconnected');
   }
@@ -241,6 +261,7 @@
     connect(addr, token).then(() => {
       clearTimeout(timeout);
       connected = true;
+      serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
       try {
         const s = JSON.parse(localStorage.getItem('tmux_state') || '{}');
         if (s.terminalTarget) {
@@ -394,7 +415,9 @@
       {#if connected}
         <div class="sp-section">
           <div class="sp-label">Connection</div>
-          <div class="sp-info">{localStorage.getItem('tmux_address')}</div>
+          <div class="sp-info">{serverInfo.hostname || 'unknown'}</div>
+          <div class="sp-info sp-sub">{localStorage.getItem('tmux_address')}</div>
+          <div class="sp-info sp-sub">ID: {serverInfo.machineId?.slice(0, 8) || '—'}</div>
         </div>
       {/if}
       <div class="sp-section">
@@ -406,19 +429,21 @@
         </div>
       </div>
       <div class="sp-section">
-        <div class="sp-label">Font Size</div>
-        <div class="sp-font-row">
-          <button class="sp-font-btn" onclick={() => { fontSize = Math.max(8, fontSize - 1); localStorage.setItem('tmux_fontsize', fontSize); }}>−</button>
-          <span class="sp-font-val">{fontSize}px</span>
-          <button class="sp-font-btn" onclick={() => { fontSize = Math.min(24, fontSize + 1); localStorage.setItem('tmux_fontsize', fontSize); }}>+</button>
-        </div>
-      </div>
-      <div class="sp-section">
-        <div class="sp-label">Debug</div>
-        <div class="sp-btns">
-          <button class:active={debugMode} onclick={() => { debugMode = !debugMode; localStorage.setItem('tmux_debug', debugMode ? '1' : ''); }}>
-            {debugMode ? 'On' : 'Off'}
-          </button>
+        <div class="sp-row">
+          <div>
+            <div class="sp-label">Font Size</div>
+            <div class="sp-font-row">
+              <button class="sp-font-btn" onclick={() => { fontSize = Math.max(8, fontSize - 1); localStorage.setItem('tmux_fontsize', fontSize); }}>−</button>
+              <span class="sp-font-val">{fontSize}px</span>
+              <button class="sp-font-btn" onclick={() => { fontSize = Math.min(24, fontSize + 1); localStorage.setItem('tmux_fontsize', fontSize); }}>+</button>
+            </div>
+          </div>
+          <div>
+            <div class="sp-label">Debug</div>
+            <div class="sp-font-row">
+              <button class="sp-font-btn" style="font-size:11px" class:active={debugMode} onclick={() => { debugMode = !debugMode; localStorage.setItem('tmux_debug', debugMode ? '1' : ''); }}>{debugMode ? 'On' : 'Off'}</button>
+            </div>
+          </div>
         </div>
       </div>
       {#if connected}
@@ -654,8 +679,11 @@
   }
   .sp-section { padding: 8px 0; border-bottom: 1px solid var(--border2); }
   .sp-section:last-of-type { border-bottom: none; }
+  .sp-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border2); }
+  .sp-row > div { display: flex; flex-direction: column; gap: 6px; }
   .sp-label { font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
   .sp-info { font-size: 13px; font-family: 'SF Mono', Menlo, monospace; color: var(--text2); }
+  .sp-sub { font-size: 11px; color: var(--text3); margin-top: 2px; }
   .sp-btns {
     display: flex; gap: 4px; background: var(--pill-bg); border-radius: 8px; padding: 2px;
   }
@@ -675,6 +703,7 @@
     -webkit-tap-highlight-color: transparent;
   }
   .sp-font-btn:active { background: var(--accent-bg); color: var(--accent); }
+  .sp-font-btn.active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
   .sp-font-val {
     font-size: 13px; font-family: 'SF Mono', Menlo, monospace; color: var(--text);
     min-width: 40px; text-align: center;

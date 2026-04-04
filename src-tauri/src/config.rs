@@ -16,6 +16,7 @@ pub struct Config {
     pub host: String,
     pub port: u16,
     pub token: String,
+    pub machine_id: String,
     pub tmux_socket: Option<String>,
     pub tls_cert: Option<String>,
     pub tls_key: Option<String>,
@@ -61,11 +62,24 @@ impl Config {
                 .or(file_cfg.port)
                 .unwrap_or(9899),
             token,
+            machine_id: load_or_create_machine_id(),
             tmux_socket: std::env::var("TMUX_SOCKET").ok().or(file_cfg.tmux_socket),
             tls_cert: std::env::var("TLS_CERT").ok().or(file_cfg.tls_cert),
             tls_key: std::env::var("TLS_KEY").ok().or(file_cfg.tls_key),
         }
     }
+}
+
+fn load_or_create_machine_id() -> String {
+    let path = dirs_next().join("machine_id");
+    if let Ok(id) = std::fs::read_to_string(&path) {
+        let id = id.trim().to_string();
+        if !id.is_empty() { return id; }
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    let _ = std::fs::create_dir_all(dirs_next());
+    let _ = std::fs::write(&path, &id);
+    id
 }
 
 fn save_token(token: &str) -> std::io::Result<()> {

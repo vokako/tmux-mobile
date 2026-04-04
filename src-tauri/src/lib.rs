@@ -73,7 +73,7 @@ pub fn run() {
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
-                if let Err(e) = server::start_with_socket(&cfg.host, cfg.port, &cfg.token, cfg.tmux_socket, cfg.tls_cert, cfg.tls_key).await {
+                if let Err(e) = server::start_with_socket(&cfg.host, cfg.port, &cfg.token, &cfg.machine_id, cfg.tmux_socket, cfg.tls_cert, cfg.tls_key).await {
                     eprintln!("Server error: {}", e);
                 }
             });
