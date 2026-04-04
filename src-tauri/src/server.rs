@@ -428,6 +428,30 @@ fn handle_request(req: &Request) -> Response {
             }
         }
 
+        "shell_exec" => {
+            let cmd = match require_str(p, "command") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            let cwd = p.get("cwd").and_then(|v| v.as_str());
+            let mut child = std::process::Command::new("sh");
+            child.arg("-c").arg(cmd);
+            if let Some(d) = cwd {
+                child.current_dir(d);
+            }
+            match child.output() {
+                Ok(output) => {
+                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                    Response::ok(
+                        id,
+                        serde_json::json!({ "stdout": stdout, "stderr": stderr, "code": output.status.code() }),
+                    )
+                }
+                Err(e) => Response::err(id, ERR_INTERNAL, e.to_string()),
+            }
+        }
+
         _ => Response::err(
             id,
             ERR_METHOD_NOT_FOUND,

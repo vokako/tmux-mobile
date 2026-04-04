@@ -67,27 +67,24 @@ fn get_download_path(name: String) -> Result<String, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(desktop)]
+    {
+        let cfg = Config::load();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async {
+                if let Err(e) = server::start_with_socket(&cfg.host, cfg.port, &cfg.token, cfg.tmux_socket, cfg.tls_cert, cfg.tls_key).await {
+                    eprintln!("Server error: {}", e);
+                }
+            });
+        });
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![get_local_config, save_to_downloads, list_downloads, delete_download, get_download_path])
-        .setup(|_app| {
-            // Only start server on desktop, not on mobile
-            #[cfg(desktop)]
-            {
-                let cfg = Config::load();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(e) =
-                        server::start_with_socket(&cfg.host, cfg.port, &cfg.token, cfg.tmux_socket, cfg.tls_cert, cfg.tls_key)
-                            .await
-                    {
-                        eprintln!("Server error: {}", e);
-                    }
-                });
-            }
-            Ok(())
-        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
