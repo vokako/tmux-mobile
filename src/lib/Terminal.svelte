@@ -5,7 +5,7 @@
   import Icon from './Icon.svelte';
   import { detectParser } from './parsers.js';
 
-  let { target, session, command: initialCommand = '', viewMode = 'terminal', onChatSupported = () => {}, onSwitchPane = null } = $props();
+  let { target, session, command: initialCommand = '', viewMode = 'terminal', fontSize = 14, onChatSupported = () => {}, onSwitchPane = null } = $props();
 
   let input = $state('');
   let paneContent = $state('');
@@ -71,6 +71,12 @@
     if (termEl) {
       termEl.style.background = t.background;
     }
+  });
+
+  $effect(() => {
+    if (!term) return;
+    term.options.fontSize = fontSize;
+    window.dispatchEvent(new Event('terminal-refit'));
   });
 
   let parser = $derived(detectParser(paneContent, command));
@@ -193,8 +199,6 @@
   // xterm.js setup + subscription
   $effect(() => {
     touchScrolling = false; // reset on pane switch
-    // Pre-calculate initial size before terminal opens (avoids race with keyboard auto-focus)
-    const fontSize = 14;
     const estCellW = fontSize * 0.6;
     const estCellH = fontSize * 1.2;
     const containerW = termEl?.clientWidth || 300;
@@ -683,7 +687,7 @@
     {/if}
   </div>
   {#if viewMode === 'chat'}
-    <ChatView content={paneContent} {command} onSendKeys={(keys) => sendKeys(target, keys, false)} />
+    <ChatView content={paneContent} {command} {fontSize} onSendKeys={(keys) => sendKeys(target, keys, false)} />
   {/if}
 
   <div class="input-area">

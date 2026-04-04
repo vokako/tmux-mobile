@@ -2,7 +2,7 @@
   import { detectParser, parseMessages, stripAnsi } from './parsers.js';
   import Icon from './Icon.svelte';
 
-  let { content = '', onSendKeys = null, command = '' } = $props();
+  let { content = '', onSendKeys = null, command = '', fontSize = 14 } = $props();
 
   let chatEl;
 
@@ -288,7 +288,7 @@
   }
 </script>
 
-<div class="chat-wrap">
+<div class="chat-wrap" style="--chat-font-size: {fontSize}px">
   <div class="chat" bind:this={chatEl} onscroll={checkAtBottom}>
     {#if messages.length === 0}
     <div class="empty">No conversation detected. Waiting for CLI output…</div>
@@ -481,7 +481,7 @@
   .bubble {
     border-radius: 16px;
     padding: 10px 14px;
-    font-size: 14px;
+    font-size: var(--chat-font-size, 14px);
     line-height: 1.5;
     min-width: 40px;
     max-width: 100%;
@@ -598,9 +598,9 @@
     background: var(--accent-bg); border-bottom: 1px solid var(--accent);
   }
   .compact-body {
-    padding: 10px 14px; font-size: 13px; line-height: 1.6; color: var(--text2);
+    padding: 10px 14px; font-size: var(--chat-font-size, 14px); line-height: 1.6; color: var(--text2);
   }
-  .compact-body :global(h2) { font-size: 13px; font-weight: 700; color: var(--accent); margin: 10px 0 4px; }
+  .compact-body :global(h2) { font-size: var(--chat-font-size, 14px); font-weight: 700; color: var(--accent); margin: 10px 0 4px; }
   .compact-body :global(ul), .compact-body :global(ol) { padding-left: 16px; margin: 4px 0; }
   .compact-body :global(li) { margin: 2px 0; }
   .compact-body :global(p) { margin: 4px 0; }

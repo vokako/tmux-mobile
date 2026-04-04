@@ -14,6 +14,7 @@
   let viewMode = $state('terminal');
   let chatSupported = $state(false);
   let theme = $state(localStorage.getItem('tmux_theme') || 'system');
+  let fontSize = $state(parseInt(localStorage.getItem('tmux_fontsize')) || 14);
   let showSettings = $state(false);
   let debugMode = $state(!!localStorage.getItem('tmux_debug'));
   let debugEl = $state(null);
@@ -405,6 +406,14 @@
         </div>
       </div>
       <div class="sp-section">
+        <div class="sp-label">Font Size</div>
+        <div class="sp-font-row">
+          <button class="sp-font-btn" onclick={() => { fontSize = Math.max(8, fontSize - 1); localStorage.setItem('tmux_fontsize', fontSize); }}>−</button>
+          <span class="sp-font-val">{fontSize}px</span>
+          <button class="sp-font-btn" onclick={() => { fontSize = Math.min(24, fontSize + 1); localStorage.setItem('tmux_fontsize', fontSize); }}>+</button>
+        </div>
+      </div>
+      <div class="sp-section">
         <div class="sp-label">Debug</div>
         <div class="sp-btns">
           <button class:active={debugMode} onclick={() => { debugMode = !debugMode; localStorage.setItem('tmux_debug', debugMode ? '1' : ''); }}>
@@ -439,7 +448,7 @@
         <Files session={terminalSession} visible={page === 'files'} onGoBack={(fn) => filesGoBack = fn} />
       </div>
       <div class="page-layer" class:hidden={page !== 'terminal'}>
-        <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {viewMode} onChatSupported={(v) => chatSupported = v} onSwitchPane={(t, cmd) => { terminalTarget = t; terminalCommand = cmd || ''; }} />
+        <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {viewMode} {fontSize} onChatSupported={(v) => chatSupported = v} onSwitchPane={(t, cmd) => { terminalTarget = t; terminalCommand = cmd || ''; }} />
       </div>
     {/if}
   </div>
@@ -656,6 +665,20 @@
     -webkit-tap-highlight-color: transparent;
   }
   .sp-btns button.active { background: var(--accent-bg); color: var(--accent); }
+  .sp-font-row {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .sp-font-btn {
+    width: 32px; height: 32px; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--pill-bg); color: var(--text); font-size: 16px; font-weight: 600;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .sp-font-btn:active { background: var(--accent-bg); color: var(--accent); }
+  .sp-font-val {
+    font-size: 13px; font-family: 'SF Mono', Menlo, monospace; color: var(--text);
+    min-width: 40px; text-align: center;
+  }
   .sp-disconnect {
     width: 100%; margin-top: 8px; padding: 10px; border: 1px solid var(--danger);
     border-radius: 8px; background: var(--bg2); color: var(--danger);
