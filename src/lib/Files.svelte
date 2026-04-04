@@ -247,6 +247,18 @@
     gitLoading = false;
   }
 
+  let pushResult = $state('');
+  async function gitPush() {
+    gitLoading = true;
+    pushResult = '';
+    try {
+      const r = await git('push');
+      pushResult = r.trim() || 'Pushed successfully';
+    } catch (e) { pushResult = e.message; }
+    gitLoading = false;
+    setTimeout(() => { pushResult = ''; }, 3000);
+  }
+
   $effect(() => {
     getBookmarks().then(r => { bookmarks = r.bookmarks || []; }).catch(() => {});
   });
@@ -1053,9 +1065,13 @@
       <button class="back-btn" onclick={() => { if (gitDiff) gitDiff = null; else view = 'list'; }}><Icon name="chevron-left" size={16} /></button>
       <span class="preview-name"><Icon name="git-branch" size={14} /> {gitBranch || 'Git'}</span>
       <div class="preview-actions">
+        <button class="act-btn" onclick={gitPush} disabled={gitLoading}><Icon name="upload" size={14} /></button>
         <button class="act-btn" onclick={() => { gitTab === 'status' ? loadGitStatus() : loadGitLog(); }}><Icon name="refresh" size={14} /></button>
       </div>
     </div>
+    {#if pushResult}
+      <div class="git-push-result" class:git-error={pushResult.includes('error') || pushResult.includes('rejected') || pushResult.includes('failed')}>{pushResult}</div>
+    {/if}
     {#if !gitDiff}
       <div class="git-tabs">
         <button class:active={gitTab === 'status'} onclick={() => { gitTab = 'status'; loadGitStatus(); }}>Status</button>
@@ -1410,6 +1426,8 @@
   }
   .git-tabs button.active { background: var(--accent-bg); color: var(--accent); }
   .git-error { padding: 10px; color: var(--danger); font-size: 12px; background: var(--danger-bg); }
+  .git-push-result { padding: 8px 12px; font-size: 12px; color: var(--status-ok); background: var(--accent-bg); flex-shrink: 0; }
+  .git-push-result.git-error { color: var(--danger); background: var(--danger-bg); }
   .git-loading { padding: 20px; text-align: center; color: var(--text3); font-size: 13px; }
   .git-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   .git-file {

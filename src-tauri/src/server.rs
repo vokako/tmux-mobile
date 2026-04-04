@@ -441,7 +441,7 @@ fn handle_request(req: &Request) -> Response {
             let cwd = p.get("cwd").and_then(|v| v.as_str());
 
             const ALLOWED: &[&str] = &[
-                "status", "diff", "log", "show", "branch", "rev-parse",
+                "status", "diff", "log", "show", "branch", "rev-parse", "push",
             ];
             if !ALLOWED.contains(&subcmd) {
                 return Response::err(id, ERR_INVALID_PARAMS, format!("git subcommand not allowed: {}", subcmd));
