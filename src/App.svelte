@@ -577,6 +577,7 @@
   :global(.preview-body), :global(.md-render), :global(.code-preview), :global(.git-diff-body), :global(.info-body) { user-select: text; -webkit-user-select: text; }
   :global(*) { box-sizing: border-box; }
   :global(html) { overflow: hidden; overscroll-behavior: none; --sat: env(safe-area-inset-top); --sab: env(safe-area-inset-bottom); --app-height: 100dvh; }
+  :global(body), main, nav, .settings-panel { transition: background-color 0.3s ease, color 0.3s ease; }
   :global(html[data-theme="dark"]) {
     --bg: #0a0a0f; --bg2: #0f0f18; --bg3: #12121a;
     --text: #e2e8f0; --text2: rgba(226,232,240,0.5); --text3: rgba(226,232,240,0.3);
@@ -680,7 +681,9 @@
     background: var(--bg); border: 1px solid var(--border);
     border-radius: 12px; padding: 12px; min-width: 220px;
     box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+    animation: sp-in 0.15s ease;
   }
+  @keyframes sp-in { from { opacity: 0; transform: translateY(-8px) scale(0.95); } to { opacity: 1; transform: none; } }
   .sp-section { padding: 8px 0; border-bottom: 1px solid var(--border2); }
   .sp-section:last-of-type { border-bottom: none; }
   .sp-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border2); }

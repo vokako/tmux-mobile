@@ -73,7 +73,7 @@
     if (onGoBack) onGoBack(() => {
       if (view === 'git' && gitDiff) { gitDiff = null; return true; }
       if (view === 'git') { view = 'list'; return true; }
-      if (view === 'edit') { view = 'preview'; return true; }
+      if (view === 'edit') { if (isEdited && !confirm('Discard unsaved changes?')) return true; view = 'preview'; return true; }
       if (view === 'info') { view = fromGit ? (fromGit = false, 'git') : currentFile?.content != null ? 'preview' : 'list'; return true; }
       if (view === 'preview') { if (fromGit) { fromGit = false; view = 'git'; } else { view = 'list'; } currentFile = null; return true; }
       if (view === 'local') { view = 'list'; return true; }
@@ -171,6 +171,7 @@
   let gitDiff = $state(null); // { file, diff }
   let fromGit = $state(false);
   let gitLoading = $state(false);
+  let gitListEl = $state(null);
   let gitError = $state('');
 
   let gitRoot = '';
@@ -186,6 +187,7 @@
   }
 
   async function loadGitStatus() {
+    const scrollTop = gitListEl?.scrollTop || 0;
     gitLoading = true;
     gitError = '';
     try {
@@ -197,6 +199,7 @@
       }));
     } catch (e) { gitError = e.message; }
     gitLoading = false;
+    requestAnimationFrame(() => { if (gitListEl) gitListEl.scrollTop = scrollTop; });
   }
 
   async function loadGitLog() {
@@ -514,6 +517,7 @@
   }
 
   function backToPreview() {
+    if (isEdited && !confirm('Discard unsaved changes?')) return;
     view = 'preview';
   }
 
@@ -952,7 +956,7 @@
           <div class="file-row">
             <button class="file-main" onclick={() => openEntry(entry)}>
               <Icon name={fileIcon(entry)} size={16} />
-              <span class="file-name" class:dir-name={entry.type === 'dir'}>{entry.name}</span>
+              <span class="file-name" class:dir-name={entry.type === 'dir'} title={entry.name}>{entry.name}</span>
               {#if entry.type !== 'dir'}
                 <span class="file-size">{formatSize(entry.size)}</span>
               {/if}
@@ -1105,14 +1109,15 @@
       <div class="git-push-result" class:git-error={pushResult.startsWith('✗')}>{pushResult}</div>
     {/if}
     {#if !gitDiff}
+      {@const stagedCount = gitStatus.filter(f => f.status[0] !== ' ' && f.status[0] !== '?').length}
       <div class="git-actions">
         <button class="git-act-btn" onclick={gitAddAll}>Add All</button>
-        <button class="git-act-btn" onclick={() => showCommitInput = !showCommitInput}>Commit</button>
+        <button class="git-act-btn" onclick={() => showCommitInput = !showCommitInput}>Commit{stagedCount ? ` (${stagedCount})` : ''}</button>
         <button class="git-act-btn" onclick={gitPush} disabled={gitLoading}>Push</button>
       </div>
       {#if showCommitInput}
         <div class="git-commit-row">
-          <input type="text" bind:value={commitMsg} placeholder="commit message…" onkeydown={(e) => e.key === 'Enter' && gitCommit()} autocapitalize="off" />
+          <textarea bind:value={commitMsg} placeholder="commit message…" onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); gitCommit(); } }} rows="2"></textarea>
           <button class="git-commit-btn" onclick={gitCommit} disabled={!commitMsg.trim()}>OK</button>
         </div>
       {/if}
@@ -1126,7 +1131,7 @@
       {#if gitLoading}
         <div class="git-loading">Loading…</div>
       {:else if gitTab === 'status'}
-        <div class="git-list">
+        <div class="git-list" bind:this={gitListEl}>
           {#if !gitStatus.length}
             <div class="empty">Working tree clean</div>
           {/if}
@@ -1488,11 +1493,12 @@
   .git-commit-row {
     display: flex; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0;
   }
-  .git-commit-row input {
+  .git-commit-row textarea {
     flex: 1; padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 6px;
     background: var(--input-bg); color: var(--text); font-size: 13px; outline: none;
+    font-family: inherit; resize: none; line-height: 1.4;
   }
-  .git-commit-row input:focus { border-color: var(--accent); }
+  .git-commit-row textarea:focus { border-color: var(--accent); }
   .git-commit-btn {
     padding: 6px 14px; border: none; border-radius: 6px;
     background: var(--accent); color: var(--bg); font-size: 12px; font-weight: 600;

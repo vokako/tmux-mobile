@@ -467,12 +467,6 @@
     width: 18px;
     height: 18px;
   }
-  .pane-size {
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
-    color: var(--text3);
-    font-size: 11px;
-  }
-
   .bottom-bar { display: flex; gap: 8px; }
   .new-btn {
     flex: 1; padding: 12px; border: 1px dashed var(--border); border-radius: 14px;
