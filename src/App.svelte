@@ -423,8 +423,8 @@
         <div class="sp-label">Theme</div>
         <div class="sp-btns">
           <button class:active={theme === 'system'} onclick={() => setTheme('system')}>Auto</button>
-          <button class:active={theme === 'light'} onclick={() => setTheme('light')}>☀</button>
-          <button class:active={theme === 'dark'} onclick={() => setTheme('dark')}>☾</button>
+          <button class:active={theme === 'light'} onclick={() => setTheme('light')}>Light</button>
+          <button class:active={theme === 'dark'} onclick={() => setTheme('dark')}>Dark</button>
         </div>
       </div>
       <div class="sp-section">
@@ -438,7 +438,8 @@
           <div style="flex:1"></div>
           <div class="sp-label">Debug</div>
           <button class="sp-toggle" class:on={debugMode} onclick={() => { debugMode = !debugMode; localStorage.setItem('tmux_debug', debugMode ? '1' : ''); }}>
-            <span class="sp-toggle-dot"></span>
+            <span class="sp-toggle-opt sp-toggle-off">Off</span>
+            <span class="sp-toggle-opt sp-toggle-on">On</span>
           </button>
         </div>
       </div>
@@ -701,7 +702,7 @@
   .sp-inline { display: flex; align-items: center; gap: 10px; }
   .sp-inline .sp-label { margin-bottom: 0; }
   .sp-btns {
-    display: flex; gap: 2px; background: var(--pill-bg); border-radius: 8px; padding: 2px;
+    display: inline-flex; gap: 2px; background: var(--pill-bg); border-radius: 8px; padding: 2px;
   }
   .sp-btns button {
     padding: 6px 14px; border: none; border-radius: 6px; background: transparent;
@@ -714,28 +715,25 @@
   }
   .sp-font-btn {
     width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 7px;
-    background: var(--pill-bg); color: var(--text); font-size: 15px; font-weight: 600;
+    background: var(--pill-bg); color: var(--text2); font-size: 15px; font-weight: 600;
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     -webkit-tap-highlight-color: transparent;
   }
   .sp-font-btn:active { background: var(--accent-bg); color: var(--accent); }
   .sp-font-val {
-    font-size: 13px; font-weight: 600; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; color: var(--text);
+    font-size: 13px; font-weight: 600; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; color: var(--text2);
     min-width: 24px; text-align: center;
   }
   .sp-toggle {
-    width: 38px; height: 22px; border-radius: 11px; border: none;
-    background: var(--surface2); position: relative; cursor: pointer;
-    transition: background 0.2s; -webkit-tap-highlight-color: transparent; padding: 0; flex-shrink: 0;
+    display: inline-flex; gap: 2px; background: var(--pill-bg); border-radius: 8px;
+    padding: 2px; border: none; cursor: pointer; -webkit-tap-highlight-color: transparent; flex-shrink: 0;
   }
-  .sp-toggle.on { background: var(--accent); }
-  .sp-toggle-dot {
-    position: absolute; top: 3px; left: 3px;
-    width: 16px; height: 16px; border-radius: 50%;
-    background: #fff; transition: transform 0.2s;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  .sp-toggle-opt {
+    padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 500;
+    color: var(--text3); transition: all 0.15s;
   }
-  .sp-toggle.on .sp-toggle-dot { transform: translateX(16px); }
+  .sp-toggle.on .sp-toggle-on { background: var(--accent-bg); color: var(--accent); }
+  .sp-toggle:not(.on) .sp-toggle-off { background: var(--accent-bg); color: var(--accent); }
   .sp-disconnect {
     width: calc(100% - 12px); margin: 6px; padding: 10px; border: 1px solid var(--danger);
     border-radius: 8px; background: none; color: var(--danger);

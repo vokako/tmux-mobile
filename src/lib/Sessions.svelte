@@ -12,12 +12,17 @@
   let sessionsEl;
 
   let refreshDone = $state(false);
+  let canPull = false;
 
-  function onPullStart(e) { pullStartY = e.touches[0].clientY; pulling = false; pullDist = 0; }
+  function onPullStart(e) {
+    pullStartY = e.touches[0].clientY; pulling = false; pullDist = 0;
+    canPull = sessionsEl && sessionsEl.scrollTop <= 0;
+  }
   function onPullMove(e) {
-    if (refreshing || !sessionsEl || sessionsEl.scrollTop > 0) return;
+    if (!canPull || refreshing) return;
     const dy = e.touches[0].clientY - pullStartY;
     if (dy > 10) { pulling = true; pullDist = Math.min(100, dy * 0.5); }
+    else if (dy < -5) { canPull = false; }
   }
   function onPullEnd() {
     if (pulling && pullDist >= 60) {
@@ -215,7 +220,7 @@
               {@const aiTag = info.match(/kiro/i) ? 'Kiro' : info.match(/claude/i) ? 'Claude' : ''}
               <div class="pane-row">
                 <button class="pane" class:active-pane={activeTarget === `${p.session}:${p.window}.${p.pane}`} onclick={() => openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command)}>
-                  <span class="pane-id">:{p.window}.{p.pane}</span>
+                  <span class="pane-id">{p.window}.{p.pane}</span>
                   <span class="pane-cmd">{p.current_command}</span>
                   {#if aiTag === 'Kiro'}
                     <img class="pane-ai-icon" src="/assets/kiro.svg" alt="Kiro" />

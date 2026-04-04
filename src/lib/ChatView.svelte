@@ -349,7 +349,7 @@
               {#if msg.role === 'user'}
                 <div class="md-block">{@html cachedRenderMarkdown(stripAnsi(block.content))}</div>
               {:else}
-                <div class="md-block">{@html cachedAnsiToHtml(block.content)}</div>
+                <div class="md-block">{@html cachedRenderMarkdown(stripAnsi(block.content))}</div>
               {/if}
             {:else if block.type === 'code'}
               <div class="code-block">

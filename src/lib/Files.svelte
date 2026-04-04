@@ -317,19 +317,21 @@
   let pullDist = $state(0);
   let pulling = $state(false);
   let refreshing = $state(false);
+  let canPull = false;
 
   function onTouchStart(e) {
     swipeStartX = e.touches[0].clientX;
     pullStartY = e.touches[0].clientY;
     pulling = false;
     pullDist = 0;
+    const listEl = filesEl?.querySelector('.file-list');
+    canPull = view === 'list' && listEl && listEl.scrollTop <= 0;
   }
   function onTouchMove(e) {
-    if (view !== 'list' || refreshing) return;
-    const listEl = filesEl?.querySelector('.file-list');
-    if (!listEl || listEl.scrollTop > 0) return;
+    if (!canPull || refreshing) return;
     const dy = e.touches[0].clientY - pullStartY;
     if (dy > 10) { pulling = true; pullDist = Math.min(100, dy * 0.5); }
+    else if (dy < -5) { canPull = false; }
   }
   let refreshDone = $state(false);
 
@@ -1086,7 +1088,7 @@
     </div>
     <div class="info-body">
       {#if currentFile?.stat}
-        <div class="info-row"><span class="info-label">Path</span><button class="info-path" onclick={() => copyPath(currentFile.stat.path)}>{currentFile.stat.path} <Icon name="copy" size={11} /></button></div>
+        <div class="info-row"><span class="info-label">Path</span><button class="info-path" onclick={() => copyPath(currentFile.stat.path)}>{currentFile.stat.path}</button></div>
         <div class="info-row"><span class="info-label">Type</span><span class="info-val">{currentFile.stat.mime_hint}</span></div>
         <div class="info-row"><span class="info-label">Size</span><span class="info-val">{formatSize(currentFile.stat.size)}</span></div>
         <div class="info-row"><span class="info-label">Modified</span><span class="info-val">{formatDate(currentFile.stat.modified)}</span></div>
