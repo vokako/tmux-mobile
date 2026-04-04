@@ -20,11 +20,12 @@
 
 You're running [Kiro CLI](https://kiro.dev), Claude Code, or any coding agent in a tmux session on your Mac. You walk away from your desk. **tmux-mobile** lets you keep watching and interacting from your phone:
 
-- **Terminal view** — ANSI-rendered output with theme-aware colors, native scrolling, shortcut keys
-- **Chat view** — AI agent conversations rendered as chat bubbles, with syntax-highlighted code blocks, collapsible tool calls, diff rendering, `/model` selector, and `/compact` summary cards
-- **File browser** — browse, preview, edit, upload/download files with bookmarks
-- **Sessions** — browse all tmux sessions/windows/panes, create or kill sessions
-- **Light/Dark theme** — system-following or manual toggle, applies to all views including terminal
+- **Terminal view** — xterm.js with theme-aware colors, touch scrolling with iOS-like momentum, shortcut keys with long-press repeat, collapsible window switcher with AI agent icons
+- **Chat view** — AI agent conversations rendered as chat bubbles, with markdown rendering, syntax-highlighted code blocks, collapsible tool calls, diff rendering, `/model` selector, and `/compact` summary cards
+- **File browser** — browse, preview, edit, upload/download files with bookmarks, git integration (status, diff, log, add, commit, push)
+- **Sessions** — browse all tmux sessions/windows/panes, create or kill sessions, pull-to-refresh
+- **Settings** — font size control, light/dark/auto theme with smooth transitions, server connection info (hostname, machine ID), debug toggle
+- **Multi-address reconnect** — server machine ID tracks alternate addresses, auto-failover on disconnect
 
 The server runs on your Mac, the UI runs in any browser or as a native app (macOS, Android).
 
@@ -70,20 +71,21 @@ TLS_CERT=/path/to/cert.pem TLS_KEY=/path/to/key.pem npm run tauri:dev
 
 ### Terminal
 
-- ANSI-to-HTML rendering with theme-aware color mapping (light/dark)
-- Native CSS scrolling with inertia (no xterm.js flicker)
-- Shortcut buttons (^C, ^D, ^Z, Tab, Up, Down)
-- Empty send = Enter key (return arrow icon)
-- Multi-line input (Shift+Enter for newline)
-- IME-aware (composing Enter doesn't send)
-- Status bar inside input bar showing session:pane and command
+- xterm.js with theme-aware color schemes (light/dark)
+- Touch scrolling with velocity smoothing and iOS-like momentum physics
+- Shortcut buttons (Esc, ^C, ^D, Tab, arrows) with long-press repeat
+- Keyboard toggle button to show/hide on-screen keyboard
+- Collapsible window switcher — shows AI agent icons (Kiro/Claude) or command name, persists state
+- Floating buttons (scroll-to-bottom, window switcher) with frosted glass style
+- Configurable font size and font family (Maple Mono NF CN)
+- Status bar showing session:pane and running command
 
 ### Chat View
 
 Auto-detects supported CLI tools (currently Kiro CLI) and renders output as a messaging UI:
 
 - User messages → right-aligned bubbles with copy button
-- Agent responses → left-aligned bubbles with bot avatar
+- Agent responses → left-aligned bubbles with bot avatar, markdown rendered
 - Code blocks → syntax-highlighted cards
 - Tool calls → compact collapsible cards
 - Diffs → red/green line-by-line rendering
@@ -103,18 +105,20 @@ Browse the server's filesystem starting from the session's working directory:
 - Unified toolbar: all actions in one compact icon row
 - Directory navigation with breadcrumbs on separate path row
 - Bookmarks: star current directory, bookmark panel with scrollable paths
-- File preview: Markdown (rendered), CSV (table), code (syntax highlighted), HTML (iframe), PDF (pdf.js), images
-- Text file editor with syntax highlighting, undo stack, save
+- File preview: Markdown (rendered), CSV (table), code (syntax highlighted with Maple Mono font), HTML (iframe), PDF (pdf.js), images
+- Text file editor with syntax highlighting, undo stack, save, unsaved changes confirmation
 - File operations: create file/folder, rename, delete, upload, download
-- File info: path, type, size, modified, permissions
-- Show/hide hidden files
+- File info: path (tap to copy), type, size, modified, permissions
+- Show/hide hidden files, pull-to-refresh (mobile)
 - Swipe right from left edge to go back
+- **Git integration**: status view with per-file stage/unstage, GitHub-style diff viewer, commit log, add all/commit/push actions
 
 ### Connection
 
 - Address field: `ws://host:port` or `wss://host:port`
-- Address history: cached recent connections for quick switching
-- Auto-reconnect on network disconnect
+- Address history: cached recent connections with token, quick switching
+- Auto-reconnect on network disconnect with multi-address failover (same machine ID)
+- Server info display: hostname, machine ID, address
 - State restore on reload (page, session, view mode)
 - tmux socket support (`-S` path)
 
@@ -192,7 +196,7 @@ JSON-RPC over WebSocket. Connect with `ws://` or `wss://`. First message must au
 
 ```json
 → {"method": "auth", "params": {"token": "..."}}
-← {"result": {"authenticated": true}}
+← {"result": {"authenticated": true, "machine_id": "uuid", "hostname": "my-mac"}}
 ```
 
 ### Methods
@@ -222,6 +226,7 @@ JSON-RPC over WebSocket. Connect with `ws://` or `wss://`. First message must au
 | `fs_rename` | `from`, `to` | Rename/move |
 | `fs_download` | `path` | Download file as base64 (≤50MB) |
 | `fs_upload` | `path`, `data` | Upload file (base64) |
+| `git` | `subcmd`, `args[]`, `cwd?` | Git operations (whitelisted: status, diff, log, show, branch, rev-parse, push, add, commit, restore) |
 
 ## Prerequisites
 
