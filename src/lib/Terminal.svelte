@@ -651,33 +651,44 @@
     <div class="toast">{toastMsg}</div>
   {/if}
   {#if windows.length > 1}
-    <div class="win-switcher" class:expanded={showWindowCmd}>
-      {#each windows as w}
-        <button
-          class="win-tab"
-          class:active={String(w.window) === currentWindow}
-          onclick={(e) => {
-            e.stopPropagation();
-            if (String(w.window) === currentWindow) { showWindowCmd = !showWindowCmd; }
-            else if (onSwitchPane) {
-              // Dismiss keyboard, reset layout and scroll state before switching pane
-              document.activeElement?.blur();
-              directMode = false;
-              touchScrolling = false;
-              // Use saved full height (not current innerHeight which may be keyboard-shrunk)
-              const fh = window.__fullHeight?.() || window.innerHeight;
-              document.documentElement.style.setProperty('--app-height', fh + 'px');
-              document.documentElement.classList.remove('keyboard-open');
-              onSwitchPane(`${w.session}:${w.window}.${w.pane}`, w.current_command);
-              showWindowCmd = false;
-            }
-          }}
-        >
-          <span class="win-num">{w.window}</span>
-          {#if showWindowCmd}<span class="win-cmd">{w.current_command}</span>{/if}
-        </button>
-      {/each}
-    </div>
+    {#if showWindowCmd}
+      <div class="win-switcher expanded">
+        <button class="win-collapse" onclick={() => showWindowCmd = false}><Icon name="arrow-up" size={12} /></button>
+        {#each windows as w}
+          {@const info = (w.pane_title || '') + ' ' + (w.current_command || '')}
+          {@const aiTag = info.match(/kiro/i) ? 'Kiro' : info.match(/claude/i) ? 'Claude' : ''}
+          <button
+            class="win-tab"
+            class:active={String(w.window) === currentWindow}
+            onclick={(e) => {
+              e.stopPropagation();
+              if (String(w.window) !== currentWindow && onSwitchPane) {
+                document.activeElement?.blur();
+                directMode = false;
+                touchScrolling = false;
+                const fh = window.__fullHeight?.() || window.innerHeight;
+                document.documentElement.style.setProperty('--app-height', fh + 'px');
+                document.documentElement.classList.remove('keyboard-open');
+                onSwitchPane(`${w.session}:${w.window}.${w.pane}`, w.current_command);
+              }
+            }}
+          >
+            <span class="win-num">{w.window}</span>
+            {#if aiTag === 'Kiro'}
+              <img class="win-ai-icon" src="/assets/kiro.svg" alt="Kiro" />
+            {:else if aiTag === 'Claude'}
+              <img class="win-ai-icon claude" src="/assets/claude.svg" alt="Claude" />
+            {:else}
+              <span class="win-cmd">{w.current_command || w.window_name}</span>
+            {/if}
+          </button>
+        {/each}
+      </div>
+    {:else}
+      <button class="win-toggle" onclick={() => showWindowCmd = true}>
+        <Icon name="sessions" size={16} />
+      </button>
+    {/if}
   {/if}
 
   <div class="term-wrap" class:hidden={viewMode !== 'terminal'}>
@@ -777,18 +788,41 @@
   }
 
   /* Window switcher */
-  .win-switcher {
-    position: absolute; top: 8px; right: 8px; z-index: 10;
-    display: flex; flex-direction: column; gap: 2px;
-    background: var(--bg); border: 1px solid var(--border);
-    border-radius: 8px; padding: 2px; opacity: 0.85;
-    max-height: 50%; overflow-y: auto;
+  .win-toggle {
+    position: absolute; top: 8px; left: 8px; z-index: 10;
+    width: 36px; height: 36px; border: 1px solid var(--border);
+    border-radius: 10px; background: rgba(10,10,15,0.45); color: var(--text2);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
   }
-  .win-switcher.expanded { opacity: 1; }
+  :global(html[data-theme="light"]) .win-toggle { background: rgba(245,245,247,0.45); }
+  .win-toggle:active { background: var(--accent-bg); color: var(--accent); }
+  .win-badge {
+    font-size: 11px; font-weight: 700;
+    font-family: 'SF Mono', Menlo, monospace;
+  }
+  .win-switcher {
+    position: absolute; top: 8px; left: 8px; z-index: 10;
+    display: flex; flex-direction: column; gap: 2px;
+    background: rgba(10,10,15,0.5); border: 1px solid var(--border);
+    border-radius: 10px; padding: 4px;
+    max-height: 50%; overflow-y: auto;
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  }
+  :global(html[data-theme="light"]) .win-switcher { background: rgba(245,245,247,0.5); }
+  .win-collapse {
+    padding: 4px; border: none; border-radius: 6px;
+    background: none; color: var(--text3); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .win-collapse:active { color: var(--accent); }
   .win-tab {
-    display: flex; align-items: center; gap: 6px;
-    padding: 4px 8px; border: none; border-radius: 6px;
-    background: none; color: var(--text2); font-size: 11px;
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; border: none; border-radius: 8px;
+    background: none; color: var(--text2); font-size: 12px;
     cursor: pointer; white-space: nowrap;
     -webkit-tap-highlight-color: transparent;
     font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
@@ -796,7 +830,9 @@
   .win-tab.active { background: var(--accent-bg); color: var(--accent); }
   .win-tab:active { background: var(--surface2); }
   .win-num { font-weight: 600; min-width: 14px; text-align: center; }
-  .win-cmd { color: var(--text3); font-size: 10px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+  .win-cmd { color: var(--text3); font-size: 10px; max-width: 100px; overflow: hidden; text-overflow: ellipsis; }
+  .win-ai-icon { height: 14px; width: auto; }
+  .win-ai-icon.claude { filter: brightness(0.9); }
 
   .input-status {
     display: flex;

@@ -1014,7 +1014,7 @@
           {/if}
           {#each gitStatus as f}
             <button class="git-file" onclick={() => showFileDiff(f.file, f.status[0] !== ' ' && f.status[0] !== '?')}>
-              <span class="git-st" class:git-add={f.status.includes('A') || f.status.includes('?')} class:git-mod={f.status.includes('M')} class:git-del={f.status.includes('D')}>{f.status}</span>
+              <span class="git-st" class:git-add={f.status.includes('A') || f.status.includes('?')} class:git-mod={f.status.includes('M')} class:git-del={f.status.includes('D')}>{f.status === '??' ? ' U' : f.status}</span>
               <span class="git-fname">{f.file}</span>
             </button>
           {/each}
