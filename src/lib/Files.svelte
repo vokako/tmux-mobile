@@ -1150,7 +1150,7 @@
   /* Path row */
   .bc-path-row {
     display: flex; align-items: center; gap: 1px; padding: 4px 10px;
-    overflow-x: auto; font-size: 12px; font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
+    overflow-x: auto; font-size: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     scrollbar-width: none; border-bottom: 1px solid var(--border2); flex-shrink: 0;
   }
   .bc-path-row::-webkit-scrollbar { display: none; }
@@ -1173,7 +1173,7 @@
   .bm-path {
     flex: 1; display: block;
     padding: 8px 0; border: none; background: none; color: var(--text);
-    font-size: 12px; font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
+    font-size: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     cursor: pointer; text-align: left; overflow-x: auto;
     white-space: nowrap; scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
@@ -1194,7 +1194,7 @@
   .new-item input {
     flex: 1; padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 6px;
     background: var(--input-bg); color: var(--text); font-size: 13px;
-    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
   }
   .new-item button {
     padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 6px;
@@ -1229,7 +1229,7 @@
   .file-main:active { background: var(--input-bg); }
   .file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dir-name { color: var(--accent); }
-  .file-size { color: var(--text3); font-size: 11px; font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; white-space: nowrap; }
+  .file-size { color: var(--text3); font-size: 11px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; white-space: nowrap; }
   .file-actions { display: flex; gap: 2px; padding-right: 8px; }
   .act-btn {
     padding: 6px; border: none; border-radius: 6px; background: none;
@@ -1263,7 +1263,7 @@
   /* Preview body */
   .preview-body { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 12px; display: flex; flex-direction: column; min-height: 0; }
   .code-preview {
-    margin: 0; font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; font-size: var(--file-font-size, 13px);
+    margin: 0; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-size: var(--file-font-size, 13px);
     line-height: 1.5; color: var(--text); white-space: pre-wrap; word-break: break-all; flex: 1;
   }
   .code-preview :global(code) { font-family: inherit; background: none; padding: 0; }
@@ -1271,7 +1271,7 @@
     display: flex; flex: 1; overflow: auto; -webkit-overflow-scrolling: touch;
   }
   .line-nums {
-    padding: 0 8px; text-align: right; color: var(--text3); font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
+    padding: 0 8px; text-align: right; color: var(--text3); font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: var(--file-font-size, 13px); line-height: 1.5; white-space: pre; user-select: none; flex-shrink: 0;
     border-right: 1px solid var(--border);
   }
@@ -1292,7 +1292,7 @@
   .md-render :global(h3) { font-size: 16px; margin: 10px 0 4px; color: var(--accent); }
   .md-render :global(h4), .md-render :global(h5), .md-render :global(h6) { font-size: 14px; margin: 8px 0 4px; color: var(--accent); }
   .md-render :global(p) { margin: 8px 0; }
-  .md-render :global(code) { background: var(--surface2); padding: 2px 5px; border-radius: 3px; font-size: 12px; font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; }
+  .md-render :global(code) { background: var(--surface2); padding: 2px 5px; border-radius: 3px; font-size: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; }
   .md-render :global(pre) { background: var(--code-bg); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 8px 0; }
   .md-render :global(pre code) { background: none; padding: 0; font-size: 12px; line-height: 1.5; }
   .md-render :global(strong) { color: var(--text); }
@@ -1324,13 +1324,13 @@
     flex: 1; display: flex; overflow: auto; -webkit-overflow-scrolling: touch; min-height: 0;
   }
   .editor-nums {
-    padding: 12px 8px; text-align: right; color: var(--text3); font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
+    padding: 12px 8px; text-align: right; color: var(--text3); font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: var(--file-font-size, 13px); line-height: 1.5; white-space: pre; user-select: none; flex-shrink: 0;
     border-right: 1px solid var(--border);
   }
   .editor-layer { position: relative; flex: 1; min-width: 0; }
   .editor-highlight {
-    margin: 0; padding: 12px; font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; font-size: var(--file-font-size, 13px);
+    margin: 0; padding: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-size: var(--file-font-size, 13px);
     line-height: 1.5; white-space: pre-wrap; word-break: break-all; color: var(--text);
     pointer-events: none;
   }
@@ -1338,7 +1338,7 @@
   .editor {
     position: absolute; inset: 0; width: 100%; height: 100%; padding: 12px; border: none; resize: none;
     background: transparent; color: transparent; caret-color: var(--text);
-    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; font-size: var(--file-font-size, 13px); line-height: 1.5; outline: none;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-size: var(--file-font-size, 13px); line-height: 1.5; outline: none;
     white-space: pre-wrap; word-break: break-all;
   }
 
@@ -1349,7 +1349,7 @@
   }
   .info-label { width: 100px; flex-shrink: 0; color: var(--text3); font-size: 12px; }
   .info-val { flex: 1; font-size: 13px; word-break: break-all; }
-  .info-val.mono { font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; }
+  .info-val.mono { font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; }
   .info-path {
     flex: 1; font-size: 13px; word-break: break-all; text-align: left;
     background: none; border: none; color: var(--text); cursor: pointer; padding: 0;
@@ -1372,12 +1372,12 @@
   .dl-path {
     flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     direction: rtl; text-align: left; min-width: 0;
-    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; font-size: 11px; color: var(--text2);
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 11px; color: var(--text2);
   }
   .dl-ring { flex-shrink: 0; }
   .dl-ring circle:last-child { transition: stroke-dashoffset 0.3s ease; }
   .dl-pct {
-    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; font-size: 11px;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 11px;
     font-weight: 600; color: var(--accent); min-width: 30px;
   }
   .dl-name {
@@ -1421,7 +1421,7 @@
   }
   .git-file:active { background: var(--accent-bg); }
   .git-st {
-    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; font-size: 12px; font-weight: 600;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 12px; font-weight: 600;
     min-width: 24px; color: var(--text3);
   }
   .git-st.git-add { color: var(--status-ok); }
@@ -1429,23 +1429,23 @@
   .git-st.git-del { color: var(--danger); }
   .git-fname {
     flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; font-size: 12px;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 12px;
   }
   .git-hash {
-    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; font-size: 11px;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 11px;
     color: var(--accent); min-width: 56px;
   }
   .git-date { font-size: 11px; color: var(--text3); white-space: nowrap; }
   .git-diff-header {
     display: flex; align-items: center; gap: 8px;
-    padding: 8px 12px; font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; font-size: 12px;
+    padding: 8px 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 12px;
     color: var(--accent); background: var(--accent-bg); border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
   .git-diff-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .git-diff-body {
     flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; background: var(--code-bg);
-    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: var(--file-font-size, 13px); line-height: 1.6;
   }
   .diff-line {

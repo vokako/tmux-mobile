@@ -774,7 +774,7 @@
 
   /* Window switcher */
   .win-toggle {
-    position: absolute; top: 8px; left: 8px; z-index: 10;
+    position: absolute; top: 8px; right: 8px; z-index: 10;
     width: 36px; height: 36px; border: 1px solid var(--border);
     border-radius: 10px; background: rgba(10,10,15,0.85); color: var(--accent);
     cursor: pointer; display: flex; align-items: center; justify-content: center;
@@ -789,10 +789,10 @@
   .win-toggle:active { background: var(--accent-bg); color: var(--accent); }
   .win-badge {
     font-size: 11px; font-weight: 700;
-    font-family: 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
   }
   .win-switcher {
-    position: absolute; top: 8px; left: 8px; z-index: 10;
+    position: absolute; top: 8px; right: 8px; z-index: 10;
     display: flex; flex-direction: column; gap: 2px;
     background: rgba(10,10,15,0.85); border: 1px solid var(--border);
     border-radius: 10px; padding: 4px;
@@ -814,11 +814,11 @@
   .win-collapse:active { color: var(--accent); }
   .win-tab {
     display: flex; align-items: center; gap: 8px;
-    padding: 7px 10px; border: none; border-radius: 8px;
+    padding: 7px 6px; border: none; border-radius: 8px;
     background: none; color: var(--text2); font-size: 12px;
     cursor: pointer; white-space: nowrap;
     -webkit-tap-highlight-color: transparent;
-    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
   }
   .win-tab.active { background: var(--accent-bg); color: var(--accent); }
   .win-tab:active { background: var(--surface2); }
@@ -837,7 +837,7 @@
   }
   .status-left .kiro { color: var(--accent); }
   .status-left {
-    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: 10px;
     white-space: nowrap;
     overflow: hidden;
@@ -847,7 +847,7 @@
     display: flex;
     align-items: center;
     gap: 5px;
-    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     font-weight: 500;
     font-size: 12px;
     margin-left: auto;
@@ -983,7 +983,7 @@
     background: var(--input-bg);
     color: var(--text2);
     font-size: 12px;
-    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     font-weight: 500;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
@@ -1006,7 +1006,7 @@
 
   .prompt {
     color: var(--accent);
-    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: 15px;
     font-weight: 600;
     flex-shrink: 0;
@@ -1020,7 +1020,7 @@
     border: none;
     background: transparent;
     color: var(--text);
-    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: 15px;
     outline: none;
     -webkit-appearance: none;

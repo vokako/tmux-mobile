@@ -248,7 +248,7 @@
   .hist-item {
     padding: 9px 14px; border: none; background: var(--input-bg);
     color: var(--text); font-size: 14px; text-align: left; cursor: pointer;
-    font-family: 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     border-bottom: 1px solid var(--border2);
     -webkit-tap-highlight-color: transparent;
   }

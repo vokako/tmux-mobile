@@ -581,7 +581,7 @@
   }
   .system-pre {
     margin: 0;
-    font-family: 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: 12px;
     line-height: 1.5;
     color: var(--text2);
@@ -631,7 +631,7 @@
   .model-item:last-child { border-bottom: none; }
   .model-item:active { background: var(--accent-bg); }
   .model-item.model-selected { background: var(--accent-bg); color: var(--accent); }
-  .model-name { font-family: 'SF Mono', Menlo, monospace; font-size: 12px; }
+  .model-name { font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 12px; }
   .model-credits { font-size: 11px; color: var(--text3); }
 
   .model-done {
@@ -640,7 +640,7 @@
     background: var(--accent-bg); border: 1px solid var(--accent);
     color: var(--accent); font-size: 13px;
   }
-  .model-done-name { font-family: 'SF Mono', Menlo, monospace; font-weight: 500; }
+  .model-done-name { font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-weight: 500; }
 
   .permission-bubble {
     width: 100%;
@@ -668,7 +668,7 @@
   .md-block :global(strong) { font-weight: 600; color: var(--text); }
   .md-block :global(em) { font-style: italic; color: var(--text2); }
   .md-block :global(code) {
-    font-family: 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: 12px;
     background: var(--surface2);
     padding: 1px 5px;
@@ -723,7 +723,7 @@
     color: var(--text3);
     background: var(--surface);
     border-bottom: 1px solid var(--border2);
-    font-family: 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
@@ -735,7 +735,7 @@
     line-height: 1.5;
   }
   .code-block code {
-    font-family: 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     color: var(--text);
   }
 
@@ -778,7 +778,7 @@
   .tool-body {
     margin: 0;
     padding: 8px 10px;
-    font-family: 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: 11px;
     color: var(--text2);
     line-height: 1.4;
@@ -791,7 +791,7 @@
     overflow: hidden;
     border: 1px solid var(--border);
     background: var(--code-bg);
-    font-family: 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: 12px;
     line-height: 1.5;
     overflow-x: auto;

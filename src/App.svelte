@@ -513,7 +513,7 @@
     flex-direction: column;
     background: rgba(0, 0, 0, 0.85);
     color: #0f0;
-    font-family: 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: 9px;
     line-height: 1.3;
     border-radius: 6px;
@@ -686,7 +686,7 @@
   .sp-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border2); }
   .sp-row > div { display: flex; flex-direction: column; gap: 6px; }
   .sp-label { font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
-  .sp-info { font-size: 13px; font-family: 'SF Mono', Menlo, monospace; color: var(--text2); }
+  .sp-info { font-size: 13px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; color: var(--text2); }
   .sp-sub { font-size: 11px; color: var(--text3); margin-top: 2px; }
   .sp-btns {
     display: flex; gap: 4px; background: var(--pill-bg); border-radius: 8px; padding: 2px;
@@ -709,7 +709,7 @@
   .sp-font-btn:active { background: var(--accent-bg); color: var(--accent); }
   .sp-font-btn.active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
   .sp-font-val {
-    font-size: 13px; font-family: 'SF Mono', Menlo, monospace; color: var(--text);
+    font-size: 13px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; color: var(--text);
     min-width: 40px; text-align: center;
   }
   .sp-disconnect {

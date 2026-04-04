@@ -222,7 +222,6 @@
                   {:else if aiTag === 'Claude'}
                     <img class="pane-ai-icon claude" src="/assets/claude.svg" alt="Claude" />
                   {/if}
-                  <span class="pane-size">{p.width}×{p.height}</span>
                 </button>
                 <button class="pane-kill" class:confirm={confirmKillWindow === `${s.name}:${p.window}`} onclick={() => removeWindow(`${s.name}:${p.window}`, s.name)}>
                   {#if confirmKillWindow === `${s.name}:${p.window}`}
@@ -446,7 +445,7 @@
   .pane-add:active { color: var(--accent); }
 
   .pane-id {
-    font-family: 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     color: var(--accent);
     font-weight: 500;
     font-size: 12px;
@@ -469,7 +468,7 @@
     height: 18px;
   }
   .pane-size {
-    font-family: 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     color: var(--text3);
     font-size: 11px;
   }
@@ -526,7 +525,7 @@
   .picker-path {
     flex: 1; display: flex; align-items: center; gap: 1px;
     overflow-x: auto; scrollbar-width: none;
-    font-family: 'SF Mono', Menlo, monospace; font-size: 12px;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 12px;
     -webkit-overflow-scrolling: touch;
   }
   .picker-path::-webkit-scrollbar { display: none; }
