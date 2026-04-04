@@ -434,19 +434,23 @@
     bottom: 12px;
     right: 16px;
     width: 36px; height: 36px;
-    border: 1px solid var(--input-border);
-    border-radius: 50%;
-    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(10,10,15,0.85);
     color: var(--accent);
-    font-size: 16px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 5;
     -webkit-tap-highlight-color: transparent;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
   }
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    .scroll-btn { background: rgba(10,10,15,0.45); }
+    :global(html[data-theme="light"]) .scroll-btn { background: rgba(245,245,247,0.45); }
+  }
+  :global(html[data-theme="light"]) .scroll-btn { background: rgba(245,245,247,0.85); }
   .scroll-btn:active { transform: scale(0.9); }
 
   .empty {

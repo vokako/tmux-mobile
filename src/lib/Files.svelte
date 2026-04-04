@@ -246,12 +246,44 @@
     await saveBookmarks(bookmarks).catch(() => {});
   }
 
-  // Swipe right to go back
+  // Swipe right to go back + pull to refresh
+  const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
   let swipeStartX = 0;
-  function onTouchStart(e) { swipeStartX = e.touches[0].clientX; }
+  let pullStartY = 0;
+  let pullDist = $state(0);
+  let pulling = $state(false);
+  let refreshing = $state(false);
+
+  function onTouchStart(e) {
+    swipeStartX = e.touches[0].clientX;
+    pullStartY = e.touches[0].clientY;
+    pulling = false;
+    pullDist = 0;
+  }
+  function onTouchMove(e) {
+    if (view !== 'list' || refreshing) return;
+    const listEl = filesEl?.querySelector('.file-list');
+    if (!listEl || listEl.scrollTop > 0) return;
+    const dy = e.touches[0].clientY - pullStartY;
+    if (dy > 10) { pulling = true; pullDist = Math.min(100, dy * 0.5); }
+  }
+  let refreshDone = $state(false);
+
   function onTouchEnd(e) {
     const dx = e.changedTouches[0].clientX - swipeStartX;
     if (dx > 60 && swipeStartX < 40) goBack();
+    if (pulling && pullDist >= 60) {
+      refreshing = true;
+      pullDist = 60;
+      loadDir(cwd).finally(() => {
+        refreshing = false;
+        refreshDone = true;
+        setTimeout(() => { refreshDone = false; pullDist = 0; }, 600);
+      });
+    } else {
+      pullDist = 0;
+    }
+    pulling = false;
   }
 
   function goBack() {
@@ -754,12 +786,12 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="files" bind:this={filesEl} ontouchstart={onTouchStart} ontouchend={onTouchEnd}>
+<div class="files" bind:this={filesEl} ontouchstart={onTouchStart} ontouchmove={onTouchMove} ontouchend={onTouchEnd}>
   {#if view === 'list'}
     <!-- Toolbar: all buttons in one row -->
     <div class="toolbar">
       <button class="tool-btn" onclick={goHome}><Icon name="home" size={15} /></button>
-      <button class="tool-btn" onclick={() => loadDir(cwd)}><Icon name="refresh" size={15} /></button>
+      {#if !isMobile}<button class="tool-btn" onclick={() => loadDir(cwd)}><Icon name="refresh" size={15} /></button>{/if}
       <button class="tool-btn" onclick={() => { newType = 'file'; newName = ''; }}><Icon name="plus" size={15} /></button>
       <button class="tool-btn" onclick={() => { newType = 'dir'; newName = ''; }}><Icon name="folder-plus" size={15} /></button>
       <button class="tool-btn" onclick={handleUpload}><Icon name="upload" size={15} /></button>
@@ -840,6 +872,17 @@
     {/if}
 
     <!-- File list -->
+    {#if pullDist > 0}
+      <div class="pull-indicator" style="height:{pullDist}px">
+        {#if refreshDone}
+          <svg class="pull-done" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        {:else}
+          <svg class="pull-arrow" class:pull-spin={refreshing} style="transform:rotate({refreshing ? 0 : Math.min(pullDist / 60 * 180, 180)}deg);opacity:{Math.min(pullDist / 30, 1)}" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+          </svg>
+        {/if}
+      </div>
+    {/if}
     <div class="file-list">
       {#if loading}
         <div class="loading">Loading...</div>
@@ -1141,6 +1184,16 @@
 
   /* File list */
   .file-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .pull-indicator {
+    display: flex; align-items: center; justify-content: center;
+    color: var(--accent); flex-shrink: 0; overflow: hidden;
+    transition: height 0.25s ease;
+  }
+  .pull-arrow { transition: opacity 0.15s; }
+  .pull-done { color: var(--status-ok); animation: pull-pop 0.3s ease; }
+  @keyframes pull-pop { 0% { transform: scale(0.5); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+  .pull-spin { animation: pull-rotate 0.6s linear infinite; }
+  @keyframes pull-rotate { to { transform: rotate(360deg) !important; } }
   .file-row {
     display: flex; align-items: center; border-bottom: 1px solid var(--border2);
   }

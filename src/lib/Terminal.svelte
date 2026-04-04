@@ -101,7 +101,7 @@
 
   // Window switcher
   let windowPanes = $state([]);
-  let showWindowCmd = $state(false);
+  let showWindowCmd = $state(localStorage.getItem('tmux_winswitcher') === '1');
   let currentWindow = $derived(target.split(':')[1]?.split('.')[0] || '');
 
   // Group panes by window
@@ -277,7 +277,8 @@
 
     // Mobile touch: scrolling, scrollbar drag, long-press word selection
     let touchY = 0, touchStartY = 0, accumulatedDy = 0, longPressTimer = null, didScroll = false;
-    let velocity = 0, lastMoveTime = 0, momentumId = null, totalDist = 0;
+    let lastMoveTime = 0, momentumId = null, totalDist = 0;
+    let velocitySamples = []; // recent velocity samples for smoothing
     const lineHeight = () => (termEl?.clientHeight || 384) / (term?.rows || 24);
 
     let onScrollbar = false, scrollbarStartY = 0, scrollbarStartViewport = 0;
@@ -329,7 +330,7 @@
       touchY = e.touches[0].clientY;
       touchStartY = touchY;
       accumulatedDy = 0;
-      velocity = 0;
+      velocitySamples = [];
       totalDist = 0;
       lastMoveTime = Date.now();
       touchScrolling = false;
@@ -395,7 +396,11 @@
       accumulatedDy += dy;
       totalDist += Math.abs(dy);
       const lh = lineHeight();
-      velocity = (dy / lh) / dt * 16;
+      // Track velocity in px/ms, keep last 5 samples within 100ms
+      velocitySamples.push({ v: dy / dt, t: now });
+      while (velocitySamples.length > 5 || (velocitySamples.length > 1 && now - velocitySamples[0].t > 100)) {
+        velocitySamples.shift();
+      }
       const lines = Math.trunc(accumulatedDy / lh);
       if (lines !== 0) {
         didScroll = true;
@@ -411,30 +416,42 @@
       if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
       // Selection active → keep visible, tap on it to copy
       if (isSelecting) return;
-      if (touchScrolling && Math.abs(velocity) > 0.05) {
-        // Momentum: cap by both speed and swipe distance
+      if (touchScrolling && velocitySamples.length > 0) {
+        // Weighted average of recent velocity samples (newer = heavier)
+        let wSum = 0, wTotal = 0;
+        for (let i = 0; i < velocitySamples.length; i++) {
+          const w = i + 1;
+          wSum += velocitySamples[i].v * w;
+          wTotal += w;
+        }
+        const avgVelocity = wSum / wTotal; // px/ms
         const lh = lineHeight();
-        const distLines = totalDist / lh;
-        const distCap = Math.min(6, distLines * 0.5);
-        const speedV = Math.max(-6, Math.min(6, velocity * 16));
-        let v = Math.sign(speedV) * Math.min(Math.abs(speedV), distCap);
-        let acc = 0;
-        const coast = () => {
-          v *= 0.97;
-          acc += v;
-          const lines = Math.trunc(acc);
-          if (lines !== 0) {
-            term.scrollLines(lines);
-            acc -= lines;
-          }
-          if (Math.abs(v) > 0.05) {
-            momentumId = requestAnimationFrame(coast);
-          } else {
-            momentumId = null;
-            setTimeout(endTouchScroll, 200);
-          }
-        };
-        momentumId = requestAnimationFrame(coast);
+        // Cap velocity at 120px/frame equivalent, then convert to lines/frame
+        const maxPxPerFrame = 240;
+        const cappedPx = Math.max(-maxPxPerFrame, Math.min(maxPxPerFrame, avgVelocity * 16));
+        let v = cappedPx / lh;
+        if (Math.abs(v) > 0.1) {
+          let acc = 0;
+          const friction = 0.95;
+          const coast = () => {
+            v *= friction;
+            acc += v;
+            const lines = Math.trunc(acc);
+            if (lines !== 0) {
+              term.scrollLines(lines);
+              acc -= lines;
+            }
+            if (Math.abs(v) > 0.05) {
+              momentumId = requestAnimationFrame(coast);
+            } else {
+              momentumId = null;
+              setTimeout(endTouchScroll, 200);
+            }
+          };
+          momentumId = requestAnimationFrame(coast);
+        } else {
+          setTimeout(endTouchScroll, 500);
+        }
       } else if (touchScrolling) {
         setTimeout(endTouchScroll, 500);
       }
@@ -640,7 +657,7 @@
   {#if windows.length > 1}
     {#if showWindowCmd}
       <div class="win-switcher expanded">
-        <button class="win-collapse" onclick={() => showWindowCmd = false}><Icon name="arrow-up" size={12} /></button>
+        <button class="win-collapse" onclick={() => { showWindowCmd = false; localStorage.setItem('tmux_winswitcher', '0'); }}><Icon name="arrow-up" size={12} /></button>
         {#each windows as w}
           {@const info = (w.pane_title || '') + ' ' + (w.current_command || '')}
           {@const aiTag = info.match(/kiro/i) ? 'Kiro' : info.match(/claude/i) ? 'Claude' : ''}
@@ -671,7 +688,7 @@
         {/each}
       </div>
     {:else}
-      <button class="win-toggle" onclick={() => showWindowCmd = true}>
+      <button class="win-toggle" onclick={() => { showWindowCmd = true; localStorage.setItem('tmux_winswitcher', '1'); }}>
         <Icon name="sessions" size={16} />
       </button>
     {/if}
@@ -706,7 +723,7 @@
             <button ontouchstart={(e) => { e.preventDefault(); startRepeat('Left'); }}><Icon name="arrow-left" size={13} /></button>
             <button ontouchstart={(e) => { e.preventDefault(); startRepeat('Down'); }}><Icon name="arrow-down" size={13} /></button>
             <button ontouchstart={(e) => { e.preventDefault(); startRepeat('Right'); }}><Icon name="arrow-right" size={13} /></button>
-            <button ontouchstart={(e) => e.stopPropagation()} onclick={() => { document.activeElement?.blur(); }}><Icon name="keyboard" size={13} /></button>
+            <button onpointerdown={(e) => { e.stopPropagation(); e.stopImmediatePropagation(); requestAnimationFrame(() => { const ta = termEl?.querySelector('.xterm-helper-textarea'); if (ta && document.activeElement === ta) { ta.blur(); } else if (ta) { ta.focus(); } }); }}><Icon name="keyboard" size={13} /></button>
           </div>
         </div>
       </div>
@@ -759,12 +776,16 @@
   .win-toggle {
     position: absolute; top: 8px; left: 8px; z-index: 10;
     width: 36px; height: 36px; border: 1px solid var(--border);
-    border-radius: 10px; background: rgba(10,10,15,0.45); color: var(--text2);
+    border-radius: 10px; background: rgba(10,10,15,0.85); color: var(--accent);
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     -webkit-tap-highlight-color: transparent;
     backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
   }
-  :global(html[data-theme="light"]) .win-toggle { background: rgba(245,245,247,0.45); }
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    .win-toggle { background: rgba(10,10,15,0.45); }
+    :global(html[data-theme="light"]) .win-toggle { background: rgba(245,245,247,0.45); }
+  }
+  :global(html[data-theme="light"]) .win-toggle { background: rgba(245,245,247,0.85); }
   .win-toggle:active { background: var(--accent-bg); color: var(--accent); }
   .win-badge {
     font-size: 11px; font-weight: 700;
@@ -773,13 +794,17 @@
   .win-switcher {
     position: absolute; top: 8px; left: 8px; z-index: 10;
     display: flex; flex-direction: column; gap: 2px;
-    background: rgba(10,10,15,0.5); border: 1px solid var(--border);
+    background: rgba(10,10,15,0.85); border: 1px solid var(--border);
     border-radius: 10px; padding: 4px;
     max-height: 50%; overflow-y: auto;
     backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
     box-shadow: 0 4px 16px rgba(0,0,0,0.3);
   }
-  :global(html[data-theme="light"]) .win-switcher { background: rgba(245,245,247,0.5); }
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    .win-switcher { background: rgba(10,10,15,0.5); }
+    :global(html[data-theme="light"]) .win-switcher { background: rgba(245,245,247,0.5); }
+  }
+  :global(html[data-theme="light"]) .win-switcher { background: rgba(245,245,247,0.85); }
   .win-collapse {
     padding: 4px; border: none; border-radius: 6px;
     background: none; color: var(--text3); cursor: pointer;
@@ -895,19 +920,23 @@
     bottom: 12px;
     right: 16px;
     width: 36px; height: 36px;
-    background: var(--bg);
-    border: 1px solid var(--input-border);
-    border-radius: 50%;
+    background: rgba(10,10,15,0.85);
+    border: 1px solid var(--border);
+    border-radius: 10px;
     color: var(--accent);
-    font-size: 16px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 5;
     -webkit-tap-highlight-color: transparent;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
   }
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    .scroll-btn { background: rgba(10,10,15,0.45); }
+    :global(html[data-theme="light"]) .scroll-btn { background: rgba(245,245,247,0.45); }
+  }
+  :global(html[data-theme="light"]) .scroll-btn { background: rgba(245,245,247,0.85); }
   .scroll-btn:active { transform: scale(0.9); }
 
   .input-area {
@@ -918,7 +947,8 @@
   :global(html.keyboard-open) .input-area { padding: 0 4px 2px; }
 
   .input-bar {
-    background: var(--bg);
+    background: rgba(10,10,15,0.65);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
     border: 1px solid var(--border);
     border-radius: 14px;
     padding: 8px 10px;
@@ -926,6 +956,7 @@
     flex-direction: column;
     gap: 8px;
   }
+  :global(html[data-theme="light"]) .input-bar { background: rgba(245,245,247,0.65); }
   :global(html.keyboard-open) .input-bar {
     border-radius: 8px;
     padding: 4px 6px;

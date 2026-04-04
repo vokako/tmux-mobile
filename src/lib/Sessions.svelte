@@ -4,6 +4,36 @@
 
   let { openTerminal, activeTarget = '', visible = false } = $props();
 
+  const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  let pullStartY = 0;
+  let pullDist = $state(0);
+  let pulling = $state(false);
+  let refreshing = $state(false);
+  let sessionsEl;
+
+  let refreshDone = $state(false);
+
+  function onPullStart(e) { pullStartY = e.touches[0].clientY; pulling = false; pullDist = 0; }
+  function onPullMove(e) {
+    if (refreshing || !sessionsEl || sessionsEl.scrollTop > 0) return;
+    const dy = e.touches[0].clientY - pullStartY;
+    if (dy > 10) { pulling = true; pullDist = Math.min(100, dy * 0.5); }
+  }
+  function onPullEnd() {
+    if (pulling && pullDist >= 60) {
+      refreshing = true;
+      pullDist = 60;
+      refresh().finally(() => {
+        refreshing = false;
+        refreshDone = true;
+        setTimeout(() => { refreshDone = false; pullDist = 0; }, 600);
+      });
+    } else {
+      pullDist = 0;
+    }
+    pulling = false;
+  }
+
   let sessions = $state([]);
   let expanded = $state({});
   let panes = $state({});
@@ -108,7 +138,6 @@
     }
   }
 
-  let refreshing = $state(false);
   let confirmKillWindow = $state(null);
   let confirmKill = $state(null);
 
@@ -144,7 +173,18 @@
   }
 </script>
 
-<div class="sessions">
+<div class="sessions" bind:this={sessionsEl} ontouchstart={onPullStart} ontouchmove={onPullMove} ontouchend={onPullEnd}>
+  {#if pullDist > 0}
+    <div class="pull-indicator" style="height:{pullDist}px">
+      {#if refreshDone}
+        <svg class="pull-done" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      {:else}
+        <svg class="pull-arrow" class:pull-spin={refreshing} style="transform:rotate({refreshing ? 0 : Math.min(pullDist / 60 * 180, 180)}deg);opacity:{Math.min(pullDist / 30, 1)}" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+      {/if}
+    </div>
+  {/if}
   {#if error}
     <div class="error">{error}</div>
   {/if}
@@ -533,4 +573,14 @@
     border-radius: 10px;
   }
 
+  .pull-indicator {
+    display: flex; align-items: center; justify-content: center;
+    color: var(--accent); flex-shrink: 0; overflow: hidden;
+    transition: height 0.25s ease;
+  }
+  .pull-arrow { transition: opacity 0.15s; }
+  .pull-done { color: var(--status-ok); animation: pull-pop 0.3s ease; }
+  @keyframes pull-pop { 0% { transform: scale(0.5); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+  .pull-spin { animation: pull-rotate 0.6s linear infinite; }
+  @keyframes pull-rotate { to { transform: rotate(360deg) !important; } }
 </style>
