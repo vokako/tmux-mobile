@@ -619,22 +619,18 @@
   // Long-press repeat for shortcut keys
   let repeatTimer = null;
   let repeatInterval = null;
+
   function startRepeat(key) {
     sendSpecial(key);
     repeatTimer = setTimeout(() => {
       repeatInterval = setInterval(() => sendSpecial(key), 80);
-    }, 400); // 400ms delay before repeat starts, then 80ms interval
+    }, 400);
   }
   function stopRepeat() {
     clearTimeout(repeatTimer);
     clearInterval(repeatInterval);
     repeatTimer = null;
     repeatInterval = null;
-    if (directMode && inputEl) {
-      requestAnimationFrame(() => inputEl.focus());
-    } else if (term) {
-      requestAnimationFrame(() => term.focus());
-    }
   }
 
   // When input box opens: disable xterm stdin (so its hidden textarea is removed)
@@ -708,21 +704,21 @@
     {#if viewMode === 'terminal' && isMobile}
       <div class="input-bar">
         <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="shortcut-rows" ontouchend={(e) => { e.preventDefault(); stopRepeat(); }} ontouchcancel={stopRepeat} oncontextmenu={(e) => e.preventDefault()} onmouseup={stopRepeat}>
+        <div class="shortcut-rows" onpointerdown={(e) => e.preventDefault()} ontouchend={(e) => { e.preventDefault(); stopRepeat(); }} ontouchcancel={stopRepeat} oncontextmenu={(e) => e.preventDefault()} onmouseup={stopRepeat}>
           <div class="shortcuts">
-            <button tabindex="-1" ontouchstart={(e) => { e.preventDefault(); startRepeat('Escape'); }}>Esc</button>
-            <button tabindex="-1" ontouchstart={(e) => { e.preventDefault(); startRepeat('C-d'); }}>^D</button>
-            <button tabindex="-1" ontouchstart={(e) => { e.preventDefault(); startRepeat('C-a'); }}><Icon name="skip-left" size={13} /></button>
-            <button tabindex="-1" ontouchstart={(e) => { e.preventDefault(); startRepeat('Up'); }}><Icon name="arrow-up" size={13} /></button>
-            <button tabindex="-1" ontouchstart={(e) => { e.preventDefault(); startRepeat('C-e'); }}><Icon name="skip-right" size={13} /></button>
-            <button tabindex="-1" ontouchstart={(e) => { e.preventDefault(); startRepeat('BSpace'); }}><Icon name="delete" size={13} /></button>
+            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('Escape'); }}>Esc</button>
+            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('C-d'); }}>^D</button>
+            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('C-a'); }}><Icon name="skip-left" size={13} /></button>
+            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('Up'); }}><Icon name="arrow-up" size={13} /></button>
+            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('C-e'); }}><Icon name="skip-right" size={13} /></button>
+            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('BSpace'); }}><Icon name="delete" size={13} /></button>
           </div>
           <div class="shortcuts">
-            <button tabindex="-1" ontouchstart={(e) => { e.preventDefault(); startRepeat('Tab'); }}>Tab</button>
-            <button tabindex="-1" ontouchstart={(e) => { e.preventDefault(); startRepeat('C-c'); }}>^C</button>
-            <button tabindex="-1" ontouchstart={(e) => { e.preventDefault(); startRepeat('Left'); }}><Icon name="arrow-left" size={13} /></button>
-            <button tabindex="-1" ontouchstart={(e) => { e.preventDefault(); startRepeat('Down'); }}><Icon name="arrow-down" size={13} /></button>
-            <button tabindex="-1" ontouchstart={(e) => { e.preventDefault(); startRepeat('Right'); }}><Icon name="arrow-right" size={13} /></button>
+            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('Tab'); }}>Tab</button>
+            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('C-c'); }}>^C</button>
+            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('Left'); }}><Icon name="arrow-left" size={13} /></button>
+            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('Down'); }}><Icon name="arrow-down" size={13} /></button>
+            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('Right'); }}><Icon name="arrow-right" size={13} /></button>
             <button class:sk-active={directMode} ontouchstart={(e) => e.stopPropagation()} onmousedown={(e) => e.stopPropagation()} onclick={() => { directMode = !directMode; if (directMode) requestAnimationFrame(() => inputEl?.focus()); }}><Icon name="chat" size={13} /></button>
           </div>
         </div>
