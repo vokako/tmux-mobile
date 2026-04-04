@@ -676,7 +676,6 @@
               }
             }}
           >
-            <span class="win-num">{w.window}</span>
             {#if aiTag === 'Kiro'}
               <img class="win-ai-icon" src="/assets/kiro.svg" alt="Kiro" />
             {:else if aiTag === 'Claude'}
@@ -688,8 +687,16 @@
         {/each}
       </div>
     {:else}
+      {@const cur = windows.find(w => String(w.window) === currentWindow)}
+      {@const curAi = cur ? ((cur.pane_title || '') + ' ' + (cur.current_command || '')).match(/kiro/i) ? 'Kiro' : ((cur.pane_title || '') + ' ' + (cur.current_command || '')).match(/claude/i) ? 'Claude' : '' : ''}
       <button class="win-toggle" onclick={() => { showWindowCmd = true; localStorage.setItem('tmux_winswitcher', '1'); }}>
-        <Icon name="sessions" size={16} />
+        {#if curAi === 'Kiro'}
+          <img class="win-ai-icon" src="/assets/kiro.svg" alt="Kiro" />
+        {:else if curAi === 'Claude'}
+          <img class="win-ai-icon claude" src="/assets/claude.svg" alt="Claude" />
+        {:else}
+          <span class="win-toggle-cmd">{cur?.current_command || cur?.window_name || '?'}</span>
+        {/if}
       </button>
     {/if}
   {/if}
@@ -775,9 +782,9 @@
   /* Window switcher */
   .win-toggle {
     position: absolute; top: 8px; right: 8px; z-index: 10;
-    width: 36px; height: 36px; border: 1px solid var(--border);
+    width: auto; min-width: 36px; height: 36px; border: 1px solid var(--border);
     border-radius: 10px; background: rgba(10,10,15,0.85); color: var(--accent);
-    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0 8px;
     -webkit-tap-highlight-color: transparent;
     backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
   }
@@ -787,6 +794,7 @@
   }
   :global(html[data-theme="light"]) .win-toggle { background: rgba(245,245,247,0.85); }
   .win-toggle:active { background: var(--accent-bg); color: var(--accent); }
+  .win-toggle-cmd { font-size: 10px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .win-badge {
     font-size: 11px; font-weight: 700;
     font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
@@ -813,18 +821,20 @@
   }
   .win-collapse:active { color: var(--accent); }
   .win-tab {
-    display: flex; align-items: center; gap: 8px;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
     padding: 7px 6px; border: none; border-radius: 8px;
     background: none; color: var(--text2); font-size: 12px;
     cursor: pointer; white-space: nowrap;
     -webkit-tap-highlight-color: transparent;
-    font-family: 'Maple Mono NF CN', 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
   }
   .win-tab.active { background: var(--accent-bg); color: var(--accent); }
   .win-tab:active { background: var(--surface2); }
   .win-num { font-weight: 600; min-width: 14px; text-align: center; }
-  .win-cmd { color: var(--text3); font-size: 10px; max-width: 100px; overflow: hidden; text-overflow: ellipsis; }
+  .win-cmd { color: inherit; font-size: 10px; max-width: 100px; overflow: hidden; text-overflow: ellipsis; }
   .win-ai-icon { height: 14px; width: auto; }
+  .win-tab .win-ai-icon { opacity: 0.5; }
+  .win-tab.active .win-ai-icon { opacity: 1; }
   .win-ai-icon.claude { filter: brightness(0.9); }
 
   .input-status {

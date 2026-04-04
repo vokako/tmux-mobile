@@ -1386,7 +1386,7 @@
 
   /* Editor */
   .editor-wrap {
-    flex: 1; display: flex; overflow: auto; -webkit-overflow-scrolling: touch; min-height: 0;
+    flex: 1; display: flex; overflow: auto; -webkit-overflow-scrolling: touch; min-height: 0; touch-action: pan-y;
   }
   .editor-nums {
     padding: 12px 8px; text-align: right; color: var(--text3); font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
@@ -1404,10 +1404,8 @@
     position: absolute; inset: 0; width: 100%; height: 100%; padding: 12px; border: none; resize: none;
     background: transparent; color: transparent; caret-color: var(--text);
     font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-size: var(--file-font-size, 13px); line-height: 1.5; outline: none;
-    white-space: pre-wrap; word-break: break-all;
+    white-space: pre-wrap; word-break: break-all; overflow: hidden;
   }
-
-  /* Info */
   .info-body { flex: 1; overflow: auto; padding: 12px; }
   .info-row {
     display: flex; padding: 10px 0; border-bottom: 1px solid var(--border2);
