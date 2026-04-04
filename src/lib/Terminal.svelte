@@ -10,13 +10,11 @@
   let input = $state('');
   let paneContent = $state('');
   let command = $state(initialCommand);
-  let directMode = $state(false);
   $effect(() => { command = initialCommand; });
   let termEl;
   let term;
   let termAtBottom = $state(true);
   let toastMsg = $state('');
-  let inputEl;
   const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
   function showToast(msg) {
@@ -226,7 +224,6 @@
 
     // Forward keyboard input to tmux — skip when input box is open
     term.onData(data => {
-      if (directMode && inputEl) return;
       // Filter xterm.js terminal response sequences that leak through onData.
       // These are generated when pane content contains query sequences (e.g. \x1b[6n).
       // Without filtering, they create a feedback loop: response→tmux→capture→xterm→response.
@@ -245,7 +242,7 @@
       sendKeys(target, data, true).catch(() => {});
     });
     // Block xterm from processing keys when input box is open
-    term.attachCustomKeyEventHandler(() => !directMode);
+    term.attachCustomKeyEventHandler(() => true);
 
     let lastContent = '';
     let lastCursor = null;
@@ -314,7 +311,7 @@
         selectionRange = null;
         // Temporarily disable stdin so this tap doesn't open the keyboard
         term.options.disableStdin = true;
-        setTimeout(() => { if (term) term.options.disableStdin = directMode; }, 300);
+        setTimeout(() => { if (term) term.options.disableStdin = false; }, 300);
         endTouchScroll();
         return;
       }
@@ -633,15 +630,6 @@
     repeatInterval = null;
   }
 
-  // When input box opens: disable xterm stdin (so its hidden textarea is removed)
-  // and focus our textarea. When closed: re-enable xterm stdin.
-  $effect(() => {
-    if (!term) return;
-    term.options.disableStdin = directMode;
-    if (directMode && inputEl) {
-      requestAnimationFrame(() => inputEl.focus());
-    }
-  });
 
 </script>
 
@@ -663,7 +651,6 @@
               e.stopPropagation();
               if (String(w.window) !== currentWindow && onSwitchPane) {
                 document.activeElement?.blur();
-                directMode = false;
                 touchScrolling = false;
                 const fh = window.__fullHeight?.() || window.innerHeight;
                 document.documentElement.style.setProperty('--app-height', fh + 'px');
@@ -719,27 +706,9 @@
             <button ontouchstart={(e) => { e.preventDefault(); startRepeat('Left'); }}><Icon name="arrow-left" size={13} /></button>
             <button ontouchstart={(e) => { e.preventDefault(); startRepeat('Down'); }}><Icon name="arrow-down" size={13} /></button>
             <button ontouchstart={(e) => { e.preventDefault(); startRepeat('Right'); }}><Icon name="arrow-right" size={13} /></button>
-            <button class:sk-active={directMode} ontouchstart={(e) => e.stopPropagation()} onmousedown={(e) => e.stopPropagation()} onclick={() => { directMode = !directMode; if (directMode) requestAnimationFrame(() => inputEl?.focus()); }}><Icon name="chat" size={13} /></button>
+            <button ontouchstart={(e) => e.stopPropagation()} onclick={() => { document.activeElement?.blur(); }}><Icon name="keyboard" size={13} /></button>
           </div>
         </div>
-        {#if directMode}
-        <div class="cmd-row">
-          <span class="prompt">❯</span>
-          <textarea
-            bind:value={input}
-            bind:this={inputEl}
-            onkeydown={handleKeydown}
-            oninput={autoResize}
-            placeholder="command…"
-            autocapitalize="off"
-            autocomplete="off"
-            autocorrect="off"
-            spellcheck="false"
-            rows="1"
-          ></textarea>
-          <button class="send" ontouchstart={(e) => { if (input.trim()) e.preventDefault(); }} onmousedown={(e) => { if (input.trim()) e.preventDefault(); }} onclick={handleSubmit}><Icon name={input.trim() ? "arrow-right" : "send"} size={14} /></button>
-        </div>
-        {/if}
       </div>
     {:else if viewMode === 'terminal'}
       <!-- Desktop: no input bar, keyboard goes directly to xterm.js -->
@@ -989,11 +958,6 @@
     -webkit-tap-highlight-color: transparent;
     display: flex; align-items: center; justify-content: center;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
-  }
-  .shortcuts button.sk-active {
-    background: var(--accent-bg);
-    color: var(--accent);
-    border-color: var(--accent);
   }
   .shortcuts button:active {
     background: var(--accent-bg);
