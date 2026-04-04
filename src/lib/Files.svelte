@@ -22,7 +22,7 @@
   import 'highlight.js/styles/github-dark.min.css';
   import mermaid from 'mermaid';
   import Icon from './Icon.svelte';
-  import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsUpload, getBookmarks, saveBookmarks, shellExec } from './ws.js';
+  import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsUpload, getBookmarks, saveBookmarks, gitCmd } from './ws.js';
 
   // Tauri plugin imports (tree-shaken in browser builds)
   let tauriFs, tauriDialog, tauriOpener, tauriPath;
@@ -64,7 +64,7 @@
   mermaid.initialize({ startOnLoad: false, theme: 'dark' });
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
-  let { session = '', onGoBack = null, visible = false } = $props();
+  let { session = '', onGoBack = null, visible = false, fontSize = 14 } = $props();
 
   function navPush() { history.pushState({ app: true }, ''); }
 
@@ -74,8 +74,8 @@
       if (view === 'git' && gitDiff) { gitDiff = null; return true; }
       if (view === 'git') { view = 'list'; return true; }
       if (view === 'edit') { view = 'preview'; return true; }
-      if (view === 'info') { view = currentFile?.content != null ? 'preview' : 'list'; return true; }
-      if (view === 'preview') { view = 'list'; currentFile = null; return true; }
+      if (view === 'info') { view = fromGit ? (fromGit = false, 'git') : currentFile?.content != null ? 'preview' : 'list'; return true; }
+      if (view === 'preview') { if (fromGit) { fromGit = false; view = 'git'; } else { view = 'list'; } currentFile = null; return true; }
       if (view === 'local') { view = 'list'; return true; }
       if (cwd !== '/') { goUp(); return true; }
       return false;
@@ -169,11 +169,18 @@
   let gitLog = $state([]);
   let gitBranch = $state('');
   let gitDiff = $state(null); // { file, diff }
+  let fromGit = $state(false);
   let gitLoading = $state(false);
   let gitError = $state('');
 
-  async function git(cmd) {
-    const r = await shellExec(`git ${cmd}`, cwd);
+  let gitRoot = '';
+
+  async function git(subcmd, ...args) {
+    if (!gitRoot) {
+      const r = await gitCmd('rev-parse', ['--show-toplevel'], cwd);
+      gitRoot = r.stdout.trim();
+    }
+    const r = await gitCmd(subcmd, args, gitRoot);
     if (r.code !== 0 && r.stderr) throw new Error(r.stderr.trim());
     return r.stdout;
   }
@@ -182,8 +189,8 @@
     gitLoading = true;
     gitError = '';
     try {
-      gitBranch = (await git('branch --show-current')).trim();
-      const out = await git('status --porcelain');
+      gitBranch = (await git('branch', '--show-current')).trim();
+      const out = await git('status', '--porcelain');
       gitStatus = out.split('\n').filter(Boolean).map(line => ({
         status: line.slice(0, 2),
         file: line.slice(3),
@@ -196,7 +203,7 @@
     gitLoading = true;
     gitError = '';
     try {
-      const out = await git('log --oneline -30 --format="%h|%s|%ar|%an"');
+      const out = await git('log', '--oneline', '-30', '--format=%h|%s|%ar|%an');
       gitLog = out.split('\n').filter(Boolean).map(line => {
         const [hash, subject, date, author] = line.split('|');
         return { hash, subject, date, author };
@@ -209,6 +216,7 @@
     view = 'git';
     gitTab = 'status';
     gitDiff = null;
+    gitRoot = '';
     await loadGitStatus();
     navPush();
   }
@@ -216,18 +224,26 @@
   async function showFileDiff(file, staged) {
     gitLoading = true;
     try {
-      const diff = await git(`diff ${staged ? '--cached ' : ''}-- "${file}"`);
-      gitDiff = { file, diff: diff || '(no diff — new or binary file)' };
-    } catch (e) { gitDiff = { file, diff: e.message }; }
+      const isUntracked = gitStatus.find(f => f.file === file)?.status === '??';
+      const isBinary = !isUntracked && (await git('diff', '--numstat', ...(staged ? ['--cached'] : []), '--', file)).startsWith('-');
+      if (isUntracked || isBinary || file.match(/\.(png|jpe?g|gif|webp|svg|ico|bmp|avif|pdf|zip|tar|gz|mp[34]|mov|wav)$/i)) {
+        gitLoading = false;
+        fromGit = true;
+        openEntry({ type: 'file', path: gitRoot + '/' + file, name: file.split('/').pop() });
+        return;
+      }
+      const diff = await git('diff', ...(staged ? ['--cached'] : []), '--', file);
+      gitDiff = { file, diff: diff || '(no changes)', _root: gitRoot };
+    } catch (e) { gitDiff = { file, diff: e.message, _root: '' }; }
     gitLoading = false;
   }
 
   async function showCommitDiff(hash) {
     gitLoading = true;
     try {
-      const diff = await git(`show --stat --patch ${hash}`);
-      gitDiff = { file: hash, diff };
-    } catch (e) { gitDiff = { file: hash, diff: e.message }; }
+      const diff = await git('show', '--stat', '--patch', hash);
+      gitDiff = { file: hash, diff, _root: gitRoot };
+    } catch (e) { gitDiff = { file: hash, diff: e.message, _root: '' }; }
     gitLoading = false;
   }
 
@@ -288,8 +304,8 @@
 
   function goBack() {
     if (view === 'edit') { view = 'preview'; }
-    else if (view === 'info') { view = currentFile?.content != null ? 'preview' : 'list'; }
-    else if (view === 'preview') { view = 'list'; currentFile = null; }
+    else if (view === 'info') { view = fromGit ? (fromGit = false, 'git') : currentFile?.content != null ? 'preview' : 'list'; }
+    else if (view === 'preview') { if (fromGit) { fromGit = false; view = 'git'; } else { view = 'list'; } currentFile = null; }
     else goUp();
   }
 
@@ -448,7 +464,7 @@
   }
 
   function backToList() {
-    view = 'list';
+    if (fromGit) { fromGit = false; view = 'git'; } else { view = 'list'; }
     currentFile = null;
   }
 
@@ -936,7 +952,7 @@
         <button class="act-btn" onclick={() => { view = 'info'; navPush(); }}><Icon name="info" size={14} /></button>
       </div>
     </div>
-    <div class="preview-body" style="zoom:{previewZoom / 100}">
+    <div class="preview-body" style="zoom:{previewZoom / 100};--file-font-size:{fontSize}px">
       {#if mimeCategory(currentFile.stat?.mime_hint) === 'markdown'}
         <div class="md-render" bind:this={previewEl}>{@html renderMarkdown(currentFile.content)}</div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'csv'}
@@ -955,7 +971,7 @@
       {:else}
         <div class="code-lined">
           <div class="line-nums">{@html currentFile.content.split('\n').map((_, i) => i + 1).join('\n')}</div>
-          <pre class="code-preview">{currentFile.content}</pre>
+          <pre class="code-preview"><code>{@html highlightCode(currentFile.content, currentFile.stat?.mime_hint)}</code></pre>
         </div>
       {/if}
     </div>
@@ -970,7 +986,7 @@
         <button class="act-btn save" onclick={saveFile} disabled={!isEdited}><Icon name="save" size={14} /></button>
       </div>
     </div>
-    <div class="editor-wrap">
+    <div class="editor-wrap" style="--file-font-size:{fontSize}px">
       <div class="editor-nums">{@html editContent.split('\n').map((_, i) => i + 1).join('\n')}</div>
       <div class="editor-layer">
         <pre class="editor-highlight" aria-hidden="true"><code>{@html highlightCode(editContent, currentFile?.stat?.mime_hint)}</code>{'\n'}</pre>
@@ -1074,9 +1090,17 @@
         </div>
       {/if}
     {:else}
-      <div class="git-diff-header">{gitDiff.file}</div>
-      <div class="git-diff-body">
-        <pre>{#each gitDiff.diff.split('\n') as line}<span class={line.startsWith('+') ? 'diff-add' : line.startsWith('-') ? 'diff-del' : line.startsWith('@@') ? 'diff-hunk' : ''}>{line}</span>{'\n'}{/each}</pre>
+      <div class="git-diff-header">
+        <span class="git-diff-name">{gitDiff.file}</span>
+        <button class="act-btn" onclick={() => {
+          const root = gitDiff._root;
+          if (root) { fromGit = true; openEntry({ type: 'file', path: root + '/' + gitDiff.file, name: gitDiff.file.split('/').pop() }); }
+        }}><Icon name="eye" size={14} /></button>
+      </div>
+      <div class="git-diff-body" style="--file-font-size:{fontSize}px">
+        {#each gitDiff.diff.split('\n') as line, i}
+          <div class="diff-line" class:diff-add={line.startsWith('+') && !line.startsWith('+++')} class:diff-del={line.startsWith('-') && !line.startsWith('---')} class:diff-hunk={line.startsWith('@@')} class:diff-meta={line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')}><span class="diff-text">{line}</span></div>
+        {/each}
       </div>
     {/if}
   {/if}
@@ -1126,7 +1150,7 @@
   /* Path row */
   .bc-path-row {
     display: flex; align-items: center; gap: 1px; padding: 4px 10px;
-    overflow-x: auto; font-size: 12px; font-family: 'SF Mono', Menlo, monospace;
+    overflow-x: auto; font-size: 12px; font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
     scrollbar-width: none; border-bottom: 1px solid var(--border2); flex-shrink: 0;
   }
   .bc-path-row::-webkit-scrollbar { display: none; }
@@ -1149,7 +1173,7 @@
   .bm-path {
     flex: 1; display: block;
     padding: 8px 0; border: none; background: none; color: var(--text);
-    font-size: 12px; font-family: 'SF Mono', Menlo, monospace;
+    font-size: 12px; font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
     cursor: pointer; text-align: left; overflow-x: auto;
     white-space: nowrap; scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
@@ -1170,7 +1194,7 @@
   .new-item input {
     flex: 1; padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 6px;
     background: var(--input-bg); color: var(--text); font-size: 13px;
-    font-family: 'SF Mono', Menlo, monospace;
+    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
   }
   .new-item button {
     padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 6px;
@@ -1205,7 +1229,7 @@
   .file-main:active { background: var(--input-bg); }
   .file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dir-name { color: var(--accent); }
-  .file-size { color: var(--text3); font-size: 11px; font-family: 'SF Mono', Menlo, monospace; white-space: nowrap; }
+  .file-size { color: var(--text3); font-size: 11px; font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; white-space: nowrap; }
   .file-actions { display: flex; gap: 2px; padding-right: 8px; }
   .act-btn {
     padding: 6px; border: none; border-radius: 6px; background: none;
@@ -1239,7 +1263,7 @@
   /* Preview body */
   .preview-body { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 12px; display: flex; flex-direction: column; min-height: 0; }
   .code-preview {
-    margin: 0; font-family: 'SF Mono', Menlo, monospace; font-size: 13px;
+    margin: 0; font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; font-size: var(--file-font-size, 13px);
     line-height: 1.5; color: var(--text); white-space: pre-wrap; word-break: break-all; flex: 1;
   }
   .code-preview :global(code) { font-family: inherit; background: none; padding: 0; }
@@ -1247,8 +1271,8 @@
     display: flex; flex: 1; overflow: auto; -webkit-overflow-scrolling: touch;
   }
   .line-nums {
-    padding: 0 8px; text-align: right; color: var(--text3); font-family: 'SF Mono', Menlo, monospace;
-    font-size: 13px; line-height: 1.5; white-space: pre; user-select: none; flex-shrink: 0;
+    padding: 0 8px; text-align: right; color: var(--text3); font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
+    font-size: var(--file-font-size, 13px); line-height: 1.5; white-space: pre; user-select: none; flex-shrink: 0;
     border-right: 1px solid var(--border);
   }
   .html-preview {
@@ -1262,13 +1286,13 @@
     flex: 1; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 12px;
   }
   .image-preview img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; }
-  .md-render { font-size: 14px; line-height: 1.6; color: var(--text); overflow-wrap: break-word; }
+  .md-render { font-size: var(--file-font-size, 14px); line-height: 1.6; color: var(--text); overflow-wrap: break-word; }
   .md-render :global(h1) { font-size: 22px; margin: 16px 0 8px; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 6px; }
   .md-render :global(h2) { font-size: 18px; margin: 14px 0 6px; color: var(--accent); }
   .md-render :global(h3) { font-size: 16px; margin: 10px 0 4px; color: var(--accent); }
   .md-render :global(h4), .md-render :global(h5), .md-render :global(h6) { font-size: 14px; margin: 8px 0 4px; color: var(--accent); }
   .md-render :global(p) { margin: 8px 0; }
-  .md-render :global(code) { background: var(--surface2); padding: 2px 5px; border-radius: 3px; font-size: 12px; font-family: 'SF Mono', Menlo, monospace; }
+  .md-render :global(code) { background: var(--surface2); padding: 2px 5px; border-radius: 3px; font-size: 12px; font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; }
   .md-render :global(pre) { background: var(--code-bg); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 8px 0; }
   .md-render :global(pre code) { background: none; padding: 0; font-size: 12px; line-height: 1.5; }
   .md-render :global(strong) { color: var(--text); }
@@ -1300,13 +1324,13 @@
     flex: 1; display: flex; overflow: auto; -webkit-overflow-scrolling: touch; min-height: 0;
   }
   .editor-nums {
-    padding: 12px 8px; text-align: right; color: var(--text3); font-family: 'SF Mono', Menlo, monospace;
-    font-size: 13px; line-height: 1.5; white-space: pre; user-select: none; flex-shrink: 0;
+    padding: 12px 8px; text-align: right; color: var(--text3); font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
+    font-size: var(--file-font-size, 13px); line-height: 1.5; white-space: pre; user-select: none; flex-shrink: 0;
     border-right: 1px solid var(--border);
   }
   .editor-layer { position: relative; flex: 1; min-width: 0; }
   .editor-highlight {
-    margin: 0; padding: 12px; font-family: 'SF Mono', Menlo, monospace; font-size: 13px;
+    margin: 0; padding: 12px; font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; font-size: var(--file-font-size, 13px);
     line-height: 1.5; white-space: pre-wrap; word-break: break-all; color: var(--text);
     pointer-events: none;
   }
@@ -1314,7 +1338,7 @@
   .editor {
     position: absolute; inset: 0; width: 100%; height: 100%; padding: 12px; border: none; resize: none;
     background: transparent; color: transparent; caret-color: var(--text);
-    font-family: 'SF Mono', Menlo, monospace; font-size: 13px; line-height: 1.5; outline: none;
+    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; font-size: var(--file-font-size, 13px); line-height: 1.5; outline: none;
     white-space: pre-wrap; word-break: break-all;
   }
 
@@ -1325,7 +1349,7 @@
   }
   .info-label { width: 100px; flex-shrink: 0; color: var(--text3); font-size: 12px; }
   .info-val { flex: 1; font-size: 13px; word-break: break-all; }
-  .info-val.mono { font-family: 'SF Mono', Menlo, monospace; }
+  .info-val.mono { font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; }
   .info-path {
     flex: 1; font-size: 13px; word-break: break-all; text-align: left;
     background: none; border: none; color: var(--text); cursor: pointer; padding: 0;
@@ -1348,12 +1372,12 @@
   .dl-path {
     flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     direction: rtl; text-align: left; min-width: 0;
-    font-family: 'SF Mono', Menlo, monospace; font-size: 11px; color: var(--text2);
+    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; font-size: 11px; color: var(--text2);
   }
   .dl-ring { flex-shrink: 0; }
   .dl-ring circle:last-child { transition: stroke-dashoffset 0.3s ease; }
   .dl-pct {
-    font-family: 'SF Mono', Menlo, monospace; font-size: 11px;
+    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; font-size: 11px;
     font-weight: 600; color: var(--accent); min-width: 30px;
   }
   .dl-name {
@@ -1397,7 +1421,7 @@
   }
   .git-file:active { background: var(--accent-bg); }
   .git-st {
-    font-family: 'SF Mono', Menlo, monospace; font-size: 12px; font-weight: 600;
+    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; font-size: 12px; font-weight: 600;
     min-width: 24px; color: var(--text3);
   }
   .git-st.git-add { color: var(--status-ok); }
@@ -1405,26 +1429,32 @@
   .git-st.git-del { color: var(--danger); }
   .git-fname {
     flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-family: 'SF Mono', Menlo, monospace; font-size: 12px;
+    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; font-size: 12px;
   }
   .git-hash {
-    font-family: 'SF Mono', Menlo, monospace; font-size: 11px;
+    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; font-size: 11px;
     color: var(--accent); min-width: 56px;
   }
   .git-date { font-size: 11px; color: var(--text3); white-space: nowrap; }
   .git-diff-header {
-    padding: 8px 12px; font-family: 'SF Mono', Menlo, monospace; font-size: 12px;
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace; font-size: 12px;
     color: var(--accent); background: var(--accent-bg); border-bottom: 1px solid var(--border);
-    flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex-shrink: 0;
   }
+  .git-diff-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .git-diff-body {
     flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; background: var(--code-bg);
+    font-family: 'Maple Mono NF CN', 'SF Mono', Menlo, monospace;
+    font-size: var(--file-font-size, 13px); line-height: 1.6;
   }
-  .git-diff-body pre {
-    margin: 0; padding: 10px; font-family: 'SF Mono', Menlo, monospace;
-    font-size: 11px; line-height: 1.5; white-space: pre; color: var(--text2);
+  .diff-line {
+    padding: 0 12px; white-space: pre; min-height: 1.6em;
+    border-left: 3px solid transparent;
   }
-  .diff-add { color: var(--status-ok); }
-  .diff-del { color: var(--danger); }
-  .diff-hunk { color: var(--accent); font-weight: 600; }
+  .diff-line.diff-add { background: rgba(74,222,128,0.1); border-left-color: var(--status-ok); color: var(--status-ok); }
+  .diff-line.diff-del { background: rgba(255,80,80,0.1); border-left-color: var(--danger); color: var(--danger); }
+  .diff-line.diff-hunk { color: var(--accent); font-weight: 600; background: var(--accent-bg); }
+  .diff-line.diff-meta { color: var(--text3); }
+  .diff-text { user-select: text; -webkit-user-select: text; }
 </style>

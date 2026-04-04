@@ -428,14 +428,34 @@ fn handle_request(req: &Request) -> Response {
             }
         }
 
-        "shell_exec" => {
-            let cmd = match require_str(p, "command") {
+        "git" => {
+            let subcmd = match require_str(p, "subcmd") {
                 Ok(s) => s,
                 Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
             };
+            let args: Vec<String> = p
+                .get("args")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default();
             let cwd = p.get("cwd").and_then(|v| v.as_str());
-            let mut child = std::process::Command::new("sh");
-            child.arg("-c").arg(cmd);
+
+            const ALLOWED: &[&str] = &[
+                "status", "diff", "log", "show", "branch", "rev-parse",
+            ];
+            if !ALLOWED.contains(&subcmd) {
+                return Response::err(id, ERR_INVALID_PARAMS, format!("git subcommand not allowed: {}", subcmd));
+            }
+            // Reject args containing shell metacharacters
+            for arg in &args {
+                if arg.contains(|c: char| matches!(c, '|' | ';' | '&' | '$' | '`' | '\n')) {
+                    return Response::err(id, ERR_INVALID_PARAMS, "invalid characters in argument".into());
+                }
+            }
+
+            let mut child = std::process::Command::new("git");
+            child.arg(&subcmd);
+            child.args(&args);
             if let Some(d) = cwd {
                 child.current_dir(d);
             }

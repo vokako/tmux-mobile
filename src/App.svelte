@@ -470,7 +470,7 @@
     {/if}
     {#if terminalTarget}
       <div class="page-layer" class:hidden={page !== 'files'}>
-        <Files session={terminalSession} visible={page === 'files'} onGoBack={(fn) => filesGoBack = fn} />
+        <Files session={terminalSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} />
       </div>
       <div class="page-layer" class:hidden={page !== 'terminal'}>
         <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {viewMode} {fontSize} onChatSupported={(v) => chatSupported = v} onSwitchPane={(t, cmd) => { terminalTarget = t; terminalCommand = cmd || ''; }} />
@@ -570,7 +570,11 @@
     left: 0;
     overscroll-behavior: none;
     -webkit-overflow-scrolling: touch;
+    user-select: none;
+    -webkit-user-select: none;
   }
+  :global(input), :global(textarea) { user-select: text; -webkit-user-select: text; }
+  :global(.preview-body), :global(.md-render), :global(.code-preview), :global(.git-diff-body), :global(.info-body) { user-select: text; -webkit-user-select: text; }
   :global(*) { box-sizing: border-box; }
   :global(html) { overflow: hidden; overscroll-behavior: none; --sat: env(safe-area-inset-top); --sab: env(safe-area-inset-bottom); --app-height: 100dvh; }
   :global(html[data-theme="dark"]) {

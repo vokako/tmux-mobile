@@ -12,7 +12,11 @@
   let showToken = $state(false);
   let showHistory = $state(false);
 
-  let history = $state(JSON.parse(localStorage.getItem('tmux_address_history') || '[]'));
+  let history = $state((() => {
+    const raw = JSON.parse(localStorage.getItem('tmux_address_history') || '[]');
+    // Migrate: old format was string[], new is {address, token}[]
+    return raw.map(h => typeof h === 'string' ? { address: h, token: '' } : h);
+  })());
 
   // Migrate old host+port
   $effect(() => {
@@ -52,9 +56,9 @@
     return a;
   }
 
-  function saveHistory(addr) {
-    const trimmed = addr.trim();
-    history = [trimmed, ...history.filter(h => h !== trimmed)].slice(0, 8);
+  function saveHistory(addr, tok) {
+    const entry = { address: addr.trim(), token: tok || '' };
+    history = [entry, ...history.filter(h => h.address !== entry.address)].slice(0, 8);
     localStorage.setItem('tmux_address_history', JSON.stringify(history));
   }
 
@@ -70,7 +74,7 @@
       localStorage.setItem('tmux_token', token);
       if (socket.trim()) localStorage.setItem('tmux_socket', socket.trim());
       else localStorage.removeItem('tmux_socket');
-      saveHistory(url);
+      saveHistory(url, token);
       await connect(url, token);
       if (cancelled) return;
       if (socket.trim()) {
@@ -125,7 +129,7 @@
         {#if showHistory && history.length}
           <div class="hist-list">
             {#each history as h}
-              <button class="hist-item" onclick={() => { address = h; showHistory = false; }}>{h}</button>
+              <button class="hist-item" onclick={() => { address = h.address; token = h.token; showHistory = false; }}>{h.address}</button>
             {/each}
           </div>
         {/if}
