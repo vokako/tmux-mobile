@@ -248,13 +248,46 @@
   }
 
   let pushResult = $state('');
+  let commitMsg = $state('');
+  let showCommitInput = $state(false);
+
   async function gitPush() {
     gitLoading = true;
     pushResult = '';
     try {
       const r = await git('push');
-      pushResult = r.trim() || 'Pushed successfully';
-    } catch (e) { pushResult = e.message; }
+      pushResult = r.trim() || 'Pushed';
+    } catch (e) { pushResult = '✗ ' + e.message; }
+    gitLoading = false;
+    setTimeout(() => { pushResult = ''; }, 3000);
+  }
+
+  async function gitAddAll() {
+    try { await git('add', '.'); } catch {}
+    loadGitStatus();
+  }
+
+  async function gitAddFile(file) {
+    try { await git('add', file); } catch {}
+    loadGitStatus();
+  }
+
+  async function gitRestoreFile(file) {
+    try { await git('restore', '--staged', file); } catch {}
+    loadGitStatus();
+  }
+
+  async function gitCommit() {
+    if (!commitMsg.trim()) return;
+    gitLoading = true;
+    pushResult = '';
+    try {
+      await git('commit', '-m', commitMsg.trim());
+      pushResult = 'Committed';
+      commitMsg = '';
+      showCommitInput = false;
+      loadGitStatus();
+    } catch (e) { pushResult = '✗ ' + e.message; }
     gitLoading = false;
     setTimeout(() => { pushResult = ''; }, 3000);
   }
@@ -1065,14 +1098,24 @@
       <button class="back-btn" onclick={() => { if (gitDiff) gitDiff = null; else view = 'list'; }}><Icon name="chevron-left" size={16} /></button>
       <span class="preview-name"><Icon name="git-branch" size={14} /> {gitBranch || 'Git'}</span>
       <div class="preview-actions">
-        <button class="act-btn" onclick={gitPush} disabled={gitLoading}><Icon name="upload" size={14} /></button>
         <button class="act-btn" onclick={() => { gitTab === 'status' ? loadGitStatus() : loadGitLog(); }}><Icon name="refresh" size={14} /></button>
       </div>
     </div>
     {#if pushResult}
-      <div class="git-push-result" class:git-error={pushResult.includes('error') || pushResult.includes('rejected') || pushResult.includes('failed')}>{pushResult}</div>
+      <div class="git-push-result" class:git-error={pushResult.startsWith('✗')}>{pushResult}</div>
     {/if}
     {#if !gitDiff}
+      <div class="git-actions">
+        <button class="git-act-btn" onclick={gitAddAll}>Add All</button>
+        <button class="git-act-btn" onclick={() => showCommitInput = !showCommitInput}>Commit</button>
+        <button class="git-act-btn" onclick={gitPush} disabled={gitLoading}>Push</button>
+      </div>
+      {#if showCommitInput}
+        <div class="git-commit-row">
+          <input type="text" bind:value={commitMsg} placeholder="commit message…" onkeydown={(e) => e.key === 'Enter' && gitCommit()} autocapitalize="off" />
+          <button class="git-commit-btn" onclick={gitCommit} disabled={!commitMsg.trim()}>OK</button>
+        </div>
+      {/if}
       <div class="git-tabs">
         <button class:active={gitTab === 'status'} onclick={() => { gitTab = 'status'; loadGitStatus(); }}>Status</button>
         <button class:active={gitTab === 'log'} onclick={() => { gitTab = 'log'; loadGitLog(); }}>Log</button>
@@ -1088,10 +1131,16 @@
             <div class="empty">Working tree clean</div>
           {/if}
           {#each gitStatus as f}
-            <button class="git-file" onclick={() => showFileDiff(f.file, f.status[0] !== ' ' && f.status[0] !== '?')}>
-              <span class="git-st" class:git-add={f.status.includes('A') || f.status.includes('?')} class:git-mod={f.status.includes('M')} class:git-del={f.status.includes('D')}>{f.status === '??' ? ' U' : f.status}</span>
-              <span class="git-fname">{f.file}</span>
-            </button>
+            {@const staged = f.status[0] !== ' ' && f.status[0] !== '?'}
+            <div class="git-file-row">
+              <button class="git-file" onclick={() => showFileDiff(f.file, staged)}>
+                <span class="git-st" class:git-add={f.status.includes('A') || f.status.includes('?')} class:git-mod={f.status.includes('M')} class:git-del={f.status.includes('D')}>{f.status === '??' ? ' U' : f.status}</span>
+                <span class="git-fname">{f.file}</span>
+              </button>
+              <button class="git-stage-btn" onclick={(e) => { e.stopPropagation(); staged ? gitRestoreFile(f.file) : gitAddFile(f.file); }}>
+                {staged ? '−' : '+'}
+              </button>
+            </div>
           {/each}
         </div>
       {:else}
@@ -1428,6 +1477,39 @@
   .git-error { padding: 10px; color: var(--danger); font-size: 12px; background: var(--danger-bg); }
   .git-push-result { padding: 8px 12px; font-size: 12px; color: var(--status-ok); background: var(--accent-bg); flex-shrink: 0; }
   .git-push-result.git-error { color: var(--danger); background: var(--danger-bg); }
+  .git-actions {
+    display: flex; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .git-act-btn {
+    padding: 5px 12px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface2); color: var(--text2); font-size: 12px; font-weight: 500;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  .git-act-btn:active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+  .git-act-btn:disabled { opacity: 0.4; }
+  .git-commit-row {
+    display: flex; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .git-commit-row input {
+    flex: 1; padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 6px;
+    background: var(--input-bg); color: var(--text); font-size: 13px; outline: none;
+  }
+  .git-commit-row input:focus { border-color: var(--accent); }
+  .git-commit-btn {
+    padding: 6px 14px; border: none; border-radius: 6px;
+    background: var(--accent); color: var(--bg); font-size: 12px; font-weight: 600;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  .git-commit-btn:disabled { opacity: 0.4; }
+  .git-file-row { display: flex; align-items: center; border-bottom: 1px solid var(--border2); }
+  .git-file-row .git-file { flex: 1; border-bottom: none; }
+  .git-stage-btn {
+    width: 32px; height: 32px; border: none; border-radius: 6px;
+    background: none; color: var(--accent); font-size: 18px; font-weight: 600;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; -webkit-tap-highlight-color: transparent;
+  }
+  .git-stage-btn:active { background: var(--accent-bg); }
   .git-loading { padding: 20px; text-align: center; color: var(--text3); font-size: 13px; }
   .git-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   .git-file {
