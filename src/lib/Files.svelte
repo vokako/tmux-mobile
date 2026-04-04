@@ -395,9 +395,9 @@
     setTimeout(() => { if (bcPathEl) bcPathEl.scrollLeft = bcPathEl.scrollWidth; }, 0);
   });
 
-  // Sync CWD from terminal session when Files tab becomes visible
+  // Sync CWD from terminal session when Files tab becomes visible (only if on list view)
   $effect(() => {
-    if (session && visible) {
+    if (session && visible && view === 'list') {
       fsCwd(session).then(r => {
         if (r.path !== cwd) {
           cwd = r.path;
