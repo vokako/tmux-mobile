@@ -402,9 +402,11 @@
     setTimeout(() => { if (bcPathEl) bcPathEl.scrollLeft = bcPathEl.scrollWidth; }, 0);
   });
 
-  // Sync CWD from terminal session when Files tab becomes visible (only if on list view)
+  // Sync CWD from terminal session only on first visit to list view
+  let cwdSynced = false;
   $effect(() => {
-    if (session && visible && view === 'list') {
+    if (session && visible && view === 'list' && !cwdSynced) {
+      cwdSynced = true;
       fsCwd(session).then(r => {
         if (r.path !== cwd) {
           cwd = r.path;
@@ -539,7 +541,12 @@
   }
 
   function backToList() {
-    if (fromGit) { fromGit = false; view = 'git'; } else { view = 'list'; }
+    if (fromGit) { fromGit = false; view = 'git'; } else {
+      // Stay in the file's parent directory, not session cwd
+      const dir = currentFile?.path?.replace(/\/[^/]+$/, '') || cwd;
+      view = 'list';
+      if (dir !== cwd) loadDir(dir);
+    }
     currentFile = null;
   }
 
@@ -1016,11 +1023,6 @@
     <div class="preview-header">
       <button class="back-btn" onclick={backToList}><Icon name="chevron-left" size={16} /></button>
       <span class="preview-name">{currentFile.name}</span>
-      <div class="zoom-ctl">
-        <button class="act-btn" onclick={() => previewZoom = Math.max(50, previewZoom - 10)}>−</button>
-        <span class="zoom-pct">{previewZoom}%</span>
-        <button class="act-btn" onclick={() => previewZoom = Math.min(200, previewZoom + 10)}>+</button>
-      </div>
       <div class="preview-actions">
         {#if currentFile.stat?.is_text && currentFile.stat?.writable}
           <button class="act-btn" onclick={startEdit}><Icon name="edit" size={14} /></button>
@@ -1030,7 +1032,7 @@
         <button class="act-btn" onclick={() => { view = 'info'; navPush(); }}><Icon name="info" size={14} /></button>
       </div>
     </div>
-    <div class="preview-body" style="zoom:{previewZoom / 100};--file-font-size:{fontSize}px">
+    <div class="preview-body" style="--file-font-size:{fontSize}px">
       {#if mimeCategory(currentFile.stat?.mime_hint) === 'markdown'}
         <div class="md-render" bind:this={previewEl}>{@html renderMarkdown(currentFile.content)}</div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'csv'}
