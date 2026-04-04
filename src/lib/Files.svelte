@@ -412,6 +412,9 @@
         }
       }).catch(() => {});
     }
+    if (visible && view === 'preview') {
+      reloadPreview();
+    }
   });
 
   // Init: get session CWD
@@ -483,6 +486,21 @@
       error = e.message;
     }
     loading = false;
+  }
+
+  async function reloadPreview() {
+    if (!currentFile?.path) return;
+    try {
+      if (currentFile.stat?.is_text) {
+        const r = await fsRead(currentFile.path);
+        currentFile.content = r.content;
+        currentFile = currentFile; // trigger reactivity
+      } else if (currentFile.stat?.mime_hint?.startsWith('image/')) {
+        const r = await fsDownload(currentFile.path);
+        currentFile.dataUrl = `data:${currentFile.stat.mime_hint};base64,${r.data}`;
+        currentFile = currentFile;
+      }
+    } catch {}
   }
 
   function startEdit() {
@@ -1008,7 +1026,7 @@
           <button class="act-btn" onclick={startEdit}><Icon name="edit" size={14} /></button>
         {/if}
         <button class="act-btn" onclick={() => handleDownload(currentFile.path)}><Icon name="download" size={14} /></button>
-        <button class="act-btn" onclick={() => copyPath(currentFile.path)}><Icon name="copy" size={14} /></button>
+        <button class="act-btn" onclick={reloadPreview}><Icon name="refresh" size={14} /></button>
         <button class="act-btn" onclick={() => { view = 'info'; navPush(); }}><Icon name="info" size={14} /></button>
       </div>
     </div>
