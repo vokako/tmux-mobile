@@ -172,6 +172,13 @@
   let fromGit = $state(false);
   let gitLoading = $state(false);
   let gitListEl = $state(null);
+  let hasGit = $state(false);
+
+  $effect(() => {
+    if (cwd) {
+      gitCmd('rev-parse', ['--git-dir'], cwd).then(r => { hasGit = r.code === 0; }).catch(() => { hasGit = false; });
+    }
+  });
   let gitError = $state('');
 
   let gitRoot = '';
@@ -871,9 +878,11 @@
       <button class="tool-btn" class:tool-active={showBookmarks} onclick={() => showBookmarks = !showBookmarks} title="Bookmarks">
         <Icon name="folder-star" size={15} />
       </button>
-      <button class="tool-btn" onclick={openGitView} title="Git">
-        <Icon name="git-branch" size={15} />
-      </button>
+      {#if hasGit}
+        <button class="tool-btn" onclick={openGitView} title="Git">
+          <Icon name="git-branch" size={15} />
+        </button>
+      {/if}
       <div style="flex:1"></div>
       {#if isTauri}
         <button class="tool-btn" onclick={openLocalFiles} title="Local files"><Icon name="download" size={15} /></button>
