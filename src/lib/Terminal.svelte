@@ -47,14 +47,14 @@
   const lightTheme = {
     background: '#f5f5f7', foreground: '#1a1a2e', cursor: '#0088cc',
     selectionBackground: 'rgba(0, 136, 204, 0.18)',
-    black: '#1a1a2e', brightBlack: '#6b7280',
+    black: '#f5f5f7', brightBlack: '#9ca3af',
     red: '#dc2626', brightRed: '#ef4444',
     green: '#16a34a', brightGreen: '#22c55e',
     yellow: '#ca8a04', brightYellow: '#eab308',
     blue: '#0088cc', brightBlue: '#2563eb',
     magenta: '#9333ea', brightMagenta: '#a855f7',
     cyan: '#0891b2', brightCyan: '#06b6d4',
-    white: '#e2e8f0', brightWhite: '#f8fafc',
+    white: '#1a1a2e', brightWhite: '#0f0f1a',
   };
 
   function getTermTheme() {
@@ -221,6 +221,7 @@
     });
 
     term.open(termEl);
+    termEl.style.background = getTermTheme().background;
 
     // Forward keyboard input to tmux — skip when input box is open
     term.onData(data => {
