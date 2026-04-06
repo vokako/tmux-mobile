@@ -144,6 +144,27 @@
   function countLines(s) { let n = 1; for (let i = 0; i < s.length; i++) if (s[i] === '\n') n++; return n; }
 
   // Write content + position cursor in xterm.js
+  function adaptColorsForLight(text) {
+    if (theme !== 'light') return text;
+    return text
+      // Dark RGB backgrounds → invert to light
+      .replace(/\x1b\[48;2;(\d+);(\d+);(\d+)m/g, (m, r, g, b) => {
+        r = +r; g = +g; b = +b;
+        if (r * 0.299 + g * 0.587 + b * 0.114 < 100) {
+          return `\x1b[48;2;${255 - r};${255 - g};${255 - b}m`;
+        }
+        return m;
+      })
+      // Dark RGB foregrounds → brighten if too dark on light bg
+      .replace(/\x1b\[38;2;(\d+);(\d+);(\d+)m/g, (m, r, g, b) => {
+        r = +r; g = +g; b = +b;
+        if (r * 0.299 + g * 0.587 + b * 0.114 < 40) {
+          return `\x1b[38;2;${Math.min(255, r + 60)};${Math.min(255, g + 60)};${Math.min(255, b + 60)}m`;
+        }
+        return m;
+      });
+  }
+
   function writeToXterm(content, cursor) {
     if (!term || touchScrolling) return;
     // Sync xterm cols/rows when pane size changes (tmux controls the size)
@@ -183,7 +204,7 @@
       }
     }
     // Clear screen + scrollback, write content, position cursor
-    term.write('\x1b[?25l\x1b[2J\x1b[3J\x1b[H' + content + padLines + cursorSeq + '\x1b[?25h', () => {
+    term.write('\x1b[?25l\x1b[2J\x1b[3J\x1b[H' + adaptColorsForLight(content) + padLines + cursorSeq + '\x1b[?25h', () => {
       // Skip scroll adjustment if user is touch-scrolling (async callback race)
       if (touchScrolling) return;
       if (atBottom) {
