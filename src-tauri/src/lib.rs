@@ -71,6 +71,7 @@ pub fn run() {
     #[cfg(desktop)]
     {
         let cfg = Config::load();
+        tmux::set_scrollback(cfg.scrollback);
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {

@@ -236,6 +236,8 @@ export const resizePane = (target, cols, rows) => call('resize_pane', { target, 
 export const setSocket = (socket) => call('set_socket', { socket });
 export const getBookmarks = () => call('get_bookmarks');
 export const saveBookmarks = (bookmarks) => call('save_bookmarks', { bookmarks });
+export const getPrefs = () => call('get_prefs');
+export const setPref = (key, value) => call('set_pref', { key, value });
 
 // File system
 export const fsCwd = (session) => call('fs_cwd', { session });

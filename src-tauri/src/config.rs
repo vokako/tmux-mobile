@@ -10,6 +10,7 @@ struct FileConfig {
     tmux_socket: Option<String>,
     tls_cert: Option<String>,
     tls_key: Option<String>,
+    scrollback: Option<usize>,
 }
 
 pub struct Config {
@@ -20,6 +21,7 @@ pub struct Config {
     pub tmux_socket: Option<String>,
     pub tls_cert: Option<String>,
     pub tls_key: Option<String>,
+    pub scrollback: usize,
 }
 
 fn config_path() -> PathBuf {
@@ -66,6 +68,11 @@ impl Config {
             tmux_socket: std::env::var("TMUX_SOCKET").ok().or(file_cfg.tmux_socket),
             tls_cert: std::env::var("TLS_CERT").ok().or(file_cfg.tls_cert),
             tls_key: std::env::var("TLS_KEY").ok().or(file_cfg.tls_key),
+            scrollback: std::env::var("SCROLLBACK")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .or(file_cfg.scrollback)
+                .unwrap_or(500),
         }
     }
 }
@@ -115,6 +122,30 @@ pub fn save_bookmarks(bookmarks: &[String]) -> Result<(), String> {
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let json = serde_json::to_string(bookmarks).map_err(|e| e.to_string())?;
     std::fs::write(bookmarks_path(), json).map_err(|e| e.to_string())
+}
+
+/// User preferences: synced key-value store at ~/.config/tmux-mobile/prefs.json
+fn prefs_path() -> std::path::PathBuf {
+    dirs_next().join("prefs.json")
+}
+
+pub fn get_prefs() -> serde_json::Value {
+    std::fs::read_to_string(prefs_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(serde_json::json!({}))
+}
+
+pub fn set_prefs(key: &str, value: serde_json::Value) -> Result<(), String> {
+    let dir = dirs_next();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let mut prefs: serde_json::Map<String, serde_json::Value> = std::fs::read_to_string(prefs_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    prefs.insert(key.to_string(), value);
+    let json = serde_json::to_string_pretty(&prefs).map_err(|e| e.to_string())?;
+    std::fs::write(prefs_path(), json).map_err(|e| e.to_string())
 }
 
 /// Tauri command: return config for frontend auto-fill

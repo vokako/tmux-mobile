@@ -24,8 +24,13 @@ pub struct TmuxPane {
 }
 
 use std::sync::{OnceLock, RwLock};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 static TMUX_SOCKET: OnceLock<RwLock<Option<String>>> = OnceLock::new();
+static SCROLLBACK: AtomicUsize = AtomicUsize::new(500);
+
+pub fn set_scrollback(n: usize) { SCROLLBACK.store(n, Ordering::Relaxed); }
+pub fn get_scrollback() -> usize { SCROLLBACK.load(Ordering::Relaxed) }
 
 fn socket_lock() -> &'static RwLock<Option<String>> {
     TMUX_SOCKET.get_or_init(|| RwLock::new(None))
@@ -196,7 +201,7 @@ pub fn capture_pane_with_width(
 ) -> Result<(String, usize), String> {
     let start_line = lines
         .map(|n| format!("-{}", n))
-        .unwrap_or("-200".to_string());
+        .unwrap_or_else(|| format!("-{}", get_scrollback()));
     let output = run_tmux(&[
         "capture-pane",
         "-t",

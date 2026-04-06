@@ -298,6 +298,22 @@ fn handle_request(req: &Request) -> Response {
             }
         }
 
+        "get_prefs" => {
+            Response::ok(id, crate::config::get_prefs())
+        }
+
+        "set_pref" => {
+            let key = match require_str(p, "key") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            let value = p.get("value").cloned().unwrap_or(serde_json::Value::Null);
+            match crate::config::set_prefs(key, value) {
+                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
+                Err(e) => Response::err(id, ERR_INTERNAL, e),
+            }
+        }
+
         "fs_cwd" => {
             let session = match require_str(p, "session") {
                 Ok(s) => s,

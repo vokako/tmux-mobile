@@ -146,23 +146,10 @@
   // Write content + position cursor in xterm.js
   function adaptColorsForLight(text) {
     if (theme !== 'light') return text;
-    return text
-      // Dark RGB backgrounds → invert to light
-      .replace(/\x1b\[48;2;(\d+);(\d+);(\d+)m/g, (m, r, g, b) => {
-        r = +r; g = +g; b = +b;
-        if (r * 0.299 + g * 0.587 + b * 0.114 < 100) {
-          return `\x1b[48;2;${255 - r};${255 - g};${255 - b}m`;
-        }
-        return m;
-      })
-      // Dark RGB foregrounds → brighten if too dark on light bg
-      .replace(/\x1b\[38;2;(\d+);(\d+);(\d+)m/g, (m, r, g, b) => {
-        r = +r; g = +g; b = +b;
-        if (r * 0.299 + g * 0.587 + b * 0.114 < 40) {
-          return `\x1b[38;2;${Math.min(255, r + 60)};${Math.min(255, g + 60)};${Math.min(255, b + 60)}m`;
-        }
-        return m;
-      });
+    // Invert all RGB colors: both foreground (38;2) and background (48;2)
+    return text.replace(/\x1b\[(3|4)8;2;(\d+);(\d+);(\d+)m/g, (m, type, r, g, b) => {
+      return `\x1b[${type}8;2;${255 - +r};${255 - +g};${255 - +b}m`;
+    });
   }
 
   function writeToXterm(content, cursor) {
@@ -175,7 +162,7 @@
     const atBottom = buf.viewportY >= buf.baseY;
     const prevViewport = buf.viewportY;
     // Compute correct xterm screen row for cursor:
-    // Content includes scrollback (-S -200) + visible pane (trimmed).
+    // Content includes scrollback (-S -500) + visible pane (trimmed).
     // cursor.y is relative to the visible pane, not the content.
     // We map: paneStart = N + trailing - paneHeight, cursorLine = paneStart + cursor.y
     // Then adjust for xterm scrollback overflow.
