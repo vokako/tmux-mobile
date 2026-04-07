@@ -22,7 +22,7 @@
   import 'highlight.js/styles/github-dark.min.css';
   import mermaid from 'mermaid';
   import Icon from './Icon.svelte';
-  import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsUpload, getBookmarks, saveBookmarks, gitCmd } from './ws.js';
+  import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref } from './ws.js';
 
   // Tauri plugin imports (tree-shaken in browser builds)
   let tauriFs, tauriDialog, tauriOpener, tauriPath;
@@ -162,6 +162,17 @@
   let filesEl = $state(null);
   let bookmarks = $state([]);
   let showBookmarks = $state(false);
+  let recentFiles = $state([]);
+  let showRecent = $state(false);
+
+  $effect(() => {
+    getPrefs().then(p => { recentFiles = p.recentFiles || []; }).catch(() => {});
+  });
+
+  function addRecent(path, name) {
+    recentFiles = [{ path, name }, ...recentFiles.filter(f => f.path !== path)].slice(0, 20);
+    setPref('recentFiles', recentFiles).catch(() => {});
+  }
 
   // Git view state
   let gitTab = $state('status'); // 'status' | 'log'
@@ -468,6 +479,7 @@
     try {
       const stat = await fsStat(entry.path);
       currentFile = { path: entry.path, name: entry.name, stat };
+      addRecent(entry.path, entry.name);
       navPush();
       if (stat.mime_hint === 'application/pdf') {
         const r = await fsDownload(entry.path);
@@ -900,8 +912,11 @@
       <button class="tool-btn" class:starred={isBookmarked(cwd)} onclick={() => toggleBookmark(cwd)} title="Bookmark">
         <Icon name={isBookmarked(cwd) ? 'star-filled' : 'star'} size={15} />
       </button>
-      <button class="tool-btn" class:tool-active={showBookmarks} onclick={() => showBookmarks = !showBookmarks} title="Bookmarks">
+      <button class="tool-btn" class:tool-active={showBookmarks} onclick={() => { showBookmarks = !showBookmarks; showRecent = false; }} title="Bookmarks">
         <Icon name="folder-star" size={15} />
+      </button>
+      <button class="tool-btn" class:tool-active={showRecent} onclick={() => { showRecent = !showRecent; showBookmarks = false; }} title="Recent">
+        <Icon name="clock" size={15} />
       </button>
       {#if hasGit}
         <button class="tool-btn" onclick={openGitView} title="Git">
@@ -932,6 +947,20 @@
               {bm}
             </button>
             <button class="bm-del" onclick={() => toggleBookmark(bm)}><Icon name="x" size={12} /></button>
+          </div>
+        {/each}
+      </div>
+    {/if}
+
+    {#if showRecent && recentFiles.length}
+      <div class="bookmarks-panel">
+        {#each recentFiles as rf}
+          <div class="bm-row">
+            <span class="bm-icon"><Icon name="clock" size={13} /></span>
+            <button class="bm-path" onclick={() => { showRecent = false; openEntry({ type: 'file', path: rf.path, name: rf.name }); }} use:scrollEnd>
+              {rf.name} <span style="color:var(--text3);font-size:10px">{rf.path.replace(/\/[^/]+$/, '')}</span>
+            </button>
+            <button class="bm-del" onclick={() => { recentFiles = recentFiles.filter(f => f.path !== rf.path); setPref('recentFiles', recentFiles).catch(() => {}); }}><Icon name="x" size={12} /></button>
           </div>
         {/each}
       </div>

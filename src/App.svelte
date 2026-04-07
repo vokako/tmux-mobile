@@ -4,7 +4,7 @@
   import Terminal from './lib/Terminal.svelte';
   import Files from './lib/Files.svelte';
   import Icon from './lib/Icon.svelte';
-  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, getMachineId, getHostname, getPrefs, setPref } from './lib/ws.js';
+  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, getMachineId, getHostname } from './lib/ws.js';
 
   let page = $state('settings');
   let connected = $state(false);
@@ -110,7 +110,6 @@
     theme = t;
     localStorage.setItem('tmux_theme', t);
     applyTheme();
-    syncPref('theme', t);
   }
 
   let isDark = $state(true);
@@ -211,19 +210,6 @@
     serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
     page = 'sessions';
     localStorage.removeItem('tmux_disconnected');
-    loadServerPrefs();
-  }
-
-  async function loadServerPrefs() {
-    try {
-      const prefs = await getPrefs();
-      if (prefs.fontSize) { fontSize = prefs.fontSize; localStorage.setItem('tmux_fontsize', fontSize); }
-      if (prefs.theme) { setTheme(prefs.theme); }
-    } catch {}
-  }
-
-  function syncPref(key, value) {
-    if (connected) setPref(key, value).catch(() => {});
   }
 
   function openTerminal(session, target, command = '') {
@@ -445,9 +431,9 @@
         <div class="sp-inline">
           <div class="sp-label">Font</div>
           <div class="sp-font-row">
-            <button class="sp-font-btn" onclick={() => { fontSize = Math.max(8, fontSize - 1); localStorage.setItem('tmux_fontsize', fontSize); syncPref('fontSize', fontSize); }}>−</button>
+            <button class="sp-font-btn" onclick={() => { fontSize = Math.max(8, fontSize - 1); localStorage.setItem('tmux_fontsize', fontSize); }}>−</button>
             <span class="sp-font-val">{fontSize}</span>
-            <button class="sp-font-btn" onclick={() => { fontSize = Math.min(24, fontSize + 1); localStorage.setItem('tmux_fontsize', fontSize); syncPref('fontSize', fontSize); }}>+</button>
+            <button class="sp-font-btn" onclick={() => { fontSize = Math.min(24, fontSize + 1); localStorage.setItem('tmux_fontsize', fontSize); }}>+</button>
           </div>
           <div style="flex:1"></div>
           <div class="sp-label">Debug</div>
