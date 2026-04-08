@@ -153,13 +153,14 @@
       connected = false;
       return;
     }
-    connected = false;
+    // Keep connected=true during reconnect to avoid UI flicker
     reconnecting = true;
     tryReconnect();
   });
 
   function cancelReconnect() {
     reconnecting = false;
+    connected = false;
     clearTimeout(reconnectTimer);
     disconnect();
     page = 'settings';
@@ -200,6 +201,7 @@
         reconnectTimer = setTimeout(() => tryReconnect(attempt + 1), delay);
       } else {
         reconnecting = false;
+        connected = false;
         page = 'settings';
       }
     });
@@ -239,7 +241,6 @@
   $effect(() => {
     const handler = () => {
       if (document.visibilityState === 'visible' && !isConnected() && !reconnecting) {
-        connected = false;
         reconnecting = true;
         tryReconnect();
       }
