@@ -667,7 +667,7 @@
         <button class="win-collapse" onclick={() => { showWindowCmd = false; localStorage.setItem('tmux_winswitcher', '0'); }}><Icon name="arrow-up" size={12} /></button>
         {#each windows as w}
           {@const info = (w.pane_title || '') + ' ' + (w.current_command || '')}
-          {@const aiTag = info.match(/kiro/i) ? 'Kiro' : info.match(/claude/i) ? 'Claude' : ''}
+          {@const aiTag = info.match(/kiro/i) ? 'Kiro' : info.match(/claude/i) ? 'Claude' : info.match(/openclaw/i) ? 'OpenClaw' : ''}
           <button
             class="win-tab"
             class:active={String(w.window) === currentWindow}
@@ -687,6 +687,8 @@
               <img class="win-ai-icon" src="/assets/kiro.svg" alt="Kiro" />
             {:else if aiTag === 'Claude'}
               <img class="win-ai-icon claude" src="/assets/claude.svg" alt="Claude" />
+            {:else if aiTag === 'OpenClaw'}
+              <img class="win-ai-icon" src="/assets/openclaw.svg" alt="OpenClaw" />
             {:else}
               <span class="win-cmd">{w.current_command || w.window_name}</span>
             {/if}
@@ -695,12 +697,14 @@
       </div>
     {:else}
       {@const cur = windows.find(w => String(w.window) === currentWindow)}
-      {@const curAi = cur ? ((cur.pane_title || '') + ' ' + (cur.current_command || '')).match(/kiro/i) ? 'Kiro' : ((cur.pane_title || '') + ' ' + (cur.current_command || '')).match(/claude/i) ? 'Claude' : '' : ''}
+      {@const curAi = cur ? ((cur.pane_title || '') + ' ' + (cur.current_command || '')).match(/kiro/i) ? 'Kiro' : ((cur.pane_title || '') + ' ' + (cur.current_command || '')).match(/claude/i) ? 'Claude' : ((cur.pane_title || '') + ' ' + (cur.current_command || '')).match(/openclaw/i) ? 'OpenClaw' : '' : ''}
       <button class="win-toggle" onclick={() => { showWindowCmd = true; localStorage.setItem('tmux_winswitcher', '1'); }}>
         {#if curAi === 'Kiro'}
           <img class="win-ai-icon" src="/assets/kiro.svg" alt="Kiro" />
         {:else if curAi === 'Claude'}
           <img class="win-ai-icon claude" src="/assets/claude.svg" alt="Claude" />
+        {:else if curAi === 'OpenClaw'}
+          <img class="win-ai-icon" src="/assets/openclaw.svg" alt="OpenClaw" />
         {:else}
           <span class="win-toggle-cmd">{cur?.current_command || cur?.window_name || '?'}</span>
         {/if}

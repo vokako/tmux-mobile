@@ -136,7 +136,13 @@
     if (!newName.trim()) return;
     try {
       await newSession(newName.trim(), newPath.trim() || undefined, newCmd.trim() || undefined);
+      const name = newName.trim();
       newName = ''; newPath = ''; newCmd = ''; showNew = false;
+      const ps = await listPanes(name);
+      if (ps.length) {
+        const p = ps[0];
+        openTerminal(name, `${p.session}:${p.window}.${p.pane}`, p.current_command);
+      }
       await refresh();
     } catch (e) {
       error = e.message;
@@ -217,7 +223,7 @@
           <div class="pane-list">
             {#each panes[s.name] as p}
               {@const info = (p.pane_title || '') + ' ' + (p.current_command || '')}
-              {@const aiTag = info.match(/kiro/i) ? 'Kiro' : info.match(/claude/i) ? 'Claude' : ''}
+              {@const aiTag = info.match(/kiro/i) ? 'Kiro' : info.match(/claude/i) ? 'Claude' : info.match(/openclaw/i) ? 'OpenClaw' : ''}
               <div class="pane-row">
                 <button class="pane" class:active-pane={activeTarget === `${p.session}:${p.window}.${p.pane}`} onclick={() => openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command)}>
                   <span class="pane-id">{p.window}.{p.pane}</span>
@@ -226,6 +232,8 @@
                     <img class="pane-ai-icon" src="/assets/kiro.svg" alt="Kiro" />
                   {:else if aiTag === 'Claude'}
                     <img class="pane-ai-icon claude" src="/assets/claude.svg" alt="Claude" />
+                  {:else if aiTag === 'OpenClaw'}
+                    <img class="pane-ai-icon" src="/assets/openclaw.svg" alt="OpenClaw" />
                   {/if}
                 </button>
                 <button class="pane-kill" class:confirm={confirmKillWindow === `${s.name}:${p.window}`} onclick={() => removeWindow(`${s.name}:${p.window}`, s.name)}>
@@ -237,7 +245,7 @@
                 </button>
               </div>
             {/each}
-            <button class="pane-add" onclick={async () => { await newWindow(s.name); panes[s.name] = await listPanes(s.name); }}>
+            <button class="pane-add" onclick={async () => { await newWindow(s.name); const ps = await listPanes(s.name); panes[s.name] = ps; const p = ps[ps.length - 1]; if (p) openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command); }}>
               <Icon name="plus" size={12} /> Window
             </button>
           </div>

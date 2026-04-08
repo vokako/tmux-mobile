@@ -464,7 +464,7 @@ fn handle_request(req: &Request) -> Response {
             }
             // Reject args containing shell metacharacters
             for arg in &args {
-                if arg.contains(|c: char| matches!(c, '|' | ';' | '&' | '$' | '`' | '\n')) {
+                if arg.contains(|c: char| matches!(c, ';' | '&' | '$' | '`' | '\n')) {
                     return Response::err(id, ERR_INVALID_PARAMS, "invalid characters in argument".into());
                 }
             }

@@ -18,19 +18,14 @@
     return raw.map(h => typeof h === 'string' ? { address: h, token: '' } : h);
   })());
 
-  // Migrate old host+port
-  $effect(() => {
-    const oldHost = localStorage.getItem('tmux_host');
+  // Migrate old host+port (one-time)
+  const oldHost = localStorage.getItem('tmux_host');
+  if (oldHost) {
     const oldPort = localStorage.getItem('tmux_port');
-    if (oldHost && !localStorage.getItem('tmux_address')) {
-      address = `ws://${oldHost}:${oldPort || '9899'}`;
-      localStorage.removeItem('tmux_host');
-      localStorage.removeItem('tmux_port');
-    }
-    if (address && !address.startsWith('ws')) {
-      address = `ws://${address}`;
-    }
-  });
+    address = `ws://${oldHost}:${oldPort || '9899'}`;
+    localStorage.removeItem('tmux_host');
+    localStorage.removeItem('tmux_port');
+  }
 
   // Auto-fill from local config in Tauri desktop app
   $effect(() => {
@@ -131,7 +126,7 @@
             {#each history as h}
               <div class="hist-row">
                 <button class="hist-item" onclick={() => { address = h.address; token = h.token; showHistory = false; }}>{h.address}</button>
-                <button class="hist-del" onclick={(e) => { e.stopPropagation(); history = history.filter(x => x.address !== h.address); localStorage.setItem('tmux_address_history', JSON.stringify(history)); }}><Icon name="x" size={11} /></button>
+                <button class="hist-del" onclick={(e) => { e.stopPropagation(); const addr = h.address; history = history.filter(x => x.address !== addr); localStorage.setItem('tmux_address_history', JSON.stringify(history)); try { const machines = JSON.parse(localStorage.getItem('tmux_machines') || '{}'); for (const mid in machines) { machines[mid] = machines[mid].filter(u => u !== addr); if (!machines[mid].length) delete machines[mid]; } localStorage.setItem('tmux_machines', JSON.stringify(machines)); } catch {} }}><Icon name="x" size={11} /></button>
               </div>
             {/each}
           </div>
@@ -250,14 +245,15 @@
   }
   .hist-row {
     display: flex; align-items: center;
-    border-bottom: 1px solid var(--border2);
+    border-bottom: 1px solid var(--border2); min-width: 0;
   }
   .hist-row:last-child { border-bottom: none; }
   .hist-item {
-    flex: 1; padding: 9px 14px; border: none; background: none;
+    flex: 1; min-width: 0; padding: 9px 14px; border: none; background: none;
     color: var(--text); font-size: 14px; text-align: left; cursor: pointer;
     font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     -webkit-tap-highlight-color: transparent;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .hist-item:active { background: var(--accent-bg); color: var(--accent); }
   .hist-del {

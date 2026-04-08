@@ -1321,10 +1321,10 @@
   /* New item / rename */
   .new-item {
     display: flex; gap: 6px; padding: 6px 10px;
-    border-bottom: 1px solid var(--border2);
+    border-bottom: 1px solid var(--border2); min-width: 0;
   }
   .new-item input {
-    flex: 1; padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 6px;
+    flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 6px;
     background: var(--input-bg); color: var(--text); font-size: 13px;
     font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
   }
