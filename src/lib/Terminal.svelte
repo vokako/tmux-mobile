@@ -192,9 +192,10 @@
     }
     // Clear screen + scrollback, write content, position cursor
     term.write('\x1b[?25l\x1b[2J\x1b[3J\x1b[H' + adaptColorsForLight(content) + padLines + cursorSeq + '\x1b[?25h', () => {
-      // Skip scroll adjustment if user is touch-scrolling (async callback race)
       if (touchScrolling) return;
-      if (atBottom) {
+      if (term.buffer.active.baseY === 0) {
+        term.scrollToTop();
+      } else if (atBottom) {
         term.scrollToBottom();
       } else {
         term.scrollToLine(Math.min(prevViewport, term.buffer.active.baseY));
