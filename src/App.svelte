@@ -180,12 +180,11 @@
     if (!reconnecting) return;
     const addr = localStorage.getItem('tmux_address');
     const token = localStorage.getItem('tmux_token') || '';
-    if (!addr) { reconnecting = false; page = 'settings'; return; }
+    if (!addr) { reconnecting = false; connected = false; page = 'settings'; return; }
 
-    // After 3 failures on primary, try alternate addresses
-    const useAddr = (attempt >= 3 && attempt % 2 === 1)
-      ? (getAltAddresses()[(attempt - 3) >> 1] || addr)
-      : addr;
+    // Build address list: primary first, then alternates
+    const allAddrs = [addr, ...getAltAddresses()];
+    const useAddr = allAddrs[attempt % allAddrs.length];
 
     connect(useAddr, token).then(() => {
       if (!reconnecting) return;
@@ -414,10 +413,19 @@
   {#if showSettings}
     <div class="settings-panel">
       {#if connected}
+        {@const mid = serverInfo.machineId}
+        {@const urls = mid ? (JSON.parse(localStorage.getItem('tmux_machines') || '{}')[mid] || []) : []}
         <div class="sp-conn">
           <div class="sp-conn-host">{serverInfo.hostname || 'unknown'}</div>
           <div class="sp-conn-addr">{localStorage.getItem('tmux_address')}</div>
-          <div class="sp-conn-id">{serverInfo.machineId?.slice(0, 8) || '—'}</div>
+          {#if urls.length > 1}
+            <div class="sp-conn-urls">
+              {#each urls as u}
+                <span class="sp-conn-url" class:sp-conn-active={u === localStorage.getItem('tmux_address')}>{u}</span>
+              {/each}
+            </div>
+          {/if}
+          <div class="sp-conn-id">{mid?.slice(0, 8) || '—'}</div>
         </div>
       {/if}
       <div class="sp-section">
@@ -697,6 +705,14 @@
     font-size: 10px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     color: var(--text3); opacity: 0.6;
   }
+  .sp-conn-urls {
+    display: flex; flex-direction: column; gap: 2px; margin-top: 4px;
+  }
+  .sp-conn-url {
+    font-size: 10px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    color: var(--text3);
+  }
+  .sp-conn-active { color: var(--accent); }
   .sp-section { padding: 10px 14px; border-bottom: 1px solid var(--border2); }
   .sp-section:last-of-type { border-bottom: none; }
   .sp-label { font-size: 10px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }

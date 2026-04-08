@@ -154,48 +154,45 @@
 
   function writeToXterm(content, cursor) {
     if (!term || touchScrolling) return;
-    // Sync xterm cols/rows when pane size changes (tmux controls the size)
     if (cursor?.w && cursor?.h && (term.cols !== cursor.w || term.rows !== cursor.h)) {
       term.resize(cursor.w, cursor.h);
     }
     const buf = term.buffer.active;
     const atBottom = buf.viewportY >= buf.baseY;
     const prevViewport = buf.viewportY;
-    // Compute correct xterm screen row for cursor:
-    // Content includes scrollback (-S -500) + visible pane (trimmed).
-    // cursor.y is relative to the visible pane, not the content.
-    // We map: paneStart = N + trailing - paneHeight, cursorLine = paneStart + cursor.y
-    // Then adjust for xterm scrollback overflow.
+
+    const N = countLines(content);
+    const trailing = cursor?.t || 0;
+
+    // trailing = empty lines trimmed from capture, need to add back
     let cursorSeq = '';
-    let padLines = '';
+    let afterPad = '';
+    let topPad = '';
     if (cursor) {
-      const N = countLines(content);
-      const trailing = cursor.t || 0;
       const paneStart = Math.max(0, N + trailing - cursor.h);
-      const cursorLine = paneStart + cursor.y; // 0-indexed content line
-      // Pad so cursor line exists in content
-      let pad = Math.max(0, cursorLine + 1 - N);
-      // Recompute row with padding; add more if cursor row exceeds screen
-      let total = N + pad;
-      let sb = Math.max(0, total - term.rows);
-      let row = cursorLine - sb + 1; // 1-indexed screen row
-      if (row > term.rows) {
-        pad += row - term.rows;
-        total = N + pad;
-        sb = Math.max(0, total - term.rows);
-        row = cursorLine - sb + 1;
+      const cursorLine = paneStart + cursor.y;
+      // Only pad enough after content to reach cursor, not all trailing
+      const needAfter = Math.max(0, cursorLine + 1 - N);
+      afterPad = needAfter > 0 ? '\n'.repeat(needAfter) : '';
+      // Total visible content lines
+      const contentLines = N + needAfter;
+      // Pad top so visible pane area fills the screen from bottom
+      if (contentLines < term.rows) {
+        topPad = '\n'.repeat(term.rows - contentLines);
       }
-      if (pad > 0) padLines = '\n'.repeat(pad);
+      const topPadCount = topPad.length;
+      const totalWritten = topPadCount + contentLines;
+      const sb = Math.max(0, totalWritten - term.rows);
+      const row = topPadCount + cursorLine - sb + 1;
       if (row > 0 && row <= term.rows) {
         cursorSeq = `\x1b[${row};${cursor.x + 1}H`;
       }
     }
-    // Clear screen + scrollback, write content, position cursor
-    term.write('\x1b[?25l\x1b[2J\x1b[3J\x1b[H' + adaptColorsForLight(content) + padLines + cursorSeq + '\x1b[?25h', () => {
+
+    if (buf.baseY > 0) term.clear();
+    term.write('\x1b[?25l\x1b[2J\x1b[H' + topPad + adaptColorsForLight(content) + afterPad + cursorSeq + '\x1b[?25h', () => {
       if (touchScrolling) return;
-      if (term.buffer.active.baseY === 0) {
-        term.scrollToTop();
-      } else if (atBottom) {
+      if (atBottom) {
         term.scrollToBottom();
       } else {
         term.scrollToLine(Math.min(prevViewport, term.buffer.active.baseY));
