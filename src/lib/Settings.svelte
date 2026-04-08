@@ -254,7 +254,7 @@
   }
   .hist-row:last-child { border-bottom: none; }
   .hist-item {
-    flex: 1; padding: 9px 14px; border: none; background: var(--input-bg);
+    flex: 1; padding: 9px 14px; border: none; background: none;
     color: var(--text); font-size: 14px; text-align: left; cursor: pointer;
     font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     -webkit-tap-highlight-color: transparent;

@@ -421,7 +421,7 @@
           {#if urls.length > 1}
             <div class="sp-conn-urls">
               {#each urls as u}
-                <span class="sp-conn-url" class:sp-conn-active={u === localStorage.getItem('tmux_address')}>{u}</span>
+                <button class="sp-conn-url" class:sp-conn-active={u === localStorage.getItem('tmux_address')} onclick={() => { if (u !== localStorage.getItem('tmux_address')) { localStorage.setItem('tmux_address', u); showSettings = false; doDisconnect(); setTimeout(() => { const token = localStorage.getItem('tmux_token') || ''; connect(u, token).then(() => { connected = true; serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' }; if (terminalTarget) wsSubscribe(terminalTarget); }).catch(() => { page = 'settings'; }); }, 100); } }}>{u}</button>
               {/each}
             </div>
           {/if}
@@ -709,10 +709,12 @@
     display: flex; flex-direction: column; gap: 2px; margin-top: 4px;
   }
   .sp-conn-url {
-    font-size: 10px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
-    color: var(--text3);
+    font-size: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    color: var(--text3); padding: 6px 8px; border: 1px solid var(--border2); border-radius: 6px;
+    background: none; text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
-  .sp-conn-active { color: var(--accent); }
+  .sp-conn-url:active { background: var(--accent-bg); }
+  .sp-conn-active { color: var(--accent); border-color: var(--accent); }
   .sp-section { padding: 10px 14px; border-bottom: 1px solid var(--border2); }
   .sp-section:last-of-type { border-bottom: none; }
   .sp-label { font-size: 10px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
