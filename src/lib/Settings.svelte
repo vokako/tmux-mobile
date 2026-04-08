@@ -129,7 +129,10 @@
         {#if showHistory && history.length}
           <div class="hist-list">
             {#each history as h}
-              <button class="hist-item" onclick={() => { address = h.address; token = h.token; showHistory = false; }}>{h.address}</button>
+              <div class="hist-row">
+                <button class="hist-item" onclick={() => { address = h.address; token = h.token; showHistory = false; }}>{h.address}</button>
+                <button class="hist-del" onclick={(e) => { e.stopPropagation(); history = history.filter(x => x.address !== h.address); localStorage.setItem('tmux_address_history', JSON.stringify(history)); }}><Icon name="x" size={11} /></button>
+              </div>
             {/each}
           </div>
         {/if}
@@ -245,15 +248,23 @@
     border: 1px solid var(--input-border); border-radius: 8px;
     overflow: hidden; margin-top: 2px;
   }
+  .hist-row {
+    display: flex; align-items: center;
+    border-bottom: 1px solid var(--border2);
+  }
+  .hist-row:last-child { border-bottom: none; }
   .hist-item {
-    padding: 9px 14px; border: none; background: var(--input-bg);
+    flex: 1; padding: 9px 14px; border: none; background: var(--input-bg);
     color: var(--text); font-size: 14px; text-align: left; cursor: pointer;
     font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
-    border-bottom: 1px solid var(--border2);
     -webkit-tap-highlight-color: transparent;
   }
-  .hist-item:last-child { border-bottom: none; }
   .hist-item:active { background: var(--accent-bg); color: var(--accent); }
+  .hist-del {
+    padding: 8px 10px; border: none; background: none;
+    color: var(--text3); cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  .hist-del:active { color: var(--danger); }
 
   label {
     display: flex;
