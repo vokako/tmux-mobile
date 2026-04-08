@@ -92,8 +92,34 @@
     setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'end' }), 50);
   }
 
-  // Refresh when page becomes visible
-  $effect(() => { if (visible) refresh(); });
+  // Refresh when page becomes visible — show cached data immediately, update in background
+  let lastRefresh = 0;
+  $effect(() => {
+    if (visible) {
+      const now = Date.now();
+      if (sessions.length === 0 || now - lastRefresh > 30000) {
+        refresh();
+      } else {
+        refreshQuiet();
+      }
+    }
+  });
+
+  async function refreshQuiet() {
+    try {
+      const list = await listSessions();
+      const activeSession = activeTarget.split(':')[0];
+      sessions = list.sort((a, b) => {
+        if (a.name === activeSession) return -1;
+        if (b.name === activeSession) return 1;
+        return (b.attached ? 1 : 0) - (a.attached ? 1 : 0);
+      });
+      for (const s of sessions) {
+        try { panes[s.name] = await listPanes(s.name); } catch {}
+      }
+      lastRefresh = Date.now();
+    } catch {}
+  }
 
   async function refresh() {
     try {
@@ -117,6 +143,7 @@
     } catch (e) {
       error = e.message;
     }
+    lastRefresh = Date.now();
   }
 
   async function toggleSession(name) {
