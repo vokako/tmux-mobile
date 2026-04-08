@@ -903,8 +903,7 @@
     <div class="toolbar">
       <button class="tool-btn" onclick={goHome}><Icon name="home" size={15} /></button>
       {#if !isMobile}<button class="tool-btn" onclick={() => loadDir(cwd)}><Icon name="refresh" size={15} /></button>{/if}
-      <button class="tool-btn" onclick={() => { newType = 'file'; newName = ''; }}><Icon name="plus" size={15} /></button>
-      <button class="tool-btn" onclick={() => { newType = 'dir'; newName = ''; }}><Icon name="folder-plus" size={15} /></button>
+      <button class="tool-btn" onclick={() => { newType = newType ? '' : 'file'; newName = ''; }}><Icon name="plus" size={15} /></button>
       <button class="tool-btn" onclick={handleUpload}><Icon name="upload" size={15} /></button>
       <button class="tool-btn" class:tool-active={showHidden} onclick={() => { showHidden = !showHidden; loadDir(cwd); }}>
         <Icon name="eye" size={15} />
@@ -969,6 +968,9 @@
     <!-- New item input -->
     {#if newType}
       <div class="new-item">
+        <button class="new-type-btn" onclick={() => newType = newType === 'file' ? 'dir' : 'file'}>
+          <Icon name={newType === 'dir' ? 'folder' : 'file'} size={13} />
+        </button>
         <input
           type="text"
           bind:value={newName}
@@ -1330,6 +1332,7 @@
     padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 6px;
     background: var(--surface2); color: var(--text2); cursor: pointer;
   }
+  .new-type-btn { display: flex; align-items: center; color: var(--accent); }
 
   .error {
     padding: 8px 12px; background: var(--bg2); color: var(--danger);

@@ -417,13 +417,24 @@
         {@const urls = mid ? (JSON.parse(localStorage.getItem('tmux_machines') || '{}')[mid] || []) : []}
         <div class="sp-conn">
           <div class="sp-conn-host">{serverInfo.hostname || 'unknown'}</div>
-          <div class="sp-conn-addr">{localStorage.getItem('tmux_address')}</div>
           {#if urls.length > 1}
             <div class="sp-conn-urls">
               {#each urls as u}
-                <button class="sp-conn-url" class:sp-conn-active={u === localStorage.getItem('tmux_address')} onclick={() => { if (u !== localStorage.getItem('tmux_address')) { localStorage.setItem('tmux_address', u); showSettings = false; doDisconnect(); setTimeout(() => { const token = localStorage.getItem('tmux_token') || ''; connect(u, token).then(() => { connected = true; serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' }; if (terminalTarget) wsSubscribe(terminalTarget); }).catch(() => { page = 'settings'; }); }, 100); } }}>{u}</button>
+                <button class="sp-conn-url" class:sp-conn-active={u === localStorage.getItem('tmux_address')} onclick={() => {
+                  if (u !== localStorage.getItem('tmux_address')) {
+                    localStorage.setItem('tmux_address', u);
+                    showSettings = false;
+                    disconnect();
+                    connect(u, localStorage.getItem('tmux_token') || '').then(() => {
+                      serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
+                      if (terminalTarget) wsSubscribe(terminalTarget);
+                    }).catch(() => { reconnecting = true; tryReconnect(); });
+                  }
+                }}>{u}</button>
               {/each}
             </div>
+          {:else}
+            <div class="sp-conn-addr">{localStorage.getItem('tmux_address')}</div>
           {/if}
           <div class="sp-conn-id">{mid?.slice(0, 8) || '—'}</div>
         </div>
