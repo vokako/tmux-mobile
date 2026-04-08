@@ -322,12 +322,19 @@ pub fn new_session(name: &str, path: Option<&str>, command: Option<&str>) -> Res
     }
     let mut args = vec!["new-session", "-d", "-s", name];
     let resolved;
+    let home = std::env::var("HOME").unwrap_or_default();
     if let Some(p) = path {
         if !p.is_empty() {
             resolved = crate::fs::resolve(p);
             args.push("-c");
             args.push(&resolved);
+        } else if !home.is_empty() {
+            args.push("-c");
+            args.push(&home);
         }
+    } else if !home.is_empty() {
+        args.push("-c");
+        args.push(&home);
     }
     let cmd_str;
     if let Some(cmd) = command {
