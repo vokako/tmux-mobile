@@ -121,19 +121,14 @@
     return () => clearInterval(id);
   });
 
-  // Calculate optimal cols/rows — on mobile, use max observed container height
-  // (not keyboard-shrunk height) to keep terminal size stable across keyboard open/close
-  let maxContainerH = 0;
+  // Calculate optimal cols/rows based on current container size
   function calcFit() {
     if (!term || !termEl) return null;
     const core = term._core;
     const cellW = core?._renderService?.dimensions?.css?.cell?.width || (term.options.fontSize * 0.6);
     const cellH = core?._renderService?.dimensions?.css?.cell?.height || (term.options.fontSize * 1.2);
     const w = termEl.clientWidth;
-    const clientH = termEl.clientHeight;
-    if (clientH > maxContainerH) maxContainerH = clientH;
-    // On mobile, use max seen height so keyboard doesn't shrink the terminal
-    const h = isMobile ? Math.max(clientH, maxContainerH) : clientH;
+    const h = termEl.clientHeight;
     if (!w || !h || !cellW || !cellH) return null;
     return { cols: Math.max(2, Math.floor(w / cellW)), rows: Math.max(1, Math.floor(h / cellH)) };
   }
