@@ -511,22 +511,15 @@
     const onKbShift = (e) => {
       if (!termEl || !term) return;
       const kbh = e.detail?.kbHeight || 0;
-      const core = term._core;
-      const cellH = core?._renderService?.dimensions?.css?.cell?.height || (term.options.fontSize * 1.2);
       if (kbh > 0) {
         const containerH = termEl.parentElement?.clientHeight || 0;
+        const core = term._core;
+        const cellH = core?._renderService?.dimensions?.css?.cell?.height || (term.options.fontSize * 1.2);
         const terminalH = term.rows * cellH;
         const overflow = terminalH - containerH;
         termEl.style.marginTop = overflow > 0 ? `-${overflow}px` : '0';
-        // Resize tmux pane to visible rows so vim/fullscreen apps adapt
-        const visibleRows = Math.max(1, Math.floor(containerH / cellH));
-        if (visibleRows < term.rows) {
-          resizePane(target, term.cols, visibleRows).catch(() => {});
-        }
       } else {
         termEl.style.marginTop = '0';
-        // Restore tmux pane to full size
-        resizePane(target, term.cols, term.rows).catch(() => {});
       }
     };
     window.addEventListener('keyboard-shift', onKbShift);
