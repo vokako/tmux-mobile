@@ -35,7 +35,9 @@
   // Keyboard height detection
   $effect(() => {
     // Android Tauri app: native event provides exact keyboard height
+    let androidNativeKb = false;
     const nativeHandler = (e) => {
+      androidNativeKb = true; // suppress visualViewport handler on Android
       const kbh = e.detail?.height || 0;
       if (kbh === 0 && window.innerHeight > fullHeight) fullHeight = window.innerHeight;
       const h = kbh > 0 ? (fullHeight - kbh) + 'px' : fullHeight + 'px';
@@ -62,7 +64,7 @@
     // the visible area (keyboard doesn't push nav off screen).
     const vv = window.visualViewport;
     const vpHandler = () => {
-      if (!vv) return;
+      if (!vv || androidNativeKb) return;
       const h = vv.height;
       // Update full height when viewport grows (keyboard closing)
       if (h > fullHeight) fullHeight = h;

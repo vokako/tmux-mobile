@@ -121,22 +121,20 @@
     return () => clearInterval(id);
   });
 
-  // Calculate optimal cols/rows — use max height to prevent tmux resize on keyboard open
-  let maxContainerH = 0;
+  // Calculate optimal cols/rows based on current container size
   function calcFit() {
     if (!term || !termEl) return null;
     const core = term._core;
     const cellW = core?._renderService?.dimensions?.css?.cell?.width || (term.options.fontSize * 0.6);
     const cellH = core?._renderService?.dimensions?.css?.cell?.height || (term.options.fontSize * 1.2);
     const w = termEl.clientWidth;
-    const clientH = termEl.clientHeight;
-    if (clientH > maxContainerH) maxContainerH = clientH;
-    const h = isMobile ? Math.max(clientH, maxContainerH) : clientH;
+    const h = termEl.clientHeight;
     if (!w || !h || !cellW || !cellH) return null;
     return { cols: Math.max(2, Math.floor(w / cellW)), rows: Math.max(1, Math.floor(h / cellH)) };
   }
 
   let touchScrolling = false; // set by touch handler, pauses content updates
+  let resizePendingTs = 0; // timestamp of last local resize, guards against stale server dimensions
 
   // Count lines without allocating a split array
   function countLines(s) { let n = 1; for (let i = 0; i < s.length; i++) if (s[i] === '\n') n++; return n; }
@@ -153,7 +151,12 @@
   function writeToXterm(content, cursor) {
     if (!term || touchScrolling) return;
     if (cursor?.w && cursor?.h && (term.cols !== cursor.w || term.rows !== cursor.h)) {
-      term.resize(cursor.w, cursor.h);
+      // Don't let stale server dimensions revert a recent local resize
+      if (Date.now() - resizePendingTs > 800) {
+        term.resize(cursor.w, cursor.h);
+      }
+    } else if (resizePendingTs > 0) {
+      resizePendingTs = 0; // server confirmed new dimensions
     }
     const buf = term.buffer.active;
     const atBottom = buf.viewportY >= buf.baseY;
@@ -484,17 +487,21 @@
     let lastFitCols = 0, lastFitRows = 0;
     function doResize() {
       const fit = calcFit();
-      if (!fit || (fit.cols === lastFitCols && fit.rows === lastFitRows)) return;
+      if (!fit) return;
       lastFitCols = fit.cols;
       lastFitRows = fit.rows;
+      // Skip if terminal is already at the correct size (avoids redundant resizePane + resizePendingTs reset)
+      if (fit.cols === term.cols && fit.rows === term.rows) return;
+      resizePendingTs = Date.now();
       resizePane(target, fit.cols, fit.rows).catch(() => {});
       term.resize(fit.cols, fit.rows);
+      // Immediately rewrite content so display is clean during the ~200ms server catch-up
+      if (lastContent) writeToXterm(lastContent, lastCursor);
     }
     requestAnimationFrame(doResize);
 
-    // Debounced resize — only on real window size changes, not keyboard open/close.
-    // Track window.innerWidth/Height (stable when keyboard opens) instead of
-    // visualViewport (shrinks when keyboard opens, causing double-shift).
+    // Debounced resize for window size changes (orientation, split-screen).
+    // Height-only changes on mobile are skipped (address bar, keyboard handled via onKbShift).
     let lastWinW = window.innerWidth, lastWinH = window.innerHeight;
     let resizeTimer = null;
     const onResize = () => {
@@ -507,20 +514,16 @@
     };
     window.addEventListener('resize', onResize);
 
-    // Shift xterm up when keyboard opens so cursor (at bottom) stays visible
+    // Resize terminal to fit visible area when keyboard opens/closes
+    let kbResizeTimer = null;
     const onKbShift = (e) => {
       if (!termEl || !term) return;
-      const kbh = e.detail?.kbHeight || 0;
-      if (kbh > 0) {
-        const containerH = termEl.parentElement?.clientHeight || 0;
-        const core = term._core;
-        const cellH = core?._renderService?.dimensions?.css?.cell?.height || (term.options.fontSize * 1.2);
-        const terminalH = term.rows * cellH;
-        const overflow = terminalH - containerH;
-        termEl.style.marginTop = overflow > 0 ? `-${overflow}px` : '0';
-      } else {
-        termEl.style.marginTop = '0';
-      }
+      termEl.style.marginTop = '0'; // remove legacy shift
+      clearTimeout(kbResizeTimer);
+      kbResizeTimer = setTimeout(() => {
+        lastFitCols = 0; lastFitRows = 0; // force recalc
+        doResize();
+      }, 100);
     };
     window.addEventListener('keyboard-shift', onKbShift);
 
@@ -567,6 +570,7 @@
 
     return () => {
       clearTimeout(resizeTimer);
+      clearTimeout(kbResizeTimer);
       stopMomentum();
       window.removeEventListener('resize', onResize);
       window.removeEventListener('terminal-refit', onRefit);
