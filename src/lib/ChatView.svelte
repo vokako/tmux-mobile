@@ -138,7 +138,7 @@
     return blocks;
   }
 
-  let parser = $derived(detectParser(content, command));
+  let parser = $derived(detectParser('', command));
   let parsed = $state({ messages: [], isThinking: false, isSummarizing: false });
   let lastParsedContent = '';
   $effect(() => {
@@ -253,6 +253,13 @@
     if (r === undefined) { r = renderMarkdown(s); _mdCache.set(s, r); if (_mdCache.size > 200) _mdCache.delete(_mdCache.keys().next().value); }
     return r;
   }
+  const _blockCache = new Map();
+  function cachedParseBlocks(text, rawText) {
+    const key = text;
+    let r = _blockCache.get(key);
+    if (r === undefined) { r = parseBlocks(text, rawText); _blockCache.set(key, r); if (_blockCache.size > 200) _blockCache.delete(_blockCache.keys().next().value); }
+    return r;
+  }
 
   let collapsedTools = $state({});
   function toggleTool(id) { collapsedTools[id] = !collapsedTools[id]; }
@@ -345,7 +352,7 @@
         {:else}
         <div class="bubble-wrap">
           <div class="bubble" class:user-bubble={msg.role === 'user'} class:agent-bubble={msg.role === 'agent'} role="button" tabindex="-1" onclick={() => handleBubbleTap(mi, msg.text)} onkeydown={(e) => { if (e.key === 'Enter') handleBubbleTap(mi, msg.text); }}>
-          {#each parseBlocks(msg.text, msg.rawText) as block, bi}
+          {#each cachedParseBlocks(msg.text, msg.rawText) as block, bi}
             {#if block.type === 'text'}
               {#if msg.role === 'user'}
                 <div class="md-block">{@html cachedRenderMarkdown(stripAnsi(block.content))}</div>

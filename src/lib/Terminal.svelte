@@ -77,7 +77,7 @@
     window.dispatchEvent(new Event('terminal-refit'));
   });
 
-  let parser = $derived(detectParser(paneContent, command));
+  let parser = $derived(detectParser('', command));
 
   $effect(() => { onChatSupported(!!parser); });
 
@@ -114,7 +114,7 @@
   });
 
   $effect(() => {
-    if (!session) return;
+    if (!session || viewMode !== 'terminal') return;
     const load = () => listPanes(session).then(p => { windowPanes = p; }).catch(() => {});
     load();
     const id = setInterval(load, 5000);
@@ -140,12 +140,17 @@
   function countLines(s) { let n = 1; for (let i = 0; i < s.length; i++) if (s[i] === '\n') n++; return n; }
 
   // Write content + position cursor in xterm.js
+  let _colorCacheIn = '', _colorCacheOut = '', _colorCacheTheme = '';
   function adaptColorsForLight(text) {
     if (theme !== 'light') return text;
+    if (text === _colorCacheIn && theme === _colorCacheTheme) return _colorCacheOut;
+    _colorCacheIn = text;
+    _colorCacheTheme = theme;
     // Invert all RGB colors: both foreground (38;2) and background (48;2)
-    return text.replace(/\x1b\[(3|4)8;2;(\d+);(\d+);(\d+)m/g, (m, type, r, g, b) => {
+    _colorCacheOut = text.replace(/\x1b\[(3|4)8;2;(\d+);(\d+);(\d+)m/g, (m, type, r, g, b) => {
       return `\x1b[${type}8;2;${255 - +r};${255 - +g};${255 - +b}m`;
     });
+    return _colorCacheOut;
   }
 
   function writeToXterm(content, cursor) {
