@@ -25,6 +25,8 @@ static CONN_ID_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 
 const MAX_AUTH_FAILURES: u32 = 5;
 const AUTH_LOCKOUT_SECS: u64 = 60;
+const SUBSCRIPTION_POLL_MS: u64 = 200;
+const MAX_CAPTURE_FAILURES: u32 = 5;
 
 fn bytes_to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
@@ -544,7 +546,7 @@ async fn subscription_loop(
     subs: Subscriptions,
     cipher: Arc<Mutex<Option<SessionCipher>>>,
 ) {
-    let mut interval = tokio::time::interval(std::time::Duration::from_millis(200));
+    let mut interval = tokio::time::interval(std::time::Duration::from_millis(SUBSCRIPTION_POLL_MS));
     let mut fail_counts: HashMap<String, u32> = HashMap::new();
     loop {
         interval.tick().await;
@@ -576,7 +578,7 @@ async fn subscription_loop(
                 _ => {
                     let count = fail_counts.entry(target.clone()).or_insert(0);
                     *count += 1;
-                    if *count >= 5 {
+                    if *count >= MAX_CAPTURE_FAILURES {
                         subs.lock().await.remove(&target);
                         fail_counts.remove(&target);
                         // Notify client that pane is gone

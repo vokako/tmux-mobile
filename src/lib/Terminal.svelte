@@ -5,6 +5,25 @@
   import Icon from './Icon.svelte';
   import { detectParser } from './parsers.js';
 
+  // Timing constants
+  const PANE_COMMAND_POLL_MS = 3000;
+  const WINDOW_LIST_POLL_MS = 5000;
+  const RESIZE_DEBOUNCE_MS = 300;
+  const KB_RESIZE_DELAY_MS = 100;
+  const RESIZE_PENDING_TTL_MS = 800;
+  const LONG_PRESS_MS = 500;
+  const TOUCH_END_DELAY_MS = 500;
+
+  // xterm.js fallback cell size ratios (used when render dimensions unavailable)
+  const CELL_W_RATIO = 0.6;
+  const CELL_H_RATIO = 1.2;
+
+  // Touch scrolling physics
+  const MOMENTUM_MAX_PX = 240;
+  const MOMENTUM_FRICTION = 0.95;
+  const MOMENTUM_MIN_V = 0.05;
+  const SCROLLBAR_TOUCH_WIDTH = 30;
+
   let { target, session, command: initialCommand = '', viewMode = 'terminal', fontSize = 14, onChatSupported = () => {}, onSwitchPane = null, onPaneExit = () => {} } = $props();
 
   let input = $state('');
@@ -85,7 +104,7 @@
   $effect(() => {
     const poll = () => paneCommand(target).then(r => { command = r.command || ''; }).catch(() => {});
     poll();
-    const id = setInterval(poll, 3000);
+    const id = setInterval(poll, PANE_COMMAND_POLL_MS);
     return () => clearInterval(id);
   });
 
@@ -117,7 +136,7 @@
     if (!session || viewMode !== 'terminal') return;
     const load = () => listPanes(session).then(p => { windowPanes = p; }).catch(() => {});
     load();
-    const id = setInterval(load, 5000);
+    const id = setInterval(load, WINDOW_LIST_POLL_MS);
     return () => clearInterval(id);
   });
 
@@ -125,8 +144,8 @@
   function calcFit() {
     if (!term || !termEl) return null;
     const core = term._core;
-    const cellW = core?._renderService?.dimensions?.css?.cell?.width || (term.options.fontSize * 0.6);
-    const cellH = core?._renderService?.dimensions?.css?.cell?.height || (term.options.fontSize * 1.2);
+    const cellW = core?._renderService?.dimensions?.css?.cell?.width || (term.options.fontSize * CELL_W_RATIO);
+    const cellH = core?._renderService?.dimensions?.css?.cell?.height || (term.options.fontSize * CELL_H_RATIO);
     const w = termEl.clientWidth;
     const h = termEl.clientHeight;
     if (!w || !h || !cellW || !cellH) return null;
@@ -157,7 +176,7 @@
     if (!term || touchScrolling) return;
     if (cursor?.w && cursor?.h && (term.cols !== cursor.w || term.rows !== cursor.h)) {
       // Don't let stale server dimensions revert a recent local resize
-      if (!resizePendingTs || Date.now() - resizePendingTs > 800) {
+      if (!resizePendingTs || Date.now() - resizePendingTs > RESIZE_PENDING_TTL_MS) {
         term.resize(cursor.w, cursor.h);
         resizePendingTs = 0;
       }
@@ -211,8 +230,8 @@
   $effect(() => {
     touchScrolling = false; // reset on pane switch
     resizePendingTs = 0;
-    const estCellW = fontSize * 0.6;
-    const estCellH = fontSize * 1.2;
+    const estCellW = fontSize * CELL_W_RATIO;
+    const estCellH = fontSize * CELL_H_RATIO;
     const containerW = termEl?.clientWidth || 300;
     const containerH = termEl?.clientHeight || 400;
     const initCols = Math.max(2, Math.floor(containerW / estCellW));
@@ -270,8 +289,8 @@
     function touchToCell(clientX, clientY) {
       const rect = termEl.getBoundingClientRect();
       const core = term._core;
-      const cellW = core?._renderService?.dimensions?.css?.cell?.width || (term.options.fontSize * 0.6);
-      const cellH = core?._renderService?.dimensions?.css?.cell?.height || (term.options.fontSize * 1.2);
+      const cellW = core?._renderService?.dimensions?.css?.cell?.width || (term.options.fontSize * CELL_W_RATIO);
+      const cellH = core?._renderService?.dimensions?.css?.cell?.height || (term.options.fontSize * CELL_H_RATIO);
       return {
         col: Math.min(term.cols - 1, Math.max(0, Math.floor((clientX - rect.left) / cellW))),
         row: Math.min(term.rows - 1, Math.max(0, Math.floor((clientY - rect.top) / cellH))),
@@ -336,7 +355,7 @@
       // Scrollbar drag
       const rect = termEl.getBoundingClientRect();
       const touchX = e.touches[0].clientX;
-      onScrollbar = (rect.right - touchX) < 30;
+      onScrollbar = (rect.right - touchX) < SCROLLBAR_TOUCH_WIDTH;
       if (onScrollbar) {
         touchScrolling = true;
         scrollbarStartY = e.touches[0].clientY;
@@ -356,6 +375,7 @@
       const startCX = e.touches[0].clientX;
       const startCY = e.touches[0].clientY;
       longPressTimer = setTimeout(() => {
+
         if (!didScroll && term) {
           const textarea = termEl.querySelector('.xterm-helper-textarea');
           if (textarea) textarea.blur();
@@ -368,7 +388,7 @@
           selectionRange = { sRow: bufRow, sCol: bounds.start, eRow: bufRow, eCol: bounds.end - 1 };
           touchScrolling = true; // pause content updates during selection
         }
-      }, 500);
+      }, LONG_PRESS_MS);
     };
     // Find the tracked touch by identifier (ignore extra fingers)
     const findTouch = (list) => { for (let i = 0; i < list.length; i++) if (list[i].identifier === touchId) return list[i]; return null; };
@@ -433,7 +453,7 @@
       }
     };
     const onTouchEnd = () => {
-      if (onScrollbar) { onScrollbar = false; setTimeout(endTouchScroll, 500); return; }
+      if (onScrollbar) { onScrollbar = false; setTimeout(endTouchScroll, TOUCH_END_DELAY_MS); return; }
       if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
       // Selection active → keep visible, tap on it to copy
       if (isSelecting) return;
@@ -448,12 +468,12 @@
         const avgVelocity = wSum / wTotal; // px/ms
         const lh = lineHeight();
         // Cap velocity at 120px/frame equivalent, then convert to lines/frame
-        const maxPxPerFrame = 240;
+        const maxPxPerFrame = MOMENTUM_MAX_PX;
         const cappedPx = Math.max(-maxPxPerFrame, Math.min(maxPxPerFrame, avgVelocity * 16));
         let v = cappedPx / lh;
         if (Math.abs(v) > 0.1) {
           let acc = 0;
-          const friction = 0.95;
+          const friction = MOMENTUM_FRICTION;
           const coast = () => {
             v *= friction;
             acc += v;
@@ -462,7 +482,7 @@
               term.scrollLines(lines);
               acc -= lines;
             }
-            if (Math.abs(v) > 0.05) {
+            if (Math.abs(v) > MOMENTUM_MIN_V) {
               momentumId = requestAnimationFrame(coast);
             } else {
               momentumId = null;
@@ -471,10 +491,10 @@
           };
           momentumId = requestAnimationFrame(coast);
         } else {
-          setTimeout(endTouchScroll, 500);
+          setTimeout(endTouchScroll, TOUCH_END_DELAY_MS);
         }
       } else if (touchScrolling) {
-        setTimeout(endTouchScroll, 500);
+        setTimeout(endTouchScroll, TOUCH_END_DELAY_MS);
       }
     };
     const onTouchCancel = () => {
@@ -523,7 +543,7 @@
       if (isMobile && ww === lastWinW && wh !== lastWinH) return;
       lastWinW = ww; lastWinH = wh;
       clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(doResize, 300);
+      resizeTimer = setTimeout(doResize, RESIZE_DEBOUNCE_MS);
     };
     window.addEventListener('resize', onResize);
 
@@ -536,7 +556,7 @@
       kbResizeTimer = setTimeout(() => {
         lastFitCols = 0; lastFitRows = 0; // force recalc
         doResize();
-      }, 100);
+      }, KB_RESIZE_DELAY_MS);
     };
     window.addEventListener('keyboard-shift', onKbShift);
 

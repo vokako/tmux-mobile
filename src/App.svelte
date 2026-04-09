@@ -6,6 +6,13 @@
   import Icon from './lib/Icon.svelte';
   import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, getMachineId, getHostname } from './lib/ws.js';
 
+  // Tunable constants
+  const KB_OPEN_THRESHOLD = 100; // px difference to detect keyboard open
+  const SWIPE_MIN_DISTANCE = 120; // px minimum for tab swipe
+  const SWIPE_MAX_ANGLE = 0.7; // vertical/horizontal ratio to reject diagonal swipes
+  const RECONNECT_MAX_ATTEMPTS = 20;
+  const SLIDE_ANIMATION_MS = 120;
+
   let page = $state('settings');
   let connected = $state(false);
   let terminalTarget = $state('');
@@ -68,7 +75,7 @@
       const h = vv.height;
       // Update full height when viewport grows (keyboard closing)
       if (h > fullHeight) fullHeight = h;
-      const kbOpen = h < fullHeight - 100;
+      const kbOpen = h < fullHeight - KB_OPEN_THRESHOLD;
       const wasKbOpen = document.documentElement.classList.contains('keyboard-open');
       window.__dbg?.(`vpResize: vv.h=${h.toFixed(0)} fullH=${fullHeight} kbOpen=${kbOpen}${kbOpen !== wasKbOpen ? (kbOpen ? ' ⌨️OPEN' : ' ⌨️CLOSE') : ''}`);
       document.documentElement.style.setProperty('--app-height', h + 'px');
@@ -197,7 +204,7 @@
       if (terminalTarget) wsSubscribe(terminalTarget);
     }).catch(() => {
       if (!reconnecting) return;
-      if (attempt < 20) {
+      if (attempt < RECONNECT_MAX_ATTEMPTS) {
         const delay = Math.min(1000 * (attempt + 1), 5000);
         reconnectTimer = setTimeout(() => tryReconnect(attempt + 1), delay);
       } else {
@@ -341,7 +348,7 @@
     if (slideAnim) return;
     const dx = e.changedTouches[0].clientX - swipeX;
     const dy = Math.abs(e.changedTouches[0].clientY - swipeY);
-    if (Math.abs(dx) < 120 || dy > Math.abs(dx) * 0.7) return;
+    if (Math.abs(dx) < SWIPE_MIN_DISTANCE || dy > Math.abs(dx) * SWIPE_MAX_ANGLE) return;
     if (page === 'files' && dx > 0 && swipeX < 40) return;
 
     const t = tabs();
@@ -369,7 +376,7 @@
     if (fromIdx >= 0 && toIdx >= 0) {
       slideAnim = toIdx > fromIdx ? 'slide-in-right' : 'slide-in-left';
       requestAnimationFrame(() => {
-        setTimeout(() => { slideAnim = ''; }, 120);
+        setTimeout(() => { slideAnim = ''; }, SLIDE_ANIMATION_MS);
       });
     }
   }

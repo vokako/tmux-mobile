@@ -1,5 +1,9 @@
 // WebSocket client for tmux-mobile server
 
+const CONNECT_TIMEOUT_MS = 5000;
+const RPC_TIMEOUT_MS = 10000;
+const BASE64_CHUNK_SIZE = 8192;
+
 let ws = null;
 let requestId = 0;
 const pending = new Map();
@@ -62,8 +66,8 @@ async function encryptMsg(text) {
   // Chunked base64 encoding to avoid stack overflow on large messages
   const bytes = new Uint8Array(ct);
   let binary = '';
-  for (let i = 0; i < bytes.length; i += 8192) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+  for (let i = 0; i < bytes.length; i += BASE64_CHUNK_SIZE) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + BASE64_CHUNK_SIZE));
   }
   return btoa(binary);
 }
@@ -102,7 +106,7 @@ export function connect(url, token) {
     const timeout = setTimeout(() => {
       ws?.close();
       reject(new Error('connection timeout'));
-    }, 5000);
+    }, CONNECT_TIMEOUT_MS);
 
     let authed = false;
     let serverNonce = null;
@@ -225,7 +229,7 @@ function call(method, params = {}) {
     const timer = setTimeout(() => {
       pending.delete(id);
       reject(new Error('request timeout'));
-    }, 10000);
+    }, RPC_TIMEOUT_MS);
     pending.set(id, {
       resolve: (v) => { clearTimeout(timer); resolve(v); },
       reject: (e) => { clearTimeout(timer); reject(e); },

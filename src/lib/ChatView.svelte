@@ -4,6 +4,16 @@
 
   let { content = '', onSendKeys = null, command = '', fontSize = 14 } = $props();
 
+  const SCROLL_BOTTOM_THRESHOLD = 40;
+  const SCROLL_DELAYS_MS = [50, 150, 300, 500];
+
+  // Simple LRU cache helper
+  function cached(map, limit, key, compute) {
+    let r = map.get(key);
+    if (r === undefined) { r = compute(); map.set(key, r); if (map.size > limit) map.delete(map.keys().next().value); }
+    return r;
+  }
+
   let chatEl;
 
   // ANSI 256-color palette (basic 16 + 216 cube + 24 grayscale)
@@ -176,7 +186,7 @@
 
   function checkAtBottom() {
     if (!chatEl) return;
-    isAtBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 40;
+    isAtBottom = chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < SCROLL_BOTTOM_THRESHOLD;
   }
 
   function scrollToBottom() {
@@ -195,7 +205,7 @@
   // Scroll to bottom when keyboard opens/closes (only if user was at bottom)
   function scheduleScroll() {
     if (!isAtBottom) return;
-    for (const ms of [50, 150, 300, 500]) setTimeout(() => {
+    for (const ms of SCROLL_DELAYS_MS) setTimeout(() => {
       if (isAtBottom) scrollToBottom();
       checkAtBottom();
     }, ms);
@@ -242,24 +252,11 @@
 
   // Memoize expensive render functions
   const _ansiCache = new Map();
-  function cachedAnsiToHtml(s) {
-    let r = _ansiCache.get(s);
-    if (r === undefined) { r = ansiToHtml(s); _ansiCache.set(s, r); if (_ansiCache.size > 500) _ansiCache.delete(_ansiCache.keys().next().value); }
-    return r;
-  }
   const _mdCache = new Map();
-  function cachedRenderMarkdown(s) {
-    let r = _mdCache.get(s);
-    if (r === undefined) { r = renderMarkdown(s); _mdCache.set(s, r); if (_mdCache.size > 200) _mdCache.delete(_mdCache.keys().next().value); }
-    return r;
-  }
   const _blockCache = new Map();
-  function cachedParseBlocks(text, rawText) {
-    const key = text;
-    let r = _blockCache.get(key);
-    if (r === undefined) { r = parseBlocks(text, rawText); _blockCache.set(key, r); if (_blockCache.size > 200) _blockCache.delete(_blockCache.keys().next().value); }
-    return r;
-  }
+  function cachedAnsiToHtml(s) { return cached(_ansiCache, 500, s, () => ansiToHtml(s)); }
+  function cachedRenderMarkdown(s) { return cached(_mdCache, 200, s, () => renderMarkdown(s)); }
+  function cachedParseBlocks(text, rawText) { return cached(_blockCache, 200, text, () => parseBlocks(text, rawText)); }
 
   let collapsedTools = $state({});
   function toggleTool(id) { collapsedTools[id] = !collapsedTools[id]; }
