@@ -250,6 +250,7 @@ export const fsDelete = (path) => call('fs_delete', { path });
 export const fsRename = (from, to) => call('fs_rename', { from, to });
 export const fsDownload = (path) => call('fs_download', { path });
 export const fsUpload = (path, data) => call('fs_upload', { path, data });
+export const fsConvert = (path, format = 'html') => call('fs_convert', { path, format });
 export const gitCmd = (subcmd, args = [], cwd) => call('git', { subcmd, args, cwd });
 
 export function subscribe(target) {

@@ -22,7 +22,7 @@
   import 'highlight.js/styles/github-dark.min.css';
   import mermaid from 'mermaid';
   import Icon from './Icon.svelte';
-  import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref } from './ws.js';
+  import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref, fsConvert } from './ws.js';
 
   // Tauri plugin imports (tree-shaken in browser builds)
   let tauriFs, tauriDialog, tauriOpener, tauriPath;
@@ -492,6 +492,10 @@
       } else if (stat.is_text && stat.size <= 512 * 1024) {
         const r = await fsRead(entry.path);
         currentFile.content = r.content;
+        view = 'preview';
+      } else if (entry.name.match(/\.pptx$/i)) {
+        const r = await fsConvert(entry.path);
+        currentFile.convertedHtml = r.html;
         view = 'preview';
       } else {
         view = 'info';
@@ -1074,6 +1078,8 @@
         <div class="pdf-container" bind:this={pdfContainer} style="margin: -12px; padding: 0;"></div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'image'}
         <div class="image-preview"><img src={currentFile.dataUrl} alt={currentFile.name} /></div>
+      {:else if currentFile.convertedHtml}
+        <div class="md-render">{@html currentFile.convertedHtml}</div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'code'}
         <div class="code-lined">
           <div class="line-nums">{@html currentFile.content.split('\n').map((_, i) => i + 1).join('\n')}</div>

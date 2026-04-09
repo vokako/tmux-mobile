@@ -488,6 +488,49 @@ fn handle_request(req: &Request) -> Response {
             }
         }
 
+        "fs_convert" => {
+            let path = match require_str(p, "path") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            let format = p.get("format").and_then(|v| v.as_str()).unwrap_or("html");
+            if format != "html" {
+                return Response::err(id, ERR_INVALID_PARAMS, "only html format supported".into());
+            }
+            let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            let script = match ext.as_str() {
+                "pptx" => format!(
+                    r#"import pptx,html as h;p=pptx.Presentation("{}");o=""
+for i,s in enumerate(p.slides):
+ o+=f"<div style='border:1px solid #ccc;border-radius:8px;padding:16px;margin:12px 0'><b>Slide {{i+1}}</b><br>"
+ for sh in s.shapes:
+  if sh.has_text_frame:
+   for pa in sh.text_frame.paragraphs:
+    t=h.escape("".join(r.text for r in pa.runs))
+    if t.strip():o+=f"<p>{{t}}</p>"
+  if sh.has_table:
+   o+="<table border=1 cellpadding=4 style='border-collapse:collapse;margin:8px 0'>"
+   for row in sh.table.rows:
+    o+="<tr>"+"".join(f"<td>{{h.escape(c.text)}}</td>" for c in row.cells)+"</tr>"
+   o+="</table>"
+ o+="</div>"
+print(o)"#, path),
+                _ => return Response::err(id, ERR_INVALID_PARAMS, format!("unsupported file type: .{}", ext)),
+            };
+            match std::process::Command::new("python3").arg("-c").arg(&script).output() {
+                Ok(output) => {
+                    if output.status.success() {
+                        let html = String::from_utf8_lossy(&output.stdout).to_string();
+                        Response::ok(id, serde_json::json!({ "html": html }))
+                    } else {
+                        let err = String::from_utf8_lossy(&output.stderr).to_string();
+                        Response::err(id, ERR_INTERNAL, err)
+                    }
+                }
+                Err(e) => Response::err(id, ERR_INTERNAL, e.to_string()),
+            }
+        }
+
         _ => Response::err(
             id,
             ERR_METHOD_NOT_FOUND,
