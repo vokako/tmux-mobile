@@ -320,6 +320,17 @@ fn home_dir() -> String {
         .unwrap_or_else(|| std::env::var("HOME").unwrap_or_default())
 }
 
+/// Get the working directory of the active pane in a session/target.
+pub fn pane_cwd(target: &str) -> Result<String, String> {
+    let path = run_tmux(&["display-message", "-t", target, "-p", "#{pane_current_path}"])?;
+    let path = path.trim().to_string();
+    if path.is_empty() {
+        Ok(home_dir())
+    } else {
+        Ok(path)
+    }
+}
+
 /// 创建新 session
 pub fn new_session(name: &str, path: Option<&str>, command: Option<&str>) -> Result<(), String> {
     // Check if session name already exists to prevent grouped sessions

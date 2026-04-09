@@ -57,7 +57,13 @@ async function encryptMsg(text) {
   if (!sessionCipher) return text;
   const nonce = makeNonce(sessionCipher.sendCounter++);
   const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, sessionCipher.key, new TextEncoder().encode(text));
-  return btoa(String.fromCharCode(...new Uint8Array(ct)));
+  // Chunked base64 encoding to avoid stack overflow on large messages
+  const bytes = new Uint8Array(ct);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 8192) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+  }
+  return btoa(binary);
 }
 
 async function decryptMsg(b64) {
@@ -218,7 +224,11 @@ function call(method, params = {}) {
       reject: (e) => { clearTimeout(timer); reject(e); },
     });
     const msg = JSON.stringify({ id, method, params });
-    encryptMsg(msg).then(out => ws?.send(out)).catch(() => {});
+    encryptMsg(msg).then(out => ws?.send(out)).catch((e) => {
+      pending.delete(id);
+      clearTimeout(timer);
+      reject(e);
+    });
   });
 }
 

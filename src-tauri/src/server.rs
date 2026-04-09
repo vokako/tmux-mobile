@@ -464,7 +464,7 @@ fn handle_request(req: &Request) -> Response {
             }
             // Reject args containing shell metacharacters
             for arg in &args {
-                if arg.contains(|c: char| matches!(c, ';' | '&' | '$' | '`' | '\n')) {
+                if arg.contains(|c: char| matches!(c, ';' | '&' | '$' | '`' | '|' | '>' | '<' | '\n' | '\r')) {
                     return Response::err(id, ERR_INVALID_PARAMS, "invalid characters in argument".into());
                 }
             }
@@ -499,25 +499,24 @@ fn handle_request(req: &Request) -> Response {
             }
             let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
             let script = match ext.as_str() {
-                "pptx" => format!(
-                    r#"import pptx,html as h;p=pptx.Presentation("{}");o=""
+                "pptx" => r#"import sys,pptx,html as h;p=pptx.Presentation(sys.argv[1]);o=""
 for i,s in enumerate(p.slides):
- o+=f"<div style='border:1px solid #ccc;border-radius:8px;padding:16px;margin:12px 0'><b>Slide {{i+1}}</b><br>"
+ o+=f"<div style='border:1px solid #ccc;border-radius:8px;padding:16px;margin:12px 0'><b>Slide {i+1}</b><br>"
  for sh in s.shapes:
   if sh.has_text_frame:
    for pa in sh.text_frame.paragraphs:
     t=h.escape("".join(r.text for r in pa.runs))
-    if t.strip():o+=f"<p>{{t}}</p>"
+    if t.strip():o+=f"<p>{t}</p>"
   if sh.has_table:
    o+="<table border=1 cellpadding=4 style='border-collapse:collapse;margin:8px 0'>"
    for row in sh.table.rows:
-    o+="<tr>"+"".join(f"<td>{{h.escape(c.text)}}</td>" for c in row.cells)+"</tr>"
+    o+="<tr>"+"".join(f"<td>{h.escape(c.text)}</td>" for c in row.cells)+"</tr>"
    o+="</table>"
  o+="</div>"
-print(o)"#, path),
+print(o)"#.to_string(),
                 _ => return Response::err(id, ERR_INVALID_PARAMS, format!("unsupported file type: .{}", ext)),
             };
-            match std::process::Command::new("python3").arg("-c").arg(&script).output() {
+            match std::process::Command::new("python3").arg("-c").arg(&script).arg(path).output() {
                 Ok(output) => {
                     if output.status.success() {
                         let html = String::from_utf8_lossy(&output.stdout).to_string();

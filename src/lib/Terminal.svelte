@@ -152,8 +152,9 @@
     if (!term || touchScrolling) return;
     if (cursor?.w && cursor?.h && (term.cols !== cursor.w || term.rows !== cursor.h)) {
       // Don't let stale server dimensions revert a recent local resize
-      if (Date.now() - resizePendingTs > 800) {
+      if (!resizePendingTs || Date.now() - resizePendingTs > 800) {
         term.resize(cursor.w, cursor.h);
+        resizePendingTs = 0;
       }
     } else if (resizePendingTs > 0) {
       resizePendingTs = 0; // server confirmed new dimensions
@@ -192,7 +193,7 @@
 
     if (buf.baseY > 0) term.clear();
     term.write('\x1b[?25l\x1b[2J\x1b[H' + topPad + adaptColorsForLight(content) + afterPad + cursorSeq + '\x1b[?25h', () => {
-      if (touchScrolling) return;
+      if (!term || touchScrolling) return;
       if (atBottom) {
         term.scrollToBottom();
       } else {
@@ -284,6 +285,7 @@
     }
 
     // Mobile touch: scrolling, scrollbar drag, long-press word selection
+    let touchId = null; // track the initial touch to ignore extra fingers
     let touchY = 0, touchStartY = 0, accumulatedDy = 0, longPressTimer = null, didScroll = false;
     let lastMoveTime = 0, momentumId = null, totalDist = 0;
     let velocitySamples = []; // recent velocity samples for smoothing
@@ -295,6 +297,7 @@
 
     const onTouchStart = (e) => {
       stopMomentum();
+      touchId = e.touches[0].identifier; // track this finger
       // Tap while selection active → copy if on selection, else just clear
       if (isSelecting) {
         const cell = touchToCell(e.touches[0].clientX, e.touches[0].clientY);
@@ -361,11 +364,15 @@
         }
       }, 500);
     };
+    // Find the tracked touch by identifier (ignore extra fingers)
+    const findTouch = (list) => { for (let i = 0; i < list.length; i++) if (list[i].identifier === touchId) return list[i]; return null; };
     const onTouchMove = (e) => {
       if (!term) return;
+      const t0 = findTouch(e.touches);
+      if (!t0) return; // not our finger
       // Scrollbar drag: map touch delta proportionally to scroll position
       if (onScrollbar) {
-        const deltaY = e.touches[0].clientY - scrollbarStartY;
+        const deltaY = t0.clientY - scrollbarStartY;
         const trackH = termEl.clientHeight;
         const totalScroll = term.buffer.active.baseY;
         if (totalScroll > 0 && trackH > 0) {
@@ -377,7 +384,7 @@
       }
       // Selection drag: extend from anchor word to current cell
       if (isSelecting && selectionAnchor) {
-        const cell = touchToCell(e.touches[0].clientX, e.touches[0].clientY);
+        const cell = touchToCell(t0.clientX, t0.clientY);
         const bufRow = term.buffer.active.viewportY + cell.row;
         let sCol, sRow, eCol, eRow, len;
         if (bufRow < selectionAnchor.bufRow || (bufRow === selectionAnchor.bufRow && cell.col < selectionAnchor.col)) {
@@ -396,7 +403,7 @@
       }
       // Normal content scroll
       const now = Date.now();
-      const y = e.touches[0].clientY;
+      const y = t0.clientY;
       const dy = touchY - y;
       const dt = Math.max(1, now - lastMoveTime);
       touchY = y;
@@ -571,6 +578,7 @@
     return () => {
       clearTimeout(resizeTimer);
       clearTimeout(kbResizeTimer);
+      if (longPressTimer) clearTimeout(longPressTimer);
       stopMomentum();
       window.removeEventListener('resize', onResize);
       window.removeEventListener('terminal-refit', onRefit);
@@ -582,7 +590,7 @@
       // Server kills the control-mode client on WS disconnect → tmux auto-restores size
       unsubscribe(target);
       setOnPaneOutput(null);
-      term.dispose();
+      try { term.dispose(); } catch {}
       term = null;
     };
   });

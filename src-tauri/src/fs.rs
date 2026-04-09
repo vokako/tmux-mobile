@@ -133,25 +133,7 @@ fn is_text_file(path: &Path, name: &str) -> bool {
 }
 
 pub fn get_cwd(session: &str) -> Result<String, String> {
-    // Get the CWD of the active pane in the session
-    let output = std::process::Command::new("tmux")
-        .args([
-            "display-message",
-            "-t",
-            session,
-            "-p",
-            "#{pane_current_path}",
-        ])
-        .output()
-        .map_err(|e| format!("tmux error: {}", e))?;
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if path.is_empty() {
-        Ok(dirs::home_dir()
-            .map(|h| h.to_string_lossy().to_string())
-            .unwrap_or_else(|| "/".to_string()))
-    } else {
-        Ok(path)
-    }
+    crate::tmux::pane_cwd(session)
 }
 
 pub fn list_dir(path: &str, show_hidden: bool) -> Result<Vec<FileEntry>, String> {
