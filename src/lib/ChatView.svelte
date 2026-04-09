@@ -192,10 +192,11 @@
     });
   });
 
-  // Scroll to bottom when keyboard opens/closes
+  // Scroll to bottom when keyboard opens/closes (only if user was at bottom)
   function scheduleScroll() {
+    if (!isAtBottom) return;
     for (const ms of [50, 150, 300, 500]) setTimeout(() => {
-      scrollToBottom();
+      if (isAtBottom) scrollToBottom();
       checkAtBottom();
     }, ms);
   }

@@ -245,7 +245,7 @@
                 </button>
               </div>
             {/each}
-            <button class="pane-add" onclick={async () => { await newWindow(s.name); const ps = await listPanes(s.name); panes[s.name] = ps; const p = ps[ps.length - 1]; if (p) openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command); }}>
+            <button class="pane-add" onclick={async () => { try { await newWindow(s.name); const ps = await listPanes(s.name); panes[s.name] = ps; const p = ps[ps.length - 1]; if (p) openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command); } catch (e) { error = e.message; } }}>
               <Icon name="plus" size={12} /> Window
             </button>
           </div>

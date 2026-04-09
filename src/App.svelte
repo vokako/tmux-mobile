@@ -354,6 +354,7 @@
 
   function switchTab(target) {
     if (slideAnim) return;
+    showSettings = false;
     const t = tabs();
     const curName = page === 'terminal' ? (viewMode === 'chat' ? 'chat' : 'terminal') : page;
     if (target === curName) return;

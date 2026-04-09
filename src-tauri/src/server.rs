@@ -559,8 +559,12 @@ async fn subscription_loop(
             let t = target.clone();
             let t2 = target.clone();
             let (new_content, cursor, trailing_trimmed) = match tokio::task::spawn_blocking(move || {
+                // Get cursor first for pane width, then capture content immediately after
+                // to minimize race window between the two tmux calls
                 let cursor = tmux::cursor_info(&t2).unwrap_or((0, 0, 24, 80));
                 let (content, trailing) = tmux::capture_pane_with_width(&t, None, cursor.3)?;
+                // Re-read cursor to get position matching the captured content
+                let cursor = tmux::cursor_info(&t2).unwrap_or(cursor);
                 Ok::<_, String>((content, cursor, trailing))
             })
             .await

@@ -205,6 +205,7 @@
   // xterm.js setup + subscription
   $effect(() => {
     touchScrolling = false; // reset on pane switch
+    resizePendingTs = 0;
     const estCellW = fontSize * 0.6;
     const estCellH = fontSize * 1.2;
     const containerW = termEl?.clientWidth || 300;
@@ -683,6 +684,7 @@
             onclick={(e) => {
               e.stopPropagation();
               if (String(w.window) !== currentWindow && onSwitchPane) {
+                showWindowCmd = false; localStorage.setItem('tmux_winswitcher', '0');
                 document.activeElement?.blur();
                 touchScrolling = false;
                 const fh = window.__fullHeight?.() || window.innerHeight;

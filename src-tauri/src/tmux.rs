@@ -93,17 +93,18 @@ fn run_tmux(args: &[&str]) -> Result<String, String> {
 
 /// 列出所有 session
 pub fn list_sessions() -> Result<Vec<TmuxSession>, String> {
+    // Use unit separator (\x1f) as delimiter — cannot appear in session names
     let output = run_tmux(&[
         "list-sessions",
         "-F",
-        "#{session_name}|#{session_windows}|#{session_attached}|#{session_activity}",
+        "#{session_name}\x1f#{session_windows}\x1f#{session_attached}\x1f#{session_activity}",
     ])?;
 
     let mut sessions: Vec<TmuxSession> = output
         .lines()
         .filter(|l| !l.is_empty())
         .map(|line| {
-            let parts: Vec<&str> = line.split('|').collect();
+            let parts: Vec<&str> = line.split('\x1f').collect();
             TmuxSession {
                 name: parts.get(0).unwrap_or(&"").to_string(),
                 windows: parts.get(1).unwrap_or(&"0").parse().unwrap_or(0),
@@ -131,14 +132,14 @@ pub fn list_panes(session: &str) -> Result<Vec<TmuxPane>, String> {
         "-t",
         session,
         "-F",
-        "#{session_name}|#{window_index}|#{pane_index}|#{pane_width}|#{pane_height}|#{pane_current_command}|#{window_name}|#{pane_title}",
+        "#{session_name}\x1f#{window_index}\x1f#{pane_index}\x1f#{pane_width}\x1f#{pane_height}\x1f#{pane_current_command}\x1f#{window_name}\x1f#{pane_title}",
     ])?;
 
     let panes = output
         .lines()
         .filter(|l| !l.is_empty())
         .map(|line| {
-            let parts: Vec<&str> = line.split('|').collect();
+            let parts: Vec<&str> = line.split('\x1f').collect();
             TmuxPane {
                 session: parts.get(0).unwrap_or(&"").to_string(),
                 window: parts.get(1).unwrap_or(&"0").parse().unwrap_or(0),
