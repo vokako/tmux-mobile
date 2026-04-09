@@ -121,14 +121,17 @@
     return () => clearInterval(id);
   });
 
-  // Calculate optimal cols/rows based on current container size
+  // Calculate optimal cols/rows — use max height to prevent tmux resize on keyboard open
+  let maxContainerH = 0;
   function calcFit() {
     if (!term || !termEl) return null;
     const core = term._core;
     const cellW = core?._renderService?.dimensions?.css?.cell?.width || (term.options.fontSize * 0.6);
     const cellH = core?._renderService?.dimensions?.css?.cell?.height || (term.options.fontSize * 1.2);
     const w = termEl.clientWidth;
-    const h = termEl.clientHeight;
+    const clientH = termEl.clientHeight;
+    if (clientH > maxContainerH) maxContainerH = clientH;
+    const h = isMobile ? Math.max(clientH, maxContainerH) : clientH;
     if (!w || !h || !cellW || !cellH) return null;
     return { cols: Math.max(2, Math.floor(w / cellW)), rows: Math.max(1, Math.floor(h / cellH)) };
   }
