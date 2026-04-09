@@ -576,9 +576,27 @@ async fn subscription_loop(
                 _ => {
                     let count = fail_counts.entry(target.clone()).or_insert(0);
                     *count += 1;
-                    if *count >= 15 {
+                    if *count >= 5 {
                         subs.lock().await.remove(&target);
                         fail_counts.remove(&target);
+                        // Notify client that pane is gone
+                        let msg = serde_json::json!({
+                            "id": null,
+                            "method": "pane_closed",
+                            "params": { "target": target }
+                        });
+                        let text = serde_json::to_string(&msg).unwrap();
+                        let out = {
+                            let mut c = cipher.lock().await;
+                            if let Some(ref mut sc) = *c {
+                                use base64::Engine;
+                                base64::engine::general_purpose::STANDARD.encode(sc.encrypt(text.as_bytes()))
+                            } else {
+                                text
+                            }
+                        };
+                        let mut tx = sender.lock().await;
+                        let _ = tx.send(Message::Text(out.into())).await;
                     }
                     continue;
                 }

@@ -1,11 +1,11 @@
 <script>
-  import { subscribe, unsubscribe, setOnPaneOutput, sendCommand, sendKeys, paneCommand, listPanes, capturePane, resizePane } from './ws.js';
+  import { subscribe, unsubscribe, setOnPaneOutput, setOnPaneClosed, sendCommand, sendKeys, paneCommand, listPanes, capturePane, resizePane } from './ws.js';
   import { Terminal } from '@xterm/xterm';
   import ChatView from './ChatView.svelte';
   import Icon from './Icon.svelte';
   import { detectParser } from './parsers.js';
 
-  let { target, session, command: initialCommand = '', viewMode = 'terminal', fontSize = 14, onChatSupported = () => {}, onSwitchPane = null } = $props();
+  let { target, session, command: initialCommand = '', viewMode = 'terminal', fontSize = 14, onChatSupported = () => {}, onSwitchPane = null, onPaneExit = () => {} } = $props();
 
   let input = $state('');
   let paneContent = $state('');
@@ -565,6 +565,10 @@
       }
     });
 
+    setOnPaneClosed((t) => {
+      if (t === target) onPaneExit(target);
+    });
+
     subscribe(target);
     capturePane(target).then(r => {
       if (lastContent) return; // subscription already delivered content
@@ -591,6 +595,7 @@
       // Server kills the control-mode client on WS disconnect → tmux auto-restores size
       unsubscribe(target);
       setOnPaneOutput(null);
+      setOnPaneClosed(null);
       try { term.dispose(); } catch {}
       term = null;
     };

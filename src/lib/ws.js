@@ -4,10 +4,12 @@ let ws = null;
 let requestId = 0;
 const pending = new Map();
 let onPaneOutput = null;
+let onPaneClosed = null;
 let onDisconnect = null;
 let sessionCipher = null; // {key, sendCounter, recvCounter}
 
 export function setOnPaneOutput(cb) { onPaneOutput = cb; }
+export function setOnPaneClosed(cb) { onPaneClosed = cb; }
 export function setOnDisconnect(cb) { onDisconnect = cb; }
 
 // --- Crypto helpers (Web Crypto API) ---
@@ -163,6 +165,11 @@ export function connect(url, token) {
 
       if (data.method === 'pane_output') {
         onPaneOutput?.(data.params?.target, data.params?.content, data.params?.cursor);
+        return;
+      }
+
+      if (data.method === 'pane_closed') {
+        onPaneClosed?.(data.params?.target);
         return;
       }
 
