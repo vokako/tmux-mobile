@@ -782,7 +782,7 @@
             <button ontouchstart={(e) => { e.preventDefault(); startRepeat('Left'); }}><Icon name="arrow-left" size={13} /></button>
             <button ontouchstart={(e) => { e.preventDefault(); startRepeat('Down'); }}><Icon name="arrow-down" size={13} /></button>
             <button ontouchstart={(e) => { e.preventDefault(); startRepeat('Right'); }}><Icon name="arrow-right" size={13} /></button>
-            <button onpointerdown={(e) => { e.stopPropagation(); e.stopImmediatePropagation(); requestAnimationFrame(() => { const ta = termEl?.querySelector('.xterm-helper-textarea'); if (ta && document.activeElement === ta) { ta.blur(); } else if (ta) { ta.focus(); } }); }}><Icon name="keyboard" size={13} /></button>
+            <button class="kb-toggle" onpointerdown={(e) => { e.stopPropagation(); e.stopImmediatePropagation(); requestAnimationFrame(() => { const ta = termEl?.querySelector('.xterm-helper-textarea'); if (ta && document.activeElement === ta) { ta.blur(); } else if (ta) { ta.focus(); } }); }}><Icon name="keyboard" size={13} /></button>
           </div>
         </div>
       </div>
@@ -1058,6 +1058,11 @@
     border-color: var(--accent);
     transform: translateY(1px);
     box-shadow: none;
+  }
+  :global(html.keyboard-open) .shortcuts .kb-toggle {
+    background: var(--accent-bg);
+    color: var(--accent);
+    border-color: var(--accent);
   }
 
   .cmd-row {
