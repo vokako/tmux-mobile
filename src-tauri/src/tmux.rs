@@ -314,6 +314,12 @@ pub fn send_command(target: &str, command: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn home_dir() -> String {
+    dirs::home_dir()
+        .map(|h| h.to_string_lossy().to_string())
+        .unwrap_or_else(|| std::env::var("HOME").unwrap_or_default())
+}
+
 /// 创建新 session
 pub fn new_session(name: &str, path: Option<&str>, command: Option<&str>) -> Result<(), String> {
     // Check if session name already exists to prevent grouped sessions
@@ -322,7 +328,7 @@ pub fn new_session(name: &str, path: Option<&str>, command: Option<&str>) -> Res
     }
     let mut args = vec!["new-session", "-d", "-s", name];
     let resolved;
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = home_dir();
     if let Some(p) = path {
         if !p.is_empty() {
             resolved = crate::fs::resolve(p);
@@ -353,9 +359,18 @@ pub fn kill_session(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 创建新 window
+/// 创建新 window（继承当前 pane 的工作目录）
 pub fn new_window(session: &str) -> Result<(), String> {
-    run_tmux(&["new-window", "-t", session])?;
+    // Get the active pane's working directory so new window starts there
+    let cwd = run_tmux(&["display-message", "-t", session, "-p", "#{pane_current_path}"])
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    let dir = if cwd.is_empty() { home_dir() } else { cwd };
+    if dir.is_empty() {
+        run_tmux(&["new-window", "-t", session])?;
+    } else {
+        run_tmux(&["new-window", "-t", session, "-c", &dir])?;
+    }
     Ok(())
 }
 
