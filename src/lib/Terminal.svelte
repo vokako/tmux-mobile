@@ -714,7 +714,6 @@
             onclick={(e) => {
               e.stopPropagation();
               if (String(w.window) !== currentWindow && onSwitchPane) {
-                showWindowCmd = false; localStorage.setItem('tmux_winswitcher', '0');
                 document.activeElement?.blur();
                 touchScrolling = false;
                 const fh = window.__fullHeight?.() || window.innerHeight;
