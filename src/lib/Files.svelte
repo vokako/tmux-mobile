@@ -960,8 +960,8 @@
         {#each recentFiles as rf}
           <div class="bm-row">
             <span class="bm-icon"><Icon name="clock" size={13} /></span>
-            <button class="bm-path" onclick={() => { showRecent = false; openEntry({ type: 'file', path: rf.path, name: rf.name }); }} use:scrollEnd>
-              {rf.name} <span style="color:var(--text3);font-size:10px">{rf.path.replace(/\/[^/]+$/, '')}</span>
+            <button class="bm-path bm-path-recent" onclick={() => { showRecent = false; openEntry({ type: 'file', path: rf.path, name: rf.name }); }}>
+              <span class="bm-dir">{rf.path.replace(/\/[^/]+$/, '')}/</span><span class="bm-name">{rf.name}</span>
             </button>
             <button class="bm-del" onclick={() => { recentFiles = recentFiles.filter(f => f.path !== rf.path); setPref('recentFiles', recentFiles).catch(() => {}); }}><Icon name="x" size={12} /></button>
           </div>
@@ -1318,6 +1318,14 @@
   }
   .bm-path::-webkit-scrollbar { display: none; }
   .bm-path:active { color: var(--accent); }
+  .bm-path-recent {
+    display: flex !important; align-items: baseline; overflow: hidden !important;
+  }
+  .bm-dir {
+    flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    color: var(--text3); font-size: 10px;
+  }
+  .bm-name { flex-shrink: 0; color: var(--text); }
   .bm-del {
     padding: 4px; border: none; border-radius: 4px; background: none;
     color: var(--text3); cursor: pointer; display: flex;
