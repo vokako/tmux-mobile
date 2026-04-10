@@ -741,7 +741,14 @@
             const ps = await listPanes(session);
             windowPanes = ps;
             const p = ps[ps.length - 1];
-            if (p && onSwitchPane) onSwitchPane(`${p.session}:${p.window}.${p.pane}`, p.current_command);
+            if (p && onSwitchPane) {
+              document.activeElement?.blur();
+              touchScrolling = false;
+              const fh = window.__fullHeight?.() || window.innerHeight;
+              document.documentElement.style.setProperty('--app-height', fh + 'px');
+              document.documentElement.classList.remove('keyboard-open');
+              onSwitchPane(`${p.session}:${p.window}.${p.pane}`, p.current_command);
+            }
           } catch {}
         }}><Icon name="plus" size={12} /></button>
       </div>
