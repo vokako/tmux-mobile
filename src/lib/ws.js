@@ -300,7 +300,7 @@ export function classifyAddress(url) {
   } catch { return 2; }
 }
 
-export const ADDRESS_LABELS = ['局域网', 'Tailscale', '公网'];
+export const ADDRESS_LABELS = ['LAN', 'Tailscale', 'WAN'];
 
 // Lightweight probe: WebSocket handshake only, no auth
 function probeAddress(url) {
