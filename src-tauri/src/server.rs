@@ -371,10 +371,8 @@ fn handle_request(req: &Request) -> Response {
                 Ok(s) => s,
                 Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
             };
-            let content = match require_str(p, "content") {
-                Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
-            };
+            // Allow empty content (creating empty files is valid)
+            let content = p.get("content").and_then(|v| v.as_str()).unwrap_or("");
             match rfs::write_file(path, content) {
                 Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
                 Err(e) => Response::err(id, ERR_INTERNAL, e),
