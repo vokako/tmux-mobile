@@ -1,5 +1,5 @@
 <script>
-  import { subscribe, unsubscribe, setOnPaneOutput, setOnPaneClosed, sendCommand, sendKeys, paneCommand, listPanes, capturePane, resizePane } from './ws.js';
+  import { subscribe, unsubscribe, setOnPaneOutput, setOnPaneClosed, sendCommand, sendKeys, paneCommand, listPanes, capturePane, resizePane, newWindow } from './ws.js';
   import { Terminal } from '@xterm/xterm';
   import ChatView from './ChatView.svelte';
   import Icon from './Icon.svelte';
@@ -701,7 +701,7 @@
   {#if toastMsg}
     <div class="toast">{toastMsg}</div>
   {/if}
-  {#if windows.length > 1}
+  {#if windows.length >= 1}
     {#if showWindowCmd}
       <div class="win-switcher expanded">
         <button class="win-collapse" onclick={() => { showWindowCmd = false; localStorage.setItem('tmux_winswitcher', '0'); }}><Icon name="arrow-up" size={12} /></button>
@@ -734,6 +734,16 @@
             {/if}
           </button>
         {/each}
+        <button class="win-tab win-add" onclick={async (e) => {
+          e.stopPropagation();
+          try {
+            await newWindow(session);
+            const ps = await listPanes(session);
+            windowPanes = ps;
+            const p = ps[ps.length - 1];
+            if (p && onSwitchPane) onSwitchPane(`${p.session}:${p.window}.${p.pane}`, p.current_command);
+          } catch {}
+        }}><Icon name="plus" size={12} /></button>
       </div>
     {:else}
       {@const cur = windows.find(w => String(w.window) === currentWindow)}
@@ -881,6 +891,7 @@
   }
   .win-tab.active { background: var(--accent-bg); color: var(--accent); }
   .win-tab:active { background: var(--surface2); }
+  .win-add { color: var(--text3); border-top: 1px solid var(--border2); }
   .win-num { font-weight: 600; min-width: 14px; text-align: center; }
   .win-cmd { color: inherit; font-size: 10px; max-width: 100px; overflow: hidden; text-overflow: ellipsis; }
   .win-ai-icon { height: 14px; width: auto; }
