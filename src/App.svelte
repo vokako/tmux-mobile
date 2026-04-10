@@ -4,7 +4,7 @@
   import Terminal from './lib/Terminal.svelte';
   import Files from './lib/Files.svelte';
   import Icon from './lib/Icon.svelte';
-  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, getMachineId, getHostname } from './lib/ws.js';
+  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS } from './lib/ws.js';
 
   // Tunable constants
   const KB_OPEN_THRESHOLD = 100; // px difference to detect keyboard open
@@ -12,6 +12,7 @@
   const SWIPE_MAX_ANGLE = 0.7; // vertical/horizontal ratio to reject diagonal swipes
   const RECONNECT_MAX_ATTEMPTS = 20;
   const SLIDE_ANIMATION_MS = 120;
+  const OPTIMIZE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
   let page = $state('settings');
   let connected = $state(false);
@@ -242,19 +243,66 @@
     localStorage.setItem('tmux_disconnected', '1');
   }
 
+  // --- Optimal address selection ---
+  let lastProbeTime = 0;
+  let optimizing = $state(false);
+
+  function getAllAddresses() {
+    const mid = localStorage.getItem('tmux_machine_id');
+    if (!mid) return [];
+    try { return JSON.parse(localStorage.getItem('tmux_machines') || '{}')[mid] || []; }
+    catch { return []; }
+  }
+
+  async function optimizeConnection() {
+    const addrs = getAllAddresses();
+    if (addrs.length <= 1 || optimizing) return;
+    const current = localStorage.getItem('tmux_address');
+    optimizing = true;
+    try {
+      const best = await findBestAddress(addrs);
+      if (!best || best === current) return;
+      // Only switch if the new address is higher priority (lower class number)
+      if (classifyAddress(best) >= classifyAddress(current)) return;
+      window.__dbg?.(`optimize: switching ${ADDRESS_LABELS[classifyAddress(current)]} → ${ADDRESS_LABELS[classifyAddress(best)]}`);
+      localStorage.setItem('tmux_address', best);
+      disconnect();
+      const token = localStorage.getItem('tmux_token') || '';
+      await connect(best, token);
+      serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
+      if (terminalTarget) wsSubscribe(terminalTarget);
+    } catch {
+      // Switch failed — trigger normal reconnect which will try all addresses
+      reconnecting = true;
+      tryReconnect();
+    } finally {
+      optimizing = false;
+      lastProbeTime = Date.now();
+    }
+  }
+
   // Auto-reconnect and restore state on page load
   let autoConnectAttempted = false;
 
-  // Detect app resume (Android background → foreground)
+  // Detect app resume (Android background → foreground) + periodic optimize
   $effect(() => {
     const handler = () => {
-      if (document.visibilityState === 'visible' && !isConnected() && !reconnecting) {
+      if (document.visibilityState !== 'visible') return;
+      if (!isConnected() && !reconnecting) {
         reconnecting = true;
         tryReconnect();
+      } else if (isConnected() && Date.now() - lastProbeTime > OPTIMIZE_INTERVAL_MS) {
+        optimizeConnection();
       }
     };
     document.addEventListener('visibilitychange', handler);
-    return () => document.removeEventListener('visibilitychange', handler);
+    // Periodic check while connected
+    const interval = setInterval(() => {
+      if (isConnected() && Date.now() - lastProbeTime > OPTIMIZE_INTERVAL_MS) {
+        optimizeConnection();
+      }
+    }, OPTIMIZE_INTERVAL_MS);
+    return () => { document.removeEventListener('visibilitychange', handler); clearInterval(interval); };
   });
 
   $effect(() => {
@@ -447,6 +495,16 @@
             <div class="sp-conn-addr">{localStorage.getItem('tmux_address')}</div>
           {/if}
           <div class="sp-conn-id">{mid?.slice(0, 8) || '—'}</div>
+          {#if urls.length > 1}
+            {@const currentType = ADDRESS_LABELS[classifyAddress(localStorage.getItem('tmux_address') || '')]}
+            <button class="sp-optimize" onclick={optimizeConnection} disabled={optimizing}>
+              {#if optimizing}
+                <span class="reconnect-spinner"></span> Probing...
+              {:else}
+                <Icon name="refresh" size={12} /> {currentType} · Find best
+              {/if}
+            </button>
+          {/if}
         </div>
       {/if}
       <div class="sp-section">
@@ -726,6 +784,14 @@
     font-size: 10px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     color: var(--text3); opacity: 0.6;
   }
+  .sp-optimize {
+    display: flex; align-items: center; gap: 6px; margin-top: 6px;
+    width: 100%; padding: 6px 8px; border: 1px solid var(--border2); border-radius: 6px;
+    background: none; color: var(--text2); font-size: 11px; font-weight: 500;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  .sp-optimize:active { background: var(--accent-bg); color: var(--accent); }
+  .sp-optimize:disabled { opacity: 0.5; cursor: default; }
   .sp-conn-urls {
     display: flex; flex-direction: column; gap: 2px; margin-top: 4px;
   }

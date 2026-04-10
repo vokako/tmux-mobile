@@ -285,3 +285,42 @@ export function unsubscribe(target) {
   const msg = JSON.stringify({ method: 'unsubscribe', params: { target } });
   encryptMsg(msg).then(out => ws?.send(out)).catch(() => {});
 }
+
+// --- Address optimization ---
+
+const PROBE_TIMEOUT_MS = 3000;
+
+// Classify address: 0=LAN, 1=Tailscale, 2=Internet
+export function classifyAddress(url) {
+  try {
+    const host = new URL(url).hostname;
+    if (/^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host)) return 0;
+    if (/^100\./.test(host)) return 1;
+    return 2;
+  } catch { return 2; }
+}
+
+export const ADDRESS_LABELS = ['LAN', 'Tailscale', 'Internet'];
+
+// Lightweight probe: WebSocket handshake only, no auth
+function probeAddress(url) {
+  return new Promise(resolve => {
+    try {
+      const probe = new WebSocket(url);
+      const timer = setTimeout(() => { try { probe.close(); } catch {} resolve(false); }, PROBE_TIMEOUT_MS);
+      probe.onopen = () => { clearTimeout(timer); try { probe.close(); } catch {} resolve(true); };
+      probe.onerror = () => { clearTimeout(timer); resolve(false); };
+    } catch { resolve(false); }
+  });
+}
+
+// Probe all addresses in parallel, return best reachable one (LAN > Tailscale > Internet)
+export async function findBestAddress(addresses) {
+  if (!addresses || addresses.length <= 1) return addresses?.[0] || null;
+  const sorted = [...addresses].sort((a, b) => classifyAddress(a) - classifyAddress(b));
+  const results = await Promise.all(sorted.map(url => probeAddress(url)));
+  for (let i = 0; i < sorted.length; i++) {
+    if (results[i]) return sorted[i];
+  }
+  return null;
+}
