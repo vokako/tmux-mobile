@@ -25,6 +25,7 @@
   let fontSize = $state(parseInt(localStorage.getItem('tmux_fontsize')) || 14);
   let showSettings = $state(false);
   let serverInfo = $state({ hostname: '', machineId: '' });
+  let activeAddress = $state(localStorage.getItem('tmux_address') || '');
   let debugMode = $state(!!localStorage.getItem('tmux_debug'));
   let debugEl = $state(null);
 
@@ -201,7 +202,7 @@
       connected = true;
       reconnecting = false;
       serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
-      if (useAddr !== addr) localStorage.setItem('tmux_address', useAddr);
+      if (useAddr !== addr) { localStorage.setItem('tmux_address', useAddr); activeAddress = useAddr; }
       if (terminalTarget) wsSubscribe(terminalTarget);
     }).catch(() => {
       if (!reconnecting) return;
@@ -266,6 +267,7 @@
       if (classifyAddress(best) >= classifyAddress(current)) return;
       window.__dbg?.(`optimize: switching ${ADDRESS_LABELS[classifyAddress(current)]} → ${ADDRESS_LABELS[classifyAddress(best)]}`);
       localStorage.setItem('tmux_address', best);
+      activeAddress = best;
       disconnect();
       const token = localStorage.getItem('tmux_token') || '';
       await connect(best, token);
@@ -478,9 +480,10 @@
           {#if urls.length > 1}
             <div class="sp-conn-urls">
               {#each urls as u}
-                <button class="sp-conn-url" class:sp-conn-active={u === localStorage.getItem('tmux_address')} onclick={() => {
-                  if (u !== localStorage.getItem('tmux_address')) {
+                <button class="sp-conn-url" class:sp-conn-active={u === activeAddress} onclick={() => {
+                  if (u !== activeAddress) {
                     localStorage.setItem('tmux_address', u);
+                    activeAddress = u;
                     showSettings = false;
                     disconnect();
                     connect(u, localStorage.getItem('tmux_token') || '').then(() => {
@@ -492,11 +495,11 @@
               {/each}
             </div>
           {:else}
-            <div class="sp-conn-addr">{localStorage.getItem('tmux_address')}</div>
+            <div class="sp-conn-addr">{activeAddress}</div>
           {/if}
           <div class="sp-conn-id">{mid?.slice(0, 8) || '—'}</div>
           {#if urls.length > 1}
-            {@const currentType = ADDRESS_LABELS[classifyAddress(localStorage.getItem('tmux_address') || '')]}
+            {@const currentType = ADDRESS_LABELS[classifyAddress(activeAddress)]}
             <button class="sp-optimize" onclick={optimizeConnection} disabled={optimizing}>
               {#if optimizing}
                 <span class="reconnect-spinner"></span> Probing...
