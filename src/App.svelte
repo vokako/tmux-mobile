@@ -482,9 +482,9 @@
               {@const currentType = ADDRESS_LABELS[classifyAddress(activeAddress)]}
               <button class="sp-optimize" onclick={optimizeConnection} disabled={optimizing}>
                 {#if optimizing}
-                  <span class="reconnect-spinner"></span>
+                  <span class="reconnect-spinner"></span> 嗅探中
                 {:else}
-                  {currentType} <Icon name="refresh" size={10} />
+                  {currentType} · 嗅探
                 {/if}
               </button>
             {/if}
