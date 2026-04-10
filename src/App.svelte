@@ -476,7 +476,19 @@
         {@const mid = serverInfo.machineId}
         {@const urls = mid ? (JSON.parse(localStorage.getItem('tmux_machines') || '{}')[mid] || []) : []}
         <div class="sp-conn">
-          <div class="sp-conn-host">{serverInfo.hostname || 'unknown'}</div>
+          <div class="sp-conn-row">
+            <div class="sp-conn-host">{serverInfo.hostname || 'unknown'}</div>
+            {#if urls.length > 1}
+              {@const currentType = ADDRESS_LABELS[classifyAddress(activeAddress)]}
+              <button class="sp-optimize" onclick={optimizeConnection} disabled={optimizing}>
+                {#if optimizing}
+                  <span class="reconnect-spinner"></span>
+                {:else}
+                  {currentType} <Icon name="refresh" size={10} />
+                {/if}
+              </button>
+            {/if}
+          </div>
           {#if urls.length > 1}
             <div class="sp-conn-urls">
               {#each urls as u}
@@ -498,16 +510,6 @@
             <div class="sp-conn-addr">{activeAddress}</div>
           {/if}
           <div class="sp-conn-id">{mid?.slice(0, 8) || '—'}</div>
-          {#if urls.length > 1}
-            {@const currentType = ADDRESS_LABELS[classifyAddress(activeAddress)]}
-            <button class="sp-optimize" onclick={optimizeConnection} disabled={optimizing}>
-              {#if optimizing}
-                <span class="reconnect-spinner"></span> Probing...
-              {:else}
-                <Icon name="refresh" size={12} /> {currentType} · Find best
-              {/if}
-            </button>
-          {/if}
         </div>
       {/if}
       <div class="sp-section">
@@ -787,11 +789,14 @@
     font-size: 10px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     color: var(--text3); opacity: 0.6;
   }
+  .sp-conn-row {
+    display: flex; align-items: center; gap: 8px;
+  }
   .sp-optimize {
-    display: flex; align-items: center; gap: 6px; margin-top: 6px;
-    width: 100%; padding: 6px 8px; border: 1px solid var(--border2); border-radius: 6px;
-    background: none; color: var(--text2); font-size: 11px; font-weight: 500;
-    cursor: pointer; -webkit-tap-highlight-color: transparent;
+    display: flex; align-items: center; gap: 4px; margin-left: auto;
+    padding: 3px 8px; border: 1px solid var(--border2); border-radius: 6px;
+    background: none; color: var(--text3); font-size: 10px; font-weight: 500;
+    cursor: pointer; -webkit-tap-highlight-color: transparent; white-space: nowrap;
   }
   .sp-optimize:active { background: var(--accent-bg); color: var(--accent); }
   .sp-optimize:disabled { opacity: 0.5; cursor: default; }
