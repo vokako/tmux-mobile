@@ -3,6 +3,7 @@
   import { Terminal } from '@xterm/xterm';
   import ChatView from './ChatView.svelte';
   import Icon from './Icon.svelte';
+  import { t } from './i18n.svelte.js';
   import { detectParser } from './parsers.js';
 
   // Timing constants
@@ -35,6 +36,8 @@
   let termAtBottom = $state(true);
   let toastMsg = $state('');
   const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  let kbBlurTimer = null;
+  let kbLocked = true; // true = keyboard must not show; false = keyboard allowed
 
   function showToast(msg) {
     toastMsg = msg;
@@ -230,6 +233,7 @@
   $effect(() => {
     touchScrolling = false; // reset on pane switch
     resizePendingTs = 0;
+    kbLocked = true;
     const estCellW = fontSize * CELL_W_RATIO;
     const estCellH = fontSize * CELL_H_RATIO;
     const containerW = termEl?.clientWidth || 300;
@@ -255,6 +259,13 @@
 
     term.open(termEl);
     termEl.style.background = getTermTheme().background;
+
+    // Mobile: control keyboard via inputmode attribute on xterm's hidden textarea.
+    // Default inputmode="none" prevents keyboard from showing when shortcut buttons cause
+    // accidental focus (Android IME re-triggers keyboard for previously-focused textareas).
+    // Only set inputmode="text" right before explicit user actions: keyboard toggle or terminal tap.
+    const kbTa = isMobile ? termEl.querySelector('.xterm-helper-textarea') : null;
+    if (kbTa) kbTa.setAttribute('inputmode', 'none');
 
     // Forward keyboard input to tmux — skip when input box is open
     term.onData(data => {
@@ -282,6 +293,11 @@
     let lastCursor = null;
     function endTouchScroll() {
       touchScrolling = false;
+      // Re-lock keyboard if textarea wasn't focused (e.g. after scroll, not tap)
+      if (kbTa && document.activeElement !== kbTa) {
+        kbLocked = true;
+        kbTa.setAttribute('inputmode', 'none');
+      }
       if (lastContent) writeToXterm(lastContent, lastCursor);
     }
 
@@ -340,15 +356,12 @@
         }
         if (onSel && term.hasSelection()) {
           const sel = term.getSelection();
-          if (sel) navigator.clipboard.writeText(sel).then(() => showToast('Copied')).catch(() => {});
+          if (sel) navigator.clipboard.writeText(sel).then(() => showToast(t('copied'))).catch(() => {});
         }
         term.clearSelection();
         isSelecting = false;
         selectionAnchor = null;
         selectionRange = null;
-        // Temporarily disable stdin so this tap doesn't open the keyboard
-        term.options.disableStdin = true;
-        setTimeout(() => { if (term) term.options.disableStdin = false; }, 300);
         endTouchScroll();
         return;
       }
@@ -511,6 +524,42 @@
     termEl.addEventListener('touchend', onTouchEnd, { passive: true });
     termEl.addEventListener('touchcancel', onTouchCancel, { passive: true });
 
+    // Mobile: allow keyboard only on terminal tap or explicit keyboard toggle.
+    // Two layers: inputmode="none" (browser hint) + kbLocked flag (focus guard).
+    let onTermPointerDown, onTaBlur, onTaFocus;
+    if (kbTa) {
+      onTermPointerDown = () => {
+        if (!kbLocked) return; // already unlocked — don't re-unlock or kbShift close will race
+        clearTimeout(kbBlurTimer);
+        kbLocked = false;
+        kbTa.setAttribute('inputmode', 'text');
+        window.__dbg?.('kb: termEl pointerdown → unlock, inputmode=text');
+      };
+      termEl.addEventListener('pointerdown', onTermPointerDown, { capture: true });
+
+      onTaBlur = () => {
+        clearTimeout(kbBlurTimer);
+        kbBlurTimer = setTimeout(() => {
+          kbLocked = true;
+          kbTa.setAttribute('inputmode', 'none');
+          window.__dbg?.('kb: blur timer → lock, inputmode=none');
+        }, 150);
+        window.__dbg?.('kb: textarea blur (timer scheduled)');
+      };
+      kbTa.addEventListener('blur', onTaBlur);
+
+      onTaFocus = () => {
+        clearTimeout(kbBlurTimer);
+        if (kbLocked) {
+          window.__dbg?.('kb: textarea focus while LOCKED → blur!');
+          kbTa.blur();
+          return;
+        }
+        window.__dbg?.('kb: textarea focus (allowed)');
+      };
+      kbTa.addEventListener('focus', onTaFocus);
+    }
+
     term.onScroll(() => {
       const buf = term.buffer.active;
       termAtBottom = buf.viewportY >= buf.baseY;
@@ -552,6 +601,16 @@
     const onKbShift = (e) => {
       if (!termEl || !term) return;
       termEl.style.marginTop = '0'; // remove legacy shift
+      // When keyboard closes, lock + blur to prevent accidental re-open from shortcut buttons.
+      // Key scenario: user taps terminal (unlock), keyboard opens, then keyboard dismissed
+      // by Android back/system — textarea stays focused but keyboard is gone. Without this,
+      // any subsequent touch (shortcut button) causes IME to re-show keyboard.
+      if (kbTa && e.detail?.kbHeight === 0) {
+        kbLocked = true;
+        kbTa.setAttribute('inputmode', 'none');
+        if (document.activeElement === kbTa) kbTa.blur();
+        window.__dbg?.('kb: keyboard-shift kbH=0 → lock + blur');
+      }
       clearTimeout(kbResizeTimer);
       kbResizeTimer = setTimeout(() => {
         lastFitCols = 0; lastFitRows = 0; // force recalc
@@ -609,6 +668,10 @@
       clearTimeout(resizeTimer);
       clearTimeout(kbResizeTimer);
       if (longPressTimer) clearTimeout(longPressTimer);
+      clearTimeout(kbBlurTimer);
+      if (onTermPointerDown) termEl.removeEventListener('pointerdown', onTermPointerDown, { capture: true });
+      if (kbTa && onTaBlur) kbTa.removeEventListener('blur', onTaBlur);
+      if (kbTa && onTaFocus) kbTa.removeEventListener('focus', onTaFocus);
       stopMomentum();
       window.removeEventListener('resize', onResize);
       window.removeEventListener('terminal-refit', onRefit);
@@ -682,6 +745,8 @@
   let repeatInterval = null;
 
   function startRepeat(key) {
+    const ta = termEl?.querySelector('.xterm-helper-textarea');
+    window.__dbg?.(`kb: shortcut "${key}" locked=${kbLocked} inputmode=${ta?.getAttribute('inputmode')} focused=${document.activeElement === ta}`);
     sendSpecial(key);
     repeatTimer = setTimeout(() => {
       repeatInterval = setInterval(() => sendSpecial(key), 80);
@@ -692,6 +757,33 @@
     clearInterval(repeatInterval);
     repeatTimer = null;
     repeatInterval = null;
+  }
+
+  // Svelte 5 registers touchstart as passive, so e.preventDefault() is ignored.
+  // We need non-passive touchstart to prevent keyboard popup on shortcut buttons.
+  function nonPassiveShortcuts(node) {
+    let activeBtn = null;
+    const onStart = (e) => {
+      // preventDefault on ALL buttons (including kb-toggle) to prevent synthetic
+      // mousedown from stealing focus away from xterm's textarea after ta.focus().
+      const btn = e.target.closest('button');
+      if (btn && node.contains(btn)) {
+        e.preventDefault();
+        btn.classList.add('pressed');
+        activeBtn = btn;
+      }
+    };
+    const onEnd = () => {
+      if (activeBtn) { activeBtn.classList.remove('pressed'); activeBtn = null; }
+    };
+    node.addEventListener('touchstart', onStart, { passive: false });
+    node.addEventListener('touchend', onEnd, { passive: true });
+    node.addEventListener('touchcancel', onEnd, { passive: true });
+    return { destroy() {
+      node.removeEventListener('touchstart', onStart);
+      node.removeEventListener('touchend', onEnd);
+      node.removeEventListener('touchcancel', onEnd);
+    }};
   }
 
 
@@ -783,22 +875,22 @@
     {#if viewMode === 'terminal' && isMobile}
       <div class="input-bar">
         <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="shortcut-rows" onpointerdown={(e) => e.preventDefault()} ontouchend={(e) => { e.preventDefault(); stopRepeat(); }} ontouchcancel={stopRepeat} oncontextmenu={(e) => e.preventDefault()} onmouseup={stopRepeat}>
+        <div class="shortcut-rows" use:nonPassiveShortcuts ontouchend={stopRepeat} ontouchcancel={stopRepeat} oncontextmenu={(e) => e.preventDefault()} onmouseup={stopRepeat}>
           <div class="shortcuts">
-            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('Escape'); }}>Esc</button>
-            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('C-d'); }}>^D</button>
-            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('C-a'); }}><Icon name="skip-left" size={13} /></button>
-            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('Up'); }}><Icon name="arrow-up" size={13} /></button>
-            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('C-e'); }}><Icon name="skip-right" size={13} /></button>
-            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('BSpace'); }}><Icon name="delete" size={13} /></button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('Escape')}>Esc</button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('C-d')}>^D</button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('C-a')}><Icon name="skip-left" size={13} /></button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('Up')}><Icon name="arrow-up" size={13} /></button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('C-e')}><Icon name="skip-right" size={13} /></button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('BSpace')}><Icon name="delete" size={13} /></button>
           </div>
           <div class="shortcuts">
-            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('Tab'); }}>Tab</button>
-            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('C-c'); }}>^C</button>
-            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('Left'); }}><Icon name="arrow-left" size={13} /></button>
-            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('Down'); }}><Icon name="arrow-down" size={13} /></button>
-            <button ontouchstart={(e) => { e.preventDefault(); startRepeat('Right'); }}><Icon name="arrow-right" size={13} /></button>
-            <button class="kb-toggle" onpointerdown={(e) => { e.stopPropagation(); e.stopImmediatePropagation(); requestAnimationFrame(() => { const ta = termEl?.querySelector('.xterm-helper-textarea'); if (ta && document.activeElement === ta) { ta.blur(); } else if (ta) { ta.focus(); } }); }}><Icon name="keyboard" size={13} /></button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('Tab')}>Tab</button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('C-c')}>^C</button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('Left')}><Icon name="arrow-left" size={13} /></button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('Down')}><Icon name="arrow-down" size={13} /></button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('Right')}><Icon name="arrow-right" size={13} /></button>
+            <button class="kb-toggle" onpointerdown={(e) => { e.stopPropagation(); e.stopImmediatePropagation(); requestAnimationFrame(() => { const ta = termEl?.querySelector('.xterm-helper-textarea'); if (ta && document.activeElement === ta) { window.__dbg?.('kb: toggle → close'); ta.blur(); } else if (ta) { window.__dbg?.('kb: toggle → open'); clearTimeout(kbBlurTimer); kbLocked = false; ta.setAttribute('inputmode', 'text'); ta.focus(); } }); }}><Icon name="keyboard" size={13} /></button>
           </div>
         </div>
       </div>
@@ -823,7 +915,7 @@
             bind:value={input}
             onkeydown={handleKeydown}
             oninput={autoResize}
-            placeholder="message…"
+            placeholder={t('message')}
             autocapitalize="off"
             autocomplete="off"
             autocorrect="off"
@@ -1069,7 +1161,8 @@
     display: flex; align-items: center; justify-content: center;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
   }
-  .shortcuts button:active {
+  .shortcuts button:active,
+  .shortcuts :global(button.pressed) {
     background: var(--accent-bg);
     color: var(--accent);
     border-color: var(--accent);
