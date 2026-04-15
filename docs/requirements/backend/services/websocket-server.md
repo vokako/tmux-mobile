@@ -1,0 +1,47 @@
+# WebSocket Server Service
+
+## Purpose
+Rust-based WebSocket server providing JSON-RPC interface to tmux and filesystem operations.
+
+## Implementation
+- File: `src-tauri/src/server.rs`
+- Dependencies: tokio, tokio-tungstenite, hmac, sha2, aes-gcm, base64
+- Starts on desktop only (`#[cfg(desktop)]`)
+- Standalone binary: `src-tauri/src/bin/server.rs`
+
+## Authentication
+- Two modes: encrypted (AES-256-GCM with HKDF key derivation) and legacy plain token
+- Server sends `server_nonce` on connect; client responds with `client_nonce` + HMAC proof, or plain token
+- Encrypted mode: all subsequent messages wrapped in AES-256-GCM + base64
+- Token auto-generated on first run, persisted in `~/.config/tmux-mobile/config.toml`
+- Environment variable `TOKEN` overrides config
+- Rate limiting: per-IP auth failure tracking with lockout after repeated failures
+
+## Subscription Model
+- `subscribe(target)` starts a polling loop (200ms interval)
+- Polls `capture_pane_with_width` (ANSI escapes + joined soft-wrapped lines + CJK width fix)
+- Also polls `cursor_info` for cursor position
+- Pushes `pane_output` with content (only when changed) and cursor position
+- Pushes `pane_closed` after repeated capture failures (pane gone)
+- One subscription map per connection (multiple targets supported)
+- `unsubscribe` or disconnect stops the loop
+
+## Resize Tracking
+- `resize_pane` resizes tmux pane to match client viewport
+- Per-connection tracking of resized windows
+- On disconnect, auto-restores windows to auto-size (`resize-window -A`)
+- Sets tmux hook (`after-client-attached`) so real terminal clients restore size
+
+## Configuration
+- File: `~/.config/tmux-mobile/config.toml`
+- Fields: token, host (default 0.0.0.0), port (default 9899), tmux_socket, tls_cert, tls_key, scrollback (default 500)
+- Env vars: TOKEN, HOST, PORT, TMUX_SOCKET, TLS_CERT, TLS_KEY, SCROLLBACK
+- TLS support via tls_cert + tls_key paths
+- Preferences: separate `prefs.json` file for client-side settings (get_prefs/set_pref)
+- Bookmarks: separate `bookmarks.json` file
+
+## Security
+- Full filesystem access by design (remote management tool)
+- Path traversal protection on download filenames (`sanitize_filename()`)
+- Git operations whitelisted to safe subset, shell metacharacters rejected in args
+- iframe sandbox: `allow-same-origin` only (no scripts)

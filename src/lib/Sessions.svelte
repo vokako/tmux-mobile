@@ -1,6 +1,7 @@
 <script>
   import { listSessions, listPanes, newSession, killSession, newWindow, killWindow, fsList } from './ws.js';
   import Icon from './Icon.svelte';
+  import { t } from './i18n.svelte.js';
 
   let { openTerminal, activeTarget = '', visible = false } = $props();
 
@@ -209,10 +210,10 @@
             <span class="name">{s.name}</span>
           </div>
           <div class="session-meta">
-            <span class="badge">{s.windows} {s.windows === 1 ? 'window' : 'windows'}</span>
+            <span class="badge">{s.windows} {s.windows === 1 ? t('window') : t('windows')}</span>
             <button class="kill" class:confirm={confirmKill === s.name} onclick={(e) => { e.stopPropagation(); removeSession(s.name); }} aria-label="Kill session">
               {#if confirmKill === s.name}
-                <span class="kill-text">tap to kill</span>
+                <span class="kill-text">{t('tapToKill')}</span>
               {:else}
                 <span class="kill-icon"><Icon name="x" size={11} /></span>
               {/if}
@@ -222,8 +223,9 @@
         {#if expanded[s.name] && panes[s.name]}
           <div class="pane-list">
             {#each panes[s.name] as p}
-              {@const info = (p.pane_title || '') + ' ' + (p.current_command || '')}
-              {@const aiTag = info.match(/kiro/i) ? 'Kiro' : info.match(/claude/i) ? 'Claude' : info.match(/openclaw/i) ? 'OpenClaw' : ''}
+              {@const titleCmd = (p.pane_title || '').split(/\s/)[0]}
+              {@const cmd = (p.current_command || '') + (/[\/~@:]/.test(titleCmd) ? '' : ' ' + titleCmd)}
+              {@const aiTag = /kiro/i.test(cmd) ? 'Kiro' : /claude/i.test(cmd) ? 'Claude' : /openclaw/i.test(cmd) ? 'OpenClaw' : ''}
               <div class="pane-row">
                 <button class="pane" class:active-pane={activeTarget === `${p.session}:${p.window}.${p.pane}`} onclick={() => openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command)}>
                   <span class="pane-id">{p.window}.{p.pane}</span>
@@ -238,7 +240,7 @@
                 </button>
                 <button class="pane-kill" class:confirm={confirmKillWindow === `${s.name}:${p.window}`} onclick={() => removeWindow(`${s.name}:${p.window}`, s.name)}>
                   {#if confirmKillWindow === `${s.name}:${p.window}`}
-                    <span class="kill-text">del</span>
+                    <span class="kill-text">{t('del')}</span>
                   {:else}
                     <Icon name="x" size={10} />
                   {/if}
@@ -246,7 +248,7 @@
               </div>
             {/each}
             <button class="pane-add" onclick={async () => { try { await newWindow(s.name); const ps = await listPanes(s.name); panes[s.name] = ps; const p = ps[ps.length - 1]; if (p) openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command); } catch (e) { error = e.message; } }}>
-              <Icon name="plus" size={12} /> Window
+              <Icon name="plus" size={12} /> {t('window')}
             </button>
           </div>
         {/if}
@@ -256,9 +258,9 @@
 
   {#if showNew}
     <div class="new-form" use:scrollIntoView>
-      <input type="text" bind:value={newName} placeholder="Session name" onkeydown={(e) => e.key === 'Enter' && createSession()} autocapitalize="off" />
+      <input type="text" bind:value={newName} placeholder={t('sessionName')} onkeydown={(e) => e.key === 'Enter' && createSession()} autocapitalize="off" />
       <div class="cmd-row-new">
-        <input type="text" bind:value={newPath} placeholder="Working directory (optional)" autocapitalize="off" />
+        <input type="text" bind:value={newPath} placeholder={t('workingDir')} autocapitalize="off" />
         <button class="preset-btn" onclick={openPicker}><Icon name="folder" size={14} /></button>
       </div>
       {#if showPicker}
@@ -281,23 +283,23 @@
               </button>
             {/each}
             {#if !pickerEntries.length}
-              <div class="picker-empty">No subdirectories</div>
+              <div class="picker-empty">{t('noSubdirs')}</div>
             {/if}
           </div>
         </div>
       {/if}
       <div class="cmd-row-new">
-        <input type="text" bind:value={newCmd} placeholder="Command (optional)" autocapitalize="off" />
+        <input type="text" bind:value={newCmd} placeholder={t('commandOpt')} autocapitalize="off" />
         <button class="preset-btn" class:active={newCmd === 'kiro-cli-chat chat -a'} onclick={() => newCmd = newCmd === 'kiro-cli-chat chat -a' ? '' : 'kiro-cli-chat chat -a'}><img src="/assets/kiro.svg" alt="Kiro" width="16" height="16" /></button>
         <button class="preset-btn" class:active={newCmd === 'claude --dangerously-skip-permissions'} onclick={() => newCmd = newCmd === 'claude --dangerously-skip-permissions' ? '' : 'claude --dangerously-skip-permissions'}><img src="/assets/claude.svg" alt="Claude" width="18" height="18" /></button>
       </div>
-      <button class="create-btn" onclick={createSession} disabled={!newName.trim()}>Create</button>
+      <button class="create-btn" onclick={createSession} disabled={!newName.trim()}>{t('create')}</button>
     </div>
   {/if}
 
   <div class="bottom-bar">
     <button class="new-btn" onclick={() => showNew = !showNew}>
-      <Icon name="plus" size={16} /> New Session
+      <Icon name="plus" size={16} /> {t('newSession')}
     </button>
     <button class="refresh-icon" class:spinning={refreshing} onclick={doRefresh}><Icon name="refresh" size={16} /></button>
   </div>

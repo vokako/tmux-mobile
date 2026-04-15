@@ -1,6 +1,7 @@
 <script>
   import { detectParser, parseMessages, stripAnsi } from './parsers.js';
   import Icon from './Icon.svelte';
+  import { t } from './i18n.svelte.js';
 
   let { content = '', onSendKeys = null, command = '', fontSize = 14 } = $props();
 
@@ -296,7 +297,7 @@
 <div class="chat-wrap" style="--chat-font-size: {fontSize}px">
   <div class="chat" bind:this={chatEl} onscroll={checkAtBottom}>
     {#if messages.length === 0}
-    <div class="empty">No conversation detected. Waiting for CLI output…</div>
+    <div class="empty">{t('noConversation')}</div>
   {:else}
     {#each messages as msg, mi (mi)}
       <div class="msg" class:user={msg.role === 'user'} class:agent={msg.role === 'agent'} class:system={msg.role === 'system' || msg.role === 'compact' || msg.role === 'model' || msg.role === 'model_done' || msg.role === 'permission'}>
@@ -322,12 +323,12 @@
           </div>
         {:else if msg.role === 'compact'}
           <div class="compact-bubble">
-            <div class="compact-header"><Icon name="info" size={13} /> Conversation Summary</div>
+            <div class="compact-header"><Icon name="info" size={13} /> {t('conversationSummary')}</div>
             <div class="compact-body">{@html cachedRenderMarkdown(stripAnsi(msg.text))}</div>
           </div>
         {:else if msg.role === 'model'}
           <div class="model-bubble">
-            <div class="model-header"><Icon name="gear" size={13} /> Select Model</div>
+            <div class="model-header"><Icon name="gear" size={13} /> {t('selectModel')}</div>
             {#each msg.text.split('\n').filter(l => l.trim()) as item, idx}
               {@const allItems = msg.text.split('\n').filter(l => l.trim())}
               {@const currentIdx = allItems.findIndex(l => /^>/.test(l.trim()))}
@@ -384,7 +385,7 @@
         </div>
           {#if copyMsg === mi}
             <button class="copy-btn" class:copied={copiedMsg === mi} onclick={(e) => { e.stopPropagation(); doCopy(msg.text); }}>
-              <Icon name={copiedMsg === mi ? "check" : "copy"} size={16} /> Copy
+              <Icon name={copiedMsg === mi ? "check" : "copy"} size={16} /> {t('copy')}
             </button>
           {/if}
         </div>
@@ -396,7 +397,7 @@
         <div class="avatar"><Icon name="bot" size={14} /></div>
         <div class="bubble agent-bubble thinking-bubble">
           <span class="thinking-spinner"></span>
-          <span class="thinking-text">Thinking…</span>
+          <span class="thinking-text">{t('thinking')}</span>
         </div>
       </div>
     {/if}
@@ -405,7 +406,7 @@
         <div class="avatar"><Icon name="bot" size={14} /></div>
         <div class="bubble agent-bubble thinking-bubble">
           <span class="thinking-spinner"></span>
-          <span class="thinking-text">Creating summary…</span>
+          <span class="thinking-text">{t('creatingSummary')}</span>
         </div>
       </div>
     {/if}

@@ -2,9 +2,11 @@
 
 const CONNECT_TIMEOUT_MS = 5000;
 const RPC_TIMEOUT_MS = 10000;
+const HEARTBEAT_INTERVAL_MS = 10000;
 const BASE64_CHUNK_SIZE = 8192;
 
 let ws = null;
+let heartbeatTimer = null;
 let requestId = 0;
 const pending = new Map();
 let onPaneOutput = null;
@@ -94,16 +96,22 @@ export function connect(url, token) {
     rejectAllPending();
   }
   sessionCipher = null;
+  clearInterval(heartbeatTimer);
+  heartbeatTimer = null;
+  rpcTimeouts = 0;
+  window.__dbg?.(`ws: connecting to ${url}`);
 
   return new Promise((resolve, reject) => {
     try {
       ws = new WebSocket(url);
     } catch (e) {
+      window.__dbg?.(`ws: connect error: ${e.message}`);
       reject(e);
       return;
     }
 
     const timeout = setTimeout(() => {
+      window.__dbg?.('ws: connect timeout');
       ws?.close();
       reject(new Error('connection timeout'));
     }, CONNECT_TIMEOUT_MS);
@@ -112,6 +120,24 @@ export function connect(url, token) {
     let serverNonce = null;
     let machineId = null;
     let hostname = null;
+
+    function authSuccess() {
+      clearTimeout(timeout);
+      authed = true;
+      window.__dbg?.(`ws: authenticated (machine=${machineId})`);
+      let pingFails = 0;
+      heartbeatTimer = setInterval(() => {
+        call('ping').then(() => { pingFails = 0; }).catch(() => {
+          pingFails++;
+          window.__dbg?.(`heartbeat: ping failed #${pingFails}`);
+          if (pingFails >= 2) {
+            window.__dbg?.('heartbeat: 2 failures, forcing disconnect');
+            forceDisconnect();
+          }
+        });
+      }, HEARTBEAT_INTERVAL_MS);
+      resolve(machineId);
+    }
 
     // Expose getters
     ws._getMachineId = () => machineId;
@@ -148,12 +174,12 @@ export function connect(url, token) {
           try {
             const pt = await decryptMsg(event.data);
             const resp = JSON.parse(pt);
-            if (resp.result?.authenticated) { clearTimeout(timeout); authed = true; machineId = resp.result.machine_id; hostname = resp.result.hostname; resolve(machineId); return; }
+            if (resp.result?.authenticated) { machineId = resp.result.machine_id; hostname = resp.result.hostname; authSuccess(); return; }
           } catch {}
           clearTimeout(timeout); sessionCipher = null; reject(new Error('auth failed')); return;
         } else {
           // Plain response
-          if (data?.result?.authenticated) { clearTimeout(timeout); authed = true; machineId = data.result.machine_id; hostname = data.result.hostname; resolve(machineId); return; }
+          if (data?.result?.authenticated) { machineId = data.result.machine_id; hostname = data.result.hostname; authSuccess(); return; }
           clearTimeout(timeout); reject(new Error(data?.error?.message || 'auth failed')); return;
         }
       }
@@ -187,22 +213,28 @@ export function connect(url, token) {
 
     ws.onclose = () => {
       clearTimeout(timeout);
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
       const wasAuthed = authed;
       authed = false;
       ws = null;
       sessionCipher = null;
       rejectAllPending();
+      window.__dbg?.(`ws: closed (wasAuthed=${wasAuthed})`);
       if (wasAuthed) onDisconnect?.();
     };
 
     ws.onerror = () => {
       clearTimeout(timeout);
+      window.__dbg?.('ws: error');
       if (!authed) reject(new Error('connection failed'));
     };
   });
 }
 
 export function disconnect() {
+  clearInterval(heartbeatTimer);
+  heartbeatTimer = null;
   ws?.close();
   ws = null;
 }
@@ -219,7 +251,21 @@ export function getHostname() {
   return ws?._getHostname?.();
 }
 
-function call(method, params = {}) {
+let rpcTimeouts = 0;
+
+function forceDisconnect() {
+  if (!ws) return;
+  window.__dbg?.('ws: forcing disconnect');
+  clearInterval(heartbeatTimer);
+  heartbeatTimer = null;
+  try { ws.onclose = null; ws.close(); } catch {}
+  ws = null;
+  sessionCipher = null;
+  rejectAllPending();
+  onDisconnect?.();
+}
+
+function call(method, params = {}, timeoutMs = RPC_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       reject(new Error('not connected'));
@@ -228,10 +274,13 @@ function call(method, params = {}) {
     const id = ++requestId;
     const timer = setTimeout(() => {
       pending.delete(id);
+      rpcTimeouts++;
+      window.__dbg?.(`ws: timeout method=${method} (${rpcTimeouts} consecutive)`);
+      if (rpcTimeouts >= 3) forceDisconnect();
       reject(new Error('request timeout'));
-    }, RPC_TIMEOUT_MS);
+    }, timeoutMs);
     pending.set(id, {
-      resolve: (v) => { clearTimeout(timer); resolve(v); },
+      resolve: (v) => { clearTimeout(timer); rpcTimeouts = 0; resolve(v); },
       reject: (e) => { clearTimeout(timer); reject(e); },
     });
     const msg = JSON.stringify({ id, method, params });
@@ -269,8 +318,8 @@ export const fsWrite = (path, content) => call('fs_write', { path, content });
 export const fsMkdir = (path) => call('fs_mkdir', { path });
 export const fsDelete = (path) => call('fs_delete', { path });
 export const fsRename = (from, to) => call('fs_rename', { from, to });
-export const fsDownload = (path) => call('fs_download', { path });
-export const fsUpload = (path, data) => call('fs_upload', { path, data });
+export const fsDownload = (path) => call('fs_download', { path }, 60000);
+export const fsUpload = (path, data) => call('fs_upload', { path, data }, 60000);
 export const fsConvert = (path, format = 'html') => call('fs_convert', { path, format });
 export const gitCmd = (subcmd, args = [], cwd) => call('git', { subcmd, args, cwd });
 

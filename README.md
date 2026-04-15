@@ -24,7 +24,7 @@ You're running [Kiro CLI](https://kiro.dev), Claude Code, or any coding agent in
 - **Chat view** — AI agent conversations rendered as chat bubbles, with markdown rendering, syntax-highlighted code blocks, collapsible tool calls, diff rendering, `/model` selector, and `/compact` summary cards
 - **File browser** — browse, preview, edit, upload/download files with bookmarks, git integration (status, diff, log, add, commit, push)
 - **Sessions** — browse all tmux sessions/windows/panes, create or kill sessions, pull-to-refresh
-- **Settings** — font size control, light/dark/auto theme with smooth transitions, server connection info (hostname, machine ID), debug toggle
+- **Settings** — font size control, light/dark/auto theme with smooth transitions, language switching (EN/中文), server connection info (hostname, machine ID), debug toggle
 - **Multi-address reconnect** — server machine ID tracks alternate addresses, auto-failover on disconnect
 
 The server runs on your Mac, the UI runs in any browser or as a native app (macOS, Android).
@@ -176,6 +176,7 @@ src/
 │   ├── Files.svelte        # File browser, preview, editor, bookmarks
 │   ├── Icon.svelte         # SVG icon system (Lucide-based)
 │   ├── parsers.js          # Pluggable CLI output parsers
+│   ├── i18n.js             # Lightweight i18n (EN/中文), auto-detect locale
 │   └── ws.js               # WebSocket client (tmux + filesystem RPC)
 src-tauri/
 ├── src/

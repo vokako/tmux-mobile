@@ -1,6 +1,7 @@
 <script>
   import { subscribe, unsubscribe, setOnPaneOutput, setOnPaneClosed, sendCommand, sendKeys, paneCommand, listPanes, capturePane, resizePane, newWindow } from './ws.js';
   import { Terminal } from '@xterm/xterm';
+  import { WebLinksAddon } from '@xterm/addon-web-links';
   import ChatView from './ChatView.svelte';
   import Icon from './Icon.svelte';
   import { t } from './i18n.svelte.js';
@@ -38,6 +39,19 @@
   const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
   let kbBlurTimer = null;
   let kbLocked = true; // true = keyboard must not show; false = keyboard allowed
+  let endTouchScrollTimer = null;
+  let kbTa = null; // set in $effect after term.open
+
+  function unlockKeyboard() {
+    clearTimeout(kbBlurTimer);
+    clearTimeout(endTouchScrollTimer);
+    kbLocked = false;
+    if (kbTa) {
+      kbTa.setAttribute('inputmode', 'text');
+      kbTa.focus();
+    }
+    window.__dbg?.('kb: unlock + focus');
+  }
 
   function showToast(msg) {
     toastMsg = msg;
@@ -258,16 +272,34 @@
     });
 
     term.open(termEl);
+    term.loadAddon(new WebLinksAddon((e, url) => {
+      e.preventDefault();
+      if (window.__TAURI_INTERNALS__) {
+        import('@tauri-apps/plugin-opener').then(m => m.openUrl(url)).catch(() => window.open(url, '_blank'));
+      } else {
+        window.open(url, '_blank');
+      }
+    }));
     termEl.style.background = getTermTheme().background;
 
     // Mobile: control keyboard via inputmode attribute on xterm's hidden textarea.
     // Default inputmode="none" prevents keyboard from showing when shortcut buttons cause
     // accidental focus (Android IME re-triggers keyboard for previously-focused textareas).
     // Only set inputmode="text" right before explicit user actions: keyboard toggle or terminal tap.
-    const kbTa = isMobile ? termEl.querySelector('.xterm-helper-textarea') : null;
+    kbTa = isMobile ? termEl.querySelector('.xterm-helper-textarea') : null;
     if (kbTa) kbTa.setAttribute('inputmode', 'none');
 
     // Forward keyboard input to tmux — skip when input box is open
+    let isPasting = false;
+    if (isMobile) {
+      const ta = termEl?.querySelector('.xterm-helper-textarea');
+      if (ta) {
+        ta.addEventListener('paste', () => { isPasting = true; });
+        ta.addEventListener('input', () => {
+          window.__dbg?.(`input: ta.input val=${JSON.stringify(ta.value).slice(0,30)} focused=${document.activeElement === ta} inputmode=${ta.getAttribute('inputmode')} locked=${kbLocked}`);
+        });
+      }
+    }
     term.onData(data => {
       // Filter xterm.js terminal response sequences that leak through onData.
       // These are generated when pane content contains query sequences (e.g. \x1b[6n).
@@ -275,30 +307,35 @@
       if (/^\x1b\[[\?>=]?[\d;]*c$/.test(data)) return; // DA1/DA2/DA3
       if (/^\x1b\[\d+;\d+R$/.test(data)) return;        // DSR cursor position
       if (/^\x1b\[\d+n$/.test(data)) return;             // DSR device status
-      // Mobile: force-clear xterm's hidden textarea after single-char input to prevent
-      // accumulation from auto-paired quotes. Skip for multi-char input (paste) so
-      // pasted text isn't truncated before xterm.js fully processes the textarea.
-      if (isMobile && data.length <= 1) {
+      window.__dbg?.(`input: onData len=${data.length} paste=${isPasting} data=${JSON.stringify(data).slice(0,40)}`);
+      // Mobile: force-clear xterm's hidden textarea after keyboard input to prevent
+      // accumulation from auto-paired quotes/brackets. Skip paste so xterm.js can
+      // fully process the pasted content.
+      if (isMobile && !isPasting) {
         requestAnimationFrame(() => {
           const ta = termEl?.querySelector('.xterm-helper-textarea');
           if (ta && ta.value) ta.value = '';
         });
       }
-      sendKeys(target, data, true).catch(() => {});
+      isPasting = false;
+      sendKeys(target, data, true).catch((e) => {
+        window.__dbg?.(`input: sendKeys FAILED: ${e.message}`);
+      });
     });
     // Block xterm from processing keys when input box is open
     term.attachCustomKeyEventHandler(() => true);
 
     let lastContent = '';
     let lastCursor = null;
+    let endTouchScrollTimer = null;
     function endTouchScroll() {
       touchScrolling = false;
-      // Re-lock keyboard if textarea wasn't focused (e.g. after scroll, not tap)
-      if (kbTa && document.activeElement !== kbTa) {
-        kbLocked = true;
-        kbTa.setAttribute('inputmode', 'none');
-      }
+      endTouchScrollTimer = null;
       if (lastContent) writeToXterm(lastContent, lastCursor);
+    }
+    function scheduleEndTouchScroll(ms) {
+      clearTimeout(endTouchScrollTimer);
+      endTouchScrollTimer = setTimeout(endTouchScroll, ms);
     }
 
     // Helper: convert touch coordinates to terminal cell (col, row in viewport)
@@ -466,7 +503,7 @@
       }
     };
     const onTouchEnd = () => {
-      if (onScrollbar) { onScrollbar = false; setTimeout(endTouchScroll, TOUCH_END_DELAY_MS); return; }
+      if (onScrollbar) { onScrollbar = false; scheduleEndTouchScroll(TOUCH_END_DELAY_MS); return; }
       if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
       // Selection active → keep visible, tap on it to copy
       if (isSelecting) return;
@@ -499,15 +536,15 @@
               momentumId = requestAnimationFrame(coast);
             } else {
               momentumId = null;
-              setTimeout(endTouchScroll, 200);
+              scheduleEndTouchScroll(200);
             }
           };
           momentumId = requestAnimationFrame(coast);
         } else {
-          setTimeout(endTouchScroll, TOUCH_END_DELAY_MS);
+          scheduleEndTouchScroll(TOUCH_END_DELAY_MS);
         }
       } else if (touchScrolling) {
-        setTimeout(endTouchScroll, TOUCH_END_DELAY_MS);
+        scheduleEndTouchScroll(TOUCH_END_DELAY_MS);
       }
     };
     const onTouchCancel = () => {
@@ -517,25 +554,33 @@
       selectionAnchor = null;
       selectionRange = null;
       stopMomentum();
-      setTimeout(endTouchScroll, 100);
+      scheduleEndTouchScroll(100);
     };
     termEl.addEventListener('touchstart', onTouchStart, { passive: true });
     termEl.addEventListener('touchmove', onTouchMove, { passive: false });
     termEl.addEventListener('touchend', onTouchEnd, { passive: true });
     termEl.addEventListener('touchcancel', onTouchCancel, { passive: true });
 
-    // Mobile: allow keyboard only on terminal tap or explicit keyboard toggle.
+    // Mobile keyboard: double-tap to open, toggle button to open/close.
     // Two layers: inputmode="none" (browser hint) + kbLocked flag (focus guard).
-    let onTermPointerDown, onTaBlur, onTaFocus;
+    let onTaBlur, onTaFocus;
+    let lastTapTime = 0;
+    const DOUBLE_TAP_MS = 300;
+
     if (kbTa) {
-      onTermPointerDown = () => {
-        if (!kbLocked) return; // already unlocked — don't re-unlock or kbShift close will race
-        clearTimeout(kbBlurTimer);
-        kbLocked = false;
-        kbTa.setAttribute('inputmode', 'text');
-        window.__dbg?.('kb: termEl pointerdown → unlock, inputmode=text');
+      // Double-tap detection on touchend (not pointerdown — avoids firing during scroll/selection)
+      const onTermTapEnd = (e) => {
+        // Skip if gesture was a scroll, selection, or scrollbar drag
+        if (didScroll || isSelecting || onScrollbar || touchScrolling) return;
+        const now = Date.now();
+        if (now - lastTapTime < DOUBLE_TAP_MS) {
+          lastTapTime = 0;
+          if (kbLocked) unlockKeyboard();
+        } else {
+          lastTapTime = now;
+        }
       };
-      termEl.addEventListener('pointerdown', onTermPointerDown, { capture: true });
+      termEl.addEventListener('touchend', onTermTapEnd, { passive: true });
 
       onTaBlur = () => {
         clearTimeout(kbBlurTimer);
@@ -570,9 +615,9 @@
     function doResize() {
       const fit = calcFit();
       if (!fit) return;
+      window.__dbg?.(`resize: fit=${fit.cols}x${fit.rows} cur=${term.cols}x${term.rows} elH=${termEl.clientHeight}`);
       lastFitCols = fit.cols;
       lastFitRows = fit.rows;
-      // Skip if terminal is already at the correct size (avoids redundant resizePane + resizePendingTs reset)
       if (fit.cols === term.cols && fit.rows === term.rows) return;
       resizePendingTs = Date.now();
       resizePane(target, fit.cols, fit.rows).catch(() => {});
@@ -667,9 +712,9 @@
     return () => {
       clearTimeout(resizeTimer);
       clearTimeout(kbResizeTimer);
+      clearTimeout(endTouchScrollTimer);
       if (longPressTimer) clearTimeout(longPressTimer);
       clearTimeout(kbBlurTimer);
-      if (onTermPointerDown) termEl.removeEventListener('pointerdown', onTermPointerDown, { capture: true });
       if (kbTa && onTaBlur) kbTa.removeEventListener('blur', onTaBlur);
       if (kbTa && onTaFocus) kbTa.removeEventListener('focus', onTaFocus);
       stopMomentum();
@@ -798,8 +843,9 @@
       <div class="win-switcher expanded">
         <button class="win-collapse" onclick={() => { showWindowCmd = false; localStorage.setItem('tmux_winswitcher', '0'); }}><Icon name="arrow-up" size={12} /></button>
         {#each windows as w}
-          {@const info = (w.pane_title || '') + ' ' + (w.current_command || '')}
-          {@const aiTag = info.match(/kiro/i) ? 'Kiro' : info.match(/claude/i) ? 'Claude' : info.match(/openclaw/i) ? 'OpenClaw' : ''}
+          {@const titleCmd = (w.pane_title || '').split(/\s/)[0]}
+          {@const cmd = (w.current_command || '') + (/[\/~@:]/.test(titleCmd) ? '' : ' ' + titleCmd)}
+          {@const aiTag = /kiro/i.test(cmd) ? 'Kiro' : /claude/i.test(cmd) ? 'Claude' : /openclaw/i.test(cmd) ? 'OpenClaw' : ''}
           <button
             class="win-tab"
             class:active={String(w.window) === currentWindow}
@@ -846,7 +892,9 @@
       </div>
     {:else}
       {@const cur = windows.find(w => String(w.window) === currentWindow)}
-      {@const curAi = cur ? ((cur.pane_title || '') + ' ' + (cur.current_command || '')).match(/kiro/i) ? 'Kiro' : ((cur.pane_title || '') + ' ' + (cur.current_command || '')).match(/claude/i) ? 'Claude' : ((cur.pane_title || '') + ' ' + (cur.current_command || '')).match(/openclaw/i) ? 'OpenClaw' : '' : ''}
+      {@const curTitle = cur ? (cur.pane_title || '').split(/\s/)[0] : ''}
+      {@const curCmd = cur ? (cur.current_command || '') + (/[\/~@:]/.test(curTitle) ? '' : ' ' + curTitle) : ''}
+      {@const curAi = cur ? /kiro/i.test(curCmd) ? 'Kiro' : /claude/i.test(curCmd) ? 'Claude' : /openclaw/i.test(curCmd) ? 'OpenClaw' : '' : ''}
       <button class="win-toggle" onclick={() => { showWindowCmd = true; localStorage.setItem('tmux_winswitcher', '1'); }}>
         {#if curAi === 'Kiro'}
           <img class="win-ai-icon" src="/assets/kiro.svg" alt="Kiro" />
@@ -890,7 +938,7 @@
             <button tabindex="-1" ontouchstart={() => startRepeat('Left')}><Icon name="arrow-left" size={13} /></button>
             <button tabindex="-1" ontouchstart={() => startRepeat('Down')}><Icon name="arrow-down" size={13} /></button>
             <button tabindex="-1" ontouchstart={() => startRepeat('Right')}><Icon name="arrow-right" size={13} /></button>
-            <button class="kb-toggle" onpointerdown={(e) => { e.stopPropagation(); e.stopImmediatePropagation(); requestAnimationFrame(() => { const ta = termEl?.querySelector('.xterm-helper-textarea'); if (ta && document.activeElement === ta) { window.__dbg?.('kb: toggle → close'); ta.blur(); } else if (ta) { window.__dbg?.('kb: toggle → open'); clearTimeout(kbBlurTimer); kbLocked = false; ta.setAttribute('inputmode', 'text'); ta.focus(); } }); }}><Icon name="keyboard" size={13} /></button>
+            <button class="kb-toggle" onpointerdown={(e) => { e.stopPropagation(); e.stopImmediatePropagation(); requestAnimationFrame(() => { const ta = termEl?.querySelector('.xterm-helper-textarea'); if (ta && document.activeElement === ta) { window.__dbg?.('kb: toggle → close'); ta.blur(); } else if (kbTa) { window.__dbg?.('kb: toggle → open'); unlockKeyboard(); } }); }}><Icon name="keyboard" size={13} /></button>
           </div>
         </div>
       </div>
@@ -990,7 +1038,7 @@
   }
   .win-tab.active { background: var(--accent-bg); color: var(--accent); }
   .win-tab:active { background: var(--surface2); }
-  .win-add { color: var(--text3); border-top: 1px solid var(--border2); }
+  .win-add { color: var(--text3); border-top: 1px solid var(--border2); background: none !important; }
   .win-num { font-weight: 600; min-width: 14px; text-align: center; }
   .win-cmd { color: inherit; font-size: 10px; max-width: 100px; overflow: hidden; text-overflow: ellipsis; }
   .win-ai-icon { height: 14px; width: auto; }

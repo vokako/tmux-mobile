@@ -1,6 +1,7 @@
 <script>
   import { connect, disconnect } from './ws.js';
   import Icon from './Icon.svelte';
+  import { t } from './i18n.svelte.js';
 
   let { onConnected } = $props();
 
@@ -109,12 +110,12 @@
     <div class="card-header">
       <div class="icon"><img class="icon-dark" src="/assets/icon-dark.svg" alt="" width="72" height="72" /><img class="icon-light" src="/assets/icon-light.svg" alt="" width="72" height="72" /></div>
       <h2>tmux<span class="accent">mobile</span></h2>
-      <p class="subtitle">Connect to your tmux server</p>
+      <p class="subtitle">{t('connectTitle')}</p>
     </div>
 
     <div class="fields">
       <label>
-        <span class="label-text">Address</span>
+        <span class="label-text">{t('address')}</span>
         <div class="addr-wrap">
           <input type="text" bind:value={address} placeholder="ws://host:port" autocapitalize="off" autocomplete="off" />
           {#if history.length > 1}
@@ -134,7 +135,7 @@
       </label>
 
       <label>
-        <span class="label-text">Token</span>
+        <span class="label-text">{t('token')}</span>
         <div class="token-wrap">
           <span class="token-icon"><Icon name="key" size={13} /></span>
           <input type={showToken ? 'text' : 'password'} bind:value={token} placeholder="auth token" />
@@ -145,7 +146,7 @@
       </label>
 
       <label>
-        <span class="label-text">tmux Socket <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional, -S path)</span></span>
+        <span class="label-text">{t('tmuxSocket')} <span style="font-weight:400;text-transform:none;letter-spacing:0">{t('tmuxSocketHint')}</span></span>
         <input type="text" bind:value={socket} placeholder="/tmp/tmux-1000/default" autocapitalize="off" autocomplete="off" />
       </label>
     </div>
@@ -157,13 +158,13 @@
     {#if connecting}
       <div class="connect-row">
         <button class="connect-btn connecting" disabled>
-          <span class="spinner"></span> Connecting…
+          <span class="spinner"></span> {t('connecting')}
         </button>
-        <button class="cancel-btn" onclick={cancelConnect}>Cancel</button>
+        <button class="cancel-btn" onclick={cancelConnect}>{t('cancel')}</button>
       </div>
     {:else}
       <button class="connect-btn" onclick={doConnect} disabled={!address}>
-        Connect
+        {t('connect')}
       </button>
     {/if}
   </div>

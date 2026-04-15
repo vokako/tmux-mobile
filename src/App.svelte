@@ -5,11 +5,10 @@
   import Files from './lib/Files.svelte';
   import Icon from './lib/Icon.svelte';
   import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS } from './lib/ws.js';
+  import { t, i18n, setLocale } from './lib/i18n.svelte.js';
 
   // Tunable constants
   const KB_OPEN_THRESHOLD = 100; // px difference to detect keyboard open
-  const SWIPE_MIN_DISTANCE = 120; // px minimum for tab swipe
-  const SWIPE_MAX_ANGLE = 0.7; // vertical/horizontal ratio to reject diagonal swipes
   const RECONNECT_MAX_ATTEMPTS = 20;
   const SLIDE_ANIMATION_MS = 120;
   const OPTIMIZE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
@@ -41,6 +40,21 @@
     debugEl.scrollTop = debugEl.scrollHeight;
   };
 
+  // Intercept external link clicks → open in system browser instead of in-app navigation
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest('a[href]');
+    if (!a) return;
+    const href = a.getAttribute('href');
+    if (href && /^https?:\/\//.test(href)) {
+      e.preventDefault();
+      if (window.__TAURI_INTERNALS__) {
+        import('@tauri-apps/plugin-opener').then(m => m.openUrl(href)).catch(() => window.open(href, '_blank'));
+      } else {
+        window.open(href, '_blank');
+      }
+    }
+  });
+
   // Keyboard height detection
   $effect(() => {
     // Android Tauri app: native event provides exact keyboard height
@@ -48,6 +62,13 @@
     const nativeHandler = (e) => {
       androidNativeKb = true; // suppress visualViewport handler on Android
       const kbh = e.detail?.height || 0;
+      // Guard: ignore keyboard-open events when no text input is focused
+      // (Android OnGlobalLayoutListener can fire stale heights during layout transitions)
+      const activeTag = document.activeElement?.tagName;
+      if (kbh > 0 && activeTag !== 'TEXTAREA' && activeTag !== 'INPUT') {
+        window.__dbg?.(`androidKb: IGNORED kbh=${kbh} (activeEl=${activeTag})`);
+        return;
+      }
       if (kbh === 0 && window.innerHeight > fullHeight) fullHeight = window.innerHeight;
       const h = kbh > 0 ? (fullHeight - kbh) + 'px' : fullHeight + 'px';
       document.documentElement.style.setProperty('--app-height', h);
@@ -61,6 +82,7 @@
       });
       if (kbh === 0) {
         setTimeout(() => window.dispatchEvent(new Event('terminal-refit')), 100);
+        setTimeout(() => window.dispatchEvent(new Event('terminal-refit')), 500);
       }
     };
     window.addEventListener('androidKeyboardHeight', nativeHandler);
@@ -91,6 +113,7 @@
       if (wasKbOpen && !kbOpen) {
         window.__dbg?.('⌨️CLOSE → dispatching terminal-refit');
         setTimeout(() => window.dispatchEvent(new Event('terminal-refit')), 100);
+        setTimeout(() => window.dispatchEvent(new Event('terminal-refit')), 500);
       }
       window.scrollTo(0, 0);
       document.documentElement.scrollTop = 0;
@@ -196,20 +219,24 @@
     // Build address list: primary first, then alternates
     const allAddrs = [addr, ...getAltAddresses()];
     const useAddr = allAddrs[attempt % allAddrs.length];
+    window.__dbg?.(`reconnect: attempt ${attempt + 1}/${RECONNECT_MAX_ATTEMPTS} → ${useAddr}`);
 
     connect(useAddr, token).then(() => {
       if (!reconnecting) return;
       connected = true;
       reconnecting = false;
+      window.__dbg?.('reconnect: success');
       serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
       if (useAddr !== addr) { localStorage.setItem('tmux_address', useAddr); activeAddress = useAddr; }
       if (terminalTarget) wsSubscribe(terminalTarget);
-    }).catch(() => {
+    }).catch((e) => {
       if (!reconnecting) return;
+      window.__dbg?.(`reconnect: failed (${e.message})`);
       if (attempt < RECONNECT_MAX_ATTEMPTS) {
         const delay = Math.min(1000 * (attempt + 1), 5000);
         reconnectTimer = setTimeout(() => tryReconnect(attempt + 1), delay);
       } else {
+        window.__dbg?.('reconnect: gave up');
         reconnecting = false;
         connected = false;
         page = 'settings';
@@ -376,38 +403,7 @@
     return t;
   });
 
-  let swipeX = 0;
-  let swipeY = 0;
-  let swipeDir = 0;
   let slideAnim = $state('');
-
-  function curTabIdx() {
-    const t = tabs();
-    const cur = page === 'terminal' ? (viewMode === 'chat' ? 'chat' : 'terminal') : page;
-    return t.indexOf(cur);
-  }
-
-  function onPageTouchStart(e) {
-    if (slideAnim) return;
-    swipeX = e.touches[0].clientX;
-    swipeY = e.touches[0].clientY;
-    swipeDir = 0;
-  }
-
-  function onPageTouchEnd(e) {
-    if (slideAnim) return;
-    const dx = e.changedTouches[0].clientX - swipeX;
-    const dy = Math.abs(e.changedTouches[0].clientY - swipeY);
-    if (Math.abs(dx) < SWIPE_MIN_DISTANCE || dy > Math.abs(dx) * SWIPE_MAX_ANGLE) return;
-    if (page === 'files' && dx > 0 && swipeX < 40) return;
-
-    const t = tabs();
-    const idx = curTabIdx();
-    const dir = dx < 0 ? 1 : -1;
-    const next = t[idx + dir];
-    if (!next) return;
-    switchTab(next);
-  }
 
   function switchTab(target) {
     if (slideAnim) return;
@@ -437,27 +433,27 @@
     {#if connected}
       <img class="nav-icon" src={iconSrc} alt="" width="28" height="28" />
       <div class="nav-pills">
-        <button class:active={page === 'sessions'} onclick={() => switchTab('sessions')}>
-          Sessions
+        <button tabindex="-1" class:active={page === 'sessions'} onclick={() => switchTab('sessions')}>
+          {t('sessions')}
         </button>
         {#if terminalTarget}
-          <button class:active={page === 'terminal' && viewMode === 'terminal'} onclick={() => switchTab('terminal')}>
-            Terminal
+          <button tabindex="-1" class:active={page === 'terminal' && viewMode === 'terminal'} onclick={() => switchTab('terminal')}>
+            {t('terminal')}
           </button>
         {/if}
         {#if terminalTarget && chatSupported}
-          <button class:active={page === 'terminal' && viewMode === 'chat'} onclick={() => switchTab('chat')}>
-            Chat
+          <button tabindex="-1" class:active={page === 'terminal' && viewMode === 'chat'} onclick={() => switchTab('chat')}>
+            {t('chat')}
           </button>
         {/if}
         {#if terminalTarget}
-          <button class:active={page === 'files'} onclick={() => switchTab('files')}>
-            Files
+          <button tabindex="-1" class:active={page === 'files'} onclick={() => switchTab('files')}>
+            {t('files')}
           </button>
         {/if}
       </div>
       <div class="nav-right">
-        <button class="gear-btn" onclick={() => showSettings = !showSettings}><Icon name="gear" size={16} /></button>
+        <button tabindex="-1" class="gear-btn" onclick={() => showSettings = !showSettings}><Icon name="gear" size={16} /></button>
       </div>
     {:else}
       <div class="brand">
@@ -465,7 +461,7 @@
         <span class="brand-text">tmux<span class="brand-accent">mobile</span></span>
       </div>
       <div class="nav-right">
-        <button class="gear-btn" onclick={() => showSettings = !showSettings}><Icon name="gear" size={16} /></button>
+        <button tabindex="-1" class="gear-btn" onclick={() => showSettings = !showSettings}><Icon name="gear" size={16} /></button>
       </div>
     {/if}
   </nav>
@@ -482,9 +478,9 @@
               {@const currentType = ADDRESS_LABELS[classifyAddress(activeAddress)]}
               <button class="sp-optimize" onclick={optimizeConnection} disabled={optimizing}>
                 {#if optimizing}
-                  <span class="reconnect-spinner"></span> Sniffing
+                  <span class="reconnect-spinner"></span> {t('sniffing')}
                 {:else}
-                  {currentType} · Sniff
+                  {currentType} · {t('sniff')}
                 {/if}
               </button>
             {/if}
@@ -513,31 +509,40 @@
         </div>
       {/if}
       <div class="sp-section">
-        <div class="sp-label">Theme</div>
+        <div class="sp-label">{t('theme')}</div>
         <div class="sp-btns">
-          <button class:active={theme === 'system'} onclick={() => setTheme('system')}>Auto</button>
-          <button class:active={theme === 'light'} onclick={() => setTheme('light')}>Light</button>
-          <button class:active={theme === 'dark'} onclick={() => setTheme('dark')}>Dark</button>
+          <button class:active={theme === 'system'} onclick={() => setTheme('system')}>{t('themeAuto')}</button>
+          <button class:active={theme === 'light'} onclick={() => setTheme('light')}>{t('themeLight')}</button>
+          <button class:active={theme === 'dark'} onclick={() => setTheme('dark')}>{t('themeDark')}</button>
         </div>
       </div>
       <div class="sp-section">
         <div class="sp-inline">
-          <div class="sp-label">Font</div>
+          <div class="sp-label">{t('language')}</div>
+          <div class="sp-btns">
+            <button class:active={i18n.lang === 'en'} onclick={() => setLocale('en')}>EN</button>
+            <button class:active={i18n.lang === 'zh'} onclick={() => setLocale('zh')}>中文</button>
+          </div>
+        </div>
+      </div>
+      <div class="sp-section">
+        <div class="sp-inline">
+          <div class="sp-label">{t('font')}</div>
           <div class="sp-font-row">
             <button class="sp-font-btn" onclick={() => { fontSize = Math.max(8, fontSize - 1); localStorage.setItem('tmux_fontsize', fontSize); }}>−</button>
             <span class="sp-font-val">{fontSize}</span>
             <button class="sp-font-btn" onclick={() => { fontSize = Math.min(24, fontSize + 1); localStorage.setItem('tmux_fontsize', fontSize); }}>+</button>
           </div>
           <div style="flex:1"></div>
-          <div class="sp-label">Debug</div>
+          <div class="sp-label">{t('debug')}</div>
           <button class="sp-toggle" class:on={debugMode} onclick={() => { debugMode = !debugMode; localStorage.setItem('tmux_debug', debugMode ? '1' : ''); }}>
-            <span class="sp-toggle-opt sp-toggle-off">Off</span>
-            <span class="sp-toggle-opt sp-toggle-on">On</span>
+            <span class="sp-toggle-opt sp-toggle-off">{t('off')}</span>
+            <span class="sp-toggle-opt sp-toggle-on">{t('on')}</span>
           </button>
         </div>
       </div>
       {#if connected}
-      <button class="sp-disconnect" onclick={() => { showSettings = false; doDisconnect(); }}>Disconnect</button>
+      <button class="sp-disconnect" onclick={() => { showSettings = false; doDisconnect(); }}>{t('disconnect')}</button>
       {/if}
     </div>
     <button class="sp-overlay" onclick={() => showSettings = false} aria-label="Close settings"></button>
@@ -545,14 +550,12 @@
 
   {#if reconnecting && page !== 'settings'}
     <div class="reconnect-bar">
-      <span class="reconnect-spinner"></span> Reconnecting...
-      <button class="reconnect-cancel" onclick={cancelReconnect}>Cancel</button>
+      <span class="reconnect-spinner"></span> {t('reconnecting')}
+      <button class="reconnect-cancel" onclick={cancelReconnect}>{t('cancel')}</button>
     </div>
   {/if}
 
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="page {slideAnim}" class:page-terminal={page === 'terminal'}
-    ontouchstart={onPageTouchStart} ontouchend={onPageTouchEnd}>
+  <div class="page {slideAnim}" class:page-terminal={page === 'terminal'}>
     {#if page === 'settings'}
       <Settings {onConnected} />
     {:else if page === 'sessions'}
@@ -586,7 +589,7 @@
         document.addEventListener('touchend', onEnd);
       }}
     >
-      <div class="debug-header">DEBUG <button onclick={() => { if (debugEl) { navigator.clipboard.writeText(debugEl.innerText).catch(() => {}); } }}>copy</button> <button onclick={() => { if (debugEl) debugEl.innerHTML = ''; }}>clear</button></div>
+      <div class="debug-header">DEBUG <button onclick={() => { if (debugEl) { navigator.clipboard.writeText(debugEl.innerText).catch(() => {}); } }}>copy</button> <button onclick={() => { if (debugEl) debugEl.innerHTML = ''; }}>clear</button> <button onclick={() => { debugMode = false; localStorage.removeItem('tmux_debug'); }}>✕</button></div>
       <div class="debug-content" bind:this={debugEl}></div>
     </div>
   {/if}

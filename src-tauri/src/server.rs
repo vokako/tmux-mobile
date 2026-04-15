@@ -154,6 +154,8 @@ fn handle_request(req: &Request) -> Response {
     let p = &req.params;
 
     match req.method.as_str() {
+        "ping" => Response::ok(id, serde_json::json!("pong")),
+
         "list_sessions" => match tmux::list_sessions() {
             Ok(sessions) => Response::ok(id, serde_json::to_value(&sessions).unwrap()),
             Err(e) => Response::err(id, ERR_INTERNAL, e),

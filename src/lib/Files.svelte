@@ -22,6 +22,7 @@
   import 'highlight.js/styles/github-dark.min.css';
   import mermaid from 'mermaid';
   import Icon from './Icon.svelte';
+  import { t } from './i18n.svelte.js';
   import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref, fsConvert } from './ws.js';
 
   // Tauri plugin imports (tree-shaken in browser builds)
@@ -73,7 +74,7 @@
     if (onGoBack) onGoBack(() => {
       if (view === 'git' && gitDiff) { gitDiff = null; return true; }
       if (view === 'git') { view = 'list'; return true; }
-      if (view === 'edit') { if (isEdited && !confirm('Discard unsaved changes?')) return true; view = 'preview'; return true; }
+      if (view === 'edit') { if (isEdited && !confirm(t('discardChanges'))) return true; view = 'preview'; return true; }
       if (view === 'info') { view = fromGit ? (fromGit = false, 'git') : currentFile?.content != null ? 'preview' : 'list'; return true; }
       if (view === 'preview') { if (fromGit) { fromGit = false; view = 'git'; } else { view = 'list'; } currentFile = null; return true; }
       if (view === 'local') { view = 'list'; return true; }
@@ -137,7 +138,7 @@
   async function openLocalFile(name) {
     try {
       await openFileNative(localDir + name);
-    } catch (e) { error = 'Open failed: ' + (e.message || e); }
+    } catch (e) { error = t('openFailed') + (e.message || e); }
   }
 
   async function deleteLocalFile(name) {
@@ -646,7 +647,7 @@
         await tauriReady;
         await tauriOpener.openPath(downloadedPath);
       }
-    } catch (e) { error = 'Open failed: ' + (e.message || e); }
+    } catch (e) { error = t('openFailed') + (e.message || e); }
     dismissDownload();
   }
 
@@ -659,14 +660,18 @@
     try {
       downloading = name;
       startDlProgress();
+      window.__dbg?.(`dl: start ${name}`);
       if (isTauri && tauriFs) {
         await tauriReady;
         if (isAndroid) {
+          const t0 = Date.now();
           const r = await fsDownload(path);
+          window.__dbg?.(`dl: fetched ${(r.data?.length/1024|0)}KB in ${Date.now()-t0}ms`);
           stopDlProgress(); dlProgress = 85;
           const { invoke } = await import('@tauri-apps/api/core');
           dlProgress = 90;
           const filePath = await invoke('save_to_downloads', { name: r.name, data: r.data });
+          window.__dbg?.(`dl: saved → ${filePath}`);
           dlProgress = 100;
           await new Promise(r => setTimeout(r, 300));
           downloading = '';
@@ -678,11 +683,14 @@
         // macOS / desktop: use save dialog
         const savePath = await tauriDialog.save({ defaultPath: name });
         if (!savePath) { stopDlProgress(); downloading = ''; dlProgress = 0; return; }
+        const t0d = Date.now();
         const r = await fsDownload(path);
+        window.__dbg?.(`dl: fetched ${(r.data?.length/1024|0)}KB in ${Date.now()-t0d}ms`);
         stopDlProgress(); dlProgress = 85;
         const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
         dlProgress = 90;
         await tauriFs.writeFile(savePath, bytes);
+        window.__dbg?.(`dl: saved → ${savePath}`);
         dlProgress = 100;
         await new Promise(r => setTimeout(r, 300));
         downloading = '';
@@ -692,7 +700,9 @@
         return;
       }
       // Browser fallback
+      const t0b = Date.now();
       const r = await fsDownload(path);
+      window.__dbg?.(`dl: fetched ${(r.data?.length/1024|0)}KB in ${Date.now()-t0b}ms`);
       stopDlProgress(); dlProgress = 90;
       const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
       const blob = new Blob([bytes]);
@@ -707,7 +717,7 @@
       downloading = '';
       downloadToast = 'Downloaded';
       setTimeout(() => downloadToast = '', 2000);
-    } catch (e) { stopDlProgress(); downloading = ''; dlProgress = 0; error = e.message; }
+    } catch (e) { stopDlProgress(); downloading = ''; dlProgress = 0; window.__dbg?.(`dl: FAILED ${e.message}`); error = e.message; }
   }
 
   async function handleUpload() {
@@ -978,7 +988,7 @@
         <input
           type="text"
           bind:value={newName}
-          placeholder={newType === 'dir' ? 'folder name...' : 'file name...'}
+          placeholder={newType === 'dir' ? t('folderName') : t('fileName')}
           onkeydown={(e) => e.key === 'Enter' && handleNewItem()}
           autocapitalize="off"
           autocomplete="off"
@@ -994,7 +1004,7 @@
         <input
           type="text"
           bind:value={renameValue}
-          placeholder="new name..."
+          placeholder={t('newName')}
           onkeydown={(e) => e.key === 'Enter' && handleRename()}
           autocapitalize="off"
         />
@@ -1021,7 +1031,7 @@
     {/if}
     <div class="file-list">
       {#if loading}
-        <div class="loading">Loading...</div>
+        <div class="loading">{t('loading')}</div>
       {:else}
         {#each entries as entry}
           <div class="file-row">
@@ -1039,7 +1049,7 @@
               <button class="act-btn" onclick={() => { renaming = entry.path; renameValue = entry.name; }} title="Rename"><Icon name="edit" size={12} /></button>
               <button class="act-btn del" class:confirm={confirmDelete === entry.path} onclick={() => handleDelete(entry.path)} title="Delete">
                 {#if confirmDelete === entry.path}
-                  <span class="del-text">del</span>
+                  <span class="del-text">{t('del')}</span>
                 {:else}
                   <Icon name="trash" size={12} />
                 {/if}
@@ -1048,7 +1058,7 @@
           </div>
         {/each}
         {#if !entries.length && !loading}
-          <div class="empty">Empty directory</div>
+          <div class="empty">{t('emptyDir')}</div>
         {/if}
       {/if}
     </div>
@@ -1122,7 +1132,7 @@
     <!-- Local downloaded files -->
     <div class="preview-header">
       <button class="back-btn" onclick={() => { view = 'list'; }}><Icon name="chevron-left" size={16} /></button>
-      <span class="preview-name">Downloads</span>
+      <span class="preview-name">{t('downloads')}</span>
       <div class="preview-actions">
         <button class="act-btn" onclick={openLocalFiles}><Icon name="refresh" size={14} /></button>
       </div>
@@ -1138,7 +1148,7 @@
         </div>
       {/each}
       {#if !localFiles.length}
-        <div class="empty">No downloaded files</div>
+        <div class="empty">{t('noDownloads')}</div>
       {/if}
     </div>
 
@@ -1154,14 +1164,14 @@
     </div>
     <div class="info-body">
       {#if currentFile?.stat}
-        <div class="info-row"><span class="info-label">Path</span><button class="info-path" onclick={() => copyPath(currentFile.stat.path)}>{currentFile.stat.path}</button></div>
-        <div class="info-row"><span class="info-label">Type</span><span class="info-val">{currentFile.stat.mime_hint}</span></div>
-        <div class="info-row"><span class="info-label">Size</span><span class="info-val">{formatSize(currentFile.stat.size)}</span></div>
-        <div class="info-row"><span class="info-label">Modified</span><span class="info-val">{formatDate(currentFile.stat.modified)}</span></div>
-        <div class="info-row"><span class="info-label">Permissions</span><span class="info-val mono">{currentFile.stat.permissions}</span></div>
-        <div class="info-row"><span class="info-label">Readable</span><span class="info-val">{currentFile.stat.readable ? 'Yes' : 'No'}</span></div>
-        <div class="info-row"><span class="info-label">Writable</span><span class="info-val">{currentFile.stat.writable ? 'Yes' : 'No'}</span></div>
-        <div class="info-row"><span class="info-label">Text file</span><span class="info-val">{currentFile.stat.is_text ? 'Yes' : 'No'}</span></div>
+        <div class="info-row"><span class="info-label">{t('path')}</span><button class="info-path" onclick={() => copyPath(currentFile.stat.path)}>{currentFile.stat.path}</button></div>
+        <div class="info-row"><span class="info-label">{t('type')}</span><span class="info-val">{currentFile.stat.mime_hint}</span></div>
+        <div class="info-row"><span class="info-label">{t('size')}</span><span class="info-val">{formatSize(currentFile.stat.size)}</span></div>
+        <div class="info-row"><span class="info-label">{t('modified')}</span><span class="info-val">{formatDate(currentFile.stat.modified)}</span></div>
+        <div class="info-row"><span class="info-label">{t('permissions')}</span><span class="info-val mono">{currentFile.stat.permissions}</span></div>
+        <div class="info-row"><span class="info-label">{t('readable')}</span><span class="info-val">{currentFile.stat.readable ? t('yes') : t('no')}</span></div>
+        <div class="info-row"><span class="info-label">{t('writable')}</span><span class="info-val">{currentFile.stat.writable ? t('yes') : t('no')}</span></div>
+        <div class="info-row"><span class="info-label">{t('textFile')}</span><span class="info-val">{currentFile.stat.is_text ? t('yes') : t('no')}</span></div>
       {/if}
     </div>
   {:else if view === 'git'}
@@ -1179,29 +1189,29 @@
     {#if !gitDiff}
       {@const stagedCount = gitStatus.filter(f => f.status[0] !== ' ' && f.status[0] !== '?').length}
       <div class="git-actions">
-        <button class="git-act-btn" onclick={gitAddAll}>Add All</button>
-        <button class="git-act-btn" onclick={() => showCommitInput = !showCommitInput}>Commit{stagedCount ? ` (${stagedCount})` : ''}</button>
-        <button class="git-act-btn" onclick={gitPush} disabled={gitLoading}>Push</button>
+        <button class="git-act-btn" onclick={gitAddAll}>{t('addAll')}</button>
+        <button class="git-act-btn" onclick={() => showCommitInput = !showCommitInput}>{t('commit')}{stagedCount ? ` (${stagedCount})` : ''}</button>
+        <button class="git-act-btn" onclick={gitPush} disabled={gitLoading}>{t('push')}</button>
       </div>
       {#if showCommitInput}
         <div class="git-commit-row">
-          <textarea bind:value={commitMsg} placeholder="commit message…" onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); gitCommit(); } }} rows="2"></textarea>
+          <textarea bind:value={commitMsg} placeholder={t('commitMsg')} onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); gitCommit(); } }} rows="2"></textarea>
           <button class="git-commit-btn" onclick={gitCommit} disabled={!commitMsg.trim()}>OK</button>
         </div>
       {/if}
       <div class="git-tabs">
-        <button class:active={gitTab === 'status'} onclick={() => { gitTab = 'status'; loadGitStatus(); }}>Status</button>
-        <button class:active={gitTab === 'log'} onclick={() => { gitTab = 'log'; loadGitLog(); }}>Log</button>
+        <button class:active={gitTab === 'status'} onclick={() => { gitTab = 'status'; loadGitStatus(); }}>{t('status')}</button>
+        <button class:active={gitTab === 'log'} onclick={() => { gitTab = 'log'; loadGitLog(); }}>{t('log')}</button>
       </div>
       {#if gitError}
         <div class="git-error">{gitError}</div>
       {/if}
       {#if gitLoading}
-        <div class="git-loading">Loading…</div>
+        <div class="git-loading">{t('gitLoading')}</div>
       {:else if gitTab === 'status'}
         <div class="git-list" bind:this={gitListEl}>
           {#if !gitStatus.length}
-            <div class="empty">Working tree clean</div>
+            <div class="empty">{t('cleanTree')}</div>
           {/if}
           {#each gitStatus as f}
             {@const staged = f.status[0] !== ' ' && f.status[0] !== '?'}
@@ -1243,7 +1253,7 @@
     {/if}
   {/if}
   {#if copyToast}
-    <div class="copy-toast">Copied</div>
+    <div class="copy-toast">{t('copied')}</div>
   {/if}
   {#if downloading}
     <div class="copy-toast download-toast">
@@ -1259,9 +1269,9 @@
     </div>
   {:else if downloadToast}
     <div class="copy-toast download-toast">
-      Saved: <span class="dl-path">{downloadToast}</span>
+      {t('saved')} <span class="dl-path">{downloadToast}</span>
       {#if downloadedPath}
-        <button class="toast-open" onclick={openDownloaded}>Open</button>
+        <button class="toast-open" onclick={openDownloaded}>{t('open')}</button>
       {/if}
       <button class="toast-close" onclick={dismissDownload}><Icon name="x" size={12} /></button>
     </div>
