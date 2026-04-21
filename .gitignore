@@ -3,3 +3,10 @@
 /node_modules
 /temp
 temp/
+
+# Local scratch / not-in-repo assets
+/deploy
+/plan.md
+/example.txt
+/tmuxmobile.svg
+/icon_macos.png
