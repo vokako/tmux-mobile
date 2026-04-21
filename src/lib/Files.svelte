@@ -470,6 +470,45 @@
     fsCwd(session).then(r => loadDir(r.path)).catch(() => loadDir('/'));
   }
 
+  const PREVIEW_SIZE_LIMIT = 5 * 1024 * 1024;
+
+  function isPreviewable(stat, name) {
+    if (!stat) return false;
+    const m = stat.mime_hint || '';
+    if (m === 'application/pdf') return true;
+    if (m.startsWith('image/')) return true;
+    if (stat.is_text && stat.size <= 512 * 1024) return true;
+    if (name && /\.pptx$/i.test(name)) return true;
+    return false;
+  }
+
+  async function loadPreviewContent(file) {
+    loading = true;
+    try {
+      const { path, name, stat } = file;
+      if (stat.mime_hint === 'application/pdf') {
+        const r = await fsDownload(path);
+        currentFile = { ...file, pdfData: r.data };
+        view = 'preview';
+      } else if (stat.mime_hint.startsWith('image/')) {
+        const r = await fsDownload(path);
+        currentFile = { ...file, dataUrl: `data:${stat.mime_hint};base64,${r.data}` };
+        view = 'preview';
+      } else if (stat.is_text && stat.size <= 512 * 1024) {
+        const r = await fsRead(path);
+        currentFile = { ...file, content: r.content };
+        view = 'preview';
+      } else if (/\.pptx$/i.test(name)) {
+        const r = await fsConvert(path);
+        currentFile = { ...file, convertedHtml: r.html };
+        view = 'preview';
+      }
+    } catch (e) {
+      error = e.message;
+    }
+    loading = false;
+  }
+
   async function openEntry(entry) {
     if (entry.type === 'dir') {
       navPush();
@@ -482,29 +521,18 @@
       currentFile = { path: entry.path, name: entry.name, stat };
       addRecent(entry.path, entry.name);
       navPush();
-      if (stat.mime_hint === 'application/pdf') {
-        const r = await fsDownload(entry.path);
-        currentFile.pdfData = r.data;
-        view = 'preview';
-      } else if (stat.mime_hint.startsWith('image/')) {
-        const r = await fsDownload(entry.path);
-        currentFile.dataUrl = `data:${stat.mime_hint};base64,${r.data}`;
-        view = 'preview';
-      } else if (stat.is_text && stat.size <= 512 * 1024) {
-        const r = await fsRead(entry.path);
-        currentFile.content = r.content;
-        view = 'preview';
-      } else if (entry.name.match(/\.pptx$/i)) {
-        const r = await fsConvert(entry.path);
-        currentFile.convertedHtml = r.html;
-        view = 'preview';
-      } else {
+      if (stat.size > PREVIEW_SIZE_LIMIT || !isPreviewable(stat, entry.name)) {
         view = 'info';
+        loading = false;
+        return;
       }
     } catch (e) {
       error = e.message;
+      loading = false;
+      return;
     }
     loading = false;
+    await loadPreviewContent(currentFile);
   }
 
   async function reloadPreview() {
@@ -1158,6 +1186,9 @@
       <button class="back-btn" onclick={() => { view = currentFile?.content != null ? 'preview' : 'list'; }}><Icon name="chevron-left" size={16} /></button>
       <span class="preview-name">{currentFile?.name}</span>
       <div class="preview-actions">
+        {#if isPreviewable(currentFile?.stat, currentFile?.name)}
+          <button class="act-btn" onclick={() => loadPreviewContent(currentFile)} title={t('preview')}><Icon name="eye" size={14} /></button>
+        {/if}
         <button class="act-btn" onclick={() => handleDownload(currentFile.path)}><Icon name="download" size={14} /></button>
         <button class="act-btn" onclick={() => copyPath(currentFile.path)}><Icon name="copy" size={14} /></button>
       </div>
@@ -1376,7 +1407,13 @@
     font-size: 14px; min-width: 0; -webkit-tap-highlight-color: transparent;
   }
   .file-main:active { background: var(--input-bg); }
-  .file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-name {
+    flex: 1; min-width: 0; white-space: nowrap;
+    overflow-x: auto; overflow-y: hidden;
+    scrollbar-width: none; -ms-overflow-style: none;
+    overscroll-behavior-x: contain;
+  }
+  .file-name::-webkit-scrollbar { display: none; }
   .dir-name { color: var(--accent); }
   .file-size { color: var(--text3); font-size: 11px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; white-space: nowrap; }
   .file-actions { display: flex; gap: 2px; padding-right: 8px; }

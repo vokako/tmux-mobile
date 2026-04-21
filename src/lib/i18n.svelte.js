@@ -83,6 +83,7 @@ const msgs = {
     textFile: 'Text file',
     yes: 'Yes',
     no: 'No',
+    preview: 'Preview',
 
     addAll: 'Add All',
     commit: 'Commit',
@@ -166,6 +167,7 @@ const msgs = {
     textFile: '文本文件',
     yes: '是',
     no: '否',
+    preview: '预览',
 
     addAll: '全部添加',
     commit: '提交',

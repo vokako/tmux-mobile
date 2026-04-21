@@ -16,7 +16,9 @@ Browse, preview, edit, and manage files on the remote server's filesystem. Start
 
 ## Interactions
 - Tap directory → navigate into it
-- Tap file → preview
+- Tap file → preview (or info page if file size > 5 MB or not previewable)
+- From info page → tap preview (eye) button to load preview on demand
+- Long file names in the list scroll horizontally on touch drag
 - Tap edit → open text editor
 - Long-press / info button → file info panel
 - Star button → bookmark current directory
@@ -50,6 +52,7 @@ Browse, preview, edit, and manage files on the remote server's filesystem. Start
 
 ## Edge Cases
 - Base64 upload uses chunked encoding (8192 bytes/chunk) to avoid stack overflow
+- Files > 5 MB (or not previewable by mime/name) open the info page instead of auto-loading preview; user confirms via preview button to avoid heavy transfers on mobile
 - Markdown preview resolves relative image paths, infers MIME from image extension (not parent file)
 - HTML preview iframe: `allow-same-origin` only, NO `allow-scripts` (sandbox escape prevention)
 - Android downloads go to `/storage/emulated/0/Download/TmuxMobile/`, opened via FileProvider + Intent
