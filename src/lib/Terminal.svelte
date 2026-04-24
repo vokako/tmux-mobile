@@ -566,6 +566,20 @@
     termEl.addEventListener('touchend', onTouchEnd, { passive: true });
     termEl.addEventListener('touchcancel', onTouchCancel, { passive: true });
 
+    // Safety net: if the app is backgrounded mid-selection or mid-scroll, touchcancel
+    // may never fire and touchScrolling can stay stuck true, which freezes
+    // writeToXterm. Reset transient gesture state whenever we regain visibility.
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      touchScrolling = false;
+      onScrollbar = false;
+      isSelecting = false;
+      selectionAnchor = null;
+      selectionRange = null;
+      if (lastContent && termAtBottom) writeToXterm(lastContent, lastCursor);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
     // Mobile keyboard: double-tap to open, toggle button to open/close.
     // Two layers: inputmode="none" (browser hint) + kbLocked flag (focus guard).
     let onTaBlur, onTaFocus;
@@ -754,6 +768,7 @@
       window.removeEventListener('resize', onResize);
       window.removeEventListener('terminal-refit', onRefit);
       window.removeEventListener('keyboard-shift', onKbShift);
+      document.removeEventListener('visibilitychange', onVisible);
       termEl.removeEventListener('touchstart', onTouchStart);
       termEl.removeEventListener('touchmove', onTouchMove);
       termEl.removeEventListener('touchend', onTouchEnd);
