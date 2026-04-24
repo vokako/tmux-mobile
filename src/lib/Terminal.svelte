@@ -300,6 +300,7 @@
 
     // Forward keyboard input to tmux — skip when input box is open
     let isPasting = false;
+    let isComposing = false;
     if (isMobile) {
       const ta = termEl?.querySelector('.xterm-helper-textarea');
       if (ta) {
@@ -310,6 +311,8 @@
           // next keystroke as paste.
           setTimeout(() => { isPasting = false; }, 200);
         });
+        ta.addEventListener('compositionstart', () => { isComposing = true; });
+        ta.addEventListener('compositionend', () => { isComposing = false; });
         ta.addEventListener('input', () => {
           window.__dbg?.(`input: ta.input val=${JSON.stringify(ta.value).slice(0,30)} focused=${document.activeElement === ta} inputmode=${ta.getAttribute('inputmode')} locked=${kbLocked}`);
         });
@@ -325,9 +328,12 @@
       window.__dbg?.(`input: onData len=${data.length} paste=${isPasting} data=${JSON.stringify(data).slice(0,40)}`);
       // Mobile: force-clear xterm's hidden textarea after keyboard input to prevent
       // accumulation from auto-paired quotes/brackets. Skip paste so xterm.js can
-      // fully process the pasted content.
-      if (isMobile && !isPasting) {
+      // fully process the pasted content. Also skip while an IME composition is in
+      // progress — clearing textarea.value mid-composition breaks CJK/Japanese
+      // input (e.g. drops pinyin the user is currently typing).
+      if (isMobile && !isPasting && !isComposing) {
         requestAnimationFrame(() => {
+          if (isComposing) return; // composition may have started in the meantime
           const ta = termEl?.querySelector('.xterm-helper-textarea');
           if (ta && ta.value) ta.value = '';
         });

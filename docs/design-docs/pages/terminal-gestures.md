@@ -63,7 +63,9 @@ The App-level left/right swipe to switch tabs is suppressed when:
 - Vertical movement > 10px (any vertical gesture)
 
 ## Auto-pair Textarea Clearing
-Mobile keyboards auto-pair quotes/brackets (`""`, `()`, `[]`). This breaks xterm.js textarea clearing. Fix: force-clear textarea after each `onData` on mobile, EXCEPT during paste (detected via `paste` event flag, NOT `data.length`).
+Mobile keyboards auto-pair quotes/brackets (`""`, `()`, `[]`). This breaks xterm.js textarea clearing. Fix: force-clear textarea after each `onData` on mobile, EXCEPT:
+- during paste (detected via `paste` event flag, NOT `data.length`)
+- during an active IME composition (detected via `compositionstart` / `compositionend`). Clearing the textarea mid-composition drops the buffered pinyin/kana and prevents CJK input from completing correctly. The rAF callback re-checks the composing flag in case a composition started between scheduling and running.
 
 ## Lessons Learned
 - `endTouchScroll` via setTimeout can fire after `pointerdown` unlock → removed kbLocked manipulation from endTouchScroll
