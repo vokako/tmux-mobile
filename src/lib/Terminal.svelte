@@ -691,6 +691,8 @@
       kbResizeTimer = setTimeout(() => {
         lastFitCols = 0; lastFitRows = 0; // force recalc
         doResize();
+        // Keep the cursor area visible when the keyboard just appeared
+        if (kbH > 0 && termAtBottom && term) term.scrollToBottom();
       }, KB_RESIZE_DELAY_MS);
     };
     window.addEventListener('keyboard-shift', onKbShift);
