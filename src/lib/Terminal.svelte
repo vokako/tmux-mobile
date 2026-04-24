@@ -590,36 +590,18 @@
     };
     document.addEventListener('visibilitychange', onVisible);
 
-    // Mobile keyboard: double-tap to open, toggle button to open/close.
+    // Mobile keyboard: single tap opens; closing is only via the toggle button.
     // Two layers: inputmode="none" (browser hint) + kbLocked flag (focus guard).
     let onTaBlur, onTaFocus;
-    let lastTapTime = 0;
-    let lastTapX = 0, lastTapY = 0;
-    const DOUBLE_TAP_MS = 400;
-    const DOUBLE_TAP_DIST = 40; // px — two taps must land near each other
 
     if (kbTa) {
-      // Double-tap detection on touchend (not pointerdown — avoids firing during scroll/selection)
-      const onTermTapEnd = (e) => {
-        // Skip if gesture was a scroll or scrollbar drag. Do NOT guard on isSelecting:
-        // an accidental selection from the 1st tap should not disable the 2nd tap.
-        if (didScroll || onScrollbar || touchScrolling) return;
-        const t = e.changedTouches?.[0];
-        const x = t ? t.clientX : 0, y = t ? t.clientY : 0;
-        const now = Date.now();
-        const dx = x - lastTapX, dy = y - lastTapY;
-        if (now - lastTapTime < DOUBLE_TAP_MS && Math.hypot(dx, dy) < DOUBLE_TAP_DIST) {
-          lastTapTime = 0;
-          // Clear any stray selection from the 1st tap / xterm's own double-click handler
-          term.clearSelection();
-          isSelecting = false;
-          selectionAnchor = null;
-          selectionRange = null;
-          if (kbLocked) unlockKeyboard();
-        } else {
-          lastTapTime = now;
-          lastTapX = x; lastTapY = y;
-        }
+      // Single-tap open (on touchend, not pointerdown — avoids firing during scroll/selection).
+      // Never closes the keyboard: if already unlocked, re-focusing the textarea is a no-op.
+      const onTermTapEnd = () => {
+        // Skip gestures that are not a clean tap: scroll, scrollbar drag, active selection.
+        if (didScroll || onScrollbar || touchScrolling || isSelecting) return;
+        if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+        if (kbLocked) unlockKeyboard();
       };
       termEl.addEventListener('touchend', onTermTapEnd, { passive: true });
 
