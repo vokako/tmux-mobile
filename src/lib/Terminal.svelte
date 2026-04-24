@@ -115,7 +115,11 @@
   $effect(() => {
     if (!term) return;
     term.options.fontSize = fontSize;
-    window.dispatchEvent(new Event('terminal-refit'));
+    // xterm re-measures cell geometry on the next render, not synchronously.
+    // Defer refit by two frames so calcFit reads the new cell width/height.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => window.dispatchEvent(new Event('terminal-refit')));
+    });
   });
 
   let parser = $derived(detectParser('', command));
