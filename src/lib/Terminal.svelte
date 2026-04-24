@@ -832,6 +832,7 @@
   function startRepeat(key) {
     const ta = termEl?.querySelector('.xterm-helper-textarea');
     window.__dbg?.(`kb: shortcut "${key}" locked=${kbLocked} inputmode=${ta?.getAttribute('inputmode')} focused=${document.activeElement === ta}`);
+    navigator.vibrate?.(8); // haptic tick on press; silent during repeat interval
     sendSpecial(key);
     repeatTimer = setTimeout(() => {
       repeatInterval = setInterval(() => sendSpecial(key), 80);
