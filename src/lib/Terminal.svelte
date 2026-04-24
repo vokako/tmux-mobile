@@ -299,7 +299,13 @@
     if (isMobile) {
       const ta = termEl?.querySelector('.xterm-helper-textarea');
       if (ta) {
-        ta.addEventListener('paste', () => { isPasting = true; });
+        ta.addEventListener('paste', () => {
+          isPasting = true;
+          // Safety reset: if onData never fires (xterm swallowed it, or paste
+          // produced no data), the flag would persist and misclassify the
+          // next keystroke as paste.
+          setTimeout(() => { isPasting = false; }, 200);
+        });
         ta.addEventListener('input', () => {
           window.__dbg?.(`input: ta.input val=${JSON.stringify(ta.value).slice(0,30)} focused=${document.activeElement === ta} inputmode=${ta.getAttribute('inputmode')} locked=${kbLocked}`);
         });
