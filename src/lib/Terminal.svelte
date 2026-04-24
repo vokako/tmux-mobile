@@ -452,6 +452,8 @@
           selectionAnchor = { col: bounds.start, endCol: bounds.end, bufRow };
           selectionRange = { sRow: bufRow, sCol: bounds.start, eRow: bufRow, eCol: bounds.end - 1 };
           touchScrolling = true; // pause content updates during selection
+          navigator.vibrate?.(15); // haptic confirmation that long-press selection engaged
+          showToast(t('selected'));
         }
       }, LONG_PRESS_MS);
     };

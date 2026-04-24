@@ -70,6 +70,7 @@ const msgs = {
     discardChanges: 'Discard unsaved changes?',
     openFailed: 'Open failed: ',
     copied: 'Copied',
+    selected: 'Selected — tap to copy',
     saved: 'Saved: ',
     open: 'Open',
 
@@ -154,6 +155,7 @@ const msgs = {
     discardChanges: '放弃未保存的更改？',
     openFailed: '打开失败：',
     copied: '已复制',
+    selected: '已选中，点击复制',
     saved: '已保存：',
     open: '打开',
 
