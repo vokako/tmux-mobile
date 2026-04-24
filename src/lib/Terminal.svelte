@@ -39,6 +39,7 @@
   const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
   let kbBlurTimer = null;
   let kbLocked = true; // true = keyboard must not show; false = keyboard allowed
+  let unlockUntil = 0; // grace window after explicit unlock; auto-lock paths must respect it
   let endTouchScrollTimer = null;
   let kbTa = null; // set in $effect after term.open
 
@@ -46,6 +47,7 @@
     clearTimeout(kbBlurTimer);
     clearTimeout(endTouchScrollTimer);
     kbLocked = false;
+    unlockUntil = Date.now() + 1500;
     if (kbTa) {
       kbTa.setAttribute('inputmode', 'text');
       kbTa.focus();
@@ -565,19 +567,31 @@
     // Two layers: inputmode="none" (browser hint) + kbLocked flag (focus guard).
     let onTaBlur, onTaFocus;
     let lastTapTime = 0;
-    const DOUBLE_TAP_MS = 300;
+    let lastTapX = 0, lastTapY = 0;
+    const DOUBLE_TAP_MS = 400;
+    const DOUBLE_TAP_DIST = 40; // px — two taps must land near each other
 
     if (kbTa) {
       // Double-tap detection on touchend (not pointerdown — avoids firing during scroll/selection)
       const onTermTapEnd = (e) => {
-        // Skip if gesture was a scroll, selection, or scrollbar drag
-        if (didScroll || isSelecting || onScrollbar || touchScrolling) return;
+        // Skip if gesture was a scroll or scrollbar drag. Do NOT guard on isSelecting:
+        // an accidental selection from the 1st tap should not disable the 2nd tap.
+        if (didScroll || onScrollbar || touchScrolling) return;
+        const t = e.changedTouches?.[0];
+        const x = t ? t.clientX : 0, y = t ? t.clientY : 0;
         const now = Date.now();
-        if (now - lastTapTime < DOUBLE_TAP_MS) {
+        const dx = x - lastTapX, dy = y - lastTapY;
+        if (now - lastTapTime < DOUBLE_TAP_MS && Math.hypot(dx, dy) < DOUBLE_TAP_DIST) {
           lastTapTime = 0;
+          // Clear any stray selection from the 1st tap / xterm's own double-click handler
+          term.clearSelection();
+          isSelecting = false;
+          selectionAnchor = null;
+          selectionRange = null;
           if (kbLocked) unlockKeyboard();
         } else {
           lastTapTime = now;
+          lastTapX = x; lastTapY = y;
         }
       };
       termEl.addEventListener('touchend', onTermTapEnd, { passive: true });
@@ -585,6 +599,13 @@
       onTaBlur = () => {
         clearTimeout(kbBlurTimer);
         kbBlurTimer = setTimeout(() => {
+          if (Date.now() < unlockUntil) {
+            window.__dbg?.('kb: blur timer skipped (grace)');
+            // Retry focus within grace window — the blur was likely system-initiated
+            // (e.g., Android pad where IME didn't come up yet).
+            if (kbTa && !kbLocked && document.activeElement !== kbTa) kbTa.focus();
+            return;
+          }
           kbLocked = true;
           kbTa.setAttribute('inputmode', 'none');
           window.__dbg?.('kb: blur timer → lock, inputmode=none');
@@ -643,19 +664,25 @@
 
     // Resize terminal to fit visible area when keyboard opens/closes
     let kbResizeTimer = null;
+    let lastKbHeight = 0;
     const onKbShift = (e) => {
       if (!termEl || !term) return;
       termEl.style.marginTop = '0'; // remove legacy shift
-      // When keyboard closes, lock + blur to prevent accidental re-open from shortcut buttons.
-      // Key scenario: user taps terminal (unlock), keyboard opens, then keyboard dismissed
-      // by Android back/system — textarea stays focused but keyboard is gone. Without this,
-      // any subsequent touch (shortcut button) causes IME to re-show keyboard.
-      if (kbTa && e.detail?.kbHeight === 0) {
+      const kbH = e.detail?.kbHeight ?? 0;
+      // When keyboard closes (was open, now 0), lock + blur to prevent accidental re-open
+      // from shortcut buttons. Key scenario: user taps terminal (unlock), keyboard opens,
+      // then keyboard dismissed by Android back/system — textarea stays focused but keyboard
+      // is gone. Without this, any subsequent touch (shortcut button) causes IME to re-show.
+      // Guard: only trigger on the open→close transition. A bare kbH=0 event (e.g., Android
+      // pad where IME never actually rose) must NOT re-lock — that would kill the keyboard
+      // toggle the user just pressed.
+      if (kbTa && kbH === 0 && lastKbHeight > 0 && Date.now() >= unlockUntil) {
         kbLocked = true;
         kbTa.setAttribute('inputmode', 'none');
         if (document.activeElement === kbTa) kbTa.blur();
-        window.__dbg?.('kb: keyboard-shift kbH=0 → lock + blur');
+        window.__dbg?.('kb: keyboard-shift kbH=0 (was ' + lastKbHeight + ') → lock + blur');
       }
+      lastKbHeight = kbH;
       clearTimeout(kbResizeTimer);
       kbResizeTimer = setTimeout(() => {
         lastFitCols = 0; lastFitRows = 0; // force recalc

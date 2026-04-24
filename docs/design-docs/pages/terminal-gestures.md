@@ -12,7 +12,7 @@ xterm.js v6 has no mobile touch support. All touch interactions are custom. The 
 | 3 | Vertical scroll | touchmove vertical > 1 line | long-press, tab swipe |
 | 4 | Long-press select | 500ms hold without scroll | — |
 | 5 | Tap on selection | touchstart while `isSelecting` | keyboard open |
-| 6 | Double-tap | two taps within 300ms | — (opens keyboard) |
+| 6 | Double-tap | two taps within 400ms + within 40px | — (opens keyboard) |
 | 7 | Tab swipe (App) | horizontal swipe > 120px | — (lowest priority) |
 
 ## Gesture State Machine
@@ -42,10 +42,10 @@ IDLE
 ### Transitions
 | From | Event | To | Action |
 |------|-------|----|--------|
-| locked | double-tap terminal | unlocked | set inputmode=text, focus textarea |
-| locked | keyboard toggle button | unlocked | set inputmode=text, focus textarea |
-| unlocked | textarea blur (150ms timer) | locked | set inputmode=none |
-| unlocked | keyboard-shift kbH=0 | locked | set inputmode=none, blur textarea |
+| locked | double-tap terminal | unlocked | set inputmode=text, focus textarea, start 1.5s grace |
+| locked | keyboard toggle button | unlocked | set inputmode=text, focus textarea, start 1.5s grace |
+| unlocked | textarea blur (150ms timer) | locked (or retry focus if in grace) | grace → re-focus; post-grace → inputmode=none |
+| unlocked | keyboard-shift kbH=0 (was >0, post-grace) | locked | set inputmode=none, blur textarea |
 | unlocked | keyboard toggle button | locked | blur textarea |
 | unlocked | pane switch | locked | reset state |
 
@@ -53,7 +53,7 @@ IDLE
 1. **Double-tap to open keyboard** — single tap does nothing (prevents accidental keyboard popup during scroll/selection)
 2. **Keyboard toggle button** — always works as explicit open/close
 3. **endTouchScroll** — does NOT change kbLocked (was causing race conditions with delayed timers)
-4. **keyboard-shift kbH=0** — always locks (catches Android system keyboard dismiss)
+4. **keyboard-shift kbH=0** — locks on the **open→close falling edge** only (`lastKbHeight > 0`) and only when past the unlock grace window. A bare kbH=0 event (e.g., Android pad where IME never rose) MUST NOT re-lock, otherwise a freshly-pressed keyboard toggle would be immediately cancelled.
 5. **Nav buttons have tabindex=-1** — prevents focus stealing from textarea
 
 ## Tab Swipe Suppression (App level)
