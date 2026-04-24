@@ -40,6 +40,8 @@
   let kbBlurTimer = null;
   let kbLocked = true; // true = keyboard must not show; false = keyboard allowed
   let unlockUntil = 0; // grace window after explicit unlock; auto-lock paths must respect it
+  let unlockRetries = 0; // blur re-focus attempts inside the current grace window
+  const UNLOCK_RETRY_MAX = 2;
   let endTouchScrollTimer = null;
   let kbTa = null; // set in $effect after term.open
 
@@ -48,6 +50,7 @@
     clearTimeout(endTouchScrollTimer);
     kbLocked = false;
     unlockUntil = Date.now() + 1500;
+    unlockRetries = 0;
     if (kbTa) {
       kbTa.setAttribute('inputmode', 'text');
       kbTa.focus();
@@ -599,8 +602,9 @@
       onTaBlur = () => {
         clearTimeout(kbBlurTimer);
         kbBlurTimer = setTimeout(() => {
-          if (Date.now() < unlockUntil) {
-            window.__dbg?.('kb: blur timer skipped (grace)');
+          if (Date.now() < unlockUntil && unlockRetries < UNLOCK_RETRY_MAX) {
+            unlockRetries++;
+            window.__dbg?.(`kb: blur timer skipped (grace retry ${unlockRetries}/${UNLOCK_RETRY_MAX})`);
             // Retry focus within grace window — the blur was likely system-initiated
             // (e.g., Android pad where IME didn't come up yet).
             if (kbTa && !kbLocked && document.activeElement !== kbTa) kbTa.focus();
