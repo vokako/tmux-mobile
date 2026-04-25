@@ -1057,7 +1057,7 @@
         {/if}
       </div>
     {/if}
-    <div class="file-list">
+    <div class="file-list" class:panel-open={showBookmarks || showRecent}>
       {#if loading}
         <div class="loading">{t('loading')}</div>
       {:else}
@@ -1390,6 +1390,9 @@
 
   /* File list */
   .file-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  /* When the bookmarks/recent panel is open, lock the file list so touch
+     gestures on the panel can't bleed through and drag the list too. */
+  .file-list.panel-open { overflow: hidden; touch-action: none; }
   .pull-indicator {
     display: flex; align-items: center; justify-content: center;
     color: var(--accent); flex-shrink: 0; overflow: hidden;
