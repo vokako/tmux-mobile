@@ -1,8 +1,15 @@
 // WebSocket client for tmux-mobile server
 
 const CONNECT_TIMEOUT_MS = 5000;
-const RPC_TIMEOUT_MS = 10000;
-const HEARTBEAT_INTERVAL_MS = 10000;
+// RPC timeout 6s (was 10s): most calls are lightweight (send_keys, list_panes,
+// capture_pane). Long-running calls (fs_download, fs_upload) pass explicit
+// timeouts. Shorter default means N consecutive timeouts hit the disconnect
+// threshold faster, so the reconnect UI appears sooner on a dead link.
+const RPC_TIMEOUT_MS = 6000;
+// Heartbeat every 5s (was 10s). On flaky mobile networks this halves the
+// time-to-detect a dead connection without adding meaningful traffic
+// (one ping is a ~40 byte JSON roundtrip).
+const HEARTBEAT_INTERVAL_MS = 5000;
 const BASE64_CHUNK_SIZE = 8192;
 
 let ws = null;
