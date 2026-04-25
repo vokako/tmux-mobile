@@ -12,7 +12,7 @@ xterm.js v6 has no mobile touch support. All touch interactions are custom. The 
 | 3 | Vertical scroll | touchmove vertical > 1 line | long-press, tab swipe |
 | 4 | Long-press select | 500ms hold without scroll | — |
 | 5 | Tap on selection | touchstart while `isSelecting` | keyboard open |
-| 6 | Single-tap | clean tap (no scroll / scrollbar / selection) | — (opens keyboard; never closes it) |
+| 6 | Tap | clean tap (no scroll / scrollbar / selection) | — (does nothing; keyboard is opened via the toggle button only) |
 | 7 | Tab swipe (App) | horizontal swipe > 120px | — (lowest priority) |
 
 ## Gesture State Machine
@@ -27,8 +27,8 @@ IDLE
   │   ├─ 500ms hold → SELECTING (long-press)
   │   │   ├─ touchmove → SELECTION_DRAG
   │   │   └─ touchend → SELECTED (wait for tap to copy)
-  │   └─ touchend (no scroll, no long-press, not on selection) → open keyboard if locked
-  │       (single tap never closes — closing is only via the toggle button)
+  │   └─ touchend (no scroll, no long-press, not on selection) → IDLE (no action)
+  │       (keyboard is opened only via the toggle button — tapping the terminal never opens or closes it)
   └─ (App level) horizontal swipe not consumed → TAB_SWITCH
 ```
 
@@ -41,21 +41,20 @@ IDLE
 ### Transitions
 | From | Event | To | Action |
 |------|-------|----|--------|
-| locked | single tap on terminal | unlocked | set inputmode=text, focus textarea, start 1.5s grace |
 | locked | keyboard toggle button | unlocked | set inputmode=text, focus textarea, start 1.5s grace |
-| unlocked | single tap on terminal | unlocked | no-op (intentionally does not close) |
+| locked | tap on terminal | locked | no-op (intentionally does not open) |
+| unlocked | tap on terminal | unlocked | no-op (intentionally does not close) |
 | unlocked | textarea blur (150ms timer) | locked (or retry focus if in grace) | grace → re-focus; post-grace → inputmode=none |
 | unlocked | keyboard-shift kbH=0 (was >0, post-grace) | locked | set inputmode=none, blur textarea |
 | unlocked | keyboard toggle button | locked | blur textarea |
 | unlocked | pane switch | locked | reset state |
 
 ### Key Rules
-1. **Single tap opens the keyboard; it never closes it.** Closing is only via the explicit keyboard toggle button. This matches user intent: a stray tap while reading the terminal should not hide the keyboard the user is actively typing into.
-2. **Tap is guarded against scroll, scrollbar drag, and active selection** — those branches return early so an accidental tap during those gestures cannot trigger unlock.
-3. **Keyboard toggle button** — always works as explicit open/close.
-4. **endTouchScroll** — does NOT change kbLocked (was causing race conditions with delayed timers).
-5. **keyboard-shift kbH=0** — locks on the **open→close falling edge** only (`lastKbHeight > 0`) and only when past the unlock grace window. A bare kbH=0 event (e.g., Android pad where IME never rose) MUST NOT re-lock, otherwise a freshly-pressed keyboard toggle would be immediately cancelled.
-6. **Nav buttons have tabindex=-1** — prevents focus stealing from textarea.
+1. **Keyboard toggle button is the only way to open the keyboard.** Tapping the terminal never opens or closes it — stray taps while reading scrollback, adjusting selection handles, or aiming at the window switcher all failed to trigger the keyboard unintentionally.
+2. **Tap on terminal is reserved for the non-keyboard paths**: tap-on-selection copies + clears; all other taps are intentionally no-ops.
+3. **endTouchScroll** — does NOT change kbLocked (was causing race conditions with delayed timers).
+4. **keyboard-shift kbH=0** — locks on the **open→close falling edge** only (`lastKbHeight > 0`) and only when past the unlock grace window. A bare kbH=0 event (e.g., Android pad where IME never rose) MUST NOT re-lock, otherwise a freshly-pressed keyboard toggle would be immediately cancelled.
+5. **Nav buttons have tabindex=-1** — prevents focus stealing from textarea.
 
 ## Tab Swipe Suppression (App level)
 The App-level left/right swipe to switch tabs is suppressed when:
@@ -72,4 +71,4 @@ Mobile keyboards auto-pair quotes/brackets (`""`, `()`, `[]`). This breaks xterm
 - `data.length <= 1` misclassifies auto-paired input as paste → use paste event flag
 - Android `OnGlobalLayoutListener` can fire stale keyboard heights → guard with activeElement check
 - Nav buttons without `tabindex=-1` steal focus from textarea on blur
-- Double-tap to open keyboard proved unreliable on Android (two-tap latency + occasional stray selection on the first tap) → reverted to single tap. Accidental popups during scroll/selection are prevented by the `didScroll / touchScrolling / onScrollbar / isSelecting` guards in `onTermTapEnd` instead of by requiring a second tap. Closing is never tied to tap so a stray tap while typing cannot hide the keyboard.
+- Double-tap to open keyboard proved unreliable on Android (two-tap latency + occasional stray selection on the first tap) → reverted to single tap. Then single-tap to open was also removed because strays while reading scrollback or adjusting selection handles kept flipping the keyboard unexpectedly. Current model: **the keyboard toggle button is the only way to open it.** Tapping the terminal is reserved for tap-on-selection (copy+clear) and long-press paths.

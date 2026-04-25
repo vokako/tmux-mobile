@@ -598,21 +598,13 @@
     };
     document.addEventListener('visibilitychange', onVisible);
 
-    // Mobile keyboard: single tap opens; closing is only via the toggle button.
+    // Mobile keyboard: opened only via the keyboard toggle button.
+    // Tapping the terminal does NOT open the keyboard — users found stray taps
+    // while reading scrollback (or near the selection handles) surprising.
     // Two layers: inputmode="none" (browser hint) + kbLocked flag (focus guard).
     let onTaBlur, onTaFocus;
 
     if (kbTa) {
-      // Single-tap open (on touchend, not pointerdown — avoids firing during scroll/selection).
-      // Never closes the keyboard: if already unlocked, re-focusing the textarea is a no-op.
-      const onTermTapEnd = () => {
-        // Skip gestures that are not a clean tap: scroll, scrollbar drag, active selection.
-        if (didScroll || onScrollbar || touchScrolling || isSelecting) return;
-        if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
-        if (kbLocked) unlockKeyboard();
-      };
-      termEl.addEventListener('touchend', onTermTapEnd, { passive: true });
-
       onTaBlur = () => {
         clearTimeout(kbBlurTimer);
         kbBlurTimer = setTimeout(() => {
