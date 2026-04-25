@@ -179,6 +179,8 @@
   let manualDisconnect = false;
 
   let reconnecting = $state(false);
+  let reconnectAttempt = $state(0);   // 1-indexed when visible; 0 means not attempting
+  let reconnectClass = $state('');    // LAN / Tailscale / WAN label for the current try
   let reconnectTimer = null;
 
   setOnDisconnect(() => {
@@ -194,6 +196,8 @@
 
   function cancelReconnect() {
     reconnecting = false;
+    reconnectAttempt = 0;
+    reconnectClass = '';
     connected = false;
     clearTimeout(reconnectTimer);
     disconnect();
@@ -216,15 +220,18 @@
     const token = localStorage.getItem('tmux_token') || '';
     if (!addr) { reconnecting = false; connected = false; page = 'settings'; return; }
 
-    // Build address list: primary first, then alternates
     const allAddrs = [addr, ...getAltAddresses()];
     const useAddr = allAddrs[attempt % allAddrs.length];
     window.__dbg?.(`reconnect: attempt ${attempt + 1}/${RECONNECT_MAX_ATTEMPTS} → ${useAddr}`);
+    reconnectAttempt = attempt + 1;
+    reconnectClass = ADDRESS_LABELS[classifyAddress(useAddr)] || '';
 
     connect(useAddr, token).then(() => {
       if (!reconnecting) return;
       connected = true;
       reconnecting = false;
+      reconnectAttempt = 0;
+      reconnectClass = '';
       window.__dbg?.('reconnect: success');
       serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
       if (useAddr !== addr) { localStorage.setItem('tmux_address', useAddr); activeAddress = useAddr; }
@@ -238,6 +245,8 @@
       } else {
         window.__dbg?.('reconnect: gave up');
         reconnecting = false;
+        reconnectAttempt = 0;
+        reconnectClass = '';
         connected = false;
         page = 'settings';
       }
@@ -550,7 +559,8 @@
 
   {#if reconnecting && page !== 'settings'}
     <div class="reconnect-bar">
-      <span class="reconnect-spinner"></span> {t('reconnecting')}
+      <span class="reconnect-spinner"></span>
+      <span>{t('reconnecting')}{#if reconnectAttempt} ({reconnectAttempt}/{RECONNECT_MAX_ATTEMPTS}{#if reconnectClass} · {reconnectClass}{/if}){/if}</span>
       <button class="reconnect-cancel" onclick={cancelReconnect}>{t('cancel')}</button>
     </div>
   {/if}
