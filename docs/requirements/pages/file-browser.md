@@ -8,6 +8,7 @@ Browse, preview, edit, and manage files on the remote server's filesystem. Start
 - Breadcrumb path row (separate from toolbar)
 - File/directory list with icons, size, modified date
 - Bookmark panel (star current dir, scrollable saved paths)
+- Recent files panel (last 20 opened files, scrollable, capped to 40vh)
 - File preview: Markdown (rendered + mermaid + KaTeX), CSV (table), code (syntax highlighted), HTML (sandboxed iframe), PDF (pdf.js), images
 - Text editor with syntax highlighting, undo stack, save button
 - File operations: create file/folder, rename, delete, upload, download

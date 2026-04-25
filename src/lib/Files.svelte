@@ -1340,9 +1340,11 @@
   .bc-seg:last-of-type { color: var(--accent); }
   .bc-sep { color: var(--text3); font-size: 11px; }
 
-  /* Bookmarks panel */
+  /* Bookmarks / Recent panel */
   .bookmarks-panel {
     border-bottom: 1px solid var(--border2); flex-shrink: 0;
+    max-height: 40vh; overflow-y: auto;
+    -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
   }
   .bm-row {
     display: flex; align-items: center; gap: 6px; padding: 0 10px;
