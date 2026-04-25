@@ -71,6 +71,7 @@ const msgs = {
     openFailed: 'Open failed: ',
     copied: 'Copied',
     selected: 'Selected — tap to copy',
+    connectionUnstable: 'Connection unstable',
     saved: 'Saved: ',
     open: 'Open',
 
@@ -156,6 +157,7 @@ const msgs = {
     openFailed: '打开失败：',
     copied: '已复制',
     selected: '已选中，点击复制',
+    connectionUnstable: '网络连接不稳定',
     saved: '已保存：',
     open: '打开',
 

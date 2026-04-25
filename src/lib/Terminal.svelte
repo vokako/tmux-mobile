@@ -339,8 +339,9 @@
         });
       }
       isPasting = false;
-      sendKeys(target, data, true).catch((e) => {
+      sendKeys(target, data, true).then(noteSendSuccess).catch((e) => {
         window.__dbg?.(`input: sendKeys FAILED: ${e.message}`);
+        noteSendFailure('key');
       });
     });
     // Block xterm from processing keys when input box is open
@@ -786,22 +787,29 @@
       if (!input.trim()) return;
       try {
         await sendCommand(target, input);
+        noteSendSuccess();
         input = '';
         document.querySelectorAll('.input-bar textarea').forEach(ta => ta.style.height = 'auto');
-      } catch (_) {}
+      } catch (e) {
+        noteSendFailure('chat send');
+      }
       return;
     }
     // Terminal mode
     if (!input.trim()) {
-      await sendKeys(target, 'Enter', false).catch(() => {});
+      try { await sendKeys(target, 'Enter', false); noteSendSuccess(); }
+      catch (e) { noteSendFailure('Enter'); }
       document.activeElement?.blur();
       return;
     }
     try {
       await sendKeys(target, input, true);
+      noteSendSuccess();
       input = '';
       document.querySelectorAll('.input-bar textarea').forEach(ta => ta.style.height = 'auto');
-    } catch (_) {}
+    } catch (e) {
+      noteSendFailure('submit');
+    }
   }
 
   async function handleKeydown(e) {
@@ -819,10 +827,27 @@
     });
   }
 
+  // Track consecutive send failures so the user gets a visible "unstable" toast
+  // well before the heartbeat detector fires its 10-15s disconnect. One stray
+  // failure is ignored (could be a single dropped packet). Two in a row on any
+  // channel (shortcut, Enter, or raw key-through) surfaces a toast.
+  let sendFailCount = 0;
+  function noteSendFailure(label) {
+    sendFailCount++;
+    window.__dbg?.(`send fail (${label}) #${sendFailCount}`);
+    if (sendFailCount === 2) showToast(t('connectionUnstable'));
+  }
+  function noteSendSuccess() {
+    if (sendFailCount > 0) sendFailCount = 0;
+  }
+
   async function sendSpecial(key) {
     try {
       await sendKeys(target, key, false);
-    } catch (_) {}
+      noteSendSuccess();
+    } catch (e) {
+      noteSendFailure(`shortcut ${key}`);
+    }
   }
 
   // Long-press repeat for shortcut keys
