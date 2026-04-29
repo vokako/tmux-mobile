@@ -6,23 +6,28 @@ const CONNECT_TIMEOUT_MS = 5000;
 // timeouts. Shorter default means N consecutive timeouts hit the disconnect
 // threshold faster, so the reconnect UI appears sooner on a dead link.
 const RPC_TIMEOUT_MS = 6000;
-// Heartbeat every 5s (was 10s). On flaky mobile networks this halves the
-// time-to-detect a dead connection without adding meaningful traffic
-// (one ping is a ~40 byte JSON roundtrip).
+// Heartbeat every 5s: cheap to run, quick to notice a dead link.
 const HEARTBEAT_INTERVAL_MS = 5000;
+// Skip the heartbeat ping if we've received *any* message from the server
+// within this window. Data flowing in either direction is proof of liveness,
+// so during a download/upload or active subscription stream we don't bother
+// pinging. If the wire goes quiet for longer than this, we fall back to an
+// explicit ping with a relaxed timeout.
+const HEARTBEAT_QUIET_MS = 8000;
+// Explicit ping response window. Longer than the usual RPC timeout because
+// the response can legitimately queue behind a large in-flight transfer
+// (e.g. the big base64 frame of an fs_download), especially on mobile.
+const PING_TIMEOUT_MS = 20000;
 const BASE64_CHUNK_SIZE = 8192;
 
 let ws = null;
 let heartbeatTimer = null;
 let requestId = 0;
 const pending = new Map();
-// Counter of in-flight "heavy" RPCs (downloads/uploads/other long transfers).
-// While > 0, the heartbeat task skips its next ping: a large response can
-// saturate the downlink for tens of seconds, queueing the ping's response
-// behind the transfer and tripping the 6s RPC timeout even though the link
-// is perfectly healthy. Every long RPC must wrap its call in
-// heavyRpc(() => ...).
-let heavyRpcInFlight = 0;
+// Timestamp (Date.now()) of the last incoming WS message. Any frame from the
+// server — RPC response, pane_output, encrypted or plain — updates this.
+// The heartbeat uses it as a "connection is breathing" signal.
+let lastRxAt = 0;
 let onPaneOutput = null;
 let onPaneClosed = null;
 let onDisconnect = null;
@@ -113,7 +118,7 @@ export function connect(url, token) {
   clearInterval(heartbeatTimer);
   heartbeatTimer = null;
   rpcTimeouts = 0;
-  heavyRpcInFlight = 0;
+  lastRxAt = Date.now();
   window.__dbg?.(`ws: connecting to ${url}`);
 
   return new Promise((resolve, reject) => {
@@ -140,25 +145,37 @@ export function connect(url, token) {
       clearTimeout(timeout);
       authed = true;
       window.__dbg?.(`ws: authenticated (machine=${machineId})`);
+      // Liveness strategy:
+      //   - Any inbound frame refreshes lastRxAt, so downloads / pane pushes
+      //     / RPC responses all count as "connection is breathing".
+      //   - Every HEARTBEAT_INTERVAL_MS we check: if data flowed recently,
+      //     skip the tick and don't pile up another ping RPC.
+      //   - Only if the line is quiet for HEARTBEAT_QUIET_MS do we actively
+      //     probe with call('ping'). Its timeout is PING_TIMEOUT_MS (larger
+      //     than default) because the response can legitimately queue behind
+      //     a big in-flight transfer; we'd rather wait than reconnect.
+      //   - One pending ping at a time (pingInFlight flag); overlapping pings
+      //     would inflate the fail counter on a busy but healthy link.
+      //   - 2 consecutive genuine failures → disconnect + reconnect UI.
       let pingFails = 0;
+      let pingInFlight = false;
       heartbeatTimer = setInterval(() => {
-        // Skip this tick if a heavy transfer is in progress. Large RPC
-        // responses can block the ping's response behind tens of MB of data,
-        // making a healthy connection look dead. The transfer itself has its
-        // own 60s timeout so genuine breakage is still caught.
-        if (heavyRpcInFlight > 0) {
+        if (pingInFlight) return;
+        if (Date.now() - lastRxAt < HEARTBEAT_QUIET_MS) {
           pingFails = 0;
-          window.__dbg?.(`heartbeat: skip tick (heavy RPC in flight: ${heavyRpcInFlight})`);
           return;
         }
-        call('ping').then(() => { pingFails = 0; }).catch(() => {
+        pingInFlight = true;
+        call('ping', {}, PING_TIMEOUT_MS).then(() => {
+          pingFails = 0;
+        }).catch(() => {
           pingFails++;
           window.__dbg?.(`heartbeat: ping failed #${pingFails}`);
           if (pingFails >= 2) {
             window.__dbg?.('heartbeat: 2 failures, forcing disconnect');
             forceDisconnect();
           }
-        });
+        }).finally(() => { pingInFlight = false; });
       }, HEARTBEAT_INTERVAL_MS);
       resolve(machineId);
     }
@@ -168,6 +185,9 @@ export function connect(url, token) {
     ws._getHostname = () => hostname;
 
     ws.onmessage = async (event) => {
+      // Any inbound frame is proof of liveness — downloads, pane pushes,
+      // RPC responses all count.
+      lastRxAt = Date.now();
       let data;
       try { data = JSON.parse(event.data); } catch {}
 
@@ -342,16 +362,12 @@ export const fsWrite = (path, content) => call('fs_write', { path, content });
 export const fsMkdir = (path) => call('fs_mkdir', { path });
 export const fsDelete = (path) => call('fs_delete', { path });
 export const fsRename = (from, to) => call('fs_rename', { from, to });
-// Wrap a long-running RPC so the heartbeat pauses for its duration.
-// Use for calls where the response is large enough to monopolize the WS
-// downlink on a mobile connection (tens of KB-seconds of transfer).
-function heavyRpc(thunk) {
-  heavyRpcInFlight++;
-  return thunk().finally(() => { heavyRpcInFlight = Math.max(0, heavyRpcInFlight - 1); });
-}
-
-export const fsDownload = (path) => heavyRpc(() => call('fs_download', { path }, 60000));
-export const fsUpload = (path, data) => heavyRpc(() => call('fs_upload', { path, data }, 60000));
+// Large transfers have a long explicit timeout. The heartbeat stays out of
+// their way automatically because any incoming frame (including the transfer
+// response itself) refreshes `lastRxAt`, and the heartbeat skips ticks while
+// the connection is recently active.
+export const fsDownload = (path) => call('fs_download', { path }, 60000);
+export const fsUpload = (path, data) => call('fs_upload', { path, data }, 60000);
 export const fsConvert = (path, format = 'html') => call('fs_convert', { path, format });
 export const gitCmd = (subcmd, args = [], cwd) => call('git', { subcmd, args, cwd });
 
