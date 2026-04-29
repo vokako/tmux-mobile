@@ -16,6 +16,13 @@ let ws = null;
 let heartbeatTimer = null;
 let requestId = 0;
 const pending = new Map();
+// Counter of in-flight "heavy" RPCs (downloads/uploads/other long transfers).
+// While > 0, the heartbeat task skips its next ping: a large response can
+// saturate the downlink for tens of seconds, queueing the ping's response
+// behind the transfer and tripping the 6s RPC timeout even though the link
+// is perfectly healthy. Every long RPC must wrap its call in
+// heavyRpc(() => ...).
+let heavyRpcInFlight = 0;
 let onPaneOutput = null;
 let onPaneClosed = null;
 let onDisconnect = null;
@@ -106,6 +113,7 @@ export function connect(url, token) {
   clearInterval(heartbeatTimer);
   heartbeatTimer = null;
   rpcTimeouts = 0;
+  heavyRpcInFlight = 0;
   window.__dbg?.(`ws: connecting to ${url}`);
 
   return new Promise((resolve, reject) => {
@@ -134,6 +142,15 @@ export function connect(url, token) {
       window.__dbg?.(`ws: authenticated (machine=${machineId})`);
       let pingFails = 0;
       heartbeatTimer = setInterval(() => {
+        // Skip this tick if a heavy transfer is in progress. Large RPC
+        // responses can block the ping's response behind tens of MB of data,
+        // making a healthy connection look dead. The transfer itself has its
+        // own 60s timeout so genuine breakage is still caught.
+        if (heavyRpcInFlight > 0) {
+          pingFails = 0;
+          window.__dbg?.(`heartbeat: skip tick (heavy RPC in flight: ${heavyRpcInFlight})`);
+          return;
+        }
         call('ping').then(() => { pingFails = 0; }).catch(() => {
           pingFails++;
           window.__dbg?.(`heartbeat: ping failed #${pingFails}`);
@@ -325,8 +342,16 @@ export const fsWrite = (path, content) => call('fs_write', { path, content });
 export const fsMkdir = (path) => call('fs_mkdir', { path });
 export const fsDelete = (path) => call('fs_delete', { path });
 export const fsRename = (from, to) => call('fs_rename', { from, to });
-export const fsDownload = (path) => call('fs_download', { path }, 60000);
-export const fsUpload = (path, data) => call('fs_upload', { path, data }, 60000);
+// Wrap a long-running RPC so the heartbeat pauses for its duration.
+// Use for calls where the response is large enough to monopolize the WS
+// downlink on a mobile connection (tens of KB-seconds of transfer).
+function heavyRpc(thunk) {
+  heavyRpcInFlight++;
+  return thunk().finally(() => { heavyRpcInFlight = Math.max(0, heavyRpcInFlight - 1); });
+}
+
+export const fsDownload = (path) => heavyRpc(() => call('fs_download', { path }, 60000));
+export const fsUpload = (path, data) => heavyRpc(() => call('fs_upload', { path, data }, 60000));
 export const fsConvert = (path, format = 'html') => call('fs_convert', { path, format });
 export const gitCmd = (subcmd, args = [], cwd) => call('git', { subcmd, args, cwd });
 

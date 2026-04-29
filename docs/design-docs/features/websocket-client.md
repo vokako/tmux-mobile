@@ -16,6 +16,13 @@ Custom WebSocket client (`ws.js`) with auto-reconnect, pending promise cleanup, 
   as "the app is frozen")
 - Long-running RPCs (`fs_download`, `fs_upload`) pass explicit `timeoutMs` so
   the tightened default does not abort legitimate large transfers
+- Heavy RPCs are wrapped in `heavyRpc(...)` which bumps a global counter
+  `heavyRpcInFlight`; while > 0 the heartbeat task skips its next ping (and
+  resets `pingFails` to 0). Rationale: a large response (e.g. 50 MB base64)
+  can saturate the downlink for tens of seconds on mobile, queueing the
+  ping response behind the transfer and tripping the 6 s RPC timeout even
+  on a healthy link. The transfer itself has its own 60 s timeout so a
+  genuinely dead link is still caught.
 - Auto-reconnect with exponential backoff
 - Per-attempt connect timeout scales with address class: LAN 2 s, Tailscale
   3 s, WAN 5 s (public internet can legitimately need several seconds for
@@ -38,3 +45,9 @@ Custom WebSocket client (`ws.js`) with auto-reconnect, pending promise cleanup, 
 - Manual disconnect MUST cancel reconnect timers — otherwise zombie reconnects fire
 - Wrap `JSON.parse` in try-catch — malformed messages crash the handler
 - Use optional chaining on server push params — malformed messages can have missing params
+- A healthy WS link can still miss heartbeats if a large in-flight response
+  saturates the downlink. JSON-RPC ping shares the same transport and can't
+  pre-empt a multi-megabyte send, so the `heavyRpcInFlight` counter pauses
+  the heartbeat for the duration of a known long transfer (downloads,
+  uploads). Any new large-response RPC must wrap its `call(...)` in
+  `heavyRpc(() => ...)` or it will trip the heartbeat on slow networks.
