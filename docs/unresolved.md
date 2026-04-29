@@ -54,3 +54,13 @@
 - **Priority**: Low
 - **Area**: Terminal / Reconnect
 - **Details**: On reconnect, `onReconnectSuccess` calls `wsSubscribe(terminalTarget)` but does not call `capturePane`. The terminal then shows stale content until the next server-side 200ms tick pushes a `pane_output`. Usually imperceptible but on very slow networks the gap is visible. Consider dispatching a one-shot `capturePane` right after subscribe.
+
+## Color adaptation: FG+BG not re-balanced as pair
+- **Priority**: Low
+- **Area**: Terminal / Color
+- **Details**: `adaptColors` in `Terminal.svelte` reshapes each ANSI color independently, so hand-picked FG/BG combos can lose contrast in extreme cases (e.g. purple bg `rgb(128,0,128)` with yellow fg `rgb(255,255,0)` in light mode: both get moved toward mid luminance and end up with ~1.6:1 contrast). Fixing this requires a small SGR state machine that tracks current FG/BG and adjusts them jointly — meaningful work, low real-world impact because typical AI CLI output uses FG-only colors on the default terminal bg.
+
+## Color adaptation: ANSI palette colors 0-15 not adapted
+- **Priority**: Low
+- **Area**: Terminal / Color
+- **Details**: Basic 16 ANSI colors (`\x1b[31m` etc.) are left to xterm.js's theme mapping (`red`, `brightRed`, etc.). If a CLI relies on basic palette codes and the theme's chosen red/green clashes with the terminal bg in either mode, `adaptColors` won't help. Tune the palette in `darkTheme` / `lightTheme` objects, or extend the adaptation to post-process the xterm canvas (much harder).

@@ -42,6 +42,7 @@ cd src-tauri && cargo test -- --test-threads=1   # Tests (needs tmux running)
 - [Android Platform Integration](docs/design-docs/features/android-platform.md)
 - [WebSocket Client Robustness](docs/design-docs/features/websocket-client.md)
 - [File Handling & Security](docs/design-docs/features/file-handling.md)
+- [Terminal Color Adaptation](docs/design-docs/features/color-adaptation.md)
 
 ### Other
 - [Unresolved Issues](docs/unresolved.md)
