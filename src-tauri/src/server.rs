@@ -753,7 +753,6 @@ where
     // is gone).
     let shutdown = Arc::new(tokio::sync::Notify::new());
     let shutdown_tx = shutdown.clone();
-    let addr_for_send = addr;
     let send_task = tokio::spawn(async move {
         let mut ws_sender = ws_sender;
         let mut cipher: Option<HalfCipher> = None;
@@ -771,8 +770,12 @@ where
                                 .into(),
                         )
                     } else {
-                        eprintln!("send [{}]: Encrypted before InitCipher — dropped", addr_for_send);
-                        continue;
+                        // No session cipher — this is the plain-token
+                        // fallback path (http:// clients without Web Crypto).
+                        // Fall through and send the response in the clear.
+                        // The client also expects plain-text responses when
+                        // it authenticated with a raw token.
+                        Message::Text(s.into())
                     }
                 }
             };

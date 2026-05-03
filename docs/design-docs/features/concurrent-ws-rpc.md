@@ -64,9 +64,19 @@ derived from the same AES-256 key, is the natural shape.
 Authentication must complete before the cipher is known. The auth branch
 of the receiver loop runs inline (does not `spawn` a task), sends its
 response via `out_tx`, and on success emits `InitCipher` + the auth
-response in that order. Any Encrypted message enqueued before `InitCipher`
-would be dropped with a log line — this shouldn't happen, but the send
-task refuses to produce ciphertext without a key.
+response in that order.
+
+Plain-token auth (the fallback for `http://` clients without
+`crypto.subtle` — e.g. a browser pointing at a LAN IP) is different:
+`authenticated` flips to `true`, but **no `InitCipher` is ever
+emitted**. Subsequent RPC responses still go out as
+`Outbound::Encrypted(...)` from the dispatch code (they don't know
+which auth style the client used). The send task therefore has a
+fallback: when it sees `Outbound::Encrypted` and has no cipher, it
+sends the JSON as plain text instead of dropping it. That matches the
+client's expectations in plain-token mode. If we ever want to force
+the encrypted path and reject plain-fallback entirely, tighten the
+auth branch — do not rely on the send task's silent fallback.
 
 ## Alternatives Considered
 - **Second WebSocket just for downloads**: clean separation but requires

@@ -511,3 +511,70 @@ async fn server_sends_ws_pings_that_auto_pong() {
     }
     assert!(saw_ping, "server did not send a WS PING within 18s");
 }
+
+/// Minimal plain-text client — no encrypted handshake, just the legacy
+/// token path. Used to verify that http:// clients (where `crypto.subtle`
+/// is unavailable) still get post-auth RPC responses.
+struct PlainClient {
+    ws: tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
+}
+
+impl PlainClient {
+    async fn connect(addr: SocketAddr, token: &str) -> Self {
+        let url = format!("ws://{}/", addr);
+        let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+
+        // Drain server_nonce (we ignore it and auth with plain token).
+        let _ = ws.next().await.unwrap().unwrap();
+
+        let auth = serde_json::json!({"method": "auth", "params": {"token": token}});
+        ws.send(Message::Text(serde_json::to_string(&auth).unwrap().into()))
+            .await
+            .unwrap();
+
+        // Expect a plain-text auth OK.
+        let msg = ws.next().await.unwrap().unwrap();
+        let text = match msg {
+            Message::Text(t) => t.to_string(),
+            other => panic!("expected text, got {:?}", other),
+        };
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["result"]["authenticated"].as_bool(), Some(true), "plain auth failed: {}", text);
+
+        Self { ws }
+    }
+
+    async fn send_rpc(&mut self, id: u64, method: &str) {
+        let req = serde_json::json!({"id": id, "method": method, "params": {}});
+        self.ws.send(Message::Text(serde_json::to_string(&req).unwrap().into()))
+            .await.unwrap();
+    }
+
+    async fn recv(&mut self) -> serde_json::Value {
+        // Response is plain text (no encryption in plain-token mode).
+        let msg = self.ws.next().await.unwrap().unwrap();
+        let text = match msg {
+            Message::Text(t) => t.to_string(),
+            other => panic!("expected text, got {:?}", other),
+        };
+        serde_json::from_str(&text).unwrap()
+    }
+}
+
+#[tokio::test]
+async fn plain_token_auth_delivers_rpc_responses() {
+    // Regression for 'send [...]: Encrypted before InitCipher — dropped'.
+    // After plain-token auth the server's send cipher is intentionally not
+    // initialized; previously this caused every subsequent Outbound::Encrypted
+    // (i.e. any post-auth RPC response) to be dropped and the client would
+    // see a dead connection. With the plain fallback in the send task,
+    // responses should flow in cleartext.
+    let addr = spawn_server_once("plain-test-token").await;
+    let mut c = PlainClient::connect(addr, "plain-test-token").await;
+    c.send_rpc(42, "ping").await;
+    let resp = tokio::time::timeout(Duration::from_secs(3), c.recv())
+        .await
+        .expect("timed out waiting for ping response — the response was likely dropped by send_task");
+    assert_eq!(resp["id"].as_u64(), Some(42));
+    assert_eq!(resp["result"].as_str(), Some("pong"));
+}
