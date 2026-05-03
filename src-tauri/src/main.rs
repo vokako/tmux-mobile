@@ -38,7 +38,7 @@ mod tests {
     #[test]
     fn t03_create_and_kill_session() {
         cleanup();
-        tmux::new_session(TEST_SESSION).expect("Failed to create session");
+        tmux::new_session(TEST_SESSION, None, None).expect("Failed to create session");
         let sessions = tmux::list_sessions().unwrap();
         assert!(
             sessions.iter().any(|s| s.name == TEST_SESSION),
@@ -58,7 +58,7 @@ mod tests {
     #[test]
     fn t04_list_panes() {
         cleanup();
-        tmux::new_session(TEST_SESSION).unwrap();
+        tmux::new_session(TEST_SESSION, None, None).unwrap();
         let panes = tmux::list_panes(TEST_SESSION).expect("Failed to list panes");
         println!("✅ Session {} has {} pane(s):", TEST_SESSION, panes.len());
         for p in &panes {
@@ -74,7 +74,7 @@ mod tests {
     #[test]
     fn t05_send_command_and_capture() {
         cleanup();
-        tmux::new_session(TEST_SESSION).unwrap();
+        tmux::new_session(TEST_SESSION, None, None).unwrap();
         thread::sleep(Duration::from_millis(200));
 
         let marker = "TMUX_MOBILE_TEST_12345";
@@ -91,7 +91,7 @@ mod tests {
     #[test]
     fn t06_send_special_keys() {
         cleanup();
-        tmux::new_session(TEST_SESSION).unwrap();
+        tmux::new_session(TEST_SESSION, None, None).unwrap();
         thread::sleep(Duration::from_millis(200));
 
         tmux::send_keys(TEST_SESSION, "echo partial", true).unwrap();
@@ -112,7 +112,7 @@ mod tests {
     #[test]
     fn t07_capture_scrollback() {
         cleanup();
-        tmux::new_session(TEST_SESSION).unwrap();
+        tmux::new_session(TEST_SESSION, None, None).unwrap();
         thread::sleep(Duration::from_millis(200));
 
         tmux::send_command(
