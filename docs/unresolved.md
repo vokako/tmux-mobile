@@ -64,3 +64,8 @@
 - **Priority**: Low
 - **Area**: Terminal / Color
 - **Details**: Basic 16 ANSI colors (`\x1b[31m` etc.) are left to xterm.js's theme mapping (`red`, `brightRed`, etc.). If a CLI relies on basic palette codes and the theme's chosen red/green clashes with the terminal bg in either mode, `adaptColors` won't help. Tune the palette in `darkTheme` / `lightTheme` objects, or extend the adaptation to post-process the xterm canvas (much harder).
+
+## cargo test is broken at HEAD
+- **Priority**: Low (no user impact; blocks running the automated test suite)
+- **Area**: Build / Testing
+- **Details**: `cargo test` fails to compile in `src-tauri/src/main.rs` because the tests still call `tmux::new_session(TEST_SESSION)` with a single argument, but the function signature was widened to `new_session(name, path: Option<&str>, command: Option<&str>)`. The bin builds fine (`cargo check`), so this only blocks the test runner. Fix: update the test call sites to pass `None, None`. Pre-existing when I started the color/reconnect/sort work — not introduced by any of my commits.

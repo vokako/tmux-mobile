@@ -158,3 +158,30 @@ pub fn get_config_json() -> serde_json::Value {
         "tmux_socket": cfg.tmux_socket,
     })
 }
+
+/// Per-session "last opened in tmux-mobile" timestamp store.
+/// Persisted to ~/.config/tmux-mobile/session_usage.json as a name → unix-seconds map.
+/// Used by the Sessions page to sort recently-used sessions to the top.
+fn session_usage_path() -> std::path::PathBuf {
+    dirs_next().join("session_usage.json")
+}
+
+pub fn get_session_usage() -> std::collections::HashMap<String, u64> {
+    std::fs::read_to_string(session_usage_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+pub fn touch_session(name: &str) -> Result<(), String> {
+    let dir = dirs_next();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let mut map = get_session_usage();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    map.insert(name.to_string(), now);
+    let json = serde_json::to_string(&map).map_err(|e| e.to_string())?;
+    std::fs::write(session_usage_path(), json).map_err(|e| e.to_string())
+}

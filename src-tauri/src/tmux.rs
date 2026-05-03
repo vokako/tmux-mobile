@@ -9,6 +9,11 @@ pub struct TmuxSession {
     pub windows: usize,
     pub attached: bool,
     pub created: String,
+    /// Unix seconds of the last time this session was opened via tmux-mobile,
+    /// persisted across server restarts. `None` if never opened from the app.
+    /// Clients use this to sort the most-recently-used sessions to the top.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_opened: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -110,11 +115,20 @@ pub fn list_sessions() -> Result<Vec<TmuxSession>, String> {
                 windows: parts.get(1).unwrap_or(&"0").parse().unwrap_or(0),
                 attached: parts.get(2).unwrap_or(&"0") == &"1",
                 created: parts.get(3).unwrap_or(&"0").to_string(),
+                last_opened: None,
             }
         })
         .collect();
 
-    // Sort by activity timestamp descending (most recent first)
+    // Annotate with the last time each session was opened via tmux-mobile
+    // (persisted, per-server). The client uses this to sort MRU-first.
+    let usage = crate::config::get_session_usage();
+    for s in sessions.iter_mut() {
+        s.last_opened = usage.get(&s.name).copied();
+    }
+
+    // Sort by tmux session_activity timestamp descending as a baseline; the
+    // client applies its own MRU-first sort on top using `last_opened`.
     sessions.sort_by(|a, b| {
         let ta: u64 = b.created.parse().unwrap_or(0);
         let tb: u64 = a.created.parse().unwrap_or(0);

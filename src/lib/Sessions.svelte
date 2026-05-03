@@ -99,12 +99,18 @@
   async function refresh() {
     try {
       let list = await listSessions();
-      // Active session first, then attached, then rest
+      // Sort most-recently-used-in-tmux-mobile first. `last_opened` is a
+      // unix-seconds timestamp stamped by the server when the client
+      // subscribes to a session. Sessions never opened from the app have no
+      // timestamp and fall back to the server's baseline order (tmux
+      // session_activity descending).
       const activeSession = activeTarget.split(':')[0];
       sessions = list.sort((a, b) => {
         if (a.name === activeSession) return -1;
         if (b.name === activeSession) return 1;
-        return (b.attached ? 1 : 0) - (a.attached ? 1 : 0);
+        const la = a.last_opened || 0, lb = b.last_opened || 0;
+        if (la !== lb) return lb - la;
+        return 0; // preserve server order for never-opened sessions
       });
       error = '';
       for (const s of sessions) {

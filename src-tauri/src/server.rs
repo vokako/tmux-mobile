@@ -651,6 +651,13 @@ fn handle_subscribe(params: &serde_json::Value, subs: &mut HashMap<String, Strin
         Err(e) => return Response::err(None, ERR_INVALID_PARAMS, e),
     };
     subs.insert(target.to_string(), String::new());
+    // Record "last opened from tmux-mobile" for MRU sorting on the Sessions
+    // page. Target is "name:window.pane"; the session name is everything
+    // before the first colon.
+    let session_name = target.split(':').next().unwrap_or(target);
+    if !session_name.is_empty() {
+        let _ = crate::config::touch_session(session_name);
+    }
     Response::ok(None, serde_json::json!({ "subscribed": target }))
 }
 

@@ -31,7 +31,7 @@ JSON-RPC over WebSocket (`ws://` or `wss://`).
 ### Session Management
 | Method | Params | Response |
 |--------|--------|----------|
-| `list_sessions` | — | Array of session objects |
+| `list_sessions` | — | Array of `{name, windows, attached, created, last_opened?}` objects. `last_opened` is unix seconds of the last time this session was opened via tmux-mobile (`subscribe` RPC); absent if never opened. |
 | `list_panes` | `session` | Array of pane objects across all windows |
 | `new_session` | `name?`, `path?`, `command?` | OK |
 | `kill_session` | `name` | OK |
@@ -46,7 +46,7 @@ JSON-RPC over WebSocket (`ws://` or `wss://`).
 | `send_command` | `target`, `command` | OK |
 | `pane_command` | `target` | `{command}` string |
 | `resize_pane` | `target`, `cols`, `rows` | OK (auto-restores on disconnect) |
-| `subscribe` | `target` | Starts polling, pushes `pane_output` |
+| `subscribe` | `target` | Starts polling, pushes `pane_output`. Side effect: stamps the session's `last_opened` timestamp (persisted to `session_usage.json`) for MRU sorting. |
 | `unsubscribe` | `target` | Stops streaming |
 
 ### Filesystem
