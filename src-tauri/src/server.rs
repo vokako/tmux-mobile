@@ -12,7 +12,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
-use tokio_tungstenite::{accept_async, tungstenite::Message};
+use tokio_tungstenite::{accept_async_with_config, tungstenite::Message, tungstenite::protocol::WebSocketConfig};
 
 // Brute-force protection: track failed auth attempts per IP
 pub type AuthTracker = Arc<Mutex<HashMap<IpAddr, (u32, tokio::time::Instant)>>>;
@@ -27,6 +27,23 @@ const MAX_AUTH_FAILURES: u32 = 5;
 const AUTH_LOCKOUT_SECS: u64 = 60;
 const SUBSCRIPTION_POLL_MS: u64 = 200;
 const MAX_CAPTURE_FAILURES: u32 = 5;
+
+// WebSocket frame / message limits. A legitimate `fs_upload` can carry a
+// file up to fs::MAX_READ_SIZE (50 MB) inside a base64 string (~67 MB text),
+// plus JSON envelope + encryption overhead. 80 MB accommodates that with
+// margin; anything bigger is almost certainly malformed or abusive.
+// tokio-tungstenite's default (64 MB) is too small for a max-size upload,
+// and without an explicit cap an attacker could force per-connection buffer
+// growth up to that limit on every frame.
+const WS_MAX_MESSAGE_BYTES: usize = 80 * 1024 * 1024;
+const WS_MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+
+fn ws_config() -> WebSocketConfig {
+    let mut cfg = WebSocketConfig::default();
+    cfg.max_message_size = Some(WS_MAX_MESSAGE_BYTES);
+    cfg.max_frame_size = Some(WS_MAX_FRAME_BYTES);
+    cfg
+}
 
 fn bytes_to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
@@ -674,7 +691,7 @@ pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<S
         }
     }
 
-    let ws_stream = match accept_async(stream).await {
+    let ws_stream = match accept_async_with_config(stream, Some(ws_config())).await {
         Ok(ws) => ws,
         Err(e) => {
             eprintln!("❌ WebSocket handshake failed for {}: {}", addr, e);
@@ -1002,7 +1019,7 @@ pub async fn start_with_socket(
             tokio::spawn(async move {
                 match acceptor.accept(stream).await {
                     Ok(tls_stream) => {
-                        let ws_stream = match tokio_tungstenite::accept_async(tls_stream).await {
+                        let ws_stream = match tokio_tungstenite::accept_async_with_config(tls_stream, Some(ws_config())).await {
                             Ok(ws) => ws,
                             Err(e) => { eprintln!("❌ WSS handshake failed for {}: {}", addr, e); return; }
                         };
