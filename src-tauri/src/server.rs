@@ -952,6 +952,9 @@ pub async fn start_with_socket(
     tls_key: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     tmux::set_socket(socket);
+    // Best-effort harden existing config.toml so upgraded installs with the
+    // old loose permissions get fixed on next start.
+    crate::config::harden_config_perms();
     let addr = format!("{}:{}", host, port);
     let listener = TcpListener::bind(&addr).await?;
     let token = Arc::new(token.to_string());

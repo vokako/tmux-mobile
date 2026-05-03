@@ -102,7 +102,89 @@ fn save_token(token: &str) -> std::io::Result<()> {
         content.push('\n');
     }
     content.push_str(&format!("token = \"{}\"\n", token));
-    std::fs::write(&path, content)
+    std::fs::write(&path, content)?;
+    // The token is a session-wide secret; any local user who can read
+    // this file can impersonate the owner. Tighten to 0600 so cohabiting
+    // accounts (shared Macs, multi-user Linux) can't trivially pick it up.
+    // We only set perms when we're the writer — we do NOT tighten existing
+    // files to avoid surprising users who intentionally relaxed them.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+/// Tighten permissions on existing config.toml if we can. Safe to call on
+/// every startup: no-op on non-unix; no-op if file absent; clamps to 0600
+/// otherwise. This is a belt-and-braces measure for configs written by
+/// older versions (pre-hardening) or by a manual edit that widened perms.
+#[cfg(unix)]
+pub fn harden_config_perms() {
+    harden_path_0600(&config_path());
+}
+#[cfg(not(unix))]
+pub fn harden_config_perms() {}
+
+/// Clamp `path`'s mode to 0600 if any group/other bits are set. No-op on
+/// non-unix. Extracted so it can be unit-tested without touching
+/// `~/.config/tmux-mobile`.
+#[cfg(unix)]
+fn harden_path_0600(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Ok(meta) = std::fs::metadata(path) {
+        let mode = meta.permissions().mode() & 0o777;
+        if mode & 0o077 != 0 {
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+}
+#[cfg(not(unix))]
+#[allow(dead_code)]
+fn harden_path_0600(_path: &std::path::Path) {}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static TEST_CTR: AtomicUsize = AtomicUsize::new(0);
+
+    fn mkfile(mode: u32) -> std::path::PathBuf {
+        let n = TEST_CTR.fetch_add(1, Ordering::Relaxed);
+        let p = std::env::temp_dir()
+            .join(format!("tmux_mobile_cfg_test_{}_{}", std::process::id(), n));
+        std::fs::write(&p, b"token = \"x\"\n").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode)).unwrap();
+        p
+    }
+
+    #[test]
+    fn harden_tightens_0644_to_0600() {
+        let p = mkfile(0o644);
+        harden_path_0600(&p);
+        let m = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(m, 0o600, "expected 0600, got {:o}", m);
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn harden_leaves_0600_alone() {
+        let p = mkfile(0o600);
+        harden_path_0600(&p);
+        let m = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(m, 0o600);
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn harden_on_missing_file_is_noop() {
+        let p = std::env::temp_dir().join("tmux_mobile_cfg_test_nonexistent");
+        let _ = std::fs::remove_file(&p);
+        harden_path_0600(&p); // must not panic
+    }
 }
 
 /// Bookmarks: read/write ~/.config/tmux-mobile/bookmarks.json
