@@ -41,6 +41,7 @@ cd src-tauri && cargo test -- --test-threads=1   # Tests (needs tmux running)
 - [Terminal Gesture State Machine](docs/design-docs/pages/terminal-gestures.md)
 - [Android Platform Integration](docs/design-docs/features/android-platform.md)
 - [WebSocket Client Robustness](docs/design-docs/features/websocket-client.md)
+- [Concurrent WS RPC (server)](docs/design-docs/features/concurrent-ws-rpc.md)
 - [File Handling & Security](docs/design-docs/features/file-handling.md)
 - [Terminal Color Adaptation](docs/design-docs/features/color-adaptation.md)
 

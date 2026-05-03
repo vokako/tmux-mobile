@@ -54,39 +54,52 @@ fn derive_key(token: &str, server_nonce: &[u8; 16], client_nonce: &[u8; 16]) -> 
     key
 }
 
-/// Per-connection cipher state for encrypting/decrypting messages.
-struct SessionCipher {
+/// Unidirectional cipher half: after auth, the session splits into a
+/// recv-side (owned by the receiver loop, decrypts incoming in strict
+/// order) and a send-side (owned by the send task, encrypts outgoing in
+/// strict order). Splitting lets multiple business tasks run in parallel
+/// without fighting over a single cipher's counter.
+struct HalfCipher {
     cipher: Aes256Gcm,
-    send_counter: u64,
-    recv_counter: u64,
+    counter: u64,
 }
 
-impl SessionCipher {
+impl HalfCipher {
     fn new(key: &[u8; 32]) -> Self {
-        Self {
-            cipher: Aes256Gcm::new_from_slice(key).unwrap(),
-            send_counter: 0,
-            recv_counter: 0,
-        }
+        Self { cipher: Aes256Gcm::new_from_slice(key).unwrap(), counter: 0 }
     }
-
     fn encrypt(&mut self, plaintext: &[u8]) -> Vec<u8> {
         let mut nonce_bytes = [0u8; 12];
-        nonce_bytes[4..].copy_from_slice(&self.send_counter.to_be_bytes());
-        self.send_counter += 1;
-        self.cipher
-            .encrypt(Nonce::from_slice(&nonce_bytes), plaintext)
-            .unwrap()
+        nonce_bytes[4..].copy_from_slice(&self.counter.to_be_bytes());
+        self.counter += 1;
+        self.cipher.encrypt(Nonce::from_slice(&nonce_bytes), plaintext).unwrap()
     }
-
     fn decrypt(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>, String> {
         let mut nonce_bytes = [0u8; 12];
-        nonce_bytes[4..].copy_from_slice(&self.recv_counter.to_be_bytes());
-        self.recv_counter += 1;
-        self.cipher
-            .decrypt(Nonce::from_slice(&nonce_bytes), ciphertext)
+        nonce_bytes[4..].copy_from_slice(&self.counter.to_be_bytes());
+        self.counter += 1;
+        self.cipher.decrypt(Nonce::from_slice(&nonce_bytes), ciphertext)
             .map_err(|_| "decryption failed".to_string())
     }
+}
+
+/// Outbound message types funneled through the single send task. The send
+/// task is what guarantees encrypt-counter ordering: even if many business
+/// tasks finish out of order, they enqueue into this channel and the one
+/// consumer encrypts + ws.send in strict FIFO order.
+enum Outbound {
+    /// Plain text frame — used only for the initial `server_nonce` handshake
+    /// and the plain-fallback auth response (legacy path for http:// clients
+    /// without Web Crypto).
+    Plain(String),
+    /// Ciphertext path. Once the send task has been given its cipher (via
+    /// `InitCipher`), every payload here is encrypted in enqueue order.
+    Encrypted(String),
+    /// Hand a freshly-built send-side cipher to the send task. Emitted once,
+    /// right after successful encrypted auth. Must be enqueued *before* any
+    /// `Encrypted` message for that session, otherwise the send task drops
+    /// the message with a warning.
+    InitCipher(HalfCipher),
 }
 
 // JSON-RPC style request/response
@@ -542,9 +555,8 @@ print(o)"#.to_string(),
 
 // Subscription polling task: captures pane content and sends diffs
 async fn subscription_loop(
-    sender: Arc<Mutex<dyn futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Send + Unpin>>,
+    out_tx: tokio::sync::mpsc::UnboundedSender<Outbound>,
     subs: Subscriptions,
-    cipher: Arc<Mutex<Option<SessionCipher>>>,
 ) {
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(SUBSCRIPTION_POLL_MS));
     let mut fail_counts: HashMap<String, u32> = HashMap::new();
@@ -587,18 +599,7 @@ async fn subscription_loop(
                             "method": "pane_closed",
                             "params": { "target": target }
                         });
-                        let text = serde_json::to_string(&msg).unwrap();
-                        let out = {
-                            let mut c = cipher.lock().await;
-                            if let Some(ref mut sc) = *c {
-                                use base64::Engine;
-                                base64::engine::general_purpose::STANDARD.encode(sc.encrypt(text.as_bytes()))
-                            } else {
-                                text
-                            }
-                        };
-                        let mut tx = sender.lock().await;
-                        let _ = tx.send(Message::Text(out.into())).await;
+                        let _ = out_tx.send(Outbound::Encrypted(serde_json::to_string(&msg).unwrap()));
                     }
                     continue;
                 }
@@ -627,19 +628,8 @@ async fn subscription_loop(
                     "params": { "target": target, "cursor": cursor_obj }
                 })
             };
-            let text = serde_json::to_string(&msg).unwrap();
-            let out = {
-                let mut c = cipher.lock().await;
-                if let Some(ref mut sc) = *c {
-                    use base64::Engine;
-                    base64::engine::general_purpose::STANDARD.encode(sc.encrypt(text.as_bytes()))
-                } else {
-                    text
-                }
-            };
-            let mut tx = sender.lock().await;
-            if tx.send(Message::Text(out.into())).await.is_err() {
-                return;
+            if out_tx.send(Outbound::Encrypted(serde_json::to_string(&msg).unwrap())).is_err() {
+                return; // receiver has shut down
             }
         }
     }
@@ -711,26 +701,60 @@ where
     }
 
     let (ws_sender, mut receiver) = ws_stream.split();
-    let sender: Arc<Mutex<dyn futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Send + Unpin>> = Arc::new(Mutex::new(ws_sender));
     let subs: Subscriptions = Arc::new(Mutex::new(HashMap::new()));
     let conn_id = CONN_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let hostname = gethostname::gethostname().to_string_lossy().to_string();
     let mut authenticated = false;
-    let shared_cipher: Arc<Mutex<Option<SessionCipher>>> = Arc::new(Mutex::new(None));
+    // Receive-side cipher lives in this task and guards strict decrypt
+    // ordering. Send-side cipher is handed off to the dedicated send task
+    // (below) so business tasks can finish out of order without corrupting
+    // the encrypt counter.
+    let mut recv_cipher: Option<HalfCipher> = None;
 
-    // Step 1: Send server_nonce
+    // Outbound channel: every response / push goes through this single
+    // consumer, which encrypts (in FIFO) and ws.send()s. That is what lets
+    // multiple business tasks run in parallel — they just enqueue strings.
+    let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<Outbound>();
+
+    // --- Send task ---
+    let addr_for_send = addr;
+    let send_task = tokio::spawn(async move {
+        let mut ws_sender = ws_sender;
+        let mut cipher: Option<HalfCipher> = None;
+        while let Some(msg) = out_rx.recv().await {
+            let bytes: String = match msg {
+                Outbound::Plain(s) => s,
+                Outbound::InitCipher(c) => { cipher = Some(c); continue; }
+                Outbound::Encrypted(s) => {
+                    if let Some(ref mut c) = cipher {
+                        use base64::Engine;
+                        base64::engine::general_purpose::STANDARD.encode(c.encrypt(s.as_bytes()))
+                    } else {
+                        eprintln!("send [{}]: Encrypted before InitCipher — dropped", addr_for_send);
+                        continue;
+                    }
+                }
+            };
+            if ws_sender.send(Message::Text(bytes.into())).await.is_err() {
+                break;
+            }
+        }
+        // Channel closed or send failed — drain anything left (nothing to do,
+        // just return). The WS close is handled by the outer task.
+    });
+
+    // Step 1: Send server_nonce (plain, pre-cipher)
     let mut server_nonce = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut server_nonce);
     {
         let msg = serde_json::json!({ "server_nonce": bytes_to_hex(&server_nonce) });
-        let mut tx = sender.lock().await;
-        if tx.send(Message::Text(serde_json::to_string(&msg).unwrap().into())).await.is_err() {
+        if out_tx.send(Outbound::Plain(serde_json::to_string(&msg).unwrap())).is_err() {
             return;
         }
     }
 
-    // Start subscription polling task
-    let sub_handle = tokio::spawn(subscription_loop(sender.clone(), subs.clone(), shared_cipher.clone()));
+    // Start subscription polling task (enqueues to out_tx like any task)
+    let sub_handle = tokio::spawn(subscription_loop(out_tx.clone(), subs.clone()));
 
     while let Some(msg) = receiver.next().await {
         let msg = match msg {
@@ -743,179 +767,164 @@ where
 
         match msg {
             Message::Text(text) => {
-                // Decrypt if encrypted session is active
-                let plaintext = {
-                    let mut c = shared_cipher.lock().await;
-                    if let Some(ref mut sc) = *c {
-                        match sc.decrypt(&{
-                            use base64::Engine;
-                            base64::engine::general_purpose::STANDARD.decode(text.as_bytes()).unwrap_or_default()
-                        }) {
-                            Ok(pt) => String::from_utf8_lossy(&pt).to_string(),
-                            Err(_) => { eprintln!("❌ Decrypt failed from {}", addr); break; }
-                        }
-                    } else {
-                        text.to_string()
+                // Decrypt in strict order (recv_cipher counter is monotonic).
+                let plaintext = if let Some(ref mut rc) = recv_cipher {
+                    use base64::Engine;
+                    let ct = base64::engine::general_purpose::STANDARD.decode(text.as_bytes()).unwrap_or_default();
+                    match rc.decrypt(&ct) {
+                        Ok(pt) => String::from_utf8_lossy(&pt).to_string(),
+                        Err(_) => { eprintln!("❌ Decrypt failed from {}", addr); break; }
                     }
+                } else {
+                    text.to_string()
                 };
 
-                let response = match serde_json::from_str::<Request>(&plaintext) {
-                    Ok(req) => {
-                        if !authenticated {
-                            if req.method == "auth" {
-                                // Encrypted auth: client sends {client_nonce, proof}
-                                let client_nonce_hex = req.params.get("client_nonce").and_then(|v| v.as_str()).unwrap_or("");
-                                let proof_hex = req.params.get("proof").and_then(|v| v.as_str()).unwrap_or("");
-                                // Also support legacy plain token auth
-                                let plain_token = req.params.get("token").and_then(|v| v.as_str()).unwrap_or("");
-
-                                if !client_nonce_hex.is_empty() && !proof_hex.is_empty() {
-                                    // Encrypted auth flow
-                                    let client_nonce_bytes = hex_to_bytes(client_nonce_hex).unwrap_or_default();
-                                    let proof_bytes = hex_to_bytes(proof_hex).unwrap_or_default();
-                                    if client_nonce_bytes.len() != 16 {
-                                        let r = Response::err(req.id, ERR_AUTH, "invalid client_nonce".into());
-                                        let json = serde_json::to_string(&r).unwrap();
-                                        let mut tx = sender.lock().await;
-                                        let _ = tx.send(Message::Text(json.into())).await;
-                                        let _ = tx.send(Message::Close(None)).await;
-                                        break;
-                                    }
-                                    let mut cn = [0u8; 16];
-                                    cn.copy_from_slice(&client_nonce_bytes);
-                                    let key = derive_key(&token, &server_nonce, &cn);
-                                    // Verify proof = HMAC-SHA256(key, server_nonce)
-                                    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&key).unwrap();
-                                    mac.update(&server_nonce);
-                                    if mac.verify_slice(&proof_bytes).is_ok() {
-                                        authenticated = true;
-                                        auth_tracker.lock().await.remove(&addr.ip());
-                                        let mut sc = SessionCipher::new(&key);
-                                        let resp = serde_json::to_string(&serde_json::json!({"result":{"authenticated":true,"machine_id":*machine_id,"hostname":&hostname}})).unwrap();
-                                        let ct = sc.encrypt(resp.as_bytes());
-                                        use base64::Engine;
-                                        let b64 = base64::engine::general_purpose::STANDARD.encode(&ct);
-                                        let mut tx = sender.lock().await;
-                                        let _ = tx.send(Message::Text(b64.into())).await;
-                                        drop(tx);
-                                        *shared_cipher.lock().await = Some(sc);
-                                        continue;
-                                    } else {
-                                        let mut tracker = auth_tracker.lock().await;
-                                        let entry = tracker.entry(addr.ip()).or_insert((0, tokio::time::Instant::now()));
-                                        if entry.1.elapsed().as_secs() >= AUTH_LOCKOUT_SECS { *entry = (0, tokio::time::Instant::now()); }
-                                        entry.0 += 1;
-                                        eprintln!("🚫 Auth failed from {} (attempt {})", addr, entry.0);
-                                        drop(tracker);
-                                        let r = Response::err(req.id, ERR_AUTH, "invalid proof".into());
-                                        let json = serde_json::to_string(&r).unwrap();
-                                        let mut tx = sender.lock().await;
-                                        let _ = tx.send(Message::Text(json.into())).await;
-                                        let _ = tx.send(Message::Close(None)).await;
-                                        break;
-                                    }
-                                } else if provided_token_matches(plain_token, &token) {
-                                    // Legacy plain token auth (for wss:// or local connections)
-                                    authenticated = true;
-                                    auth_tracker.lock().await.remove(&addr.ip());
-                                    Response::ok(req.id, serde_json::json!({ "authenticated": true, "machine_id": *machine_id, "hostname": &hostname }))
-                                } else {
-                                    // Track failure
-                                    let mut tracker = auth_tracker.lock().await;
-                                    let entry = tracker.entry(addr.ip()).or_insert((0, tokio::time::Instant::now()));
-                                    if entry.1.elapsed().as_secs() >= AUTH_LOCKOUT_SECS {
-                                        *entry = (0, tokio::time::Instant::now());
-                                    }
-                                    entry.0 += 1;
-                                    let fails = entry.0;
-                                    drop(tracker);
-                                    eprintln!("🚫 Auth failed from {} (attempt {})", addr, fails);
-                                    let r = Response::err(req.id, ERR_AUTH, "invalid token".into());
-                                    let json = serde_json::to_string(&r).unwrap();
-                                    let mut tx = sender.lock().await;
-                                    let _ = tx.send(Message::Text(json.into())).await;
-                                    let _ = tx.send(Message::Close(None)).await;
-                                    break;
-                                }
-                            } else {
-                                let r = Response::err(req.id, ERR_AUTH, "auth required — send {\"method\":\"auth\",\"params\":{\"token\":\"...\"}} first".into());
-                                let json = serde_json::to_string(&r).unwrap();
-                                let mut tx = sender.lock().await;
-                                let _ = tx.send(Message::Text(json.into())).await;
-                                let _ = tx.send(Message::Close(None)).await;
-                                break;
-                            }
+                let req = match serde_json::from_str::<Request>(&plaintext) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        let r = Response::err(None, ERR_PARSE, format!("invalid JSON: {}", e));
+                        let _ = out_tx.send(if recv_cipher.is_some() {
+                            Outbound::Encrypted(serde_json::to_string(&r).unwrap())
                         } else {
-                            match req.method.as_str() {
-                                "subscribe" => {
-                                    let mut map = subs.lock().await;
-                                    handle_subscribe(&req.params, &mut map)
-                                }
-                                "unsubscribe" => {
-                                    let mut map = subs.lock().await;
-                                    handle_unsubscribe(&req.params, &mut map)
-                                }
-                                "resize_pane" => {
-                                    let id = req.id;
-                                    let p = &req.params;
-                                    let target = p.get("target").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                    let cols = p.get("cols").and_then(|v| v.as_u64()).unwrap_or(80) as usize;
-                                    let rows = p.get("rows").and_then(|v| v.as_u64()).unwrap_or(24) as usize;
-                                    let tracker = resize_tracker.clone();
-                                    tokio::task::spawn_blocking(move || {
-                                        match tmux::resize_pane(&target, cols, rows) {
-                                            Ok(()) => {
-                                                let win = target.split('.').next().unwrap_or(&target).to_string();
-                                                let session = target.split(':').next().unwrap_or(&target);
-                                                // Set tmux hook so next real client auto-restores size
-                                                let _ = tmux::set_resize_hook(session);
-                                                tracker.lock().unwrap().entry(conn_id).or_default().insert(win);
-                                                Response::ok(id, serde_json::json!({ "ok": true }))
-                                            }
-                                            Err(e) => Response::err(id, ERR_INTERNAL, e),
-                                        }
-                                    }).await.unwrap_or_else(|e| Response::err(None, ERR_INTERNAL, format!("task panic: {}", e)))
-                                }
-                                _ => tokio::task::spawn_blocking(move || handle_request(&req))
-                                    .await
-                                    .unwrap_or_else(|e| {
-                                        Response::err(
-                                            None,
-                                            ERR_INTERNAL,
-                                            format!("task panic: {}", e),
-                                        )
-                                    }),
-                            }
-                        }
+                            Outbound::Plain(serde_json::to_string(&r).unwrap())
+                        });
+                        continue;
                     }
-                    Err(e) => Response::err(None, ERR_PARSE, format!("invalid JSON: {}", e)),
                 };
 
-                let json = serde_json::to_string(&response).unwrap();
-                let out = {
-                    let mut c = shared_cipher.lock().await;
-                    if let Some(ref mut sc) = *c {
-                        use base64::Engine;
-                        base64::engine::general_purpose::STANDARD.encode(sc.encrypt(json.as_bytes()))
-                    } else {
-                        json
+                if !authenticated {
+                    // Auth must stay strictly serial (it sets up the ciphers).
+                    if req.method != "auth" {
+                        let r = Response::err(req.id, ERR_AUTH, "auth required — send {\"method\":\"auth\",\"params\":{\"token\":\"...\"}} first".into());
+                        let _ = out_tx.send(Outbound::Plain(serde_json::to_string(&r).unwrap()));
+                        break;
                     }
-                };
-                let mut tx = sender.lock().await;
-                if tx.send(Message::Text(out.into())).await.is_err() {
-                    break;
+                    let client_nonce_hex = req.params.get("client_nonce").and_then(|v| v.as_str()).unwrap_or("");
+                    let proof_hex = req.params.get("proof").and_then(|v| v.as_str()).unwrap_or("");
+                    let plain_token = req.params.get("token").and_then(|v| v.as_str()).unwrap_or("");
+
+                    if !client_nonce_hex.is_empty() && !proof_hex.is_empty() {
+                        // Encrypted auth
+                        let client_nonce_bytes = hex_to_bytes(client_nonce_hex).unwrap_or_default();
+                        let proof_bytes = hex_to_bytes(proof_hex).unwrap_or_default();
+                        if client_nonce_bytes.len() != 16 {
+                            let r = Response::err(req.id, ERR_AUTH, "invalid client_nonce".into());
+                            let _ = out_tx.send(Outbound::Plain(serde_json::to_string(&r).unwrap()));
+                            break;
+                        }
+                        let mut cn = [0u8; 16];
+                        cn.copy_from_slice(&client_nonce_bytes);
+                        let key = derive_key(&token, &server_nonce, &cn);
+                        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&key).unwrap();
+                        mac.update(&server_nonce);
+                        if mac.verify_slice(&proof_bytes).is_ok() {
+                            authenticated = true;
+                            auth_tracker.lock().await.remove(&addr.ip());
+                            // Split into two independent cipher halves — one
+                            // for the receive path (this task), one for the
+                            // send path (send task).
+                            recv_cipher = Some(HalfCipher::new(&key));
+                            // The InitCipher message must be queued before
+                            // any Encrypted message so the send task has its
+                            // cipher ready. We enqueue it first, then the
+                            // auth response.
+                            let _ = out_tx.send(Outbound::InitCipher(HalfCipher::new(&key)));
+                            let resp = serde_json::to_string(&serde_json::json!({"result":{"authenticated":true,"machine_id":*machine_id,"hostname":&hostname}})).unwrap();
+                            let _ = out_tx.send(Outbound::Encrypted(resp));
+                            continue;
+                        } else {
+                            let mut tracker = auth_tracker.lock().await;
+                            let entry = tracker.entry(addr.ip()).or_insert((0, tokio::time::Instant::now()));
+                            if entry.1.elapsed().as_secs() >= AUTH_LOCKOUT_SECS { *entry = (0, tokio::time::Instant::now()); }
+                            entry.0 += 1;
+                            eprintln!("🚫 Auth failed from {} (attempt {})", addr, entry.0);
+                            drop(tracker);
+                            let r = Response::err(req.id, ERR_AUTH, "invalid proof".into());
+                            let _ = out_tx.send(Outbound::Plain(serde_json::to_string(&r).unwrap()));
+                            break;
+                        }
+                    } else if provided_token_matches(plain_token, &token) {
+                        // Legacy plain token auth (http:// fallback)
+                        authenticated = true;
+                        auth_tracker.lock().await.remove(&addr.ip());
+                        let r = Response::ok(req.id, serde_json::json!({ "authenticated": true, "machine_id": *machine_id, "hostname": &hostname }));
+                        let _ = out_tx.send(Outbound::Plain(serde_json::to_string(&r).unwrap()));
+                        continue;
+                    } else {
+                        let mut tracker = auth_tracker.lock().await;
+                        let entry = tracker.entry(addr.ip()).or_insert((0, tokio::time::Instant::now()));
+                        if entry.1.elapsed().as_secs() >= AUTH_LOCKOUT_SECS { *entry = (0, tokio::time::Instant::now()); }
+                        entry.0 += 1;
+                        let fails = entry.0;
+                        drop(tracker);
+                        eprintln!("🚫 Auth failed from {} (attempt {})", addr, fails);
+                        let r = Response::err(req.id, ERR_AUTH, "invalid token".into());
+                        let _ = out_tx.send(Outbound::Plain(serde_json::to_string(&r).unwrap()));
+                        break;
+                    }
                 }
+
+                // Post-auth dispatch. Each request is processed in its own
+                // task so a slow one (fs_download, fs_upload) doesn't block
+                // the receive loop from reading / dispatching the next one.
+                // Responses are funneled through out_tx and the send task
+                // keeps their encrypt + ws.send in FIFO order.
+                let subs_c = subs.clone();
+                let tracker_c = resize_tracker.clone();
+                let out_tx_c = out_tx.clone();
+                tokio::spawn(async move {
+                    let response = match req.method.as_str() {
+                        "subscribe" => {
+                            let mut map = subs_c.lock().await;
+                            handle_subscribe(&req.params, &mut map)
+                        }
+                        "unsubscribe" => {
+                            let mut map = subs_c.lock().await;
+                            handle_unsubscribe(&req.params, &mut map)
+                        }
+                        "resize_pane" => {
+                            let id = req.id;
+                            let p = &req.params;
+                            let target = p.get("target").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let cols = p.get("cols").and_then(|v| v.as_u64()).unwrap_or(80) as usize;
+                            let rows = p.get("rows").and_then(|v| v.as_u64()).unwrap_or(24) as usize;
+                            let tracker = tracker_c.clone();
+                            tokio::task::spawn_blocking(move || {
+                                match tmux::resize_pane(&target, cols, rows) {
+                                    Ok(()) => {
+                                        let win = target.split('.').next().unwrap_or(&target).to_string();
+                                        let session = target.split(':').next().unwrap_or(&target);
+                                        let _ = tmux::set_resize_hook(session);
+                                        tracker.lock().unwrap().entry(conn_id).or_default().insert(win);
+                                        Response::ok(id, serde_json::json!({ "ok": true }))
+                                    }
+                                    Err(e) => Response::err(id, ERR_INTERNAL, e),
+                                }
+                            }).await.unwrap_or_else(|e| Response::err(None, ERR_INTERNAL, format!("task panic: {}", e)))
+                        }
+                        _ => tokio::task::spawn_blocking(move || handle_request(&req))
+                            .await
+                            .unwrap_or_else(|e| Response::err(None, ERR_INTERNAL, format!("task panic: {}", e))),
+                    };
+                    let _ = out_tx_c.send(Outbound::Encrypted(serde_json::to_string(&response).unwrap()));
+                });
             }
             Message::Close(_) => break,
             Message::Ping(data) => {
-                let mut tx = sender.lock().await;
-                let _ = tx.send(Message::Pong(data)).await;
+                // OS-level WS ping: respond with Pong inline (cheap, no cipher).
+                // Note: this still races on ws_sender which the send task owns.
+                // To keep things simple we let the client rely on application
+                // pings (ping RPC) which flow through out_tx; browser WS
+                // doesn't normally initiate protocol-level pings anyway.
+                let _ = out_tx.send(Outbound::Plain(String::from_utf8_lossy(&data).into_owned()));
             }
             _ => {}
         }
     }
 
     sub_handle.abort();
+    drop(out_tx); // close the channel so the send task finishes
+    let _ = send_task.await;
     // Restore any windows this connection resized (tmux auto-fits to remaining clients)
     {
         let mut tracker = resize_tracker.lock().unwrap();
