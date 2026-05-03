@@ -19,7 +19,10 @@
   let terminalSession = $state('');
   let terminalCommand = $state('');
   let viewMode = $state('terminal');
-  let chatSupported = $state(false);
+  // Chat view is disabled (placeholder kept so parser / ChatView code still
+  // compiles, to be re-enabled later if wanted). While this is false the
+  // chat tab, tab swipe target, and auto-switch effect are all hidden.
+  const chatSupported = false;
   let theme = $state(localStorage.getItem('tmux_theme') || 'system');
   let fontSize = $state(parseInt(localStorage.getItem('tmux_fontsize')) || 14);
   let showSettings = $state(false);
@@ -576,7 +579,7 @@
         <Files session={terminalSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} />
       </div>
       <div class="page-layer" class:hidden={page !== 'terminal'}>
-        <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {viewMode} {fontSize} onChatSupported={(v) => chatSupported = v} onSwitchPane={(t, cmd) => { terminalTarget = t; terminalCommand = cmd || ''; }} onPaneExit={() => { terminalTarget = ''; page = 'sessions'; }} />
+        <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {viewMode} {fontSize} onSwitchPane={(t, cmd) => { terminalTarget = t; terminalCommand = cmd || ''; }} onPaneExit={() => { terminalTarget = ''; page = 'sessions'; }} />
       </div>
     {/if}
   </div>

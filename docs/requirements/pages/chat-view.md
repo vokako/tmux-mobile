@@ -1,5 +1,11 @@
 # Chat View Page
 
+> **Status: disabled in UI.** The chat view code (ChatView.svelte, parsers.js,
+> i18n keys, markdown/mermaid/katex deps) is all kept, but `chatSupported` in
+> `App.svelte` is pinned to `false` so the tab button and tab-swipe target
+> never appear. Re-enable by turning `chatSupported` back into `$state(false)`
+> and wiring `onChatSupported` back onto the Terminal component.
+
 ## Purpose
 Renders CLI agent output (Kiro CLI, Claude Code) as a messaging UI. Auto-detected when a supported CLI tool is running in the active pane.
 
