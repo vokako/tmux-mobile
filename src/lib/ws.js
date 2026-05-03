@@ -1,33 +1,23 @@
 // WebSocket client for tmux-mobile server
 
 const CONNECT_TIMEOUT_MS = 5000;
-// RPC timeout 6s (was 10s): most calls are lightweight (send_keys, list_panes,
-// capture_pane). Long-running calls (fs_download, fs_upload) pass explicit
-// timeouts. Shorter default means N consecutive timeouts hit the disconnect
-// threshold faster, so the reconnect UI appears sooner on a dead link.
+// Default timeout for ordinary RPCs. Long-running methods (fs_download,
+// fs_upload) override with a much larger value at their call site.
+// Short default → consecutive timeouts feel a dead link quickly AND the
+// UI flips to "Reconnecting" fast. See call() for the interplay with
+// `pending.size` gating.
 const RPC_TIMEOUT_MS = 6000;
-// Heartbeat every 5s: cheap to run, quick to notice a dead link.
-const HEARTBEAT_INTERVAL_MS = 5000;
-// Skip the heartbeat ping if we've received *any* message from the server
-// within this window. Data flowing in either direction is proof of liveness,
-// so during a download/upload or active subscription stream we don't bother
-// pinging. If the wire goes quiet for longer than this, we fall back to an
-// explicit ping with a relaxed timeout.
-const HEARTBEAT_QUIET_MS = 8000;
-// Explicit ping response window. Longer than the usual RPC timeout because
-// the response can legitimately queue behind a large in-flight transfer
-// (e.g. the big base64 frame of an fs_download), especially on mobile.
-const PING_TIMEOUT_MS = 20000;
 const BASE64_CHUNK_SIZE = 8192;
 
+// Liveness is handled at the WebSocket protocol layer: the server sends
+// PING frames periodically and the browser auto-replies with PONG at a
+// layer we never touch. When TCP really dies, `ws.onclose` fires and the
+// app layer reacts via `onDisconnect`. Client-side JSON-RPC "ping" RPCs
+// are no longer needed here.
+
 let ws = null;
-let heartbeatTimer = null;
 let requestId = 0;
 const pending = new Map();
-// Timestamp (Date.now()) of the last incoming WS message. Any frame from the
-// server — RPC response, pane_output, encrypted or plain — updates this.
-// The heartbeat uses it as a "connection is breathing" signal.
-let lastRxAt = 0;
 let onPaneOutput = null;
 let onPaneClosed = null;
 let onDisconnect = null;
@@ -120,10 +110,7 @@ export function connect(url, token) {
     rejectAllPending('superseded by new connect');
   }
   sessionCipher = null;
-  clearInterval(heartbeatTimer);
-  heartbeatTimer = null;
   rpcTimeouts = 0;
-  lastRxAt = Date.now();
   window.__dbg?.(`ws: connecting to ${url}`);
 
   return new Promise((resolve, reject) => {
@@ -150,38 +137,11 @@ export function connect(url, token) {
       clearTimeout(timeout);
       authed = true;
       window.__dbg?.(`ws: authenticated (machine=${machineId})`);
-      // Liveness strategy:
-      //   - Any inbound frame refreshes lastRxAt, so downloads / pane pushes
-      //     / RPC responses all count as "connection is breathing".
-      //   - Every HEARTBEAT_INTERVAL_MS we check: if data flowed recently,
-      //     skip the tick and don't pile up another ping RPC.
-      //   - Only if the line is quiet for HEARTBEAT_QUIET_MS do we actively
-      //     probe with call('ping'). Its timeout is PING_TIMEOUT_MS (larger
-      //     than default) because the response can legitimately queue behind
-      //     a big in-flight transfer; we'd rather wait than reconnect.
-      //   - One pending ping at a time (pingInFlight flag); overlapping pings
-      //     would inflate the fail counter on a busy but healthy link.
-      //   - 2 consecutive genuine failures → disconnect + reconnect UI.
-      let pingFails = 0;
-      let pingInFlight = false;
-      heartbeatTimer = setInterval(() => {
-        if (pingInFlight) return;
-        if (Date.now() - lastRxAt < HEARTBEAT_QUIET_MS) {
-          pingFails = 0;
-          return;
-        }
-        pingInFlight = true;
-        call('ping', {}, PING_TIMEOUT_MS).then(() => {
-          pingFails = 0;
-        }).catch(() => {
-          pingFails++;
-          window.__dbg?.(`heartbeat: ping failed #${pingFails}`);
-          if (pingFails >= 2) {
-            window.__dbg?.('heartbeat: 2 failures, forcing disconnect');
-            forceDisconnect('heartbeat: 2 consecutive ping failures');
-          }
-        }).finally(() => { pingInFlight = false; });
-      }, HEARTBEAT_INTERVAL_MS);
+      // Liveness is the server's job now: it sends WS PING frames on a
+      // 15 s cadence and tears down the TCP connection if the browser
+      // stops PONGing (browsers auto-reply at the protocol layer). That
+      // shows up here as `ws.onclose`, and `rejectAllPending` + the
+      // `onDisconnect` callback handle the reconnect UI from there.
       resolve(machineId);
     }
 
@@ -190,9 +150,6 @@ export function connect(url, token) {
     ws._getHostname = () => hostname;
 
     ws.onmessage = async (event) => {
-      // Any inbound frame is proof of liveness — downloads, pane pushes,
-      // RPC responses all count.
-      lastRxAt = Date.now();
       let data;
       try { data = JSON.parse(event.data); } catch {}
 
@@ -262,8 +219,6 @@ export function connect(url, token) {
 
     ws.onclose = () => {
       clearTimeout(timeout);
-      clearInterval(heartbeatTimer);
-      heartbeatTimer = null;
       const wasAuthed = authed;
       authed = false;
       ws = null;
@@ -282,8 +237,6 @@ export function connect(url, token) {
 }
 
 export function disconnect() {
-  clearInterval(heartbeatTimer);
-  heartbeatTimer = null;
   ws?.close();
   ws = null;
 }
@@ -305,8 +258,6 @@ let rpcTimeouts = 0;
 function forceDisconnect(reason) {
   if (!ws) return;
   window.__dbg?.(`ws: forcing disconnect (${reason || 'unknown'})`);
-  clearInterval(heartbeatTimer);
-  heartbeatTimer = null;
   try { ws.onclose = null; ws.close(); } catch {}
   ws = null;
   sessionCipher = null;
@@ -380,10 +331,10 @@ export const fsWrite = (path, content) => call('fs_write', { path, content });
 export const fsMkdir = (path) => call('fs_mkdir', { path });
 export const fsDelete = (path) => call('fs_delete', { path });
 export const fsRename = (from, to) => call('fs_rename', { from, to });
-// Large transfers have a long explicit timeout. The heartbeat stays out of
-// their way automatically because any incoming frame (including the transfer
-// response itself) refreshes `lastRxAt`, and the heartbeat skips ticks while
-// the connection is recently active.
+// Large transfers have a long explicit timeout — they're allowed to sit in
+// flight longer than the default RPC timeout. Liveness detection during the
+// transfer is handled at the WS protocol layer (server PING / browser PONG),
+// so even a 50 MB frame in the air won't make us give up on the socket.
 export const fsDownload = (path) => call('fs_download', { path }, 60000);
 export const fsUpload = (path, data) => call('fs_upload', { path, data }, 60000);
 export const fsConvert = (path, format = 'html') => call('fs_convert', { path, format });

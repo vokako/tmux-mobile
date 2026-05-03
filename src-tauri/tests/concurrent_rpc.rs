@@ -461,3 +461,53 @@ async fn auth_proof_must_bind_client_nonce() {
         other => panic!("unexpected frame: {:?}", other),
     }
 }
+
+// --- WebSocket protocol-level keepalive ---
+
+/// Minimal test client that speaks encrypted auth, grabs its cipher, and
+/// then lets the caller drive inbound/outbound WS frames directly. Used for
+/// keepalive tests that care about PING/PONG at the WS layer, not the
+/// higher-level RPC behavior.
+async fn raw_authed_client(
+    addr: SocketAddr,
+    token: &str,
+) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>> {
+    // Reuse Client::connect for the handshake, then pull its ws out.
+    let c = Client::connect(addr, token).await;
+    c.ws
+}
+
+#[tokio::test]
+async fn server_sends_ws_pings_that_auto_pong() {
+    // Integration sanity: within one PING_INTERVAL_SECS window, at least
+    // one Message::Ping must arrive from the server. tokio-tungstenite
+    // auto-replies with Pong at the stream level on the next poll, so
+    // steady-state we don't see ourselves miss a heartbeat.
+    //
+    // NB: we intentionally don't have a companion test for "server drops
+    // an unresponsive peer" at this layer — tokio-tungstenite auto-
+    // responds to inbound Pings on behalf of the application, so any
+    // pure-Rust test client does pong whether we ask it to or not.
+    // That failure mode (client's Pong never makes it back through a
+    // half-open TCP connection) would need platform-level network
+    // fault injection; we rely on code review + manual testing for it.
+    let addr = spawn_server_once("test-token-keepalive").await;
+    let mut ws = raw_authed_client(addr, "test-token-keepalive").await;
+
+    let mut saw_ping = false;
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(18) {
+        match tokio::time::timeout(Duration::from_secs(5), ws.next()).await {
+            Ok(Some(Ok(Message::Ping(data)))) => {
+                saw_ping = true;
+                ws.send(Message::Pong(data)).await.unwrap();
+                break;
+            }
+            Ok(Some(Ok(_))) => {}
+            Ok(Some(Err(e))) => panic!("ws error: {:?}", e),
+            Ok(None) => panic!("connection closed unexpectedly"),
+            Err(_) => {}
+        }
+    }
+    assert!(saw_ping, "server did not send a WS PING within 18s");
+}

@@ -122,6 +122,10 @@ enum Outbound {
     /// `Encrypted` message for that session, otherwise the send task drops
     /// the message with a warning.
     InitCipher(HalfCipher),
+    /// Protocol-level WebSocket PING frame. Browsers auto-reply with PONG
+    /// without application code running, so this probes TCP liveness without
+    /// contending with JSON-RPC traffic for the encrypt/send mutex.
+    Ping(Vec<u8>),
 }
 
 // JSON-RPC style request/response
@@ -754,20 +758,25 @@ where
         let mut ws_sender = ws_sender;
         let mut cipher: Option<HalfCipher> = None;
         while let Some(msg) = out_rx.recv().await {
-            let bytes: String = match msg {
-                Outbound::Plain(s) => s,
+            let frame = match msg {
+                Outbound::Plain(s) => Message::Text(s.into()),
                 Outbound::InitCipher(c) => { cipher = Some(c); continue; }
+                Outbound::Ping(data) => Message::Ping(data.into()),
                 Outbound::Encrypted(s) => {
                     if let Some(ref mut c) = cipher {
                         use base64::Engine;
-                        base64::engine::general_purpose::STANDARD.encode(c.encrypt(s.as_bytes()))
+                        Message::Text(
+                            base64::engine::general_purpose::STANDARD
+                                .encode(c.encrypt(s.as_bytes()))
+                                .into(),
+                        )
                     } else {
                         eprintln!("send [{}]: Encrypted before InitCipher — dropped", addr_for_send);
                         continue;
                     }
                 }
             };
-            if ws_sender.send(Message::Text(bytes.into())).await.is_err() {
+            if ws_sender.send(frame).await.is_err() {
                 break;
             }
         }
@@ -789,6 +798,36 @@ where
 
     // Start subscription polling task (enqueues to out_tx like any task)
     let sub_handle = tokio::spawn(subscription_loop(out_tx.clone(), subs.clone()));
+
+    // Start keepalive: server sends WS PING every 15s; browsers auto-reply
+    // with PONG in the WS layer without running app code, so this probes
+    // TCP liveness without contending for the encrypt/send mutex. If we
+    // haven't seen a PONG in PING_DEADLINE_SECS, assume the link is dead
+    // and tell the connection to tear down.
+    let last_pong_at = Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
+    const PING_INTERVAL_SECS: u64 = 15;
+    const PING_DEADLINE_SECS: u64 = 45;
+    let ping_handle = {
+        let out_tx = out_tx.clone();
+        let last_pong_at = last_pong_at.clone();
+        let shutdown_for_ping = shutdown.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(PING_INTERVAL_SECS));
+            tick.tick().await; // discard immediate first tick
+            loop {
+                tick.tick().await;
+                let elapsed = last_pong_at.lock().unwrap().elapsed().as_secs();
+                if elapsed > PING_DEADLINE_SECS {
+                    eprintln!("💀 ping deadline exceeded ({}s > {}s); tearing down", elapsed, PING_DEADLINE_SECS);
+                    shutdown_for_ping.notify_waiters();
+                    return;
+                }
+                if out_tx.send(Outbound::Ping(b"hb".to_vec())).is_err() {
+                    return; // send task gone
+                }
+            }
+        })
+    };
 
     while let Some(msg) = tokio::select! {
         m = receiver.next() => m,
@@ -952,19 +991,23 @@ where
                 });
             }
             Message::Close(_) => break,
-            Message::Ping(data) => {
-                // OS-level WS ping: respond with Pong inline (cheap, no cipher).
-                // Note: this still races on ws_sender which the send task owns.
-                // To keep things simple we let the client rely on application
-                // pings (ping RPC) which flow through out_tx; browser WS
-                // doesn't normally initiate protocol-level pings anyway.
-                let _ = out_tx.send(Outbound::Plain(String::from_utf8_lossy(&data).into_owned()));
+            Message::Ping(_) => {
+                // Browsers don't usually send WS PINGs (they only reply to
+                // ours). If some non-browser client does, we just ignore it
+                // here — the connection survives fine without an explicit
+                // Pong because our own keepalive going the other way is what
+                // we rely on.
+            }
+            Message::Pong(_) => {
+                // Reply to our own keepalive ping: mark the link as alive.
+                *last_pong_at.lock().unwrap() = std::time::Instant::now();
             }
             _ => {}
         }
     }
 
     sub_handle.abort();
+    ping_handle.abort();
     drop(out_tx); // close the channel so the send task finishes
     let _ = send_task.await;
     // Restore any windows this connection resized (tmux auto-fits to remaining clients)
