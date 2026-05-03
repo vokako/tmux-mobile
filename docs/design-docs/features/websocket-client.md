@@ -14,6 +14,16 @@ Custom WebSocket client (`ws.js`) with auto-reconnect, pending promise cleanup, 
   RPC timeouts force a disconnect and trigger the reconnect UI; the previous
   10 s / 10 s settings pushed detection latency to 20-30 s which users read
   as "the app is frozen")
+- **3-consecutive-timeout disconnect is gated on `pending.size === 0`.** If
+  a long RPC (typically `fs_download`) is still in flight, its single huge
+  response frame is almost certainly what's delaying the short polling RPCs
+  behind it on the shared WS send mutex — the link is alive, just
+  monopolized. We'd rather let the pollers fail individually and keep the
+  connection open. When the long RPC completes or times out, `pending.size`
+  drops to 0 and the normal disconnect check re-arms. This was added after
+  a WAN-only user report: downloads on LAN are fast enough that pollers
+  don't pile up, but on public internet the pollers time out mid-download
+  and used to force a spurious reconnect that aborted the transfer.
 - Long-running RPCs (`fs_download`, `fs_upload`) pass explicit `timeoutMs` so
   the tightened default does not abort legitimate large transfers
 - Activity-aware heartbeat: every inbound WS message stamps `lastRxAt`.
@@ -54,3 +64,12 @@ Custom WebSocket client (`ws.js`) with auto-reconnect, pending promise cleanup, 
   it: the heartbeat reads *any* recent inbound traffic as liveness proof
   (`lastRxAt`) and only pings when the wire is genuinely quiet. No RPC
   needs to declare itself "heavy".
+- Even with heartbeats happy, the *polling* RPCs that Terminal fires in the
+  background (`pane_command` every 3 s, `list_panes` every 5 s) are still
+  regular `call()`s and can independently trigger the "3 consecutive timeouts"
+  disconnect rule. On WAN, a 50 MB download response monopolizes the send
+  mutex long enough that 3 polling RPCs time out before the download frame
+  finishes — users saw the transfer abort with "disconnected" halfway
+  through. Fix: gate that disconnect on `pending.size === 0` so pollers
+  failing behind a long RPC don't kill the connection. When nothing is
+  pending and the link still silently fails, the disconnect still fires.

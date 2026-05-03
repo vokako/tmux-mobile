@@ -320,7 +320,20 @@ function call(method, params = {}, timeoutMs = RPC_TIMEOUT_MS) {
       pending.delete(id);
       rpcTimeouts++;
       window.__dbg?.(`ws: timeout method=${method} (${rpcTimeouts} consecutive)`);
-      if (rpcTimeouts >= 3) forceDisconnect();
+      // Only tear down the connection when consecutive timeouts *and* there
+      // is nothing else still in flight. If another RPC is still pending
+      // (e.g. a big download), its single huge response frame is almost
+      // certainly what's delaying our little polling RPCs — the link is
+      // alive, just momentarily monopolized. We'd rather let the pollers
+      // fail individually and keep the connection open. Real dead-link
+      // scenarios still trip: once the long RPC also fails or completes,
+      // the next idle window will re-check.
+      if (rpcTimeouts >= 3 && pending.size === 0) {
+        window.__dbg?.('ws: 3 consecutive timeouts with no pending RPC → forcing disconnect');
+        forceDisconnect();
+      } else if (rpcTimeouts >= 3) {
+        window.__dbg?.(`ws: 3 consecutive timeouts but ${pending.size} RPC still pending — staying connected`);
+      }
       reject(new Error('request timeout'));
     }, timeoutMs);
     pending.set(id, {
