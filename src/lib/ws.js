@@ -105,8 +105,9 @@ async function decryptMsg(b64) {
   return new TextDecoder().decode(pt);
 }
 
-function rejectAllPending() {
-  const err = new Error('disconnected');
+function rejectAllPending(reason) {
+  const err = new Error(reason || 'disconnected');
+  err.code = 'DISCONNECTED';
   for (const { reject: rej } of pending.values()) rej(err);
   pending.clear();
 }
@@ -116,7 +117,7 @@ export function connect(url, token) {
   if (ws) {
     try { ws.onclose = null; ws.onerror = null; ws.close(); } catch {}
     ws = null;
-    rejectAllPending();
+    rejectAllPending('superseded by new connect');
   }
   sessionCipher = null;
   clearInterval(heartbeatTimer);
@@ -177,7 +178,7 @@ export function connect(url, token) {
           window.__dbg?.(`heartbeat: ping failed #${pingFails}`);
           if (pingFails >= 2) {
             window.__dbg?.('heartbeat: 2 failures, forcing disconnect');
-            forceDisconnect();
+            forceDisconnect('heartbeat: 2 consecutive ping failures');
           }
         }).finally(() => { pingInFlight = false; });
       }, HEARTBEAT_INTERVAL_MS);
@@ -267,7 +268,7 @@ export function connect(url, token) {
       authed = false;
       ws = null;
       sessionCipher = null;
-      rejectAllPending();
+      rejectAllPending(wasAuthed ? 'connection lost' : 'connection closed during auth');
       window.__dbg?.(`ws: closed (wasAuthed=${wasAuthed})`);
       if (wasAuthed) onDisconnect?.();
     };
@@ -301,15 +302,15 @@ export function getHostname() {
 
 let rpcTimeouts = 0;
 
-function forceDisconnect() {
+function forceDisconnect(reason) {
   if (!ws) return;
-  window.__dbg?.('ws: forcing disconnect');
+  window.__dbg?.(`ws: forcing disconnect (${reason || 'unknown'})`);
   clearInterval(heartbeatTimer);
   heartbeatTimer = null;
   try { ws.onclose = null; ws.close(); } catch {}
   ws = null;
   sessionCipher = null;
-  rejectAllPending();
+  rejectAllPending(reason || 'forced disconnect');
   onDisconnect?.();
 }
 
@@ -334,7 +335,7 @@ function call(method, params = {}, timeoutMs = RPC_TIMEOUT_MS) {
       // the next idle window will re-check.
       if (rpcTimeouts >= 3 && pending.size === 0) {
         window.__dbg?.('ws: 3 consecutive timeouts with no pending RPC → forcing disconnect');
-        forceDisconnect();
+        forceDisconnect('3 consecutive RPC timeouts');
       } else if (rpcTimeouts >= 3) {
         window.__dbg?.(`ws: 3 consecutive timeouts but ${pending.size} RPC still pending — staying connected`);
       }
