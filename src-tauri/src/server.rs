@@ -844,7 +844,12 @@ where
                         cn.copy_from_slice(&client_nonce_bytes);
                         let key = derive_key(&token, &server_nonce, &cn);
                         let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&key).unwrap();
+                        // Bind proof to BOTH nonces so a captured proof from
+                        // a previous handshake can't be replayed: each
+                        // session has a fresh (server_nonce, client_nonce)
+                        // pair, and the MAC commits to both.
                         mac.update(&server_nonce);
+                        mac.update(&cn);
                         if mac.verify_slice(&proof_bytes).is_ok() {
                             authenticated = true;
                             auth_tracker.lock().await.remove(&addr.ip());

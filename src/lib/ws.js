@@ -67,7 +67,11 @@ async function computeProof(token, serverNonce, clientNonce) {
   const baseKey = await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits']);
   const keyBits = await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt, info: new TextEncoder().encode('tmux-mobile-e2e') }, baseKey, 256);
   const hmacKey = await crypto.subtle.importKey('raw', keyBits, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  const sig = await crypto.subtle.sign('HMAC', hmacKey, serverNonce);
+  // Bind proof to BOTH nonces (see server-side comment in handle auth).
+  const msg = new Uint8Array(serverNonce.length + clientNonce.length);
+  msg.set(serverNonce, 0);
+  msg.set(clientNonce, serverNonce.length);
+  const sig = await crypto.subtle.sign('HMAC', hmacKey, msg);
   return new Uint8Array(sig);
 }
 

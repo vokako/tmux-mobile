@@ -124,6 +124,7 @@ impl Client {
         let key = derive_key(token, &server_nonce, &client_nonce);
         let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&key).unwrap();
         mac.update(&server_nonce);
+        mac.update(&client_nonce);
         let proof = mac.finalize().into_bytes();
 
         // Step 3: send auth
@@ -401,5 +402,62 @@ async fn slow_rpc_does_not_block_fast_rpc() {
     // Drain the download response if it hasn't come yet.
     if order.len() < 5 {
         let _ = client.recv_response().await;
+    }
+}
+
+#[tokio::test]
+async fn auth_proof_must_bind_client_nonce() {
+    // Regression guard for the R2 hardening: a proof computed only over
+    // server_nonce (the previous formula) must be rejected. This ensures
+    // the server really requires the new commitment over both nonces.
+    let addr = spawn_server_once("test-token-6").await;
+    let url = format!("ws://{}/", addr);
+    let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+
+    // Receive server_nonce
+    let msg = ws.next().await.unwrap().unwrap();
+    let text = match msg {
+        Message::Text(t) => t.to_string(),
+        _ => panic!("text expected"),
+    };
+    let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let server_nonce_hex = v["server_nonce"].as_str().unwrap();
+    let server_nonce_vec = hex_decode(server_nonce_hex);
+    let mut server_nonce = [0u8; 16];
+    server_nonce.copy_from_slice(&server_nonce_vec);
+
+    // Build a proof using the OLD formula (server_nonce only).
+    let client_nonce: [u8; 16] = rand::random();
+    let key = derive_key("test-token-6", &server_nonce, &client_nonce);
+    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&key).unwrap();
+    mac.update(&server_nonce);
+    // NOTE: deliberately NOT updating with client_nonce.
+    let bad_proof = mac.finalize().into_bytes();
+
+    let auth = serde_json::json!({
+        "method": "auth",
+        "params": {
+            "client_nonce": hex_encode(&client_nonce),
+            "proof": hex_encode(&bad_proof),
+        }
+    });
+    ws.send(Message::Text(serde_json::to_string(&auth).unwrap().into()))
+        .await
+        .unwrap();
+
+    // Expect an error response + a close; server rejects the proof.
+    let resp = ws.next().await.unwrap().unwrap();
+    match resp {
+        Message::Text(t) => {
+            let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+            assert!(v["error"].is_object(), "expected error, got {:?}", v);
+            let msg = v["error"]["message"].as_str().unwrap_or("");
+            assert!(
+                msg.contains("proof") || msg.contains("auth"),
+                "unexpected error message: {}",
+                msg
+            );
+        }
+        other => panic!("unexpected frame: {:?}", other),
     }
 }
