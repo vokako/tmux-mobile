@@ -25,6 +25,11 @@ static CONN_ID_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 
 const MAX_AUTH_FAILURES: u32 = 5;
 const AUTH_LOCKOUT_SECS: u64 = 60;
+// Drop auth-tracker entries whose last activity is older than this (in
+// seconds). Otherwise a distributed scan from many IPs would grow the
+// HashMap unboundedly; each IP only needs to be remembered for as long
+// as the lockout could still apply.
+const AUTH_TRACKER_GC_AFTER_SECS: u64 = 600;
 const SUBSCRIPTION_POLL_MS: u64 = 200;
 const MAX_CAPTURE_FAILURES: u32 = 5;
 
@@ -680,9 +685,13 @@ fn handle_unsubscribe(params: &serde_json::Value, subs: &mut HashMap<String, Str
 pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker) {
     println!("📱 Client connected: {}", addr);
 
-    // Check if IP is locked out
+    // Check if IP is locked out, and opportunistically GC old entries so
+    // the tracker doesn't grow unbounded under a distributed scan.
     {
-        let tracker = auth_tracker.lock().await;
+        let mut tracker = auth_tracker.lock().await;
+        tracker.retain(|_ip, (_fails, since)| {
+            since.elapsed().as_secs() < AUTH_TRACKER_GC_AFTER_SECS
+        });
         if let Some((fails, since)) = tracker.get(&addr.ip()) {
             if *fails >= MAX_AUTH_FAILURES && since.elapsed().as_secs() < AUTH_LOCKOUT_SECS {
                 eprintln!("🚫 Rejected {} (locked out, {} failures)", addr, fails);
