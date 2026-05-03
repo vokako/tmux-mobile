@@ -734,6 +734,12 @@ where
     let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<Outbound>();
 
     // --- Send task ---
+    // shutdown: raised if the send task fails. The receiver uses it to
+    // break out of ws.recv() promptly so we don't sit in onmessage while
+    // responses are silently piling up in the out_rx queue (whose consumer
+    // is gone).
+    let shutdown = Arc::new(tokio::sync::Notify::new());
+    let shutdown_tx = shutdown.clone();
     let addr_for_send = addr;
     let send_task = tokio::spawn(async move {
         let mut ws_sender = ws_sender;
@@ -756,8 +762,10 @@ where
                 break;
             }
         }
-        // Channel closed or send failed — drain anything left (nothing to do,
-        // just return). The WS close is handled by the outer task.
+        // Channel closed OR ws.send failed. Either way, whoever's still
+        // writing to out_tx should stop as soon as possible — tell the
+        // receiver to bail.
+        shutdown_tx.notify_waiters();
     });
 
     // Step 1: Send server_nonce (plain, pre-cipher)
@@ -773,7 +781,10 @@ where
     // Start subscription polling task (enqueues to out_tx like any task)
     let sub_handle = tokio::spawn(subscription_loop(out_tx.clone(), subs.clone()));
 
-    while let Some(msg) = receiver.next().await {
+    while let Some(msg) = tokio::select! {
+        m = receiver.next() => m,
+        _ = shutdown.notified() => None,  // send task died — tear down
+    } {
         let msg = match msg {
             Ok(m) => m,
             Err(e) => {
