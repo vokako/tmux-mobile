@@ -15,11 +15,11 @@ use tokio::sync::Mutex;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 
 // Brute-force protection: track failed auth attempts per IP
-type AuthTracker = Arc<Mutex<HashMap<IpAddr, (u32, tokio::time::Instant)>>>;
+pub type AuthTracker = Arc<Mutex<HashMap<IpAddr, (u32, tokio::time::Instant)>>>;
 
 // Track which windows each connection has resized, so we can restore on disconnect.
 // Key = conn_id, Value = set of "session:window" targets that were resized.
-type ResizeTracker = Arc<std::sync::Mutex<HashMap<u64, std::collections::HashSet<String>>>>;
+pub type ResizeTracker = Arc<std::sync::Mutex<HashMap<u64, std::collections::HashSet<String>>>>;
 
 static CONN_ID_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
@@ -660,7 +660,7 @@ fn handle_unsubscribe(params: &serde_json::Value, subs: &mut HashMap<String, Str
     Response::ok(None, serde_json::json!({ "unsubscribed": target }))
 }
 
-async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker) {
+pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker) {
     println!("📱 Client connected: {}", addr);
 
     // Check if IP is locked out
