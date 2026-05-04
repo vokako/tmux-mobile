@@ -578,22 +578,13 @@
     const onTouchStart = (e) => {
       stopMomentum();
       touchId = e.touches[0].identifier; // track this finger
-      // Tap while selection active → copy if on selection, else just clear
+      // Tap while selection active → copy the selection and clear it.
+      // Tolerant hit-test: anywhere on the terminal triggers copy, not just
+      // inside the selected rectangle. Precise tap-on-selection was hard to
+      // hit on mobile and users reported tapping near a selection appearing
+      // to do nothing (the old path silently cleared without copying).
       if (isSelecting) {
-        const cell = touchToCell(e.touches[0].clientX, e.touches[0].clientY);
-        const bufRow = term.buffer.active.viewportY + cell.row;
-        // Hit-test: is tap within selected area?
-        let onSel = false;
-        if (selectionRange) {
-          const { sRow, sCol, eRow, eCol } = selectionRange;
-          if (bufRow >= sRow && bufRow <= eRow) {
-            if (sRow === eRow) onSel = cell.col >= sCol && cell.col <= eCol;
-            else if (bufRow === sRow) onSel = cell.col >= sCol;
-            else if (bufRow === eRow) onSel = cell.col <= eCol;
-            else onSel = true;
-          }
-        }
-        if (onSel && term.hasSelection()) {
+        if (term.hasSelection()) {
           const sel = term.getSelection();
           if (sel) {
             copyText(sel).then(ok => {

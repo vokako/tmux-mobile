@@ -12,13 +12,17 @@
 
 export async function copyText(text) {
   if (text == null) return false;
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
+  // Prefer the modern API. Requiring isSecureContext rejects Tauri's
+  // tauri://localhost + Android WebView's http://tauri.localhost in some
+  // versions even though writeText() would actually work, so we just try
+  // it and fall back on any thrown error.
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try {
       await navigator.clipboard.writeText(text);
       return true;
+    } catch {
+      // fall through
     }
-  } catch {
-    // fall through to the execCommand path
   }
   try {
     const ta = document.createElement('textarea');
