@@ -43,6 +43,22 @@
     debugEl.scrollTop = debugEl.scrollHeight;
   };
 
+  // Cmd+/- zoom for desktop app
+  if (window.__TAURI_INTERNALS__) {
+    let zoomLevel = parseFloat(localStorage.getItem('tmux_zoom') || '1');
+    document.documentElement.style.zoom = zoomLevel;
+    document.addEventListener('keydown', (e) => {
+      if (!e.metaKey && !e.ctrlKey) return;
+      if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomLevel = Math.min(2, zoomLevel + 0.1); }
+      else if (e.key === '-') { e.preventDefault(); zoomLevel = Math.max(0.5, zoomLevel - 0.1); }
+      else if (e.key === '0') { e.preventDefault(); zoomLevel = 1; }
+      else return;
+      document.documentElement.style.zoom = zoomLevel;
+      localStorage.setItem('tmux_zoom', zoomLevel);
+      setTimeout(() => window.dispatchEvent(new Event('terminal-refit')), 50);
+    });
+  }
+
   // Intercept external link clicks → open in system browser instead of in-app navigation
   document.addEventListener('click', (e) => {
     const a = e.target.closest('a[href]');
