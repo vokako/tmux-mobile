@@ -507,7 +507,7 @@
   .top-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     min-height: 28px;
   }
   .icon-btn {
@@ -540,7 +540,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 0 8px 0 12px;
+    padding: 0 6px 0 12px;
     height: 28px;
     background: var(--input-bg);
     border: 1px solid var(--border2);

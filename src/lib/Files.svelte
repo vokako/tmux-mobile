@@ -1302,15 +1302,19 @@
 <style>
   .files { display: flex; flex-direction: column; flex: 1; min-height: 0; background: var(--bg); }
 
-  /* Toolbar */
+  /* Toolbar — same vertical rhythm as the Terminal window-switcher bar
+     and the Sessions top-row (28 px buttons + 4 px padding = ~37 px total). */
   .toolbar {
-    display: flex; align-items: center; gap: 4px; padding: 6px 10px;
+    display: flex; align-items: center; gap: 4px; padding: 4px 8px;
     border-bottom: 1px solid var(--border); flex-shrink: 0;
   }
   .tool-btn {
-    padding: 8px; border: none; border-radius: 6px;
+    width: 28px; height: 28px;
+    padding: 0; border: none; border-radius: 7px;
     background: var(--surface2); color: var(--text2); cursor: pointer;
-    font-size: 12px; display: flex; align-items: center; gap: 4px; -webkit-tap-highlight-color: transparent;
+    font-size: 12px; display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    -webkit-tap-highlight-color: transparent;
   }
   .tool-btn:active { background: var(--accent-bg); color: var(--accent); }
   .tool-btn.tool-active { background: var(--accent-bg); color: var(--accent); }

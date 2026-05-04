@@ -1283,8 +1283,8 @@
      only handles positioning. */
   .win-collapsed-anchor {
     position: absolute;
-    top: 6px;
-    right: 6px;
+    top: 4px;
+    right: 4px;
     z-index: 10;
   }
 
@@ -1295,7 +1295,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 4px 4px 4px 8px;
+    padding: 4px 6px 4px 8px;
     border-bottom: 1px solid var(--border2);
     background: var(--surface);
     flex-shrink: 0;
@@ -1313,10 +1313,10 @@
   .win-bar-scroll::-webkit-scrollbar { display: none; }
   .win-bar-collapse {
     flex-shrink: 0;
-    width: 24px; height: 24px;
+    width: 28px; height: 28px;
     padding: 0;
     border: none;
-    border-radius: 6px;
+    border-radius: 999px;
     background: transparent;
     color: var(--text3);
     cursor: pointer;
