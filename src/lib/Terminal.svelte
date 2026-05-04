@@ -4,6 +4,7 @@
   import { WebLinksAddon } from '@xterm/addon-web-links';
   import ChatView from './ChatView.svelte';
   import Icon from './Icon.svelte';
+  import AgentChip from './AgentChip.svelte';
   import { t } from './i18n.svelte.js';
   import { detectParser } from './parsers.js';
   import { detectAgent, paneIsAgent, sessionHasAgent, AGENTS } from './agents.js';
@@ -1107,9 +1108,10 @@
         <div class="win-bar-scroll">
           {#each windows as w}
             {@const wAgent = detectAgent((w.current_command || '') + ' ' + (w.pane_title || ''))}
-            <button
-              class="win-chip"
-              class:active={String(w.window) === currentWindow}
+            <AgentChip
+              agent={wAgent}
+              label={wAgent ? '' : (w.current_command || w.window_name)}
+              variant={String(w.window) === currentWindow ? 'active' : 'default'}
               title={w.current_command || w.window_name}
               onclick={(e) => {
                 e.stopPropagation();
@@ -1122,38 +1124,38 @@
                   onSwitchPane(`${w.session}:${w.window}.${w.pane}`, w.current_command);
                 }
               }}
-            >
-              {#if wAgent}
-                <img class="win-ai-icon" class:claude={wAgent.tag === 'Claude'} src={wAgent.icon} alt={wAgent.tag} />
-              {:else}
-                <span class="win-chip-cmd">{w.current_command || w.window_name}</span>
-              {/if}
-            </button>
+            />
           {/each}
 
-          <button class="win-chip win-add" aria-label="New window" onclick={async (e) => {
-            e.stopPropagation();
-            try {
-              await newWindow(session);
-              const ps = await listPanes(session);
-              windowPanes = ps;
-              const p = ps[ps.length - 1];
-              if (p && onSwitchPane) {
-                document.activeElement?.blur();
-                touchScrolling = false;
-                const fh = window.__fullHeight?.() || window.innerHeight;
-                document.documentElement.style.setProperty('--app-height', fh + 'px');
-                document.documentElement.classList.remove('keyboard-open');
-                onSwitchPane(`${p.session}:${p.window}.${p.pane}`, p.current_command);
-              }
-            } catch {}
-          }}><Icon name="plus" size={12} /></button>
+          <AgentChip
+            variant="add"
+            iconName="plus"
+            title="New window"
+            onclick={async (e) => {
+              e.stopPropagation();
+              try {
+                await newWindow(session);
+                const ps = await listPanes(session);
+                windowPanes = ps;
+                const p = ps[ps.length - 1];
+                if (p && onSwitchPane) {
+                  document.activeElement?.blur();
+                  touchScrolling = false;
+                  const fh = window.__fullHeight?.() || window.innerHeight;
+                  document.documentElement.style.setProperty('--app-height', fh + 'px');
+                  document.documentElement.classList.remove('keyboard-open');
+                  onSwitchPane(`${p.session}:${p.window}.${p.pane}`, p.current_command);
+                }
+              } catch {}
+            }}
+          />
 
           {#if otherAgentSessions.length > 0}
             <span class="win-sep" aria-hidden="true"></span>
             {#each otherAgentSessions as o}
-              <button
-                class="win-chip cross"
+              <AgentChip
+                agent={o.agent}
+                label={o.name}
                 title={`${o.name}  (${o.agent.tag})`}
                 onclick={(e) => {
                   e.stopPropagation();
@@ -1166,10 +1168,7 @@
                     onSwitchPane(`${o.pane.session}:${o.pane.window}.${o.pane.pane}`, o.pane.current_command);
                   }
                 }}
-              >
-                <img class="win-ai-icon" class:claude={o.agent.tag === 'Claude'} src={o.agent.icon} alt={o.agent.tag} />
-                <span class="cross-name">{o.name}</span>
-              </button>
+              />
             {/each}
           {/if}
         </div>
@@ -1185,17 +1184,16 @@
         Collapsed state: a single chip in the top-right corner using the
         exact chip visual language from the expanded bar. Conceptually the
         switcher hasn't become "something else" — it has been compressed
-        to the right end of the bar. Positioned absolute so it doesn't
-        steal a row from the terminal viewport.
+        to the right end of the bar.
       -->
-      <button class="win-chip collapsed" onclick={() => { showWindowCmd = true; localStorage.setItem('tmux_winswitcher', '1'); }}>
-        {#if curAgent}
-          <img class="win-ai-icon" class:claude={curAgent.tag === 'Claude'} src={curAgent.icon} alt={curAgent.tag} />
-        {:else}
-          <span class="win-chip-cmd">{cur?.current_command || cur?.window_name || '?'}</span>
-        {/if}
-        <Icon name="chevron-down" size={10} />
-      </button>
+      <div class="win-collapsed-anchor">
+        <AgentChip
+          agent={curAgent}
+          label={curAgent ? '' : (cur?.current_command || cur?.window_name || '?')}
+          chevron="down"
+          onclick={() => { showWindowCmd = true; localStorage.setItem('tmux_winswitcher', '1'); }}
+        />
+      </div>
     {/if}
   {/if}
 
@@ -1280,28 +1278,24 @@
     position: relative;
   }
 
-  /* Collapsed state: a single chip in the top-right corner using the same
-     chip visual language as the expanded bar. Positioned absolute so it
-     does not steal a row from the terminal viewport. */
-  .win-chip.collapsed {
+  /* Collapsed: single chip floating top-right. The chip itself is an
+     <AgentChip>, so its size/color come from that component. This wrapper
+     only handles positioning. */
+  .win-collapsed-anchor {
     position: absolute;
     top: 6px;
     right: 6px;
     z-index: 10;
-    gap: 4px;
-    padding: 5px 6px 5px 8px;
-    color: var(--text2);
   }
-  .win-chip.collapsed:active { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
 
   /* Expanded: horizontal tab bar pinned to the top of the Terminal view.
      Holds current-session windows AND cross-session AI chips in one scroll
-     strip. Chip visual language matches the Sessions page chips-row. */
+     strip. Chip visuals live in AgentChip. */
   .win-bar {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 6px 6px 10px;
+    gap: 4px;
+    padding: 4px 4px 4px 8px;
     border-bottom: 1px solid var(--border2);
     background: var(--surface);
     flex-shrink: 0;
@@ -1319,10 +1313,10 @@
   .win-bar-scroll::-webkit-scrollbar { display: none; }
   .win-bar-collapse {
     flex-shrink: 0;
-    width: 28px; height: 28px;
+    width: 24px; height: 24px;
     padding: 0;
     border: none;
-    border-radius: 7px;
+    border-radius: 6px;
     background: transparent;
     color: var(--text3);
     cursor: pointer;
@@ -1331,77 +1325,13 @@
   }
   .win-bar-collapse:active { color: var(--accent); background: var(--surface2); }
 
-  .win-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 10px 5px 8px;
-    border: 1px solid var(--border2);
-    border-radius: 999px;
-    background: var(--input-bg);
-    color: var(--text2);
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    flex-shrink: 0;
-    white-space: nowrap;
-    max-width: 140px;
-    -webkit-tap-highlight-color: transparent;
-    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
-  }
-  .win-chip:active {
-    background: var(--accent-bg);
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-  .win-chip.active {
-    background: var(--accent-bg);
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-  .win-chip.win-add {
-    padding: 5px 9px;
-    color: var(--text3);
-    background: transparent;
-    border-style: dashed;
-  }
-  .win-chip.win-add:active { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
-  .win-chip-cmd {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-size: 11px;
-  }
-  /* Cross-session chip: slightly muted, to read as "other" without being invisible */
-  .win-chip.cross {
-    font-family: inherit;
-    color: var(--text2);
-    background: transparent;
-    border-color: var(--border2);
-  }
-  .win-chip.cross:active {
-    background: var(--accent-bg);
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-  .cross-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 96px;
-  }
   .win-sep {
     flex-shrink: 0;
     width: 1px;
-    height: 18px;
+    height: 14px;
     background: var(--border2);
     margin: 0 2px;
   }
-
-  .win-ai-icon { height: 14px; width: auto; flex-shrink: 0; }
-  .win-chip .win-ai-icon { opacity: 0.6; }
-  .win-chip.active .win-ai-icon { opacity: 1; }
-  .win-chip.cross .win-ai-icon { opacity: 1; }
-  .win-ai-icon.claude { filter: brightness(0.9); }
 
   .input-status {
     display: flex;

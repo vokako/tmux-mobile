@@ -8,24 +8,23 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
 - Shortcut buttons: Esc, ^C, ^D, Tab, arrows — with long-press repeat
 - Keyboard toggle button (show/hide on-screen keyboard)
 - Collapsible window switcher:
-  - **Collapsed**: the bar compresses to a single chip in the top-right
-    corner, using the same chip visual language as the expanded bar
-    (same border, same pill shape, same colors). Shows the current
-    window's agent icon (or its command name) plus a chevron-down
-    indicator. Positioned absolute so it does not steal a row from the
-    terminal viewport.
+  - **Collapsed**: a single chip in the top-right corner (uses the shared
+    AgentChip component — same visual language as every other chip in the
+    app). Shows the current window's agent icon or command name plus a
+    small chevron-down indicator. Positioned absolute so it does not
+    steal a row from the terminal viewport.
   - **Expanded**: horizontal tab bar pinned to the top of the Terminal
     view. Holds chips for (1) every window in the current session,
     (2) a `+ new window` button, (3) a vertical separator, (4) up to 5
     most-recently-opened AI sessions (Kiro/Claude/OpenClaw) as chips.
     Scrolls horizontally. A chevron-up button on the right collapses
     the bar back into the single chip.
+  - All chips in both states are the same `AgentChip` component — same
+    height, same padding, same font. The switcher has one size in its
+    expanded state and a smaller footprint in its collapsed state, not
+    two different visual languages.
   - State (collapsed vs expanded) is persisted in localStorage.
-  - The collapsed chip and every expanded-bar chip share one visual
-    language — there is no "switch mode" that replaces a floating glass
-    button with a different kind of widget. Conceptually the switcher
-    has been *compressed to the right end of the bar*, not replaced
-    with a different surface.
+- Floating buttons: scroll-to-bottom (frosted glass style)
 - Floating buttons: scroll-to-bottom (frosted glass style)
 - Status bar: session:pane and running command
 

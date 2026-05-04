@@ -53,7 +53,10 @@ Plus a `+ Window` button at the end of the pane list.
 ### Bottom bar
 - **New Session** — expands an inline form with session name, working-dir
   picker, optional startup command with Kiro/Claude presets.
-- **Refresh** icon (also reachable via pull-to-refresh on mobile).
+- **Refresh** icon. Pull-to-refresh was removed: it was a custom
+  touch-handler implementation and on top of a scrolling list it conflicted
+  too often with ordinary vertical scrolling near the top edge. A tap on
+  the refresh button is explicit, reliable, and hits the same code path.
 
 ## Interactions
 
@@ -62,8 +65,12 @@ Plus a `+ Window` button at the end of the pane list.
   navigates directly to Terminal with that pane.
 - **Multi-window session** → tap the session row → expands the pane list in
   place. Tap again to collapse. Tap any pane to navigate.
-- **MRU chip** → single tap → opens the session at its primary pane (same
-  rule as a single-pane session row).
+- **MRU chip** → single tap → opens the session at its *primary AI pane*
+  (the first pane running a known agent CLI, falling back to the first
+  pane). **Chips never toggle the inline pane list** — the chip strip is
+  the fast-switch surface, so a chip tap must move the user to the
+  terminal, not leave them on the Sessions page with an unexpected row
+  expansion elsewhere.
 
 ### Searching
 - Type in the search box → list filters instantly. Matches highlight by
@@ -80,11 +87,6 @@ Plus a `+ Window` button at the end of the pane list.
 - Clicking the row instead of the kill button during confirm state activates
   the session, **not** kill. Kill must be an explicit second tap on the kill
   button itself.
-
-### Pull to refresh (mobile)
-- Drag down from the top of the list → indicator rotates with distance →
-  releases above 60px threshold to trigger refresh → check-mark animation
-  on success.
 
 ## API Calls
 - `list_sessions` — sessions with `last_opened` annotation.

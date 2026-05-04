@@ -1,6 +1,7 @@
 <script>
   import { listSessions, listPanes, newSession, killSession, newWindow, killWindow, fsList } from './ws.js';
   import Icon from './Icon.svelte';
+  import AgentChip from './AgentChip.svelte';
   import { t } from './i18n.svelte.js';
   import { detectAgent, sessionHasAgent, AGENTS } from './agents.js';
 
@@ -32,13 +33,7 @@
   let confirmKill = $state(null);       // session name
   let confirmKillWindow = $state(null); // "session:window"
 
-  // Pull-to-refresh
-  let pullStartY = 0;
-  let pullDist = $state(0);
-  let pulling = $state(false);
   let refreshing = $state(false);
-  let refreshDone = $state(false);
-  let canPull = false;
 
   // ─── Helpers ───────────────────────────────────────────
   const AGENT_BY_TAG = new Map(AGENTS.map(a => [a.tag, a]));
@@ -128,6 +123,17 @@
       return;
     }
     const p = ps[0];
+    if (!p) return;
+    openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command);
+  }
+  // Chip click is always a direct-open, even for multi-window sessions.
+  // The chip is an MRU fast-switch surface — toggling a row's expansion
+  // elsewhere on the page would leave the user wondering what happened.
+  // We pick the most-informative pane: first AI pane, else first pane.
+  function chipOpen(s) {
+    const ps = panes[s.name] || [];
+    const aiPane = ps.find(p => detectAgent((p.current_command || '') + ' ' + (p.pane_title || '')));
+    const p = aiPane || ps[0];
     if (!p) return;
     openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command);
   }
@@ -255,50 +261,12 @@
   // Auto-expand during search so panes matching the query are visible.
   let isSearching = $derived(!!query.trim());
 
-  // ─── Pull-to-refresh ───────────────────────────────────
-  function onPullStart(e) {
-    pullStartY = e.touches[0].clientY; pulling = false; pullDist = 0;
-    canPull = sessionsEl && sessionsEl.scrollTop <= 0;
-  }
-  function onPullMove(e) {
-    if (!canPull || refreshing) return;
-    const dy = e.touches[0].clientY - pullStartY;
-    if (dy > 10) { pulling = true; pullDist = Math.min(100, dy * 0.5); }
-    else if (dy < -5) { canPull = false; }
-  }
-  function onPullEnd() {
-    if (pulling && pullDist >= 60) {
-      refreshing = true;
-      pullDist = 60;
-      refresh().finally(() => {
-        refreshing = false;
-        refreshDone = true;
-        setTimeout(() => { refreshDone = false; pullDist = 0; }, 600);
-      });
-    } else {
-      pullDist = 0;
-    }
-    pulling = false;
-  }
-
   function scrollIntoView(el) {
     setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'end' }), 50);
   }
 </script>
 
-<div class="sessions" bind:this={sessionsEl} ontouchstart={onPullStart} ontouchmove={onPullMove} ontouchend={onPullEnd}>
-  {#if pullDist > 0}
-    <div class="pull-indicator" style="height:{pullDist}px">
-      {#if refreshDone}
-        <svg class="pull-done" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-      {:else}
-        <svg class="pull-arrow" class:pull-spin={refreshing} style="transform:rotate({refreshing ? 0 : Math.min(pullDist / 60 * 180, 180)}deg);opacity:{Math.min(pullDist / 30, 1)}" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-        </svg>
-      {/if}
-    </div>
-  {/if}
-
+<div class="sessions" bind:this={sessionsEl}>
   <!-- Search bar -->
   <div class="search-bar">
     <Icon name="search" size={14} />
@@ -322,10 +290,11 @@
     <div class="chips-row">
       {#each mruChips as s}
         {@const sum = sessionSummary(s)}
-        <button class="chip" onclick={() => activateSession(s)}>
-          <img class="chip-ai" class:claude={sum.ai === 'Claude'} src={aiIcon(sum.ai)} alt={sum.ai} />
-          <span class="chip-name">{s.name}</span>
-        </button>
+        <AgentChip
+          agent={AGENT_BY_TAG.get(sum.ai)}
+          label={s.name}
+          onclick={() => chipOpen(s)}
+        />
       {/each}
     </div>
   {/if}
@@ -493,10 +462,10 @@
 
 <style>
   .sessions {
-    padding: 12px 14px 16px;
+    padding: 10px 12px 14px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
     overflow-y: auto;
     flex: 1;
     -webkit-overflow-scrolling: touch;
@@ -525,8 +494,8 @@
     border: none;
     outline: none;
     background: transparent;
-    padding: 10px 0;
-    font-size: 14px;
+    padding: 8px 0;
+    font-size: 13px;
     color: var(--text);
     -webkit-appearance: none;
   }
@@ -556,38 +525,6 @@
     padding-right: 14px;
   }
   .chips-row::-webkit-scrollbar { display: none; }
-  .chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 10px 6px 8px;
-    border: 1px solid var(--border2);
-    border-radius: 999px;
-    background: var(--input-bg);
-    color: var(--text2);
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    flex-shrink: 0;
-    white-space: nowrap;
-    max-width: 140px;
-    -webkit-tap-highlight-color: transparent;
-    transition: all 0.15s ease;
-  }
-  .chip:active {
-    background: var(--accent-bg);
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-  .chip-ai {
-    width: 14px; height: 14px;
-    flex-shrink: 0;
-  }
-  .chip-ai.claude { width: 16px; height: 16px; }
-  .chip-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
 
   /* ─── Session list ───────────────────────────────────── */
   .list {
@@ -997,26 +934,4 @@
   }
   .create-btn:active:not(:disabled) { opacity: 0.8; }
   .create-btn:disabled { opacity: 0.3; cursor: default; }
-
-  /* ─── Pull-to-refresh ──────────────────────────────── */
-  .pull-indicator {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--accent);
-    flex-shrink: 0;
-    overflow: hidden;
-    transition: height 0.25s ease;
-  }
-  .pull-arrow { transition: opacity 0.15s; }
-  .pull-done {
-    color: var(--status-ok);
-    animation: pull-pop 0.3s ease;
-  }
-  @keyframes pull-pop {
-    0% { transform: scale(0.5); opacity: 0; }
-    100% { transform: scale(1); opacity: 1; }
-  }
-  .pull-spin { animation: pull-rotate 0.6s linear infinite; }
-  @keyframes pull-rotate { to { transform: rotate(360deg) !important; } }
 </style>

@@ -201,3 +201,40 @@ General rule for collapse/expand animations: the collapsed state should
 look like a minimum-size version of the expanded state, not a separate
 affordance. Chevron icons (down = expand, up = collapse) convey direction
 without needing a new visual language.
+
+### One chip, one component
+After the first horizontal-bar draft, chip styling was duplicated between
+Sessions.svelte and Terminal.svelte with slightly different sizing rules.
+Inevitable drift: one page's chip looked noticeably bigger than the
+other, the cross-session chip had a different font than the current-
+session chip, etc. Extracted `src/lib/AgentChip.svelte` — one component
+that holds all chip visuals (size, padding, border, font, agent icon,
+optional chevron, optional label). Consumer pages pick a variant and
+pass props; they cannot accidentally diverge on spacing.
+
+This also makes future tweaks cheap: moving chip size down from 28 px to
+24 px touched one file instead of three.
+
+### Do not hand-roll pull-to-refresh on a scrollable list
+The original Sessions page had a hand-written touchstart/move/end pull-
+to-refresh. It mis-fired whenever the user tried to scroll up near the
+top of the list. The gesture was ambiguous — "scroll a bit past the top"
+vs "pull to refresh" — and the 60 px / 10 px threshold we chose worked
+most of the time but produced the ~30 % "the indicator is dangling
+halfway, is it going to refresh or not?" bug the user noticed.
+
+Removed entirely. The explicit refresh button in the bottom bar is
+reliable, discoverable, and takes one tap. If a future version wants
+pull-to-refresh back, it should come from a tested library — not hand-
+written gesture detection. On a list that fits on one screen the button
+is the right primitive anyway.
+
+### Chips never toggle inline rows
+First draft had MRU chips call the same `activateSession(s)` handler as
+the session row itself, which (for a multi-window session) toggled the
+row's inline pane list. Click a chip at the top, a row somewhere down in
+the list silently changed shape. Classic action-at-a-distance bug. Fixed
+by giving chips their own handler (`chipOpen`) that always navigates to
+a concrete pane — preferring a pane that has an agent running, falling
+back to the first pane. A chip tap should ALWAYS take the user
+somewhere; never "do something quietly".
