@@ -133,6 +133,19 @@
   // elsewhere on the page would leave the user wondering what happened.
   // We pick the most-informative pane: first AI pane, else first pane.
   function chipOpen(s) {
+    // If this chip represents the currently-active session, return to the
+    // exact pane the user was viewing (not whichever AI pane the summary
+    // picked). Tapping the active chip = "go back to Terminal".
+    if (activeTarget.startsWith(s.name + ':')) {
+      const parts = activeTarget.split(':')[1]?.split('.') || [];
+      const win = parseInt(parts[0], 10);
+      const pane = parseInt(parts[1], 10);
+      const ps = panes[s.name] || [];
+      const p = ps.find(x => x.window === win && x.pane === pane) || ps[0];
+      if (!p) return;
+      openTerminal(s.name, activeTarget, p.current_command);
+      return;
+    }
     const ps = panes[s.name] || [];
     const aiPane = ps.find(p => detectAgent((p.current_command || '') + ' ' + (p.pane_title || '')));
     const p = aiPane || ps[0];
@@ -218,20 +231,24 @@
   });
 
   // ─── Derived: filtered + MRU chips ────────────────────
-  // MRU chips: top N AI sessions by last_opened (excluding the currently
-  // active one). AI-only because the whole point of chips is fast switching
-  // between parallel coding-agent sessions — plain zsh/node/vim sessions
-  // clutter this list and you use the full list below to reach them.
+  // MRU chips: up to N AI sessions (Kiro/Claude/…) by last_opened,
+  // INCLUDING the currently-active one — the active session is pinned
+  // first and highlighted so the user can see "I am here". Tapping it
+  // returns to the Terminal view. AI-only filter: plain zsh/node/vim
+  // sessions clutter the fast-switch surface and are still reachable
+  // via the search bar or the full list.
   const MRU_CHIP_MAX = 5;
   let mruChips = $derived.by(() => {
     const activeName = activeTarget.split(':')[0];
-    return sessions
-      .filter(s =>
-        s.last_opened &&
-        s.name !== activeName &&
-        sessionHasAgent(panes[s.name])
-      )
-      .slice(0, MRU_CHIP_MAX);
+    const eligible = sessions.filter(s =>
+      sessionHasAgent(panes[s.name]) &&
+      (s.name === activeName || s.last_opened)
+    );
+    const active = eligible.find(s => s.name === activeName);
+    const rest = eligible
+      .filter(s => s.name !== activeName)
+      .slice(0, MRU_CHIP_MAX - (active ? 1 : 0));
+    return active ? [active, ...rest] : rest;
   });
 
   // Filter list by query. Matches against: session name, window name,
@@ -319,9 +336,11 @@
         <div class="chips-row">
           {#each mruChips as s}
             {@const sum = sessionSummary(s)}
+            {@const isActive = activeTarget.startsWith(s.name + ':')}
             <AgentChip
               agent={AGENT_BY_TAG.get(sum.ai)}
               label={s.name}
+              variant={isActive ? 'active' : 'default'}
               onclick={() => chipOpen(s)}
             />
           {/each}
