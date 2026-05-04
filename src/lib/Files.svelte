@@ -23,6 +23,7 @@
   import mermaid from 'mermaid';
   import Icon from './Icon.svelte';
   import { t } from './i18n.svelte.js';
+  import { copyText } from './clipboard.js';
   import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsDownloadHttp, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref, fsConvert } from './ws.js';
 
   // Tauri plugin imports (tree-shaken in browser builds)
@@ -796,7 +797,7 @@
   let copyToast = $state(false);
   let copyTimer;
   async function copyPath(path) {
-    try { await navigator.clipboard.writeText(path); } catch {}
+    await copyText(path);
     clearTimeout(copyTimer);
     copyToast = true;
     copyTimer = setTimeout(() => copyToast = false, 1200);

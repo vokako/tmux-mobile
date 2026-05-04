@@ -8,6 +8,7 @@
   import { t } from './i18n.svelte.js';
   import { detectParser } from './parsers.js';
   import { detectAgent, paneIsAgent, sessionHasAgent, AGENTS } from './agents.js';
+  import { copyText } from './clipboard.js';
 
   // Timing constants
   const PANE_COMMAND_POLL_MS = 3000;
@@ -594,7 +595,11 @@
         }
         if (onSel && term.hasSelection()) {
           const sel = term.getSelection();
-          if (sel) navigator.clipboard.writeText(sel).then(() => showToast(t('copied'))).catch(() => {});
+          if (sel) {
+            copyText(sel).then(ok => {
+              showToast(ok ? t('copied') : t('copyFailed'));
+            });
+          }
         }
         term.clearSelection();
         isSelecting = false;

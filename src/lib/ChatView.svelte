@@ -2,6 +2,7 @@
   import { detectParser, parseMessages, stripAnsi } from './parsers.js';
   import Icon from './Icon.svelte';
   import { t } from './i18n.svelte.js';
+  import { copyText } from './clipboard.js';
 
   let { content = '', onSendKeys = null, command = '', fontSize = 14 } = $props();
 
@@ -272,7 +273,7 @@
     if (copyMsg !== null) copyTimer = setTimeout(() => copyMsg = null, 3000);
   }
   async function doCopy(text) {
-    try { await navigator.clipboard.writeText(text); } catch {}
+    await copyText(text);
     copiedMsg = copyMsg;
     setTimeout(() => { copiedMsg = null; copyMsg = null; }, 1000);
   }

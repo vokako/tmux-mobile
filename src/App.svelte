@@ -4,6 +4,7 @@
   import Terminal from './lib/Terminal.svelte';
   import Files from './lib/Files.svelte';
   import Icon from './lib/Icon.svelte';
+  import { copyText } from './lib/clipboard.js';
   import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS } from './lib/ws.js';
   import { t, i18n, setLocale } from './lib/i18n.svelte.js';
 
@@ -671,7 +672,7 @@
         document.addEventListener('touchend', onEnd);
       }}
     >
-      <div class="debug-header">DEBUG <button onclick={() => { if (debugEl) { navigator.clipboard.writeText(debugEl.innerText).catch(() => {}); } }}>copy</button> <button onclick={() => { if (debugEl) debugEl.innerHTML = ''; }}>clear</button> <button onclick={() => { debugMode = false; localStorage.removeItem('tmux_debug'); }}>✕</button></div>
+      <div class="debug-header">DEBUG <button onclick={() => { if (debugEl) copyText(debugEl.innerText); }}>copy</button> <button onclick={() => { if (debugEl) debugEl.innerHTML = ''; }}>clear</button> <button onclick={() => { debugMode = false; localStorage.removeItem('tmux_debug'); }}>✕</button></div>
       <div class="debug-content" bind:this={debugEl}></div>
     </div>
   {/if}
