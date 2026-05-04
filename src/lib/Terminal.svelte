@@ -12,7 +12,9 @@
   const WINDOW_LIST_POLL_MS = 5000;
   const RESIZE_DEBOUNCE_MS = 300;
   const KB_RESIZE_DELAY_MS = 100;
-  const RESIZE_PENDING_TTL_MS = 800;
+  // Max wait for server to echo our resize. If never confirmed (external resize
+  // or slow tmux), client falls back to trusting server-reported dimensions.
+  const RESIZE_CONFIRM_TIMEOUT_MS = 5000;
   const LONG_PRESS_MS = 500;
   const TOUCH_END_DELAY_MS = 500;
 
@@ -35,6 +37,7 @@
   let termEl;
   let term;
   let termAtBottom = $state(true);
+  let hasNewContent = $state(false); // set when new output arrives while user is scrolled up
   let toastMsg = $state('');
   const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
   let kbBlurTimer = null;
@@ -166,12 +169,21 @@
     return () => clearInterval(id);
   });
 
+  // Read xterm's actual rendered cell dimensions (falls back to font-size-based estimate
+  // before first paint). Single source of truth for calcFit / touch mapping / momentum scroll.
+  function cellSize(t) {
+    if (!t) return { w: 0, h: 0 };
+    const core = t._core;
+    return {
+      w: core?._renderService?.dimensions?.css?.cell?.width || (t.options.fontSize * CELL_W_RATIO),
+      h: core?._renderService?.dimensions?.css?.cell?.height || (t.options.fontSize * CELL_H_RATIO),
+    };
+  }
+
   // Calculate optimal cols/rows based on current container size
   function calcFit() {
     if (!term || !termEl) return null;
-    const core = term._core;
-    const cellW = core?._renderService?.dimensions?.css?.cell?.width || (term.options.fontSize * CELL_W_RATIO);
-    const cellH = core?._renderService?.dimensions?.css?.cell?.height || (term.options.fontSize * CELL_H_RATIO);
+    const { w: cellW, h: cellH } = cellSize(term);
     const w = termEl.clientWidth;
     const h = termEl.clientHeight;
     if (!w || !h || !cellW || !cellH) return null;
@@ -179,7 +191,9 @@
   }
 
   let touchScrolling = false; // set by touch handler, pauses content updates
-  let resizePendingTs = 0; // timestamp of last local resize, guards against stale server dimensions
+  // Resize confirmation: after local resize, we expect server to echo cursor.w/cursor.h
+  // matching pendingCols/pendingRows. Until confirmed, ignore server dims (stale).
+  let pendingCols = 0, pendingRows = 0, pendingResizeTs = 0;
 
   // Count lines without allocating a split array
   function countLines(s) { let n = 1; for (let i = 0; i < s.length; i++) if (s[i] === '\n') n++; return n; }
@@ -285,6 +299,26 @@
     return _hslToRgb(h, s, isDark ? HSL_L_FG_DARK : HSL_L_FG_LIGHT);
   }
 
+  // Compute xterm row (1-based) + required padding for cursor placement.
+  // Shared by full-rewrite and cursor-only paths to ensure they stay in sync.
+  function computeCursorLayout(content, cursor, rows) {
+    const N = countLines(content);
+    const trailing = cursor.t || 0;
+    const paneStart = Math.max(0, N + trailing - cursor.h);
+    const cursorLine = paneStart + cursor.y;
+    const needAfter = Math.max(0, cursorLine + 1 - N);
+    const contentLines = N + needAfter;
+    const topPadCount = contentLines < rows ? rows - contentLines : 0;
+    const totalWritten = topPadCount + contentLines;
+    const sb = Math.max(0, totalWritten - rows);
+    return {
+      row: topPadCount + cursorLine - sb + 1,
+      topPad: topPadCount > 0 ? '\n'.repeat(topPadCount) : '',
+      afterPad: needAfter > 0 ? '\n'.repeat(needAfter) : '',
+    };
+  }
+
+  // Write content + position cursor in xterm.js
   let _colorCacheIn = '', _colorCacheOut = '', _colorCacheTheme = '';
   function adaptColors(text) {
     if (text === _colorCacheIn && theme === _colorCacheTheme) return _colorCacheOut;
@@ -309,44 +343,32 @@
 
   function writeToXterm(content, cursor) {
     if (!term || touchScrolling) return;
-    if (cursor?.w && cursor?.h && (term.cols !== cursor.w || term.rows !== cursor.h)) {
-      // Don't let stale server dimensions revert a recent local resize
-      if (!resizePendingTs || Date.now() - resizePendingTs > RESIZE_PENDING_TTL_MS) {
+    // Reconcile terminal dimensions with server-reported ones.
+    // If we have a pending local resize, only clear it when server echoes matching dims;
+    // otherwise ignore stale dims. If no pending (or expired), trust server.
+    if (cursor?.w && cursor?.h) {
+      const pendingActive = pendingResizeTs && Date.now() - pendingResizeTs < RESIZE_CONFIRM_TIMEOUT_MS;
+      if (pendingActive) {
+        if (cursor.w === pendingCols && cursor.h === pendingRows) {
+          pendingResizeTs = 0; // confirmed
+        }
+        // else: stale, ignore
+      } else if (term.cols !== cursor.w || term.rows !== cursor.h) {
         term.resize(cursor.w, cursor.h);
-        resizePendingTs = 0;
+        pendingResizeTs = 0;
       }
-    } else if (resizePendingTs > 0) {
-      resizePendingTs = 0; // server confirmed new dimensions
     }
     const buf = term.buffer.active;
     const atBottom = buf.viewportY >= buf.baseY;
     const prevViewport = buf.viewportY;
 
-    const N = countLines(content);
-    const trailing = cursor?.t || 0;
-
-    // trailing = empty lines trimmed from capture, need to add back
-    let cursorSeq = '';
-    let afterPad = '';
-    let topPad = '';
+    let cursorSeq = '', topPad = '', afterPad = '';
     if (cursor) {
-      const paneStart = Math.max(0, N + trailing - cursor.h);
-      const cursorLine = paneStart + cursor.y;
-      // Only pad enough after content to reach cursor, not all trailing
-      const needAfter = Math.max(0, cursorLine + 1 - N);
-      afterPad = needAfter > 0 ? '\n'.repeat(needAfter) : '';
-      // Total visible content lines
-      const contentLines = N + needAfter;
-      // Pad top so visible pane area fills the screen from bottom
-      if (contentLines < term.rows) {
-        topPad = '\n'.repeat(term.rows - contentLines);
-      }
-      const topPadCount = topPad.length;
-      const totalWritten = topPadCount + contentLines;
-      const sb = Math.max(0, totalWritten - term.rows);
-      const row = topPadCount + cursorLine - sb + 1;
-      if (row > 0 && row <= term.rows) {
-        cursorSeq = `\x1b[${row};${cursor.x + 1}H`;
+      const layout = computeCursorLayout(content, cursor, term.rows);
+      topPad = layout.topPad;
+      afterPad = layout.afterPad;
+      if (layout.row > 0 && layout.row <= term.rows) {
+        cursorSeq = `\x1b[${layout.row};${cursor.x + 1}H`;
       }
     }
 
@@ -364,7 +386,7 @@
   // xterm.js setup + subscription
   $effect(() => {
     touchScrolling = false; // reset on pane switch
-    resizePendingTs = 0;
+    pendingCols = 0; pendingRows = 0; pendingResizeTs = 0;
     kbLocked = true;
     const estCellW = fontSize * CELL_W_RATIO;
     const estCellH = fontSize * CELL_H_RATIO;
@@ -458,11 +480,11 @@
 
     let lastContent = '';
     let lastCursor = null;
-    let endTouchScrollTimer = null;
+    // Uses outer endTouchScrollTimer so unlockKeyboard() and effect cleanup can clear it.
     function endTouchScroll() {
       touchScrolling = false;
       endTouchScrollTimer = null;
-      if (lastContent) writeToXterm(lastContent, lastCursor);
+      if (lastContent && termAtBottom) writeToXterm(lastContent, lastCursor);
     }
     function scheduleEndTouchScroll(ms) {
       clearTimeout(endTouchScrollTimer);
@@ -472,9 +494,7 @@
     // Helper: convert touch coordinates to terminal cell (col, row in viewport)
     function touchToCell(clientX, clientY) {
       const rect = termEl.getBoundingClientRect();
-      const core = term._core;
-      const cellW = core?._renderService?.dimensions?.css?.cell?.width || (term.options.fontSize * CELL_W_RATIO);
-      const cellH = core?._renderService?.dimensions?.css?.cell?.height || (term.options.fontSize * CELL_H_RATIO);
+      const { w: cellW, h: cellH } = cellSize(term);
       return {
         col: Math.min(term.cols - 1, Math.max(0, Math.floor((clientX - rect.left) / cellW))),
         row: Math.min(term.rows - 1, Math.max(0, Math.floor((clientY - rect.top) / cellH))),
@@ -498,7 +518,7 @@
     let touchY = 0, touchStartY = 0, accumulatedDy = 0, longPressTimer = null, didScroll = false;
     let lastMoveTime = 0, momentumId = null, totalDist = 0;
     let velocitySamples = []; // recent velocity samples for smoothing
-    const lineHeight = () => (termEl?.clientHeight || 384) / (term?.rows || 24);
+    const lineHeight = () => cellSize(term).h || (fontSize * CELL_H_RATIO);
 
     let onScrollbar = false, scrollbarStartY = 0, scrollbarStartViewport = 0;
     let isSelecting = false, selectionAnchor = null, selectionRange = null;
@@ -748,7 +768,13 @@
 
     term.onScroll(() => {
       const buf = term.buffer.active;
+      const wasAtBottom = termAtBottom;
       termAtBottom = buf.viewportY >= buf.baseY;
+      // Returning to bottom → flush the latest snapshot we deferred while scrolled up
+      if (!wasAtBottom && termAtBottom && lastContent && !touchScrolling) {
+        writeToXterm(lastContent, lastCursor);
+      }
+      if (termAtBottom) hasNewContent = false;
     });
 
     // Resize tmux pane to fit screen
@@ -760,7 +786,9 @@
       lastFitCols = fit.cols;
       lastFitRows = fit.rows;
       if (fit.cols === term.cols && fit.rows === term.rows) return;
-      resizePendingTs = Date.now();
+      pendingCols = fit.cols;
+      pendingRows = fit.rows;
+      pendingResizeTs = Date.now();
       resizePane(target, fit.cols, fit.rows).catch(() => {});
       term.resize(fit.cols, fit.rows);
       // Immediately rewrite content so display is clean during the ~200ms server catch-up
@@ -820,23 +848,28 @@
     };
     window.addEventListener('terminal-refit', onRefit);
 
+    // Reconnect recovery: the previous server's resize_tracker cleanup auto-fits the pane
+    // back to an arbitrary size on disconnect. Clear stale pending confirmation and
+    // re-send resize so the new server's tmux pane matches our terminal again.
+    const onReconnected = () => {
+      pendingCols = 0; pendingRows = 0; pendingResizeTs = 0;
+      lastFitCols = 0; lastFitRows = 0;
+      requestAnimationFrame(doResize);
+    };
+    window.addEventListener('ws-reconnected', onReconnected);
+
     setOnPaneOutput((t, content, cursor) => {
       if (t !== target) return;
       if (cursor) lastCursor = cursor;
       if (content != null && content !== lastContent) {
         lastContent = content;
         paneContent = content;
-        writeToXterm(content, lastCursor);
-      } else if (cursor && term && lastContent) {
-        // Cursor-only update — use same row calculation as writeToXterm
-        const N = countLines(lastContent);
-        const trailing = cursor.t || 0;
-        const paneStart = Math.max(0, N + trailing - cursor.h);
-        const cursorLine = paneStart + cursor.y;
-        const pad = Math.max(0, cursorLine + 1 - N);
-        const total = N + pad;
-        const sb = Math.max(0, total - term.rows);
-        let row = cursorLine - sb + 1;
+        // Defer rendering while user is reading scrollback; flush on scroll-to-bottom
+        if (termAtBottom) writeToXterm(content, lastCursor);
+        else hasNewContent = true;
+      } else if (cursor && term && lastContent && termAtBottom) {
+        // Cursor-only update — share layout calc with writeToXterm so topPad offset matches
+        const { row } = computeCursorLayout(lastContent, cursor, term.rows);
         if (row > 0 && row <= term.rows) {
           term.write(`\x1b[${row};${cursor.x + 1}H`);
         }
@@ -869,13 +902,14 @@
       stopMomentum();
       window.removeEventListener('resize', onResize);
       window.removeEventListener('terminal-refit', onRefit);
+      window.removeEventListener('ws-reconnected', onReconnected);
       window.removeEventListener('keyboard-shift', onKbShift);
       document.removeEventListener('visibilitychange', onVisible);
       termEl.removeEventListener('touchstart', onTouchStart);
       termEl.removeEventListener('touchmove', onTouchMove);
       termEl.removeEventListener('touchend', onTouchEnd);
       termEl.removeEventListener('touchcancel', onTouchCancel);
-      // Server kills the control-mode client on WS disconnect → tmux auto-restores size
+      // Server's resize_tracker auto-restores this window via `resize-window -A` on WS disconnect
       unsubscribe(target);
       setOnPaneOutput(null);
       setOnPaneClosed(null);
@@ -922,7 +956,7 @@
   }
 
   async function handleKeydown(e) {
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
       e.preventDefault();
       await handleSubmit();
     }
@@ -1087,7 +1121,10 @@
   <div class="term-wrap" class:hidden={viewMode !== 'terminal'}>
     <div class="xterm-wrap" bind:this={termEl}></div>
     {#if !termAtBottom}
-      <button class="scroll-btn" onclick={() => term?.scrollToBottom()}><Icon name="arrow-down" size={16} /></button>
+      <button class="scroll-btn" class:has-new={hasNewContent} onclick={() => term?.scrollToBottom()} aria-label={hasNewContent ? t('newOutput') : t('scrollToBottom')}>
+        <Icon name="arrow-down" size={16} />
+        {#if hasNewContent}<span class="new-dot"></span>{/if}
+      </button>
     {/if}
   </div>
   {#if viewMode === 'chat'}
@@ -1332,6 +1369,13 @@
   }
   :global(html[data-theme="light"]) .scroll-btn { background: rgba(245,245,247,0.85); }
   .scroll-btn:active { transform: scale(0.9); }
+  .scroll-btn.has-new { border-color: var(--accent); color: var(--accent); }
+  .new-dot {
+    position: absolute; top: 4px; right: 4px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--danger, #ff5050);
+    box-shadow: 0 0 0 2px var(--bg);
+  }
 
   .input-area {
     flex-shrink: 0;
