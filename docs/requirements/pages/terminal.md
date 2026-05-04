@@ -7,11 +7,18 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
 - xterm.js v6 terminal emulator with theme-aware color schemes (light/dark)
 - Shortcut buttons: Esc, ^C, ^D, Tab, arrows — with long-press repeat
 - Keyboard toggle button (show/hide on-screen keyboard)
-- Collapsible window switcher — AI agent icons (Kiro/Claude) or command
-  name, persists state. When expanded, also lists other AI sessions as
-  chips (up to 5, most-recently-opened), so the user can jump straight to
-  a different coding-agent session without returning to the Sessions page.
-- Floating buttons: scroll-to-bottom, window switcher (frosted glass style)
+- Collapsible window switcher:
+  - **Collapsed**: small AI-icon button floating in the top-right corner
+    (glass/blur background). Shows the current window's agent icon, or
+    its command name if no agent detected. Tap to expand.
+  - **Expanded**: horizontal tab bar pinned to the top of the Terminal
+    view, replacing the floating toggle. Holds chips for (1) every
+    window in the current session, (2) a `+ new window` button, (3) a
+    vertical separator, (4) up to 5 most-recently-opened AI sessions
+    (Kiro/Claude/OpenClaw) as chips. Scrolls horizontally. A collapse
+    button on the right restores the floating toggle.
+  - State (collapsed vs expanded) is persisted in localStorage.
+- Floating buttons: scroll-to-bottom (frosted glass style)
 - Status bar: session:pane and running command
 
 ## Interactions (Mobile)

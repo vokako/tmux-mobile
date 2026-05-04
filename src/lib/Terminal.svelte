@@ -1098,73 +1098,85 @@
   {/if}
   {#if windows.length >= 1}
     {#if showWindowCmd}
-      <div class="win-switcher expanded">
-        <button class="win-collapse" onclick={() => { showWindowCmd = false; localStorage.setItem('tmux_winswitcher', '0'); }}><Icon name="arrow-up" size={12} /></button>
-        {#each windows as w}
-          {@const wAgent = detectAgent((w.current_command || '') + ' ' + (w.pane_title || ''))}
-          <button
-            class="win-tab"
-            class:active={String(w.window) === currentWindow}
-            onclick={(e) => {
-              e.stopPropagation();
-              if (String(w.window) !== currentWindow && onSwitchPane) {
-                document.activeElement?.blur();
-                touchScrolling = false;
-                const fh = window.__fullHeight?.() || window.innerHeight;
-                document.documentElement.style.setProperty('--app-height', fh + 'px');
-                document.documentElement.classList.remove('keyboard-open');
-                onSwitchPane(`${w.session}:${w.window}.${w.pane}`, w.current_command);
-              }
-            }}
-          >
-            {#if wAgent}
-              <img class="win-ai-icon" class:claude={wAgent.tag === 'Claude'} src={wAgent.icon} alt={wAgent.tag} />
-            {:else}
-              <span class="win-cmd">{w.current_command || w.window_name}</span>
-            {/if}
-          </button>
-        {/each}
-        <button class="win-tab win-add" onclick={async (e) => {
-          e.stopPropagation();
-          try {
-            await newWindow(session);
-            const ps = await listPanes(session);
-            windowPanes = ps;
-            const p = ps[ps.length - 1];
-            if (p && onSwitchPane) {
-              document.activeElement?.blur();
-              touchScrolling = false;
-              const fh = window.__fullHeight?.() || window.innerHeight;
-              document.documentElement.style.setProperty('--app-height', fh + 'px');
-              document.documentElement.classList.remove('keyboard-open');
-              onSwitchPane(`${p.session}:${p.window}.${p.pane}`, p.current_command);
-            }
-          } catch {}
-        }}><Icon name="plus" size={12} /></button>
-
-        {#if otherAgentSessions.length > 0}
-          {#each otherAgentSessions as o, i}
+      <!--
+        Expanded switcher: a top-of-page horizontal tab bar that holds
+        BOTH the current session's windows and up-to-5 other AI sessions
+        as chips. One concept: "everywhere I can switch to".
+      -->
+      <div class="win-bar">
+        <div class="win-bar-scroll">
+          {#each windows as w}
+            {@const wAgent = detectAgent((w.current_command || '') + ' ' + (w.pane_title || ''))}
             <button
-              class="win-tab cross-session"
-              class:cross-first={i === 0}
-              title={`${o.name}  (${o.agent.tag})`}
+              class="win-chip"
+              class:active={String(w.window) === currentWindow}
+              title={w.current_command || w.window_name}
               onclick={(e) => {
                 e.stopPropagation();
-                if (onSwitchPane) {
+                if (String(w.window) !== currentWindow && onSwitchPane) {
                   document.activeElement?.blur();
                   touchScrolling = false;
                   const fh = window.__fullHeight?.() || window.innerHeight;
                   document.documentElement.style.setProperty('--app-height', fh + 'px');
                   document.documentElement.classList.remove('keyboard-open');
-                  onSwitchPane(`${o.pane.session}:${o.pane.window}.${o.pane.pane}`, o.pane.current_command);
+                  onSwitchPane(`${w.session}:${w.window}.${w.pane}`, w.current_command);
                 }
               }}
             >
-              <img class="win-ai-icon" class:claude={o.agent.tag === 'Claude'} src={o.agent.icon} alt={o.agent.tag} />
-              <span class="cross-name">{o.name}</span>
+              {#if wAgent}
+                <img class="win-ai-icon" class:claude={wAgent.tag === 'Claude'} src={wAgent.icon} alt={wAgent.tag} />
+              {:else}
+                <span class="win-chip-cmd">{w.current_command || w.window_name}</span>
+              {/if}
             </button>
           {/each}
-        {/if}
+
+          <button class="win-chip win-add" aria-label="New window" onclick={async (e) => {
+            e.stopPropagation();
+            try {
+              await newWindow(session);
+              const ps = await listPanes(session);
+              windowPanes = ps;
+              const p = ps[ps.length - 1];
+              if (p && onSwitchPane) {
+                document.activeElement?.blur();
+                touchScrolling = false;
+                const fh = window.__fullHeight?.() || window.innerHeight;
+                document.documentElement.style.setProperty('--app-height', fh + 'px');
+                document.documentElement.classList.remove('keyboard-open');
+                onSwitchPane(`${p.session}:${p.window}.${p.pane}`, p.current_command);
+              }
+            } catch {}
+          }}><Icon name="plus" size={12} /></button>
+
+          {#if otherAgentSessions.length > 0}
+            <span class="win-sep" aria-hidden="true"></span>
+            {#each otherAgentSessions as o}
+              <button
+                class="win-chip cross"
+                title={`${o.name}  (${o.agent.tag})`}
+                onclick={(e) => {
+                  e.stopPropagation();
+                  if (onSwitchPane) {
+                    document.activeElement?.blur();
+                    touchScrolling = false;
+                    const fh = window.__fullHeight?.() || window.innerHeight;
+                    document.documentElement.style.setProperty('--app-height', fh + 'px');
+                    document.documentElement.classList.remove('keyboard-open');
+                    onSwitchPane(`${o.pane.session}:${o.pane.window}.${o.pane.pane}`, o.pane.current_command);
+                  }
+                }}
+              >
+                <img class="win-ai-icon" class:claude={o.agent.tag === 'Claude'} src={o.agent.icon} alt={o.agent.tag} />
+                <span class="cross-name">{o.name}</span>
+              </button>
+            {/each}
+          {/if}
+        </div>
+
+        <button class="win-bar-collapse" aria-label="Collapse" onclick={() => { showWindowCmd = false; localStorage.setItem('tmux_winswitcher', '0'); }}>
+          <Icon name="arrow-up" size={12} />
+        </button>
       </div>
     {:else}
       {@const cur = windows.find(w => String(w.window) === currentWindow)}
@@ -1260,7 +1272,7 @@
     position: relative;
   }
 
-  /* Window switcher */
+  /* Collapsed floating entry — small AI icon in the top-right corner */
   .win-toggle {
     position: absolute; top: 8px; right: 8px; z-index: 10;
     width: auto; min-width: 36px; height: 36px; border: 1px solid var(--border);
@@ -1280,62 +1292,115 @@
     font-size: 11px; font-weight: 700;
     font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
   }
-  .win-switcher {
-    position: absolute; top: 8px; right: 8px; z-index: 10;
-    display: flex; flex-direction: column; gap: 2px;
-    background: rgba(10,10,15,0.85); border: 1px solid var(--border);
-    border-radius: 10px; padding: 4px;
-    max-height: 50%; overflow-y: auto;
-    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+
+  /* Expanded: horizontal tab bar pinned to the top of the Terminal view.
+     Holds current-session windows AND cross-session AI chips in one scroll
+     strip. Chip visual language matches the Sessions page chips-row. */
+  .win-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 6px 6px 10px;
+    border-bottom: 1px solid var(--border2);
+    background: var(--surface);
+    flex-shrink: 0;
   }
-  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
-    .win-switcher { background: rgba(10,10,15,0.5); }
-    :global(html[data-theme="light"]) .win-switcher { background: rgba(245,245,247,0.5); }
+  .win-bar-scroll {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
   }
-  :global(html[data-theme="light"]) .win-switcher { background: rgba(245,245,247,0.85); }
-  .win-collapse {
-    padding: 4px; border: none; border-radius: 6px;
-    background: none; color: var(--text3); cursor: pointer;
+  .win-bar-scroll::-webkit-scrollbar { display: none; }
+  .win-bar-collapse {
+    flex-shrink: 0;
+    width: 28px; height: 28px;
+    padding: 0;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text3);
+    cursor: pointer;
     display: flex; align-items: center; justify-content: center;
     -webkit-tap-highlight-color: transparent;
   }
-  .win-collapse:active { color: var(--accent); }
-  .win-tab {
-    display: flex; align-items: center; justify-content: center; gap: 8px;
-    padding: 7px 6px; border: none; border-radius: 8px;
-    background: none; color: var(--text2); font-size: 12px;
-    cursor: pointer; white-space: nowrap;
+  .win-bar-collapse:active { color: var(--accent); background: var(--surface2); }
+
+  .win-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px 5px 8px;
+    border: 1px solid var(--border2);
+    border-radius: 999px;
+    background: var(--input-bg);
+    color: var(--text2);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    flex-shrink: 0;
+    white-space: nowrap;
+    max-width: 140px;
     -webkit-tap-highlight-color: transparent;
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
     font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
   }
-  .win-tab.active { background: var(--accent-bg); color: var(--accent); }
-  .win-tab:active { background: var(--surface2); }
-  .win-add { color: var(--text3); border-top: 1px solid var(--border2); background: none !important; }
-  .win-num { font-weight: 600; min-width: 14px; text-align: center; }
-  .win-cmd { color: inherit; font-size: 10px; max-width: 100px; overflow: hidden; text-overflow: ellipsis; }
-  .win-ai-icon { height: 14px; width: auto; }
-  .win-tab .win-ai-icon { opacity: 0.5; }
-  .win-tab.active .win-ai-icon { opacity: 1; }
-  .win-ai-icon.claude { filter: brightness(0.9); }
-
-  /* Cross-session AI chips: shown below the `+` in the expanded switcher,
-     separated by a top border on the first one. Slightly muted vs current-
-     session tabs so the eye reaches the current session first. */
-  .win-tab.cross-session {
-    justify-content: flex-start;
-    padding-left: 8px;
-    color: var(--text3);
-    font-size: 11px;
+  .win-chip:active {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+    color: var(--accent);
   }
-  .win-tab.cross-first { border-top: 1px solid var(--border2); margin-top: 2px; padding-top: 8px; }
-  .win-tab.cross-session:active { background: var(--accent-bg); color: var(--accent); }
-  .win-tab.cross-session:active .win-ai-icon { opacity: 1; }
-  .win-tab.cross-session .cross-name {
-    max-width: 90px;
+  .win-chip.active {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .win-chip.win-add {
+    padding: 5px 9px;
+    color: var(--text3);
+    background: transparent;
+    border-style: dashed;
+  }
+  .win-chip.win-add:active { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
+  .win-chip-cmd {
     overflow: hidden;
     text-overflow: ellipsis;
+    font-size: 11px;
   }
+  /* Cross-session chip: slightly muted, to read as "other" without being invisible */
+  .win-chip.cross {
+    font-family: inherit;
+    color: var(--text2);
+    background: transparent;
+    border-color: var(--border2);
+  }
+  .win-chip.cross:active {
+    background: var(--accent-bg);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .cross-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 96px;
+  }
+  .win-sep {
+    flex-shrink: 0;
+    width: 1px;
+    height: 18px;
+    background: var(--border2);
+    margin: 0 2px;
+  }
+
+  .win-ai-icon { height: 14px; width: auto; flex-shrink: 0; }
+  .win-chip .win-ai-icon { opacity: 0.6; }
+  .win-chip.active .win-ai-icon { opacity: 1; }
+  .win-chip.cross .win-ai-icon { opacity: 1; }
+  .win-ai-icon.claude { filter: brightness(0.9); }
 
   .input-status {
     display: flex;

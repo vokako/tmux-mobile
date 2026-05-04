@@ -66,10 +66,17 @@ from visuals carrying meaning that isn't there.
   workflow that actually benefits from a 1-tap surface — plain zsh/node/vim
   sessions are easily reached via search / the full list.
 - The same chip strip is embedded in the **Terminal page's window switcher**
-  (when expanded): below the `+ new window` button, separated by a top
-  border. One scroll switcher for everything — current-session windows and
-  other-session AI chips share the same click handler (`onSwitchPane`), so
-  the user doesn't need to learn two patterns.
+  when expanded: a horizontal tab bar pinned to the top of the Terminal
+  view, holding both the current session's windows and up to 5 other AI
+  sessions in one scroll strip, separated by a vertical rule. Collapsed
+  state falls back to the existing small floating AI-icon button in the
+  top-right (minimal footprint when not in use). One scroll switcher for
+  everything — current-session windows and other-session AI chips share
+  the same click handler (`onSwitchPane`), so the user doesn't need to
+  learn two patterns. Horizontal layout was chosen over the previous
+  vertical floating panel because the vertical form took half the viewport
+  height when expanded; the horizontal bar is ~40 px tall and doesn't
+  eat terminal real estate the way the vertical one did.
 
 ### Sort order (unchanged from previous)
 1. Currently-active session (pinned top)
@@ -159,3 +166,17 @@ Added `searchSessions`, `noMatches`, `noSessions`, `justNow`, `minAbbr`,
 `hourAbbr`, `dayAbbr` keys. Both `en` and `zh` branches updated in the
 same commit — drift here is especially painful to debug because an untran-
 slated key renders as literal string and looks almost-right.
+
+### Vertical "panel" switchers eat the viewport
+The first Terminal-page switcher draft was a vertical panel (inherited
+from the old right-top floating design). Expanded it covered ~50% of the
+viewport height on mobile — which is exactly the wrong trade-off when the
+whole point of the page is to see the terminal. Swapped to a horizontal
+top bar: ~40 px tall, scrolls laterally instead of vertically, and does
+not fight the terminal for vertical real estate. Collapsed state kept as
+a small floating AI-icon so the default idle cost stays near zero.
+
+General rule: on mobile, if a panel is always-visible or often-visible,
+spend horizontal space (scroll laterally) before vertical space. Vertical
+"accordions" / "drawers" work when they're modal or rare, but a switcher
+that's meant to be glanced at during other work is not rare.
