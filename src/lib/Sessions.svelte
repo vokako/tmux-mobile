@@ -380,7 +380,7 @@
               {#if confirmKill === s.name}
                 <span class="kill-text">{t('tapToKill')}</span>
               {:else}
-                <Icon name="x" size={12} />
+                <Icon name="trash" size={12} />
               {/if}
             </button>
           </span>
@@ -410,7 +410,7 @@
                   {#if confirmKillWindow === `${s.name}:${p.window}`}
                     <span class="kill-text">{t('del')}</span>
                   {:else}
-                    <Icon name="x" size={10} />
+                    <Icon name="trash" size={11} />
                   {/if}
                 </button>
               </div>
@@ -717,7 +717,7 @@
   }
 
   .kill {
-    width: 24px; height: 24px;
+    padding: 6px;
     background: transparent;
     border: none;
     color: var(--text3);
@@ -726,16 +726,10 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.15s ease;
+    transition: color 0.15s ease;
     -webkit-tap-highlight-color: transparent;
   }
-  .kill:active { background: var(--danger-bg); color: var(--danger); }
-  .kill.confirm {
-    background: var(--danger-bg);
-    color: var(--danger);
-    width: auto;
-    padding: 0 8px;
-  }
+  .kill:active, .kill.confirm { color: var(--danger); }
   .kill-text { font-size: 10px; font-weight: 600; white-space: nowrap; }
 
   /* ─── Pane list (expanded) ──────────────────────────── */
@@ -798,11 +792,16 @@
   }
   .pane-ai-icon.claude { width: 15px; height: 15px; }
   .pane-kill {
-    padding: 8px 10px;
+    padding: 6px;
     border: none;
+    border-radius: 6px;
     background: transparent;
     color: var(--text3);
     cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s ease;
     -webkit-tap-highlight-color: transparent;
   }
   .pane-kill:active, .pane-kill.confirm { color: var(--danger); }
