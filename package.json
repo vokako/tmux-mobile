@@ -13,9 +13,9 @@
     "tauri:build": "tauri build",
     "tauri:android": "tauri android dev",
     "tauri:android:build": "tauri android build",
-    "build:all": "npm run build && npm run tauri:build && npx tauri android build --target aarch64",
+    "build:all": "npm run build && npm run tauri:build && npx tauri android build --target aarch64 --apk",
     "build:mac": "npm run tauri:build",
-    "build:android": "npx tauri android build --target aarch64"
+    "build:android": "npx tauri android build --target aarch64 --apk"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5",
