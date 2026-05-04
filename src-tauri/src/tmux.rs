@@ -26,6 +26,9 @@ pub struct TmuxPane {
     pub current_command: String,
     pub window_name: String,
     pub pane_title: String,
+    /// Current working directory of the pane's process (tmux pane_current_path).
+    /// Used by the client to show a cwd hint alongside the command name.
+    pub current_path: String,
 }
 
 use std::sync::{OnceLock, RwLock};
@@ -146,7 +149,7 @@ pub fn list_panes(session: &str) -> Result<Vec<TmuxPane>, String> {
         "-t",
         session,
         "-F",
-        "#{session_name}\x1f#{window_index}\x1f#{pane_index}\x1f#{pane_width}\x1f#{pane_height}\x1f#{pane_current_command}\x1f#{window_name}\x1f#{pane_title}",
+        "#{session_name}\x1f#{window_index}\x1f#{pane_index}\x1f#{pane_width}\x1f#{pane_height}\x1f#{pane_current_command}\x1f#{window_name}\x1f#{pane_title}\x1f#{pane_current_path}",
     ])?;
 
     let panes = output
@@ -163,6 +166,7 @@ pub fn list_panes(session: &str) -> Result<Vec<TmuxPane>, String> {
                 current_command: parts.get(5).unwrap_or(&"").to_string(),
                 window_name: parts.get(6).unwrap_or(&"").to_string(),
                 pane_title: parts.get(7).unwrap_or(&"").to_string(),
+                current_path: parts.get(8).unwrap_or(&"").to_string(),
             }
         })
         .collect();

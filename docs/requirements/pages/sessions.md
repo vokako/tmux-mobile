@@ -1,47 +1,129 @@
 # Sessions Page
 
 ## Purpose
-Browse all tmux sessions, windows, and panes. Create or kill sessions. Entry point for selecting which pane to view.
+Fast, scannable entry point for selecting which pane to view. Optimized for
+a user running many parallel coding-agent sessions ("is Kiro done in `proj-A`?
+what's Claude doing in `proj-B`?") — each row should reveal its identity at a
+glance without requiring interaction.
 
 ## Components
-- Session list with expand/collapse
-- Pane entries showing command name, AI agent icons (Kiro/Claude)
-- New session / new window buttons
-- Kill session / kill window buttons with confirmation
-- Pull-to-refresh (mobile)
+
+### Top bar
+- **Search input** (always visible). Filters the list in real time against
+  session name, window name, pane command, pane cwd, and AI tag (Kiro /
+  Claude / OpenClaw). Clear button appears when query is non-empty.
+- **MRU chips row** (hidden while searching). Up to 5 most-recently-opened
+  sessions (excluding the currently-open one), horizontally scrollable.
+  Each chip shows the session's AI icon (if any) or an attached/detached
+  dot, plus the session name. One tap on a chip opens that session.
+
+### Session row (single line, dense)
+Left-to-right:
+- **Status dot** — accent color + glow when tmux `attached == true`,
+  muted otherwise.
+- **Session name** (bold, truncates at 40% of row width).
+- **Inline summary** — the row's identity, chosen as:
+  - If a pane in the session runs a known AI CLI → the AI's icon.
+  - Otherwise → the primary pane's `current_command` (monospace).
+  - Followed by the trailing segment of the primary pane's `current_path`
+    (e.g. `~/260226_x`).
+
+  The "primary pane" is: the pane matching `activeTarget` if open, else the
+  first pane with an AI tag, else the first pane returned by the server.
+- **Trailing cluster** (right-aligned, tight):
+  - Relative time of last open (`now`, `5m`, `3h`, `2d`, or month/day).
+    Only shown when the session has a `last_opened` timestamp.
+  - Window count badge `Nw` — only when `windows > 1`.
+  - Kill button (`×` → "tap to kill" on first tap; 3-second confirm window).
+
+### Pane list (expanded only when relevant)
+Default: collapsed for every session. Shown when:
+- The session has > 1 window AND the user taps the session row once, OR
+- A search query is active AND the session matches but some panes match
+  more specifically (search auto-expands).
+
+Each pane row shows: `W.P` index (monospace, accent) · `current_command` ·
+`cwd segment` · AI icon (if any) · `×` kill button.
+
+Plus a `+ Window` button at the end of the pane list.
+
+### Bottom bar
+- **New Session** — expands an inline form with session name, working-dir
+  picker, optional startup command with Kiro/Claude presets.
+- **Refresh** icon (also reachable via pull-to-refresh on mobile).
 
 ## Interactions
-- Tap session → expand/collapse pane list
-- Tap pane → navigate to Terminal view, subscribe to pane
-- Tap new session → `new_session` RPC (supports optional path and command)
-- Tap new window → `new_window` RPC
-- Tap kill session → confirmation → `kill_session` RPC
-- Tap kill window → confirmation → `kill_window` RPC
-- Pull down → refresh session list
+
+### Opening a session
+- **Single pane session** → tap the session row anywhere (except kill) →
+  navigates directly to Terminal with that pane.
+- **Multi-window session** → tap the session row → expands the pane list in
+  place. Tap again to collapse. Tap any pane to navigate.
+- **MRU chip** → single tap → opens the session at its primary pane (same
+  rule as a single-pane session row).
+
+### Searching
+- Type in the search box → list filters instantly. Matches highlight by
+  virtue of appearing at all (no per-match highlighting; density already
+  makes matches visible).
+- Empty state while searching shows the query verbatim:
+  `No matches for "foo"`.
+- MRU chips hide while searching to focus attention on results.
+
+### Kill
+- Session kill: tap `×` → row shows `tap to kill`. Tap again within 3s →
+  `kill_session` RPC → refresh.
+- Window kill: same pattern inside the pane list.
+- Clicking the row instead of the kill button during confirm state activates
+  the session, **not** kill. Kill must be an explicit second tap on the kill
+  button itself.
+
+### Pull to refresh (mobile)
+- Drag down from the top of the list → indicator rotates with distance →
+  releases above 60px threshold to trigger refresh → check-mark animation
+  on success.
 
 ## API Calls
-- `list_sessions` — list all tmux sessions
-- `list_panes(session)` — list panes in session
-- `new_session(name?, path?, command?)` — create session
-- `kill_session(name)` — kill session
-- `new_window(session)` — create window in session
-- `kill_window(target)` — kill window
-- `pane_command(target)` — get running command (for AI agent detection)
+- `list_sessions` — sessions with `last_opened` annotation.
+- `list_panes(session)` — called for every session on load (needed for
+  inline summary). One call per session; cheap.
+- `new_session(name?, path?, command?)`.
+- `kill_session(name)`.
+- `new_window(session)`.
+- `kill_window(target)`.
+- `fs_list(path)` — for the working-dir picker in the new-session form.
 
 ## State Management
-- Sessions array with expanded state
-- Active session/pane selection
-- Sort order: (1) the session currently being viewed on the Terminal tab,
-  (2) sessions sorted by `last_opened` descending (unix seconds of the last
-  time the session was opened via tmux-mobile; persisted server-side),
-  (3) sessions that have never been opened from the app, in the server's
-  baseline order (tmux `session_activity` descending).
+- `sessions`: array of `TmuxSession` sorted as: (1) active session, then
+  (2) sessions with `last_opened` descending (MRU), then (3) never-opened
+  sessions in server's baseline order (tmux `session_activity` desc).
+- `panes[sessionName]`: `TmuxPane[]`, loaded eagerly for summary rendering.
+- `expanded[sessionName]`: bool, user-controlled per-session expansion for
+  multi-window sessions.
+- `query`: current search string, `$derived` `isSearching` gates chip
+  visibility and auto-expansion.
+
+## Derived rendering rules
+
+### `sessionSummary(session)`
+Picks the "primary pane" as described above and returns `{ ai, cmd, cwd }`.
+The session row uses this to render inline context without opening the list.
+
+### `cwdShort(path)`
+Trailing path segment; `~` and `/` kept verbatim. Rendered with a `~/` prefix
+in the session row to keep it short but clearly-a-path.
+
+### `relTime(unixSec)`
+`< 45s` → `now`, `< 1h` → `Nm`, `< 24h` → `Nh`, `< 7d` → `Nd`, otherwise
+`M/D`. Tabular numerals so the column is steady.
 
 ## Edge Cases
-- Auto-expand sessions on load
-- AI agent detection by command name (kiro, claude)
-- `last_opened` survives across server and client restarts (stored in
-  `~/.config/tmux-mobile/session_usage.json`). A session deleted and
-  recreated with the same name will inherit the old record; acceptable.
-- First-time use (no timestamps yet): all sessions fall back to the server's
-  baseline order, matching the previous behavior.
+- **No sessions**: shows a friendly empty state at the list position.
+- **Sessions without `last_opened`**: still listed (at the bottom of the
+  MRU tail), but no time chip.
+- **Long session names / cwd**: truncated with ellipsis; inline summary
+  sacrifices cwd first, then cmd, keeping name and trailing cluster intact.
+- **Recreated session with same name**: inherits previous `last_opened`
+  (persisted by name); acceptable for MRU.
+- **Search query exact match on cwd but no visible cwd in row**: the row
+  still appears — search runs against full data, not rendered text.

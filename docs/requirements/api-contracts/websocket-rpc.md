@@ -32,7 +32,7 @@ JSON-RPC over WebSocket (`ws://` or `wss://`).
 | Method | Params | Response |
 |--------|--------|----------|
 | `list_sessions` | — | Array of `{name, windows, attached, created, last_opened?}` objects. `last_opened` is unix seconds of the last time this session was opened via tmux-mobile (`subscribe` RPC); absent if never opened. |
-| `list_panes` | `session` | Array of pane objects across all windows |
+| `list_panes` | `session` | Array of pane objects: `{session, window, pane, width, height, current_command, window_name, pane_title, current_path}`. `current_path` is tmux `#{pane_current_path}` (the pane process's cwd). |
 | `new_session` | `name?`, `path?`, `command?` | OK |
 | `kill_session` | `name` | OK |
 | `new_window` | `session` | OK |
