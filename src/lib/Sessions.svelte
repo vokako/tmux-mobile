@@ -753,7 +753,7 @@
 
   /* ─── Pane list (expanded) ──────────────────────────── */
   .pane-list {
-    margin: 2px 8px 8px;
+    margin: 2px 0 6px;
     border-top: 1px solid var(--border2);
     display: flex;
     flex-direction: column;
@@ -771,7 +771,9 @@
     align-items: center;
     gap: 8px;
     flex: 1;
-    padding: 8px 10px 8px 22px;
+    /* left padding = session-row's 12 + 8 indent visually subordinates panes
+       to their session without wasting horizontal space */
+    padding: 7px 10px 7px 20px;
     background: none;
     border: none;
     color: var(--text);
@@ -787,7 +789,7 @@
     color: var(--accent);
     font-weight: 500;
     font-size: 11px;
-    min-width: 28px;
+    min-width: 22px;
     flex-shrink: 0;
   }
   .pane-cmd {
