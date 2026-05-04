@@ -9,7 +9,8 @@
 
   // Tunable constants
   const KB_OPEN_THRESHOLD = 100; // px difference to detect keyboard open
-  const RECONNECT_MAX_ATTEMPTS = 20;
+  const RECONNECT_MAX_ATTEMPTS = 10;           // total attempts before giving up
+  const RECONNECT_WATCHDOG_MS = 180000;        // hard cap: if still reconnecting after 3min, force reset
   const SLIDE_ANIMATION_MS = 120;
   const OPTIMIZE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -201,6 +202,30 @@
   let reconnectAttempt = $state(0);   // 1-indexed when visible; 0 means not attempting
   let reconnectClass = $state('');    // LAN / Tailscale / WAN label for the current try
   let reconnectTimer = null;
+  let reconnectWatchdog = null;
+
+  function clearReconnectTimers() {
+    clearTimeout(reconnectTimer);
+    clearTimeout(reconnectWatchdog);
+    reconnectTimer = null;
+    reconnectWatchdog = null;
+    reconnectAttempt = 0;
+    reconnectClass = '';
+  }
+
+  function armReconnectWatchdog() {
+    // Hard cap: if reconnecting never finishes (stuck promise, platform WebSocket hang),
+    // force-reset to settings so user can escape without killing the app.
+    clearTimeout(reconnectWatchdog);
+    reconnectWatchdog = setTimeout(() => {
+      if (!reconnecting) return;
+      window.__dbg?.('reconnect: watchdog fired — force reset');
+      reconnecting = false;
+      clearTimeout(reconnectTimer);
+      connected = false;
+      page = 'settings';
+    }, RECONNECT_WATCHDOG_MS);
+  }
 
   setOnDisconnect(() => {
     if (manualDisconnect) {
@@ -210,6 +235,7 @@
     }
     // Keep connected=true during reconnect to avoid UI flicker
     reconnecting = true;
+    armReconnectWatchdog();
     tryReconnect();
   });
 
@@ -218,7 +244,7 @@
     reconnectAttempt = 0;
     reconnectClass = '';
     connected = false;
-    clearTimeout(reconnectTimer);
+    clearReconnectTimers();
     disconnect();
     page = 'settings';
   }
@@ -233,39 +259,65 @@
     } catch { return []; }
   }
 
-  function tryReconnect(attempt = 0) {
-    if (!reconnecting) return;
-    const addr = localStorage.getItem('tmux_address');
-    const token = localStorage.getItem('tmux_token') || '';
-    if (!addr) { reconnecting = false; connected = false; page = 'settings'; return; }
+  function onReconnectSuccess(useAddr, primaryAddr) {
+    connected = true;
+    reconnecting = false;
+    clearReconnectTimers();
+    window.__dbg?.('reconnect: success');
+    serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
+    if (useAddr !== primaryAddr) { localStorage.setItem('tmux_address', useAddr); activeAddress = useAddr; }
+    if (terminalTarget) wsSubscribe(terminalTarget);
+    // Tell Terminal to reset stale resize state + re-fit against the new server.
+    window.dispatchEvent(new Event('ws-reconnected'));
+  }
 
-    const allAddrs = [addr, ...getAltAddresses()];
-    const useAddr = allAddrs[attempt % allAddrs.length];
+  async function tryReconnect(attempt = 0) {
+    if (!reconnecting) return;
+    const primary = localStorage.getItem('tmux_address');
+    const token = localStorage.getItem('tmux_token') || '';
+    if (!primary) { reconnecting = false; clearReconnectTimers(); connected = false; page = 'settings'; return; }
+
+    const allAddrs = [primary, ...getAltAddresses()];
+    let useAddr;
+
+    // First attempt with multiple candidates: parallel probe → pick first reachable.
+    // Avoids burning 3s × N timeouts cycling through dead addresses serially.
+    if (attempt === 0 && allAddrs.length > 1) {
+      window.__dbg?.(`reconnect: probing ${allAddrs.length} addresses in parallel`);
+      try {
+        const best = await findBestAddress(allAddrs);
+        if (!reconnecting) return; // cancelled mid-probe
+        useAddr = best || allAddrs[0];
+      } catch {
+        useAddr = allAddrs[0];
+      }
+    } else {
+      useAddr = allAddrs[attempt % allAddrs.length];
+    }
+
     window.__dbg?.(`reconnect: attempt ${attempt + 1}/${RECONNECT_MAX_ATTEMPTS} → ${useAddr}`);
     reconnectAttempt = attempt + 1;
     reconnectClass = ADDRESS_LABELS[classifyAddress(useAddr)] || '';
 
-    connect(useAddr, token).then(() => {
+    // Per-attempt connect timeout scales with address class: LAN is fast and
+    // should fail fast; WAN (public internet, slow cellular, far regions)
+    // legitimately needs more time for TCP + TLS handshake.
+    const cls = classifyAddress(useAddr);
+    const attemptTimeout = cls === 0 ? 2000 : cls === 1 ? 3000 : 5000;
+
+    connect(useAddr, token, attemptTimeout).then(() => {
       if (!reconnecting) return;
-      connected = true;
-      reconnecting = false;
-      reconnectAttempt = 0;
-      reconnectClass = '';
-      window.__dbg?.('reconnect: success');
-      serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
-      if (useAddr !== addr) { localStorage.setItem('tmux_address', useAddr); activeAddress = useAddr; }
-      if (terminalTarget) wsSubscribe(terminalTarget);
+      onReconnectSuccess(useAddr, primary);
     }).catch((e) => {
       if (!reconnecting) return;
       window.__dbg?.(`reconnect: failed (${e.message})`);
-      if (attempt < RECONNECT_MAX_ATTEMPTS) {
-        const delay = Math.min(1000 * (attempt + 1), 5000);
+      if (attempt + 1 < RECONNECT_MAX_ATTEMPTS) {
+        const delay = Math.min(500 * (attempt + 1), 3000); // tighter backoff since timeouts are short
         reconnectTimer = setTimeout(() => tryReconnect(attempt + 1), delay);
       } else {
         window.__dbg?.('reconnect: gave up');
         reconnecting = false;
-        reconnectAttempt = 0;
-        reconnectClass = '';
+        clearReconnectTimers();
         connected = false;
         page = 'settings';
       }
@@ -328,6 +380,7 @@
       await connect(best, token);
       serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
       if (terminalTarget) wsSubscribe(terminalTarget);
+      window.dispatchEvent(new Event('ws-reconnected'));
     } catch {
       // Switch failed — trigger normal reconnect which will try all addresses
       reconnecting = true;
@@ -696,7 +749,7 @@
     -webkit-user-select: none;
   }
   :global(input), :global(textarea) { user-select: text; -webkit-user-select: text; }
-  :global(.preview-body), :global(.md-render), :global(.code-preview), :global(.git-diff-body), :global(.info-body) { user-select: text; -webkit-user-select: text; }
+  :global(.preview-body), :global(.md-render), :global(.code-preview), :global(.git-diff-body), :global(.info-body), :global(.bubble) { user-select: text; -webkit-user-select: text; }
   :global(*) { box-sizing: border-box; }
   :global(html) { overflow: hidden; overscroll-behavior: none; --sat: env(safe-area-inset-top); --sab: env(safe-area-inset-bottom); --app-height: 100dvh; }
   :global(body), main, nav, .settings-panel { transition: background-color 0.3s ease, color 0.3s ease; }
