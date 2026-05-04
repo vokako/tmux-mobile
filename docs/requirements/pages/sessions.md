@@ -8,17 +8,18 @@ glance without requiring interaction.
 
 ## Components
 
-### Top bar
-- **Search input** (always visible). Filters the list in real time against
-  session name, window name, pane command, pane cwd, and AI tag (Kiro /
-  Claude / OpenClaw). Clear button appears when query is non-empty.
-- **MRU chips row** (hidden while searching). Up to 5 most-recently-opened
-  **AI sessions** — sessions where at least one pane is running a known
-  coding-agent CLI (Kiro/Claude/OpenClaw), excluding the currently-open one.
-  The filter is deliberate: plain zsh/node/vim sessions clutter a "fast
-  switch" surface and are still reachable via the full list and search
-  below. Horizontally scrollable. One tap on a chip opens that session.
-  Each chip shows the agent's icon plus the session name.
+### Top row
+- **Single row combining MRU chips and search**. Chips fill the left, a
+  round search icon button sits on the right. Tapping search swaps the
+  entire row into full-width input mode (chips hide, input grows, × on
+  the right closes / clears). Escape also closes.
+- **MRU chips** (shown in the default row state). Up to 5 most-recently-
+  opened **AI sessions** — sessions where at least one pane is running a
+  known coding-agent CLI (Kiro/Claude/OpenClaw), excluding the currently-
+  open one. The filter is deliberate: plain zsh/node/vim sessions clutter
+  a "fast switch" surface and are still reachable via search or the full
+  list. Horizontally scrollable. One tap on a chip opens that session at
+  its primary AI pane.
 
 ### Session row (single line, dense)
 Left-to-right:

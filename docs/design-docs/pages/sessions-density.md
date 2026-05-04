@@ -199,8 +199,11 @@ strip.
 
 General rule for collapse/expand animations: the collapsed state should
 look like a minimum-size version of the expanded state, not a separate
-affordance. Chevron icons (down = expand, up = collapse) convey direction
-without needing a new visual language.
+affordance. Chevron icons should point in the direction of the movement
+— a horizontal bar that collapses to the right uses `chevron-right` for
+collapse and `chevron-left` for expand (pointing toward where the bar
+will grow from). Do NOT use up/down chevrons on a horizontal primitive
+just because dropdowns use that convention; match the axis of motion.
 
 ### One chip, one component
 After the first horizontal-bar draft, chip styling was duplicated between
@@ -238,3 +241,15 @@ by giving chips their own handler (`chipOpen`) that always navigates to
 a concrete pane — preferring a pane that has an agent running, falling
 back to the first pane. A chip tap should ALWAYS take the user
 somewhere; never "do something quietly".
+
+### Secondary surfaces on demand, not always-visible
+First pass had the search box as an always-visible row at the top — one
+row for search, one for chips, stacked. Fine on paper, looked bulky in
+practice (two strips of chrome before the actual list). Collapsed search
+into a round icon button sharing the same row as the chip strip. Tapping
+the button swaps the row into full-width input mode. Chips let the user
+switch with one tap without search; search is a click away when needed.
+
+Rule: if a secondary UI is accessed occasionally, prefer "collapsed on
+demand" over "always shown". Mobile viewports are too narrow to
+permanently spend a row on every potentially-useful action.

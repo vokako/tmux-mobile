@@ -15,6 +15,8 @@
   let expanded = $state({});        // session name → bool (manually opened in multi-window view)
   let error = $state('');
   let query = $state('');
+  let searchOpen = $state(false);
+  let searchInputEl = $state(null);
   let sessionsEl;
 
   // New session form
@@ -261,43 +263,73 @@
   // Auto-expand during search so panes matching the query are visible.
   let isSearching = $derived(!!query.trim());
 
+  // When the user opens the search box, focus the input (next microtask
+  // so the input is rendered first).
+  $effect(() => {
+    if (searchOpen && searchInputEl) {
+      setTimeout(() => searchInputEl?.focus(), 0);
+    }
+  });
+  function closeSearch() {
+    query = '';
+    searchOpen = false;
+  }
+
   function scrollIntoView(el) {
     setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'end' }), 50);
   }
 </script>
 
 <div class="sessions" bind:this={sessionsEl}>
-  <!-- Search bar -->
-  <div class="search-bar">
-    <Icon name="search" size={14} />
-    <input
-      type="text"
-      bind:value={query}
-      placeholder={t('searchSessions')}
-      autocapitalize="off"
-      autocomplete="off"
-      spellcheck="false"
-    />
-    {#if query}
-      <button class="search-clear" onclick={() => query = ''} aria-label="Clear">
-        <Icon name="x" size={12} />
+  <!--
+    Top row: chip strip on the left, search button on the right.
+    Tapping search swaps this row into full-width input mode; closing it
+    restores chips. The chip strip itself already hides while searching,
+    so there's no fight for horizontal space.
+  -->
+  <div class="top-row">
+    {#if searchOpen}
+      <div class="search-bar">
+        <Icon name="search" size={14} />
+        <input
+          bind:this={searchInputEl}
+          type="text"
+          bind:value={query}
+          placeholder={t('searchSessions')}
+          autocapitalize="off"
+          autocomplete="off"
+          spellcheck="false"
+          onkeydown={(e) => { if (e.key === 'Escape') closeSearch(); }}
+        />
+        <button class="icon-btn" onclick={closeSearch} aria-label="Close search">
+          <Icon name="x" size={12} />
+        </button>
+      </div>
+    {:else}
+      {#if mruChips.length > 0}
+        <div class="chips-row">
+          {#each mruChips as s}
+            {@const sum = sessionSummary(s)}
+            <AgentChip
+              agent={AGENT_BY_TAG.get(sum.ai)}
+              label={s.name}
+              onclick={() => chipOpen(s)}
+            />
+          {/each}
+        </div>
+      {:else}
+        <!-- Keep the row's height stable when there are no chips -->
+        <div class="chips-row empty"></div>
+      {/if}
+      <button
+        class="icon-btn search-btn"
+        onclick={() => (searchOpen = true)}
+        aria-label={t('searchSessions')}
+      >
+        <Icon name="search" size={14} />
       </button>
     {/if}
   </div>
-
-  <!-- MRU chips (hidden while searching to keep focus on results) -->
-  {#if mruChips.length > 0 && !isSearching}
-    <div class="chips-row">
-      {#each mruChips as s}
-        {@const sum = sessionSummary(s)}
-        <AgentChip
-          agent={AGENT_BY_TAG.get(sum.ai)}
-          label={s.name}
-          onclick={() => chipOpen(s)}
-        />
-      {/each}
-    </div>
-  {/if}
 
   {#if error}
     <div class="error">{error}</div>
@@ -471,16 +503,48 @@
     -webkit-overflow-scrolling: touch;
   }
 
-  /* ─── Search bar ─────────────────────────────────────── */
-  .search-bar {
-    position: relative;
+  /* ─── Top row (chips + search) ─────────────────────── */
+  .top-row {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 0 12px;
+    min-height: 28px;
+  }
+  .icon-btn {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid var(--border2);
+    border-radius: 999px;
+    background: var(--input-bg);
+    color: var(--text3);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  }
+  .icon-btn:active {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-bg);
+  }
+
+  /* ─── Search bar (expanded state) ─────────────────── */
+  .search-bar {
+    flex: 1;
+    min-width: 0;
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 8px 0 12px;
+    height: 28px;
     background: var(--input-bg);
     border: 1px solid var(--border2);
-    border-radius: 12px;
+    border-radius: 999px;
     color: var(--text3);
     transition: border-color 0.15s ease;
   }
@@ -494,37 +558,37 @@
     border: none;
     outline: none;
     background: transparent;
-    padding: 8px 0;
+    padding: 0;
     font-size: 13px;
     color: var(--text);
     -webkit-appearance: none;
+    line-height: 1;
   }
   .search-bar input::placeholder { color: var(--text3); }
-  .search-clear {
-    padding: 4px;
+  .search-bar .icon-btn {
+    width: 20px;
+    height: 20px;
     border: none;
     background: transparent;
-    color: var(--text3);
-    cursor: pointer;
-    border-radius: 6px;
-    display: flex;
-    -webkit-tap-highlight-color: transparent;
   }
-  .search-clear:active { color: var(--text); background: var(--surface2); }
+  .search-bar .icon-btn:active {
+    background: var(--surface2);
+    color: var(--text);
+  }
 
   /* ─── MRU chips ──────────────────────────────────────── */
   .chips-row {
+    flex: 1;
+    min-width: 0;
     display: flex;
+    align-items: center;
     gap: 6px;
     overflow-x: auto;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
-    padding: 2px 0;
-    margin: -2px -14px 0;
-    padding-left: 14px;
-    padding-right: 14px;
   }
   .chips-row::-webkit-scrollbar { display: none; }
+  .chips-row.empty { min-height: 28px; }
 
   /* ─── Session list ───────────────────────────────────── */
   .list {

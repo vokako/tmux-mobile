@@ -1174,7 +1174,7 @@
         </div>
 
         <button class="win-bar-collapse" aria-label="Collapse" onclick={() => { showWindowCmd = false; localStorage.setItem('tmux_winswitcher', '0'); }}>
-          <Icon name="chevron-up" size={12} />
+          <Icon name="chevron-right" size={12} />
         </button>
       </div>
     {:else}
@@ -1190,7 +1190,7 @@
         <AgentChip
           agent={curAgent}
           label={curAgent ? '' : (cur?.current_command || cur?.window_name || '?')}
-          chevron="down"
+          chevron="left"
           onclick={() => { showWindowCmd = true; localStorage.setItem('tmux_winswitcher', '1'); }}
         />
       </div>
