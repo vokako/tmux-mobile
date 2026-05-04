@@ -264,7 +264,7 @@
 
   {#if showNew}
     <div class="new-form" use:scrollIntoView>
-      <input type="text" bind:value={newName} placeholder={t('sessionName')} onkeydown={(e) => e.key === 'Enter' && createSession()} autocapitalize="off" />
+      <input type="text" bind:value={newName} placeholder={t('sessionName')} onkeydown={(e) => e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && createSession()} autocapitalize="off" />
       <div class="cmd-row-new">
         <input type="text" bind:value={newPath} placeholder={t('workingDir')} autocapitalize="off" />
         <button class="preset-btn" onclick={openPicker}><Icon name="folder" size={14} /></button>

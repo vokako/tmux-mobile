@@ -1017,7 +1017,7 @@
           type="text"
           bind:value={newName}
           placeholder={newType === 'dir' ? t('folderName') : t('fileName')}
-          onkeydown={(e) => e.key === 'Enter' && handleNewItem()}
+          onkeydown={(e) => e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && handleNewItem()}
           autocapitalize="off"
           autocomplete="off"
         />
@@ -1033,7 +1033,7 @@
           type="text"
           bind:value={renameValue}
           placeholder={t('newName')}
-          onkeydown={(e) => e.key === 'Enter' && handleRename()}
+          onkeydown={(e) => e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && handleRename()}
           autocapitalize="off"
         />
         <button onclick={handleRename}><Icon name="edit" size={12} /></button>
@@ -1226,7 +1226,7 @@
       </div>
       {#if showCommitInput}
         <div class="git-commit-row">
-          <textarea bind:value={commitMsg} placeholder={t('commitMsg')} onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); gitCommit(); } }} rows="2"></textarea>
+          <textarea bind:value={commitMsg} placeholder={t('commitMsg')} onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); gitCommit(); } }} rows="2"></textarea>
           <button class="git-commit-btn" onclick={gitCommit} disabled={!commitMsg.trim()}>OK</button>
         </div>
       {/if}
