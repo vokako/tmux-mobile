@@ -23,7 +23,7 @@ Browse, preview, edit, and manage files on the remote server's filesystem. Start
 - Tap edit → open text editor
 - Long-press / info button → file info panel
 - Star button → bookmark current directory
-- Pull-to-refresh (mobile)
+- Refresh button in the toolbar → re-list current directory
 - Swipe right from left edge → go back
 - Upload button → file picker (Tauri on desktop/Android, `<input>` in browser)
 - Download button → save file locally
