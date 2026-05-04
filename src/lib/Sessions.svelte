@@ -278,6 +278,15 @@
   function scrollIntoView(el) {
     setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'end' }), 50);
   }
+
+  // Svelte action: after the element mounts, scroll its horizontal content
+  // to the right end so the most-informative tail of a long path is
+  // visible without the user having to scroll. Re-runs when content changes.
+  function scrollEndIntoView(el) {
+    const update = () => { if (el) el.scrollLeft = el.scrollWidth; };
+    update();
+    return { update };
+  }
 </script>
 
 <div class="sessions" bind:this={sessionsEl}>
@@ -360,8 +369,8 @@
             {:else if sum.cmd}
               <span class="cmd">{sum.cmd}</span>
             {/if}
-            {#if sum.cwd}
-              <span class="cwd">~/{sum.cwd}</span>
+            {#if sum.pane?.current_path}
+              <span class="cwd" use:scrollEndIntoView>{sum.pane.current_path}</span>
             {/if}
           </span>
           <span class="trailing">
@@ -396,7 +405,7 @@
                   <span class="pane-id">{p.window}.{p.pane}</span>
                   <span class="pane-cmd">{p.current_command}</span>
                   {#if p.current_path}
-                    <span class="pane-cwd">{cwdShort(p.current_path)}</span>
+                    <span class="pane-cwd" use:scrollEndIntoView>{p.current_path}</span>
                   {/if}
                   {#if pAi}
                     <img class="pane-ai-icon" class:claude={pAi === 'Claude'} src={aiIcon(pAi)} alt={pAi} />
@@ -688,12 +697,22 @@
     min-width: 0;
   }
   .meta .cwd {
+    display: block;
     color: var(--text3);
     font-size: 11px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    flex: 1;
     min-width: 0;
+    white-space: nowrap;
+    /* Long paths horizontally scroll. Initial position is scrolled to the
+       right end (see scrollEndIntoView) so the informative tail is visible. */
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
   }
+  .meta .cwd::-webkit-scrollbar { display: none; }
 
   .trailing {
     display: flex;
@@ -778,14 +797,24 @@
     flex-shrink: 0;
   }
   .pane-cwd {
+    display: block;
     color: var(--text3);
     font-size: 11px;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     min-width: 0;
+    white-space: nowrap;
+    /* Long paths horizontally scroll. Initial position is scrolled to the
+       right end (see scrollEndIntoView) so the tail is visible first. */
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    /* Allow horizontal pan gestures here without triggering vertical scroll
+       on the parent list. */
+    touch-action: pan-x;
   }
+  .pane-cwd::-webkit-scrollbar { display: none; }
   .pane-ai-icon {
     width: 13px; height: 13px;
     flex-shrink: 0;
