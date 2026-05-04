@@ -16,6 +16,7 @@ const BASE64_CHUNK_SIZE = 8192;
 // are no longer needed here.
 
 let ws = null;
+let wsUrl = null;
 let requestId = 0;
 const pending = new Map();
 let onPaneOutput = null;
@@ -120,6 +121,7 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
   }
   sessionCipher = null;
   rpcTimeouts = 0;
+  wsUrl = url;
   window.__dbg?.(`ws: connecting to ${url} (timeout=${timeoutMs}ms)`);
 
   return new Promise((resolve, reject) => {
@@ -345,6 +347,17 @@ export const fsRename = (from, to) => call('fs_rename', { from, to });
 // transfer is handled at the WS protocol layer (server PING / browser PONG),
 // so even a 50 MB frame in the air won't make us give up on the socket.
 export const fsDownload = (path) => call('fs_download', { path }, 60000);
+export const fsDownloadUrl = (path) => call('fs_download_url', { path });
+export function fsDownloadHttp(path) {
+  // HTTP download only works for ws:// (plain TCP); wss:// falls back to WS download
+  if (wsUrl && wsUrl.startsWith('wss://')) {
+    return fsDownload(path).then(r => ({ blob: null, base64: r.data, name: r.name }));
+  }
+  return fsDownloadUrl(path).then(({ url, name }) => {
+    const base = wsUrl.replace(/^ws/, 'http').replace(/\/$/, '');
+    return { url: base + url, name };
+  });
+}
 export const fsUpload = (path, data) => call('fs_upload', { path, data }, 60000);
 export const fsConvert = (path, format = 'html') => call('fs_convert', { path, format });
 export const gitCmd = (subcmd, args = [], cwd) => call('git', { subcmd, args, cwd });

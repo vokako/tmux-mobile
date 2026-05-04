@@ -23,7 +23,7 @@
   import mermaid from 'mermaid';
   import Icon from './Icon.svelte';
   import { t } from './i18n.svelte.js';
-  import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref, fsConvert } from './ws.js';
+  import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsDownloadHttp, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref, fsConvert } from './ws.js';
 
   // Tauri plugin imports (tree-shaken in browser builds)
   let tauriFs, tauriDialog, tauriOpener, tauriPath;
@@ -689,16 +689,42 @@
       downloading = name;
       startDlProgress();
       window.__dbg?.(`dl: start ${name}`);
+      const t0 = Date.now();
+      const dlInfo = await fsDownloadHttp(path);
+      window.__dbg?.(`dl: got ${dlInfo.url ? 'HTTP URL' : 'base64'} in ${Date.now()-t0}ms`);
+      dlProgress = 20;
+
+      // Helper: get file bytes
+      async function fetchBytes() {
+        if (dlInfo.url) {
+          const resp = await fetch(dlInfo.url);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          return new Uint8Array(await resp.arrayBuffer());
+        }
+        return Uint8Array.from(atob(dlInfo.base64), c => c.charCodeAt(0));
+      }
+
       if (isTauri && tauriFs) {
         await tauriReady;
         if (isAndroid) {
-          const t0 = Date.now();
-          const r = await fsDownload(path);
-          window.__dbg?.(`dl: fetched ${(r.data?.length/1024|0)}KB in ${Date.now()-t0}ms`);
+          let b64;
+          if (dlInfo.base64) {
+            b64 = dlInfo.base64;
+          } else {
+            const resp = await fetch(dlInfo.url);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const blob = await resp.blob();
+            window.__dbg?.(`dl: fetched ${(blob.size/1024|0)}KB in ${Date.now()-t0}ms`);
+            b64 = await new Promise((resolve) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result.split(',')[1]);
+              reader.readAsDataURL(blob);
+            });
+          }
           stopDlProgress(); dlProgress = 85;
           const { invoke } = await import('@tauri-apps/api/core');
           dlProgress = 90;
-          const filePath = await invoke('save_to_downloads', { name: r.name, data: r.data });
+          const filePath = await invoke('save_to_downloads', { name, data: b64 });
           window.__dbg?.(`dl: saved → ${filePath}`);
           dlProgress = 100;
           await new Promise(r => setTimeout(r, 300));
@@ -711,12 +737,9 @@
         // macOS / desktop: use save dialog
         const savePath = await tauriDialog.save({ defaultPath: name });
         if (!savePath) { stopDlProgress(); downloading = ''; dlProgress = 0; return; }
-        const t0d = Date.now();
-        const r = await fsDownload(path);
-        window.__dbg?.(`dl: fetched ${(r.data?.length/1024|0)}KB in ${Date.now()-t0d}ms`);
-        stopDlProgress(); dlProgress = 85;
-        const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
-        dlProgress = 90;
+        const bytes = await fetchBytes();
+        window.__dbg?.(`dl: fetched ${(bytes.length/1024|0)}KB in ${Date.now()-t0}ms`);
+        stopDlProgress(); dlProgress = 90;
         await tauriFs.writeFile(savePath, bytes);
         window.__dbg?.(`dl: saved → ${savePath}`);
         dlProgress = 100;
@@ -728,20 +751,25 @@
         return;
       }
       // Browser fallback
-      const t0b = Date.now();
-      const r = await fsDownload(path);
-      window.__dbg?.(`dl: fetched ${(r.data?.length/1024|0)}KB in ${Date.now()-t0b}ms`);
-      stopDlProgress(); dlProgress = 90;
-      const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
+      let bytes;
+      if (dlInfo.url) {
+        const resp = await fetch(dlInfo.url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        bytes = new Uint8Array(await resp.arrayBuffer());
+        window.__dbg?.(`dl: fetched ${(bytes.length/1024|0)}KB in ${Date.now()-t0}ms`);
+      } else {
+        bytes = Uint8Array.from(atob(dlInfo.base64), c => c.charCodeAt(0));
+        window.__dbg?.(`dl: decoded ${(bytes.length/1024|0)}KB`);
+      }
       const blob = new Blob([bytes]);
-      const url = URL.createObjectURL(blob);
+      const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = r.name;
+      a.href = blobUrl; a.download = name;
       document.body.appendChild(a);
       a.click();
-      dlProgress = 100;
+      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(blobUrl); }, 100);
+      stopDlProgress(); dlProgress = 100;
       await new Promise(r => setTimeout(r, 300));
-      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
       downloading = '';
       downloadToast = 'Downloaded';
       setTimeout(() => downloadToast = '', 2000);

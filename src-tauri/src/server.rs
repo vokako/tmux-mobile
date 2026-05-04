@@ -32,6 +32,19 @@ const AUTH_LOCKOUT_SECS: u64 = 60;
 const AUTH_TRACKER_GC_AFTER_SECS: u64 = 600;
 const SUBSCRIPTION_POLL_MS: u64 = 200;
 const MAX_CAPTURE_FAILURES: u32 = 5;
+const DL_TOKEN_TTL_SECS: u64 = 60;
+
+fn sign_download(token: &str, path: &str, ts: u64) -> String {
+    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(token.as_bytes()).unwrap();
+    mac.update(format!("dl:{}:{}", path, ts).as_bytes());
+    hex::encode(mac.finalize().into_bytes())
+}
+
+fn verify_download(token: &str, path: &str, ts: u64, sig: &str) -> bool {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    if now.saturating_sub(ts) > DL_TOKEN_TTL_SECS { return false; }
+    sign_download(token, path, ts) == sig
+}
 
 // WebSocket frame / message limits. A legitimate `fs_upload` can carry a
 // file up to fs::MAX_READ_SIZE (50 MB) inside a base64 string (~67 MB text),
@@ -188,7 +201,7 @@ fn require_str<'a>(params: &'a serde_json::Value, key: &str) -> Result<&'a str, 
         .ok_or_else(|| format!("missing required param: {}", key))
 }
 
-fn handle_request(req: &Request) -> Response {
+fn handle_request(req: &Request, token: &str) -> Response {
     let id = req.id;
     let p = &req.params;
 
@@ -470,6 +483,18 @@ fn handle_request(req: &Request) -> Response {
             }
         }
 
+        "fs_download_url" => {
+            let path = match require_str(p, "path") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+            let sig = sign_download(token, path, ts);
+            let name = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or("file");
+            let qs = format!("/dl?path={}&ts={}&sig={}", urlencoding::encode(path), ts, sig);
+            Response::ok(id, serde_json::json!({ "url": qs, "name": name }))
+        }
+
         "fs_upload" => {
             let path = match require_str(p, "path") {
                 Ok(s) => s,
@@ -686,7 +711,81 @@ fn handle_unsubscribe(params: &serde_json::Value, subs: &mut HashMap<String, Str
     Response::ok(None, serde_json::json!({ "unsubscribed": target }))
 }
 
+async fn handle_http_download(mut stream: TcpStream, addr: SocketAddr, token: Arc<String>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // Read HTTP request
+    let mut buf = vec![0u8; 4096];
+    let n = match stream.read(&mut buf).await {
+        Ok(n) if n > 0 => n,
+        _ => return,
+    };
+    let req = String::from_utf8_lossy(&buf[..n]);
+    let first_line = req.lines().next().unwrap_or("");
+
+    // Parse "GET /dl?path=...&ts=...&sig=... HTTP/1.1"
+    let url_part = first_line.split_whitespace().nth(1).unwrap_or("");
+    let query = url_part.strip_prefix("/dl?").unwrap_or("");
+    let params: HashMap<&str, &str> = query.split('&')
+        .filter_map(|p| p.split_once('='))
+        .collect();
+
+    let path = match params.get("path") {
+        Some(p) => urlencoding::decode(p).unwrap_or_default().to_string(),
+        None => { let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n").await; return; }
+    };
+    let ts: u64 = params.get("ts").and_then(|s| s.parse().ok()).unwrap_or(0);
+    let sig = params.get("sig").unwrap_or(&"");
+
+    if !verify_download(&token, &path, ts, sig) {
+        eprintln!("🚫 HTTP download rejected for {} (invalid sig)", addr);
+        let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n").await;
+        return;
+    }
+
+    // Read file and stream response
+    let file_path = std::path::Path::new(&path);
+    let metadata = match std::fs::metadata(file_path) {
+        Ok(m) => m,
+        Err(_) => { let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n").await; return; }
+    };
+    let name = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    let size = metadata.len();
+
+    let header = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"{}\"\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\n\r\n",
+        name, size
+    );
+    if stream.write_all(header.as_bytes()).await.is_err() { return; }
+
+    // Stream file in chunks
+    let mut file = match tokio::fs::File::open(&path).await {
+        Ok(f) => f,
+        Err(_) => return,
+    };
+    let mut chunk = vec![0u8; 65536];
+    loop {
+        let n = match file.read(&mut chunk).await {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(_) => break,
+        };
+        if stream.write_all(&chunk[..n]).await.is_err() { break; }
+    }
+}
+
 pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker) {
+    // Peek at first bytes to distinguish HTTP download from WebSocket
+    let mut buf = [0u8; 7];
+    let n = match stream.peek(&mut buf).await {
+        Ok(n) => n,
+        Err(_) => return,
+    };
+    if n >= 7 && &buf[..7] == b"GET /dl" {
+        handle_http_download(stream, addr, token).await;
+        return;
+    }
+
     println!("📱 Client connected: {}", addr);
 
     // Check if IP is locked out, and opportunistically GC old entries so
@@ -956,6 +1055,7 @@ where
                 let subs_c = subs.clone();
                 let tracker_c = resize_tracker.clone();
                 let out_tx_c = out_tx.clone();
+                let token_c = token.clone();
                 tokio::spawn(async move {
                     let response = match req.method.as_str() {
                         "subscribe" => {
@@ -986,7 +1086,7 @@ where
                                 }
                             }).await.unwrap_or_else(|e| Response::err(None, ERR_INTERNAL, format!("task panic: {}", e)))
                         }
-                        _ => tokio::task::spawn_blocking(move || handle_request(&req))
+                        _ => tokio::task::spawn_blocking(move || handle_request(&req, &token_c))
                             .await
                             .unwrap_or_else(|e| Response::err(None, ERR_INTERNAL, format!("task panic: {}", e))),
                     };
