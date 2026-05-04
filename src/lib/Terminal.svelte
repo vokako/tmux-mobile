@@ -1295,7 +1295,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 4px 6px 4px 8px;
+    padding: 3px 4px 3px 6px;
     border-bottom: 1px solid var(--border2);
     background: var(--surface);
     flex-shrink: 0;
@@ -1313,7 +1313,7 @@
   .win-bar-scroll::-webkit-scrollbar { display: none; }
   .win-bar-collapse {
     flex-shrink: 0;
-    width: 28px; height: 28px;
+    width: 24px; height: 24px;
     padding: 0;
     border: none;
     border-radius: 999px;

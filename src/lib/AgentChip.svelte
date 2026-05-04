@@ -52,11 +52,10 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    /* Vertical padding + 16px content height is enough room for descenders
-       (g / p / y) at 11px font. Don't force line-height: 1 or glyphs get
-       clipped; 1.3 matches the ratio in other buttons. */
-    padding: 5px 9px;
-    height: 28px;
+    /* 24 px chip with line-height 1.3 leaves ~4 px slack for g/p/y
+       descenders at 11 px font. Don't force line-height: 1 — glyphs clip. */
+    padding: 3px 8px;
+    height: 24px;
     border: 1px solid var(--border2);
     border-radius: 999px;
     background: var(--input-bg);
@@ -89,7 +88,7 @@
     background: transparent;
     border-style: dashed;
     color: var(--text3);
-    padding: 5px 10px;
+    padding: 3px 9px;
   }
   .chip-add:active {
     color: var(--accent);

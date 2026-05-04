@@ -944,30 +944,30 @@
   {#if view === 'list'}
     <!-- Toolbar: all buttons in one row -->
     <div class="toolbar">
-      <button class="tool-btn" onclick={goHome}><Icon name="home" size={15} /></button>
-      <button class="tool-btn" onclick={() => loadDir(cwd)} aria-label="Refresh"><Icon name="refresh" size={15} /></button>
-      <button class="tool-btn" onclick={() => { newType = newType ? '' : 'file'; newName = ''; }}><Icon name="plus" size={15} /></button>
-      <button class="tool-btn" onclick={handleUpload}><Icon name="upload" size={15} /></button>
+      <button class="tool-btn" onclick={goHome}><Icon name="home" size={13} /></button>
+      <button class="tool-btn" onclick={() => loadDir(cwd)} aria-label="Refresh"><Icon name="refresh" size={13} /></button>
+      <button class="tool-btn" onclick={() => { newType = newType ? '' : 'file'; newName = ''; }}><Icon name="plus" size={13} /></button>
+      <button class="tool-btn" onclick={handleUpload}><Icon name="upload" size={13} /></button>
       <button class="tool-btn" class:tool-active={showHidden} onclick={() => { showHidden = !showHidden; loadDir(cwd); }}>
-        <Icon name="eye" size={15} />
+        <Icon name="eye" size={13} />
       </button>
       <button class="tool-btn" class:starred={isBookmarked(cwd)} onclick={() => toggleBookmark(cwd)} title="Bookmark">
-        <Icon name={isBookmarked(cwd) ? 'star-filled' : 'star'} size={15} />
+        <Icon name={isBookmarked(cwd) ? 'star-filled' : 'star'} size={13} />
       </button>
       <button class="tool-btn" class:tool-active={showBookmarks} onclick={() => { showBookmarks = !showBookmarks; showRecent = false; }} title="Bookmarks">
-        <Icon name="folder-star" size={15} />
+        <Icon name="folder-star" size={13} />
       </button>
       <button class="tool-btn" class:tool-active={showRecent} onclick={() => { showRecent = !showRecent; showBookmarks = false; }} title="Recent">
-        <Icon name="clock" size={15} />
+        <Icon name="clock" size={13} />
       </button>
       {#if hasGit}
         <button class="tool-btn" onclick={openGitView} title="Git">
-          <Icon name="git-branch" size={15} />
+          <Icon name="git-branch" size={13} />
         </button>
       {/if}
       <div style="flex:1"></div>
       {#if isTauri}
-        <button class="tool-btn" onclick={openLocalFiles} title="Local files"><Icon name="download" size={15} /></button>
+        <button class="tool-btn" onclick={openLocalFiles} title="Local files"><Icon name="download" size={13} /></button>
       {/if}
     </div>
 
@@ -1303,14 +1303,14 @@
   .files { display: flex; flex-direction: column; flex: 1; min-height: 0; background: var(--bg); }
 
   /* Toolbar — same vertical rhythm as the Terminal window-switcher bar
-     and the Sessions top-row (28 px buttons + 4 px padding = ~37 px total). */
+     and the Sessions top-row (24 px buttons + 3 px padding = ~31 px total). */
   .toolbar {
-    display: flex; align-items: center; gap: 4px; padding: 4px 8px;
+    display: flex; align-items: center; gap: 4px; padding: 3px 6px;
     border-bottom: 1px solid var(--border); flex-shrink: 0;
   }
   .tool-btn {
-    width: 28px; height: 28px;
-    padding: 0; border: none; border-radius: 7px;
+    width: 24px; height: 24px;
+    padding: 0; border: none; border-radius: 6px;
     background: var(--surface2); color: var(--text2); cursor: pointer;
     font-size: 12px; display: flex; align-items: center; justify-content: center;
     flex-shrink: 0;

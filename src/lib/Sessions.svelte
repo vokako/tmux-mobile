@@ -508,12 +508,12 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    min-height: 28px;
+    min-height: 24px;
   }
   .icon-btn {
     flex-shrink: 0;
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
     padding: 0;
     border: 1px solid var(--border2);
     border-radius: 999px;
@@ -540,8 +540,8 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 0 6px 0 12px;
-    height: 28px;
+    padding: 0 4px 0 10px;
+    height: 24px;
     background: var(--input-bg);
     border: 1px solid var(--border2);
     border-radius: 999px;
@@ -588,7 +588,7 @@
     -webkit-overflow-scrolling: touch;
   }
   .chips-row::-webkit-scrollbar { display: none; }
-  .chips-row.empty { min-height: 28px; }
+  .chips-row.empty { min-height: 24px; }
 
   /* ─── Session list ───────────────────────────────────── */
   .list {
