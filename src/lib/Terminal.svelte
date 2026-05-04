@@ -1,11 +1,12 @@
 <script>
-  import { subscribe, unsubscribe, setOnPaneOutput, setOnPaneClosed, sendCommand, sendKeys, paneCommand, listPanes, capturePane, resizePane, newWindow } from './ws.js';
+  import { subscribe, unsubscribe, setOnPaneOutput, setOnPaneClosed, sendCommand, sendKeys, paneCommand, listPanes, listSessions, capturePane, resizePane, newWindow } from './ws.js';
   import { Terminal } from '@xterm/xterm';
   import { WebLinksAddon } from '@xterm/addon-web-links';
   import ChatView from './ChatView.svelte';
   import Icon from './Icon.svelte';
   import { t } from './i18n.svelte.js';
   import { detectParser } from './parsers.js';
+  import { detectAgent, paneIsAgent, sessionHasAgent, AGENTS } from './agents.js';
 
   // Timing constants
   const PANE_COMMAND_POLL_MS = 3000;
@@ -152,6 +153,41 @@
   let showWindowCmd = $state(localStorage.getItem('tmux_winswitcher') === '1');
   let currentWindow = $derived(target.split(':')[1]?.split('.')[0] || '');
 
+  // Other AI sessions — shown as chips in the expanded window-switcher so
+  // users can jump between parallel coding-agent sessions (Kiro/Claude/…)
+  // without backing out to the Sessions page. Loaded only when the switcher
+  // is expanded to avoid an unnecessary RPC tick on every Terminal view.
+  let otherAgentSessions = $state([]); // [{ name, pane, agent }]
+  const OTHER_AGENT_MAX = 5;
+
+  async function loadOtherAgentSessions() {
+    try {
+      const sessions = await listSessions();
+      const cur = session;
+      // Sort MRU-first (matches Sessions page order), filter current, keep
+      // sessions that have last_opened so we don't surface never-used ones.
+      const candidates = sessions
+        .filter(s => s.name !== cur && s.last_opened)
+        .sort((a, b) => (b.last_opened || 0) - (a.last_opened || 0));
+      const results = [];
+      for (const s of candidates) {
+        if (results.length >= OTHER_AGENT_MAX) break;
+        try {
+          const panes = await listPanes(s.name);
+          // Prefer a pane currently running the agent; fall back to first pane.
+          const p = panes.find(paneIsAgent) || (sessionHasAgent(panes) ? panes[0] : null);
+          if (p) {
+            const agent = detectAgent((p.current_command || '') + ' ' + (p.pane_title || ''));
+            if (agent) results.push({ name: s.name, pane: p, agent });
+          }
+        } catch {}
+      }
+      otherAgentSessions = results;
+    } catch {
+      otherAgentSessions = [];
+    }
+  }
+
   // Group panes by window
   let windows = $derived.by(() => {
     const map = new Map();
@@ -163,10 +199,23 @@
 
   $effect(() => {
     if (!session || viewMode !== 'terminal') return;
-    const load = () => listPanes(session).then(p => { windowPanes = p; }).catch(() => {});
+    const load = () => {
+      listPanes(session).then(p => { windowPanes = p; }).catch(() => {});
+      // Only refresh the cross-session chip data while the switcher is
+      // actually visible — saves listSessions + N*listPanes per tick.
+      if (showWindowCmd) loadOtherAgentSessions();
+    };
     load();
     const id = setInterval(load, WINDOW_LIST_POLL_MS);
     return () => clearInterval(id);
+  });
+
+  // When the user expands the switcher, fetch immediately (don't wait for
+  // the next poll tick).
+  $effect(() => {
+    if (showWindowCmd && session && viewMode === 'terminal') {
+      loadOtherAgentSessions();
+    }
   });
 
   // Read xterm's actual rendered cell dimensions (falls back to font-size-based estimate
@@ -1052,9 +1101,7 @@
       <div class="win-switcher expanded">
         <button class="win-collapse" onclick={() => { showWindowCmd = false; localStorage.setItem('tmux_winswitcher', '0'); }}><Icon name="arrow-up" size={12} /></button>
         {#each windows as w}
-          {@const titleCmd = (w.pane_title || '').split(/\s/)[0]}
-          {@const cmd = (w.current_command || '') + (/[\/~@:]/.test(titleCmd) ? '' : ' ' + titleCmd)}
-          {@const aiTag = /kiro/i.test(cmd) ? 'Kiro' : /claude/i.test(cmd) ? 'Claude' : /openclaw/i.test(cmd) ? 'OpenClaw' : ''}
+          {@const wAgent = detectAgent((w.current_command || '') + ' ' + (w.pane_title || ''))}
           <button
             class="win-tab"
             class:active={String(w.window) === currentWindow}
@@ -1070,12 +1117,8 @@
               }
             }}
           >
-            {#if aiTag === 'Kiro'}
-              <img class="win-ai-icon" src="/assets/kiro.svg" alt="Kiro" />
-            {:else if aiTag === 'Claude'}
-              <img class="win-ai-icon claude" src="/assets/claude.svg" alt="Claude" />
-            {:else if aiTag === 'OpenClaw'}
-              <img class="win-ai-icon" src="/assets/openclaw.svg" alt="OpenClaw" />
+            {#if wAgent}
+              <img class="win-ai-icon" class:claude={wAgent.tag === 'Claude'} src={wAgent.icon} alt={wAgent.tag} />
             {:else}
               <span class="win-cmd">{w.current_command || w.window_name}</span>
             {/if}
@@ -1098,19 +1141,37 @@
             }
           } catch {}
         }}><Icon name="plus" size={12} /></button>
+
+        {#if otherAgentSessions.length > 0}
+          {#each otherAgentSessions as o, i}
+            <button
+              class="win-tab cross-session"
+              class:cross-first={i === 0}
+              title={`${o.name}  (${o.agent.tag})`}
+              onclick={(e) => {
+                e.stopPropagation();
+                if (onSwitchPane) {
+                  document.activeElement?.blur();
+                  touchScrolling = false;
+                  const fh = window.__fullHeight?.() || window.innerHeight;
+                  document.documentElement.style.setProperty('--app-height', fh + 'px');
+                  document.documentElement.classList.remove('keyboard-open');
+                  onSwitchPane(`${o.pane.session}:${o.pane.window}.${o.pane.pane}`, o.pane.current_command);
+                }
+              }}
+            >
+              <img class="win-ai-icon" class:claude={o.agent.tag === 'Claude'} src={o.agent.icon} alt={o.agent.tag} />
+              <span class="cross-name">{o.name}</span>
+            </button>
+          {/each}
+        {/if}
       </div>
     {:else}
       {@const cur = windows.find(w => String(w.window) === currentWindow)}
-      {@const curTitle = cur ? (cur.pane_title || '').split(/\s/)[0] : ''}
-      {@const curCmd = cur ? (cur.current_command || '') + (/[\/~@:]/.test(curTitle) ? '' : ' ' + curTitle) : ''}
-      {@const curAi = cur ? /kiro/i.test(curCmd) ? 'Kiro' : /claude/i.test(curCmd) ? 'Claude' : /openclaw/i.test(curCmd) ? 'OpenClaw' : '' : ''}
+      {@const curAgent = cur ? detectAgent((cur.current_command || '') + ' ' + (cur.pane_title || '')) : null}
       <button class="win-toggle" onclick={() => { showWindowCmd = true; localStorage.setItem('tmux_winswitcher', '1'); }}>
-        {#if curAi === 'Kiro'}
-          <img class="win-ai-icon" src="/assets/kiro.svg" alt="Kiro" />
-        {:else if curAi === 'Claude'}
-          <img class="win-ai-icon claude" src="/assets/claude.svg" alt="Claude" />
-        {:else if curAi === 'OpenClaw'}
-          <img class="win-ai-icon" src="/assets/openclaw.svg" alt="OpenClaw" />
+        {#if curAgent}
+          <img class="win-ai-icon" class:claude={curAgent.tag === 'Claude'} src={curAgent.icon} alt={curAgent.tag} />
         {:else}
           <span class="win-toggle-cmd">{cur?.current_command || cur?.window_name || '?'}</span>
         {/if}
@@ -1257,6 +1318,24 @@
   .win-tab .win-ai-icon { opacity: 0.5; }
   .win-tab.active .win-ai-icon { opacity: 1; }
   .win-ai-icon.claude { filter: brightness(0.9); }
+
+  /* Cross-session AI chips: shown below the `+` in the expanded switcher,
+     separated by a top border on the first one. Slightly muted vs current-
+     session tabs so the eye reaches the current session first. */
+  .win-tab.cross-session {
+    justify-content: flex-start;
+    padding-left: 8px;
+    color: var(--text3);
+    font-size: 11px;
+  }
+  .win-tab.cross-first { border-top: 1px solid var(--border2); margin-top: 2px; padding-top: 8px; }
+  .win-tab.cross-session:active { background: var(--accent-bg); color: var(--accent); }
+  .win-tab.cross-session:active .win-ai-icon { opacity: 1; }
+  .win-tab.cross-session .cross-name {
+    max-width: 90px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
   .input-status {
     display: flex;

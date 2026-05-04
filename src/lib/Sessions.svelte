@@ -2,6 +2,7 @@
   import { listSessions, listPanes, newSession, killSession, newWindow, killWindow, fsList } from './ws.js';
   import Icon from './Icon.svelte';
   import { t } from './i18n.svelte.js';
+  import { detectAgent, sessionHasAgent, AGENTS } from './agents.js';
 
   let { openTerminal, activeTarget = '', visible = false } = $props();
 
@@ -40,19 +41,9 @@
   let canPull = false;
 
   // ─── Helpers ───────────────────────────────────────────
-  function aiTag(cmd) {
-    if (!cmd) return '';
-    if (/kiro/i.test(cmd)) return 'Kiro';
-    if (/claude/i.test(cmd)) return 'Claude';
-    if (/openclaw/i.test(cmd)) return 'OpenClaw';
-    return '';
-  }
-  function aiIcon(tag) {
-    if (tag === 'Kiro') return '/assets/kiro.svg';
-    if (tag === 'Claude') return '/assets/claude.svg';
-    if (tag === 'OpenClaw') return '/assets/openclaw.svg';
-    return '';
-  }
+  const AGENT_BY_TAG = new Map(AGENTS.map(a => [a.tag, a]));
+  function aiTag(cmd) { return detectAgent(cmd)?.tag || ''; }
+  function aiIcon(tag) { return AGENT_BY_TAG.get(tag)?.icon || ''; }
   // Trailing segment of a path, keeping `~` visible. E.g.:
   //   /Users/clawd/work/proj     → proj
   //   ~/work/project/260226_x    → 260226_x
@@ -219,14 +210,19 @@
   });
 
   // ─── Derived: filtered + MRU chips ────────────────────
-  // MRU chips: top N sessions by last_opened (excluding currently open),
-  // used for "quick switch" bar above the list.
+  // MRU chips: top N AI sessions by last_opened (excluding the currently
+  // active one). AI-only because the whole point of chips is fast switching
+  // between parallel coding-agent sessions — plain zsh/node/vim sessions
+  // clutter this list and you use the full list below to reach them.
   const MRU_CHIP_MAX = 5;
   let mruChips = $derived.by(() => {
-    const now = sessions.slice();
     const activeName = activeTarget.split(':')[0];
-    return now
-      .filter(s => s.last_opened && s.name !== activeName)
+    return sessions
+      .filter(s =>
+        s.last_opened &&
+        s.name !== activeName &&
+        sessionHasAgent(panes[s.name])
+      )
       .slice(0, MRU_CHIP_MAX);
   });
 
@@ -327,11 +323,7 @@
       {#each mruChips as s}
         {@const sum = sessionSummary(s)}
         <button class="chip" onclick={() => activateSession(s)}>
-          {#if sum.ai}
-            <img class="chip-ai" class:claude={sum.ai === 'Claude'} src={aiIcon(sum.ai)} alt={sum.ai} />
-          {:else}
-            <span class="chip-dot" class:attached={s.attached}></span>
-          {/if}
+          <img class="chip-ai" class:claude={sum.ai === 'Claude'} src={aiIcon(sum.ai)} alt={sum.ai} />
           <span class="chip-name">{s.name}</span>
         </button>
       {/each}
@@ -592,15 +584,6 @@
     flex-shrink: 0;
   }
   .chip-ai.claude { width: 16px; height: 16px; }
-  .chip-dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--text3);
-    flex-shrink: 0;
-  }
-  .chip-dot.attached {
-    background: var(--accent);
-  }
   .chip-name {
     overflow: hidden;
     text-overflow: ellipsis;

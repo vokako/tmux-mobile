@@ -648,7 +648,7 @@
         <Files session={terminalSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} />
       </div>
       <div class="page-layer" class:hidden={page !== 'terminal'}>
-        <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {viewMode} {fontSize} onSwitchPane={(t, cmd) => { terminalTarget = t; terminalCommand = cmd || ''; }} onPaneExit={() => { terminalTarget = ''; page = 'sessions'; }} />
+        <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {viewMode} {fontSize} onSwitchPane={(t, cmd) => { terminalTarget = t; terminalSession = t.split(':')[0]; terminalCommand = cmd || ''; }} onPaneExit={() => { terminalTarget = ''; page = 'sessions'; }} />
       </div>
     {/if}
   </div>

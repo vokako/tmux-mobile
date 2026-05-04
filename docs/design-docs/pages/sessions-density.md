@@ -60,9 +60,16 @@ from visuals carrying meaning that isn't there.
 - **Search**: live filter across name + cmd + cwd + window_name + AI tag.
   Auto-expands any session that has pane-level matches so the specific
   match is visible.
-- **MRU chips**: top 5 recently-opened sessions (excluding the currently-
-  active one), single tap to switch. This is the "switch back to the one I
-  was just on" workflow, reduced to one gesture.
+- **MRU chips**: top 5 recently-opened **AI sessions** (sessions where any
+  pane runs a known coding-agent CLI — Kiro/Claude/OpenClaw), excluding the
+  currently-active one. Single tap switches. AI-filtered because that's the
+  workflow that actually benefits from a 1-tap surface — plain zsh/node/vim
+  sessions are easily reached via search / the full list.
+- The same chip strip is embedded in the **Terminal page's window switcher**
+  (when expanded): below the `+ new window` button, separated by a top
+  border. One scroll switcher for everything — current-session windows and
+  other-session AI chips share the same click handler (`onSwitchPane`), so
+  the user doesn't need to learn two patterns.
 
 ### Sort order (unchanged from previous)
 1. Currently-active session (pinned top)

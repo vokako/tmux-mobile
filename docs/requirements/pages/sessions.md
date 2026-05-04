@@ -13,9 +13,12 @@ glance without requiring interaction.
   session name, window name, pane command, pane cwd, and AI tag (Kiro /
   Claude / OpenClaw). Clear button appears when query is non-empty.
 - **MRU chips row** (hidden while searching). Up to 5 most-recently-opened
-  sessions (excluding the currently-open one), horizontally scrollable.
-  Each chip shows the session's AI icon (if any) or an attached/detached
-  dot, plus the session name. One tap on a chip opens that session.
+  **AI sessions** — sessions where at least one pane is running a known
+  coding-agent CLI (Kiro/Claude/OpenClaw), excluding the currently-open one.
+  The filter is deliberate: plain zsh/node/vim sessions clutter a "fast
+  switch" surface and are still reachable via the full list and search
+  below. Horizontally scrollable. One tap on a chip opens that session.
+  Each chip shows the agent's icon plus the session name.
 
 ### Session row (single line, dense)
 Left-to-right:

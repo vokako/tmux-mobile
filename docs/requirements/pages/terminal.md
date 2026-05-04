@@ -7,7 +7,10 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
 - xterm.js v6 terminal emulator with theme-aware color schemes (light/dark)
 - Shortcut buttons: Esc, ^C, ^D, Tab, arrows — with long-press repeat
 - Keyboard toggle button (show/hide on-screen keyboard)
-- Collapsible window switcher — AI agent icons (Kiro/Claude) or command name, persists state
+- Collapsible window switcher — AI agent icons (Kiro/Claude) or command
+  name, persists state. When expanded, also lists other AI sessions as
+  chips (up to 5, most-recently-opened), so the user can jump straight to
+  a different coding-agent session without returning to the Sessions page.
 - Floating buttons: scroll-to-bottom, window switcher (frosted glass style)
 - Status bar: session:pane and running command
 
@@ -28,7 +31,10 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
 - `send_command(target, command)` — send text + Enter
 - `capture_pane(target, lines)` — initial content load
 - `pane_command(target)` — get running command for status bar
-- `list_panes(session)` — populate window switcher
+- `list_panes(session)` — populate window switcher (current session)
+- `list_sessions` — populate cross-session AI chips (expanded switcher only)
+- `list_panes(other_session)` — per AI-candidate session, to find the primary
+  pane for chip targets (expanded switcher only)
 - `resize_pane(target, cols, rows)` — resize pane to match client viewport (auto-restores on disconnect)
 
 ## State Management
