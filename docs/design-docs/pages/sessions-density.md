@@ -180,3 +180,24 @@ General rule: on mobile, if a panel is always-visible or often-visible,
 spend horizontal space (scroll laterally) before vertical space. Vertical
 "accordions" / "drawers" work when they're modal or rare, but a switcher
 that's meant to be glanced at during other work is not rare.
+
+### Collapse is compression, not "become a different widget"
+First pass of the horizontal bar kept the old floating glass blur button
+as the collapsed state. Users correctly pointed out that the collapsed
+state looked like a *different* widget (different shape, different
+material, different corner treatment) from the expanded bar — as if
+tapping collapsed an *entire component* and revealed *another one*. That
+breaks the mental model: users should feel they are working with one
+thing that has two sizes, not two unrelated surfaces.
+
+Fix: the collapsed state is now just a single `.win-chip` (same class as
+every other chip in the expanded bar), absolute-positioned to the top
+right. Same border, same shape, same colors. Visually the switcher has
+been compressed to the right end of an invisible bar — which matches the
+"collapse to the right" direction that feels natural for a horizontal
+strip.
+
+General rule for collapse/expand animations: the collapsed state should
+look like a minimum-size version of the expanded state, not a separate
+affordance. Chevron icons (down = expand, up = collapse) convey direction
+without needing a new visual language.

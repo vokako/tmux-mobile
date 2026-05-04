@@ -39,6 +39,10 @@
     <path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/>
   {:else if name === 'chevron-right'}
     <polyline points="9 18 15 12 9 6"/>
+  {:else if name === 'chevron-down'}
+    <polyline points="6 9 12 15 18 9"/>
+  {:else if name === 'chevron-up'}
+    <polyline points="18 15 12 9 6 15"/>
   {:else if name === 'skip-left'}
     <line x1="7" y1="5" x2="7" y2="19"/><polyline points="17 5 11 12 17 19"/>
   {:else if name === 'skip-right'}

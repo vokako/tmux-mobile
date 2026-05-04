@@ -8,16 +8,24 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
 - Shortcut buttons: Esc, ^C, ^D, Tab, arrows — with long-press repeat
 - Keyboard toggle button (show/hide on-screen keyboard)
 - Collapsible window switcher:
-  - **Collapsed**: small AI-icon button floating in the top-right corner
-    (glass/blur background). Shows the current window's agent icon, or
-    its command name if no agent detected. Tap to expand.
+  - **Collapsed**: the bar compresses to a single chip in the top-right
+    corner, using the same chip visual language as the expanded bar
+    (same border, same pill shape, same colors). Shows the current
+    window's agent icon (or its command name) plus a chevron-down
+    indicator. Positioned absolute so it does not steal a row from the
+    terminal viewport.
   - **Expanded**: horizontal tab bar pinned to the top of the Terminal
-    view, replacing the floating toggle. Holds chips for (1) every
-    window in the current session, (2) a `+ new window` button, (3) a
-    vertical separator, (4) up to 5 most-recently-opened AI sessions
-    (Kiro/Claude/OpenClaw) as chips. Scrolls horizontally. A collapse
-    button on the right restores the floating toggle.
+    view. Holds chips for (1) every window in the current session,
+    (2) a `+ new window` button, (3) a vertical separator, (4) up to 5
+    most-recently-opened AI sessions (Kiro/Claude/OpenClaw) as chips.
+    Scrolls horizontally. A chevron-up button on the right collapses
+    the bar back into the single chip.
   - State (collapsed vs expanded) is persisted in localStorage.
+  - The collapsed chip and every expanded-bar chip share one visual
+    language — there is no "switch mode" that replaces a floating glass
+    button with a different kind of widget. Conceptually the switcher
+    has been *compressed to the right end of the bar*, not replaced
+    with a different surface.
 - Floating buttons: scroll-to-bottom (frosted glass style)
 - Status bar: session:pane and running command
 

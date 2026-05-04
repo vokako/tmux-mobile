@@ -1175,18 +1175,26 @@
         </div>
 
         <button class="win-bar-collapse" aria-label="Collapse" onclick={() => { showWindowCmd = false; localStorage.setItem('tmux_winswitcher', '0'); }}>
-          <Icon name="arrow-up" size={12} />
+          <Icon name="chevron-up" size={12} />
         </button>
       </div>
     {:else}
       {@const cur = windows.find(w => String(w.window) === currentWindow)}
       {@const curAgent = cur ? detectAgent((cur.current_command || '') + ' ' + (cur.pane_title || '')) : null}
-      <button class="win-toggle" onclick={() => { showWindowCmd = true; localStorage.setItem('tmux_winswitcher', '1'); }}>
+      <!--
+        Collapsed state: a single chip in the top-right corner using the
+        exact chip visual language from the expanded bar. Conceptually the
+        switcher hasn't become "something else" — it has been compressed
+        to the right end of the bar. Positioned absolute so it doesn't
+        steal a row from the terminal viewport.
+      -->
+      <button class="win-chip collapsed" onclick={() => { showWindowCmd = true; localStorage.setItem('tmux_winswitcher', '1'); }}>
         {#if curAgent}
           <img class="win-ai-icon" class:claude={curAgent.tag === 'Claude'} src={curAgent.icon} alt={curAgent.tag} />
         {:else}
-          <span class="win-toggle-cmd">{cur?.current_command || cur?.window_name || '?'}</span>
+          <span class="win-chip-cmd">{cur?.current_command || cur?.window_name || '?'}</span>
         {/if}
+        <Icon name="chevron-down" size={10} />
       </button>
     {/if}
   {/if}
@@ -1272,26 +1280,19 @@
     position: relative;
   }
 
-  /* Collapsed floating entry — small AI icon in the top-right corner */
-  .win-toggle {
-    position: absolute; top: 8px; right: 8px; z-index: 10;
-    width: auto; min-width: 36px; height: 36px; border: 1px solid var(--border);
-    border-radius: 10px; background: rgba(10,10,15,0.85); color: var(--accent);
-    cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0 8px;
-    -webkit-tap-highlight-color: transparent;
-    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  /* Collapsed state: a single chip in the top-right corner using the same
+     chip visual language as the expanded bar. Positioned absolute so it
+     does not steal a row from the terminal viewport. */
+  .win-chip.collapsed {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 10;
+    gap: 4px;
+    padding: 5px 6px 5px 8px;
+    color: var(--text2);
   }
-  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
-    .win-toggle { background: rgba(10,10,15,0.45); }
-    :global(html[data-theme="light"]) .win-toggle { background: rgba(245,245,247,0.45); }
-  }
-  :global(html[data-theme="light"]) .win-toggle { background: rgba(245,245,247,0.85); }
-  .win-toggle:active { background: var(--accent-bg); color: var(--accent); }
-  .win-toggle-cmd { font-size: 10px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .win-badge {
-    font-size: 11px; font-weight: 700;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
-  }
+  .win-chip.collapsed:active { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
 
   /* Expanded: horizontal tab bar pinned to the top of the Terminal view.
      Holds current-session windows AND cross-session AI chips in one scroll
