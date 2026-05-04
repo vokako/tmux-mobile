@@ -102,16 +102,25 @@ function rejectAllPending(reason) {
   pending.clear();
 }
 
-export function connect(url, token) {
-  // Close any existing connection before creating a new one
+export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
+  // Close any existing connection before creating a new one.
+  // IMPORTANT: null ALL handlers (including onmessage) so any in-flight events on
+  // the old socket don't fire handlers that still close over module-level `ws` and
+  // accidentally send frames on the NEW socket (common race during reconnect).
   if (ws) {
-    try { ws.onclose = null; ws.onerror = null; ws.close(); } catch {}
+    try {
+      ws.onclose = null;
+      ws.onerror = null;
+      ws.onmessage = null;
+      ws.onopen = null;
+      ws.close();
+    } catch {}
     ws = null;
     rejectAllPending('superseded by new connect');
   }
   sessionCipher = null;
   rpcTimeouts = 0;
-  window.__dbg?.(`ws: connecting to ${url}`);
+  window.__dbg?.(`ws: connecting to ${url} (timeout=${timeoutMs}ms)`);
 
   return new Promise((resolve, reject) => {
     try {
@@ -124,9 +133,9 @@ export function connect(url, token) {
 
     const timeout = setTimeout(() => {
       window.__dbg?.('ws: connect timeout');
-      ws?.close();
+      try { ws?.close(); } catch {}
       reject(new Error('connection timeout'));
-    }, CONNECT_TIMEOUT_MS);
+    }, timeoutMs);
 
     let authed = false;
     let serverNonce = null;
