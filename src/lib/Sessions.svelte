@@ -331,9 +331,10 @@
     {/if}
   </div>
 
-  {#if error}
-    <div class="error">{error}</div>
-  {/if}
+  <div class="content">
+    {#if error}
+      <div class="error">{error}</div>
+    {/if}
 
   <!-- Session list -->
   <div class="list">
@@ -490,25 +491,43 @@
       <Icon name="refresh" size={16} />
     </button>
   </div>
+  </div>
 </div>
 
 <style>
   .sessions {
-    padding: 10px 12px 14px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    overflow-y: auto;
     flex: 1;
+    min-height: 0;
     -webkit-overflow-scrolling: touch;
   }
 
-  /* ─── Top row (chips + search) ─────────────────────── */
+  /* Scrollable content below the top bar. Padding/gap moved here so the
+     top bar can span edge-to-edge at the page top (matching Terminal /
+     Files top strips). */
+  .content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px 14px;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Top bar flush against the page top, matches Terminal win-bar and
+     Files toolbar height (24 px content + 3 px padding + 1 px border). */
   .top-row {
     display: flex;
     align-items: center;
     gap: 6px;
     min-height: 24px;
+    padding: 3px 8px;
+    border-bottom: 1px solid var(--border2);
+    background: var(--surface);
+    flex-shrink: 0;
   }
   .icon-btn {
     flex-shrink: 0;
