@@ -578,13 +578,26 @@
     const onTouchStart = (e) => {
       stopMomentum();
       touchId = e.touches[0].identifier; // track this finger
-      // Tap while selection active → copy the selection and clear it.
-      // Tolerant hit-test: anywhere on the terminal triggers copy, not just
-      // inside the selected rectangle. Precise tap-on-selection was hard to
-      // hit on mobile and users reported tapping near a selection appearing
-      // to do nothing (the old path silently cleared without copying).
+      // Tap while selection active → copy ONLY if the tap landed inside
+      // the selected region. Tapping outside just clears the selection.
+      // Rationale: tap-anywhere-to-copy was pollution-prone (any stray
+      // tap would overwrite the user's clipboard). The hit-test is
+      // forgiving enough on mobile because long-press selection is word-
+      // sized and triple-click selection is line-sized.
       if (isSelecting) {
-        if (term.hasSelection()) {
+        const cell = touchToCell(e.touches[0].clientX, e.touches[0].clientY);
+        const bufRow = term.buffer.active.viewportY + cell.row;
+        let onSel = false;
+        if (selectionRange) {
+          const { sRow, sCol, eRow, eCol } = selectionRange;
+          if (bufRow >= sRow && bufRow <= eRow) {
+            if (sRow === eRow) onSel = cell.col >= sCol && cell.col <= eCol;
+            else if (bufRow === sRow) onSel = cell.col >= sCol;
+            else if (bufRow === eRow) onSel = cell.col <= eCol;
+            else onSel = true;
+          }
+        }
+        if (onSel && term.hasSelection()) {
           const sel = term.getSelection();
           if (sel) {
             copyText(sel).then(ok => {
@@ -760,6 +773,36 @@
     termEl.addEventListener('touchend', onTouchEnd, { passive: true });
     termEl.addEventListener('touchcancel', onTouchCancel, { passive: true });
 
+    // Track selections that originate outside our long-press flow — most
+    // notably triple-click/triple-tap which xterm.js handles internally and
+    // which leaves isSelecting=false. Without this hook, the next tap would
+    // go down the "no active selection" path and never reach the
+    // copy-on-tap-inside-selection branch.
+    //
+    // Note: xterm's onSelectionChange fires synchronously from within
+    // term.select(), so the long-press path (which calls term.select then
+    // sets isSelecting=true) briefly sees isSelecting=false here. That's
+    // fine — this handler adopts the selection the same way the long-press
+    // path does a few lines later; the second set is a no-op. We skip the
+    // "selected" toast here to avoid doubling it up in that case; the
+    // long-press path shows its own toast with haptics.
+    const onSelChange = term.onSelectionChange(() => {
+      if (!term.hasSelection()) {
+        isSelecting = false;
+        selectionAnchor = null;
+        selectionRange = null;
+        return;
+      }
+      if (isSelecting) return;
+      const pos = term.getSelectionPosition();
+      if (!pos) return;
+      selectionRange = { sRow: pos.start.y, sCol: pos.start.x, eRow: pos.end.y, eCol: pos.end.x };
+      selectionAnchor = null; // no drag-anchor — selection wasn't made by our touch flow
+      isSelecting = true;
+      // Pause content updates so incoming tmux output doesn't wipe the
+      // selection before the user taps to copy.
+      touchScrolling = true;
+    });
     // Safety net: if the app is backgrounded mid-selection or mid-scroll, touchcancel
     // may never fire and touchScrolling can stay stuck true, which freezes
     // writeToXterm. Reset transient gesture state whenever we regain visibility.
@@ -958,6 +1001,7 @@
     return () => {
       resizeObs.disconnect();
       try { onFirstRender.dispose(); } catch {}
+      try { onSelChange.dispose(); } catch {}
       doResizeRef = null;
       clearTimeout(endTouchScrollTimer);
       if (longPressTimer) clearTimeout(longPressTimer);
