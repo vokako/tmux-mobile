@@ -13,8 +13,6 @@
   // Timing constants
   const PANE_COMMAND_POLL_MS = 3000;
   const WINDOW_LIST_POLL_MS = 5000;
-  const RESIZE_DEBOUNCE_MS = 300;
-  const KB_RESIZE_DELAY_MS = 100;
   // Max wait for server to echo our resize. If never confirmed (external resize
   // or slow tmux), client falls back to trusting server-reported dimensions.
   const RESIZE_CONFIRM_TIMEOUT_MS = 5000;
@@ -123,10 +121,12 @@
     term.options.fontSize = fontSize;
     // xterm re-measures cell geometry on the next render, not synchronously.
     // Defer refit by two frames so calcFit reads the new cell width/height.
+    // doResizeRef is set by the main $effect after term is created.
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => window.dispatchEvent(new Event('terminal-refit')));
+      requestAnimationFrame(() => doResizeRef?.());
     });
   });
+  let doResizeRef = null;
 
   let parser = $derived(detectParser('', command));
 
@@ -823,14 +823,25 @@
       if (termAtBottom) hasNewContent = false;
     });
 
-    // Resize tmux pane to fit screen
-    let lastFitCols = 0, lastFitRows = 0;
+    // Resize tmux pane to fit screen.
+    //
+    // First principle: the terminal's (cols, rows) must always equal
+    //   floor(termEl.clientWidth / cellW) × floor(termEl.clientHeight / cellH).
+    // Everything else — keyboard open/close, orientation change, window
+    // resize, flex reflow, safe-area shifts — is just a cause of container
+    // size change. The only thing we actually need to observe is
+    // termEl's box. ResizeObserver does exactly that, including cases the
+    // old code relied on intermediate custom events for.
+    //
+    // Secondary detail: xterm computes real cell dimensions asynchronously
+    // (after first render). Until then calcFit falls back to a font-size
+    // estimate that can be off by 1-2 rows, which is why initial paint
+    // sometimes left the bottom rows blank. We run one more fit on
+    // term.onRender's first fire so the first real fit uses real metrics.
     function doResize() {
       const fit = calcFit();
       if (!fit) return;
       window.__dbg?.(`resize: fit=${fit.cols}x${fit.rows} cur=${term.cols}x${term.rows} elH=${termEl.clientHeight}`);
-      lastFitCols = fit.cols;
-      lastFitRows = fit.rows;
       if (fit.cols === term.cols && fit.rows === term.rows) return;
       pendingCols = fit.cols;
       pendingRows = fit.rows;
@@ -840,24 +851,26 @@
       // Immediately rewrite content so display is clean during the ~200ms server catch-up
       if (lastContent) writeToXterm(lastContent, lastCursor);
     }
-    requestAnimationFrame(doResize);
+    doResizeRef = doResize;
 
-    // Debounced resize for window size changes (orientation, split-screen).
-    // Height-only changes on mobile are skipped (address bar, keyboard handled via onKbShift).
-    let lastWinW = window.innerWidth, lastWinH = window.innerHeight;
-    let resizeTimer = null;
-    const onResize = () => {
-      const ww = window.innerWidth, wh = window.innerHeight;
-      // Skip if only height changed (likely keyboard open/close on mobile)
-      if (isMobile && ww === lastWinW && wh !== lastWinH) return;
-      lastWinW = ww; lastWinH = wh;
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(doResize, RESIZE_DEBOUNCE_MS);
-    };
-    window.addEventListener('resize', onResize);
+    // Single observer for all container-size changes.
+    const resizeObs = new ResizeObserver(() => doResize());
+    resizeObs.observe(termEl);
 
-    // Resize terminal to fit visible area when keyboard opens/closes
-    let kbResizeTimer = null;
+    // First real paint → real cell metrics available → refit once so the
+    // initial ResizeObserver tick (which ran with estimated metrics) gets
+    // corrected. term.onRender fires on every render, so we disarm after
+    // the first call.
+    let firstRenderDone = false;
+    const onFirstRender = term.onRender(() => {
+      if (firstRenderDone) return;
+      firstRenderDone = true;
+      doResize();
+    });
+
+    // Keyboard state (lock/unlock) is driven by keyboard-shift events.
+    // Resize is NOT — ResizeObserver handles any container change caused by
+    // the keyboard. We keep this handler purely for the kbLocked lifecycle.
     let lastKbHeight = 0;
     const onKbShift = (e) => {
       if (!termEl || !term) return;
@@ -877,30 +890,35 @@
         window.__dbg?.('kb: keyboard-shift kbH=0 (was ' + lastKbHeight + ') → lock + blur');
       }
       lastKbHeight = kbH;
-      clearTimeout(kbResizeTimer);
-      kbResizeTimer = setTimeout(() => {
-        lastFitCols = 0; lastFitRows = 0; // force recalc
-        doResize();
-        // Keep the cursor area visible when the keyboard just appeared
-        if (kbH > 0 && termAtBottom && term) term.scrollToBottom();
-      }, KB_RESIZE_DELAY_MS);
+      // Keep the cursor area visible when the keyboard just appeared.
+      // The actual resize has already been (or will be) picked up by
+      // ResizeObserver; we just nudge scroll on the next frame so the
+      // scroll is applied to the post-resize geometry.
+      if (kbH > 0 && termAtBottom && term) {
+        requestAnimationFrame(() => term?.scrollToBottom());
+      }
     };
     window.addEventListener('keyboard-shift', onKbShift);
-
-    // Re-fit when keyboard closes (container grows back, terminal needs to match)
-    const onRefit = () => {
-      lastFitCols = 0; lastFitRows = 0; // force recalc
-      doResize();
-    };
-    window.addEventListener('terminal-refit', onRefit);
 
     // Reconnect recovery: the previous server's resize_tracker cleanup auto-fits the pane
     // back to an arbitrary size on disconnect. Clear stale pending confirmation and
     // re-send resize so the new server's tmux pane matches our terminal again.
     const onReconnected = () => {
       pendingCols = 0; pendingRows = 0; pendingResizeTs = 0;
-      lastFitCols = 0; lastFitRows = 0;
-      requestAnimationFrame(doResize);
+      // Force doResize to actually send by invalidating the cur===fit check.
+      // We do this by momentarily pretending term has different dims.
+      if (term) {
+        const fit = calcFit();
+        if (fit) {
+          pendingCols = fit.cols;
+          pendingRows = fit.rows;
+          pendingResizeTs = Date.now();
+          resizePane(target, fit.cols, fit.rows).catch(() => {});
+          // term.resize is a no-op if dims already match, which is fine.
+          term.resize(fit.cols, fit.rows);
+          if (lastContent) writeToXterm(lastContent, lastCursor);
+        }
+      }
     };
     window.addEventListener('ws-reconnected', onReconnected);
 
@@ -938,16 +956,15 @@
     }).catch(() => {});
 
     return () => {
-      clearTimeout(resizeTimer);
-      clearTimeout(kbResizeTimer);
+      resizeObs.disconnect();
+      try { onFirstRender.dispose(); } catch {}
+      doResizeRef = null;
       clearTimeout(endTouchScrollTimer);
       if (longPressTimer) clearTimeout(longPressTimer);
       clearTimeout(kbBlurTimer);
       if (kbTa && onTaBlur) kbTa.removeEventListener('blur', onTaBlur);
       if (kbTa && onTaFocus) kbTa.removeEventListener('focus', onTaFocus);
       stopMomentum();
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('terminal-refit', onRefit);
       window.removeEventListener('ws-reconnected', onReconnected);
       window.removeEventListener('keyboard-shift', onKbShift);
       document.removeEventListener('visibilitychange', onVisible);

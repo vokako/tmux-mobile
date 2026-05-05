@@ -57,7 +57,6 @@
       else return;
       document.documentElement.style.zoom = zoomLevel;
       localStorage.setItem('tmux_zoom', zoomLevel);
-      setTimeout(() => window.dispatchEvent(new Event('terminal-refit')), 50);
     });
   }
 
@@ -101,10 +100,8 @@
         const termWrap = document.querySelector('.term-wrap');
         window.__dbg?.(`androidKb: kbh=${kbh} appH=${h} mainH=${main?.clientHeight} termH=${termWrap?.clientHeight} bodyH=${document.body.clientHeight}`);
       });
-      if (kbh === 0) {
-        setTimeout(() => window.dispatchEvent(new Event('terminal-refit')), 100);
-        setTimeout(() => window.dispatchEvent(new Event('terminal-refit')), 500);
-      }
+      // No explicit refit needed — updating --app-height changes the terminal
+      // container size, which Terminal.svelte's ResizeObserver picks up.
     };
     window.addEventListener('androidKeyboardHeight', nativeHandler);
 
@@ -130,12 +127,9 @@
         const kbShift = kbOpen ? (fullHeight - h) : 0;
         window.dispatchEvent(new CustomEvent('keyboard-shift', { detail: { kbHeight: kbShift } }));
       });
-      // When keyboard closes, terminal needs to re-fit to the larger container
-      if (wasKbOpen && !kbOpen) {
-        window.__dbg?.('⌨️CLOSE → dispatching terminal-refit');
-        setTimeout(() => window.dispatchEvent(new Event('terminal-refit')), 100);
-        setTimeout(() => window.dispatchEvent(new Event('terminal-refit')), 500);
-      }
+      // No explicit refit needed — --app-height already reflects the
+      // visible viewport, so Terminal.svelte's ResizeObserver picks up
+      // the container size change on both keyboard open and close.
       window.scrollTo(0, 0);
       document.documentElement.scrollTop = 0;
     };
