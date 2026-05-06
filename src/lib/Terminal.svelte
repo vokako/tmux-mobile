@@ -402,14 +402,18 @@
     };
   }
 
-  // Write content + position cursor in xterm.js
-  let _colorCacheIn = '', _colorCacheOut = '', _colorCacheTheme = '';
-  function adaptColors(text) {
-    if (text === _colorCacheIn && theme === _colorCacheTheme) return _colorCacheOut;
-    _colorCacheIn = text;
-    _colorCacheTheme = theme;
-    const isDark = theme !== 'light';
-    let out = text.replace(/\x1b\[(3|4)8;2;(\d+);(\d+);(\d+)m/g, (_m, type, r, g, b) => {
+  // Write content + position cursor in xterm.js.
+  // Color adaptation runs per line, with a Map cache keyed by (rawLine, theme).
+  // Hit rate is high in streaming scenarios because most lines repeat verbatim
+  // between snapshots — only the few changing lines re-run the regex pass.
+  // We bound the cache so unbounded scrollback doesn't grow it forever.
+  const _colorCache = new Map();
+  const _COLOR_CACHE_MAX = 4000;
+  function adaptLine(rawLine, isDark) {
+    const key = (isDark ? 'd:' : 'l:') + rawLine;
+    const hit = _colorCache.get(key);
+    if (hit !== undefined) return hit;
+    let out = rawLine.replace(/\x1b\[(3|4)8;2;(\d+);(\d+);(\d+)m/g, (_m, type, r, g, b) => {
       const isBg = type === '4';
       const [nr, ng, nb] = _adjustColor(+r, +g, +b, isBg, isDark);
       return `\x1b[${type}8;2;${nr};${ng};${nb}m`;
@@ -421,11 +425,52 @@
       const [nr, ng, nb] = _adjustColor(rgb[0], rgb[1], rgb[2], isBg, isDark);
       return `\x1b[${type}8;2;${nr};${ng};${nb}m`;
     });
-    _colorCacheOut = out;
+    if (_colorCache.size >= _COLOR_CACHE_MAX) {
+      // Drop oldest entry. Map iteration is insertion-ordered.
+      const firstKey = _colorCache.keys().next().value;
+      if (firstKey !== undefined) _colorCache.delete(firstKey);
+    }
+    _colorCache.set(key, out);
     return out;
+  }
+  function adaptColors(text) {
+    const isDark = theme !== 'light';
+    if (text.indexOf('\n') < 0) return adaptLine(text, isDark);
+    // Split, adapt per line, rejoin. \n is preserved at line boundaries.
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) lines[i] = adaptLine(lines[i], isDark);
+    return lines.join('\n');
+  }
+
+  // Coalesce high-frequency snapshots into one render per animation frame.
+  // When token streams arrive at 30–60 Hz, multiple snapshots collapse into
+  // a single xterm write — saves CPU, eliminates the "two writes painting at
+  // once" jitter, and bounded latency is the rAF interval (~16 ms, well
+  // below human flicker threshold).
+  // The pending frame holds only the LATEST content/cursor (older snapshots
+  // are intentionally dropped — they are replaced wholesale, not appended).
+  let _pendingContent = null;
+  let _pendingCursor = null;
+  let _pendingRaf = 0;
+
+  function _flushPending() {
+    _pendingRaf = 0;
+    const c = _pendingContent;
+    const cur = _pendingCursor;
+    _pendingContent = null;
+    _pendingCursor = null;
+    if (c == null) return;
+    _writeToXtermNow(c, cur);
   }
 
   function writeToXterm(content, cursor) {
+    _pendingContent = content;
+    _pendingCursor = cursor;
+    if (_pendingRaf) return;
+    _pendingRaf = requestAnimationFrame(_flushPending);
+  }
+
+  function _writeToXtermNow(content, cursor) {
     if (!term || touchScrolling) return;
     // Reconcile terminal dimensions with server-reported ones.
     // If we have a pending local resize, only clear it when server echoes matching dims;
@@ -457,7 +502,26 @@
     }
 
     if (buf.baseY > 0) term.clear();
-    term.write('\x1b[?25l\x1b[2J\x1b[H' + topPad + adaptColors(content) + afterPad + cursorSeq + '\x1b[?25h', () => {
+    // Build the body so each line ends with SGR reset + erase-to-EOL. This
+    // overwrites the previous frame's cells *in place* — xterm never has a
+    // "fully blank" intermediate state, so there is no visible flash.
+    // Compare with the old `\x1b[2J` (clear-screen) which emptied every cell
+    // before painting, producing a one-frame flicker on every snapshot.
+    const adapted = adaptColors(content);
+    const lines = adapted.split('\n');
+    let body = '';
+    for (let i = 0; i < lines.length; i++) {
+      body += lines[i] + '\x1b[0m\x1b[K';
+      if (i < lines.length - 1) body += '\n';
+    }
+    // topPad / afterPad are sequences of '\n'; we add \x1b[K after each so
+    // any stale cells on those rows are wiped without flashing.
+    const padTop = topPad ? topPad.replace(/\n/g, '\x1b[0m\x1b[K\n') : '';
+    const padAft = afterPad ? afterPad.replace(/\n/g, '\x1b[0m\x1b[K\n') : '';
+    // Synchronized Output (mode 2026): tell xterm to defer rendering until
+    // the whole batch is parsed. Effectively wraps the entire frame in a
+    // single render commit, avoiding any partial-paint glimpses.
+    term.write('\x1b[?2026h\x1b[?25l\x1b[H' + padTop + body + padAft + cursorSeq + '\x1b[?25h\x1b[?2026l', () => {
       if (!term || touchScrolling) return;
       if (atBottom) {
         term.scrollToBottom();
@@ -1283,6 +1347,9 @@
       if (kbTa && onTaBlur) kbTa.removeEventListener('blur', onTaBlur);
       if (kbTa && onTaFocus) kbTa.removeEventListener('focus', onTaFocus);
       stopMomentum();
+      if (_pendingRaf) { cancelAnimationFrame(_pendingRaf); _pendingRaf = 0; }
+      _pendingContent = null;
+      _pendingCursor = null;
       window.removeEventListener('ws-reconnected', onReconnected);
       window.removeEventListener('keyboard-shift', onKbShift);
       document.removeEventListener('visibilitychange', onVisible);
