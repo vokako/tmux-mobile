@@ -57,7 +57,7 @@ cd src-tauri && cargo test -- --test-threads=1   # Tests (needs tmux running)
 - **Base64 large data**: Chunked 8192 bytes per chunk. Never spread all bytes.
 - **HTML preview**: iframe `allow-same-origin` only, NO `allow-scripts`.
 - **WebSocket lifecycle**: `connect()` cleans up existing. `onclose` rejects pending. `doDisconnect()` clears timers. Heartbeat ping every 15s; 2 consecutive RPC timeouts → auto-close → reconnect.
-- **Terminal touch**: All custom (xterm.js v6 has no touch support). Pause updates during touch. See `docs/design-docs/pages/terminal-gestures.md` for full state machine.
+- **Terminal touch**: All custom (xterm.js v6 has no touch support). Pause updates during touch. Selection is an *object* (`{anchor, head}`, both inclusive buffer-row/col) that persists until explicitly copied or cancelled; both endpoints are draggable via handles; copy is via an explicit floating toolbar (no tap-to-copy heuristics). See `docs/design-docs/pages/terminal-gestures.md` for the full state machine.
 - **Terminal keyboard**: Double-tap to open (NOT single-tap). `kbLocked` flag + `inputmode` attribute. `endTouchScroll` must NEVER change `kbLocked` (race condition with delayed timers). Only `unlockKeyboard()`, blur timer, keyboard-shift, and pane switch may change it.
 - **Mobile auto-pair textarea**: Force-clear xterm's hidden textarea after keyboard input (NOT paste). Use `paste` event flag to distinguish — NEVER use `data.length` (auto-paired `""` `()` have length 2, gets misclassified as paste).
 - **Tab swipe priority**: App-level left/right tab swipe is lowest priority. Suppressed when any child gesture is active (`defaultPrevented` or vertical movement > 10px).

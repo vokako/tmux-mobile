@@ -242,6 +242,39 @@
   }
 
   let touchScrolling = false; // set by touch handler, pauses content updates
+
+  // ─── Mobile text selection ────────────────────────────────────────────────
+  // First principle: a selection is an *object* (anchor + head, both inclusive
+  // buffer-row/col), not a transient state of the touch handler. Once made
+  // (long-press, double/triple-tap), it lives until the user explicitly copies
+  // (toolbar) or cancels (tap outside, new long-press, pane switch).
+  //
+  // The two endpoints are independently draggable via handles. We never store
+  // pre-sorted (start, end) in the source-of-truth — selStart/selEnd derive
+  // them from anchor/head so a handle drag that crosses the other endpoint
+  // just flips which one is "leading" without any swap bookkeeping.
+  let selection = $state(null); // null | { anchor: {row, col}, head: {row, col} }
+  let selUI = $state(null);     // pixel-space UI: { startX, startY, endX, endY, toolbarX, toolbarY, toolbarBelow, startInView, endInView, toolbarVisible }
+  let isApplyingSelection = false; // guard onSelectionChange while we drive term.select ourselves
+  // Toolbar button handlers — assigned inside the $effect that owns `term`,
+  // `lastContent`, etc. The template guards on `selection != null`, which can
+  // only happen after the effect has run, so the assignment is always live
+  // when the buttons can be clicked.
+  let copySelection = () => {};
+  let clearSelection = () => {};
+
+  function selStart(s) {
+    if (!s) return null;
+    const { anchor, head } = s;
+    if (head.row < anchor.row || (head.row === anchor.row && head.col < anchor.col)) return head;
+    return anchor;
+  }
+  function selEnd(s) {
+    if (!s) return null;
+    const { anchor, head } = s;
+    if (head.row < anchor.row || (head.row === anchor.row && head.col < anchor.col)) return anchor;
+    return head;
+  }
   // Resize confirmation: after local resize, we expect server to echo cursor.w/cursor.h
   // matching pendingCols/pendingRows. Until confirmed, ignore server dims (stale).
   let pendingCols = 0, pendingRows = 0, pendingResizeTs = 0;
@@ -439,6 +472,7 @@
     touchScrolling = false; // reset on pane switch
     pendingCols = 0; pendingRows = 0; pendingResizeTs = 0;
     kbLocked = true;
+    selection = null; selUI = null;
     const estCellW = fontSize * CELL_W_RATIO;
     const estCellH = fontSize * CELL_H_RATIO;
     const containerW = termEl?.clientWidth || 300;
@@ -533,8 +567,12 @@
     let lastCursor = null;
     // Uses outer endTouchScrollTimer so unlockKeyboard() and effect cleanup can clear it.
     function endTouchScroll() {
-      touchScrolling = false;
       endTouchScrollTimer = null;
+      // Selection holds the pin; releasing it would clear+rewrite and wipe
+      // xterm's native selection visuals. Stay pinned until the selection is
+      // cleared (toolbar copy, tap outside, pane switch).
+      if (selection) return;
+      touchScrolling = false;
       if (lastContent && termAtBottom) writeToXterm(lastContent, lastCursor);
     }
     function scheduleEndTouchScroll(ms) {
@@ -572,84 +610,271 @@
     const lineHeight = () => cellSize(term).h || (fontSize * CELL_H_RATIO);
 
     let onScrollbar = false, scrollbarStartY = 0, scrollbarStartViewport = 0;
-    let isSelecting = false, selectionAnchor = null, selectionRange = null;
+    // Touch mode: 'idle' | 'down' | 'scrollbar' | 'scroll' | 'longpress-select' | 'handle-drag'
+    let touchMode = 'idle';
+    let dragHandle = null; // 'start' | 'end' when touchMode === 'handle-drag'
     const stopMomentum = () => { if (momentumId) { cancelAnimationFrame(momentumId); momentumId = null; } };
+
+    // Cell at touch coords, allowing 1 cell of overshoot in each direction so
+    // drags out of the visible area still hit the closest edge. Caller decides
+    // whether to clamp; default clamp matches the legacy touchToCell behavior.
+    // Recompute pixel positions for handles + toolbar from current selection
+    // and viewport. Called whenever selection, scroll, resize, or render
+    // geometry changes.
+    function recomputeSelUI() {
+      if (!selection || !term || !termEl) { selUI = null; return; }
+      const { w: cellW, h: cellH } = cellSize(term);
+      if (!cellW || !cellH) { selUI = null; return; }
+      const buf = term.buffer.active;
+      const top = buf.viewportY;
+      const rows = term.rows;
+      const cols = term.cols;
+      const a = selStart(selection);
+      const b = selEnd(selection);
+      // viewport-relative rows; null if off-screen on that side
+      const aRowV = a.row - top;
+      const bRowV = b.row - top;
+      const startInView = aRowV >= 0 && aRowV < rows;
+      const endInView = bRowV >= 0 && bRowV < rows;
+      // Handle anchor points (iOS-style lollipop):
+      //   start handle anchored at the TOP-LEFT corner of the start cell —
+      //     a 2px bar runs DOWN through the cell's left edge, with a dot
+      //     ABOVE the line.
+      //   end handle anchored at the BOTTOM-RIGHT corner of the end cell —
+      //     a 2px bar runs UP through the cell's right edge, with a dot
+      //     BELOW the line.
+      // Stems align exactly with the cell border so the handle reads as part
+      // of the selection rather than floating UI.
+      const startX = a.col * cellW;
+      const startY = aRowV * cellH;
+      const endX = (b.col + 1) * cellW;
+      const endY = (bRowV + 1) * cellH;
+      // Toolbar placement: must clear the start handle's dot (which sits
+      // ~14px ABOVE the start row) and the end handle's dot (~14px BELOW
+      // the end row). We keep an extra 8px of breathing room so the user
+      // can comfortably grab the dot without the toolbar getting in the way.
+      const HANDLE_DOT_CLEARANCE = 22; // dot radius + gap
+      let toolbarX, toolbarY, toolbarBelow = false, toolbarVisible = true;
+      const rect = termEl.getBoundingClientRect();
+      const innerW = rect.width;
+      if (startInView) {
+        // Center between start and (if same line) end; else over start col.
+        const cx = a.row === b.row
+          ? ((a.col + b.col + 1) / 2) * cellW
+          : (a.col * cellW + cellW * Math.min(8, cols - a.col) / 2);
+        toolbarX = cx;
+        // Above the start row, beyond the start dot.
+        toolbarY = aRowV * cellH - HANDLE_DOT_CLEARANCE;
+        if (toolbarY < 8) {
+          // Not enough room above — place below the end row, beyond the end dot.
+          toolbarY = (Math.min(rows - 1, bRowV) + 1) * cellH + HANDLE_DOT_CLEARANCE;
+          toolbarBelow = true;
+        }
+      } else if (endInView) {
+        const cx = (b.col + 1) * cellW - cellW;
+        toolbarX = cx;
+        toolbarY = (bRowV + 1) * cellH + HANDLE_DOT_CLEARANCE;
+        toolbarBelow = true;
+      } else {
+        toolbarVisible = false;
+        toolbarX = 0;
+        toolbarY = 0;
+      }
+      // Clamp toolbar X within container with 8px padding
+      toolbarX = Math.max(48, Math.min(innerW - 48, toolbarX));
+      selUI = { startX, startY, endX, endY, toolbarX, toolbarY, toolbarBelow, startInView, endInView, toolbarVisible, cellH };
+    }
+
+    // Drive xterm.js native selection from our selection model. xterm.select
+    // takes (col, row, length) where length is across rows and assumes fixed
+    // cols; we compute it inclusive-of-end.
+    function applySelectionToXterm() {
+      if (!term) return;
+      isApplyingSelection = true;
+      try {
+        if (!selection) { term.clearSelection(); return; }
+        const a = selStart(selection), b = selEnd(selection);
+        const len = (b.row - a.row) * term.cols + (b.col - a.col + 1);
+        term.select(a.col, a.row, Math.max(1, len));
+      } finally {
+        isApplyingSelection = false;
+      }
+    }
+
+    clearSelection = () => {
+      if (!selection) return;
+      selection = null;
+      selUI = null;
+      isApplyingSelection = true;
+      try { term?.clearSelection(); } finally { isApplyingSelection = false; }
+      // Resume content updates (selection had pinned them).
+      if (touchMode === 'idle') {
+        touchScrolling = false;
+        if (lastContent && termAtBottom) writeToXterm(lastContent, lastCursor);
+      }
+    };
+
+    copySelection = async () => {
+      if (!term?.hasSelection()) return;
+      const text = term.getSelection();
+      if (!text) return;
+      const ok = await copyText(text);
+      showToast(ok ? t('copied') : t('copyFailed'));
+      clearSelection();
+    };
+
+    // ─── Selection extension helpers ────────────────────────────────────────
+    function setSelectionFromWord(bufRow, col) {
+      const bounds = wordBoundsAt(bufRow, col);
+      const a = { row: bufRow, col: bounds.start };
+      const b = { row: bufRow, col: bounds.end - 1 };
+      selection = { anchor: a, head: b };
+      applySelectionToXterm();
+      recomputeSelUI();
+      touchScrolling = true; // pin content updates while selection is live
+    }
+    function moveHead(bufRow, col) {
+      if (!selection) return;
+      selection = { anchor: selection.anchor, head: { row: bufRow, col } };
+      applySelectionToXterm();
+      recomputeSelUI();
+    }
+    function moveEndpoint(which, bufRow, col) {
+      if (!selection) return;
+      // 'start' / 'end' refer to the geometric ordering. Map to anchor/head
+      // such that dragging the start handle past the end (or vice versa)
+      // flips which is anchor — but selStart/selEnd derive from raw anchor/head
+      // so we just rewrite the right field.
+      const a = selStart(selection), b = selEnd(selection);
+      const isAnchorTheStart = (selection.anchor === a);
+      if (which === 'start') {
+        // move what is currently the start endpoint
+        if (isAnchorTheStart) selection = { anchor: { row: bufRow, col }, head: selection.head };
+        else                  selection = { anchor: selection.anchor, head: { row: bufRow, col } };
+      } else {
+        if (isAnchorTheStart) selection = { anchor: selection.anchor, head: { row: bufRow, col } };
+        else                  selection = { anchor: { row: bufRow, col }, head: selection.head };
+      }
+      applySelectionToXterm();
+      recomputeSelUI();
+    }
+
+    // Cell from clientX/clientY in buffer-row coords (row is absolute, not viewport-relative)
+    function touchToBufferCell(clientX, clientY) {
+      const cell = touchToCell(clientX, clientY);
+      return { row: term.buffer.active.viewportY + cell.row, col: cell.col };
+    }
+
+    // Hit-test handles. Each handle is a lollipop (dot + stem); the dot is
+    // the actual affordance, so we center the hit zone on the dot. Use a
+    // capsule shape (rect with rounded ends) along the stem axis so dragging
+    // from anywhere along the stem feels natural.
+    function hitHandle(clientX, clientY) {
+      if (!selection || !selUI || !termEl) return null;
+      const rect = termEl.getBoundingClientRect();
+      const px = clientX - rect.left;
+      const py = clientY - rect.top;
+      const HIT_HALF_W = 22;
+      const cellH = selUI.cellH || 16;
+      // Start: stem runs DOWN from anchor for cellH (inside selection); dot
+      // sits ABOVE the anchor (~14px). Capsule spans [anchorY - 16, anchorY + cellH].
+      if (selUI.startInView) {
+        const dx = px - selUI.startX;
+        if (Math.abs(dx) <= HIT_HALF_W && py >= selUI.startY - 16 && py <= selUI.startY + cellH) {
+          return 'start';
+        }
+      }
+      // End: stem runs UP from anchor for cellH (inside selection); dot sits
+      // BELOW the anchor (~14px). Capsule spans [anchorY - cellH, anchorY + 16].
+      if (selUI.endInView) {
+        const dx = px - selUI.endX;
+        if (Math.abs(dx) <= HIT_HALF_W && py >= selUI.endY - cellH && py <= selUI.endY + 16) {
+          return 'end';
+        }
+      }
+      return null;
+    }
+    // Hit-test the toolbar copy button (handled by the button's own pointer
+    // events; we just need to know to skip terminal-touch handling when the
+    // touch lands on the toolbar).
+    function isOnToolbar(target) {
+      return !!(target && target.closest && target.closest('.sel-toolbar'));
+    }
+    // Hit-test whether a buffer-row/col is inside the current selection
+    function isInsideSelection(bufRow, col) {
+      if (!selection) return false;
+      const a = selStart(selection), b = selEnd(selection);
+      if (bufRow < a.row || bufRow > b.row) return false;
+      if (a.row === b.row) return col >= a.col && col <= b.col;
+      if (bufRow === a.row) return col >= a.col;
+      if (bufRow === b.row) return col <= b.col;
+      return true;
+    }
 
     const onTouchStart = (e) => {
       stopMomentum();
       touchId = e.touches[0].identifier; // track this finger
-      // Tap while selection active → copy ONLY if the tap landed inside
-      // the selected region. Tapping outside just clears the selection.
-      // Rationale: tap-anywhere-to-copy was pollution-prone (any stray
-      // tap would overwrite the user's clipboard). The hit-test is
-      // forgiving enough on mobile because long-press selection is word-
-      // sized and triple-click selection is line-sized.
-      if (isSelecting) {
-        const cell = touchToCell(e.touches[0].clientX, e.touches[0].clientY);
-        const bufRow = term.buffer.active.viewportY + cell.row;
-        let onSel = false;
-        if (selectionRange) {
-          const { sRow, sCol, eRow, eCol } = selectionRange;
-          if (bufRow >= sRow && bufRow <= eRow) {
-            if (sRow === eRow) onSel = cell.col >= sCol && cell.col <= eCol;
-            else if (bufRow === sRow) onSel = cell.col >= sCol;
-            else if (bufRow === eRow) onSel = cell.col <= eCol;
-            else onSel = true;
-          }
-        }
-        if (onSel && term.hasSelection()) {
-          const sel = term.getSelection();
-          if (sel) {
-            copyText(sel).then(ok => {
-              showToast(ok ? t('copied') : t('copyFailed'));
-            });
-          }
-        }
-        term.clearSelection();
-        isSelecting = false;
-        selectionAnchor = null;
-        selectionRange = null;
-        endTouchScroll();
+      const cx = e.touches[0].clientX;
+      const cy = e.touches[0].clientY;
+
+      // Toolbar / handle hit-tests come first — they're tiny UI surfaces and
+      // the rest of the terminal-touch logic must not run for them. Toolbar
+      // buttons handle their own clicks; we just bow out.
+      if (isOnToolbar(e.target)) {
+        touchMode = 'idle';
         return;
       }
-      // Scrollbar drag
+      if (selection) {
+        const which = hitHandle(cx, cy);
+        if (which) {
+          touchMode = 'handle-drag';
+          dragHandle = which;
+          // Pin content updates while dragging. preventDefault on touchmove
+          // (which is non-passive) blocks the page from scrolling.
+          touchScrolling = true;
+          return;
+        }
+      }
+
+      // Scrollbar drag (right edge)
       const rect = termEl.getBoundingClientRect();
-      const touchX = e.touches[0].clientX;
-      onScrollbar = (rect.right - touchX) < SCROLLBAR_TOUCH_WIDTH;
+      onScrollbar = (rect.right - cx) < SCROLLBAR_TOUCH_WIDTH;
       if (onScrollbar) {
+        touchMode = 'scrollbar';
         touchScrolling = true;
-        scrollbarStartY = e.touches[0].clientY;
+        scrollbarStartY = cy;
         scrollbarStartViewport = term.buffer.active.viewportY;
         return;
       }
 
-      touchY = e.touches[0].clientY;
+      touchY = cy;
       touchStartY = touchY;
       accumulatedDy = 0;
       velocitySamples = [];
       totalDist = 0;
       lastMoveTime = Date.now();
-      touchScrolling = false;
       didScroll = false;
-      // Long press: 500ms hold without scroll → select word at touch point
-      const startCX = e.touches[0].clientX;
-      const startCY = e.touches[0].clientY;
+      touchMode = 'down';
+      // Selection lives on. We DO allow scrolling within a selection — the
+      // selection follows buffer rows, so scrolling just moves it. We do
+      // NOT, however, kick off a new long-press while a selection exists;
+      // long-press inside the selection is no-op (use handle to refine),
+      // long-press outside cancels and starts a new selection.
+      const startCX = cx, startCY = cy;
       longPressTimer = setTimeout(() => {
-
-        if (!didScroll && term) {
-          const textarea = termEl.querySelector('.xterm-helper-textarea');
-          if (textarea) textarea.blur();
-          const cell = touchToCell(startCX, startCY);
-          const bufRow = term.buffer.active.viewportY + cell.row;
-          const bounds = wordBoundsAt(bufRow, cell.col);
-          term.select(bounds.start, bufRow, bounds.end - bounds.start);
-          isSelecting = true;
-          selectionAnchor = { col: bounds.start, endCol: bounds.end, bufRow };
-          selectionRange = { sRow: bufRow, sCol: bounds.start, eRow: bufRow, eCol: bounds.end - 1 };
-          touchScrolling = true; // pause content updates during selection
-          navigator.vibrate?.(15); // haptic confirmation that long-press selection engaged
-          showToast(t('selected'));
-        }
+        if (touchMode !== 'down' || didScroll || !term) return;
+        const textarea = termEl.querySelector('.xterm-helper-textarea');
+        if (textarea) textarea.blur();
+        const cell = touchToCell(startCX, startCY);
+        const bufRow = term.buffer.active.viewportY + cell.row;
+        // If a selection exists and the long-press lands inside it, ignore
+        // (avoid surprising users who are aiming at handles).
+        if (selection && isInsideSelection(bufRow, cell.col)) return;
+        // New selection
+        if (selection) clearSelection();
+        setSelectionFromWord(bufRow, cell.col);
+        touchMode = 'longpress-select';
+        navigator.vibrate?.(15);
       }, LONG_PRESS_MS);
     };
     // Find the tracked touch by identifier (ignore extra fingers)
@@ -659,7 +884,7 @@
       const t0 = findTouch(e.touches);
       if (!t0) return; // not our finger
       // Scrollbar drag: map touch delta proportionally to scroll position
-      if (onScrollbar) {
+      if (touchMode === 'scrollbar') {
         const deltaY = t0.clientY - scrollbarStartY;
         const trackH = termEl.clientHeight;
         const totalScroll = term.buffer.active.baseY;
@@ -670,22 +895,17 @@
         if (e.cancelable) e.preventDefault();
         return;
       }
-      // Selection drag: extend from anchor word to current cell
-      if (isSelecting && selectionAnchor) {
-        const cell = touchToCell(t0.clientX, t0.clientY);
-        const bufRow = term.buffer.active.viewportY + cell.row;
-        let sCol, sRow, eCol, eRow, len;
-        if (bufRow < selectionAnchor.bufRow || (bufRow === selectionAnchor.bufRow && cell.col < selectionAnchor.col)) {
-          sCol = cell.col; sRow = bufRow;
-          eCol = selectionAnchor.endCol - 1; eRow = selectionAnchor.bufRow;
-          len = (eRow - sRow) * term.cols + (selectionAnchor.endCol - cell.col);
-        } else {
-          sCol = selectionAnchor.col; sRow = selectionAnchor.bufRow;
-          eCol = cell.col; eRow = bufRow;
-          len = (eRow - sRow) * term.cols + (cell.col + 1 - selectionAnchor.col);
-        }
-        term.select(sCol, sRow, Math.max(1, len));
-        selectionRange = { sRow, sCol, eRow, eCol };
+      // Handle drag: move whichever endpoint we grabbed
+      if (touchMode === 'handle-drag' && selection) {
+        const { row, col } = touchToBufferCell(t0.clientX, t0.clientY);
+        moveEndpoint(dragHandle, row, col);
+        if (e.cancelable) e.preventDefault();
+        return;
+      }
+      // Long-press selection: extend from anchor word to current cell
+      if (touchMode === 'longpress-select' && selection) {
+        const { row, col } = touchToBufferCell(t0.clientX, t0.clientY);
+        moveHead(row, col);
         if (e.cancelable) e.preventDefault();
         return;
       }
@@ -708,17 +928,51 @@
       if (lines !== 0) {
         didScroll = true;
         if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+        if (touchMode === 'down') touchMode = 'scroll';
         touchScrolling = true;
         term.scrollLines(lines);
         accumulatedDy -= lines * lh;
         if (e.cancelable) e.preventDefault();
       }
     };
-    const onTouchEnd = () => {
-      if (onScrollbar) { onScrollbar = false; scheduleEndTouchScroll(TOUCH_END_DELAY_MS); return; }
+    const onTouchEnd = (e) => {
+      const endedMode = touchMode;
       if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
-      // Selection active → keep visible, tap on it to copy
-      if (isSelecting) return;
+      if (endedMode === 'scrollbar') {
+        touchMode = 'idle';
+        onScrollbar = false;
+        scheduleEndTouchScroll(TOUCH_END_DELAY_MS);
+        return;
+      }
+      if (endedMode === 'handle-drag') {
+        touchMode = 'idle';
+        dragHandle = null;
+        // Selection persists; pinning persists
+        return;
+      }
+      if (endedMode === 'longpress-select') {
+        touchMode = 'idle';
+        // Selection persists with current head; pinning persists
+        return;
+      }
+      // 'down' (clean tap) or 'scroll' (released after scroll)
+      if (endedMode === 'down') {
+        // Clean tap. If a selection exists and the tap was outside it
+        // (and not on a handle/toolbar — those bailed at touchstart),
+        // cancel the selection. Otherwise no-op (keyboard never opens via
+        // terminal tap; the toolbar/copy is the only commit action).
+        if (selection) {
+          const t0 = e.changedTouches?.[0];
+          if (t0) {
+            const { row, col } = touchToBufferCell(t0.clientX, t0.clientY);
+            if (!isInsideSelection(row, col)) clearSelection();
+          }
+        }
+        touchMode = 'idle';
+        return;
+      }
+      // 'scroll' or anything that left touchScrolling=true
+      touchMode = 'idle';
       if (touchScrolling && velocitySamples.length > 0) {
         // Weighted average of recent velocity samples (newer = heavier)
         let wSum = 0, wTotal = 0;
@@ -755,53 +1009,57 @@
         } else {
           scheduleEndTouchScroll(TOUCH_END_DELAY_MS);
         }
-      } else if (touchScrolling) {
+      } else if (touchScrolling && !selection) {
         scheduleEndTouchScroll(TOUCH_END_DELAY_MS);
       }
     };
     const onTouchCancel = () => {
       if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
       onScrollbar = false;
-      isSelecting = false;
-      selectionAnchor = null;
-      selectionRange = null;
+      touchMode = 'idle';
+      dragHandle = null;
       stopMomentum();
-      scheduleEndTouchScroll(100);
+      // Don't blow away the selection on a stray cancel — but if we were
+      // mid-handle-drag the user expects the partial drag to commit, which
+      // it already has via moveEndpoint() on the last touchmove.
+      if (!selection) scheduleEndTouchScroll(100);
     };
     termEl.addEventListener('touchstart', onTouchStart, { passive: true });
     termEl.addEventListener('touchmove', onTouchMove, { passive: false });
     termEl.addEventListener('touchend', onTouchEnd, { passive: true });
     termEl.addEventListener('touchcancel', onTouchCancel, { passive: true });
 
-    // Track selections that originate outside our long-press flow — most
-    // notably triple-click/triple-tap which xterm.js handles internally and
-    // which leaves isSelecting=false. Without this hook, the next tap would
-    // go down the "no active selection" path and never reach the
-    // copy-on-tap-inside-selection branch.
-    //
-    // Note: xterm's onSelectionChange fires synchronously from within
-    // term.select(), so the long-press path (which calls term.select then
-    // sets isSelecting=true) briefly sees isSelecting=false here. That's
-    // fine — this handler adopts the selection the same way the long-press
-    // path does a few lines later; the second set is a no-op. We skip the
-    // "selected" toast here to avoid doubling it up in that case; the
-    // long-press path shows its own toast with haptics.
+    // Adopt selections that originate outside our touch flow — double-tap,
+    // triple-tap (xterm.js handles those internally), keyboard Cmd+A on
+    // desktop, mouse drag. Skip the events we triggered ourselves
+    // (applySelectionToXterm sets isApplyingSelection=true).
     const onSelChange = term.onSelectionChange(() => {
+      if (isApplyingSelection) return;
       if (!term.hasSelection()) {
-        isSelecting = false;
-        selectionAnchor = null;
-        selectionRange = null;
+        // Native cleared (e.g., user clicked outside on desktop). Drop our
+        // model too. clearSelection() guards against re-clearing xterm.
+        if (selection) {
+          selection = null;
+          selUI = null;
+          if (touchMode === 'idle') {
+            touchScrolling = false;
+            if (lastContent && termAtBottom) writeToXterm(lastContent, lastCursor);
+          }
+        }
         return;
       }
-      if (isSelecting) return;
       const pos = term.getSelectionPosition();
       if (!pos) return;
-      selectionRange = { sRow: pos.start.y, sCol: pos.start.x, eRow: pos.end.y, eCol: pos.end.x };
-      selectionAnchor = null; // no drag-anchor — selection wasn't made by our touch flow
-      isSelecting = true;
-      // Pause content updates so incoming tmux output doesn't wipe the
-      // selection before the user taps to copy.
-      touchScrolling = true;
+      // xterm's pos.end.x is exclusive (one past the last selected cell).
+      // Convert to our inclusive model. If end.x === 0 the selection ends at
+      // the start of a row, which means "include up to the previous row's
+      // last cell"; clamp to col 0 anyway — visual difference is < 1 cell.
+      const sRow = pos.start.y, sCol = pos.start.x;
+      const eRow = pos.end.y;
+      const eCol = Math.max(0, pos.end.x - 1);
+      selection = { anchor: { row: sRow, col: sCol }, head: { row: eRow, col: eCol } };
+      recomputeSelUI();
+      touchScrolling = true; // pin while selection is live
     });
     // Safety net: if the app is backgrounded mid-selection or mid-scroll, touchcancel
     // may never fire and touchScrolling can stay stuck true, which freezes
@@ -810,9 +1068,11 @@
       if (document.visibilityState !== 'visible') return;
       touchScrolling = false;
       onScrollbar = false;
-      isSelecting = false;
-      selectionAnchor = null;
-      selectionRange = null;
+      touchMode = 'idle';
+      dragHandle = null;
+      // Drop the selection — re-attaching to a clipboard from before
+      // backgrounding is rarely useful and could surprise the user.
+      if (selection) clearSelection();
       if (lastContent && termAtBottom) writeToXterm(lastContent, lastCursor);
     };
     document.addEventListener('visibilitychange', onVisible);
@@ -864,6 +1124,9 @@
         writeToXterm(lastContent, lastCursor);
       }
       if (termAtBottom) hasNewContent = false;
+      // Selection lives in buffer-row space; viewport scroll moves the
+      // pixel-space handles. Recompute on every scroll tick.
+      if (selection) recomputeSelUI();
     });
 
     // Resize tmux pane to fit screen.
@@ -885,12 +1148,23 @@
       const fit = calcFit();
       if (!fit) return;
       window.__dbg?.(`resize: fit=${fit.cols}x${fit.rows} cur=${term.cols}x${term.rows} elH=${termEl.clientHeight}`);
-      if (fit.cols === term.cols && fit.rows === term.rows) return;
+      if (fit.cols === term.cols && fit.rows === term.rows) {
+        // Same dims but cell metrics may have changed (font size); refresh
+        // selection UI either way.
+        if (selection) recomputeSelUI();
+        return;
+      }
       pendingCols = fit.cols;
       pendingRows = fit.rows;
       pendingResizeTs = Date.now();
       resizePane(target, fit.cols, fit.rows).catch(() => {});
       term.resize(fit.cols, fit.rows);
+      // Resize wipes xterm's buffer-row mapping — re-anchor our selection
+      // before the rewrite so the visuals stay consistent.
+      if (selection) {
+        applySelectionToXterm();
+        recomputeSelUI();
+      }
       // Immediately rewrite content so display is clean during the ~200ms server catch-up
       if (lastContent) writeToXterm(lastContent, lastCursor);
     }
@@ -1022,6 +1296,8 @@
       setOnPaneClosed(null);
       try { term.dispose(); } catch {}
       term = null;
+      copySelection = () => {};
+      clearSelection = () => {};
     };
   });
 
@@ -1256,6 +1532,19 @@
 
   <div class="term-wrap" class:hidden={viewMode !== 'terminal'}>
     <div class="xterm-wrap" bind:this={termEl}></div>
+    {#if isMobile && selection && selUI}
+      {#if selUI.startInView}
+        <div class="sel-handle sel-handle-start" style="left: {selUI.startX}px; top: {selUI.startY}px; --cell-h: {selUI.cellH}px;" aria-hidden="true"></div>
+      {/if}
+      {#if selUI.endInView}
+        <div class="sel-handle sel-handle-end" style="left: {selUI.endX}px; top: {selUI.endY}px; --cell-h: {selUI.cellH}px;" aria-hidden="true"></div>
+      {/if}
+      {#if selUI.toolbarVisible}
+        <div class="sel-toolbar" class:below={selUI.toolbarBelow} style="left: {selUI.toolbarX}px; top: {selUI.toolbarY}px;">
+          <button class="sel-toolbar-btn" onpointerdown={(e) => { e.stopPropagation(); e.preventDefault(); copySelection(); }}>{t('copy')}</button>
+        </div>
+      {/if}
+    {/if}
     {#if !termAtBottom}
       <button class="scroll-btn" class:has-new={hasNewContent} onclick={() => term?.scrollToBottom()} aria-label={hasNewContent ? t('newOutput') : t('scrollToBottom')}>
         <Icon name="arrow-down" size={16} />
@@ -1476,6 +1765,92 @@
   .xterm-wrap :global(.slider) {
     min-height: 40px !important;
     border-radius: 4px !important;
+  }
+
+  /* ─── Mobile selection handles + toolbar ──────────────────────────────── */
+  /* iOS-style lollipop. The .sel-handle root is positioned at the precise
+     anchor point on the selection edge (no negative margins — let JS land
+     the anchor exactly on the cell corner). The stem (::before) rides ALONG
+     the cell's vertical edge for one row of height; the dot (::after) is
+     attached to the FREE end of the stem, away from the selection. */
+  .sel-handle {
+    position: absolute;
+    width: 0; height: 0;
+    z-index: 8;
+    pointer-events: none; /* hit-test done in JS */
+  }
+  /* The .sel-handle div is 0×0 and positioned exactly on the anchor (cell
+     corner). Both ::before (stem) and ::after (dot) are positioned relative
+     to that single point.
+     Invariant: stem and dot are both centered on the anchor's X (translateX(-50%)).
+     The dot's near edge meets the stem's far end with no gap. */
+  .sel-handle::before {
+    /* Stem: 2px wide, one cell tall. */
+    content: '';
+    position: absolute;
+    width: 2px;
+    height: var(--cell-h, 16px);
+    background: var(--accent, #00d4ff);
+    transform: translateX(-50%);
+    left: 0;
+  }
+  .sel-handle::after {
+    /* Dot: 12px circle. */
+    content: '';
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--accent, #00d4ff);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+    transform: translateX(-50%);
+    left: 0;
+  }
+  /* Start handle: anchor at cell top-left.
+       stem occupies [0, +cellH] (down into selection's first row)
+       dot occupies  [-12, 0] (above anchor, outside selection) */
+  .sel-handle-start::before { top: 0; }
+  .sel-handle-start::after  { top: -12px; }
+  /* End handle: anchor at cell bottom-right.
+       stem occupies [-cellH, 0] (up into selection's last row)
+       dot occupies  [0, +12] (below anchor, outside selection) */
+  .sel-handle-end::before { top: calc(0px - var(--cell-h, 16px)); }
+  .sel-handle-end::after  { top: 0; }
+
+  .sel-toolbar {
+    position: absolute;
+    transform: translate(-50%, -100%);
+    z-index: 9;
+    background: rgba(20, 20, 28, 0.95);
+    border: 1px solid var(--border, #2a2a3a);
+    border-radius: 10px;
+    padding: 4px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    display: flex;
+    gap: 2px;
+  }
+  .sel-toolbar.below {
+    transform: translate(-50%, 0);
+  }
+  :global(html[data-theme="light"]) .sel-toolbar {
+    background: rgba(245, 245, 247, 0.95);
+  }
+  .sel-toolbar-btn {
+    background: transparent;
+    border: none;
+    color: var(--accent, #00d4ff);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    min-width: 56px;
+    min-height: 32px;
+  }
+  .sel-toolbar-btn:active {
+    background: rgba(0, 212, 255, 0.15);
   }
 
   .scroll-btn {
