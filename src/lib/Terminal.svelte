@@ -55,8 +55,14 @@
     kbLocked = false;
     unlockUntil = Date.now() + 1500;
     unlockRetries = 0;
+    // inputmode is pinned to "text" at init; no toggle here.
     if (kbTa) {
-      kbTa.setAttribute('inputmode', 'text');
+      // If the textarea is somehow already focused while the IME is
+      // hidden (e.g. user closed IME via the system keyboard's own button
+      // or back gesture, leaving view focus untouched), a fresh focus()
+      // is a no-op and the IME stays down. blur() first to make the next
+      // focus a true focus transition.
+      if (document.activeElement === kbTa) kbTa.blur();
       kbTa.focus();
     }
     window.__dbg?.('kb: unlock + focus');
@@ -571,12 +577,30 @@
     }));
     termEl.style.background = getTermTheme().background;
 
-    // Mobile: control keyboard via inputmode attribute on xterm's hidden textarea.
-    // Default inputmode="none" prevents keyboard from showing when shortcut buttons cause
-    // accidental focus (Android IME re-triggers keyboard for previously-focused textareas).
-    // Only set inputmode="text" right before explicit user actions: keyboard toggle or terminal tap.
+    // Mobile keyboard control:
+    //   We pin inputmode="text" for the whole session and gate IME via the
+    //   focus state (kbLocked + onTaFocus). Earlier we toggled
+    //   inputmode="none" ↔ "text" around explicit unlocks, but that hit a
+    //   nasty Android InputMethodManager quirk: when the textarea was
+    //   created with inputmode="none", the very first focus after the
+    //   first switch-to-"text" was ignored — the IME's InputConnection had
+    //   already cached "this view doesn't want the soft keyboard" and only
+    //   reset on a full blur+focus cycle. Users had to tap the toggle 3
+    //   times to open the keyboard on a fresh page load.
+    //
+    //   Defenses against accidental IME we still have:
+    //     - tabindex="-1" on every shortcut button (no focus stealing).
+    //     - onTaFocus blurs immediately whenever kbLocked=true, so even
+    //       if something does focus the textarea we don't get the IME up.
+    //
+    // The xterm.js helper textarea is recreated when xterm rebuilds its
+    // DOM (e.g. fontSize change), so re-pinning inputmode is cheap to
+    // repeat from any path that might rebuild it; we currently only set
+    // it once and rely on xterm not changing it.
     kbTa = isMobile ? termEl.querySelector('.xterm-helper-textarea') : null;
-    if (kbTa) kbTa.setAttribute('inputmode', 'none');
+    if (kbTa) {
+      kbTa.setAttribute('inputmode', 'text');
+    }
 
     // Forward keyboard input to tmux — skip when input box is open
     let isPasting = false;
@@ -1186,7 +1210,9 @@
     // Mobile keyboard: opened only via the keyboard toggle button.
     // Tapping the terminal does NOT open the keyboard — users found stray taps
     // while reading scrollback (or near the selection handles) surprising.
-    // Two layers: inputmode="none" (browser hint) + kbLocked flag (focus guard).
+    // Single layer: kbLocked flag, enforced by onTaFocus (it blurs whenever
+    // a focus lands while locked). inputmode is pinned to "text" — see init
+    // for the InputMethodManager bug that motivated removing the toggle.
     let onTaBlur, onTaFocus;
 
     if (kbTa) {
@@ -1202,8 +1228,7 @@
             return;
           }
           kbLocked = true;
-          kbTa.setAttribute('inputmode', 'none');
-          window.__dbg?.('kb: blur timer → lock, inputmode=none');
+          window.__dbg?.('kb: blur timer → lock');
         }, 150);
         window.__dbg?.('kb: textarea blur (timer scheduled)');
       };
@@ -1308,7 +1333,6 @@
       // toggle the user just pressed.
       if (kbTa && kbH === 0 && lastKbHeight > 0 && Date.now() >= unlockUntil) {
         kbLocked = true;
-        kbTa.setAttribute('inputmode', 'none');
         if (document.activeElement === kbTa) kbTa.blur();
         window.__dbg?.('kb: keyboard-shift kbH=0 (was ' + lastKbHeight + ') → lock + blur');
       }
@@ -1684,7 +1708,39 @@
             <button tabindex="-1" ontouchstart={() => startRepeat('Left')}><Icon name="arrow-left" size={13} /></button>
             <button tabindex="-1" ontouchstart={() => startRepeat('Down')}><Icon name="arrow-down" size={13} /></button>
             <button tabindex="-1" ontouchstart={() => startRepeat('Right')}><Icon name="arrow-right" size={13} /></button>
-            <button class="kb-toggle" tabindex="-1" onpointerdown={(e) => { e.stopPropagation(); e.stopImmediatePropagation(); e.preventDefault(); requestAnimationFrame(() => { const ta = termEl?.querySelector('.xterm-helper-textarea'); if (ta && document.activeElement === ta) { window.__dbg?.('kb: toggle → close'); /* User explicitly closing — kill grace so the blur retry loop doesn't re-focus and re-open. */ unlockUntil = 0; unlockRetries = 0; kbLocked = true; ta.setAttribute('inputmode', 'none'); ta.blur(); } else if (kbTa) { window.__dbg?.('kb: toggle → open'); unlockKeyboard(); } }); }}><Icon name="keyboard" size={13} /></button>
+            <button class="kb-toggle" tabindex="-1" onpointerdown={(e) => {
+              // Stop the touch from bubbling into terminal-touch handlers.
+              // Note: we deliberately do NOT call e.preventDefault() here.
+              // On Chrome Android, preventDefault on a pointerdown that
+              // ends up driving focus() can consume the user-activation
+              // token, leaving the IME refusing to honour showSoftInput.
+              // Focus stealing is already prevented by tabindex="-1".
+              e.stopPropagation();
+              e.stopImmediatePropagation();
+              const ta = kbTa;
+              if (!ta) return;
+              // Decide open/close from the REAL IME visibility, not from
+              // our internal kbLocked flag. Two states could disagree:
+              //   - User dismisses IME via the system keyboard's close
+              //     button → IME hidden, but the textarea remains focused
+              //     and our kbLocked stays false (no blur was issued).
+              //     Reading kbLocked here would route us through the
+              //     "close" branch, requiring a second tap to actually
+              //     re-open. visualViewport is the source of truth.
+              const kbOpen = document.documentElement.classList.contains('keyboard-open');
+              if (!kbOpen) {
+                window.__dbg?.('kb: toggle → open');
+                unlockKeyboard();
+              } else {
+                window.__dbg?.('kb: toggle → close');
+                // Cancel any pending unlock-grace retries so the blur
+                // timer doesn't bounce focus back. See 73957f5.
+                unlockUntil = 0;
+                unlockRetries = 0;
+                kbLocked = true;
+                ta.blur();
+              }
+            }}><Icon name="keyboard" size={13} /></button>
           </div>
         </div>
       </div>
