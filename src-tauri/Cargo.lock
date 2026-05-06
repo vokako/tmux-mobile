@@ -4228,6 +4228,7 @@ dependencies = [
  "aes-gcm",
  "base64 0.22.1",
  "dirs 5.0.1",
+ "flate2",
  "futures-util",
  "gethostname",
  "hex",

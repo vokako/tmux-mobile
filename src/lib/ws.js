@@ -1,5 +1,18 @@
 // WebSocket client for tmux-mobile server
 
+// ─── Wire framing for the encrypted binary path ─────────────────────────
+// Encrypted frames travel as binary; the plaintext (post-decrypt) starts
+// with a 1-byte tag telling us how to decode the rest:
+//   0x00 = raw UTF-8 JSON
+//   0x01 = raw deflate (RFC 1951) of UTF-8 JSON
+// Plaintext-token connections (no Web Crypto) keep using TEXT frames with
+// no framing.
+const WIRE_PLAIN_JSON = 0x00;
+const WIRE_DEFLATE_JSON = 0x01;
+// Same threshold as the server: below this, deflate's overhead loses to
+// the input size, so we just send plaintext.
+const COMPRESS_MIN_BYTES = 256;
+
 const CONNECT_TIMEOUT_MS = 5000;
 // Default timeout for ordinary RPCs. Long-running methods (fs_download,
 // fs_upload) override with a much larger value at their call site.
@@ -75,25 +88,73 @@ function makeNonce(counter) {
   return n;
 }
 
-async function encryptMsg(text) {
-  if (!sessionCipher) return text;
-  const nonce = makeNonce(sessionCipher.sendCounter++);
-  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, sessionCipher.key, new TextEncoder().encode(text));
-  // Chunked base64 encoding to avoid stack overflow on large messages
-  const bytes = new Uint8Array(ct);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += BASE64_CHUNK_SIZE) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + BASE64_CHUNK_SIZE));
+// Compress a JSON string into the wire-plaintext byte stream:
+// [framing byte] [body bytes]. Returns Uint8Array. Falls back to plain
+// when the input is small or compresses to no benefit.
+async function encodeWirePayload(text) {
+  const utf8 = new TextEncoder().encode(text);
+  if (utf8.length < COMPRESS_MIN_BYTES || typeof CompressionStream === 'undefined') {
+    const out = new Uint8Array(1 + utf8.length);
+    out[0] = WIRE_PLAIN_JSON;
+    out.set(utf8, 1);
+    return out;
   }
-  return btoa(binary);
+  // CompressionStream is native (zlib via the platform), much faster than
+  // any JS deflate library and zero CPU on V8's JIT.
+  const stream = new Blob([utf8]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+  const compressed = new Uint8Array(await new Response(stream).arrayBuffer());
+  if (compressed.length + 1 >= utf8.length + 1) {
+    // Pathological: compressing made it bigger. Fall back to plain.
+    const out = new Uint8Array(1 + utf8.length);
+    out[0] = WIRE_PLAIN_JSON;
+    out.set(utf8, 1);
+    return out;
+  }
+  const out = new Uint8Array(1 + compressed.length);
+  out[0] = WIRE_DEFLATE_JSON;
+  out.set(compressed, 1);
+  return out;
 }
 
-async function decryptMsg(b64) {
-  if (!sessionCipher) return b64;
-  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+// Inverse of encodeWirePayload: decode a wire-plaintext byte buffer
+// (framing byte + body) back into the original JSON string.
+async function decodeWirePayload(bytes) {
+  if (!bytes || bytes.length < 1) throw new Error('empty wire payload');
+  const tag = bytes[0];
+  const body = bytes.subarray(1);
+  if (tag === WIRE_PLAIN_JSON) {
+    return new TextDecoder().decode(body);
+  }
+  if (tag === WIRE_DEFLATE_JSON) {
+    if (typeof DecompressionStream === 'undefined') {
+      throw new Error('server sent deflate but DecompressionStream is unavailable');
+    }
+    const stream = new Blob([body]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    return new Response(stream).text();
+  }
+  throw new Error(`unknown wire framing tag: 0x${tag.toString(16)}`);
+}
+
+// Encrypt a JSON string and return a Uint8Array suitable for ws.send().
+// The plaintext is the wire-framed payload (compressed or not).
+async function encryptMsg(text) {
+  if (!sessionCipher) return text; // plain path: caller sends it as text
+  const plaintext = await encodeWirePayload(text);
+  const nonce = makeNonce(sessionCipher.sendCounter++);
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, sessionCipher.key, plaintext);
+  return new Uint8Array(ct);
+}
+
+// Decrypt an inbound binary ciphertext into the original JSON string.
+async function decryptMsg(buf) {
+  if (!sessionCipher) {
+    // Plain-token fallback: buf is already the decoded text.
+    return typeof buf === 'string' ? buf : new TextDecoder().decode(buf);
+  }
+  const ctBytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
   const nonce = makeNonce(sessionCipher.recvCounter++);
-  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, sessionCipher.key, bytes);
-  return new TextDecoder().decode(pt);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, sessionCipher.key, ctBytes);
+  return decodeWirePayload(new Uint8Array(pt));
 }
 
 function rejectAllPending(reason) {
@@ -127,6 +188,9 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     try {
       ws = new WebSocket(url);
+      // Receive ciphertext as ArrayBuffer rather than Blob so we can decrypt
+      // synchronously without a Blob → arrayBuffer round-trip per message.
+      ws.binaryType = 'arraybuffer';
     } catch (e) {
       window.__dbg?.(`ws: connect error: ${e.message}`);
       reject(e);
@@ -161,10 +225,15 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
     ws._getHostname = () => hostname;
 
     ws.onmessage = async (event) => {
+      // event.data is either a string (text frames: handshake, plain auth
+      // path) or an ArrayBuffer (binary frames: encrypted messages).
+      const isBinary = event.data instanceof ArrayBuffer;
       let data;
-      try { data = JSON.parse(event.data); } catch {}
+      if (!isBinary) {
+        try { data = JSON.parse(event.data); } catch {}
+      }
 
-      // Step 1: Receive server_nonce
+      // Step 1: Receive server_nonce (always text)
       if (!authed && !serverNonce && data?.server_nonce) {
         serverNonce = hexToBytes(data.server_nonce);
         if (crypto.subtle) {
@@ -187,7 +256,12 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
       // Step 2: Auth response
       if (!authed && serverNonce) {
         if (sessionCipher) {
-          // Encrypted response
+          // Encrypted auth response — must arrive as a binary frame.
+          if (!isBinary) {
+            clearTimeout(timeout); sessionCipher = null;
+            reject(new Error('auth failed: expected binary auth response'));
+            return;
+          }
           try {
             const pt = await decryptMsg(event.data);
             const resp = JSON.parse(pt);
@@ -195,14 +269,17 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
           } catch {}
           clearTimeout(timeout); sessionCipher = null; reject(new Error('auth failed')); return;
         } else {
-          // Plain response
+          // Plain (token) response — text frame.
           if (data?.result?.authenticated) { machineId = data.result.machine_id; hostname = data.result.hostname; authSuccess(); return; }
           clearTimeout(timeout); reject(new Error(data?.error?.message || 'auth failed')); return;
         }
       }
 
-      // Post-auth: decrypt all messages
+      // Post-auth: every encrypted message arrives as a binary frame and
+      // gets decrypted + wire-decoded into JSON. Plain-token connections
+      // continue to receive text frames (data is already parsed above).
       if (authed && sessionCipher) {
+        if (!isBinary) return; // ignore unexpected text frames after encrypted auth
         let pt;
         try { pt = await decryptMsg(event.data); } catch { return; }
         try { data = JSON.parse(pt); } catch { return; }
