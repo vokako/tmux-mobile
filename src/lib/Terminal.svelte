@@ -1642,7 +1642,7 @@
             <button tabindex="-1" ontouchstart={() => startRepeat('Left')}><Icon name="arrow-left" size={13} /></button>
             <button tabindex="-1" ontouchstart={() => startRepeat('Down')}><Icon name="arrow-down" size={13} /></button>
             <button tabindex="-1" ontouchstart={() => startRepeat('Right')}><Icon name="arrow-right" size={13} /></button>
-            <button class="kb-toggle" onpointerdown={(e) => { e.stopPropagation(); e.stopImmediatePropagation(); requestAnimationFrame(() => { const ta = termEl?.querySelector('.xterm-helper-textarea'); if (ta && document.activeElement === ta) { window.__dbg?.('kb: toggle → close'); ta.blur(); } else if (kbTa) { window.__dbg?.('kb: toggle → open'); unlockKeyboard(); } }); }}><Icon name="keyboard" size={13} /></button>
+            <button class="kb-toggle" tabindex="-1" onpointerdown={(e) => { e.stopPropagation(); e.stopImmediatePropagation(); e.preventDefault(); requestAnimationFrame(() => { const ta = termEl?.querySelector('.xterm-helper-textarea'); if (ta && document.activeElement === ta) { window.__dbg?.('kb: toggle → close'); /* User explicitly closing — kill grace so the blur retry loop doesn't re-focus and re-open. */ unlockUntil = 0; unlockRetries = 0; kbLocked = true; ta.setAttribute('inputmode', 'none'); ta.blur(); } else if (kbTa) { window.__dbg?.('kb: toggle → open'); unlockKeyboard(); } }); }}><Icon name="keyboard" size={13} /></button>
           </div>
         </div>
       </div>
