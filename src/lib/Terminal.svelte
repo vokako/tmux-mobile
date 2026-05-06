@@ -713,6 +713,18 @@
       const startY = aRowV * cellH;
       const endX = (b.col + 1) * cellW;
       const endY = (bRowV + 1) * cellH;
+      // Edge-of-screen dot shifts. When the selection touches column 0 the
+      // start dot would sit half off-screen with `translateX(-50%)`, leaving
+      // a thin 6 px target the user can't reliably grab. Same on the right
+      // edge for the end dot, which additionally collides with the
+      // scrollbar's 30 px touch zone. Push the dot ~7 px inward in those
+      // cases — the stem stays on the cell border (visual anchor preserved)
+      // but the dot is fully in the touchable area.
+      const DOT_R = 6; // approximately half the dot's visual diameter
+      const startAtLeftEdge = a.col === 0;
+      const endAtRightEdge = b.col >= cols - 1;
+      const startDotShiftX = startAtLeftEdge ? DOT_R : 0;
+      const endDotShiftX = endAtRightEdge ? -DOT_R : 0;
       // Toolbar placement: must clear the start handle's dot (which sits
       // ~14px ABOVE the start row) and the end handle's dot (~14px BELOW
       // the end row). We keep an extra 8px of breathing room so the user
@@ -746,7 +758,7 @@
       }
       // Clamp toolbar X within container with 8px padding
       toolbarX = Math.max(48, Math.min(innerW - 48, toolbarX));
-      selUI = { startX, startY, endX, endY, toolbarX, toolbarY, toolbarBelow, startInView, endInView, toolbarVisible, cellH };
+      selUI = { startX, startY, endX, endY, toolbarX, toolbarY, toolbarBelow, startInView, endInView, toolbarVisible, cellH, startDotShiftX, endDotShiftX, startAtLeftEdge, endAtRightEdge };
     }
 
     // Drive xterm.js native selection from our selection model. xterm.select
@@ -829,32 +841,62 @@
       return { row: term.buffer.active.viewportY + cell.row, col: cell.col };
     }
 
-    // Hit-test handles. Each handle is a lollipop (dot + stem); the dot is
-    // the actual affordance, so we center the hit zone on the dot. Use a
-    // capsule shape (rect with rounded ends) along the stem axis so dragging
-    // from anywhere along the stem feels natural.
+    // Hit-test handles. Each handle is a lollipop (dot + stem); the visible
+    // dot is 12 px but the *touchable* zone is much larger so the user
+    // doesn't have to aim. Capsule axis runs along the stem, with generous
+    // buffer in both directions.
+    //
+    // Sizing rationale: a thumb-pad on a phone is ~44 px wide at the tip
+    // and lays down a roughly oval contact patch. We use 28 px half-width
+    // (= 56 px wide hit zone) and extend ±22 px past the dot end of the
+    // capsule, which means anywhere in a ~56 × (cellH + 44) rectangle hits.
+    //
+    // Conflicts handled below:
+    //   - Short single-row selection (start/end in same row, close
+    //     together): the two capsules overlap. We split the overlap at the
+    //     midpoint between start.X and end.X so each handle owns its half.
+    //   - col 0:    extend start capsule LEFT to the container edge so a
+    //               miss to the left of the dot still hits.
+    //   - col cols-1: extend end capsule RIGHT to the container edge,
+    //               which also swallows the scrollbar's 30 px touch zone
+    //               for that range. handle is tested before scrollbar in
+    //               onTouchStart so the priority is right.
     function hitHandle(clientX, clientY) {
       if (!selection || !selUI || !termEl) return null;
       const rect = termEl.getBoundingClientRect();
       const px = clientX - rect.left;
       const py = clientY - rect.top;
-      const HIT_HALF_W = 22;
+      const HIT_HALF_W = 28;       // half the touchable width, ≈ thumb pad
+      const HIT_DOT_PAD = 22;      // buffer past the dot end of the capsule
       const cellH = selUI.cellH || 16;
-      // Start: stem runs DOWN from anchor for cellH (inside selection); dot
-      // sits ABOVE the anchor (~14px). Capsule spans [anchorY - 16, anchorY + cellH].
+      const innerW = rect.width;
+
+      // Compute X overlap-resolution boundary. If both handles are in view
+      // on the same row, anything between them belongs to whichever is
+      // closer (split at midpoint).
+      const sameRow =
+        selection.anchor.row === selection.head.row &&
+        selUI.startInView && selUI.endInView;
+      const midX = sameRow ? (selUI.startX + selUI.endX) / 2 : null;
+
       if (selUI.startInView) {
-        const dx = px - selUI.startX;
-        if (Math.abs(dx) <= HIT_HALF_W && py >= selUI.startY - 16 && py <= selUI.startY + cellH) {
-          return 'start';
-        }
+        // X bounds with edge / overlap adjustments.
+        let xMin = selUI.startAtLeftEdge ? 0 : selUI.startX - HIT_HALF_W;
+        let xMax = selUI.startX + HIT_HALF_W;
+        if (midX !== null) xMax = Math.min(xMax, midX);
+        // Y bounds: dot side gets HIT_DOT_PAD past the dot center; the
+        // stem side runs into the selection for one cell height.
+        const yMin = selUI.startY - HIT_DOT_PAD;
+        const yMax = selUI.startY + cellH + HIT_DOT_PAD * 0.5;
+        if (px >= xMin && px <= xMax && py >= yMin && py <= yMax) return 'start';
       }
-      // End: stem runs UP from anchor for cellH (inside selection); dot sits
-      // BELOW the anchor (~14px). Capsule spans [anchorY - cellH, anchorY + 16].
       if (selUI.endInView) {
-        const dx = px - selUI.endX;
-        if (Math.abs(dx) <= HIT_HALF_W && py >= selUI.endY - cellH && py <= selUI.endY + 16) {
-          return 'end';
-        }
+        let xMin = selUI.endX - HIT_HALF_W;
+        let xMax = selUI.endAtRightEdge ? innerW : selUI.endX + HIT_HALF_W;
+        if (midX !== null) xMin = Math.max(xMin, midX);
+        const yMin = selUI.endY - cellH - HIT_DOT_PAD * 0.5;
+        const yMax = selUI.endY + HIT_DOT_PAD;
+        if (px >= xMin && px <= xMax && py >= yMin && py <= yMax) return 'end';
       }
       return null;
     }
@@ -1601,10 +1643,10 @@
     <div class="xterm-wrap" bind:this={termEl}></div>
     {#if isMobile && selection && selUI}
       {#if selUI.startInView}
-        <div class="sel-handle sel-handle-start" style="left: {selUI.startX}px; top: {selUI.startY}px; --cell-h: {selUI.cellH}px;" aria-hidden="true"></div>
+        <div class="sel-handle sel-handle-start" style="left: {selUI.startX}px; top: {selUI.startY}px; --cell-h: {selUI.cellH}px; --dot-shift-x: {selUI.startDotShiftX}px;" aria-hidden="true"></div>
       {/if}
       {#if selUI.endInView}
-        <div class="sel-handle sel-handle-end" style="left: {selUI.endX}px; top: {selUI.endY}px; --cell-h: {selUI.cellH}px;" aria-hidden="true"></div>
+        <div class="sel-handle sel-handle-end" style="left: {selUI.endX}px; top: {selUI.endY}px; --cell-h: {selUI.cellH}px; --dot-shift-x: {selUI.endDotShiftX}px;" aria-hidden="true"></div>
       {/if}
       {#if selUI.toolbarVisible}
         <div class="sel-toolbar" class:below={selUI.toolbarBelow} style="left: {selUI.toolbarX}px; top: {selUI.toolbarY}px;">
@@ -1862,7 +1904,10 @@
     left: 0;
   }
   .sel-handle::after {
-    /* Dot: 12px circle. */
+    /* Dot: 12px circle. translateX(-50%) centers it on the anchor X.
+       --dot-shift-x is normally 0; when the handle is at column 0 / cols-1,
+       JS sets it to ±6 px so the dot stays fully inside the touchable
+       area instead of half-clipped against the screen edge. */
     content: '';
     position: absolute;
     width: 12px;
@@ -1870,7 +1915,7 @@
     border-radius: 50%;
     background: var(--accent, #00d4ff);
     box-shadow: 0 1px 3px rgba(0,0,0,0.35);
-    transform: translateX(-50%);
+    transform: translateX(calc(-50% + var(--dot-shift-x, 0px)));
     left: 0;
   }
   /* Start handle: anchor at cell top-left.
