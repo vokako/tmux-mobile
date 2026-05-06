@@ -550,7 +550,7 @@
       cursorStyle: 'block',
       disableStdin: false,
       fontSize,
-      fontFamily: "'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace",
+      fontFamily: "'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace",
       fontWeight: 300,
       fontWeightBold: 600,
       theme: getTermTheme(),
@@ -1756,7 +1756,7 @@
   }
   .status-left .kiro { color: var(--accent); }
   .status-left {
-    font-family: 'Maple Mono NF CN', 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: 10px;
     white-space: nowrap;
     overflow: hidden;
@@ -1766,7 +1766,7 @@
     display: flex;
     align-items: center;
     gap: 5px;
-    font-family: 'Maple Mono NF CN', 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     font-weight: 500;
     font-size: 12px;
     margin-left: auto;
@@ -1995,7 +1995,7 @@
     background: var(--input-bg);
     color: var(--text2);
     font-size: 12px;
-    font-family: 'Maple Mono NF CN', 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     font-weight: 500;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
@@ -2024,7 +2024,7 @@
 
   .prompt {
     color: var(--accent);
-    font-family: 'Maple Mono NF CN', 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: 15px;
     font-weight: 600;
     flex-shrink: 0;
@@ -2038,7 +2038,7 @@
     border: none;
     background: transparent;
     color: var(--text);
-    font-family: 'Maple Mono NF CN', 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: 15px;
     outline: none;
     -webkit-appearance: none;

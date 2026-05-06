@@ -708,7 +708,7 @@
   }
   .meta .ai-icon.claude { width: 15px; height: 15px; }
   .meta .cmd {
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: 11px;
     color: var(--text2);
     overflow: hidden;
@@ -719,7 +719,7 @@
     display: block;
     color: var(--text3);
     font-size: 11px;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     flex: 1;
     min-width: 0;
     white-space: nowrap;
@@ -804,7 +804,7 @@
   }
   .pane:active { background: var(--surface2); border-radius: 8px; }
   .pane-id {
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     color: var(--accent);
     font-weight: 500;
     font-size: 11px;
@@ -812,7 +812,7 @@
     flex-shrink: 0;
   }
   .pane-cmd {
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     color: var(--text2);
     font-size: 12px;
     flex-shrink: 0;
@@ -821,7 +821,7 @@
     display: block;
     color: var(--text3);
     font-size: 11px;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     flex: 1;
     min-width: 0;
     white-space: nowrap;
@@ -887,7 +887,7 @@
   }
   .empty-q {
     color: var(--text);
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
   }
   .error {
     color: var(--danger);
@@ -1003,7 +1003,7 @@
     gap: 1px;
     overflow-x: auto;
     scrollbar-width: none;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: 12px;
     -webkit-overflow-scrolling: touch;
   }

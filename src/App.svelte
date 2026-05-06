@@ -683,7 +683,7 @@
     flex-direction: column;
     background: rgba(0, 0, 0, 0.85);
     color: #0f0;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: 9px;
     line-height: 1.3;
     border-radius: 6px;
@@ -862,11 +862,11 @@
     font-size: 14px; font-weight: 600; color: var(--text);
   }
   .sp-conn-addr {
-    font-size: 11px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-size: 11px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     color: var(--text3);
   }
   .sp-conn-id {
-    font-size: 10px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-size: 10px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     color: var(--text3); opacity: 0.6;
   }
   .sp-conn-row {
@@ -884,7 +884,7 @@
     display: flex; flex-direction: column; gap: 2px; margin-top: 4px;
   }
   .sp-conn-url {
-    font-size: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-size: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
     color: var(--text3); padding: 6px 8px; border: 1px solid var(--border2); border-radius: 6px;
     background: none; text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
@@ -915,7 +915,7 @@
   }
   .sp-font-btn:active { background: var(--accent-bg); color: var(--accent); }
   .sp-font-val {
-    font-size: 13px; font-weight: 600; font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, 'Courier New', monospace; color: var(--text2);
+    font-size: 13px; font-weight: 600; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace; color: var(--text2);
     min-width: 24px; text-align: center;
   }
   .sp-toggle {
