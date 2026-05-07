@@ -433,6 +433,16 @@
     loading = false;
   }
 
+  // After a reconnect, the directory listing may be stale (files added /
+  // removed by other tools while we were offline). Re-list when visible.
+  // Inactive Files page picks up fresh data from its existing visibility
+  // $effect the next time the user navigates here.
+  $effect(() => {
+    const onReconn = () => { if (visible && cwd) loadDir(cwd); };
+    window.addEventListener('ws-reconnected', onReconn);
+    return () => window.removeEventListener('ws-reconnected', onReconn);
+  });
+
   function goUp() {
     const parent = cwd.replace(/\/[^/]+\/?$/, '') || '/';
     loadDir(parent);

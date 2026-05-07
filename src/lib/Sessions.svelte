@@ -1,5 +1,5 @@
 <script>
-  import { listSessions, listPanes, newSession, killSession, newWindow, killWindow, fsList } from './ws.js';
+  import { listSessions, listPanes, listSessionsWithPanes, newSession, killSession, newWindow, killWindow, fsList } from './ws.js';
   import Icon from './Icon.svelte';
   import AgentChip from './AgentChip.svelte';
   import { t } from './i18n.svelte.js';
@@ -86,9 +86,22 @@
   // ─── Data loading ──────────────────────────────────────
   $effect(() => { if (visible) refresh(); });
 
+  // After a reconnect, the cached sessions/panes likely went stale (process
+  // exited, new windows, …). Re-pull when we hear the app's reconnect-success
+  // event. Only acts if the page is currently visible — invisible pages get
+  // their refresh from the visibility $effect above the next time they show.
+  $effect(() => {
+    const onReconn = () => { if (visible) refresh(); };
+    window.addEventListener('ws-reconnected', onReconn);
+    return () => window.removeEventListener('ws-reconnected', onReconn);
+  });
+
   async function refresh() {
     try {
-      const list = await listSessions();
+      // Single round-trip: server returns sessions[] + panes[] (across all
+      // sessions). We group panes by session_name client-side to populate
+      // the same shape the rest of the page expects.
+      const { sessions: list, panes: allPanes } = await listSessionsWithPanes();
       const activeSession = activeTarget.split(':')[0];
       sessions = list.sort((a, b) => {
         if (a.name === activeSession) return -1;
@@ -97,13 +110,12 @@
         if (la !== lb) return lb - la;
         return 0;
       });
+      const grouped = {};
+      for (const p of allPanes) {
+        (grouped[p.session] ||= []).push(p);
+      }
+      panes = grouped;
       error = '';
-      // Eagerly load panes for every session — we need them for inline summary
-      // (AI tag, cwd, cmd). Cheap: one list-panes call per session.
-      await Promise.all(sessions.map(async s => {
-        try { panes[s.name] = await listPanes(s.name); }
-        catch {}
-      }));
     } catch (e) {
       error = e.message;
     }

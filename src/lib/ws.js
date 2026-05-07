@@ -22,6 +22,16 @@ const CONNECT_TIMEOUT_MS = 5000;
 const RPC_TIMEOUT_MS = 6000;
 const BASE64_CHUNK_SIZE = 8192;
 
+// Idle-ping threshold. The server pushes pane snapshots at 200 ms and
+// PINGs at 15 s, so under normal conditions the link sees inbound traffic
+// every few hundred ms even when the user is idle. If we go this long
+// without hearing anything, the link is plausibly half-open (mobile
+// network parked the TCP socket without telling us) — issue a ping RPC
+// so onclose fires within ~6 s instead of waiting 45 s for the server's
+// own PING deadline.
+const IDLE_PROBE_THRESHOLD_MS = 8000;
+const IDLE_PROBE_INTERVAL_MS = 4000;  // how often we check the threshold
+
 // Liveness is handled at the WebSocket protocol layer: the server sends
 // PING frames periodically and the browser auto-replies with PONG at a
 // layer we never touch. When TCP really dies, `ws.onclose` fires and the
@@ -36,6 +46,12 @@ let onPaneOutput = null;
 let onPaneClosed = null;
 let onDisconnect = null;
 let sessionCipher = null; // {key, sendCounter, recvCounter}
+// Idle-probe state. lastInboundAt is updated on every inbound message
+// (any frame: handshake, RPC reply, push). idleProbeTimer is the periodic
+// checker that fires a `ping` RPC if nothing has arrived for too long.
+let lastInboundAt = 0;
+let idleProbeTimer = null;
+let idleProbeInFlight = false;
 
 export function setOnPaneOutput(cb) { onPaneOutput = cb; }
 export function setOnPaneClosed(cb) { onPaneClosed = cb; }
@@ -157,6 +173,42 @@ async function decryptMsg(buf) {
   return decodeWirePayload(new Uint8Array(pt));
 }
 
+// Issue a ping RPC if the inbound channel has been silent past the
+// threshold. ping is cheap (one RTT, ~zero bytes), and using a regular
+// RPC means timeout / error handling already exists in `call()` — three
+// consecutive failures already trigger forceDisconnect.
+//
+// Skip when:
+//   - another idle probe is in flight (avoid stacking)
+//   - a real RPC is already in flight (its response will reset the clock,
+//     and stacking probes on top of a slow legitimate RPC is wasteful)
+//   - the threshold hasn't elapsed (pane_output / RPC reply already
+//     reset lastInboundAt)
+function maybeIdleProbe() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (idleProbeInFlight) return;
+  if (pending.size > 0) return;
+  if (Date.now() - lastInboundAt < IDLE_PROBE_THRESHOLD_MS) return;
+  idleProbeInFlight = true;
+  // Use a tighter timeout than RPC_TIMEOUT_MS — we already know the link
+  // hasn't said anything in 8 s, no point waiting another 6.
+  call('ping', {}, 4000).catch(() => {}).finally(() => {
+    idleProbeInFlight = false;
+  });
+}
+
+function startIdleProbe() {
+  stopIdleProbe();
+  lastInboundAt = Date.now();
+  idleProbeTimer = setInterval(maybeIdleProbe, IDLE_PROBE_INTERVAL_MS);
+}
+
+function stopIdleProbe() {
+  if (idleProbeTimer) clearInterval(idleProbeTimer);
+  idleProbeTimer = null;
+  idleProbeInFlight = false;
+}
+
 function rejectAllPending(reason) {
   const err = new Error(reason || 'disconnected');
   err.code = 'DISCONNECTED';
@@ -178,6 +230,7 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
       ws.close();
     } catch {}
     ws = null;
+    stopIdleProbe();
     rejectAllPending('superseded by new connect');
   }
   sessionCipher = null;
@@ -212,11 +265,12 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
       clearTimeout(timeout);
       authed = true;
       window.__dbg?.(`ws: authenticated (machine=${machineId})`);
-      // Liveness is the server's job now: it sends WS PING frames on a
-      // 15 s cadence and tears down the TCP connection if the browser
-      // stops PONGing (browsers auto-reply at the protocol layer). That
-      // shows up here as `ws.onclose`, and `rejectAllPending` + the
-      // `onDisconnect` callback handle the reconnect UI from there.
+      // Liveness is the server's job at the protocol layer: it sends WS
+      // PING every 15 s and tears down TCP after a 45 s deadline. That
+      // surfaces here as `ws.onclose`. We add an application-layer idle
+      // probe (below) so we trip onclose within ~14 s instead of 45 s
+      // when the link goes half-open (common on mobile networks).
+      startIdleProbe();
       resolve(machineId);
     }
 
@@ -225,6 +279,9 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
     ws._getHostname = () => hostname;
 
     ws.onmessage = async (event) => {
+      // Any inbound message resets the idle clock — the link is alive,
+      // even if the message is just a handshake / push / heartbeat.
+      lastInboundAt = Date.now();
       // event.data is either a string (text frames: handshake, plain auth
       // path) or an ArrayBuffer (binary frames: encrypted messages).
       const isBinary = event.data instanceof ArrayBuffer;
@@ -288,7 +345,10 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
       if (!data) return;
 
       if (data.method === 'pane_output') {
-        onPaneOutput?.(data.params?.target, data.params?.content, data.params?.cursor);
+        // current_command is included only on the first push and when it
+        // actually changes — most ticks omit it. Pass through as-is; the
+        // callback decides what to do with `undefined`.
+        onPaneOutput?.(data.params?.target, data.params?.content, data.params?.cursor, data.params?.current_command);
         return;
       }
 
@@ -305,14 +365,25 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       clearTimeout(timeout);
+      stopIdleProbe();
       const wasAuthed = authed;
       authed = false;
       ws = null;
       sessionCipher = null;
       rejectAllPending(wasAuthed ? 'connection lost' : 'connection closed during auth');
-      window.__dbg?.(`ws: closed (wasAuthed=${wasAuthed})`);
+      // Surface close-frame metadata so we can tell client-initiated from
+      // server-initiated from network-killed disconnects:
+      //   1000 = normal close
+      //   1001 = "going away" — common when an Android webview is
+      //          backgrounded; the OS suspends the WS without sending
+      //          a clean close. May surface here without a code at all.
+      //   1006 = abnormal closure, no close frame received (usual TCP RST
+      //          on mobile networks)
+      //   custom 4xxx codes = the server's `break`/`return` paths just
+      //          drop the connection without a code, you'll see 1006.
+      window.__dbg?.(`ws: closed code=${ev?.code ?? '?'} reason=${ev?.reason ? JSON.stringify(ev.reason) : '""'} clean=${!!ev?.wasClean} wasAuthed=${wasAuthed} idleSinceMs=${lastInboundAt ? Date.now() - lastInboundAt : 'n/a'}`);
       if (wasAuthed) onDisconnect?.();
     };
 
@@ -349,6 +420,7 @@ function forceDisconnect(reason) {
   try { ws.onclose = null; ws.close(); } catch {}
   ws = null;
   sessionCipher = null;
+  stopIdleProbe();
   rejectAllPending(reason || 'forced disconnect');
   onDisconnect?.();
 }
@@ -395,6 +467,10 @@ function call(method, params = {}, timeoutMs = RPC_TIMEOUT_MS) {
 
 export const listSessions = () => call('list_sessions');
 export const listPanes = (session) => call('list_panes', { session });
+// Single round-trip alternative for callers (Sessions page) that need both
+// the session list AND all their panes — saves N+1 RPCs vs listSessions
+// followed by N × listPanes.
+export const listSessionsWithPanes = () => call('list_sessions_with_panes');
 export const capturePane = (target, lines) => call('capture_pane', { target, lines });
 export const sendKeys = (target, keys, literal = true) => call('send_keys', { target, keys, literal });
 export const sendCommand = (target, command) => call('send_command', { target, command });

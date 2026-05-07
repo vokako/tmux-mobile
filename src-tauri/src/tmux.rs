@@ -174,6 +174,40 @@ pub fn list_panes(session: &str) -> Result<Vec<TmuxPane>, String> {
     Ok(panes)
 }
 
+/// List panes across ALL sessions in one tmux call. Avoids the N+1 RPC
+/// pattern where the client previously did `list_sessions` + N ×
+/// `list_panes(session)`. tmux's `-a` flag iterates every server-known
+/// session in a single subprocess; the client groups by session_name.
+pub fn list_all_panes() -> Result<Vec<TmuxPane>, String> {
+    let output = run_tmux(&[
+        "list-panes",
+        "-a",
+        "-F",
+        "#{session_name}\x1f#{window_index}\x1f#{pane_index}\x1f#{pane_width}\x1f#{pane_height}\x1f#{pane_current_command}\x1f#{window_name}\x1f#{pane_title}\x1f#{pane_current_path}",
+    ])?;
+
+    let panes = output
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(|line| {
+            let parts: Vec<&str> = line.split('\x1f').collect();
+            TmuxPane {
+                session: parts.get(0).unwrap_or(&"").to_string(),
+                window: parts.get(1).unwrap_or(&"0").parse().unwrap_or(0),
+                pane: parts.get(2).unwrap_or(&"0").parse().unwrap_or(0),
+                width: parts.get(3).unwrap_or(&"0").parse().unwrap_or(0),
+                height: parts.get(4).unwrap_or(&"0").parse().unwrap_or(0),
+                current_command: parts.get(5).unwrap_or(&"").to_string(),
+                window_name: parts.get(6).unwrap_or(&"").to_string(),
+                pane_title: parts.get(7).unwrap_or(&"").to_string(),
+                current_path: parts.get(8).unwrap_or(&"").to_string(),
+            }
+        })
+        .collect();
+
+    Ok(panes)
+}
+
 /// Get current command of a pane
 pub fn pane_command(target: &str) -> Result<String, String> {
     run_tmux(&[
@@ -201,6 +235,34 @@ pub fn cursor_info(target: &str) -> Result<(usize, usize, usize, usize), String>
     let h = parts.get(2).unwrap_or(&"24").parse().unwrap_or(24);
     let w = parts.get(3).unwrap_or(&"80").parse().unwrap_or(80);
     Ok((x, y, h, w))
+}
+
+/// Same as `cursor_info` but also returns `pane_current_command`. tmux's
+/// `display-message` formats can carry both in a single subprocess call,
+/// so this lets the subscription loop piggyback the running command on
+/// every snapshot tick — replacing a separate per-pane 3 s polling RPC
+/// from the client. Use this where the running command actually matters
+/// (currently only `subscription_loop`); other call sites stay on the
+/// shorter signature to avoid threading a String everywhere.
+pub fn cursor_info_with_cmd(
+    target: &str,
+) -> Result<(usize, usize, usize, usize, String), String> {
+    let out = run_tmux(&[
+        "display-message",
+        "-t",
+        target,
+        "-p",
+        // Use a delimiter that can't appear in a process name. \x1f is
+        // already used elsewhere in this module for the same purpose.
+        "#{cursor_x}\x1f#{cursor_y}\x1f#{pane_height}\x1f#{pane_width}\x1f#{pane_current_command}",
+    ])?;
+    let parts: Vec<&str> = out.trim_end_matches('\n').split('\x1f').collect();
+    let x = parts.get(0).unwrap_or(&"0").parse().unwrap_or(0);
+    let y = parts.get(1).unwrap_or(&"0").parse().unwrap_or(0);
+    let h = parts.get(2).unwrap_or(&"24").parse().unwrap_or(24);
+    let w = parts.get(3).unwrap_or(&"80").parse().unwrap_or(80);
+    let cmd = parts.get(4).unwrap_or(&"").to_string();
+    Ok((x, y, h, w, cmd))
 }
 
 /// 捕获 pane 内容（屏幕输出，保留 ANSI 转义序列）

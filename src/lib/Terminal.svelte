@@ -1,5 +1,5 @@
 <script>
-  import { subscribe, unsubscribe, setOnPaneOutput, setOnPaneClosed, sendCommand, sendKeys, paneCommand, listPanes, listSessions, capturePane, resizePane, newWindow } from './ws.js';
+  import { subscribe, unsubscribe, setOnPaneOutput, setOnPaneClosed, sendCommand, sendKeys, listPanes, listSessions, capturePane, resizePane, newWindow } from './ws.js';
   import { Terminal } from '@xterm/xterm';
   import { WebLinksAddon } from '@xterm/addon-web-links';
   import ChatView from './ChatView.svelte';
@@ -11,7 +11,6 @@
   import { copyText } from './clipboard.js';
 
   // Timing constants
-  const PANE_COMMAND_POLL_MS = 3000;
   const WINDOW_LIST_POLL_MS = 5000;
   // Max wait for server to echo our resize. If never confirmed (external resize
   // or slow tmux), client falls back to trusting server-reported dimensions.
@@ -138,13 +137,9 @@
 
   $effect(() => { onChatSupported(!!parser); });
 
-  // Poll pane command every 3s to detect kiro start/exit
-  $effect(() => {
-    const poll = () => paneCommand(target).then(r => { command = r.command || ''; }).catch(() => {});
-    poll();
-    const id = setInterval(poll, PANE_COMMAND_POLL_MS);
-    return () => clearInterval(id);
-  });
+  // pane_output snapshots now carry `current_command` (server piggybacks it
+  // on cursor reads — same tmux subprocess, zero extra cost). Update
+  // `command` in setOnPaneOutput below; no separate polling RPC needed.
 
   let waitingForInput = $derived.by(() => {
     if (!paneContent || !parser) return false;
@@ -1366,12 +1361,30 @@
           if (lastContent) writeToXterm(lastContent, lastCursor);
         }
       }
+      // Pull a fresh snapshot immediately rather than waiting up to 200 ms
+      // for the server's subscribe loop to push the first frame. Otherwise
+      // the user sees stale content right after the reconnect dialog
+      // disappears, which feels broken on flaky networks.
+      capturePane(target).then(r => {
+        const c = r.output || r.content;
+        if (c && c !== lastContent) {
+          lastContent = c;
+          paneContent = c;
+          if (termAtBottom) writeToXterm(c, lastCursor);
+          else hasNewContent = true;
+        }
+      }).catch(() => {});
     };
     window.addEventListener('ws-reconnected', onReconnected);
 
-    setOnPaneOutput((t, content, cursor) => {
+    setOnPaneOutput((t, content, cursor, currentCommand) => {
       if (t !== target) return;
       if (cursor) lastCursor = cursor;
+      // Pane's running command, only present on first push and on changes.
+      // Drives the chat-parser detection (kiro / claude code / gemini).
+      if (currentCommand !== undefined) {
+        command = currentCommand;
+      }
       if (content != null && content !== lastContent) {
         lastContent = content;
         paneContent = content;

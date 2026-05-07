@@ -73,6 +73,37 @@ fn verify_download(token: &str, path: &str, ts: u64, sig: &str) -> bool {
 const WS_MAX_MESSAGE_BYTES: usize = 80 * 1024 * 1024;
 const WS_MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 
+/// Configure aggressive TCP keepalive on a freshly accepted connection.
+///
+/// Why: home routers / cellular NAT gateways drop "idle" TCP entries from
+/// their state tables after as little as ~30 s. Without keepalive the next
+/// packet hits a dropped entry, the gateway sends RST, and the WebSocket
+/// dies with a 1006 abnormal close (ECONNRESET on the server side).
+///
+/// We already have a 15 s WebSocket PING — but that runs in user space and
+/// may queue behind other traffic, drift past 30 s in adverse scheduling,
+/// or fail to reach the gateway when buffered. TCP keepalive is a kernel
+/// timer emitting empty ACK packets that **always** count as activity to
+/// stateful firewalls. Combining both is a small belt-and-suspenders.
+///
+/// Tunables:
+///   IDLE = 20 s — start sending probes after 20 s without any data on
+///                 the socket. Far below the typical 30–60 s NAT idle
+///                 threshold.
+///   INTERVAL = 5 s — probe every 5 s if the first one didn't ack.
+///   COUNT = OS default (typically 3–9). The connection is considered
+///          dead after IDLE + INTERVAL × COUNT, so ~35 s worst case.
+fn enable_tcp_keepalive(stream: &TcpStream) {
+    use socket2::{SockRef, TcpKeepalive};
+    let ka = TcpKeepalive::new()
+        .with_time(std::time::Duration::from_secs(20))
+        .with_interval(std::time::Duration::from_secs(5));
+    let sock = SockRef::from(stream);
+    if let Err(e) = sock.set_tcp_keepalive(&ka) {
+        eprintln!("⚠️  failed to enable TCP keepalive: {}", e);
+    }
+}
+
 fn ws_config() -> WebSocketConfig {
     let mut cfg = WebSocketConfig::default();
     cfg.max_message_size = Some(WS_MAX_MESSAGE_BYTES);
@@ -298,6 +329,26 @@ fn handle_request(req: &Request, token: &str) -> Response {
                 Ok(panes) => Response::ok(id, serde_json::to_value(&panes).unwrap()),
                 Err(e) => Response::err(id, ERR_INTERNAL, e),
             }
+        }
+
+        // Combined sessions + panes in one round-trip. The Sessions page
+        // needs both to render its summary chips (cwd, current command, AI
+        // detection) — issuing them as 1 + N RPCs added perceivable latency
+        // when N grew beyond a handful. Single tmux call now returns
+        // everything; client groups panes by session_name client-side.
+        "list_sessions_with_panes" => {
+            let sessions = match tmux::list_sessions() {
+                Ok(v) => v,
+                Err(e) => return Response::err(id, ERR_INTERNAL, e),
+            };
+            let panes = match tmux::list_all_panes() {
+                Ok(v) => v,
+                Err(e) => return Response::err(id, ERR_INTERNAL, e),
+            };
+            Response::ok(id, serde_json::json!({
+                "sessions": sessions,
+                "panes": panes,
+            }))
         }
 
         "capture_pane" => {
@@ -699,14 +750,16 @@ async fn subscription_loop(
         for (target, prev) in targets {
             let t = target.clone();
             let t2 = target.clone();
-            let (new_content, cursor, trailing_trimmed) = match tokio::task::spawn_blocking(move || {
+            let (new_content, cursor, trailing_trimmed, current_cmd) = match tokio::task::spawn_blocking(move || {
                 // Get cursor first for pane width, then capture content immediately after
                 // to minimize race window between the two tmux calls
-                let cursor = tmux::cursor_info(&t2).unwrap_or((0, 0, 24, 80));
-                let (content, trailing) = tmux::capture_pane_with_width(&t, None, cursor.3)?;
-                // Re-read cursor to get position matching the captured content
-                let cursor = tmux::cursor_info(&t2).unwrap_or(cursor);
-                Ok::<_, String>((content, cursor, trailing))
+                let info = tmux::cursor_info_with_cmd(&t2).unwrap_or((0, 0, 24, 80, String::new()));
+                let (content, trailing) = tmux::capture_pane_with_width(&t, None, info.3)?;
+                // Re-read cursor to get position matching the captured content.
+                // Reuse the previous current_cmd — its value rarely flips
+                // mid-tick and one tmux call is cheaper than two.
+                let info2 = tmux::cursor_info_with_cmd(&t2).unwrap_or(info.clone());
+                Ok::<_, String>((content, (info2.0, info2.1, info2.2, info2.3), trailing, info2.4))
             })
             .await
             {
@@ -731,7 +784,13 @@ async fn subscription_loop(
                     continue;
                 }
             };
-            let state_key = format!("{}\x00{},{},{},{}", new_content, cursor.0, cursor.1, cursor.2, cursor.3);
+            // state_key is only used for change detection; including the
+            // current command makes "command changed but content didn't"
+            // (rare but possible: `clear` + new shell prompt) a real diff.
+            let state_key = format!(
+                "{}\x00{},{},{},{}\x00{}",
+                new_content, cursor.0, cursor.1, cursor.2, cursor.3, current_cmd
+            );
             if state_key == prev {
                 continue;
             }
@@ -740,21 +799,28 @@ async fn subscription_loop(
                 .insert(target.clone(), state_key);
             let content_changed = !prev.is_empty()
                 && prev.split('\x00').next().unwrap_or("") != new_content;
+            // Detect command changes by comparing the third \x00-delimited
+            // segment. Empty `prev` means first push → always include cmd.
+            let prev_cmd = prev.split('\x00').nth(2).unwrap_or("");
+            let cmd_changed = prev.is_empty() || prev_cmd != current_cmd;
             // Send raw tmux cursor position + trailing trimmed count for xterm.js row mapping
             let cursor_obj = serde_json::json!({ "x": cursor.0, "y": cursor.1, "w": cursor.3, "h": cursor.2, "t": trailing_trimmed });
-            let msg = if content_changed || prev.is_empty() {
-                serde_json::json!({
-                    "id": null,
-                    "method": "pane_output",
-                    "params": { "target": target, "content": new_content, "cursor": cursor_obj }
-                })
-            } else {
-                serde_json::json!({
-                    "id": null,
-                    "method": "pane_output",
-                    "params": { "target": target, "cursor": cursor_obj }
-                })
-            };
+            // Only include current_command when it actually changed, to keep
+            // the hot path frame ~zero bytes heavier than before.
+            let mut params = serde_json::Map::new();
+            params.insert("target".into(), serde_json::Value::String(target.clone()));
+            if content_changed || prev.is_empty() {
+                params.insert("content".into(), serde_json::Value::String(new_content));
+            }
+            params.insert("cursor".into(), cursor_obj);
+            if cmd_changed {
+                params.insert("current_command".into(), serde_json::Value::String(current_cmd));
+            }
+            let msg = serde_json::json!({
+                "id": null,
+                "method": "pane_output",
+                "params": params,
+            });
             if out_tx.send(Outbound::Encrypted(serde_json::to_string(&msg).unwrap())).is_err() {
                 return; // receiver has shut down
             }
@@ -862,7 +928,9 @@ pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<S
         return;
     }
 
-    println!("📱 Client connected: {}", addr);
+    let conn_id = CONN_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let conn_started_at = std::time::Instant::now();
+    println!("📱 Client connected: {} (conn_id={})", addr, conn_id);
 
     // Check if IP is locked out, and opportunistically GC old entries so
     // the tracker doesn't grow unbounded under a distributed scan.
@@ -887,10 +955,10 @@ pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<S
         }
     };
 
-    handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, resize_tracker).await;
+    handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, resize_tracker, conn_id, conn_started_at).await;
 }
 
-async fn handle_connection_ws<S>(ws_stream: tokio_tungstenite::WebSocketStream<S>, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker)
+async fn handle_connection_ws<S>(ws_stream: tokio_tungstenite::WebSocketStream<S>, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, conn_id: u64, conn_started_at: std::time::Instant)
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
@@ -907,7 +975,7 @@ where
 
     let (ws_sender, mut receiver) = ws_stream.split();
     let subs: Subscriptions = Arc::new(Mutex::new(HashMap::new()));
-    let conn_id = CONN_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // conn_id allocated above so the "connected" log line carries it.
     let hostname = gethostname::gethostname().to_string_lossy().to_string();
     let mut authenticated = false;
     // Receive-side cipher lives in this task and guards strict decrypt
@@ -1001,7 +1069,7 @@ where
                 tick.tick().await;
                 let elapsed = last_pong_at.lock().unwrap().elapsed().as_secs();
                 if elapsed > PING_DEADLINE_SECS {
-                    eprintln!("💀 ping deadline exceeded ({}s > {}s); tearing down", elapsed, PING_DEADLINE_SECS);
+                    eprintln!("💀 ping deadline exceeded ({}s > {}s) conn_id={}; tearing down", elapsed, PING_DEADLINE_SECS, conn_id);
                     shutdown_for_ping.notify_waiters();
                     return;
                 }
@@ -1019,7 +1087,15 @@ where
         let msg = match msg {
             Ok(m) => m,
             Err(e) => {
-                eprintln!("❌ Read error from {}: {}", addr, e);
+                // Annotate with conn_id + how long the connection had been
+                // up. This is the path that fires on TCP RST / network
+                // teardown; the "uptime" number is the most useful clue
+                // when chasing NAT-dropped sessions.
+                let up = conn_started_at.elapsed().as_secs();
+                eprintln!(
+                    "❌ Read error from {} (conn_id={}, authed={}, up={}s): {}",
+                    addr, conn_id, authenticated, up, e
+                );
                 break;
             }
         };
@@ -1037,7 +1113,7 @@ where
                     let ct = base64::engine::general_purpose::STANDARD.decode(text.as_bytes()).unwrap_or_default();
                     match rc.decrypt(&ct) {
                         Ok(pt) => Some(String::from_utf8_lossy(&pt).to_string()),
-                        Err(_) => { eprintln!("❌ Decrypt failed from {}", addr); break; }
+                        Err(_) => { eprintln!("❌ Decrypt failed (text path) from {} conn_id={}", addr, conn_id); break; }
                     }
                 } else {
                     Some(text.to_string())
@@ -1047,15 +1123,15 @@ where
                 // New wire: binary ciphertext, plaintext = framing byte +
                 // (optionally deflated) JSON. Auth must already be set up.
                 let Some(rc) = recv_cipher.as_mut() else {
-                    eprintln!("❌ Binary frame before auth from {}", addr);
+                    eprintln!("❌ Binary frame before auth from {} conn_id={}", addr, conn_id);
                     break;
                 };
                 match rc.decrypt(bytes) {
                     Ok(pt) => match decode_wire_payload(&pt) {
                         Ok(s) => Some(s),
-                        Err(e) => { eprintln!("❌ Wire decode failed from {}: {}", addr, e); break; }
+                        Err(e) => { eprintln!("❌ Wire decode failed from {} conn_id={}: {}", addr, conn_id, e); break; }
                     },
-                    Err(_) => { eprintln!("❌ Decrypt failed from {}", addr); break; }
+                    Err(_) => { eprintln!("❌ Decrypt failed (binary path) from {} conn_id={} bytes_len={}", addr, conn_id, bytes.len()); break; }
                 }
             }
             _ => None,
@@ -1231,7 +1307,11 @@ where
             }
         }
     }
-    println!("👋 Client disconnected: {} (conn_id={})", addr, conn_id);
+    let up = conn_started_at.elapsed().as_secs();
+    println!(
+        "👋 Client disconnected: {} (conn_id={}, authed={}, up={}s)",
+        addr, conn_id, authenticated, up
+    );
 }
 
 pub async fn start(host: &str, port: u16, token: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -1289,6 +1369,14 @@ pub async fn start_with_socket(
 
     loop {
         let (stream, addr) = listener.accept().await?;
+        // OS-level NAT-friendly heartbeat. Must happen on the raw TcpStream
+        // before tokio-rustls / tokio-tungstenite wrap it.
+        enable_tcp_keepalive(&stream);
+        // Disable Nagle. Our traffic is small JSON-RPC frames + occasional
+        // big payloads — Nagle's 40 ms coalescing doesn't help here and
+        // adds latency to interactive keystrokes.
+        let _ = stream.set_nodelay(true);
+
         let token = token.clone();
         let machine_id = machine_id.clone();
         let auth_tracker = auth_tracker.clone();
@@ -1302,7 +1390,10 @@ pub async fn start_with_socket(
                             Ok(ws) => ws,
                             Err(e) => { eprintln!("❌ WSS handshake failed for {}: {}", addr, e); return; }
                         };
-                        handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, control_mgr).await;
+                        let conn_id = CONN_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let conn_started_at = std::time::Instant::now();
+                        println!("📱 Client connected (TLS): {} (conn_id={})", addr, conn_id);
+                        handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, control_mgr, conn_id, conn_started_at).await;
                     }
                     Err(e) => eprintln!("❌ TLS handshake failed for {}: {}", addr, e),
                 }
