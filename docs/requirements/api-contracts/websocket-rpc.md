@@ -60,7 +60,8 @@ JSON-RPC over WebSocket (`ws://` or `wss://`).
 | `fs_mkdir` | `path` | OK |
 | `fs_delete` | `path` | OK |
 | `fs_rename` | `from`, `to` | OK |
-| `fs_download` | `path` | `{name, data}` base64 (≤50MB) |
+| `fs_download` | `path` | `{name, data}` base64 (≤50MB). For inline preview; user-initiated downloads use `fs_download_url` + HTTP `/dl` streaming instead. |
+| `fs_download_url` | `path` | `{url, name}` where `url` = `/dl?path=…&ts=…&sig=…`. Client GETs it on the same host (http:// for ws://, https:// for wss://) to stream the file. HMAC-SHA256 signature over token+path+ts, 60 s TTL. No server-side size limit. |
 | `fs_upload` | `path`, `data` | OK |
 | `fs_convert` | `path`, `format?` | `{html}` (currently only pptx→html) |
 

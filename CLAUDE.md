@@ -44,6 +44,7 @@ cd src-tauri && cargo test -- --test-threads=1   # Tests (needs tmux running)
 - [Android Platform Integration](docs/design-docs/features/android-platform.md)
 - [WebSocket Client Robustness](docs/design-docs/features/websocket-client.md)
 - [Concurrent WS RPC (server)](docs/design-docs/features/concurrent-ws-rpc.md)
+- [Disconnect Grace (server)](docs/design-docs/features/disconnect-grace.md)
 - [File Handling & Security](docs/design-docs/features/file-handling.md)
 - [Terminal Color Adaptation](docs/design-docs/features/color-adaptation.md)
 
@@ -72,6 +73,7 @@ cd src-tauri && cargo test -- --test-threads=1
 Tests are sequential (shared tmux state), in `src-tauri/src/main.rs`.
 
 ## Config
-File: `~/.config/tmux-mobile/config.toml` — token, host, port, tmux_socket, tls_cert, tls_key, scrollback.
-Env vars `TOKEN`, `HOST`, `PORT`, `TMUX_SOCKET`, `TLS_CERT`, `TLS_KEY`, `SCROLLBACK` override config.
+File: `~/.config/tmux-mobile/config.toml` — token, host, port, tmux_socket, tls_cert, tls_key, scrollback, disconnect_grace_secs.
+Env vars `TOKEN`, `HOST`, `PORT`, `TMUX_SOCKET`, `TLS_CERT`, `TLS_KEY`, `SCROLLBACK`, `DISCONNECT_GRACE_SECS` override config.
 Default scrollback: 500 lines.
+Default disconnect_grace_secs: 600 (10 min). Delay before a disconnected client's tmux window is auto-resized back; set to 0 for legacy immediate restore. See `docs/design-docs/features/disconnect-grace.md`.

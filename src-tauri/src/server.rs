@@ -34,9 +34,32 @@ pub const COMPRESS_MIN_BYTES: usize = 256;
 // Brute-force protection: track failed auth attempts per IP
 pub type AuthTracker = Arc<Mutex<HashMap<IpAddr, (u32, tokio::time::Instant)>>>;
 
-// Track which windows each connection has resized, so we can restore on disconnect.
-// Key = conn_id, Value = set of "session:window" targets that were resized.
-pub type ResizeTracker = Arc<std::sync::Mutex<HashMap<u64, std::collections::HashSet<String>>>>;
+// Resize tracking: per-window state so that short disconnects (app
+// backgrounded, network blip) don't trigger an immediate tmux
+// `resize-window -A`, which reflows the pane to a non-mobile size and
+// makes the re-connect feel like "页面刷新半天". On the last connection
+// to a window dropping off, we schedule a restore task that sleeps for
+// `grace_secs`; if any connection resizes the window again before it
+// fires we abort the task and the window stays at mobile size.
+//
+// - `per_conn[conn_id]` : windows this connection has resized. Used at
+//   disconnect time to know which windows to decrement.
+// - `per_window[win]`   : aggregate state — how many still-connected
+//   connections are "holding" the window at its current size, and any
+//   in-flight grace timer.
+#[derive(Default)]
+pub struct ResizeTrackerInner {
+    pub per_conn: HashMap<u64, std::collections::HashSet<String>>,
+    pub per_window: HashMap<String, WindowResizeState>,
+}
+
+#[derive(Default)]
+pub struct WindowResizeState {
+    pub active_conns: u32,
+    pub pending_restore: Option<tokio::task::JoinHandle<()>>,
+}
+
+pub type ResizeTracker = Arc<std::sync::Mutex<ResizeTrackerInner>>;
 
 static CONN_ID_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
@@ -853,7 +876,10 @@ fn handle_unsubscribe(params: &serde_json::Value, subs: &mut HashMap<String, Str
     Response::ok(None, serde_json::json!({ "unsubscribed": target }))
 }
 
-async fn handle_http_download(mut stream: TcpStream, addr: SocketAddr, token: Arc<String>) {
+async fn handle_http_download<S>(mut stream: S, addr: SocketAddr, token: Arc<String>)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
+{
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     // Read HTTP request
@@ -882,6 +908,7 @@ async fn handle_http_download(mut stream: TcpStream, addr: SocketAddr, token: Ar
     if !verify_download(&token, &path, ts, sig) {
         eprintln!("🚫 HTTP download rejected for {} (invalid sig)", addr);
         let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n").await;
+        let _ = stream.flush().await;
         return;
     }
 
@@ -889,7 +916,11 @@ async fn handle_http_download(mut stream: TcpStream, addr: SocketAddr, token: Ar
     let file_path = std::path::Path::new(&path);
     let metadata = match std::fs::metadata(file_path) {
         Ok(m) => m,
-        Err(_) => { let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n").await; return; }
+        Err(_) => {
+            let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n").await;
+            let _ = stream.flush().await;
+            return;
+        }
     };
     let name = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
     let size = metadata.len();
@@ -914,9 +945,12 @@ async fn handle_http_download(mut stream: TcpStream, addr: SocketAddr, token: Ar
         };
         if stream.write_all(&chunk[..n]).await.is_err() { break; }
     }
+    // Flush any data still sitting in BufStream's write buffer — on drop
+    // that buffer is discarded and the tail of the file would be lost.
+    let _ = stream.flush().await;
 }
 
-pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker) {
+pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, grace_secs: u64) {
     // Peek at first bytes to distinguish HTTP download from WebSocket
     let mut buf = [0u8; 7];
     let n = match stream.peek(&mut buf).await {
@@ -955,10 +989,10 @@ pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<S
         }
     };
 
-    handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, resize_tracker, conn_id, conn_started_at).await;
+    handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, resize_tracker, conn_id, conn_started_at, grace_secs).await;
 }
 
-async fn handle_connection_ws<S>(ws_stream: tokio_tungstenite::WebSocketStream<S>, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, conn_id: u64, conn_started_at: std::time::Instant)
+async fn handle_connection_ws<S>(ws_stream: tokio_tungstenite::WebSocketStream<S>, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, conn_id: u64, conn_started_at: std::time::Instant, grace_secs: u64)
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
@@ -1260,7 +1294,23 @@ where
                                         let win = target.split('.').next().unwrap_or(&target).to_string();
                                         let session = target.split(':').next().unwrap_or(&target);
                                         let _ = tmux::set_resize_hook(session);
-                                        tracker.lock().unwrap().entry(conn_id).or_default().insert(win);
+                                        // Register this conn as an active holder
+                                        // of `win`, and cancel any in-flight
+                                        // restore task — the window is actively
+                                        // being used at a known size again.
+                                        let mut t = tracker.lock().unwrap();
+                                        let first_time_for_conn = t
+                                            .per_conn
+                                            .entry(conn_id)
+                                            .or_default()
+                                            .insert(win.clone());
+                                        let state = t.per_window.entry(win).or_default();
+                                        if let Some(h) = state.pending_restore.take() {
+                                            h.abort();
+                                        }
+                                        if first_time_for_conn {
+                                            state.active_conns = state.active_conns.saturating_add(1);
+                                        }
                                         Response::ok(id, serde_json::json!({ "ok": true }))
                                     }
                                     Err(e) => Response::err(id, ERR_INTERNAL, e),
@@ -1297,13 +1347,80 @@ where
     ping_handle.abort();
     drop(out_tx); // close the channel so the send task finishes
     let _ = send_task.await;
-    // Restore any windows this connection resized (tmux auto-fits to remaining clients)
-    {
-        let mut tracker = resize_tracker.lock().unwrap();
-        if let Some(windows) = tracker.remove(&conn_id) {
-            for win in &windows {
-                let _ = tmux::run_resize_window_auto(win);
+    // Schedule restoration of any windows this connection resized, but only
+    // for windows where this conn was the last remaining holder. Other
+    // still-connected clients might be actively driving the same window at
+    // a different size; in that case we just decrement and leave the window
+    // alone. A grace timer absorbs short reconnects so the pane doesn't get
+    // reflowed twice (once on disconnect, once on the reconnect resize).
+    let windows = {
+        let mut t = resize_tracker.lock().unwrap();
+        t.per_conn.remove(&conn_id).unwrap_or_default()
+    };
+    // Decision made under the lock; side-effects (tmux call / await) happen
+    // after the guard is dropped so the future stays Send.
+    enum Decision { Skip, RestoreNow, Scheduled }
+    for win in windows {
+        let decision = {
+            let mut t = resize_tracker.lock().unwrap();
+            let Some(state) = t.per_window.get_mut(&win) else { continue };
+            state.active_conns = state.active_conns.saturating_sub(1);
+            if state.active_conns > 0 {
+                Decision::Skip
+            } else {
+                // Defensively abort any existing pending (shouldn't be one,
+                // since we only reach here as the final holder leaves).
+                if let Some(h) = state.pending_restore.take() {
+                    h.abort();
+                }
+                if grace_secs == 0 {
+                    Decision::RestoreNow
+                } else {
+                    let tracker_c = resize_tracker.clone();
+                    let w = win.clone();
+                    let grace = std::time::Duration::from_secs(grace_secs);
+                    let handle = tokio::spawn(async move {
+                        tokio::time::sleep(grace).await;
+                        // Re-check: a reconnect during the sleep would have
+                        // aborted us, but abort is delivered at the next
+                        // await point — we may have already passed the
+                        // sleep. Confirm active_conns is still 0 before
+                        // touching tmux.
+                        let should_restore = {
+                            let t = tracker_c.lock().unwrap();
+                            t.per_window.get(&w).map(|s| s.active_conns == 0).unwrap_or(false)
+                        };
+                        if !should_restore { return; }
+                        let w2 = w.clone();
+                        let _ = tokio::task::spawn_blocking(move || tmux::run_resize_window_auto(&w2)).await;
+                        eprintln!("📐 Restored window '{}' to auto-size (after {}s grace)", w, grace.as_secs());
+                        let mut t = tracker_c.lock().unwrap();
+                        if let Some(s) = t.per_window.get(&w) {
+                            if s.active_conns == 0 {
+                                t.per_window.remove(&w);
+                            }
+                        }
+                    });
+                    state.pending_restore = Some(handle);
+                    Decision::Scheduled
+                }
+            }
+        };
+        match decision {
+            Decision::Skip => {}
+            Decision::RestoreNow => {
+                let w = win.clone();
+                let _ = tokio::task::spawn_blocking(move || tmux::run_resize_window_auto(&w)).await;
                 eprintln!("📐 Restored window '{}' to auto-size", win);
+                let mut t = resize_tracker.lock().unwrap();
+                if let Some(s) = t.per_window.get(&win) {
+                    if s.active_conns == 0 && s.pending_restore.is_none() {
+                        t.per_window.remove(&win);
+                    }
+                }
+            }
+            Decision::Scheduled => {
+                eprintln!("⏳ Window '{}' scheduled for restore in {}s", win, grace_secs);
             }
         }
     }
@@ -1315,7 +1432,7 @@ where
 }
 
 pub async fn start(host: &str, port: u16, token: &str) -> Result<(), Box<dyn std::error::Error>> {
-    start_with_socket(host, port, token, "unknown", None, None, None).await
+    start_with_socket(host, port, token, "unknown", None, None, None, 600).await
 }
 
 pub async fn start_with_socket(
@@ -1326,6 +1443,7 @@ pub async fn start_with_socket(
     socket: Option<String>,
     tls_cert: Option<String>,
     tls_key: Option<String>,
+    disconnect_grace_secs: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
     tmux::set_socket(socket);
     // Best-effort harden existing config.toml so upgraded installs with the
@@ -1336,7 +1454,7 @@ pub async fn start_with_socket(
     let token = Arc::new(token.to_string());
     let machine_id = Arc::new(machine_id.to_string());
     let auth_tracker: AuthTracker = Arc::new(Mutex::new(HashMap::new()));
-    let resize_tracker: ResizeTracker = Arc::new(std::sync::Mutex::new(HashMap::new()));
+    let resize_tracker: ResizeTracker = Arc::new(std::sync::Mutex::new(ResizeTrackerInner::default()));
 
     // Load TLS config if cert+key provided
     let tls_acceptor = match (&tls_cert, &tls_key) {
@@ -1381,25 +1499,46 @@ pub async fn start_with_socket(
         let machine_id = machine_id.clone();
         let auth_tracker = auth_tracker.clone();
         let control_mgr = resize_tracker.clone();
+        let grace = disconnect_grace_secs;
         if let Some(ref acceptor) = tls_acceptor {
             let acceptor = acceptor.clone();
             tokio::spawn(async move {
                 match acceptor.accept(stream).await {
                     Ok(tls_stream) => {
-                        let ws_stream = match tokio_tungstenite::accept_async_with_config(tls_stream, Some(ws_config())).await {
+                        // Peek first bytes after TLS handshake to tell HTTP
+                        // /dl (large-file streaming) from a WebSocket upgrade.
+                        // Plain-TCP uses TcpStream::peek; TlsStream has no
+                        // peek, so we wrap in BufStream and use AsyncBufRead
+                        // which fills an internal buffer and replays it on
+                        // subsequent reads. The buffered stream is fed to
+                        // whichever handler we dispatch to.
+                        use tokio::io::AsyncBufReadExt;
+                        let mut buf_stream = tokio::io::BufStream::new(tls_stream);
+                        let is_http = match buf_stream.fill_buf().await {
+                            Ok(b) => b.len() >= 7 && &b[..7] == b"GET /dl",
+                            Err(e) => {
+                                eprintln!("❌ TLS read failed for {}: {}", addr, e);
+                                return;
+                            }
+                        };
+                        if is_http {
+                            handle_http_download(buf_stream, addr, token).await;
+                            return;
+                        }
+                        let ws_stream = match tokio_tungstenite::accept_async_with_config(buf_stream, Some(ws_config())).await {
                             Ok(ws) => ws,
                             Err(e) => { eprintln!("❌ WSS handshake failed for {}: {}", addr, e); return; }
                         };
                         let conn_id = CONN_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         let conn_started_at = std::time::Instant::now();
                         println!("📱 Client connected (TLS): {} (conn_id={})", addr, conn_id);
-                        handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, control_mgr, conn_id, conn_started_at).await;
+                        handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, control_mgr, conn_id, conn_started_at, grace).await;
                     }
                     Err(e) => eprintln!("❌ TLS handshake failed for {}: {}", addr, e),
                 }
             });
         } else {
-            tokio::spawn(handle_connection(stream, addr, token, machine_id, auth_tracker, control_mgr));
+            tokio::spawn(handle_connection(stream, addr, token, machine_id, auth_tracker, control_mgr, grace));
         }
     }
 }

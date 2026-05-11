@@ -13,7 +13,7 @@ Server-side filesystem operations. File: `src-tauri/src/fs.rs`
 - `create_dir(path)` — create directory (recursive)
 - `delete_path(path)` — delete file or directory (recursive for dirs)
 - `rename_path(from, to)` — rename/move
-- `download_file(path)` — download as base64 (≤50MB limit), returns (filename, data)
+- `download_file(path)` — read file into memory + base64 encode (≤50MB `MAX_READ_SIZE`), returns `(filename, data)`. Used for inline PDF/image preview. User-initiated file downloads go through the streaming HTTP `/dl` endpoint instead (no size limit, no base64 overhead); see `docs/design-docs/features/file-handling.md`.
 - `upload_file(path, data_b64)` — upload from base64, creates parent dirs
 
 ## Helpers

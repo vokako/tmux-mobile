@@ -29,7 +29,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message;
 
-use tmux_mobile::server::{handle_connection, AuthTracker, ResizeTracker};
+use tmux_mobile::server::{handle_connection, AuthTracker, ResizeTracker, ResizeTrackerInner};
 
 // --- Test harness ---
 
@@ -43,7 +43,7 @@ async fn spawn_server_once(token: &str) -> SocketAddr {
     let machine_id = Arc::new("test-machine".to_string());
     let auth_tracker: AuthTracker = Arc::new(Mutex::new(HashMap::new()));
     let resize_tracker: ResizeTracker =
-        Arc::new(std::sync::Mutex::new(HashMap::new()));
+        Arc::new(std::sync::Mutex::new(ResizeTrackerInner::default()));
 
     tokio::spawn(async move {
         loop {
@@ -55,7 +55,8 @@ async fn spawn_server_once(token: &str) -> SocketAddr {
             let m = machine_id.clone();
             let at = auth_tracker.clone();
             let rt = resize_tracker.clone();
-            tokio::spawn(handle_connection(stream, peer, t, m, at, rt));
+            // grace=0 keeps test teardown synchronous (no lingering timer tasks)
+            tokio::spawn(handle_connection(stream, peer, t, m, at, rt, 0));
         }
     });
     addr

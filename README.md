@@ -57,6 +57,9 @@ port = 9899          # optional
 tmux_socket = ""     # optional, -S path
 tls_cert = ""        # optional, path to PEM cert for wss://
 tls_key = ""         # optional, path to PEM private key for wss://
+disconnect_grace_secs = 600  # optional, seconds to wait before restoring
+                             # tmux window size after last client drops.
+                             # 0 = restore immediately (legacy behavior).
 ```
 
 Environment variables override the config file:
@@ -65,6 +68,8 @@ Environment variables override the config file:
 TOKEN=my-secret PORT=8080 npm run tauri:dev
 # WSS mode:
 TLS_CERT=/path/to/cert.pem TLS_KEY=/path/to/key.pem npm run tauri:dev
+# Disable the grace period (restore window size immediately on disconnect):
+DISCONNECT_GRACE_SECS=0 npm run tauri:dev
 ```
 
 ## Features
@@ -225,7 +230,8 @@ JSON-RPC over WebSocket. Connect with `ws://` or `wss://`. First message must au
 | `fs_mkdir` | `path` | Create directory |
 | `fs_delete` | `path` | Delete file or directory |
 | `fs_rename` | `from`, `to` | Rename/move |
-| `fs_download` | `path` | Download file as base64 (≤50MB) |
+| `fs_download` | `path` | Download file as base64 (≤50MB) — for inline preview |
+| `fs_download_url` | `path` | Signed URL for the HTTP `/dl` streaming endpoint (no size limit); used by file download action |
 | `fs_upload` | `path`, `data` | Upload file (base64) |
 | `git` | `subcmd`, `args[]`, `cwd?` | Git operations (whitelisted: status, diff, log, show, branch, rev-parse, push, add, commit, restore) |
 

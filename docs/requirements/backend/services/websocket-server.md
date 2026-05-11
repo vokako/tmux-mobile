@@ -28,14 +28,18 @@ Rust-based WebSocket server providing JSON-RPC interface to tmux and filesystem 
 
 ## Resize Tracking
 - `resize_pane` resizes tmux pane to match client viewport
-- Per-connection tracking of resized windows
-- On disconnect, auto-restores windows to auto-size (`resize-window -A`)
-- Sets tmux hook (`after-client-attached`) so real terminal clients restore size
+- Two-level tracking:
+  - Per-connection: which windows each connection has resized
+  - Per-window: how many still-connected clients are "holding" the window at its current size, plus an optional pending-restore task handle
+- On disconnect: decrement the holder count for each window; if the count reaches 0, schedule (not perform) a restore task that sleeps `disconnect_grace_secs` and then calls `resize-window -A`
+- Any subsequent `resize_pane` on that window cancels the pending restore — so short reconnects (app backgrounded, network blip) avoid the disconnect → reflow → reconnect → reflow double-cycle
+- `disconnect_grace_secs = 0` preserves the legacy immediate-restore behavior (no timer)
+- Sets tmux hook (`client-session-changed`) so real terminal clients restore size when they next attach
 
 ## Configuration
 - File: `~/.config/tmux-mobile/config.toml`
-- Fields: token, host (default 0.0.0.0), port (default 9899), tmux_socket, tls_cert, tls_key, scrollback (default 500)
-- Env vars: TOKEN, HOST, PORT, TMUX_SOCKET, TLS_CERT, TLS_KEY, SCROLLBACK
+- Fields: token, host (default 0.0.0.0), port (default 9899), tmux_socket, tls_cert, tls_key, scrollback (default 500), disconnect_grace_secs (default 600)
+- Env vars: TOKEN, HOST, PORT, TMUX_SOCKET, TLS_CERT, TLS_KEY, SCROLLBACK, DISCONNECT_GRACE_SECS
 - TLS support via tls_cert + tls_key paths
 - Preferences: separate `prefs.json` file for client-side settings (get_prefs/set_pref)
 - Bookmarks: separate `bookmarks.json` file

@@ -24,14 +24,17 @@ fn sanitize_filename(name: &str) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn save_to_downloads(name: String, data: String) -> Result<String, String> {
+fn save_to_downloads(name: String, data: Vec<u8>) -> Result<String, String> {
+    // Used to take base64 String — the round trip
+    //   Rust raw → JS base64 → JSON IPC → Rust base64-decode → write
+    // dominated download time on Android for any non-trivial file.
+    // Now Tauri's IPC carries Vec<u8> directly via its binary channel,
+    // so the bytes pass through without a single copy or transcode.
     let safe_name = sanitize_filename(&name)?;
-    let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &data)
-        .map_err(|e| format!("base64: {}", e))?;
     let dir = std::path::PathBuf::from("/storage/emulated/0/Download/TmuxMobile");
     std::fs::create_dir_all(&dir).ok();
     let path = dir.join(&safe_name);
-    std::fs::write(&path, &bytes).map_err(|e| format!("write: {}", e))?;
+    std::fs::write(&path, &data).map_err(|e| format!("write: {}", e))?;
     Ok(path.to_string_lossy().to_string())
 }
 
@@ -75,7 +78,7 @@ pub fn run() {
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
-                if let Err(e) = server::start_with_socket(&cfg.host, cfg.port, &cfg.token, &cfg.machine_id, cfg.tmux_socket, cfg.tls_cert, cfg.tls_key).await {
+                if let Err(e) = server::start_with_socket(&cfg.host, cfg.port, &cfg.token, &cfg.machine_id, cfg.tmux_socket, cfg.tls_cert, cfg.tls_key, cfg.disconnect_grace_secs).await {
                     eprintln!("Server error: {}", e);
                 }
             });

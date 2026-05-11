@@ -502,10 +502,11 @@ export const fsRename = (from, to) => call('fs_rename', { from, to });
 export const fsDownload = (path) => call('fs_download', { path }, 60000);
 export const fsDownloadUrl = (path) => call('fs_download_url', { path });
 export function fsDownloadHttp(path) {
-  // HTTP download only works for ws:// (plain TCP); wss:// falls back to WS download
-  if (wsUrl && wsUrl.startsWith('wss://')) {
-    return fsDownload(path).then(r => ({ blob: null, base64: r.data, name: r.name }));
-  }
+  // Both ws:// and wss:// use the streaming HTTP /dl endpoint — the server
+  // peeks the first bytes of every accepted (plain or TLS) connection and
+  // branches HTTP vs WS. Streaming avoids the 50 MB cap on fs_download and
+  // the base64 overhead. wsUrl maps cleanly: ws://host → http://host,
+  // wss://host → https://host.
   return fsDownloadUrl(path).then(({ url, name }) => {
     const base = wsUrl.replace(/^ws/, 'http').replace(/\/$/, '');
     return { url: base + url, name };

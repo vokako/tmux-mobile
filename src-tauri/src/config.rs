@@ -11,6 +11,11 @@ struct FileConfig {
     tls_cert: Option<String>,
     tls_key: Option<String>,
     scrollback: Option<usize>,
+    // Seconds to wait after the last client on a resized tmux window
+    // disconnects before restoring that window to auto-size. 0 = restore
+    // immediately (legacy behavior). Default 600 (10 min) so short
+    // reconnects (backgrounded app, network blip) skip the reflow cycle.
+    disconnect_grace_secs: Option<u64>,
 }
 
 pub struct Config {
@@ -22,6 +27,7 @@ pub struct Config {
     pub tls_cert: Option<String>,
     pub tls_key: Option<String>,
     pub scrollback: usize,
+    pub disconnect_grace_secs: u64,
 }
 
 fn config_path() -> PathBuf {
@@ -73,6 +79,11 @@ impl Config {
                 .and_then(|s| s.parse().ok())
                 .or(file_cfg.scrollback)
                 .unwrap_or(500),
+            disconnect_grace_secs: std::env::var("DISCONNECT_GRACE_SECS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .or(file_cfg.disconnect_grace_secs)
+                .unwrap_or(600),
         }
     }
 }
