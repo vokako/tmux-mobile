@@ -696,6 +696,7 @@
     // Touch mode: 'idle' | 'down' | 'scrollbar' | 'scroll' | 'longpress-select' | 'handle-drag'
     let touchMode = 'idle';
     let dragHandle = null; // 'start' | 'end' when touchMode === 'handle-drag'
+    let handleGrabDy = 0;  // finger Y minus dragged endpoint centre Y at grab time
     const stopMomentum = () => { if (momentumId) { cancelAnimationFrame(momentumId); momentumId = null; } };
 
     // Cell at touch coords, allowing 1 cell of overshoot in each direction so
@@ -954,6 +955,15 @@
         if (which) {
           touchMode = 'handle-drag';
           dragHandle = which;
+          // Record the finger's offset from the dragged endpoint's row centre
+          // so the first move doesn't snap. We then lift the mapped point one
+          // row above the finger (see onTouchMove) so the endpoint stays
+          // visible instead of hiding under the fingertip.
+          const r = termEl.getBoundingClientRect();
+          const epCenterY = which === 'start'
+            ? r.top + selUI.startY + selUI.cellH / 2
+            : r.top + selUI.endY - selUI.cellH / 2;
+          handleGrabDy = cy - epCenterY;
           // Pin content updates while dragging. preventDefault on touchmove
           // (which is non-passive) blocks the page from scrolling.
           touchScrolling = true;
@@ -1022,7 +1032,11 @@
       }
       // Handle drag: move whichever endpoint we grabbed
       if (touchMode === 'handle-drag' && selection) {
-        const { row, col } = touchToBufferCell(t0.clientX, t0.clientY);
+        // Compensate the grab offset so there's no snap on first move, then
+        // lift the mapped point one row above the finger so the endpoint
+        // isn't hidden under the fingertip.
+        const lift = (cellSize(term).h || (fontSize * CELL_H_RATIO));
+        const { row, col } = touchToBufferCell(t0.clientX, t0.clientY - handleGrabDy - lift);
         moveEndpoint(dragHandle, row, col);
         if (e.cancelable) e.preventDefault();
         return;
