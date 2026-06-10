@@ -200,6 +200,23 @@
     return [...map.values()];
   });
 
+  // Agent (if any) running in the currently-shown window.
+  let currentWinAgent = $derived.by(() => {
+    const cur = windows.find(w => String(w.window) === currentWindow);
+    if (!cur) return null;
+    return detectAgent((cur.current_command || '') + ' ' + (cur.pane_title || ''));
+  });
+
+  // Whether the window switcher is worth showing at all. A lone plain shell
+  // with no agent anywhere has nothing to switch to — showing an (almost)
+  // empty bar just steals vertical space. Show it only when there's a real
+  // choice: multiple windows, the current window is an agent, or other agent
+  // sessions exist (the latter is only known while expanded, since we don't
+  // poll cross-session data when collapsed).
+  let showSwitcher = $derived(
+    windows.length > 1 || !!currentWinAgent || otherAgentSessions.length > 0
+  );
+
   $effect(() => {
     if (!session || viewMode !== 'terminal') return;
     const load = () => {
@@ -1590,7 +1607,7 @@
   {#if toastMsg}
     <div class="toast">{toastMsg}</div>
   {/if}
-  {#if windows.length >= 1}
+  {#if showSwitcher}
     {#if showWindowCmd}
       <!--
         Expanded switcher: a top-of-page horizontal tab bar that holds
@@ -1672,7 +1689,7 @@
       </div>
     {:else}
       {@const cur = windows.find(w => String(w.window) === currentWindow)}
-      {@const curAgent = cur ? detectAgent((cur.current_command || '') + ' ' + (cur.pane_title || '')) : null}
+      {@const curAgent = currentWinAgent}
       <!--
         Collapsed state: a single chip in the top-right corner using the
         exact chip visual language from the expanded bar. Conceptually the
