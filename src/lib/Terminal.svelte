@@ -921,10 +921,11 @@
         let xMin = selUI.startAtLeftEdge ? 0 : selUI.startX - HIT_HALF_W;
         let xMax = selUI.startX + HIT_HALF_W;
         if (midX !== null) xMax = Math.min(xMax, midX);
-        // Y bounds: dot side gets HIT_DOT_PAD past the dot center; the
-        // stem side runs into the selection for one cell height.
-        const yMin = selUI.startY - HIT_DOT_PAD;
-        const yMax = selUI.startY + cellH + HIT_DOT_PAD * 0.5;
+        // Y bounds: stem runs DOWN through the selection's first row; the
+        // dot now sits BELOW that (mirrors the end handle), so the dot-side
+        // buffer extends past startY + cellH.
+        const yMin = selUI.startY - HIT_DOT_PAD * 0.5;
+        const yMax = selUI.startY + cellH + HIT_DOT_PAD;
         if (px >= xMin && px <= xMax && py >= yMin && py <= yMax) return 'start';
       }
       if (selUI.endInView) {
@@ -2019,10 +2020,12 @@
     left: 0;
   }
   /* Start handle: anchor at cell top-left.
-       stem occupies [0, +cellH] (down into selection's first row)
-       dot occupies  [-12, 0] (above anchor, outside selection) */
+       stem occupies [0, +cellH] (down through selection's first row)
+       dot occupies  [+cellH, +cellH+12] (BELOW the stem, same side as the
+       end handle's dot — keeps the touch target below the fingertip so the
+       endpoint stays visible while dragging) */
   .sel-handle-start::before { top: 0; }
-  .sel-handle-start::after  { top: -12px; }
+  .sel-handle-start::after  { top: calc(var(--cell-h, 16px)); }
   /* End handle: anchor at cell bottom-right.
        stem occupies [-cellH, 0] (up into selection's last row)
        dot occupies  [0, +12] (below anchor, outside selection) */
