@@ -11,3 +11,8 @@ temp/
 /example.txt
 /tmuxmobile.svg
 /icon_macos.png
+
+# Project uses npm; stray pnpm lockfile would create a dual-lockfile conflict
+/pnpm-lock.yaml
+# Backup left by a git history filter/rewrite — keep locally, never commit
+/.git.backup-before-filter/
