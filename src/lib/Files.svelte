@@ -630,25 +630,10 @@
   let downloadToast = $state('');
   let downloadedPath = $state('');
   let downloading = $state('');
+  // Real progress 0–100, driven by the byte counter in fetchBytes (0–95)
+  // and the final write step (95–100). No more synthetic timer that always
+  // hovered at 80% — that was the user-visible "stuck at 80%" bug.
   let dlProgress = $state(0);
-  let dlProgressTimer = null;
-
-  // Simulate gradual progress while waiting for download RPC
-  function startDlProgress() {
-    dlProgress = 5;
-    let target = 80; // simulate up to 80%, rest is real stages
-    dlProgressTimer = setInterval(() => {
-      if (dlProgress < target) {
-        // Slow down as we approach target
-        const remaining = target - dlProgress;
-        dlProgress += Math.max(0.5, remaining * 0.06);
-      }
-    }, 100);
-  }
-  function stopDlProgress() {
-    clearInterval(dlProgressTimer);
-    dlProgressTimer = null;
-  }
 
   async function openDownloaded() {
     if (!downloadedPath) return;
@@ -667,48 +652,85 @@
     downloadToast = ''; downloadedPath = ''; downloading = ''; dlProgress = 0;
   }
 
+  // Fetch a URL into a Uint8Array, reporting real byte progress through
+  // `onProgress(0..1)`. Uses the response's ReadableStream so we can count
+  // received bytes in flight; `arrayBuffer()` would block until the whole
+  // body is in memory and give us no progress signal.
+  //
+  // If Content-Length is missing (chunked encoding without it), we fall
+  // back to reporting an indeterminate progress (`onProgress(null)`).
+  async function fetchWithProgress(url, onProgress) {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const total = Number(resp.headers.get('content-length')) || 0;
+    if (!resp.body || !resp.body.getReader) {
+      // Older browser / Tauri webview without streaming: degrade gracefully.
+      const buf = await resp.arrayBuffer();
+      onProgress?.(1);
+      return new Uint8Array(buf);
+    }
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let received = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      if (total) onProgress?.(received / total);
+      else onProgress?.(null); // size unknown → indeterminate
+    }
+    // Concatenate. Single allocation of total size, one O(n) copy — same
+    // cost as arrayBuffer() but with the streaming progress we wanted.
+    const out = new Uint8Array(received);
+    let off = 0;
+    for (const c of chunks) { out.set(c, off); off += c.length; }
+    return out;
+  }
+
   async function handleDownload(path) {
     const name = path.split('/').pop();
     try {
       downloading = name;
-      startDlProgress();
+      dlProgress = 0;
       window.__dbg?.(`dl: start ${name}`);
       const t0 = Date.now();
       const dlInfo = await fsDownloadHttp(path);
       window.__dbg?.(`dl: got ${dlInfo.url ? 'HTTP URL' : 'base64'} in ${Date.now()-t0}ms`);
-      dlProgress = 20;
 
-      // Helper: get file bytes
-      async function fetchBytes() {
-        if (dlInfo.url) {
-          const resp = await fetch(dlInfo.url);
-          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-          return new Uint8Array(await resp.arrayBuffer());
-        }
-        return Uint8Array.from(atob(dlInfo.base64), c => c.charCodeAt(0));
+      // Pull the bytes. Same shape regardless of platform; downstream code
+      // either writes via Tauri fs/invoke or triggers a browser download.
+      // Progress 0..0.95 is reserved for fetch; 0.95..1.00 for write.
+      let bytes;
+      if (dlInfo.url) {
+        bytes = await fetchWithProgress(dlInfo.url, (frac) => {
+          if (frac == null) {
+            // Indeterminate: tick a slow ramp so the bar isn't motionless.
+            if (dlProgress < 90) dlProgress = Math.min(90, dlProgress + 1);
+          } else {
+            dlProgress = Math.round(frac * 95);
+          }
+        });
+      } else {
+        // wss:// fallback path: we got base64 over WS RPC. No progress to
+        // report mid-decode; jump straight to "fetched".
+        bytes = Uint8Array.from(atob(dlInfo.base64), c => c.charCodeAt(0));
+        dlProgress = 95;
       }
+      window.__dbg?.(`dl: fetched ${(bytes.length/1024|0)}KB in ${Date.now()-t0}ms`);
 
+      // Write phase. dlProgress runs 95→100 as the write completes.
       if (isTauri && tauriFs) {
         await tauriReady;
         if (isAndroid) {
-          let b64;
-          if (dlInfo.base64) {
-            b64 = dlInfo.base64;
-          } else {
-            const resp = await fetch(dlInfo.url);
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            const blob = await resp.blob();
-            window.__dbg?.(`dl: fetched ${(blob.size/1024|0)}KB in ${Date.now()-t0}ms`);
-            b64 = await new Promise((resolve) => {
-              const reader = new FileReader();
-              reader.onload = () => resolve(reader.result.split(',')[1]);
-              reader.readAsDataURL(blob);
-            });
-          }
-          stopDlProgress(); dlProgress = 85;
+          // Tauri 2's invoke supports Vec<u8> natively over its binary IPC
+          // channel. Earlier we transcoded bytes → base64 → JSON IPC →
+          // Rust base64-decode, which dominated download time on Android
+          // (FileReader.readAsDataURL is a main-thread allocation of 4n/3
+          // bytes in addition to the n raw bytes the response already used).
+          dlProgress = 96;
           const { invoke } = await import('@tauri-apps/api/core');
-          dlProgress = 90;
-          const filePath = await invoke('save_to_downloads', { name, data: b64 });
+          const filePath = await invoke('save_to_downloads', { name, data: bytes });
           window.__dbg?.(`dl: saved → ${filePath}`);
           dlProgress = 100;
           await new Promise(r => setTimeout(r, 300));
@@ -718,12 +740,10 @@
           setTimeout(() => { if (downloadToast === filePath) dismissDownload(); }, 10000);
           return;
         }
-        // macOS / desktop: use save dialog
+        // macOS / desktop: prompt for save location.
         const savePath = await tauriDialog.save({ defaultPath: name });
-        if (!savePath) { stopDlProgress(); downloading = ''; dlProgress = 0; return; }
-        const bytes = await fetchBytes();
-        window.__dbg?.(`dl: fetched ${(bytes.length/1024|0)}KB in ${Date.now()-t0}ms`);
-        stopDlProgress(); dlProgress = 90;
+        if (!savePath) { downloading = ''; dlProgress = 0; return; }
+        dlProgress = 96;
         await tauriFs.writeFile(savePath, bytes);
         window.__dbg?.(`dl: saved → ${savePath}`);
         dlProgress = 100;
@@ -734,17 +754,7 @@
         setTimeout(() => { if (downloadToast === downloadedPath) dismissDownload(); }, 10000);
         return;
       }
-      // Browser fallback
-      let bytes;
-      if (dlInfo.url) {
-        const resp = await fetch(dlInfo.url);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        bytes = new Uint8Array(await resp.arrayBuffer());
-        window.__dbg?.(`dl: fetched ${(bytes.length/1024|0)}KB in ${Date.now()-t0}ms`);
-      } else {
-        bytes = Uint8Array.from(atob(dlInfo.base64), c => c.charCodeAt(0));
-        window.__dbg?.(`dl: decoded ${(bytes.length/1024|0)}KB`);
-      }
+      // Plain browser: trigger a tag-based download.
       const blob = new Blob([bytes]);
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -752,12 +762,16 @@
       document.body.appendChild(a);
       a.click();
       setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(blobUrl); }, 100);
-      stopDlProgress(); dlProgress = 100;
+      dlProgress = 100;
       await new Promise(r => setTimeout(r, 300));
       downloading = '';
       downloadToast = 'Downloaded';
       setTimeout(() => downloadToast = '', 2000);
-    } catch (e) { stopDlProgress(); downloading = ''; dlProgress = 0; window.__dbg?.(`dl: FAILED ${e.message}`); error = e.message; }
+    } catch (e) {
+      downloading = ''; dlProgress = 0;
+      window.__dbg?.(`dl: FAILED ${e.message}`);
+      error = e.message;
+    }
   }
 
   async function handleUpload() {
