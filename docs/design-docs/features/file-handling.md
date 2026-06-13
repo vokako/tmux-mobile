@@ -18,6 +18,13 @@ Frontend `fsDownloadHttp` always uses the streaming HTTP path now (both `ws://` 
 
 `fs_download` stays — it's still the right choice for inline preview (the browser wants the bytes as `data:` URL anyway, so the base64 it gets from the server is already the final shape).
 
+### Resumable downloads (Range + retry)
+Public-internet paths (reverse proxy in front of the server) routinely kill long-lived large responses: proxy idle/total timeouts, connection resets, silent stalls. Three pieces make `/dl` survive that:
+
+- **Server: `Range: bytes=N-` support.** `/dl` answers `206 Partial Content` + `Content-Range` for the open-ended single-range form, and advertises `Accept-Ranges: bytes`. Only `bytes=N-` is honored (the only form our client sends); other forms fall back to a full 200, which is legal per RFC 7233.
+- **Server: robust request parsing.** The request is read until `\r\n\r\n` (a proxy may split the request line across TCP segments — a single `read()` used to truncate the query mid-signature and 403 valid requests). `/dl?` is located anywhere in the request line so an unstripped proxy path prefix (`GET /tmux/dl?...`) still routes. Same prefix tolerance in the HTTP-vs-WS dispatch (`looks_like_dl_request`, request line only — header echoes don't match).
+- **Client: `fetchWithResume` (Files.svelte).** Streams the body with a 20 s stall watchdog (AbortController); on any mid-transfer failure it retries with `Range: bytes=<received>-`, so finished bytes are never re-fetched. Each retry re-signs the URL via `fs_download_url` (signatures expire after 60 s — a retry minutes into a transfer would otherwise 403). The retry budget (4) refills whenever an attempt makes progress, so a flaky-but-moving link survives many small interruptions; only consecutive zero-progress failures abort. If a resume gets 200 instead of 206 (proxy stripped the Range), the client restarts from byte 0 rather than corrupting the buffer.
+
 ### Base64 Chunking
 `btoa(String.fromCharCode(...spread))` crashes on files >100KB (JS argument limit). Use 8192-byte chunks.
 

@@ -652,36 +652,113 @@
     downloadToast = ''; downloadedPath = ''; downloading = ''; dlProgress = 0;
   }
 
-  // Fetch a URL into a Uint8Array, reporting real byte progress through
-  // `onProgress(0..1)`. Uses the response's ReadableStream so we can count
-  // received bytes in flight; `arrayBuffer()` would block until the whole
-  // body is in memory and give us no progress signal.
-  //
-  // If Content-Length is missing (chunked encoding without it), we fall
-  // back to reporting an indeterminate progress (`onProgress(null)`).
-  async function fetchWithProgress(url, onProgress) {
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const total = Number(resp.headers.get('content-length')) || 0;
-    if (!resp.body || !resp.body.getReader) {
-      // Older browser / Tauri webview without streaming: degrade gracefully.
-      const buf = await resp.arrayBuffer();
-      onProgress?.(1);
-      return new Uint8Array(buf);
+  // Stream one HTTP response body into `chunks`, counting bytes. A stall
+  // watchdog aborts the fetch if no bytes arrive for STALL_TIMEOUT_MS —
+  // reverse proxies on the public internet love to silently kill long
+  // responses, and without the watchdog reader.read() hangs forever.
+  const DL_STALL_TIMEOUT_MS = 20000;
+  async function fetchRangeInto(url, startByte, chunks, onBytes) {
+    const ctrl = new AbortController();
+    let stallTimer = null;
+    const armStall = () => {
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => ctrl.abort(new Error('download stalled')), DL_STALL_TIMEOUT_MS);
+    };
+    armStall();
+    try {
+      const headers = startByte > 0 ? { Range: `bytes=${startByte}-` } : {};
+      const resp = await fetch(url, { headers, signal: ctrl.signal });
+      if (!resp.ok && resp.status !== 206) throw new Error(`HTTP ${resp.status}`);
+      // Asked to resume but got a full 200 (server/proxy ignored Range):
+      // the bytes we already have would be duplicated. Restart cleanly.
+      if (startByte > 0 && resp.status !== 206) {
+        chunks.length = 0;
+        onBytes?.(-startByte, 0);
+        startByte = 0;
+      }
+      // total size of the WHOLE file (for progress), regardless of range
+      let total = 0;
+      const cr = resp.headers.get('content-range'); // "bytes N-M/SIZE"
+      if (cr) total = Number(cr.split('/')[1]) || 0;
+      else total = Number(resp.headers.get('content-length')) || 0;
+      if (!resp.body || !resp.body.getReader) {
+        const buf = await resp.arrayBuffer();
+        clearTimeout(stallTimer);
+        chunks.push(new Uint8Array(buf));
+        onBytes?.(buf.byteLength, total);
+        return;
+      }
+      const reader = resp.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        armStall();
+        chunks.push(value);
+        onBytes?.(value.length, total);
+      }
+    } finally {
+      clearTimeout(stallTimer);
     }
-    const reader = resp.body.getReader();
+  }
+
+  // Fetch a download into a Uint8Array with REAL progress + automatic
+  // resume. On a mid-transfer failure (proxy idle timeout, network blip,
+  // stall) we retry with `Range: bytes=<received>-` so completed bytes are
+  // never re-downloaded. Each retry calls `freshUrl()` because the signed
+  // /dl URL expires after 60 s — a retry minutes into a big transfer would
+  // otherwise 403. The retry budget refills whenever a retry makes real
+  // progress, so a flaky-but-moving link can take many small hits without
+  // dying; only consecutive no-progress failures give up.
+  const DL_MAX_RETRIES = 4;
+  const DL_RETRY_DELAY_MS = 1500;
+  // Zero bytes after this many attempts ⇒ the HTTP path is unreachable
+  // (typical: a reverse proxy that forwards WebSocket upgrades but not
+  // plain GETs — WS works fine, every fetch dies instantly). Retrying is
+  // pointless; fail fast with a marker so the caller can fall back to the
+  // WS RPC download path.
+  const DL_UNREACHABLE_ATTEMPTS = 2;
+  async function fetchWithResume(url, freshUrl, onProgress) {
     const chunks = [];
     let received = 0;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      received += value.length;
-      if (total) onProgress?.(received / total);
+    let totalSize = 0;
+    let retriesLeft = DL_MAX_RETRIES;
+    let attempts = 0;
+    const onBytes = (n, total) => {
+      received += n;
+      if (total) totalSize = total;
+      if (totalSize) onProgress?.(received / totalSize);
       else onProgress?.(null); // size unknown → indeterminate
+    };
+    let curUrl = url;
+    while (true) {
+      const receivedBefore = received;
+      try {
+        attempts++;
+        await fetchRangeInto(curUrl, received, chunks, onBytes);
+        break; // complete
+      } catch (e) {
+        // If the whole-file size is known and we already have every byte,
+        // treat the error as EOF noise (some proxies cut the connection
+        // instead of finishing cleanly).
+        if (totalSize && received >= totalSize) break;
+        // Never received a single byte across multiple attempts: the HTTP
+        // endpoint is unreachable, not flaky. Surface a typed error so the
+        // caller can switch transports instead of burning the full retry
+        // budget on a path that will never work.
+        if (received === 0 && attempts >= DL_UNREACHABLE_ATTEMPTS) {
+          const err = new Error(`HTTP download unreachable: ${e.message}`);
+          err.code = 'DL_HTTP_UNREACHABLE';
+          throw err;
+        }
+        if (received > receivedBefore) retriesLeft = DL_MAX_RETRIES; // made progress
+        if (retriesLeft <= 0) throw e;
+        retriesLeft--;
+        window.__dbg?.(`dl: retry at byte ${received} (${retriesLeft} left): ${e.message}`);
+        await new Promise(r => setTimeout(r, DL_RETRY_DELAY_MS));
+        // Signed URL may have expired (60 s TTL) — get a fresh one.
+        try { curUrl = await freshUrl(); } catch { /* keep old URL */ }
+      }
     }
-    // Concatenate. Single allocation of total size, one O(n) copy — same
-    // cost as arrayBuffer() but with the streaming progress we wanted.
     const out = new Uint8Array(received);
     let off = 0;
     for (const c of chunks) { out.set(c, off); off += c.length; }
@@ -703,14 +780,29 @@
       // Progress 0..0.95 is reserved for fetch; 0.95..1.00 for write.
       let bytes;
       if (dlInfo.url) {
-        bytes = await fetchWithProgress(dlInfo.url, (frac) => {
-          if (frac == null) {
-            // Indeterminate: tick a slow ramp so the bar isn't motionless.
-            if (dlProgress < 90) dlProgress = Math.min(90, dlProgress + 1);
-          } else {
-            dlProgress = Math.round(frac * 95);
-          }
-        });
+        // freshUrl re-signs on each retry: the /dl signature has a 60 s TTL,
+        // so resuming a long transfer needs a new URL, not the original.
+        const freshUrl = () => fsDownloadHttp(path).then(info => info.url);
+        try {
+          bytes = await fetchWithResume(dlInfo.url, freshUrl, (frac) => {
+            if (frac == null) {
+              // Indeterminate: tick a slow ramp so the bar isn't motionless.
+              if (dlProgress < 90) dlProgress = Math.min(90, dlProgress + 1);
+            } else {
+              dlProgress = Math.round(frac * 95);
+            }
+          });
+        } catch (e) {
+          if (e.code !== 'DL_HTTP_UNREACHABLE') throw e;
+          // The WS connection demonstrably works (we just got the signed
+          // URL over it) but plain HTTP to the same host doesn't — typical
+          // when a reverse proxy only forwards WebSocket upgrades. Fall
+          // back to the WS RPC download (base64, 50 MB server-side cap).
+          window.__dbg?.('dl: HTTP unreachable → falling back to WS RPC');
+          const r = await fsDownload(path);
+          bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
+        }
+        dlProgress = 95;
       } else {
         // wss:// fallback path: we got base64 over WS RPC. No progress to
         // report mid-decode; jump straight to "fetched".
@@ -1348,7 +1440,7 @@
   /* Path row */
   .bc-path-row {
     display: flex; align-items: center; gap: 1px; padding: 4px 10px;
-    overflow-x: auto; font-size: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    overflow-x: auto; font-size: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     scrollbar-width: none; border-bottom: 1px solid var(--border2); flex-shrink: 0;
   }
   .bc-path-row::-webkit-scrollbar { display: none; }
@@ -1373,7 +1465,7 @@
   .bm-path {
     flex: 1; display: block;
     padding: 8px 0; border: none; background: none; color: var(--text);
-    font-size: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-size: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     cursor: pointer; text-align: left; overflow-x: auto;
     white-space: nowrap; scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
@@ -1394,7 +1486,7 @@
   .new-item input {
     flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 6px;
     background: var(--input-bg); color: var(--text); font-size: 13px;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
   }
   .new-item button {
     padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 6px;
@@ -1429,7 +1521,7 @@
   }
   .file-name::-webkit-scrollbar { display: none; }
   .dir-name { color: var(--accent); }
-  .file-size { color: var(--text3); font-size: 11px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace; white-space: nowrap; }
+  .file-size { color: var(--text3); font-size: 11px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; white-space: nowrap; }
   .file-actions { display: flex; gap: 2px; padding-right: 8px; }
   .act-btn {
     padding: 6px; border: none; border-radius: 6px; background: none;
@@ -1463,7 +1555,7 @@
   /* Preview body */
   .preview-body { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 12px; display: flex; flex-direction: column; min-height: 0; }
   .code-preview {
-    margin: 0; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-size: var(--file-font-size, 13px);
+    margin: 0; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; font-size: var(--file-font-size, 13px);
     line-height: 1.5; color: var(--text); white-space: pre-wrap; word-break: break-all; flex: 1;
   }
   .code-preview :global(code) { font-family: inherit; background: none; padding: 0; }
@@ -1471,7 +1563,7 @@
     display: flex; flex: 1; overflow: auto; -webkit-overflow-scrolling: touch;
   }
   .line-nums {
-    padding: 0 8px; text-align: right; color: var(--text3); font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    padding: 0 8px; text-align: right; color: var(--text3); font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: var(--file-font-size, 13px); line-height: 1.5; white-space: pre; user-select: none; flex-shrink: 0;
     border-right: 1px solid var(--border);
   }
@@ -1492,7 +1584,7 @@
   .md-render :global(h3) { font-size: 16px; margin: 10px 0 4px; color: var(--accent); }
   .md-render :global(h4), .md-render :global(h5), .md-render :global(h6) { font-size: 14px; margin: 8px 0 4px; color: var(--accent); }
   .md-render :global(p) { margin: 8px 0; }
-  .md-render :global(code) { background: var(--surface2); padding: 2px 5px; border-radius: 3px; font-size: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace; }
+  .md-render :global(code) { background: var(--surface2); padding: 2px 5px; border-radius: 3px; font-size: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; }
   .md-render :global(pre) { background: var(--code-bg); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 8px 0; }
   .md-render :global(pre code) { background: none; padding: 0; font-size: 12px; line-height: 1.5; }
   .md-render :global(strong) { color: var(--text); }
@@ -1524,13 +1616,13 @@
     flex: 1; display: flex; overflow: auto; -webkit-overflow-scrolling: touch; min-height: 0; touch-action: pan-y;
   }
   .editor-nums {
-    padding: 12px 8px; text-align: right; color: var(--text3); font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    padding: 12px 8px; text-align: right; color: var(--text3); font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: var(--file-font-size, 13px); line-height: 1.5; white-space: pre; user-select: none; flex-shrink: 0;
     border-right: 1px solid var(--border);
   }
   .editor-layer { position: relative; flex: 1; min-width: 0; }
   .editor-highlight {
-    margin: 0; padding: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-size: var(--file-font-size, 13px);
+    margin: 0; padding: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; font-size: var(--file-font-size, 13px);
     line-height: 1.5; white-space: pre-wrap; word-break: break-all; color: var(--text);
     pointer-events: none;
   }
@@ -1538,7 +1630,7 @@
   .editor {
     position: absolute; inset: 0; width: 100%; height: 100%; padding: 12px; border: none; resize: none;
     background: transparent; color: transparent; caret-color: var(--text);
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-size: var(--file-font-size, 13px); line-height: 1.5; outline: none;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; font-size: var(--file-font-size, 13px); line-height: 1.5; outline: none;
     white-space: pre-wrap; word-break: break-all; overflow: hidden;
   }
   .info-body { flex: 1; overflow: auto; padding: 12px; }
@@ -1547,7 +1639,7 @@
   }
   .info-label { width: 100px; flex-shrink: 0; color: var(--text3); font-size: 12px; }
   .info-val { flex: 1; font-size: 13px; word-break: break-all; }
-  .info-val.mono { font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace; }
+  .info-val.mono { font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; }
   .info-path {
     flex: 1; font-size: 13px; word-break: break-all; text-align: left;
     background: none; border: none; color: var(--text); cursor: pointer; padding: 0;
@@ -1570,12 +1662,12 @@
   .dl-path {
     flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     direction: rtl; text-align: left; min-width: 0;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 11px; color: var(--text2);
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 11px; color: var(--text2);
   }
   .dl-ring { flex-shrink: 0; }
   .dl-ring circle:last-child { transition: stroke-dashoffset 0.3s ease; }
   .dl-pct {
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 11px;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 11px;
     font-weight: 600; color: var(--accent); min-width: 30px;
   }
   .dl-name {
@@ -1655,7 +1747,7 @@
   }
   .git-file:active { background: var(--accent-bg); }
   .git-st {
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 12px; font-weight: 600;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 12px; font-weight: 600;
     min-width: 24px; color: var(--text3);
   }
   .git-st.git-add { color: var(--status-ok); }
@@ -1663,23 +1755,23 @@
   .git-st.git-del { color: var(--danger); }
   .git-fname {
     flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 12px;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 12px;
   }
   .git-hash {
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 11px;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 11px;
     color: var(--accent); min-width: 56px;
   }
   .git-date { font-size: 11px; color: var(--text3); white-space: nowrap; }
   .git-diff-header {
     display: flex; align-items: center; gap: 8px;
-    padding: 8px 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 12px;
+    padding: 8px 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 12px;
     color: var(--accent); background: var(--accent-bg); border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
   .git-diff-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .git-diff-body {
     flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; background: var(--code-bg);
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: var(--file-font-size, 13px); line-height: 1.6;
   }
   .diff-line {

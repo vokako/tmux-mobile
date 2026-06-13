@@ -45,16 +45,6 @@
 - **Area**: Terminal / UX
 - **Details**: When the user scrolls up to read history and new output arrives, the current `scroll-btn` stays visually identical. A red dot / highlight on the button when `hasNewContent` is true would make it obvious that new output is waiting. This only becomes useful once the main-branch defer-rendering behavior lands (currently HEAD writes immediately on output, which re-clears scrollback and pulls termAtBottom back to true). Revisit after the defer-render change is merged. Affects: `src/lib/Terminal.svelte:setOnPaneOutput`, `.scroll-btn` in `<style>`.
 
-## Adaptive per-attempt reconnect timeout
-- **Priority**: Low
-- **Area**: App / Reconnect
-- **Details**: HEAD's `tryReconnect` uses the default `connect()` timeout (5 s) for every attempt regardless of address class. Once the pending HTTP/parallel-probe reconnect rework lands, scale per-attempt timeout with `classifyAddress()` — e.g. LAN 2 s, Tailscale 3 s, WAN 5 s. LAN-local retries should fail fast; public-internet retries legitimately need more headroom (TLS + routing on cellular). Affects: `src/App.svelte:tryReconnect`, `src/lib/ws.js:connect`.
-
-## Reconnect success does not immediately re-capture pane
-- **Priority**: Low
-- **Area**: Terminal / Reconnect
-- **Details**: On reconnect, `onReconnectSuccess` calls `wsSubscribe(terminalTarget)` but does not call `capturePane`. The terminal then shows stale content until the next server-side 200ms tick pushes a `pane_output`. Usually imperceptible but on very slow networks the gap is visible. Consider dispatching a one-shot `capturePane` right after subscribe.
-
 ## Color adaptation: FG+BG not re-balanced as pair
 - **Priority**: Low
 - **Area**: Terminal / Color

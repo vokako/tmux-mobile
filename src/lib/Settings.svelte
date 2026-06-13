@@ -252,7 +252,7 @@
   .hist-item {
     flex: 1; min-width: 0; padding: 9px 14px; border: none; background: none;
     color: var(--text); font-size: 14px; text-align: left; cursor: pointer;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     -webkit-tap-highlight-color: transparent;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }

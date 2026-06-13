@@ -5,6 +5,42 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content, viewport-fit=cover" />
   <title>tmux-mobile</title>
   <link rel="icon" type="image/png" href="/favicon.png?v=2" />
+  <!--
+    Fonts are bundled (public/fonts/, copied verbatim to the build) and
+    declared here so they resolve from the local origin — the Android APK
+    no longer depends on a CDN that may be slow or blocked. Declaring them
+    in the HTML head (rather than via runtime JS FontFace) means the
+    @font-face rules exist before first paint, so font-family references in
+    the app's CSS resolve immediately. `display: swap` shows fallback text
+    for the few ms the local woff2 takes to decode.
+  -->
+  <style>
+    @font-face {
+      font-family: 'Maple Mono'; font-style: normal; font-weight: 300;
+      font-display: swap; src: url('/fonts/maple-mono-latin-300.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Maple Mono'; font-style: normal; font-weight: 600;
+      font-display: swap; src: url('/fonts/maple-mono-latin-600.woff2') format('woff2');
+    }
+    @font-face {
+      /* CJK subset (CJK basic block + punctuation + fullwidth, ~5 MB).
+         Bundled so Chinese renders identically on every device instead of
+         falling through to each platform's own font. Listed after
+         'Maple Mono' in every stack: Latin glyphs resolve from the Latin
+         files, CJK from this one. */
+      font-family: 'Maple Mono CJK'; font-style: normal; font-weight: 400;
+      font-display: swap; src: url('/fonts/maple-mono-cjk.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Noto Sans Symbols 2'; font-style: normal; font-weight: 400;
+      font-display: swap; src: url('/fonts/noto-symbols2-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Symbols Nerd Font Mono'; font-style: normal; font-weight: 400;
+      font-display: swap; src: url('/fonts/symbols-nerd-mono.woff2') format('woff2');
+    }
+  </style>
 </head>
 <body>
   <div id="app"></div>

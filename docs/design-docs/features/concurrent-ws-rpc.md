@@ -50,8 +50,21 @@ Key pieces:
   errors) enqueue; the send task dequeues in FIFO, encrypts, and writes to
   the WebSocket sink.
 - **`Outbound` enum**: `Plain` (pre-auth handshake and plain-fallback
-  auth response), `Encrypted` (everything after auth), and `InitCipher`
-  (hands the send cipher to the send task right after successful auth).
+  auth response), `Encrypted` (everything after auth), `Snapshot`
+  (pane_output pushes — same wire treatment as `Encrypted` but tracked
+  by the in-flight counter, see below), `Ping` (WS protocol keepalive),
+  and `InitCipher` (hands the send cipher to the send task right after
+  successful auth).
+- **`snapshots_inflight`** (`Arc<AtomicUsize>`): backpressure for pane
+  snapshots. The subscription loop increments before enqueueing a
+  `Snapshot` and *skips the entire capture tick* while the counter is
+  non-zero; the send task decrements after the frame is written to the
+  socket. Latest-frame-wins: on a link slower than the 200 ms capture
+  cadence, the next tick after the socket drains captures *current*
+  pane content instead of replaying a backlog of stale frames. Without
+  this, slow links accumulated seconds of dead snapshots in the channel
+  + kernel buffer, and small RPC replies queued behind them until the
+  client's timeout breaker tripped a false disconnect.
 
 ### Why `HalfCipher` not `SessionCipher`
 The old `SessionCipher` bundled both counters, implying one-object ownership.
@@ -104,8 +117,10 @@ auth branch — do not rely on the send task's silent fallback.
   but if anything ever relied on FIFO it will now break.
 - **Send task is a single consumer.** If the send side ever got stuck
   (OS socket buffer full, slow peer), the channel would grow unbounded
-  in memory. Fine for normal RPC traffic; pane_output pushes are small.
-  For the large download frame, we accept the transient memory hit.
+  in memory for RPC responses. Pane snapshots are exempt: the
+  `snapshots_inflight` counter caps them at one in flight, so the
+  dominant traffic source self-limits. For the large download frame,
+  we accept the transient memory hit.
 - **Error on the send task** (ws.send failure) just returns; the
   receiver loop notices on its next ws read (it will get an error)
   and tears down. Could be tighter but adequate.

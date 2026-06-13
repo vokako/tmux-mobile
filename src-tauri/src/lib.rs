@@ -90,6 +90,62 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![get_local_config, save_to_downloads, list_downloads, delete_download, get_download_path])
+        .setup(|app| {
+            // Desktop: build a custom menu WITHOUT the default View → Zoom
+            // items.
+            //
+            // Tauri's default macOS menu includes Zoom entries bound to ⌘+/⌘-
+            // that drive WKWebView's NATIVE magnification (scales the whole
+            // page — nav/tab bar included). That runs at the AppKit level, so
+            // a JS keydown preventDefault can't stop it, and it fights the
+            // app's own font-size shortcut (you'd get both at once). We can't
+            // remove just that item from the auto-generated menu, so we
+            // rebuild a minimal menu that keeps the essentials (copy / paste /
+            // cut / select-all / undo / redo / quit + window controls) but
+            // omits Zoom. ⌘+/⌘-/⌘0 then reach only the frontend, which
+            // adjusts the terminal font size and refits xterm correctly.
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::menu::{Menu, Submenu, PredefinedMenuItem as P};
+                let pkg = &app.package_info().name;
+                let app_menu = Submenu::with_items(app, pkg, true, &[
+                    &P::about(app, None, None)?,
+                    &P::separator(app)?,
+                    &P::services(app, None)?,
+                    &P::separator(app)?,
+                    &P::hide(app, None)?,
+                    &P::hide_others(app, None)?,
+                    &P::show_all(app, None)?,
+                    &P::separator(app)?,
+                    &P::quit(app, None)?,
+                ])?;
+                let edit_menu = Submenu::with_items(app, "Edit", true, &[
+                    &P::undo(app, None)?,
+                    &P::redo(app, None)?,
+                    &P::separator(app)?,
+                    &P::cut(app, None)?,
+                    &P::copy(app, None)?,
+                    &P::paste(app, None)?,
+                    &P::select_all(app, None)?,
+                ])?;
+                let window_menu = Submenu::with_items(app, "Window", true, &[
+                    &P::minimize(app, None)?,
+                    &P::maximize(app, None)?,
+                    &P::separator(app)?,
+                    &P::close_window(app, None)?,
+                ])?;
+                let menu = Menu::with_items(app, &[&app_menu, &edit_menu, &window_menu])?;
+                app.set_menu(menu)?;
+            }
+            // Non-macOS desktop: an empty menu bar is fine (zoom accelerators
+            // there come from the menu too; copy/paste work without it).
+            #[cfg(all(desktop, not(target_os = "macos")))]
+            {
+                use tauri::menu::Menu;
+                app.set_menu(Menu::new(app)?)?;
+            }
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

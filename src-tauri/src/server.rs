@@ -260,6 +260,15 @@ enum Outbound {
     /// Ciphertext path. Once the send task has been given its cipher (via
     /// `InitCipher`), every payload here is encrypted in enqueue order.
     Encrypted(String),
+    /// Same wire treatment as `Encrypted`, but flags a pane snapshot whose
+    /// completion decrements the shared in-flight counter. Snapshots are
+    /// latest-frame-wins: the subscription loop refuses to enqueue a new one
+    /// while a previous one is still queued or being written to a slow
+    /// socket. Without this, a link slower than the 200 ms capture cadence
+    /// accumulates stale frames without bound (channel + kernel buffer), the
+    /// client renders seconds-old content, and small RPC replies queue
+    /// behind megabytes of dead snapshots until they time out.
+    Snapshot(String),
     /// Hand a freshly-built send-side cipher to the send task. Emitted once,
     /// right after successful encrypted auth. Must be enqueued *before* any
     /// `Encrypted` message for that session, otherwise the send task drops
@@ -758,11 +767,20 @@ print(o)"#.to_string(),
 async fn subscription_loop(
     out_tx: tokio::sync::mpsc::UnboundedSender<Outbound>,
     subs: Subscriptions,
+    snapshots_inflight: Arc<std::sync::atomic::AtomicUsize>,
 ) {
     let mut interval = tokio::time::interval(std::time::Duration::from_millis(SUBSCRIPTION_POLL_MS));
     let mut fail_counts: HashMap<String, u32> = HashMap::new();
     loop {
         interval.tick().await;
+        // Backpressure: latest-frame-wins. While a previous snapshot is still
+        // queued or being written to a slow socket, skip the whole tick —
+        // don't even run the tmux captures. The next tick after the link
+        // drains captures *current* content, so the client always converges
+        // on the freshest frame instead of replaying a backlog of stale ones.
+        if snapshots_inflight.load(std::sync::atomic::Ordering::Acquire) > 0 {
+            continue;
+        }
         let targets: Vec<(String, String)> = {
             let map = subs.lock().await;
             map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
@@ -844,7 +862,12 @@ async fn subscription_loop(
                 "method": "pane_output",
                 "params": params,
             });
-            if out_tx.send(Outbound::Encrypted(serde_json::to_string(&msg).unwrap())).is_err() {
+            // Increment BEFORE send: the send task decrements after the
+            // frame hits the socket, so the counter can never be observed
+            // at 0 while a snapshot is actually pending.
+            snapshots_inflight.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            if out_tx.send(Outbound::Snapshot(serde_json::to_string(&msg).unwrap())).is_err() {
+                snapshots_inflight.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
                 return; // receiver has shut down
             }
         }
@@ -876,24 +899,85 @@ fn handle_unsubscribe(params: &serde_json::Value, subs: &mut HashMap<String, Str
     Response::ok(None, serde_json::json!({ "unsubscribed": target }))
 }
 
+/// Find the end of the HTTP header block (offset of the CRLFCRLF terminator).
+fn find_header_end(buf: &[u8]) -> Option<usize> {
+    buf.windows(4).position(|w| w == b"\r\n\r\n")
+}
+
+/// Parse a `Range: bytes=N-` request header out of a raw header block.
+/// Only the open-ended single-range form is supported — that's the only
+/// form our resume client emits. Any other form is ignored (a server is
+/// allowed to ignore Range and answer 200 with the full body).
+fn parse_range_start(req: &str) -> Option<u64> {
+    for line in req.lines() {
+        let Some((k, v)) = line.split_once(':') else { continue };
+        if !k.trim().eq_ignore_ascii_case("range") {
+            continue;
+        }
+        let spec = v.trim().strip_prefix("bytes=")?;
+        let (start, rest) = spec.split_once('-')?;
+        if !rest.is_empty() {
+            return None; // "N-M" / "-N" suffix form: ignore, serve full body
+        }
+        return start.parse().ok();
+    }
+    None
+}
+
+/// Decide whether a peeked request prelude is an HTTP /dl download rather
+/// than a WebSocket upgrade. Both arrive as HTTP GET; we look for the
+/// "/dl?" path segment in the request LINE only, tolerating a reverse-proxy
+/// path prefix (e.g. "GET /tmux/dl?path=..." when the proxy doesn't strip
+/// its location prefix).
+fn looks_like_dl_request(prelude: &[u8]) -> bool {
+    if !prelude.starts_with(b"GET ") {
+        return false;
+    }
+    let line_end = prelude
+        .iter()
+        .position(|&b| b == b'\r' || b == b'\n')
+        .unwrap_or(prelude.len());
+    prelude[..line_end].windows(4).any(|w| w == b"/dl?")
+}
+
 async fn handle_http_download<S>(mut stream: S, addr: SocketAddr, token: Arc<String>)
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send,
 {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
-    // Read HTTP request
-    let mut buf = vec![0u8; 4096];
-    let n = match stream.read(&mut buf).await {
-        Ok(n) if n > 0 => n,
-        _ => return,
+    // Read until the full header block has arrived. Reverse proxies often
+    // deliver the request line and headers across multiple TCP segments;
+    // a single read() truncates the query string mid-signature and rejects
+    // a perfectly valid request with 403. (Direct LAN/Tailscale clients
+    // virtually always deliver everything in one segment, which is why
+    // this only ever bit through a proxy.)
+    let mut buf: Vec<u8> = Vec::with_capacity(4096);
+    let mut tmp = [0u8; 2048];
+    let header_end = loop {
+        if let Some(pos) = find_header_end(&buf) {
+            break pos;
+        }
+        if buf.len() > 16 * 1024 {
+            return; // oversized header block — not a legitimate /dl request
+        }
+        match stream.read(&mut tmp).await {
+            Ok(0) => return,
+            Ok(n) => buf.extend_from_slice(&tmp[..n]),
+            Err(_) => return,
+        }
     };
-    let req = String::from_utf8_lossy(&buf[..n]);
+    let req = String::from_utf8_lossy(&buf[..header_end]).to_string();
     let first_line = req.lines().next().unwrap_or("");
 
-    // Parse "GET /dl?path=...&ts=...&sig=... HTTP/1.1"
+    // Parse "GET <path>/dl?path=...&ts=...&sig=... HTTP/1.1". Locate the
+    // "/dl?" segment instead of assuming it starts the path, so a proxy
+    // prefix doesn't break query extraction.
     let url_part = first_line.split_whitespace().nth(1).unwrap_or("");
-    let query = url_part.strip_prefix("/dl?").unwrap_or("");
+    let query = match url_part.find("/dl?") {
+        Some(i) => &url_part[i + 4..],
+        None => "",
+    };
     let params: HashMap<&str, &str> = query.split('&')
         .filter_map(|p| p.split_once('='))
         .collect();
@@ -925,10 +1009,27 @@ where
     let name = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
     let size = metadata.len();
 
-    let header = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"{}\"\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\n\r\n",
-        name, size
-    );
+    // Range support: lets the client RESUME an interrupted transfer instead
+    // of restarting from byte 0. Critical through reverse proxies on the
+    // public internet, where long-lived large responses get cut by proxy
+    // idle/total timeouts — without resume, a 100 MB file that dies at 95%
+    // restarts from scratch and may never complete.
+    // `Connection: close` matters behind reverse proxies: we serve one
+    // request per TCP connection and then drop it. Without the header,
+    // HTTP/1.1 defaults to keep-alive and the proxy may pool the (already
+    // closed) backend connection, surfacing as intermittent 502s on the
+    // next download.
+    let range_start = parse_range_start(&req).filter(|&s| s > 0 && s < size);
+    let header = match range_start {
+        Some(start) => format!(
+            "HTTP/1.1 206 Partial Content\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"{}\"\r\nContent-Length: {}\r\nContent-Range: bytes {}-{}/{}\r\nAccept-Ranges: bytes\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges\r\nConnection: close\r\n\r\n",
+            name, size - start, start, size - 1, size
+        ),
+        None => format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"{}\"\r\nContent-Length: {}\r\nAccept-Ranges: bytes\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges\r\nConnection: close\r\n\r\n",
+            name, size
+        ),
+    };
     if stream.write_all(header.as_bytes()).await.is_err() { return; }
 
     // Stream file in chunks
@@ -936,6 +1037,11 @@ where
         Ok(f) => f,
         Err(_) => return,
     };
+    if let Some(start) = range_start {
+        if file.seek(std::io::SeekFrom::Start(start)).await.is_err() {
+            return;
+        }
+    }
     let mut chunk = vec![0u8; 65536];
     loop {
         let n = match file.read(&mut chunk).await {
@@ -951,13 +1057,16 @@ where
 }
 
 pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, grace_secs: u64) {
-    // Peek at first bytes to distinguish HTTP download from WebSocket
-    let mut buf = [0u8; 7];
+    // Peek at the request prelude to distinguish HTTP download from
+    // WebSocket. 256 bytes covers the request line even with a reverse-proxy
+    // path prefix; peek doesn't consume, so the WS handshake still sees the
+    // full request.
+    let mut buf = [0u8; 256];
     let n = match stream.peek(&mut buf).await {
         Ok(n) => n,
         Err(_) => return,
     };
-    if n >= 7 && &buf[..7] == b"GET /dl" {
+    if looks_like_dl_request(&buf[..n]) {
         handle_http_download(stream, addr, token).await;
         return;
     }
@@ -1030,15 +1139,21 @@ where
     // is gone).
     let shutdown = Arc::new(tokio::sync::Notify::new());
     let shutdown_tx = shutdown.clone();
+    // Snapshot in-flight counter shared between the subscription loop
+    // (producer, increments + skips ticks while > 0) and the send task
+    // (consumer, decrements after ws.send resolves).
+    let snapshots_inflight = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let snapshots_inflight_send = snapshots_inflight.clone();
     let send_task = tokio::spawn(async move {
         let mut ws_sender = ws_sender;
         let mut cipher: Option<HalfCipher> = None;
         while let Some(msg) = out_rx.recv().await {
+            let is_snapshot = matches!(msg, Outbound::Snapshot(_));
             let frame = match msg {
                 Outbound::Plain(s) => Message::Text(s.into()),
                 Outbound::InitCipher(c) => { cipher = Some(c); continue; }
                 Outbound::Ping(data) => Message::Ping(data.into()),
-                Outbound::Encrypted(s) => {
+                Outbound::Encrypted(s) | Outbound::Snapshot(s) => {
                     if let Some(ref mut c) = cipher {
                         // 1. Frame + (optionally) deflate the JSON.
                         // 2. Encrypt the framed plaintext.
@@ -1061,7 +1176,15 @@ where
                     }
                 }
             };
-            if ws_sender.send(frame).await.is_err() {
+            let send_result = ws_sender.send(frame).await;
+            // Decrement regardless of send outcome — on error we break and
+            // the connection tears down, but a clean counter avoids the
+            // subscription loop spinning on a stale "in flight" forever if
+            // teardown is slow.
+            if is_snapshot {
+                snapshots_inflight_send.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+            }
+            if send_result.is_err() {
                 break;
             }
         }
@@ -1082,7 +1205,7 @@ where
     }
 
     // Start subscription polling task (enqueues to out_tx like any task)
-    let sub_handle = tokio::spawn(subscription_loop(out_tx.clone(), subs.clone()));
+    let sub_handle = tokio::spawn(subscription_loop(out_tx.clone(), subs.clone(), snapshots_inflight.clone()));
 
     // Start keepalive: server sends WS PING every 15s; browsers auto-reply
     // with PONG in the WS layer without running app code, so this probes
@@ -1515,7 +1638,7 @@ pub async fn start_with_socket(
                         use tokio::io::AsyncBufReadExt;
                         let mut buf_stream = tokio::io::BufStream::new(tls_stream);
                         let is_http = match buf_stream.fill_buf().await {
-                            Ok(b) => b.len() >= 7 && &b[..7] == b"GET /dl",
+                            Ok(b) => looks_like_dl_request(b),
                             Err(e) => {
                                 eprintln!("❌ TLS read failed for {}: {}", addr, e);
                                 return;
@@ -1713,6 +1836,46 @@ mod tests {
         // Skip ahead on the receive side, then try to decrypt ct1.
         let _ = recv_c.decrypt(&_ct2); // advances counter past ct1
         assert!(recv_c.decrypt(&ct1).is_err(), "ct1 must fail under wrong nonce");
+    }
+
+    // ─── HTTP /dl request parsing ────────────────────────────────────────
+
+    #[test]
+    fn range_header_open_ended_parses() {
+        let req = "GET /dl?path=x HTTP/1.1\r\nHost: h\r\nRange: bytes=12345-\r\n";
+        assert_eq!(parse_range_start(req), Some(12345));
+    }
+
+    #[test]
+    fn range_header_case_insensitive() {
+        let req = "GET /dl?path=x HTTP/1.1\r\nrange: bytes=7-\r\n";
+        assert_eq!(parse_range_start(req), Some(7));
+    }
+
+    #[test]
+    fn range_header_bounded_form_ignored() {
+        // "N-M" and suffix forms are not emitted by our client; server
+        // falls back to a full 200 response.
+        assert_eq!(parse_range_start("Range: bytes=0-499\r\n"), None);
+        assert_eq!(parse_range_start("Range: bytes=-500\r\n"), None);
+        assert_eq!(parse_range_start("GET / HTTP/1.1\r\nHost: h\r\n"), None);
+    }
+
+    #[test]
+    fn dl_detection_with_and_without_proxy_prefix() {
+        assert!(looks_like_dl_request(b"GET /dl?path=a&ts=1&sig=b HTTP/1.1\r\n"));
+        // Reverse proxy that forwards its location prefix unstripped.
+        assert!(looks_like_dl_request(b"GET /tmux/dl?path=a HTTP/1.1\r\n"));
+        assert!(!looks_like_dl_request(b"GET / HTTP/1.1\r\nUpgrade: websocket\r\n"));
+        // "/dl?" appearing only in a header (not the request line) must not match.
+        assert!(!looks_like_dl_request(b"GET /ws HTTP/1.1\r\nReferer: /dl?x\r\n"));
+        assert!(!looks_like_dl_request(b"POST /dl?path=a HTTP/1.1\r\n"));
+    }
+
+    #[test]
+    fn header_end_detection() {
+        assert_eq!(find_header_end(b"GET / HTTP/1.1\r\nHost: h\r\n\r\nbody"), Some(23));
+        assert_eq!(find_header_end(b"GET / HTTP/1.1\r\nHost: h\r\n"), None);
     }
 
     #[test]

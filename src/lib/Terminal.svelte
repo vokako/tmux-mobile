@@ -1,5 +1,5 @@
 <script>
-  import { subscribe, unsubscribe, setOnPaneOutput, setOnPaneClosed, sendCommand, sendKeys, listPanes, listSessions, capturePane, resizePane, newWindow } from './ws.js';
+  import { subscribe, unsubscribe, addPaneOutputListener, removePaneOutputListener, addPaneClosedListener, removePaneClosedListener, sendCommand, sendKeys, listPanes, listSessionsWithPanes, capturePane, resizePane, newWindow } from './ws.js';
   import { Terminal } from '@xterm/xterm';
   import { WebLinksAddon } from '@xterm/addon-web-links';
   import ChatView from './ChatView.svelte';
@@ -7,7 +7,7 @@
   import AgentChip from './AgentChip.svelte';
   import { t } from './i18n.svelte.js';
   import { detectParser } from './parsers.js';
-  import { detectAgent, paneIsAgent, sessionHasAgent, AGENTS } from './agents.js';
+  import { detectAgent, paneIsAgent, paneAgent, sessionHasAgent, AGENTS } from './agents.js';
   import { copyText } from './clipboard.js';
 
   // Timing constants
@@ -40,6 +40,12 @@
   let hasNewContent = $state(false); // set when new output arrives while user is scrolled up
   let toastMsg = $state('');
   const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  // Visual width of xterm's overlay scrollbar (passed to the Terminal ctor
+  // below). It floats ON TOP of the content's right edge and does NOT
+  // reserve layout space — calcFit deliberately uses the full width so the
+  // pane gets the maximum column count; the trade-off is the scrollbar
+  // briefly overlapping the last glyph.
+  const SCROLLBAR_W = isMobile ? 20 : 14;
   let kbBlurTimer = null;
   let kbLocked = true; // true = keyboard must not show; false = keyboard allowed
   let unlockUntil = 0; // grace window after explicit unlock; auto-lock paths must respect it
@@ -139,7 +145,7 @@
 
   // pane_output snapshots now carry `current_command` (server piggybacks it
   // on cursor reads — same tmux subprocess, zero extra cost). Update
-  // `command` in setOnPaneOutput below; no separate polling RPC needed.
+  // `command` in the pane-output listener below; no separate polling RPC needed.
 
   let waitingForInput = $derived.by(() => {
     if (!paneContent || !parser) return false;
@@ -165,8 +171,16 @@
 
   async function loadOtherAgentSessions() {
     try {
-      const sessions = await listSessions();
+      // Single round-trip: sessions + all panes in one RPC instead of
+      // listSessions + N × listPanes (which on a slow link stacked N+1
+      // requests behind every poll tick).
+      const { sessions, panes } = await listSessionsWithPanes();
       const cur = session;
+      const panesBySession = new Map();
+      for (const p of panes) {
+        const arr = panesBySession.get(p.session);
+        if (arr) arr.push(p); else panesBySession.set(p.session, [p]);
+      }
       // Sort MRU-first (matches Sessions page order), filter current, keep
       // sessions that have last_opened so we don't surface never-used ones.
       const candidates = sessions
@@ -175,15 +189,13 @@
       const results = [];
       for (const s of candidates) {
         if (results.length >= OTHER_AGENT_MAX) break;
-        try {
-          const panes = await listPanes(s.name);
-          // Prefer a pane currently running the agent; fall back to first pane.
-          const p = panes.find(paneIsAgent) || (sessionHasAgent(panes) ? panes[0] : null);
-          if (p) {
-            const agent = detectAgent((p.current_command || '') + ' ' + (p.pane_title || ''));
-            if (agent) results.push({ name: s.name, pane: p, agent });
-          }
-        } catch {}
+        const sPanes = panesBySession.get(s.name) || [];
+        // Prefer a pane currently running the agent; fall back to first pane.
+        const p = sPanes.find(paneIsAgent) || (sessionHasAgent(sPanes) ? sPanes[0] : null);
+        if (p) {
+          const agent = paneAgent(p);
+          if (agent) results.push({ name: s.name, pane: p, agent });
+        }
       }
       otherAgentSessions = results;
     } catch {
@@ -191,11 +203,18 @@
     }
   }
 
-  // Group panes by window
+  // Group panes by window. Representative pane preference:
+  //   agent pane > active pane > first listed.
+  // The old "first listed" pick made a window whose layout is
+  // [zsh | claude] show a zsh chip — the agent badge silently vanished.
   let windows = $derived.by(() => {
     const map = new Map();
     for (const p of windowPanes) {
-      if (!map.has(p.window)) map.set(p.window, p);
+      const cur = map.get(p.window);
+      if (!cur) { map.set(p.window, p); continue; }
+      const curScore = paneIsAgent(cur) ? 2 : cur.active ? 1 : 0;
+      const pScore = paneIsAgent(p) ? 2 : p.active ? 1 : 0;
+      if (pScore > curScore) map.set(p.window, p);
     }
     return [...map.values()];
   });
@@ -204,7 +223,7 @@
   let currentWinAgent = $derived.by(() => {
     const cur = windows.find(w => String(w.window) === currentWindow);
     if (!cur) return null;
-    return detectAgent((cur.current_command || '') + ' ' + (cur.pane_title || ''));
+    return paneAgent(cur);
   });
 
   // Whether the window switcher is worth showing at all. A lone plain shell
@@ -219,11 +238,21 @@
 
   $effect(() => {
     if (!session || viewMode !== 'terminal') return;
-    const load = () => {
-      listPanes(session).then(p => { windowPanes = p; }).catch(() => {});
-      // Only refresh the cross-session chip data while the switcher is
-      // actually visible — saves listSessions + N*listPanes per tick.
-      if (showWindowCmd) loadOtherAgentSessions();
+    // In-flight guard: on a slow link a poll RPC can outlive the 5 s
+    // interval; without the guard, ticks stack unbounded requests on a
+    // link that is already struggling.
+    let polling = false;
+    const load = async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        const p = await listPanes(session);
+        windowPanes = p;
+        // Only refresh the cross-session chip data while the switcher is
+        // actually visible — saves an extra RPC per tick.
+        if (showWindowCmd) await loadOtherAgentSessions();
+      } catch {}
+      polling = false;
     };
     load();
     const id = setInterval(load, WINDOW_LIST_POLL_MS);
@@ -253,6 +282,11 @@
   function calcFit() {
     if (!term || !termEl) return null;
     const { w: cellW, h: cellH } = cellSize(term);
+    // Use the full container width. The overlay scrollbar floats ON TOP of
+    // the rightmost column rather than reserving space — that's acceptable
+    // (a brief overlap of the last glyph) in exchange for more usable
+    // columns. Because cols = floor(w / cellW), cols × cellW ≤ w, so the
+    // text's right edge never spills past the screen.
     const w = termEl.clientWidth;
     const h = termEl.clientHeight;
     if (!w || !h || !cellW || !cellH) return null;
@@ -555,6 +589,8 @@
     pendingCols = 0; pendingRows = 0; pendingResizeTs = 0;
     kbLocked = true;
     selection = null; selUI = null;
+    keyQueue = []; // queued keys belong to the previous pane
+
     const estCellW = fontSize * CELL_W_RATIO;
     const estCellH = fontSize * CELL_H_RATIO;
     const containerW = termEl?.clientWidth || 300;
@@ -568,14 +604,14 @@
       cursorStyle: 'block',
       disableStdin: false,
       fontSize,
-      fontFamily: "'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace",
+      fontFamily: "'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace",
       fontWeight: 300,
       fontWeightBold: 600,
       theme: getTermTheme(),
       scrollback: 500,
       convertEol: true,
       allowTransparency: false,
-      scrollbar: { showScrollbar: true, width: isMobile ? 20 : 14 },
+      scrollbar: { showScrollbar: true, width: SCROLLBAR_W },
     });
 
     term.open(termEl);
@@ -655,13 +691,61 @@
         });
       }
       isPasting = false;
-      sendKeys(target, data, true).then(noteSendSuccess).catch((e) => {
-        window.__dbg?.(`input: sendKeys FAILED: ${e.message}`);
-        noteSendFailure('key');
-      });
+      enqueueKeys(data, true);
     });
     // Block xterm from processing keys when input box is open
     term.attachCustomKeyEventHandler(() => true);
+
+    // Desktop: forward Ctrl-key combos straight to tmux.
+    //
+    // Problem: xterm's input sink is a real <textarea>. On macOS WKWebView
+    // (and to a lesser extent other browsers) the OS-level emacs text
+    // bindings — Ctrl-A/E/K/U/W/D … — are consumed by the text field
+    // BEFORE the keydown reaches JS, so xterm never emits onData and
+    // Ctrl-C / Ctrl-U / Ctrl-D silently do nothing in the remote shell.
+    //
+    // Fix: a capture-phase keydown listener converts Ctrl+<letter> (and a
+    // few friends) into the corresponding C0 control byte and sends it via
+    // the same queue as normal input, then preventDefault +
+    // stopImmediatePropagation so neither the OS binding nor xterm's own
+    // handler also acts on it. Capture phase is essential: it runs before
+    // the textarea's default action.
+    let onDesktopKeydown = null;
+    if (!isMobile) {
+      onDesktopKeydown = (e) => {
+        // Only the Ctrl modifier (allow Shift for Ctrl-Shift-letter → same
+        // control byte). Cmd/Alt combos are left to the browser (copy/paste,
+        // word nav) — tmux doesn't use them.
+        if (!e.ctrlKey || e.metaKey || e.altKey) return;
+        let byte = null;
+        const k = e.key;
+        if (k.length === 1) {
+          const code = k.toLowerCase().charCodeAt(0);
+          if (code >= 97 && code <= 122) {
+            byte = String.fromCharCode(code - 96); // Ctrl-A=0x01 … Ctrl-Z=0x1a
+          } else if (k === ' ') {
+            byte = '\x00'; // Ctrl-Space = NUL
+          } else if (k === '\\') {
+            byte = '\x1c';
+          } else if (k === ']') {
+            byte = '\x1d';
+          }
+        }
+        if (byte == null) return; // not a combo we translate — leave it alone
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        window.__dbg?.(`kb(desktop): Ctrl-${k} → 0x${byte.charCodeAt(0).toString(16)}`);
+        enqueueKeys(byte, true);
+      };
+      // Capture phase on the wrapper so it fires before the textarea default.
+      termEl.addEventListener('keydown', onDesktopKeydown, { capture: true });
+      // Desktop has no on-screen keyboard / toggle, so focus the xterm sink
+      // immediately and on click so ordinary typing (and our handler) works.
+      const focusTerm = () => { try { term.focus(); } catch {} };
+      termEl.addEventListener('mousedown', focusTerm);
+      requestAnimationFrame(focusTerm);
+      onDesktopKeydown._focusTerm = focusTerm; // kept for cleanup reference
+    }
 
     let lastContent = '';
     let lastCursor = null;
@@ -713,7 +797,11 @@
     // Touch mode: 'idle' | 'down' | 'scrollbar' | 'scroll' | 'longpress-select' | 'handle-drag'
     let touchMode = 'idle';
     let dragHandle = null; // 'start' | 'end' when touchMode === 'handle-drag'
-    let handleGrabDy = 0;  // finger Y minus dragged endpoint centre Y at grab time
+    let handleGrabDx = 0;  // finger minus dragged endpoint cell-centre at grab time
+    let handleGrabDy = 0;
+    let edgeScrollId = null; // rAF loop for drag-at-edge auto-scroll
+    let edgeScrollDir = 0;   // -1 up / +1 down / 0 none
+    let lastDragX = 0, lastDragY = 0; // latest compensated drag point (px)
     const stopMomentum = () => { if (momentumId) { cancelAnimationFrame(momentumId); momentumId = null; } };
 
     // Cell at touch coords, allowing 1 cell of overshoot in each direction so
@@ -852,30 +940,93 @@
       applySelectionToXterm();
       recomputeSelUI();
     }
-    function moveEndpoint(which, bufRow, col) {
+    // Called once at grab time: rewrite the selection so the endpoint being
+    // dragged becomes `head` and the stationary one becomes `anchor`. From
+    // then on every touchmove just rewrites `head` — the anchor can never
+    // move, so dragging one handle past the other flips the selection's
+    // direction (native behavior) instead of perturbing the far end.
+    //
+    // The old code addressed endpoints by geometric role ('start'/'end')
+    // per-move: after a crossover the roles swap, but dragHandle still said
+    // 'end', so the NEXT move rewrote the wrong endpoint and both ends
+    // visibly jumped.
+    function beginEndpointDrag(which) {
       if (!selection) return;
-      // 'start' / 'end' refer to the geometric ordering. Map to anchor/head
-      // such that dragging the start handle past the end (or vice versa)
-      // flips which is anchor — but selStart/selEnd derive from raw anchor/head
-      // so we just rewrite the right field.
       const a = selStart(selection), b = selEnd(selection);
-      const isAnchorTheStart = (selection.anchor === a);
-      if (which === 'start') {
-        // move what is currently the start endpoint
-        if (isAnchorTheStart) selection = { anchor: { row: bufRow, col }, head: selection.head };
-        else                  selection = { anchor: selection.anchor, head: { row: bufRow, col } };
-      } else {
-        if (isAnchorTheStart) selection = { anchor: selection.anchor, head: { row: bufRow, col } };
-        else                  selection = { anchor: { row: bufRow, col }, head: selection.head };
-      }
-      applySelectionToXterm();
-      recomputeSelUI();
+      selection = which === 'start'
+        ? { anchor: { ...b }, head: { ...a } }
+        : { anchor: { ...a }, head: { ...b } };
     }
 
     // Cell from clientX/clientY in buffer-row coords (row is absolute, not viewport-relative)
     function touchToBufferCell(clientX, clientY) {
       const cell = touchToCell(clientX, clientY);
       return { row: term.buffer.active.viewportY + cell.row, col: cell.col };
+    }
+
+    // Map a (compensated) drag point to a buffer cell with edge snapping,
+    // and move `head` there. Snap zones make line starts/ends reachable:
+    // the first/last ~60% of a cell at each horizontal edge snaps to col 0
+    // / last col — matching OS text selection, where dragging past the text
+    // edge selects to the line boundary even though the finger can't
+    // physically center on the first/last character.
+    function applyHandleDragAt(px, py) {
+      const rect = termEl.getBoundingClientRect();
+      const { w: cellW } = cellSize(term);
+      const x = px - rect.left;
+      const cell = touchToCell(px, py);
+      let col = cell.col;
+      const EDGE_SNAP_PX = Math.max(10, cellW * 0.6);
+      if (x <= EDGE_SNAP_PX) col = 0;
+      else if (x >= rect.width - SCROLLBAR_TOUCH_WIDTH - EDGE_SNAP_PX) col = term.cols - 1;
+      const row = term.buffer.active.viewportY + cell.row;
+      moveHead(row, col);
+    }
+
+    // Auto-scroll while dragging a handle near the top/bottom edge — the
+    // native way to extend a selection beyond the visible screen. Speed
+    // ramps with proximity to the edge (1 px/frame deep in the zone is
+    // ~1 row per 3 frames; pressed against the edge it's ~4 rows/frame...
+    // we keep it gentle: 1 row per N frames scaling to 2 rows/frame).
+    const EDGE_SCROLL_ZONE_PX = 36;
+    function updateEdgeScroll(clientY) {
+      const rect = termEl.getBoundingClientRect();
+      const topDist = clientY - rect.top;
+      const botDist = rect.bottom - clientY;
+      let dir = 0;
+      if (topDist < EDGE_SCROLL_ZONE_PX) dir = -1;
+      else if (botDist < EDGE_SCROLL_ZONE_PX) dir = 1;
+      edgeScrollDir = dir;
+      if (dir !== 0 && !edgeScrollId) {
+        let acc = 0;
+        const tick = () => {
+          if (edgeScrollDir === 0 || touchMode !== 'handle-drag' || !term) {
+            edgeScrollId = null;
+            return;
+          }
+          const rect2 = termEl.getBoundingClientRect();
+          const dist = edgeScrollDir < 0
+            ? Math.max(0, lastDragY + handleGrabDy - rect2.top)
+            : Math.max(0, rect2.bottom - (lastDragY + handleGrabDy));
+          // 0 px from edge → 2 rows/frame; at zone boundary → ~0.25
+          const speed = 0.25 + (1 - Math.min(1, dist / EDGE_SCROLL_ZONE_PX)) * 1.75;
+          acc += speed * edgeScrollDir;
+          const lines = Math.trunc(acc);
+          if (lines !== 0) {
+            term.scrollLines(lines);
+            acc -= lines;
+            // Viewport moved under the stationary finger — re-map the
+            // endpoint so the selection keeps extending row by row.
+            applyHandleDragAt(lastDragX, lastDragY);
+          }
+          edgeScrollId = requestAnimationFrame(tick);
+        };
+        edgeScrollId = requestAnimationFrame(tick);
+      }
+    }
+    function stopEdgeScroll() {
+      edgeScrollDir = 0;
+      if (edgeScrollId) { cancelAnimationFrame(edgeScrollId); edgeScrollId = null; }
     }
 
     // Hit-test handles. Each handle is a lollipop (dot + stem); the visible
@@ -973,14 +1124,22 @@
         if (which) {
           touchMode = 'handle-drag';
           dragHandle = which;
-          // Record the finger's offset from the dragged endpoint's row centre
-          // so the first move doesn't snap. We then lift the mapped point one
-          // row above the finger (see onTouchMove) so the endpoint stays
-          // visible instead of hiding under the fingertip.
+          // Re-anchor so the grabbed endpoint is `head` — all subsequent
+          // moves rewrite head only (see beginEndpointDrag).
+          beginEndpointDrag(which);
+          // Record the finger's offset from the dragged endpoint's CELL
+          // CENTRE in both axes, so the first touchmove maps to exactly the
+          // cell the endpoint is already on — zero snap. The old code only
+          // compensated Y (the end-handle dot sits at the cell's right edge,
+          // so X was off by up to a full column) and then "lifted" the point
+          // one row above the finger, which guaranteed a one-row jump on the
+          // first frame of every drag.
           const r = termEl.getBoundingClientRect();
-          const epCenterY = which === 'start'
-            ? r.top + selUI.startY + selUI.cellH / 2
-            : r.top + selUI.endY - selUI.cellH / 2;
+          const { w: cw, h: ch } = cellSize(term);
+          const ep = selection.head;
+          const epCenterX = r.left + (ep.col + 0.5) * cw;
+          const epCenterY = r.top + (ep.row - term.buffer.active.viewportY + 0.5) * ch;
+          handleGrabDx = cx - epCenterX;
           handleGrabDy = cy - epCenterY;
           // Pin content updates while dragging. preventDefault on touchmove
           // (which is non-passive) blocks the page from scrolling.
@@ -1048,14 +1207,14 @@
         if (e.cancelable) e.preventDefault();
         return;
       }
-      // Handle drag: move whichever endpoint we grabbed
+      // Handle drag: the grabbed endpoint is `head` (re-anchored at grab
+      // time); just track the finger. Grab-offset compensation in BOTH axes
+      // means the mapped cell starts exactly where the endpoint already is.
       if (touchMode === 'handle-drag' && selection) {
-        // Compensate the grab offset so there's no snap on first move, then
-        // lift the mapped point one row above the finger so the endpoint
-        // isn't hidden under the fingertip.
-        const lift = (cellSize(term).h || (fontSize * CELL_H_RATIO));
-        const { row, col } = touchToBufferCell(t0.clientX, t0.clientY - handleGrabDy - lift);
-        moveEndpoint(dragHandle, row, col);
+        lastDragX = t0.clientX - handleGrabDx;
+        lastDragY = t0.clientY - handleGrabDy;
+        applyHandleDragAt(lastDragX, lastDragY);
+        updateEdgeScroll(t0.clientY);
         if (e.cancelable) e.preventDefault();
         return;
       }
@@ -1104,6 +1263,7 @@
       if (endedMode === 'handle-drag') {
         touchMode = 'idle';
         dragHandle = null;
+        stopEdgeScroll();
         // Selection persists; pinning persists
         return;
       }
@@ -1176,9 +1336,10 @@
       touchMode = 'idle';
       dragHandle = null;
       stopMomentum();
+      stopEdgeScroll();
       // Don't blow away the selection on a stray cancel — but if we were
       // mid-handle-drag the user expects the partial drag to commit, which
-      // it already has via moveEndpoint() on the last touchmove.
+      // it already has via moveHead() on the last touchmove.
       if (!selection) scheduleEndTouchScroll(100);
     };
     termEl.addEventListener('touchstart', onTouchStart, { passive: true });
@@ -1343,6 +1504,42 @@
       doResize();
     });
 
+    // Re-measure once the bundled web fonts finish loading.
+    //
+    // xterm measures the monospace cell WIDTH at open() time. With the fonts
+    // bundled as async woff2 (not installed system-wide), that first
+    // measurement runs against the system fallback font, whose advance width
+    // differs from Maple Mono. When Maple Mono then swaps in, xterm keeps the
+    // stale (fallback) cell width — so on devices whose fallback is narrower
+    // than Maple Mono (observed on some MIUI WebViews) the real glyphs are
+    // wider than their cell and visually collide ("characters stuck together,
+    // no gaps"); on devices whose fallback happens to match (vivo) it looked
+    // fine. document.fonts.ready resolves after all @font-face loads settle;
+    // we then clear xterm's cached glyph atlas + char-dimension cache and
+    // refit so the cell geometry matches the actual font.
+    let fontReadyHandled = false;
+    const remeasureAfterFonts = () => {
+      if (fontReadyHandled || !term) return;
+      fontReadyHandled = true;
+      try {
+        // Force xterm to drop cached cell metrics + glyph atlas and recompute
+        // against the now-loaded font. clearTextureAtlas exists on the render
+        // service across the WebGL/canvas renderers; guard in case it doesn't.
+        term._core?._renderService?.clearTextureAtlas?.();
+        term._core?._charSizeService?.measure?.();
+      } catch {}
+      // Recompute cols/rows for the corrected cell size, then repaint.
+      doResize();
+      if (lastContent) writeToXterm(lastContent, lastCursor);
+      term.refresh(0, term.rows - 1);
+    };
+    if (document.fonts?.ready) {
+      document.fonts.ready.then(remeasureAfterFonts).catch(() => {});
+      // Belt-and-suspenders: also fire when the specific family reports loaded,
+      // in case `ready` resolved earlier against the fallback.
+      document.fonts.load?.('14px "Maple Mono"').then(remeasureAfterFonts).catch(() => {});
+    }
+
     // Keyboard state (lock/unlock) is driven by keyboard-shift events.
     // Resize is NOT — ResizeObserver handles any container change caused by
     // the keyboard. We keep this handler purely for the kbLocked lifecycle.
@@ -1409,7 +1606,7 @@
     };
     window.addEventListener('ws-reconnected', onReconnected);
 
-    setOnPaneOutput((t, content, cursor, currentCommand) => {
+    addPaneOutputListener(target, (t, content, cursor, currentCommand) => {
       if (t !== target) return;
       if (cursor) lastCursor = cursor;
       // Pane's running command, only present on first push and on changes.
@@ -1432,7 +1629,7 @@
       }
     });
 
-    setOnPaneClosed((t) => {
+    addPaneClosedListener(target, (t) => {
       if (t === target) onPaneExit(target);
     });
 
@@ -1458,6 +1655,7 @@
       if (kbTa && onTaBlur) kbTa.removeEventListener('blur', onTaBlur);
       if (kbTa && onTaFocus) kbTa.removeEventListener('focus', onTaFocus);
       stopMomentum();
+      stopEdgeScroll();
       if (_pendingRaf) { cancelAnimationFrame(_pendingRaf); _pendingRaf = 0; }
       _pendingContent = null;
       _pendingCursor = null;
@@ -1468,10 +1666,14 @@
       termEl.removeEventListener('touchmove', onTouchMove);
       termEl.removeEventListener('touchend', onTouchEnd);
       termEl.removeEventListener('touchcancel', onTouchCancel);
+      if (onDesktopKeydown) {
+        termEl.removeEventListener('keydown', onDesktopKeydown, { capture: true });
+        if (onDesktopKeydown._focusTerm) termEl.removeEventListener('mousedown', onDesktopKeydown._focusTerm);
+      }
       // Server's resize_tracker auto-restores this window via `resize-window -A` on WS disconnect
       unsubscribe(target);
-      setOnPaneOutput(null);
-      setOnPaneClosed(null);
+      removePaneOutputListener(target);
+      removePaneClosedListener(target);
       try { term.dispose(); } catch {}
       term = null;
       copySelection = () => {};
@@ -1545,13 +1747,55 @@
     if (sendFailCount > 0) sendFailCount = 0;
   }
 
-  async function sendSpecial(key) {
-    try {
-      await sendKeys(target, key, false);
-      noteSendSuccess();
-    } catch (e) {
-      noteSendFailure(`shortcut ${key}`);
+  // ─── Keystroke send queue ────────────────────────────────────────────────
+  // One RPC per keystroke melts down on slow links: fast typing or the 80 ms
+  // long-press repeat stacks dozens of in-flight send_keys, each competing
+  // with pane snapshots for the link. Instead, only one send_keys is in
+  // flight at a time; keys pressed meanwhile queue up, and consecutive
+  // LITERAL chars merge into a single string (tmux send-keys -l applies it
+  // as one write). Special keys can't merge (each is a distinct key name)
+  // but still serialize through the queue so ordering with typed chars is
+  // preserved.
+  const KEY_QUEUE_MAX = 64;
+  let keyQueue = [];
+  let keySending = false;
+
+  function enqueueKeys(keys, literal) {
+    const last = keyQueue[keyQueue.length - 1];
+    if (literal && last?.literal) {
+      last.keys += keys;
+    } else if (keyQueue.length >= KEY_QUEUE_MAX) {
+      // Saturated (long-press repeat on a dead-slow link). Drop the newest —
+      // dropping anything earlier would reorder the user's input.
+      window.__dbg?.('input: key queue full — dropping key');
+      return;
+    } else {
+      keyQueue.push({ keys, literal });
     }
+    pumpKeyQueue();
+  }
+
+  async function pumpKeyQueue() {
+    if (keySending) return;
+    keySending = true;
+    while (keyQueue.length > 0) {
+      const item = keyQueue.shift();
+      try {
+        await sendKeys(target, item.keys, item.literal);
+        noteSendSuccess();
+      } catch (e) {
+        window.__dbg?.(`input: sendKeys FAILED: ${e.message}`);
+        noteSendFailure('key');
+        // Drop everything queued behind the failure — replaying seconds-old
+        // keystrokes after a reconnect is worse than losing them.
+        keyQueue = [];
+      }
+    }
+    keySending = false;
+  }
+
+  function sendSpecial(key) {
+    enqueueKeys(key, false);
   }
 
   // Long-press repeat for shortcut keys
@@ -1618,7 +1862,7 @@
       <div class="win-bar">
         <div class="win-bar-scroll">
           {#each windows as w}
-            {@const wAgent = detectAgent((w.current_command || '') + ' ' + (w.pane_title || ''))}
+            {@const wAgent = paneAgent(w)}
             <AgentChip
               agent={wAgent}
               label={wAgent ? '' : (w.current_command || w.window_name)}
@@ -1899,7 +2143,7 @@
   }
   .status-left .kiro { color: var(--accent); }
   .status-left {
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: 10px;
     white-space: nowrap;
     overflow: hidden;
@@ -1909,7 +2153,7 @@
     display: flex;
     align-items: center;
     gap: 5px;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     font-weight: 500;
     font-size: 12px;
     margin-left: auto;
@@ -2143,7 +2387,7 @@
     background: var(--input-bg);
     color: var(--text2);
     font-size: 12px;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     font-weight: 500;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
@@ -2172,7 +2416,7 @@
 
   .prompt {
     color: var(--accent);
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: 15px;
     font-weight: 600;
     flex-shrink: 0;
@@ -2186,7 +2430,7 @@
     border: none;
     background: transparent;
     color: var(--text);
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: 15px;
     outline: none;
     -webkit-appearance: none;

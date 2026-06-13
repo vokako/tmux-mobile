@@ -2,10 +2,11 @@
   import Settings from './lib/Settings.svelte';
   import Sessions from './lib/Sessions.svelte';
   import Terminal from './lib/Terminal.svelte';
+  import SplitView from './lib/SplitView.svelte';
   import Files from './lib/Files.svelte';
   import Icon from './lib/Icon.svelte';
   import { copyText } from './lib/clipboard.js';
-  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS } from './lib/ws.js';
+  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable } from './lib/ws.js';
   import { t, i18n, setLocale } from './lib/i18n.svelte.js';
 
   // Tunable constants
@@ -21,12 +22,88 @@
   let terminalSession = $state('');
   let terminalCommand = $state('');
   let viewMode = $state('terminal');
+
+  // ─── Split-screen (desktop + wide only) ────────────────────────────────
+  // splitLayout 1 = the single-pane path (mobile + default desktop), exactly
+  // as before. 2/3/4/6 tile that many independent Terminal cells via
+  // SplitView. The single `terminalTarget` above stays the source of truth
+  // for the Files page, nav pills, and the narrow-screen fallback; cell 0
+  // mirrors it.
+  let splitLayout = $state(1);
+  let splitCells = $state([]);   // [{ id, target, session, command }]
+  let activeCellId = $state(null);
+  let nextCellId = 0;
+  const SPLIT_MIN_WIDTH = 900;
+  const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  let wideEnough = $state(typeof window !== 'undefined' && window.innerWidth >= SPLIT_MIN_WIDTH);
+  let splitEligible = $derived(!isTouchDevice && wideEnough);
+  let splitActive = $derived(splitEligible && splitLayout > 1 && splitCells.length > 0);
+
+  function setLayout(n) {
+    if (!splitEligible || n <= 1) {
+      splitLayout = 1;
+      splitCells = [];
+      activeCellId = null;
+      return;
+    }
+    // Seed cell 0 from the current single pane; pad to n with empty cells.
+    const base = splitCells.length
+      ? splitCells.slice()
+      : (terminalTarget
+          ? [{ id: nextCellId++, target: terminalTarget, session: terminalSession, command: terminalCommand }]
+          : []);
+    const next = base.slice(0, n);
+    while (next.length < n) next.push({ id: nextCellId++, target: '', session: '', command: '' });
+    splitLayout = n;
+    splitCells = next;
+    if (activeCellId == null || !next.some(c => c.id === activeCellId)) {
+      activeCellId = next[0]?.id ?? null;
+    }
+  }
+  function assignCell(id, target, session, command = '') {
+    splitCells = splitCells.map(c => c.id === id ? { ...c, target, session, command } : c);
+    // Keep the single-pane mirror pointed at the active cell so the
+    // narrow-screen fallback and Files page follow what the user is using.
+    if (id === activeCellId && target) {
+      terminalTarget = target; terminalSession = session; terminalCommand = command;
+    }
+  }
+  function closeCell(id) {
+    splitCells = splitCells.map(c => c.id === id ? { ...c, target: '', session: '', command: '' } : c);
+  }
+  function cellPaneExit(id) { closeCell(id); }
+
+  // Re-subscribe the right set of panes after a reconnect / address switch.
+  // In split mode every populated cell needs its own subscription; otherwise
+  // just the single pane. (Each mounted Terminal ALSO re-subscribes itself
+  // via the ws-reconnected event, but this covers the gap before its handler
+  // runs and the multi-target case explicitly.)
+  function resubscribeAll() {
+    if (splitActive) {
+      for (const c of splitCells) if (c.target) wsSubscribe(c.target);
+    } else if (terminalTarget) {
+      wsSubscribe(terminalTarget);
+    }
+  }
   // Chat view is disabled (placeholder kept so parser / ChatView code still
   // compiles, to be re-enabled later if wanted). While this is false the
   // chat tab, tab swipe target, and auto-switch effect are all hidden.
   const chatSupported = false;
   let theme = $state(localStorage.getItem('tmux_theme') || 'system');
   let fontSize = $state(parseInt(localStorage.getItem('tmux_fontsize')) || 14);
+  const FONT_MIN = 8, FONT_MAX = 24;
+  // Single source of truth for font-size changes (settings panel + the
+  // desktop cmd/ctrl +/- shortcut both route through here). Changing
+  // fontSize flows to Terminal as a prop, which re-fits xterm's cell
+  // geometry properly — unlike browser page zoom (cmd +/-), which scales
+  // the whole page without telling xterm to re-measure, leaving the cell
+  // grid misaligned (the "height looks wrong" bug).
+  function setFontSize(n) {
+    const v = Math.max(FONT_MIN, Math.min(FONT_MAX, n));
+    if (v === fontSize) return;
+    fontSize = v;
+    localStorage.setItem('tmux_fontsize', v);
+  }
   let showSettings = $state(false);
   let serverInfo = $state({ hostname: '', machineId: '' });
   let activeAddress = $state(localStorage.getItem('tmux_address') || '');
@@ -111,7 +188,18 @@
 
     // Mobile browser: track visualViewport height so main always fits
     // the visible area (keyboard doesn't push nav off screen).
-    const vv = window.visualViewport;
+    //
+    // Desktop must NOT run this. A desktop window still has a
+    // window.visualViewport, and resizing/zooming the window fires its
+    // `resize` event — pinning `--app-height` to vv.height there both
+    // (a) false-trips the `kbOpen` heuristic when the window shrinks past
+    // the threshold, and (b) under page zoom hands back a scaled height
+    // that diverges from the real layout box, so the terminal computes the
+    // wrong row count (width was unaffected because it's pure flex). On
+    // desktop we leave `--app-height` at its CSS default (100dvh) and let
+    // the terminal's ResizeObserver refit on window resize.
+    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    const vv = isTouch ? window.visualViewport : null;
     const vpHandler = () => {
       if (!vv || androidNativeKb) return;
       const h = vv.height;
@@ -155,6 +243,40 @@
     };
   });
 
+  // Track window width so split-screen collapses to single below the
+  // threshold (and re-enables when widened). Cheap; desktop only matters.
+  $effect(() => {
+    const onResize = () => { wideEnough = window.innerWidth >= SPLIT_MIN_WIDTH; };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  });
+
+  // Desktop: route cmd/ctrl +/-/0 to the app's font-size logic instead of
+  // letting the WebView page-zoom. Page zoom scales the DOM without telling
+  // xterm to re-measure its cell grid, so the terminal renders with a
+  // mismatched cell height/width (the "height is wrong after cmd+-" bug).
+  // Driving fontSize re-fits xterm correctly via the Terminal prop. Mobile
+  // has no such shortcut, so this only matters on desktop.
+  $effect(() => {
+    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    if (isTouch) return;
+    const onKey = (e) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      // Equals/Plus (zoom in), Minus (zoom out), 0 (reset). Match by key so
+      // it works across layouts; include numpad variants.
+      if (e.key === '=' || e.key === '+') {
+        e.preventDefault(); setFontSize(fontSize + 1); // reads current $state
+      } else if (e.key === '-' || e.key === '_') {
+        e.preventDefault(); setFontSize(fontSize - 1);
+      } else if (e.key === '0') {
+        e.preventDefault(); setFontSize(14);
+      }
+    };
+    // Capture phase so we beat the WebView's built-in zoom handler.
+    window.addEventListener('keydown', onKey, { capture: true });
+    return () => window.removeEventListener('keydown', onKey, { capture: true });
+  });
+
   function setTheme(t) {
     theme = t;
     localStorage.setItem('tmux_theme', t);
@@ -182,11 +304,14 @@
     if (!chatSupported && viewMode === 'chat') viewMode = 'terminal';
   });
 
-  // Persist nav state for restore on reload
+  // Persist nav state for restore on reload. splitLayout/splitCells are only
+  // meaningful on desktop; a desktop-saved state degrades to single-pane on a
+  // phone because restore re-gates on splitEligible.
   $effect(() => {
     if (connected && terminalTarget) {
       localStorage.setItem('tmux_state', JSON.stringify({
-        page, viewMode, terminalTarget, terminalSession, terminalCommand
+        page, viewMode, terminalTarget, terminalSession, terminalCommand,
+        splitLayout, splitCells
       }));
     }
   });
@@ -261,7 +386,7 @@
     window.__dbg?.('reconnect: success');
     serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
     if (useAddr !== primaryAddr) { localStorage.setItem('tmux_address', useAddr); activeAddress = useAddr; }
-    if (terminalTarget) wsSubscribe(terminalTarget);
+    resubscribeAll();
     // Tell Terminal to reset stale resize state + re-fit against the new server.
     window.dispatchEvent(new Event('ws-reconnected'));
   }
@@ -287,7 +412,14 @@
         useAddr = allAddrs[0];
       }
     } else {
-      useAddr = allAddrs[attempt % allAddrs.length];
+      // Round-robin, but skip addresses that recently failed a probe or
+      // connect (LAN/Tailscale IPs while on cellular keep failing until a
+      // network change, which clears the memory in ws.js). If everything
+      // is in cooldown, fall back to plain round-robin — a total outage
+      // shouldn't stop us from retrying at all.
+      const viable = allAddrs.filter(isAddressViable);
+      const pool = viable.length > 0 ? viable : allAddrs;
+      useAddr = pool[attempt % pool.length];
     }
 
     window.__dbg?.(`reconnect: attempt ${attempt + 1}/${RECONNECT_MAX_ATTEMPTS} → ${useAddr}`);
@@ -306,6 +438,12 @@
     }).catch((e) => {
       if (!reconnecting) return;
       window.__dbg?.(`reconnect: failed (${e.message})`);
+      // Reachability failures (timeout / refused, NOT auth errors) feed the
+      // same cooldown memory the prober uses, so the next attempts skip
+      // this address instead of re-burning its timeout.
+      if (/timeout|connection failed|closed during auth/i.test(e.message || '')) {
+        noteAddressUnreachable(useAddr);
+      }
       if (attempt + 1 < RECONNECT_MAX_ATTEMPTS) {
         const delay = Math.min(500 * (attempt + 1), 3000); // tighter backoff since timeouts are short
         reconnectTimer = setTimeout(() => tryReconnect(attempt + 1), delay);
@@ -361,12 +499,22 @@
     const addrs = getAllAddresses();
     if (addrs.length <= 1 || optimizing) return;
     const current = localStorage.getItem('tmux_address');
+    // Only probe addresses that would be a strict UPGRADE over the current
+    // class (LAN < Tailscale < WAN). Probing peers/downgrades is pure
+    // waste: we'd never switch to them (the check below rejects ≥ current
+    // class), and when the phone is on WAN the LAN/Tailscale addresses are
+    // unreachable — each probe is a phantom connection attempt hanging
+    // until its 3 s timeout, polluting logs and radio wakeups every cycle.
+    const curClass = classifyAddress(current);
+    if (curClass === 0) { lastProbeTime = Date.now(); return; } // already best
+    const candidates = addrs.filter(a => classifyAddress(a) < curClass);
+    if (candidates.length === 0) { lastProbeTime = Date.now(); return; }
     optimizing = true;
     try {
-      const best = await findBestAddress(addrs);
+      const best = await findBestAddress(candidates);
       if (!best || best === current) return;
       // Only switch if the new address is higher priority (lower class number)
-      if (classifyAddress(best) >= classifyAddress(current)) return;
+      if (classifyAddress(best) >= curClass) return;
       window.__dbg?.(`optimize: switching ${ADDRESS_LABELS[classifyAddress(current)]} → ${ADDRESS_LABELS[classifyAddress(best)]}`);
       localStorage.setItem('tmux_address', best);
       activeAddress = best;
@@ -374,7 +522,7 @@
       const token = localStorage.getItem('tmux_token') || '';
       await connect(best, token);
       serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
-      if (terminalTarget) wsSubscribe(terminalTarget);
+      resubscribeAll();
       window.dispatchEvent(new Event('ws-reconnected'));
     } catch {
       // Switch failed — trigger normal reconnect which will try all addresses
@@ -432,6 +580,14 @@
           terminalCommand = s.terminalCommand || '';
           page = s.page || 'terminal';
           viewMode = 'terminal';
+          // Restore split layout only on eligible (desktop + wide) clients;
+          // a desktop-saved state silently stays single-pane on a phone.
+          if (splitEligible && s.splitLayout > 1 && Array.isArray(s.splitCells) && s.splitCells.length) {
+            splitCells = s.splitCells;
+            splitLayout = s.splitLayout;
+            nextCellId = Math.max(0, ...s.splitCells.map(c => c.id ?? 0)) + 1;
+            activeCellId = s.splitCells[0]?.id ?? null;
+          }
         } else {
           page = 'sessions';
         }
@@ -572,7 +728,7 @@
                     disconnect();
                     connect(u, localStorage.getItem('tmux_token') || '').then(() => {
                       serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
-                      if (terminalTarget) wsSubscribe(terminalTarget);
+                      resubscribeAll();
                     }).catch(() => { reconnecting = true; tryReconnect(); });
                   }
                 }}>{u}</button>
@@ -584,33 +740,32 @@
           <div class="sp-conn-id">{mid?.slice(0, 8) || '—'}</div>
         </div>
       {/if}
-      <div class="sp-section">
-        <div class="sp-label">{t('theme')}</div>
-        <div class="sp-btns">
-          <button class:active={theme === 'system'} onclick={() => setTheme('system')}>{t('themeAuto')}</button>
-          <button class:active={theme === 'light'} onclick={() => setTheme('light')}>{t('themeLight')}</button>
-          <button class:active={theme === 'dark'} onclick={() => setTheme('dark')}>{t('themeDark')}</button>
+      <div class="sp-rows">
+        <div class="sp-row">
+          <span class="sp-label">{t('theme')}</span>
+          <div class="sp-btns">
+            <button class:active={theme === 'system'} onclick={() => setTheme('system')}>{t('themeAuto')}</button>
+            <button class:active={theme === 'light'} onclick={() => setTheme('light')}>{t('themeLight')}</button>
+            <button class:active={theme === 'dark'} onclick={() => setTheme('dark')}>{t('themeDark')}</button>
+          </div>
         </div>
-      </div>
-      <div class="sp-section">
-        <div class="sp-inline">
-          <div class="sp-label">{t('language')}</div>
+        <div class="sp-row">
+          <span class="sp-label">{t('language')}</span>
           <div class="sp-btns">
             <button class:active={i18n.lang === 'en'} onclick={() => setLocale('en')}>EN</button>
             <button class:active={i18n.lang === 'zh'} onclick={() => setLocale('zh')}>中文</button>
           </div>
         </div>
-      </div>
-      <div class="sp-section">
-        <div class="sp-inline">
-          <div class="sp-label">{t('font')}</div>
+        <div class="sp-row">
+          <span class="sp-label">{t('font')}</span>
           <div class="sp-font-row">
-            <button class="sp-font-btn" onclick={() => { fontSize = Math.max(8, fontSize - 1); localStorage.setItem('tmux_fontsize', fontSize); }}>−</button>
+            <button class="sp-font-btn" onclick={() => setFontSize(fontSize - 1)}>−</button>
             <span class="sp-font-val">{fontSize}</span>
-            <button class="sp-font-btn" onclick={() => { fontSize = Math.min(24, fontSize + 1); localStorage.setItem('tmux_fontsize', fontSize); }}>+</button>
+            <button class="sp-font-btn" onclick={() => setFontSize(fontSize + 1)}>+</button>
           </div>
-          <div style="flex:1"></div>
-          <div class="sp-label">{t('debug')}</div>
+        </div>
+        <div class="sp-row">
+          <span class="sp-label">{t('debug')}</span>
           <button class="sp-toggle" class:on={debugMode} onclick={() => { debugMode = !debugMode; localStorage.setItem('tmux_debug', debugMode ? '1' : ''); }}>
             <span class="sp-toggle-opt sp-toggle-off">{t('off')}</span>
             <span class="sp-toggle-opt sp-toggle-on">{t('on')}</span>
@@ -643,7 +798,25 @@
         <Files session={terminalSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} />
       </div>
       <div class="page-layer" class:hidden={page !== 'terminal'}>
-        <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {viewMode} {fontSize} onSwitchPane={(t, cmd) => { terminalTarget = t; terminalSession = t.split(':')[0]; terminalCommand = cmd || ''; }} onPaneExit={() => { terminalTarget = ''; page = 'sessions'; }} />
+        {#if splitEligible && viewMode === 'terminal'}
+          <div class="split-toolbar">
+            <span class="split-toolbar-label">{t('split')}</span>
+            {#each [1, 2, 3, 4, 6] as n}
+              <button class="split-btn" class:active={(n === 1 && !splitActive) || (splitActive && splitLayout === n)} onclick={() => setLayout(n)}>{n === 1 ? '1' : `${n}`}</button>
+            {/each}
+          </div>
+        {/if}
+        <div class="terminal-body">
+          {#if splitActive}
+            <SplitView cells={splitCells} layout={splitLayout} {activeCellId} {fontSize}
+              onActivate={(id) => activeCellId = id}
+              onAssign={assignCell}
+              onCloseCell={closeCell}
+              onPaneExit={cellPaneExit} />
+          {:else}
+            <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {viewMode} {fontSize} onSwitchPane={(t, cmd) => { terminalTarget = t; terminalSession = t.split(':')[0]; terminalCommand = cmd || ''; }} onPaneExit={() => { terminalTarget = ''; page = 'sessions'; }} />
+          {/if}
+        </div>
       </div>
     {/if}
   </div>
@@ -683,7 +856,7 @@
     flex-direction: column;
     background: rgba(0, 0, 0, 0.85);
     color: #0f0;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: 9px;
     line-height: 1.3;
     border-radius: 6px;
@@ -728,7 +901,7 @@
   }
   :global(body) {
     margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'Maple Mono CJK', sans-serif;
     background: var(--bg);
     color: var(--text);
     overflow: hidden;
@@ -855,18 +1028,18 @@
   }
   @keyframes sp-in { from { opacity: 0; transform: translateY(-8px) scale(0.95); } to { opacity: 1; transform: none; } }
   .sp-conn {
-    padding: 12px 14px; border-bottom: 1px solid var(--border2);
+    padding: 12px 14px; margin-bottom: 4px; border-bottom: 1px solid var(--border2);
     display: flex; flex-direction: column; gap: 3px;
   }
   .sp-conn-host {
     font-size: 14px; font-weight: 600; color: var(--text);
   }
   .sp-conn-addr {
-    font-size: 11px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-size: 11px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     color: var(--text3);
   }
   .sp-conn-id {
-    font-size: 10px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-size: 10px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     color: var(--text3); opacity: 0.6;
   }
   .sp-conn-row {
@@ -884,22 +1057,30 @@
     display: flex; flex-direction: column; gap: 2px; margin-top: 4px;
   }
   .sp-conn-url {
-    font-size: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-size: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     color: var(--text3); padding: 6px 8px; border: 1px solid var(--border2); border-radius: 6px;
     background: none; text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
   .sp-conn-url:active { background: var(--accent-bg); }
   .sp-conn-active { color: var(--accent); border-color: var(--accent); }
-  .sp-section { padding: 10px 14px; border-bottom: 1px solid var(--border2); }
-  .sp-section:last-of-type { border-bottom: none; }
-  .sp-label { font-size: 10px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
-  .sp-inline { display: flex; align-items: center; gap: 10px; }
-  .sp-inline .sp-label { margin-bottom: 0; }
+  /* Settings rows: one item per line, label left, control right-aligned.
+     A shared row grid keeps every control's right edge flush so the panel
+     reads as an aligned table rather than a stack of ad-hoc layouts. */
+  .sp-rows { padding: 6px; display: flex; flex-direction: column; }
+  .sp-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; min-height: 40px; padding: 4px 8px;
+  }
+  .sp-row + .sp-row { border-top: 1px solid var(--border2); }
+  .sp-label {
+    font-size: 11px; font-weight: 600; color: var(--text3);
+    text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;
+  }
   .sp-btns {
     display: inline-flex; gap: 2px; background: var(--pill-bg); border-radius: 8px; padding: 2px;
   }
   .sp-btns button {
-    padding: 6px 14px; border: none; border-radius: 6px; background: transparent;
+    padding: 6px 12px; border: none; border-radius: 6px; background: transparent;
     color: var(--text3); font-size: 12px; font-weight: 500; cursor: pointer;
     -webkit-tap-highlight-color: transparent; transition: all 0.15s;
   }
@@ -915,7 +1096,7 @@
   }
   .sp-font-btn:active { background: var(--accent-bg); color: var(--accent); }
   .sp-font-val {
-    font-size: 13px; font-weight: 600; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace; color: var(--text2);
+    font-size: 13px; font-weight: 600; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; color: var(--text2);
     min-width: 24px; text-align: center;
   }
   .sp-toggle {
@@ -999,4 +1180,30 @@
     visibility: hidden;
     pointer-events: none;
   }
+
+  /* Split-screen layout toolbar (desktop + wide only) */
+  .split-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border2);
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+  .split-toolbar-label {
+    font-size: 10px; font-weight: 600; color: var(--text3);
+    text-transform: uppercase; letter-spacing: 0.5px;
+    margin-right: 2px;
+  }
+  .split-btn {
+    min-width: 26px; height: 24px;
+    padding: 0 6px; border: 1px solid var(--border2); border-radius: 6px;
+    background: var(--input-bg); color: var(--text3);
+    font-size: 12px; font-weight: 600; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: all 0.15s ease;
+  }
+  .split-btn.active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+  .terminal-body { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
 </style>

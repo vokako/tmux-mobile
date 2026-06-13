@@ -3,7 +3,7 @@
   import Icon from './Icon.svelte';
   import AgentChip from './AgentChip.svelte';
   import { t } from './i18n.svelte.js';
-  import { detectAgent, sessionHasAgent, AGENTS } from './agents.js';
+  import { detectAgent, sessionHasAgent, paneAgent, paneText, AGENTS } from './agents.js';
 
   let { openTerminal, activeTarget = '', visible = false } = $props();
 
@@ -70,10 +70,12 @@
     if (!ps || !ps.length) return { ai: '', cmd: '', cwd: '', count: s.windows };
     // Prefer pane that matches activeTarget; else first with AI tag; else first.
     const act = ps.find(p => activeTarget === `${p.session}:${p.window}.${p.pane}`);
-    const tagged = ps.find(p => aiTag(p.current_command + ' ' + (p.pane_title || '')));
+    const tagged = ps.find(p => paneAgent(p));
     const p = act || tagged || ps[0];
-    const rawCmd = (p.current_command || '') + ' ' + ((p.pane_title || '').split(/\s/)[0] || '');
-    const ai = aiTag(rawCmd);
+    // Detect on the full pane signal (command + title + child argv). The
+    // session row's big icon comes from this — title-only matching missed
+    // interpreter-launched agents (codex = "node", claude = "2.1.141").
+    const ai = paneAgent(p)?.tag || '';
     return {
       ai,
       cmd: p.current_command || '',
@@ -159,7 +161,7 @@
       return;
     }
     const ps = panes[s.name] || [];
-    const aiPane = ps.find(p => detectAgent((p.current_command || '') + ' ' + (p.pane_title || '')));
+    const aiPane = ps.find(p => paneAgent(p));
     const p = aiPane || ps[0];
     if (!p) return;
     openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command);
@@ -274,7 +276,7 @@
       (p.current_command || '').toLowerCase().includes(ql) ||
       (p.window_name || '').toLowerCase().includes(ql) ||
       (p.current_path || '').toLowerCase().includes(ql) ||
-      aiTag(p.current_command).toLowerCase().includes(ql)
+      (paneAgent(p)?.tag || '').toLowerCase().includes(ql)
     );
   }
   function paneMatches(p, q) {
@@ -284,7 +286,7 @@
       (p.current_command || '').toLowerCase().includes(ql) ||
       (p.window_name || '').toLowerCase().includes(ql) ||
       (p.current_path || '').toLowerCase().includes(ql) ||
-      aiTag(p.current_command).toLowerCase().includes(ql)
+      (paneAgent(p)?.tag || '').toLowerCase().includes(ql)
     );
   }
   let filtered = $derived(sessions.filter(s => sessionMatches(s, query)));
@@ -429,7 +431,7 @@
         {#if isExpanded && visiblePanes.length}
           <div class="pane-list">
             {#each visiblePanes as p}
-              {@const pAi = aiTag(p.current_command + ' ' + (p.pane_title || ''))}
+              {@const pAi = paneAgent(p)?.tag || ''}
               {@const isPaneActive = activeTarget === `${p.session}:${p.window}.${p.pane}`}
               <div class="pane-row" class:active-pane={isPaneActive}>
                 <button class="pane" onclick={() => openPane(s, p)}>
@@ -720,7 +722,7 @@
   }
   .meta .ai-icon.claude { width: 15px; height: 15px; }
   .meta .cmd {
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: 11px;
     color: var(--text2);
     overflow: hidden;
@@ -731,7 +733,7 @@
     display: block;
     color: var(--text3);
     font-size: 11px;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     flex: 1;
     min-width: 0;
     white-space: nowrap;
@@ -816,7 +818,7 @@
   }
   .pane:active { background: var(--surface2); border-radius: 8px; }
   .pane-id {
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     color: var(--accent);
     font-weight: 500;
     font-size: 11px;
@@ -824,7 +826,7 @@
     flex-shrink: 0;
   }
   .pane-cmd {
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     color: var(--text2);
     font-size: 12px;
     flex-shrink: 0;
@@ -833,7 +835,7 @@
     display: block;
     color: var(--text3);
     font-size: 11px;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     flex: 1;
     min-width: 0;
     white-space: nowrap;
@@ -899,7 +901,7 @@
   }
   .empty-q {
     color: var(--text);
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
   }
   .error {
     color: var(--danger);
@@ -1015,7 +1017,7 @@
     gap: 1px;
     overflow-x: auto;
     scrollbar-width: none;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     font-size: 12px;
     -webkit-overflow-scrolling: touch;
   }

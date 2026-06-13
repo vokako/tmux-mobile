@@ -12,6 +12,10 @@ temp/
 /tmuxmobile.svg
 /icon_macos.png
 
+# Bundled web fonts — generated/downloaded by scripts/fetch-fonts.sh, kept
+# out of git (the CJK subset alone is 5 MB). Run that script after cloning.
+/public/fonts/
+
 # Project uses npm; stray pnpm lockfile would create a dual-lockfile conflict
 /pnpm-lock.yaml
 # Backup left by a git history filter/rewrite — keep locally, never commit
