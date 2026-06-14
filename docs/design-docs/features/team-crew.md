@@ -107,12 +107,29 @@ real project). The phone defaults it to the current terminal session's cwd
 ## 4. Agent ↔ tmux pane link (the "preview execution state" requirement)
 
 Each agent runs in its own tmux window **named after the agent**
-(`tmux::new_named_window`). The Team tab maps an agent to its pane by matching
-`window_name == agent.name` within `tmm-crew-<slug>` (`Team.svelte:previewAgent`)
-and calls the existing `openTerminal(...)`. Tapping "worker" opens worker's live
-pane via the same subscribe/snapshot path every other pane uses — no new
-streaming code. Tapping the session in the PanePicker dropdown shows the agent
-names directly.
+(`tmux::new_named_window`). Agent → pane mapping is `window_name == agent.name`
+within `tmm-crew-<slug>`. Two surfaces use it:
+
+- **Mobile / narrow**: the roster chip → `Team.svelte:previewAgent` →
+  `openTerminal(...)`, jumping to that agent's pane in the Terminal tab (same
+  subscribe/snapshot path as any pane). The PanePicker dropdown also labels
+  `tmm-crew-*` panes by agent name.
+
+- **Desktop (≥900px, non-touch)**: the Team tab is a **two-pane split** — a live
+  agent terminal **grid** on the left, the chat on the right, with a draggable
+  splitter (ratio persisted in `tmux_crew_gridfrac`, default 0.6). See
+  `AgentGrid.svelte`:
+  - one cell per employee, laid out near-square: `cols = ceil(√n)`,
+    `rows = ceil(n/cols)`;
+  - each cell is a **chromeless** embedded `Terminal` (new prop — no
+    window-switcher bar, window-list poll skipped, since the cell is pinned to
+    one agent). Read-only until clicked; clicking activates it (xterm focus +
+    full interaction), exactly like an active split cell;
+  - cell font = app font − 2 (glanceable previews);
+  - panes resolved via a 2 s `listSessionsWithPanes` poll, so cells fill in as
+    agents launch; offline employees show a placeholder until their window
+    appears.
+  No quick-switch chrome — the grid is fixed by agent count, by design.
 
 ## 5. The in-process supervisor (`src-tauri/src/crew.rs`)
 
