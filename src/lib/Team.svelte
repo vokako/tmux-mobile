@@ -82,6 +82,17 @@
     }
   }
 
+  // Lightweight roster+status refresh (no history reload, no workspace reseed).
+  // Used by the live push + the poll so presence/status dots stay current.
+  async function refreshRoster() {
+    try {
+      const [r, s] = await Promise.all([crewRoster(), crewStatus()]);
+      roster = r?.roster || [];
+      teamStarted = !!s?.team_started;
+      available = true;
+    } catch { /* transient; the poll/visible effect will retry */ }
+  }
+
   async function startTeam() {
     if (starting || !workspace.trim()) return;
     starting = true;
@@ -89,8 +100,9 @@
     try {
       await crewStartTeam(workspace.trim());
       teamStarted = true;
-      // Agents take a few seconds to come online; refresh the roster shortly.
-      setTimeout(refresh, 3000);
+      // Agents come online over the next seconds; the visibility poll below
+      // keeps refreshing the roster, so the "coming online…" state resolves on
+      // its own without needing a tab switch.
     } catch {
     } finally {
       starting = false;
@@ -98,9 +110,13 @@
   }
 
   // Live push: append each broadcast message. De-dupe by id (history + a racing
-  // push can overlap right after mount).
+  // push can overlap right after mount). join/leave/system messages mean the
+  // roster changed → refresh presence immediately (don't wait for the poll).
   function onCrewMessage(m) {
     if (!m?.id) return;
+    if (m.kind === 'join' || m.kind === 'leave' || m.kind === 'system') {
+      refreshRoster();
+    }
     if (messages.some(x => x.id === m.id)) return;
     messages = [...messages, m];
     scrollToBottom();
@@ -111,9 +127,15 @@
     return () => removeCrewMessageListener(onCrewMessage);
   });
 
-  // Refresh whenever the tab becomes visible (cheap; also catches reconnects).
+  // While the tab is visible: full refresh once, then poll the roster so agent
+  // presence/status (online → waiting/working) stays live and the "coming
+  // online…" spinner resolves as agents join — no tab switch required. Agent
+  // status changes aren't broadcast as messages, so a poll is the only signal.
   $effect(() => {
-    if (visible) refresh();
+    if (!visible) return;
+    refresh();
+    const id = setInterval(refreshRoster, 2500);
+    return () => clearInterval(id);
   });
 
   async function send() {
