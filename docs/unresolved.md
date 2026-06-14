@@ -2,30 +2,25 @@
 
 ## Team feature — open issues (review 2026-06-15)
 
-### close_team leaks the room's bus + re-broadcast pump
-- **Priority**: Medium · **Area**: Team / team_bridge.rs
-- `close_team` removes the `Team` from the registry and kills the tmux session,
-  but the per-room `agora::Bus` and its spawned re-broadcast pump task
-  (`ensure_room`) are never torn down. The pump lives until `json_tx` closes
-  (process exit). Reopening the same room later re-`ensure_room`s and spawns a
-  SECOND pump → duplicate `team_message` pushes for that room. Fix: track the
-  pump JoinHandle per room and abort it on close; or de-dup pumps by room.
+### ~~close_team leaks the room's bus + re-broadcast pump~~ — FIXED
+- The `Team` now stores its pump `JoinHandle`; `close_team` aborts it (and the
+  double-checked-insert path aborts the duplicate pump). No leak, no duplicate
+  pushes on reopen.
 
-### Supervisor retries a failing launch every 3s forever
-- **Priority**: Medium · **Area**: Team / team.rs reconcile_loop
-- If `launch_agent` errors (e.g. `kiro-cli` not installed, bad backend) the loop
-  logs and retries the same agent every `RECONCILE_INTERVAL` (3s) indefinitely —
-  log spam + repeated tmux window churn if the window half-creates. No backoff,
-  no failure cap, no surfacing to the UI. Fix: per-agent failure count → stop
-  after N, mark the employee failed, and report it in the roster/teams payload.
+### ~~Supervisor retries a failing launch every 3s forever~~ — FIXED
+- The reconcile loop now counts per-agent launch failures and stops retrying
+  after `MAX_LAUNCH_FAILURES` (3). (Still not surfaced in the UI — see below.)
 
-### A closed team that wasn't fully launched never stops its supervisor
-- **Priority**: Low · **Area**: Team / team.rs
-- The reconcile loop only exits when `launched_any && !session_exists`. If a team
-  is closed before any agent launched (e.g. all launches failed), `launched_any`
-  stays false and the loop spins forever against a removed room (`employee_specs`
-  returns empty each tick). Harmless but wasteful. Fix: also exit when the room
-  is no longer registered (add a bridge `room_exists(room)` check).
+### ~~A closed team that wasn't fully launched never stops its supervisor~~ — FIXED
+- The loop now exits when `!bridge.room_exists(room)` too, not only on
+  `launched_any && session gone`.
+
+### Launch failures / fired agents not surfaced in the UI
+- **Priority**: Low · **Area**: Team
+- After the failure cap (above) the supervisor stops trying, but the UI shows no
+  "failed" state — the agent just never appears as a chip/grid cell. Likewise a
+  `fire`d or crashed agent. Fix: include a per-agent state (failed/offline) in
+  the teams/roster payload and badge it in the roster + grid.
 
 ### Fired/offline agents keep a dead cell + stale pane in the grid
 - **Priority**: Low · **Area**: Team / AgentGrid.svelte

@@ -298,13 +298,15 @@ fn seed_template(bridge: &dyn TeamBridge, room: &str, template: &str, cfg: &Team
 /// second. The previous in-memory-only tracking re-launched every agent on
 /// restart, piling up duplicate manager/worker/reviewer windows.
 async fn reconcile_loop(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: String, session: String, paths: Paths) {
+    const MAX_LAUNCH_FAILURES: u32 = 3; // give up relaunching an agent after this
     let mut launched: HashMap<String, Option<String>> = HashMap::new();
+    let mut fail_count: HashMap<String, u32> = HashMap::new();
     let mut launched_any = false;
     loop {
-        // Stop the loop once the team is closed. close_team kills the session,
-        // so: if we have already launched ≥1 agent and the session no longer
-        // exists, the team was closed — exit cleanly.
-        if launched_any && !tmux::session_exists(&session) {
+        // Stop the loop once the team is closed. close_team removes the room
+        // from the registry AND kills the session — exit on either signal (the
+        // room check also covers a team closed before any agent launched).
+        if !bridge.room_exists(&room) || (launched_any && !tmux::session_exists(&session)) {
             println!("🜂 team: room '{}' closed; supervisor exiting", room);
             return;
         }
@@ -337,13 +339,23 @@ async fn reconcile_loop(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: Stri
                 launched_any = true;
                 continue;
             }
+            // Give up after repeated failures (e.g. backend CLI not installed)
+            // instead of retrying — and churning windows — every tick forever.
+            if fail_count.get(name).copied().unwrap_or(0) >= MAX_LAUNCH_FAILURES {
+                continue;
+            }
             match launch_agent(name, spec, &cfg, &room, &session, &paths) {
                 Ok(pane) => {
                     println!("🜂 team: launched '{}' in window {}", name, pane);
                     launched.insert(name.clone(), Some(pane));
+                    fail_count.remove(name);
                     launched_any = true;
                 }
-                Err(e) => eprintln!("⚠️  team: launch '{}' failed: {}", name, e),
+                Err(e) => {
+                    let n = fail_count.entry(name.clone()).or_insert(0);
+                    *n += 1;
+                    eprintln!("⚠️  team: launch '{}' failed ({}/{}): {}", name, n, MAX_LAUNCH_FAILURES, e);
+                }
             }
         }
         tokio::time::sleep(RECONCILE_INTERVAL).await;
@@ -583,6 +595,7 @@ mod tests {
             Ok(())
         }
         fn employee_specs(&self, _room: &str) -> Vec<(String, Value, String)> { self.existing.clone() }
+        fn room_exists(&self, _room: &str) -> bool { true }
         fn start_team(&self, _workspace: &str, _template: &str) -> Value { serde_json::json!({ "started": false }) }
         fn close_team(&self, _room: &str) -> bool { false }
         fn teams(&self) -> Value { serde_json::json!({ "teams": [] }) }

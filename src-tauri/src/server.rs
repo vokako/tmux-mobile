@@ -57,6 +57,9 @@ pub trait TeamBridge: Send + Sync {
     /// Raw employee list for `room` as `(name, spec, state)` for the
     /// supervisor's reconcile loop.
     fn employee_specs(&self, room: &str) -> Vec<(String, serde_json::Value, String)>;
+    /// Whether `room` is still a registered (not-yet-closed) team. The
+    /// supervisor uses this to exit cleanly when its team is closed.
+    fn room_exists(&self, room: &str) -> bool;
     /// Start a team for `workspace` from `template` (named roster; empty =
     /// "default"): derive its room (= workspace slug), seed the roster, launch
     /// agents into a per-workspace tmux session. Idempotent per room. Returns
@@ -1897,6 +1900,7 @@ mod tests {
         fn employee_specs(&self, _room: &str) -> Vec<(String, serde_json::Value, String)> {
             Vec::new()
         }
+        fn room_exists(&self, _room: &str) -> bool { true }
         fn start_team(&self, workspace: &str, template: &str) -> serde_json::Value {
             serde_json::json!({ "started": true, "room": "ws", "workspace": workspace, "template": template })
         }

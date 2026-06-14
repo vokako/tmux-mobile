@@ -26,6 +26,7 @@ struct Team {
     template: String,  // roster template this team was started from
     session: String,   // tmm-team-<room>
     started: bool,     // supervisor launched for this room
+    pump: tokio::task::JoinHandle<()>, // the Message→JSON re-broadcast task
 }
 
 pub struct TeamManager {
@@ -168,8 +169,10 @@ impl TeamManager {
         }
         // All rooms share ONE connection (no per-room write contention).
         let bus = Bus::with_shared(self.conn.clone(), room.to_string());
-        // Pump this room's messages into the merged push channel.
-        {
+        // Pump this room's messages into the merged push channel. The handle is
+        // stored on the Team so close_team can abort it (otherwise reopening the
+        // same room would spawn a second pump → duplicate pushes).
+        let pump = {
             let mut rx = bus.subscribe();
             let tx = self.json_tx.clone();
             tokio::spawn(async move {
@@ -184,12 +187,13 @@ impl TeamManager {
                         Err(broadcast::error::RecvError::Closed) => return,
                     }
                 }
-            });
-        }
+            })
+        };
         {
             let mut teams = self.teams.lock().unwrap();
             // Double-checked: another thread may have inserted while we built.
             if let Some(t) = teams.get(room) {
+                pump.abort(); // discard the duplicate pump we just spawned
                 return Ok(t.bus.clone());
             }
             teams.insert(
@@ -200,6 +204,7 @@ impl TeamManager {
                     template: if template.is_empty() { "default".to_string() } else { template.to_string() },
                     session: format!("{}{}", SESSION_PREFIX, room),
                     started: false,
+                    pump,
                 },
             );
         }
@@ -261,6 +266,10 @@ impl TeamBridge for TeamManager {
         bus.seed_employee(name, spec).map_err(|e| e.to_string())
     }
 
+    fn room_exists(&self, room: &str) -> bool {
+        self.teams.lock().unwrap().contains_key(room)
+    }
+
     fn employee_specs(&self, room: &str) -> Vec<(String, serde_json::Value, String)> {
         self.room_bus(room)
             .and_then(|b| b.employees().ok())
@@ -303,15 +312,16 @@ impl TeamBridge for TeamManager {
     }
 
     fn close_team(&self, room: &str) -> bool {
-        let session = {
+        let removed = {
             let mut teams = self.teams.lock().unwrap();
-            teams.remove(room).map(|t| t.session)
+            teams.remove(room)
         };
-        match session {
-            Some(s) => {
+        match removed {
+            Some(t) => {
+                t.pump.abort(); // stop the re-broadcast task (no leak / no dup on reopen)
                 // Kill the tmux session (best-effort). The chat log stays in the
                 // db, so re-starting the same workspace resumes its history.
-                let _ = crate::tmux::kill_session(&s);
+                let _ = crate::tmux::kill_session(&t.session);
                 self.save_meta(); // drop it from the recovery map too
                 true
             }
