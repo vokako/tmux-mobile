@@ -17,7 +17,9 @@
   const BACKENDS = ['kiro', 'claude', 'codex'];
 
   // Local editable copy so edits aren't lost on the 1s status poll re-render.
-  let drafts = $state(structuredClone(templates));
+  // NOTE: `templates` is a Svelte $state proxy — structuredClone() throws a
+  // DataCloneError on proxies, so deep-clone via JSON instead.
+  let drafts = $state(JSON.parse(JSON.stringify(templates ?? [])));
   let selIdx = $state(0);
   let dirty = $state(false);
   let saving = $state(false);
