@@ -61,11 +61,14 @@ pub fn config_dir() -> PathBuf {
 }
 
 fn dirs_next() -> PathBuf {
-    if let Some(home) = std::env::var_os("HOME") {
-        PathBuf::from(home).join(".config").join("tmux-mobile")
-    } else {
-        PathBuf::from(".config").join("tmux-mobile")
-    }
+    // Follow the XDG Base Directory convention: $XDG_CONFIG_HOME if set,
+    // else ~/.config. App state lives under the `tmux-mobile/` subdir.
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .unwrap_or_else(|| PathBuf::from(".config"));
+    base.join("tmux-mobile")
 }
 
 impl Config {

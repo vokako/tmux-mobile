@@ -12,9 +12,12 @@
 use crate::crew::{self, CrewConfig};
 use crate::server::CrewBridge;
 use agora::bus::{Bus, BusProvider};
+use agora::store::SharedConn;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use tokio::sync::broadcast;
+
+const SESSION_PREFIX: &str = "tmm-crew-";
 
 /// One live team: its bus + launch metadata.
 struct Team {
@@ -25,38 +28,48 @@ struct Team {
 }
 
 pub struct CrewBus {
-    /// Open db path (rooms are opened lazily against it).
-    db: String,
+    /// One shared SQLite connection for ALL rooms (WAL single-writer).
+    conn: SharedConn,
     /// room -> Team. Guarded by a std Mutex (never held across .await).
     teams: Mutex<HashMap<String, Team>>,
     /// Merged message fan-out for the WS push path (all rooms).
     json_tx: broadcast::Sender<String>,
     /// Server-level launcher config (bus URL + default model).
     cfg: CrewConfig,
+    /// Where room→workspace is persisted so restarts can recover teams.
+    meta_path: std::path::PathBuf,
     self_ref: OnceLock<Weak<CrewBus>>,
 }
 
 impl CrewBus {
-    /// Open the store dir, start the MCP/dashboard daemon (room-aware), and
-    /// return the manager. No team is created until the operator starts one.
+    /// Open the store, start the MCP/dashboard daemon (room-aware), and recover
+    /// any teams still running in tmux from a previous run.
     pub fn start(db: &str, _room: &str, bind: &str, model: &str) -> Result<Arc<CrewBus>, Box<dyn std::error::Error>> {
         if let Some(parent) = std::path::Path::new(db).parent() {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent).ok();
             }
         }
+        let conn = agora::store::open_shared(db)?;
         let (json_tx, _) = broadcast::channel::<String>(1024);
         let port = bind.rsplit(':').next().unwrap_or("8787");
         let cfg = CrewConfig {
             url: format!("http://127.0.0.1:{}", port),
             model: model.to_string(),
         };
+        // room→workspace map lives next to the db so a restart knows where each
+        // recovered team's agents work.
+        let meta_path = std::path::Path::new(db)
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("teams.json");
 
         let me = Arc::new(CrewBus {
-            db: db.to_string(),
+            conn,
             teams: Mutex::new(HashMap::new()),
             json_tx,
             cfg,
+            meta_path,
             self_ref: OnceLock::new(),
         });
         let _ = me.self_ref.set(Arc::downgrade(&me));
@@ -75,11 +88,60 @@ impl CrewBus {
             });
         }
 
+        me.recover_running_teams();
         Ok(me)
     }
 
-    /// Get an existing room's bus, or open + register it (lazily) and start its
-    /// re-broadcast pump. `workspace` is recorded on first open.
+    /// On startup, find teams still alive in tmux (sessions named tmm-crew-*)
+    /// and resume supervising them — the server can restart without abandoning
+    /// running agents. Their workspace comes from the persisted meta map.
+    fn recover_running_teams(self: &Arc<Self>) {
+        let meta = self.load_meta();
+        for session in crate::tmux::list_team_sessions(SESSION_PREFIX) {
+            let room = match session.strip_prefix(SESSION_PREFIX) {
+                Some(r) if !r.is_empty() => r.to_string(),
+                _ => continue,
+            };
+            let workspace = meta.get(&room).cloned().unwrap_or_default();
+            if self.ensure_room(&room, &workspace).is_err() {
+                continue;
+            }
+            // Mark started + relaunch the reconcile loop, which ADOPTS the
+            // existing agent windows rather than reopening them.
+            if let Some(t) = self.teams.lock().unwrap().get_mut(&room) {
+                t.started = true;
+            }
+            if let Some(arc) = self.self_ref.get().and_then(|w| w.upgrade()) {
+                let bridge: Arc<dyn CrewBridge> = arc;
+                crew::start(bridge, self.cfg.clone(), room.clone(), workspace);
+                println!("🜂 crew: recovered running team '{}'", room);
+            }
+        }
+    }
+
+    fn load_meta(&self) -> HashMap<String, String> {
+        std::fs::read_to_string(&self.meta_path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
+    /// Persist room→workspace for every known team (best-effort).
+    fn save_meta(&self) {
+        let map: HashMap<String, String> = self
+            .teams
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(room, t)| (room.clone(), t.workspace.clone()))
+            .collect();
+        if let Ok(s) = serde_json::to_string_pretty(&map) {
+            let _ = std::fs::write(&self.meta_path, s);
+        }
+    }
+
+    /// Get an existing room's bus, or register it over the shared connection and
+    /// start its re-broadcast pump. `workspace` is recorded on first open.
     fn ensure_room(&self, room: &str, workspace: &str) -> Result<Bus, String> {
         {
             let teams = self.teams.lock().unwrap();
@@ -87,9 +149,8 @@ impl CrewBus {
                 return Ok(t.bus.clone());
             }
         }
-        // Open a fresh connection to the shared db, scoped to this room.
-        let conn = agora::store::open(&self.db).map_err(|e| e.to_string())?;
-        let bus = Bus::new(conn, room.to_string());
+        // All rooms share ONE connection (no per-room write contention).
+        let bus = Bus::with_shared(self.conn.clone(), room.to_string());
         // Pump this room's messages into the merged push channel.
         {
             let mut rx = bus.subscribe();
@@ -108,20 +169,23 @@ impl CrewBus {
                 }
             });
         }
-        let mut teams = self.teams.lock().unwrap();
-        // Double-checked: another thread may have inserted while we opened.
-        if let Some(t) = teams.get(room) {
-            return Ok(t.bus.clone());
+        {
+            let mut teams = self.teams.lock().unwrap();
+            // Double-checked: another thread may have inserted while we built.
+            if let Some(t) = teams.get(room) {
+                return Ok(t.bus.clone());
+            }
+            teams.insert(
+                room.to_string(),
+                Team {
+                    bus: bus.clone(),
+                    workspace: workspace.to_string(),
+                    session: format!("{}{}", SESSION_PREFIX, room),
+                    started: false,
+                },
+            );
         }
-        teams.insert(
-            room.to_string(),
-            Team {
-                bus: bus.clone(),
-                workspace: workspace.to_string(),
-                session: format!("tmm-crew-{}", room),
-                started: false,
-            },
-        );
+        self.save_meta();
         Ok(bus)
     }
 
@@ -229,6 +293,7 @@ impl CrewBridge for CrewBus {
                 // Kill the tmux session (best-effort). The chat log stays in the
                 // db, so re-starting the same workspace resumes its history.
                 let _ = crate::tmux::kill_session(&s);
+                self.save_meta(); // drop it from the recovery map too
                 true
             }
             None => false,
@@ -242,7 +307,7 @@ impl CrewBridge for CrewBus {
             .map(|t| {
                 let agents = t.bus.roster().map(|r| r.iter().filter(|a| a.status != "offline").count()).unwrap_or(0);
                 serde_json::json!({
-                    "room": t.session.strip_prefix("tmm-crew-").unwrap_or(&t.session),
+                    "room": t.session.strip_prefix(SESSION_PREFIX).unwrap_or(&t.session),
                     "workspace": t.workspace,
                     "session": t.session,
                     "started": t.started,
@@ -272,16 +337,21 @@ mod tests {
     /// Build a manager backed by a temp db, WITHOUT the network daemon (we only
     /// exercise the room registry + bus routing here).
     fn manager() -> Arc<CrewBus> {
-        let dir = std::env::temp_dir().join(format!("crewtest-{}", std::process::id()));
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static N: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir()
+            .join(format!("crewtest-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).ok();
-        let db = dir.join(format!("crew-{:p}.db", &dir)).to_string_lossy().into_owned();
-        let _ = std::fs::remove_file(&db);
+        let db = dir.join("crew.db").to_string_lossy().into_owned();
+        let conn = agora::store::open_shared(&db).unwrap();
         let (json_tx, _) = broadcast::channel::<String>(64);
         let me = Arc::new(CrewBus {
-            db,
+            conn,
             teams: Mutex::new(HashMap::new()),
             json_tx,
             cfg: CrewConfig { url: "http://127.0.0.1:0".into(), model: "m".into() },
+            meta_path: dir.join("teams.json"),
             self_ref: OnceLock::new(),
         });
         let _ = me.self_ref.set(Arc::downgrade(&me));

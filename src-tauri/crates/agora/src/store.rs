@@ -26,6 +26,16 @@ pub fn open(path: &str) -> Result<Connection> {
     Ok(conn)
 }
 
+/// A connection shared across rooms, behind a Mutex. Hides the rusqlite type so
+/// host crates can hold the handle without depending on rusqlite directly.
+pub type SharedConn = std::sync::Arc<std::sync::Mutex<Connection>>;
+
+/// Open the db once and return a shareable handle. All rooms run over this one
+/// connection (WAL single-writer → no inter-connection write contention).
+pub fn open_shared(path: &str) -> Result<SharedConn> {
+    Ok(std::sync::Arc::new(std::sync::Mutex::new(open(path)?)))
+}
+
 pub fn open_in_memory() -> Result<Connection> {
     let conn = Connection::open_in_memory()?;
     configure(&conn)?;

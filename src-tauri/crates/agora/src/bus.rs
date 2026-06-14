@@ -97,6 +97,16 @@ impl Bus {
         Bus { conn: Arc::new(Mutex::new(conn)), tx, room: room.into() }
     }
 
+    /// Build a room-scoped bus over a connection SHARED with other rooms. All
+    /// rooms then funnel through one `Mutex<Connection>` — under SQLite WAL a
+    /// single writer avoids the inter-connection write contention you'd get
+    /// from one connection per room. Each room still has its own broadcast
+    /// channel (per-room live wakeups); isolation stays at the `room` column.
+    pub fn with_shared(conn: Arc<Mutex<rusqlite::Connection>>, room: impl Into<String>) -> Self {
+        let (tx, _rx) = broadcast::channel(1024);
+        Bus { conn, tx, room: room.into() }
+    }
+
     pub fn room(&self) -> &str {
         &self.room
     }
