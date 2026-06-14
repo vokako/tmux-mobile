@@ -12,9 +12,10 @@
   // disabled) makes the crew_* RPCs reject with method-not-found; we surface
   // that as an "unavailable" state and the App hides the tab.
   import Icon from './Icon.svelte';
+  import AgentGrid from './AgentGrid.svelte';
   import { t } from './i18n.svelte.js';
   import {
-    crewHistory, crewRoster, crewPost, crewStatus, crewStartTeam,
+    crewHistory, crewRoster, crewPost, crewStatus, crewStartTeam, crewEmployees,
     addCrewMessageListener, removeCrewMessageListener,
     listSessionsWithPanes, fsCwd,
   } from './ws.js';
@@ -22,8 +23,27 @@
   let {
     visible = false,
     currentSession = '',     // the open terminal session, used to default the workspace
+    fontSize = 14,           // app standard size; the grid renders 2 notches smaller
     openTerminal = () => {}, // (session, target, command) — preview an agent's pane
   } = $props();
+
+  // Desktop + wide → show the split layout (agent grid | chat). Mobile/narrow
+  // keeps the chat-only view (roster chips already give pane preview via tab).
+  const SPLIT_MIN_WIDTH = 900;
+  const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  let wideEnough = $state(typeof window !== 'undefined' && window.innerWidth >= SPLIT_MIN_WIDTH);
+  let splitEligible = $derived(!isTouchDevice && wideEnough);
+  $effect(() => {
+    if (isTouchDevice) return;
+    const onResize = () => { wideEnough = window.innerWidth >= SPLIT_MIN_WIDTH; };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  });
+
+  // Grid pane width as a fraction (left = agent grid). Draggable splitter.
+  // Persisted so the user's choice survives reloads.
+  let gridFrac = $state(parseFloat(localStorage.getItem('tmux_crew_gridfrac') || '0.6'));
+  let employees = $state([]);   // desired roster (all employees → grid cells)
 
   let messages = $state([]);     // crew Message[] (oldest first)
   let roster = $state([]);       // AgentRow[]
@@ -59,10 +79,11 @@
 
   async function refresh() {
     try {
-      const [h, r, s] = await Promise.all([crewHistory(200), crewRoster(), crewStatus()]);
+      const [h, r, s, e] = await Promise.all([crewHistory(200), crewRoster(), crewStatus(), crewEmployees()]);
       messages = h?.messages || [];
       roster = r?.roster || [];
       teamStarted = !!s?.team_started;
+      employees = e?.employees || [];
       available = true;
       // Seed the workspace field once: prefer the current terminal session's
       // cwd, else the server's default (home). User can edit until they start.
@@ -92,11 +113,32 @@
     if (rosterInFlight) return; // don't stack if a poll is slow
     rosterInFlight = true;
     try {
-      const r = await crewRoster();
+      const [r, e] = await Promise.all([crewRoster(), crewEmployees()]);
       roster = r?.roster || [];
+      employees = e?.employees || [];
       available = true;
     } catch { /* transient; the next poll tick retries */ }
     finally { rosterInFlight = false; }
+  }
+
+  // Splitter drag: adjust the grid/chat width ratio (desktop only).
+  let splitRow = $state(null);
+  function startDrag(e) {
+    e.preventDefault();
+    const rect = splitRow?.getBoundingClientRect();
+    if (!rect) return;
+    const onMove = (ev) => {
+      const x = (ev.touches ? ev.touches[0].clientX : ev.clientX) - rect.left;
+      const f = Math.min(0.8, Math.max(0.2, x / rect.width));
+      gridFrac = f;
+    };
+    const onUp = () => {
+      localStorage.setItem('tmux_crew_gridfrac', String(gridFrac));
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
   }
 
   async function startTeam() {
@@ -217,6 +259,96 @@
   function isMine(m) { return m.kind === 'msg' && m.from === 'human'; }
 </script>
 
+{#snippet chatPane()}
+  <!-- Roster: present agents as chips; tap to preview their tmux pane (mobile)
+       or focus its grid cell (desktop, via previewAgent → openTerminal). -->
+  {#if agents.length > 0}
+    <div class="team-roster">
+      {#each agents as a}
+        <button class="roster-chip" class:waiting={a.status === 'waiting'} onclick={() => previewAgent(a.name)} title={a.role || a.name}>
+          <span class="roster-dot status-{a.status}"></span>
+          <span class="roster-name">{a.name}</span>
+          <Icon name="terminal" size={11} />
+        </button>
+      {/each}
+    </div>
+  {/if}
+
+  <!-- Start panel: shown until a crew is up. Workspace = agents' working dir
+       (defaults to the current session's cwd), editable before starting. -->
+  {#if agents.length === 0}
+    <div class="team-start-panel">
+      {#if teamStarted}
+        <span class="reconnect-spinner-sm"></span>
+        <span class="start-hint">{t('teamStarting')}</span>
+      {:else}
+        <div class="start-ws">
+          <span class="start-ws-label">{t('teamWorkspace')}</span>
+          {#if editingWorkspace}
+            <input class="start-ws-input" bind:value={workspace}
+              onkeydown={(e) => { if (e.key === 'Enter') editingWorkspace = false; }}
+              placeholder="/path/to/project" />
+          {:else}
+            <button class="start-ws-path" onclick={() => editingWorkspace = true} title={workspace}>
+              {workspace || '—'} <Icon name="edit" size={11} />
+            </button>
+          {/if}
+        </div>
+        <button class="team-start" disabled={starting || !workspace.trim()} onclick={startTeam}>
+          {#if starting}<span class="reconnect-spinner-sm"></span>{:else}<Icon name="bot" size={14} />{/if}
+          {t('teamStart')}
+        </button>
+      {/if}
+    </div>
+  {/if}
+
+  <!-- Message log -->
+  <div class="team-log" bind:this={listEl}>
+    {#if messages.length === 0}
+      <div class="team-empty">{t('teamNoMessages')}</div>
+    {:else}
+      {#each messages as m (m.id)}
+        {#if isSystem(m)}
+          <div class="msg-system">{m.body}</div>
+        {:else}
+          <div class="msg-row" class:mine={isMine(m)}>
+            <div class="msg-bubble" class:mine={isMine(m)}>
+              {#if !isMine(m)}<div class="msg-from">{m.from}</div>{/if}
+              <div class="msg-body">{m.body}</div>
+              <div class="msg-time">{fmtTime(m.ts)}</div>
+            </div>
+          </div>
+        {/if}
+      {/each}
+    {/if}
+  </div>
+
+  <!-- Compose -->
+  <div class="team-compose">
+    {#if agents.length}
+      <div class="compose-mentions">
+        {#each agents as a}
+          <button class="mention-chip" onclick={() => mention(a.name)}>@{a.name}</button>
+        {/each}
+      </div>
+    {/if}
+    <div class="compose-row">
+      <textarea
+        class="compose-input"
+        bind:this={inputEl}
+        bind:value={draft}
+        onkeydown={onKeydown}
+        oninput={(e) => autogrow(e.currentTarget)}
+        placeholder={t('teamMessage')}
+        rows="1"
+      ></textarea>
+      <button class="compose-send" disabled={!draft.trim() || sending} onclick={send} aria-label={t('teamSend')} title={t('teamSendHint')}>
+        <Icon name="send" size={16} />
+      </button>
+    </div>
+  </div>
+{/snippet}
+
 <div class="team">
   {#if loading}
     <div class="team-empty">…</div>
@@ -225,97 +357,38 @@
       <Icon name="bot" size={28} />
       <p>{t('teamUnavailable')}</p>
     </div>
+  {:else if splitEligible && employees.length > 0}
+    <!-- Desktop split: agent grid (left) | draggable splitter | chat (right). -->
+    <div class="team-split" bind:this={splitRow}>
+      <div class="team-grid-pane" style="flex: {gridFrac} 1 0;">
+        <AgentGrid {crewSession} {employees} {fontSize} {visible} />
+      </div>
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="team-splitter" onmousedown={startDrag} title="Drag to resize"></div>
+      <div class="team-chat-pane" style="flex: {1 - gridFrac} 1 0;">
+        {@render chatPane()}
+      </div>
+    </div>
   {:else}
-    <!-- Roster: present agents as chips; tap to preview their tmux pane. -->
-    {#if agents.length > 0}
-      <div class="team-roster">
-        {#each agents as a}
-          <button class="roster-chip" class:waiting={a.status === 'waiting'} onclick={() => previewAgent(a.name)} title={a.role || a.name}>
-            <span class="roster-dot status-{a.status}"></span>
-            <span class="roster-name">{a.name}</span>
-            <Icon name="terminal" size={11} />
-          </button>
-        {/each}
-      </div>
-    {/if}
-
-    <!-- Start panel: shown until a crew is up. Workspace = agents' working dir
-         (defaults to the current session's cwd), editable before starting. -->
-    {#if agents.length === 0}
-      <div class="team-start-panel">
-        {#if teamStarted}
-          <span class="reconnect-spinner-sm"></span>
-          <span class="start-hint">{t('teamStarting')}</span>
-        {:else}
-          <div class="start-ws">
-            <span class="start-ws-label">{t('teamWorkspace')}</span>
-            {#if editingWorkspace}
-              <input class="start-ws-input" bind:value={workspace}
-                onkeydown={(e) => { if (e.key === 'Enter') editingWorkspace = false; }}
-                placeholder="/path/to/project" />
-            {:else}
-              <button class="start-ws-path" onclick={() => editingWorkspace = true} title={workspace}>
-                {workspace || '—'} <Icon name="edit" size={11} />
-              </button>
-            {/if}
-          </div>
-          <button class="team-start" disabled={starting || !workspace.trim()} onclick={startTeam}>
-            {#if starting}<span class="reconnect-spinner-sm"></span>{:else}<Icon name="bot" size={14} />{/if}
-            {t('teamStart')}
-          </button>
-        {/if}
-      </div>
-    {/if}
-
-    <!-- Message log -->
-    <div class="team-log" bind:this={listEl}>
-      {#if messages.length === 0}
-        <div class="team-empty">{t('teamNoMessages')}</div>
-      {:else}
-        {#each messages as m (m.id)}
-          {#if isSystem(m)}
-            <div class="msg-system">{m.body}</div>
-          {:else}
-            <div class="msg-row" class:mine={isMine(m)}>
-              <div class="msg-bubble" class:mine={isMine(m)}>
-                {#if !isMine(m)}<div class="msg-from">{m.from}</div>{/if}
-                <div class="msg-body">{m.body}</div>
-                <div class="msg-time">{fmtTime(m.ts)}</div>
-              </div>
-            </div>
-          {/if}
-        {/each}
-      {/if}
-    </div>
-
-    <!-- Compose -->
-    <div class="team-compose">
-      {#if agents.length}
-        <div class="compose-mentions">
-          {#each agents as a}
-            <button class="mention-chip" onclick={() => mention(a.name)}>@{a.name}</button>
-          {/each}
-        </div>
-      {/if}
-      <div class="compose-row">
-        <textarea
-          class="compose-input"
-          bind:this={inputEl}
-          bind:value={draft}
-          onkeydown={onKeydown}
-          oninput={(e) => autogrow(e.currentTarget)}
-          placeholder={t('teamMessage')}
-          rows="1"
-        ></textarea>
-        <button class="compose-send" disabled={!draft.trim() || sending} onclick={send} aria-label={t('teamSend')} title={t('teamSendHint')}>
-          <Icon name="send" size={16} />
-        </button>
-      </div>
-    </div>
+    {@render chatPane()}
   {/if}
 </div>
 
 <style>
+  /* Desktop split: grid pane | splitter | chat pane. */
+  .team-split { display: flex; height: 100%; min-height: 0; width: 100%; }
+  .team-grid-pane { min-width: 0; min-height: 0; overflow: hidden; }
+  .team-chat-pane {
+    min-width: 0; min-height: 0;
+    display: flex; flex-direction: column;
+    border-left: 1px solid var(--border);
+  }
+  .team-splitter {
+    flex: 0 0 6px; cursor: col-resize; background: var(--border);
+    transition: background 0.15s ease;
+  }
+  .team-splitter:hover { background: var(--accent); }
+
   .team {
     display: flex;
     flex-direction: column;

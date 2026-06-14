@@ -825,7 +825,7 @@
     {:else if page === 'sessions'}
       <Sessions {openTerminal} activeTarget={terminalTarget} visible={page === 'sessions'} />
     {:else if page === 'team'}
-      <Team visible={page === 'team'} currentSession={terminalSession} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} />
+      <Team visible={page === 'team'} currentSession={terminalSession} {fontSize} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} />
     {/if}
     {#if terminalTarget}
       <div class="page-layer" class:hidden={page !== 'files'}>

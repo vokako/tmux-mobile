@@ -38,7 +38,10 @@
   // focusable textarea per document, so N cells auto-focusing on mount/rebuild
   // fight each other and end up with input going nowhere. Single-pane is
   // always active.
-  let { target, session, command: initialCommand = '', viewMode = 'terminal', fontSize = 14, embedded = false, active = true, onChatSupported = () => {}, onSwitchPane = null, onPaneExit = () => {}, onClose = null } = $props();
+  // `chromeless` = embedded with NO window-switcher bar (used by the desktop
+  // agent grid, where each cell is pinned to one agent's pane — there is
+  // nothing to switch to, so the bar would only steal vertical space).
+  let { target, session, command: initialCommand = '', viewMode = 'terminal', fontSize = 14, embedded = false, active = true, chromeless = false, onChatSupported = () => {}, onSwitchPane = null, onPaneExit = () => {}, onClose = null } = $props();
 
   let input = $state('');
   let paneContent = $state('');
@@ -254,11 +257,16 @@
   // Embedded (split cell) always shows the bar — it's the cell's header.
   // Standalone keeps the "only when there's something to switch to" rule.
   let showSwitcher = $derived(
-    embedded || windows.length > 1 || !!currentWinAgent || otherAgentSessions.length > 0
+    !chromeless &&
+    (embedded || windows.length > 1 || !!currentWinAgent || otherAgentSessions.length > 0)
   );
 
   $effect(() => {
     if (!session || viewMode !== 'terminal') return;
+    // Chromeless cells (agent grid) have no switcher, so the window-list poll
+    // is pure waste — skip it entirely (N agent cells would otherwise each
+    // poll listPanes every few seconds).
+    if (chromeless) return;
     // In-flight guard: on a slow link a poll RPC can outlive the 5 s
     // interval; without the guard, ticks stack unbounded requests on a
     // link that is already struggling.
