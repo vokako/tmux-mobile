@@ -17,11 +17,23 @@ server. See `docs/design-docs/features/team.md` for architecture.
 - Each team is an isolated chat **room** (id = workspace slug) — separate
   conversation, roster, and agents. Many teams (one per project) coexist.
 - **Header dropdown** lists active teams (room · live agent count); pick one to
-  switch the chat + agent grid to it.
-- **+ New team** opens the workspace picker → `team_start_team(workspace)`.
+  switch the chat + agent grid to it. Live agent status chips sit on the same
+  header row (dot + name; wrap on overflow; tap → preview pane).
+- **+ New team** opens the workspace picker (folder browser) + a **roster
+  template** picker → `team_start_team(workspace, template)`.
 - **× Close team** stops the active team's agents (`team_close_team`, kills its
   tmux session); its chat log persists, so re-starting the same workspace
   resumes history.
+
+## Roster templates
+- A team launches from a **named roster template** at
+  `<config>/tmux-mobile/teams/<name>.json` (`{ agents:[{name, backend, role,
+  goal, backstory, model, manage}] }`). `default.json` is written on first run.
+- The new-team panel picks which template (A / B / …) to use.
+- An **editor** (edit button beside the picker) adds/renames/deletes templates
+  and edits every agent field, add/remove agents (`team_templates` /
+  `team_template_save` / `team_template_delete`).
+- An empty `model` on a kiro agent falls back to the server default model.
 
 ## Components
 

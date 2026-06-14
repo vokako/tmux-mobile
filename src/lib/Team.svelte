@@ -16,11 +16,12 @@
   import DirPicker from './DirPicker.svelte';
   import { t } from './i18n.svelte.js';
   import {
-    teamHistory, teamRoster, teamPost, teamStatus, teamTeams, teamStartTeam,
-    teamCloseTeam, teamEmployees,
+    teamHistory, teamRoster, teamPost, teamStatus, teamStartTeam,
+    teamCloseTeam, teamEmployees, teamTemplateSave, teamTemplateDelete,
     addTeamMessageListener, removeTeamMessageListener,
     listSessionsWithPanes, fsCwd,
   } from './ws.js';
+  import TeamTemplates from './TeamTemplates.svelte';
 
   let {
     visible = false,
@@ -67,6 +68,11 @@
   // Workspace for a NEW team. Defaulted (current session cwd > server default).
   let workspace = $state('');
   let showPicker = $state(false);   // folder-browser open in the new-team panel
+  // Roster templates (named). `templates` = [{name, agents}]; `selectedTemplate`
+  // is the one a new team will use. `showTemplates` opens the editor panel.
+  let templates = $state([]);
+  let selectedTemplate = $state('default');
+  let showTemplates = $state(false);
 
   let activeTeam = $derived(teams.find(x => x.room === activeRoom) || null);
   // team session for the active team (window_name → agent for pane preview).
@@ -84,6 +90,11 @@
   async function refreshTeams() {
     const s = await teamStatus();
     teams = s?.teams || [];
+    templates = s?.templates || [];
+    // Keep selectedTemplate valid (default if the chosen one vanished).
+    if (!templates.some(x => x.name === selectedTemplate)) {
+      selectedTemplate = templates[0]?.name || 'default';
+    }
     available = true;
     if (!workspace) {
       let ws = '';
@@ -178,7 +189,7 @@
     starting = true;
     showPicker = false;
     try {
-      const res = await teamStartTeam(workspace.trim());
+      const res = await teamStartTeam(workspace.trim(), selectedTemplate);
       newTeam = false;
       if (res?.room) {
         activeRoom = res.room;
@@ -301,7 +312,8 @@
 </script>
 
 {#snippet teamSwitcher()}
-  <!-- Header: active-team dropdown + new + close. -->
+  <!-- Header: active-team dropdown + close, then the live agent status chips on
+       the SAME row (wrapping to the next line when they overflow). -->
   <div class="team-header">
     <div class="team-pick">
       <button class="team-pick-btn" onclick={() => switcherOpen = !switcherOpen}>
@@ -333,6 +345,16 @@
         <Icon name="x" size={13} />
       </button>
     {/if}
+    <!-- Agent status chips: dot + name only; tap to preview the agent's pane.
+         flex-wrap drops overflow onto the next line. -->
+    {#if !newTeam && activeRoom}
+      {#each agents as a}
+        <button class="roster-chip" onclick={() => previewAgent(a.name)} title={a.role || a.name}>
+          <span class="roster-dot status-{a.status}"></span>
+          <span class="roster-name">{a.name}</span>
+        </button>
+      {/each}
+    {/if}
   </div>
 {/snippet}
 
@@ -352,6 +374,18 @@
         onPick={(p) => { workspace = p; showPicker = false; }}
         onClose={() => showPicker = false} />
     {/if}
+    <!-- Roster template picker: which named roster (A/B/…) this team uses. -->
+    <div class="start-row">
+      <span class="start-ws-label">{t('teamTemplate')}</span>
+      <select class="start-tpl" bind:value={selectedTemplate}>
+        {#each templates as tpl}
+          <option value={tpl.name}>{tpl.name} ({tpl.agents?.length ?? 0})</option>
+        {/each}
+      </select>
+      <button class="start-browse" onclick={() => showTemplates = true} aria-label={t('teamEditTemplates')} title={t('teamEditTemplates')}>
+        <Icon name="edit" size={14} />
+      </button>
+    </div>
     <div class="start-actions">
       <button class="team-start" disabled={starting || !workspace.trim()} onclick={startTeam}>
         {#if starting}<span class="reconnect-spinner-sm"></span>{:else}<Icon name="bot" size={14} />{/if}
@@ -370,19 +404,9 @@
   {#if newTeam || !activeRoom}
     {@render newTeamPanel()}
   {:else}
-    <!-- Roster: present agents as chips; tap to preview their tmux pane (mobile)
-         or focus its grid cell (desktop, via previewAgent → openTerminal). -->
-    {#if agents.length > 0}
-      <div class="team-roster">
-        {#each agents as a}
-          <button class="roster-chip" class:waiting={a.status === 'waiting'} onclick={() => previewAgent(a.name)} title={a.role || a.name}>
-            <span class="roster-dot status-{a.status}"></span>
-            <span class="roster-name">{a.name}</span>
-            <Icon name="terminal" size={11} />
-          </button>
-        {/each}
-      </div>
-    {:else}
+    <!-- Agent chips live in the header now. Show a "coming online" hint until
+         the first agent appears. -->
+    {#if agents.length === 0}
       <div class="team-start-panel">
         <span class="reconnect-spinner-sm"></span>
         <span class="start-hint">{t('teamStarting')}</span>
@@ -462,6 +486,14 @@
   {:else}
     {@render chatPane()}
   {/if}
+
+  {#if showTemplates}
+    <TeamTemplates
+      {templates}
+      onSave={async (name, agents) => { await teamTemplateSave(name, agents); await refresh(); }}
+      onDelete={async (name) => { await teamTemplateDelete(name); await refresh(); }}
+      onClose={() => showTemplates = false} />
+  {/if}
 </div>
 
 <style>
@@ -489,11 +521,11 @@
 
   /* Team switcher header */
   .team-header {
-    display: flex; align-items: center; gap: 8px;
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
     padding: 6px 10px; flex-shrink: 0;
     border-bottom: 1px solid var(--border);
   }
-  .team-pick { position: relative; flex: 1; min-width: 0; }
+  .team-pick { position: relative; flex-shrink: 0; min-width: 0; }
   .team-pick-btn {
     display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
     padding: 5px 10px; border: 1px solid var(--border2); border-radius: 8px;
@@ -589,6 +621,13 @@
     -webkit-tap-highlight-color: transparent;
   }
   .start-browse:active, .start-browse.on { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
+  .start-tpl {
+    flex: 1; min-width: 0;
+    padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 8px;
+    background: var(--input-bg); color: var(--text); font-size: 12px; outline: none;
+    font-family: 'Maple Mono NF CN','Maple Mono','SF Mono',Menlo,monospace;
+  }
+  .start-tpl:focus { border-color: var(--accent); }
   .start-actions { display: flex; align-items: center; gap: 8px; }
   .team-start {
     display: inline-flex; align-items: center; gap: 6px;
@@ -608,7 +647,7 @@
   @keyframes team-spin { to { transform: rotate(360deg); } }
   .roster-chip {
     display: inline-flex; align-items: center; gap: 6px;
-    padding: 4px 10px; height: 28px;
+    padding: 3px 9px; height: 26px;
     border: 1px solid var(--border2); border-radius: 999px;
     background: var(--input-bg); color: var(--text2);
     font-size: 12px; font-weight: 500; cursor: pointer; flex-shrink: 0;

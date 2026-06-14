@@ -57,15 +57,22 @@ pub trait TeamBridge: Send + Sync {
     /// Raw employee list for `room` as `(name, spec, state)` for the
     /// supervisor's reconcile loop.
     fn employee_specs(&self, room: &str) -> Vec<(String, serde_json::Value, String)>;
-    /// Start a team for `workspace`: derive its room (= workspace slug), seed
-    /// the default roster, and launch agents into a per-workspace tmux session.
-    /// Idempotent per room. Returns `{ room, started, workspace }`.
-    fn start_team(&self, workspace: &str) -> serde_json::Value;
+    /// Start a team for `workspace` from `template` (named roster; empty =
+    /// "default"): derive its room (= workspace slug), seed the roster, launch
+    /// agents into a per-workspace tmux session. Idempotent per room. Returns
+    /// `{ room, started, workspace }`.
+    fn start_team(&self, workspace: &str, template: &str) -> serde_json::Value;
     /// Stop a team: kill its tmux session and forget it (the chat log persists
     /// in the db). Returns true if the room was known.
     fn close_team(&self, room: &str) -> bool;
     /// All known teams: `[{ room, workspace, session, started, agents }]`.
     fn teams(&self) -> serde_json::Value;
+    /// All roster templates: `[{ name, agents:[…] }]`.
+    fn templates(&self) -> serde_json::Value;
+    /// Save (overwrite) a template's agent array.
+    fn save_template(&self, name: &str, agents: &serde_json::Value) -> Result<(), String>;
+    /// Delete a template (the built-in "default" is protected).
+    fn delete_template(&self, name: &str) -> Result<(), String>;
     /// The default workspace to offer in the UI when none is chosen (the
     /// current terminal session's cwd if known, else the user's home).
     fn default_workspace(&self) -> String;
@@ -938,23 +945,48 @@ fn handle_team_request(req: &Request, team: Option<&dyn TeamBridge>) -> Response
         "team_status" => Response::ok(id, serde_json::json!({
             "available": true,
             "teams": bus.teams().get("teams").cloned().unwrap_or(serde_json::json!([])),
+            "templates": bus.templates().get("templates").cloned().unwrap_or(serde_json::json!([])),
             "default_workspace": bus.default_workspace(),
         })),
         "team_teams" => Response::ok(id, bus.teams()),
+        // Roster templates (named agent rosters the user can edit).
+        "team_templates" => Response::ok(id, bus.templates()),
+        "team_template_save" => {
+            let name = match require_str(p, "name") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            let agents = p.get("agents").cloned().unwrap_or(serde_json::json!([]));
+            match bus.save_template(name, &agents) {
+                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true, "name": name })),
+                Err(e) => Response::err(id, ERR_INTERNAL, e),
+            }
+        }
+        "team_template_delete" => {
+            let name = match require_str(p, "name") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            match bus.delete_template(name) {
+                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
+                Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
+            }
+        }
         "team_history" => {
             let limit = p.get("limit").and_then(|v| v.as_i64()).unwrap_or(100).clamp(1, 1000);
             Response::ok(id, bus.history(room, limit))
         }
         "team_roster" => Response::ok(id, bus.roster(room)),
         "team_employees" => Response::ok(id, bus.employees(room)),
-        // Operator action: spin up a team in `workspace` (its room = the
-        // workspace slug). Idempotent per room; returns { room, started, workspace }.
+        // Operator action: spin up a team in `workspace` from `template` (its
+        // room = the workspace slug). Idempotent; returns { room, started, workspace }.
         "team_start_team" => {
             let workspace = p.get("workspace").and_then(|v| v.as_str())
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| bus.default_workspace());
-            Response::ok(id, bus.start_team(&workspace))
+            let template = p.get("template").and_then(|v| v.as_str()).unwrap_or("default");
+            Response::ok(id, bus.start_team(&workspace, template))
         }
         // Stop a team: kill its tmux session, forget it (chat log persists).
         "team_close_team" => {
@@ -1852,14 +1884,23 @@ mod tests {
         fn employee_specs(&self, _room: &str) -> Vec<(String, serde_json::Value, String)> {
             Vec::new()
         }
-        fn start_team(&self, workspace: &str) -> serde_json::Value {
-            serde_json::json!({ "started": true, "room": "ws", "workspace": workspace })
+        fn start_team(&self, workspace: &str, template: &str) -> serde_json::Value {
+            serde_json::json!({ "started": true, "room": "ws", "workspace": workspace, "template": template })
         }
         fn close_team(&self, _room: &str) -> bool {
             true
         }
         fn teams(&self) -> serde_json::Value {
             serde_json::json!({ "teams": [] })
+        }
+        fn templates(&self) -> serde_json::Value {
+            serde_json::json!({ "templates": [{ "name": "default", "agents": [] }] })
+        }
+        fn save_template(&self, _name: &str, _agents: &serde_json::Value) -> Result<(), String> {
+            Ok(())
+        }
+        fn delete_template(&self, _name: &str) -> Result<(), String> {
+            Ok(())
         }
         fn default_workspace(&self) -> String {
             "/tmp/ws".to_string()

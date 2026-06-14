@@ -34,43 +34,94 @@ const KEEPALIVE_SH: &str = include_str!("../../team/hooks/keepalive.sh");
 const RECONCILE_INTERVAL: Duration = Duration::from_secs(3);
 const KICK: &str = "你已接入 team 群聊（协作规则见 AGENTS.md）。直接调用 wait 等待消息；被点名就用 post 回复发起人，没你的事就继续 wait；不要主动停止。";
 
-/// One member of the default team (role / goal / backstory / backend / manage).
-struct Member {
-    name: &'static str,
-    backend: &'static str,
-    role: &'static str,
-    goal: &'static str,
-    backstory: &'static str,
-    manage: bool,
+// ─── Team templates (named rosters under <config>/tmux-mobile/teams/) ──────
+// A template is a JSON file `teams/<name>.json` = { "agents": [ {name, backend,
+// role, goal, backstory, model, manage}, … ] }. The user edits these from the
+// app (Templates panel); `start_team` seeds the chosen template into the room.
+// The built-in default is written to teams/default.json on first run so there
+// is always something to edit.
+
+/// Default model placeholder substituted in when a kiro agent leaves model empty.
+pub const BUILTIN_TEMPLATE: &str = include_str!("../../team/templates/default.json");
+
+/// The teams/ template directory.
+fn templates_dir() -> PathBuf {
+    crate::config::config_dir().join("teams")
 }
 
-/// The built-in team — same roster as the original `team.yaml`.
-const DEFAULT_TEAM: &[Member] = &[
-    Member {
-        name: "manager",
-        backend: "kiro",
-        role: "经理",
-        goal: "把人类给的目标拆成清晰的小任务，分派给 worker；完成后向人类汇报结果。",
-        backstory: "你统筹全局，不亲自写实现，只做拆解、分派与收口。",
-        manage: true,
-    },
-    Member {
-        name: "worker",
-        backend: "kiro",
-        role: "执行者",
-        goal: "领取分派给你的任务并完成，把结果简洁地回复给 manager。",
-        backstory: "你专注把单个任务做扎实，做完就汇报。",
-        manage: false,
-    },
-    Member {
-        name: "reviewer",
-        backend: "kiro",
-        role: "评审",
-        goal: "检查 worker 的产出，批准或指出一处需要改进的地方。",
-        backstory: "你严谨、建设性，只关注质量与正确性。",
-        manage: false,
-    },
-];
+fn template_path(name: &str) -> PathBuf {
+    // Sanitize to a bare file stem so a template name can't escape the dir.
+    let safe: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect();
+    let safe = if safe.trim_matches('-').is_empty() { "default".to_string() } else { safe };
+    templates_dir().join(format!("{}.json", safe))
+}
+
+/// Ensure the teams/ dir exists and holds at least the built-in default.
+pub fn ensure_templates_seeded() {
+    let dir = templates_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let def = dir.join("default.json");
+    if !def.exists() {
+        let _ = std::fs::write(&def, BUILTIN_TEMPLATE);
+    }
+}
+
+/// List available template names (file stems in teams/).
+pub fn list_templates() -> Vec<String> {
+    ensure_templates_seeded();
+    let mut names: Vec<String> = std::fs::read_dir(templates_dir())
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter_map(|e| {
+                    let p = e.path();
+                    if p.extension().and_then(|x| x.to_str()) == Some("json") {
+                        p.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    names
+}
+
+/// Read a template's agent list (the `agents` array), or empty if missing/bad.
+pub fn read_template(name: &str) -> Vec<Value> {
+    std::fs::read_to_string(template_path(name))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.get("agents").and_then(|a| a.as_array()).cloned())
+        .unwrap_or_default()
+}
+
+/// Read every template as `{ name, agents }` for the editor panel.
+pub fn read_all_templates() -> Vec<Value> {
+    list_templates()
+        .into_iter()
+        .map(|name| serde_json::json!({ "name": name, "agents": read_template(&name) }))
+        .collect()
+}
+
+/// Write a template (overwrites). `agents` is the raw array of member objects.
+pub fn save_template(name: &str, agents: &Value) -> Result<(), String> {
+    ensure_templates_seeded();
+    let body = serde_json::json!({ "agents": agents });
+    let s = serde_json::to_string_pretty(&body).map_err(|e| e.to_string())?;
+    std::fs::write(template_path(name), s).map_err(|e| e.to_string())
+}
+
+/// Delete a template (the built-in default is protected).
+pub fn delete_template(name: &str) -> Result<(), String> {
+    if name == "default" {
+        return Err("the default template cannot be deleted".into());
+    }
+    std::fs::remove_file(template_path(name)).map_err(|e| e.to_string())
+}
 
 /// Per-run config homes under `~/.config/tmux-mobile/team/<slug>/`. NOTE: this is
 /// where each backend's *config* + the shared brief live — NOT the agents'
@@ -120,7 +171,7 @@ pub struct TeamConfig {
 /// agents' working directory is `workspace` (the user's project); our config +
 /// brief live in a private per-team home, never written into the project.
 /// Best-effort — any failure is logged, never fatal.
-pub fn start(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: String, workspace: String) {
+pub fn start(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: String, workspace: String, template: String) {
     tokio::spawn(async move {
         let session = format!("tmm-team-{}", room);
         let paths = Paths::new(&workspace, &room);
@@ -128,8 +179,9 @@ pub fn start(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: String, workspa
             eprintln!("⚠️  team: failed to prepare config home: {}", e);
             return;
         }
-        seed_default_team(&*bridge, &room, &cfg);
-        println!("🜂 team: room={} workspace={} session={}", room, workspace, session);
+        let tpl = if template.trim().is_empty() { "default".to_string() } else { template };
+        seed_template(&*bridge, &room, &tpl, &cfg);
+        println!("🜂 team: room={} workspace={} template={} session={}", room, workspace, tpl, session);
         reconcile_loop(bridge, cfg, room, session, paths).await;
     });
 }
@@ -166,27 +218,47 @@ fn prepare_home(p: &Paths) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Register the built-in team as employees, unless a team already exists (so a
-/// restart doesn't duplicate-seed; seed_employee also rejects taken names).
-fn seed_default_team(bridge: &dyn TeamBridge, room: &str, cfg: &TeamConfig) {
+/// Seed the chosen `template`'s roster as employees, unless the room already has
+/// a team (so a restart doesn't duplicate-seed; seed_employee also rejects taken
+/// names). Each agent's `spec` is the template entry; an empty `model` on a kiro
+/// agent falls back to the server default.
+fn seed_template(bridge: &dyn TeamBridge, room: &str, template: &str, cfg: &TeamConfig) {
     let existing = bridge.employee_specs(room);
     if !existing.is_empty() {
-        return; // a team is already seeded (this run or a previous one)
+        return; // already seeded (this run or a recovered one)
     }
-    for m in DEFAULT_TEAM {
+    let agents = read_template(template);
+    if agents.is_empty() {
+        eprintln!("⚠️  team: template '{}' empty/missing; nothing to seed", template);
+        return;
+    }
+    let mut names = Vec::new();
+    for a in &agents {
+        let name = a.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
+        if name.is_empty() { continue; }
+        let backend = a.get("backend").and_then(|v| v.as_str()).unwrap_or("kiro");
+        // Empty model on a kiro agent → server default; other backends keep null.
+        let model = a.get("model").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+        let model = match (backend, model) {
+            (_, Some(m)) => Value::String(m.to_string()),
+            ("kiro", None) => Value::String(cfg.model.clone()),
+            _ => Value::Null,
+        };
         let spec = serde_json::json!({
-            "role": m.role,
-            "goal": m.goal,
-            "backstory": m.backstory,
-            "backend": m.backend,
-            "manage": m.manage,
-            "model": if m.backend == "kiro" { Value::String(cfg.model.clone()) } else { Value::Null },
+            "role": a.get("role").and_then(|v| v.as_str()).unwrap_or(name),
+            "goal": a.get("goal").and_then(|v| v.as_str()).unwrap_or(""),
+            "backstory": a.get("backstory").and_then(|v| v.as_str()).unwrap_or(""),
+            "backend": backend,
+            "manage": a.get("manage").and_then(|v| v.as_bool()).unwrap_or(false),
+            "model": model,
         });
-        if let Err(e) = bridge.seed_employee(room, m.name, &spec) {
-            eprintln!("⚠️  team: seed '{}' failed: {}", m.name, e);
+        if let Err(e) = bridge.seed_employee(room, name, &spec) {
+            eprintln!("⚠️  team: seed '{}' failed: {}", name, e);
+        } else {
+            names.push(name.to_string());
         }
     }
-    println!("🜂 team: seeded default roster (manager · worker · reviewer); launching…");
+    println!("🜂 team: seeded '{}' ({}); launching…", template, names.join(" · "));
 }
 
 /// Reconcile the desired roster into real agent windows, forever (until the
@@ -483,9 +555,12 @@ mod tests {
             Ok(())
         }
         fn employee_specs(&self, _room: &str) -> Vec<(String, Value, String)> { self.existing.clone() }
-        fn start_team(&self, _workspace: &str) -> Value { serde_json::json!({ "started": false }) }
+        fn start_team(&self, _workspace: &str, _template: &str) -> Value { serde_json::json!({ "started": false }) }
         fn close_team(&self, _room: &str) -> bool { false }
         fn teams(&self) -> Value { serde_json::json!({ "teams": [] }) }
+        fn templates(&self) -> Value { serde_json::json!({ "templates": [] }) }
+        fn save_template(&self, _name: &str, _agents: &Value) -> Result<(), String> { Ok(()) }
+        fn delete_template(&self, _name: &str) -> Result<(), String> { Ok(()) }
         fn default_workspace(&self) -> String { "/tmp/ws".into() }
         fn subscribe(&self) -> tokio::sync::broadcast::Receiver<String> {
             tokio::sync::broadcast::channel(1).1
@@ -497,27 +572,37 @@ mod tests {
     }
 
     #[test]
-    fn seed_default_team_seeds_three_with_one_manager() {
-        let b = RecordingBridge { seeded: Mutex::new(vec![]), existing: vec![] };
-        seed_default_team(&b, "myroom", &cfg());
-        let seeded = b.seeded.lock().unwrap();
-        assert_eq!(seeded.len(), 3, "manager + worker + reviewer");
-        let names: Vec<&str> = seeded.iter().map(|(n, _)| n.as_str()).collect();
+    fn builtin_default_template_has_three_agents_one_manager() {
+        // Parse the embedded built-in template (what teams/default.json seeds).
+        let v: Value = serde_json::from_str(BUILTIN_TEMPLATE).unwrap();
+        let agents = v["agents"].as_array().unwrap();
+        assert_eq!(agents.len(), 3, "manager + worker + reviewer");
+        let names: Vec<&str> = agents.iter().filter_map(|a| a["name"].as_str()).collect();
         assert!(names.contains(&"manager") && names.contains(&"worker") && names.contains(&"reviewer"));
-        let managers = seeded.iter().filter(|(_, s)| s["manage"] == true).count();
-        assert_eq!(managers, 1);
-        // kiro agents carry a model; the spec must include it.
-        assert_eq!(seeded[0].1["model"], "claude-sonnet-4.6");
+        let managers = agents.iter().filter(|a| a["manage"] == true).count();
+        assert_eq!(managers, 1, "exactly one manager");
     }
 
     #[test]
-    fn seed_default_team_skips_when_team_already_present() {
+    fn seed_template_skips_when_team_already_present() {
         let b = RecordingBridge {
             seeded: Mutex::new(vec![]),
             existing: vec![("manager".into(), Value::Null, "active".into())],
         };
-        seed_default_team(&b, "myroom", &cfg());
+        seed_template(&b, "myroom", "default", &cfg());
         assert!(b.seeded.lock().unwrap().is_empty(), "must not re-seed an existing team");
+    }
+
+    #[test]
+    fn seed_template_kiro_empty_model_falls_back_to_default() {
+        // seed_template reads from disk; ensure the built-in default exists.
+        ensure_templates_seeded();
+        let b = RecordingBridge { seeded: Mutex::new(vec![]), existing: vec![] };
+        seed_template(&b, "myroom", "default", &cfg());
+        let seeded = b.seeded.lock().unwrap();
+        assert!(!seeded.is_empty(), "default template should seed agents");
+        // kiro agents with empty model inherit the server default.
+        assert!(seeded.iter().all(|(_, s)| s["model"] == "claude-sonnet-4.6"));
     }
 
     #[test]
@@ -552,12 +637,6 @@ mod tests {
     fn role_line_is_single_line() {
         let r = role_line("worker", "do\nthings\nwell");
         assert!(!r.contains('\n'), "role line must be single-line: {}", r);
-    }
-
-    #[test]
-    fn default_team_has_one_manager() {
-        let managers = DEFAULT_TEAM.iter().filter(|m| m.manage).count();
-        assert_eq!(managers, 1, "exactly one manager in the default team");
     }
 }
 

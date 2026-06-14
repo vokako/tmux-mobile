@@ -23,6 +23,7 @@ const SESSION_PREFIX: &str = "tmm-team-";
 struct Team {
     bus: Bus,
     workspace: String,
+    template: String,  // roster template this team was started from
     session: String,   // tmm-team-<room>
     started: bool,     // supervisor launched for this room
 }
@@ -45,6 +46,9 @@ impl TeamManager {
     /// Open the store, start the MCP/dashboard daemon (room-aware), and recover
     /// any teams still running in tmux from a previous run.
     pub fn start(db: &str, _room: &str, bind: &str, model: &str) -> Result<Arc<TeamManager>, Box<dyn std::error::Error>> {
+        // Write the built-in default roster template if the teams/ dir is empty,
+        // so the user always has something to pick + edit.
+        team::ensure_templates_seeded();
         if let Some(parent) = std::path::Path::new(db).parent() {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent).ok();
@@ -102,8 +106,11 @@ impl TeamManager {
                 Some(r) if !r.is_empty() => r.to_string(),
                 _ => continue,
             };
-            let workspace = meta.get(&room).cloned().unwrap_or_default();
-            if self.ensure_room(&room, &workspace).is_err() {
+            let (workspace, template) = meta
+                .get(&room)
+                .map(|(w, t)| (w.clone(), t.clone()))
+                .unwrap_or_default();
+            if self.ensure_room(&room, &workspace, &template).is_err() {
                 continue;
             }
             // Mark started + relaunch the reconcile loop, which ADOPTS the
@@ -113,36 +120,46 @@ impl TeamManager {
             }
             if let Some(arc) = self.self_ref.get().and_then(|w| w.upgrade()) {
                 let bridge: Arc<dyn TeamBridge> = arc;
-                team::start(bridge, self.cfg.clone(), room.clone(), workspace);
+                team::start(bridge, self.cfg.clone(), room.clone(), workspace, template);
                 println!("🜂 team: recovered running team '{}'", room);
             }
         }
     }
 
-    fn load_meta(&self) -> HashMap<String, String> {
-        std::fs::read_to_string(&self.meta_path)
+    /// room → (workspace, template), persisted to teams.json.
+    fn load_meta(&self) -> HashMap<String, (String, String)> {
+        let v: serde_json::Value = std::fs::read_to_string(&self.meta_path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+            .unwrap_or(serde_json::Value::Null);
+        let mut map = HashMap::new();
+        if let Some(obj) = v.as_object() {
+            for (room, entry) in obj {
+                let ws = entry.get("workspace").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                let tpl = entry.get("template").and_then(|x| x.as_str()).unwrap_or("default").to_string();
+                map.insert(room.clone(), (ws, tpl));
+            }
+        }
+        map
     }
 
-    /// Persist room→workspace for every known team (best-effort).
+    /// Persist room→{workspace,template} for every known team (best-effort).
     fn save_meta(&self) {
-        let map: HashMap<String, String> = self
+        let map: serde_json::Map<String, serde_json::Value> = self
             .teams
             .lock()
             .unwrap()
             .iter()
-            .map(|(room, t)| (room.clone(), t.workspace.clone()))
+            .map(|(room, t)| (room.clone(), serde_json::json!({ "workspace": t.workspace, "template": t.template })))
             .collect();
-        if let Ok(s) = serde_json::to_string_pretty(&map) {
+        if let Ok(s) = serde_json::to_string_pretty(&serde_json::Value::Object(map)) {
             let _ = std::fs::write(&self.meta_path, s);
         }
     }
 
     /// Get an existing room's bus, or register it over the shared connection and
-    /// start its re-broadcast pump. `workspace` is recorded on first open.
-    fn ensure_room(&self, room: &str, workspace: &str) -> Result<Bus, String> {
+    /// start its re-broadcast pump. `workspace`/`template` recorded on first open.
+    fn ensure_room(&self, room: &str, workspace: &str, template: &str) -> Result<Bus, String> {
         {
             let teams = self.teams.lock().unwrap();
             if let Some(t) = teams.get(room) {
@@ -180,6 +197,7 @@ impl TeamManager {
                 Team {
                     bus: bus.clone(),
                     workspace: workspace.to_string(),
+                    template: if template.is_empty() { "default".to_string() } else { template.to_string() },
                     session: format!("{}{}", SESSION_PREFIX, room),
                     started: false,
                 },
@@ -252,12 +270,13 @@ impl TeamBridge for TeamManager {
             .collect()
     }
 
-    fn start_team(&self, workspace: &str) -> serde_json::Value {
+    fn start_team(&self, workspace: &str, template: &str) -> serde_json::Value {
         let ws = if workspace.trim().is_empty() { self.default_workspace() } else { workspace.trim().to_string() };
+        let tpl = if template.trim().is_empty() { "default".to_string() } else { template.trim().to_string() };
         let room = team::workspace_slug(&ws);
 
         // Open/register the room, then mark it started (one-shot per room).
-        if let Err(e) = self.ensure_room(&room, &ws) {
+        if let Err(e) = self.ensure_room(&room, &ws, &tpl) {
             return serde_json::json!({ "started": false, "room": room, "workspace": ws, "error": e });
         }
         let already = {
@@ -273,8 +292,8 @@ impl TeamBridge for TeamManager {
         match self.self_ref.get().and_then(|w| w.upgrade()) {
             Some(arc) => {
                 let bridge: Arc<dyn TeamBridge> = arc;
-                team::start(bridge, self.cfg.clone(), room.clone(), ws.clone());
-                serde_json::json!({ "started": true, "room": room, "workspace": ws })
+                team::start(bridge, self.cfg.clone(), room.clone(), ws.clone(), tpl.clone());
+                serde_json::json!({ "started": true, "room": room, "workspace": ws, "template": tpl })
             }
             None => {
                 if let Some(t) = self.teams.lock().unwrap().get_mut(&room) { t.started = false; }
@@ -309,6 +328,7 @@ impl TeamBridge for TeamManager {
                 serde_json::json!({
                     "room": t.session.strip_prefix(SESSION_PREFIX).unwrap_or(&t.session),
                     "workspace": t.workspace,
+                    "template": t.template,
                     "session": t.session,
                     "started": t.started,
                     "agents": agents,
@@ -316,6 +336,18 @@ impl TeamBridge for TeamManager {
             })
             .collect();
         serde_json::json!({ "teams": list })
+    }
+
+    fn templates(&self) -> serde_json::Value {
+        serde_json::json!({ "templates": team::read_all_templates() })
+    }
+
+    fn save_template(&self, name: &str, agents: &serde_json::Value) -> Result<(), String> {
+        team::save_template(name, agents)
+    }
+
+    fn delete_template(&self, name: &str) -> Result<(), String> {
+        team::delete_template(name)
     }
 
     fn default_workspace(&self) -> String {
@@ -365,7 +397,7 @@ mod tests {
         assert!(m.room_bus("alpha").is_none());
         assert!(m.post("alpha", "human", "hi", false).is_err());
         // Registering the room opens it.
-        m.ensure_room("alpha", "/tmp/alpha").unwrap();
+        m.ensure_room("alpha", "/tmp/alpha", "default").unwrap();
         assert!(m.room_bus("alpha").is_some());
         assert!(m.post("alpha", "human", "hi", false).is_ok());
     }
@@ -373,8 +405,8 @@ mod tests {
     #[tokio::test]
     async fn rooms_are_isolated() {
         let m = manager();
-        m.ensure_room("alpha", "/tmp/alpha").unwrap();
-        m.ensure_room("beta", "/tmp/beta").unwrap();
+        m.ensure_room("alpha", "/tmp/alpha", "default").unwrap();
+        m.ensure_room("beta", "/tmp/beta", "default").unwrap();
         m.post("alpha", "human", "hello alpha", false).unwrap();
         m.post("beta", "human", "hello beta", false).unwrap();
 
@@ -393,7 +425,7 @@ mod tests {
     #[tokio::test]
     async fn teams_lists_registered_rooms() {
         let m = manager();
-        m.ensure_room("alpha", "/tmp/alpha").unwrap();
+        m.ensure_room("alpha", "/tmp/alpha", "default").unwrap();
         let teams = m.teams();
         let arr = teams["teams"].as_array().unwrap();
         assert_eq!(arr.len(), 1);

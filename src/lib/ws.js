@@ -584,9 +584,14 @@ export const teamHistory = (room, limit = 100) => call('team_history', { room, l
 export const teamRoster = (room) => call('team_roster', { room });
 export const teamEmployees = (room) => call('team_employees', { room });
 export const teamPost = (room, body, requires_reply) => call('team_post', { room, body, requires_reply });
-// Operator actions: spin up a team for a workspace (room = its slug), or close one.
-export const teamStartTeam = (workspace) => call('team_start_team', { workspace });
+// Operator actions: spin up a team for a workspace (room = its slug) from a
+// named roster template, or close one.
+export const teamStartTeam = (workspace, template) => call('team_start_team', { workspace, template });
 export const teamCloseTeam = (room) => call('team_close_team', { room });
+// Roster templates (named agent rosters; edited in the Templates settings panel).
+export const teamTemplates = () => call('team_templates');
+export const teamTemplateSave = (name, agents) => call('team_template_save', { name, agents });
+export const teamTemplateDelete = (name) => call('team_template_delete', { name });
 
 // Subscription refcount per target. The server keeps ONE subscription entry
 // per target, so two split cells on the same window must NOT let the first
