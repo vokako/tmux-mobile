@@ -61,9 +61,9 @@ const pending = new Map();
 // other's intact.
 const paneOutputListeners = new Map(); // target -> Set<cb(target, content, cursor, current_command)>
 const paneClosedListeners = new Map(); // target -> Set<cb(target)>
-// Crew group-chat message push listeners (Team tab). Unkeyed — one stream
+// Team group-chat message push listeners (Team tab). Unkeyed — one stream
 // for the whole room — so a plain Set, not a per-target map.
-const crewMessageListeners = new Set(); // Set<cb(message)>
+const teamMessageListeners = new Set(); // Set<cb(message)>
 
 function addListener(map, target, cb) {
   let set = map.get(target);
@@ -92,8 +92,8 @@ export function addPaneOutputListener(target, cb) { addListener(paneOutputListen
 export function removePaneOutputListener(target, cb) { removeListener(paneOutputListeners, target, cb); }
 export function addPaneClosedListener(target, cb) { addListener(paneClosedListeners, target, cb); }
 export function removePaneClosedListener(target, cb) { removeListener(paneClosedListeners, target, cb); }
-export function addCrewMessageListener(cb) { crewMessageListeners.add(cb); }
-export function removeCrewMessageListener(cb) { crewMessageListeners.delete(cb); }
+export function addTeamMessageListener(cb) { teamMessageListeners.add(cb); }
+export function removeTeamMessageListener(cb) { teamMessageListeners.delete(cb); }
 export function setOnDisconnect(cb) { onDisconnect = cb; }
 
 // --- Crypto helpers (Web Crypto API) ---
@@ -400,9 +400,9 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
         return;
       }
 
-      if (data.method === 'crew_message') {
+      if (data.method === 'team_message') {
         const m = data.params?.message;
-        if (m) for (const cb of crewMessageListeners) cb(m);
+        if (m) for (const cb of teamMessageListeners) cb(m);
         return;
       }
 
@@ -573,20 +573,20 @@ export const fsUpload = (path, data) => call('fs_upload', { path, data }, 60000)
 export const fsConvert = (path, format = 'html') => call('fs_convert', { path, format });
 export const gitCmd = (subcmd, args = [], cwd) => call('git', { subcmd, args, cwd });
 
-// Crew multi-agent bus (Team tab). Only available when the server has the
+// Team multi-agent bus (Team tab). Only available when the server has the
 // in-process bus wired (desktop); on a server without it these reject with a
 // method-not-found error, which the Team tab uses to hide itself.
-// All chat ops are scoped to a team `room`. crew_status / crew_teams are
+// All chat ops are scoped to a team `room`. team_status / team_teams are
 // team-agnostic (they list teams); the rest take the active room.
-export const crewStatus = () => call('crew_status');
-export const crewTeams = () => call('crew_teams');
-export const crewHistory = (room, limit = 100) => call('crew_history', { room, limit });
-export const crewRoster = (room) => call('crew_roster', { room });
-export const crewEmployees = (room) => call('crew_employees', { room });
-export const crewPost = (room, body, requires_reply) => call('crew_post', { room, body, requires_reply });
+export const teamStatus = () => call('team_status');
+export const teamTeams = () => call('team_teams');
+export const teamHistory = (room, limit = 100) => call('team_history', { room, limit });
+export const teamRoster = (room) => call('team_roster', { room });
+export const teamEmployees = (room) => call('team_employees', { room });
+export const teamPost = (room, body, requires_reply) => call('team_post', { room, body, requires_reply });
 // Operator actions: spin up a team for a workspace (room = its slug), or close one.
-export const crewStartTeam = (workspace) => call('crew_start_team', { workspace });
-export const crewCloseTeam = (room) => call('crew_close_team', { room });
+export const teamStartTeam = (workspace) => call('team_start_team', { workspace });
+export const teamCloseTeam = (room) => call('team_close_team', { room });
 
 // Subscription refcount per target. The server keeps ONE subscription entry
 // per target, so two split cells on the same window must NOT let the first

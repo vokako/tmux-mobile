@@ -1,17 +1,17 @@
 <script>
   // Desktop-only agent grid for the Team tab. Tiles one read-only-by-default
-  // terminal preview per crew employee, laid out in a near-square grid
+  // terminal preview per team employee, laid out in a near-square grid
   // (w = ceil(√n), h = ceil(n/w)). Click a cell to activate it (focus + full
   // interaction, like an active split cell); inactive cells stay read-only.
   // Unlike SplitView there is NO switcher chrome — each cell is pinned to its
-  // agent's pane (window_name == agent name in the per-workspace crew session).
+  // agent's pane (window_name == agent name in the per-workspace team session).
   import Terminal from './Terminal.svelte';
   import Icon from './Icon.svelte';
   import { listSessionsWithPanes } from './ws.js';
   import { paneAgent } from './agents.js';
 
   let {
-    crewSession = '',     // tmm-crew-<slug>: the session whose windows are agents
+    teamSession = '',     // tmm-team-<slug>: the session whose windows are agents
     employees = [],       // [{ name, state, ... }] desired roster (all employees)
     fontSize = 14,        // standard size; cells render two notches smaller
     visible = false,
@@ -32,7 +32,7 @@
       const { panes } = await listSessionsWithPanes();
       const map = {};
       for (const p of panes || []) {
-        if (p.session === crewSession && p.window_name) map[p.window_name] = p;
+        if (p.session === teamSession && p.window_name) map[p.window_name] = p;
       }
       panesByName = map;
     } catch { /* transient; next tick retries */ }
@@ -48,7 +48,7 @@
 
   // Stable cell order: employees in roster order (manager/worker/reviewer/…).
   // Offline / not-yet-launched agents still get a cell (placeholder until their
-  // window appears), so the grid shape is stable as the crew comes up.
+  // window appears), so the grid shape is stable as the team comes up.
   let cells = $derived(employees.map(e => ({ name: e.name, state: e.state, pane: panesByName[e.name] || null })));
 
   // Near-square grid: columns = ceil(√n), rows = ceil(n / columns).

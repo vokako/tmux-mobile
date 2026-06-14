@@ -543,7 +543,7 @@ pub fn session_exists(session: &str) -> bool {
     run_tmux(&["has-session", "-t", session]).is_ok()
 }
 
-/// All tmux session names beginning with `prefix` (e.g. "tmm-crew-"). Used on
+/// All tmux session names beginning with `prefix` (e.g. "tmm-team-"). Used on
 /// startup to recover teams that survived a server restart.
 pub fn list_team_sessions(prefix: &str) -> Vec<String> {
     match run_tmux(&["list-sessions", "-F", "#{session_name}"]) {
@@ -575,7 +575,7 @@ pub fn ensure_session(session: &str, cwd: &str) -> Result<(), String> {
 }
 
 /// Find the active pane id of a window named `name` in `session`, if one exists.
-/// Used by the crew supervisor to adopt an already-open agent window instead of
+/// Used by the team supervisor to adopt an already-open agent window instead of
 /// launching a duplicate (idempotent across server restarts).
 pub fn find_window_by_name(session: &str, name: &str) -> Option<String> {
     let out = run_tmux(&[

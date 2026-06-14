@@ -31,19 +31,19 @@ pub const WIRE_DEFLATE_JSON: u8 = 0x01;
 // output bigger than the input. Skip compression for small payloads.
 pub const COMPRESS_MIN_BYTES: usize = 256;
 
-// ─── crew multi-agent bus bridge ────────────────────────────────────────
-// The Team tab talks to the crew group-chat bus, which lives in a desktop-only
+// ─── team multi-agent bus bridge ────────────────────────────────────────
+// The Team tab talks to the team group-chat bus, which lives in a desktop-only
 // sub-crate (heavy axum/rmcp/rusqlite deps the phone never builds). To keep
 // server.rs compiling on Android/iOS, the bus is reached only through this
 // JSON-only trait object: the desktop build supplies a concrete impl wrapping
 // `agora::Bus`; mobile builds always pass `None` and never call it.
 //
-// All methods speak `serde_json::Value` so no crew type crosses this boundary.
+// All methods speak `serde_json::Value` so no team type crosses this boundary.
 // Every chat operation is scoped to a `room` (= a team). Multiple teams are
 // fully isolated rooms sharing one daemon/db; the phone passes the active
 // room with each call, and pushes are tagged with their room so the client
 // can filter to the team currently in view.
-pub trait CrewBridge: Send + Sync {
+pub trait TeamBridge: Send + Sync {
     /// Recent messages for `room`, oldest first: `{ "messages": [...] }`.
     fn history(&self, room: &str, limit: i64) -> serde_json::Value;
     /// Roster + presence for `room`: `{ "roster": [...] }`.
@@ -57,7 +57,7 @@ pub trait CrewBridge: Send + Sync {
     /// Raw employee list for `room` as `(name, spec, state)` for the
     /// supervisor's reconcile loop.
     fn employee_specs(&self, room: &str) -> Vec<(String, serde_json::Value, String)>;
-    /// Start a crew for `workspace`: derive its room (= workspace slug), seed
+    /// Start a team for `workspace`: derive its room (= workspace slug), seed
     /// the default roster, and launch agents into a per-workspace tmux session.
     /// Idempotent per room. Returns `{ room, started, workspace }`.
     fn start_team(&self, workspace: &str) -> serde_json::Value;
@@ -75,7 +75,7 @@ pub trait CrewBridge: Send + Sync {
     fn subscribe(&self) -> tokio::sync::broadcast::Receiver<String>;
 }
 
-pub type OptCrew = Option<Arc<dyn CrewBridge>>;
+pub type OptTeam = Option<Arc<dyn TeamBridge>>;
 
 // Brute-force protection: track failed auth attempts per IP
 pub type AuthTracker = Arc<Mutex<HashMap<IpAddr, (u32, tokio::time::Instant)>>>;
@@ -920,14 +920,14 @@ async fn subscription_loop(
     }
 }
 
-/// Dispatch `crew_*` RPC methods to the in-process bus bridge. Returns a
+/// Dispatch `team_*` RPC methods to the in-process bus bridge. Returns a
 /// method-not-found error when no bus is wired (mobile builds, or desktop with
-/// crew disabled) so the client can degrade gracefully (hide the Team tab).
-fn handle_crew_request(req: &Request, crew: Option<&dyn CrewBridge>) -> Response {
+/// team disabled) so the client can degrade gracefully (hide the Team tab).
+fn handle_team_request(req: &Request, team: Option<&dyn TeamBridge>) -> Response {
     let id = req.id;
     let p = &req.params;
-    let Some(bus) = crew else {
-        return Response::err(id, ERR_METHOD_NOT_FOUND, "crew bus not available on this server".into());
+    let Some(bus) = team else {
+        return Response::err(id, ERR_METHOD_NOT_FOUND, "team bus not available on this server".into());
     };
     // Most methods operate on a specific team `room` (the phone's active team).
     let room = p.get("room").and_then(|v| v.as_str()).unwrap_or("");
@@ -935,21 +935,21 @@ fn handle_crew_request(req: &Request, crew: Option<&dyn CrewBridge>) -> Response
         // Bus availability + the team list + a default workspace to pre-fill.
         // Team-agnostic, so the Team tab can render the switcher before picking
         // an active room.
-        "crew_status" => Response::ok(id, serde_json::json!({
+        "team_status" => Response::ok(id, serde_json::json!({
             "available": true,
             "teams": bus.teams().get("teams").cloned().unwrap_or(serde_json::json!([])),
             "default_workspace": bus.default_workspace(),
         })),
-        "crew_teams" => Response::ok(id, bus.teams()),
-        "crew_history" => {
+        "team_teams" => Response::ok(id, bus.teams()),
+        "team_history" => {
             let limit = p.get("limit").and_then(|v| v.as_i64()).unwrap_or(100).clamp(1, 1000);
             Response::ok(id, bus.history(room, limit))
         }
-        "crew_roster" => Response::ok(id, bus.roster(room)),
-        "crew_employees" => Response::ok(id, bus.employees(room)),
-        // Operator action: spin up a crew in `workspace` (its room = the
+        "team_roster" => Response::ok(id, bus.roster(room)),
+        "team_employees" => Response::ok(id, bus.employees(room)),
+        // Operator action: spin up a team in `workspace` (its room = the
         // workspace slug). Idempotent per room; returns { room, started, workspace }.
-        "crew_start_team" => {
+        "team_start_team" => {
             let workspace = p.get("workspace").and_then(|v| v.as_str())
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
@@ -957,13 +957,13 @@ fn handle_crew_request(req: &Request, crew: Option<&dyn CrewBridge>) -> Response
             Response::ok(id, bus.start_team(&workspace))
         }
         // Stop a team: kill its tmux session, forget it (chat log persists).
-        "crew_close_team" => {
+        "team_close_team" => {
             if room.is_empty() {
                 return Response::err(id, ERR_INVALID_PARAMS, "missing required param: room".into());
             }
             Response::ok(id, serde_json::json!({ "closed": bus.close_team(room) }))
         }
-        "crew_post" => {
+        "team_post" => {
             if room.is_empty() {
                 return Response::err(id, ERR_INVALID_PARAMS, "missing required param: room".into());
             }
@@ -972,7 +972,7 @@ fn handle_crew_request(req: &Request, crew: Option<&dyn CrewBridge>) -> Response
                 Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
             };
             // The human is "you" on the phone; default sender name "human"
-            // matches crew's dashboard/CLI convention so the operator shows
+            // matches team's dashboard/CLI convention so the operator shows
             // up consistently across surfaces.
             let from = p.get("from").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or("human");
             // Mirror the dashboard: an @mention implies a reply is wanted
@@ -986,28 +986,28 @@ fn handle_crew_request(req: &Request, crew: Option<&dyn CrewBridge>) -> Response
                 Err(e) => Response::err(id, ERR_INTERNAL, e),
             }
         }
-        other => Response::err(id, ERR_METHOD_NOT_FOUND, format!("unknown crew method: {}", other)),
+        other => Response::err(id, ERR_METHOD_NOT_FOUND, format!("unknown team method: {}", other)),
     }
 }
 
-/// Push newly-broadcast crew messages to this client as `crew_message`
+/// Push newly-broadcast team messages to this client as `team_message`
 /// notifications, so the Team tab updates live without polling. Mirrors the
 /// dashboard's SSE stream, but rides the existing encrypted Outbound channel.
-async fn crew_push_loop(out_tx: tokio::sync::mpsc::UnboundedSender<Outbound>, crew: Arc<dyn CrewBridge>) {
-    let mut rx = crew.subscribe();
+async fn team_push_loop(out_tx: tokio::sync::mpsc::UnboundedSender<Outbound>, team: Arc<dyn TeamBridge>) {
+    let mut rx = team.subscribe();
     loop {
         match rx.recv().await {
             Ok(msg_json) => {
                 let frame = serde_json::json!({
                     "id": null,
-                    "method": "crew_message",
+                    "method": "team_message",
                     "params": { "message": serde_json::from_str::<serde_json::Value>(&msg_json).unwrap_or(serde_json::Value::Null) },
                 });
                 if out_tx.send(Outbound::Encrypted(serde_json::to_string(&frame).unwrap())).is_err() {
                     return; // send task gone
                 }
             }
-            // Lagged: the client re-syncs via crew_history on demand, so just
+            // Lagged: the client re-syncs via team_history on demand, so just
             // keep receiving from the current tail.
             Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
             Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
@@ -1197,7 +1197,7 @@ where
     let _ = stream.flush().await;
 }
 
-pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, grace_secs: u64, crew: OptCrew) {
+pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, grace_secs: u64, team: OptTeam) {
     // Peek at the request prelude to distinguish HTTP download from
     // WebSocket. 256 bytes covers the request line even with a reverse-proxy
     // path prefix; peek doesn't consume, so the WS handshake still sees the
@@ -1239,10 +1239,10 @@ pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<S
         }
     };
 
-    handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, resize_tracker, conn_id, conn_started_at, grace_secs, crew).await;
+    handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, resize_tracker, conn_id, conn_started_at, grace_secs, team).await;
 }
 
-async fn handle_connection_ws<S>(ws_stream: tokio_tungstenite::WebSocketStream<S>, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, conn_id: u64, conn_started_at: std::time::Instant, grace_secs: u64, crew: OptCrew)
+async fn handle_connection_ws<S>(ws_stream: tokio_tungstenite::WebSocketStream<S>, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, conn_id: u64, conn_started_at: std::time::Instant, grace_secs: u64, team: OptTeam)
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
@@ -1262,10 +1262,10 @@ where
     // conn_id allocated above so the "connected" log line carries it.
     let hostname = gethostname::gethostname().to_string_lossy().to_string();
     let mut authenticated = false;
-    // crew message-push task: started once, right after auth succeeds (it
+    // team message-push task: started once, right after auth succeeds (it
     // enqueues Encrypted frames, which need the session cipher in place).
     // Aborted at teardown alongside the other per-connection tasks.
-    let mut crew_push_handle: Option<tokio::task::JoinHandle<()>> = None;
+    let mut team_push_handle: Option<tokio::task::JoinHandle<()>> = None;
     // Receive-side cipher lives in this task and guards strict decrypt
     // ordering. Send-side cipher is handed off to the dedicated send task
     // (below) so business tasks can finish out of order without corrupting
@@ -1497,8 +1497,8 @@ where
                             let _ = out_tx.send(Outbound::InitCipher(HalfCipher::new(&key)));
                             let resp = serde_json::to_string(&serde_json::json!({"result":{"authenticated":true,"machine_id":*machine_id,"hostname":&hostname}})).unwrap();
                             let _ = out_tx.send(Outbound::Encrypted(resp));
-                            if let Some(ref a) = crew {
-                                crew_push_handle = Some(tokio::spawn(crew_push_loop(out_tx.clone(), a.clone())));
+                            if let Some(ref a) = team {
+                                team_push_handle = Some(tokio::spawn(team_push_loop(out_tx.clone(), a.clone())));
                             }
                             continue;
                         } else {
@@ -1518,8 +1518,8 @@ where
                         auth_tracker.lock().await.remove(&addr.ip());
                         let r = Response::ok(req.id, serde_json::json!({ "authenticated": true, "machine_id": *machine_id, "hostname": &hostname }));
                         let _ = out_tx.send(Outbound::Plain(serde_json::to_string(&r).unwrap()));
-                        if let Some(ref a) = crew {
-                            crew_push_handle = Some(tokio::spawn(crew_push_loop(out_tx.clone(), a.clone())));
+                        if let Some(ref a) = team {
+                            team_push_handle = Some(tokio::spawn(team_push_loop(out_tx.clone(), a.clone())));
                         }
                         continue;
                     } else {
@@ -1545,7 +1545,7 @@ where
                 let tracker_c = resize_tracker.clone();
                 let out_tx_c = out_tx.clone();
                 let token_c = token.clone();
-                let crew_c = crew.clone();
+                let team_c = team.clone();
                 tokio::spawn(async move {
                     let response = match req.method.as_str() {
                         "subscribe" => {
@@ -1556,7 +1556,7 @@ where
                             let mut map = subs_c.lock().await;
                             handle_unsubscribe(&req.params, &mut map)
                         }
-                        m if m.starts_with("crew_") => handle_crew_request(&req, crew_c.as_deref()),
+                        m if m.starts_with("team_") => handle_team_request(&req, team_c.as_deref()),
                         "resize_pane" => {
                             let id = req.id;
                             let p = &req.params;
@@ -1621,7 +1621,7 @@ where
 
     sub_handle.abort();
     ping_handle.abort();
-    if let Some(h) = crew_push_handle.take() {
+    if let Some(h) = team_push_handle.take() {
         h.abort();
     }
     drop(out_tx); // close the channel so the send task finishes
@@ -1724,7 +1724,7 @@ pub async fn start_with_socket(
     tls_cert: Option<String>,
     tls_key: Option<String>,
     disconnect_grace_secs: u64,
-    crew: OptCrew,
+    team: OptTeam,
 ) -> Result<(), Box<dyn std::error::Error>> {
     tmux::set_socket(socket);
     // Best-effort harden existing config.toml so upgraded installs with the
@@ -1781,7 +1781,7 @@ pub async fn start_with_socket(
         let auth_tracker = auth_tracker.clone();
         let control_mgr = resize_tracker.clone();
         let grace = disconnect_grace_secs;
-        let crew_c = crew.clone();
+        let team_c = team.clone();
         if let Some(ref acceptor) = tls_acceptor {
             let acceptor = acceptor.clone();
             tokio::spawn(async move {
@@ -1814,13 +1814,13 @@ pub async fn start_with_socket(
                         let conn_id = CONN_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         let conn_started_at = std::time::Instant::now();
                         println!("📱 Client connected (TLS): {} (conn_id={})", addr, conn_id);
-                        handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, control_mgr, conn_id, conn_started_at, grace, crew_c).await;
+                        handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, control_mgr, conn_id, conn_started_at, grace, team_c).await;
                     }
                     Err(e) => eprintln!("❌ TLS handshake failed for {}: {}", addr, e),
                 }
             });
         } else {
-            tokio::spawn(handle_connection(stream, addr, token, machine_id, auth_tracker, control_mgr, grace, crew_c));
+            tokio::spawn(handle_connection(stream, addr, token, machine_id, auth_tracker, control_mgr, grace, team_c));
         }
     }
 }
@@ -1829,11 +1829,11 @@ pub async fn start_with_socket(
 mod tests {
     use super::*;
 
-    // ─── crew WS proxy dispatch ─────────────────────────────────────────
-    // A tiny in-memory CrewBridge stand-in so we can exercise
-    // handle_crew_request without pulling in the real (desktop-only) bus.
+    // ─── team WS proxy dispatch ─────────────────────────────────────────
+    // A tiny in-memory TeamBridge stand-in so we can exercise
+    // handle_team_request without pulling in the real (desktop-only) bus.
     struct MockAgora;
-    impl CrewBridge for MockAgora {
+    impl TeamBridge for MockAgora {
         fn history(&self, _room: &str, limit: i64) -> serde_json::Value {
             serde_json::json!({ "messages": [], "echo_limit": limit })
         }
@@ -1876,40 +1876,40 @@ mod tests {
     }
 
     #[test]
-    fn crew_request_without_bus_is_method_not_found() {
-        let r = handle_crew_request(&req("crew_roster", serde_json::json!({})), None);
+    fn team_request_without_bus_is_method_not_found() {
+        let r = handle_team_request(&req("team_roster", serde_json::json!({})), None);
         assert_eq!(r.error.as_ref().map(|e| e.code), Some(ERR_METHOD_NOT_FOUND));
     }
 
     #[test]
-    fn crew_roster_returns_roster() {
+    fn team_roster_returns_roster() {
         let bus = MockAgora;
-        let r = handle_crew_request(&req("crew_roster", serde_json::json!({ "room": "ws" })), Some(&bus));
+        let r = handle_team_request(&req("team_roster", serde_json::json!({ "room": "ws" })), Some(&bus));
         let roster = r.result.unwrap();
         assert_eq!(roster["roster"][0]["name"], "worker");
     }
 
     #[test]
-    fn crew_post_requires_room_and_body_and_infers_reply_from_mention() {
+    fn team_post_requires_room_and_body_and_infers_reply_from_mention() {
         let bus = MockAgora;
         // Missing room → invalid params.
-        let no_room = handle_crew_request(&req("crew_post", serde_json::json!({ "body": "hi" })), Some(&bus));
+        let no_room = handle_team_request(&req("team_post", serde_json::json!({ "body": "hi" })), Some(&bus));
         assert_eq!(no_room.error.as_ref().map(|e| e.code), Some(ERR_INVALID_PARAMS));
 
         // Missing body → invalid params.
-        let bad = handle_crew_request(&req("crew_post", serde_json::json!({ "room": "ws" })), Some(&bus));
+        let bad = handle_team_request(&req("team_post", serde_json::json!({ "room": "ws" })), Some(&bus));
         assert_eq!(bad.error.as_ref().map(|e| e.code), Some(ERR_INVALID_PARAMS));
 
         // @mention with no explicit flag → requires_reply inferred true.
-        let mentioned = handle_crew_request(
-            &req("crew_post", serde_json::json!({ "room": "ws", "body": "@worker do X" })),
+        let mentioned = handle_team_request(
+            &req("team_post", serde_json::json!({ "room": "ws", "body": "@worker do X" })),
             Some(&bus),
         );
         assert_eq!(mentioned.result.unwrap()["message"]["requires_reply"], true);
 
         // Plain broadcast → requires_reply inferred false; default sender "human".
-        let plain = handle_crew_request(
-            &req("crew_post", serde_json::json!({ "room": "ws", "body": "hello team" })),
+        let plain = handle_team_request(
+            &req("team_post", serde_json::json!({ "room": "ws", "body": "hello team" })),
             Some(&bus),
         );
         let msg = plain.result.unwrap();
@@ -1917,26 +1917,26 @@ mod tests {
         assert_eq!(msg["message"]["from"], "human");
 
         // Explicit requires_reply=false overrides the @mention inference.
-        let forced = handle_crew_request(
-            &req("crew_post", serde_json::json!({ "room": "ws", "body": "@worker fyi", "requires_reply": false })),
+        let forced = handle_team_request(
+            &req("team_post", serde_json::json!({ "room": "ws", "body": "@worker fyi", "requires_reply": false })),
             Some(&bus),
         );
         assert_eq!(forced.result.unwrap()["message"]["requires_reply"], false);
     }
 
     #[test]
-    fn crew_status_lists_teams_without_a_room() {
+    fn team_status_lists_teams_without_a_room() {
         let bus = MockAgora;
-        let r = handle_crew_request(&req("crew_status", serde_json::json!({})), Some(&bus));
+        let r = handle_team_request(&req("team_status", serde_json::json!({})), Some(&bus));
         let s = r.result.unwrap();
         assert_eq!(s["available"], true);
         assert!(s["teams"].is_array());
     }
 
     #[test]
-    fn crew_unknown_method_is_method_not_found() {
+    fn team_unknown_method_is_method_not_found() {
         let bus = MockAgora;
-        let r = handle_crew_request(&req("crew_bogus", serde_json::json!({})), Some(&bus));
+        let r = handle_team_request(&req("team_bogus", serde_json::json!({})), Some(&bus));
         assert_eq!(r.error.as_ref().map(|e| e.code), Some(ERR_METHOD_NOT_FOUND));
     }
 

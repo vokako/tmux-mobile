@@ -31,7 +31,7 @@ KEEPALIVE_HOOK = str(HERE / "hooks" / "keepalive.sh")
 # Non-management agora tools (workers/reviewer get these; managers also get hire/fire).
 WORKER_TOOLS = ["post", "wait", "list_agents", "history"]
 
-KICK = ("你已接入 crew 群聊（协作规则见 AGENTS.md）。"
+KICK = ("你已接入 team 群聊（协作规则见 AGENTS.md）。"
         "直接调用 wait 等待消息；被点名就用 post 回复发起人，没你的事就继续 wait；不要主动停止。")
 
 
@@ -44,7 +44,7 @@ def role_line(role, goal):
 def full_prompt(role, goal, backstory):
     """Multi-line prompt embedded in Kiro's agent config."""
     return (f"你是「{role}」。\n目标：{(goal or '').strip()}\n背景：{(backstory or '').strip()}\n"
-            "你和其他 agent、以及一位人类，在共享的『crew 群聊』里协作（通过 @crew 工具）。"
+            "你和其他 agent、以及一位人类，在共享的『team 群聊』里协作（通过 @team 工具）。"
             "请始终用中文交流，消息保持简短。")
 
 
@@ -71,7 +71,7 @@ def _kiro(name, role, goal, backstory, manage, url, demo, workspace, model):
     (home / "settings").mkdir(parents=True, exist_ok=True)
     (home / "settings" / "cli.json").write_text(
         json.dumps({"chat.disableTrustAllConfirmation": True}, indent=2))
-    agora = ["@crew"] if manage else [f"@crew/{t}" for t in WORKER_TOOLS]
+    agora = ["@team"] if manage else [f"@team/{t}" for t in WORKER_TOOLS]
     conf = {
         "name": name,
         "description": f"{role} on the agora bus",
@@ -79,7 +79,7 @@ def _kiro(name, role, goal, backstory, manage, url, demo, workspace, model):
         "tools": ["*"] + agora,
         "allowedTools": ["@builtin"] + agora,
         "resources": [f"file://{pathlib.Path(workspace) / 'AGENTS.md'}"],
-        "mcpServers": {"crew": {"url": f"{url}/mcp", "headers": {"x-agent": name}}},
+        "mcpServers": {"team": {"url": f"{url}/mcp", "headers": {"x-agent": name}}},
         "hooks": {"stop": [{"command": KEEPALIVE_HOOK}]},
     }
     (home / "agents" / f"{name}.json").write_text(json.dumps(conf, ensure_ascii=False, indent=2))
@@ -98,7 +98,7 @@ def _claude(name, role, goal, manage, url, demo, model):
     d = demo / "claude"
     d.mkdir(parents=True, exist_ok=True)
     mcpfile = d / f"{name}.mcp.json"
-    mcpfile.write_text(json.dumps({"mcpServers": {"crew": {
+    mcpfile.write_text(json.dumps({"mcpServers": {"team": {
         "type": "http", "url": f"{url}/mcp", "headers": {"x-agent": name}}}}, indent=2))
     settingsfile = d / f"{name}.settings.json"
     settingsfile.write_text(json.dumps({
@@ -106,7 +106,7 @@ def _claude(name, role, goal, manage, url, demo, model):
     }, indent=2))
     env = {}
     m = model or "sonnet"
-    disallow = "" if manage else "--disallowedTools mcp__crew__hire mcp__crew__fire "
+    disallow = "" if manage else "--disallowedTools mcp__team__hire mcp__team__fire "
     first_msg = f"{role_line(role, goal)} {KICK}"
     # Start interactive (no positional prompt). Then: accept the folder-trust dialog,
     # type the kickoff, and submit it. (Passing the prompt positionally races the trust

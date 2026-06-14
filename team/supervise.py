@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Team supervisor — turns hire/fire decisions into real agent windows.
 
-Vendored & adapted from the standalone agora project. It talks to the crew bus
+Vendored & adapted from the standalone agora project. It talks to the team bus
 that runs IN-PROCESS inside the tmux-mobile desktop server (default
 http://127.0.0.1:8787), so it never starts its own daemon.
 
@@ -20,16 +20,16 @@ import time
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import crew_backends  # noqa: E402
+import team_backends  # noqa: E402
 
 import pathlib
 
-URL = os.environ.get("CREW_URL", "http://127.0.0.1:8787")
-SESSION = os.environ.get("CREW_SESSION", "tmm-crew-team")
-WORK = os.environ.get("CREW_WORKSPACE", ".")
-DEMO = pathlib.Path(os.environ.get("CREW_DEMO", "/tmp/tmux-mobile-team"))
-HIRE_BACKEND = os.environ.get("CREW_HIRE_BACKEND", "kiro")
-INTERVAL = float(os.environ.get("CREW_SUPERVISE_INTERVAL", "3"))
+URL = os.environ.get("TEAM_URL", "http://127.0.0.1:8787")
+SESSION = os.environ.get("TEAM_SESSION", "tmm-team-team")
+WORK = os.environ.get("TEAM_WORKSPACE", ".")
+DEMO = pathlib.Path(os.environ.get("TEAM_DEMO", "/tmp/tmux-mobile-team"))
+HIRE_BACKEND = os.environ.get("TEAM_HIRE_BACKEND", "kiro")
+INTERVAL = float(os.environ.get("TEAM_SUPERVISE_INTERVAL", "3"))
 
 import subprocess
 
@@ -75,12 +75,12 @@ while session_alive():
         # hire backend (runtime hires carry no backend; the seeded team does).
         spec = e.get("spec") or {}
         backend = spec.get("backend") or HIRE_BACKEND
-        env, cmd, post_keys = crew_backends.prepare_agent(
+        env, cmd, post_keys = team_backends.prepare_agent(
             backend, name=name, role=spec.get("role", name), goal=spec.get("goal", ""),
             backstory=spec.get("backstory", ""), manage=bool(spec.get("manage", False)),
             url=URL, demo=DEMO, workspace=pathlib.Path(WORK), model=spec.get("model"))
         try:
-            pane = crew_backends.launch_window(SESSION, name, env, cmd, WORK, post_keys)
+            pane = team_backends.launch_window(SESSION, name, env, cmd, WORK, post_keys)
             launched[name] = pane
             print(f"[supervise] launched '{name}' ({backend}) in window {pane}", flush=True)
         except Exception as ex:

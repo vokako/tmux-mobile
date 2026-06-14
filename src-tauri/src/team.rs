@@ -2,12 +2,12 @@
 //!
 //! This is the Rust port of the standalone `team/` Python launcher, moved
 //! inside the app so the user never starts a separate process: the desktop
-//! server itself seeds the team into the crew bus and reconciles the desired
+//! server itself seeds the team into the team bus and reconciles the desired
 //! roster into real agent windows in tmux. The agent CLIs (kiro/claude/codex)
 //! still run as their own processes in tmux panes — that is intrinsic, and it
 //! is exactly what lets the Team tab preview an agent's live execution state.
 //!
-//! Flow (mirrors crew's supervisor, but native):
+//! Flow (mirrors team's supervisor, but native):
 //!   1. `seed_default_team` registers the built-in team (manager/worker/
 //!      reviewer) as employees on the bus, if no team is present yet.
 //!   2. a reconcile loop polls the bus's employee roster: a `requested`/`active`
@@ -15,10 +15,10 @@
 //!      tmux window opened; a `disabled` one has its window killed. The same
 //!      path serves the initial team and any runtime `hire`/`fire`.
 //!
-//! The bus is reached through [`CrewBridge`] (JSON-only) so this module stays
-//! decoupled from crew's concrete types, like the rest of server.rs.
+//! The bus is reached through [`TeamBridge`] (JSON-only) so this module stays
+//! decoupled from team's concrete types, like the rest of server.rs.
 
-use crate::server::CrewBridge;
+use crate::server::TeamBridge;
 use crate::tmux;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -28,11 +28,11 @@ use std::time::Duration;
 
 // Shared team brief + keepalive hook, embedded so a packaged .app has no
 // external file dependency. Written to the team work dir at startup.
-const AGENTS_MD: &str = include_str!("../../crew/AGENTS.md");
-const KEEPALIVE_SH: &str = include_str!("../../crew/hooks/keepalive.sh");
+const AGENTS_MD: &str = include_str!("../../team/AGENTS.md");
+const KEEPALIVE_SH: &str = include_str!("../../team/hooks/keepalive.sh");
 
 const RECONCILE_INTERVAL: Duration = Duration::from_secs(3);
-const KICK: &str = "你已接入 crew 群聊（协作规则见 AGENTS.md）。直接调用 wait 等待消息；被点名就用 post 回复发起人，没你的事就继续 wait；不要主动停止。";
+const KICK: &str = "你已接入 team 群聊（协作规则见 AGENTS.md）。直接调用 wait 等待消息；被点名就用 post 回复发起人，没你的事就继续 wait；不要主动停止。";
 
 /// One member of the default team (role / goal / backstory / backend / manage).
 struct Member {
@@ -72,7 +72,7 @@ const DEFAULT_TEAM: &[Member] = &[
     },
 ];
 
-/// Per-run config homes under `~/.config/tmux-mobile/crew/<slug>/`. NOTE: this is
+/// Per-run config homes under `~/.config/tmux-mobile/team/<slug>/`. NOTE: this is
 /// where each backend's *config* + the shared brief live — NOT the agents'
 /// working directory. Agents `cd` into the user's chosen `workspace` (their
 /// real project); we never write our brief into that project. Kiro loads the
@@ -81,7 +81,7 @@ const DEFAULT_TEAM: &[Member] = &[
 struct Paths {
     /// Agents' working directory (the user's project) — agents run `-c` here.
     workspace: PathBuf,
-    /// Our private per-crew config root (NOT inside the user's project).
+    /// Our private per-team config root (NOT inside the user's project).
     kiro_home: PathBuf,
     claude: PathBuf,
     codex: PathBuf,
@@ -91,9 +91,9 @@ struct Paths {
 
 impl Paths {
     /// `workspace` = the agents' working dir; `slug` = its sanitized basename,
-    /// used to namespace our config home so multiple crews coexist.
+    /// used to namespace our config home so multiple teams coexist.
     fn new(workspace: &str, slug: &str) -> Self {
-        let home = crate::config::config_dir().join("crew").join(slug);
+        let home = crate::config::config_dir().join("team").join(slug);
         Paths {
             workspace: PathBuf::from(workspace),
             kiro_home: home.join("kiro-home"),
@@ -108,35 +108,35 @@ impl Paths {
 /// Server-level config the supervisor needs (bus URL + default model). The
 /// per-run session + workspace are passed to `start`.
 #[derive(Clone)]
-pub struct CrewConfig {
+pub struct TeamConfig {
     /// Bus URL the agents connect to over HTTP MCP (the in-process daemon).
     pub url: String,
     /// Default model for kiro-backed agents.
     pub model: String,
 }
 
-/// Start the crew for `workspace`: seed the default roster and spawn the
+/// Start the team for `workspace`: seed the default roster and spawn the
 /// reconcile loop, launching agents into a per-workspace tmux session. The
 /// agents' working directory is `workspace` (the user's project); our config +
-/// brief live in a private per-crew home, never written into the project.
+/// brief live in a private per-team home, never written into the project.
 /// Best-effort — any failure is logged, never fatal.
-pub fn start(bridge: Arc<dyn CrewBridge>, cfg: CrewConfig, room: String, workspace: String) {
+pub fn start(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: String, workspace: String) {
     tokio::spawn(async move {
-        let session = format!("tmm-crew-{}", room);
+        let session = format!("tmm-team-{}", room);
         let paths = Paths::new(&workspace, &room);
         if let Err(e) = prepare_home(&paths) {
-            eprintln!("⚠️  crew: failed to prepare config home: {}", e);
+            eprintln!("⚠️  team: failed to prepare config home: {}", e);
             return;
         }
         seed_default_team(&*bridge, &room, &cfg);
-        println!("🜂 crew: room={} workspace={} session={}", room, workspace, session);
+        println!("🜂 team: room={} workspace={} session={}", room, workspace, session);
         reconcile_loop(bridge, cfg, room, session, paths).await;
     });
 }
 
 /// Sanitize a workspace path into a tmux-safe slug from its basename. tmux
 /// session names can't contain ':' or '.'; keep it short and predictable so
-/// `tmm-crew-<slug>` is easy to recognize and parse.
+/// `tmm-team-<slug>` is easy to recognize and parse.
 pub fn workspace_slug(workspace: &str) -> String {
     let base = std::path::Path::new(workspace)
         .file_name()
@@ -152,7 +152,7 @@ pub fn workspace_slug(workspace: &str) -> String {
     if slug.is_empty() { "root".to_string() } else { slug.chars().take(32).collect() }
 }
 
-/// Write the shared brief + keepalive hook into our private per-crew home (NOT
+/// Write the shared brief + keepalive hook into our private per-team home (NOT
 /// the user's workspace).
 fn prepare_home(p: &Paths) -> std::io::Result<()> {
     std::fs::create_dir_all(&p.kiro_home)?;
@@ -168,7 +168,7 @@ fn prepare_home(p: &Paths) -> std::io::Result<()> {
 
 /// Register the built-in team as employees, unless a team already exists (so a
 /// restart doesn't duplicate-seed; seed_employee also rejects taken names).
-fn seed_default_team(bridge: &dyn CrewBridge, room: &str, cfg: &CrewConfig) {
+fn seed_default_team(bridge: &dyn TeamBridge, room: &str, cfg: &TeamConfig) {
     let existing = bridge.employee_specs(room);
     if !existing.is_empty() {
         return; // a team is already seeded (this run or a previous one)
@@ -197,7 +197,7 @@ fn seed_default_team(bridge: &dyn CrewBridge, room: &str, cfg: &CrewConfig) {
 /// (server restarted, agent already running), we adopt it instead of opening a
 /// second. The previous in-memory-only tracking re-launched every agent on
 /// restart, piling up duplicate manager/worker/reviewer windows.
-async fn reconcile_loop(bridge: Arc<dyn CrewBridge>, cfg: CrewConfig, room: String, session: String, paths: Paths) {
+async fn reconcile_loop(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: String, session: String, paths: Paths) {
     let mut launched: HashMap<String, Option<String>> = HashMap::new();
     let mut launched_any = false;
     loop {
@@ -205,7 +205,7 @@ async fn reconcile_loop(bridge: Arc<dyn CrewBridge>, cfg: CrewConfig, room: Stri
         // so: if we have already launched ≥1 agent and the session no longer
         // exists, the team was closed — exit cleanly.
         if launched_any && !tmux::session_exists(&session) {
-            println!("🜂 crew: room '{}' closed; supervisor exiting", room);
+            println!("🜂 team: room '{}' closed; supervisor exiting", room);
             return;
         }
         let employees = bridge.employee_specs(&room);
@@ -232,25 +232,25 @@ async fn reconcile_loop(bridge: Arc<dyn CrewBridge>, cfg: CrewConfig, room: Stri
                 continue;
             }
             if let Some(pane) = tmux::find_window_by_name(&session, name) {
-                println!("🜂 crew: adopted existing window for '{}' ({})", name, pane);
+                println!("🜂 team: adopted existing window for '{}' ({})", name, pane);
                 launched.insert(name.clone(), Some(pane));
                 launched_any = true;
                 continue;
             }
             match launch_agent(name, spec, &cfg, &room, &session, &paths) {
                 Ok(pane) => {
-                    println!("🜂 crew: launched '{}' in window {}", name, pane);
+                    println!("🜂 team: launched '{}' in window {}", name, pane);
                     launched.insert(name.clone(), Some(pane));
                     launched_any = true;
                 }
-                Err(e) => eprintln!("⚠️  crew: launch '{}' failed: {}", name, e),
+                Err(e) => eprintln!("⚠️  team: launch '{}' failed: {}", name, e),
             }
         }
         tokio::time::sleep(RECONCILE_INTERVAL).await;
     }
 }
 
-fn roster_status(bridge: &dyn CrewBridge, room: &str) -> HashMap<String, String> {
+fn roster_status(bridge: &dyn TeamBridge, room: &str) -> HashMap<String, String> {
     let mut out = HashMap::new();
     if let Some(arr) = bridge.roster(room).get("roster").and_then(|v| v.as_array()) {
         for a in arr {
@@ -265,7 +265,7 @@ fn roster_status(bridge: &dyn CrewBridge, room: &str) -> HashMap<String, String>
 /// Write the backend config for `name` and open a named tmux window running it.
 /// Returns the new pane id. Blocking tmux/fs work runs on the caller (the
 /// reconcile loop is its own task and the cadence is 3 s, so this is fine).
-fn launch_agent(name: &str, spec: &Value, cfg: &CrewConfig, room: &str, session: &str, paths: &Paths) -> Result<String, String> {
+fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &str, session: &str, paths: &Paths) -> Result<String, String> {
     let backend = spec.get("backend").and_then(|v| v.as_str()).unwrap_or("kiro");
     let role = spec.get("role").and_then(|v| v.as_str()).unwrap_or(name);
     let goal = spec.get("goal").and_then(|v| v.as_str()).unwrap_or("");
@@ -328,7 +328,7 @@ fn kick_with_brief(paths: &Paths) -> String {
 
 fn full_prompt(role: &str, goal: &str, backstory: &str) -> String {
     format!(
-        "你是「{}」。\n目标：{}\n背景：{}\n你和其他 agent、以及一位人类，在共享的『crew 群聊』里协作（通过 @crew 工具）。请始终用中文交流，消息保持简短。",
+        "你是「{}」。\n目标：{}\n背景：{}\n你和其他 agent、以及一位人类，在共享的『team 群聊』里协作（通过 @team 工具）。请始终用中文交流，消息保持简短。",
         role, goal.trim(), backstory.trim()
     )
 }
@@ -339,7 +339,7 @@ const WORKER_TOOLS: &[&str] = &["post", "wait", "list_agents", "history"];
 #[allow(clippy::too_many_arguments)] // agent config genuinely needs all of these
 fn prepare_kiro(
     name: &str, role: &str, goal: &str, backstory: &str, manage: bool,
-    cfg: &CrewConfig, room: &str, paths: &Paths, model: Option<&str>,
+    cfg: &TeamConfig, room: &str, paths: &Paths, model: Option<&str>,
 ) -> Result<Prepared, String> {
     let home = &paths.kiro_home;
     std::fs::create_dir_all(home.join("agents")).map_err(|e| e.to_string())?;
@@ -350,26 +350,26 @@ fn prepare_kiro(
     )
     .map_err(|e| e.to_string())?;
 
-    let crew: Vec<String> = if manage {
-        vec!["@crew".to_string()]
+    let team: Vec<String> = if manage {
+        vec!["@team".to_string()]
     } else {
-        WORKER_TOOLS.iter().map(|t| format!("@crew/{}", t)).collect()
+        WORKER_TOOLS.iter().map(|t| format!("@team/{}", t)).collect()
     };
     let mut tools = vec!["*".to_string()];
-    tools.extend(crew.clone());
+    tools.extend(team.clone());
     let mut allowed = vec!["@builtin".to_string()];
-    allowed.extend(crew);
+    allowed.extend(team);
 
     // Brief lives in our private home (NOT the user's workspace); kiro loads it
     // by absolute path via `resources`.
     let conf = serde_json::json!({
         "name": name,
-        "description": format!("{} on the crew bus", role),
+        "description": format!("{} on the team bus", role),
         "prompt": full_prompt(role, goal, backstory),
         "tools": tools,
         "allowedTools": allowed,
         "resources": [format!("file://{}", paths.brief.to_string_lossy())],
-        "mcpServers": { "crew": { "url": format!("{}/mcp", cfg.url), "headers": { "x-agent": name, "x-room": room } } },
+        "mcpServers": { "team": { "url": format!("{}/mcp", cfg.url), "headers": { "x-agent": name, "x-room": room } } },
         "hooks": { "stop": [ { "command": paths.keepalive.to_string_lossy() } ] },
     });
     std::fs::write(
@@ -391,7 +391,7 @@ fn prepare_kiro(
 #[allow(clippy::too_many_arguments)]
 fn prepare_claude(
     name: &str, role: &str, goal: &str, manage: bool,
-    cfg: &CrewConfig, room: &str, paths: &Paths, model: Option<&str>,
+    cfg: &TeamConfig, room: &str, paths: &Paths, model: Option<&str>,
 ) -> Result<Prepared, String> {
     let d = &paths.claude;
     std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
@@ -399,7 +399,7 @@ fn prepare_claude(
     std::fs::write(
         &mcpfile,
         serde_json::to_string_pretty(&serde_json::json!({
-            "mcpServers": { "crew": { "type": "http", "url": format!("{}/mcp", cfg.url), "headers": { "x-agent": name, "x-room": room } } }
+            "mcpServers": { "team": { "type": "http", "url": format!("{}/mcp", cfg.url), "headers": { "x-agent": name, "x-room": room } } }
         }))
         .unwrap(),
     )
@@ -415,8 +415,8 @@ fn prepare_claude(
     .map_err(|e| e.to_string())?;
 
     let m = model.unwrap_or("sonnet");
-    // MCP tool names are mcp__<server>__<tool>; our server is named "crew".
-    let disallow = if manage { "" } else { "--disallowedTools mcp__crew__hire mcp__crew__fire " };
+    // MCP tool names are mcp__<server>__<tool>; our server is named "team".
+    let disallow = if manage { "" } else { "--disallowedTools mcp__team__hire mcp__team__fire " };
     let cmd = format!(
         "claude --mcp-config {} --strict-mcp-config --settings {} --model {} --dangerously-skip-permissions {}",
         shell_quote(&mcpfile.to_string_lossy()),
@@ -435,13 +435,13 @@ fn prepare_claude(
 // ---- Codex ----
 #[allow(clippy::too_many_arguments)]
 fn prepare_codex(
-    name: &str, role: &str, goal: &str, manage: bool, cfg: &CrewConfig, room: &str, paths: &Paths,
+    name: &str, role: &str, goal: &str, manage: bool, cfg: &TeamConfig, room: &str, paths: &Paths,
 ) -> Result<Prepared, String> {
     let home = paths.codex.join(name);
     std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
     let gating = if manage { "" } else { "disabled_tools = [\"hire\", \"fire\"]\n" };
     let config = format!(
-        "[mcp_servers.crew]\nurl = \"{}/mcp\"\nenabled = true\nexperimental_use_rmcp_client = true\n{}\n[mcp_servers.crew.http_headers]\n\"x-agent\" = \"{}\"\n\"x-room\" = \"{}\"\n",
+        "[mcp_servers.team]\nurl = \"{}/mcp\"\nenabled = true\nexperimental_use_rmcp_client = true\n{}\n[mcp_servers.team.http_headers]\n\"x-agent\" = \"{}\"\n\"x-room\" = \"{}\"\n",
         cfg.url, gating, name, room
     );
     std::fs::write(home.join("config.toml"), config).map_err(|e| e.to_string())?;
@@ -473,7 +473,7 @@ mod tests {
         seeded: Mutex<Vec<(String, Value)>>,
         existing: Vec<(String, Value, String)>,
     }
-    impl CrewBridge for RecordingBridge {
+    impl TeamBridge for RecordingBridge {
         fn history(&self, _room: &str, _l: i64) -> Value { serde_json::json!({}) }
         fn roster(&self, _room: &str) -> Value { serde_json::json!({ "roster": [] }) }
         fn post(&self, _room: &str, _f: &str, _b: &str, _r: bool) -> Result<Value, String> { Ok(Value::Null) }
@@ -492,8 +492,8 @@ mod tests {
         }
     }
 
-    fn cfg() -> CrewConfig {
-        CrewConfig { url: "http://127.0.0.1:8787".into(), model: "claude-sonnet-4.6".into() }
+    fn cfg() -> TeamConfig {
+        TeamConfig { url: "http://127.0.0.1:8787".into(), model: "claude-sonnet-4.6".into() }
     }
 
     #[test]

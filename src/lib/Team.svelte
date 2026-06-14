@@ -1,24 +1,24 @@
 <script>
-  // Team tab — the crew multi-agent group chat.
+  // Team tab — the team multi-agent group chat.
   //
-  // Talks to the in-process crew bus on the desktop server (RPC methods
-  // crew_history / crew_roster / crew_post + the crew_message push). The human
+  // Talks to the in-process team bus on the desktop server (RPC methods
+  // team_history / team_roster / team_post + the team_message push). The human
   // operator ("you") is just another participant: type to broadcast, or tap an
   // agent to @mention it. Tapping an agent's roster chip jumps to the tmux pane
-  // that agent runs in (per-workspace session tmm-crew-<slug>, window named
+  // that agent runs in (per-workspace session tmm-team-<slug>, window named
   // after the agent), so you can preview its live execution state.
   //
-  // Availability: a server without the bus (mobile, or desktop with crew
-  // disabled) makes the crew_* RPCs reject with method-not-found; we surface
+  // Availability: a server without the bus (mobile, or desktop with team
+  // disabled) makes the team_* RPCs reject with method-not-found; we surface
   // that as an "unavailable" state and the App hides the tab.
   import Icon from './Icon.svelte';
   import AgentGrid from './AgentGrid.svelte';
   import DirPicker from './DirPicker.svelte';
   import { t } from './i18n.svelte.js';
   import {
-    crewHistory, crewRoster, crewPost, crewStatus, crewTeams, crewStartTeam,
-    crewCloseTeam, crewEmployees,
-    addCrewMessageListener, removeCrewMessageListener,
+    teamHistory, teamRoster, teamPost, teamStatus, teamTeams, teamStartTeam,
+    teamCloseTeam, teamEmployees,
+    addTeamMessageListener, removeTeamMessageListener,
     listSessionsWithPanes, fsCwd,
   } from './ws.js';
 
@@ -43,7 +43,7 @@
   });
 
   // Grid pane width as a fraction (left = agent grid). Draggable splitter.
-  let gridFrac = $state(parseFloat(localStorage.getItem('tmux_crew_gridfrac') || '0.6'));
+  let gridFrac = $state(parseFloat(localStorage.getItem('tmux_team_gridfrac') || '0.6'));
 
   // ─── Multiple teams ──────────────────────────────────────────────────────
   // Each team is an isolated room. `teams` is the live list; `activeRoom` is
@@ -57,7 +57,7 @@
 
   let messages = $state([]);     // active room Message[] (oldest first)
   let roster = $state([]);       // active room AgentRow[]
-  let available = $state(true);  // false when the server has no crew bus
+  let available = $state(true);  // false when the server has no team bus
   let starting = $state(false);
   let loading = $state(true);
   let draft = $state('');
@@ -69,8 +69,8 @@
   let showPicker = $state(false);   // folder-browser open in the new-team panel
 
   let activeTeam = $derived(teams.find(x => x.room === activeRoom) || null);
-  // crew session for the active team (window_name → agent for pane preview).
-  let crewSession = $derived(activeRoom ? `tmm-crew-${activeRoom}` : '');
+  // team session for the active team (window_name → agent for pane preview).
+  let teamSession = $derived(activeRoom ? `tmm-team-${activeRoom}` : '');
 
   // Roster entries that are present (not offline). The human posts as "human";
   // never show it as an addressable agent (you can't @ yourself usefully).
@@ -82,7 +82,7 @@
 
   // Refresh the team list + default workspace. Picks an active room if none.
   async function refreshTeams() {
-    const s = await crewStatus();
+    const s = await teamStatus();
     teams = s?.teams || [];
     available = true;
     if (!workspace) {
@@ -105,7 +105,7 @@
       await refreshTeams();
       if (activeRoom) {
         const [h, r, e] = await Promise.all([
-          crewHistory(activeRoom, 200), crewRoster(activeRoom), crewEmployees(activeRoom),
+          teamHistory(activeRoom, 200), teamRoster(activeRoom), teamEmployees(activeRoom),
         ]);
         messages = h?.messages || [];
         roster = r?.roster || [];
@@ -128,12 +128,12 @@
     if (pollInFlight) return;
     pollInFlight = true;
     try {
-      const s = await crewStatus();
+      const s = await teamStatus();
       teams = s?.teams || [];
       available = true;
       if (!teams.some(x => x.room === activeRoom)) activeRoom = teams[0]?.room || '';
       if (activeRoom) {
-        const [r, e] = await Promise.all([crewRoster(activeRoom), crewEmployees(activeRoom)]);
+        const [r, e] = await Promise.all([teamRoster(activeRoom), teamEmployees(activeRoom)]);
         roster = r?.roster || [];
         employees = e?.employees || [];
       }
@@ -164,7 +164,7 @@
       gridFrac = f;
     };
     const onUp = () => {
-      localStorage.setItem('tmux_crew_gridfrac', String(gridFrac));
+      localStorage.setItem('tmux_team_gridfrac', String(gridFrac));
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
@@ -178,7 +178,7 @@
     starting = true;
     showPicker = false;
     try {
-      const res = await crewStartTeam(workspace.trim());
+      const res = await teamStartTeam(workspace.trim());
       newTeam = false;
       if (res?.room) {
         activeRoom = res.room;
@@ -196,7 +196,7 @@
     if (!activeRoom) return;
     switcherOpen = false;
     const room = activeRoom;
-    try { await crewCloseTeam(room); } catch {}
+    try { await teamCloseTeam(room); } catch {}
     activeRoom = '';
     await refresh();
   }
@@ -204,7 +204,7 @@
   // Live push: append messages for the ACTIVE room only (each Message carries
   // its room). join/leave/system → refresh presence immediately. Messages for
   // other rooms still bump the team list via the poll.
-  function onCrewMessage(m) {
+  function onTeamMessage(m) {
     if (!m?.id) return;
     if (m.room && activeRoom && m.room !== activeRoom) return; // other team
     if (m.kind === 'join' || m.kind === 'leave' || m.kind === 'system') {
@@ -216,8 +216,8 @@
   }
 
   $effect(() => {
-    addCrewMessageListener(onCrewMessage);
-    return () => removeCrewMessageListener(onCrewMessage);
+    addTeamMessageListener(onTeamMessage);
+    return () => removeTeamMessageListener(onTeamMessage);
   });
 
   // While visible: full refresh once, then poll on a tight interval so the
@@ -235,10 +235,10 @@
     if (!body || sending || !activeRoom) return;
     sending = true;
     try {
-      await crewPost(activeRoom, body);
+      await teamPost(activeRoom, body);
       draft = '';
       if (inputEl) inputEl.style.height = 'auto'; // collapse back to one row
-      // The post echoes back via the crew_message push, so we don't append
+      // The post echoes back via the team_message push, so we don't append
       // locally (avoids a duplicate).
     } catch {
       // Leave the draft in place so the user can retry.
@@ -275,14 +275,14 @@
     draft = `${draft}${sep}@${name} `;
   }
 
-  // Jump to the tmux pane an agent runs in. The crew session names each agent's
+  // Jump to the tmux pane an agent runs in. The team session names each agent's
   // window after the agent, so we find the pane whose window_name matches in
   // our per-workspace session.
   async function previewAgent(name) {
     try {
       const { panes } = await listSessionsWithPanes();
       const p = (panes || []).find(p =>
-        p.session === crewSession && (p.window_name === name)
+        p.session === teamSession && (p.window_name === name)
       ) || (panes || []).find(p => p.window_name === name);
       if (!p) return;
       const target = `${p.session}:${p.window}.${p.pane}`;
@@ -450,7 +450,7 @@
     <div class="team-split" bind:this={splitRow}>
       <div class="team-grid-pane" style="flex: {gridFrac} 1 0;">
         {#key activeRoom}
-          <AgentGrid {crewSession} {employees} {fontSize} {visible} />
+          <AgentGrid {teamSession} {employees} {fontSize} {visible} />
         {/key}
       </div>
       <!-- svelte-ignore a11y_no_static_element_interactions -->
