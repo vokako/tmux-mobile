@@ -34,6 +34,7 @@
   let draft = $state('');
   let sending = $state(false);
   let listEl = $state(null);
+  let inputEl = $state(null);
   // Agents' working directory. Defaulted (current session cwd > server default)
   // and editable before the crew is started.
   let workspace = $state('');
@@ -153,6 +154,7 @@
     try {
       await crewPost(body);
       draft = '';
+      if (inputEl) inputEl.style.height = 'auto'; // collapse back to one row
       // The post echoes back via the crew_message push, so we don't append
       // locally (avoids a duplicate).
     } catch {
@@ -163,12 +165,24 @@
   }
 
   function onKeydown(e) {
-    // Enter sends; Shift+Enter inserts a newline (desktop). On a soft keyboard
-    // Enter usually inserts a newline, so the send button is the primary path.
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    // Cmd/Ctrl+Enter sends. A bare Enter inserts a newline (multi-line input),
+    // and crucially does NOTHING while an IME is composing — a Chinese IME uses
+    // Enter to confirm a candidate, and intercepting it would both eat that
+    // confirmation and fire a premature send. `isComposing` (and the legacy
+    // keyCode 229) guard against that.
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       send();
     }
+    // bare Enter → default behavior (newline); textarea auto-grows via autogrow.
+  }
+
+  // Grow the textarea with its content up to a max, then scroll internally.
+  function autogrow(el) {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
   }
 
   function mention(name) {
@@ -286,12 +300,14 @@
       <div class="compose-row">
         <textarea
           class="compose-input"
+          bind:this={inputEl}
           bind:value={draft}
           onkeydown={onKeydown}
+          oninput={(e) => autogrow(e.currentTarget)}
           placeholder={t('teamMessage')}
           rows="1"
         ></textarea>
-        <button class="compose-send" disabled={!draft.trim() || sending} onclick={send} aria-label={t('teamSend')}>
+        <button class="compose-send" disabled={!draft.trim() || sending} onclick={send} aria-label={t('teamSend')} title={t('teamSendHint')}>
           <Icon name="send" size={16} />
         </button>
       </div>
@@ -460,10 +476,11 @@
   .mention-chip:active { color: var(--accent); border-color: var(--accent); }
   .compose-row { display: flex; align-items: flex-end; gap: 8px; }
   .compose-input {
-    flex: 1; min-height: 38px; max-height: 120px;
+    flex: 1; min-height: 38px; max-height: 160px;
     padding: 9px 12px; border: 1px solid var(--input-border); border-radius: 18px;
     background: var(--input-bg); color: var(--text); font-size: 14px;
     font-family: inherit; resize: none; line-height: 1.4;
+    overflow-y: auto;
     outline: none;
   }
   .compose-input:focus { border-color: var(--accent); }

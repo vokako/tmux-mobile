@@ -110,8 +110,9 @@ const msgs = {
     cleanTree: 'Working tree clean',
     gitLoading: 'Loading…',
 
-    teamMessage: 'Message the team…',
+    teamMessage: 'Message the team…  (Enter = newline, ⌘/Ctrl+Enter = send)',
     teamSend: 'Send',
+    teamSendHint: 'Send (⌘/Ctrl+Enter)',
     teamNoAgents: 'No agents online',
     teamNoMessages: 'No messages yet. Say hello to the team.',
     teamUnavailable: 'The multi-agent bus is not running on this server. Start a team to collaborate with agents here.',
@@ -219,8 +220,9 @@ const msgs = {
     cleanTree: '工作区干净',
     gitLoading: '加载中…',
 
-    teamMessage: '给团队发消息…',
+    teamMessage: '给团队发消息…（回车换行，⌘/Ctrl+回车 发送）',
     teamSend: '发送',
+    teamSendHint: '发送（⌘/Ctrl+回车）',
     teamNoAgents: '暂无在线 agent',
     teamNoMessages: '还没有消息，和团队打个招呼吧。',
     teamUnavailable: '当前服务器未运行多 agent 总线。启动一个团队即可在此与 agent 协作。',
