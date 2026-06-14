@@ -8,8 +8,11 @@
   import { fsList } from './ws.js';
 
   let {
-    start = '~',          // initial directory to open at
-    onPick = () => {},    // (path) — confirmed directory
+    start = '~',           // initial directory to open at
+    onPick = () => {},     // (path) — confirmed directory (✓ button)
+    onNavigate = () => {}, // (path) — fires on every browse step, so the
+                           // caller's field tracks where the picker is even
+                           // before the user confirms with ✓
     onClose = () => {},
   } = $props();
 
@@ -20,8 +23,9 @@
   async function load(p) {
     try {
       const r = await fsList(p, false);
-      path = p;
+      path = r.path || p;   // server resolves ~/relative → absolute
       entries = (r.entries || []).filter(e => e.type === 'dir').sort((a, b) => a.name.localeCompare(b.name));
+      onNavigate(path);
     } catch {}
   }
   function up() {

@@ -348,6 +348,7 @@
     </div>
     {#if showPicker}
       <DirPicker start={workspace || undefined}
+        onNavigate={(p) => { workspace = p; }}
         onPick={(p) => { workspace = p; showPicker = false; }}
         onClose={() => showPicker = false} />
     {/if}
