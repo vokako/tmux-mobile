@@ -122,6 +122,7 @@ const msgs = {
     teamNew: 'New team',
     teamNone: 'No teams',
     teamClose: 'Close team',
+    teamBrowse: 'Browse folders',
   },
   zh: {
     sessions: '会 话',
@@ -235,6 +236,7 @@ const msgs = {
     teamNew: '新建团队',
     teamNone: '暂无团队',
     teamClose: '关闭团队',
+    teamBrowse: '浏览文件夹',
   },
 };
 

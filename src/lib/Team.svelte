@@ -13,6 +13,7 @@
   // that as an "unavailable" state and the App hides the tab.
   import Icon from './Icon.svelte';
   import AgentGrid from './AgentGrid.svelte';
+  import DirPicker from './DirPicker.svelte';
   import { t } from './i18n.svelte.js';
   import {
     crewHistory, crewRoster, crewPost, crewStatus, crewTeams, crewStartTeam,
@@ -65,7 +66,7 @@
   let inputEl = $state(null);
   // Workspace for a NEW team. Defaulted (current session cwd > server default).
   let workspace = $state('');
-  let editingWorkspace = $state(false);
+  let showPicker = $state(false);   // folder-browser open in the new-team panel
 
   let activeTeam = $derived(teams.find(x => x.room === activeRoom) || null);
   // crew session for the active team (window_name → agent for pane preview).
@@ -175,7 +176,7 @@
   async function startTeam() {
     if (starting || !workspace.trim()) return;
     starting = true;
-    editingWorkspace = false;
+    showPicker = false;
     try {
       const res = await crewStartTeam(workspace.trim());
       newTeam = false;
@@ -337,25 +338,28 @@
 
 {#snippet newTeamPanel()}
   <div class="team-start-panel">
-    <div class="start-ws">
+    <div class="start-row">
       <span class="start-ws-label">{t('teamWorkspace')}</span>
-      {#if editingWorkspace}
-        <input class="start-ws-input" bind:value={workspace}
-          onkeydown={(e) => { if (e.key === 'Enter') editingWorkspace = false; }}
-          placeholder="/path/to/project" />
-      {:else}
-        <button class="start-ws-path" onclick={() => editingWorkspace = true} title={workspace}>
-          {workspace || '—'} <Icon name="edit" size={11} />
-        </button>
+      <!-- Editable path + a folder-browse button (same UX as new-session). -->
+      <input class="start-ws-input" bind:value={workspace} placeholder="/path/to/project" autocapitalize="off" />
+      <button class="start-browse" class:on={showPicker} onclick={() => showPicker = !showPicker} aria-label={t('teamBrowse')} title={t('teamBrowse')}>
+        <Icon name="folder" size={14} />
+      </button>
+    </div>
+    {#if showPicker}
+      <DirPicker start={workspace || undefined}
+        onPick={(p) => { workspace = p; showPicker = false; }}
+        onClose={() => showPicker = false} />
+    {/if}
+    <div class="start-actions">
+      <button class="team-start" disabled={starting || !workspace.trim()} onclick={startTeam}>
+        {#if starting}<span class="reconnect-spinner-sm"></span>{:else}<Icon name="bot" size={14} />{/if}
+        {t('teamStart')}
+      </button>
+      {#if teams.length > 0}
+        <button class="team-start-cancel" onclick={() => { newTeam = false; showPicker = false; }}>{t('cancel')}</button>
       {/if}
     </div>
-    <button class="team-start" disabled={starting || !workspace.trim()} onclick={startTeam}>
-      {#if starting}<span class="reconnect-spinner-sm"></span>{:else}<Icon name="bot" size={14} />{/if}
-      {t('teamStart')}
-    </button>
-    {#if teams.length > 0}
-      <button class="team-start-cancel" onclick={() => newTeam = false}>{t('cancel')}</button>
-    {/if}
   </div>
 {/snippet}
 
@@ -559,31 +563,32 @@
   .team-roster::-webkit-scrollbar { display: none; }
   .team-roster-empty { color: var(--text3); font-size: 12px; padding: 4px 2px; }
   .team-start-panel {
-    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    display: flex; flex-direction: column; gap: 8px;
     padding: 10px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
   }
   .start-hint { color: var(--text3); font-size: 12px; }
-  .start-ws { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+  .start-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .start-ws-label {
     font-size: 10px; font-weight: 600; color: var(--text3);
     text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;
   }
-  .start-ws-path {
-    flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px;
-    padding: 5px 10px; border: 1px solid var(--border2); border-radius: 8px;
-    background: var(--input-bg); color: var(--text2);
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, monospace;
-    font-size: 12px; cursor: pointer; -webkit-tap-highlight-color: transparent;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left;
-  }
-  .start-ws-path:active { border-color: var(--accent); color: var(--accent); }
   .start-ws-input {
     flex: 1; min-width: 0;
-    padding: 5px 10px; border: 1px solid var(--accent); border-radius: 8px;
+    padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 8px;
     background: var(--input-bg); color: var(--text);
     font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, monospace;
     font-size: 12px; outline: none;
   }
+  .start-ws-input:focus { border-color: var(--accent); }
+  .start-browse {
+    flex-shrink: 0; width: 30px; height: 30px; padding: 0;
+    border: 1px solid var(--border2); border-radius: 8px;
+    background: var(--input-bg); color: var(--text3);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .start-browse:active, .start-browse.on { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
+  .start-actions { display: flex; align-items: center; gap: 8px; }
   .team-start {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 5px 12px; height: 28px;
