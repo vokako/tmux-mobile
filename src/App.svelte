@@ -6,7 +6,7 @@
   import Files from './lib/Files.svelte';
   import Icon from './lib/Icon.svelte';
   import { copyText } from './lib/clipboard.js';
-  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable } from './lib/ws.js';
+  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable } from './lib/ws.js';
   import { t, i18n, setLocale } from './lib/i18n.svelte.js';
 
   // Tunable constants
@@ -32,6 +32,7 @@
   let splitLayout = $state(1);
   let splitCells = $state([]);   // [{ id, target, session, command }]
   let activeCellId = $state(null);
+  let splitMenuOpen = $state(false);   // the top-right layout popover
   let nextCellId = 0;
   const SPLIT_MIN_WIDTH = 900;
   const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
@@ -73,17 +74,13 @@
   }
   function cellPaneExit(id) { closeCell(id); }
 
-  // Re-subscribe the right set of panes after a reconnect / address switch.
-  // In split mode every populated cell needs its own subscription; otherwise
-  // just the single pane. (Each mounted Terminal ALSO re-subscribes itself
-  // via the ws-reconnected event, but this covers the gap before its handler
-  // runs and the multi-target case explicitly.)
+  // Re-subscribe after a reconnect / address switch: the server forgot all
+  // subscriptions, so re-send the wire `subscribe` for every target with a
+  // live refcount. This does NOT touch refcounts (the Terminals are still
+  // mounted — only the server-side state was lost), so it's safe to call on
+  // every reconnect without leaking counts.
   function resubscribeAll() {
-    if (splitActive) {
-      for (const c of splitCells) if (c.target) wsSubscribe(c.target);
-    } else if (terminalTarget) {
-      wsSubscribe(terminalTarget);
-    }
+    wsResubscribeActive();
   }
   // Chat view is disabled (placeholder kept so parser / ChatView code still
   // compiles, to be re-enabled later if wanted). While this is false the
@@ -814,15 +811,24 @@
         <Files session={terminalSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} />
       </div>
       <div class="page-layer" class:hidden={page !== 'terminal'}>
-        {#if splitEligible && viewMode === 'terminal'}
-          <div class="split-toolbar">
-            <span class="split-toolbar-label">{t('split')}</span>
-            {#each [1, 2, 3, 4, 6] as n}
-              <button class="split-btn" class:active={(n === 1 && !splitActive) || (splitActive && splitLayout === n)} onclick={() => setLayout(n)}>{n === 1 ? '1' : `${n}`}</button>
-            {/each}
-          </div>
-        {/if}
-        <div class="terminal-body">
+        <div class="terminal-body" class:split-capable={splitEligible && viewMode === 'terminal'}>
+          {#if splitEligible && viewMode === 'terminal'}
+            <!-- Split-layout control: a single floating icon (top-right) that
+                 opens a small popover, instead of a full-width toolbar row. -->
+            <div class="split-control">
+              <button class="split-toggle" class:on={splitActive} title={t('split')} onclick={() => splitMenuOpen = !splitMenuOpen}>
+                <Icon name="layout" size={15} />
+              </button>
+              {#if splitMenuOpen}
+                <div class="split-menu">
+                  {#each [1, 2, 3, 4, 6] as n}
+                    <button class="split-opt" class:active={(n === 1 && !splitActive) || (splitActive && splitLayout === n)} onclick={() => { setLayout(n); splitMenuOpen = false; }}>{n}</button>
+                  {/each}
+                </div>
+                <button class="split-menu-backdrop" aria-label="close" onclick={() => splitMenuOpen = false}></button>
+              {/if}
+            </div>
+          {/if}
           {#if splitActive}
             <SplitView cells={splitCells} layout={splitLayout} {activeCellId} {fontSize}
               onActivate={(id) => activeCellId = id}
@@ -1197,29 +1203,34 @@
     pointer-events: none;
   }
 
-  /* Split-screen layout toolbar (desktop + wide only) */
-  .split-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 8px;
-    border-bottom: 1px solid var(--border2);
-    background: var(--surface);
-    flex-shrink: 0;
-  }
-  .split-toolbar-label {
-    font-size: 10px; font-weight: 600; color: var(--text3);
-    text-transform: uppercase; letter-spacing: 0.5px;
-    margin-right: 2px;
-  }
-  .split-btn {
-    min-width: 26px; height: 24px;
-    padding: 0 6px; border: 1px solid var(--border2); border-radius: 6px;
-    background: var(--input-bg); color: var(--text3);
-    font-size: 12px; font-weight: 600; cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-    transition: all 0.15s ease;
-  }
-  .split-btn.active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
   .terminal-body { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+
+  /* Split-layout control: a single floating icon in the terminal's top-right
+     corner (no full-width toolbar row). Opens a small popover with 1/2/3/4/6. */
+  .split-control { position: absolute; top: 6px; right: 8px; z-index: 12; }
+  .split-toggle {
+    width: 28px; height: 28px; padding: 0;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--surface); color: var(--text3);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  }
+  .split-toggle:hover { color: var(--text2); }
+  .split-toggle.on { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
+  .split-menu {
+    position: absolute; top: 34px; right: 0; z-index: 13;
+    display: flex; gap: 2px; padding: 3px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.35);
+  }
+  .split-opt {
+    min-width: 28px; height: 28px;
+    border: none; border-radius: 6px; background: transparent;
+    color: var(--text3); font-size: 13px; font-weight: 600; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .split-opt:hover { background: var(--surface2); color: var(--text2); }
+  .split-opt.active { background: var(--accent-bg); color: var(--accent); }
+  .split-menu-backdrop { position: fixed; inset: 0; z-index: 12; background: transparent; border: none; cursor: default; }
 </style>

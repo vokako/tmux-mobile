@@ -5,6 +5,7 @@
   import ChatView from './ChatView.svelte';
   import Icon from './Icon.svelte';
   import AgentChip from './AgentChip.svelte';
+  import PanePicker from './PanePicker.svelte';
   import { t } from './i18n.svelte.js';
   import { detectParser } from './parsers.js';
   import { detectAgent, paneIsAgent, paneAgent, sessionHasAgent, AGENTS } from './agents.js';
@@ -28,7 +29,16 @@
   const MOMENTUM_MIN_V = 0.05;
   const SCROLLBAR_TOUCH_WIDTH = 30;
 
-  let { target, session, command: initialCommand = '', viewMode = 'terminal', fontSize = 14, onChatSupported = () => {}, onSwitchPane = null, onPaneExit = () => {} } = $props();
+  // `embedded` = rendered inside a split-screen cell. The cell uses this
+  // Terminal's OWN window-switcher bar as its header (same form as the
+  // single-pane view), so when embedded we always show that bar and add a
+  // close button to it. `onClose` (split only) closes the cell.
+  // `active` (split only): is this the focused cell? Only the active cell
+  // grabs DOM focus for its hidden xterm textarea — there is exactly ONE
+  // focusable textarea per document, so N cells auto-focusing on mount/rebuild
+  // fight each other and end up with input going nowhere. Single-pane is
+  // always active.
+  let { target, session, command: initialCommand = '', viewMode = 'terminal', fontSize = 14, embedded = false, active = true, onChatSupported = () => {}, onSwitchPane = null, onPaneExit = () => {}, onClose = null } = $props();
 
   let input = $state('');
   let paneContent = $state('');
@@ -160,6 +170,15 @@
   // Window switcher
   let windowPanes = $state([]);
   let showWindowCmd = $state(localStorage.getItem('tmux_winswitcher') === '1');
+  let showPanePicker = $state(false); // session-badge → jump-to-any-pane popover
+
+  // Desktop split: when this cell becomes the active one, pull DOM focus to
+  // its xterm textarea so keystrokes route here. (Single-pane: active is
+  // always true; the mousedown/mount focus covers it.)
+  $effect(() => {
+    if (!embedded || isMobile || !active || !term) return;
+    requestAnimationFrame(() => { try { term?.focus(); } catch {} });
+  });
   let currentWindow = $derived(target.split(':')[1]?.split('.')[0] || '');
 
   // Other AI sessions — shown as chips in the expanded window-switcher so
@@ -232,8 +251,10 @@
   // choice: multiple windows, the current window is an agent, or other agent
   // sessions exist (the latter is only known while expanded, since we don't
   // poll cross-session data when collapsed).
+  // Embedded (split cell) always shows the bar — it's the cell's header.
+  // Standalone keeps the "only when there's something to switch to" rule.
   let showSwitcher = $derived(
-    windows.length > 1 || !!currentWinAgent || otherAgentSessions.length > 0
+    embedded || windows.length > 1 || !!currentWinAgent || otherAgentSessions.length > 0
   );
 
   $effect(() => {
@@ -248,9 +269,10 @@
       try {
         const p = await listPanes(session);
         windowPanes = p;
-        // Only refresh the cross-session chip data while the switcher is
-        // actually visible — saves an extra RPC per tick.
-        if (showWindowCmd) await loadOtherAgentSessions();
+        // Cross-session AI chips: only when the switcher is expanded AND not
+        // a split cell (in split mode every cell already shows the bar; we
+        // don't want N cells each fanning out a listSessionsWithPanes tick).
+        if (showWindowCmd && !embedded) await loadOtherAgentSessions();
       } catch {}
       polling = false;
     };
@@ -740,10 +762,12 @@
       // Capture phase on the wrapper so it fires before the textarea default.
       termEl.addEventListener('keydown', onDesktopKeydown, { capture: true });
       // Desktop has no on-screen keyboard / toggle, so focus the xterm sink
-      // immediately and on click so ordinary typing (and our handler) works.
+      // on click so ordinary typing (and our handler) works. Auto-focus on
+      // mount ONLY for the active terminal — otherwise multiple split cells
+      // race for the single document focus and input lands nowhere.
       const focusTerm = () => { try { term.focus(); } catch {} };
       termEl.addEventListener('mousedown', focusTerm);
-      requestAnimationFrame(focusTerm);
+      if (active) requestAnimationFrame(focusTerm);
       onDesktopKeydown._focusTerm = focusTerm; // kept for cleanup reference
     }
 
@@ -1606,7 +1630,10 @@
     };
     window.addEventListener('ws-reconnected', onReconnected);
 
-    addPaneOutputListener(target, (t, content, cursor, currentCommand) => {
+    // Named refs so cleanup removes EXACTLY this cell's listener — two cells
+    // on the same target each register their own; removing by reference
+    // leaves the other's intact.
+    const onPaneOutputCb = (t, content, cursor, currentCommand) => {
       if (t !== target) return;
       if (cursor) lastCursor = cursor;
       // Pane's running command, only present on first push and on changes.
@@ -1627,11 +1654,10 @@
           term.write(`\x1b[${row};${cursor.x + 1}H`);
         }
       }
-    });
-
-    addPaneClosedListener(target, (t) => {
-      if (t === target) onPaneExit(target);
-    });
+    };
+    const onPaneClosedCb = (t) => { if (t === target) onPaneExit(target); };
+    addPaneOutputListener(target, onPaneOutputCb);
+    addPaneClosedListener(target, onPaneClosedCb);
 
     subscribe(target);
     capturePane(target).then(r => {
@@ -1672,8 +1698,8 @@
       }
       // Server's resize_tracker auto-restores this window via `resize-window -A` on WS disconnect
       unsubscribe(target);
-      removePaneOutputListener(target);
-      removePaneClosedListener(target);
+      removePaneOutputListener(target, onPaneOutputCb);
+      removePaneClosedListener(target, onPaneClosedCb);
       try { term.dispose(); } catch {}
       term = null;
       copySelection = () => {};
@@ -1853,13 +1879,37 @@
     <div class="toast">{toastMsg}</div>
   {/if}
   {#if showSwitcher}
-    {#if showWindowCmd}
+    {#if showWindowCmd || embedded}
       <!--
         Expanded switcher: a top-of-page horizontal tab bar that holds
         BOTH the current session's windows and up-to-5 other AI sessions
         as chips. One concept: "everywhere I can switch to".
       -->
       <div class="win-bar">
+        <!-- Session name as a fixed tag at the far left of the switcher row,
+             so it's always visible without stealing a whole row. The window
+             chips scroll independently to its right. -->
+        <button class="win-session" title={session} onclick={(e) => { e.stopPropagation(); showPanePicker = !showPanePicker; }}>
+          <Icon name="sessions" size={11} /><span class="win-session-name">{session}</span>
+          <Icon name="chevron-down" size={9} />
+        </button>
+        {#if showPanePicker}
+          <PanePicker
+            currentTarget={target}
+            onPick={(p) => {
+              showPanePicker = false;
+              if (`${p.session}:${p.window}.${p.pane}` !== target && onSwitchPane) {
+                document.activeElement?.blur();
+                touchScrolling = false;
+                const fh = window.__fullHeight?.() || window.innerHeight;
+                document.documentElement.style.setProperty('--app-height', fh + 'px');
+                document.documentElement.classList.remove('keyboard-open');
+                onSwitchPane(`${p.session}:${p.window}.${p.pane}`, p.current_command);
+              }
+            }}
+            onClose={() => showPanePicker = false}
+          />
+        {/if}
         <div class="win-bar-scroll">
           {#each windows as w}
             {@const wAgent = paneAgent(w)}
@@ -1928,9 +1978,17 @@
           {/if}
         </div>
 
-        <button class="win-bar-collapse" aria-label="Collapse" onclick={() => { showWindowCmd = false; localStorage.setItem('tmux_winswitcher', '0'); }}>
-          <Icon name="chevron-right" size={12} />
-        </button>
+        {#if embedded && onClose}
+          <!-- Split cell: close button instead of the collapse chevron
+               (collapsing makes no sense — the bar IS the cell header). -->
+          <button class="win-bar-collapse" aria-label="Close pane" onclick={(e) => { e.stopPropagation(); onClose(); }}>
+            <Icon name="x" size={12} />
+          </button>
+        {:else}
+          <button class="win-bar-collapse" aria-label="Collapse" onclick={() => { showWindowCmd = false; localStorage.setItem('tmux_winswitcher', '0'); }}>
+            <Icon name="chevron-right" size={12} />
+          </button>
+        {/if}
       </div>
     {:else}
       {@const cur = windows.find(w => String(w.window) === currentWindow)}
@@ -2099,6 +2157,30 @@
     border-bottom: 1px solid var(--border2);
     background: var(--surface);
     flex-shrink: 0;
+    position: relative; /* anchor for the PanePicker popover */
+  }
+  .win-session {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    max-width: 160px;
+    padding: 3px 7px;
+    border: none;
+    border-radius: 999px;
+    background: var(--accent-bg);
+    color: var(--accent);
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Maple Mono CJK', 'SF Mono', Menlo, monospace;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .win-session:active { background: var(--accent); color: var(--bg); }
+  .win-session-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .win-bar-scroll {
     flex: 1;

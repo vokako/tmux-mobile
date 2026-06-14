@@ -51,10 +51,28 @@ let requestId = 0;
 const pending = new Map();
 // Per-target listener registries. Each mounted Terminal registers a callback
 // keyed by its own target, so multiple terminals (split-screen) coexist —
-// pane_output / pane_closed are routed to the matching listener instead of a
+// pane_output / pane_closed are routed to the matching listeners instead of a
 // single shared callback that instances would overwrite.
-const paneOutputListeners = new Map(); // target -> cb(target, content, cursor, current_command)
-const paneClosedListeners = new Map(); // target -> cb(target)
+//
+// Value is a Set of callbacks, NOT a single cb: two split cells can show the
+// SAME target (same window), and both must receive every push. With a single
+// cb the second registration silently replaced the first, so only one cell
+// refreshed. A Set fans out to all, and removing one cell's cb leaves the
+// other's intact.
+const paneOutputListeners = new Map(); // target -> Set<cb(target, content, cursor, current_command)>
+const paneClosedListeners = new Map(); // target -> Set<cb(target)>
+
+function addListener(map, target, cb) {
+  let set = map.get(target);
+  if (!set) { set = new Set(); map.set(target, set); }
+  set.add(cb);
+}
+function removeListener(map, target, cb) {
+  const set = map.get(target);
+  if (!set) return;
+  set.delete(cb);
+  if (set.size === 0) map.delete(target);
+}
 let onDisconnect = null;
 let sessionCipher = null; // {key, sendCounter, recvCounter}
 // Idle-probe state. lastInboundAt is updated on every inbound message
@@ -64,10 +82,13 @@ let lastInboundAt = 0;
 let idleProbeTimer = null;
 let idleProbeInFlight = false;
 
-export function addPaneOutputListener(target, cb) { paneOutputListeners.set(target, cb); }
-export function removePaneOutputListener(target) { paneOutputListeners.delete(target); }
-export function addPaneClosedListener(target, cb) { paneClosedListeners.set(target, cb); }
-export function removePaneClosedListener(target) { paneClosedListeners.delete(target); }
+// These take the cb so the caller can register/unregister its own listener
+// without disturbing other cells on the same target. Callers MUST pass the
+// same function reference to remove that they passed to add.
+export function addPaneOutputListener(target, cb) { addListener(paneOutputListeners, target, cb); }
+export function removePaneOutputListener(target, cb) { removeListener(paneOutputListeners, target, cb); }
+export function addPaneClosedListener(target, cb) { addListener(paneClosedListeners, target, cb); }
+export function removePaneClosedListener(target, cb) { removeListener(paneClosedListeners, target, cb); }
 export function setOnDisconnect(cb) { onDisconnect = cb; }
 
 // --- Crypto helpers (Web Crypto API) ---
@@ -359,16 +380,18 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
 
       if (data.method === 'pane_output') {
         // current_command is included only on the first push and when it
-        // actually changes — most ticks omit it. Route to the listener for
-        // this exact target (split-screen has one per cell).
+        // actually changes — most ticks omit it. Fan out to EVERY listener
+        // on this target (multiple split cells may show the same window).
         const tgt = data.params?.target;
-        paneOutputListeners.get(tgt)?.(tgt, data.params?.content, data.params?.cursor, data.params?.current_command);
+        const set = paneOutputListeners.get(tgt);
+        if (set) for (const cb of set) cb(tgt, data.params?.content, data.params?.cursor, data.params?.current_command);
         return;
       }
 
       if (data.method === 'pane_closed') {
         const tgt = data.params?.target;
-        paneClosedListeners.get(tgt)?.(tgt);
+        const set = paneClosedListeners.get(tgt);
+        if (set) for (const cb of set) cb(tgt);
         return;
       }
 
@@ -539,16 +562,46 @@ export const fsUpload = (path, data) => call('fs_upload', { path, data }, 60000)
 export const fsConvert = (path, format = 'html') => call('fs_convert', { path, format });
 export const gitCmd = (subcmd, args = [], cwd) => call('git', { subcmd, args, cwd });
 
-export function subscribe(target) {
+// Subscription refcount per target. The server keeps ONE subscription entry
+// per target, so two split cells on the same window must NOT let the first
+// cell's unmount send `unsubscribe` and cut the survivor's feed. We send the
+// wire subscribe only on the 0→1 transition and unsubscribe only on 1→0.
+// (The set of who-wants-it is the count; resubscribe-on-reconnect re-sends
+// for every still-positive target.)
+const subRefcount = new Map(); // target -> count
+
+function sendSubscribe(target) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   const msg = JSON.stringify({ method: 'subscribe', params: { target } });
   encryptMsg(msg).then(out => ws?.send(out)).catch(() => {});
 }
-
-export function unsubscribe(target) {
+function sendUnsubscribe(target) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   const msg = JSON.stringify({ method: 'unsubscribe', params: { target } });
   encryptMsg(msg).then(out => ws?.send(out)).catch(() => {});
+}
+
+export function subscribe(target) {
+  const n = (subRefcount.get(target) || 0) + 1;
+  subRefcount.set(target, n);
+  if (n === 1) sendSubscribe(target); // first subscriber → tell the server
+}
+
+export function unsubscribe(target) {
+  const n = (subRefcount.get(target) || 0) - 1;
+  if (n <= 0) {
+    subRefcount.delete(target);
+    sendUnsubscribe(target); // last subscriber left → tell the server
+  } else {
+    subRefcount.set(target, n);
+  }
+}
+
+// Re-send subscribe for every target with a live refcount. Used after a
+// reconnect, where the server forgot all subscriptions. Does NOT change
+// refcounts (the cells are still mounted; only the wire state was lost).
+export function resubscribeActive() {
+  for (const target of subRefcount.keys()) sendSubscribe(target);
 }
 
 // --- Address optimization ---
