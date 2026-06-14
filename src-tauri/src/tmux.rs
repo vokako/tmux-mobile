@@ -176,11 +176,19 @@ fn process_table() -> std::collections::HashMap<u32, (u32, String)> {
         return map;
     };
     for line in String::from_utf8_lossy(&out.stdout).lines() {
-        let s = line.trim_start();
-        let mut it = s.splitn(3, char::is_whitespace);
-        let (Some(pid), Some(ppid)) = (it.next(), it.next()) else { continue };
-        let (Ok(pid), Ok(ppid)) = (pid.parse(), ppid.parse()) else { continue };
-        let args = it.next().map(|a| a.trim_start().to_string()).unwrap_or_default();
+        // `ps` right-aligns the numeric pid/ppid columns, so consecutive
+        // fields are separated by RUNS of spaces, not single spaces. Read the
+        // two leading numbers off a whitespace-collapsing iterator, then take
+        // args as the rest of the line after the ppid token. (splitn on a
+        // single whitespace char would yield an empty ppid field on every
+        // padded row and drop the entire process table — the bug this fixes.)
+        let mut it = line.split_whitespace();
+        let (Some(pid_tok), Some(ppid_tok)) = (it.next(), it.next()) else { continue };
+        let (Ok(pid), Ok(ppid)) = (pid_tok.parse::<u32>(), ppid_tok.parse::<u32>()) else { continue };
+        // args = whatever the iterator has left, rejoined with single spaces.
+        // (Original spacing inside argv is irrelevant — we only substring-match
+        // against it.)
+        let args = it.collect::<Vec<_>>().join(" ");
         map.insert(pid, (ppid, args));
     }
     map
