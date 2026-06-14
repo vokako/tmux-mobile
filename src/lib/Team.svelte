@@ -82,15 +82,20 @@
     }
   }
 
-  // Lightweight roster+status refresh (no history reload, no workspace reseed).
-  // Used by the live push + the poll so presence/status dots stay current.
+  // Lightweight roster-only refresh (no history, no status, no workspace
+  // reseed). This is the hot path that keeps the status bar live, so it stays
+  // as cheap as possible — one small RPC. `team_started` is set once on Start
+  // and only goes false→true, so it doesn't need re-polling here.
+  let rosterInFlight = false;
   async function refreshRoster() {
+    if (rosterInFlight) return; // don't stack if a poll is slow
+    rosterInFlight = true;
     try {
-      const [r, s] = await Promise.all([crewRoster(), crewStatus()]);
+      const r = await crewRoster();
       roster = r?.roster || [];
-      teamStarted = !!s?.team_started;
       available = true;
-    } catch { /* transient; the poll/visible effect will retry */ }
+    } catch { /* transient; the next poll tick retries */ }
+    finally { rosterInFlight = false; }
   }
 
   async function startTeam() {
@@ -127,14 +132,17 @@
     return () => removeCrewMessageListener(onCrewMessage);
   });
 
-  // While the tab is visible: full refresh once, then poll the roster so agent
-  // presence/status (online → waiting/working) stays live and the "coming
-  // online…" spinner resolves as agents join — no tab switch required. Agent
-  // status changes aren't broadcast as messages, so a poll is the only signal.
+  // While the tab is visible: full refresh once, then poll the roster on a
+  // tight interval so the status bar (online → waiting/working) stays
+  // responsive and the "coming online…" spinner resolves as agents join — no
+  // tab switch required. Agent status changes aren't broadcast as messages, so
+  // a poll is the only signal. The poll is roster-only (one cheap RPC) and
+  // guarded against stacking, so 1s is comfortable; it stops when the tab hides.
+  const ROSTER_POLL_MS = 1000;
   $effect(() => {
     if (!visible) return;
     refresh();
-    const id = setInterval(refreshRoster, 2500);
+    const id = setInterval(refreshRoster, ROSTER_POLL_MS);
     return () => clearInterval(id);
   });
 
