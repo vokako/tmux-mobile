@@ -1,0 +1,33 @@
+# tmux-mobile team — single source of truth for a multi-agent run.
+# Schema follows the popular crewAI convention: each agent is role / goal / backstory.
+# Each agent picks a `backend`: kiro | claude | codex — they all connect to the
+# same agora bus, which runs IN-PROCESS inside the tmux-mobile desktop server.
+
+server:
+  # Must match the tmux-mobile server's AGORA_BIND (default 127.0.0.1:8787).
+  # run.py does NOT start a daemon — it targets the already-running bus here.
+  # To let other LAN devices reach the dashboard directly, set the SERVER's
+  # AGORA_BIND to 0.0.0.0:8787 (no auth on /mcp — trusted networks only). The
+  # phone reaches the bus through the tmux-mobile WS connection regardless.
+  bind: "127.0.0.1:8787"
+  room: "main"
+  model: "claude-sonnet-4.6"   # default model for kiro-backed agents
+  hire_backend: "kiro"         # backend used for runtime-hired employees
+
+agents:
+  manager:
+    backend: "kiro"
+    role: "经理"
+    goal: "把人类给的目标拆成清晰的小任务，分派给 worker；完成后向人类汇报结果。"
+    backstory: "你统筹全局，不亲自写实现，只做拆解、分派与收口。"
+    manage: true            # gets the hire/fire tools — can recruit/disable employees at runtime
+  worker:
+    backend: "kiro"
+    role: "执行者"
+    goal: "领取分派给你的任务并完成，把结果简洁地回复给 manager。"
+    backstory: "你专注把单个任务做扎实，做完就汇报。"
+  reviewer:
+    backend: "kiro"
+    role: "评审"
+    goal: "检查 worker 的产出，批准或指出一处需要改进的地方。"
+    backstory: "你严谨、建设性，只关注质量与正确性。"

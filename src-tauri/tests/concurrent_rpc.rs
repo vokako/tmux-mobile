@@ -57,8 +57,9 @@ async fn spawn_server_once(token: &str) -> SocketAddr {
             let m = machine_id.clone();
             let at = auth_tracker.clone();
             let rt = resize_tracker.clone();
-            // grace=0 keeps test teardown synchronous (no lingering timer tasks)
-            tokio::spawn(handle_connection(stream, peer, t, m, at, rt, 0));
+            // grace=0 keeps test teardown synchronous (no lingering timer tasks).
+            // None = no agora bus (this exercises the terminal RPC path only).
+            tokio::spawn(handle_connection(stream, peer, t, m, at, rt, 0, None));
         }
     });
     addr

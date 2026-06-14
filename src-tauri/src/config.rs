@@ -16,6 +16,16 @@ struct FileConfig {
     // immediately (legacy behavior). Default 600 (10 min) so short
     // reconnects (backgrounded app, network blip) skip the reflow cycle.
     disconnect_grace_secs: Option<u64>,
+    // agora multi-agent bus (desktop only). `agora_bind` is where the
+    // in-process MCP daemon + dashboard listen for external coding agents;
+    // the phone reaches the same room through the tmux-mobile WS server, so
+    // this address only matters for the agents themselves. Empty bind keeps
+    // the default; the bus itself always runs in-process.
+    agora_bind: Option<String>,
+    agora_db: Option<String>,
+    agora_room: Option<String>,
+    // Default model for kiro-backed team agents.
+    agora_model: Option<String>,
 }
 
 pub struct Config {
@@ -28,10 +38,21 @@ pub struct Config {
     pub tls_key: Option<String>,
     pub scrollback: usize,
     pub disconnect_grace_secs: u64,
+    pub agora_bind: String,
+    pub agora_db: String,
+    pub agora_room: String,
+    pub agora_model: String,
 }
 
 fn config_path() -> PathBuf {
     dirs_next().join("config.toml")
+}
+
+/// The tmux-mobile config directory (`~/.config/tmux-mobile`). Public so the
+/// team supervisor can place its per-agent working files alongside the rest of
+/// the app's state.
+pub fn config_dir() -> PathBuf {
+    dirs_next()
 }
 
 fn dirs_next() -> PathBuf {
@@ -84,6 +105,22 @@ impl Config {
                 .and_then(|s| s.parse().ok())
                 .or(file_cfg.disconnect_grace_secs)
                 .unwrap_or(600),
+            agora_bind: std::env::var("AGORA_BIND")
+                .ok()
+                .or(file_cfg.agora_bind)
+                .unwrap_or_else(|| "127.0.0.1:8787".into()),
+            agora_db: std::env::var("AGORA_DB")
+                .ok()
+                .or(file_cfg.agora_db)
+                .unwrap_or_else(|| dirs_next().join("agora.db").to_string_lossy().into_owned()),
+            agora_room: std::env::var("AGORA_ROOM")
+                .ok()
+                .or(file_cfg.agora_room)
+                .unwrap_or_else(|| "main".into()),
+            agora_model: std::env::var("AGORA_MODEL")
+                .ok()
+                .or(file_cfg.agora_model)
+                .unwrap_or_else(|| "claude-sonnet-4.6".into()),
         }
     }
 }

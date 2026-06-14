@@ -31,6 +31,43 @@ pub const WIRE_DEFLATE_JSON: u8 = 0x01;
 // output bigger than the input. Skip compression for small payloads.
 pub const COMPRESS_MIN_BYTES: usize = 256;
 
+// ─── agora multi-agent bus bridge ────────────────────────────────────────
+// The Team tab talks to the agora group-chat bus, which lives in a desktop-only
+// sub-crate (heavy axum/rmcp/rusqlite deps the phone never builds). To keep
+// server.rs compiling on Android/iOS, the bus is reached only through this
+// JSON-only trait object: the desktop build supplies a concrete impl wrapping
+// `agora::Bus`; mobile builds always pass `None` and never call it.
+//
+// All methods speak `serde_json::Value` so no agora type crosses this boundary.
+pub trait AgoraBridge: Send + Sync {
+    /// Recent messages, oldest first: `{ "messages": [...] }`.
+    fn history(&self, limit: i64) -> serde_json::Value;
+    /// Roster + presence: `{ "roster": [...] }`.
+    fn roster(&self) -> serde_json::Value;
+    /// Post as a participant. Returns the stored message JSON on success.
+    fn post(&self, from: &str, body: &str, requires_reply: bool) -> Result<serde_json::Value, String>;
+    /// Desired-roster employees: `{ "employees": [...] }`.
+    fn employees(&self) -> serde_json::Value;
+    /// Seed an employee into the desired roster (used by the in-process team
+    /// supervisor to register the initial team). `spec` is the opaque launcher
+    /// blob (role/goal/backend/manage/model). Returns the name on success.
+    fn seed_employee(&self, name: &str, spec: &serde_json::Value) -> Result<(), String>;
+    /// Raw employee list as `(name, spec, state)` for the supervisor's
+    /// reconcile loop (avoids re-parsing the JSON `employees()` shape).
+    fn employee_specs(&self) -> Vec<(String, serde_json::Value, String)>;
+    /// Start the built-in team (seed the default roster + launch agents into
+    /// tmux). Idempotent: a second call while already started is a no-op.
+    /// Returns whether this call started it (false = already running).
+    fn start_team(&self) -> bool;
+    /// Whether the team supervisor has been started this session.
+    fn team_started(&self) -> bool;
+    /// A receiver of newly-broadcast messages, each pre-serialized to a JSON
+    /// string. Used to push `agora_message` frames to the phone in real time.
+    fn subscribe(&self) -> tokio::sync::broadcast::Receiver<String>;
+}
+
+pub type OptAgora = Option<Arc<dyn AgoraBridge>>;
+
 // Brute-force protection: track failed auth attempts per IP
 pub type AuthTracker = Arc<Mutex<HashMap<IpAddr, (u32, tokio::time::Instant)>>>;
 
@@ -874,6 +911,83 @@ async fn subscription_loop(
     }
 }
 
+/// Dispatch `agora_*` RPC methods to the in-process bus bridge. Returns a
+/// method-not-found error when no bus is wired (mobile builds, or desktop with
+/// agora disabled) so the client can degrade gracefully (hide the Team tab).
+fn handle_agora_request(req: &Request, agora: Option<&dyn AgoraBridge>) -> Response {
+    let id = req.id;
+    let p = &req.params;
+    let Some(bus) = agora else {
+        return Response::err(id, ERR_METHOD_NOT_FOUND, "agora bus not available on this server".into());
+    };
+    match req.method.as_str() {
+        "agora_history" => {
+            let limit = p.get("limit").and_then(|v| v.as_i64()).unwrap_or(100).clamp(1, 1000);
+            Response::ok(id, bus.history(limit))
+        }
+        "agora_roster" => Response::ok(id, bus.roster()),
+        "agora_employees" => Response::ok(id, bus.employees()),
+        // Whether the bus is present + whether the team supervisor is running.
+        // The Team tab probes this to show the right state (start vs running).
+        "agora_status" => Response::ok(id, serde_json::json!({
+            "available": true,
+            "team_started": bus.team_started(),
+        })),
+        // Operator action: spin up the built-in team (seed roster + launch
+        // agents into tmux). Idempotent; returns whether this call started it.
+        "agora_start_team" => Response::ok(id, serde_json::json!({
+            "started": bus.start_team(),
+            "team_started": true,
+        })),
+        "agora_post" => {
+            let body = match require_str(p, "body") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            // The human is "you" on the phone; default sender name "human"
+            // matches agora's dashboard/CLI convention so the operator shows
+            // up consistently across surfaces.
+            let from = p.get("from").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or("human");
+            // Mirror the dashboard: an @mention implies a reply is wanted
+            // unless the client says otherwise.
+            let requires_reply = p
+                .get("requires_reply")
+                .and_then(|v| v.as_bool())
+                .unwrap_or_else(|| body.contains('@'));
+            match bus.post(from, body, requires_reply) {
+                Ok(msg) => Response::ok(id, serde_json::json!({ "message": msg })),
+                Err(e) => Response::err(id, ERR_INTERNAL, e),
+            }
+        }
+        other => Response::err(id, ERR_METHOD_NOT_FOUND, format!("unknown agora method: {}", other)),
+    }
+}
+
+/// Push newly-broadcast agora messages to this client as `agora_message`
+/// notifications, so the Team tab updates live without polling. Mirrors the
+/// dashboard's SSE stream, but rides the existing encrypted Outbound channel.
+async fn agora_push_loop(out_tx: tokio::sync::mpsc::UnboundedSender<Outbound>, agora: Arc<dyn AgoraBridge>) {
+    let mut rx = agora.subscribe();
+    loop {
+        match rx.recv().await {
+            Ok(msg_json) => {
+                let frame = serde_json::json!({
+                    "id": null,
+                    "method": "agora_message",
+                    "params": { "message": serde_json::from_str::<serde_json::Value>(&msg_json).unwrap_or(serde_json::Value::Null) },
+                });
+                if out_tx.send(Outbound::Encrypted(serde_json::to_string(&frame).unwrap())).is_err() {
+                    return; // send task gone
+                }
+            }
+            // Lagged: the client re-syncs via agora_history on demand, so just
+            // keep receiving from the current tail.
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+        }
+    }
+}
+
 fn handle_subscribe(params: &serde_json::Value, subs: &mut HashMap<String, String>) -> Response {
     let target = match require_str(params, "target") {
         Ok(s) => s,
@@ -1056,7 +1170,7 @@ where
     let _ = stream.flush().await;
 }
 
-pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, grace_secs: u64) {
+pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, grace_secs: u64, agora: OptAgora) {
     // Peek at the request prelude to distinguish HTTP download from
     // WebSocket. 256 bytes covers the request line even with a reverse-proxy
     // path prefix; peek doesn't consume, so the WS handshake still sees the
@@ -1098,10 +1212,10 @@ pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<S
         }
     };
 
-    handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, resize_tracker, conn_id, conn_started_at, grace_secs).await;
+    handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, resize_tracker, conn_id, conn_started_at, grace_secs, agora).await;
 }
 
-async fn handle_connection_ws<S>(ws_stream: tokio_tungstenite::WebSocketStream<S>, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, conn_id: u64, conn_started_at: std::time::Instant, grace_secs: u64)
+async fn handle_connection_ws<S>(ws_stream: tokio_tungstenite::WebSocketStream<S>, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, conn_id: u64, conn_started_at: std::time::Instant, grace_secs: u64, agora: OptAgora)
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
@@ -1121,6 +1235,10 @@ where
     // conn_id allocated above so the "connected" log line carries it.
     let hostname = gethostname::gethostname().to_string_lossy().to_string();
     let mut authenticated = false;
+    // agora message-push task: started once, right after auth succeeds (it
+    // enqueues Encrypted frames, which need the session cipher in place).
+    // Aborted at teardown alongside the other per-connection tasks.
+    let mut agora_push_handle: Option<tokio::task::JoinHandle<()>> = None;
     // Receive-side cipher lives in this task and guards strict decrypt
     // ordering. Send-side cipher is handed off to the dedicated send task
     // (below) so business tasks can finish out of order without corrupting
@@ -1352,6 +1470,9 @@ where
                             let _ = out_tx.send(Outbound::InitCipher(HalfCipher::new(&key)));
                             let resp = serde_json::to_string(&serde_json::json!({"result":{"authenticated":true,"machine_id":*machine_id,"hostname":&hostname}})).unwrap();
                             let _ = out_tx.send(Outbound::Encrypted(resp));
+                            if let Some(ref a) = agora {
+                                agora_push_handle = Some(tokio::spawn(agora_push_loop(out_tx.clone(), a.clone())));
+                            }
                             continue;
                         } else {
                             let mut tracker = auth_tracker.lock().await;
@@ -1370,6 +1491,9 @@ where
                         auth_tracker.lock().await.remove(&addr.ip());
                         let r = Response::ok(req.id, serde_json::json!({ "authenticated": true, "machine_id": *machine_id, "hostname": &hostname }));
                         let _ = out_tx.send(Outbound::Plain(serde_json::to_string(&r).unwrap()));
+                        if let Some(ref a) = agora {
+                            agora_push_handle = Some(tokio::spawn(agora_push_loop(out_tx.clone(), a.clone())));
+                        }
                         continue;
                     } else {
                         let mut tracker = auth_tracker.lock().await;
@@ -1394,6 +1518,7 @@ where
                 let tracker_c = resize_tracker.clone();
                 let out_tx_c = out_tx.clone();
                 let token_c = token.clone();
+                let agora_c = agora.clone();
                 tokio::spawn(async move {
                     let response = match req.method.as_str() {
                         "subscribe" => {
@@ -1404,6 +1529,7 @@ where
                             let mut map = subs_c.lock().await;
                             handle_unsubscribe(&req.params, &mut map)
                         }
+                        m if m.starts_with("agora_") => handle_agora_request(&req, agora_c.as_deref()),
                         "resize_pane" => {
                             let id = req.id;
                             let p = &req.params;
@@ -1468,6 +1594,9 @@ where
 
     sub_handle.abort();
     ping_handle.abort();
+    if let Some(h) = agora_push_handle.take() {
+        h.abort();
+    }
     drop(out_tx); // close the channel so the send task finishes
     let _ = send_task.await;
     // Schedule restoration of any windows this connection resized, but only
@@ -1555,9 +1684,10 @@ where
 }
 
 pub async fn start(host: &str, port: u16, token: &str) -> Result<(), Box<dyn std::error::Error>> {
-    start_with_socket(host, port, token, "unknown", None, None, None, 600).await
+    start_with_socket(host, port, token, "unknown", None, None, None, 600, None).await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn start_with_socket(
     host: &str,
     port: u16,
@@ -1567,6 +1697,7 @@ pub async fn start_with_socket(
     tls_cert: Option<String>,
     tls_key: Option<String>,
     disconnect_grace_secs: u64,
+    agora: OptAgora,
 ) -> Result<(), Box<dyn std::error::Error>> {
     tmux::set_socket(socket);
     // Best-effort harden existing config.toml so upgraded installs with the
@@ -1623,6 +1754,7 @@ pub async fn start_with_socket(
         let auth_tracker = auth_tracker.clone();
         let control_mgr = resize_tracker.clone();
         let grace = disconnect_grace_secs;
+        let agora_c = agora.clone();
         if let Some(ref acceptor) = tls_acceptor {
             let acceptor = acceptor.clone();
             tokio::spawn(async move {
@@ -1655,13 +1787,13 @@ pub async fn start_with_socket(
                         let conn_id = CONN_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         let conn_started_at = std::time::Instant::now();
                         println!("📱 Client connected (TLS): {} (conn_id={})", addr, conn_id);
-                        handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, control_mgr, conn_id, conn_started_at, grace).await;
+                        handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, control_mgr, conn_id, conn_started_at, grace, agora_c).await;
                     }
                     Err(e) => eprintln!("❌ TLS handshake failed for {}: {}", addr, e),
                 }
             });
         } else {
-            tokio::spawn(handle_connection(stream, addr, token, machine_id, auth_tracker, control_mgr, grace));
+            tokio::spawn(handle_connection(stream, addr, token, machine_id, auth_tracker, control_mgr, grace, agora_c));
         }
     }
 }
@@ -1669,6 +1801,98 @@ pub async fn start_with_socket(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── agora WS proxy dispatch ─────────────────────────────────────────
+    // A tiny in-memory AgoraBridge stand-in so we can exercise
+    // handle_agora_request without pulling in the real (desktop-only) bus.
+    struct MockAgora;
+    impl AgoraBridge for MockAgora {
+        fn history(&self, limit: i64) -> serde_json::Value {
+            serde_json::json!({ "messages": [], "echo_limit": limit })
+        }
+        fn roster(&self) -> serde_json::Value {
+            serde_json::json!({ "roster": [{ "name": "worker", "status": "waiting" }] })
+        }
+        fn post(&self, from: &str, body: &str, requires_reply: bool) -> Result<serde_json::Value, String> {
+            Ok(serde_json::json!({ "from": from, "body": body, "requires_reply": requires_reply }))
+        }
+        fn employees(&self) -> serde_json::Value {
+            serde_json::json!({ "employees": [] })
+        }
+        fn seed_employee(&self, _name: &str, _spec: &serde_json::Value) -> Result<(), String> {
+            Ok(())
+        }
+        fn employee_specs(&self) -> Vec<(String, serde_json::Value, String)> {
+            Vec::new()
+        }
+        fn start_team(&self) -> bool {
+            true
+        }
+        fn team_started(&self) -> bool {
+            false
+        }
+        fn subscribe(&self) -> tokio::sync::broadcast::Receiver<String> {
+            let (tx, rx) = tokio::sync::broadcast::channel(4);
+            let _ = tx; // keep the sender alive only as long as needed for the type
+            rx
+        }
+    }
+
+    fn req(method: &str, params: serde_json::Value) -> Request {
+        Request { id: Some(1), method: method.to_string(), params }
+    }
+
+    #[test]
+    fn agora_request_without_bus_is_method_not_found() {
+        let r = handle_agora_request(&req("agora_roster", serde_json::json!({})), None);
+        assert_eq!(r.error.as_ref().map(|e| e.code), Some(ERR_METHOD_NOT_FOUND));
+    }
+
+    #[test]
+    fn agora_roster_returns_roster() {
+        let bus = MockAgora;
+        let r = handle_agora_request(&req("agora_roster", serde_json::json!({})), Some(&bus));
+        let roster = r.result.unwrap();
+        assert_eq!(roster["roster"][0]["name"], "worker");
+    }
+
+    #[test]
+    fn agora_post_requires_body_and_infers_reply_from_mention() {
+        let bus = MockAgora;
+        // Missing body → invalid params.
+        let bad = handle_agora_request(&req("agora_post", serde_json::json!({})), Some(&bus));
+        assert_eq!(bad.error.as_ref().map(|e| e.code), Some(ERR_INVALID_PARAMS));
+
+        // @mention with no explicit flag → requires_reply inferred true.
+        let mentioned = handle_agora_request(
+            &req("agora_post", serde_json::json!({ "body": "@worker do X" })),
+            Some(&bus),
+        );
+        assert_eq!(mentioned.result.unwrap()["message"]["requires_reply"], true);
+
+        // Plain broadcast → requires_reply inferred false; default sender "human".
+        let plain = handle_agora_request(
+            &req("agora_post", serde_json::json!({ "body": "hello team" })),
+            Some(&bus),
+        );
+        let msg = plain.result.unwrap();
+        assert_eq!(msg["message"]["requires_reply"], false);
+        assert_eq!(msg["message"]["from"], "human");
+
+        // Explicit requires_reply=false overrides the @mention inference.
+        let forced = handle_agora_request(
+            &req("agora_post", serde_json::json!({ "body": "@worker fyi", "requires_reply": false })),
+            Some(&bus),
+        );
+        assert_eq!(forced.result.unwrap()["message"]["requires_reply"], false);
+    }
+
+    #[test]
+    fn agora_unknown_method_is_method_not_found() {
+        let bus = MockAgora;
+        let r = handle_agora_request(&req("agora_bogus", serde_json::json!({})), Some(&bus));
+        assert_eq!(r.error.as_ref().map(|e| e.code), Some(ERR_METHOD_NOT_FOUND));
+    }
 
     // ─── encode/decode_wire_payload roundtrip ────────────────────────────
 

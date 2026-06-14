@@ -4,8 +4,10 @@
   import Terminal from './lib/Terminal.svelte';
   import SplitView from './lib/SplitView.svelte';
   import Files from './lib/Files.svelte';
+  import Team from './lib/Team.svelte';
   import Icon from './lib/Icon.svelte';
   import { copyText } from './lib/clipboard.js';
+  import { agoraRoster } from './lib/ws.js';
   import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable } from './lib/ws.js';
   import { t, i18n, setLocale } from './lib/i18n.svelte.js';
 
@@ -22,6 +24,14 @@
   let terminalSession = $state('');
   let terminalCommand = $state('');
   let viewMode = $state('terminal');
+  // Team (agora multi-agent bus) is desktop-server-only. We probe once per
+  // connection: agora_roster rejects with method-not-found when the server has
+  // no bus, so a resolved probe means the tab should appear.
+  let teamAvailable = $state(false);
+  async function probeTeam() {
+    try { await agoraRoster(); teamAvailable = true; }
+    catch { teamAvailable = false; }
+  }
 
   // ─── Split-screen (desktop + wide only) ────────────────────────────────
   // splitLayout 1 = the single-pane path (mobile + default desktop), exactly
@@ -400,6 +410,7 @@
     serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
     if (useAddr !== primaryAddr) { localStorage.setItem('tmux_address', useAddr); activeAddress = useAddr; }
     resubscribeAll();
+    probeTeam();
     // Tell Terminal to reset stale resize state + re-fit against the new server.
     window.dispatchEvent(new Event('ws-reconnected'));
   }
@@ -475,6 +486,7 @@
     serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
     page = 'sessions';
     localStorage.removeItem('tmux_disconnected');
+    probeTeam();
   }
 
   function openTerminal(session, target, command = '') {
@@ -585,6 +597,7 @@
       clearTimeout(timeout);
       connected = true;
       serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
+      probeTeam();
       try {
         const s = JSON.parse(localStorage.getItem('tmux_state') || '{}');
         if (s.terminalTarget) {
@@ -627,7 +640,7 @@
       if (page === 'files' || (page === 'terminal' && viewMode === 'chat')) {
         viewMode = 'terminal'; page = 'terminal'; return;
       }
-      if (page === 'terminal') { page = 'sessions'; return; }
+      if (page === 'terminal' || page === 'team') { page = 'sessions'; return; }
       if (showSettings) { showSettings = false; return; }
       // At sessions root, re-push to prevent exit
       navPush();
@@ -640,6 +653,7 @@
   // Swipe left/right to switch tabs with slide animation
   const tabs = $derived(() => {
     const t = ['sessions'];
+    if (teamAvailable) t.push('team');
     if (terminalTarget) {
       t.push('terminal');
       if (chatSupported) t.push('chat');
@@ -681,6 +695,11 @@
         <button tabindex="-1" class:active={page === 'sessions'} onclick={() => switchTab('sessions')}>
           {t('sessions')}
         </button>
+        {#if teamAvailable}
+          <button tabindex="-1" class:active={page === 'team'} onclick={() => switchTab('team')}>
+            {t('team')}
+          </button>
+        {/if}
         {#if terminalTarget}
           <button tabindex="-1" class:active={page === 'terminal' && viewMode === 'terminal'} onclick={() => switchTab('terminal')}>
             {t('terminal')}
@@ -805,6 +824,8 @@
       <Settings {onConnected} />
     {:else if page === 'sessions'}
       <Sessions {openTerminal} activeTarget={terminalTarget} visible={page === 'sessions'} />
+    {:else if page === 'team'}
+      <Team visible={page === 'team'} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} />
     {/if}
     {#if terminalTarget}
       <div class="page-layer" class:hidden={page !== 'files'}>

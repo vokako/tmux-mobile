@@ -538,6 +538,37 @@ pub fn kill_window(target: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Ensure `session` exists (detached), creating it at `cwd` if missing. Used by
+/// the in-process team supervisor before it spawns agent windows.
+pub fn ensure_session(session: &str, cwd: &str) -> Result<(), String> {
+    if run_tmux(&["has-session", "-t", session]).is_ok() {
+        return Ok(());
+    }
+    let dir = if cwd.is_empty() { home_dir() } else { cwd.to_string() };
+    if dir.is_empty() {
+        run_tmux(&["new-session", "-d", "-s", session])?;
+    } else {
+        run_tmux(&["new-session", "-d", "-s", session, "-c", &dir])?;
+    }
+    // Deep scrollback so an agent's history survives in its window.
+    let _ = run_tmux(&["set-option", "-t", session, "history-limit", "100000"]);
+    Ok(())
+}
+
+/// Create a new window named `name` in `session` rooted at `cwd`, returning the
+/// new pane id (`%NN`). The window name lets the Team tab map an agent to its
+/// pane by `window_name`.
+pub fn new_named_window(session: &str, name: &str, cwd: &str) -> Result<String, String> {
+    let dir = if cwd.is_empty() { home_dir() } else { cwd.to_string() };
+    let mut args = vec!["new-window", "-t", session, "-n", name, "-P", "-F", "#{pane_id}"];
+    if !dir.is_empty() {
+        args.push("-c");
+        args.push(&dir);
+    }
+    let out = run_tmux(&args)?;
+    Ok(out.trim().to_string())
+}
+
 /// Resize the window containing target pane to given cols × rows.
 /// Only effective when no terminal client is attached to the session.
 pub fn resize_pane(target: &str, cols: usize, rows: usize) -> Result<(), String> {

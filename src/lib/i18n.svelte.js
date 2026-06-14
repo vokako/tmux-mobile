@@ -15,6 +15,7 @@ const msgs = {
     terminal: 'Terminal',
     chat: 'Chat',
     files: 'Files',
+    team: 'Team',
 
     theme: 'Theme',
     themeAuto: 'Auto',
@@ -108,12 +109,21 @@ const msgs = {
     commitMsg: 'commit message…',
     cleanTree: 'Working tree clean',
     gitLoading: 'Loading…',
+
+    teamMessage: 'Message the team…',
+    teamSend: 'Send',
+    teamNoAgents: 'No agents online',
+    teamNoMessages: 'No messages yet. Say hello to the team.',
+    teamUnavailable: 'The multi-agent bus is not running on this server. Start a team to collaborate with agents here.',
+    teamStart: 'Start team',
+    teamStarting: 'Agents coming online…',
   },
   zh: {
     sessions: '会 话',
     terminal: '终 端',
     chat: '聊 天',
     files: '文 件',
+    team: '团 队',
 
     theme: '主题',
     themeAuto: '自动',
@@ -207,6 +217,14 @@ const msgs = {
     commitMsg: '提交信息…',
     cleanTree: '工作区干净',
     gitLoading: '加载中…',
+
+    teamMessage: '给团队发消息…',
+    teamSend: '发送',
+    teamNoAgents: '暂无在线 agent',
+    teamNoMessages: '还没有消息，和团队打个招呼吧。',
+    teamUnavailable: '当前服务器未运行多 agent 总线。启动一个团队即可在此与 agent 协作。',
+    teamStart: '启动团队',
+    teamStarting: 'agent 正在上线…',
   },
 };
 

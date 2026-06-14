@@ -61,6 +61,9 @@ const pending = new Map();
 // other's intact.
 const paneOutputListeners = new Map(); // target -> Set<cb(target, content, cursor, current_command)>
 const paneClosedListeners = new Map(); // target -> Set<cb(target)>
+// agora group-chat message push listeners (Team tab). Unkeyed — one stream
+// for the whole room — so a plain Set, not a per-target map.
+const agoraMessageListeners = new Set(); // Set<cb(message)>
 
 function addListener(map, target, cb) {
   let set = map.get(target);
@@ -89,6 +92,8 @@ export function addPaneOutputListener(target, cb) { addListener(paneOutputListen
 export function removePaneOutputListener(target, cb) { removeListener(paneOutputListeners, target, cb); }
 export function addPaneClosedListener(target, cb) { addListener(paneClosedListeners, target, cb); }
 export function removePaneClosedListener(target, cb) { removeListener(paneClosedListeners, target, cb); }
+export function addAgoraMessageListener(cb) { agoraMessageListeners.add(cb); }
+export function removeAgoraMessageListener(cb) { agoraMessageListeners.delete(cb); }
 export function setOnDisconnect(cb) { onDisconnect = cb; }
 
 // --- Crypto helpers (Web Crypto API) ---
@@ -395,6 +400,12 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
         return;
       }
 
+      if (data.method === 'agora_message') {
+        const m = data.params?.message;
+        if (m) for (const cb of agoraMessageListeners) cb(m);
+        return;
+      }
+
       if (data.id != null && pending.has(data.id)) {
         const { resolve: res, reject: rej } = pending.get(data.id);
         pending.delete(data.id);
@@ -561,6 +572,18 @@ export function fsDownloadHttp(path) {
 export const fsUpload = (path, data) => call('fs_upload', { path, data }, 60000);
 export const fsConvert = (path, format = 'html') => call('fs_convert', { path, format });
 export const gitCmd = (subcmd, args = [], cwd) => call('git', { subcmd, args, cwd });
+
+// agora multi-agent bus (Team tab). Only available when the server has the
+// in-process bus wired (desktop); on a server without it these reject with a
+// method-not-found error, which the Team tab uses to hide itself.
+export const agoraHistory = (limit = 100) => call('agora_history', { limit });
+export const agoraRoster = () => call('agora_roster');
+export const agoraEmployees = () => call('agora_employees');
+export const agoraPost = (body, requires_reply) => call('agora_post', { body, requires_reply });
+// Bus availability + whether the team supervisor is running.
+export const agoraStatus = () => call('agora_status');
+// Operator action: spin up the built-in team (seed roster + launch agents).
+export const agoraStartTeam = () => call('agora_start_team');
 
 // Subscription refcount per target. The server keeps ONE subscription entry
 // per target, so two split cells on the same window must NOT let the first

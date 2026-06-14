@@ -3,6 +3,13 @@ pub mod fs;
 pub mod server;
 pub mod tmux;
 
+// agora multi-agent bus bridge + in-process team supervisor — desktop only
+// (Android/iOS never build agora).
+#[cfg(all(desktop, not(any(target_os = "android", target_os = "ios"))))]
+pub mod agora_bridge;
+#[cfg(all(desktop, not(any(target_os = "android", target_os = "ios"))))]
+pub mod team;
+
 #[cfg(desktop)]
 use config::Config;
 
@@ -78,7 +85,21 @@ pub fn run() {
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
-                if let Err(e) = server::start_with_socket(&cfg.host, cfg.port, &cfg.token, &cfg.machine_id, cfg.tmux_socket, cfg.tls_cert, cfg.tls_key, cfg.disconnect_grace_secs).await {
+                // Start the in-process agora bus + MCP daemon (best-effort; a
+                // failure here just disables the Team tab, the terminal server
+                // still runs). Desktop-only — never built on Android/iOS.
+                let agora: server::OptAgora = {
+                    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                    {
+                        match agora_bridge::AgoraBus::start(&cfg.agora_db, &cfg.agora_room, &cfg.agora_bind, &cfg.agora_model) {
+                            Ok(b) => Some(b as std::sync::Arc<dyn server::AgoraBridge>),
+                            Err(e) => { eprintln!("⚠️  agora bus failed to start: {}", e); None }
+                        }
+                    }
+                    #[cfg(any(target_os = "android", target_os = "ios"))]
+                    { None }
+                };
+                if let Err(e) = server::start_with_socket(&cfg.host, cfg.port, &cfg.token, &cfg.machine_id, cfg.tmux_socket, cfg.tls_cert, cfg.tls_key, cfg.disconnect_grace_secs, agora).await {
                     eprintln!("Server error: {}", e);
                 }
             });
