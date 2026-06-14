@@ -245,8 +245,24 @@
 
   // Track window width so split-screen collapses to single below the
   // threshold (and re-enables when widened). Cheap; desktop only matters.
+  //
+  // ALSO drive --app-height from window.innerHeight on desktop. The CSS
+  // default is `100dvh`, but macOS WKWebView does NOT recompute `dvh` when
+  // the window is enlarged — it stays pinned at the smaller value, so the
+  // layout box never grows, the terminal's ResizeObserver never fires, and a
+  // black gap opens below the terminal. (Chromium recomputes dvh, which is
+  // why the browser is fine.) Writing innerHeight on every resize makes the
+  // layout box track the window exactly, which the ResizeObserver then picks
+  // up to refit xterm. Mobile is excluded: its height is owned by the
+  // visualViewport handler above (keyboard-aware), and touching it here would
+  // fight that handler.
   $effect(() => {
-    const onResize = () => { wideEnough = window.innerWidth >= SPLIT_MIN_WIDTH; };
+    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    const onResize = () => {
+      wideEnough = window.innerWidth >= SPLIT_MIN_WIDTH;
+      if (!isTouch) document.documentElement.style.setProperty('--app-height', window.innerHeight + 'px');
+    };
+    onResize(); // set the correct height on mount, not just on the first resize
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   });
