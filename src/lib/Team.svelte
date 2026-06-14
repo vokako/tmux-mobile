@@ -1,41 +1,52 @@
 <script>
-  // Team tab — the agora multi-agent group chat.
+  // Team tab — the crew multi-agent group chat.
   //
-  // Talks to the in-process agora bus on the desktop server (RPC methods
-  // agora_history / agora_roster / agora_post + the agora_message push). The
-  // human operator ("you") is just another participant: type to broadcast, or
-  // tap an agent to @mention it (which requires a reply, per the bus's
-  // obligation rule). Tapping an agent's roster chip jumps to the tmux pane
-  // that agent runs in, so you can preview its live execution state in the
-  // Terminal tab.
+  // Talks to the in-process crew bus on the desktop server (RPC methods
+  // crew_history / crew_roster / crew_post + the crew_message push). The human
+  // operator ("you") is just another participant: type to broadcast, or tap an
+  // agent to @mention it. Tapping an agent's roster chip jumps to the tmux pane
+  // that agent runs in (per-workspace session tmm-crew-<slug>, window named
+  // after the agent), so you can preview its live execution state.
   //
-  // Availability: a server without the bus (mobile, or desktop with agora
-  // disabled) makes the agora_* RPCs reject with method-not-found; we surface
+  // Availability: a server without the bus (mobile, or desktop with crew
+  // disabled) makes the crew_* RPCs reject with method-not-found; we surface
   // that as an "unavailable" state and the App hides the tab.
-  import AgentChip from './AgentChip.svelte';
   import Icon from './Icon.svelte';
   import { t } from './i18n.svelte.js';
   import {
-    agoraHistory, agoraRoster, agoraPost, agoraStatus, agoraStartTeam,
-    addAgoraMessageListener, removeAgoraMessageListener,
-    listSessionsWithPanes,
+    crewHistory, crewRoster, crewPost, crewStatus, crewStartTeam,
+    addCrewMessageListener, removeCrewMessageListener,
+    listSessionsWithPanes, fsCwd,
   } from './ws.js';
 
   let {
     visible = false,
-    teamSession = 'agora',  // tmux session the launcher runs agents in
+    currentSession = '',     // the open terminal session, used to default the workspace
     openTerminal = () => {}, // (session, target, command) — preview an agent's pane
   } = $props();
 
-  let messages = $state([]);     // agora Message[] (oldest first)
+  let messages = $state([]);     // crew Message[] (oldest first)
   let roster = $state([]);       // AgentRow[]
-  let available = $state(true);  // false when the server has no agora bus
-  let teamStarted = $state(false); // whether the supervisor has launched a team
+  let available = $state(true);  // false when the server has no crew bus
+  let teamStarted = $state(false); // whether the supervisor has launched a crew
   let starting = $state(false);
   let loading = $state(true);
   let draft = $state('');
   let sending = $state(false);
   let listEl = $state(null);
+  // Agents' working directory. Defaulted (current session cwd > server default)
+  // and editable before the crew is started.
+  let workspace = $state('');
+  let editingWorkspace = $state(false);
+
+  // tmux session the crew runs in: tmm-crew-<workspace-slug>. Must match the
+  // server's `crew::workspace_slug` so previewAgent finds the right windows.
+  function slugify(p) {
+    const base = (p || '').replace(/\/+$/, '').split('/').pop() || 'root';
+    let s = base.replace(/[^A-Za-z0-9_-]/g, '-').toLowerCase().replace(/^-+|-+$/g, '');
+    return (s || 'root').slice(0, 32);
+  }
+  let crewSession = $derived(`tmm-crew-${slugify(workspace)}`);
 
   // Roster entries that are present (not offline). The human posts as "human";
   // never show it as an addressable agent (you can't @ yourself usefully).
@@ -47,11 +58,20 @@
 
   async function refresh() {
     try {
-      const [h, r, s] = await Promise.all([agoraHistory(200), agoraRoster(), agoraStatus()]);
+      const [h, r, s] = await Promise.all([crewHistory(200), crewRoster(), crewStatus()]);
       messages = h?.messages || [];
       roster = r?.roster || [];
       teamStarted = !!s?.team_started;
       available = true;
+      // Seed the workspace field once: prefer the current terminal session's
+      // cwd, else the server's default (home). User can edit until they start.
+      if (!workspace) {
+        let ws = '';
+        if (currentSession) {
+          try { ws = (await fsCwd(currentSession))?.path || ''; } catch {}
+        }
+        workspace = ws || s?.default_workspace || '';
+      }
       scrollToBottom();
     } catch (e) {
       // method-not-found → no bus on this server. Any other error is transient
@@ -63,10 +83,11 @@
   }
 
   async function startTeam() {
-    if (starting) return;
+    if (starting || !workspace.trim()) return;
     starting = true;
+    editingWorkspace = false;
     try {
-      await agoraStartTeam();
+      await crewStartTeam(workspace.trim());
       teamStarted = true;
       // Agents take a few seconds to come online; refresh the roster shortly.
       setTimeout(refresh, 3000);
@@ -78,7 +99,7 @@
 
   // Live push: append each broadcast message. De-dupe by id (history + a racing
   // push can overlap right after mount).
-  function onAgoraMessage(m) {
+  function onCrewMessage(m) {
     if (!m?.id) return;
     if (messages.some(x => x.id === m.id)) return;
     messages = [...messages, m];
@@ -86,8 +107,8 @@
   }
 
   $effect(() => {
-    addAgoraMessageListener(onAgoraMessage);
-    return () => removeAgoraMessageListener(onAgoraMessage);
+    addCrewMessageListener(onCrewMessage);
+    return () => removeCrewMessageListener(onCrewMessage);
   });
 
   // Refresh whenever the tab becomes visible (cheap; also catches reconnects).
@@ -100,10 +121,10 @@
     if (!body || sending) return;
     sending = true;
     try {
-      await agoraPost(body);
+      await crewPost(body);
       draft = '';
-      // The post echoes back via the agora_message push, so we don't append
-      // locally (avoids a duplicate). Just refresh the roster status.
+      // The post echoes back via the crew_message push, so we don't append
+      // locally (avoids a duplicate).
     } catch {
       // Leave the draft in place so the user can retry.
     } finally {
@@ -127,13 +148,14 @@
     draft = `${draft}${sep}@${name} `;
   }
 
-  // Jump to the tmux pane an agent runs in. The launcher names each agent's
-  // window after the agent, so we find the pane whose window_name matches.
+  // Jump to the tmux pane an agent runs in. The crew session names each agent's
+  // window after the agent, so we find the pane whose window_name matches in
+  // our per-workspace session.
   async function previewAgent(name) {
     try {
       const { panes } = await listSessionsWithPanes();
       const p = (panes || []).find(p =>
-        p.session === teamSession && (p.window_name === name)
+        p.session === crewSession && (p.window_name === name)
       ) || (panes || []).find(p => p.window_name === name);
       if (!p) return;
       const target = `${p.session}:${p.window}.${p.pane}`;
@@ -161,17 +183,8 @@
     </div>
   {:else}
     <!-- Roster: present agents as chips; tap to preview their tmux pane. -->
-    <div class="team-roster">
-      {#if agents.length === 0}
-        {#if teamStarted}
-          <span class="team-roster-empty">{t('teamStarting')}</span>
-        {:else}
-          <button class="team-start" disabled={starting} onclick={startTeam}>
-            {#if starting}<span class="reconnect-spinner-sm"></span>{:else}<Icon name="bot" size={14} />{/if}
-            {t('teamStart')}
-          </button>
-        {/if}
-      {:else}
+    {#if agents.length > 0}
+      <div class="team-roster">
         {#each agents as a}
           <button class="roster-chip" class:waiting={a.status === 'waiting'} onclick={() => previewAgent(a.name)} title={a.role || a.name}>
             <span class="roster-dot status-{a.status}"></span>
@@ -179,8 +192,36 @@
             <Icon name="terminal" size={11} />
           </button>
         {/each}
-      {/if}
-    </div>
+      </div>
+    {/if}
+
+    <!-- Start panel: shown until a crew is up. Workspace = agents' working dir
+         (defaults to the current session's cwd), editable before starting. -->
+    {#if agents.length === 0}
+      <div class="team-start-panel">
+        {#if teamStarted}
+          <span class="reconnect-spinner-sm"></span>
+          <span class="start-hint">{t('teamStarting')}</span>
+        {:else}
+          <div class="start-ws">
+            <span class="start-ws-label">{t('teamWorkspace')}</span>
+            {#if editingWorkspace}
+              <input class="start-ws-input" bind:value={workspace}
+                onkeydown={(e) => { if (e.key === 'Enter') editingWorkspace = false; }}
+                placeholder="/path/to/project" />
+            {:else}
+              <button class="start-ws-path" onclick={() => editingWorkspace = true} title={workspace}>
+                {workspace || '—'} <Icon name="edit" size={11} />
+              </button>
+            {/if}
+          </div>
+          <button class="team-start" disabled={starting || !workspace.trim()} onclick={startTeam}>
+            {#if starting}<span class="reconnect-spinner-sm"></span>{:else}<Icon name="bot" size={14} />{/if}
+            {t('teamStart')}
+          </button>
+        {/if}
+      </div>
+    {/if}
 
     <!-- Message log -->
     <div class="team-log" bind:this={listEl}>
@@ -262,6 +303,32 @@
   }
   .team-roster::-webkit-scrollbar { display: none; }
   .team-roster-empty { color: var(--text3); font-size: 12px; padding: 4px 2px; }
+  .team-start-panel {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 10px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .start-hint { color: var(--text3); font-size: 12px; }
+  .start-ws { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+  .start-ws-label {
+    font-size: 10px; font-weight: 600; color: var(--text3);
+    text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;
+  }
+  .start-ws-path {
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px;
+    padding: 5px 10px; border: 1px solid var(--border2); border-radius: 8px;
+    background: var(--input-bg); color: var(--text2);
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, monospace;
+    font-size: 12px; cursor: pointer; -webkit-tap-highlight-color: transparent;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left;
+  }
+  .start-ws-path:active { border-color: var(--accent); color: var(--accent); }
+  .start-ws-input {
+    flex: 1; min-width: 0;
+    padding: 5px 10px; border: 1px solid var(--accent); border-radius: 8px;
+    background: var(--input-bg); color: var(--text);
+    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, monospace;
+    font-size: 12px; outline: none;
+  }
   .team-start {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 5px 12px; height: 28px;

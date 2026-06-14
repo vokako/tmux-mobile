@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Team launcher — spin up a multi-agent team that joins tmux-mobile's agora bus.
+"""Team launcher — spin up a multi-agent team that joins tmux-mobile's crew bus.
 
 Vendored & adapted from the standalone agora project. KEY DIFFERENCE: the agora
 bus runs IN-PROCESS inside the tmux-mobile desktop server, so this script does
 NOT start a daemon. It assumes the tmux-mobile app (or `cargo run --bin server`)
-is already running with its agora bus up (default http://127.0.0.1:8787), then:
+is already running with its crew bus up (default http://127.0.0.1:8787), then:
 
   1. seeds the DESIRED roster from team.yaml (POST /api/employees)
   2. starts the supervisor, which reconciles that roster into real agents, each
-     in its own named tmux window inside the `agora` session
+     in its own named tmux window inside the per-workspace tmm-crew session
 
 You drive the team from the phone's Team tab (or the dashboard / CLI). No task
 is posted automatically — message the team yourself.
@@ -25,21 +25,21 @@ except ImportError:
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import agora_demo  # noqa: E402
+import crew_backends  # noqa: E402
 
-SESSION = os.environ.get("AGORA_SESSION", "agora")
-DEMO = pathlib.Path(os.environ.get("AGORA_DEMO_DIR", "/tmp/tmux-mobile-team"))
+SESSION = os.environ.get("CREW_SESSION", "tmm-crew-team")
+DEMO = pathlib.Path(os.environ.get("CREW_DEMO_DIR", "/tmp/tmux-mobile-team"))
 KIRO_HOME = DEMO / "kiro-home"
-WORK = pathlib.Path(os.environ.get("AGORA_WORKSPACE", str(DEMO / "workspace")))
+WORK = pathlib.Path(os.environ.get("CREW_WORKSPACE", str(DEMO / "workspace")))
 
 cfg = yaml.safe_load((HERE / "team.yaml").read_text())
 srv = cfg.get("server", {})
 # Where the tmux-mobile server's in-process bus listens. team.yaml's `bind` is
-# the server's AGORA_BIND; agents + CLI always connect locally.
+# the server's CREW_BIND; agents + CLI always connect locally.
 bind = srv.get("bind", "127.0.0.1:8787")
 port = bind.rsplit(":", 1)[-1]
 model = srv.get("model", "claude-sonnet-4.6")
-url = os.environ.get("AGORA_URL", f"http://127.0.0.1:{port}")
+url = os.environ.get("CREW_URL", f"http://127.0.0.1:{port}")
 agents = cfg["agents"]
 
 
@@ -52,7 +52,7 @@ def tmux_out(*args):
 
 
 # 1. Confirm the bus is reachable (the desktop server must be running).
-print(f"==> checking agora bus at {url}")
+print(f"==> checking crew bus at {url}")
 reachable = False
 for _ in range(10):
     try:
@@ -62,9 +62,9 @@ for _ in range(10):
     except Exception:
         time.sleep(0.3)
 if not reachable:
-    sys.exit(f"agora bus not reachable at {url}.\n"
+    sys.exit(f"crew bus not reachable at {url}.\n"
              f"Start the tmux-mobile app or `cd src-tauri && cargo run --bin server` first\n"
-             f"(its AGORA_BIND must match {bind}).")
+             f"(its CREW_BIND must match {bind}).")
 
 # 2. Fresh isolated workspace (your real ~/.kiro is never touched).
 print(f"==> setting up isolated team home at {DEMO}")
@@ -105,10 +105,10 @@ for name, a in agents.items():
 print("    seeded team:", ", ".join(f"{n}[{a.get('backend', 'kiro')}]" for n, a in agents.items()))
 
 # 5. Supervisor: turns the seeded roster + manager's hire/fire into real windows.
-supervise_env = {**os.environ, "AGORA_URL": url, "AGORA_SESSION": SESSION,
-                 "KIRO_HOME": str(KIRO_HOME), "AGORA_MODEL": model,
-                 "AGORA_WORKSPACE": str(WORK), "AGORA_DEMO": str(DEMO),
-                 "AGORA_HIRE_BACKEND": srv.get("hire_backend", "kiro")}
+supervise_env = {**os.environ, "CREW_URL": url, "CREW_SESSION": SESSION,
+                 "KIRO_HOME": str(KIRO_HOME), "CREW_MODEL": model,
+                 "CREW_WORKSPACE": str(WORK), "CREW_DEMO": str(DEMO),
+                 "CREW_HIRE_BACKEND": srv.get("hire_backend", "kiro")}
 subprocess.Popen([sys.executable, str(HERE / "supervise.py")],
                  env=supervise_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 

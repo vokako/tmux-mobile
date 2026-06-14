@@ -16,16 +16,21 @@ struct FileConfig {
     // immediately (legacy behavior). Default 600 (10 min) so short
     // reconnects (backgrounded app, network blip) skip the reflow cycle.
     disconnect_grace_secs: Option<u64>,
-    // agora multi-agent bus (desktop only). `agora_bind` is where the
-    // in-process MCP daemon + dashboard listen for external coding agents;
-    // the phone reaches the same room through the tmux-mobile WS server, so
-    // this address only matters for the agents themselves. Empty bind keeps
-    // the default; the bus itself always runs in-process.
-    agora_bind: Option<String>,
-    agora_db: Option<String>,
-    agora_room: Option<String>,
-    // Default model for kiro-backed team agents.
-    agora_model: Option<String>,
+    // Crew multi-agent bus (desktop only). `crew_bind` is where the in-process
+    // MCP daemon + dashboard listen for external coding agents; the phone
+    // reaches the same room through the tmux-mobile WS server, so this address
+    // only matters for the agents themselves. The bus always runs in-process.
+    // `agora_*` aliases are accepted for configs written by the pre-rebrand
+    // build (the bus library is still upstream "agora").
+    #[serde(alias = "agora_bind")]
+    crew_bind: Option<String>,
+    #[serde(alias = "agora_db")]
+    crew_db: Option<String>,
+    #[serde(alias = "agora_room")]
+    crew_room: Option<String>,
+    // Default model for kiro-backed crew agents.
+    #[serde(alias = "agora_model")]
+    crew_model: Option<String>,
 }
 
 pub struct Config {
@@ -38,10 +43,10 @@ pub struct Config {
     pub tls_key: Option<String>,
     pub scrollback: usize,
     pub disconnect_grace_secs: u64,
-    pub agora_bind: String,
-    pub agora_db: String,
-    pub agora_room: String,
-    pub agora_model: String,
+    pub crew_bind: String,
+    pub crew_db: String,
+    pub crew_room: String,
+    pub crew_model: String,
 }
 
 fn config_path() -> PathBuf {
@@ -105,21 +110,25 @@ impl Config {
                 .and_then(|s| s.parse().ok())
                 .or(file_cfg.disconnect_grace_secs)
                 .unwrap_or(600),
-            agora_bind: std::env::var("AGORA_BIND")
+            crew_bind: std::env::var("CREW_BIND")
                 .ok()
-                .or(file_cfg.agora_bind)
+                .or_else(|| std::env::var("AGORA_BIND").ok())
+                .or(file_cfg.crew_bind)
                 .unwrap_or_else(|| "127.0.0.1:8787".into()),
-            agora_db: std::env::var("AGORA_DB")
+            crew_db: std::env::var("CREW_DB")
                 .ok()
-                .or(file_cfg.agora_db)
-                .unwrap_or_else(|| dirs_next().join("agora.db").to_string_lossy().into_owned()),
-            agora_room: std::env::var("AGORA_ROOM")
+                .or_else(|| std::env::var("AGORA_DB").ok())
+                .or(file_cfg.crew_db)
+                .unwrap_or_else(|| dirs_next().join("crew.db").to_string_lossy().into_owned()),
+            crew_room: std::env::var("CREW_ROOM")
                 .ok()
-                .or(file_cfg.agora_room)
+                .or_else(|| std::env::var("AGORA_ROOM").ok())
+                .or(file_cfg.crew_room)
                 .unwrap_or_else(|| "main".into()),
-            agora_model: std::env::var("AGORA_MODEL")
+            crew_model: std::env::var("CREW_MODEL")
                 .ok()
-                .or(file_cfg.agora_model)
+                .or_else(|| std::env::var("AGORA_MODEL").ok())
+                .or(file_cfg.crew_model)
                 .unwrap_or_else(|| "claude-sonnet-4.6".into()),
         }
     }

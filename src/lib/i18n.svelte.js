@@ -117,6 +117,7 @@ const msgs = {
     teamUnavailable: 'The multi-agent bus is not running on this server. Start a team to collaborate with agents here.',
     teamStart: 'Start team',
     teamStarting: 'Agents coming online…',
+    teamWorkspace: 'Workspace',
   },
   zh: {
     sessions: '会 话',
@@ -225,6 +226,7 @@ const msgs = {
     teamUnavailable: '当前服务器未运行多 agent 总线。启动一个团队即可在此与 agent 协作。',
     teamStart: '启动团队',
     teamStarting: 'agent 正在上线…',
+    teamWorkspace: '工作目录',
   },
 };
 

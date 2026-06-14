@@ -3,12 +3,12 @@ pub mod fs;
 pub mod server;
 pub mod tmux;
 
-// agora multi-agent bus bridge + in-process team supervisor — desktop only
-// (Android/iOS never build agora).
+// crew multi-agent bus bridge + in-process team supervisor — desktop only
+// (Android/iOS never build crew).
 #[cfg(all(desktop, not(any(target_os = "android", target_os = "ios"))))]
-pub mod agora_bridge;
+pub mod crew_bridge;
 #[cfg(all(desktop, not(any(target_os = "android", target_os = "ios"))))]
-pub mod team;
+pub mod crew;
 
 #[cfg(desktop)]
 use config::Config;
@@ -85,21 +85,21 @@ pub fn run() {
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
-                // Start the in-process agora bus + MCP daemon (best-effort; a
+                // Start the in-process crew bus + MCP daemon (best-effort; a
                 // failure here just disables the Team tab, the terminal server
                 // still runs). Desktop-only — never built on Android/iOS.
-                let agora: server::OptAgora = {
+                let crew: server::OptCrew = {
                     #[cfg(not(any(target_os = "android", target_os = "ios")))]
                     {
-                        match agora_bridge::AgoraBus::start(&cfg.agora_db, &cfg.agora_room, &cfg.agora_bind, &cfg.agora_model) {
-                            Ok(b) => Some(b as std::sync::Arc<dyn server::AgoraBridge>),
-                            Err(e) => { eprintln!("⚠️  agora bus failed to start: {}", e); None }
+                        match crew_bridge::CrewBus::start(&cfg.crew_db, &cfg.crew_room, &cfg.crew_bind, &cfg.crew_model) {
+                            Ok(b) => Some(b as std::sync::Arc<dyn server::CrewBridge>),
+                            Err(e) => { eprintln!("⚠️  crew bus failed to start: {}", e); None }
                         }
                     }
                     #[cfg(any(target_os = "android", target_os = "ios"))]
                     { None }
                 };
-                if let Err(e) = server::start_with_socket(&cfg.host, cfg.port, &cfg.token, &cfg.machine_id, cfg.tmux_socket, cfg.tls_cert, cfg.tls_key, cfg.disconnect_grace_secs, agora).await {
+                if let Err(e) = server::start_with_socket(&cfg.host, cfg.port, &cfg.token, &cfg.machine_id, cfg.tmux_socket, cfg.tls_cert, cfg.tls_key, cfg.disconnect_grace_secs, crew).await {
                     eprintln!("Server error: {}", e);
                 }
             });

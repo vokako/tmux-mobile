@@ -7,7 +7,7 @@
   import Team from './lib/Team.svelte';
   import Icon from './lib/Icon.svelte';
   import { copyText } from './lib/clipboard.js';
-  import { agoraRoster } from './lib/ws.js';
+  import { crewRoster } from './lib/ws.js';
   import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable } from './lib/ws.js';
   import { t, i18n, setLocale } from './lib/i18n.svelte.js';
 
@@ -24,12 +24,12 @@
   let terminalSession = $state('');
   let terminalCommand = $state('');
   let viewMode = $state('terminal');
-  // Team (agora multi-agent bus) is desktop-server-only. We probe once per
-  // connection: agora_roster rejects with method-not-found when the server has
+  // Team (crew multi-agent bus) is desktop-server-only. We probe once per
+  // connection: crew_roster rejects with method-not-found when the server has
   // no bus, so a resolved probe means the tab should appear.
   let teamAvailable = $state(false);
   async function probeTeam() {
-    try { await agoraRoster(); teamAvailable = true; }
+    try { await crewRoster(); teamAvailable = true; }
     catch { teamAvailable = false; }
   }
 
@@ -825,7 +825,7 @@
     {:else if page === 'sessions'}
       <Sessions {openTerminal} activeTarget={terminalTarget} visible={page === 'sessions'} />
     {:else if page === 'team'}
-      <Team visible={page === 'team'} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} />
+      <Team visible={page === 'team'} currentSession={terminalSession} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} />
     {/if}
     {#if terminalTarget}
       <div class="page-layer" class:hidden={page !== 'files'}>

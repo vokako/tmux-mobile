@@ -49,7 +49,7 @@ cd src-tauri && cargo test -- --test-threads=1   # Tests (needs tmux running)
 - [Desktop Split-Screen](docs/design-docs/features/split-screen.md)
 - [File Handling & Security](docs/design-docs/features/file-handling.md)
 - [Terminal Color Adaptation](docs/design-docs/features/color-adaptation.md)
-- [Team / agora multi-agent bus](docs/design-docs/features/team-agora.md)
+- [Team / Crew multi-agent bus](docs/design-docs/features/team-crew.md)
 
 ### Other
 - [Unresolved Issues](docs/unresolved.md)
@@ -67,7 +67,7 @@ cd src-tauri && cargo test -- --test-threads=1   # Tests (needs tmux running)
 - **Tab swipe priority**: App-level left/right tab swipe is lowest priority. Suppressed when any child gesture is active (`defaultPrevented` or vertical movement > 10px).
 - **Chat parsing**: Use ANSI color codes as semantic markers BEFORE stripping.
 - **xterm DA filtering**: Filter device attribute responses before forwarding to tmux.
-- **agora (Team) is desktop-only + JSON-gated**: the `agora` crate is a target-gated dep (`cfg(not(android|ios))`); `server.rs` must NEVER name an agora type — it talks to the bus only through the JSON-only `server::AgoraBridge` trait (concrete impl in desktop-only `agora_bridge.rs`). Mobile passes `None`; `agora_*` RPCs then return method-not-found and the Team tab hides itself. The bus runs in-process and shares ONE `Bus` between agora's MCP daemon (`:8787`, external agents) and the phone's WS path. See `docs/design-docs/features/team-agora.md`.
+- **Team/Crew is desktop-only + JSON-gated**: branding is **Crew** for everything we built + the user sees (`crew_*` RPCs, `CREW_*` config, `tmm-crew-<slug>` sessions, `crew.rs`/`crew_bridge.rs`); the **vendored library crate stays `agora`** (faithful upstream copy — `use agora::bus::Bus`). It's a target-gated dep (`cfg(not(android|ios))`); `server.rs` must NEVER name an agora type — it talks to the bus only through the JSON-only `server::CrewBridge` trait (concrete impl in desktop-only `crew_bridge.rs`). Mobile passes `None`; `crew_*` RPCs then return method-not-found and the Team tab hides itself. The bus runs in-process, sharing ONE `Bus` between the MCP daemon (`:8787`, external agents) and the phone's WS path. Crews are **per-workspace**: each runs in `tmm-crew-<workspace-slug>` with agents as named windows; config homes under `~/.config/tmux-mobile/crew/<slug>/` (the user's project is never written into). See `docs/design-docs/features/team-crew.md`.
 
 ## Testing
 ```bash
@@ -77,8 +77,8 @@ cd src-tauri && cargo test -- --test-threads=1
 Tests are sequential (shared tmux state), in `src-tauri/src/main.rs`.
 
 ## Config
-File: `~/.config/tmux-mobile/config.toml` — token, host, port, tmux_socket, tls_cert, tls_key, scrollback, disconnect_grace_secs, agora_bind, agora_db, agora_room, agora_model.
-Env vars `TOKEN`, `HOST`, `PORT`, `TMUX_SOCKET`, `TLS_CERT`, `TLS_KEY`, `SCROLLBACK`, `DISCONNECT_GRACE_SECS`, `AGORA_BIND`, `AGORA_DB`, `AGORA_ROOM`, `AGORA_MODEL` override config.
+File: `~/.config/tmux-mobile/config.toml` — token, host, port, tmux_socket, tls_cert, tls_key, scrollback, disconnect_grace_secs, crew_bind, crew_db, crew_room, crew_model.
+Env vars `TOKEN`, `HOST`, `PORT`, `TMUX_SOCKET`, `TLS_CERT`, `TLS_KEY`, `SCROLLBACK`, `DISCONNECT_GRACE_SECS`, `CREW_BIND`, `CREW_DB`, `CREW_ROOM`, `CREW_MODEL` override config (legacy `AGORA_*` env vars + `agora_*` config keys still accepted as aliases).
 Default scrollback: 500 lines.
 Default disconnect_grace_secs: 600 (10 min). Delay before a disconnected client's tmux window is auto-resized back; set to 0 for legacy immediate restore. See `docs/design-docs/features/disconnect-grace.md`.
-Default agora_bind: `127.0.0.1:8787` (in-process MCP daemon + dashboard for the Team feature, desktop only). agora_db default: `~/.config/tmux-mobile/agora.db`; agora_room default: `main`; agora_model default: `claude-sonnet-4.6` (kiro-backed team agents). Team launching is in-process (`src-tauri/src/team.rs`), triggered by the Team tab's Start button. See `docs/design-docs/features/team-agora.md`.
+Default crew_bind: `127.0.0.1:8787` (in-process MCP daemon + dashboard for the Team feature, desktop only). crew_db default: `~/.config/tmux-mobile/crew.db`; crew_room default: `main`; crew_model default: `claude-sonnet-4.6` (kiro-backed agents). Team launching is in-process (`src-tauri/src/crew.rs`), per-workspace, triggered by the Team tab's Start button. See `docs/design-docs/features/team-crew.md`.

@@ -1,47 +1,47 @@
-//! Desktop-only glue between the tmux-mobile WS server and the agora bus.
+//! Desktop-only glue between the tmux-mobile WS server and the crew bus.
 //!
-//! The agora `Bus` (group-chat coordination over SQLite + a broadcast channel)
+//! The crew `Bus` (group-chat coordination over SQLite + a broadcast channel)
 //! runs in-process. This module:
 //!   1. opens the store + builds the `Bus`,
-//!   2. spawns agora's own axum router (MCP `/mcp` + dashboard) on a local port
+//!   2. spawns crew's own axum router (MCP `/mcp` + dashboard) on a local port
 //!      so external coding agents (kiro/claude/codex) can join the same room,
-//!   3. adapts the `Bus` to the server's JSON-only [`AgoraBridge`] trait so the
+//!   3. adapts the `Bus` to the server's JSON-only [`CrewBridge`] trait so the
 //!      phone reaches the same room through the existing WS connection.
 //!
 //! This file is compiled ONLY on desktop (see lib.rs `#[cfg(...)]` gating); the
-//! mobile build never references agora and passes `None` to the server.
+//! mobile build never references crew and passes `None` to the server.
 
-use crate::server::AgoraBridge;
-use crate::team::TeamConfig;
+use crate::server::CrewBridge;
+use crate::crew::CrewConfig;
 use agora::bus::Bus;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 use tokio::sync::broadcast;
 
-/// Wraps the agora `Bus` and re-broadcasts its `Message` stream as JSON strings
-/// (the trait boundary is JSON-only so no agora type leaks into server.rs).
-pub struct AgoraBus {
+/// Wraps the crew `Bus` and re-broadcasts its `Message` stream as JSON strings
+/// (the trait boundary is JSON-only so no crew type leaks into server.rs).
+pub struct CrewBus {
     bus: Bus,
-    /// Pre-serialized message fan-out for the WS push path. We bridge agora's
+    /// Pre-serialized message fan-out for the WS push path. We bridge crew's
     /// `broadcast::Receiver<Message>` into a `broadcast::Sender<String>` once,
     /// here, rather than serializing per-connection.
     json_tx: broadcast::Sender<String>,
     /// Team supervisor config + one-shot start guard. The team is launched on
     /// demand (the phone's "start team" action), never automatically — spinning
     /// up real LLM agents is costly and must be the operator's choice.
-    team_cfg: TeamConfig,
+    team_cfg: CrewConfig,
     team_started: AtomicBool,
     /// Weak self-handle so `start_team(&self)` can hand the supervisor an
-    /// `Arc<dyn AgoraBridge>` to call back into. Set once, right after
+    /// `Arc<dyn CrewBridge>` to call back into. Set once, right after
     /// construction (see `start`).
-    self_ref: OnceLock<Weak<AgoraBus>>,
+    self_ref: OnceLock<Weak<CrewBus>>,
 }
 
-impl AgoraBus {
+impl CrewBus {
     /// Open the store, build the bus, start the MCP/dashboard daemon, and start
     /// the Message→JSON re-broadcast pump. Returns the concrete bridge so the
     /// caller can both hand it to the WS server and start the team on it.
-    pub fn start(db: &str, room: &str, bind: &str, model: &str) -> Result<Arc<AgoraBus>, Box<dyn std::error::Error>> {
+    pub fn start(db: &str, room: &str, bind: &str, model: &str) -> Result<Arc<CrewBus>, Box<dyn std::error::Error>> {
         if let Some(parent) = std::path::Path::new(db).parent() {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent).ok();
@@ -74,12 +74,12 @@ impl AgoraBus {
         // use) is non-fatal — the in-process bus still works for the phone; we
         // just log it so the operator can pick another AGORA_BIND.
         {
-            println!("🜂 agora bus ready (room '{}', db {}); MCP + dashboard → http://{}/", room, db, bind);
+            println!("🜂 crew bus ready (room '{}', db {}); MCP + dashboard → http://{}/", room, db, bind);
             let bus = bus.clone();
             let bind = bind.to_string();
             tokio::spawn(async move {
                 if let Err(e) = agora::web::serve(bus, &bind).await {
-                    eprintln!("⚠️  agora daemon not listening on {}: {}", bind, e);
+                    eprintln!("⚠️  crew daemon not listening on {}: {}", bind, e);
                 }
             });
         }
@@ -87,13 +87,12 @@ impl AgoraBus {
         // Agents connect to the bus locally over MCP. If the bind is on
         // 0.0.0.0 (LAN dashboard), agents still dial 127.0.0.1 on that port.
         let port = bind.rsplit(':').next().unwrap_or("8787");
-        let team_cfg = TeamConfig {
-            session: "agora".to_string(),
+        let team_cfg = CrewConfig {
             url: format!("http://127.0.0.1:{}", port),
             model: model.to_string(),
         };
 
-        let me = Arc::new(AgoraBus {
+        let me = Arc::new(CrewBus {
             bus,
             json_tx,
             team_cfg,
@@ -105,7 +104,7 @@ impl AgoraBus {
     }
 }
 
-impl AgoraBridge for AgoraBus {
+impl CrewBridge for CrewBus {
     fn history(&self, limit: i64) -> serde_json::Value {
         let msgs = self.bus.history(limit).unwrap_or_default();
         serde_json::json!({ "messages": msgs })
@@ -141,17 +140,22 @@ impl AgoraBridge for AgoraBus {
             .collect()
     }
 
-    fn start_team(&self) -> bool {
+    fn start_team(&self, workspace: &str) -> bool {
         // One-shot: only the first caller actually starts the supervisor.
         if self.team_started.swap(true, Ordering::SeqCst) {
             return false;
         }
-        // Upgrade the weak self-handle into the Arc<dyn AgoraBridge> the
+        // Upgrade the weak self-handle into the Arc<dyn CrewBridge> the
         // supervisor calls back through.
         match self.self_ref.get().and_then(|w| w.upgrade()) {
             Some(arc) => {
-                let bridge: Arc<dyn AgoraBridge> = arc;
-                crate::team::start(bridge, self.team_cfg.clone());
+                let bridge: Arc<dyn CrewBridge> = arc;
+                let ws = if workspace.trim().is_empty() {
+                    self.default_workspace()
+                } else {
+                    workspace.to_string()
+                };
+                crate::crew::start(bridge, self.team_cfg.clone(), ws);
                 true
             }
             None => {
@@ -165,6 +169,14 @@ impl AgoraBridge for AgoraBus {
 
     fn team_started(&self) -> bool {
         self.team_started.load(Ordering::SeqCst)
+    }
+
+    fn default_workspace(&self) -> String {
+        // Safe fallback the UI pre-fills; the phone overrides it with the
+        // current terminal session's cwd when it has one.
+        dirs::home_dir()
+            .map(|h| h.to_string_lossy().into_owned())
+            .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| ".".to_string()))
     }
 
     fn subscribe(&self) -> broadcast::Receiver<String> {

@@ -555,6 +555,25 @@ pub fn ensure_session(session: &str, cwd: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Find the active pane id of a window named `name` in `session`, if one exists.
+/// Used by the crew supervisor to adopt an already-open agent window instead of
+/// launching a duplicate (idempotent across server restarts).
+pub fn find_window_by_name(session: &str, name: &str) -> Option<String> {
+    let out = run_tmux(&[
+        "list-windows", "-t", session, "-F", "#{window_name}\x1f#{pane_id}",
+    ])
+    .ok()?;
+    for line in out.lines() {
+        let mut it = line.split('\x1f');
+        if let (Some(wname), Some(pane)) = (it.next(), it.next()) {
+            if wname == name {
+                return Some(pane.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// Create a new window named `name` in `session` rooted at `cwd`, returning the
 /// new pane id (`%NN`). The window name lets the Team tab map an agent to its
 /// pane by `window_name`.

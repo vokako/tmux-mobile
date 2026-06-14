@@ -1,13 +1,13 @@
 # tmux-mobile team — single source of truth for a multi-agent run.
 # Schema follows the popular crewAI convention: each agent is role / goal / backstory.
 # Each agent picks a `backend`: kiro | claude | codex — they all connect to the
-# same agora bus, which runs IN-PROCESS inside the tmux-mobile desktop server.
+# same crew bus, which runs IN-PROCESS inside the tmux-mobile desktop server.
 
 server:
-  # Must match the tmux-mobile server's AGORA_BIND (default 127.0.0.1:8787).
+  # Must match the tmux-mobile server's CREW_BIND (default 127.0.0.1:8787).
   # run.py does NOT start a daemon — it targets the already-running bus here.
   # To let other LAN devices reach the dashboard directly, set the SERVER's
-  # AGORA_BIND to 0.0.0.0:8787 (no auth on /mcp — trusted networks only). The
+  # CREW_BIND to 0.0.0.0:8787 (no auth on /mcp — trusted networks only). The
   # phone reaches the bus through the tmux-mobile WS connection regardless.
   bind: "127.0.0.1:8787"
   room: "main"
