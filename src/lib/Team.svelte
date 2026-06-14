@@ -15,7 +15,8 @@
   import AgentGrid from './AgentGrid.svelte';
   import { t } from './i18n.svelte.js';
   import {
-    crewHistory, crewRoster, crewPost, crewStatus, crewStartTeam, crewEmployees,
+    crewHistory, crewRoster, crewPost, crewStatus, crewTeams, crewStartTeam,
+    crewCloseTeam, crewEmployees,
     addCrewMessageListener, removeCrewMessageListener,
     listSessionsWithPanes, fsCwd,
   } from './ws.js';
@@ -41,33 +42,34 @@
   });
 
   // Grid pane width as a fraction (left = agent grid). Draggable splitter.
-  // Persisted so the user's choice survives reloads.
   let gridFrac = $state(parseFloat(localStorage.getItem('tmux_crew_gridfrac') || '0.6'));
-  let employees = $state([]);   // desired roster (all employees → grid cells)
 
-  let messages = $state([]);     // crew Message[] (oldest first)
-  let roster = $state([]);       // AgentRow[]
+  // ─── Multiple teams ──────────────────────────────────────────────────────
+  // Each team is an isolated room. `teams` is the live list; `activeRoom` is
+  // the one in view. All chat data is scoped to activeRoom; pushes are filtered
+  // by their message's room. `newTeam` toggles the start-a-new-team panel.
+  let teams = $state([]);        // [{ room, workspace, session, started, agents }]
+  let activeRoom = $state('');   // '' = none selected yet
+  let newTeam = $state(false);   // true = showing the "new team" workspace picker
+  let switcherOpen = $state(false);
+  let employees = $state([]);    // active team's desired roster (grid cells)
+
+  let messages = $state([]);     // active room Message[] (oldest first)
+  let roster = $state([]);       // active room AgentRow[]
   let available = $state(true);  // false when the server has no crew bus
-  let teamStarted = $state(false); // whether the supervisor has launched a crew
   let starting = $state(false);
   let loading = $state(true);
   let draft = $state('');
   let sending = $state(false);
   let listEl = $state(null);
   let inputEl = $state(null);
-  // Agents' working directory. Defaulted (current session cwd > server default)
-  // and editable before the crew is started.
+  // Workspace for a NEW team. Defaulted (current session cwd > server default).
   let workspace = $state('');
   let editingWorkspace = $state(false);
 
-  // tmux session the crew runs in: tmm-crew-<workspace-slug>. Must match the
-  // server's `crew::workspace_slug` so previewAgent finds the right windows.
-  function slugify(p) {
-    const base = (p || '').replace(/\/+$/, '').split('/').pop() || 'root';
-    let s = base.replace(/[^A-Za-z0-9_-]/g, '-').toLowerCase().replace(/^-+|-+$/g, '');
-    return (s || 'root').slice(0, 32);
-  }
-  let crewSession = $derived(`tmm-crew-${slugify(workspace)}`);
+  let activeTeam = $derived(teams.find(x => x.room === activeRoom) || null);
+  // crew session for the active team (window_name → agent for pane preview).
+  let crewSession = $derived(activeRoom ? `tmm-crew-${activeRoom}` : '');
 
   // Roster entries that are present (not offline). The human posts as "human";
   // never show it as an addressable agent (you can't @ yourself usefully).
@@ -77,48 +79,76 @@
     requestAnimationFrame(() => { if (listEl) listEl.scrollTop = listEl.scrollHeight; });
   }
 
+  // Refresh the team list + default workspace. Picks an active room if none.
+  async function refreshTeams() {
+    const s = await crewStatus();
+    teams = s?.teams || [];
+    available = true;
+    if (!workspace) {
+      let ws = '';
+      if (currentSession) {
+        try { ws = (await fsCwd(currentSession))?.path || ''; } catch {}
+      }
+      workspace = ws || s?.default_workspace || '';
+    }
+    // Auto-select: keep current if still present, else first team, else none.
+    if (!teams.some(x => x.room === activeRoom)) {
+      activeRoom = teams[0]?.room || '';
+    }
+    if (!activeRoom) newTeam = teams.length === 0; // no teams → straight to new-team panel
+  }
+
+  // Full load for the active room: history + roster + employees.
   async function refresh() {
     try {
-      const [h, r, s, e] = await Promise.all([crewHistory(200), crewRoster(), crewStatus(), crewEmployees()]);
-      messages = h?.messages || [];
-      roster = r?.roster || [];
-      teamStarted = !!s?.team_started;
-      employees = e?.employees || [];
-      available = true;
-      // Seed the workspace field once: prefer the current terminal session's
-      // cwd, else the server's default (home). User can edit until they start.
-      if (!workspace) {
-        let ws = '';
-        if (currentSession) {
-          try { ws = (await fsCwd(currentSession))?.path || ''; } catch {}
-        }
-        workspace = ws || s?.default_workspace || '';
+      await refreshTeams();
+      if (activeRoom) {
+        const [h, r, e] = await Promise.all([
+          crewHistory(activeRoom, 200), crewRoster(activeRoom), crewEmployees(activeRoom),
+        ]);
+        messages = h?.messages || [];
+        roster = r?.roster || [];
+        employees = e?.employees || [];
+      } else {
+        messages = []; roster = []; employees = [];
       }
       scrollToBottom();
     } catch (e) {
-      // method-not-found → no bus on this server. Any other error is transient
-      // (treat as unavailable too; a reconnect re-runs this).
       available = false;
     } finally {
       loading = false;
     }
   }
 
-  // Lightweight roster-only refresh (no history, no status, no workspace
-  // reseed). This is the hot path that keeps the status bar live, so it stays
-  // as cheap as possible — one small RPC. `team_started` is set once on Start
-  // and only goes false→true, so it doesn't need re-polling here.
-  let rosterInFlight = false;
+  // Lightweight poll: team list + active room's roster/employees. Cheap; keeps
+  // the status bar + switcher live. No history reload.
+  let pollInFlight = false;
   async function refreshRoster() {
-    if (rosterInFlight) return; // don't stack if a poll is slow
-    rosterInFlight = true;
+    if (pollInFlight) return;
+    pollInFlight = true;
     try {
-      const [r, e] = await Promise.all([crewRoster(), crewEmployees()]);
-      roster = r?.roster || [];
-      employees = e?.employees || [];
+      const s = await crewStatus();
+      teams = s?.teams || [];
       available = true;
-    } catch { /* transient; the next poll tick retries */ }
-    finally { rosterInFlight = false; }
+      if (!teams.some(x => x.room === activeRoom)) activeRoom = teams[0]?.room || '';
+      if (activeRoom) {
+        const [r, e] = await Promise.all([crewRoster(activeRoom), crewEmployees(activeRoom)]);
+        roster = r?.roster || [];
+        employees = e?.employees || [];
+      }
+    } catch { /* transient; next tick retries */ }
+    finally { pollInFlight = false; }
+  }
+
+  // Switch the active team: reload its chat. Clears the current view first so
+  // we never show team A's messages under team B's header.
+  async function selectTeam(room) {
+    switcherOpen = false;
+    newTeam = false;
+    if (room === activeRoom) return;
+    activeRoom = room;
+    messages = []; roster = []; employees = [];
+    await refresh();
   }
 
   // Splitter drag: adjust the grid/chat width ratio (desktop only).
@@ -141,27 +171,41 @@
     window.addEventListener('mouseup', onUp);
   }
 
+  // Start a NEW team for the chosen workspace; its room = the workspace slug.
   async function startTeam() {
     if (starting || !workspace.trim()) return;
     starting = true;
     editingWorkspace = false;
     try {
-      await crewStartTeam(workspace.trim());
-      teamStarted = true;
-      // Agents come online over the next seconds; the visibility poll below
-      // keeps refreshing the roster, so the "coming online…" state resolves on
-      // its own without needing a tab switch.
+      const res = await crewStartTeam(workspace.trim());
+      newTeam = false;
+      if (res?.room) {
+        activeRoom = res.room;
+        messages = []; roster = []; employees = [];
+      }
+      await refresh();
     } catch {
     } finally {
       starting = false;
     }
   }
 
-  // Live push: append each broadcast message. De-dupe by id (history + a racing
-  // push can overlap right after mount). join/leave/system messages mean the
-  // roster changed → refresh presence immediately (don't wait for the poll).
+  // Close the active team (kill its agents); chat log persists server-side.
+  async function closeActiveTeam() {
+    if (!activeRoom) return;
+    switcherOpen = false;
+    const room = activeRoom;
+    try { await crewCloseTeam(room); } catch {}
+    activeRoom = '';
+    await refresh();
+  }
+
+  // Live push: append messages for the ACTIVE room only (each Message carries
+  // its room). join/leave/system → refresh presence immediately. Messages for
+  // other rooms still bump the team list via the poll.
   function onCrewMessage(m) {
     if (!m?.id) return;
+    if (m.room && activeRoom && m.room !== activeRoom) return; // other team
     if (m.kind === 'join' || m.kind === 'leave' || m.kind === 'system') {
       refreshRoster();
     }
@@ -175,12 +219,8 @@
     return () => removeCrewMessageListener(onCrewMessage);
   });
 
-  // While the tab is visible: full refresh once, then poll the roster on a
-  // tight interval so the status bar (online → waiting/working) stays
-  // responsive and the "coming online…" spinner resolves as agents join — no
-  // tab switch required. Agent status changes aren't broadcast as messages, so
-  // a poll is the only signal. The poll is roster-only (one cheap RPC) and
-  // guarded against stacking, so 1s is comfortable; it stops when the tab hides.
+  // While visible: full refresh once, then poll on a tight interval so the
+  // status bar + team list stay live. Stops when the tab hides.
   const ROSTER_POLL_MS = 1000;
   $effect(() => {
     if (!visible) return;
@@ -191,10 +231,10 @@
 
   async function send() {
     const body = draft.trim();
-    if (!body || sending) return;
+    if (!body || sending || !activeRoom) return;
     sending = true;
     try {
-      await crewPost(body);
+      await crewPost(activeRoom, body);
       draft = '';
       if (inputEl) inputEl.style.height = 'auto'; // collapse back to one row
       // The post echoes back via the crew_message push, so we don't append
@@ -259,94 +299,137 @@
   function isMine(m) { return m.kind === 'msg' && m.from === 'human'; }
 </script>
 
-{#snippet chatPane()}
-  <!-- Roster: present agents as chips; tap to preview their tmux pane (mobile)
-       or focus its grid cell (desktop, via previewAgent → openTerminal). -->
-  {#if agents.length > 0}
-    <div class="team-roster">
-      {#each agents as a}
-        <button class="roster-chip" class:waiting={a.status === 'waiting'} onclick={() => previewAgent(a.name)} title={a.role || a.name}>
-          <span class="roster-dot status-{a.status}"></span>
-          <span class="roster-name">{a.name}</span>
-          <Icon name="terminal" size={11} />
-        </button>
-      {/each}
-    </div>
-  {/if}
-
-  <!-- Start panel: shown until a crew is up. Workspace = agents' working dir
-       (defaults to the current session's cwd), editable before starting. -->
-  {#if agents.length === 0}
-    <div class="team-start-panel">
-      {#if teamStarted}
-        <span class="reconnect-spinner-sm"></span>
-        <span class="start-hint">{t('teamStarting')}</span>
-      {:else}
-        <div class="start-ws">
-          <span class="start-ws-label">{t('teamWorkspace')}</span>
-          {#if editingWorkspace}
-            <input class="start-ws-input" bind:value={workspace}
-              onkeydown={(e) => { if (e.key === 'Enter') editingWorkspace = false; }}
-              placeholder="/path/to/project" />
-          {:else}
-            <button class="start-ws-path" onclick={() => editingWorkspace = true} title={workspace}>
-              {workspace || '—'} <Icon name="edit" size={11} />
+{#snippet teamSwitcher()}
+  <!-- Header: active-team dropdown + new + close. -->
+  <div class="team-header">
+    <div class="team-pick">
+      <button class="team-pick-btn" onclick={() => switcherOpen = !switcherOpen}>
+        <Icon name="bot" size={13} />
+        <span class="team-pick-name">{activeTeam ? activeTeam.room : (newTeam ? t('teamNew') : t('teamNone'))}</span>
+        <Icon name="chevron-down" size={10} />
+      </button>
+      {#if switcherOpen}
+        <button class="team-pick-backdrop" aria-label="close" onclick={() => switcherOpen = false}></button>
+        <div class="team-pick-menu">
+          {#each teams as tm}
+            <button class="team-pick-item" class:active={tm.room === activeRoom} onclick={() => selectTeam(tm.room)} title={tm.workspace}>
+              <span class="tp-dot" class:on={tm.agents > 0}></span>
+              <span class="tp-name">{tm.room}</span>
+              <span class="tp-count">{tm.agents}</span>
             </button>
+          {/each}
+          {#if teams.length === 0}
+            <div class="team-pick-empty">{t('teamNone')}</div>
           {/if}
+          <button class="team-pick-new" onclick={() => { newTeam = true; switcherOpen = false; }}>
+            <Icon name="plus" size={12} /> {t('teamNew')}
+          </button>
         </div>
-        <button class="team-start" disabled={starting || !workspace.trim()} onclick={startTeam}>
-          {#if starting}<span class="reconnect-spinner-sm"></span>{:else}<Icon name="bot" size={14} />{/if}
-          {t('teamStart')}
+      {/if}
+    </div>
+    {#if activeTeam}
+      <button class="team-close" onclick={closeActiveTeam} title={t('teamClose')} aria-label={t('teamClose')}>
+        <Icon name="x" size={13} />
+      </button>
+    {/if}
+  </div>
+{/snippet}
+
+{#snippet newTeamPanel()}
+  <div class="team-start-panel">
+    <div class="start-ws">
+      <span class="start-ws-label">{t('teamWorkspace')}</span>
+      {#if editingWorkspace}
+        <input class="start-ws-input" bind:value={workspace}
+          onkeydown={(e) => { if (e.key === 'Enter') editingWorkspace = false; }}
+          placeholder="/path/to/project" />
+      {:else}
+        <button class="start-ws-path" onclick={() => editingWorkspace = true} title={workspace}>
+          {workspace || '—'} <Icon name="edit" size={11} />
         </button>
       {/if}
     </div>
-  {/if}
-
-  <!-- Message log -->
-  <div class="team-log" bind:this={listEl}>
-    {#if messages.length === 0}
-      <div class="team-empty">{t('teamNoMessages')}</div>
-    {:else}
-      {#each messages as m (m.id)}
-        {#if isSystem(m)}
-          <div class="msg-system">{m.body}</div>
-        {:else}
-          <div class="msg-row" class:mine={isMine(m)}>
-            <div class="msg-bubble" class:mine={isMine(m)}>
-              {#if !isMine(m)}<div class="msg-from">{m.from}</div>{/if}
-              <div class="msg-body">{m.body}</div>
-              <div class="msg-time">{fmtTime(m.ts)}</div>
-            </div>
-          </div>
-        {/if}
-      {/each}
+    <button class="team-start" disabled={starting || !workspace.trim()} onclick={startTeam}>
+      {#if starting}<span class="reconnect-spinner-sm"></span>{:else}<Icon name="bot" size={14} />{/if}
+      {t('teamStart')}
+    </button>
+    {#if teams.length > 0}
+      <button class="team-start-cancel" onclick={() => newTeam = false}>{t('cancel')}</button>
     {/if}
   </div>
+{/snippet}
 
-  <!-- Compose -->
-  <div class="team-compose">
-    {#if agents.length}
-      <div class="compose-mentions">
+{#snippet chatPane()}
+  {@render teamSwitcher()}
+
+  {#if newTeam || !activeRoom}
+    {@render newTeamPanel()}
+  {:else}
+    <!-- Roster: present agents as chips; tap to preview their tmux pane (mobile)
+         or focus its grid cell (desktop, via previewAgent → openTerminal). -->
+    {#if agents.length > 0}
+      <div class="team-roster">
         {#each agents as a}
-          <button class="mention-chip" onclick={() => mention(a.name)}>@{a.name}</button>
+          <button class="roster-chip" class:waiting={a.status === 'waiting'} onclick={() => previewAgent(a.name)} title={a.role || a.name}>
+            <span class="roster-dot status-{a.status}"></span>
+            <span class="roster-name">{a.name}</span>
+            <Icon name="terminal" size={11} />
+          </button>
         {/each}
       </div>
+    {:else}
+      <div class="team-start-panel">
+        <span class="reconnect-spinner-sm"></span>
+        <span class="start-hint">{t('teamStarting')}</span>
+      </div>
     {/if}
-    <div class="compose-row">
-      <textarea
-        class="compose-input"
-        bind:this={inputEl}
-        bind:value={draft}
-        onkeydown={onKeydown}
-        oninput={(e) => autogrow(e.currentTarget)}
-        placeholder={t('teamMessage')}
-        rows="1"
-      ></textarea>
-      <button class="compose-send" disabled={!draft.trim() || sending} onclick={send} aria-label={t('teamSend')} title={t('teamSendHint')}>
-        <Icon name="send" size={16} />
-      </button>
+
+    <!-- Message log -->
+    <div class="team-log" bind:this={listEl}>
+      {#if messages.length === 0}
+        <div class="team-empty">{t('teamNoMessages')}</div>
+      {:else}
+        {#each messages as m (m.id)}
+          {#if isSystem(m)}
+            <div class="msg-system">{m.body}</div>
+          {:else}
+            <div class="msg-row" class:mine={isMine(m)}>
+              <div class="msg-bubble" class:mine={isMine(m)}>
+                {#if !isMine(m)}<div class="msg-from">{m.from}</div>{/if}
+                <div class="msg-body">{m.body}</div>
+                <div class="msg-time">{fmtTime(m.ts)}</div>
+              </div>
+            </div>
+          {/if}
+        {/each}
+      {/if}
     </div>
-  </div>
+
+    <!-- Compose -->
+    <div class="team-compose">
+      {#if agents.length}
+        <div class="compose-mentions">
+          {#each agents as a}
+            <button class="mention-chip" onclick={() => mention(a.name)}>@{a.name}</button>
+          {/each}
+        </div>
+      {/if}
+      <div class="compose-row">
+        <textarea
+          class="compose-input"
+          bind:this={inputEl}
+          bind:value={draft}
+          onkeydown={onKeydown}
+          oninput={(e) => autogrow(e.currentTarget)}
+          placeholder={t('teamMessage')}
+          rows="1"
+        ></textarea>
+        <button class="compose-send" disabled={!draft.trim() || sending} onclick={send} aria-label={t('teamSend')} title={t('teamSendHint')}>
+          <Icon name="send" size={16} />
+        </button>
+      </div>
+    </div>
+  {/if}
 {/snippet}
 
 <div class="team">
@@ -357,11 +440,13 @@
       <Icon name="bot" size={28} />
       <p>{t('teamUnavailable')}</p>
     </div>
-  {:else if splitEligible && employees.length > 0}
+  {:else if splitEligible && activeRoom && !newTeam && employees.length > 0}
     <!-- Desktop split: agent grid (left) | draggable splitter | chat (right). -->
     <div class="team-split" bind:this={splitRow}>
       <div class="team-grid-pane" style="flex: {gridFrac} 1 0;">
-        <AgentGrid {crewSession} {employees} {fontSize} {visible} />
+        {#key activeRoom}
+          <AgentGrid {crewSession} {employees} {fontSize} {visible} />
+        {/key}
       </div>
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="team-splitter" onmousedown={startDrag} title="Drag to resize"></div>
@@ -395,6 +480,57 @@
     height: 100%;
     min-height: 0;
     background: var(--bg);
+  }
+
+  /* Team switcher header */
+  .team-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .team-pick { position: relative; flex: 1; min-width: 0; }
+  .team-pick-btn {
+    display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+    padding: 5px 10px; border: 1px solid var(--border2); border-radius: 8px;
+    background: var(--input-bg); color: var(--text2);
+    font-size: 12px; font-weight: 600; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .team-pick-btn:active { border-color: var(--accent); color: var(--accent); }
+  .team-pick-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .team-pick-backdrop { position: fixed; inset: 0; z-index: 30; background: transparent; border: none; }
+  .team-pick-menu {
+    position: absolute; top: 34px; left: 0; z-index: 31;
+    min-width: 200px; max-width: 280px; max-height: 50vh; overflow-y: auto;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.4); padding: 4px;
+  }
+  .team-pick-item, .team-pick-new {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 7px 9px; border: none; border-radius: 7px; background: transparent;
+    color: var(--text2); font-size: 12px; cursor: pointer; text-align: left;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .team-pick-item:active, .team-pick-new:active { background: var(--surface2); }
+  .team-pick-item.active { background: var(--accent-bg); color: var(--accent); }
+  .tp-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text3); flex-shrink: 0; }
+  .tp-dot.on { background: var(--status-ok); }
+  .tp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'Maple Mono NF CN','Maple Mono','SF Mono',Menlo,monospace; }
+  .tp-count { color: var(--text3); font-size: 11px; }
+  .team-pick-empty { padding: 8px 9px; color: var(--text3); font-size: 12px; }
+  .team-pick-new { color: var(--accent); border-top: 1px solid var(--border2); border-radius: 0 0 7px 7px; margin-top: 2px; }
+  .team-close {
+    flex-shrink: 0; width: 28px; height: 28px; padding: 0;
+    border: 1px solid var(--border2); border-radius: 8px;
+    background: var(--input-bg); color: var(--text3);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .team-close:active { color: var(--danger); border-color: var(--danger); }
+  .team-start-cancel {
+    padding: 6px 12px; border: 1px solid var(--border2); border-radius: 8px;
+    background: transparent; color: var(--text3); font-size: 12px; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
   }
   .team-empty {
     flex: 1;

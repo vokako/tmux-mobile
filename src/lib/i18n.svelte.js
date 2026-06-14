@@ -119,6 +119,9 @@ const msgs = {
     teamStart: 'Start team',
     teamStarting: 'Agents coming online…',
     teamWorkspace: 'Workspace',
+    teamNew: 'New team',
+    teamNone: 'No teams',
+    teamClose: 'Close team',
   },
   zh: {
     sessions: '会 话',
@@ -229,6 +232,9 @@ const msgs = {
     teamStart: '启动团队',
     teamStarting: 'agent 正在上线…',
     teamWorkspace: '工作目录',
+    teamNew: '新建团队',
+    teamNone: '暂无团队',
+    teamClose: '关闭团队',
   },
 };
 

@@ -263,3 +263,71 @@ impl CrewBridge for CrewBus {
         self.json_tx.subscribe()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::CrewBridge;
+
+    /// Build a manager backed by a temp db, WITHOUT the network daemon (we only
+    /// exercise the room registry + bus routing here).
+    fn manager() -> Arc<CrewBus> {
+        let dir = std::env::temp_dir().join(format!("crewtest-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).ok();
+        let db = dir.join(format!("crew-{:p}.db", &dir)).to_string_lossy().into_owned();
+        let _ = std::fs::remove_file(&db);
+        let (json_tx, _) = broadcast::channel::<String>(64);
+        let me = Arc::new(CrewBus {
+            db,
+            teams: Mutex::new(HashMap::new()),
+            json_tx,
+            cfg: CrewConfig { url: "http://127.0.0.1:0".into(), model: "m".into() },
+            self_ref: OnceLock::new(),
+        });
+        let _ = me.self_ref.set(Arc::downgrade(&me));
+        me
+    }
+
+    #[tokio::test]
+    async fn unknown_room_is_refused_until_registered() {
+        let m = manager();
+        // No room yet → bus_for/post refuse.
+        assert!(m.room_bus("alpha").is_none());
+        assert!(m.post("alpha", "human", "hi", false).is_err());
+        // Registering the room opens it.
+        m.ensure_room("alpha", "/tmp/alpha").unwrap();
+        assert!(m.room_bus("alpha").is_some());
+        assert!(m.post("alpha", "human", "hi", false).is_ok());
+    }
+
+    #[tokio::test]
+    async fn rooms_are_isolated() {
+        let m = manager();
+        m.ensure_room("alpha", "/tmp/alpha").unwrap();
+        m.ensure_room("beta", "/tmp/beta").unwrap();
+        m.post("alpha", "human", "hello alpha", false).unwrap();
+        m.post("beta", "human", "hello beta", false).unwrap();
+
+        let a = m.history("alpha", 100);
+        let b = m.history("beta", 100);
+        let a_bodies: Vec<String> = a["messages"].as_array().unwrap().iter()
+            .map(|x| x["body"].as_str().unwrap_or("").to_string()).collect();
+        let b_bodies: Vec<String> = b["messages"].as_array().unwrap().iter()
+            .map(|x| x["body"].as_str().unwrap_or("").to_string()).collect();
+        assert!(a_bodies.iter().any(|s| s == "hello alpha"));
+        assert!(!a_bodies.iter().any(|s| s == "hello beta"), "beta leaked into alpha");
+        assert!(b_bodies.iter().any(|s| s == "hello beta"));
+        assert!(!b_bodies.iter().any(|s| s == "hello alpha"), "alpha leaked into beta");
+    }
+
+    #[tokio::test]
+    async fn teams_lists_registered_rooms() {
+        let m = manager();
+        m.ensure_room("alpha", "/tmp/alpha").unwrap();
+        let teams = m.teams();
+        let arr = teams["teams"].as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["room"], "alpha");
+        assert_eq!(arr[0]["workspace"], "/tmp/alpha");
+    }
+}

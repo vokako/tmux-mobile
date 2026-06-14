@@ -576,14 +576,17 @@ export const gitCmd = (subcmd, args = [], cwd) => call('git', { subcmd, args, cw
 // Crew multi-agent bus (Team tab). Only available when the server has the
 // in-process bus wired (desktop); on a server without it these reject with a
 // method-not-found error, which the Team tab uses to hide itself.
-export const crewHistory = (limit = 100) => call('crew_history', { limit });
-export const crewRoster = () => call('crew_roster');
-export const crewEmployees = () => call('crew_employees');
-export const crewPost = (body, requires_reply) => call('crew_post', { body, requires_reply });
-// Bus availability + whether the team supervisor is running.
+// All chat ops are scoped to a team `room`. crew_status / crew_teams are
+// team-agnostic (they list teams); the rest take the active room.
 export const crewStatus = () => call('crew_status');
-// Operator action: spin up the built-in team (seed roster + launch agents).
-export const crewStartTeam = () => call('crew_start_team');
+export const crewTeams = () => call('crew_teams');
+export const crewHistory = (room, limit = 100) => call('crew_history', { room, limit });
+export const crewRoster = (room) => call('crew_roster', { room });
+export const crewEmployees = (room) => call('crew_employees', { room });
+export const crewPost = (room, body, requires_reply) => call('crew_post', { room, body, requires_reply });
+// Operator actions: spin up a team for a workspace (room = its slug), or close one.
+export const crewStartTeam = (workspace) => call('crew_start_team', { workspace });
+export const crewCloseTeam = (room) => call('crew_close_team', { room });
 
 // Subscription refcount per target. The server keeps ONE subscription entry
 // per target, so two split cells on the same window must NOT let the first

@@ -10,8 +10,18 @@ server. See `docs/design-docs/features/team-crew.md` for architecture.
 - **Desktop server only.** The crew bus is desktop-only; the phone reaches it
   through its existing WebSocket connection.
 - The tab appears **only when** the connected server has the bus running (probed
-  once per connection via the `crew_roster` RPC; method-not-found → hidden).
-- A server with the bus present but no agents shows the tab with the start panel.
+  once per connection via the `crew_status` RPC; method-not-found → hidden).
+- A server with the bus present but no teams shows the "New team" panel.
+
+## Multiple teams
+- Each team is an isolated chat **room** (id = workspace slug) — separate
+  conversation, roster, and agents. Many teams (one per project) coexist.
+- **Header dropdown** lists active teams (room · live agent count); pick one to
+  switch the chat + agent grid to it.
+- **+ New team** opens the workspace picker → `crew_start_team(workspace)`.
+- **× Close team** stops the active team's agents (`crew_close_team`, kills its
+  tmux session); its chat log persists, so re-starting the same workspace
+  resumes history.
 
 ## Components
 

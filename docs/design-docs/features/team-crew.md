@@ -84,11 +84,37 @@ Why this shape, and what was rejected:
   `src-tauri/crates/agora/` (dropping its CLI `main.rs` — the daemon runs
   in-process) and kept its tests.
 
+## 2b. Multiple teams = isolated rooms
+
+The bus is **room-aware**: each team is its own chat **room** (id = the
+workspace slug), fully isolated — separate message log, roster, and obligation
+graph. One daemon serves all rooms.
+
+- **agora crate**: a `BusProvider` trait (`room → Bus`) that `mcp.rs`/`web.rs`
+  resolve per request — agents via an **`x-room` header**, the human API via a
+  `?room=` query. `SingleRoom` wraps one `Bus` for the single-room/test path.
+  The store was already fully room-keyed, so only routing changed.
+- **Host (`crew_bridge.rs`)**: `CrewBus` is a **registry** of rooms (each a
+  `Bus` lazily opened on the shared db, with its own pump into one merged push
+  channel) and *is* the `BusProvider` for the MCP daemon. Unknown rooms are
+  refused until a team is started — a stray agent can't conjure a room by
+  guessing a header; only the operator's "New team" creates one.
+- **The phone** passes the active `room` with every `crew_*` RPC and filters the
+  `crew_message` push by each message's `room`, so the view never mixes teams.
+- **Agents** are launched with an `x-room` header for their team's room, so
+  kiro/claude/codex each join the right chat.
+- **Team tab UI**: a header dropdown lists active teams (room · agent count),
+  "+ New team" opens the workspace picker, and "×" closes the active team
+  (`crew_close_team` kills its tmux session; the chat log persists in the db, so
+  re-starting the same workspace resumes its history).
+
 ## 3. Per-workspace crews (the "limited to a directory" requirement)
 
 A crew is tied to a **workspace** = the agents' shared working directory (their
 real project). The phone defaults it to the current terminal session's cwd
-(`fsCwd`), shows it, and lets the user edit it before starting.
+(`fsCwd`), shows it, and lets the user edit it before starting. The room id IS
+the workspace slug, so the team, its session `tmm-crew-<slug>`, and its config
+home all share one identifier.
 
 - The tmux session is **`tmm-crew-<slug>`** where `slug` is the sanitized
   workspace basename (`crew::workspace_slug`, mirrored in `Team.svelte:slugify`
