@@ -139,13 +139,27 @@ impl Bus {
             let mentions = mentioned_names(&conn, &self.room, body)?; // @name in body (+ "all")
             let recipients = self.resolve_recipients(&conn, from, &mentions)?;
             let msg = store::append(&conn, &self.room, from, &mentions, Kind::Msg, body)?;
-            for b in &recipients {
-                // Replying to someone you owe clears your debt (regardless of requires_reply).
-                if store::has_obligation(&conn, &self.room, from, b)? {
-                    store::clear_obligation(&conn, &self.room, from, b)?;
+
+            // Discharge debts FIRST, against ALL raw @-mentions — not just
+            // registered ones. The creditor may be the human operator, who is
+            // never in the roster (`mentioned_names` would drop "@human"). If
+            // we only cleared debts to registered recipients, an agent could
+            // never answer the human: its `wait` stays Blocked forever and it
+            // re-replies on every tick (the real-world "@human 在线" spam loop).
+            // You can always discharge a reply you owe by addressing that name.
+            for creditor in store::owes(&conn, &self.room, from)? {
+                if raw_mentions_creditor(body, &creditor) {
+                    store::clear_obligation(&conn, &self.room, from, &creditor)?;
                 }
-                // If you asked for a reply, the mentioned (registered) agent now owes you.
-                if requires_reply && store::get_agent(&conn, &self.room, b)?.is_some() {
+            }
+
+            // Then create new obligations: a registered agent you @mention with
+            // requires_reply now owes you a reply.
+            for b in &recipients {
+                if requires_reply
+                    && !b.eq_ignore_ascii_case(from)
+                    && store::get_agent(&conn, &self.room, b)?.is_some()
+                {
                     store::add_obligation(&conn, &self.room, b, from, &msg.id)?;
                 }
             }
@@ -329,6 +343,38 @@ fn apply_presence(mut roster: Vec<AgentRow>) -> Vec<AgentRow> {
         }
     }
     roster
+}
+
+/// True if `body` contains an `@creditor` token (or `@all`/`@*`), regardless of
+/// whether `creditor` is a registered agent. Used to discharge a debt to ANY
+/// addressee — crucially the human operator, who never joins the roster. ASCII
+/// `[A-Za-z0-9_-]` tokens only, matching `mentioned_names`'s tokenizer.
+fn raw_mentions_creditor(body: &str, creditor: &str) -> bool {
+    let bytes = body.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'@' {
+            let start = i + 1;
+            let mut j = start;
+            while j < bytes.len()
+                && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_' || bytes[j] == b'-')
+            {
+                j += 1;
+            }
+            if j > start {
+                let tok = &body[start..j];
+                if tok.eq_ignore_ascii_case(creditor)
+                    || ALL_TOKENS.contains(&tok.to_ascii_lowercase().as_str())
+                {
+                    return true;
+                }
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    false
 }
 
 /// Find `@name` mentions in `body` that match a known agent/employee name (or an

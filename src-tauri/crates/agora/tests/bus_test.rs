@@ -113,6 +113,39 @@ async fn reply_does_not_ping_pong() {
 }
 
 #[tokio::test]
+async fn can_discharge_debt_to_unregistered_human() {
+    // Regression: the human operator is never a registered agent. When the
+    // human's directed message obligates an agent, the agent MUST be able to
+    // discharge by replying "@human …" even though "human" isn't in the roster.
+    // Before the fix, mentioned_names dropped @human, the debt never cleared,
+    // and the agent's wait stayed Blocked forever (the real "@human 在线" spam).
+    let bus = new_bus();
+    bus.join("worker", None).unwrap();
+    drain(&bus, "worker").await;
+
+    // Human (unregistered) directs worker with a required reply.
+    bus.post("human", "@worker 你在线吗", true).unwrap();
+    assert!(matches!(
+        bus.wait("worker", Some(Duration::from_millis(300))).await.unwrap(),
+        WaitOutcome::Delivered { .. }
+    ));
+
+    // Worker owes "human"; re-wait is blocked until it answers.
+    assert!(matches!(
+        bus.wait("worker", Some(Duration::from_millis(200))).await.unwrap(),
+        WaitOutcome::Blocked { .. }
+    ));
+
+    // Replying "@human …" discharges the debt even though human is unregistered.
+    bus.post("worker", "@human 在线", false).unwrap();
+    let after = bus.wait("worker", Some(Duration::from_millis(300))).await.unwrap();
+    assert!(
+        matches!(after, WaitOutcome::Idle { .. } | WaitOutcome::Delivered { .. }),
+        "debt to unregistered human must clear; got {after:?}"
+    );
+}
+
+#[tokio::test]
 async fn mention_of_unregistered_name_creates_no_obligation() {
     let bus = new_bus();
     bus.join("manager", None).unwrap();
