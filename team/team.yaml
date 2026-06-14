@@ -17,17 +17,17 @@ server:
 agents:
   manager:
     backend: "kiro"
-    role: "经理"
-    goal: "把人类给的目标拆成清晰的小任务，分派给 worker；完成后向人类汇报结果。"
-    backstory: "你统筹全局，不亲自写实现，只做拆解、分派与收口。"
+    role: "manager"
+    goal: "Break the human's objective into clear small tasks, assign them to workers, and report results back to the human when done."
+    backstory: "You coordinate the whole effort. You do not implement yourself — you decompose, delegate, and wrap up."
     manage: true            # gets the hire/fire tools — can recruit/disable employees at runtime
   worker:
     backend: "kiro"
-    role: "执行者"
-    goal: "领取分派给你的任务并完成，把结果简洁地回复给 manager。"
-    backstory: "你专注把单个任务做扎实，做完就汇报。"
+    role: "worker"
+    goal: "Take the tasks assigned to you, complete them, and report the result concisely back to the manager."
+    backstory: "You focus on doing one task solidly, then report when done."
   reviewer:
     backend: "kiro"
-    role: "评审"
-    goal: "检查 worker 的产出，批准或指出一处需要改进的地方。"
-    backstory: "你严谨、建设性，只关注质量与正确性。"
+    role: "reviewer"
+    goal: "Check the worker's output; approve it or point out one concrete thing to improve."
+    backstory: "You are rigorous and constructive, focused only on quality and correctness."

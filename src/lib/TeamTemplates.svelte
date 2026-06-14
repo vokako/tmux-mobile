@@ -147,6 +147,23 @@
     display: flex; flex-direction: column;
     background: var(--bg); border: 1px solid var(--border); border-radius: 14px;
     box-shadow: 0 20px 60px rgba(0,0,0,0.5); overflow: hidden;
+    box-sizing: border-box;
+  }
+  /* Phone: near-fullscreen sheet, list becomes a top strip, fields stack. */
+  @media (max-width: 620px) {
+    .tpl-modal {
+      width: 100vw; height: 100%; height: var(--app-height, 100dvh);
+      top: 0; left: 0; transform: none; border-radius: 0; border: none;
+      padding-top: var(--sat); padding-bottom: var(--sab);
+    }
+    .tpl-body { flex-direction: column; }
+    .tpl-list {
+      width: auto; flex-direction: row; overflow-x: auto; overflow-y: hidden;
+      border-right: none; border-bottom: 1px solid var(--border);
+      scrollbar-width: none;
+    }
+    .tpl-list::-webkit-scrollbar { display: none; }
+    .tpl-item, .tpl-add { flex-shrink: 0; white-space: nowrap; }
   }
   .tpl-head {
     display: flex; align-items: center; justify-content: space-between;
@@ -190,14 +207,15 @@
     display: flex; flex-direction: column; gap: 6px;
     padding: 10px; border: 1px solid var(--border2); border-radius: 10px; background: var(--surface);
   }
-  .agent-card-head { display: flex; align-items: center; gap: 6px; }
+  .agent-card-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .ag-field {
     padding: 6px 9px; border: 1px solid var(--input-border); border-radius: 7px;
-    background: var(--input-bg); color: var(--text); font-size: 12px; font-family: inherit; outline: none;
+    background: var(--input-bg); color: var(--text); font-size: 12px; font-family: inherit;
+    outline: none; width: 100%; box-sizing: border-box;
   }
   .ag-field:focus { border-color: var(--accent); }
-  .ag-name { flex: 1; min-width: 0; font-weight: 600; }
-  .ag-backend { flex-shrink: 0; }
+  .ag-name { flex: 1; min-width: 80px; width: auto; font-weight: 600; }
+  .ag-backend { flex-shrink: 0; width: auto; }
   .ag-manage { display: flex; align-items: center; gap: 3px; font-size: 11px; color: var(--text3); white-space: nowrap; }
   .ag-del { border: none; background: none; color: var(--text3); cursor: pointer; display: flex; flex-shrink: 0; padding: 4px; }
   .ag-del:active { color: var(--danger); }

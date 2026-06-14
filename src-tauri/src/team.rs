@@ -32,7 +32,7 @@ const AGENTS_MD: &str = include_str!("../../team/AGENTS.md");
 const KEEPALIVE_SH: &str = include_str!("../../team/hooks/keepalive.sh");
 
 const RECONCILE_INTERVAL: Duration = Duration::from_secs(3);
-const KICK: &str = "你已接入 team 群聊（协作规则见 AGENTS.md）。直接调用 wait 等待消息；被点名就用 post 回复发起人，没你的事就继续 wait；不要主动停止。";
+const KICK: &str = "You are connected to the team group chat (collaboration rules are in AGENTS.md). Call `wait` to receive messages; when someone @mentions you, reply with `post`; otherwise keep calling `wait`. Never stop on your own — always end your turn with `wait`.";
 
 // ─── Team templates (named rosters under <config>/tmux-mobile/teams/) ──────
 // A template is a JSON file `teams/<name>.json` = { "agents": [ {name, backend,
@@ -388,19 +388,19 @@ type Prepared = (Vec<(String, String)>, String, Vec<PostKey>);
 
 fn role_line(role: &str, goal: &str) -> String {
     let g = goal.replace('\n', " ");
-    format!("你是「{}」。{} 请用中文、消息简短。", role, g.trim()).trim().to_string()
+    format!("You are the {}. {} Keep messages short.", role, g.trim()).trim().to_string()
 }
 
 /// KICK plus a pointer to the team brief. Kiro injects the brief via `resources`
 /// so it just gets KICK; claude/codex have no such mechanism here (we don't
 /// write into the user's workspace), so we tell them to read the brief by path.
 fn kick_with_brief(paths: &Paths) -> String {
-    format!("{} 先读团队协作手册：{}。", KICK, paths.brief.to_string_lossy())
+    format!("{} First read the team playbook: {}", KICK, paths.brief.to_string_lossy())
 }
 
 fn full_prompt(role: &str, goal: &str, backstory: &str) -> String {
     format!(
-        "你是「{}」。\n目标：{}\n背景：{}\n你和其他 agent、以及一位人类，在共享的『team 群聊』里协作（通过 @team 工具）。请始终用中文交流，消息保持简短。",
+        "You are the {}.\nGoal: {}\nBackground: {}\nYou collaborate with other agents and a human operator in a shared team group chat (via the @team tools). Keep messages short.",
         role, goal.trim(), backstory.trim()
     )
 }

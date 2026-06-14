@@ -31,21 +31,22 @@ KEEPALIVE_HOOK = str(HERE / "hooks" / "keepalive.sh")
 # Non-management agora tools (workers/reviewer get these; managers also get hire/fire).
 WORKER_TOOLS = ["post", "wait", "list_agents", "history"]
 
-KICK = ("你已接入 team 群聊（协作规则见 AGENTS.md）。"
-        "直接调用 wait 等待消息；被点名就用 post 回复发起人，没你的事就继续 wait；不要主动停止。")
+KICK = ("You are connected to the team group chat (collaboration rules are in AGENTS.md). "
+        "Call wait to receive messages; when someone @mentions you, reply with post; "
+        "otherwise keep calling wait. Never stop on your own — always end your turn with wait.")
 
 
 def role_line(role, goal):
     """One-line role injected as the first message for claude/codex (no newlines)."""
     g = (goal or "").strip().replace("\n", " ")
-    return f"你是「{role}」。{g} 请用中文、消息简短。".strip()
+    return f"You are the {role}. {g} Keep messages short.".strip()
 
 
 def full_prompt(role, goal, backstory):
     """Multi-line prompt embedded in Kiro's agent config."""
-    return (f"你是「{role}」。\n目标：{(goal or '').strip()}\n背景：{(backstory or '').strip()}\n"
-            "你和其他 agent、以及一位人类，在共享的『team 群聊』里协作（通过 @team 工具）。"
-            "请始终用中文交流，消息保持简短。")
+    return (f"You are the {role}.\nGoal: {(goal or '').strip()}\nBackground: {(backstory or '').strip()}\n"
+            "You collaborate with other agents and a human operator in a shared team group chat "
+            "(via the @team tools). Keep messages short.")
 
 
 def prepare_agent(backend, *, name, role, goal, backstory, manage, url, demo, workspace, model=None):
