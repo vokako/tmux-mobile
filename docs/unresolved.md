@@ -1,5 +1,67 @@
 # Unresolved Issues
 
+## Team feature — open issues (review 2026-06-15)
+
+### close_team leaks the room's bus + re-broadcast pump
+- **Priority**: Medium · **Area**: Team / team_bridge.rs
+- `close_team` removes the `Team` from the registry and kills the tmux session,
+  but the per-room `agora::Bus` and its spawned re-broadcast pump task
+  (`ensure_room`) are never torn down. The pump lives until `json_tx` closes
+  (process exit). Reopening the same room later re-`ensure_room`s and spawns a
+  SECOND pump → duplicate `team_message` pushes for that room. Fix: track the
+  pump JoinHandle per room and abort it on close; or de-dup pumps by room.
+
+### Supervisor retries a failing launch every 3s forever
+- **Priority**: Medium · **Area**: Team / team.rs reconcile_loop
+- If `launch_agent` errors (e.g. `kiro-cli` not installed, bad backend) the loop
+  logs and retries the same agent every `RECONCILE_INTERVAL` (3s) indefinitely —
+  log spam + repeated tmux window churn if the window half-creates. No backoff,
+  no failure cap, no surfacing to the UI. Fix: per-agent failure count → stop
+  after N, mark the employee failed, and report it in the roster/teams payload.
+
+### A closed team that wasn't fully launched never stops its supervisor
+- **Priority**: Low · **Area**: Team / team.rs
+- The reconcile loop only exits when `launched_any && !session_exists`. If a team
+  is closed before any agent launched (e.g. all launches failed), `launched_any`
+  stays false and the loop spins forever against a removed room (`employee_specs`
+  returns empty each tick). Harmless but wasteful. Fix: also exit when the room
+  is no longer registered (add a bridge `room_exists(room)` check).
+
+### Fired/offline agents keep a dead cell + stale pane in the grid
+- **Priority**: Low · **Area**: Team / AgentGrid.svelte
+- The desktop grid renders one cell per *employee* (all states), so a `fire`d or
+  crashed agent leaves a cell pointing at a dead/closed pane (spinner or last
+  frame). No visual "offline/failed" treatment. Fix: badge offline cells, or
+  drop disabled employees from the grid.
+
+### Manager hire() launches on a hardcoded backend, no model/x-room nuance
+- **Priority**: Low · **Area**: Team / agora hire + supervisor
+- `agora::bus::hire` seeds an employee with `backend` absent; our supervisor
+  defaults hires to "kiro" (the recovery/seed path) — a hire can't pick
+  claude/codex, and the hired spec has no `model`. Acceptable for now; revisit
+  if runtime hiring is used heavily.
+
+### System prompt / template edits don't affect already-running teams
+- **Priority**: Low · **Area**: Team
+- The system prompt + roster are baked into a team's brief/seed at launch.
+  Editing them only affects teams started afterward; running agents must be
+  restarted to pick up changes. By design, but not surfaced to the user.
+
+### rmcp client reconnect behavior on server restart unverified
+- **Priority**: Medium · **Area**: Team / agora MCP
+- The in-process MCP daemon's session ids are in-memory (LocalSessionManager);
+  on server restart agents get stale-session errors and must re-handshake.
+  Whether kiro/claude/codex reconnect silently vs error to the model is
+  unverified (needs a real agent + restart). DB-backed history means no messages
+  are lost (cursor replay), but the reconnect smoothness is unknown.
+
+### Stale Chinese default.json on existing installs
+- **Priority**: Low · **Area**: Team / templates
+- `ensure_templates_seeded` only writes `default.json` when absent, so installs
+  created before the English rewrite keep the Chinese roster. The English roster
+  ships as `default-en.json` (added to the user config) but `default.json` is
+  not migrated. Fix: offer a "reset to built-in" action, or version the builtin.
+
 ## iOS Target
 - **Priority**: Low
 - **Area**: Build / Platform
