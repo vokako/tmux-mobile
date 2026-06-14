@@ -14,6 +14,7 @@
   import Icon from './Icon.svelte';
   import AgentGrid from './AgentGrid.svelte';
   import DirPicker from './DirPicker.svelte';
+  import { marked } from 'marked';
   import { t } from './i18n.svelte.js';
   import {
     teamHistory, teamRoster, teamPost, teamStatus, teamStartTeam,
@@ -314,6 +315,26 @@
 
   function isSystem(m) { return m.kind === 'join' || m.kind === 'leave' || m.kind === 'system'; }
   function isMine(m) { return m.kind === 'msg' && m.from === 'human'; }
+
+  // Render a message body as markdown. Agent output is UNTRUSTED, and marked
+  // (v17) no longer sanitizes, so we escape HTML first — markdown syntax (**,
+  // #, ```fences```, tables, links) still renders, but any raw <script>/<img
+  // onerror> becomes inert literal text. Memoized by body (chat re-renders on
+  // every poll/push). Links open in the system browser via App's global
+  // a[href] handler.
+  const _mdCache = new Map();
+  function renderMarkdown(body) {
+    const src = body || '';
+    const hit = _mdCache.get(src);
+    if (hit !== undefined) return hit;
+    const escaped = src.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    let html;
+    try { html = marked.parse(escaped, { gfm: true, breaks: true }); }
+    catch { html = escaped; }
+    if (_mdCache.size > 500) _mdCache.clear(); // bound the cache
+    _mdCache.set(src, html);
+    return html;
+  }
 </script>
 
 {#snippet teamSwitcher()}
@@ -445,7 +466,8 @@
             <div class="msg-row" class:mine={isMine(m)}>
               <div class="msg-bubble" class:mine={isMine(m)}>
                 {#if !isMine(m)}<div class="msg-from">{m.from}</div>{/if}
-                <div class="msg-body">{m.body}</div>
+                <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+                <div class="msg-body md">{@html renderMarkdown(m.body)}</div>
                 <div class="msg-time">{fmtTime(m.ts)}</div>
               </div>
             </div>
@@ -746,9 +768,39 @@
   }
   .msg-body {
     font-size: 13px; line-height: 1.45; color: var(--text);
-    white-space: pre-wrap; word-break: break-word;
+    word-break: break-word; overflow-wrap: anywhere;
     user-select: text; -webkit-user-select: text;
   }
+  /* Markdown element styling inside a message bubble. Tight margins so a
+     one-line message looks like one line, not a padded document. */
+  .msg-body.md :global(p) { margin: 0 0 6px; }
+  .msg-body.md :global(p:last-child) { margin-bottom: 0; }
+  .msg-body.md :global(ul),
+  .msg-body.md :global(ol) { margin: 4px 0; padding-left: 20px; }
+  .msg-body.md :global(li) { margin: 1px 0; }
+  .msg-body.md :global(h1),
+  .msg-body.md :global(h2),
+  .msg-body.md :global(h3),
+  .msg-body.md :global(h4) { font-size: 13px; font-weight: 700; margin: 6px 0 3px; }
+  .msg-body.md :global(code) {
+    font-family: 'Maple Mono NF CN','Maple Mono','SF Mono',Menlo,monospace;
+    font-size: 12px; background: var(--code-bg); padding: 1px 4px; border-radius: 4px;
+  }
+  .msg-body.md :global(pre) {
+    background: var(--code-bg); border: 1px solid var(--border2); border-radius: 8px;
+    padding: 8px 10px; margin: 6px 0; overflow-x: auto; -webkit-overflow-scrolling: touch;
+  }
+  .msg-body.md :global(pre code) { background: none; padding: 0; font-size: 12px; line-height: 1.4; }
+  .msg-body.md :global(a) { color: var(--accent); text-decoration: underline; }
+  .msg-body.md :global(blockquote) {
+    margin: 4px 0; padding-left: 10px; border-left: 3px solid var(--border);
+    color: var(--text2);
+  }
+  .msg-body.md :global(table) { border-collapse: collapse; margin: 6px 0; font-size: 12px; }
+  .msg-body.md :global(th),
+  .msg-body.md :global(td) { border: 1px solid var(--border2); padding: 3px 7px; text-align: left; }
+  .msg-body.md :global(hr) { border: none; border-top: 1px solid var(--border2); margin: 8px 0; }
+  .msg-body.md :global(img) { max-width: 100%; border-radius: 6px; }
   .msg-time { font-size: 9px; color: var(--text3); margin-top: 3px; text-align: right; }
 
   /* Compose */
