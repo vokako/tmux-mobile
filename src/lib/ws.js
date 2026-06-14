@@ -32,6 +32,13 @@ const BASE64_CHUNK_SIZE = 8192;
 const IDLE_PROBE_THRESHOLD_MS = 8000;
 const IDLE_PROBE_INTERVAL_MS = 4000;  // how often we check the threshold
 
+// Consecutive RPC timeouts only force a disconnect when the inbound channel
+// has ALSO been silent this long. On a high-RTT link (bad cellular, 5-7 s
+// round trips) small RPCs time out while pane_output pushes keep arriving —
+// the link is alive, just slow; tearing it down and re-handshaking makes
+// things strictly worse.
+const TIMEOUT_DISCONNECT_INBOUND_SILENCE_MS = 10000;
+
 // Liveness is handled at the WebSocket protocol layer: the server sends
 // PING frames periodically and the browser auto-replies with PONG at a
 // layer we never touch. When TCP really dies, `ws.onclose` fires and the
@@ -42,8 +49,30 @@ let ws = null;
 let wsUrl = null;
 let requestId = 0;
 const pending = new Map();
-let onPaneOutput = null;
-let onPaneClosed = null;
+// Per-target listener registries. Each mounted Terminal registers a callback
+// keyed by its own target, so multiple terminals (split-screen) coexist —
+// pane_output / pane_closed are routed to the matching listeners instead of a
+// single shared callback that instances would overwrite.
+//
+// Value is a Set of callbacks, NOT a single cb: two split cells can show the
+// SAME target (same window), and both must receive every push. With a single
+// cb the second registration silently replaced the first, so only one cell
+// refreshed. A Set fans out to all, and removing one cell's cb leaves the
+// other's intact.
+const paneOutputListeners = new Map(); // target -> Set<cb(target, content, cursor, current_command)>
+const paneClosedListeners = new Map(); // target -> Set<cb(target)>
+
+function addListener(map, target, cb) {
+  let set = map.get(target);
+  if (!set) { set = new Set(); map.set(target, set); }
+  set.add(cb);
+}
+function removeListener(map, target, cb) {
+  const set = map.get(target);
+  if (!set) return;
+  set.delete(cb);
+  if (set.size === 0) map.delete(target);
+}
 let onDisconnect = null;
 let sessionCipher = null; // {key, sendCounter, recvCounter}
 // Idle-probe state. lastInboundAt is updated on every inbound message
@@ -53,8 +82,13 @@ let lastInboundAt = 0;
 let idleProbeTimer = null;
 let idleProbeInFlight = false;
 
-export function setOnPaneOutput(cb) { onPaneOutput = cb; }
-export function setOnPaneClosed(cb) { onPaneClosed = cb; }
+// These take the cb so the caller can register/unregister its own listener
+// without disturbing other cells on the same target. Callers MUST pass the
+// same function reference to remove that they passed to add.
+export function addPaneOutputListener(target, cb) { addListener(paneOutputListeners, target, cb); }
+export function removePaneOutputListener(target, cb) { removeListener(paneOutputListeners, target, cb); }
+export function addPaneClosedListener(target, cb) { addListener(paneClosedListeners, target, cb); }
+export function removePaneClosedListener(target, cb) { removeListener(paneClosedListeners, target, cb); }
 export function setOnDisconnect(cb) { onDisconnect = cb; }
 
 // --- Crypto helpers (Web Crypto API) ---
@@ -346,14 +380,18 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
 
       if (data.method === 'pane_output') {
         // current_command is included only on the first push and when it
-        // actually changes — most ticks omit it. Pass through as-is; the
-        // callback decides what to do with `undefined`.
-        onPaneOutput?.(data.params?.target, data.params?.content, data.params?.cursor, data.params?.current_command);
+        // actually changes — most ticks omit it. Fan out to EVERY listener
+        // on this target (multiple split cells may show the same window).
+        const tgt = data.params?.target;
+        const set = paneOutputListeners.get(tgt);
+        if (set) for (const cb of set) cb(tgt, data.params?.content, data.params?.cursor, data.params?.current_command);
         return;
       }
 
       if (data.method === 'pane_closed') {
-        onPaneClosed?.(data.params?.target);
+        const tgt = data.params?.target;
+        const set = paneClosedListeners.get(tgt);
+        if (set) for (const cb of set) cb(tgt);
         return;
       }
 
@@ -444,9 +482,17 @@ function call(method, params = {}, timeoutMs = RPC_TIMEOUT_MS) {
       // fail individually and keep the connection open. Real dead-link
       // scenarios still trip: once the long RPC also fails or completes,
       // the next idle window will re-check.
-      if (rpcTimeouts >= 3 && pending.size === 0) {
-        window.__dbg?.('ws: 3 consecutive timeouts with no pending RPC → forcing disconnect');
+      const inboundSilenceMs = Date.now() - lastInboundAt;
+      if (rpcTimeouts >= 3 && pending.size === 0 && inboundSilenceMs >= TIMEOUT_DISCONNECT_INBOUND_SILENCE_MS) {
+        window.__dbg?.('ws: 3 consecutive timeouts with no pending RPC and silent inbound → forcing disconnect');
         forceDisconnect('3 consecutive RPC timeouts');
+      } else if (rpcTimeouts >= 3 && inboundSilenceMs < TIMEOUT_DISCONNECT_INBOUND_SILENCE_MS) {
+        // Server pushes are still arriving — the link is alive but slow
+        // (or our requests are being starved by a big inbound frame).
+        // Reset the counter so we re-evaluate from scratch instead of
+        // tripping the breaker the moment pushes pause.
+        window.__dbg?.(`ws: 3 consecutive timeouts but inbound is fresh (${inboundSilenceMs}ms ago) — staying connected`);
+        rpcTimeouts = 0;
       } else if (rpcTimeouts >= 3) {
         window.__dbg?.(`ws: 3 consecutive timeouts but ${pending.size} RPC still pending — staying connected`);
       }
@@ -516,16 +562,46 @@ export const fsUpload = (path, data) => call('fs_upload', { path, data }, 60000)
 export const fsConvert = (path, format = 'html') => call('fs_convert', { path, format });
 export const gitCmd = (subcmd, args = [], cwd) => call('git', { subcmd, args, cwd });
 
-export function subscribe(target) {
+// Subscription refcount per target. The server keeps ONE subscription entry
+// per target, so two split cells on the same window must NOT let the first
+// cell's unmount send `unsubscribe` and cut the survivor's feed. We send the
+// wire subscribe only on the 0→1 transition and unsubscribe only on 1→0.
+// (The set of who-wants-it is the count; resubscribe-on-reconnect re-sends
+// for every still-positive target.)
+const subRefcount = new Map(); // target -> count
+
+function sendSubscribe(target) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   const msg = JSON.stringify({ method: 'subscribe', params: { target } });
   encryptMsg(msg).then(out => ws?.send(out)).catch(() => {});
 }
-
-export function unsubscribe(target) {
+function sendUnsubscribe(target) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   const msg = JSON.stringify({ method: 'unsubscribe', params: { target } });
   encryptMsg(msg).then(out => ws?.send(out)).catch(() => {});
+}
+
+export function subscribe(target) {
+  const n = (subRefcount.get(target) || 0) + 1;
+  subRefcount.set(target, n);
+  if (n === 1) sendSubscribe(target); // first subscriber → tell the server
+}
+
+export function unsubscribe(target) {
+  const n = (subRefcount.get(target) || 0) - 1;
+  if (n <= 0) {
+    subRefcount.delete(target);
+    sendUnsubscribe(target); // last subscriber left → tell the server
+  } else {
+    subRefcount.set(target, n);
+  }
+}
+
+// Re-send subscribe for every target with a live refcount. Used after a
+// reconnect, where the server forgot all subscriptions. Does NOT change
+// refcounts (the cells are still mounted; only the wire state was lost).
+export function resubscribeActive() {
+  for (const target of subRefcount.keys()) sendSubscribe(target);
 }
 
 // --- Address optimization ---
@@ -544,6 +620,38 @@ export function classifyAddress(url) {
 
 export const ADDRESS_LABELS = ['LAN', 'Tailscale', 'WAN'];
 
+// ─── Probe failure memory ────────────────────────────────────────────────
+// The browser can't read its own subnet (no reliable "am I on this LAN?"
+// signal in a WebView), so we approximate it from history: an address that
+// just failed a probe will keep failing until the device changes networks.
+// Remember failures and skip those addresses for a cooldown window; clear
+// the memory the moment the platform reports a network change (wifi join,
+// cellular handoff) — that's exactly when a dead LAN address may have come
+// alive.
+const PROBE_FAIL_COOLDOWN_MS = 2 * 60 * 1000;
+const probeFailedAt = new Map(); // url -> timestamp of last failed probe
+
+function clearProbeMemory() {
+  probeFailedAt.clear();
+}
+
+// True if the address has no fresh probe/connect failure on record.
+// Used by the reconnect round-robin to skip addresses that just proved
+// unreachable (e.g. LAN IPs while the phone is on cellular).
+export function isAddressViable(url) {
+  const failedAt = probeFailedAt.get(url);
+  return !failedAt || Date.now() - failedAt > PROBE_FAIL_COOLDOWN_MS;
+}
+
+// Record a reachability failure observed outside probeAddress (e.g. a real
+// connect() attempt that timed out or failed before auth).
+export function noteAddressUnreachable(url) {
+  if (url) probeFailedAt.set(url, Date.now());
+}
+window.addEventListener('online', clearProbeMemory);
+// Network type / subnet change (wifi↔cellular, AP switch) on supporting platforms.
+navigator.connection?.addEventListener?.('change', clearProbeMemory);
+
 // Lightweight probe: WebSocket handshake only, no auth
 function probeAddress(url) {
   return new Promise(resolve => {
@@ -553,16 +661,33 @@ function probeAddress(url) {
       probe.onopen = () => { clearTimeout(timer); try { probe.close(); } catch {} resolve(true); };
       probe.onerror = () => { clearTimeout(timer); resolve(false); };
     } catch { resolve(false); }
+  }).then(ok => {
+    if (ok) probeFailedAt.delete(url);
+    else probeFailedAt.set(url, Date.now());
+    return ok;
   });
 }
 
-// Probe all addresses in parallel, return best reachable one (LAN > Tailscale > Internet)
+// Probe addresses in parallel, return best reachable one (LAN > Tailscale > Internet).
+// Addresses with a fresh probe failure are skipped — they cannot have come
+// back without a network change, and that clears the memory. If every
+// candidate is in cooldown (e.g. total outage just now), probe them all
+// anyway rather than returning nothing.
 export async function findBestAddress(addresses) {
   if (!addresses || addresses.length <= 1) return addresses?.[0] || null;
   const sorted = [...addresses].sort((a, b) => classifyAddress(a) - classifyAddress(b));
-  const results = await Promise.all(sorted.map(url => probeAddress(url)));
-  for (let i = 0; i < sorted.length; i++) {
-    if (results[i]) return sorted[i];
+  const now = Date.now();
+  let candidates = sorted.filter(url => {
+    const failedAt = probeFailedAt.get(url);
+    return !failedAt || now - failedAt > PROBE_FAIL_COOLDOWN_MS;
+  });
+  if (candidates.length === 0) candidates = sorted;
+  else if (candidates.length < sorted.length) {
+    window.__dbg?.(`probe: skipping ${sorted.length - candidates.length} recently-failed address(es)`);
+  }
+  const results = await Promise.all(candidates.map(url => probeAddress(url)));
+  for (let i = 0; i < candidates.length; i++) {
+    if (results[i]) return candidates[i];
   }
   return null;
 }

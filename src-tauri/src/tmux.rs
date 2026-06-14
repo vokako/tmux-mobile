@@ -29,6 +29,17 @@ pub struct TmuxPane {
     /// Current working directory of the pane's process (tmux pane_current_path).
     /// Used by the client to show a cwd hint alongside the command name.
     pub current_path: String,
+    /// Whether this is the window's active pane. Clients use it to pick the
+    /// representative pane for window chips (active pane's command/title,
+    /// not whatever pane happens to list first).
+    pub active: bool,
+    /// argv of the foreground-most descendant of the pane's shell, e.g.
+    /// "node /…/@openai/codex/bin/codex.js". `pane_current_command` only
+    /// reports the immediate process name ("node", "2.1.141"), which is
+    /// useless for detecting interpreter-launched agent CLIs — the real
+    /// identity lives in the argv. Empty when the pane runs a bare shell.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub child_cmd: String,
 }
 
 use std::sync::{OnceLock, RwLock};
@@ -149,15 +160,83 @@ pub fn list_panes(session: &str) -> Result<Vec<TmuxPane>, String> {
         "-t",
         session,
         "-F",
-        "#{session_name}\x1f#{window_index}\x1f#{pane_index}\x1f#{pane_width}\x1f#{pane_height}\x1f#{pane_current_command}\x1f#{window_name}\x1f#{pane_title}\x1f#{pane_current_path}",
+        PANE_FORMAT,
     ])?;
+    Ok(parse_pane_lines(&output))
+}
 
-    let panes = output
+const PANE_FORMAT: &str = "#{session_name}\x1f#{window_index}\x1f#{pane_index}\x1f#{pane_width}\x1f#{pane_height}\x1f#{pane_current_command}\x1f#{window_name}\x1f#{pane_title}\x1f#{pane_current_path}\x1f#{pane_active}\x1f#{pane_pid}";
+
+/// Snapshot of the process table: pid -> (ppid, args). One `ps` subprocess
+/// per pane-listing call, shared across all panes — far cheaper than a
+/// per-pane lookup and portable across macOS / Linux.
+fn process_table() -> std::collections::HashMap<u32, (u32, String)> {
+    let mut map = std::collections::HashMap::new();
+    let Ok(out) = Command::new("ps").args(["-axo", "pid=,ppid=,args="]).output() else {
+        return map;
+    };
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        // `ps` right-aligns the numeric pid/ppid columns, so consecutive
+        // fields are separated by RUNS of spaces, not single spaces. Read the
+        // two leading numbers off a whitespace-collapsing iterator, then take
+        // args as the rest of the line after the ppid token. (splitn on a
+        // single whitespace char would yield an empty ppid field on every
+        // padded row and drop the entire process table — the bug this fixes.)
+        let mut it = line.split_whitespace();
+        let (Some(pid_tok), Some(ppid_tok)) = (it.next(), it.next()) else { continue };
+        let (Ok(pid), Ok(ppid)) = (pid_tok.parse::<u32>(), ppid_tok.parse::<u32>()) else { continue };
+        // args = whatever the iterator has left, rejoined with single spaces.
+        // (Original spacing inside argv is irrelevant — we only substring-match
+        // against it.)
+        let args = it.collect::<Vec<_>>().join(" ");
+        map.insert(pid, (ppid, args));
+    }
+    map
+}
+
+/// Concatenated argv of the first-child chain under `root` (the pane's
+/// shell), up to 4 levels deep. Agent CLIs sit directly under the shell or
+/// behind one wrapper level (script launcher → node), but they also spawn
+/// their own subprocesses (tool executions) — so we keep EVERY level's
+/// argv, not just the deepest, and let the caller's substring matching
+/// find the agent's name anywhere in the chain. Each level is capped so a
+/// pathological argv doesn't bloat every pane listing.
+fn descendant_cmd(table: &std::collections::HashMap<u32, (u32, String)>, root: u32) -> String {
+    const MAX_ARGS_PER_LEVEL: usize = 160;
+    let mut children: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    for (&pid, &(ppid, _)) in table.iter() {
+        children.entry(ppid).or_default().push(pid);
+    }
+    let mut cur = root;
+    let mut acc = String::new();
+    for _ in 0..4 {
+        let Some(kids) = children.get(&cur) else { break };
+        // Lowest pid = first-spawned ≈ the foreground job.
+        let Some(&next) = kids.iter().min() else { break };
+        if let Some((_, args)) = table.get(&next) {
+            if !args.is_empty() {
+                if !acc.is_empty() {
+                    acc.push(' ');
+                }
+                let mut end = MAX_ARGS_PER_LEVEL.min(args.len());
+                while end < args.len() && !args.is_char_boundary(end) {
+                    end += 1;
+                }
+                acc.push_str(&args[..end]);
+            }
+        }
+        cur = next;
+    }
+    acc
+}
+
+fn parse_pane_lines(output: &str) -> Vec<TmuxPane> {
+    let mut panes: Vec<(TmuxPane, u32)> = output
         .lines()
         .filter(|l| !l.is_empty())
         .map(|line| {
             let parts: Vec<&str> = line.split('\x1f').collect();
-            TmuxPane {
+            let pane = TmuxPane {
                 session: parts.get(0).unwrap_or(&"").to_string(),
                 window: parts.get(1).unwrap_or(&"0").parse().unwrap_or(0),
                 pane: parts.get(2).unwrap_or(&"0").parse().unwrap_or(0),
@@ -167,11 +246,23 @@ pub fn list_panes(session: &str) -> Result<Vec<TmuxPane>, String> {
                 window_name: parts.get(6).unwrap_or(&"").to_string(),
                 pane_title: parts.get(7).unwrap_or(&"").to_string(),
                 current_path: parts.get(8).unwrap_or(&"").to_string(),
-            }
+                active: parts.get(9).unwrap_or(&"0") == &"1",
+                child_cmd: String::new(),
+            };
+            let pid: u32 = parts.get(10).unwrap_or(&"0").parse().unwrap_or(0);
+            (pane, pid)
         })
         .collect();
-
-    Ok(panes)
+    // Single ps snapshot serves every pane in this listing.
+    if panes.iter().any(|(_, pid)| *pid > 0) {
+        let table = process_table();
+        for (pane, pid) in panes.iter_mut() {
+            if *pid > 0 {
+                pane.child_cmd = descendant_cmd(&table, *pid);
+            }
+        }
+    }
+    panes.into_iter().map(|(p, _)| p).collect()
 }
 
 /// List panes across ALL sessions in one tmux call. Avoids the N+1 RPC
@@ -179,33 +270,8 @@ pub fn list_panes(session: &str) -> Result<Vec<TmuxPane>, String> {
 /// `list_panes(session)`. tmux's `-a` flag iterates every server-known
 /// session in a single subprocess; the client groups by session_name.
 pub fn list_all_panes() -> Result<Vec<TmuxPane>, String> {
-    let output = run_tmux(&[
-        "list-panes",
-        "-a",
-        "-F",
-        "#{session_name}\x1f#{window_index}\x1f#{pane_index}\x1f#{pane_width}\x1f#{pane_height}\x1f#{pane_current_command}\x1f#{window_name}\x1f#{pane_title}\x1f#{pane_current_path}",
-    ])?;
-
-    let panes = output
-        .lines()
-        .filter(|l| !l.is_empty())
-        .map(|line| {
-            let parts: Vec<&str> = line.split('\x1f').collect();
-            TmuxPane {
-                session: parts.get(0).unwrap_or(&"").to_string(),
-                window: parts.get(1).unwrap_or(&"0").parse().unwrap_or(0),
-                pane: parts.get(2).unwrap_or(&"0").parse().unwrap_or(0),
-                width: parts.get(3).unwrap_or(&"0").parse().unwrap_or(0),
-                height: parts.get(4).unwrap_or(&"0").parse().unwrap_or(0),
-                current_command: parts.get(5).unwrap_or(&"").to_string(),
-                window_name: parts.get(6).unwrap_or(&"").to_string(),
-                pane_title: parts.get(7).unwrap_or(&"").to_string(),
-                current_path: parts.get(8).unwrap_or(&"").to_string(),
-            }
-        })
-        .collect();
-
-    Ok(panes)
+    let output = run_tmux(&["list-panes", "-a", "-F", PANE_FORMAT])?;
+    Ok(parse_pane_lines(&output))
 }
 
 /// Get current command of a pane
@@ -508,4 +574,52 @@ pub fn set_resize_hook(session: &str) -> Result<(), String> {
 /// 检查 tmux server 是否运行
 pub fn is_server_running() -> bool {
     run_tmux(&["list-sessions"]).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn table(entries: &[(u32, u32, &str)]) -> std::collections::HashMap<u32, (u32, String)> {
+        entries.iter().map(|&(pid, ppid, args)| (pid, (ppid, args.to_string()))).collect()
+    }
+
+    #[test]
+    fn descendant_cmd_finds_interpreter_launched_agent() {
+        // zsh(100) → node codex.js(200): the codex case where
+        // pane_current_command only says "node".
+        let t = table(&[
+            (100, 1, "-zsh"),
+            (200, 100, "node /Users/x/node_modules/@openai/codex/bin/codex.js"),
+        ]);
+        let cmd = descendant_cmd(&t, 100);
+        assert!(cmd.contains("codex"), "got: {}", cmd);
+    }
+
+    #[test]
+    fn descendant_cmd_keeps_all_levels() {
+        // zsh(100) → claude(200) → tool subprocess(300). The agent's own
+        // subprocess must not REPLACE the agent argv in the result.
+        let t = table(&[
+            (100, 1, "-zsh"),
+            (200, 100, "claude --dangerously-skip-permissions"),
+            (300, 200, "git status"),
+        ]);
+        let cmd = descendant_cmd(&t, 100);
+        assert!(cmd.contains("claude"), "got: {}", cmd);
+        assert!(cmd.contains("git status"), "got: {}", cmd);
+    }
+
+    #[test]
+    fn descendant_cmd_idle_shell_is_empty() {
+        let t = table(&[(100, 1, "-zsh")]);
+        assert_eq!(descendant_cmd(&t, 100), "");
+    }
+
+    #[test]
+    fn descendant_cmd_caps_runaway_argv() {
+        let long = format!("node {}", "x".repeat(2000));
+        let t = table(&[(100, 1, "-zsh"), (200, 100, long.as_str())]);
+        assert!(descendant_cmd(&t, 100).len() <= 200);
+    }
 }

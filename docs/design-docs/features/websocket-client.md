@@ -7,6 +7,15 @@ Mobile connections are unreliable. WebSocket client must handle disconnects, rec
 Custom WebSocket client (`ws.js`) with auto-reconnect, pending promise cleanup, and multi-address failover.
 
 ## How It Works
+- **Pane-output routing is a per-target listener registry**, not a single
+  callback. `addPaneOutputListener(target, cb)` / `removePaneOutputListener(target)`
+  (and the `…ClosedListener` pair) keep a `Map<target, cb>`; the `pane_output`
+  / `pane_closed` dispatch in `onmessage` routes each push to the listener for
+  that exact `target`. This is what lets desktop split-screen mount several
+  `Terminal` instances on one connection — each registers its own target and
+  they no longer overwrite a shared slot. The single-pane path is the
+  degenerate case (one listener for one target). See
+  `docs/design-docs/features/split-screen.md`.
 - `connect()` cleans up existing connection before creating new one
 - `onclose` rejects all pending RPC promises (prevents caller hangs); each
   rejection carries a `reason` (e.g. `'connection lost'`,
@@ -25,13 +34,20 @@ Custom WebSocket client (`ws.js`) with auto-reconnect, pending promise cleanup, 
   through the WS framing layer, not through our JSON-RPC mutex.
 - RPC timeout is 6 s by default; long-running methods (`fs_download`,
   `fs_upload`) pass `60_000` at the call site.
-- **3-consecutive-RPC-timeout disconnect is gated on `pending.size === 0`.**
-  If a long RPC is still in flight, its single huge response frame is
-  almost certainly what's delaying the short polling RPCs behind it on
-  the shared WS send mutex — the link is alive, just monopolized. Let
-  the pollers fail individually and keep the connection open. When the
-  long RPC completes or times out, `pending.size` drops to 0 and the
-  normal disconnect check re-arms.
+- **3-consecutive-RPC-timeout disconnect is gated on `pending.size === 0`
+  AND inbound silence ≥ 10 s.** Two separate "link is actually alive"
+  signals suppress the breaker:
+  1. If a long RPC is still in flight, its single huge response frame is
+     almost certainly what's delaying the short polling RPCs behind it on
+     the shared WS send mutex — let the pollers fail individually.
+  2. If any inbound message (pane_output push, RPC reply, handshake)
+     arrived within the last 10 s (`TIMEOUT_DISCONNECT_INBOUND_SILENCE_MS`),
+     the link is alive but slow — common on high-RTT cellular where 5–7 s
+     round trips make 6 s RPC timeouts fire while server pushes keep
+     arriving. Tearing down + re-handshaking on such a link makes things
+     strictly worse. In this case the timeout counter resets to 0.
+  When nothing is pending and inbound has been silent past the threshold,
+  the disconnect fires as before.
 - Auto-reconnect with exponential backoff
 - Multi-address failover: server `machine_id` tracks alternate addresses
 - Optional E2E encryption layer

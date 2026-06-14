@@ -45,16 +45,6 @@
 - **Area**: Terminal / UX
 - **Details**: When the user scrolls up to read history and new output arrives, the current `scroll-btn` stays visually identical. A red dot / highlight on the button when `hasNewContent` is true would make it obvious that new output is waiting. This only becomes useful once the main-branch defer-rendering behavior lands (currently HEAD writes immediately on output, which re-clears scrollback and pulls termAtBottom back to true). Revisit after the defer-render change is merged. Affects: `src/lib/Terminal.svelte:setOnPaneOutput`, `.scroll-btn` in `<style>`.
 
-## Adaptive per-attempt reconnect timeout
-- **Priority**: Low
-- **Area**: App / Reconnect
-- **Details**: HEAD's `tryReconnect` uses the default `connect()` timeout (5 s) for every attempt regardless of address class. Once the pending HTTP/parallel-probe reconnect rework lands, scale per-attempt timeout with `classifyAddress()` — e.g. LAN 2 s, Tailscale 3 s, WAN 5 s. LAN-local retries should fail fast; public-internet retries legitimately need more headroom (TLS + routing on cellular). Affects: `src/App.svelte:tryReconnect`, `src/lib/ws.js:connect`.
-
-## Reconnect success does not immediately re-capture pane
-- **Priority**: Low
-- **Area**: Terminal / Reconnect
-- **Details**: On reconnect, `onReconnectSuccess` calls `wsSubscribe(terminalTarget)` but does not call `capturePane`. The terminal then shows stale content until the next server-side 200ms tick pushes a `pane_output`. Usually imperceptible but on very slow networks the gap is visible. Consider dispatching a one-shot `capturePane` right after subscribe.
-
 ## Color adaptation: FG+BG not re-balanced as pair
 - **Priority**: Low
 - **Area**: Terminal / Color
@@ -70,7 +60,8 @@
 - **Area**: Terminal / xterm input filter
 - **Details**: Occasionally the literal string `?62;22;52c` shows up in the terminal as if the user typed it. This is xterm.js's reply to a DA1 (Primary Device Attributes) query — full sequence `\x1b[?62;22;52c`. The query reaches xterm because `tmux capture-pane -e` re-emits ANSI sequences captured from programs that printed `\x1b[c`. xterm replies via `term.onData(...)`, our existing filter at `Terminal.svelte:605` drops `^\x1b\[[\?>=]?[\d;]*c$` — but the reply can be split across two `onData` invocations (e.g. `\x1b[?62;22` then `;52c`), defeating the regex. Fix candidates: (a) accumulate `onData` chunks across a short window and re-test the joined string before forwarding; (b) strip DA-related sequences server-side before pushing the snapshot, since they're never useful as visible content; (c) configure xterm to not auto-reply DA queries at all. Need a real-world repro to pick the cleanest path. Affects: `src/lib/Terminal.svelte:onData`.
 
-## cargo test is broken at HEAD
-- **Priority**: Low (no user impact; blocks running the automated test suite)
-- **Area**: Build / Testing
-- **Details**: `cargo test` fails to compile in `src-tauri/src/main.rs` because the tests still call `tmux::new_session(TEST_SESSION)` with a single argument, but the function signature was widened to `new_session(name, path: Option<&str>, command: Option<&str>)`. The bin builds fine (`cargo check`), so this only blocks the test runner. Fix: update the test call sites to pass `None, None`. Pre-existing when I started the color/reconnect/sort work — not introduced by any of my commits.
+## concurrent_rpc integration tests fail (stale wire-format assumption)
+- **Priority**: Low (no user impact; the 7 main.rs tmux integration tests + lib tests all pass)
+- **Area**: Testing / WS protocol
+- **Details**: `cargo test --test concurrent_rpc` fails 6/8 with `expected encrypted text, got Binary(...)`. The test (`tests/concurrent_rpc.rs:147`) still assumes encrypted RPC responses arrive as base64 `Message::Text`, but `09c6907 (perf(wire): deflate + binary frames)` switched the server to send encrypted payloads as `Message::Binary` (server.rs:1168). The implementation is correct and ships; the test was never updated. Confirmed pre-existing: identical 2-pass/6-fail result at baseline commit 099000a, before the 0.5.0 work. Fix: update the test client to read `Message::Binary`, base64 no longer involved — decode/decrypt the raw bytes directly. Affects: `src-tauri/tests/concurrent_rpc.rs`.
+- (The earlier `new_session` signature breakage noted here is resolved — the 7 main.rs integration tests compile and pass.)

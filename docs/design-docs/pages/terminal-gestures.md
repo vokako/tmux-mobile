@@ -41,7 +41,12 @@ While a selection exists:
 - Resize re-applies the selection to xterm via `term.select()` so the visual highlight tracks the new geometry.
 
 ### Endpoint Adjustment
-Drag a handle within its 22px hit zone. `moveEndpoint` rewrites *just* the corresponding endpoint of `{anchor, head}`. Crossing past the other endpoint flips which is leading via `selStart()`/`selEnd()` derivations — no swap bookkeeping needed.
+Drag a handle within its hit zone. At **grab time** (`beginEndpointDrag`) the selection is rewritten so the grabbed endpoint becomes `head` and the stationary one becomes `anchor`; every subsequent touchmove rewrites *head only*. Dragging past the other endpoint flips the selection's direction naturally — the anchor physically cannot move. (Earlier code addressed endpoints by geometric role per-move; after a crossover the roles swapped under a stale `dragHandle`, so the next move perturbed the far endpoint and both ends jumped.)
+
+Drag mapping details (all in `applyHandleDragAt` / grab-offset capture):
+- **Grab-offset compensation in both axes**: at grab, record finger − endpoint-cell-centre delta (X and Y); subtract it on every move. First frame maps to exactly the cell the endpoint is already on — zero snap. No artificial "lift" above the finger.
+- **Horizontal edge snap**: within `max(10px, 0.6·cellW)` of the container's left edge → col 0; symmetric on the right (excluding the scrollbar zone) → last col. Matches OS selection where dragging past the text edge reaches the line boundary.
+- **Vertical edge auto-scroll**: holding a drag within 36 px of the top/bottom edge scrolls the viewport (rAF loop, speed ramps 0.25→2 rows/frame with proximity) and re-maps the endpoint each scrolled line, so selections extend beyond the visible screen — same as native text views.
 
 ### Termination
 - **Toolbar Copy**: copy text, then clear.
