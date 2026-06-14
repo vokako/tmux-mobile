@@ -29,7 +29,9 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message;
 
-use tmux_mobile::server::{handle_connection, AuthTracker, ResizeTracker, ResizeTrackerInner};
+use tmux_mobile::server::{
+    decode_wire_payload, handle_connection, AuthTracker, ResizeTracker, ResizeTrackerInner,
+};
 
 // --- Test harness ---
 
@@ -140,20 +142,20 @@ impl Client {
             .await
             .unwrap();
 
-        // Step 4: receive encrypted auth response
+        // Step 4: receive encrypted auth response. The server sends encrypted
+        // payloads as BINARY frames whose plaintext is a wire-framing byte +
+        // (optionally deflated) JSON — NOT base64 text. See server.rs send_task.
         let msg = ws.next().await.expect("no msg").expect("recv");
-        let b64 = match msg {
-            Message::Text(t) => t.to_string(),
-            other => panic!("expected encrypted text, got {:?}", other),
+        let ct = match msg {
+            Message::Binary(b) => b.to_vec(),
+            other => panic!("expected encrypted binary frame, got {:?}", other),
         };
-        let ct = base64::engine::general_purpose::STANDARD
-            .decode(b64.as_bytes())
-            .expect("b64");
         let recv_cipher = Aes256Gcm::new_from_slice(&key).unwrap();
-        let pt = recv_cipher
+        let wire = recv_cipher
             .decrypt(Nonce::from_slice(&make_nonce(0)), ct.as_ref())
             .expect("decrypt auth resp");
-        let resp: serde_json::Value = serde_json::from_slice(&pt).unwrap();
+        let json = decode_wire_payload(&wire).expect("wire decode");
+        let resp: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(resp["result"]["authenticated"].as_bool().unwrap_or(false));
 
         Self {
@@ -179,21 +181,24 @@ impl Client {
     }
 
     async fn recv_response(&mut self) -> serde_json::Value {
-        let msg = self.ws.next().await.expect("no msg").expect("recv");
-        let b64 = match msg {
-            Message::Text(t) => t.to_string(),
-            other => panic!("unexpected msg: {:?}", other),
+        // Skip server keepalive PINGs — they can arrive interleaved with RPC
+        // responses and are not part of the encrypted stream.
+        let ct = loop {
+            let msg = self.ws.next().await.expect("no msg").expect("recv");
+            match msg {
+                Message::Binary(b) => break b.to_vec(),
+                Message::Ping(_) | Message::Pong(_) => continue,
+                other => panic!("unexpected msg: {:?}", other),
+            }
         };
-        let ct = base64::engine::general_purpose::STANDARD
-            .decode(b64.as_bytes())
-            .expect("b64");
         let nonce = make_nonce(self.recv_counter);
         self.recv_counter += 1;
-        let pt = self
+        let wire = self
             .recv_cipher
             .decrypt(Nonce::from_slice(&nonce), ct.as_ref())
             .expect("decrypt rpc resp — counter misalignment?");
-        serde_json::from_slice(&pt).expect("json")
+        let json = decode_wire_payload(&wire).expect("wire decode");
+        serde_json::from_str(&json).expect("json")
     }
 }
 
@@ -301,15 +306,18 @@ async fn client_counter_mismatch_fails_decrypt() {
     let mut client = Client::connect(addr, "test-token-4").await;
     client.send_rpc(1, "ping").await;
 
-    let msg = client.ws.next().await.unwrap().unwrap();
-    let b64 = match msg {
-        Message::Text(t) => t.to_string(),
-        _ => panic!("expected text"),
+    let ct = loop {
+        let msg = client.ws.next().await.unwrap().unwrap();
+        match msg {
+            Message::Binary(b) => break b.to_vec(),
+            Message::Ping(_) | Message::Pong(_) => continue,
+            other => panic!("expected binary frame, got {:?}", other),
+        }
     };
-    let ct = base64::engine::general_purpose::STANDARD
-        .decode(b64.as_bytes())
-        .unwrap();
 
+    // Note: ct here is the AES-GCM ciphertext of the wire payload (framing
+    // byte + JSON). We only check that GCM authentication keys off the nonce
+    // counter — we don't decode the wire payload, so deflate is irrelevant.
     // Correct counter (1) would succeed; wrong counter (99) must fail.
     let wrong_nonce = make_nonce(99);
     let result = client.recv_cipher.decrypt(Nonce::from_slice(&wrong_nonce), ct.as_ref());
