@@ -592,6 +592,8 @@ export const teamCloseTeam = (room) => call('team_close_team', { room });
 export const teamTemplates = () => call('team_templates');
 export const teamTemplateSave = (name, agents) => call('team_template_save', { name, agents });
 export const teamTemplateDelete = (name) => call('team_template_delete', { name });
+// Global system prompt prepended to every agent's brief (team_status returns it).
+export const teamSystemPromptSave = (text) => call('team_system_prompt_save', { text });
 
 // Subscription refcount per target. The server keeps ONE subscription entry
 // per target, so two split cells on the same window must NOT let the first

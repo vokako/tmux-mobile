@@ -73,6 +73,10 @@ pub trait TeamBridge: Send + Sync {
     fn save_template(&self, name: &str, agents: &serde_json::Value) -> Result<(), String>;
     /// Delete a template (the built-in "default" is protected).
     fn delete_template(&self, name: &str) -> Result<(), String>;
+    /// The global system prompt prepended to every agent's brief.
+    fn system_prompt(&self) -> String;
+    /// Save the global system prompt (empty clears it).
+    fn save_system_prompt(&self, text: &str) -> Result<(), String>;
     /// The default workspace to offer in the UI when none is chosen (the
     /// current terminal session's cwd if known, else the user's home).
     fn default_workspace(&self) -> String;
@@ -946,9 +950,18 @@ fn handle_team_request(req: &Request, team: Option<&dyn TeamBridge>) -> Response
             "available": true,
             "teams": bus.teams().get("teams").cloned().unwrap_or(serde_json::json!([])),
             "templates": bus.templates().get("templates").cloned().unwrap_or(serde_json::json!([])),
+            "system_prompt": bus.system_prompt(),
             "default_workspace": bus.default_workspace(),
         })),
         "team_teams" => Response::ok(id, bus.teams()),
+        // Global system prompt (prepended to every agent's brief).
+        "team_system_prompt_save" => {
+            let text = p.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            match bus.save_system_prompt(text) {
+                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
+                Err(e) => Response::err(id, ERR_INTERNAL, e),
+            }
+        }
         // Roster templates (named agent rosters the user can edit).
         "team_templates" => Response::ok(id, bus.templates()),
         "team_template_save" => {
@@ -1900,6 +1913,12 @@ mod tests {
             Ok(())
         }
         fn delete_template(&self, _name: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn system_prompt(&self) -> String {
+            String::new()
+        }
+        fn save_system_prompt(&self, _text: &str) -> Result<(), String> {
             Ok(())
         }
         fn default_workspace(&self) -> String {

@@ -18,6 +18,7 @@
   import {
     teamHistory, teamRoster, teamPost, teamStatus, teamStartTeam,
     teamCloseTeam, teamEmployees, teamTemplateSave, teamTemplateDelete,
+    teamSystemPromptSave,
     addTeamMessageListener, removeTeamMessageListener,
     listSessionsWithPanes, fsCwd,
   } from './ws.js';
@@ -74,6 +75,7 @@
   let selectedTemplate = $state('default');
   let showTemplates = $state(false);
   let tplOpen = $state(false);   // template dropdown open
+  let systemPrompt = $state(''); // global system prompt, shared across all teams
   let selectedTplAgents = $derived(templates.find(x => x.name === selectedTemplate)?.agents?.length ?? null);
 
   let activeTeam = $derived(teams.find(x => x.room === activeRoom) || null);
@@ -93,6 +95,7 @@
     const s = await teamStatus();
     teams = s?.teams || [];
     templates = s?.templates || [];
+    systemPrompt = s?.system_prompt || '';
     // Keep selectedTemplate valid (default if the chosen one vanished).
     if (!templates.some(x => x.name === selectedTemplate)) {
       selectedTemplate = templates[0]?.name || 'default';
@@ -507,8 +510,10 @@
   {#if showTemplates}
     <TeamTemplates
       {templates}
+      {systemPrompt}
       onSave={async (name, agents) => { await teamTemplateSave(name, agents); await refresh(); }}
       onDelete={async (name) => { await teamTemplateDelete(name); await refresh(); }}
+      onSaveSystemPrompt={async (text) => { await teamSystemPromptSave(text); await refresh(); }}
       onClose={() => showTemplates = false} />
   {/if}
 </div>

@@ -9,8 +9,10 @@
 
   let {
     templates = [],        // [{ name, agents:[…] }]
+    systemPrompt = '',     // global system prompt (shared across all teams)
     onSave = () => {},     // (name, agents)
     onDelete = () => {},   // (name)
+    onSaveSystemPrompt = () => {}, // (text)
     onClose = () => {},
   } = $props();
 
@@ -23,6 +25,17 @@
   let selIdx = $state(0);
   let dirty = $state(false);
   let saving = $state(false);
+  // Global system prompt (editable; saved separately from templates).
+  let sysDraft = $state(systemPrompt);
+  let sysDirty = $state(false);
+  let sysSaving = $state(false);
+
+  async function saveSystem() {
+    if (sysSaving) return;
+    sysSaving = true;
+    try { await onSaveSystemPrompt(sysDraft); sysDirty = false; }
+    catch {} finally { sysSaving = false; }
+  }
 
   let sel = $derived(drafts[selIdx] || null);
 
@@ -80,6 +93,18 @@
   <div class="tpl-head">
     <span class="tpl-title">{t('teamTemplates')}</span>
     <button class="tpl-x" onclick={onClose} aria-label={t('close')}><Icon name="x" size={15} /></button>
+  </div>
+
+  <!-- Global system prompt: prepended to EVERY agent's brief, across all teams. -->
+  <div class="sys-section">
+    <div class="sys-label-row">
+      <span class="sys-label">{t('teamSystemPrompt')}</span>
+      <button class="sys-save" disabled={!sysDirty || sysSaving} onclick={saveSystem}>
+        {#if sysSaving}<span class="tpl-spin"></span>{/if}{t('teamSaveTemplate')}
+      </button>
+    </div>
+    <textarea class="sys-input" bind:value={sysDraft} oninput={() => sysDirty = true}
+      placeholder={t('teamSystemPromptHint')} rows="2"></textarea>
   </div>
 
   <div class="tpl-body">
@@ -172,6 +197,30 @@
   .tpl-title { font-size: 14px; font-weight: 600; color: var(--text); }
   .tpl-x { border: none; background: none; color: var(--text3); cursor: pointer; display: flex; }
   .tpl-x:active { color: var(--accent); }
+
+  .sys-section {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 10px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .sys-label-row { display: flex; align-items: center; justify-content: space-between; }
+  .sys-label {
+    font-size: 10px; font-weight: 600; color: var(--text3);
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .sys-save {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 10px; border: 1px solid var(--accent); border-radius: 7px;
+    background: var(--accent-bg); color: var(--accent); font-size: 11px; font-weight: 600;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  .sys-save:disabled { opacity: 0.45; cursor: default; }
+  .sys-input {
+    width: 100%; box-sizing: border-box; max-height: 120px;
+    padding: 8px 10px; border: 1px solid var(--input-border); border-radius: 8px;
+    background: var(--input-bg); color: var(--text); font-size: 12px;
+    font-family: inherit; resize: vertical; line-height: 1.4; outline: none;
+  }
+  .sys-input:focus { border-color: var(--accent); }
 
   .tpl-body { flex: 1; min-height: 0; display: flex; }
   .tpl-list {

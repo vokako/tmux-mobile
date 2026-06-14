@@ -35,6 +35,13 @@ server. See `docs/design-docs/features/team.md` for architecture.
   `team_template_save` / `team_template_delete`).
 - An empty `model` on a kiro agent falls back to the server default model.
 
+## Global system prompt
+- A single shared prompt at `<config>/tmux-mobile/system_prompt.md`, edited at
+  the top of the template editor (`team_system_prompt_save`).
+- It is **prepended to the brief every agent reads at startup**, across all
+  teams/roles — for project-wide conventions, tone, language preference, etc.
+  Empty by default (no-op).
+
 ## Components
 
 ### Roster strip (top, when a team is running)

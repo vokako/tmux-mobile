@@ -204,11 +204,39 @@ pub fn workspace_slug(workspace: &str) -> String {
     if slug.is_empty() { "root".to_string() } else { slug.chars().take(32).collect() }
 }
 
+// ─── Global system prompt (shared across every team + agent) ──────────────
+// A single editable text at <config>/tmux-mobile/system_prompt.md, prepended to
+// the brief that EVERY agent reads at startup. Use it for project-wide
+// conventions, tone, language preference, etc. — instructions that should apply
+// regardless of team or role. Empty by default (no-op).
+
+fn system_prompt_path() -> PathBuf {
+    crate::config::config_dir().join("system_prompt.md")
+}
+
+/// Read the global system prompt (empty string if unset).
+pub fn read_system_prompt() -> String {
+    std::fs::read_to_string(system_prompt_path()).unwrap_or_default()
+}
+
+/// Write the global system prompt (creates the file; empty clears it).
+pub fn save_system_prompt(text: &str) -> Result<(), String> {
+    let _ = std::fs::create_dir_all(crate::config::config_dir());
+    std::fs::write(system_prompt_path(), text).map_err(|e| e.to_string())
+}
+
 /// Write the shared brief + keepalive hook into our private per-team home (NOT
-/// the user's workspace).
+/// the user's workspace). The global system prompt is prepended to the brief so
+/// every agent — across all teams — sees it first.
 fn prepare_home(p: &Paths) -> std::io::Result<()> {
     std::fs::create_dir_all(&p.kiro_home)?;
-    std::fs::write(&p.brief, AGENTS_MD)?;
+    let sys = read_system_prompt();
+    let brief = if sys.trim().is_empty() {
+        AGENTS_MD.to_string()
+    } else {
+        format!("{}\n\n---\n\n{}", sys.trim(), AGENTS_MD)
+    };
+    std::fs::write(&p.brief, brief)?;
     std::fs::write(&p.keepalive, KEEPALIVE_SH)?;
     #[cfg(unix)]
     {
@@ -561,6 +589,8 @@ mod tests {
         fn templates(&self) -> Value { serde_json::json!({ "templates": [] }) }
         fn save_template(&self, _name: &str, _agents: &Value) -> Result<(), String> { Ok(()) }
         fn delete_template(&self, _name: &str) -> Result<(), String> { Ok(()) }
+        fn system_prompt(&self) -> String { String::new() }
+        fn save_system_prompt(&self, _text: &str) -> Result<(), String> { Ok(()) }
         fn default_workspace(&self) -> String { "/tmp/ws".into() }
         fn subscribe(&self) -> tokio::sync::broadcast::Receiver<String> {
             tokio::sync::broadcast::channel(1).1
@@ -637,6 +667,37 @@ mod tests {
     fn role_line_is_single_line() {
         let r = role_line("worker", "do\nthings\nwell");
         assert!(!r.contains('\n'), "role line must be single-line: {}", r);
+    }
+
+    #[test]
+    fn system_prompt_roundtrip_and_prepend() {
+        // Isolate config dir so we don't touch the real ~/.config.
+        let dir = std::env::temp_dir().join(format!("teamtest-sys-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::env::set_var("XDG_CONFIG_HOME", &dir);
+
+        // Empty by default.
+        assert_eq!(read_system_prompt(), "");
+        // Save + read back.
+        save_system_prompt("Respond in English. Be terse.").unwrap();
+        assert_eq!(read_system_prompt(), "Respond in English. Be terse.");
+
+        // prepare_home prepends it to the embedded brief.
+        let paths = Paths::new("/tmp/proj", "proj");
+        prepare_home(&paths).unwrap();
+        let brief = std::fs::read_to_string(&paths.brief).unwrap();
+        assert!(brief.starts_with("Respond in English. Be terse."), "system prompt must lead the brief");
+        assert!(brief.contains("collaboration playbook") || brief.contains("AGENTS.md") || brief.contains("team group chat"),
+            "brief body must still be present");
+
+        // Clearing it leaves the brief as just the built-in.
+        save_system_prompt("").unwrap();
+        prepare_home(&paths).unwrap();
+        let brief2 = std::fs::read_to_string(&paths.brief).unwrap();
+        assert!(!brief2.starts_with("Respond in English"));
+
+        std::env::remove_var("XDG_CONFIG_HOME");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

@@ -350,6 +350,14 @@ impl TeamBridge for TeamManager {
         team::delete_template(name)
     }
 
+    fn system_prompt(&self) -> String {
+        team::read_system_prompt()
+    }
+
+    fn save_system_prompt(&self, text: &str) -> Result<(), String> {
+        team::save_system_prompt(text)
+    }
+
     fn default_workspace(&self) -> String {
         dirs::home_dir()
             .map(|h| h.to_string_lossy().into_owned())

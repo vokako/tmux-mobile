@@ -135,6 +135,8 @@ const msgs = {
     teamGoal: 'Goal',
     teamBackstory: 'Backstory',
     teamModel: 'Model (blank = default)',
+    teamSystemPrompt: 'System prompt (all teams)',
+    teamSystemPromptHint: 'Shared instructions prepended to every agent’s brief — conventions, tone, language…',
   },
   zh: {
     sessions: '会 话',
@@ -261,6 +263,8 @@ const msgs = {
     teamGoal: '目标',
     teamBackstory: '背景',
     teamModel: '模型（留空用默认）',
+    teamSystemPrompt: '系统提示词（所有团队共享）',
+    teamSystemPromptHint: '会被加到每个 agent 的设定最前面——约定、语气、语言偏好等',
   },
 };
 
