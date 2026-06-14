@@ -29,6 +29,33 @@ pub struct Bus {
     room: String,
 }
 
+/// Resolves a room name to its [`Bus`]. The MCP + web layers route each request
+/// to a room (agents via an `x-room` header, the human API via `?room=`), so a
+/// single daemon can serve many isolated chat rooms. A single-room deployment
+/// uses [`SingleRoom`]; the tmux-mobile host supplies a multi-room registry.
+pub trait BusProvider: Send + Sync {
+    /// The bus for `room`, creating/opening it if needed. `None` only if the
+    /// provider refuses the room (e.g. unknown room in a fixed deployment).
+    fn bus_for(&self, room: &str) -> Option<Bus>;
+    /// Default room when a request omits one (header/query absent).
+    fn default_room(&self) -> String {
+        "main".to_string()
+    }
+}
+
+/// Trivial single-room provider: every request maps to one fixed [`Bus`].
+#[derive(Clone)]
+pub struct SingleRoom(pub Bus);
+
+impl BusProvider for SingleRoom {
+    fn bus_for(&self, _room: &str) -> Option<Bus> {
+        Some(self.0.clone())
+    }
+    fn default_room(&self) -> String {
+        self.0.room().to_string()
+    }
+}
+
 /// An outstanding obligation: `debtor` owes `creditor` a response.
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub struct Obligation {

@@ -5,7 +5,7 @@
 //! `post` and `wait`. `list_agents`/`history` exist for occasional catch-up but the
 //! roster is also returned by `wait`, so they rarely need to be called.
 
-use crate::bus::{Bus, WaitOutcome};
+use crate::bus::{Bus, BusProvider, WaitOutcome};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::tool::{Extension, Parameters};
 use rmcp::model::{ServerCapabilities, ServerInfo};
@@ -16,7 +16,7 @@ use std::time::Duration;
 
 #[derive(Clone)]
 pub struct AgoraMcp {
-    bus: Bus,
+    provider: std::sync::Arc<dyn BusProvider>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -65,8 +65,22 @@ fn err(msg: impl Into<String>) -> ErrorData {
     ErrorData::invalid_params(msg.into(), None)
 }
 
-/// Resolve the caller from the `x-agent` header and ensure it is registered.
-fn identity(bus: &Bus, parts: &http::request::Parts) -> Result<String, ErrorData> {
+/// Resolve the target room from the `x-room` header (or the provider default),
+/// then the caller from `x-agent`, register them, and return (bus, name).
+fn identity(
+    provider: &dyn BusProvider,
+    parts: &http::request::Parts,
+) -> Result<(Bus, String), ErrorData> {
+    let room = parts
+        .headers
+        .get("x-room")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| provider.default_room());
+    let bus = provider
+        .bus_for(&room)
+        .ok_or_else(|| err(format!("unknown room '{room}'")))?;
     let name = parts
         .headers
         .get("x-agent")
@@ -81,7 +95,7 @@ fn identity(bus: &Bus, parts: &http::request::Parts) -> Result<String, ErrorData
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
     bus.join(&name, role.as_deref()).map_err(|e| err(format!("join failed: {e}")))?;
-    Ok(name)
+    Ok((bus, name))
 }
 
 // --- agent-facing rendering: only what helps the LLM act, no DB/internal fields ---
@@ -118,8 +132,8 @@ fn render_roster(roster: &[crate::store::AgentRow]) -> String {
 
 #[tool_router]
 impl AgoraMcp {
-    pub fn new(bus: Bus) -> Self {
-        Self { bus, tool_router: Self::tool_router() }
+    pub fn new(provider: std::sync::Arc<dyn BusProvider>) -> Self {
+        Self { provider, tool_router: Self::tool_router() }
     }
 
     #[tool(
@@ -135,9 +149,8 @@ impl AgoraMcp {
         Extension(parts): Extension<http::request::Parts>,
         Parameters(args): Parameters<PostArgs>,
     ) -> Result<String, ErrorData> {
-        let me = identity(&self.bus, &parts)?;
-        self.bus
-            .post(&me, &args.body, args.requires_reply)
+        let (bus, me) = identity(&*self.provider, &parts)?;
+        bus.post(&me, &args.body, args.requires_reply)
             .map_err(|e| err(format!("post failed: {e}")))?;
         Ok("Sent.".to_string())
     }
@@ -153,10 +166,9 @@ impl AgoraMcp {
         Extension(parts): Extension<http::request::Parts>,
         Parameters(args): Parameters<WaitArgs>,
     ) -> Result<String, ErrorData> {
-        let me = identity(&self.bus, &parts)?;
+        let (bus, me) = identity(&*self.provider, &parts)?;
         let timeout = args.timeout_ms.map(Duration::from_millis);
-        let outcome = self
-            .bus
+        let outcome = bus
             .wait(&me, timeout)
             .await
             .map_err(|e| err(format!("wait failed: {e}")))?;
@@ -187,8 +199,8 @@ impl AgoraMcp {
         &self,
         Extension(parts): Extension<http::request::Parts>,
     ) -> Result<String, ErrorData> {
-        let _ = identity(&self.bus, &parts)?;
-        let roster = self.bus.roster().map_err(|e| err(format!("roster failed: {e}")))?;
+        let (bus, _) = identity(&*self.provider, &parts)?;
+        let roster = bus.roster().map_err(|e| err(format!("roster failed: {e}")))?;
         Ok(render_roster(&roster))
     }
 
@@ -198,9 +210,9 @@ impl AgoraMcp {
         Extension(parts): Extension<http::request::Parts>,
         Parameters(args): Parameters<HistoryArgs>,
     ) -> Result<String, ErrorData> {
-        let me = identity(&self.bus, &parts)?;
+        let (bus, me) = identity(&*self.provider, &parts)?;
         let limit = args.limit.unwrap_or(50).clamp(1, 1000);
-        let msgs = self.bus.history(limit).map_err(|e| err(format!("history failed: {e}")))?;
+        let msgs = bus.history(limit).map_err(|e| err(format!("history failed: {e}")))?;
         let lines: Vec<String> = msgs.iter().map(|m| render_msg(m, &me)).collect();
         Ok(if lines.is_empty() { "(no history)".to_string() } else { lines.join("\n") })
     }
@@ -216,9 +228,8 @@ impl AgoraMcp {
         Extension(parts): Extension<http::request::Parts>,
         Parameters(args): Parameters<HireArgs>,
     ) -> Result<String, ErrorData> {
-        let me = identity(&self.bus, &parts)?;
-        let msg = self
-            .bus
+        let (bus, me) = identity(&*self.provider, &parts)?;
+        let msg = bus
             .hire(&me, &args.name, &args.responsibility)
             .map_err(|e| err(e.to_string()))?;
         Ok(msg.body)
@@ -230,8 +241,8 @@ impl AgoraMcp {
         Extension(parts): Extension<http::request::Parts>,
         Parameters(args): Parameters<FireArgs>,
     ) -> Result<String, ErrorData> {
-        let me = identity(&self.bus, &parts)?;
-        let msg = self.bus.fire(&me, &args.name).map_err(|e| err(e.to_string()))?;
+        let (bus, me) = identity(&*self.provider, &parts)?;
+        let msg = bus.fire(&me, &args.name).map_err(|e| err(e.to_string()))?;
         Ok(msg.body)
     }
 }

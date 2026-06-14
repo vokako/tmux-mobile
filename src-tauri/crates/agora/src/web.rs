@@ -28,15 +28,25 @@ use tokio_stream::StreamExt;
 
 #[derive(Clone)]
 struct AppState {
-    bus: Bus,
+    provider: Arc<dyn crate::bus::BusProvider>,
 }
 
-/// Build the full axum router (MCP + dashboard) for the given bus.
-pub fn router(bus: Bus) -> Router {
+impl AppState {
+    /// Resolve the bus for a `?room=` query (or the provider default).
+    fn bus(&self, room: &Option<String>) -> Option<Bus> {
+        let room = room.clone().unwrap_or_else(|| self.provider.default_room());
+        self.provider.bus_for(&room)
+    }
+}
+
+/// Build the full axum router (MCP + dashboard) for the given bus provider.
+/// Each request is routed to a room: agents via the `x-room` header, the human
+/// API via a `?room=` query (both default to the provider's default room).
+pub fn router(provider: Arc<dyn crate::bus::BusProvider>) -> Router {
     let mcp_service = StreamableHttpService::new(
         {
-            let bus = bus.clone();
-            move || Ok(AgoraMcp::new(bus.clone()))
+            let provider = provider.clone();
+            move || Ok(AgoraMcp::new(provider.clone()))
         },
         Arc::new(LocalSessionManager::default()),
         Default::default(),
@@ -51,27 +61,39 @@ pub fn router(bus: Bus) -> Router {
         .route("/api/history", get(api_history))
         .route("/api/employees", get(api_employees).post(api_seed_employee))
         .nest_service("/mcp", mcp_service)
-        .with_state(AppState { bus })
+        .with_state(AppState { provider })
+}
+
+/// Convenience for a single-room deployment (e.g. tests): wrap one `Bus`.
+pub fn router_single(bus: Bus) -> Router {
+    router(Arc::new(crate::bus::SingleRoom(bus)))
 }
 
 /// Bind `addr` and serve the full app (MCP + dashboard) until the process ends.
-/// Used by the tmux-mobile desktop server to expose the in-process bus to
+/// Used by the tmux-mobile desktop server to expose the in-process bus(es) to
 /// external coding agents without pulling axum into the host crate.
-pub async fn serve(bus: Bus, addr: &str) -> anyhow::Result<()> {
-    let app = router(bus);
+pub async fn serve(provider: Arc<dyn crate::bus::BusProvider>, addr: &str) -> anyhow::Result<()> {
+    let app = router(provider);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
     Ok(())
 }
 
+const ERR_NO_ROOM: (axum::http::StatusCode, &str) =
+    (axum::http::StatusCode::NOT_FOUND, "unknown room");
+
 async fn dashboard() -> Html<&'static str> {
     Html(DASHBOARD_HTML)
 }
 
-/// Live message stream. Replays recent history, then streams new messages.
-async fn sse(State(st): State<AppState>) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
-    let rx = st.bus.subscribe();
-    let history = st.bus.history(100).unwrap_or_default();
+/// Live message stream for the dashboard. Replays recent history, then streams
+/// new messages for the `?room=` room (default room if omitted).
+async fn sse(State(st): State<AppState>, Query(q): Query<RoomQuery>) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+    // Fall back to the default room's bus if the requested room is unknown, so
+    // the dashboard SSE never 500s; an empty stream is fine.
+    let bus = st.bus(&q.room).or_else(|| st.bus(&None)).expect("default room must exist");
+    let rx = bus.subscribe();
+    let history = bus.history(100).unwrap_or_default();
 
     let replay = tokio_stream::iter(history.into_iter().map(|m| {
         Ok(Event::default()
@@ -89,6 +111,15 @@ async fn sse(State(st): State<AppState>) -> Sse<impl tokio_stream::Stream<Item =
     Sse::new(replay.chain(live)).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
 }
 
+/// `?room=` selector shared by the read-only GET handlers.
+#[derive(Debug, Deserialize)]
+struct RoomQuery {
+    #[serde(default)]
+    room: Option<String>,
+    #[serde(default)]
+    limit: Option<i64>,
+}
+
 #[derive(Debug, Deserialize)]
 struct PostBody {
     #[serde(default)]
@@ -97,33 +128,39 @@ struct PostBody {
     /// If omitted, inferred: a message containing an @mention requires a reply.
     #[serde(default)]
     requires_reply: Option<bool>,
+    #[serde(default)]
+    room: Option<String>,
 }
 
-async fn api_post(State(st): State<AppState>, Json(b): Json<PostBody>) -> impl IntoResponse {
+async fn api_post(State(st): State<AppState>, Json(b): Json<PostBody>) -> axum::response::Response {
+    let Some(bus) = st.bus(&b.room) else { return ERR_NO_ROOM.into_response() };
     let from = b.from.unwrap_or_else(|| "human".to_string());
     let rr = b.requires_reply.unwrap_or_else(|| b.body.contains('@'));
-    match st.bus.post(&from, &b.body, rr) {
+    match bus.post(&from, &b.body, rr) {
         Ok(m) => Json(m).into_response(),
         Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
-async fn api_roster(State(st): State<AppState>) -> impl IntoResponse {
-    match st.bus.roster() {
+async fn api_roster(State(st): State<AppState>, Query(q): Query<RoomQuery>) -> axum::response::Response {
+    let Some(bus) = st.bus(&q.room) else { return ERR_NO_ROOM.into_response() };
+    match bus.roster() {
         Ok(r) => Json(r).into_response(),
         Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
-async fn api_quiescence(State(st): State<AppState>) -> impl IntoResponse {
-    match st.bus.quiescence() {
-        Ok(q) => Json(q).into_response(),
+async fn api_quiescence(State(st): State<AppState>, Query(q): Query<RoomQuery>) -> axum::response::Response {
+    let Some(bus) = st.bus(&q.room) else { return ERR_NO_ROOM.into_response() };
+    match bus.quiescence() {
+        Ok(qx) => Json(qx).into_response(),
         Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
-async fn api_employees(State(st): State<AppState>) -> impl IntoResponse {
-    match st.bus.employees() {
+async fn api_employees(State(st): State<AppState>, Query(q): Query<RoomQuery>) -> axum::response::Response {
+    let Some(bus) = st.bus(&q.room) else { return ERR_NO_ROOM.into_response() };
+    match bus.employees() {
         Ok(e) => Json(e).into_response(),
         Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -134,25 +171,23 @@ struct SeedBody {
     name: String,
     #[serde(default)]
     spec: serde_json::Value,
+    #[serde(default)]
+    room: Option<String>,
 }
 
 /// Seed the desired roster with an employee (used by run.py for the initial team).
-async fn api_seed_employee(State(st): State<AppState>, Json(b): Json<SeedBody>) -> impl IntoResponse {
-    match st.bus.seed_employee(&b.name, &b.spec) {
+async fn api_seed_employee(State(st): State<AppState>, Json(b): Json<SeedBody>) -> axum::response::Response {
+    let Some(bus) = st.bus(&b.room) else { return ERR_NO_ROOM.into_response() };
+    match bus.seed_employee(&b.name, &b.spec) {
         Ok(()) => Json(serde_json::json!({"ok": true, "name": b.name})).into_response(),
         Err(e) => (axum::http::StatusCode::BAD_REQUEST, e.to_string()).into_response(),
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct HistoryQuery {
-    #[serde(default)]
-    limit: Option<i64>,
-}
-
-async fn api_history(State(st): State<AppState>, Query(q): Query<HistoryQuery>) -> impl IntoResponse {
+async fn api_history(State(st): State<AppState>, Query(q): Query<RoomQuery>) -> axum::response::Response {
+    let Some(bus) = st.bus(&q.room) else { return ERR_NO_ROOM.into_response() };
     let limit = q.limit.unwrap_or(100).clamp(1, 1000);
-    match st.bus.history(limit) {
+    match bus.history(limit) {
         Ok(m) => Json(m).into_response(),
         Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }

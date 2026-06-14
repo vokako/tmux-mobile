@@ -39,34 +39,39 @@ pub const COMPRESS_MIN_BYTES: usize = 256;
 // `agora::Bus`; mobile builds always pass `None` and never call it.
 //
 // All methods speak `serde_json::Value` so no crew type crosses this boundary.
+// Every chat operation is scoped to a `room` (= a team). Multiple teams are
+// fully isolated rooms sharing one daemon/db; the phone passes the active
+// room with each call, and pushes are tagged with their room so the client
+// can filter to the team currently in view.
 pub trait CrewBridge: Send + Sync {
-    /// Recent messages, oldest first: `{ "messages": [...] }`.
-    fn history(&self, limit: i64) -> serde_json::Value;
-    /// Roster + presence: `{ "roster": [...] }`.
-    fn roster(&self) -> serde_json::Value;
-    /// Post as a participant. Returns the stored message JSON on success.
-    fn post(&self, from: &str, body: &str, requires_reply: bool) -> Result<serde_json::Value, String>;
-    /// Desired-roster employees: `{ "employees": [...] }`.
-    fn employees(&self) -> serde_json::Value;
-    /// Seed an employee into the desired roster (used by the in-process team
-    /// supervisor to register the initial team). `spec` is the opaque launcher
-    /// blob (role/goal/backend/manage/model). Returns the name on success.
-    fn seed_employee(&self, name: &str, spec: &serde_json::Value) -> Result<(), String>;
-    /// Raw employee list as `(name, spec, state)` for the supervisor's
-    /// reconcile loop (avoids re-parsing the JSON `employees()` shape).
-    fn employee_specs(&self) -> Vec<(String, serde_json::Value, String)>;
-    /// Start the built-in crew for `workspace` (the agents' shared working
-    /// directory): seed the default roster + launch agents into a per-workspace
-    /// tmux session. Idempotent — a second call while that workspace's crew is
-    /// already running is a no-op. Returns whether this call started it.
-    fn start_team(&self, workspace: &str) -> bool;
-    /// Whether the crew supervisor has been started this session.
-    fn team_started(&self) -> bool;
+    /// Recent messages for `room`, oldest first: `{ "messages": [...] }`.
+    fn history(&self, room: &str, limit: i64) -> serde_json::Value;
+    /// Roster + presence for `room`: `{ "roster": [...] }`.
+    fn roster(&self, room: &str) -> serde_json::Value;
+    /// Post as a participant in `room`. Returns the stored message JSON.
+    fn post(&self, room: &str, from: &str, body: &str, requires_reply: bool) -> Result<serde_json::Value, String>;
+    /// Desired-roster employees for `room`: `{ "employees": [...] }`.
+    fn employees(&self, room: &str) -> serde_json::Value;
+    /// Seed an employee into `room`'s desired roster (used by the supervisor).
+    fn seed_employee(&self, room: &str, name: &str, spec: &serde_json::Value) -> Result<(), String>;
+    /// Raw employee list for `room` as `(name, spec, state)` for the
+    /// supervisor's reconcile loop.
+    fn employee_specs(&self, room: &str) -> Vec<(String, serde_json::Value, String)>;
+    /// Start a crew for `workspace`: derive its room (= workspace slug), seed
+    /// the default roster, and launch agents into a per-workspace tmux session.
+    /// Idempotent per room. Returns `{ room, started, workspace }`.
+    fn start_team(&self, workspace: &str) -> serde_json::Value;
+    /// Stop a team: kill its tmux session and forget it (the chat log persists
+    /// in the db). Returns true if the room was known.
+    fn close_team(&self, room: &str) -> bool;
+    /// All known teams: `[{ room, workspace, session, started, agents }]`.
+    fn teams(&self) -> serde_json::Value;
     /// The default workspace to offer in the UI when none is chosen (the
     /// current terminal session's cwd if known, else the user's home).
     fn default_workspace(&self) -> String;
-    /// A receiver of newly-broadcast messages, each pre-serialized to a JSON
-    /// string. Used to push `crew_message` frames to the phone in real time.
+    /// A receiver of newly-broadcast messages across ALL rooms, each
+    /// pre-serialized to a JSON string (the `room` field is inside each
+    /// message). The client filters to the team currently in view.
     fn subscribe(&self) -> tokio::sync::broadcast::Receiver<String>;
 }
 
@@ -924,35 +929,44 @@ fn handle_crew_request(req: &Request, crew: Option<&dyn CrewBridge>) -> Response
     let Some(bus) = crew else {
         return Response::err(id, ERR_METHOD_NOT_FOUND, "crew bus not available on this server".into());
     };
+    // Most methods operate on a specific team `room` (the phone's active team).
+    let room = p.get("room").and_then(|v| v.as_str()).unwrap_or("");
     match req.method.as_str() {
-        "crew_history" => {
-            let limit = p.get("limit").and_then(|v| v.as_i64()).unwrap_or(100).clamp(1, 1000);
-            Response::ok(id, bus.history(limit))
-        }
-        "crew_roster" => Response::ok(id, bus.roster()),
-        "crew_employees" => Response::ok(id, bus.employees()),
-        // Whether the bus is present + whether the crew is running + the
-        // default workspace to offer. The Team tab probes this to show the
-        // right state (start vs running) and pre-fill the workspace field.
+        // Bus availability + the team list + a default workspace to pre-fill.
+        // Team-agnostic, so the Team tab can render the switcher before picking
+        // an active room.
         "crew_status" => Response::ok(id, serde_json::json!({
             "available": true,
-            "team_started": bus.team_started(),
+            "teams": bus.teams().get("teams").cloned().unwrap_or(serde_json::json!([])),
             "default_workspace": bus.default_workspace(),
         })),
-        // Operator action: spin up the crew in `workspace` (the agents' shared
-        // working dir). Idempotent; returns whether this call started it.
+        "crew_teams" => Response::ok(id, bus.teams()),
+        "crew_history" => {
+            let limit = p.get("limit").and_then(|v| v.as_i64()).unwrap_or(100).clamp(1, 1000);
+            Response::ok(id, bus.history(room, limit))
+        }
+        "crew_roster" => Response::ok(id, bus.roster(room)),
+        "crew_employees" => Response::ok(id, bus.employees(room)),
+        // Operator action: spin up a crew in `workspace` (its room = the
+        // workspace slug). Idempotent per room; returns { room, started, workspace }.
         "crew_start_team" => {
             let workspace = p.get("workspace").and_then(|v| v.as_str())
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| bus.default_workspace());
-            Response::ok(id, serde_json::json!({
-                "started": bus.start_team(&workspace),
-                "team_started": true,
-                "workspace": workspace,
-            }))
+            Response::ok(id, bus.start_team(&workspace))
+        }
+        // Stop a team: kill its tmux session, forget it (chat log persists).
+        "crew_close_team" => {
+            if room.is_empty() {
+                return Response::err(id, ERR_INVALID_PARAMS, "missing required param: room".into());
+            }
+            Response::ok(id, serde_json::json!({ "closed": bus.close_team(room) }))
         }
         "crew_post" => {
+            if room.is_empty() {
+                return Response::err(id, ERR_INVALID_PARAMS, "missing required param: room".into());
+            }
             let body = match require_str(p, "body") {
                 Ok(s) => s,
                 Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
@@ -967,7 +981,7 @@ fn handle_crew_request(req: &Request, crew: Option<&dyn CrewBridge>) -> Response
                 .get("requires_reply")
                 .and_then(|v| v.as_bool())
                 .unwrap_or_else(|| body.contains('@'));
-            match bus.post(from, body, requires_reply) {
+            match bus.post(room, from, body, requires_reply) {
                 Ok(msg) => Response::ok(id, serde_json::json!({ "message": msg })),
                 Err(e) => Response::err(id, ERR_INTERNAL, e),
             }
@@ -1820,29 +1834,32 @@ mod tests {
     // handle_crew_request without pulling in the real (desktop-only) bus.
     struct MockAgora;
     impl CrewBridge for MockAgora {
-        fn history(&self, limit: i64) -> serde_json::Value {
+        fn history(&self, _room: &str, limit: i64) -> serde_json::Value {
             serde_json::json!({ "messages": [], "echo_limit": limit })
         }
-        fn roster(&self) -> serde_json::Value {
+        fn roster(&self, _room: &str) -> serde_json::Value {
             serde_json::json!({ "roster": [{ "name": "worker", "status": "waiting" }] })
         }
-        fn post(&self, from: &str, body: &str, requires_reply: bool) -> Result<serde_json::Value, String> {
-            Ok(serde_json::json!({ "from": from, "body": body, "requires_reply": requires_reply }))
+        fn post(&self, room: &str, from: &str, body: &str, requires_reply: bool) -> Result<serde_json::Value, String> {
+            Ok(serde_json::json!({ "room": room, "from": from, "body": body, "requires_reply": requires_reply }))
         }
-        fn employees(&self) -> serde_json::Value {
+        fn employees(&self, _room: &str) -> serde_json::Value {
             serde_json::json!({ "employees": [] })
         }
-        fn seed_employee(&self, _name: &str, _spec: &serde_json::Value) -> Result<(), String> {
+        fn seed_employee(&self, _room: &str, _name: &str, _spec: &serde_json::Value) -> Result<(), String> {
             Ok(())
         }
-        fn employee_specs(&self) -> Vec<(String, serde_json::Value, String)> {
+        fn employee_specs(&self, _room: &str) -> Vec<(String, serde_json::Value, String)> {
             Vec::new()
         }
-        fn start_team(&self, _workspace: &str) -> bool {
+        fn start_team(&self, workspace: &str) -> serde_json::Value {
+            serde_json::json!({ "started": true, "room": "ws", "workspace": workspace })
+        }
+        fn close_team(&self, _room: &str) -> bool {
             true
         }
-        fn team_started(&self) -> bool {
-            false
+        fn teams(&self) -> serde_json::Value {
+            serde_json::json!({ "teams": [] })
         }
         fn default_workspace(&self) -> String {
             "/tmp/ws".to_string()
@@ -1867,28 +1884,32 @@ mod tests {
     #[test]
     fn crew_roster_returns_roster() {
         let bus = MockAgora;
-        let r = handle_crew_request(&req("crew_roster", serde_json::json!({})), Some(&bus));
+        let r = handle_crew_request(&req("crew_roster", serde_json::json!({ "room": "ws" })), Some(&bus));
         let roster = r.result.unwrap();
         assert_eq!(roster["roster"][0]["name"], "worker");
     }
 
     #[test]
-    fn crew_post_requires_body_and_infers_reply_from_mention() {
+    fn crew_post_requires_room_and_body_and_infers_reply_from_mention() {
         let bus = MockAgora;
+        // Missing room → invalid params.
+        let no_room = handle_crew_request(&req("crew_post", serde_json::json!({ "body": "hi" })), Some(&bus));
+        assert_eq!(no_room.error.as_ref().map(|e| e.code), Some(ERR_INVALID_PARAMS));
+
         // Missing body → invalid params.
-        let bad = handle_crew_request(&req("crew_post", serde_json::json!({})), Some(&bus));
+        let bad = handle_crew_request(&req("crew_post", serde_json::json!({ "room": "ws" })), Some(&bus));
         assert_eq!(bad.error.as_ref().map(|e| e.code), Some(ERR_INVALID_PARAMS));
 
         // @mention with no explicit flag → requires_reply inferred true.
         let mentioned = handle_crew_request(
-            &req("crew_post", serde_json::json!({ "body": "@worker do X" })),
+            &req("crew_post", serde_json::json!({ "room": "ws", "body": "@worker do X" })),
             Some(&bus),
         );
         assert_eq!(mentioned.result.unwrap()["message"]["requires_reply"], true);
 
         // Plain broadcast → requires_reply inferred false; default sender "human".
         let plain = handle_crew_request(
-            &req("crew_post", serde_json::json!({ "body": "hello team" })),
+            &req("crew_post", serde_json::json!({ "room": "ws", "body": "hello team" })),
             Some(&bus),
         );
         let msg = plain.result.unwrap();
@@ -1897,10 +1918,19 @@ mod tests {
 
         // Explicit requires_reply=false overrides the @mention inference.
         let forced = handle_crew_request(
-            &req("crew_post", serde_json::json!({ "body": "@worker fyi", "requires_reply": false })),
+            &req("crew_post", serde_json::json!({ "room": "ws", "body": "@worker fyi", "requires_reply": false })),
             Some(&bus),
         );
         assert_eq!(forced.result.unwrap()["message"]["requires_reply"], false);
+    }
+
+    #[test]
+    fn crew_status_lists_teams_without_a_room() {
+        let bus = MockAgora;
+        let r = handle_crew_request(&req("crew_status", serde_json::json!({})), Some(&bus));
+        let s = r.result.unwrap();
+        assert_eq!(s["available"], true);
+        assert!(s["teams"].is_array());
     }
 
     #[test]

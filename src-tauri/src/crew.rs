@@ -120,18 +120,17 @@ pub struct CrewConfig {
 /// agents' working directory is `workspace` (the user's project); our config +
 /// brief live in a private per-crew home, never written into the project.
 /// Best-effort — any failure is logged, never fatal.
-pub fn start(bridge: Arc<dyn CrewBridge>, cfg: CrewConfig, workspace: String) {
+pub fn start(bridge: Arc<dyn CrewBridge>, cfg: CrewConfig, room: String, workspace: String) {
     tokio::spawn(async move {
-        let slug = workspace_slug(&workspace);
-        let session = format!("tmm-crew-{}", slug);
-        let paths = Paths::new(&workspace, &slug);
+        let session = format!("tmm-crew-{}", room);
+        let paths = Paths::new(&workspace, &room);
         if let Err(e) = prepare_home(&paths) {
             eprintln!("⚠️  crew: failed to prepare config home: {}", e);
             return;
         }
-        seed_default_team(&*bridge, &cfg);
-        println!("🜂 crew: workspace={} session={}", workspace, session);
-        reconcile_loop(bridge, cfg, session, paths).await;
+        seed_default_team(&*bridge, &room, &cfg);
+        println!("🜂 crew: room={} workspace={} session={}", room, workspace, session);
+        reconcile_loop(bridge, cfg, room, session, paths).await;
     });
 }
 
@@ -169,8 +168,8 @@ fn prepare_home(p: &Paths) -> std::io::Result<()> {
 
 /// Register the built-in team as employees, unless a team already exists (so a
 /// restart doesn't duplicate-seed; seed_employee also rejects taken names).
-fn seed_default_team(bridge: &dyn CrewBridge, cfg: &CrewConfig) {
-    let existing = bridge.employee_specs();
+fn seed_default_team(bridge: &dyn CrewBridge, room: &str, cfg: &CrewConfig) {
+    let existing = bridge.employee_specs(room);
     if !existing.is_empty() {
         return; // a team is already seeded (this run or a previous one)
     }
@@ -183,7 +182,7 @@ fn seed_default_team(bridge: &dyn CrewBridge, cfg: &CrewConfig) {
             "manage": m.manage,
             "model": if m.backend == "kiro" { Value::String(cfg.model.clone()) } else { Value::Null },
         });
-        if let Err(e) = bridge.seed_employee(m.name, &spec) {
+        if let Err(e) = bridge.seed_employee(room, m.name, &spec) {
             eprintln!("⚠️  team: seed '{}' failed: {}", m.name, e);
         }
     }
@@ -198,11 +197,19 @@ fn seed_default_team(bridge: &dyn CrewBridge, cfg: &CrewConfig) {
 /// (server restarted, agent already running), we adopt it instead of opening a
 /// second. The previous in-memory-only tracking re-launched every agent on
 /// restart, piling up duplicate manager/worker/reviewer windows.
-async fn reconcile_loop(bridge: Arc<dyn CrewBridge>, cfg: CrewConfig, session: String, paths: Paths) {
+async fn reconcile_loop(bridge: Arc<dyn CrewBridge>, cfg: CrewConfig, room: String, session: String, paths: Paths) {
     let mut launched: HashMap<String, Option<String>> = HashMap::new();
+    let mut launched_any = false;
     loop {
-        let employees = bridge.employee_specs();
-        let roster = roster_status(&*bridge);
+        // Stop the loop once the team is closed. close_team kills the session,
+        // so: if we have already launched ≥1 agent and the session no longer
+        // exists, the team was closed — exit cleanly.
+        if launched_any && !tmux::session_exists(&session) {
+            println!("🜂 crew: room '{}' closed; supervisor exiting", room);
+            return;
+        }
+        let employees = bridge.employee_specs(&room);
+        let roster = roster_status(&*bridge, &room);
         for (name, spec, state) in &employees {
             if state == "disabled" {
                 // Kill any window we launched OR an orphan window with this name.
@@ -227,12 +234,14 @@ async fn reconcile_loop(bridge: Arc<dyn CrewBridge>, cfg: CrewConfig, session: S
             if let Some(pane) = tmux::find_window_by_name(&session, name) {
                 println!("🜂 crew: adopted existing window for '{}' ({})", name, pane);
                 launched.insert(name.clone(), Some(pane));
+                launched_any = true;
                 continue;
             }
-            match launch_agent(name, spec, &cfg, &session, &paths) {
+            match launch_agent(name, spec, &cfg, &room, &session, &paths) {
                 Ok(pane) => {
                     println!("🜂 crew: launched '{}' in window {}", name, pane);
                     launched.insert(name.clone(), Some(pane));
+                    launched_any = true;
                 }
                 Err(e) => eprintln!("⚠️  crew: launch '{}' failed: {}", name, e),
             }
@@ -241,9 +250,9 @@ async fn reconcile_loop(bridge: Arc<dyn CrewBridge>, cfg: CrewConfig, session: S
     }
 }
 
-fn roster_status(bridge: &dyn CrewBridge) -> HashMap<String, String> {
+fn roster_status(bridge: &dyn CrewBridge, room: &str) -> HashMap<String, String> {
     let mut out = HashMap::new();
-    if let Some(arr) = bridge.roster().get("roster").and_then(|v| v.as_array()) {
+    if let Some(arr) = bridge.roster(room).get("roster").and_then(|v| v.as_array()) {
         for a in arr {
             if let (Some(n), Some(s)) = (a.get("name").and_then(|v| v.as_str()), a.get("status").and_then(|v| v.as_str())) {
                 out.insert(n.to_string(), s.to_string());
@@ -256,7 +265,7 @@ fn roster_status(bridge: &dyn CrewBridge) -> HashMap<String, String> {
 /// Write the backend config for `name` and open a named tmux window running it.
 /// Returns the new pane id. Blocking tmux/fs work runs on the caller (the
 /// reconcile loop is its own task and the cadence is 3 s, so this is fine).
-fn launch_agent(name: &str, spec: &Value, cfg: &CrewConfig, session: &str, paths: &Paths) -> Result<String, String> {
+fn launch_agent(name: &str, spec: &Value, cfg: &CrewConfig, room: &str, session: &str, paths: &Paths) -> Result<String, String> {
     let backend = spec.get("backend").and_then(|v| v.as_str()).unwrap_or("kiro");
     let role = spec.get("role").and_then(|v| v.as_str()).unwrap_or(name);
     let goal = spec.get("goal").and_then(|v| v.as_str()).unwrap_or("");
@@ -265,9 +274,9 @@ fn launch_agent(name: &str, spec: &Value, cfg: &CrewConfig, session: &str, paths
     let model = spec.get("model").and_then(|v| v.as_str());
 
     let (env, cmd, post_keys) = match backend {
-        "kiro" => prepare_kiro(name, role, goal, backstory, manage, cfg, paths, model)?,
-        "claude" => prepare_claude(name, role, goal, manage, cfg, paths, model)?,
-        "codex" => prepare_codex(name, role, goal, manage, cfg, paths)?,
+        "kiro" => prepare_kiro(name, role, goal, backstory, manage, cfg, room, paths, model)?,
+        "claude" => prepare_claude(name, role, goal, manage, cfg, room, paths, model)?,
+        "codex" => prepare_codex(name, role, goal, manage, cfg, room, paths)?,
         other => return Err(format!("unknown backend: {}", other)),
     };
 
@@ -330,7 +339,7 @@ const WORKER_TOOLS: &[&str] = &["post", "wait", "list_agents", "history"];
 #[allow(clippy::too_many_arguments)] // agent config genuinely needs all of these
 fn prepare_kiro(
     name: &str, role: &str, goal: &str, backstory: &str, manage: bool,
-    cfg: &CrewConfig, paths: &Paths, model: Option<&str>,
+    cfg: &CrewConfig, room: &str, paths: &Paths, model: Option<&str>,
 ) -> Result<Prepared, String> {
     let home = &paths.kiro_home;
     std::fs::create_dir_all(home.join("agents")).map_err(|e| e.to_string())?;
@@ -360,7 +369,7 @@ fn prepare_kiro(
         "tools": tools,
         "allowedTools": allowed,
         "resources": [format!("file://{}", paths.brief.to_string_lossy())],
-        "mcpServers": { "crew": { "url": format!("{}/mcp", cfg.url), "headers": { "x-agent": name } } },
+        "mcpServers": { "crew": { "url": format!("{}/mcp", cfg.url), "headers": { "x-agent": name, "x-room": room } } },
         "hooks": { "stop": [ { "command": paths.keepalive.to_string_lossy() } ] },
     });
     std::fs::write(
@@ -379,9 +388,10 @@ fn prepare_kiro(
 }
 
 // ---- Claude Code ----
+#[allow(clippy::too_many_arguments)]
 fn prepare_claude(
     name: &str, role: &str, goal: &str, manage: bool,
-    cfg: &CrewConfig, paths: &Paths, model: Option<&str>,
+    cfg: &CrewConfig, room: &str, paths: &Paths, model: Option<&str>,
 ) -> Result<Prepared, String> {
     let d = &paths.claude;
     std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
@@ -389,7 +399,7 @@ fn prepare_claude(
     std::fs::write(
         &mcpfile,
         serde_json::to_string_pretty(&serde_json::json!({
-            "mcpServers": { "crew": { "type": "http", "url": format!("{}/mcp", cfg.url), "headers": { "x-agent": name } } }
+            "mcpServers": { "crew": { "type": "http", "url": format!("{}/mcp", cfg.url), "headers": { "x-agent": name, "x-room": room } } }
         }))
         .unwrap(),
     )
@@ -423,15 +433,16 @@ fn prepare_claude(
 }
 
 // ---- Codex ----
+#[allow(clippy::too_many_arguments)]
 fn prepare_codex(
-    name: &str, role: &str, goal: &str, manage: bool, cfg: &CrewConfig, paths: &Paths,
+    name: &str, role: &str, goal: &str, manage: bool, cfg: &CrewConfig, room: &str, paths: &Paths,
 ) -> Result<Prepared, String> {
     let home = paths.codex.join(name);
     std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
     let gating = if manage { "" } else { "disabled_tools = [\"hire\", \"fire\"]\n" };
     let config = format!(
-        "[mcp_servers.crew]\nurl = \"{}/mcp\"\nenabled = true\nexperimental_use_rmcp_client = true\n{}\n[mcp_servers.crew.http_headers]\n\"x-agent\" = \"{}\"\n",
-        cfg.url, gating, name
+        "[mcp_servers.crew]\nurl = \"{}/mcp\"\nenabled = true\nexperimental_use_rmcp_client = true\n{}\n[mcp_servers.crew.http_headers]\n\"x-agent\" = \"{}\"\n\"x-room\" = \"{}\"\n",
+        cfg.url, gating, name, room
     );
     std::fs::write(home.join("config.toml"), config).map_err(|e| e.to_string())?;
     let env = vec![("CODEX_HOME".to_string(), home.to_string_lossy().to_string())];
@@ -463,17 +474,18 @@ mod tests {
         existing: Vec<(String, Value, String)>,
     }
     impl CrewBridge for RecordingBridge {
-        fn history(&self, _l: i64) -> Value { serde_json::json!({}) }
-        fn roster(&self) -> Value { serde_json::json!({ "roster": [] }) }
-        fn post(&self, _f: &str, _b: &str, _r: bool) -> Result<Value, String> { Ok(Value::Null) }
-        fn employees(&self) -> Value { serde_json::json!({}) }
-        fn seed_employee(&self, name: &str, spec: &Value) -> Result<(), String> {
+        fn history(&self, _room: &str, _l: i64) -> Value { serde_json::json!({}) }
+        fn roster(&self, _room: &str) -> Value { serde_json::json!({ "roster": [] }) }
+        fn post(&self, _room: &str, _f: &str, _b: &str, _r: bool) -> Result<Value, String> { Ok(Value::Null) }
+        fn employees(&self, _room: &str) -> Value { serde_json::json!({}) }
+        fn seed_employee(&self, _room: &str, name: &str, spec: &Value) -> Result<(), String> {
             self.seeded.lock().unwrap().push((name.to_string(), spec.clone()));
             Ok(())
         }
-        fn employee_specs(&self) -> Vec<(String, Value, String)> { self.existing.clone() }
-        fn start_team(&self, _workspace: &str) -> bool { false }
-        fn team_started(&self) -> bool { false }
+        fn employee_specs(&self, _room: &str) -> Vec<(String, Value, String)> { self.existing.clone() }
+        fn start_team(&self, _workspace: &str) -> Value { serde_json::json!({ "started": false }) }
+        fn close_team(&self, _room: &str) -> bool { false }
+        fn teams(&self) -> Value { serde_json::json!({ "teams": [] }) }
         fn default_workspace(&self) -> String { "/tmp/ws".into() }
         fn subscribe(&self) -> tokio::sync::broadcast::Receiver<String> {
             tokio::sync::broadcast::channel(1).1
@@ -487,7 +499,7 @@ mod tests {
     #[test]
     fn seed_default_team_seeds_three_with_one_manager() {
         let b = RecordingBridge { seeded: Mutex::new(vec![]), existing: vec![] };
-        seed_default_team(&b, &cfg());
+        seed_default_team(&b, "myroom", &cfg());
         let seeded = b.seeded.lock().unwrap();
         assert_eq!(seeded.len(), 3, "manager + worker + reviewer");
         let names: Vec<&str> = seeded.iter().map(|(n, _)| n.as_str()).collect();
@@ -504,7 +516,7 @@ mod tests {
             seeded: Mutex::new(vec![]),
             existing: vec![("manager".into(), Value::Null, "active".into())],
         };
-        seed_default_team(&b, &cfg());
+        seed_default_team(&b, "myroom", &cfg());
         assert!(b.seeded.lock().unwrap().is_empty(), "must not re-seed an existing team");
     }
 

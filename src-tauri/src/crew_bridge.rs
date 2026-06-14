@@ -1,66 +1,105 @@
 //! Desktop-only glue between the tmux-mobile WS server and the crew bus.
 //!
-//! The crew `Bus` (group-chat coordination over SQLite + a broadcast channel)
-//! runs in-process. This module:
-//!   1. opens the store + builds the `Bus`,
-//!   2. spawns crew's own axum router (MCP `/mcp` + dashboard) on a local port
-//!      so external coding agents (kiro/claude/codex) can join the same room,
-//!   3. adapts the `Bus` to the server's JSON-only [`CrewBridge`] trait so the
-//!      phone reaches the same room through the existing WS connection.
+//! Multi-team manager. Each **team** is an isolated chat **room** (= the
+//! workspace slug) backed by its own `agora::Bus` on the shared SQLite db. A
+//! single MCP daemon serves them all (agents pick a room via the `x-room`
+//! header); the phone passes the active room with each `crew_*` RPC. Every
+//! room's messages funnel into one re-broadcast channel (each `Message` carries
+//! its `room`), and the phone filters to the team currently in view.
 //!
-//! This file is compiled ONLY on desktop (see lib.rs `#[cfg(...)]` gating); the
-//! mobile build never references crew and passes `None` to the server.
+//! Compiled ONLY on desktop (lib.rs `#[cfg(...)]`); mobile passes `None`.
 
+use crate::crew::{self, CrewConfig};
 use crate::server::CrewBridge;
-use crate::crew::CrewConfig;
-use agora::bus::Bus;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock, Weak};
+use agora::bus::{Bus, BusProvider};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use tokio::sync::broadcast;
 
-/// Wraps the crew `Bus` and re-broadcasts its `Message` stream as JSON strings
-/// (the trait boundary is JSON-only so no crew type leaks into server.rs).
-pub struct CrewBus {
+/// One live team: its bus + launch metadata.
+struct Team {
     bus: Bus,
-    /// Pre-serialized message fan-out for the WS push path. We bridge crew's
-    /// `broadcast::Receiver<Message>` into a `broadcast::Sender<String>` once,
-    /// here, rather than serializing per-connection.
+    workspace: String,
+    session: String,   // tmm-crew-<room>
+    started: bool,     // supervisor launched for this room
+}
+
+pub struct CrewBus {
+    /// Open db path (rooms are opened lazily against it).
+    db: String,
+    /// room -> Team. Guarded by a std Mutex (never held across .await).
+    teams: Mutex<HashMap<String, Team>>,
+    /// Merged message fan-out for the WS push path (all rooms).
     json_tx: broadcast::Sender<String>,
-    /// Team supervisor config + one-shot start guard. The team is launched on
-    /// demand (the phone's "start team" action), never automatically — spinning
-    /// up real LLM agents is costly and must be the operator's choice.
-    team_cfg: CrewConfig,
-    team_started: AtomicBool,
-    /// Weak self-handle so `start_team(&self)` can hand the supervisor an
-    /// `Arc<dyn CrewBridge>` to call back into. Set once, right after
-    /// construction (see `start`).
+    /// Server-level launcher config (bus URL + default model).
+    cfg: CrewConfig,
     self_ref: OnceLock<Weak<CrewBus>>,
 }
 
 impl CrewBus {
-    /// Open the store, build the bus, start the MCP/dashboard daemon, and start
-    /// the Message→JSON re-broadcast pump. Returns the concrete bridge so the
-    /// caller can both hand it to the WS server and start the team on it.
-    pub fn start(db: &str, room: &str, bind: &str, model: &str) -> Result<Arc<CrewBus>, Box<dyn std::error::Error>> {
+    /// Open the store dir, start the MCP/dashboard daemon (room-aware), and
+    /// return the manager. No team is created until the operator starts one.
+    pub fn start(db: &str, _room: &str, bind: &str, model: &str) -> Result<Arc<CrewBus>, Box<dyn std::error::Error>> {
         if let Some(parent) = std::path::Path::new(db).parent() {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent).ok();
             }
         }
-        let conn = agora::store::open(db)?;
-        let bus = Bus::new(conn, room.to_string());
-
-        // Re-broadcast every bus message as a JSON string for the WS push path.
         let (json_tx, _) = broadcast::channel::<String>(1024);
+        let port = bind.rsplit(':').next().unwrap_or("8787");
+        let cfg = CrewConfig {
+            url: format!("http://127.0.0.1:{}", port),
+            model: model.to_string(),
+        };
+
+        let me = Arc::new(CrewBus {
+            db: db.to_string(),
+            teams: Mutex::new(HashMap::new()),
+            json_tx,
+            cfg,
+            self_ref: OnceLock::new(),
+        });
+        let _ = me.self_ref.set(Arc::downgrade(&me));
+
+        // Serve MCP + dashboard for external agents. The provider is the manager
+        // itself (room-aware). Bind failure is non-fatal — the phone path still
+        // works in-process.
+        {
+            println!("🜂 crew manager ready (db {}); MCP + dashboard → http://{}/", db, bind);
+            let provider: Arc<dyn BusProvider> = me.clone();
+            let bind = bind.to_string();
+            tokio::spawn(async move {
+                if let Err(e) = agora::web::serve(provider, &bind).await {
+                    eprintln!("⚠️  crew daemon not listening on {}: {}", bind, e);
+                }
+            });
+        }
+
+        Ok(me)
+    }
+
+    /// Get an existing room's bus, or open + register it (lazily) and start its
+    /// re-broadcast pump. `workspace` is recorded on first open.
+    fn ensure_room(&self, room: &str, workspace: &str) -> Result<Bus, String> {
+        {
+            let teams = self.teams.lock().unwrap();
+            if let Some(t) = teams.get(room) {
+                return Ok(t.bus.clone());
+            }
+        }
+        // Open a fresh connection to the shared db, scoped to this room.
+        let conn = agora::store::open(&self.db).map_err(|e| e.to_string())?;
+        let bus = Bus::new(conn, room.to_string());
+        // Pump this room's messages into the merged push channel.
         {
             let mut rx = bus.subscribe();
-            let tx = json_tx.clone();
+            let tx = self.json_tx.clone();
             tokio::spawn(async move {
                 loop {
                     match rx.recv().await {
                         Ok(m) => {
                             if let Ok(s) = serde_json::to_string(&m) {
-                                let _ = tx.send(s); // ignore: no live receivers is fine
+                                let _ = tx.send(s);
                             }
                         }
                         Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -69,111 +108,152 @@ impl CrewBus {
                 }
             });
         }
-
-        // Serve MCP + dashboard for external agents. Bind failure (e.g. port in
-        // use) is non-fatal — the in-process bus still works for the phone; we
-        // just log it so the operator can pick another AGORA_BIND.
-        {
-            println!("🜂 crew bus ready (room '{}', db {}); MCP + dashboard → http://{}/", room, db, bind);
-            let bus = bus.clone();
-            let bind = bind.to_string();
-            tokio::spawn(async move {
-                if let Err(e) = agora::web::serve(bus, &bind).await {
-                    eprintln!("⚠️  crew daemon not listening on {}: {}", bind, e);
-                }
-            });
+        let mut teams = self.teams.lock().unwrap();
+        // Double-checked: another thread may have inserted while we opened.
+        if let Some(t) = teams.get(room) {
+            return Ok(t.bus.clone());
         }
+        teams.insert(
+            room.to_string(),
+            Team {
+                bus: bus.clone(),
+                workspace: workspace.to_string(),
+                session: format!("tmm-crew-{}", room),
+                started: false,
+            },
+        );
+        Ok(bus)
+    }
 
-        // Agents connect to the bus locally over MCP. If the bind is on
-        // 0.0.0.0 (LAN dashboard), agents still dial 127.0.0.1 on that port.
-        let port = bind.rsplit(':').next().unwrap_or("8787");
-        let team_cfg = CrewConfig {
-            url: format!("http://127.0.0.1:{}", port),
-            model: model.to_string(),
-        };
+    /// Bus for a known room (no creation). None if the room isn't registered.
+    fn room_bus(&self, room: &str) -> Option<Bus> {
+        self.teams.lock().unwrap().get(room).map(|t| t.bus.clone())
+    }
+}
 
-        let me = Arc::new(CrewBus {
-            bus,
-            json_tx,
-            team_cfg,
-            team_started: AtomicBool::new(false),
-            self_ref: OnceLock::new(),
-        });
-        let _ = me.self_ref.set(Arc::downgrade(&me));
-        Ok(me)
+// The manager IS the MCP/web room provider: agents' `x-room` header selects a
+// team. We only serve rooms that already exist (a team must be started first),
+// so an agent can't spin up a phantom room by guessing a header.
+impl BusProvider for CrewBus {
+    fn bus_for(&self, room: &str) -> Option<Bus> {
+        self.room_bus(room)
+    }
+    fn default_room(&self) -> String {
+        // First registered team, else "main" (harmless; bus_for returns None
+        // until a team exists).
+        self.teams
+            .lock()
+            .unwrap()
+            .keys()
+            .next()
+            .cloned()
+            .unwrap_or_else(|| "main".to_string())
     }
 }
 
 impl CrewBridge for CrewBus {
-    fn history(&self, limit: i64) -> serde_json::Value {
-        let msgs = self.bus.history(limit).unwrap_or_default();
+    fn history(&self, room: &str, limit: i64) -> serde_json::Value {
+        let msgs = self.room_bus(room).and_then(|b| b.history(limit).ok()).unwrap_or_default();
         serde_json::json!({ "messages": msgs })
     }
 
-    fn roster(&self) -> serde_json::Value {
-        let roster = self.bus.roster().unwrap_or_default();
+    fn roster(&self, room: &str) -> serde_json::Value {
+        let roster = self.room_bus(room).and_then(|b| b.roster().ok()).unwrap_or_default();
         serde_json::json!({ "roster": roster })
     }
 
-    fn post(&self, from: &str, body: &str, requires_reply: bool) -> Result<serde_json::Value, String> {
-        self.bus
-            .post(from, body, requires_reply)
+    fn post(&self, room: &str, from: &str, body: &str, requires_reply: bool) -> Result<serde_json::Value, String> {
+        let bus = self.room_bus(room).ok_or_else(|| format!("unknown team '{room}'"))?;
+        bus.post(from, body, requires_reply)
             .map(|m| serde_json::to_value(m).unwrap_or(serde_json::Value::Null))
             .map_err(|e| e.to_string())
     }
 
-    fn employees(&self) -> serde_json::Value {
-        let employees = self.bus.employees().unwrap_or_default();
+    fn employees(&self, room: &str) -> serde_json::Value {
+        let employees = self.room_bus(room).and_then(|b| b.employees().ok()).unwrap_or_default();
         serde_json::json!({ "employees": employees })
     }
 
-    fn seed_employee(&self, name: &str, spec: &serde_json::Value) -> Result<(), String> {
-        self.bus.seed_employee(name, spec).map_err(|e| e.to_string())
+    fn seed_employee(&self, room: &str, name: &str, spec: &serde_json::Value) -> Result<(), String> {
+        let bus = self.room_bus(room).ok_or_else(|| format!("unknown team '{room}'"))?;
+        bus.seed_employee(name, spec).map_err(|e| e.to_string())
     }
 
-    fn employee_specs(&self) -> Vec<(String, serde_json::Value, String)> {
-        self.bus
-            .employees()
+    fn employee_specs(&self, room: &str) -> Vec<(String, serde_json::Value, String)> {
+        self.room_bus(room)
+            .and_then(|b| b.employees().ok())
             .unwrap_or_default()
             .into_iter()
             .map(|e| (e.name, e.spec, e.state))
             .collect()
     }
 
-    fn start_team(&self, workspace: &str) -> bool {
-        // One-shot: only the first caller actually starts the supervisor.
-        if self.team_started.swap(true, Ordering::SeqCst) {
-            return false;
+    fn start_team(&self, workspace: &str) -> serde_json::Value {
+        let ws = if workspace.trim().is_empty() { self.default_workspace() } else { workspace.trim().to_string() };
+        let room = crew::workspace_slug(&ws);
+
+        // Open/register the room, then mark it started (one-shot per room).
+        if let Err(e) = self.ensure_room(&room, &ws) {
+            return serde_json::json!({ "started": false, "room": room, "workspace": ws, "error": e });
         }
-        // Upgrade the weak self-handle into the Arc<dyn CrewBridge> the
-        // supervisor calls back through.
+        let already = {
+            let mut teams = self.teams.lock().unwrap();
+            match teams.get_mut(&room) {
+                Some(t) => { let was = t.started; t.started = true; was }
+                None => false,
+            }
+        };
+        if already {
+            return serde_json::json!({ "started": false, "room": room, "workspace": ws });
+        }
         match self.self_ref.get().and_then(|w| w.upgrade()) {
             Some(arc) => {
                 let bridge: Arc<dyn CrewBridge> = arc;
-                let ws = if workspace.trim().is_empty() {
-                    self.default_workspace()
-                } else {
-                    workspace.to_string()
-                };
-                crate::crew::start(bridge, self.team_cfg.clone(), ws);
-                true
+                crew::start(bridge, self.cfg.clone(), room.clone(), ws.clone());
+                serde_json::json!({ "started": true, "room": room, "workspace": ws })
             }
             None => {
-                // Shouldn't happen (self_ref is set at construction); undo the
-                // guard so a later retry can succeed.
-                self.team_started.store(false, Ordering::SeqCst);
-                false
+                if let Some(t) = self.teams.lock().unwrap().get_mut(&room) { t.started = false; }
+                serde_json::json!({ "started": false, "room": room, "workspace": ws, "error": "manager gone" })
             }
         }
     }
 
-    fn team_started(&self) -> bool {
-        self.team_started.load(Ordering::SeqCst)
+    fn close_team(&self, room: &str) -> bool {
+        let session = {
+            let mut teams = self.teams.lock().unwrap();
+            teams.remove(room).map(|t| t.session)
+        };
+        match session {
+            Some(s) => {
+                // Kill the tmux session (best-effort). The chat log stays in the
+                // db, so re-starting the same workspace resumes its history.
+                let _ = crate::tmux::kill_session(&s);
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn teams(&self) -> serde_json::Value {
+        let teams = self.teams.lock().unwrap();
+        let list: Vec<serde_json::Value> = teams
+            .values()
+            .map(|t| {
+                let agents = t.bus.roster().map(|r| r.iter().filter(|a| a.status != "offline").count()).unwrap_or(0);
+                serde_json::json!({
+                    "room": t.session.strip_prefix("tmm-crew-").unwrap_or(&t.session),
+                    "workspace": t.workspace,
+                    "session": t.session,
+                    "started": t.started,
+                    "agents": agents,
+                })
+            })
+            .collect();
+        serde_json::json!({ "teams": list })
     }
 
     fn default_workspace(&self) -> String {
-        // Safe fallback the UI pre-fills; the phone overrides it with the
-        // current terminal session's cwd when it has one.
         dirs::home_dir()
             .map(|h| h.to_string_lossy().into_owned())
             .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| ".".to_string()))

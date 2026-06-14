@@ -8,7 +8,7 @@ use agora::web;
 async fn spawn_server() -> String {
     let conn = store::open_in_memory().unwrap();
     let bus = Bus::new(conn, "main");
-    let app = web::router(bus);
+    let app = web::router_single(bus);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {

@@ -538,6 +538,11 @@ pub fn kill_window(target: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// True if a tmux session with this exact name exists.
+pub fn session_exists(session: &str) -> bool {
+    run_tmux(&["has-session", "-t", session]).is_ok()
+}
+
 /// Ensure `session` exists (detached), creating it at `cwd` if missing. Used by
 /// the in-process team supervisor before it spawns agent windows.
 pub fn ensure_session(session: &str, cwd: &str) -> Result<(), String> {
