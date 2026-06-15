@@ -85,7 +85,7 @@
   .picker-path {
     flex: 1; display: flex; align-items: center; gap: 1px;
     overflow-x: auto; scrollbar-width: none;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: 12px; -webkit-overflow-scrolling: touch;
   }
   .picker-path::-webkit-scrollbar { display: none; }

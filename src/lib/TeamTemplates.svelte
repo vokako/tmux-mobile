@@ -231,7 +231,7 @@
     padding: 7px 9px; border: 1px solid var(--border2); border-radius: 8px;
     background: var(--input-bg); color: var(--text2); font-size: 12px; cursor: pointer;
     text-align: left; -webkit-tap-highlight-color: transparent;
-    font-family: 'Maple Mono NF CN','Maple Mono','SF Mono',Menlo,monospace;
+    font-family: var(--font-ui);
   }
   .tpl-item.active { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
   .tpl-count { color: var(--text3); font-size: 11px; }
@@ -246,7 +246,7 @@
   .tpl-name-input {
     width: 100%; padding: 8px 10px; border: 1px solid var(--input-border); border-radius: 8px;
     background: var(--input-bg); color: var(--text); font-size: 14px; font-weight: 600; outline: none;
-    font-family: 'Maple Mono NF CN','Maple Mono','SF Mono',Menlo,monospace;
+    font-family: var(--font-ui);
   }
   .tpl-name-input:focus { border-color: var(--accent); }
   .tpl-name-input:disabled { opacity: 0.6; }

@@ -899,7 +899,7 @@
     flex-direction: column;
     background: rgba(0, 0, 0, 0.85);
     color: #0f0;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: 9px;
     line-height: 1.3;
     border-radius: 6px;
@@ -944,7 +944,7 @@
   }
   :global(body) {
     margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'Maple Mono CJK', sans-serif;
+    font-family: var(--font-ui);
     background: var(--bg);
     color: var(--text);
     overflow: hidden;
@@ -960,9 +960,26 @@
     -webkit-user-select: none;
   }
   :global(input), :global(textarea) { user-select: text; -webkit-user-select: text; }
+  /* Form controls don't inherit font-family by default (UA gives them Arial/
+     system), so without this every <button>/<input>/<select> would ignore
+     --font-ui. Inherit it; the few controls that must be monospace (command
+     inputs, path fields, code editor) set --font-mono explicitly themselves. */
+  :global(button), :global(input), :global(textarea), :global(select) { font-family: inherit; }
   :global(.preview-body), :global(.md-render), :global(.code-preview), :global(.git-diff-body), :global(.info-body), :global(.bubble) { user-select: text; -webkit-user-select: text; }
   :global(*) { box-sizing: border-box; }
-  :global(html) { overflow: hidden; overscroll-behavior: none; --sat: env(safe-area-inset-top); --sab: env(safe-area-inset-bottom); --app-height: 100dvh; }
+  :global(html) {
+    overflow: hidden; overscroll-behavior: none;
+    --sat: env(safe-area-inset-top); --sab: env(safe-area-inset-bottom); --app-height: 100dvh;
+    /* Two font roles. --font-mono: code, terminal output, file paths, data —
+       fixed-width matters (alignment, glyph identity). Includes the bundled
+       Maple Mono (Latin) + Maple Mono CJK so code/paths render identically on
+       every device. --font-ui: everything else — labels, buttons, chat prose,
+       Chinese body text — proportional, using each platform's native UI font
+       (PingFang / YaHei / Noto Sans CJK for Chinese). Never put the monospace
+       CJK face in --font-ui: it makes Chinese UI text look like code. */
+    --font-mono: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    --font-ui: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif;
+  }
   :global(body), main, nav, .settings-panel { transition: background-color 0.3s ease, color 0.3s ease; }
   :global(html[data-theme="dark"]) {
     --bg: #0a0a0f; --bg2: #0f0f18; --bg3: #12121a;
@@ -1078,11 +1095,11 @@
     font-size: 14px; font-weight: 600; color: var(--text);
   }
   .sp-conn-addr {
-    font-size: 11px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-size: 11px; font-family: var(--font-mono);
     color: var(--text3);
   }
   .sp-conn-id {
-    font-size: 10px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-size: 10px; font-family: var(--font-mono);
     color: var(--text3); opacity: 0.6;
   }
   .sp-conn-row {
@@ -1100,7 +1117,7 @@
     display: flex; flex-direction: column; gap: 2px; margin-top: 4px;
   }
   .sp-conn-url {
-    font-size: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-size: 12px; font-family: var(--font-mono);
     color: var(--text3); padding: 6px 8px; border: 1px solid var(--border2); border-radius: 6px;
     background: none; text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
@@ -1139,7 +1156,7 @@
   }
   .sp-font-btn:active { background: var(--accent-bg); color: var(--accent); }
   .sp-font-val {
-    font-size: 13px; font-weight: 600; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; color: var(--text2);
+    font-size: 13px; font-weight: 600; font-family: var(--font-mono); color: var(--text2);
     min-width: 24px; text-align: center;
   }
   .sp-toggle {
