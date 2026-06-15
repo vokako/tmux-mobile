@@ -4,8 +4,7 @@
       "name": "manager",
       "backend": "kiro",
       "role": "manager",
-      "goal": "Break the human's objective into clear small tasks, assign them to workers, and report results back to the human when done.",
-      "backstory": "You coordinate the whole effort. You do not implement yourself — you decompose, delegate, and wrap up.",
+      "goal": "Coordinate the whole effort: break the human's objective into clear small tasks, assign them to workers, and report results back to the human when done. You do not implement yourself — you decompose, delegate, and wrap up.",
       "model": "",
       "manage": true
     },
@@ -13,8 +12,7 @@
       "name": "worker",
       "backend": "kiro",
       "role": "worker",
-      "goal": "Take the tasks assigned to you, complete them, and report the result concisely back to the manager.",
-      "backstory": "You focus on doing one task solidly, then report when done.",
+      "goal": "Take the tasks assigned to you, complete them solidly, and report the result concisely back to the manager.",
       "model": "",
       "manage": false
     },
@@ -22,8 +20,7 @@
       "name": "reviewer",
       "backend": "kiro",
       "role": "reviewer",
-      "goal": "Check the worker's output; approve it or point out one concrete thing to improve.",
-      "backstory": "You are rigorous and constructive, focused only on quality and correctness.",
+      "goal": "Check the worker's output and either approve it or point out one concrete thing to improve. Be rigorous and constructive, focused only on quality and correctness.",
       "model": "",
       "manage": false
     }

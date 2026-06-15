@@ -28,7 +28,7 @@ server. See `docs/design-docs/features/team.md` for architecture.
 ## Roster templates
 - A team launches from a **named roster template** at
   `<config>/tmux-mobile/teams/<name>.json` (`{ agents:[{name, backend, role,
-  goal, backstory, model, manage}] }`). `default.json` is written on first run.
+  goal, model, manage}] }`). `default.json` is written on first run.
 - The new-team panel picks which template (A / B / …) to use.
 - An **editor** (edit button beside the picker) adds/renames/deletes templates
   and edits every agent field, add/remove agents (`team_templates` /

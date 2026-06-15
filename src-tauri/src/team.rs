@@ -36,7 +36,7 @@ const KICK: &str = "You are connected to the team group chat (collaboration rule
 
 // ─── Team templates (named rosters under <config>/tmux-mobile/teams/) ──────
 // A template is a JSON file `teams/<name>.json` = { "agents": [ {name, backend,
-// role, goal, backstory, model, manage}, … ] }. The user edits these from the
+// role, goal, model, manage}, … ] }. The user edits these from the
 // app (Templates panel); `start_team` seeds the chosen template into the room.
 // The built-in default is written to teams/default.json on first run so there
 // is always something to edit.
@@ -275,7 +275,6 @@ fn seed_template(bridge: &dyn TeamBridge, room: &str, template: &str, cfg: &Team
         let spec = serde_json::json!({
             "role": a.get("role").and_then(|v| v.as_str()).unwrap_or(name),
             "goal": a.get("goal").and_then(|v| v.as_str()).unwrap_or(""),
-            "backstory": a.get("backstory").and_then(|v| v.as_str()).unwrap_or(""),
             "backend": backend,
             "manage": a.get("manage").and_then(|v| v.as_bool()).unwrap_or(false),
             "model": model,
@@ -384,12 +383,11 @@ fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &str, session:
     let backend = spec.get("backend").and_then(|v| v.as_str()).unwrap_or("kiro");
     let role = spec.get("role").and_then(|v| v.as_str()).unwrap_or(name);
     let goal = spec.get("goal").and_then(|v| v.as_str()).unwrap_or("");
-    let backstory = spec.get("backstory").and_then(|v| v.as_str()).unwrap_or("");
     let manage = spec.get("manage").and_then(|v| v.as_bool()).unwrap_or(false);
     let model = spec.get("model").and_then(|v| v.as_str());
 
     let (env, cmd, post_keys) = match backend {
-        "kiro" => prepare_kiro(name, role, goal, backstory, manage, cfg, room, paths, model)?,
+        "kiro" => prepare_kiro(name, role, goal, manage, cfg, room, paths, model)?,
         "claude" => prepare_claude(name, role, goal, manage, cfg, room, paths, model)?,
         "codex" => prepare_codex(name, role, goal, manage, cfg, room, paths)?,
         other => return Err(format!("unknown backend: {}", other)),
@@ -466,9 +464,15 @@ enum PostKey {
 /// scripted keys). Aliased to keep the per-backend signatures readable.
 type Prepared = (Vec<(String, String)>, String, Vec<PostKey>);
 
+/// Single-line agent brief for backends whose prompt is injected as a typed
+/// first message (claude/codex), where embedded newlines would submit early.
+/// Same content as kiro's `full_prompt` (role + goal), flattened to one line.
 fn role_line(role: &str, goal: &str) -> String {
     let g = goal.replace('\n', " ");
-    format!("You are the {}. {} Keep messages short.", role, g.trim()).trim().to_string()
+    format!("You are the {}. {} Keep messages short.", role, g.trim())
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// KICK plus a pointer to the team brief. Kiro injects the brief via `resources`
@@ -478,10 +482,10 @@ fn kick_with_brief(paths: &Paths) -> String {
     format!("{} First read the team playbook: {}", KICK, paths.brief.to_string_lossy())
 }
 
-fn full_prompt(role: &str, goal: &str, backstory: &str) -> String {
+fn full_prompt(role: &str, goal: &str) -> String {
     format!(
-        "You are the {}.\nGoal: {}\nBackground: {}\nYou collaborate with other agents and a human operator in a shared team group chat (via the @team tools). Keep messages short.",
-        role, goal.trim(), backstory.trim()
+        "You are the {}.\nGoal: {}\nYou collaborate with other agents and a human operator in a shared team group chat (via the @team tools). Keep messages short.",
+        role, goal.trim()
     )
 }
 
@@ -490,7 +494,7 @@ const WORKER_TOOLS: &[&str] = &["post", "wait", "list_agents", "history"];
 // ---- Kiro ----
 #[allow(clippy::too_many_arguments)] // agent config genuinely needs all of these
 fn prepare_kiro(
-    name: &str, role: &str, goal: &str, backstory: &str, manage: bool,
+    name: &str, role: &str, goal: &str, manage: bool,
     cfg: &TeamConfig, room: &str, paths: &Paths, model: Option<&str>,
 ) -> Result<Prepared, String> {
     let home = &paths.kiro_home;
@@ -517,7 +521,7 @@ fn prepare_kiro(
     let conf = serde_json::json!({
         "name": name,
         "description": format!("{} on the team bus", role),
-        "prompt": full_prompt(role, goal, backstory),
+        "prompt": full_prompt(role, goal),
         "tools": tools,
         "allowedTools": allowed,
         "resources": [format!("file://{}", paths.brief.to_string_lossy())],
@@ -718,6 +722,8 @@ mod tests {
 
     #[test]
     fn role_line_is_single_line() {
+        // A multi-line goal must flatten to one line (it's typed as a first
+        // message to claude/codex, where an embedded \n would submit early).
         let r = role_line("worker", "do\nthings\nwell");
         assert!(!r.contains('\n'), "role line must be single-line: {}", r);
     }

@@ -1,7 +1,7 @@
 <script>
   // Team roster template editor (modal). Lists named templates; the selected
-  // one's agents are editable in full (name, backend, role, goal, backstory,
-  // model, manage). Add/remove agents, add/rename/delete templates, save.
+  // one's agents are editable in full (name, backend, role, goal, model,
+  // manage). Add/remove agents, add/rename/delete templates, save.
   // Persists via onSave(name, agents) / onDelete(name) which call the team_*
   // template RPCs and re-fetch.
   import Icon from './Icon.svelte';
@@ -45,7 +45,7 @@
     if (!sel) return;
     sel.agents = [...sel.agents, {
       name: `agent${sel.agents.length + 1}`, backend: 'kiro',
-      role: '', goal: '', backstory: '', model: '', manage: false,
+      role: '', goal: '', model: '', manage: false,
     }];
     markDirty();
   }
@@ -139,8 +139,7 @@
               <button class="ag-del" onclick={() => removeAgent(i)} aria-label={t('teamRemoveAgent')}><Icon name="trash" size={12} /></button>
             </div>
             <input class="ag-field" bind:value={ag.role} oninput={markDirty} placeholder={t('teamRole')} />
-            <textarea class="ag-field ag-area" bind:value={ag.goal} oninput={markDirty} placeholder={t('teamGoal')} rows="2"></textarea>
-            <textarea class="ag-field ag-area" bind:value={ag.backstory} oninput={markDirty} placeholder={t('teamBackstory')} rows="2"></textarea>
+            <textarea class="ag-field ag-area" bind:value={ag.goal} oninput={markDirty} placeholder={t('teamGoal')} rows="3"></textarea>
             <input class="ag-field" bind:value={ag.model} oninput={markDirty} placeholder={t('teamModel')} />
           </div>
         {/each}
