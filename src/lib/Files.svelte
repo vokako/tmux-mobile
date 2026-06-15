@@ -88,7 +88,8 @@
   let cwd = $state('');
   let entries = $state([]);
   let showHidden = $state(false);
-  let loading = $state(false);
+  let loading = $state(false);        // directory listing in flight (left list)
+  let previewLoading = $state(false); // file content in flight (right preview)
   let error = $state('');
 
   // View modes: 'list', 'preview', 'edit', 'info', 'local'
@@ -504,7 +505,7 @@
   }
 
   async function loadPreviewContent(file) {
-    loading = true;
+    previewLoading = true;
     try {
       const { path, name, stat } = file;
       if (stat.mime_hint === 'application/pdf') {
@@ -527,7 +528,7 @@
     } catch (e) {
       error = e.message;
     }
-    loading = false;
+    previewLoading = false;
   }
 
   async function openEntry(entry) {
@@ -536,7 +537,11 @@
       loadDir(entry.path);
       return;
     }
-    loading = true;
+    // File open: use previewLoading (right pane), NOT loading — `loading` drives
+    // the left directory list's spinner, and toggling it here would make the
+    // whole list flash/re-render every time you click a file in the desktop
+    // two-pane layout (on mobile the list was hidden so it went unnoticed).
+    previewLoading = true;
     try {
       const stat = await fsStat(entry.path);
       currentFile = { path: entry.path, name: entry.name, stat };
@@ -544,15 +549,15 @@
       navPush();
       if (stat.size > PREVIEW_SIZE_LIMIT || !isPreviewable(stat, entry.name)) {
         view = 'info';
-        loading = false;
+        previewLoading = false;
         return;
       }
     } catch (e) {
       error = e.message;
-      loading = false;
+      previewLoading = false;
       return;
     }
-    loading = false;
+    previewLoading = false;
     await loadPreviewContent(currentFile);
   }
 
