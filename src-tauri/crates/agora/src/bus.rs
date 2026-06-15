@@ -349,6 +349,14 @@ impl Bus {
         store::list_employees(&conn, &self.room)
     }
 
+    /// Forget all persisted state for this room (messages, roster, obligations,
+    /// employees). For an explicit (re)start or close of a team — NOT recovery,
+    /// which adopts a still-running team and its log as-is.
+    pub fn reset_room(&self) -> Result<()> {
+        let conn = self.lock();
+        store::clear_room(&conn, &self.room)
+    }
+
     pub fn quiescence(&self) -> Result<Quiescence> {
         let conn = self.lock();
         let roster = apply_presence(store::roster(&conn, &self.room)?);

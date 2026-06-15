@@ -115,14 +115,20 @@ impl TeamManager {
                 continue;
             }
             // Mark started + relaunch the reconcile loop, which ADOPTS the
-            // existing agent windows rather than reopening them.
+            // existing agent windows (preserving each agent's conversation
+            // context + in-flight work) rather than reopening them.
             if let Some(t) = self.teams.lock().unwrap().get_mut(&room) {
                 t.started = true;
             }
             if let Some(arc) = self.self_ref.get().and_then(|w| w.upgrade()) {
                 let bridge: Arc<dyn TeamBridge> = arc;
                 team::start(bridge, self.cfg.clone(), room.clone(), workspace, template);
-                println!("🜂 team: recovered running team '{}'", room);
+                // The adopted agents are hung on a `wait` whose connection died
+                // with the old daemon; their MCP clients reconnect once unstuck
+                // but can't unstick themselves. Nudge each window to reconnect
+                // (Esc the dead call + re-prompt). One-shot, off the hot path.
+                team::nudge_session_agents(session.clone());
+                println!("🜂 team: recovered running team '{}' (adopting + nudging agents)", room);
             }
         }
     }
@@ -284,6 +290,15 @@ impl TeamBridge for TeamManager {
         let tpl = if template.trim().is_empty() { "default".to_string() } else { template.trim().to_string() };
         let room = team::workspace_slug(&ws);
 
+        // Self-heal the built-in templates (the teams/ dir may have been deleted)
+        // and refuse up front if the chosen roster is missing/empty — otherwise
+        // the team would "start" with zero agents and the UI would spin forever.
+        team::ensure_templates_seeded();
+        if team::read_template(&tpl).is_empty() {
+            return serde_json::json!({ "started": false, "room": room, "workspace": ws,
+                "error": format!("template '{}' not found or empty", tpl) });
+        }
+
         // Open/register the room, then mark it started (one-shot per room).
         if let Err(e) = self.ensure_room(&room, &ws, &tpl) {
             return serde_json::json!({ "started": false, "room": room, "workspace": ws, "error": e });
@@ -291,13 +306,28 @@ impl TeamBridge for TeamManager {
         let already = {
             let mut teams = self.teams.lock().unwrap();
             match teams.get_mut(&room) {
-                Some(t) => { let was = t.started; t.started = true; was }
+                Some(t) => {
+                    let was = t.started;
+                    t.started = true;
+                    if !was { t.template = tpl.clone(); }
+                    was
+                }
                 None => false,
             }
         };
         if already {
             return serde_json::json!({ "started": false, "room": room, "workspace": ws });
         }
+        // Authoritative fresh start: forget any leftover roster/log for this room
+        // so the CHOSEN template — not stale DB rows from a previous team on the
+        // same workspace — defines who comes online. Recovery uses a different
+        // path and never resets, so a backend restart still adopts a live team.
+        if let Some(bus) = self.room_bus(&room) {
+            if let Err(e) = bus.reset_room() {
+                eprintln!("⚠️  team: reset room '{}' failed: {}", room, e);
+            }
+        }
+        self.save_meta();
         match self.self_ref.get().and_then(|w| w.upgrade()) {
             Some(arc) => {
                 let bridge: Arc<dyn TeamBridge> = arc;
@@ -319,9 +349,13 @@ impl TeamBridge for TeamManager {
         match removed {
             Some(t) => {
                 t.pump.abort(); // stop the re-broadcast task (no leak / no dup on reopen)
-                // Kill the tmux session (best-effort). The chat log stays in the
-                // db, so re-starting the same workspace resumes its history.
+                // Kill the tmux session (best-effort), then forget the team's
+                // persisted state so a future start on the same workspace begins
+                // clean. (A backend restart resumes a LIVE team via recovery,
+                // which never goes through close — so this only forgets teams the
+                // operator explicitly closed.)
                 let _ = crate::tmux::kill_session(&t.session);
+                let _ = t.bus.reset_room();
                 self.save_meta(); // drop it from the recovery map too
                 true
             }
@@ -438,6 +472,23 @@ mod tests {
         assert!(!a_bodies.iter().any(|s| s == "hello beta"), "beta leaked into alpha");
         assert!(b_bodies.iter().any(|s| s == "hello beta"));
         assert!(!b_bodies.iter().any(|s| s == "hello alpha"), "alpha leaked into beta");
+    }
+
+    #[tokio::test]
+    async fn reset_room_forgets_roster_and_log() {
+        // The fix for stale-state shadowing: a (re)start/close resets the room so
+        // a previously-seeded roster + chat log can't carry over.
+        let m = manager();
+        m.ensure_room("alpha", "/tmp/alpha", "default").unwrap();
+        let bus = m.room_bus("alpha").unwrap();
+        bus.seed_employee("manager", &serde_json::json!({ "role": "manager" })).unwrap();
+        m.post("alpha", "human", "hello", false).unwrap();
+        assert!(!m.employees("alpha")["employees"].as_array().unwrap().is_empty());
+        assert!(!m.history("alpha", 100)["messages"].as_array().unwrap().is_empty());
+
+        bus.reset_room().unwrap();
+        assert!(m.employees("alpha")["employees"].as_array().unwrap().is_empty(), "employees cleared");
+        assert!(m.history("alpha", 100)["messages"].as_array().unwrap().is_empty(), "log cleared");
     }
 
     #[tokio::test]

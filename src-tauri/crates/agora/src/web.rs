@@ -18,7 +18,7 @@ use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
-use rmcp::transport::streamable_http_server::StreamableHttpService;
+use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use serde::Deserialize;
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -43,13 +43,28 @@ impl AppState {
 /// Each request is routed to a room: agents via the `x-room` header, the human
 /// API via a `?room=` query (both default to the provider's default room).
 pub fn router(provider: Arc<dyn crate::bus::BusProvider>) -> Router {
+    // Stateless mode: each POST is handled on its own, with NO server-side
+    // session id and NO mandatory `initialize` handshake. This is essential for
+    // the in-process daemon: it lives in the desktop server process, so every
+    // backend restart wipes any in-memory session map. With stateful sessions, a
+    // client still presenting its OLD `Mcp-Session-Id` after a restart is
+    // rejected (`401 Session not found`; a no-session request gets `422 expect
+    // initialize`) and rmcp does not auto-re-handshake — the agent hangs on
+    // `wait` forever (roster goes offline → the UI spins "coming online"
+    // indefinitely). Our tool surface is genuinely stateless: identity is
+    // resolved per-request from the `x-agent`/`x-room` headers and all state
+    // lives in SQLite, and the agent loop is pure request/response (`post`/
+    // `wait`), needing no server→client push. So statelessness costs us nothing
+    // and lets any fresh request work with no init — which is what lets a nudged
+    // agent reconnect after a restart (see team_bridge::recover_running_teams
+    // and team::nudge_session_agents).
     let mcp_service = StreamableHttpService::new(
         {
             let provider = provider.clone();
             move || Ok(AgoraMcp::new(provider.clone()))
         },
         Arc::new(LocalSessionManager::default()),
-        Default::default(),
+        StreamableHttpServerConfig { stateful_mode: false, ..Default::default() },
     );
 
     Router::new()

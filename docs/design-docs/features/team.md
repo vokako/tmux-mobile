@@ -171,12 +171,41 @@ within `tmm-team-<slug>`. Two surfaces use it:
    `disabled` employees' windows are killed. Same loop serves the initial team
    AND the manager's runtime `hire`/`fire`.
 
-**Idempotent across restarts (dup-window fix).** Before launching, the loop
-checks tmux for an existing window with the agent's name in the session and
-**adopts** it instead of opening a second. The earlier in-memory-only tracking
-re-launched every agent when the server restarted, piling up duplicate
-manager/worker/reviewer windows (observed: a 10-window `agora` session). See
-`tmux::find_window_by_name`.
+**Restart recovery: adopt the windows, nudge the agents to reconnect.** When the
+backend restarts, `recover_running_teams` finds the surviving `tmm-team-*`
+sessions and re-runs the supervisor, which **adopts** the existing agent windows
+(`tmux::find_window_by_name`) instead of reopening them — so each agent keeps its
+CLI conversation context and any in-progress work. But an adopted agent is hung:
+its MCP **client** connection died with the old daemon, and (verified with
+kiro-cli 2.7.0) the client neither times out nor retries on its own — it sits
+forever inside a dead `wait` call. It *will* reconnect, though, once that call is
+cancelled and a fresh turn starts. So recovery calls `team::nudge_session_agents`,
+which for each agent window sends `Esc` (cancel the in-flight call → back to the
+prompt) then a short re-prompt that makes it call `wait` again, re-establishing
+the connection against the stateless daemon. Nudging is harmless if an agent
+happened to be healthy (it just restarts its wait loop).
+
+This nudge lives in recovery, **not** in the reconcile loop, because the loop's
+presence check can't distinguish a healthy agent from one hung on a dead socket
+— a just-restarted agent still reports `waiting` for ~30 s until its presence TTL
+lapses, so an in-loop nudge gated on online-status would never fire (a bug found
+in testing). Killing + relaunching the agents fresh would also recover them (the
+stateless daemon makes the new handshake succeed), but it discards their context;
+adoption + nudge preserves it.
+
+**Why the daemon is stateless.** The MCP daemon is served with
+`StreamableHttpServerConfig { stateful_mode: false }` (`crates/agora/src/web.rs`).
+rmcp's default stateful mode keeps session ids in an in-memory
+`LocalSessionManager`; because the daemon runs *in-process* with the server,
+every restart wipes that map and any agent presenting an old `Mcp-Session-Id` is
+rejected (`401 Session not found`; a no-session request gets `422 expect
+initialize`) with no auto-re-handshake. Our tool surface is genuinely stateless —
+identity is resolved per request from the `x-agent`/`x-room` headers and all
+state is in SQLite — and the agent loop is pure request/response (`post`/`wait`),
+so we need no server→client push. Stateless mode therefore costs nothing and lets
+the nudged agents' fresh requests succeed with no `initialize`. See
+`unresolved.md` (the resolved "rmcp reconnect" item) for the full root-cause
+trail and the verified end-to-end test.
 
 The agent config dialects (kiro agent JSON, claude `--mcp-config`/`--settings`,
 codex `config.toml`), the keepalive Stop-hook, and the role/goal prompts carry

@@ -36,13 +36,24 @@ const KICK: &str = "You are connected to the team group chat (collaboration rule
 
 // ─── Team templates (named rosters under <config>/tmux-mobile/teams/) ──────
 // A template is a JSON file `teams/<name>.json` = { "agents": [ {name, backend,
-// role, goal, backstory, model, manage}, … ] }. The user edits these from the
+// role, goal, model, manage}, … ] }. The user edits these from the
 // app (Templates panel); `start_team` seeds the chosen template into the room.
 // The built-in default is written to teams/default.json on first run so there
 // is always something to edit.
 
 /// Default model placeholder substituted in when a kiro agent leaves model empty.
 pub const BUILTIN_TEMPLATE: &str = include_str!("../../team/templates/default.json");
+
+/// A ready-made software-development roster (tech-lead / product / architect /
+/// coder / reviewer / tester), seeded alongside the default so it appears in
+/// the app's template picker out of the box. The whole collaboration workflow
+/// lives in each agent's `goal` (role isolation) — AGENTS.md stays a
+/// role-agnostic, workflow-free communication contract.
+pub const SOFTWARE_DEV_TEMPLATE: &str = include_str!("../../team/templates/software-dev.json");
+
+/// Built-in templates seeded into teams/ on first run: (file stem, contents).
+const BUILTIN_TEMPLATES: &[(&str, &str)] =
+    &[("default", BUILTIN_TEMPLATE), ("software-dev", SOFTWARE_DEV_TEMPLATE)];
 
 /// The teams/ template directory.
 fn templates_dir() -> PathBuf {
@@ -59,13 +70,17 @@ fn template_path(name: &str) -> PathBuf {
     templates_dir().join(format!("{}.json", safe))
 }
 
-/// Ensure the teams/ dir exists and holds at least the built-in default.
+/// Ensure the teams/ dir exists and holds the built-in templates. Seed-once per
+/// file: an existing template is never overwritten, so a user's edits (and
+/// their custom templates) are preserved across restarts.
 pub fn ensure_templates_seeded() {
     let dir = templates_dir();
     let _ = std::fs::create_dir_all(&dir);
-    let def = dir.join("default.json");
-    if !def.exists() {
-        let _ = std::fs::write(&def, BUILTIN_TEMPLATE);
+    for (name, body) in BUILTIN_TEMPLATES {
+        let path = dir.join(format!("{}.json", name));
+        if !path.exists() {
+            let _ = std::fs::write(&path, body);
+        }
     }
 }
 
@@ -275,7 +290,6 @@ fn seed_template(bridge: &dyn TeamBridge, room: &str, template: &str, cfg: &Team
         let spec = serde_json::json!({
             "role": a.get("role").and_then(|v| v.as_str()).unwrap_or(name),
             "goal": a.get("goal").and_then(|v| v.as_str()).unwrap_or(""),
-            "backstory": a.get("backstory").and_then(|v| v.as_str()).unwrap_or(""),
             "backend": backend,
             "manage": a.get("manage").and_then(|v| v.as_bool()).unwrap_or(false),
             "model": model,
@@ -296,7 +310,10 @@ fn seed_template(bridge: &dyn TeamBridge, room: &str, template: &str, cfg: &Team
 /// EXISTING window named after the agent in this session. If one is there
 /// (server restarted, agent already running), we adopt it instead of opening a
 /// second. The previous in-memory-only tracking re-launched every agent on
-/// restart, piling up duplicate manager/worker/reviewer windows.
+/// restart, piling up duplicate manager/worker/reviewer windows. Reconnecting
+/// adopted agents after a *server* restart is handled separately, once, by
+/// `nudge_session_agents` (called from recovery) — not here, because the loop's
+/// presence check can't tell a healthy agent from one hung on a dead socket.
 async fn reconcile_loop(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: String, session: String, paths: Paths) {
     const MAX_LAUNCH_FAILURES: u32 = 3; // give up relaunching an agent after this
     let mut launched: HashMap<String, Option<String>> = HashMap::new();
@@ -381,12 +398,11 @@ fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &str, session:
     let backend = spec.get("backend").and_then(|v| v.as_str()).unwrap_or("kiro");
     let role = spec.get("role").and_then(|v| v.as_str()).unwrap_or(name);
     let goal = spec.get("goal").and_then(|v| v.as_str()).unwrap_or("");
-    let backstory = spec.get("backstory").and_then(|v| v.as_str()).unwrap_or("");
     let manage = spec.get("manage").and_then(|v| v.as_bool()).unwrap_or(false);
     let model = spec.get("model").and_then(|v| v.as_str());
 
     let (env, cmd, post_keys) = match backend {
-        "kiro" => prepare_kiro(name, role, goal, backstory, manage, cfg, room, paths, model)?,
+        "kiro" => prepare_kiro(name, role, goal, manage, cfg, room, paths, model)?,
         "claude" => prepare_claude(name, role, goal, manage, cfg, room, paths, model)?,
         "codex" => prepare_codex(name, role, goal, manage, cfg, room, paths)?,
         other => return Err(format!("unknown backend: {}", other)),
@@ -417,6 +433,43 @@ fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &str, session:
     Ok(pane)
 }
 
+/// After a *server* restart, nudge every agent window in `session` back online.
+///
+/// A recovered agent's MCP client lost its connection to the old (now dead)
+/// daemon and is hung inside a `wait` tool call. Verified with kiro-cli 2.7.0:
+/// the client neither times out nor retries on its own — but it reconnects fine
+/// once the dead call is cancelled and a new turn starts. So for each agent
+/// window we press Escape to cancel the in-flight call (returning the TUI to its
+/// prompt), then send a short re-prompt that makes it call `wait` again, which
+/// re-establishes the connection. Harmless if an agent happened to be healthy:
+/// it just restarts its wait loop. This is done ONCE from recovery rather than
+/// in the reconcile loop, whose presence check can't distinguish a healthy agent
+/// from one hung on a dead socket (a just-restarted agent still looks "online"
+/// for ~30 s until its presence TTL lapses).
+///
+/// Runs in a spawned task: it sleeps between keystrokes (TUI needs a beat to
+/// settle) and we must not block the recovery path.
+pub fn nudge_session_agents(session: String) {
+    const NUDGE: &str =
+        "Reconnect to the team chat: call `wait` now, and keep calling it to stay in the conversation.";
+    tokio::spawn(async move {
+        // Give a freshly-restarted daemon a moment to be listening before we
+        // ask agents to reconnect.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        for (name, pane) in tmux::list_named_windows(&session) {
+            if name == "zsh" {
+                continue; // the session's initial shell, not an agent
+            }
+            println!("🜂 team: nudging adopted agent '{}' ({}) to reconnect", name, pane);
+            let _ = tmux::send_keys(&pane, "Escape", false);
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let _ = tmux::send_keys(&pane, NUDGE, true);
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let _ = tmux::send_keys(&pane, "Enter", false);
+        }
+    });
+}
+
 enum PostKey {
     Enter,
     Text(String),
@@ -426,9 +479,15 @@ enum PostKey {
 /// scripted keys). Aliased to keep the per-backend signatures readable.
 type Prepared = (Vec<(String, String)>, String, Vec<PostKey>);
 
+/// Single-line agent brief for backends whose prompt is injected as a typed
+/// first message (claude/codex), where embedded newlines would submit early.
+/// Same content as kiro's `full_prompt` (role + goal), flattened to one line.
 fn role_line(role: &str, goal: &str) -> String {
     let g = goal.replace('\n', " ");
-    format!("You are the {}. {} Keep messages short.", role, g.trim()).trim().to_string()
+    format!("You are the {}. {} Keep messages short.", role, g.trim())
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// KICK plus a pointer to the team brief. Kiro injects the brief via `resources`
@@ -438,10 +497,10 @@ fn kick_with_brief(paths: &Paths) -> String {
     format!("{} First read the team playbook: {}", KICK, paths.brief.to_string_lossy())
 }
 
-fn full_prompt(role: &str, goal: &str, backstory: &str) -> String {
+fn full_prompt(role: &str, goal: &str) -> String {
     format!(
-        "You are the {}.\nGoal: {}\nBackground: {}\nYou collaborate with other agents and a human operator in a shared team group chat (via the @team tools). Keep messages short.",
-        role, goal.trim(), backstory.trim()
+        "You are the {}.\nGoal: {}\nYou collaborate with other agents and a human operator in a shared team group chat (via the @team tools). Keep messages short.",
+        role, goal.trim()
     )
 }
 
@@ -450,7 +509,7 @@ const WORKER_TOOLS: &[&str] = &["post", "wait", "list_agents", "history"];
 // ---- Kiro ----
 #[allow(clippy::too_many_arguments)] // agent config genuinely needs all of these
 fn prepare_kiro(
-    name: &str, role: &str, goal: &str, backstory: &str, manage: bool,
+    name: &str, role: &str, goal: &str, manage: bool,
     cfg: &TeamConfig, room: &str, paths: &Paths, model: Option<&str>,
 ) -> Result<Prepared, String> {
     let home = &paths.kiro_home;
@@ -477,7 +536,7 @@ fn prepare_kiro(
     let conf = serde_json::json!({
         "name": name,
         "description": format!("{} on the team bus", role),
-        "prompt": full_prompt(role, goal, backstory),
+        "prompt": full_prompt(role, goal),
         "tools": tools,
         "allowedTools": allowed,
         "resources": [format!("file://{}", paths.brief.to_string_lossy())],
@@ -615,15 +674,53 @@ mod tests {
     }
 
     #[test]
-    fn builtin_default_template_has_three_agents_one_manager() {
-        // Parse the embedded built-in template (what teams/default.json seeds).
+    fn builtin_default_template_is_minimal_manager_worker() {
+        // The default template is the minimal demo: a manager + one worker that
+        // shows the delegate→report loop and can grow via the manager's hire().
         let v: Value = serde_json::from_str(BUILTIN_TEMPLATE).unwrap();
         let agents = v["agents"].as_array().unwrap();
-        assert_eq!(agents.len(), 3, "manager + worker + reviewer");
+        assert_eq!(agents.len(), 2, "minimal demo = manager + worker");
         let names: Vec<&str> = agents.iter().filter_map(|a| a["name"].as_str()).collect();
-        assert!(names.contains(&"manager") && names.contains(&"worker") && names.contains(&"reviewer"));
+        assert!(names.contains(&"manager") && names.contains(&"worker"));
         let managers = agents.iter().filter(|a| a["manage"] == true).count();
         assert_eq!(managers, 1, "exactly one manager");
+    }
+
+    #[test]
+    fn software_dev_template_has_six_roles_one_manager_with_goals() {
+        // The software-dev roster is a second built-in (teams/software-dev.json).
+        let v: Value = serde_json::from_str(SOFTWARE_DEV_TEMPLATE).unwrap();
+        let agents = v["agents"].as_array().unwrap();
+        assert_eq!(agents.len(), 6, "tech-lead + product + architect + coder + reviewer + tester");
+        let names: Vec<&str> = agents.iter().filter_map(|a| a["name"].as_str()).collect();
+        for expected in ["manager", "product", "architect", "coder", "reviewer", "tester"] {
+            assert!(names.contains(&expected), "missing role '{expected}': {names:?}");
+        }
+        let managers = agents.iter().filter(|a| a["manage"] == true).count();
+        assert_eq!(managers, 1, "exactly one manager");
+        // Workflow lives in each role's goal (AGENTS.md is contract-only), so
+        // every agent must carry a substantive goal.
+        assert!(
+            agents.iter().all(|a| a["goal"].as_str().map(|g| g.len() > 80).unwrap_or(false)),
+            "each role's goal must carry its slice of the workflow"
+        );
+    }
+
+    #[test]
+    fn both_builtin_templates_are_seeded() {
+        // Isolate config dir so we don't touch the real ~/.config.
+        let dir = std::env::temp_dir().join(format!("teamtest-tpl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::env::set_var("XDG_CONFIG_HOME", &dir);
+
+        ensure_templates_seeded();
+        let mut names = list_templates();
+        names.sort();
+        assert!(names.contains(&"default".to_string()), "default seeded: {names:?}");
+        assert!(names.contains(&"software-dev".to_string()), "software-dev seeded: {names:?}");
+
+        std::env::remove_var("XDG_CONFIG_HOME");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -678,6 +775,8 @@ mod tests {
 
     #[test]
     fn role_line_is_single_line() {
+        // A multi-line goal must flatten to one line (it's typed as a first
+        // message to claude/codex, where an embedded \n would submit early).
         let r = role_line("worker", "do\nthings\nwell");
         assert!(!r.contains('\n'), "role line must be single-line: {}", r);
     }

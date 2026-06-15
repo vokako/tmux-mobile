@@ -634,6 +634,9 @@
       cursorStyle: 'block',
       disableStdin: false,
       fontSize,
+      // Literal stack, NOT var(--font-mono): this string is consumed by xterm.js
+      // for canvas/WebGL glyph measurement, not parsed as CSS, so a CSS custom
+      // property would not resolve here. Keep in sync with --font-mono (App.svelte).
       fontFamily: "'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace",
       fontWeight: 300,
       fontWeightBold: 600,
@@ -1898,7 +1901,7 @@
              so it's always visible without stealing a whole row. The window
              chips scroll independently to its right. -->
         <button class="win-session" title={session} onclick={(e) => { e.stopPropagation(); showPanePicker = !showPanePicker; }}>
-          <Icon name="sessions" size={11} /><span class="win-session-name">{session}</span>
+          <span class="win-session-name">{session}</span>
           <Icon name="chevron-down" size={9} />
         </button>
         {#if showPanePicker}
@@ -2044,6 +2047,7 @@
     <ChatView content={paneContent} {command} {fontSize} onSendKeys={(keys) => sendKeys(target, keys, false)} />
   {/if}
 
+  {#if !chromeless}
   <div class="input-area">
     {#if viewMode === 'terminal' && isMobile}
       <div class="input-bar">
@@ -2132,6 +2136,7 @@
       </div>
     {/if}
   </div>
+  {/if}
 </div>
 
 <style>
@@ -2178,7 +2183,7 @@
     border-radius: 999px;
     background: var(--accent-bg);
     color: var(--accent);
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Maple Mono CJK', 'SF Mono', Menlo, monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     font-weight: 600;
     white-space: nowrap;
@@ -2233,7 +2238,7 @@
   }
   .status-left .kiro { color: var(--accent); }
   .status-left {
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: 10px;
     white-space: nowrap;
     overflow: hidden;
@@ -2243,7 +2248,7 @@
     display: flex;
     align-items: center;
     gap: 5px;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-weight: 500;
     font-size: 12px;
     margin-left: auto;
@@ -2477,7 +2482,7 @@
     background: var(--input-bg);
     color: var(--text2);
     font-size: 12px;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-weight: 500;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
@@ -2506,7 +2511,7 @@
 
   .prompt {
     color: var(--accent);
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: 15px;
     font-weight: 600;
     flex-shrink: 0;
@@ -2520,7 +2525,7 @@
     border: none;
     background: transparent;
     color: var(--text);
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: 15px;
     outline: none;
     -webkit-appearance: none;

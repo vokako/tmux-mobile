@@ -404,3 +404,15 @@ pub fn set_employee_state(conn: &Connection, room: &str, name: &str, state: &str
     )?;
     Ok(())
 }
+
+/// Forget everything persisted about a room: its message log, roster, obligation
+/// graph, and desired-employee roster. Used on an explicit (re)start or close so
+/// leftover rows from a previous team on the same workspace can never shadow a
+/// fresh start. Recovery never calls this — it adopts a live team as-is.
+pub fn clear_room(conn: &Connection, room: &str) -> Result<()> {
+    conn.execute("DELETE FROM messages WHERE room=?1", params![room])?;
+    conn.execute("DELETE FROM agents WHERE room=?1", params![room])?;
+    conn.execute("DELETE FROM obligations WHERE room=?1", params![room])?;
+    conn.execute("DELETE FROM employees WHERE room=?1", params![room])?;
+    Ok(())
+}

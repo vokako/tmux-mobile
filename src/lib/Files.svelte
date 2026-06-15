@@ -88,12 +88,50 @@
   let cwd = $state('');
   let entries = $state([]);
   let showHidden = $state(false);
-  let loading = $state(false);
+  let loading = $state(false);        // directory listing in flight (left list)
+  let previewLoading = $state(false); // file content in flight (right preview)
   let error = $state('');
 
   // View modes: 'list', 'preview', 'edit', 'info', 'local'
   let view = $state('list');
   let previewZoom = $state(100);
+
+  // ─── Desktop two-pane (folder browser | preview) ──────────────────────────
+  // On a wide, non-touch screen Files becomes a desktop-style file manager:
+  // the list is always on the left, the preview fills the right. On mobile /
+  // narrow / touch we keep the single-pane `view` chain unchanged. Mirrors the
+  // split the Team tab already ships (Team.svelte).
+  const SPLIT_MIN_WIDTH = 900;
+  const isTouchDevice = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+  let wideEnough = $state(typeof window !== 'undefined' && window.innerWidth >= SPLIT_MIN_WIDTH);
+  let splitEligible = $derived(!isTouchDevice && wideEnough);
+  let filesFrac = $state(parseFloat(localStorage.getItem('tmux_files_frac') || '0.38')); // left = folder browser
+  let splitRow = $state(null);
+
+  $effect(() => {
+    if (isTouchDevice) return;
+    const onResize = () => { wideEnough = window.innerWidth >= SPLIT_MIN_WIDTH; };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  });
+
+  // Drag the splitter to adjust the browser/preview width ratio (desktop only).
+  function startDrag(e) {
+    e.preventDefault();
+    const rect = splitRow?.getBoundingClientRect();
+    if (!rect) return;
+    const onMove = (ev) => {
+      const x = (ev.touches ? ev.touches[0].clientX : ev.clientX) - rect.left;
+      filesFrac = Math.min(0.7, Math.max(0.2, x / rect.width));
+    };
+    const onUp = () => {
+      localStorage.setItem('tmux_files_frac', String(filesFrac));
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
 
   // Android local files
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
@@ -467,7 +505,7 @@
   }
 
   async function loadPreviewContent(file) {
-    loading = true;
+    previewLoading = true;
     try {
       const { path, name, stat } = file;
       if (stat.mime_hint === 'application/pdf') {
@@ -490,7 +528,7 @@
     } catch (e) {
       error = e.message;
     }
-    loading = false;
+    previewLoading = false;
   }
 
   async function openEntry(entry) {
@@ -499,7 +537,11 @@
       loadDir(entry.path);
       return;
     }
-    loading = true;
+    // File open: use previewLoading (right pane), NOT loading — `loading` drives
+    // the left directory list's spinner, and toggling it here would make the
+    // whole list flash/re-render every time you click a file in the desktop
+    // two-pane layout (on mobile the list was hidden so it went unnoticed).
+    previewLoading = true;
     try {
       const stat = await fsStat(entry.path);
       currentFile = { path: entry.path, name: entry.name, stat };
@@ -507,15 +549,15 @@
       navPush();
       if (stat.size > PREVIEW_SIZE_LIMIT || !isPreviewable(stat, entry.name)) {
         view = 'info';
-        loading = false;
+        previewLoading = false;
         return;
       }
     } catch (e) {
       error = e.message;
-      loading = false;
+      previewLoading = false;
       return;
     }
-    loading = false;
+    previewLoading = false;
     await loadPreviewContent(currentFile);
   }
 
@@ -1057,8 +1099,9 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="files" bind:this={filesEl} ontouchstart={onTouchStart} ontouchend={onTouchEnd}>
-  {#if view === 'list'}
+<!-- View blocks live in snippets so both layouts (mobile single-pane + desktop
+     two-pane) render the same markup. -->
+{#snippet listPanel()}
     <!-- Toolbar: all buttons in one row -->
     <div class="toolbar">
       <button class="tool-btn" onclick={goHome}><Icon name="home" size={13} /></button>
@@ -1197,8 +1240,9 @@
         {/if}
       {/if}
     </div>
+{/snippet}
 
-  {:else if view === 'preview'}
+{#snippet previewPanel()}
     <!-- File preview -->
     <div class="preview-header">
       <button class="back-btn" onclick={backToList}><Icon name="chevron-left" size={16} /></button>
@@ -1237,8 +1281,9 @@
         </div>
       {/if}
     </div>
+{/snippet}
 
-  {:else if view === 'edit'}
+{#snippet editPanel()}
     <!-- File editor -->
     <div class="preview-header">
       <button class="back-btn" onclick={backToPreview}><Icon name="chevron-left" size={16} /></button>
@@ -1262,8 +1307,9 @@
         ></textarea>
       </div>
     </div>
+{/snippet}
 
-  {:else if view === 'local'}
+{#snippet localPanel()}
     <!-- Local downloaded files -->
     <div class="preview-header">
       <button class="back-btn" onclick={() => { view = 'list'; }}><Icon name="chevron-left" size={16} /></button>
@@ -1286,8 +1332,9 @@
         <div class="empty">{t('noDownloads')}</div>
       {/if}
     </div>
+{/snippet}
 
-  {:else if view === 'info'}
+{#snippet infoPanel()}
     <!-- File info -->
     <div class="preview-header">
       <button class="back-btn" onclick={() => { view = currentFile?.content != null ? 'preview' : 'list'; }}><Icon name="chevron-left" size={16} /></button>
@@ -1312,7 +1359,9 @@
         <div class="info-row"><span class="info-label">{t('textFile')}</span><span class="info-val">{currentFile.stat.is_text ? t('yes') : t('no')}</span></div>
       {/if}
     </div>
-  {:else if view === 'git'}
+{/snippet}
+
+{#snippet gitPanel()}
     <!-- Git view -->
     <div class="preview-header">
       <button class="back-btn" onclick={() => { if (gitDiff) gitDiff = null; else view = 'list'; }}><Icon name="chevron-left" size={16} /></button>
@@ -1389,6 +1438,35 @@
         {/each}
       </div>
     {/if}
+{/snippet}
+
+<div class="files" bind:this={filesEl} ontouchstart={onTouchStart} ontouchend={onTouchEnd}>
+  {#if splitEligible}
+    <!-- Desktop: folder browser (left) | draggable splitter | preview (right). -->
+    <div class="files-split" bind:this={splitRow}>
+      <div class="files-left" style="flex: {filesFrac} 1 0;">{@render listPanel()}</div>
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="files-splitter" onmousedown={startDrag} title="Drag to resize"></div>
+      <div class="files-right" style="flex: {1 - filesFrac} 1 0;">
+        {#if view === 'preview'}{@render previewPanel()}
+        {:else if view === 'edit'}{@render editPanel()}
+        {:else if view === 'info'}{@render infoPanel()}
+        {:else if view === 'git'}{@render gitPanel()}
+        {:else if view === 'local'}{@render localPanel()}
+        {:else}
+          <div class="files-placeholder"><Icon name="file" size={40} /><p>{t('selectFile')}</p></div>
+        {/if}
+      </div>
+    </div>
+  {:else}
+    <!-- Mobile / narrow / touch: single-pane view chain (unchanged). -->
+    {#if view === 'list'}{@render listPanel()}
+    {:else if view === 'preview'}{@render previewPanel()}
+    {:else if view === 'edit'}{@render editPanel()}
+    {:else if view === 'local'}{@render localPanel()}
+    {:else if view === 'info'}{@render infoPanel()}
+    {:else if view === 'git'}{@render gitPanel()}
+    {/if}
   {/if}
   {#if copyToast}
     <div class="copy-toast">{t('copied')}</div>
@@ -1419,6 +1497,25 @@
 <style>
   .files { display: flex; flex-direction: column; flex: 1; min-height: 0; background: var(--bg); }
 
+  /* Desktop two-pane: folder browser | splitter | preview. The columns must be
+     flex-column themselves so each panel's sticky header (flex-shrink:0) +
+     scrollable body (flex:1; overflow) constrain correctly — `.files` gave them
+     that in single-pane mode; here the columns must. */
+  .files-split { display: flex; flex: 1; min-height: 0; width: 100%; }
+  .files-left, .files-right {
+    display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden;
+  }
+  .files-right { border-left: 1px solid var(--border); }
+  .files-splitter {
+    flex: 0 0 6px; cursor: col-resize; background: var(--border);
+    transition: background 0.15s ease;
+  }
+  .files-splitter:hover { background: var(--accent); }
+  .files-placeholder {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 10px; color: var(--text3); font-size: 13px; padding: 24px; text-align: center;
+  }
+
   /* Toolbar — same vertical rhythm as the Terminal window-switcher bar
      and the Sessions top-row (24 px buttons + 3 px padding = ~31 px total). */
   .toolbar {
@@ -1440,7 +1537,7 @@
   /* Path row */
   .bc-path-row {
     display: flex; align-items: center; gap: 1px; padding: 4px 10px;
-    overflow-x: auto; font-size: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    overflow-x: auto; font-size: 12px; font-family: var(--font-mono);
     scrollbar-width: none; border-bottom: 1px solid var(--border2); flex-shrink: 0;
   }
   .bc-path-row::-webkit-scrollbar { display: none; }
@@ -1465,7 +1562,7 @@
   .bm-path {
     flex: 1; display: block;
     padding: 8px 0; border: none; background: none; color: var(--text);
-    font-size: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-size: 12px; font-family: var(--font-mono);
     cursor: pointer; text-align: left; overflow-x: auto;
     white-space: nowrap; scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
@@ -1486,7 +1583,7 @@
   .new-item input {
     flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 6px;
     background: var(--input-bg); color: var(--text); font-size: 13px;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: var(--font-mono);
   }
   .new-item button {
     padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 6px;
@@ -1521,7 +1618,7 @@
   }
   .file-name::-webkit-scrollbar { display: none; }
   .dir-name { color: var(--accent); }
-  .file-size { color: var(--text3); font-size: 11px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; white-space: nowrap; }
+  .file-size { color: var(--text3); font-size: 11px; font-family: var(--font-mono); white-space: nowrap; }
   .file-actions { display: flex; gap: 2px; padding-right: 8px; }
   .act-btn {
     padding: 6px; border: none; border-radius: 6px; background: none;
@@ -1555,7 +1652,7 @@
   /* Preview body */
   .preview-body { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 12px; display: flex; flex-direction: column; min-height: 0; }
   .code-preview {
-    margin: 0; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; font-size: var(--file-font-size, 13px);
+    margin: 0; font-family: var(--font-mono); font-size: var(--file-font-size, 13px);
     line-height: 1.5; color: var(--text); white-space: pre-wrap; word-break: break-all; flex: 1;
   }
   .code-preview :global(code) { font-family: inherit; background: none; padding: 0; }
@@ -1563,7 +1660,7 @@
     display: flex; flex: 1; overflow: auto; -webkit-overflow-scrolling: touch;
   }
   .line-nums {
-    padding: 0 8px; text-align: right; color: var(--text3); font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    padding: 0 8px; text-align: right; color: var(--text3); font-family: var(--font-mono);
     font-size: var(--file-font-size, 13px); line-height: 1.5; white-space: pre; user-select: none; flex-shrink: 0;
     border-right: 1px solid var(--border);
   }
@@ -1584,7 +1681,7 @@
   .md-render :global(h3) { font-size: 16px; margin: 10px 0 4px; color: var(--accent); }
   .md-render :global(h4), .md-render :global(h5), .md-render :global(h6) { font-size: 14px; margin: 8px 0 4px; color: var(--accent); }
   .md-render :global(p) { margin: 8px 0; }
-  .md-render :global(code) { background: var(--surface2); padding: 2px 5px; border-radius: 3px; font-size: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; }
+  .md-render :global(code) { background: var(--surface2); padding: 2px 5px; border-radius: 3px; font-size: 12px; font-family: var(--font-mono); }
   .md-render :global(pre) { background: var(--code-bg); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 8px 0; }
   .md-render :global(pre code) { background: none; padding: 0; font-size: 12px; line-height: 1.5; }
   .md-render :global(strong) { color: var(--text); }
@@ -1616,13 +1713,13 @@
     flex: 1; display: flex; overflow: auto; -webkit-overflow-scrolling: touch; min-height: 0; touch-action: pan-y;
   }
   .editor-nums {
-    padding: 12px 8px; text-align: right; color: var(--text3); font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    padding: 12px 8px; text-align: right; color: var(--text3); font-family: var(--font-mono);
     font-size: var(--file-font-size, 13px); line-height: 1.5; white-space: pre; user-select: none; flex-shrink: 0;
     border-right: 1px solid var(--border);
   }
   .editor-layer { position: relative; flex: 1; min-width: 0; }
   .editor-highlight {
-    margin: 0; padding: 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; font-size: var(--file-font-size, 13px);
+    margin: 0; padding: 12px; font-family: var(--font-mono); font-size: var(--file-font-size, 13px);
     line-height: 1.5; white-space: pre-wrap; word-break: break-all; color: var(--text);
     pointer-events: none;
   }
@@ -1630,7 +1727,7 @@
   .editor {
     position: absolute; inset: 0; width: 100%; height: 100%; padding: 12px; border: none; resize: none;
     background: transparent; color: transparent; caret-color: var(--text);
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; font-size: var(--file-font-size, 13px); line-height: 1.5; outline: none;
+    font-family: var(--font-mono); font-size: var(--file-font-size, 13px); line-height: 1.5; outline: none;
     white-space: pre-wrap; word-break: break-all; overflow: hidden;
   }
   .info-body { flex: 1; overflow: auto; padding: 12px; }
@@ -1639,7 +1736,7 @@
   }
   .info-label { width: 100px; flex-shrink: 0; color: var(--text3); font-size: 12px; }
   .info-val { flex: 1; font-size: 13px; word-break: break-all; }
-  .info-val.mono { font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; }
+  .info-val.mono { font-family: var(--font-mono); }
   .info-path {
     flex: 1; font-size: 13px; word-break: break-all; text-align: left;
     background: none; border: none; color: var(--text); cursor: pointer; padding: 0;
@@ -1662,12 +1759,12 @@
   .dl-path {
     flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     direction: rtl; text-align: left; min-width: 0;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 11px; color: var(--text2);
+    font-family: var(--font-mono); font-size: 11px; color: var(--text2);
   }
   .dl-ring { flex-shrink: 0; }
   .dl-ring circle:last-child { transition: stroke-dashoffset 0.3s ease; }
   .dl-pct {
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 11px;
+    font-family: var(--font-mono); font-size: 11px;
     font-weight: 600; color: var(--accent); min-width: 30px;
   }
   .dl-name {
@@ -1747,7 +1844,7 @@
   }
   .git-file:active { background: var(--accent-bg); }
   .git-st {
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 12px; font-weight: 600;
+    font-family: var(--font-mono); font-size: 12px; font-weight: 600;
     min-width: 24px; color: var(--text3);
   }
   .git-st.git-add { color: var(--status-ok); }
@@ -1755,23 +1852,23 @@
   .git-st.git-del { color: var(--danger); }
   .git-fname {
     flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 12px;
+    font-family: var(--font-mono); font-size: 12px;
   }
   .git-hash {
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 11px;
+    font-family: var(--font-mono); font-size: 11px;
     color: var(--accent); min-width: 56px;
   }
   .git-date { font-size: 11px; color: var(--text3); white-space: nowrap; }
   .git-diff-header {
     display: flex; align-items: center; gap: 8px;
-    padding: 8px 12px; font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace; font-size: 12px;
+    padding: 8px 12px; font-family: var(--font-mono); font-size: 12px;
     color: var(--accent); background: var(--accent-bg); border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
   .git-diff-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .git-diff-body {
     flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; background: var(--code-bg);
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: var(--file-font-size, 13px); line-height: 1.6;
   }
   .diff-line {

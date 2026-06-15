@@ -111,6 +111,6 @@
   .chip-label {
     overflow: hidden;
     text-overflow: ellipsis;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: var(--font-ui);
   }
 </style>

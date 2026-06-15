@@ -360,8 +360,10 @@
           {/each}
         </div>
       {:else}
-        <!-- Keep the row's height stable when there are no chips -->
-        <div class="chips-row empty"></div>
+        <!-- Keep the row's height stable when there are no chips. Uses its own
+             modifier (NOT `empty`, which is the tall centered "no matches"
+             message style and would add 32px padding here). -->
+        <div class="chips-row chips-empty"></div>
       {/if}
       <button
         class="icon-btn search-btn"
@@ -649,7 +651,7 @@
     -webkit-overflow-scrolling: touch;
   }
   .chips-row::-webkit-scrollbar { display: none; }
-  .chips-row.empty { min-height: 24px; }
+  .chips-row.chips-empty { min-height: 24px; }
 
   /* ─── Session list ───────────────────────────────────── */
   .list {
@@ -722,7 +724,7 @@
   }
   .meta .ai-icon.claude { width: 15px; height: 15px; }
   .meta .cmd {
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     color: var(--text2);
     overflow: hidden;
@@ -733,7 +735,7 @@
     display: block;
     color: var(--text3);
     font-size: 11px;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: var(--font-mono);
     flex: 1;
     min-width: 0;
     white-space: nowrap;
@@ -818,7 +820,7 @@
   }
   .pane:active { background: var(--surface2); border-radius: 8px; }
   .pane-id {
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: var(--font-mono);
     color: var(--accent);
     font-weight: 500;
     font-size: 11px;
@@ -826,7 +828,7 @@
     flex-shrink: 0;
   }
   .pane-cmd {
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: var(--font-mono);
     color: var(--text2);
     font-size: 12px;
     flex-shrink: 0;
@@ -835,7 +837,7 @@
     display: block;
     color: var(--text3);
     font-size: 11px;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: var(--font-mono);
     flex: 1;
     min-width: 0;
     white-space: nowrap;
@@ -901,7 +903,7 @@
   }
   .empty-q {
     color: var(--text);
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: var(--font-ui);
   }
   .error {
     color: var(--danger);
@@ -1017,7 +1019,7 @@
     gap: 1px;
     overflow-x: auto;
     scrollbar-width: none;
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     -webkit-overflow-scrolling: touch;
   }

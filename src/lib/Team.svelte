@@ -62,6 +62,7 @@
   let roster = $state([]);       // active room AgentRow[]
   let available = $state(true);  // false when the server has no team bus
   let starting = $state(false);
+  let startError = $state('');   // surfaced when start_team is refused (e.g. bad template)
   let loading = $state(true);
   let draft = $state('');
   let sending = $state(false);
@@ -193,16 +194,21 @@
   async function startTeam() {
     if (starting || !workspace.trim()) return;
     starting = true;
+    startError = '';
     showPicker = false;
     try {
       const res = await teamStartTeam(workspace.trim(), selectedTemplate);
+      // The backend refuses (started:false + error) when the roster is missing/
+      // empty — surface it instead of dropping into a room with no agents.
+      if (res?.error) { startError = res.error; return; }
       newTeam = false;
       if (res?.room) {
         activeRoom = res.room;
         messages = []; roster = []; employees = [];
       }
       await refresh();
-    } catch {
+    } catch (e) {
+      startError = String(e?.message || e || 'failed to start team');
     } finally {
       starting = false;
     }
@@ -343,7 +349,6 @@
   <div class="team-header">
     <div class="team-pick">
       <button class="team-pick-btn" onclick={() => switcherOpen = !switcherOpen}>
-        <Icon name="bot" size={13} />
         <span class="team-pick-name">{activeTeam ? activeTeam.room : (newTeam ? t('teamNew') : t('teamNone'))}</span>
         <Icon name="chevron-down" size={10} />
       </button>
@@ -436,6 +441,9 @@
         <button class="team-start-cancel" onclick={() => { newTeam = false; showPicker = false; }}>{t('cancel')}</button>
       {/if}
     </div>
+    {#if startError}
+      <div class="start-error" style="margin-top:8px;color:#e5484d;font-size:13px;line-height:1.4;word-break:break-word;">{startError}</div>
+    {/if}
   </div>
 {/snippet}
 
@@ -596,7 +604,7 @@
   .team-pick-item.active { background: var(--accent-bg); color: var(--accent); }
   .tp-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text3); flex-shrink: 0; }
   .tp-dot.on { background: var(--status-ok); }
-  .tp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'Maple Mono NF CN','Maple Mono','SF Mono',Menlo,monospace; }
+  .tp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-ui); }
   .tp-count { color: var(--text3); font-size: 11px; }
   .team-pick-empty { padding: 8px 9px; color: var(--text3); font-size: 12px; }
   .team-pick-new { color: var(--accent); border-top: 1px solid var(--border2); border-radius: 0 0 7px 7px; margin-top: 2px; }
@@ -653,7 +661,7 @@
     flex: 1; min-width: 0;
     padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 8px;
     background: var(--input-bg); color: var(--text);
-    font-family: 'Maple Mono NF CN', 'Maple Mono', 'SF Mono', Menlo, monospace;
+    font-family: var(--font-mono);
     font-size: 12px; outline: none;
   }
   .start-ws-input:focus { border-color: var(--accent); }
@@ -670,7 +678,7 @@
     width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 6px;
     padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 8px;
     background: var(--input-bg); color: var(--text); font-size: 12px; cursor: pointer;
-    font-family: 'Maple Mono NF CN','Maple Mono','SF Mono',Menlo,monospace;
+    font-family: var(--font-ui);
     -webkit-tap-highlight-color: transparent;
   }
   .start-tpl:active { border-color: var(--accent); }
@@ -686,7 +694,7 @@
     display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;
     padding: 7px 9px; border: none; border-radius: 7px; background: transparent;
     color: var(--text2); font-size: 12px; cursor: pointer; text-align: left;
-    font-family: 'Maple Mono NF CN','Maple Mono','SF Mono',Menlo,monospace;
+    font-family: var(--font-ui);
     -webkit-tap-highlight-color: transparent;
   }
   .start-tpl-item:active { background: var(--surface2); }
@@ -783,7 +791,7 @@
   .msg-body.md :global(h3),
   .msg-body.md :global(h4) { font-size: 13px; font-weight: 700; margin: 6px 0 3px; }
   .msg-body.md :global(code) {
-    font-family: 'Maple Mono NF CN','Maple Mono','SF Mono',Menlo,monospace;
+    font-family: var(--font-mono);
     font-size: 12px; background: var(--code-bg); padding: 1px 4px; border-radius: 4px;
   }
   .msg-body.md :global(pre) {
