@@ -1898,7 +1898,7 @@
              so it's always visible without stealing a whole row. The window
              chips scroll independently to its right. -->
         <button class="win-session" title={session} onclick={(e) => { e.stopPropagation(); showPanePicker = !showPanePicker; }}>
-          <Icon name="sessions" size={11} /><span class="win-session-name">{session}</span>
+          <span class="win-session-name">{session}</span>
           <Icon name="chevron-down" size={9} />
         </button>
         {#if showPanePicker}

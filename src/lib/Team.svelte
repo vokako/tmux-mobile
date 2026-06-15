@@ -343,7 +343,6 @@
   <div class="team-header">
     <div class="team-pick">
       <button class="team-pick-btn" onclick={() => switcherOpen = !switcherOpen}>
-        <Icon name="bot" size={13} />
         <span class="team-pick-name">{activeTeam ? activeTeam.room : (newTeam ? t('teamNew') : t('teamNone'))}</span>
         <Icon name="chevron-down" size={10} />
       </button>
