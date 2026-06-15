@@ -112,18 +112,22 @@ fn run_tmux(args: &[&str]) -> Result<String, String> {
 
 /// 列出所有 session
 pub fn list_sessions() -> Result<Vec<TmuxSession>, String> {
-    // Use unit separator (\x1f) as delimiter — cannot appear in session names
+    // Delimiter: a printable token, NOT a control byte. tmux >= 3.4
+    // octal-escapes control bytes (e.g. 0x1f -> "\037") in `-F` output, so a
+    // unit-separator delimiter never survives and the whole line lands in one
+    // field. A distinctive printable token is emitted verbatim and is
+    // implausible in real session/window names or paths. See TMUX_FIELD_SEP.
     let output = run_tmux(&[
         "list-sessions",
         "-F",
-        "#{session_name}\x1f#{session_windows}\x1f#{session_attached}\x1f#{session_activity}",
+        "#{session_name}<TMM_SEP>#{session_windows}<TMM_SEP>#{session_attached}<TMM_SEP>#{session_activity}",
     ])?;
 
     let mut sessions: Vec<TmuxSession> = output
         .lines()
         .filter(|l| !l.is_empty())
         .map(|line| {
-            let parts: Vec<&str> = line.split('\x1f').collect();
+            let parts: Vec<&str> = line.split("<TMM_SEP>").collect();
             TmuxSession {
                 name: parts.get(0).unwrap_or(&"").to_string(),
                 windows: parts.get(1).unwrap_or(&"0").parse().unwrap_or(0),
@@ -165,7 +169,7 @@ pub fn list_panes(session: &str) -> Result<Vec<TmuxPane>, String> {
     Ok(parse_pane_lines(&output))
 }
 
-const PANE_FORMAT: &str = "#{session_name}\x1f#{window_index}\x1f#{pane_index}\x1f#{pane_width}\x1f#{pane_height}\x1f#{pane_current_command}\x1f#{window_name}\x1f#{pane_title}\x1f#{pane_current_path}\x1f#{pane_active}\x1f#{pane_pid}";
+const PANE_FORMAT: &str = "#{session_name}<TMM_SEP>#{window_index}<TMM_SEP>#{pane_index}<TMM_SEP>#{pane_width}<TMM_SEP>#{pane_height}<TMM_SEP>#{pane_current_command}<TMM_SEP>#{window_name}<TMM_SEP>#{pane_title}<TMM_SEP>#{pane_current_path}<TMM_SEP>#{pane_active}<TMM_SEP>#{pane_pid}";
 
 /// Snapshot of the process table: pid -> (ppid, args). One `ps` subprocess
 /// per pane-listing call, shared across all panes — far cheaper than a
@@ -235,7 +239,7 @@ fn parse_pane_lines(output: &str) -> Vec<TmuxPane> {
         .lines()
         .filter(|l| !l.is_empty())
         .map(|line| {
-            let parts: Vec<&str> = line.split('\x1f').collect();
+            let parts: Vec<&str> = line.split("<TMM_SEP>").collect();
             let pane = TmuxPane {
                 session: parts.get(0).unwrap_or(&"").to_string(),
                 window: parts.get(1).unwrap_or(&"0").parse().unwrap_or(0),
@@ -318,11 +322,11 @@ pub fn cursor_info_with_cmd(
         "-t",
         target,
         "-p",
-        // Use a delimiter that can't appear in a process name. \x1f is
-        // already used elsewhere in this module for the same purpose.
-        "#{cursor_x}\x1f#{cursor_y}\x1f#{pane_height}\x1f#{pane_width}\x1f#{pane_current_command}",
+        // Printable delimiter (see list_sessions): tmux 3.4 octal-escapes
+        // control bytes in -F output, so a 0x1f delimiter does not survive.
+        "#{cursor_x}<TMM_SEP>#{cursor_y}<TMM_SEP>#{pane_height}<TMM_SEP>#{pane_width}<TMM_SEP>#{pane_current_command}",
     ])?;
-    let parts: Vec<&str> = out.trim_end_matches('\n').split('\x1f').collect();
+    let parts: Vec<&str> = out.trim_end_matches('\n').split("<TMM_SEP>").collect();
     let x = parts.get(0).unwrap_or(&"0").parse().unwrap_or(0);
     let y = parts.get(1).unwrap_or(&"0").parse().unwrap_or(0);
     let h = parts.get(2).unwrap_or(&"24").parse().unwrap_or(24);
@@ -579,11 +583,11 @@ pub fn ensure_session(session: &str, cwd: &str) -> Result<(), String> {
 /// launching a duplicate (idempotent across server restarts).
 pub fn find_window_by_name(session: &str, name: &str) -> Option<String> {
     let out = run_tmux(&[
-        "list-windows", "-t", session, "-F", "#{window_name}\x1f#{pane_id}",
+        "list-windows", "-t", session, "-F", "#{window_name}<TMM_SEP>#{pane_id}",
     ])
     .ok()?;
     for line in out.lines() {
-        let mut it = line.split('\x1f');
+        let mut it = line.split("<TMM_SEP>");
         if let (Some(wname), Some(pane)) = (it.next(), it.next()) {
             if wname == name {
                 return Some(pane.to_string());
@@ -596,11 +600,11 @@ pub fn find_window_by_name(session: &str, name: &str) -> Option<String> {
 /// All `(window_name, pane_id)` pairs in `session`. Used by team recovery to
 /// nudge every agent window back online after a server restart.
 pub fn list_named_windows(session: &str) -> Vec<(String, String)> {
-    match run_tmux(&["list-windows", "-t", session, "-F", "#{window_name}\x1f#{pane_id}"]) {
+    match run_tmux(&["list-windows", "-t", session, "-F", "#{window_name}<TMM_SEP>#{pane_id}"]) {
         Ok(out) => out
             .lines()
             .filter_map(|line| {
-                let mut it = line.split('\x1f');
+                let mut it = line.split("<TMM_SEP>");
                 match (it.next(), it.next()) {
                     (Some(n), Some(p)) if !n.is_empty() && !p.is_empty() => {
                         Some((n.to_string(), p.to_string()))
