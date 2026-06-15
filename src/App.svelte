@@ -98,7 +98,7 @@
   const chatSupported = false;
   let theme = $state(localStorage.getItem('tmux_theme') || 'system');
   let fontSize = $state(parseInt(localStorage.getItem('tmux_fontsize')) || 14);
-  const FONT_MIN = 8, FONT_MAX = 24;
+  const FONT_MIN = 6, FONT_MAX = 40;
   // Single source of truth for font-size changes (settings panel + the
   // desktop cmd/ctrl +/- shortcut both route through here). Changing
   // fontSize flows to Terminal as a prop, which re-fits xterm's cell
