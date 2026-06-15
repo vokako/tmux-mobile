@@ -95,6 +95,43 @@
   let view = $state('list');
   let previewZoom = $state(100);
 
+  // ─── Desktop two-pane (folder browser | preview) ──────────────────────────
+  // On a wide, non-touch screen Files becomes a desktop-style file manager:
+  // the list is always on the left, the preview fills the right. On mobile /
+  // narrow / touch we keep the single-pane `view` chain unchanged. Mirrors the
+  // split the Team tab already ships (Team.svelte).
+  const SPLIT_MIN_WIDTH = 900;
+  const isTouchDevice = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+  let wideEnough = $state(typeof window !== 'undefined' && window.innerWidth >= SPLIT_MIN_WIDTH);
+  let splitEligible = $derived(!isTouchDevice && wideEnough);
+  let filesFrac = $state(parseFloat(localStorage.getItem('tmux_files_frac') || '0.38')); // left = folder browser
+  let splitRow = $state(null);
+
+  $effect(() => {
+    if (isTouchDevice) return;
+    const onResize = () => { wideEnough = window.innerWidth >= SPLIT_MIN_WIDTH; };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  });
+
+  // Drag the splitter to adjust the browser/preview width ratio (desktop only).
+  function startDrag(e) {
+    e.preventDefault();
+    const rect = splitRow?.getBoundingClientRect();
+    if (!rect) return;
+    const onMove = (ev) => {
+      const x = (ev.touches ? ev.touches[0].clientX : ev.clientX) - rect.left;
+      filesFrac = Math.min(0.7, Math.max(0.2, x / rect.width));
+    };
+    const onUp = () => {
+      localStorage.setItem('tmux_files_frac', String(filesFrac));
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
+
   // Android local files
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
   let localFiles = $state([]);
@@ -1057,8 +1094,9 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="files" bind:this={filesEl} ontouchstart={onTouchStart} ontouchend={onTouchEnd}>
-  {#if view === 'list'}
+<!-- View blocks live in snippets so both layouts (mobile single-pane + desktop
+     two-pane) render the same markup. -->
+{#snippet listPanel()}
     <!-- Toolbar: all buttons in one row -->
     <div class="toolbar">
       <button class="tool-btn" onclick={goHome}><Icon name="home" size={13} /></button>
@@ -1197,8 +1235,9 @@
         {/if}
       {/if}
     </div>
+{/snippet}
 
-  {:else if view === 'preview'}
+{#snippet previewPanel()}
     <!-- File preview -->
     <div class="preview-header">
       <button class="back-btn" onclick={backToList}><Icon name="chevron-left" size={16} /></button>
@@ -1237,8 +1276,9 @@
         </div>
       {/if}
     </div>
+{/snippet}
 
-  {:else if view === 'edit'}
+{#snippet editPanel()}
     <!-- File editor -->
     <div class="preview-header">
       <button class="back-btn" onclick={backToPreview}><Icon name="chevron-left" size={16} /></button>
@@ -1262,8 +1302,9 @@
         ></textarea>
       </div>
     </div>
+{/snippet}
 
-  {:else if view === 'local'}
+{#snippet localPanel()}
     <!-- Local downloaded files -->
     <div class="preview-header">
       <button class="back-btn" onclick={() => { view = 'list'; }}><Icon name="chevron-left" size={16} /></button>
@@ -1286,8 +1327,9 @@
         <div class="empty">{t('noDownloads')}</div>
       {/if}
     </div>
+{/snippet}
 
-  {:else if view === 'info'}
+{#snippet infoPanel()}
     <!-- File info -->
     <div class="preview-header">
       <button class="back-btn" onclick={() => { view = currentFile?.content != null ? 'preview' : 'list'; }}><Icon name="chevron-left" size={16} /></button>
@@ -1312,7 +1354,9 @@
         <div class="info-row"><span class="info-label">{t('textFile')}</span><span class="info-val">{currentFile.stat.is_text ? t('yes') : t('no')}</span></div>
       {/if}
     </div>
-  {:else if view === 'git'}
+{/snippet}
+
+{#snippet gitPanel()}
     <!-- Git view -->
     <div class="preview-header">
       <button class="back-btn" onclick={() => { if (gitDiff) gitDiff = null; else view = 'list'; }}><Icon name="chevron-left" size={16} /></button>
@@ -1389,6 +1433,35 @@
         {/each}
       </div>
     {/if}
+{/snippet}
+
+<div class="files" bind:this={filesEl} ontouchstart={onTouchStart} ontouchend={onTouchEnd}>
+  {#if splitEligible}
+    <!-- Desktop: folder browser (left) | draggable splitter | preview (right). -->
+    <div class="files-split" bind:this={splitRow}>
+      <div class="files-left" style="flex: {filesFrac} 1 0;">{@render listPanel()}</div>
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="files-splitter" onmousedown={startDrag} title="Drag to resize"></div>
+      <div class="files-right" style="flex: {1 - filesFrac} 1 0;">
+        {#if view === 'preview'}{@render previewPanel()}
+        {:else if view === 'edit'}{@render editPanel()}
+        {:else if view === 'info'}{@render infoPanel()}
+        {:else if view === 'git'}{@render gitPanel()}
+        {:else if view === 'local'}{@render localPanel()}
+        {:else}
+          <div class="files-placeholder"><Icon name="file" size={40} /><p>{t('selectFile')}</p></div>
+        {/if}
+      </div>
+    </div>
+  {:else}
+    <!-- Mobile / narrow / touch: single-pane view chain (unchanged). -->
+    {#if view === 'list'}{@render listPanel()}
+    {:else if view === 'preview'}{@render previewPanel()}
+    {:else if view === 'edit'}{@render editPanel()}
+    {:else if view === 'local'}{@render localPanel()}
+    {:else if view === 'info'}{@render infoPanel()}
+    {:else if view === 'git'}{@render gitPanel()}
+    {/if}
   {/if}
   {#if copyToast}
     <div class="copy-toast">{t('copied')}</div>
@@ -1418,6 +1491,25 @@
 
 <style>
   .files { display: flex; flex-direction: column; flex: 1; min-height: 0; background: var(--bg); }
+
+  /* Desktop two-pane: folder browser | splitter | preview. The columns must be
+     flex-column themselves so each panel's sticky header (flex-shrink:0) +
+     scrollable body (flex:1; overflow) constrain correctly — `.files` gave them
+     that in single-pane mode; here the columns must. */
+  .files-split { display: flex; flex: 1; min-height: 0; width: 100%; }
+  .files-left, .files-right {
+    display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden;
+  }
+  .files-right { border-left: 1px solid var(--border); }
+  .files-splitter {
+    flex: 0 0 6px; cursor: col-resize; background: var(--border);
+    transition: background 0.15s ease;
+  }
+  .files-splitter:hover { background: var(--accent); }
+  .files-placeholder {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 10px; color: var(--text3); font-size: 13px; padding: 24px; text-align: center;
+  }
 
   /* Toolbar — same vertical rhythm as the Terminal window-switcher bar
      and the Sessions top-row (24 px buttons + 3 px padding = ~31 px total). */
