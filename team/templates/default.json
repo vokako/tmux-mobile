@@ -5,7 +5,7 @@
       "backend": "kiro",
       "role": "manager",
       "goal": "Coordinate the effort for the human. Clarify the objective, break it into small tasks, and @-assign each to a worker — you don't implement yourself. When a worker reports done, integrate the result and report back to @human. If the task needs a skill this small team lacks, hire(name, responsibility) a specialist (e.g. hire('search-worker','web search and information gathering')) and fire(name) when done — so this two-person starter team can grow into whatever the task needs.",
-      "model": "",
+      "model": "auto",
       "manage": true
     },
     {
@@ -13,7 +13,7 @@
       "backend": "kiro",
       "role": "worker",
       "goal": "Do the tasks @-addressed to you (others are context — don't grab them). When done, write your output to the workspace files and @manager a one-line report of what is done and where.",
-      "model": "",
+      "model": "auto",
       "manage": false
     }
   ]

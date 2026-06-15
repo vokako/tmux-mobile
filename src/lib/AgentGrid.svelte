@@ -7,6 +7,8 @@
   // agent's pane (window_name == agent name in the per-workspace team session).
   import Terminal from './Terminal.svelte';
   import Icon from './Icon.svelte';
+  import CollabGraph from './CollabGraph.svelte';
+  import { t } from './i18n.svelte.js';
   import { listSessionsWithPanes } from './ws.js';
   import { paneAgent } from './agents.js';
 
@@ -15,7 +17,13 @@
     employees = [],       // [{ name, state, ... }] desired roster (all employees)
     fontSize = 14,        // standard size; cells render two notches smaller
     visible = false,
+    collab = false,       // show the collaboration graph as the first cell
+    collabAgents = [],    // roster for the graph
+    collabEvent = null,   // latest live message driving the graph's arcs
   } = $props();
+
+  // Any cell (agent terminal OR the graph) can be maximized to fill the pane.
+  let expandedName = $state(null);
 
   // Cell font: two notches below the app's standard size (agent previews are
   // glanceable, not the primary editing surface), clamped to a legible floor.
@@ -48,8 +56,15 @@
 
   // Stable cell order: employees in roster order (manager/worker/reviewer/…).
   // Offline / not-yet-launched agents still get a cell (placeholder until their
-  // window appears), so the grid shape is stable as the team comes up.
-  let cells = $derived(employees.map(e => ({ name: e.name, state: e.state, pane: panesByName[e.name] || null })));
+  // window appears), so the grid shape is stable as the team comes up. FIRED
+  // (disabled) employees are dropped — their window is killed, so a cell for
+  // them would spin forever waiting for a pane that never returns.
+  let cells = $derived([
+    ...(collab ? [{ name: '__collab__', collab: true }] : []),
+    ...employees
+      .filter(e => e.state !== 'disabled')
+      .map(e => ({ name: e.name, state: e.state, pane: panesByName[e.name] || null })),
+  ]);
 
   // Near-square grid: columns = ceil(√n), rows = ceil(n / columns).
   let cols = $derived(Math.max(1, Math.ceil(Math.sqrt(cells.length || 1))));
@@ -63,6 +78,12 @@
   });
 
   function targetOf(p) { return `${p.session}:${p.window}.${p.pane}`; }
+
+  // The currently-maximized cell, if any; cleared if it leaves the grid.
+  let expandedCell = $derived(cells.find(c => c.name === expandedName) || null);
+  $effect(() => {
+    if (expandedName && !cells.some(c => c.name === expandedName)) expandedName = null;
+  });
 </script>
 
 <div
@@ -70,24 +91,36 @@
   style="grid-template-columns: repeat({cols}, 1fr); grid-template-rows: repeat({rows}, 1fr);"
 >
   {#each cells as cell (cell.name)}
-    {@const agent = cell.pane ? paneAgent(cell.pane) : null}
+    {@const agent = (!cell.collab && cell.pane) ? paneAgent(cell.pane) : null}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="ag-cell"
-      class:active={cell.name === activeName}
+      class:active={!cell.collab && cell.name === activeName}
+      class:ag-collab={cell.collab}
       onmousedowncapture={() => activeName = cell.name}
     >
       <div class="ag-head">
-        {#if agent}
+        {#if cell.collab}
+          <Icon name="collab" size={11} />
+        {:else if agent}
           <img class="ag-icon" class:claude={agent.tag === 'Claude'} src={agent.icon} alt={agent.tag} />
         {:else}
           <Icon name="bot" size={11} />
         {/if}
-        <span class="ag-name">{cell.name}</span>
-        {#if !cell.pane}<span class="ag-pending">…</span>{/if}
+        <span class="ag-name">{cell.collab ? t('teamCollab') : cell.name}</span>
+        {#if !cell.collab && !cell.pane}<span class="ag-pending">…</span>{/if}
+        <span class="ag-head-actions">
+          <button class="ag-head-btn" title="Expand" aria-label="Expand" onclick={() => expandedName = cell.name}>
+            <Icon name="maximize" size={12} />
+          </button>
+        </span>
       </div>
       <div class="ag-body">
-        {#if cell.pane}
+        {#if expandedName === cell.name}
+          <div class="ag-empty"><Icon name="maximize" size={16} /></div>
+        {:else if cell.collab}
+          <CollabGraph agents={collabAgents} event={collabEvent} />
+        {:else if cell.pane}
           {#key targetOf(cell.pane)}
             <Terminal
               target={targetOf(cell.pane)}
@@ -101,14 +134,54 @@
             />
           {/key}
         {:else}
-          <div class="ag-empty">
-            <span class="reconnect-spinner-sm"></span>
-          </div>
+          <div class="ag-empty"><span class="reconnect-spinner-sm"></span></div>
         {/if}
       </div>
     </div>
   {/each}
 </div>
+
+{#if expandedCell}
+  <!-- A maximized cell takes over the whole preview pane (graph or any agent). -->
+  <div class="ag-expanded">
+    <div class="ag-head">
+      {#if expandedCell.collab}
+        <Icon name="collab" size={12} />
+      {:else if expandedCell.pane}
+        {@const a2 = paneAgent(expandedCell.pane)}
+        {#if a2}<img class="ag-icon" class:claude={a2.tag === 'Claude'} src={a2.icon} alt={a2.tag} />{:else}<Icon name="bot" size={12} />{/if}
+      {:else}
+        <Icon name="bot" size={12} />
+      {/if}
+      <span class="ag-name">{expandedCell.collab ? t('teamCollab') : expandedCell.name}</span>
+      <span class="ag-head-actions">
+        <button class="ag-head-btn" title="Collapse" aria-label="Collapse" onclick={() => expandedName = null}>
+          <Icon name="minimize" size={13} />
+        </button>
+      </span>
+    </div>
+    <div class="ag-body">
+      {#if expandedCell.collab}
+        <CollabGraph agents={collabAgents} event={collabEvent} />
+      {:else if expandedCell.pane}
+        {#key targetOf(expandedCell.pane)}
+          <Terminal
+            target={targetOf(expandedCell.pane)}
+            session={expandedCell.pane.session}
+            command={expandedCell.pane.current_command || ''}
+            viewMode="terminal"
+            embedded={true}
+            chromeless={true}
+            active={true}
+            fontSize={fontSize}
+          />
+        {/key}
+      {:else}
+        <div class="ag-empty"><span class="reconnect-spinner-sm"></span></div>
+      {/if}
+    </div>
+  </div>
+{/if}
 
 <style>
   .agent-grid {
@@ -143,6 +216,20 @@
     font-size: 11px; font-weight: 600; color: var(--text2);
   }
   .ag-cell.active .ag-head { color: var(--accent); }
+  .ag-head-actions { margin-left: auto; display: flex; gap: 2px; }
+  .ag-head-btn {
+    background: none; border: none; color: var(--text3);
+    padding: 2px; display: inline-flex; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .ag-head-btn:active { color: var(--accent); }
+  .ag-collab .ag-body { background: var(--surface); }
+  .ag-expanded {
+    position: absolute; inset: 0; z-index: 5;
+    display: flex; flex-direction: column;
+    background: var(--bg); border: 1px solid var(--accent); border-radius: 8px;
+    overflow: hidden;
+  }
   .ag-icon { width: 13px; height: 13px; flex-shrink: 0; }
   .ag-icon.claude { width: 15px; height: 15px; }
   .ag-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -7,9 +7,13 @@
 
 use crate::bus::{Bus, BusProvider, WaitOutcome};
 use rmcp::handler::server::router::tool::ToolRouter;
-use rmcp::handler::server::tool::{Extension, Parameters};
-use rmcp::model::{ServerCapabilities, ServerInfo};
-use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler};
+use rmcp::handler::server::tool::{Extension, Parameters, ToolCallContext};
+use rmcp::model::{
+    CallToolRequestParam, CallToolResult, ListToolsResult, PaginatedRequestParam,
+    ServerCapabilities, ServerInfo,
+};
+use rmcp::service::RequestContext;
+use rmcp::{tool, tool_router, ErrorData, RoleServer, ServerHandler};
 use serde::Deserialize;
 use std::future::Future;
 use std::time::Duration;
@@ -96,6 +100,22 @@ fn identity(
         .filter(|s| !s.is_empty());
     bus.join(&name, role.as_deref()).map_err(|e| err(format!("join failed: {e}")))?;
     Ok((bus, name))
+}
+
+/// Does `name` carry the `manage` flag in its employee spec for `room`? Only
+/// managers may see or call hire/fire — gated here at the server so a
+/// non-manager's tools/list never even includes them, regardless of which CLI
+/// backend the agent runs. Unknown/unseeded callers (and specs without `manage`)
+/// are NOT allowed.
+fn agent_can_manage(provider: &dyn BusProvider, room: &str, name: &str) -> bool {
+    provider
+        .bus_for(room)
+        .and_then(|b| b.employees().ok())
+        .unwrap_or_default()
+        .into_iter()
+        .find(|e| e.name.eq_ignore_ascii_case(name))
+        .and_then(|e| e.spec.get("manage").and_then(|v| v.as_bool()))
+        .unwrap_or(false)
 }
 
 // --- agent-facing rendering: only what helps the LLM act, no DB/internal fields ---
@@ -247,7 +267,31 @@ impl AgoraMcp {
     }
 }
 
-#[tool_handler]
+impl AgoraMcp {
+    /// Whether the calling agent (resolved from the x-agent/x-room headers) may
+    /// manage — i.e. carries `manage` in its employee spec. Gates hire/fire.
+    fn caller_can_manage(&self, ctx: &RequestContext<RoleServer>) -> bool {
+        let Some(parts) = ctx.extensions.get::<http::request::Parts>() else { return false };
+        let Some(name) = parts
+            .headers
+            .get("x-agent")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        else {
+            return false;
+        };
+        let room = parts
+            .headers
+            .get("x-room")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| self.provider.default_room());
+        agent_can_manage(&*self.provider, &room, name)
+    }
+}
+
 impl ServerHandler for AgoraMcp {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
@@ -273,5 +317,49 @@ impl ServerHandler for AgoraMcp {
             ),
             ..Default::default()
         }
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParam>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        let mut tools = self.tool_router.list_all();
+        if !self.caller_can_manage(&context) {
+            tools.retain(|t| t.name.as_ref() != "hire" && t.name.as_ref() != "fire");
+        }
+        Ok(ListToolsResult::with_all_items(tools))
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParam,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, ErrorData> {
+        if matches!(request.name.as_ref(), "hire" | "fire") && !self.caller_can_manage(&context) {
+            return Err(err("hire and fire are disabled for this agent"));
+        }
+        let tcc = ToolCallContext::new(self, request, context);
+        self.tool_router.call(tcc).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bus::{Bus, SingleRoom};
+    use crate::store;
+
+    #[test]
+    fn only_manage_flagged_agents_can_hire_fire() {
+        // hire/fire visibility/permission keys off the employee `manage` flag, so
+        // a template with no manage=true agent exposes neither tool to anyone.
+        let bus = Bus::new(store::open_in_memory().unwrap(), "main");
+        bus.seed_employee("boss", &serde_json::json!({ "manage": true })).unwrap();
+        bus.seed_employee("worker", &serde_json::json!({ "manage": false })).unwrap();
+        let provider = SingleRoom(bus);
+        assert!(agent_can_manage(&provider, "main", "boss"), "manager may hire/fire");
+        assert!(!agent_can_manage(&provider, "main", "worker"), "worker may not");
+        assert!(!agent_can_manage(&provider, "main", "ghost"), "unseeded caller may not");
     }
 }

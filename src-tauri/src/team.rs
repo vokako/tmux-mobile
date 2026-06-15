@@ -51,9 +51,21 @@ pub const BUILTIN_TEMPLATE: &str = include_str!("../../team/templates/default.js
 /// role-agnostic, workflow-free communication contract.
 pub const SOFTWARE_DEV_TEMPLATE: &str = include_str!("../../team/templates/software-dev.json");
 
+/// A financial-research roster modeled on Dexter (virattt/dexter): a research
+/// director plus fundamentals / market+sentiment / valuation(DCF) / memo /
+/// reviewer analysts. Dexter's single-agent skills (DCF, investment memo, X
+/// sentiment) become specialist roles; its data discipline (figures carry
+/// sources, the deliverable is a file, chat is a scannable header) and its
+/// educational-only / not-investment-advice posture are baked into the goals.
+pub const FINANCIAL_RESEARCH_TEMPLATE: &str =
+    include_str!("../../team/templates/financial-research.json");
+
 /// Built-in templates seeded into teams/ on first run: (file stem, contents).
-const BUILTIN_TEMPLATES: &[(&str, &str)] =
-    &[("default", BUILTIN_TEMPLATE), ("software-dev", SOFTWARE_DEV_TEMPLATE)];
+const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
+    ("default", BUILTIN_TEMPLATE),
+    ("software-dev", SOFTWARE_DEV_TEMPLATE),
+    ("financial-research", FINANCIAL_RESEARCH_TEMPLATE),
+];
 
 /// The teams/ template directory.
 fn templates_dir() -> PathBuf {
@@ -684,26 +696,28 @@ mod tests {
         assert!(names.contains(&"manager") && names.contains(&"worker"));
         let managers = agents.iter().filter(|a| a["manage"] == true).count();
         assert_eq!(managers, 1, "exactly one manager");
+        assert!(agents.iter().all(|a| a["model"] == "auto"), "all models pinned to auto");
     }
 
     #[test]
-    fn software_dev_template_has_six_roles_one_manager_with_goals() {
-        // The software-dev roster is a second built-in (teams/software-dev.json).
+    fn software_dev_template_has_seven_roles_hire_fire_off() {
+        // The software-dev roster is a built-in (teams/software-dev.json).
         let v: Value = serde_json::from_str(SOFTWARE_DEV_TEMPLATE).unwrap();
         let agents = v["agents"].as_array().unwrap();
-        assert_eq!(agents.len(), 6, "tech-lead + product + architect + coder + reviewer + tester");
+        assert_eq!(agents.len(), 7, "lead+product+architect+coder+reviewer+tester+devops");
         let names: Vec<&str> = agents.iter().filter_map(|a| a["name"].as_str()).collect();
-        for expected in ["manager", "product", "architect", "coder", "reviewer", "tester"] {
+        for expected in ["manager", "product", "architect", "coder", "reviewer", "tester", "devops"] {
             assert!(names.contains(&expected), "missing role '{expected}': {names:?}");
         }
         let managers = agents.iter().filter(|a| a["manage"] == true).count();
-        assert_eq!(managers, 1, "exactly one manager");
+        assert_eq!(managers, 0, "hire/fire off: no manage=true agent");
         // Workflow lives in each role's goal (AGENTS.md is contract-only), so
         // every agent must carry a substantive goal.
         assert!(
             agents.iter().all(|a| a["goal"].as_str().map(|g| g.len() > 80).unwrap_or(false)),
             "each role's goal must carry its slice of the workflow"
         );
+        assert!(agents.iter().all(|a| a["model"] == "auto"), "all models pinned to auto");
     }
 
     #[test]
@@ -718,9 +732,28 @@ mod tests {
         names.sort();
         assert!(names.contains(&"default".to_string()), "default seeded: {names:?}");
         assert!(names.contains(&"software-dev".to_string()), "software-dev seeded: {names:?}");
+        assert!(names.contains(&"financial-research".to_string()), "financial-research seeded: {names:?}");
 
         std::env::remove_var("XDG_CONFIG_HOME");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn financial_research_template_has_lead_and_auto_models() {
+        let v: Value = serde_json::from_str(FINANCIAL_RESEARCH_TEMPLATE).unwrap();
+        let agents = v["agents"].as_array().unwrap();
+        assert!(agents.len() >= 5, "a multi-analyst research team");
+        let names: Vec<&str> = agents.iter().filter_map(|a| a["name"].as_str()).collect();
+        for expected in ["lead", "fundamentals", "valuation", "memo", "reviewer"] {
+            assert!(names.contains(&expected), "missing role '{expected}': {names:?}");
+        }
+        let managers = agents.iter().filter(|a| a["manage"] == true).count();
+        assert_eq!(managers, 0, "hire/fire off: no manage=true agent");
+        assert!(agents.iter().all(|a| a["model"] == "auto"), "all models pinned to auto");
+        assert!(
+            agents.iter().all(|a| a["goal"].as_str().map(|g| g.len() > 80).unwrap_or(false)),
+            "each role's goal must carry its methodology"
+        );
     }
 
     #[test]
@@ -735,14 +768,25 @@ mod tests {
 
     #[test]
     fn seed_template_kiro_empty_model_falls_back_to_default() {
-        // seed_template reads from disk; ensure the built-in default exists.
-        ensure_templates_seeded();
+        // Built-in templates now pin "auto", so the empty-model fallback is for
+        // USER-authored templates that leave model blank. Verify with a custom one.
+        let dir = std::env::temp_dir().join(format!("teamtest-model-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::env::set_var("XDG_CONFIG_HOME", &dir);
+
+        let agents = serde_json::json!([
+            { "name": "w", "backend": "kiro", "role": "w", "goal": "do things well", "model": "", "manage": false }
+        ]);
+        save_template("blankmodel", &agents).unwrap();
         let b = RecordingBridge { seeded: Mutex::new(vec![]), existing: vec![] };
-        seed_template(&b, "myroom", "default", &cfg());
+        seed_template(&b, "myroom", "blankmodel", &cfg());
         let seeded = b.seeded.lock().unwrap();
-        assert!(!seeded.is_empty(), "default template should seed agents");
-        // kiro agents with empty model inherit the server default.
+        assert!(!seeded.is_empty(), "custom template should seed agents");
+        // Empty model on a kiro agent inherits the server default.
         assert!(seeded.iter().all(|(_, s)| s["model"] == "claude-sonnet-4.6"));
+
+        std::env::remove_var("XDG_CONFIG_HOME");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -13,9 +13,11 @@
   // that as an "unavailable" state and the App hides the tab.
   import Icon from './Icon.svelte';
   import AgentGrid from './AgentGrid.svelte';
+  import CollabGraph from './CollabGraph.svelte';
   import DirPicker from './DirPicker.svelte';
   import { marked } from 'marked';
   import { t } from './i18n.svelte.js';
+  import { layout } from './layout.svelte.js';
   import {
     teamHistory, teamRoster, teamPost, teamStatus, teamStartTeam,
     teamCloseTeam, teamEmployees, teamTemplateSave, teamTemplateDelete,
@@ -35,18 +37,50 @@
   // Desktop + wide → show the split layout (agent grid | chat). Mobile/narrow
   // keeps the chat-only view (roster chips already give pane preview via tab).
   const SPLIT_MIN_WIDTH = 900;
-  const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
   let wideEnough = $state(typeof window !== 'undefined' && window.innerWidth >= SPLIT_MIN_WIDTH);
-  let splitEligible = $derived(!isTouchDevice && wideEnough);
+  let splitEligible = $derived(!layout.isTouchDevice && (layout.forceDesktop || wideEnough));
   $effect(() => {
-    if (isTouchDevice) return;
     const onResize = () => { wideEnough = window.innerWidth >= SPLIT_MIN_WIDTH; };
+    onResize();
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   });
 
   // Grid pane width as a fraction (left = agent grid). Draggable splitter.
   let gridFrac = $state(parseFloat(localStorage.getItem('tmux_team_gridfrac') || '0.6'));
+  // Latest live message drives the collaboration graph.
+  let lastEvent = $state(null);
+  // Swap the desktop split's left/right regions (some prefer the chat on the left).
+  let swapSides = $state(localStorage.getItem('tmux_team_swap') === '1');
+  function toggleSwap() {
+    swapSides = !swapSides;
+    localStorage.setItem('tmux_team_swap', swapSides ? '1' : '0');
+  }
+  // Mobile-only: the graph rides in a collapsible panel above the chat (there's
+  // no preview grid on phones, so this is the only place it can show). Desktop
+  // shows it as a cell in the preview grid instead.
+  let collabOpen = $state(localStorage.getItem('tmux_team_collab') === '1');
+  function toggleCollab() {
+    collabOpen = !collabOpen;
+    localStorage.setItem('tmux_team_collab', collabOpen ? '1' : '0');
+  }
+  let collabHeight = $state(parseInt(localStorage.getItem('tmux_team_collabh') || '210', 10));
+  function startCollabResize(e) {
+    e.preventDefault();
+    const startY = e.touches ? e.touches[0].clientY : e.clientY;
+    const startH = collabHeight;
+    const move = (ev) => {
+      const y = ev.touches ? ev.touches[0].clientY : ev.clientY;
+      collabHeight = Math.max(140, Math.min(640, startH + (y - startY)));
+    };
+    const end = () => {
+      localStorage.setItem('tmux_team_collabh', String(Math.round(collabHeight)));
+      window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', end);
+      window.removeEventListener('touchmove', move); window.removeEventListener('touchend', end);
+    };
+    window.addEventListener('mousemove', move); window.addEventListener('mouseup', end);
+    window.addEventListener('touchmove', move, { passive: false }); window.addEventListener('touchend', end);
+  }
 
   // ─── Multiple teams ──────────────────────────────────────────────────────
   // Each team is an isolated room. `teams` is the live list; `activeRoom` is
@@ -87,6 +121,11 @@
   // Roster entries that are present (not offline). The human posts as "human";
   // never show it as an addressable agent (you can't @ yourself usefully).
   let agents = $derived(roster.filter(a => a.status !== 'offline' && a.name !== 'human'));
+
+  // Current live status for a message author (for the dot on its name label).
+  function statusOf(name) {
+    return roster.find(a => a.name === name)?.status || 'offline';
+  }
 
   function scrollToBottom() {
     requestAnimationFrame(() => { if (listEl) listEl.scrollTop = listEl.scrollHeight; });
@@ -179,7 +218,8 @@
     const onMove = (ev) => {
       const x = (ev.touches ? ev.touches[0].clientX : ev.clientX) - rect.left;
       const f = Math.min(0.8, Math.max(0.2, x / rect.width));
-      gridFrac = f;
+      // When swapped, the LEFT pane is the chat, so the grid fraction is mirrored.
+      gridFrac = swapSides ? (1 - f) : f;
     };
     const onUp = () => {
       localStorage.setItem('tmux_team_gridfrac', String(gridFrac));
@@ -230,6 +270,7 @@
   function onTeamMessage(m) {
     if (!m?.id) return;
     if (m.room && activeRoom && m.room !== activeRoom) return; // other team
+    lastEvent = m; // drive the collaboration graph (it de-dupes by id)
     if (m.kind === 'join' || m.kind === 'leave' || m.kind === 'system') {
       refreshRoster();
     }
@@ -296,6 +337,8 @@
     // (the bus turns an @mention into a reply obligation).
     const sep = draft && !draft.endsWith(' ') ? ' ' : '';
     draft = `${draft}${sep}@${name} `;
+    // Keep the keyboard up: the chip tap must not steal focus from the input.
+    inputEl?.focus();
   }
 
   // Jump to the tmux pane an agent runs in. The team session names each agent's
@@ -372,6 +415,16 @@
       {/if}
     </div>
     {#if activeTeam}
+      {#if !splitEligible}
+        <button class="team-hbtn" class:on={collabOpen} onclick={toggleCollab} title={t('teamCollab')} aria-label={t('teamCollab')}>
+          <Icon name="collab" size={14} />
+        </button>
+      {/if}
+      {#if splitEligible}
+        <button class="team-swap" onclick={toggleSwap} class:on={swapSides} title={t('teamSwap')} aria-label={t('teamSwap')}>
+          <Icon name="swap-h" size={14} />
+        </button>
+      {/if}
       <button class="team-close" onclick={closeActiveTeam} title={t('teamClose')} aria-label={t('teamClose')}>
         <Icon name="x" size={13} />
       </button>
@@ -462,6 +515,15 @@
       </div>
     {/if}
 
+    <!-- Mobile-only graph (toggled from the header button; phones have no preview grid). -->
+    {#if !splitEligible && collabOpen}
+      <div class="collab-wrap" style="height:{collabHeight}px">
+        <CollabGraph {agents} event={lastEvent} />
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="collab-resize" onmousedown={startCollabResize} ontouchstart={startCollabResize} title="Drag to resize"></div>
+      </div>
+    {/if}
+
     <!-- Message log -->
     <div class="team-log" bind:this={listEl}>
       {#if messages.length === 0}
@@ -473,7 +535,7 @@
           {:else}
             <div class="msg-row" class:mine={isMine(m)}>
               <div class="msg-bubble" class:mine={isMine(m)}>
-                {#if !isMine(m)}<div class="msg-from">{m.from}</div>{/if}
+                {#if !isMine(m)}<div class="msg-from"><span class="roster-dot status-{statusOf(m.from)}"></span>{m.from}</div>{/if}
                 <!-- eslint-disable-next-line svelte/no-at-html-tags -->
                 <div class="msg-body md">{@html renderMarkdown(m.body)}</div>
                 <div class="msg-time">{fmtTime(m.ts)}</div>
@@ -488,8 +550,9 @@
     <div class="team-compose">
       {#if agents.length}
         <div class="compose-mentions">
+          <button class="mention-chip mention-all" onmousedown={(e) => e.preventDefault()} onclick={() => mention('all')}>@all</button>
           {#each agents as a}
-            <button class="mention-chip" onclick={() => mention(a.name)}>@{a.name}</button>
+            <button class="mention-chip" onmousedown={(e) => e.preventDefault()} onclick={() => mention(a.name)}>@{a.name}</button>
           {/each}
         </div>
       {/if}
@@ -522,16 +585,29 @@
   {:else if splitEligible && activeRoom && !newTeam && employees.length > 0}
     <!-- Desktop split: agent grid (left) | draggable splitter | chat (right). -->
     <div class="team-split" bind:this={splitRow}>
-      <div class="team-grid-pane" style="flex: {gridFrac} 1 0;">
-        {#key activeRoom}
-          <AgentGrid {teamSession} {employees} {fontSize} {visible} />
-        {/key}
-      </div>
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="team-splitter" onmousedown={startDrag} title="Drag to resize"></div>
-      <div class="team-chat-pane" style="flex: {1 - gridFrac} 1 0;">
-        {@render chatPane()}
-      </div>
+      {#if swapSides}
+        <div class="team-chat-pane" style="flex: {1 - gridFrac} 1 0;">
+          {@render chatPane()}
+        </div>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="team-splitter" onmousedown={startDrag} title="Drag to resize"></div>
+        <div class="team-grid-pane" style="flex: {gridFrac} 1 0;">
+          {#key activeRoom}
+            <AgentGrid {teamSession} {employees} {fontSize} {visible} collab={true} collabAgents={agents} collabEvent={lastEvent} />
+          {/key}
+        </div>
+      {:else}
+        <div class="team-grid-pane" style="flex: {gridFrac} 1 0;">
+          {#key activeRoom}
+            <AgentGrid {teamSession} {employees} {fontSize} {visible} collab={true} collabAgents={agents} collabEvent={lastEvent} />
+          {/key}
+        </div>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="team-splitter" onmousedown={startDrag} title="Drag to resize"></div>
+        <div class="team-chat-pane" style="flex: {1 - gridFrac} 1 0;">
+          {@render chatPane()}
+        </div>
+      {/if}
     </div>
   {:else}
     {@render chatPane()}
@@ -551,7 +627,7 @@
 <style>
   /* Desktop split: grid pane | splitter | chat pane. */
   .team-split { display: flex; height: 100%; min-height: 0; width: 100%; }
-  .team-grid-pane { min-width: 0; min-height: 0; overflow: hidden; }
+  .team-grid-pane { min-width: 0; min-height: 0; overflow: hidden; position: relative; }
   .team-chat-pane {
     min-width: 0; min-height: 0;
     display: flex; flex-direction: column;
@@ -608,7 +684,7 @@
   .tp-count { color: var(--text3); font-size: 11px; }
   .team-pick-empty { padding: 8px 9px; color: var(--text3); font-size: 12px; }
   .team-pick-new { color: var(--accent); border-top: 1px solid var(--border2); border-radius: 0 0 7px 7px; margin-top: 2px; }
-  .team-close {
+  .team-close, .team-swap, .team-hbtn {
     flex-shrink: 0; width: 28px; height: 28px; padding: 0;
     border: 1px solid var(--border2); border-radius: 8px;
     background: var(--input-bg); color: var(--text3);
@@ -616,6 +692,8 @@
     -webkit-tap-highlight-color: transparent;
   }
   .team-close:active { color: var(--danger); border-color: var(--danger); }
+  .team-swap:active, .team-swap.on,
+  .team-hbtn:active, .team-hbtn.on { color: var(--accent); border-color: var(--accent); }
   .team-start-cancel {
     padding: 6px 12px; border: 1px solid var(--border2); border-radius: 8px;
     background: transparent; color: var(--text3); font-size: 12px; cursor: pointer;
@@ -733,6 +811,23 @@
   .roster-dot.status-waiting { background: var(--status-ok); }
   .roster-dot.status-online { background: var(--accent); }
 
+  /* Collaboration graph panel (mobile only — toggled from the header button). */
+  .collab-wrap { position: relative; flex-shrink: 0; background: var(--surface); border-bottom: 1px solid var(--border); }
+  /* When the soft keyboard is open there isn't room for the fixed-height graph
+     above the chat — the browser would scroll the input into view and push the
+     top nav off-screen. Hide it while typing; it returns when the keyboard closes. */
+  :global(html.keyboard-open) .collab-wrap { display: none; }
+  .collab-resize {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 9px;
+    cursor: ns-resize; touch-action: none;
+  }
+  .collab-resize::after {
+    content: ''; position: absolute; left: 50%; bottom: 3px;
+    width: 40px; height: 3px; transform: translateX(-50%);
+    border-radius: 2px; background: var(--border2);
+  }
+  .collab-resize:active::after { background: var(--accent); }
+
   /* Message log */
   .team-log {
     flex: 1;
@@ -757,7 +852,7 @@
   .msg-row { display: flex; }
   .msg-row.mine { justify-content: flex-end; }
   .msg-bubble {
-    max-width: 78%;
+    max-width: 90%;
     padding: 7px 11px;
     border-radius: 14px;
     background: var(--surface2);
@@ -771,6 +866,7 @@
     border-bottom-right-radius: 4px;
   }
   .msg-from {
+    display: inline-flex; align-items: center; gap: 5px;
     font-size: 11px; font-weight: 600; color: var(--accent);
     margin-bottom: 2px;
   }
@@ -826,14 +922,14 @@
   .mention-chip {
     flex-shrink: 0;
     padding: 3px 9px; border: 1px solid var(--border2); border-radius: 999px;
-    background: transparent; color: var(--text3); font-size: 11px; font-weight: 500;
+    background: transparent; color: var(--text2); font-size: 11px; font-weight: 500;
     cursor: pointer; -webkit-tap-highlight-color: transparent; white-space: nowrap;
   }
   .mention-chip:active { color: var(--accent); border-color: var(--accent); }
   .compose-row { display: flex; align-items: flex-end; gap: 8px; }
   .compose-input {
     flex: 1; min-height: 38px; max-height: 160px;
-    padding: 9px 12px; border: 1px solid var(--input-border); border-radius: 18px;
+    padding: 9px 12px; border: 1px solid var(--input-border); border-radius: 8px;
     background: var(--input-bg); color: var(--text); font-size: 14px;
     font-family: inherit; resize: none; line-height: 1.4;
     overflow-y: auto;
@@ -842,7 +938,7 @@
   .compose-input:focus { border-color: var(--accent); }
   .compose-send {
     width: 38px; height: 38px; flex-shrink: 0;
-    border: none; border-radius: 50%;
+    border: none; border-radius: 8px;
     background: var(--accent-bg); color: var(--accent);
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     -webkit-tap-highlight-color: transparent;

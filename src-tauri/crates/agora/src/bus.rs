@@ -21,6 +21,11 @@ use tokio::sync::broadcast;
 const PRESENCE_TTL_MS: i64 = 30_000;
 const MAX_WAIT_MS: u64 = 50_000;
 const POLL_INTERVAL_MS: u64 = 1_000;
+/// Push throttling: messages that aren't addressed to you and aren't from the
+/// human (i.e. other agents' chatter) are HELD rather than waking you. Hold them
+/// for at most this long before flushing anyway, so an agent is never starved of
+/// room context even when it is never @-mentioned.
+const MAX_PUSH_WINDOW_MS: i64 = 300_000;
 
 #[derive(Clone)]
 pub struct Bus {
@@ -215,26 +220,48 @@ impl Bus {
         let deadline = Instant::now() + budget;
 
         loop {
-            // 1. Deliver anything new first (so you always receive directed work, even
-            //    though receiving it makes you owe a reply on the next wait).
-            let (delivered, roster, new_cursor) = {
+            // 1. Decide what to deliver. We DELIVER (and advance the cursor) only
+            //    when the new batch holds something this agent should react to: a
+            //    message addressed to it (@name / @all), or ANY message from the
+            //    human. Other agents' un-addressed chatter is HELD — the cursor
+            //    stays put, the agent isn't woken — to cut needless wakeups. Held
+            //    content is flushed the moment a trigger arrives (so the agent gets
+            //    full context in ONE batch), or once the oldest held message ages
+            //    past MAX_PUSH_WINDOW_MS, so nothing is starved forever.
+            let (delivered, roster, report_cursor) = {
                 let conn = self.lock();
                 store::touch(&conn, &self.room, agent).ok();
                 let cursor = store::get_agent(&conn, &self.room, agent)?.map(|a| a.cursor).unwrap_or(0);
                 let batch = store::messages_after(&conn, &self.room, cursor, 500)?;
                 let max_seq = batch.last().map(|m| m.seq).unwrap_or(cursor);
+                let roster = apply_presence(store::roster(&conn, &self.room)?);
+                let is_agent = |name: &str| roster.iter().any(|a| a.name.eq_ignore_ascii_case(name));
                 let foreign: Vec<Message> =
                     batch.into_iter().filter(|m| !m.from.eq_ignore_ascii_case(agent)).collect();
-                if max_seq > cursor {
-                    store::set_cursor(&conn, &self.room, agent, max_seq)?;
+                // Worth waking for: addressed to me (@me/@all), or a human message.
+                let triggered = foreign.iter().any(|m| {
+                    m.addresses(agent) || (matches!(m.kind, Kind::Msg) && !is_agent(&m.from))
+                });
+                // Safety valve: don't hold the oldest pending message forever.
+                let aged_out = foreign
+                    .first()
+                    .map(|m| crate::envelope::now_ms() - m.ts >= MAX_PUSH_WINDOW_MS)
+                    .unwrap_or(false);
+                if !foreign.is_empty() && (triggered || aged_out) {
+                    if max_seq > cursor {
+                        store::set_cursor(&conn, &self.room, agent, max_seq)?;
+                    }
+                    (foreign, roster, max_seq)
+                } else {
+                    // Hold: nothing for me yet. Keep the cursor so the held messages
+                    // flush on a later trigger/window; report the un-advanced cursor.
+                    (Vec::new(), roster, cursor)
                 }
-                let roster = apply_presence(store::roster(&conn, &self.room)?);
-                (foreign, roster, max_seq)
             };
             if !delivered.is_empty() {
                 let conn = self.lock();
                 store::set_status(&conn, &self.room, agent, "working")?;
-                return Ok(WaitOutcome::Delivered { messages: delivered, roster, cursor: new_cursor });
+                return Ok(WaitOutcome::Delivered { messages: delivered, roster, cursor: report_cursor });
             }
 
             // 2. Caught up: refuse to go idle while you owe someone a reply, and
@@ -258,7 +285,7 @@ impl Bus {
             // 3. Nothing to do and nothing owed: park until a new message or the timeout.
             let now = Instant::now();
             if now >= deadline {
-                return Ok(WaitOutcome::Idle { roster, cursor: new_cursor });
+                return Ok(WaitOutcome::Idle { roster, cursor: report_cursor });
             }
             let nap = (deadline - now).min(Duration::from_millis(POLL_INTERVAL_MS));
             tokio::select! {

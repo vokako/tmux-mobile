@@ -10,6 +10,7 @@
   import { teamStatus } from './lib/ws.js';
   import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable } from './lib/ws.js';
   import { t, i18n, setLocale } from './lib/i18n.svelte.js';
+  import { layout } from './lib/layout.svelte.js';
 
   // Tunable constants
   const KB_OPEN_THRESHOLD = 100; // px difference to detect keyboard open
@@ -45,9 +46,8 @@
   let splitMenuOpen = $state(false);   // the top-right layout popover
   let nextCellId = 0;
   const SPLIT_MIN_WIDTH = 900;
-  const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
   let wideEnough = $state(typeof window !== 'undefined' && window.innerWidth >= SPLIT_MIN_WIDTH);
-  let splitEligible = $derived(!isTouchDevice && wideEnough);
+  let splitEligible = $derived(!layout.isTouchDevice && (layout.forceDesktop || wideEnough));
   let splitActive = $derived(splitEligible && splitLayout > 1 && splitCells.length > 0);
 
   function setLayout(n) {
@@ -794,6 +794,14 @@
             <button class="sp-font-btn" onclick={() => setFontSize(fontSize - 1)}>−</button>
             <span class="sp-font-val">{fontSize}</span>
             <button class="sp-font-btn" onclick={() => setFontSize(fontSize + 1)}>+</button>
+          </div>
+        </div>
+        <div class="sp-row">
+          <span class="sp-label">{t('layout')}</span>
+          <div class="sp-btns">
+            <button class:active={layout.mode === 'auto'} onclick={() => layout.set('auto')}>{t('layoutAuto')}</button>
+            <button class:active={layout.mode === 'desktop'} onclick={() => layout.set('desktop')}>{t('layoutDesktop')}</button>
+            <button class:active={layout.mode === 'mobile'} onclick={() => layout.set('mobile')}>{t('layoutMobile')}</button>
           </div>
         </div>
         <div class="sp-row">

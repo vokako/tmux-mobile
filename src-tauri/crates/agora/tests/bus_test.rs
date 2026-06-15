@@ -19,22 +19,52 @@ async fn drain(bus: &Bus, agent: &str) {
 }
 
 #[tokio::test]
-async fn wait_returns_roster_and_foreign_messages() {
+async fn wait_delivers_addressed_and_human_messages_with_roster() {
     let bus = new_bus();
     bus.join("alice", None).unwrap();
     bus.join("bob", None).unwrap();
     drain(&bus, "alice").await;
     drain(&bus, "bob").await;
 
-    bus.post("alice", "hello room", false).unwrap(); // broadcast, no @mention
+    // An agent message addressed to bob (@bob) is a trigger → delivered.
+    bus.post("alice", "@bob hello room", false).unwrap();
 
     match bus.wait("bob", Some(Duration::from_millis(500))).await.unwrap() {
         WaitOutcome::Delivered { messages, roster, .. } => {
-            assert!(messages.iter().any(|m| m.body == "hello room"));
+            assert!(messages.iter().any(|m| m.body.contains("hello room")));
             assert!(messages.iter().all(|m| m.from != "bob"));
             assert!(roster.iter().any(|a| a.name == "alice"));
         }
         other => panic!("expected delivery, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn agent_chatter_is_held_then_flushed_on_trigger() {
+    // Push throttling: another agent's un-addressed broadcast does NOT wake me;
+    // it's held until a trigger (here a human message) flushes the whole batch.
+    let bus = new_bus();
+    bus.join("lead", None).unwrap();
+    bus.join("worker", None).unwrap();
+    drain(&bus, "lead").await;
+    drain(&bus, "worker").await;
+
+    // worker thinks out loud (broadcast, not @lead) → lead must NOT be woken.
+    bus.post("worker", "thinking out loud", false).unwrap();
+    let held = bus.wait("lead", Some(Duration::from_millis(200))).await.unwrap();
+    assert!(matches!(held, WaitOutcome::Idle { .. }),
+        "un-addressed agent chatter must be held, got {held:?}");
+
+    // A human message is always a trigger → flush EVERYTHING new in one batch.
+    bus.post("human", "@lead what's the status?", false).unwrap();
+    match bus.wait("lead", Some(Duration::from_millis(500))).await.unwrap() {
+        WaitOutcome::Delivered { messages, .. } => {
+            assert!(messages.iter().any(|m| m.body.contains("thinking out loud")),
+                "the held chatter must ride along in the flushed batch");
+            assert!(messages.iter().any(|m| m.body.contains("status")),
+                "the triggering human message must be delivered");
+        }
+        other => panic!("expected a flushed batch, got {other:?}"),
     }
 }
 

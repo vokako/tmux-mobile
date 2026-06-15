@@ -23,6 +23,7 @@
   import mermaid from 'mermaid';
   import Icon from './Icon.svelte';
   import { t } from './i18n.svelte.js';
+  import { layout } from './layout.svelte.js';
   import { copyText } from './clipboard.js';
   import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsDownloadHttp, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref, fsConvert } from './ws.js';
 
@@ -102,15 +103,14 @@
   // narrow / touch we keep the single-pane `view` chain unchanged. Mirrors the
   // split the Team tab already ships (Team.svelte).
   const SPLIT_MIN_WIDTH = 900;
-  const isTouchDevice = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
   let wideEnough = $state(typeof window !== 'undefined' && window.innerWidth >= SPLIT_MIN_WIDTH);
-  let splitEligible = $derived(!isTouchDevice && wideEnough);
+  let splitEligible = $derived(!layout.isTouchDevice && (layout.forceDesktop || wideEnough));
   let filesFrac = $state(parseFloat(localStorage.getItem('tmux_files_frac') || '0.38')); // left = folder browser
   let splitRow = $state(null);
 
   $effect(() => {
-    if (isTouchDevice) return;
     const onResize = () => { wideEnough = window.innerWidth >= SPLIT_MIN_WIDTH; };
+    onResize();
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   });
@@ -1000,6 +1000,7 @@
   }
 
   function highlightCode(text, mime) {
+    if (text == null) return '';
     const lang = hljsLang(mime);
     if (lang && hljs.getLanguage(lang)) {
       return hljs.highlight(text, { language: lang }).value;
@@ -1008,6 +1009,7 @@
   }
 
   function renderMarkdown(text) {
+    if (text == null) return '';
     // Protect code blocks/inline code from KaTeX processing
     const codeHoles = [];
     let safe = text
@@ -1083,6 +1085,7 @@
   });
 
   function renderCsv(text) {
+    if (text == null) return '';
     const lines = text.trim().split('\n');
     if (!lines.length) return '';
     const rows = lines.map(l => l.split(',').map(c => c.trim().replace(/^"|"$/g, '')));
@@ -1271,12 +1274,12 @@
         <div class="md-render">{@html currentFile.convertedHtml}</div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'code'}
         <div class="code-lined">
-          <div class="line-nums">{@html currentFile.content.split('\n').map((_, i) => i + 1).join('\n')}</div>
+          <div class="line-nums">{@html (currentFile.content ?? '').split('\n').map((_, i) => i + 1).join('\n')}</div>
           <pre class="code-preview"><code>{@html highlightCode(currentFile.content, currentFile.stat?.mime_hint)}</code></pre>
         </div>
       {:else}
         <div class="code-lined">
-          <div class="line-nums">{@html currentFile.content.split('\n').map((_, i) => i + 1).join('\n')}</div>
+          <div class="line-nums">{@html (currentFile.content ?? '').split('\n').map((_, i) => i + 1).join('\n')}</div>
           <pre class="code-preview"><code>{@html highlightCode(currentFile.content, currentFile.stat?.mime_hint)}</code></pre>
         </div>
       {/if}

@@ -75,6 +75,20 @@
     <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
   {:else if name === 'undo'}
     <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+  {:else if name === 'redo'}
+    <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.13-9.36L23 10"/>
+  {:else if name === 'arc-right'}
+    <path d="M7 18 V12 A5 5 0 0 1 12 7 H16"/><polyline points="13 4 17 7 13 10"/>
+  {:else if name === 'arc-left'}
+    <path d="M17 18 V12 A5 5 0 0 0 12 7 H8"/><polyline points="11 4 7 7 11 10"/>
+  {:else if name === 'swap-h'}
+    <path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>
+  {:else if name === 'collab'}
+    <circle cx="12" cy="12" r="8"/><circle cx="12" cy="4" r="2.3"/><circle cx="5.1" cy="16" r="2.3"/><circle cx="18.9" cy="16" r="2.3"/>
+  {:else if name === 'maximize'}
+    <path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>
+  {:else if name === 'minimize'}
+    <path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/>
   {:else if name === 'info'}
     <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
   {:else if name === 'files'}
