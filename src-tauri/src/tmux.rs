@@ -538,6 +538,75 @@ pub fn kill_window(target: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// True if a tmux session with this exact name exists.
+pub fn session_exists(session: &str) -> bool {
+    run_tmux(&["has-session", "-t", session]).is_ok()
+}
+
+/// All tmux session names beginning with `prefix` (e.g. "tmm-team-"). Used on
+/// startup to recover teams that survived a server restart.
+pub fn list_team_sessions(prefix: &str) -> Vec<String> {
+    match run_tmux(&["list-sessions", "-F", "#{session_name}"]) {
+        Ok(out) => out
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| l.starts_with(prefix))
+            .map(|l| l.to_string())
+            .collect(),
+        Err(_) => Vec::new(), // no server / no sessions
+    }
+}
+
+/// Ensure `session` exists (detached), creating it at `cwd` if missing. Used by
+/// the in-process team supervisor before it spawns agent windows.
+pub fn ensure_session(session: &str, cwd: &str) -> Result<(), String> {
+    if run_tmux(&["has-session", "-t", session]).is_ok() {
+        return Ok(());
+    }
+    let dir = if cwd.is_empty() { home_dir() } else { cwd.to_string() };
+    if dir.is_empty() {
+        run_tmux(&["new-session", "-d", "-s", session])?;
+    } else {
+        run_tmux(&["new-session", "-d", "-s", session, "-c", &dir])?;
+    }
+    // Deep scrollback so an agent's history survives in its window.
+    let _ = run_tmux(&["set-option", "-t", session, "history-limit", "100000"]);
+    Ok(())
+}
+
+/// Find the active pane id of a window named `name` in `session`, if one exists.
+/// Used by the team supervisor to adopt an already-open agent window instead of
+/// launching a duplicate (idempotent across server restarts).
+pub fn find_window_by_name(session: &str, name: &str) -> Option<String> {
+    let out = run_tmux(&[
+        "list-windows", "-t", session, "-F", "#{window_name}\x1f#{pane_id}",
+    ])
+    .ok()?;
+    for line in out.lines() {
+        let mut it = line.split('\x1f');
+        if let (Some(wname), Some(pane)) = (it.next(), it.next()) {
+            if wname == name {
+                return Some(pane.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Create a new window named `name` in `session` rooted at `cwd`, returning the
+/// new pane id (`%NN`). The window name lets the Team tab map an agent to its
+/// pane by `window_name`.
+pub fn new_named_window(session: &str, name: &str, cwd: &str) -> Result<String, String> {
+    let dir = if cwd.is_empty() { home_dir() } else { cwd.to_string() };
+    let mut args = vec!["new-window", "-t", session, "-n", name, "-P", "-F", "#{pane_id}"];
+    if !dir.is_empty() {
+        args.push("-c");
+        args.push(&dir);
+    }
+    let out = run_tmux(&args)?;
+    Ok(out.trim().to_string())
+}
+
 /// Resize the window containing target pane to given cols × rows.
 /// Only effective when no terminal client is attached to the session.
 pub fn resize_pane(target: &str, cols: usize, rows: usize) -> Result<(), String> {

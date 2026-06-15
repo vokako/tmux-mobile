@@ -1,0 +1,44 @@
+[package]
+name = "agora"
+version = "0.1.0"
+edition = "2021"
+description = "A group-chat message bus for multi-agent coordination, served as an HTTP MCP server with a live dashboard."
+license = "MIT"
+
+# Vendored from the standalone `agora` project (github: experimental). Here it is
+# a desktop-only library sub-crate of tmux-mobile: the `Bus` runs in-process and
+# its axum router (MCP + dashboard) is mounted by the tmux-mobile desktop server,
+# so the phone and external MCP agents share one room without an extra HTTP hop.
+# The original CLI binary (src/main.rs) is intentionally dropped — there is no
+# standalone daemon here.
+
+[lib]
+name = "agora"
+path = "src/lib.rs"
+
+[dependencies]
+# Core domain + storage
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+anyhow = "1"
+time = { version = "0.3", features = ["formatting", "macros"] }
+
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "signal", "sync"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+
+# MCP server over Streamable HTTP
+rmcp = { version = "0.3", features = ["server", "macros", "transport-streamable-http-server", "transport-worker"] }
+schemars = "1"
+
+# Web layer: HTTP MCP mount + dashboard + SSE + human API
+axum = "0.8"
+tower = "0.5"
+http = "1"
+
+[dev-dependencies]
+tempfile = "3"
+# web_test.rs drives the axum router over a real socket.
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }

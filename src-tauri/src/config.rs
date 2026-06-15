@@ -16,6 +16,21 @@ struct FileConfig {
     // immediately (legacy behavior). Default 600 (10 min) so short
     // reconnects (backgrounded app, network blip) skip the reflow cycle.
     disconnect_grace_secs: Option<u64>,
+    // Team multi-agent bus (desktop only). `team_bind` is where the in-process
+    // MCP daemon + dashboard listen for external coding agents; the phone
+    // reaches the same room through the tmux-mobile WS server, so this address
+    // only matters for the agents themselves. The bus always runs in-process.
+    // `team_*` / `agora_*` aliases are accepted for configs written by the
+    // pre-rebrand builds (the bus library is still upstream "agora").
+    #[serde(alias = "crew_bind", alias = "agora_bind")]
+    team_bind: Option<String>,
+    #[serde(alias = "crew_db", alias = "agora_db")]
+    team_db: Option<String>,
+    #[serde(alias = "crew_room", alias = "agora_room")]
+    team_room: Option<String>,
+    // Default model for kiro-backed team agents.
+    #[serde(alias = "crew_model", alias = "agora_model")]
+    team_model: Option<String>,
 }
 
 pub struct Config {
@@ -28,18 +43,32 @@ pub struct Config {
     pub tls_key: Option<String>,
     pub scrollback: usize,
     pub disconnect_grace_secs: u64,
+    pub team_bind: String,
+    pub team_db: String,
+    pub team_room: String,
+    pub team_model: String,
 }
 
 fn config_path() -> PathBuf {
     dirs_next().join("config.toml")
 }
 
+/// The tmux-mobile config directory (`~/.config/tmux-mobile`). Public so the
+/// team supervisor can place its per-agent working files alongside the rest of
+/// the app's state.
+pub fn config_dir() -> PathBuf {
+    dirs_next()
+}
+
 fn dirs_next() -> PathBuf {
-    if let Some(home) = std::env::var_os("HOME") {
-        PathBuf::from(home).join(".config").join("tmux-mobile")
-    } else {
-        PathBuf::from(".config").join("tmux-mobile")
-    }
+    // Follow the XDG Base Directory convention: $XDG_CONFIG_HOME if set,
+    // else ~/.config. App state lives under the `tmux-mobile/` subdir.
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .unwrap_or_else(|| PathBuf::from(".config"));
+    base.join("tmux-mobile")
 }
 
 impl Config {
@@ -84,6 +113,30 @@ impl Config {
                 .and_then(|s| s.parse().ok())
                 .or(file_cfg.disconnect_grace_secs)
                 .unwrap_or(600),
+            team_bind: std::env::var("TEAM_BIND")
+                .ok()
+                .or_else(|| std::env::var("CREW_BIND").ok())
+                .or_else(|| std::env::var("AGORA_BIND").ok())
+                .or(file_cfg.team_bind)
+                .unwrap_or_else(|| "127.0.0.1:8787".into()),
+            team_db: std::env::var("TEAM_DB")
+                .ok()
+                .or_else(|| std::env::var("CREW_DB").ok())
+                .or_else(|| std::env::var("AGORA_DB").ok())
+                .or(file_cfg.team_db)
+                .unwrap_or_else(|| dirs_next().join("team.db").to_string_lossy().into_owned()),
+            team_room: std::env::var("TEAM_ROOM")
+                .ok()
+                .or_else(|| std::env::var("CREW_ROOM").ok())
+                .or_else(|| std::env::var("AGORA_ROOM").ok())
+                .or(file_cfg.team_room)
+                .unwrap_or_else(|| "main".into()),
+            team_model: std::env::var("TEAM_MODEL")
+                .ok()
+                .or_else(|| std::env::var("CREW_MODEL").ok())
+                .or_else(|| std::env::var("AGORA_MODEL").ok())
+                .or(file_cfg.team_model)
+                .unwrap_or_else(|| "claude-sonnet-4.6".into()),
         }
     }
 }

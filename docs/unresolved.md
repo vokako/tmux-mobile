@@ -1,5 +1,62 @@
 # Unresolved Issues
 
+## Team feature — open issues (review 2026-06-15)
+
+### ~~close_team leaks the room's bus + re-broadcast pump~~ — FIXED
+- The `Team` now stores its pump `JoinHandle`; `close_team` aborts it (and the
+  double-checked-insert path aborts the duplicate pump). No leak, no duplicate
+  pushes on reopen.
+
+### ~~Supervisor retries a failing launch every 3s forever~~ — FIXED
+- The reconcile loop now counts per-agent launch failures and stops retrying
+  after `MAX_LAUNCH_FAILURES` (3). (Still not surfaced in the UI — see below.)
+
+### ~~A closed team that wasn't fully launched never stops its supervisor~~ — FIXED
+- The loop now exits when `!bridge.room_exists(room)` too, not only on
+  `launched_any && session gone`.
+
+### Launch failures / fired agents not surfaced in the UI
+- **Priority**: Low · **Area**: Team
+- After the failure cap (above) the supervisor stops trying, but the UI shows no
+  "failed" state — the agent just never appears as a chip/grid cell. Likewise a
+  `fire`d or crashed agent. Fix: include a per-agent state (failed/offline) in
+  the teams/roster payload and badge it in the roster + grid.
+
+### Fired/offline agents keep a dead cell + stale pane in the grid
+- **Priority**: Low · **Area**: Team / AgentGrid.svelte
+- The desktop grid renders one cell per *employee* (all states), so a `fire`d or
+  crashed agent leaves a cell pointing at a dead/closed pane (spinner or last
+  frame). No visual "offline/failed" treatment. Fix: badge offline cells, or
+  drop disabled employees from the grid.
+
+### Manager hire() launches on a hardcoded backend, no model/x-room nuance
+- **Priority**: Low · **Area**: Team / agora hire + supervisor
+- `agora::bus::hire` seeds an employee with `backend` absent; our supervisor
+  defaults hires to "kiro" (the recovery/seed path) — a hire can't pick
+  claude/codex, and the hired spec has no `model`. Acceptable for now; revisit
+  if runtime hiring is used heavily.
+
+### System prompt / template edits don't affect already-running teams
+- **Priority**: Low · **Area**: Team
+- The system prompt + roster are baked into a team's brief/seed at launch.
+  Editing them only affects teams started afterward; running agents must be
+  restarted to pick up changes. By design, but not surfaced to the user.
+
+### rmcp client reconnect behavior on server restart unverified
+- **Priority**: Medium · **Area**: Team / agora MCP
+- The in-process MCP daemon's session ids are in-memory (LocalSessionManager);
+  on server restart agents get stale-session errors and must re-handshake.
+  Whether kiro/claude/codex reconnect silently vs error to the model is
+  unverified (needs a real agent + restart). DB-backed history means no messages
+  are lost (cursor replay), but the reconnect smoothness is unknown.
+
+### Stale Chinese default.json on existing installs
+- **Priority**: Low · **Area**: Team / templates
+- `ensure_templates_seeded` only writes `default.json` when absent, so installs
+  created before the English rewrite keep the Chinese roster. The English roster
+  ships as `default-en.json` (added to the user config) but `default.json` is
+  not migrated. Fix: offer a "reset to built-in" action, or version the builtin.
+
 ## iOS Target
 - **Priority**: Low
 - **Area**: Build / Platform

@@ -61,6 +61,9 @@ const pending = new Map();
 // other's intact.
 const paneOutputListeners = new Map(); // target -> Set<cb(target, content, cursor, current_command)>
 const paneClosedListeners = new Map(); // target -> Set<cb(target)>
+// Team group-chat message push listeners (Team tab). Unkeyed — one stream
+// for the whole room — so a plain Set, not a per-target map.
+const teamMessageListeners = new Set(); // Set<cb(message)>
 
 function addListener(map, target, cb) {
   let set = map.get(target);
@@ -89,6 +92,8 @@ export function addPaneOutputListener(target, cb) { addListener(paneOutputListen
 export function removePaneOutputListener(target, cb) { removeListener(paneOutputListeners, target, cb); }
 export function addPaneClosedListener(target, cb) { addListener(paneClosedListeners, target, cb); }
 export function removePaneClosedListener(target, cb) { removeListener(paneClosedListeners, target, cb); }
+export function addTeamMessageListener(cb) { teamMessageListeners.add(cb); }
+export function removeTeamMessageListener(cb) { teamMessageListeners.delete(cb); }
 export function setOnDisconnect(cb) { onDisconnect = cb; }
 
 // --- Crypto helpers (Web Crypto API) ---
@@ -395,6 +400,12 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
         return;
       }
 
+      if (data.method === 'team_message') {
+        const m = data.params?.message;
+        if (m) for (const cb of teamMessageListeners) cb(m);
+        return;
+      }
+
       if (data.id != null && pending.has(data.id)) {
         const { resolve: res, reject: rej } = pending.get(data.id);
         pending.delete(data.id);
@@ -561,6 +572,28 @@ export function fsDownloadHttp(path) {
 export const fsUpload = (path, data) => call('fs_upload', { path, data }, 60000);
 export const fsConvert = (path, format = 'html') => call('fs_convert', { path, format });
 export const gitCmd = (subcmd, args = [], cwd) => call('git', { subcmd, args, cwd });
+
+// Team multi-agent bus (Team tab). Only available when the server has the
+// in-process bus wired (desktop); on a server without it these reject with a
+// method-not-found error, which the Team tab uses to hide itself.
+// All chat ops are scoped to a team `room`. team_status / team_teams are
+// team-agnostic (they list teams); the rest take the active room.
+export const teamStatus = () => call('team_status');
+export const teamTeams = () => call('team_teams');
+export const teamHistory = (room, limit = 100) => call('team_history', { room, limit });
+export const teamRoster = (room) => call('team_roster', { room });
+export const teamEmployees = (room) => call('team_employees', { room });
+export const teamPost = (room, body, requires_reply) => call('team_post', { room, body, requires_reply });
+// Operator actions: spin up a team for a workspace (room = its slug) from a
+// named roster template, or close one.
+export const teamStartTeam = (workspace, template) => call('team_start_team', { workspace, template });
+export const teamCloseTeam = (room) => call('team_close_team', { room });
+// Roster templates (named agent rosters; edited in the Templates settings panel).
+export const teamTemplates = () => call('team_templates');
+export const teamTemplateSave = (name, agents) => call('team_template_save', { name, agents });
+export const teamTemplateDelete = (name) => call('team_template_delete', { name });
+// Global system prompt prepended to every agent's brief (team_status returns it).
+export const teamSystemPromptSave = (text) => call('team_system_prompt_save', { text });
 
 // Subscription refcount per target. The server keeps ONE subscription entry
 // per target, so two split cells on the same window must NOT let the first

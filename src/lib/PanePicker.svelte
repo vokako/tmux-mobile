@@ -87,9 +87,12 @@
       <div class="picker-panes">
         {#each s.panes as p}
           {@const isCur = currentTarget === `${p.session}:${p.window}.${p.pane}`}
+          {@const isTeam = p.session.startsWith('tmm-team-')}
           <AgentChip
             agent={paneAgent(p)}
-            label={p.current_command || p.window_name || `${p.window}.${p.pane}`}
+            label={isTeam
+              ? (p.window_name || p.current_command || `${p.window}.${p.pane}`)
+              : (p.current_command || p.window_name || `${p.window}.${p.pane}`)}
             variant={isCur ? 'active' : 'default'}
             title={`${p.session}:${p.window}.${p.pane}`}
             onclick={(e) => { e.stopPropagation(); onPick(p); }}
