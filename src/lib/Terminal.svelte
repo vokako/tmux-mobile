@@ -2044,6 +2044,7 @@
     <ChatView content={paneContent} {command} {fontSize} onSendKeys={(keys) => sendKeys(target, keys, false)} />
   {/if}
 
+  {#if !chromeless}
   <div class="input-area">
     {#if viewMode === 'terminal' && isMobile}
       <div class="input-bar">
@@ -2132,6 +2133,7 @@
       </div>
     {/if}
   </div>
+  {/if}
 </div>
 
 <style>

@@ -147,7 +147,12 @@
   .ag-icon.claude { width: 15px; height: 15px; }
   .ag-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ag-pending { color: var(--text3); }
-  .ag-body { flex: 1; min-width: 0; min-height: 0; position: relative; }
+  /* Flex column so the embedded <Terminal> (.terminal { flex: 1 }) is
+     constrained to the cell's height. Without display:flex here, .terminal
+     ignores its flex basis and grows to xterm's natural row count, rendering
+     ~47 rows inside a ~22-row box — the live TUI chrome (status/input lines)
+     ends up clipped below the fold and the cell shows only stale scrollback. */
+  .ag-body { flex: 1; min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; }
   .ag-empty {
     width: 100%; height: 100%;
     display: flex; align-items: center; justify-content: center;
