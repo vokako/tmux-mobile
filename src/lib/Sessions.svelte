@@ -360,8 +360,10 @@
           {/each}
         </div>
       {:else}
-        <!-- Keep the row's height stable when there are no chips -->
-        <div class="chips-row empty"></div>
+        <!-- Keep the row's height stable when there are no chips. Uses its own
+             modifier (NOT `empty`, which is the tall centered "no matches"
+             message style and would add 32px padding here). -->
+        <div class="chips-row chips-empty"></div>
       {/if}
       <button
         class="icon-btn search-btn"
@@ -649,7 +651,7 @@
     -webkit-overflow-scrolling: touch;
   }
   .chips-row::-webkit-scrollbar { display: none; }
-  .chips-row.empty { min-height: 24px; }
+  .chips-row.chips-empty { min-height: 24px; }
 
   /* ─── Session list ───────────────────────────────────── */
   .list {
