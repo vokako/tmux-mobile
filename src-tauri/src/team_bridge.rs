@@ -115,14 +115,20 @@ impl TeamManager {
                 continue;
             }
             // Mark started + relaunch the reconcile loop, which ADOPTS the
-            // existing agent windows rather than reopening them.
+            // existing agent windows (preserving each agent's conversation
+            // context + in-flight work) rather than reopening them.
             if let Some(t) = self.teams.lock().unwrap().get_mut(&room) {
                 t.started = true;
             }
             if let Some(arc) = self.self_ref.get().and_then(|w| w.upgrade()) {
                 let bridge: Arc<dyn TeamBridge> = arc;
                 team::start(bridge, self.cfg.clone(), room.clone(), workspace, template);
-                println!("🜂 team: recovered running team '{}'", room);
+                // The adopted agents are hung on a `wait` whose connection died
+                // with the old daemon; their MCP clients reconnect once unstuck
+                // but can't unstick themselves. Nudge each window to reconnect
+                // (Esc the dead call + re-prompt). One-shot, off the hot path.
+                team::nudge_session_agents(session.clone());
+                println!("🜂 team: recovered running team '{}' (adopting + nudging agents)", room);
             }
         }
     }

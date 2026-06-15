@@ -296,7 +296,10 @@ fn seed_template(bridge: &dyn TeamBridge, room: &str, template: &str, cfg: &Team
 /// EXISTING window named after the agent in this session. If one is there
 /// (server restarted, agent already running), we adopt it instead of opening a
 /// second. The previous in-memory-only tracking re-launched every agent on
-/// restart, piling up duplicate manager/worker/reviewer windows.
+/// restart, piling up duplicate manager/worker/reviewer windows. Reconnecting
+/// adopted agents after a *server* restart is handled separately, once, by
+/// `nudge_session_agents` (called from recovery) — not here, because the loop's
+/// presence check can't tell a healthy agent from one hung on a dead socket.
 async fn reconcile_loop(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: String, session: String, paths: Paths) {
     const MAX_LAUNCH_FAILURES: u32 = 3; // give up relaunching an agent after this
     let mut launched: HashMap<String, Option<String>> = HashMap::new();
@@ -415,6 +418,43 @@ fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &str, session:
         }
     }
     Ok(pane)
+}
+
+/// After a *server* restart, nudge every agent window in `session` back online.
+///
+/// A recovered agent's MCP client lost its connection to the old (now dead)
+/// daemon and is hung inside a `wait` tool call. Verified with kiro-cli 2.7.0:
+/// the client neither times out nor retries on its own — but it reconnects fine
+/// once the dead call is cancelled and a new turn starts. So for each agent
+/// window we press Escape to cancel the in-flight call (returning the TUI to its
+/// prompt), then send a short re-prompt that makes it call `wait` again, which
+/// re-establishes the connection. Harmless if an agent happened to be healthy:
+/// it just restarts its wait loop. This is done ONCE from recovery rather than
+/// in the reconcile loop, whose presence check can't distinguish a healthy agent
+/// from one hung on a dead socket (a just-restarted agent still looks "online"
+/// for ~30 s until its presence TTL lapses).
+///
+/// Runs in a spawned task: it sleeps between keystrokes (TUI needs a beat to
+/// settle) and we must not block the recovery path.
+pub fn nudge_session_agents(session: String) {
+    const NUDGE: &str =
+        "Reconnect to the team chat: call `wait` now, and keep calling it to stay in the conversation.";
+    tokio::spawn(async move {
+        // Give a freshly-restarted daemon a moment to be listening before we
+        // ask agents to reconnect.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        for (name, pane) in tmux::list_named_windows(&session) {
+            if name == "zsh" {
+                continue; // the session's initial shell, not an agent
+            }
+            println!("🜂 team: nudging adopted agent '{}' ({}) to reconnect", name, pane);
+            let _ = tmux::send_keys(&pane, "Escape", false);
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let _ = tmux::send_keys(&pane, NUDGE, true);
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let _ = tmux::send_keys(&pane, "Enter", false);
+        }
+    });
 }
 
 enum PostKey {

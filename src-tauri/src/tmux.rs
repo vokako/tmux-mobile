@@ -593,6 +593,26 @@ pub fn find_window_by_name(session: &str, name: &str) -> Option<String> {
     None
 }
 
+/// All `(window_name, pane_id)` pairs in `session`. Used by team recovery to
+/// nudge every agent window back online after a server restart.
+pub fn list_named_windows(session: &str) -> Vec<(String, String)> {
+    match run_tmux(&["list-windows", "-t", session, "-F", "#{window_name}\x1f#{pane_id}"]) {
+        Ok(out) => out
+            .lines()
+            .filter_map(|line| {
+                let mut it = line.split('\x1f');
+                match (it.next(), it.next()) {
+                    (Some(n), Some(p)) if !n.is_empty() && !p.is_empty() => {
+                        Some((n.to_string(), p.to_string()))
+                    }
+                    _ => None,
+                }
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
 /// Create a new window named `name` in `session` rooted at `cwd`, returning the
 /// new pane id (`%NN`). The window name lets the Team tab map an agent to its
 /// pane by `window_name`.

@@ -42,13 +42,41 @@
   Editing them only affects teams started afterward; running agents must be
   restarted to pick up changes. By design, but not surfaced to the user.
 
-### rmcp client reconnect behavior on server restart unverified
-- **Priority**: Medium · **Area**: Team / agora MCP
-- The in-process MCP daemon's session ids are in-memory (LocalSessionManager);
-  on server restart agents get stale-session errors and must re-handshake.
-  Whether kiro/claude/codex reconnect silently vs error to the model is
-  unverified (needs a real agent + restart). DB-backed history means no messages
-  are lost (cursor replay), but the reconnect smoothness is unknown.
+### ~~rmcp client reconnect behavior on server restart~~ — FIXED + VERIFIED
+- **Root cause (confirmed on the live system):** the in-process MCP daemon ran
+  in rmcp's default **stateful** mode (`LocalSessionManager`, in-memory session
+  ids). A backend restart wipes the session map, so a recovered agent still
+  presenting its old `Mcp-Session-Id` is rejected (`401 Session not found`; a
+  no-session request gets `422 expect initialize`). rmcp 0.3.2 does **not**
+  auto-re-handshake, so the agent hangs on `wait` forever. Its `last_seen` goes
+  stale → `apply_presence` marks the whole roster `offline` → the Team UI's
+  "coming online" spinner (gated on `agents.length === 0`) spins indefinitely.
+- **Fix 1 — stateless daemon** (`crates/agora/src/web.rs`): serve MCP with
+  `StreamableHttpServerConfig { stateful_mode: false }`. Our tool surface is
+  genuinely stateless (identity per-request from `x-agent`/`x-room` headers, all
+  state in SQLite) and the agent loop is pure request/response (`post`/`wait`),
+  so we lose nothing (no server→client push needed) and any *fresh* request now
+  works with no init/session. Verified by `tests/stateless_probe.rs` and a live
+  curl (bare `tools/call` → `200` + result).
+- **Fix 2 — adopt + nudge on recovery** (`team_bridge::recover_running_teams`
+  → `team::nudge_session_agents`): recovery **keeps** the surviving agent windows
+  (so each agent's conversation context + in-flight work is preserved) and nudges
+  each one to reconnect. The agent's MCP *client* lost its socket to the old
+  daemon and is hung inside a `wait` call; verified with kiro-cli 2.7.0, the
+  client neither times out nor retries on its own **but reconnects fine once the
+  dead call is cancelled and a new turn starts**. The nudge is `Esc` (cancel the
+  in-flight call → back to the prompt) + a short re-prompt that calls `wait`
+  again. Harmless if an agent was healthy (just restarts its wait loop). Done
+  once from recovery, NOT in the reconcile loop — the loop's presence check can't
+  tell a healthy agent from one hung on a dead socket (a just-restarted agent
+  still looks "online" for ~30 s until its presence TTL lapses, so an in-loop
+  nudge gated on online-status never fires).
+  - **Why not kill+relaunch?** Killing the windows and relaunching fresh agents
+    would also work (Fix-1 makes the fresh handshake succeed), but it throws away
+    each agent's CLI conversation + any in-progress task. Adoption keeps them.
+- **Verified end-to-end**: kill server with 3 agents online → agents hang on a
+  dead `wait` → restart server → recovery adopts the windows + nudges → all 3
+  back to `waiting`, last_seen <1s, no duplicate windows, context intact.
 
 ### Stale Chinese default.json on existing installs
 - **Priority**: Low · **Area**: Team / templates
