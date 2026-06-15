@@ -696,7 +696,7 @@ mod tests {
         assert!(names.contains(&"manager") && names.contains(&"worker"));
         let managers = agents.iter().filter(|a| a["manage"] == true).count();
         assert_eq!(managers, 1, "exactly one manager");
-        assert!(agents.iter().all(|a| a["model"] == "auto"), "all models pinned to auto");
+        assert!(agents.iter().all(|a| a["model"] == ""), "models use the server default");
     }
 
     #[test]
@@ -739,7 +739,7 @@ mod tests {
     }
 
     #[test]
-    fn financial_research_template_has_lead_and_auto_models() {
+    fn financial_research_template_has_lead_and_default_models() {
         let v: Value = serde_json::from_str(FINANCIAL_RESEARCH_TEMPLATE).unwrap();
         let agents = v["agents"].as_array().unwrap();
         assert!(agents.len() >= 5, "a multi-analyst research team");
@@ -749,7 +749,7 @@ mod tests {
         }
         let managers = agents.iter().filter(|a| a["manage"] == true).count();
         assert_eq!(managers, 0, "hire/fire off: no manage=true agent");
-        assert!(agents.iter().all(|a| a["model"] == "auto"), "all models pinned to auto");
+        assert!(agents.iter().all(|a| a["model"] == ""), "models use the server default");
         assert!(
             agents.iter().all(|a| a["goal"].as_str().map(|g| g.len() > 80).unwrap_or(false)),
             "each role's goal must carry its methodology"

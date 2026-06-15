@@ -25,6 +25,10 @@
   let terminalSession = $state('');
   let terminalCommand = $state('');
   let viewMode = $state('terminal');
+  // Which working context Files should follow: a terminal pane or the team.
+  let teamSession = $state('');     // active team's tmux session (reported by Team)
+  let workContext = $state('terminal'); // 'terminal' | 'team'
+  let filesSession = $derived(workContext === 'team' && teamSession ? teamSession : terminalSession);
   // Team (team multi-agent bus) is desktop-server-only. We probe once per
   // connection: team_status rejects with method-not-found when the server has
   // no bus, so a resolved probe means the tab should appear.
@@ -493,6 +497,7 @@
     terminalSession = session;
     terminalTarget = target;
     terminalCommand = command;
+    workContext = 'terminal';
     page = 'terminal';
     viewMode = 'terminal';
     navPush();
@@ -673,9 +678,9 @@
     const fromIdx = t.indexOf(curName);
     const toIdx = t.indexOf(target);
     // Apply page change immediately
-    if (target === 'chat') { page = 'terminal'; viewMode = 'chat'; }
-    else if (target === 'terminal') { page = 'terminal'; viewMode = 'terminal'; }
-    else { page = target; }
+    if (target === 'chat') { page = 'terminal'; viewMode = 'chat'; workContext = 'terminal'; }
+    else if (target === 'terminal') { page = 'terminal'; viewMode = 'terminal'; workContext = 'terminal'; }
+    else { page = target; if (target === 'team') workContext = 'team'; }
     navPush();
     // Single slide-in animation from the correct direction
     if (fromIdx >= 0 && toIdx >= 0) {
@@ -695,11 +700,6 @@
         <button tabindex="-1" class:active={page === 'sessions'} onclick={() => switchTab('sessions')}>
           {t('sessions')}
         </button>
-        {#if teamAvailable}
-          <button tabindex="-1" class:active={page === 'team'} onclick={() => switchTab('team')}>
-            {t('team')}
-          </button>
-        {/if}
         {#if terminalTarget}
           <button tabindex="-1" class:active={page === 'terminal' && viewMode === 'terminal'} onclick={() => switchTab('terminal')}>
             {t('terminal')}
@@ -708,6 +708,11 @@
         {#if terminalTarget && chatSupported}
           <button tabindex="-1" class:active={page === 'terminal' && viewMode === 'chat'} onclick={() => switchTab('chat')}>
             {t('chat')}
+          </button>
+        {/if}
+        {#if teamAvailable}
+          <button tabindex="-1" class:active={page === 'team'} onclick={() => switchTab('team')}>
+            {t('team')}
           </button>
         {/if}
         {#if terminalTarget}
@@ -833,11 +838,11 @@
     {:else if page === 'sessions'}
       <Sessions {openTerminal} activeTarget={terminalTarget} visible={page === 'sessions'} />
     {:else if page === 'team'}
-      <Team visible={page === 'team'} currentSession={terminalSession} {fontSize} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} />
+      <Team visible={page === 'team'} currentSession={terminalSession} {fontSize} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onTeamSession={(s) => teamSession = s} />
     {/if}
     {#if terminalTarget}
       <div class="page-layer" class:hidden={page !== 'files'}>
-        <Files session={terminalSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} />
+        <Files session={filesSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} />
       </div>
       <div class="page-layer" class:hidden={page !== 'terminal'}>
         <div class="terminal-body" class:split-capable={splitEligible && viewMode === 'terminal'}>

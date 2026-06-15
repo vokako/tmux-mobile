@@ -74,15 +74,6 @@
     {#each sessions as s}
       <div class="picker-session">
         <span class="picker-session-name">{s.name}</span>
-        <button
-          class="picker-add"
-          title={t('newWindow')}
-          aria-label={t('newWindow')}
-          disabled={busySession === s.name}
-          onclick={(e) => { e.stopPropagation(); addWindow(s.name); }}
-        >
-          <Icon name="plus" size={12} />
-        </button>
       </div>
       <div class="picker-panes">
         {#each s.panes as p}
@@ -98,6 +89,15 @@
             onclick={(e) => { e.stopPropagation(); onPick(p); }}
           />
         {/each}
+        <button
+          class="picker-add"
+          title={t('newWindow')}
+          aria-label={t('newWindow')}
+          disabled={busySession === s.name}
+          onclick={(e) => { e.stopPropagation(); addWindow(s.name); }}
+        >
+          <Icon name="plus" size={12} />
+        </button>
       </div>
     {/each}
   {/if}
@@ -129,7 +129,7 @@
   .picker-session-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .picker-add {
     flex-shrink: 0;
-    width: 20px; height: 20px; padding: 0;
+    width: 24px; height: 24px; padding: 0;
     border: 1px solid var(--border2); border-radius: 6px;
     background: var(--input-bg); color: var(--text3);
     cursor: pointer; display: flex; align-items: center; justify-content: center;
@@ -138,6 +138,6 @@
   }
   .picker-add:active { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
   .picker-add:disabled { opacity: 0.4; cursor: default; }
-  .picker-panes { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 4px 6px; }
+  .picker-panes { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 0 4px 6px; }
   .picker-empty { padding: 16px; text-align: center; color: var(--text3); font-size: 13px; }
 </style>

@@ -426,34 +426,28 @@
     setTimeout(() => { if (bcPathEl) bcPathEl.scrollLeft = bcPathEl.scrollWidth; }, 0);
   });
 
-  // Sync CWD from terminal session only on first visit to list view
-  let cwdSynced = false;
+  // Sync Files to the terminal/team working directory — but only when that dir
+  // CHANGES (you switched pane/team, or cd'd). If it's unchanged, your own
+  // in-Files navigation is preserved across tab switches. Re-checked whenever
+  // Files becomes visible or the session changes.
+  let lastSourceDir = '';
   $effect(() => {
-    if (session && visible && view === 'list' && !cwdSynced) {
-      cwdSynced = true;
-      fsCwd(session).then(r => {
-        if (r.path !== cwd) {
-          cwd = r.path;
-          loadDir(r.path);
-        }
-      }).catch(() => {});
-    }
-    if (visible && view === 'preview') {
-      reloadPreview();
-    }
+    if (!session || !visible) return;
+    fsCwd(session).then(r => {
+      if (r.path && r.path !== lastSourceDir) {
+        lastSourceDir = r.path;
+        cwd = r.path;
+        view = 'list';
+        loadDir(r.path);
+      }
+    }).catch(() => {
+      if (!lastSourceDir) { lastSourceDir = '/'; cwd = '/'; loadDir('/'); }
+    });
   });
 
-  // Init: get session CWD
+  // Refresh the preview content when returning to the tab on a preview.
   $effect(() => {
-    if (session) {
-      fsCwd(session).then(r => {
-        cwd = r.path;
-        loadDir(r.path);
-      }).catch(() => {
-        cwd = '/';
-        loadDir('/');
-      });
-    }
+    if (visible && view === 'preview') reloadPreview();
   });
 
   async function loadDir(path) {

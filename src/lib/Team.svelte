@@ -32,6 +32,7 @@
     currentSession = '',     // the open terminal session, used to default the workspace
     fontSize = 14,           // app standard size; the grid renders 2 notches smaller
     openTerminal = () => {}, // (session, target, command) — preview an agent's pane
+    onTeamSession = () => {}, // report the active team's tmux session (for Files cwd sync)
   } = $props();
 
   // Desktop + wide → show the split layout (agent grid | chat). Mobile/narrow
@@ -50,6 +51,7 @@
   let gridFrac = $state(parseFloat(localStorage.getItem('tmux_team_gridfrac') || '0.6'));
   // Latest live message drives the collaboration graph.
   let lastEvent = $state(null);
+  let confirmClose = $state(false); // tap-to-confirm gate for closing a team
   // Swap the desktop split's left/right regions (some prefer the chat on the left).
   let swapSides = $state(localStorage.getItem('tmux_team_swap') === '1');
   function toggleSwap() {
@@ -117,6 +119,8 @@
   let activeTeam = $derived(teams.find(x => x.room === activeRoom) || null);
   // team session for the active team (window_name → agent for pane preview).
   let teamSession = $derived(activeRoom ? `tmm-team-${activeRoom}` : '');
+  // Report the active team's session up so Files can follow the team's cwd.
+  $effect(() => { onTeamSession(teamSession); });
 
   // Roster entries that are present (not offline). The human posts as "human";
   // never show it as an addressable agent (you can't @ yourself usefully).
@@ -257,6 +261,13 @@
   // Close the active team (kill its agents); chat log persists server-side.
   async function closeActiveTeam() {
     if (!activeRoom) return;
+    // Tap-to-confirm (same as killing a session): first tap arms, second closes.
+    if (!confirmClose) {
+      confirmClose = true;
+      setTimeout(() => { confirmClose = false; }, 3000);
+      return;
+    }
+    confirmClose = false;
     switcherOpen = false;
     const room = activeRoom;
     try { await teamCloseTeam(room); } catch {}
@@ -425,19 +436,22 @@
           <Icon name="swap-h" size={14} />
         </button>
       {/if}
-      <button class="team-close" onclick={closeActiveTeam} title={t('teamClose')} aria-label={t('teamClose')}>
-        <Icon name="x" size={13} />
-      </button>
     {/if}
     <!-- Agent status chips: dot + name only; tap to preview the agent's pane.
-         flex-wrap drops overflow onto the next line. -->
-    {#if !newTeam && activeRoom}
+         flex-wrap drops overflow onto the next line. Hidden when the graph is
+         visible (desktop grid, or mobile panel open) — agents show there. -->
+    {#if !newTeam && activeRoom && !splitEligible && !collabOpen}
       {#each agents as a}
         <button class="roster-chip" onclick={() => previewAgent(a.name)} title={a.role || a.name}>
           <span class="roster-dot status-{a.status}"></span>
           <span class="roster-name">{a.name}</span>
         </button>
       {/each}
+    {/if}
+    {#if activeTeam}
+      <button class="team-close" class:confirm={confirmClose} onclick={closeActiveTeam} title={t('teamClose')} aria-label={t('teamClose')}>
+        {#if confirmClose}<span class="team-close-text">{t('tapToKill')}</span>{:else}<Icon name="x" size={13} />{/if}
+      </button>
     {/if}
   </div>
 {/snippet}
@@ -692,6 +706,9 @@
     -webkit-tap-highlight-color: transparent;
   }
   .team-close:active { color: var(--danger); border-color: var(--danger); }
+  .team-close { margin-left: auto; }
+  .team-close.confirm { width: auto; padding: 0 8px; color: var(--danger); border-color: var(--danger); }
+  .team-close-text { font-size: 10px; font-weight: 600; white-space: nowrap; }
   .team-swap:active, .team-swap.on,
   .team-hbtn:active, .team-hbtn.on { color: var(--accent); border-color: var(--accent); }
   .team-start-cancel {
