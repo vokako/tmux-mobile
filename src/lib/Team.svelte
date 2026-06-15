@@ -62,6 +62,7 @@
   let roster = $state([]);       // active room AgentRow[]
   let available = $state(true);  // false when the server has no team bus
   let starting = $state(false);
+  let startError = $state('');   // surfaced when start_team is refused (e.g. bad template)
   let loading = $state(true);
   let draft = $state('');
   let sending = $state(false);
@@ -193,16 +194,21 @@
   async function startTeam() {
     if (starting || !workspace.trim()) return;
     starting = true;
+    startError = '';
     showPicker = false;
     try {
       const res = await teamStartTeam(workspace.trim(), selectedTemplate);
+      // The backend refuses (started:false + error) when the roster is missing/
+      // empty — surface it instead of dropping into a room with no agents.
+      if (res?.error) { startError = res.error; return; }
       newTeam = false;
       if (res?.room) {
         activeRoom = res.room;
         messages = []; roster = []; employees = [];
       }
       await refresh();
-    } catch {
+    } catch (e) {
+      startError = String(e?.message || e || 'failed to start team');
     } finally {
       starting = false;
     }
@@ -435,6 +441,9 @@
         <button class="team-start-cancel" onclick={() => { newTeam = false; showPicker = false; }}>{t('cancel')}</button>
       {/if}
     </div>
+    {#if startError}
+      <div class="start-error" style="margin-top:8px;color:#e5484d;font-size:13px;line-height:1.4;word-break:break-word;">{startError}</div>
+    {/if}
   </div>
 {/snippet}
 

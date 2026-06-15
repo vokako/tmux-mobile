@@ -44,6 +44,17 @@ const KICK: &str = "You are connected to the team group chat (collaboration rule
 /// Default model placeholder substituted in when a kiro agent leaves model empty.
 pub const BUILTIN_TEMPLATE: &str = include_str!("../../team/templates/default.json");
 
+/// A ready-made software-development roster (tech-lead / product / architect /
+/// coder / reviewer / tester), seeded alongside the default so it appears in
+/// the app's template picker out of the box. The whole collaboration workflow
+/// lives in each agent's `goal` (role isolation) — AGENTS.md stays a
+/// role-agnostic, workflow-free communication contract.
+pub const SOFTWARE_DEV_TEMPLATE: &str = include_str!("../../team/templates/software-dev.json");
+
+/// Built-in templates seeded into teams/ on first run: (file stem, contents).
+const BUILTIN_TEMPLATES: &[(&str, &str)] =
+    &[("default", BUILTIN_TEMPLATE), ("software-dev", SOFTWARE_DEV_TEMPLATE)];
+
 /// The teams/ template directory.
 fn templates_dir() -> PathBuf {
     crate::config::config_dir().join("teams")
@@ -59,13 +70,17 @@ fn template_path(name: &str) -> PathBuf {
     templates_dir().join(format!("{}.json", safe))
 }
 
-/// Ensure the teams/ dir exists and holds at least the built-in default.
+/// Ensure the teams/ dir exists and holds the built-in templates. Seed-once per
+/// file: an existing template is never overwritten, so a user's edits (and
+/// their custom templates) are preserved across restarts.
 pub fn ensure_templates_seeded() {
     let dir = templates_dir();
     let _ = std::fs::create_dir_all(&dir);
-    let def = dir.join("default.json");
-    if !def.exists() {
-        let _ = std::fs::write(&def, BUILTIN_TEMPLATE);
+    for (name, body) in BUILTIN_TEMPLATES {
+        let path = dir.join(format!("{}.json", name));
+        if !path.exists() {
+            let _ = std::fs::write(&path, body);
+        }
     }
 }
 
@@ -659,15 +674,53 @@ mod tests {
     }
 
     #[test]
-    fn builtin_default_template_has_three_agents_one_manager() {
-        // Parse the embedded built-in template (what teams/default.json seeds).
+    fn builtin_default_template_is_minimal_manager_worker() {
+        // The default template is the minimal demo: a manager + one worker that
+        // shows the delegate→report loop and can grow via the manager's hire().
         let v: Value = serde_json::from_str(BUILTIN_TEMPLATE).unwrap();
         let agents = v["agents"].as_array().unwrap();
-        assert_eq!(agents.len(), 3, "manager + worker + reviewer");
+        assert_eq!(agents.len(), 2, "minimal demo = manager + worker");
         let names: Vec<&str> = agents.iter().filter_map(|a| a["name"].as_str()).collect();
-        assert!(names.contains(&"manager") && names.contains(&"worker") && names.contains(&"reviewer"));
+        assert!(names.contains(&"manager") && names.contains(&"worker"));
         let managers = agents.iter().filter(|a| a["manage"] == true).count();
         assert_eq!(managers, 1, "exactly one manager");
+    }
+
+    #[test]
+    fn software_dev_template_has_six_roles_one_manager_with_goals() {
+        // The software-dev roster is a second built-in (teams/software-dev.json).
+        let v: Value = serde_json::from_str(SOFTWARE_DEV_TEMPLATE).unwrap();
+        let agents = v["agents"].as_array().unwrap();
+        assert_eq!(agents.len(), 6, "tech-lead + product + architect + coder + reviewer + tester");
+        let names: Vec<&str> = agents.iter().filter_map(|a| a["name"].as_str()).collect();
+        for expected in ["manager", "product", "architect", "coder", "reviewer", "tester"] {
+            assert!(names.contains(&expected), "missing role '{expected}': {names:?}");
+        }
+        let managers = agents.iter().filter(|a| a["manage"] == true).count();
+        assert_eq!(managers, 1, "exactly one manager");
+        // Workflow lives in each role's goal (AGENTS.md is contract-only), so
+        // every agent must carry a substantive goal.
+        assert!(
+            agents.iter().all(|a| a["goal"].as_str().map(|g| g.len() > 80).unwrap_or(false)),
+            "each role's goal must carry its slice of the workflow"
+        );
+    }
+
+    #[test]
+    fn both_builtin_templates_are_seeded() {
+        // Isolate config dir so we don't touch the real ~/.config.
+        let dir = std::env::temp_dir().join(format!("teamtest-tpl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::env::set_var("XDG_CONFIG_HOME", &dir);
+
+        ensure_templates_seeded();
+        let mut names = list_templates();
+        names.sort();
+        assert!(names.contains(&"default".to_string()), "default seeded: {names:?}");
+        assert!(names.contains(&"software-dev".to_string()), "software-dev seeded: {names:?}");
+
+        std::env::remove_var("XDG_CONFIG_HOME");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
