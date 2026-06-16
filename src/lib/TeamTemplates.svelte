@@ -186,7 +186,7 @@
   <!-- Mobile: a compact dropdown to switch templates instead of the strip
        (the left-list sidebar is desktop-only). -->
   <div class="tpl-picker">
-    <label class="tpl-picker-label">{t('teamTplTag')}</label>
+    <span class="tpl-picker-label">{t('teamTplTag')}</span>
     <button class="tpl-picker-btn" onclick={() => pickerOpen = !pickerOpen}>
       <span class="tpl-picker-name">{sel?.name ?? '—'}</span>
       <span class="tpl-count">{sel?.agents?.length ?? 0}</span>
@@ -238,16 +238,16 @@
         </button>
         {#if teamWideOpen}
           <div class="ag-adv tw-adv">
-            <label class="ag-adv-label">{t('teamWidePrompt')}</label>
+            <span class="ag-adv-label">{t('teamWidePrompt')}</span>
             <textarea class="ag-field ag-area" rows="3" placeholder={t('teamWidePromptHint')}
               value={sel.prompt ?? ''} oninput={(e) => { sel.prompt = e.target.value; markDirty(); }}></textarea>
-            <label class="ag-adv-label">{t('teamSkills')}</label>
+            <span class="ag-adv-label">{t('teamSkills')}</span>
             <textarea class="ag-field ag-area" rows="2" placeholder={t('teamSkillsHint')}
               value={arrToLines(sel.skills)} oninput={(e) => setSkills(sel, e.target.value)}></textarea>
-            <label class="ag-adv-label">{t('teamEnv')}</label>
+            <span class="ag-adv-label">{t('teamEnv')}</span>
             <textarea class="ag-field ag-area" rows="2" placeholder="KEY=VALUE"
               value={envToLines(sel.env)} oninput={(e) => setEnv(sel, e.target.value)}></textarea>
-            <label class="ag-adv-label">{t('teamMcp')} {#if mcpErr['__team__']}<span class="ag-adv-err">{t('teamMcpBad')}</span>{/if}</label>
+            <span class="ag-adv-label">{t('teamMcp')} {#if mcpErr['__team__']}<span class="ag-adv-err">{t('teamMcpBad')}</span>{/if}</span>
             <textarea class="ag-field ag-area ag-mono" rows="4" placeholder={t('teamMcpHint')}
               value={mcpToText(sel.mcp)} onchange={(e) => setMcp(sel, '__team__', e.target.value)}></textarea>
           </div>
@@ -261,11 +261,11 @@
                 title={confirmRmAgent === i ? t('teamConfirmDelete') : t('teamRemoveAgent')}
                 aria-label={t('teamRemoveAgent')}><Icon name="trash" size={13} /></button>
             </div>
-            <label class="ag-flabel">{t('teamAgentName')}</label>
+            <span class="ag-flabel">{t('teamAgentName')}</span>
             <input class="ag-field" bind:value={ag.name} oninput={markDirty} placeholder={t('teamAgentName')} autocapitalize="off" />
             <div class="ag-row">
               <div class="ag-col">
-                <label class="ag-flabel">{t('teamBackend')}</label>
+                <span class="ag-flabel">{t('teamBackend')}</span>
                 <select class="ag-field ag-backend" bind:value={ag.backend} onchange={markDirty}>
                   {#each BACKENDS as b}<option value={b}>{b}</option>{/each}
                 </select>
@@ -274,11 +274,11 @@
                 <input type="checkbox" bind:checked={ag.manage} onchange={markDirty} /> {t('teamManager')}
               </label>
             </div>
-            <label class="ag-flabel">{t('teamRole')}</label>
+            <span class="ag-flabel">{t('teamRole')}</span>
             <input class="ag-field" bind:value={ag.role} oninput={markDirty} placeholder={t('teamRole')} />
-            <label class="ag-flabel">{t('teamGoal')}</label>
+            <span class="ag-flabel">{t('teamGoal')}</span>
             <textarea class="ag-field ag-area" bind:value={ag.goal} oninput={markDirty} placeholder={t('teamGoal')} rows="3"></textarea>
-            <label class="ag-flabel">{t('teamModel')}</label>
+            <span class="ag-flabel">{t('teamModel')}</span>
             <input class="ag-field" bind:value={ag.model} oninput={markDirty} placeholder={t('teamModel')} />
 
             <button class="ag-adv-toggle" onclick={() => toggleAdv(i)}>
@@ -290,13 +290,13 @@
             </button>
             {#if advSet.has(i)}
               <div class="ag-adv">
-                <label class="ag-adv-label">{t('teamSkills')}</label>
+                <span class="ag-adv-label">{t('teamSkills')}</span>
                 <textarea class="ag-field ag-area" rows="2" placeholder={t('teamSkillsHint')}
                   value={arrToLines(ag.skills)} oninput={(e) => setSkills(ag, e.target.value)}></textarea>
-                <label class="ag-adv-label">{t('teamEnv')}</label>
+                <span class="ag-adv-label">{t('teamEnv')}</span>
                 <textarea class="ag-field ag-area" rows="2" placeholder="KEY=VALUE"
                   value={envToLines(ag.env)} oninput={(e) => setEnv(ag, e.target.value)}></textarea>
-                <label class="ag-adv-label">{t('teamMcp')} {#if mcpErr[i]}<span class="ag-adv-err">{t('teamMcpBad')}</span>{/if}</label>
+                <span class="ag-adv-label">{t('teamMcp')} {#if mcpErr[i]}<span class="ag-adv-err">{t('teamMcpBad')}</span>{/if}</span>
                 <textarea class="ag-field ag-area ag-mono" rows="4" placeholder={t('teamMcpHint')}
                   value={mcpToText(ag.mcp)} onchange={(e) => setMcp(ag, i, e.target.value)}></textarea>
               </div>
@@ -452,7 +452,6 @@
     outline: none; width: 100%; box-sizing: border-box;
   }
   .ag-field:focus { border-color: var(--accent); }
-  .ag-name { flex: 1; min-width: 80px; width: auto; font-weight: 600; }
   .ag-backend { flex-shrink: 0; width: auto; }
   .ag-manage { display: flex; align-items: center; gap: 3px; font-size: 11px; color: var(--text3); white-space: nowrap; }
   .ag-del { border: none; background: none; color: var(--text3); cursor: pointer; display: flex; flex-shrink: 0; padding: 4px; }
@@ -541,7 +540,6 @@
 
     /* Agent header: name on its own row; backend + mgr + delete below. */
     .agent-card-head { gap: 8px; }
-    .ag-name { flex-basis: 100%; }
     .ag-backend { min-width: 96px; }
     .ag-del { margin-left: auto; padding: 8px; }
 
