@@ -5,7 +5,7 @@
   // it, the ✓ confirms the current directory. Calls onPick(path) on confirm.
   import Icon from './Icon.svelte';
   import { t } from './i18n.svelte.js';
-  import { fsList } from './ws.js';
+  import { fsList, fsMkdir } from './ws.js';
 
   let {
     start = '~',           // initial directory to open at
@@ -19,6 +19,25 @@
   let path = $state('');
   let entries = $state([]);
   let pathEl = $state(null);
+  // New-folder inline input.
+  let creating = $state(false);
+  let newName = $state('');
+  let createErr = $state('');
+
+  async function createFolder() {
+    const name = newName.trim();
+    if (!name) return;
+    const dir = `${path.replace(/\/$/, '')}/${name}`;
+    try {
+      await fsMkdir(dir);
+      creating = false;
+      newName = '';
+      createErr = '';
+      await load(dir); // navigate into the new folder → it becomes the selection
+    } catch (e) {
+      createErr = e?.message || 'failed';
+    }
+  }
 
   async function load(p) {
     try {
@@ -57,8 +76,19 @@
         <span class="picker-sep">/</span>
       {/each}
     </div>
+    <button class="picker-btn" class:on={creating} onclick={() => { creating = !creating; createErr = ''; }} aria-label={t('newFolder')} title={t('newFolder')}><Icon name="folder-plus" size={13} /></button>
     <button class="picker-btn pick-ok" onclick={() => onPick(path)} aria-label="Select"><Icon name="check" size={13} /></button>
   </div>
+  {#if creating}
+    <div class="picker-new">
+      <Icon name="folder-plus" size={13} />
+      <input class="picker-new-input" bind:value={newName} placeholder={t('newFolderName')}
+        autocapitalize="off" autocomplete="off"
+        onkeydown={(e) => { if (e.key === 'Enter') createFolder(); else if (e.key === 'Escape') { creating = false; newName = ''; } }} />
+      <button class="picker-btn pick-ok" onclick={createFolder} disabled={!newName.trim()} aria-label={t('create')}><Icon name="check" size={13} /></button>
+    </div>
+    {#if createErr}<div class="picker-err">{createErr}</div>{/if}
+  {/if}
   <div class="picker-list">
     {#each entries as e}
       <button class="picker-item" onclick={() => load(e.path)}>
@@ -103,7 +133,21 @@
     cursor: pointer; display: flex; -webkit-tap-highlight-color: transparent;
   }
   .picker-btn:active { color: var(--accent); }
+  .picker-btn.on { background: var(--accent-bg); color: var(--accent); }
   .pick-ok { background: var(--accent-bg); color: var(--accent); }
+  .pick-ok:disabled { opacity: 0.4; cursor: default; }
+  .picker-new {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 8px; border-bottom: 1px solid var(--border2); color: var(--text3);
+  }
+  .picker-new-input {
+    flex: 1; min-width: 0; padding: 5px 8px;
+    border: 1px solid var(--input-border); border-radius: 6px;
+    background: var(--bg); color: var(--text); font-size: 12px;
+    font-family: var(--font-mono); outline: none;
+  }
+  .picker-new-input:focus { border-color: var(--accent); }
+  .picker-err { padding: 4px 10px; color: var(--danger); font-size: 11px; border-bottom: 1px solid var(--border2); }
   .picker-list { max-height: 180px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   .picker-item {
     display: flex; align-items: center; gap: 8px; width: 100%;
