@@ -96,7 +96,6 @@
     { cls: 'working',     key: 'collabWorking' },
     { cls: 'hardworking', key: 'collabHardworking' },
     { cls: 'stalled',     key: 'collabStalled' },
-    { cls: 'human',       key: 'collabHuman' },
   ];
 </script>
 

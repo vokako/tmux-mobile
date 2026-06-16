@@ -199,6 +199,11 @@
     /* min-* let grid children shrink so xterm's ResizeObserver sees the real box. */
     min-width: 0;
     min-height: 0;
+    /* Isolate each cell into its own stacking context so the embedded Terminal's
+       z-indexed bits (scrollbar slider, floating buttons up to z-index 20) stay
+       trapped inside the cell and can't paint over the .ag-expanded overlay. */
+    position: relative;
+    isolation: isolate;
     border: 1px solid var(--border);
     border-radius: 8px;
     overflow: hidden;
@@ -225,7 +230,7 @@
   .ag-head-btn:active { color: var(--accent); }
   .ag-collab .ag-body { background: var(--surface); }
   .ag-expanded {
-    position: absolute; inset: 0; z-index: 5;
+    position: absolute; inset: 0; z-index: 10;
     display: flex; flex-direction: column;
     background: var(--bg); border: 1px solid var(--accent); border-radius: 8px;
     overflow: hidden;
