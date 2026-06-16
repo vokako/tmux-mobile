@@ -41,6 +41,8 @@ const msgs = {
     tmuxSocketHint: '(optional, -S path)',
     connect: 'Connect',
     connecting: 'Connecting…',
+    shareLink: 'Share connection link',
+    linkCopied: 'Link copied',
     cancel: 'Cancel',
 
     reconnecting: 'Reconnecting...',
@@ -194,6 +196,8 @@ const msgs = {
     tmuxSocketHint: '(可选，-S 路径)',
     connect: '连接',
     connecting: '连接中…',
+    shareLink: '分享连接链接',
+    linkCopied: '链接已复制',
     cancel: '取消',
 
     reconnecting: '重新连接中...',

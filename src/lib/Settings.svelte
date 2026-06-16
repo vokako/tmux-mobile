@@ -103,6 +103,31 @@
     connecting = false;
     disconnect();
   }
+
+  // Build a deep link that pre-fills + auto-connects (consumed by App.svelte's
+  // consumeConnectUrlParams). Includes the token so the link connects on its own.
+  let shared = $state('');
+  function buildShareUrl() {
+    const url = normalizeAddress(address);
+    const params = new URLSearchParams();
+    params.set('addr', url);
+    if (token) params.set('token', token);
+    if (socket.trim()) params.set('socket', socket.trim());
+    return `${location.origin}${location.pathname}?${params.toString()}`;
+  }
+  async function shareLink() {
+    const link = buildShareUrl();
+    try {
+      if (navigator.share) { await navigator.share({ url: link }); return; }
+      await navigator.clipboard.writeText(link);
+      shared = t('linkCopied'); setTimeout(() => shared = '', 2000);
+    } catch (e) {
+      if (e && e.name === 'AbortError') return; // user dismissed the share sheet
+      // http / insecure contexts block clipboard + share — let the user copy manually.
+      try { await navigator.clipboard.writeText(link); shared = t('linkCopied'); setTimeout(() => shared = '', 2000); }
+      catch { window.prompt(t('shareLink'), link); }
+    }
+  }
 </script>
 
 <div class="wrapper">
@@ -167,6 +192,10 @@
         {t('connect')}
       </button>
     {/if}
+
+    <button class="share-btn" onclick={shareLink} disabled={!address} title={t('shareLink')}>
+      <Icon name="copy" size={13} /> {shared || t('shareLink')}
+    </button>
   </div>
 </div>
 
@@ -343,6 +372,15 @@
   }
   .connect-row { display: flex; gap: 8px; }
   .connect-row .connect-btn { flex: 1; }
+  .share-btn {
+    width: 100%; margin-top: 8px; padding: 10px;
+    border: 1px solid var(--border); border-radius: 10px;
+    background: none; color: var(--text2); font-size: 13px; font-weight: 600;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .share-btn:active:not(:disabled) { transform: scale(0.98); color: var(--accent); border-color: var(--accent); }
+  .share-btn:disabled { opacity: 0.4; cursor: default; }
   .cancel-btn {
     padding: 13px 20px; border: 1px solid var(--border); border-radius: 10px;
     background: none; color: var(--text2); font-size: 14px; font-weight: 600;
