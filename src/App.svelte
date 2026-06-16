@@ -600,6 +600,30 @@
   }
   consumeConnectUrlParams();
 
+  // Share the CURRENT connection as a deep link (consumed by consumeConnectUrlParams
+  // on the other device). Built from the live localStorage connection keys.
+  let sharedMsg = $state('');
+  async function shareConnectionLink() {
+    const addr = localStorage.getItem('tmux_address') || activeAddress;
+    if (!addr) return;
+    const token = localStorage.getItem('tmux_token') || '';
+    const socket = localStorage.getItem('tmux_socket') || '';
+    const params = new URLSearchParams();
+    params.set('addr', addr);
+    if (token) params.set('token', token);
+    if (socket) params.set('socket', socket);
+    const link = `${location.origin}${location.pathname}?${params.toString()}`;
+    try {
+      if (navigator.share) { await navigator.share({ url: link }); return; }
+      await navigator.clipboard.writeText(link);
+      sharedMsg = t('linkCopied'); setTimeout(() => sharedMsg = '', 2000);
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+      try { await navigator.clipboard.writeText(link); sharedMsg = t('linkCopied'); setTimeout(() => sharedMsg = '', 2000); }
+      catch { window.prompt(t('shareLink'), link); }
+    }
+  }
+
   // Auto-reconnect and restore state on page load
   let autoConnectAttempted = false;
 
@@ -811,6 +835,9 @@
             <div class="sp-conn-addr">{activeAddress}</div>
           {/if}
           <div class="sp-conn-id">{mid?.slice(0, 8) || '—'}</div>
+          <button class="sp-share" onclick={shareConnectionLink} title={t('shareLink')}>
+            <Icon name="copy" size={12} /> {sharedMsg || t('shareLink')}
+          </button>
         </div>
       {/if}
       <div class="sp-rows">
@@ -1151,6 +1178,14 @@
     font-size: 10px; font-family: var(--font-mono);
     color: var(--text3); opacity: 0.6;
   }
+  .sp-share {
+    margin-top: 8px; width: 100%; padding: 8px;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: none; color: var(--text2); font-size: 12px; font-weight: 600;
+    cursor: pointer; -webkit-tap-highlight-color: transparent;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .sp-share:active { color: var(--accent); border-color: var(--accent); }
   .sp-conn-row {
     display: flex; align-items: center; gap: 8px;
   }
