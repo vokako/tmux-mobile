@@ -147,7 +147,12 @@ impl Config {
             team_rules: std::env::var("TEAM_RULES")
                 .ok()
                 .or(file_cfg.team_rules)
-                .unwrap_or_else(|| include_str!("../../team/AGENTS.md").to_string()),
+                .unwrap_or_else(|| {
+                    let rules = DEFAULT_TEAM_RULES.to_string();
+                    // Seed into config.toml so the user can see and edit it.
+                    let _ = append_config_field("team_rules", &rules);
+                    rules
+                }),
             team_kick: std::env::var("TEAM_KICK")
                 .ok()
                 .or(file_cfg.team_kick)
@@ -345,4 +350,45 @@ pub fn touch_session(name: &str) -> Result<(), String> {
     map.insert(name.to_string(), now);
     let json = serde_json::to_string(&map).map_err(|e| e.to_string())?;
     std::fs::write(session_usage_path(), json).map_err(|e| e.to_string())
+}
+
+/// Default collaboration rules seeded into config.toml on first run.
+const DEFAULT_TEAM_RULES: &str = "\
+# Team contract (shared by every agent)
+
+These are the rules every member of this team agrees to, regardless of role.
+They override convenience: follow them even when a shortcut seems faster.
+
+## Communication discipline
+- **End every turn with `wait`.** Never stop on your own. If you have nothing to do, `wait`.
+- **Reply to anything @-addressed to you.** You may decline with a reason, but never go silent. A reply is another `post` that `@`s the asker.
+- **Keep messages short.** Messages coordinate; they are not the deliverable.
+- When you pick up an @-assigned task, first broadcast \"got it, working on it\" so the team knows it's owned.
+
+## Data discipline
+- **Real output goes in files in the workspace** (code, docs, results). Messages only point to them.
+- **Never paste large content into chat.** The authoritative context lives in the project files.
+- Before editing a file others might touch, broadcast a one-line heads-up to avoid collisions.
+
+## Quality & honesty
+- **Evidence over confidence.** Before claiming something works, state which command proved it and that you ran it.
+- **Root cause over symptom.** Don't paper over an error — explain in one sentence why it happened before fixing it.
+- **Say what you actually did**, what you verified, and where you're unsure.
+- Leave the workspace at least as clean as you found it.
+
+## Scope
+- Do the task you were assigned. Don't expand scope or change unrelated things without saying so.
+- If the task is ambiguous, ask the asker directly (`@them`) rather than guessing silently.";
+
+/// Append a TOML field to config.toml (used to seed defaults on first run).
+fn append_config_field(key: &str, value: &str) -> std::io::Result<()> {
+    let dir = dirs_next();
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join("config.toml");
+    let mut content = std::fs::read_to_string(&path).unwrap_or_default();
+    if content.contains(key) { return Ok(()); }
+    if !content.is_empty() && !content.ends_with('\n') { content.push('\n'); }
+    // Multi-line string: use TOML triple-quoted literal.
+    content.push_str(&format!("{} = '''\n{}'''\n", key, value));
+    std::fs::write(&path, content)
 }
