@@ -321,22 +321,28 @@ pub fn start(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: String, workspa
     });
 }
 
-/// Sanitize a workspace path into a tmux-safe slug from its basename. tmux
-/// session names can't contain ':' or '.'; keep it short and predictable so
-/// `tmm-team-<slug>` is easy to recognize and parse.
+/// Sanitize a workspace path into a tmux-safe slug. The slug = sanitized
+/// basename + 6-char hash of the full canonical path. This guarantees uniqueness
+/// even when two workspaces share a basename (e.g. `/a/demo` vs `/b/demo`).
+/// tmux session names can't contain ':' or '.'.
 pub fn workspace_slug(workspace: &str) -> String {
-    let base = std::path::Path::new(workspace)
-        .file_name()
+    use sha2::{Sha256, Digest};
+    let canonical = std::fs::canonicalize(workspace)
+        .unwrap_or_else(|_| std::path::PathBuf::from(workspace));
+    let base = canonical.file_name()
         .and_then(|s| s.to_str())
         .filter(|s| !s.is_empty())
         .unwrap_or("root");
-    let mut slug: String = base
+    let mut name: String = base
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
         .collect();
-    slug.make_ascii_lowercase();
-    let slug = slug.trim_matches('-').to_string();
-    if slug.is_empty() { "root".to_string() } else { slug.chars().take(32).collect() }
+    name.make_ascii_lowercase();
+    let name = name.trim_matches('-');
+    let name = if name.is_empty() { "root" } else { &name[..name.len().min(24)] };
+    // 6 hex chars of SHA-256 of full path → 16M buckets, collision-free in practice.
+    let hash = format!("{:x}", Sha256::digest(canonical.to_string_lossy().as_bytes()));
+    format!("{}-{}", name, &hash[..6])
 }
 
 // ─── Global system prompt (shared across every team + agent) ──────────────
@@ -1390,14 +1396,23 @@ mod tests {
     }
 
     #[test]
-    fn workspace_slug_is_tmux_safe_basename() {
-        assert_eq!(workspace_slug("/Users/clawd/work/My Project"), "my-project");
-        assert_eq!(workspace_slug("/Users/clawd/work/260226_tmux_mobile"), "260226_tmux_mobile");
-        assert_eq!(workspace_slug("/"), "root");
-        assert_eq!(workspace_slug(""), "root");
+    fn workspace_slug_is_tmux_safe_with_hash() {
+        let s = workspace_slug("/Users/clawd/work/My Project");
+        assert!(s.starts_with("my-project-"), "got {s}");
+        assert_eq!(s.len(), "my-project-".len() + 6, "basename + 6-char hash: {s}");
+
+        // Different paths, same basename → different slugs.
+        let a = workspace_slug("/a/demo");
+        let b = workspace_slug("/b/demo");
+        assert_ne!(a, b, "same basename must get different hashes: {a} vs {b}");
+
         // No ':' or '.' (illegal in tmux session names).
         let s = workspace_slug("/a/b.c:d");
         assert!(!s.contains(':') && !s.contains('.'), "got {s}");
+
+        // Empty / root paths.
+        let r = workspace_slug("/");
+        assert!(r.starts_with("root-"), "got {r}");
     }
 
     #[test]
