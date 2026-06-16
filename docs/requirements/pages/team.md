@@ -26,13 +26,21 @@ server. See `docs/design-docs/features/team.md` for architecture.
   resumes history.
 
 ## Roster templates
-- A team launches from a **named roster template** at
-  `<config>/tmux-mobile/teams/<name>.json` (`{ agents:[{name, backend, role,
-  goal, model, manage}] }`). `default.json` is written on first run.
-- The new-team panel picks which template (A / B / …) to use.
+- A team launches from a **named roster template** — a folder
+  `<config>/tmux-mobile/teams/<name>/team.yaml` (legacy flat `<name>.json` is
+  auto-migrated). Schema: optional **team-wide** `env` / `mcp` / `skills` /
+  `prompt` (applied to every agent) plus `agents:[{ name, backend, role, goal,
+  model, manage, env?, mcp?, skills? }]`. Built-ins (`default`, `software-dev`,
+  `financial-research`, `deep-research`, `content-studio`, `data-analysis`) are
+  seeded on first run.
+- The new-team panel picks which template to use (with a folder browser that can
+  create + select a new workspace folder).
 - An **editor** (edit button beside the picker) adds/renames/deletes templates
-  and edits every agent field, add/remove agents (`team_templates` /
-  `team_template_save` / `team_template_delete`).
+  (tap-to-confirm), edits every agent field with clear labels, has a per-agent
+  **advanced** section (env / extra MCP servers / skills) and a **Team-wide**
+  section (env/mcp/skills/prompt). On phones it is a near-fullscreen sheet: the
+  template list collapses into a labelled dropdown and the global system prompt
+  collapses. (`team_templates` / `team_template_save` / `team_template_delete`.)
 - An empty `model` on a kiro agent falls back to the server default model.
 
 ## Global system prompt
