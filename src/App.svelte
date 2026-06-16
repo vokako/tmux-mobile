@@ -600,9 +600,10 @@
   }
   consumeConnectUrlParams();
 
-  // Share the CURRENT connection as a deep link (consumed by consumeConnectUrlParams
-  // on the other device). Built from the live localStorage connection keys.
-  let sharedMsg = $state('');
+  // Copy the CURRENT connection as a deep link (consumed by consumeConnectUrlParams
+  // on the other device). Plain clipboard copy with a brief ✓ — no share sheet,
+  // no prompt (copyText already falls back to execCommand on http).
+  let linkCopied = $state(false);
   async function shareConnectionLink() {
     const addr = localStorage.getItem('tmux_address') || activeAddress;
     if (!addr) return;
@@ -613,15 +614,9 @@
     if (token) params.set('token', token);
     if (socket) params.set('socket', socket);
     const link = `${location.origin}${location.pathname}?${params.toString()}`;
-    try {
-      if (navigator.share) { await navigator.share({ url: link }); return; }
-      await navigator.clipboard.writeText(link);
-      sharedMsg = t('linkCopied'); setTimeout(() => sharedMsg = '', 2000);
-    } catch (e) {
-      if (e && e.name === 'AbortError') return;
-      try { await navigator.clipboard.writeText(link); sharedMsg = t('linkCopied'); setTimeout(() => sharedMsg = '', 2000); }
-      catch { window.prompt(t('shareLink'), link); }
-    }
+    await copyText(link);
+    linkCopied = true;
+    setTimeout(() => linkCopied = false, 1500);
   }
 
   // Auto-reconnect and restore state on page load
@@ -813,6 +808,9 @@
                 {/if}
               </button>
             {/if}
+            <button class="sp-share" class:done={linkCopied} onclick={shareConnectionLink} title={t('shareLink')} aria-label={t('shareLink')}>
+              <Icon name={linkCopied ? 'check' : 'copy'} size={13} />
+            </button>
           </div>
           {#if urls.length > 1}
             <div class="sp-conn-urls">
@@ -835,9 +833,6 @@
             <div class="sp-conn-addr">{activeAddress}</div>
           {/if}
           <div class="sp-conn-id">{mid?.slice(0, 8) || '—'}</div>
-          <button class="sp-share" onclick={shareConnectionLink} title={t('shareLink')}>
-            <Icon name="copy" size={12} /> {sharedMsg || t('shareLink')}
-          </button>
         </div>
       {/if}
       <div class="sp-rows">
@@ -1179,13 +1174,16 @@
     color: var(--text3); opacity: 0.6;
   }
   .sp-share {
-    margin-top: 8px; width: 100%; padding: 8px;
-    border: 1px solid var(--border); border-radius: 8px;
-    background: none; color: var(--text2); font-size: 12px; font-weight: 600;
+    margin-left: auto; flex-shrink: 0;
+    width: 26px; height: 26px; padding: 0;
+    border: 1px solid var(--border); border-radius: 7px;
+    background: none; color: var(--text3);
     cursor: pointer; -webkit-tap-highlight-color: transparent;
-    display: flex; align-items: center; justify-content: center; gap: 6px;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: color 0.15s ease, border-color 0.15s ease;
   }
   .sp-share:active { color: var(--accent); border-color: var(--accent); }
+  .sp-share.done { color: var(--status-ok); border-color: var(--status-ok); }
   .sp-conn-row {
     display: flex; align-items: center; gap: 8px;
   }

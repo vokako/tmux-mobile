@@ -1,6 +1,7 @@
 <script>
   import { connect, disconnect } from './ws.js';
   import Icon from './Icon.svelte';
+  import { copyText } from './clipboard.js';
   import { t } from './i18n.svelte.js';
 
   let { onConnected } = $props();
@@ -116,17 +117,9 @@
     return `${location.origin}${location.pathname}?${params.toString()}`;
   }
   async function shareLink() {
-    const link = buildShareUrl();
-    try {
-      if (navigator.share) { await navigator.share({ url: link }); return; }
-      await navigator.clipboard.writeText(link);
-      shared = t('linkCopied'); setTimeout(() => shared = '', 2000);
-    } catch (e) {
-      if (e && e.name === 'AbortError') return; // user dismissed the share sheet
-      // http / insecure contexts block clipboard + share — let the user copy manually.
-      try { await navigator.clipboard.writeText(link); shared = t('linkCopied'); setTimeout(() => shared = '', 2000); }
-      catch { window.prompt(t('shareLink'), link); }
-    }
+    await copyText(buildShareUrl());
+    shared = t('linkCopied');
+    setTimeout(() => shared = '', 2000);
   }
 </script>
 
