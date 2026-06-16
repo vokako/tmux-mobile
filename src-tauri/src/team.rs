@@ -994,8 +994,6 @@ fn prepare_kiro(
     };
     let mut tools = vec!["*".to_string()];
     tools.extend(team.clone());
-    let mut allowed = vec!["@builtin".to_string()];
-    allowed.extend(team);
 
     // Skills are loaded as native skill:// resources.
     let resources: Vec<String> = extras.skills.iter()
@@ -1018,7 +1016,7 @@ fn prepare_kiro(
         "description": format!("{} on the team bus", role),
         "prompt": build_agent_prompt(role, goal, team_prompt, cfg),
         "tools": tools,
-        "allowedTools": allowed,
+        "allowedTools": ["*"],
         "resources": resources,
         "mcpServers": mcp_servers,
         "hooks": {
