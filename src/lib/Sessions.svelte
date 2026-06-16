@@ -923,12 +923,12 @@
   }
   .new-btn {
     flex: 1;
-    padding: 12px;
-    border: 1px dashed var(--border);
-    border-radius: 14px;
+    height: 36px; padding: 0 12px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
     background: none;
     color: var(--text2);
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
     cursor: pointer;
     display: flex;
@@ -936,22 +936,23 @@
     justify-content: center;
     gap: 6px;
     -webkit-tap-highlight-color: transparent;
+    transition: color 0.15s ease, border-color 0.15s ease;
   }
-  .new-btn:active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+  .new-btn:active { color: var(--accent); border-color: var(--accent); }
   .refresh-icon {
-    width: 46px;
+    width: 36px; height: 36px; flex-shrink: 0;
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: 9px;
     background: none;
-    color: var(--text2);
+    color: var(--text3);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     -webkit-tap-highlight-color: transparent;
-    transition: color 0.2s;
+    transition: color 0.2s, border-color 0.2s;
   }
-  .refresh-icon:active { color: var(--accent); }
+  .refresh-icon:active { color: var(--accent); border-color: var(--accent); }
   .refresh-icon.spinning { color: var(--accent); animation: spin 0.6s ease; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
