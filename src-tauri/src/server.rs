@@ -1886,7 +1886,7 @@ mod tests {
             serde_json::json!({ "messages": [], "echo_limit": limit })
         }
         fn roster(&self, _room: &str) -> serde_json::Value {
-            serde_json::json!({ "roster": [{ "name": "worker", "status": "waiting" }] })
+            serde_json::json!({ "roster": [{ "name": "worker", "status": "idle" }] })
         }
         fn post(&self, room: &str, from: &str, body: &str, requires_reply: bool) -> Result<serde_json::Value, String> {
             Ok(serde_json::json!({ "room": room, "from": from, "body": body, "requires_reply": requires_reply }))

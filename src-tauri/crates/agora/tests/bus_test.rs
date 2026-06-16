@@ -195,7 +195,7 @@ async fn quiescence_done_vs_deadlock() {
 
     assert!(matches!(bus.quiescence().unwrap(), Quiescence::Done));
 
-    // lead requires a reply from worker; worker stays waiting but now owes -> deadlock.
+    // lead requires a reply from worker; worker stays idle but now owes -> deadlock.
     bus.post("lead", "@worker do Y", true).unwrap();
     drain(&bus, "lead").await;
     assert!(matches!(bus.quiescence().unwrap(), Quiescence::Deadlock { .. }));

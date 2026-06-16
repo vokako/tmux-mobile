@@ -30,8 +30,14 @@ use std::time::Duration;
 // external file dependency. Written to the team work dir at startup.
 const AGENTS_MD: &str = include_str!("../../team/AGENTS.md");
 const KEEPALIVE_SH: &str = include_str!("../../team/hooks/keepalive.sh");
+const HEARTBEAT_SH: &str = include_str!("../../team/hooks/heartbeat.sh");
 
 const RECONCILE_INTERVAL: Duration = Duration::from_secs(3);
+/// Self-heal threshold: no `wait` and no heartbeat for this long ⇒ the agent is
+/// wedged; the supervisor nudges its window (Esc + reconnect re-prompt). Well
+/// above the bus's 90s `unreachable` mark so we only ever auto-restart an agent
+/// that has been silent for a genuinely long time, not one merely between tools.
+const RECOVERY_STALE_MS: i64 = 1_800_000; // 30 minutes
 const KICK: &str = "You are connected to the team group chat (collaboration rules are in AGENTS.md). Call `wait` to receive messages; when someone @mentions you, reply with `post`; otherwise keep calling `wait`. Never stop on your own — always end your turn with `wait`.";
 
 // ─── Team templates (named rosters under <config>/tmux-mobile/teams/) ──────
@@ -164,6 +170,7 @@ struct Paths {
     claude: PathBuf,
     codex: PathBuf,
     keepalive: PathBuf,
+    heartbeat: PathBuf,
     brief: PathBuf,
 }
 
@@ -178,6 +185,7 @@ impl Paths {
             claude: home.join("claude"),
             codex: home.join("codex"),
             keepalive: home.join("keepalive.sh"),
+            heartbeat: home.join("heartbeat.sh"),
             brief: home.join("AGENTS.md"),
         }
     }
@@ -265,10 +273,12 @@ fn prepare_home(p: &Paths) -> std::io::Result<()> {
     };
     std::fs::write(&p.brief, brief)?;
     std::fs::write(&p.keepalive, KEEPALIVE_SH)?;
+    std::fs::write(&p.heartbeat, HEARTBEAT_SH)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&p.keepalive, std::fs::Permissions::from_mode(0o755))?;
+        std::fs::set_permissions(&p.heartbeat, std::fs::Permissions::from_mode(0o755))?;
     }
     Ok(())
 }
@@ -330,6 +340,7 @@ async fn reconcile_loop(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: Stri
     const MAX_LAUNCH_FAILURES: u32 = 3; // give up relaunching an agent after this
     let mut launched: HashMap<String, Option<String>> = HashMap::new();
     let mut fail_count: HashMap<String, u32> = HashMap::new();
+    let mut last_nudge: HashMap<String, i64> = HashMap::new(); // self-heal cooldown
     let mut launched_any = false;
     loop {
         // Stop the loop once the team is closed. close_team removes the room
@@ -340,7 +351,7 @@ async fn reconcile_loop(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: Stri
             return;
         }
         let employees = bridge.employee_specs(&room);
-        let roster = roster_status(&*bridge, &room);
+        let roster = roster_liveness(&*bridge, &room);
         for (name, spec, state) in &employees {
             if state == "disabled" {
                 // Kill any window we launched OR an orphan window with this name.
@@ -357,7 +368,7 @@ async fn reconcile_loop(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: Stri
             }
             // Already online OR a window already exists for it → adopt, don't
             // relaunch (survives server restarts without duplicating windows).
-            let online = roster.get(name).map(|s| s != "offline").unwrap_or(false);
+            let online = roster.get(name).map(|(s, _)| s != "offline").unwrap_or(false);
             if online {
                 launched.insert(name.clone(), None);
                 continue;
@@ -387,20 +398,58 @@ async fn reconcile_loop(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: Stri
                 }
             }
         }
+        // ── Self-heal backstop ────────────────────────────────────────────
+        // An agent we have heard NOTHING from for RECOVERY_STALE_MS — no `wait`
+        // (a parked agent touches ~every second), no per-tool heartbeat — is
+        // wedged: a dead MCP socket, a crashed loop, or a stop we never caught.
+        // Nudge its window once (Esc to cancel the stuck call + a re-prompt to
+        // resume `wait`), then cool down for the same window before trying
+        // again, so we never spam — and so a genuinely long single tool (which
+        // emits no heartbeat until it returns) is interrupted at most rarely.
+        let now = now_ms();
+        for (name, (status, last_seen)) in &roster {
+            if status == "offline" || now - last_seen < RECOVERY_STALE_MS {
+                continue;
+            }
+            if now - last_nudge.get(name).copied().unwrap_or(0) < RECOVERY_STALE_MS {
+                continue; // already nudged recently; give it time
+            }
+            if let Some(pane) = tmux::find_window_by_name(&session, name) {
+                println!(
+                    "🜂 team: agent '{}' unreachable for {}s — self-heal nudging {}",
+                    name, (now - last_seen) / 1000, pane
+                );
+                tokio::spawn(async move { nudge_pane(&pane).await; });
+                last_nudge.insert(name.clone(), now);
+            }
+        }
+
         tokio::time::sleep(RECONCILE_INTERVAL).await;
     }
 }
 
-fn roster_status(bridge: &dyn TeamBridge, room: &str) -> HashMap<String, String> {
+fn roster_liveness(bridge: &dyn TeamBridge, room: &str) -> HashMap<String, (String, i64)> {
     let mut out = HashMap::new();
     if let Some(arr) = bridge.roster(room).get("roster").and_then(|v| v.as_array()) {
         for a in arr {
-            if let (Some(n), Some(s)) = (a.get("name").and_then(|v| v.as_str()), a.get("status").and_then(|v| v.as_str())) {
-                out.insert(n.to_string(), s.to_string());
+            let name = a.get("name").and_then(|v| v.as_str());
+            let status = a.get("status").and_then(|v| v.as_str());
+            let last_seen = a.get("last_seen").and_then(|v| v.as_i64()).unwrap_or(0);
+            if let (Some(n), Some(s)) = (name, status) {
+                out.insert(n.to_string(), (s.to_string(), last_seen));
             }
         }
     }
     out
+}
+
+/// Wall-clock millis since the epoch — same basis as the bus's `last_seen`, so
+/// staleness math in the self-heal backstop lines up across the crate boundary.
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// Write the backend config for `name` and open a named tmux window running it.
@@ -462,8 +511,6 @@ fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &str, session:
 /// Runs in a spawned task: it sleeps between keystrokes (TUI needs a beat to
 /// settle) and we must not block the recovery path.
 pub fn nudge_session_agents(session: String) {
-    const NUDGE: &str =
-        "Reconnect to the team chat: call `wait` now, and keep calling it to stay in the conversation.";
     tokio::spawn(async move {
         // Give a freshly-restarted daemon a moment to be listening before we
         // ask agents to reconnect.
@@ -473,13 +520,25 @@ pub fn nudge_session_agents(session: String) {
                 continue; // the session's initial shell, not an agent
             }
             println!("🜂 team: nudging adopted agent '{}' ({}) to reconnect", name, pane);
-            let _ = tmux::send_keys(&pane, "Escape", false);
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            let _ = tmux::send_keys(&pane, NUDGE, true);
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            let _ = tmux::send_keys(&pane, "Enter", false);
+            nudge_pane(&pane).await;
         }
     });
+}
+
+/// The re-prompt that gets a wedged/stopped agent calling `wait` again.
+const RECONNECT_NUDGE: &str =
+    "Reconnect to the team chat: call `wait` now, and keep calling it to stay in the conversation.";
+
+/// Press Esc (cancel any stuck in-flight call → back to the prompt), then send
+/// the reconnect re-prompt and submit it. Shared by restart-recovery and the
+/// supervisor's liveness self-heal. Sleeps between keystrokes (the TUI needs a
+/// beat to settle), so callers run it inside a spawned task.
+async fn nudge_pane(pane: &str) {
+    let _ = tmux::send_keys(pane, "Escape", false);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let _ = tmux::send_keys(pane, RECONNECT_NUDGE, true);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let _ = tmux::send_keys(pane, "Enter", false);
 }
 
 enum PostKey {
@@ -520,6 +579,16 @@ const WORKER_TOOLS: &[&str] = &["post", "wait", "list_agents", "history"];
 
 // ---- Kiro ----
 #[allow(clippy::too_many_arguments)] // agent config genuinely needs all of these
+/// Env the agent process exports so its `heartbeat.sh` hook can ping the daemon
+/// (who am I, which room, where). Injected on EVERY backend's launch line.
+fn hb_env(name: &str, room: &str, cfg: &TeamConfig) -> Vec<(String, String)> {
+    vec![
+        ("TEAM_HB_URL".to_string(), format!("{}/api/heartbeat", cfg.url)),
+        ("TEAM_AGENT".to_string(), name.to_string()),
+        ("TEAM_ROOM".to_string(), room.to_string()),
+    ]
+}
+
 fn prepare_kiro(
     name: &str, role: &str, goal: &str, manage: bool,
     cfg: &TeamConfig, room: &str, paths: &Paths, model: Option<&str>,
@@ -553,7 +622,11 @@ fn prepare_kiro(
         "allowedTools": allowed,
         "resources": [format!("file://{}", paths.brief.to_string_lossy())],
         "mcpServers": { "team": { "url": format!("{}/mcp", cfg.url), "headers": { "x-agent": name, "x-room": room } } },
-        "hooks": { "stop": [ { "command": paths.keepalive.to_string_lossy() } ] },
+        "hooks": {
+            "postToolUse": [ { "matcher": "*", "command": paths.heartbeat.to_string_lossy() } ],
+            "userPromptSubmit": [ { "command": paths.heartbeat.to_string_lossy() } ],
+            "stop": [ { "command": paths.keepalive.to_string_lossy() } ]
+        },
     });
     std::fs::write(
         home.join("agents").join(format!("{}.json", name)),
@@ -562,7 +635,8 @@ fn prepare_kiro(
     .map_err(|e| e.to_string())?;
 
     let m = model.unwrap_or("claude-sonnet-4.6");
-    let env = vec![("KIRO_HOME".to_string(), home.to_string_lossy().to_string())];
+    let mut env = vec![("KIRO_HOME".to_string(), home.to_string_lossy().to_string())];
+    env.extend(hb_env(name, room, cfg));
     let cmd = format!(
         "kiro-cli chat --agent {} --model {} --trust-all-tools {}",
         name, m, shell_quote(KICK)
@@ -591,7 +665,11 @@ fn prepare_claude(
     std::fs::write(
         &settingsfile,
         serde_json::to_string_pretty(&serde_json::json!({
-            "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": paths.keepalive.to_string_lossy() } ] } ] }
+            "hooks": {
+                "PostToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": paths.heartbeat.to_string_lossy() } ] } ],
+                "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": paths.heartbeat.to_string_lossy() } ] } ],
+                "Stop": [ { "hooks": [ { "type": "command", "command": paths.keepalive.to_string_lossy() } ] } ]
+            }
         }))
         .unwrap(),
     )
@@ -612,7 +690,7 @@ fn prepare_claude(
     let first_msg = format!("{} {}", role_line(role, goal), kick_with_brief(paths));
     // Start interactive; then accept the folder-trust dialog, type the kick, submit.
     let post = vec![PostKey::Enter, PostKey::Text(first_msg), PostKey::Enter];
-    Ok((vec![], cmd, post))
+    Ok((hb_env(name, room, cfg), cmd, post))
 }
 
 // ---- Codex ----
@@ -628,7 +706,8 @@ fn prepare_codex(
         cfg.url, gating, name, room
     );
     std::fs::write(home.join("config.toml"), config).map_err(|e| e.to_string())?;
-    let env = vec![("CODEX_HOME".to_string(), home.to_string_lossy().to_string())];
+    let mut env = vec![("CODEX_HOME".to_string(), home.to_string_lossy().to_string())];
+    env.extend(hb_env(name, room, cfg));
     let first_msg = format!("{} {}", role_line(role, goal), kick_with_brief(paths));
     let cmd = format!("codex --dangerously-bypass-approvals-and-sandbox {}", shell_quote(&first_msg));
     Ok((env, cmd, vec![]))

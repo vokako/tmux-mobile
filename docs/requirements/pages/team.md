@@ -47,8 +47,8 @@ server. See `docs/design-docs/features/team.md` for architecture.
 ### Roster strip (top, when a team is running)
 - One chip per **present** agent (offline agents hidden; the human `human` is
   never shown as an addressable agent).
-- Each chip: a status dot (waiting = green, working = amber, online = accent),
-  the agent name, and a terminal glyph.
+- Each chip: a status dot (idle = green, thinking = blue, working = amber,
+  hardworking = orange, stalled = red), the agent name, and a terminal glyph.
 - **Tap a chip → preview that agent's tmux pane** in the Terminal tab. The agent
   runs in a window named after it in `tmm-team-<workspace-slug>`; the tab maps
   name → pane via `window_name` and opens it through the normal terminal path.

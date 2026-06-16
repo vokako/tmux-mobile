@@ -91,10 +91,12 @@
   });
 
   const legend = [
-    { cls: 'working', key: 'collabWorking' },
-    { cls: 'waiting', key: 'collabWaiting' },
-    { cls: 'online',  key: 'collabOnline' },
-    { cls: 'human',   key: 'collabHuman' },
+    { cls: 'idle',        key: 'collabIdle' },
+    { cls: 'thinking',    key: 'collabThinking' },
+    { cls: 'working',     key: 'collabWorking' },
+    { cls: 'hardworking', key: 'collabHardworking' },
+    { cls: 'stalled',     key: 'collabStalled' },
+    { cls: 'human',       key: 'collabHuman' },
   ];
 </script>
 
@@ -137,11 +139,14 @@
     transform-box: fill-box; transform-origin: center;
     transition: transform 0.25s ease;
   }
-  .dot.status-working { fill: var(--status-warn); }
-  .dot.status-waiting { fill: var(--status-ok); }
-  .dot.status-online  { fill: var(--accent); }
-  .dot.status-offline { fill: var(--text3); }
-  .dot.status-human   { fill: var(--bg); stroke: var(--accent); stroke-width: 2.5; }
+  .dot.status-idle        { fill: var(--status-ok); }
+  .dot.status-thinking    { fill: var(--accent); }
+  .dot.status-working     { fill: var(--status-warn); }
+  .dot.status-hardworking { fill: var(--status-hot); }
+  .dot.status-stalled     { fill: var(--status-danger); }
+  .dot.status-online      { fill: var(--accent); }
+  .dot.status-offline     { fill: var(--text3); }
+  .dot.status-human       { fill: var(--bg); stroke: var(--accent); stroke-width: 2.5; }
   .node.pulse .dot { transform: scale(1.55); }
 
   .lbl { fill: var(--text2); font-size: 8px; font-weight: 600; }
@@ -186,10 +191,12 @@
   }
   .leg-item { display: inline-flex; align-items: center; gap: 4px; }
   .leg-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-  .leg-dot.status-working { background: var(--status-warn); }
-  .leg-dot.status-waiting { background: var(--status-ok); }
-  .leg-dot.status-online  { background: var(--accent); }
-  .leg-dot.status-human   { background: var(--bg); border: 2px solid var(--accent); box-sizing: border-box; }
+  .leg-dot.status-idle        { background: var(--status-ok); }
+  .leg-dot.status-thinking    { background: var(--accent); }
+  .leg-dot.status-working     { background: var(--status-warn); }
+  .leg-dot.status-hardworking { background: var(--status-hot); }
+  .leg-dot.status-stalled     { background: var(--status-danger); }
+  .leg-dot.status-human       { background: var(--bg); border: 2px solid var(--accent); box-sizing: border-box; }
 
   @media (prefers-reduced-motion: reduce) {
     .arc-comet { animation: none; stroke-dasharray: none; }

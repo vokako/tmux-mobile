@@ -185,11 +185,14 @@ prompt) then a short re-prompt that makes it call `wait` again, re-establishing
 the connection against the stateless daemon. Nudging is harmless if an agent
 happened to be healthy (it just restarts its wait loop).
 
-This nudge lives in recovery, **not** in the reconcile loop, because the loop's
-presence check can't distinguish a healthy agent from one hung on a dead socket
-— a just-restarted agent still reports `waiting` for ~30 s until its presence TTL
-lapses, so an in-loop nudge gated on online-status would never fire (a bug found
-in testing). Killing + relaunching the agents fresh would also recover them (the
+This *reconnect* nudge lives in recovery, **not** in the reconcile loop's fast
+path, because right after a restart the loop's presence check can't distinguish
+a healthy agent from one hung on a dead socket — a just-restarted agent still
+reports its last status (`idle`/`working`) until its 90 s presence mark lapses,
+so an in-loop nudge gated on online-status would fire on healthy agents (a bug
+found in testing). (The loop *does* carry a separate **30-min self-heal**, §5b,
+but that fires only on genuinely long silence, well past this ambiguous window.)
+Killing + relaunching the agents fresh would also recover them (the
 stateless daemon makes the new handshake succeed), but it discards their context;
 adoption + nudge preserves it.
 
@@ -211,6 +214,68 @@ The agent config dialects (kiro agent JSON, claude `--mcp-config`/`--settings`,
 codex `config.toml`), the keepalive Stop-hook, and the role/goal prompts carry
 over from agora's verified launcher. The MCP server the agents connect to is
 named **`team`** in their configs (so MCP tool names are `mcp__team__hire` etc).
+
+## 5b. Agent liveness, presence & self-heal
+
+The first version conflated "is this agent's process alive?" with "did it touch
+the bus recently?" — and a single 30 s presence TTL flipped any agent we hadn't
+heard from to **offline**, which the UI filters out of the roster. The trap: a
+*working* agent (it received messages and is now running tools / thinking) makes
+**no** `wait`/`post` call for its whole turn, so a turn longer than 30 s — i.e.
+any real coding turn — was misreported and the agent visibly **dropped from the
+team** mid-task. Presence was only ever refreshed by bus calls, and the one
+state most likely to outlast the TTL (working) was the state with no signal.
+
+The fix is one **liveness clock** — `last_seen` — fed by three independent
+sources, plus a tiered overlay that never silently removes a busy agent. The
+display status is a five-rung ladder — **idle → thinking → working →
+hardworking → stalled** (plus terminal `offline`):
+
+1. **Parked in `wait`** → status `idle`; the wait loop calls `store::touch`
+   ~every second, so an `idle` agent is always fresh.
+2. **`wait` delivers a message** → status `thinking`: it just received work and a
+   quick reply is expected. **`post`** → `working` + `last_seen`.
+3. **Heads-down working** → the agent's **tool hooks** POST `/api/heartbeat`
+   (agora `web.rs`; resolves `x-agent`/`x-room` like `/mcp`, calls
+   `Bus::heartbeat`, which sets status `working` + `last_seen`). Sustained tool
+   activity is what promotes `thinking` → `working`. Wired on the per-tool /
+   per-prompt hooks so a busy agent reports alive *between* `wait` calls: kiro
+   `postToolUse` + `userPromptSubmit`, claude `PostToolUse` + `UserPromptSubmit`.
+   The hook is `team/hooks/heartbeat.sh` — a fire-and-forget background
+   `curl -m 2` that exits 0 immediately, so it can never block or fail a turn.
+   The supervisor injects `TEAM_HB_URL`/`TEAM_AGENT`/`TEAM_ROOM` into every
+   backend's launch env so the hook is self-contained.
+
+**Tiered presence overlay** (`bus.rs::apply_presence`, read-time only —
+`STALE_TTL_MS = 90 s` sits above a typical inter-tool/thinking gap so a
+heartbeating agent never flaps; `STALLED_TTL_MS = 30 min`):
+
+- stored `offline` (explicit `leave`/`fire`) → stays `offline` (UI hides it);
+- fresh (`age ≤ 90 s`) → keep the real status (`idle`/`thinking`/`working`);
+- `90 s < age ≤ 30 min` → **`hardworking`** — a `working`/`thinking` agent whose
+  heartbeats stopped: head-down on a long tool / long think. An `idle`/`online`
+  agent that goes stale here instead means its wait loop died, so it is surfaced
+  as `stalled` directly. `hardworking` is **kept in the roster** (the chip/graph
+  node turns orange, the pane preview still works) — explicitly *not* `offline`,
+  so a quiet-but-busy agent is never "fired" by the UI again;
+- `age > 30 min` → **`stalled`** (red) — needs a restart; the supervisor
+  self-heals it (below).
+
+Colors run a heat gradient: idle green → thinking blue → working amber →
+hardworking orange (`--status-hot`) → stalled red.
+
+**Self-heal backstop** (`team.rs::reconcile_loop`, `RECOVERY_STALE_MS = 30 min`).
+Because a parked agent touches every second and a working one heartbeats per
+tool, `last_seen` older than 30 min means genuinely *nothing* — a dead MCP
+socket, a crashed loop, a stop we never caught. For such an agent (window still
+present) the supervisor runs the same `nudge_pane` recovery uses — `Esc` to
+cancel the wedged call, then a re-prompt to resume `wait` — **once**, then cools
+down the same window for another 30 min so we never spam. Tradeoff: a single
+tool that legitimately runs >30 min emits no heartbeat and could be interrupted;
+the long cooldown + high threshold make this rare and recoverable. codex has no
+per-tool hook in its config, so a working codex agent leans on this backstop
+(and shows `hardworking` then `stalled` meanwhile) — acceptable until a
+pane-output liveness probe is added.
 
 ### Optional: the standalone `team/` scripts
 
@@ -250,8 +315,11 @@ hidden.
 - **`requires_reply` defaulting.** The phone infers `requires_reply=true` from an
   `@mention`. After the §6 fix this is safe, but a casual "@worker 你在线吗" still
   creates a real obligation. Consider making it opt-in if teams feel too rigid.
-- **Roster status colors** are coarse (working/waiting/online); no "owes a reply"
-  / deadlock indicator yet (data is in `/api/quiescence`).
+- **Roster status colors**: idle / thinking / working / **hardworking** (orange)
+  / **stalled** (red) — see §5b — plus human. There is still no "owes a reply" /
+  deadlock indicator (the data is in `/api/quiescence`).
+- **Liveness for codex** relies on the 30-min self-heal backstop (no per-tool
+  hook in codex config); a pane-output probe would tighten this. See §5b.
 - **Backends not all verified locally**: kiro + claude verified upstream; codex
   needs `codex login`.
 - **History window**: the tab loads `team_history(200)`; the full log lives in

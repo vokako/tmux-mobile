@@ -18,7 +18,16 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
-const PRESENCE_TTL_MS: i64 = 30_000;
+/// Liveness ladder. `last_seen` is refreshed by every bus call (`post`, the
+/// `wait` loop touches it ~every second while parked) AND by the agent's tool
+/// hooks (`Bus::heartbeat` while it is heads-down working). The display status
+/// then ages along: fresh → its real status (idle/thinking/working); silent past
+/// `STALE_TTL_MS` → `hardworking` (deep, head-down work, no recent heartbeat);
+/// silent past `STALLED_TTL_MS` → `stalled` (needs a restart — the supervisor
+/// self-heals it). `STALE_TTL_MS` sits above a typical inter-tool/thinking gap so
+/// a heartbeating agent never flaps between working and hardworking.
+const STALE_TTL_MS: i64 = 90_000;
+const STALLED_TTL_MS: i64 = 1_800_000; // 30 min: → "stalled" (mirrors the supervisor self-heal)
 const MAX_WAIT_MS: u64 = 50_000;
 const POLL_INTERVAL_MS: u64 = 1_000;
 /// Push throttling: messages that aren't addressed to you and aren't from the
@@ -260,7 +269,9 @@ impl Bus {
             };
             if !delivered.is_empty() {
                 let conn = self.lock();
-                store::set_status(&conn, &self.room, agent, "working")?;
+                // Just received message(s) — about to process them, quick reply
+                // expected. The first tool/heartbeat promotes this to `working`.
+                store::set_status(&conn, &self.room, agent, "thinking")?;
                 return Ok(WaitOutcome::Delivered { messages: delivered, roster, cursor: report_cursor });
             }
 
@@ -279,7 +290,7 @@ impl Bus {
                     }
                     return Ok(WaitOutcome::Blocked { you_owe, pending });
                 }
-                store::set_status(&conn, &self.room, agent, "waiting")?;
+                store::set_status(&conn, &self.room, agent, "idle")?;
             }
 
             // 3. Nothing to do and nothing owed: park until a new message or the timeout.
@@ -298,6 +309,16 @@ impl Bus {
     pub fn roster(&self) -> Result<Vec<AgentRow>> {
         let conn = self.lock();
         Ok(apply_presence(store::roster(&conn, &self.room)?))
+    }
+
+    /// Out-of-band liveness ping from the agent's tool hooks (each tool / prompt
+    /// while it is heads-down on a turn). It both refreshes `last_seen` AND marks
+    /// the agent `working` — sustained tool activity is exactly what distinguishes
+    /// `working` from the brief `thinking` window right after a message arrives.
+    /// No-op (Ok) if the agent has no roster row yet.
+    pub fn heartbeat(&self, agent: &str) -> Result<()> {
+        let conn = self.lock();
+        store::set_status(&conn, &self.room, agent, "working")
     }
 
     pub fn history(&self, limit: i64) -> Result<Vec<Message>> {
@@ -391,7 +412,7 @@ impl Bus {
         if online.is_empty() {
             return Ok(Quiescence::Empty);
         }
-        if !online.iter().all(|a| a.status == "waiting") {
+        if !online.iter().all(|a| a.status == "idle") {
             return Ok(Quiescence::Active);
         }
         let obs = store::all_obligations(&conn, &self.room)?;
@@ -405,13 +426,27 @@ impl Bus {
     }
 }
 
-/// Overlay TTL-based presence: an agent whose `last_seen` is older than the TTL is
-/// reported as `offline` regardless of its stored status.
+/// Overlay the liveness ladder onto stored statuses (read-time only — never
+/// written back). An agent we have not heard from ages from its real status →
+/// `hardworking` (deep work, heartbeats stopped) → `stalled` (needs a restart).
+/// `idle`/`online` agents are kept fresh by the wait-loop touch, so if one DOES
+/// go stale its loop has died — that's `stalled`, not `hardworking`. An agent
+/// that explicitly left/was fired carries the stored `offline`, left untouched.
 fn apply_presence(mut roster: Vec<AgentRow>) -> Vec<AgentRow> {
     let now = crate::envelope::now_ms();
     for a in &mut roster {
-        if now - a.last_seen > PRESENCE_TTL_MS {
-            a.status = "offline".to_string();
+        if a.status == "offline" {
+            continue; // deliberately gone — don't relabel
+        }
+        let age = now - a.last_seen;
+        if age > STALLED_TTL_MS {
+            a.status = "stalled".to_string();
+        } else if age > STALE_TTL_MS {
+            a.status = if a.status == "working" || a.status == "thinking" {
+                "hardworking".to_string()
+            } else {
+                "stalled".to_string()
+            };
         }
     }
     roster
@@ -490,4 +525,43 @@ fn mentioned_names(conn: &rusqlite::Connection, room: &str, body: &str) -> Resul
         }
     }
     Ok(out)
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::AgentRow;
+
+    fn row(name: &str, status: &str, age_ms: i64) -> AgentRow {
+        AgentRow {
+            name: name.to_string(),
+            role: None,
+            status: status.to_string(),
+            cursor: 0,
+            joined_at: 0,
+            last_seen: crate::envelope::now_ms() - age_ms,
+        }
+    }
+
+    #[test]
+    fn presence_overlay_is_tiered() {
+        let out = apply_presence(vec![
+            row("worker", "working", 1_000),                  // heartbeating → keep
+            row("ponderer", "thinking", 5_000),               // just got a msg → keep
+            row("parked", "idle", 5_000),                     // touched recently → keep
+            row("grinding", "working", STALE_TTL_MS + 10_000),// silent → hardworking
+            row("crashed", "idle", STALE_TTL_MS + 10_000),    // parked but stale = loop died → stalled
+            row("wedged", "working", STALLED_TTL_MS + 10_000),// silent 30min+ → stalled
+            row("left", "offline", STALLED_TTL_MS + 10_000),  // explicit → stays offline
+        ]);
+        let by = |n: &str| out.iter().find(|a| a.name == n).unwrap().status.clone();
+        assert_eq!(by("worker"), "working");
+        assert_eq!(by("ponderer"), "thinking");
+        assert_eq!(by("parked"), "idle");
+        assert_eq!(by("grinding"), "hardworking", "stale in-turn agent is head-down, not removed");
+        assert_eq!(by("crashed"), "stalled", "a parked agent that stops touching has a dead loop");
+        assert_eq!(by("wedged"), "stalled");
+        assert_eq!(by("left"), "offline", "explicit offline is never relabelled");
+    }
 }

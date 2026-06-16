@@ -824,9 +824,12 @@
   .roster-chip:active { border-color: var(--accent); color: var(--accent); }
   .roster-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
   .roster-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--text3); }
-  .roster-dot.status-working { background: var(--status-warn); }
-  .roster-dot.status-waiting { background: var(--status-ok); }
-  .roster-dot.status-online { background: var(--accent); }
+  .roster-dot.status-idle        { background: var(--status-ok); }
+  .roster-dot.status-thinking    { background: var(--accent); }
+  .roster-dot.status-working     { background: var(--status-warn); }
+  .roster-dot.status-hardworking { background: var(--status-hot); }
+  .roster-dot.status-stalled     { background: var(--status-danger); }
+  .roster-dot.status-online      { background: var(--accent); }
 
   /* Collaboration graph panel (mobile only — toggled from the header button). */
   .collab-wrap { position: relative; flex-shrink: 0; background: var(--surface); border-bottom: 1px solid var(--border); }

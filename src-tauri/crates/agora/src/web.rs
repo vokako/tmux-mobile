@@ -75,6 +75,7 @@ pub fn router(provider: Arc<dyn crate::bus::BusProvider>) -> Router {
         .route("/api/quiescence", get(api_quiescence))
         .route("/api/history", get(api_history))
         .route("/api/employees", get(api_employees).post(api_seed_employee))
+        .route("/api/heartbeat", post(api_heartbeat))
         .nest_service("/mcp", mcp_service)
         .with_state(AppState { provider })
 }
@@ -155,6 +156,21 @@ async fn api_post(State(st): State<AppState>, Json(b): Json<PostBody>) -> axum::
         Ok(m) => Json(m).into_response(),
         Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
+}
+
+/// `POST /api/heartbeat` — an agent's tool hook pings this each tool/prompt so a
+/// heads-down working agent keeps a fresh `last_seen` instead of decaying to
+/// `unreachable`. Identity comes from the same headers agents send to `/mcp`:
+/// `x-agent` (who) + `x-room` (which team). Best-effort: always 204.
+async fn api_heartbeat(State(st): State<AppState>, headers: axum::http::HeaderMap) -> axum::response::Response {
+    let hdr = |k: &str| headers.get(k).and_then(|v| v.to_str().ok()).map(|s| s.to_string());
+    let agent = hdr("x-agent").unwrap_or_default();
+    if agent.is_empty() {
+        return (axum::http::StatusCode::BAD_REQUEST, "missing x-agent").into_response();
+    }
+    let Some(bus) = st.bus(&hdr("x-room")) else { return ERR_NO_ROOM.into_response() };
+    let _ = bus.heartbeat(&agent);
+    axum::http::StatusCode::NO_CONTENT.into_response()
 }
 
 async fn api_roster(State(st): State<AppState>, Query(q): Query<RoomQuery>) -> axum::response::Response {

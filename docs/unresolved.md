@@ -76,7 +76,7 @@
     each agent's CLI conversation + any in-progress task. Adoption keeps them.
 - **Verified end-to-end**: kill server with 3 agents online → agents hang on a
   dead `wait` → restart server → recovery adopts the windows + nudges → all 3
-  back to `waiting`, last_seen <1s, no duplicate windows, context intact.
+  back to `idle`, last_seen <1s, no duplicate windows, context intact.
 
 ### Stale Chinese default.json on existing installs
 - **Priority**: Low · **Area**: Team / templates
