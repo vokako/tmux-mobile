@@ -4,6 +4,8 @@
 /node_modules
 /temp
 temp/
+# Symlink to the Android gradle build cache (created by the android build)
+/build
 
 # Local scratch / not-in-repo assets
 /deploy
