@@ -206,7 +206,8 @@ struct SeedBody {
     room: Option<String>,
 }
 
-/// Seed the desired roster with an employee (used by run.py for the initial team).
+/// Seed the desired roster with an employee (the dashboard / external HTTP API;
+/// the in-app path seeds directly via `Bus::seed_employee`).
 async fn api_seed_employee(State(st): State<AppState>, Json(b): Json<SeedBody>) -> axum::response::Response {
     let Some(bus) = st.bus(&b.room) else { return ERR_NO_ROOM.into_response() };
     match bus.seed_employee(&b.name, &b.spec) {

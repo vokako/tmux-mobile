@@ -52,8 +52,8 @@ button calls `team_start_team` with a chosen **workspace** (the agents' working
 dir), and the desktop server itself seeds the default roster onto the bus and
 reconciles it into real agent windows in tmux — no separate script, no extra
 process. The agent CLIs still run as their own tmux processes (intrinsic, and
-what enables pane preview), but all orchestration lives in the app. The
-standalone `team/` Python scripts remain as an optional advanced/headless path.
+what enables pane preview), but all orchestration lives in the app. (The team's
+Python launcher that predated this Rust port has been retired — see §"Retired".)
 
 Why this shape, and what was rejected:
 
@@ -277,12 +277,18 @@ per-tool hook in its config, so a working codex agent leans on this backstop
 (and shows `hardworking` then `stalled` meanwhile) — acceptable until a
 pane-output liveness probe is added.
 
-### Optional: the standalone `team/` scripts
+### Retired: the standalone `team/` Python launcher
 
-`team/` keeps the Python launcher for advanced / headless use (custom
-`team.yaml` roster). It targets the already-running bus (no daemon) and uses
-named windows. Most users never need it; the in-app button is the default.
-Run: `cd team && uv run --with pyyaml python run.py`.
+`team/` once shipped a Python launcher (`run.py` + `supervise.py` +
+`team_backends.py` + `team.yaml`) — the original agora demo path, kept for
+headless use. It has been **removed**: `team.rs` is a faithful in-process Rust
+port that does everything it did and more (multi-room via `x-room`, the
+heartbeat hook, the private per-team home), so the Python copy only drifted out
+of sync and risked misleading the next reader. `team/` now holds only the
+artifacts the app compiles in via `include_str!`: `AGENTS.md`, `hooks/`
+(`keepalive.sh`, `heartbeat.sh`), and `templates/`. (The retired scripts live on
+in this repo's gitignored `temp/team-standalone-py/` should anyone want the
+reference.)
 
 ## 6. The obligation bug we hit and fixed
 
