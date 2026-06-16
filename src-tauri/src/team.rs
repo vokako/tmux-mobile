@@ -1285,7 +1285,7 @@ mod tests {
             agents.iter().all(|a| a["goal"].as_str().map(|g| g.len() > 80).unwrap_or(false)),
             "each role's goal must carry its slice of the workflow"
         );
-        assert!(agents.iter().all(|a| a["model"] == "auto"), "all models pinned to auto");
+        assert!(agents.iter().all(|a| a["model"] == ""), "models use the server default");
 
         // Per-agent tools wired via the new schema.
         let agent = |n: &str| agents.iter().find(|a| a["name"] == n).unwrap();

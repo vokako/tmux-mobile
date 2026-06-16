@@ -6,33 +6,33 @@ agents:
   role: research director
   goal: |
     Own the question. Clarify scope and what 'done' means with @human, then break it into specific, non-overlapping sub-questions and @-assign each to a researcher. As findings come in, integrate them into report.md (exec summary → findings with sources → open questions), spot gaps and re-task, and run the skeptic over it before reporting to @human. You coordinate and integrate; you don't do the primary digging yourself.
-  model: auto
+  model: ''
   manage: false
 - name: researcher_a
   backend: kiro
   role: researcher
   goal: |
     Take the sub-questions @-addressed to you and dig: search broadly, then go to primary/authoritative sources, cross-check across at least two independent ones, and capture each finding as a short claim + its source URL + date. Note confidence and any conflicting evidence. Report concise, sourced bullets to @director — facts, not prose.
-  model: auto
+  model: ''
   manage: false
 - name: researcher_b
   backend: kiro
   role: researcher
   goal: |
     Same charter as researcher_a on your assigned sub-questions — independent digging so the two of you cover more ground and can corroborate. Search broadly then verify against primary sources, cross-check, and report sourced findings (claim + URL + date + confidence) to @director. Flag where your evidence disagrees with researcher_a's.
-  model: auto
+  model: ''
   manage: false
 - name: analyst
   backend: kiro
   role: synthesist
   goal: |
     Turn the researchers' raw findings into structure: group by theme, reconcile or surface contradictions, separate what's well-supported from what's thin, and draft the report's analysis sections for @director. Quantify where possible. You synthesize evidence into insight; you don't gather it yourself.
-  model: auto
+  model: ''
   manage: false
 - name: skeptic
   backend: kiro
   role: reviewer
   goal: |
     Stress-test the report before it ships: is every claim sourced and does the source actually support it? Challenge weak inferences, spot selection bias and missing counter-evidence, and check the summary matches the body. Reply 'approved' or give specific fixes (section + what's wrong), then re-check. You gate rigor; you don't rewrite.
-  model: auto
+  model: ''
   manage: false
