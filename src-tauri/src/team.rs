@@ -601,7 +601,6 @@ fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &str, session:
     let backend = spec.get("backend").and_then(|v| v.as_str()).unwrap_or("kiro");
     let role = spec.get("role").and_then(|v| v.as_str()).unwrap_or(name);
     let goal = spec.get("goal").and_then(|v| v.as_str()).unwrap_or("");
-    let manage = spec.get("manage").and_then(|v| v.as_bool()).unwrap_or(false);
     let model = spec.get("model").and_then(|v| v.as_str());
     let team_prompt = spec.get("team_prompt").and_then(|v| v.as_str()).unwrap_or("");
 
@@ -626,9 +625,9 @@ fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &str, session:
     let extras = Extras { env, mcp, skills };
 
     let (env, cmd, post_keys) = match backend {
-        "kiro" => prepare_kiro(name, role, goal, manage, team_prompt, cfg, room, paths, model, &extras)?,
-        "claude" => prepare_claude(name, role, goal, manage, team_prompt, cfg, room, paths, model, &extras)?,
-        "codex" => prepare_codex(name, role, goal, manage, team_prompt, cfg, room, paths, &extras)?,
+        "kiro" => prepare_kiro(name, role, goal, team_prompt, cfg, room, paths, model, &extras)?,
+        "claude" => prepare_claude(name, role, goal, team_prompt, cfg, room, paths, model, &extras)?,
+        "codex" => prepare_codex(name, role, goal, team_prompt, cfg, room, paths, &extras)?,
         other => return Err(format!("unknown backend: {}", other)),
     };
 
@@ -731,7 +730,6 @@ fn build_agent_prompt(role: &str, goal: &str, team_prompt: &str, cfg: &TeamConfi
     )
 }
 
-const WORKER_TOOLS: &[&str] = &["post", "wait", "list_agents", "history"];
 
 // ---- Kiro ----
 #[allow(clippy::too_many_arguments)] // agent config genuinely needs all of these
@@ -975,7 +973,7 @@ fn hb_env(name: &str, room: &str, cfg: &TeamConfig) -> Vec<(String, String)> {
 }
 
 fn prepare_kiro(
-    name: &str, role: &str, goal: &str, manage: bool, team_prompt: &str,
+    name: &str, role: &str, goal: &str, team_prompt: &str,
     cfg: &TeamConfig, room: &str, paths: &Paths, model: Option<&str>, extras: &Extras,
 ) -> Result<Prepared, String> {
     let home = &paths.kiro_home;
@@ -987,13 +985,7 @@ fn prepare_kiro(
     )
     .map_err(|e| e.to_string())?;
 
-    let team: Vec<String> = if manage {
-        vec!["@team".to_string()]
-    } else {
-        WORKER_TOOLS.iter().map(|t| format!("@team/{}", t)).collect()
-    };
-    let mut tools = vec!["*".to_string()];
-    tools.extend(team.clone());
+    let tools = vec!["*".to_string(), "@team".to_string()];
 
     // Skills are loaded as native skill:// resources.
     let resources: Vec<String> = extras.skills.iter()
@@ -1045,7 +1037,7 @@ fn prepare_kiro(
 // ---- Claude Code ----
 #[allow(clippy::too_many_arguments)]
 fn prepare_claude(
-    name: &str, role: &str, goal: &str, manage: bool, team_prompt: &str,
+    name: &str, role: &str, goal: &str, team_prompt: &str,
     cfg: &TeamConfig, room: &str, paths: &Paths, model: Option<&str>, extras: &Extras,
 ) -> Result<Prepared, String> {
     let d = &paths.claude;
@@ -1082,14 +1074,11 @@ fn prepare_claude(
     .map_err(|e| e.to_string())?;
 
     let m = model.unwrap_or("sonnet");
-    // MCP tool names are mcp__<server>__<tool>; our server is named "team".
-    let disallow = if manage { "" } else { "--disallowedTools mcp__team__hire mcp__team__fire " };
     let cmd = format!(
-        "claude --mcp-config {} --strict-mcp-config --settings {} --model {} --dangerously-skip-permissions {}",
+        "claude --mcp-config {} --strict-mcp-config --settings {} --model {} --dangerously-skip-permissions",
         shell_quote(&mcpfile.to_string_lossy()),
         shell_quote(&settingsfile.to_string_lossy()),
-        m,
-        disallow
+        m
     )
     .trim_end()
     .to_string();
@@ -1104,14 +1093,13 @@ fn prepare_claude(
 // ---- Codex ----
 #[allow(clippy::too_many_arguments)]
 fn prepare_codex(
-    name: &str, role: &str, goal: &str, manage: bool, team_prompt: &str, cfg: &TeamConfig, room: &str, paths: &Paths, extras: &Extras,
+    name: &str, role: &str, goal: &str, team_prompt: &str, cfg: &TeamConfig, room: &str, paths: &Paths, extras: &Extras,
 ) -> Result<Prepared, String> {
     let home = paths.codex.join(name);
     std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
-    let gating = if manage { "" } else { "disabled_tools = [\"hire\", \"fire\"]\n" };
     let mut config = format!(
-        "[mcp_servers.team]\nurl = \"{}/mcp\"\nenabled = true\nexperimental_use_rmcp_client = true\n{}\n[mcp_servers.team.http_headers]\n\"x-agent\" = \"{}\"\n\"x-room\" = \"{}\"\n",
-        cfg.url, gating, name, room
+        "[mcp_servers.team]\nurl = \"{}/mcp\"\nenabled = true\nexperimental_use_rmcp_client = true\n\n[mcp_servers.team.http_headers]\n\"x-agent\" = \"{}\"\n\"x-room\" = \"{}\"\n",
+        cfg.url, name, room
     );
     for m in &extras.mcp {
         if !m.name.is_empty() {
