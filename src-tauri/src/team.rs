@@ -37,7 +37,6 @@ const RECONCILE_INTERVAL: Duration = Duration::from_secs(3);
 /// above the bus's 90s `unreachable` mark so we only ever auto-restart an agent
 /// that has been silent for a genuinely long time, not one merely between tools.
 const RECOVERY_STALE_MS: i64 = 1_800_000; // 30 minutes
-const KICK: &str = "You are connected to the team group chat (collaboration rules are in team-brief.md). Call `wait` to receive messages; when someone @mentions you, reply with `post`; otherwise keep calling `wait`. Never stop on your own — always end your turn with `wait`.";
 
 // ─── Team templates (named rosters under <config>/tmux-mobile/teams/) ──────
 // A template is a JSON file `teams/<name>.json` = { "agents": [ {name, backend,
@@ -272,7 +271,6 @@ struct Paths {
     codex: PathBuf,
     keepalive: PathBuf,
     heartbeat: PathBuf,
-    brief: PathBuf,
 }
 
 impl Paths {
@@ -285,7 +283,6 @@ impl Paths {
             codex: home.join("codex"),
             keepalive: home.join("keepalive.sh"),
             heartbeat: home.join("heartbeat.sh"),
-            brief: home.join("team-brief.md"),
         }
     }
 }
@@ -300,6 +297,8 @@ pub struct TeamConfig {
     pub model: String,
     /// Shared collaboration rules prepended to every agent's brief.
     pub team_rules: String,
+    /// The kick message that connects an agent to the bus loop.
+    pub team_kick: String,
 }
 
 /// Start the team for `workspace`: seed the default roster and spawn the
@@ -312,10 +311,7 @@ pub fn start(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: String, workspa
         let session = format!("tmm-team-{}", room);
         let paths = Paths::new(&workspace);
         let tpl = if template.trim().is_empty() { "default".to_string() } else { template };
-        // Team-wide prompt (if any) is appended to every agent's brief.
-        let team_prompt = read_team_def(&tpl)
-            .get("prompt").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        if let Err(e) = prepare_home(&paths, &team_prompt, &cfg) {
+        if let Err(e) = prepare_home(&paths) {
             eprintln!("⚠️  team: failed to prepare config home: {}", e);
             return;
         }
@@ -364,33 +360,16 @@ pub fn save_system_prompt(text: &str) -> Result<(), String> {
     std::fs::write(system_prompt_path(), text).map_err(|e| e.to_string())
 }
 
-/// Write the shared brief + keepalive hook into our private per-team home
-/// (`<workspace>/.tmm/`). The global system prompt is prepended to the brief so
-/// every agent — across all teams — sees it first.
-fn prepare_home(p: &Paths, team_prompt: &str, cfg: &TeamConfig) -> std::io::Result<()> {
+/// Write hooks into our private per-team home (`<workspace>/.tmm/`).
+/// The agent prompt is now fully inline (no external brief file).
+fn prepare_home(p: &Paths) -> std::io::Result<()> {
     std::fs::create_dir_all(&p.kiro_home)?;
-    // Self-gitignore: `.tmm/.gitignore` = `*` — the whole dir is invisible to
-    // git without touching the project's root .gitignore.
-    let gi = p.brief.parent().unwrap().join(".gitignore");
+    // Self-gitignore: `.tmm/.gitignore` = `*`
+    let tmm_dir = p.workspace.join(".tmm");
+    let gi = tmm_dir.join(".gitignore");
     if !gi.exists() {
         std::fs::write(&gi, "*\n")?;
     }
-    // Brief = global system prompt (all teams) → team_rules (collaboration
-    // contract from config) → this team's own prompt. Each section only if non-empty.
-    let mut brief = String::new();
-    let sys = read_system_prompt();
-    if !sys.trim().is_empty() {
-        brief.push_str(sys.trim());
-        brief.push_str("\n\n---\n\n");
-    }
-    if !cfg.team_rules.trim().is_empty() {
-        brief.push_str(cfg.team_rules.trim());
-    }
-    if !team_prompt.trim().is_empty() {
-        brief.push_str("\n\n---\n\n");
-        brief.push_str(team_prompt.trim());
-    }
-    std::fs::write(&p.brief, brief)?;
     std::fs::write(&p.keepalive, KEEPALIVE_SH)?;
     std::fs::write(&p.heartbeat, HEARTBEAT_SH)?;
     #[cfg(unix)]
@@ -423,6 +402,7 @@ fn seed_template(bridge: &dyn TeamBridge, room: &str, template: &str, cfg: &Team
     let team_env = def.get("env").cloned().unwrap_or_else(|| serde_json::json!({}));
     let team_mcp = def.get("mcp").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     let team_skills = def.get("skills").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let team_prompt = def.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
     let mut names = Vec::new();
     for a in &agents {
         let name = a.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
@@ -449,6 +429,7 @@ fn seed_template(bridge: &dyn TeamBridge, room: &str, template: &str, cfg: &Team
             "skills": merge_list(&team_skills, &agent_skills),
             // The team folder is where local (relative) skills resolve from.
             "team_dir": team_dir(template).to_string_lossy(),
+            "team_prompt": team_prompt,
         });
         if let Err(e) = bridge.seed_employee(room, name, &spec) {
             eprintln!("⚠️  team: seed '{}' failed: {}", name, e);
@@ -622,6 +603,7 @@ fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &str, session:
     let goal = spec.get("goal").and_then(|v| v.as_str()).unwrap_or("");
     let manage = spec.get("manage").and_then(|v| v.as_bool()).unwrap_or(false);
     let model = spec.get("model").and_then(|v| v.as_str());
+    let team_prompt = spec.get("team_prompt").and_then(|v| v.as_str()).unwrap_or("");
 
     // Per-agent extras (env / extra MCP servers / skills) from the team.yaml.
     let env: Vec<(String, String)> = spec
@@ -644,9 +626,9 @@ fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &str, session:
     let extras = Extras { env, mcp, skills };
 
     let (env, cmd, post_keys) = match backend {
-        "kiro" => prepare_kiro(name, role, goal, manage, cfg, room, paths, model, &extras)?,
-        "claude" => prepare_claude(name, role, goal, manage, cfg, room, paths, model, &extras)?,
-        "codex" => prepare_codex(name, role, goal, manage, cfg, room, paths, &extras)?,
+        "kiro" => prepare_kiro(name, role, goal, manage, team_prompt, cfg, room, paths, model, &extras)?,
+        "claude" => prepare_claude(name, role, goal, manage, team_prompt, cfg, room, paths, model, &extras)?,
+        "codex" => prepare_codex(name, role, goal, manage, team_prompt, cfg, room, paths, &extras)?,
         other => return Err(format!("unknown backend: {}", other)),
     };
 
@@ -731,28 +713,21 @@ enum PostKey {
 /// scripted keys). Aliased to keep the per-backend signatures readable.
 type Prepared = (Vec<(String, String)>, String, Vec<PostKey>);
 
-/// Single-line agent brief for backends whose prompt is injected as a typed
-/// first message (claude/codex), where embedded newlines would submit early.
-/// Same content as kiro's `full_prompt` (role + goal), flattened to one line.
-fn role_line(role: &str, goal: &str) -> String {
-    let g = goal.replace('\n', " ");
-    format!("You are the {}. {} Keep messages short.", role, g.trim())
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// KICK plus a pointer to the team brief. Kiro injects the brief via `resources`
-/// so it just gets KICK; claude/codex have no such mechanism here (we don't
-/// write into the user's workspace), so we tell them to read the brief by path.
-fn kick_with_brief(paths: &Paths) -> String {
-    format!("{} First read the team playbook: {}", KICK, paths.brief.to_string_lossy())
-}
-
-fn full_prompt(role: &str, goal: &str) -> String {
+/// Build the complete agent system prompt with XML-structured layers.
+/// - `<team-system-prompt>`: global rules (from config) + team-specific prompt
+/// - `<role-system-prompt>`: this agent's role + goal
+fn build_agent_prompt(role: &str, goal: &str, team_prompt: &str, cfg: &TeamConfig) -> String {
+    let mut team_section = String::new();
+    if !cfg.team_rules.trim().is_empty() {
+        team_section.push_str(cfg.team_rules.trim());
+    }
+    if !team_prompt.trim().is_empty() {
+        if !team_section.is_empty() { team_section.push_str("\n\n---\n\n"); }
+        team_section.push_str(team_prompt.trim());
+    }
     format!(
-        "You are the {}.\nGoal: {}\nYou collaborate with other agents and a human operator in a shared team group chat (via the @team tools). Keep messages short.",
-        role, goal.trim()
+        "<team-system-prompt>\n{}\n</team-system-prompt>\n\n<role-system-prompt>\nYou are the {}.\nGoal: {}\n</role-system-prompt>",
+        team_section, role, goal.trim()
     )
 }
 
@@ -1000,7 +975,7 @@ fn hb_env(name: &str, room: &str, cfg: &TeamConfig) -> Vec<(String, String)> {
 }
 
 fn prepare_kiro(
-    name: &str, role: &str, goal: &str, manage: bool,
+    name: &str, role: &str, goal: &str, manage: bool, team_prompt: &str,
     cfg: &TeamConfig, room: &str, paths: &Paths, model: Option<&str>, extras: &Extras,
 ) -> Result<Prepared, String> {
     let home = &paths.kiro_home;
@@ -1022,13 +997,10 @@ fn prepare_kiro(
     let mut allowed = vec!["@builtin".to_string()];
     allowed.extend(team);
 
-    // Brief lives in our private home (NOT the user's workspace); kiro loads it
-    // by absolute path via `resources`. Each resolved skill is added natively as
-    // a `skill://` resource (metadata at startup, content on demand).
-    let mut resources = vec![format!("file://{}", paths.brief.to_string_lossy())];
-    for sk in &extras.skills {
-        resources.push(format!("skill://{}/SKILL.md", sk.dir.to_string_lossy()));
-    }
+    // Skills are loaded as native skill:// resources.
+    let resources: Vec<String> = extras.skills.iter()
+        .map(|sk| format!("skill://{}/SKILL.md", sk.dir.to_string_lossy()))
+        .collect();
     // The team MCP server plus any extra per-agent servers from the team.yaml.
     let mut mcp_servers = serde_json::json!({
         "team": { "url": format!("{}/mcp", cfg.url), "headers": { "x-agent": name, "x-room": room } }
@@ -1044,7 +1016,7 @@ fn prepare_kiro(
     let conf = serde_json::json!({
         "name": name,
         "description": format!("{} on the team bus", role),
-        "prompt": full_prompt(role, goal),
+        "prompt": build_agent_prompt(role, goal, team_prompt, cfg),
         "tools": tools,
         "allowedTools": allowed,
         "resources": resources,
@@ -1067,7 +1039,7 @@ fn prepare_kiro(
     env.extend(extras.env.iter().cloned());
     let cmd = format!(
         "kiro-cli chat --agent {} --model {} --trust-all-tools {}",
-        name, m, shell_quote(KICK)
+        name, m, shell_quote(&cfg.team_kick)
     );
     Ok((env, cmd, vec![]))
 }
@@ -1075,7 +1047,7 @@ fn prepare_kiro(
 // ---- Claude Code ----
 #[allow(clippy::too_many_arguments)]
 fn prepare_claude(
-    name: &str, role: &str, goal: &str, manage: bool,
+    name: &str, role: &str, goal: &str, manage: bool, team_prompt: &str,
     cfg: &TeamConfig, room: &str, paths: &Paths, model: Option<&str>, extras: &Extras,
 ) -> Result<Prepared, String> {
     let d = &paths.claude;
@@ -1123,7 +1095,7 @@ fn prepare_claude(
     )
     .trim_end()
     .to_string();
-    let first_msg = format!("{} {}{}", role_line(role, goal), kick_with_brief(paths), skills_index_text(&extras.skills));
+    let first_msg = format!("{}\n\n{}{}", build_agent_prompt(role, goal, team_prompt, cfg), cfg.team_kick, skills_index_text(&extras.skills));
     // Start interactive; then accept the folder-trust dialog, type the kick, submit.
     let post = vec![PostKey::Enter, PostKey::Text(first_msg), PostKey::Enter];
     let mut env = hb_env(name, room, cfg);
@@ -1134,7 +1106,7 @@ fn prepare_claude(
 // ---- Codex ----
 #[allow(clippy::too_many_arguments)]
 fn prepare_codex(
-    name: &str, role: &str, goal: &str, manage: bool, cfg: &TeamConfig, room: &str, paths: &Paths, extras: &Extras,
+    name: &str, role: &str, goal: &str, manage: bool, team_prompt: &str, cfg: &TeamConfig, room: &str, paths: &Paths, extras: &Extras,
 ) -> Result<Prepared, String> {
     let home = paths.codex.join(name);
     std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
@@ -1152,7 +1124,7 @@ fn prepare_codex(
     let mut env = vec![("CODEX_HOME".to_string(), home.to_string_lossy().to_string())];
     env.extend(hb_env(name, room, cfg));
     env.extend(extras.env.iter().cloned());
-    let first_msg = format!("{} {}{}", role_line(role, goal), kick_with_brief(paths), skills_index_text(&extras.skills));
+    let first_msg = format!("{}\n\n{}{}", build_agent_prompt(role, goal, team_prompt, cfg), cfg.team_kick, skills_index_text(&extras.skills));
     let cmd = format!("codex --dangerously-bypass-approvals-and-sandbox {}", shell_quote(&first_msg));
     Ok((env, cmd, vec![]))
 }
@@ -1254,7 +1226,7 @@ mod tests {
     }
 
     fn cfg() -> TeamConfig {
-        TeamConfig { url: "http://127.0.0.1:8787".into(), model: "claude-sonnet-4.6".into(), team_rules: String::new() }
+        TeamConfig { url: "http://127.0.0.1:8787".into(), model: "claude-sonnet-4.6".into(), team_rules: String::new(), team_kick: "kick".into() }
     }
 
     #[test]
@@ -1460,42 +1432,34 @@ mod tests {
     }
 
     #[test]
-    fn role_line_is_single_line() {
-        // A multi-line goal must flatten to one line (it's typed as a first
-        // message to claude/codex, where an embedded \n would submit early).
-        let r = role_line("worker", "do\nthings\nwell");
-        assert!(!r.contains('\n'), "role line must be single-line: {}", r);
+    fn build_agent_prompt_structure() {
+        let cfg = TeamConfig {
+            url: String::new(), model: String::new(),
+            team_rules: "Rule one.\nRule two.".into(),
+            team_kick: "kick".into(),
+        };
+        let p = build_agent_prompt("architect", "Design the system.", "Blog style.", &cfg);
+        assert!(p.contains("<team-system-prompt>"));
+        assert!(p.contains("</team-system-prompt>"));
+        assert!(p.contains("<role-system-prompt>"));
+        assert!(p.contains("Rule one."));
+        assert!(p.contains("Blog style."));
+        assert!(p.contains("architect"));
+        assert!(p.contains("Design the system."));
     }
 
     #[test]
-    fn system_prompt_roundtrip_and_prepend() {
-        // Isolate config dir so we don't touch the real ~/.config.
-        let dir = std::env::temp_dir().join(format!("teamtest-sys-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::env::set_var("XDG_CONFIG_HOME", &dir);
-
-        // Empty by default.
-        assert_eq!(read_system_prompt(), "");
-        // Save + read back.
-        save_system_prompt("Respond in English. Be terse.").unwrap();
-        assert_eq!(read_system_prompt(), "Respond in English. Be terse.");
-
-        // prepare_home prepends it to the brief.
-        let paths = Paths::new("/tmp/proj");
-        let test_cfg = TeamConfig { url: String::new(), model: String::new(), team_rules: "how we work as one team".to_string() };
-        prepare_home(&paths, "", &test_cfg).unwrap();
-        let brief = std::fs::read_to_string(&paths.brief).unwrap();
-        assert!(brief.starts_with("Respond in English. Be terse."), "system prompt must lead the brief");
-        assert!(brief.contains("collaboration playbook") || brief.contains("team group chat") || brief.contains("how we work"),
-            "brief body must still be present");
-
-        // Clearing it leaves the brief as just the built-in.
-        save_system_prompt("").unwrap();
-        prepare_home(&paths, "", &test_cfg).unwrap();
-        let brief2 = std::fs::read_to_string(&paths.brief).unwrap();
-        assert!(!brief2.starts_with("Respond in English"));
-
-        std::env::remove_var("XDG_CONFIG_HOME");
+    fn prepare_home_creates_gitignore() {
+        let dir = std::env::temp_dir().join(format!("teamtest-home-{}", std::process::id()));
+        let ws = dir.join("proj");
+        std::fs::create_dir_all(&ws).unwrap();
+        let paths = Paths::new(ws.to_str().unwrap());
+        prepare_home(&paths).unwrap();
+        let gi = ws.join(".tmm").join(".gitignore");
+        assert!(gi.exists());
+        assert_eq!(std::fs::read_to_string(&gi).unwrap(), "*\n");
+        assert!(paths.keepalive.exists());
+        assert!(paths.heartbeat.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

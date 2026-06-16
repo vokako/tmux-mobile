@@ -34,6 +34,8 @@ struct FileConfig {
     // Shared rules prepended to every team agent's brief (the "how we
     // collaborate" contract). Overrides the built-in default if set.
     team_rules: Option<String>,
+    // The kick message sent to each agent at startup (connects them to the bus).
+    team_kick: Option<String>,
 }
 
 pub struct Config {
@@ -51,6 +53,7 @@ pub struct Config {
     pub team_room: String,
     pub team_model: String,
     pub team_rules: String,
+    pub team_kick: String,
 }
 
 fn config_path() -> PathBuf {
@@ -145,6 +148,10 @@ impl Config {
                 .ok()
                 .or(file_cfg.team_rules)
                 .unwrap_or_else(|| include_str!("../../team/AGENTS.md").to_string()),
+            team_kick: std::env::var("TEAM_KICK")
+                .ok()
+                .or(file_cfg.team_kick)
+                .unwrap_or_else(|| "You are connected to the team group chat. Call `wait` to receive messages; when someone @mentions you, reply with `post`; otherwise keep calling `wait`. Never stop on your own — always end your turn with `wait`.".to_string()),
         }
     }
 }
