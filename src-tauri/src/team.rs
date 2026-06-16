@@ -66,11 +66,27 @@ pub const SOFTWARE_DEV_TEMPLATE: &str = include_str!("../../team/templates/softw
 pub const FINANCIAL_RESEARCH_TEMPLATE: &str =
     include_str!("../../team/templates/financial-research/team.yaml");
 
+/// A deep-research roster: a director who decomposes the question, two parallel
+/// researchers, a synthesist, and a skeptic — every claim sourced, output to
+/// report.md.
+pub const DEEP_RESEARCH_TEMPLATE: &str = include_str!("../../team/templates/deep-research/team.yaml");
+
+/// A content-studio roster (editor-in-chief / researcher / writer / copy editor)
+/// for shipping a publish-ready article or docs in a shared house style.
+pub const CONTENT_STUDIO_TEMPLATE: &str = include_str!("../../team/templates/content-studio/team.yaml");
+
+/// A data-analysis roster (lead / data engineer / analyst / reporter) that
+/// answers a question from data with reproducible work and honest caveats.
+pub const DATA_ANALYSIS_TEMPLATE: &str = include_str!("../../team/templates/data-analysis/team.yaml");
+
 /// Built-in templates seeded into teams/ on first run: (file stem, contents).
 const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
     ("default", BUILTIN_TEMPLATE),
     ("software-dev", SOFTWARE_DEV_TEMPLATE),
     ("financial-research", FINANCIAL_RESEARCH_TEMPLATE),
+    ("deep-research", DEEP_RESEARCH_TEMPLATE),
+    ("content-studio", CONTENT_STUDIO_TEMPLATE),
+    ("data-analysis", DATA_ANALYSIS_TEMPLATE),
 ];
 
 /// The teams/ template directory.
@@ -1303,9 +1319,20 @@ mod tests {
         ensure_templates_seeded();
         let mut names = list_templates();
         names.sort();
-        assert!(names.contains(&"default".to_string()), "default seeded: {names:?}");
-        assert!(names.contains(&"software-dev".to_string()), "software-dev seeded: {names:?}");
-        assert!(names.contains(&"financial-research".to_string()), "financial-research seeded: {names:?}");
+        for expected in ["default", "software-dev", "financial-research", "deep-research", "content-studio", "data-analysis"] {
+            assert!(names.contains(&expected.to_string()), "{expected} seeded: {names:?}");
+        }
+
+        // Each built-in parses and every agent carries a substantive goal.
+        for (name, body) in BUILTIN_TEMPLATES {
+            let v: Value = serde_yml::from_str(body).unwrap_or_else(|e| panic!("{name} bad yaml: {e}"));
+            let agents = v["agents"].as_array().unwrap_or_else(|| panic!("{name} has no agents"));
+            assert!(!agents.is_empty(), "{name} empty roster");
+            assert!(
+                agents.iter().all(|a| a["goal"].as_str().map(|g| g.len() > 80).unwrap_or(false)),
+                "{name}: every role needs a substantive goal"
+            );
+        }
 
         std::env::remove_var("XDG_CONFIG_HOME");
         let _ = std::fs::remove_dir_all(&dir);

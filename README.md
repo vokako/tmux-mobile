@@ -139,9 +139,10 @@ them work from your phone. Desktop-server only (the agent bus runs in-process).
   own tmux window, so you can **tap any agent to preview its live pane**.
 - **Per-workspace teams** — a team is tied to a working directory; multiple teams
   run in parallel, each isolated in its own room and `tmm-team-<slug>` session.
-- **Roster templates** (YAML) — built-ins for a `default` starter, a `software-dev`
-  team (product / architect / frontend / backend / reviewer / tester / devops),
-  and `financial-research`. Define your own under
+- **Roster templates** (YAML) — built-ins for a `default` starter, `software-dev`
+  (product / architect / frontend / backend / reviewer / tester / devops),
+  `financial-research`, `deep-research`, `content-studio`, and `data-analysis`.
+  Define your own under
   `~/.config/tmux-mobile/teams/<name>/team.yaml`: per-agent role/goal/model plus
   optional **extra MCP servers** and **skills** (a local path or a GitHub URL,
   fetched + cached), and **team-wide** `env` / `mcp` / `skills` / `prompt` that

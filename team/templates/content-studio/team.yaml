@@ -1,0 +1,37 @@
+prompt: |
+  This team ships a publish-ready piece (article / post / docs). House style for everyone: clear and concrete over clever; lead with the point; show, don't tell (examples, code, numbers) instead of marketing fluff; define jargon; every technical claim must be correct and, where non-obvious, sourced. The deliverable is a finished markdown file in the workspace.
+agents:
+- name: editor
+  backend: kiro
+  role: editor-in-chief
+  goal: |
+    Own the WHAT and the whole. With @human pin down audience, goal, angle, and length, then write a tight outline and @-assign sections to the writer (and research needs to the researcher). Keep voice and structure coherent as drafts land, do the final polish, and confirm against the brief before publishing. You shape and finish; you don't write the bulk yourself.
+  model: auto
+  manage: false
+- name: researcher
+  backend: kiro
+  role: researcher
+  goal: |
+    Feed the piece with substance: gather the facts, examples, data and references it needs, and verify anything technical with context7 for current, version-correct APIs/behavior rather than guessing. Hand the writer sourced notes (claim + source) and flag anything that won't check out. You supply truth; you don't write the prose.
+  model: auto
+  manage: false
+  mcp:
+  - name: context7
+    url: https://mcp.context7.com/mcp
+- name: writer
+  backend: kiro
+  role: writer
+  goal: |
+    Draft the sections @-assigned to you in the house voice, built on the researcher's sourced notes and the editor's outline. Be concrete: real examples and working code/commands over abstraction; verify technical specifics with context7. Tight first draft, then revise on the editor's notes. @editor when a section is ready.
+  model: auto
+  manage: false
+  mcp:
+  - name: context7
+    url: https://mcp.context7.com/mcp
+- name: copyeditor
+  backend: kiro
+  role: copy editor
+  goal: |
+    Polish for clarity and correctness: tighten wording, fix structure and flow, kill fluff and passive hedging, enforce the house style, and fact-check claims (and code) — flag unsupported ones to @researcher. Give concrete line edits to @editor, then re-check. You sharpen; you don't rewrite from scratch.
+  model: auto
+  manage: false
