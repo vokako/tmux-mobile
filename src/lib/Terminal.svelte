@@ -41,7 +41,8 @@
   // `chromeless` = embedded with NO window-switcher bar (used by the desktop
   // agent grid, where each cell is pinned to one agent's pane — there is
   // nothing to switch to, so the bar would only steal vertical space).
-  let { target, session, command: initialCommand = '', viewMode = 'terminal', fontSize = 14, embedded = false, active = true, chromeless = false, onChatSupported = () => {}, onSwitchPane = null, onPaneExit = () => {}, onClose = null } = $props();
+  let { target, session, command: initialCommand = '', viewMode = 'terminal', fontSize = 14, embedded = false, active = true, chromeless = false, onChatSupported = () => {}, onSwitchPane = null, onPaneExit = () => {}, onClose = null, splitEligible = false, splitActive = false, splitLayout = 1, onSetLayout = null } = $props();
+  let splitMenuOpen = $state(false);
 
   let input = $state('');
   let paneContent = $state('');
@@ -1989,6 +1990,23 @@
           {/if}
         </div>
 
+        {#if !embedded && splitEligible && onSetLayout}
+          <div class="win-split">
+            <button class="win-bar-collapse win-split-btn" class:on={splitActive} title={t('split')} aria-label={t('split')}
+              onclick={(e) => { e.stopPropagation(); splitMenuOpen = !splitMenuOpen; }}>
+              <Icon name="layout" size={12} />
+            </button>
+            {#if splitMenuOpen}
+              <button class="win-split-backdrop" aria-label="close" onclick={(e) => { e.stopPropagation(); splitMenuOpen = false; }}></button>
+              <div class="win-split-menu">
+                {#each [1, 2, 3, 4, 6] as n}
+                  <button class="win-split-opt" class:active={(n === 1 && !splitActive) || (splitActive && splitLayout === n)}
+                    onclick={(e) => { e.stopPropagation(); onSetLayout(n); splitMenuOpen = false; }}>{n}</button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
         {#if embedded && onClose}
           <!-- Split cell: close button instead of the collapse chevron
                (collapsing makes no sense — the bar IS the cell header). -->
@@ -2219,6 +2237,25 @@
     -webkit-tap-highlight-color: transparent;
   }
   .win-bar-collapse:active { color: var(--accent); background: var(--surface2); }
+
+  .win-split { position: relative; flex-shrink: 0; display: flex; }
+  .win-split-btn.on { color: var(--accent); }
+  .win-split-backdrop { position: fixed; inset: 0; z-index: 40; border: none; background: none; }
+  .win-split-menu {
+    position: absolute; top: 100%; right: 0; z-index: 41; margin-top: 4px;
+    display: flex; gap: 3px; padding: 4px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 9px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  }
+  .win-split-opt {
+    width: 26px; height: 26px; padding: 0;
+    border: 1px solid var(--border2); border-radius: 6px;
+    background: var(--input-bg); color: var(--text2);
+    font-size: 12px; font-weight: 600; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .win-split-opt.active { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+  .win-split-opt:active { border-color: var(--accent); }
 
   .win-sep {
     flex-shrink: 0;

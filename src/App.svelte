@@ -904,9 +904,10 @@
       </div>
       <div class="page-layer" class:hidden={page !== 'terminal'}>
         <div class="terminal-body" class:split-capable={splitEligible && viewMode === 'terminal'}>
-          {#if splitEligible && viewMode === 'terminal'}
-            <!-- Split-layout control: a single floating icon (top-right) that
-                 opens a small popover, instead of a full-width toolbar row. -->
+          {#if splitActive}
+            <!-- In split mode the layout control floats top-right (no single
+                 win-bar to host it; cells have their own headers). In single-
+                 pane mode the control lives in the Terminal's chip bar. -->
             <div class="split-control">
               <button class="split-toggle" class:on={splitActive} title={t('split')} onclick={() => splitMenuOpen = !splitMenuOpen}>
                 <Icon name="layout" size={15} />
@@ -928,7 +929,9 @@
               onCloseCell={closeCell}
               onPaneExit={cellPaneExit} />
           {:else}
-            <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {viewMode} {fontSize} onSwitchPane={(t, cmd) => { terminalTarget = t; terminalSession = t.split(':')[0]; terminalCommand = cmd || ''; }} onPaneExit={() => { terminalTarget = ''; page = 'sessions'; }} />
+            <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {viewMode} {fontSize}
+              splitEligible={splitEligible && viewMode === 'terminal'} {splitActive} {splitLayout} onSetLayout={setLayout}
+              onSwitchPane={(t, cmd) => { terminalTarget = t; terminalSession = t.split(':')[0]; terminalCommand = cmd || ''; }} onPaneExit={() => { terminalTarget = ''; page = 'sessions'; }} />
           {/if}
         </div>
       </div>
