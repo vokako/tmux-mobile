@@ -28,7 +28,6 @@ use std::time::Duration;
 
 // Shared team brief + keepalive hook, embedded so a packaged .app has no
 // external file dependency. Written to the team work dir at startup.
-const AGENTS_MD: &str = include_str!("../../team/AGENTS.md");
 const KEEPALIVE_SH: &str = include_str!("../../team/hooks/keepalive.sh");
 const HEARTBEAT_SH: &str = include_str!("../../team/hooks/heartbeat.sh");
 
@@ -38,7 +37,7 @@ const RECONCILE_INTERVAL: Duration = Duration::from_secs(3);
 /// above the bus's 90s `unreachable` mark so we only ever auto-restart an agent
 /// that has been silent for a genuinely long time, not one merely between tools.
 const RECOVERY_STALE_MS: i64 = 1_800_000; // 30 minutes
-const KICK: &str = "You are connected to the team group chat (collaboration rules are in AGENTS.md). Call `wait` to receive messages; when someone @mentions you, reply with `post`; otherwise keep calling `wait`. Never stop on your own — always end your turn with `wait`.";
+const KICK: &str = "You are connected to the team group chat (collaboration rules are in team-brief.md). Call `wait` to receive messages; when someone @mentions you, reply with `post`; otherwise keep calling `wait`. Never stop on your own — always end your turn with `wait`.";
 
 // ─── Team templates (named rosters under <config>/tmux-mobile/teams/) ──────
 // A template is a JSON file `teams/<name>.json` = { "agents": [ {name, backend,
@@ -53,7 +52,7 @@ pub const BUILTIN_TEMPLATE: &str = include_str!("../../team/templates/default/te
 /// A ready-made software-development roster (tech-lead / product / architect /
 /// coder / reviewer / tester), seeded alongside the default so it appears in
 /// the app's template picker out of the box. The whole collaboration workflow
-/// lives in each agent's `goal` (role isolation) — AGENTS.md stays a
+/// lives in each agent's `goal` (role isolation) — team-brief.md stays a
 /// role-agnostic, workflow-free communication contract.
 pub const SOFTWARE_DEV_TEMPLATE: &str = include_str!("../../team/templates/software-dev/team.yaml");
 
@@ -261,16 +260,13 @@ pub fn delete_template(name: &str) -> Result<(), String> {
     std::fs::remove_dir_all(team_dir(name)).map_err(|e| e.to_string())
 }
 
-/// Per-run config homes under `~/.config/tmux-mobile/team/<slug>/`. NOTE: this is
-/// where each backend's *config* + the shared brief live — NOT the agents'
-/// working directory. Agents `cd` into the user's chosen `workspace` (their
-/// real project); we never write our brief into that project. Kiro loads the
-/// brief via an absolute `resources` path; claude/codex get it pointed to in
-/// their kick message.
+/// Per-team config home under `<workspace>/.tmm/`. Lives inside the project but
+/// is self-gitignored (`.tmm/.gitignore` = `*`). Each backend's config files,
+/// the shared brief, and hooks live here — never scattered in `~/.config/`.
 struct Paths {
     /// Agents' working directory (the user's project) — agents run `-c` here.
     workspace: PathBuf,
-    /// Our private per-team config root (NOT inside the user's project).
+    /// Our private per-team config root: `<workspace>/.tmm/`
     kiro_home: PathBuf,
     claude: PathBuf,
     codex: PathBuf,
@@ -280,10 +276,8 @@ struct Paths {
 }
 
 impl Paths {
-    /// `workspace` = the agents' working dir; `slug` = its sanitized basename,
-    /// used to namespace our config home so multiple teams coexist.
-    fn new(workspace: &str, slug: &str) -> Self {
-        let home = crate::config::config_dir().join("team").join(slug);
+    fn new(workspace: &str) -> Self {
+        let home = PathBuf::from(workspace).join(".tmm");
         Paths {
             workspace: PathBuf::from(workspace),
             kiro_home: home.join("kiro-home"),
@@ -291,7 +285,7 @@ impl Paths {
             codex: home.join("codex"),
             keepalive: home.join("keepalive.sh"),
             heartbeat: home.join("heartbeat.sh"),
-            brief: home.join("AGENTS.md"),
+            brief: home.join("team-brief.md"),
         }
     }
 }
@@ -304,6 +298,8 @@ pub struct TeamConfig {
     pub url: String,
     /// Default model for kiro-backed agents.
     pub model: String,
+    /// Shared collaboration rules prepended to every agent's brief.
+    pub team_rules: String,
 }
 
 /// Start the team for `workspace`: seed the default roster and spawn the
@@ -314,12 +310,12 @@ pub struct TeamConfig {
 pub fn start(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: String, workspace: String, template: String) {
     tokio::spawn(async move {
         let session = format!("tmm-team-{}", room);
-        let paths = Paths::new(&workspace, &room);
+        let paths = Paths::new(&workspace);
         let tpl = if template.trim().is_empty() { "default".to_string() } else { template };
         // Team-wide prompt (if any) is appended to every agent's brief.
         let team_prompt = read_team_def(&tpl)
             .get("prompt").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        if let Err(e) = prepare_home(&paths, &team_prompt) {
+        if let Err(e) = prepare_home(&paths, &team_prompt, &cfg) {
             eprintln!("⚠️  team: failed to prepare config home: {}", e);
             return;
         }
@@ -368,20 +364,28 @@ pub fn save_system_prompt(text: &str) -> Result<(), String> {
     std::fs::write(system_prompt_path(), text).map_err(|e| e.to_string())
 }
 
-/// Write the shared brief + keepalive hook into our private per-team home (NOT
-/// the user's workspace). The global system prompt is prepended to the brief so
+/// Write the shared brief + keepalive hook into our private per-team home
+/// (`<workspace>/.tmm/`). The global system prompt is prepended to the brief so
 /// every agent — across all teams — sees it first.
-fn prepare_home(p: &Paths, team_prompt: &str) -> std::io::Result<()> {
+fn prepare_home(p: &Paths, team_prompt: &str, cfg: &TeamConfig) -> std::io::Result<()> {
     std::fs::create_dir_all(&p.kiro_home)?;
-    // Brief = global system prompt (all teams) → AGENTS.md contract → this team's
-    // own prompt (all its agents). Each section only added if non-empty.
+    // Self-gitignore: `.tmm/.gitignore` = `*` — the whole dir is invisible to
+    // git without touching the project's root .gitignore.
+    let gi = p.brief.parent().unwrap().join(".gitignore");
+    if !gi.exists() {
+        std::fs::write(&gi, "*\n")?;
+    }
+    // Brief = global system prompt (all teams) → team_rules (collaboration
+    // contract from config) → this team's own prompt. Each section only if non-empty.
     let mut brief = String::new();
     let sys = read_system_prompt();
     if !sys.trim().is_empty() {
         brief.push_str(sys.trim());
         brief.push_str("\n\n---\n\n");
     }
-    brief.push_str(AGENTS_MD);
+    if !cfg.team_rules.trim().is_empty() {
+        brief.push_str(cfg.team_rules.trim());
+    }
     if !team_prompt.trim().is_empty() {
         brief.push_str("\n\n---\n\n");
         brief.push_str(team_prompt.trim());
@@ -1250,7 +1254,7 @@ mod tests {
     }
 
     fn cfg() -> TeamConfig {
-        TeamConfig { url: "http://127.0.0.1:8787".into(), model: "claude-sonnet-4.6".into() }
+        TeamConfig { url: "http://127.0.0.1:8787".into(), model: "claude-sonnet-4.6".into(), team_rules: String::new() }
     }
 
     #[test]
@@ -1279,7 +1283,7 @@ mod tests {
         }
         let managers = agents.iter().filter(|a| a["manage"] == true).count();
         assert_eq!(managers, 0, "hire/fire off: no manage=true agent");
-        // Workflow lives in each role's goal (AGENTS.md is contract-only), so
+        // Workflow lives in each role's goal (team-brief.md is contract-only), so
         // every agent must carry a substantive goal.
         assert!(
             agents.iter().all(|a| a["goal"].as_str().map(|g| g.len() > 80).unwrap_or(false)),
@@ -1476,17 +1480,18 @@ mod tests {
         save_system_prompt("Respond in English. Be terse.").unwrap();
         assert_eq!(read_system_prompt(), "Respond in English. Be terse.");
 
-        // prepare_home prepends it to the embedded brief.
-        let paths = Paths::new("/tmp/proj", "proj");
-        prepare_home(&paths, "").unwrap();
+        // prepare_home prepends it to the brief.
+        let paths = Paths::new("/tmp/proj");
+        let test_cfg = TeamConfig { url: String::new(), model: String::new(), team_rules: "how we work as one team".to_string() };
+        prepare_home(&paths, "", &test_cfg).unwrap();
         let brief = std::fs::read_to_string(&paths.brief).unwrap();
         assert!(brief.starts_with("Respond in English. Be terse."), "system prompt must lead the brief");
-        assert!(brief.contains("collaboration playbook") || brief.contains("AGENTS.md") || brief.contains("team group chat"),
+        assert!(brief.contains("collaboration playbook") || brief.contains("team group chat") || brief.contains("how we work"),
             "brief body must still be present");
 
         // Clearing it leaves the brief as just the built-in.
         save_system_prompt("").unwrap();
-        prepare_home(&paths, "").unwrap();
+        prepare_home(&paths, "", &test_cfg).unwrap();
         let brief2 = std::fs::read_to_string(&paths.brief).unwrap();
         assert!(!brief2.starts_with("Respond in English"));
 
