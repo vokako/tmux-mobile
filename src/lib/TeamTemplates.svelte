@@ -29,6 +29,7 @@
   let sysDraft = $state(systemPrompt);
   let sysDirty = $state(false);
   let sysSaving = $state(false);
+  let sysOpen = $state(false); // global system prompt collapsed by default (declutter, esp. mobile)
 
   async function saveSystem() {
     if (sysSaving) return;
@@ -64,6 +65,7 @@
   let confirmRmAgent = $state(null); // agent index armed for deletion
   let confirmDelTpl = $state(false); // template delete armed
   let teamWideOpen = $state(false);  // team-wide config section expanded
+  let pickerOpen = $state(false);    // mobile template dropdown open
 
   // Per-agent "advanced" (env / mcp / skills) expand state, keyed by index;
   // reset when switching templates.
@@ -73,7 +75,7 @@
     s.has(i) ? s.delete(i) : s.add(i);
     advSet = s;
   }
-  $effect(() => { selIdx; advSet = new Set(); confirmRmAgent = null; confirmDelTpl = false; teamWideOpen = false; });
+  $effect(() => { selIdx; advSet = new Set(); confirmRmAgent = null; confirmDelTpl = false; teamWideOpen = false; pickerOpen = false; });
 
   // env (object) ⇄ KEY=VALUE lines; skills (array) ⇄ one-per-line.
   const envToLines = (o) => (o && typeof o === 'object')
@@ -160,16 +162,50 @@
     <button class="tpl-x" onclick={onClose} aria-label={t('close')}><Icon name="x" size={15} /></button>
   </div>
 
-  <!-- Global system prompt: prepended to EVERY agent's brief, across all teams. -->
+  <!-- Global system prompt: prepended to EVERY agent's brief, across all teams.
+       Collapsed by default — it's a rarely-touched global setting. -->
   <div class="sys-section">
     <div class="sys-label-row">
-      <span class="sys-label">{t('teamSystemPrompt')}</span>
-      <button class="sys-save" disabled={!sysDirty || sysSaving} onclick={saveSystem}>
-        {#if sysSaving}<span class="tpl-spin"></span>{/if}{t('teamSaveTemplate')}
+      <button class="sys-toggle" onclick={() => sysOpen = !sysOpen}>
+        <Icon name={sysOpen ? 'chevron-down' : 'chevron-right'} size={12} />
+        <span class="sys-label">{t('teamSystemPrompt')}</span>
+        {#if sysDraft && sysDraft.trim()}<span class="ag-adv-badge">●</span>{/if}
       </button>
+      {#if sysOpen}
+        <button class="sys-save" disabled={!sysDirty || sysSaving} onclick={saveSystem}>
+          {#if sysSaving}<span class="tpl-spin"></span>{/if}{t('teamSaveTemplate')}
+        </button>
+      {/if}
     </div>
-    <textarea class="sys-input" bind:value={sysDraft} oninput={() => sysDirty = true}
-      placeholder={t('teamSystemPromptHint')} rows="2"></textarea>
+    {#if sysOpen}
+      <textarea class="sys-input" bind:value={sysDraft} oninput={() => sysDirty = true}
+        placeholder={t('teamSystemPromptHint')} rows="3"></textarea>
+    {/if}
+  </div>
+
+  <!-- Mobile: a compact dropdown to switch templates instead of the strip
+       (the left-list sidebar is desktop-only). -->
+  <div class="tpl-picker">
+    <label class="tpl-picker-label">{t('teamTplTag')}</label>
+    <button class="tpl-picker-btn" onclick={() => pickerOpen = !pickerOpen}>
+      <span class="tpl-picker-name">{sel?.name ?? '—'}</span>
+      <span class="tpl-count">{sel?.agents?.length ?? 0}</span>
+      <Icon name="chevron-down" size={12} />
+    </button>
+    {#if pickerOpen}
+      <button class="tpl-picker-backdrop" aria-label="close" onclick={() => pickerOpen = false}></button>
+      <div class="tpl-picker-menu">
+        {#each drafts as d, i}
+          <button class="tpl-picker-item" class:active={i === selIdx} onclick={() => { selIdx = i; pickerOpen = false; }}>
+            <span class="tpl-picker-name">{d.name}</span>
+            <span class="tpl-count">{d.agents?.length ?? 0}</span>
+          </button>
+        {/each}
+        <button class="tpl-picker-item tpl-picker-new" onclick={() => { addTemplate(); pickerOpen = false; }}>
+          <Icon name="plus" size={12} /> {t('teamNewTemplate')}
+        </button>
+      </div>
+    {/if}
   </div>
 
   <div class="tpl-body">
@@ -187,6 +223,7 @@
     <div class="tpl-edit">
       {#if sel}
         <div class="tpl-name-row">
+          <span class="tpl-name-tag">{t('teamNameTag')}</span>
           <input class="tpl-name-input" bind:value={sel.name} oninput={markDirty}
             disabled={sel.name === 'default'} placeholder="template name" />
         </div>
@@ -219,19 +256,29 @@
         {#each sel.agents as ag, i}
           <div class="agent-card">
             <div class="agent-card-head">
-              <input class="ag-field ag-name" bind:value={ag.name} oninput={markDirty} placeholder="name" />
-              <select class="ag-field ag-backend" bind:value={ag.backend} onchange={markDirty}>
-                {#each BACKENDS as b}<option value={b}>{b}</option>{/each}
-              </select>
-              <label class="ag-manage" title="manager (can hire/fire)">
-                <input type="checkbox" bind:checked={ag.manage} onchange={markDirty} /> mgr
-              </label>
+              <span class="ag-card-title">{ag.name?.trim() || t('teamAgentName')}</span>
               <button class="ag-del" class:confirm={confirmRmAgent === i} onclick={() => removeAgent(i)}
                 title={confirmRmAgent === i ? t('teamConfirmDelete') : t('teamRemoveAgent')}
-                aria-label={t('teamRemoveAgent')}><Icon name="trash" size={12} /></button>
+                aria-label={t('teamRemoveAgent')}><Icon name="trash" size={13} /></button>
             </div>
+            <label class="ag-flabel">{t('teamAgentName')}</label>
+            <input class="ag-field" bind:value={ag.name} oninput={markDirty} placeholder={t('teamAgentName')} autocapitalize="off" />
+            <div class="ag-row">
+              <div class="ag-col">
+                <label class="ag-flabel">{t('teamBackend')}</label>
+                <select class="ag-field ag-backend" bind:value={ag.backend} onchange={markDirty}>
+                  {#each BACKENDS as b}<option value={b}>{b}</option>{/each}
+                </select>
+              </div>
+              <label class="ag-manage" title={t('teamManagerHint')}>
+                <input type="checkbox" bind:checked={ag.manage} onchange={markDirty} /> {t('teamManager')}
+              </label>
+            </div>
+            <label class="ag-flabel">{t('teamRole')}</label>
             <input class="ag-field" bind:value={ag.role} oninput={markDirty} placeholder={t('teamRole')} />
+            <label class="ag-flabel">{t('teamGoal')}</label>
             <textarea class="ag-field ag-area" bind:value={ag.goal} oninput={markDirty} placeholder={t('teamGoal')} rows="3"></textarea>
+            <label class="ag-flabel">{t('teamModel')}</label>
             <input class="ag-field" bind:value={ag.model} oninput={markDirty} placeholder={t('teamModel')} />
 
             <button class="ag-adv-toggle" onclick={() => toggleAdv(i)}>
@@ -288,22 +335,6 @@
     box-shadow: 0 20px 60px rgba(0,0,0,0.5); overflow: hidden;
     box-sizing: border-box;
   }
-  /* Phone: near-fullscreen sheet, list becomes a top strip, fields stack. */
-  @media (max-width: 620px) {
-    .tpl-modal {
-      width: 100vw; height: 100%; height: var(--app-height, 100dvh);
-      top: 0; left: 0; transform: none; border-radius: 0; border: none;
-      padding-top: var(--sat); padding-bottom: var(--sab);
-    }
-    .tpl-body { flex-direction: column; }
-    .tpl-list {
-      width: auto; flex-direction: row; overflow-x: auto; overflow-y: hidden;
-      border-right: none; border-bottom: 1px solid var(--border);
-      scrollbar-width: none;
-    }
-    .tpl-list::-webkit-scrollbar { display: none; }
-    .tpl-item, .tpl-add { flex-shrink: 0; white-space: nowrap; }
-  }
   .tpl-head {
     display: flex; align-items: center; justify-content: space-between;
     padding: 12px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
@@ -317,6 +348,12 @@
     padding: 10px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
   }
   .sys-label-row { display: flex; align-items: center; justify-content: space-between; }
+  .sys-toggle {
+    display: flex; align-items: center; gap: 6px; flex: 1;
+    border: none; background: none; cursor: pointer; padding: 2px 0;
+    color: var(--text3); -webkit-tap-highlight-color: transparent; text-align: left;
+  }
+  .sys-toggle:active { color: var(--accent); }
   .sys-label {
     font-size: 10px; font-weight: 600; color: var(--text3);
     text-transform: uppercase; letter-spacing: 0.5px;
@@ -357,12 +394,40 @@
   }
   .tpl-add:active { color: var(--accent); border-color: var(--accent); }
 
+  /* Mobile template dropdown — hidden on desktop (the sidebar list is used). */
+  .tpl-picker { display: none; }
+  .tpl-picker-btn {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 10px 12px; border: 1px solid var(--border2); border-radius: 9px;
+    background: var(--input-bg); color: var(--text); font-size: 15px; font-weight: 600;
+    cursor: pointer; -webkit-tap-highlight-color: transparent; font-family: var(--font-ui);
+  }
+  .tpl-picker-name { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tpl-picker-label { display: block; margin-bottom: 5px; font-size: 10px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.4px; }
+  .tpl-picker-backdrop { position: fixed; inset: 0; z-index: 50; border: none; background: none; }
+  .tpl-picker-menu {
+    position: absolute; left: 14px; right: 14px; top: 100%; z-index: 51; margin-top: 2px;
+    max-height: 50vh; overflow-y: auto;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.4); padding: 4px;
+  }
+  .tpl-picker-item {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 11px 12px; border: none; border-radius: 7px;
+    background: none; color: var(--text2); font-size: 15px; cursor: pointer;
+    text-align: left; -webkit-tap-highlight-color: transparent; font-family: var(--font-ui);
+  }
+  .tpl-picker-item.active { color: var(--accent); background: var(--accent-bg); }
+  .tpl-picker-new { color: var(--text3); border-top: 1px solid var(--border2); border-radius: 0; margin-top: 2px; }
+
   .tpl-edit { flex: 1; min-width: 0; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
   .tpl-name-input {
     width: 100%; padding: 8px 10px; border: 1px solid var(--input-border); border-radius: 8px;
     background: var(--input-bg); color: var(--text); font-size: 14px; font-weight: 600; outline: none;
     font-family: var(--font-ui);
   }
+  .tpl-name-row { display: flex; align-items: center; gap: 8px; }
+  .tpl-name-tag { flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.4px; }
   .tpl-name-input:focus { border-color: var(--accent); }
   .tpl-name-input:disabled { opacity: 0.6; }
 
@@ -371,6 +436,16 @@
     padding: 10px; border: 1px solid var(--border2); border-radius: 10px; background: var(--surface);
   }
   .agent-card-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .ag-card-title {
+    flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .ag-flabel {
+    font-size: 10px; color: var(--text3); font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.4px; margin-top: 2px;
+  }
+  .ag-row { display: flex; align-items: flex-end; gap: 12px; }
+  .ag-col { display: flex; flex-direction: column; gap: 4px; }
   .ag-field {
     padding: 6px 9px; border: 1px solid var(--input-border); border-radius: 7px;
     background: var(--input-bg); color: var(--text); font-size: 12px; font-family: inherit;
@@ -446,4 +521,34 @@
     border-top-color: var(--accent); border-radius: 50%; animation: tpl-spin 0.6s linear infinite;
   }
   @keyframes tpl-spin { to { transform: rotate(360deg); } }
+
+  /* Phone overrides. Placed LAST so they win over the base rules above (a media
+     query adds no specificity — source order decides between equal selectors). */
+  @media (max-width: 620px) {
+    .tpl-modal {
+      width: 100vw; height: 100%; height: var(--app-height, 100dvh);
+      top: 0; left: 0; transform: none; border-radius: 0; border: none;
+      padding-top: var(--sat); padding-bottom: var(--sab);
+    }
+    .tpl-body { flex-direction: column; }
+    /* The horizontal strip is replaced by the compact dropdown on phones. */
+    .tpl-list { display: none; }
+    .tpl-picker { display: block; position: relative; flex-shrink: 0; padding: 8px 14px; border-bottom: 1px solid var(--border); }
+
+    /* iOS zooms the page when focusing an input whose font-size < 16px. */
+    .ag-field, .sys-input, .tpl-name-input, .ag-backend { font-size: 16px; }
+    .ag-mono { font-size: 15px; }
+
+    /* Agent header: name on its own row; backend + mgr + delete below. */
+    .agent-card-head { gap: 8px; }
+    .ag-name { flex-basis: 100%; }
+    .ag-backend { min-width: 96px; }
+    .ag-del { margin-left: auto; padding: 8px; }
+
+    /* Roomier touch targets. */
+    .ag-adv-toggle, .tw-toggle { padding: 8px; font-size: 13px; }
+    .ag-manage { font-size: 13px; }
+    .ag-manage input { width: 16px; height: 16px; }
+    .tpl-foot button { padding: 10px 14px; font-size: 14px; }
+  }
 </style>
