@@ -186,7 +186,8 @@ pub fn read_template(name: &str) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-/// Read every template as `{ name, env, agents }` for the editor panel.
+/// Read every template as `{ name, env, mcp, skills, prompt, agents }` for the
+/// editor panel (team-wide fields + the roster).
 pub fn read_all_templates() -> Vec<Value> {
     list_templates()
         .into_iter()
@@ -195,22 +196,40 @@ pub fn read_all_templates() -> Vec<Value> {
             serde_json::json!({
                 "name": name,
                 "env": def.get("env").cloned().unwrap_or(serde_json::json!({})),
+                "mcp": def.get("mcp").cloned().unwrap_or(serde_json::json!([])),
+                "skills": def.get("skills").cloned().unwrap_or(serde_json::json!([])),
+                "prompt": def.get("prompt").cloned().unwrap_or(serde_json::json!("")),
                 "agents": def.get("agents").cloned().unwrap_or(serde_json::json!([])),
             })
         })
         .collect()
 }
 
-/// Write a template (overwrites the roster). `agents` is the raw array of member
-/// objects. Any top-level `env` already in the file is preserved.
-pub fn save_template(name: &str, agents: &Value) -> Result<(), String> {
+/// Write a template from the full definition object `{ env?, mcp?, skills?,
+/// prompt?, agents }`. Empty team-wide fields are pruned so the YAML stays tidy.
+pub fn save_template(name: &str, def: &Value) -> Result<(), String> {
     ensure_templates_seeded();
-    let mut def = read_team_def(name);
-    if !def.is_object() {
-        def = serde_json::json!({});
+    // Accept either a full def object or a bare agents array (legacy callers).
+    let def = if def.is_array() {
+        serde_json::json!({ "agents": def })
+    } else {
+        def.clone()
+    };
+    let mut out = serde_json::Map::new();
+    if let Some(env) = def.get("env").and_then(|v| v.as_object()) {
+        if !env.is_empty() { out.insert("env".into(), Value::Object(env.clone())); }
     }
-    def.as_object_mut().unwrap().insert("agents".to_string(), agents.clone());
-    let yaml = serde_yml::to_string(&def).map_err(|e| e.to_string())?;
+    if let Some(mcp) = def.get("mcp").and_then(|v| v.as_array()) {
+        if !mcp.is_empty() { out.insert("mcp".into(), Value::Array(mcp.clone())); }
+    }
+    if let Some(sk) = def.get("skills").and_then(|v| v.as_array()) {
+        if !sk.is_empty() { out.insert("skills".into(), Value::Array(sk.clone())); }
+    }
+    if let Some(p) = def.get("prompt").and_then(|v| v.as_str()) {
+        if !p.trim().is_empty() { out.insert("prompt".into(), Value::String(p.to_string())); }
+    }
+    out.insert("agents".into(), def.get("agents").cloned().unwrap_or(serde_json::json!([])));
+    let yaml = serde_yml::to_string(&Value::Object(out)).map_err(|e| e.to_string())?;
     let path = template_yaml_path(name);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -280,11 +299,14 @@ pub fn start(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: String, workspa
     tokio::spawn(async move {
         let session = format!("tmm-team-{}", room);
         let paths = Paths::new(&workspace, &room);
-        if let Err(e) = prepare_home(&paths) {
+        let tpl = if template.trim().is_empty() { "default".to_string() } else { template };
+        // Team-wide prompt (if any) is appended to every agent's brief.
+        let team_prompt = read_team_def(&tpl)
+            .get("prompt").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if let Err(e) = prepare_home(&paths, &team_prompt) {
             eprintln!("⚠️  team: failed to prepare config home: {}", e);
             return;
         }
-        let tpl = if template.trim().is_empty() { "default".to_string() } else { template };
         seed_template(&*bridge, &room, &tpl, &cfg);
         println!("🜂 team: room={} workspace={} template={} session={}", room, workspace, tpl, session);
         reconcile_loop(bridge, cfg, room, session, paths).await;
@@ -333,14 +355,21 @@ pub fn save_system_prompt(text: &str) -> Result<(), String> {
 /// Write the shared brief + keepalive hook into our private per-team home (NOT
 /// the user's workspace). The global system prompt is prepended to the brief so
 /// every agent — across all teams — sees it first.
-fn prepare_home(p: &Paths) -> std::io::Result<()> {
+fn prepare_home(p: &Paths, team_prompt: &str) -> std::io::Result<()> {
     std::fs::create_dir_all(&p.kiro_home)?;
+    // Brief = global system prompt (all teams) → AGENTS.md contract → this team's
+    // own prompt (all its agents). Each section only added if non-empty.
+    let mut brief = String::new();
     let sys = read_system_prompt();
-    let brief = if sys.trim().is_empty() {
-        AGENTS_MD.to_string()
-    } else {
-        format!("{}\n\n---\n\n{}", sys.trim(), AGENTS_MD)
-    };
+    if !sys.trim().is_empty() {
+        brief.push_str(sys.trim());
+        brief.push_str("\n\n---\n\n");
+    }
+    brief.push_str(AGENTS_MD);
+    if !team_prompt.trim().is_empty() {
+        brief.push_str("\n\n---\n\n");
+        brief.push_str(team_prompt.trim());
+    }
     std::fs::write(&p.brief, brief)?;
     std::fs::write(&p.keepalive, KEEPALIVE_SH)?;
     std::fs::write(&p.heartbeat, HEARTBEAT_SH)?;
@@ -368,8 +397,12 @@ fn seed_template(bridge: &dyn TeamBridge, room: &str, template: &str, cfg: &Team
         eprintln!("⚠️  team: template '{}' empty/missing; nothing to seed", template);
         return;
     }
-    // Team-wide env is the base; each agent's env overrides it (agent wins).
+    // Team-wide config applies to every agent. env merges (agent overrides);
+    // mcp/skills are prepended so per-agent entries come last (agent wins on a
+    // same-named MCP server when the launcher builds the server map).
     let team_env = def.get("env").cloned().unwrap_or_else(|| serde_json::json!({}));
+    let team_mcp = def.get("mcp").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let team_skills = def.get("skills").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     let mut names = Vec::new();
     for a in &agents {
         let name = a.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
@@ -383,6 +416,8 @@ fn seed_template(bridge: &dyn TeamBridge, room: &str, template: &str, cfg: &Team
             _ => Value::Null,
         };
         let env = merge_env(&team_env, a.get("env"));
+        let agent_mcp = a.get("mcp").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let agent_skills = a.get("skills").and_then(|v| v.as_array()).cloned().unwrap_or_default();
         let spec = serde_json::json!({
             "role": a.get("role").and_then(|v| v.as_str()).unwrap_or(name),
             "goal": a.get("goal").and_then(|v| v.as_str()).unwrap_or(""),
@@ -390,8 +425,8 @@ fn seed_template(bridge: &dyn TeamBridge, room: &str, template: &str, cfg: &Team
             "manage": a.get("manage").and_then(|v| v.as_bool()).unwrap_or(false),
             "model": model,
             "env": env,
-            "mcp": a.get("mcp").cloned().unwrap_or_else(|| serde_json::json!([])),
-            "skills": a.get("skills").cloned().unwrap_or_else(|| serde_json::json!([])),
+            "mcp": merge_list(&team_mcp, &agent_mcp),
+            "skills": merge_list(&team_skills, &agent_skills),
             // The team folder is where local (relative) skills resolve from.
             "team_dir": team_dir(template).to_string_lossy(),
         });
@@ -402,6 +437,20 @@ fn seed_template(bridge: &dyn TeamBridge, room: &str, template: &str, cfg: &Team
         }
     }
     println!("🜂 team: seeded '{}' ({}); launching…", template, names.join(" · "));
+}
+
+/// Concatenate a team-wide list with a per-agent list (team first), de-duping
+/// string entries (skills) and keeping objects as-is (mcp — the launcher builds
+/// a name-keyed map, so a later per-agent server overrides a same-named team one).
+fn merge_list(team: &[Value], agent: &[Value]) -> Value {
+    let mut out: Vec<Value> = Vec::new();
+    for v in team.iter().chain(agent.iter()) {
+        if let Some(s) = v.as_str() {
+            if out.iter().any(|x| x.as_str() == Some(s)) { continue; }
+        }
+        out.push(v.clone());
+    }
+    Value::Array(out)
 }
 
 /// Merge a team-wide env object with a per-agent env object (agent wins) into a
@@ -1232,8 +1281,8 @@ mod tests {
         for dev in ["architect", "frontend", "backend", "reviewer", "tester", "devops"] {
             assert!(mcp_names(dev).contains(&"context7".to_string()), "{dev} should have context7");
         }
-        // reviewer & devops also reach the AWS knowledge base (cloud/IaC review + deploy).
-        for n in ["backend", "reviewer", "devops"] {
+        // architect/backend/reviewer/devops reach the AWS knowledge base.
+        for n in ["architect", "backend", "reviewer", "devops"] {
             assert!(mcp_names(n).contains(&"aws-knowledge".to_string()), "{n} has AWS knowledge");
         }
         assert!(mcp_names("tester").contains(&"chrome-devtools".to_string()), "tester has chrome-devtools for e2e");
@@ -1314,6 +1363,44 @@ mod tests {
     }
 
     #[test]
+    fn team_wide_config_folds_into_each_agent() {
+        let dir = std::env::temp_dir().join(format!("teamtest-tw-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::env::set_var("XDG_CONFIG_HOME", &dir);
+
+        let def = serde_json::json!({
+            "env": { "TEAM": "1" },
+            "mcp": [{ "name": "context7", "url": "https://mcp.context7.com/mcp" }],
+            "skills": ["./skills/shared"],
+            "prompt": "Team charter for all.",
+            "agents": [{
+                "name": "w", "backend": "kiro", "role": "w", "goal": "do things well",
+                "env": { "A": "2" }, "mcp": [{ "name": "pg", "command": "x" }]
+            }],
+        });
+        save_template("tw", &def).unwrap();
+        // prompt round-trips into the saved YAML.
+        assert_eq!(read_team_def("tw")["prompt"], "Team charter for all.");
+
+        let b = RecordingBridge { seeded: Mutex::new(vec![]), existing: vec![] };
+        seed_template(&b, "room", "tw", &cfg());
+        let seeded = b.seeded.lock().unwrap();
+        let (_, s) = seeded.first().expect("seeded one agent");
+        assert_eq!(s["env"]["TEAM"], "1", "team env reaches the agent");
+        assert_eq!(s["env"]["A"], "2", "agent env preserved");
+        let mcp_names: Vec<&str> = s["mcp"].as_array().unwrap().iter().filter_map(|m| m["name"].as_str()).collect();
+        assert!(mcp_names.contains(&"context7"), "team mcp folded in: {mcp_names:?}");
+        assert!(mcp_names.contains(&"pg"), "agent mcp kept: {mcp_names:?}");
+        assert!(
+            s["skills"].as_array().unwrap().iter().any(|x| x.as_str() == Some("./skills/shared")),
+            "team skill folded in"
+        );
+
+        std::env::remove_var("XDG_CONFIG_HOME");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn workspace_slug_is_tmux_safe_basename() {
         assert_eq!(workspace_slug("/Users/clawd/work/My Project"), "my-project");
         assert_eq!(workspace_slug("/Users/clawd/work/260226_tmux_mobile"), "260226_tmux_mobile");
@@ -1364,7 +1451,7 @@ mod tests {
 
         // prepare_home prepends it to the embedded brief.
         let paths = Paths::new("/tmp/proj", "proj");
-        prepare_home(&paths).unwrap();
+        prepare_home(&paths, "").unwrap();
         let brief = std::fs::read_to_string(&paths.brief).unwrap();
         assert!(brief.starts_with("Respond in English. Be terse."), "system prompt must lead the brief");
         assert!(brief.contains("collaboration playbook") || brief.contains("AGENTS.md") || brief.contains("team group chat"),
@@ -1372,7 +1459,7 @@ mod tests {
 
         // Clearing it leaves the brief as just the built-in.
         save_system_prompt("").unwrap();
-        prepare_home(&paths).unwrap();
+        prepare_home(&paths, "").unwrap();
         let brief2 = std::fs::read_to_string(&paths.brief).unwrap();
         assert!(!brief2.starts_with("Respond in English"));
 

@@ -301,9 +301,17 @@ The folder — not a flat file — is the unit so a team can carry its own asset
 
 **Why a platform schema, adapted down.** We define ONE schema (`team.yaml`) and
 translate it to each backend's dialect in `team.rs`, rather than exposing kiro/
-claude/codex config directly. Fields: `env` (team-wide, optional) and per-agent
-`name`/`backend`/`role`/`goal`/`model`/`manage` plus the new `env`/`mcp`/`skills`.
-The full schema is documented at the top of `default/team.yaml`.
+claude/codex config directly. The top level carries **team-wide** fields that
+apply to EVERY agent — `env`, `mcp`, `skills`, and `prompt` — and each agent adds
+`name`/`backend`/`role`/`goal`/`model`/`manage` plus its own `env`/`mcp`/`skills`.
+At seed time `seed_template` folds the team-wide config into each agent's spec:
+env merges (agent overrides), and team `mcp`/`skills` are prepended so a per-agent
+entry wins on a same-named MCP server (`merge_env` / `merge_list`). Team `prompt`
+is appended to the brief in `prepare_home` (global system prompt → AGENTS.md →
+team prompt), so it reaches every agent like a team-specific AGENTS.md. Putting a
+shared tool (e.g. context7) at the team level means writing it once instead of on
+every role. The full schema is documented at the top of `default/team.yaml`, and
+the editor's per-template "Team-wide" section edits env/mcp/skills/prompt.
 
 - **env** — optional; default is none. Team-wide `env` is the base, per-agent
   `env` overrides it (`merge_env`). It's set on the agent's process at launch, so

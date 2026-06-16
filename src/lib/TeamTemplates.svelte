@@ -63,6 +63,7 @@
   }
   let confirmRmAgent = $state(null); // agent index armed for deletion
   let confirmDelTpl = $state(false); // template delete armed
+  let teamWideOpen = $state(false);  // team-wide config section expanded
 
   // Per-agent "advanced" (env / mcp / skills) expand state, keyed by index;
   // reset when switching templates.
@@ -72,7 +73,7 @@
     s.has(i) ? s.delete(i) : s.add(i);
     advSet = s;
   }
-  $effect(() => { selIdx; advSet = new Set(); confirmRmAgent = null; confirmDelTpl = false; });
+  $effect(() => { selIdx; advSet = new Set(); confirmRmAgent = null; confirmDelTpl = false; teamWideOpen = false; });
 
   // env (object) ⇄ KEY=VALUE lines; skills (array) ⇄ one-per-line.
   const envToLines = (o) => (o && typeof o === 'object')
@@ -121,7 +122,13 @@
     if (!sel || saving) return;
     saving = true;
     try {
-      await onSave(sel.name, sel.agents);
+      await onSave(sel.name, {
+        env: sel.env ?? {},
+        mcp: sel.mcp ?? [],
+        skills: sel.skills ?? [],
+        prompt: sel.prompt ?? '',
+        agents: sel.agents,
+      });
       dirty = false;
     } catch {} finally { saving = false; }
   }
@@ -183,6 +190,31 @@
           <input class="tpl-name-input" bind:value={sel.name} oninput={markDirty}
             disabled={sel.name === 'default'} placeholder="template name" />
         </div>
+
+        <!-- Team-wide config: applies to EVERY agent in this team. -->
+        <button class="tw-toggle" onclick={() => teamWideOpen = !teamWideOpen}>
+          <Icon name={teamWideOpen ? 'chevron-down' : 'chevron-right'} size={12} />
+          {t('teamWide')}
+          {#if (sel.mcp?.length || sel.skills?.length || (sel.env && Object.keys(sel.env).length) || (sel.prompt && sel.prompt.trim()))}
+            <span class="ag-adv-badge">●</span>
+          {/if}
+        </button>
+        {#if teamWideOpen}
+          <div class="ag-adv tw-adv">
+            <label class="ag-adv-label">{t('teamWidePrompt')}</label>
+            <textarea class="ag-field ag-area" rows="3" placeholder={t('teamWidePromptHint')}
+              value={sel.prompt ?? ''} oninput={(e) => { sel.prompt = e.target.value; markDirty(); }}></textarea>
+            <label class="ag-adv-label">{t('teamSkills')}</label>
+            <textarea class="ag-field ag-area" rows="2" placeholder={t('teamSkillsHint')}
+              value={arrToLines(sel.skills)} oninput={(e) => setSkills(sel, e.target.value)}></textarea>
+            <label class="ag-adv-label">{t('teamEnv')}</label>
+            <textarea class="ag-field ag-area" rows="2" placeholder="KEY=VALUE"
+              value={envToLines(sel.env)} oninput={(e) => setEnv(sel, e.target.value)}></textarea>
+            <label class="ag-adv-label">{t('teamMcp')} {#if mcpErr['__team__']}<span class="ag-adv-err">{t('teamMcpBad')}</span>{/if}</label>
+            <textarea class="ag-field ag-area ag-mono" rows="4" placeholder={t('teamMcpHint')}
+              value={mcpToText(sel.mcp)} onchange={(e) => setMcp(sel, '__team__', e.target.value)}></textarea>
+          </div>
+        {/if}
 
         {#each sel.agents as ag, i}
           <div class="agent-card">
@@ -368,6 +400,15 @@
   .ag-adv-label { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.4px; }
   .ag-adv-err { color: var(--danger); text-transform: none; letter-spacing: 0; margin-left: 6px; }
   .ag-mono { font-family: var(--font-mono, monospace); font-size: 11px; }
+
+  .tw-toggle {
+    display: flex; align-items: center; gap: 5px; align-self: flex-start;
+    padding: 5px 8px; border: 1px dashed var(--border2); border-radius: 8px;
+    background: transparent; color: var(--text2); font-size: 12px; font-weight: 600;
+    cursor: pointer; -webkit-tap-highlight-color: transparent; font-family: var(--font-ui);
+  }
+  .tw-toggle:active { color: var(--accent); border-color: var(--accent); }
+  .tw-adv { padding: 8px; border: 1px solid var(--border2); border-radius: 10px; background: var(--surface); }
 
   .agent-add {
     padding: 9px; border: 1px dashed var(--border2); border-radius: 10px;

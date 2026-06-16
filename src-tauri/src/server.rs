@@ -972,8 +972,11 @@ fn handle_team_request(req: &Request, team: Option<&dyn TeamBridge>) -> Response
                 Ok(s) => s,
                 Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
             };
-            let agents = p.get("agents").cloned().unwrap_or(serde_json::json!([]));
-            match bus.save_template(name, &agents) {
+            // Full team definition: { env?, mcp?, skills?, prompt?, agents }.
+            // (Legacy callers sending just `agents` still work — fall back to it.)
+            let def = p.get("def").cloned()
+                .unwrap_or_else(|| serde_json::json!({ "agents": p.get("agents").cloned().unwrap_or(serde_json::json!([])) }));
+            match bus.save_template(name, &def) {
                 Ok(()) => Response::ok(id, serde_json::json!({ "ok": true, "name": name })),
                 Err(e) => Response::err(id, ERR_INTERNAL, e),
             }

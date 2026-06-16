@@ -590,7 +590,7 @@ export const teamStartTeam = (workspace, template) => call('team_start_team', { 
 export const teamCloseTeam = (room) => call('team_close_team', { room });
 // Roster templates (named agent rosters; edited in the Templates settings panel).
 export const teamTemplates = () => call('team_templates');
-export const teamTemplateSave = (name, agents) => call('team_template_save', { name, agents });
+export const teamTemplateSave = (name, def) => call('team_template_save', { name, def });
 export const teamTemplateDelete = (name) => call('team_template_delete', { name });
 // Global system prompt prepended to every agent's brief (team_status returns it).
 export const teamSystemPromptSave = (text) => call('team_system_prompt_save', { text });

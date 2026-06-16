@@ -631,7 +631,7 @@
     <TeamTemplates
       {templates}
       {systemPrompt}
-      onSave={async (name, agents) => { await teamTemplateSave(name, agents); await refresh(); }}
+      onSave={async (name, def) => { await teamTemplateSave(name, def); await refresh(); }}
       onDelete={async (name) => { await teamTemplateDelete(name); await refresh(); }}
       onSaveSystemPrompt={async (text) => { await teamSystemPromptSave(text); await refresh(); }}
       onClose={() => showTemplates = false} />

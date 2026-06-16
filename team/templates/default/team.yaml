@@ -2,8 +2,16 @@
 # holding this team.yaml (+ an optional skills/ dir of local skills).
 #
 # Schema:
-#   env:            # OPTIONAL team-wide env vars (default: none). Applied to every
-#     KEY: value    # agent process → its MCP servers and skill use inherit them.
+#   # ── Team-wide (applies to EVERY agent in this team) ──
+#   env:            # OPTIONAL env vars. Applied to every agent process → its
+#     KEY: value    # MCP servers and skill use inherit them. (default: none)
+#   mcp: [...]      # OPTIONAL MCP servers given to every agent (same shape as
+#                   # the per-agent mcp below). Per-agent mcp is added on top.
+#   skills: [...]   # OPTIONAL skills given to every agent (local path or GitHub
+#                   # URL). Per-agent skills are added on top.
+#   prompt: |       # OPTIONAL team prompt — prepended to EVERY agent's brief
+#     ...           # (like a team-specific AGENTS.md). (default: none)
+#   # ── Roster ──
 #   agents:
 #     - name: coder
 #       backend: kiro          # kiro | claude | codex
