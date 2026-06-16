@@ -564,6 +564,42 @@
     }
   }
 
+  // Deep-link connect: a shareable URL can pre-fill the connection and auto-jump
+  // in, e.g.  https://app/?addr=ws://host:9899&token=XXX  (also accepts
+  // address=/server=, an optional socket=, and params inside the #hash). We copy
+  // them into the same localStorage keys the normal flow uses — so the existing
+  // auto-connect effect below picks them up — then STRIP them from the URL so the
+  // token isn't left sitting in the address bar or re-applied on refresh.
+  // (Caveat: a token in a link can still land in browser/proxy history before we
+  // strip it — only share such links over trusted channels.)
+  function consumeConnectUrlParams() {
+    try {
+      const hashQ = location.hash.includes('?') ? location.hash.split('?')[1] : '';
+      const q = new URLSearchParams(location.search || hashQ);
+      const addrRaw = q.get('addr') || q.get('address') || q.get('server');
+      const token = q.get('token');
+      const socket = q.get('socket');
+      if (!addrRaw && token == null) return;
+      if (addrRaw) {
+        let a = addrRaw.trim();
+        if (!/^wss?:\/\//.test(a)) a = (location.protocol === 'https:' ? 'wss://' : 'ws://') + a;
+        localStorage.setItem('tmux_address', a);
+        try {
+          const hist = JSON.parse(localStorage.getItem('tmux_address_history') || '[]')
+            .map(h => (typeof h === 'string' ? { address: h, token: '' } : h));
+          const entry = { address: a, token: token || '' };
+          localStorage.setItem('tmux_address_history',
+            JSON.stringify([entry, ...hist.filter(h => h.address !== a)].slice(0, 8)));
+        } catch {}
+      }
+      if (token != null) localStorage.setItem('tmux_token', token);
+      if (socket) localStorage.setItem('tmux_socket', socket);
+      localStorage.removeItem('tmux_disconnected'); // explicit intent to connect
+      history.replaceState(null, '', location.pathname + location.hash.split('?')[0]);
+    } catch { /* malformed URL — ignore, fall back to saved/settings */ }
+  }
+  consumeConnectUrlParams();
+
   // Auto-reconnect and restore state on page load
   let autoConnectAttempted = false;
 
