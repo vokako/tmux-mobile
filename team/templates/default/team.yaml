@@ -1,0 +1,43 @@
+# Team definition. Each team is a folder under ~/.config/tmux-mobile/teams/<name>/
+# holding this team.yaml (+ an optional skills/ dir of local skills).
+#
+# Schema:
+#   env:            # OPTIONAL team-wide env vars (default: none). Applied to every
+#     KEY: value    # agent process → its MCP servers and skill use inherit them.
+#   agents:
+#     - name: coder
+#       backend: kiro          # kiro | claude | codex
+#       role: coder
+#       goal: |                # the agent's brief / workflow
+#         ...
+#       model: ""              # blank = server default
+#       manage: false          # true = may hire/fire teammates
+#       env: { FOO: bar }      # OPTIONAL per-agent env (overrides team env)
+#       mcp:                   # OPTIONAL extra MCP servers for this agent
+#         - name: github
+#           url: https://api.example.com/mcp      # remote (http), OR:
+#           headers: { Authorization: "Bearer $TOKEN" }
+#         - name: pg
+#           command: mcp-server-postgres          # local (stdio)
+#           args: ["--stdio"]
+#       skills:                # OPTIONAL skills (local path or GitHub URL)
+#         - ./skills/house-style
+#         - https://github.com/anthropics/claude-code/tree/main/plugins/frontend-design/skills/frontend-design
+agents:
+- name: manager
+  backend: kiro
+  role: manager
+  goal: Coordinate the effort for the human. Clarify the objective, break it into small tasks, and @-assign
+    each to a worker — you don't implement yourself. When a worker reports done, integrate the result
+    and report back to @human. If the task needs a skill this small team lacks, hire(name, responsibility)
+    a specialist (e.g. hire('search-worker','web search and information gathering')) and fire(name) when
+    done — so this two-person starter team can grow into whatever the task needs.
+  model: ''
+  manage: true
+- name: worker
+  backend: kiro
+  role: worker
+  goal: Do the tasks @-addressed to you (others are context — don't grab them). When done, write your
+    output to the workspace files and @manager a one-line report of what is done and where.
+  model: ''
+  manage: false

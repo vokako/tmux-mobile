@@ -51,8 +51,59 @@
   }
   function removeAgent(i) {
     if (!sel) return;
+    // Tap-to-confirm (like killing a session): first tap arms, second removes.
+    if (confirmRmAgent !== i) {
+      confirmRmAgent = i;
+      setTimeout(() => { if (confirmRmAgent === i) confirmRmAgent = null; }, 3000);
+      return;
+    }
+    confirmRmAgent = null;
     sel.agents = sel.agents.filter((_, idx) => idx !== i);
     markDirty();
+  }
+  let confirmRmAgent = $state(null); // agent index armed for deletion
+  let confirmDelTpl = $state(false); // template delete armed
+
+  // Per-agent "advanced" (env / mcp / skills) expand state, keyed by index;
+  // reset when switching templates.
+  let advSet = $state(new Set());
+  function toggleAdv(i) {
+    const s = new Set(advSet);
+    s.has(i) ? s.delete(i) : s.add(i);
+    advSet = s;
+  }
+  $effect(() => { selIdx; advSet = new Set(); confirmRmAgent = null; confirmDelTpl = false; });
+
+  // env (object) ⇄ KEY=VALUE lines; skills (array) ⇄ one-per-line.
+  const envToLines = (o) => (o && typeof o === 'object')
+    ? Object.entries(o).map(([k, v]) => `${k}=${v}`).join('\n') : '';
+  function setEnv(ag, s) {
+    const o = {};
+    for (const line of s.split('\n')) {
+      const t = line.trim();
+      if (!t) continue;
+      const i = t.indexOf('=');
+      if (i > 0) o[t.slice(0, i).trim()] = t.slice(i + 1).trim();
+    }
+    ag.env = o; markDirty();
+  }
+  const arrToLines = (a) => Array.isArray(a) ? a.join('\n') : '';
+  function setSkills(ag, s) {
+    ag.skills = s.split('\n').map(x => x.trim()).filter(Boolean);
+    markDirty();
+  }
+  // mcp is structured → edit as JSON; parse on change, ignore invalid input.
+  const mcpToText = (a) => (Array.isArray(a) && a.length) ? JSON.stringify(a, null, 2) : '';
+  let mcpErr = $state({});
+  function setMcp(ag, i, s) {
+    if (!s.trim()) { ag.mcp = []; mcpErr = { ...mcpErr, [i]: false }; markDirty(); return; }
+    try {
+      const v = JSON.parse(s);
+      if (!Array.isArray(v)) throw new Error('not an array');
+      ag.mcp = v; mcpErr = { ...mcpErr, [i]: false }; markDirty();
+    } catch {
+      mcpErr = { ...mcpErr, [i]: true };
+    }
   }
 
   function addTemplate() {
@@ -79,6 +130,13 @@
     if (!sel) return;
     const name = sel.name;
     if (name === 'default') return; // protected
+    // Tap-to-confirm: first click arms the button, second click deletes.
+    if (!confirmDelTpl) {
+      confirmDelTpl = true;
+      setTimeout(() => { confirmDelTpl = false; }, 3000);
+      return;
+    }
+    confirmDelTpl = false;
     try {
       await onDelete(name);
       drafts = drafts.filter(d => d.name !== name);
@@ -136,11 +194,34 @@
               <label class="ag-manage" title="manager (can hire/fire)">
                 <input type="checkbox" bind:checked={ag.manage} onchange={markDirty} /> mgr
               </label>
-              <button class="ag-del" onclick={() => removeAgent(i)} aria-label={t('teamRemoveAgent')}><Icon name="trash" size={12} /></button>
+              <button class="ag-del" class:confirm={confirmRmAgent === i} onclick={() => removeAgent(i)}
+                title={confirmRmAgent === i ? t('teamConfirmDelete') : t('teamRemoveAgent')}
+                aria-label={t('teamRemoveAgent')}><Icon name="trash" size={12} /></button>
             </div>
             <input class="ag-field" bind:value={ag.role} oninput={markDirty} placeholder={t('teamRole')} />
             <textarea class="ag-field ag-area" bind:value={ag.goal} oninput={markDirty} placeholder={t('teamGoal')} rows="3"></textarea>
             <input class="ag-field" bind:value={ag.model} oninput={markDirty} placeholder={t('teamModel')} />
+
+            <button class="ag-adv-toggle" onclick={() => toggleAdv(i)}>
+              <Icon name={advSet.has(i) ? 'chevron-down' : 'chevron-right'} size={12} />
+              {t('teamAdvanced')}
+              {#if (ag.mcp?.length || ag.skills?.length || (ag.env && Object.keys(ag.env).length))}
+                <span class="ag-adv-badge">{(ag.mcp?.length || 0) + (ag.skills?.length || 0) + (ag.env ? Object.keys(ag.env).length : 0)}</span>
+              {/if}
+            </button>
+            {#if advSet.has(i)}
+              <div class="ag-adv">
+                <label class="ag-adv-label">{t('teamSkills')}</label>
+                <textarea class="ag-field ag-area" rows="2" placeholder={t('teamSkillsHint')}
+                  value={arrToLines(ag.skills)} oninput={(e) => setSkills(ag, e.target.value)}></textarea>
+                <label class="ag-adv-label">{t('teamEnv')}</label>
+                <textarea class="ag-field ag-area" rows="2" placeholder="KEY=VALUE"
+                  value={envToLines(ag.env)} oninput={(e) => setEnv(ag, e.target.value)}></textarea>
+                <label class="ag-adv-label">{t('teamMcp')} {#if mcpErr[i]}<span class="ag-adv-err">{t('teamMcpBad')}</span>{/if}</label>
+                <textarea class="ag-field ag-area ag-mono" rows="4" placeholder={t('teamMcpHint')}
+                  value={mcpToText(ag.mcp)} onchange={(e) => setMcp(ag, i, e.target.value)}></textarea>
+              </div>
+            {/if}
           </div>
         {/each}
 
@@ -151,7 +232,9 @@
 
   <div class="tpl-foot">
     {#if sel && sel.name !== 'default'}
-      <button class="tpl-delete" onclick={deleteCurrent}>{t('teamDeleteTemplate')}</button>
+      <button class="tpl-delete" class:confirm={confirmDelTpl} onclick={deleteCurrent}>
+        {confirmDelTpl ? t('teamConfirmDelete') : t('teamDeleteTemplate')}
+      </button>
     {/if}
     <div class="tpl-foot-right">
       <button class="tpl-cancel" onclick={onClose}>{t('close')}</button>
@@ -267,7 +350,24 @@
   .ag-manage { display: flex; align-items: center; gap: 3px; font-size: 11px; color: var(--text3); white-space: nowrap; }
   .ag-del { border: none; background: none; color: var(--text3); cursor: pointer; display: flex; flex-shrink: 0; padding: 4px; }
   .ag-del:active { color: var(--danger); }
+  .ag-del.confirm { color: var(--danger); }
   .ag-area { resize: vertical; line-height: 1.4; }
+
+  .ag-adv-toggle {
+    display: flex; align-items: center; gap: 5px; align-self: flex-start;
+    padding: 3px 6px; border: none; background: none; cursor: pointer;
+    color: var(--text3); font-size: 11px; font-weight: 600;
+    -webkit-tap-highlight-color: transparent; font-family: var(--font-ui);
+  }
+  .ag-adv-toggle:active { color: var(--accent); }
+  .ag-adv-badge {
+    min-width: 15px; padding: 0 4px; border-radius: 7px; background: var(--accent-bg);
+    color: var(--accent); font-size: 10px; text-align: center;
+  }
+  .ag-adv { display: flex; flex-direction: column; gap: 5px; padding-left: 4px; border-left: 2px solid var(--border2); }
+  .ag-adv-label { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.4px; }
+  .ag-adv-err { color: var(--danger); text-transform: none; letter-spacing: 0; margin-left: 6px; }
+  .ag-mono { font-family: var(--font-mono, monospace); font-size: 11px; }
 
   .agent-add {
     padding: 9px; border: 1px dashed var(--border2); border-radius: 10px;
@@ -287,6 +387,7 @@
     background: none; color: var(--danger); font-size: 12px; cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
+  .tpl-delete.confirm { background: var(--danger); color: #fff; }
   .tpl-cancel {
     padding: 7px 12px; border: 1px solid var(--border2); border-radius: 8px;
     background: none; color: var(--text2); font-size: 12px; cursor: pointer;

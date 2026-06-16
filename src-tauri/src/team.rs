@@ -48,14 +48,14 @@ const KICK: &str = "You are connected to the team group chat (collaboration rule
 // is always something to edit.
 
 /// Default model placeholder substituted in when a kiro agent leaves model empty.
-pub const BUILTIN_TEMPLATE: &str = include_str!("../../team/templates/default.json");
+pub const BUILTIN_TEMPLATE: &str = include_str!("../../team/templates/default/team.yaml");
 
 /// A ready-made software-development roster (tech-lead / product / architect /
 /// coder / reviewer / tester), seeded alongside the default so it appears in
 /// the app's template picker out of the box. The whole collaboration workflow
 /// lives in each agent's `goal` (role isolation) — AGENTS.md stays a
 /// role-agnostic, workflow-free communication contract.
-pub const SOFTWARE_DEV_TEMPLATE: &str = include_str!("../../team/templates/software-dev.json");
+pub const SOFTWARE_DEV_TEMPLATE: &str = include_str!("../../team/templates/software-dev/team.yaml");
 
 /// A financial-research roster modeled on Dexter (virattt/dexter): a research
 /// director plus fundamentals / market+sentiment / valuation(DCF) / memo /
@@ -64,7 +64,7 @@ pub const SOFTWARE_DEV_TEMPLATE: &str = include_str!("../../team/templates/softw
 /// sources, the deliverable is a file, chat is a scannable header) and its
 /// educational-only / not-investment-advice posture are baked into the goals.
 pub const FINANCIAL_RESEARCH_TEMPLATE: &str =
-    include_str!("../../team/templates/financial-research.json");
+    include_str!("../../team/templates/financial-research/team.yaml");
 
 /// Built-in templates seeded into teams/ on first run: (file stem, contents).
 const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
@@ -78,31 +78,76 @@ fn templates_dir() -> PathBuf {
     crate::config::config_dir().join("teams")
 }
 
-fn template_path(name: &str) -> PathBuf {
-    // Sanitize to a bare file stem so a template name can't escape the dir.
+/// Sanitize a template name to a safe single path segment (no escaping the dir).
+fn sanitize_name(name: &str) -> String {
     let safe: String = name
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
         .collect();
-    let safe = if safe.trim_matches('-').is_empty() { "default".to_string() } else { safe };
-    templates_dir().join(format!("{}.json", safe))
+    if safe.trim_matches('-').is_empty() { "default".to_string() } else { safe }
 }
 
-/// Ensure the teams/ dir exists and holds the built-in templates. Seed-once per
-/// file: an existing template is never overwritten, so a user's edits (and
-/// their custom templates) are preserved across restarts.
+/// A template now lives in its OWN folder `teams/<name>/`, holding `team.yaml`
+/// (the roster + per-agent env/mcp/skills) and optionally a `skills/` dir of
+/// local skills bundled with the team. The folder is the unit so a team can
+/// carry its own assets.
+fn team_dir(name: &str) -> PathBuf {
+    templates_dir().join(sanitize_name(name))
+}
+
+fn template_yaml_path(name: &str) -> PathBuf {
+    team_dir(name).join("team.yaml")
+}
+
+/// One-time migration of the old flat `teams/<name>.json` files into the new
+/// `teams/<name>/team.yaml` folder layout. The legacy file is renamed to
+/// `<name>.json.bak` (kept, not deleted) so the move is reversible.
+fn migrate_legacy_json() {
+    let dir = templates_dir();
+    let Ok(rd) = std::fs::read_dir(&dir) else { return };
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.extension().and_then(|x| x.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(stem) = p.file_stem().and_then(|s| s.to_str()) else { continue };
+        let yaml_path = team_dir(stem).join("team.yaml");
+        if yaml_path.exists() {
+            continue; // already migrated
+        }
+        let Ok(text) = std::fs::read_to_string(&p) else { continue };
+        let Ok(val) = serde_json::from_str::<Value>(&text) else { continue };
+        if let Some(parent) = yaml_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(yaml) = serde_yml::to_string(&val) {
+            if std::fs::write(&yaml_path, yaml).is_ok() {
+                let _ = std::fs::rename(&p, p.with_extension("json.bak"));
+                println!("🜂 team: migrated legacy template '{}' → team.yaml", stem);
+            }
+        }
+    }
+}
+
+/// Ensure the teams/ dir exists and holds the built-in templates. Migrates any
+/// legacy `*.json` first, then seed-once per folder: an existing template is
+/// never overwritten, so a user's edits (and custom templates) survive restarts.
 pub fn ensure_templates_seeded() {
     let dir = templates_dir();
     let _ = std::fs::create_dir_all(&dir);
+    migrate_legacy_json();
     for (name, body) in BUILTIN_TEMPLATES {
-        let path = dir.join(format!("{}.json", name));
+        let path = template_yaml_path(name);
         if !path.exists() {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
             let _ = std::fs::write(&path, body);
         }
     }
 }
 
-/// List available template names (file stems in teams/).
+/// List available template names (folders in teams/ that hold a team.yaml).
 pub fn list_templates() -> Vec<String> {
     ensure_templates_seeded();
     let mut names: Vec<String> = std::fs::read_dir(templates_dir())
@@ -110,8 +155,8 @@ pub fn list_templates() -> Vec<String> {
             rd.filter_map(|e| e.ok())
                 .filter_map(|e| {
                     let p = e.path();
-                    if p.extension().and_then(|x| x.to_str()) == Some("json") {
-                        p.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string())
+                    if p.is_dir() && p.join("team.yaml").is_file() {
+                        p.file_name().and_then(|s| s.to_str()).map(|s| s.to_string())
                     } else {
                         None
                     }
@@ -123,37 +168,62 @@ pub fn list_templates() -> Vec<String> {
     names
 }
 
+/// Read a template's full definition object (`{ env?, agents }`) from YAML, or
+/// `null` if missing/bad.
+pub fn read_team_def(name: &str) -> Value {
+    std::fs::read_to_string(template_yaml_path(name))
+        .ok()
+        .and_then(|s| serde_yml::from_str::<Value>(&s).ok())
+        .unwrap_or(Value::Null)
+}
+
 /// Read a template's agent list (the `agents` array), or empty if missing/bad.
 pub fn read_template(name: &str) -> Vec<Value> {
-    std::fs::read_to_string(template_path(name))
-        .ok()
-        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-        .and_then(|v| v.get("agents").and_then(|a| a.as_array()).cloned())
+    read_team_def(name)
+        .get("agents")
+        .and_then(|a| a.as_array())
+        .cloned()
         .unwrap_or_default()
 }
 
-/// Read every template as `{ name, agents }` for the editor panel.
+/// Read every template as `{ name, env, agents }` for the editor panel.
 pub fn read_all_templates() -> Vec<Value> {
     list_templates()
         .into_iter()
-        .map(|name| serde_json::json!({ "name": name, "agents": read_template(&name) }))
+        .map(|name| {
+            let def = read_team_def(&name);
+            serde_json::json!({
+                "name": name,
+                "env": def.get("env").cloned().unwrap_or(serde_json::json!({})),
+                "agents": def.get("agents").cloned().unwrap_or(serde_json::json!([])),
+            })
+        })
         .collect()
 }
 
-/// Write a template (overwrites). `agents` is the raw array of member objects.
+/// Write a template (overwrites the roster). `agents` is the raw array of member
+/// objects. Any top-level `env` already in the file is preserved.
 pub fn save_template(name: &str, agents: &Value) -> Result<(), String> {
     ensure_templates_seeded();
-    let body = serde_json::json!({ "agents": agents });
-    let s = serde_json::to_string_pretty(&body).map_err(|e| e.to_string())?;
-    std::fs::write(template_path(name), s).map_err(|e| e.to_string())
+    let mut def = read_team_def(name);
+    if !def.is_object() {
+        def = serde_json::json!({});
+    }
+    def.as_object_mut().unwrap().insert("agents".to_string(), agents.clone());
+    let yaml = serde_yml::to_string(&def).map_err(|e| e.to_string())?;
+    let path = template_yaml_path(name);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(path, yaml).map_err(|e| e.to_string())
 }
 
-/// Delete a template (the built-in default is protected).
+/// Delete a template folder (the built-in default is protected).
 pub fn delete_template(name: &str) -> Result<(), String> {
     if name == "default" {
         return Err("the default template cannot be deleted".into());
     }
-    std::fs::remove_file(template_path(name)).map_err(|e| e.to_string())
+    std::fs::remove_dir_all(team_dir(name)).map_err(|e| e.to_string())
 }
 
 /// Per-run config homes under `~/.config/tmux-mobile/team/<slug>/`. NOTE: this is
@@ -292,11 +362,14 @@ fn seed_template(bridge: &dyn TeamBridge, room: &str, template: &str, cfg: &Team
     if !existing.is_empty() {
         return; // already seeded (this run or a recovered one)
     }
-    let agents = read_template(template);
+    let def = read_team_def(template);
+    let agents = def.get("agents").and_then(|a| a.as_array()).cloned().unwrap_or_default();
     if agents.is_empty() {
         eprintln!("⚠️  team: template '{}' empty/missing; nothing to seed", template);
         return;
     }
+    // Team-wide env is the base; each agent's env overrides it (agent wins).
+    let team_env = def.get("env").cloned().unwrap_or_else(|| serde_json::json!({}));
     let mut names = Vec::new();
     for a in &agents {
         let name = a.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
@@ -309,12 +382,18 @@ fn seed_template(bridge: &dyn TeamBridge, room: &str, template: &str, cfg: &Team
             ("kiro", None) => Value::String(cfg.model.clone()),
             _ => Value::Null,
         };
+        let env = merge_env(&team_env, a.get("env"));
         let spec = serde_json::json!({
             "role": a.get("role").and_then(|v| v.as_str()).unwrap_or(name),
             "goal": a.get("goal").and_then(|v| v.as_str()).unwrap_or(""),
             "backend": backend,
             "manage": a.get("manage").and_then(|v| v.as_bool()).unwrap_or(false),
             "model": model,
+            "env": env,
+            "mcp": a.get("mcp").cloned().unwrap_or_else(|| serde_json::json!([])),
+            "skills": a.get("skills").cloned().unwrap_or_else(|| serde_json::json!([])),
+            // The team folder is where local (relative) skills resolve from.
+            "team_dir": team_dir(template).to_string_lossy(),
         });
         if let Err(e) = bridge.seed_employee(room, name, &spec) {
             eprintln!("⚠️  team: seed '{}' failed: {}", name, e);
@@ -323,6 +402,19 @@ fn seed_template(bridge: &dyn TeamBridge, room: &str, template: &str, cfg: &Team
         }
     }
     println!("🜂 team: seeded '{}' ({}); launching…", template, names.join(" · "));
+}
+
+/// Merge a team-wide env object with a per-agent env object (agent wins) into a
+/// flat JSON object. Either side may be absent/non-object.
+fn merge_env(team_env: &Value, agent_env: Option<&Value>) -> Value {
+    let mut out = serde_json::Map::new();
+    if let Some(o) = team_env.as_object() {
+        for (k, v) in o { out.insert(k.clone(), v.clone()); }
+    }
+    if let Some(o) = agent_env.and_then(|v| v.as_object()) {
+        for (k, v) in o { out.insert(k.clone(), v.clone()); }
+    }
+    Value::Object(out)
 }
 
 /// Reconcile the desired roster into real agent windows, forever (until the
@@ -462,10 +554,30 @@ fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &str, session:
     let manage = spec.get("manage").and_then(|v| v.as_bool()).unwrap_or(false);
     let model = spec.get("model").and_then(|v| v.as_str());
 
+    // Per-agent extras (env / extra MCP servers / skills) from the team.yaml.
+    let env: Vec<(String, String)> = spec
+        .get("env")
+        .and_then(|v| v.as_object())
+        .map(|o| o.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect())
+        .unwrap_or_default();
+    let mcp: Vec<McpDef> = spec
+        .get("mcp")
+        .cloned()
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+    let skill_refs: Vec<String> = spec
+        .get("skills")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    let team_dir_ref = spec.get("team_dir").and_then(|v| v.as_str()).unwrap_or("");
+    let skills = resolve_skills(&skill_refs, team_dir_ref);
+    let extras = Extras { env, mcp, skills };
+
     let (env, cmd, post_keys) = match backend {
-        "kiro" => prepare_kiro(name, role, goal, manage, cfg, room, paths, model)?,
-        "claude" => prepare_claude(name, role, goal, manage, cfg, room, paths, model)?,
-        "codex" => prepare_codex(name, role, goal, manage, cfg, room, paths)?,
+        "kiro" => prepare_kiro(name, role, goal, manage, cfg, room, paths, model, &extras)?,
+        "claude" => prepare_claude(name, role, goal, manage, cfg, room, paths, model, &extras)?,
+        "codex" => prepare_codex(name, role, goal, manage, cfg, room, paths, &extras)?,
         other => return Err(format!("unknown backend: {}", other)),
     };
 
@@ -579,6 +691,235 @@ const WORKER_TOOLS: &[&str] = &["post", "wait", "list_agents", "history"];
 
 // ---- Kiro ----
 #[allow(clippy::too_many_arguments)] // agent config genuinely needs all of these
+/// An extra MCP server attached to an agent (from the team.yaml `mcp:` list).
+/// Either a remote HTTP server (`url` [+ `headers`]) or a local stdio server
+/// (`command` [+ `args`/`env`]).
+#[derive(serde::Deserialize, Default, Clone)]
+struct McpDef {
+    name: String,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    headers: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    command: Option<String>,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    env: std::collections::BTreeMap<String, String>,
+}
+
+/// A skill resolved to a concrete local directory (containing SKILL.md), ready
+/// to wire into a backend.
+struct ResolvedSkill {
+    name: String,
+    dir: PathBuf,
+    description: String,
+}
+
+/// Per-agent extras threaded from the spec into each backend's launcher.
+struct Extras {
+    env: Vec<(String, String)>,
+    mcp: Vec<McpDef>,
+    skills: Vec<ResolvedSkill>,
+}
+
+/// kiro mcpServers entry: remote = `{url,headers}`, local = `{command,args,env}`.
+fn kiro_mcp_value(m: &McpDef) -> Value {
+    if let Some(url) = &m.url {
+        let mut o = serde_json::json!({ "url": url });
+        if !m.headers.is_empty() {
+            o["headers"] = serde_json::to_value(&m.headers).unwrap_or(Value::Null);
+        }
+        o
+    } else if let Some(cmd) = &m.command {
+        let mut o = serde_json::json!({ "command": cmd, "args": m.args });
+        if !m.env.is_empty() {
+            o["env"] = serde_json::to_value(&m.env).unwrap_or(Value::Null);
+        }
+        o
+    } else {
+        serde_json::json!({})
+    }
+}
+
+/// claude mcpServers entry: remote gets explicit `type:"http"`.
+fn claude_mcp_value(m: &McpDef) -> Value {
+    if let Some(url) = &m.url {
+        let mut o = serde_json::json!({ "type": "http", "url": url });
+        if !m.headers.is_empty() {
+            o["headers"] = serde_json::to_value(&m.headers).unwrap_or(Value::Null);
+        }
+        o
+    } else {
+        kiro_mcp_value(m) // local stdio form is identical
+    }
+}
+
+/// codex `[mcp_servers.<name>]` TOML block for an extra server.
+fn codex_mcp_toml(m: &McpDef) -> String {
+    let mut s = format!("\n[mcp_servers.{}]\n", m.name);
+    if let Some(url) = &m.url {
+        s += &format!("url = \"{}\"\nenabled = true\nexperimental_use_rmcp_client = true\n", url);
+        if !m.headers.is_empty() {
+            s += &format!("\n[mcp_servers.{}.http_headers]\n", m.name);
+            for (k, v) in &m.headers {
+                s += &format!("\"{}\" = \"{}\"\n", k, v);
+            }
+        }
+    } else if let Some(cmd) = &m.command {
+        s += &format!("command = \"{}\"\n", cmd);
+        if !m.args.is_empty() {
+            let args: Vec<String> = m.args.iter().map(|a| format!("\"{}\"", a)).collect();
+            s += &format!("args = [{}]\n", args.join(", "));
+        }
+        if !m.env.is_empty() {
+            s += &format!("\n[mcp_servers.{}.env]\n", m.name);
+            for (k, v) in &m.env {
+                s += &format!("\"{}\" = \"{}\"\n", k, v);
+            }
+        }
+    }
+    s
+}
+
+/// A one-line skills index appended to the kick for backends without a native
+/// skill mechanism (claude/codex). kiro instead gets `skill://` resources.
+fn skills_index_text(skills: &[ResolvedSkill]) -> String {
+    if skills.is_empty() {
+        return String::new();
+    }
+    let mut s = String::from(" Skills available — read the named SKILL.md before a matching task:");
+    for sk in skills {
+        s += &format!(" [{}] {} (at {}/SKILL.md);", sk.name, sk.description, sk.dir.display());
+    }
+    s
+}
+
+fn skills_cache_dir() -> PathBuf {
+    crate::config::config_dir().join("skills-cache")
+}
+
+/// Resolve each skill reference to a local directory. A reference is either a
+/// local path (relative to the team folder, or absolute) or a GitHub URL, which
+/// is sparse-cloned into a shared cache (reused across teams/agents).
+fn resolve_skills(refs: &[String], team_dir: &str) -> Vec<ResolvedSkill> {
+    let mut out = Vec::new();
+    for r in refs {
+        let r = r.trim();
+        if r.is_empty() {
+            continue;
+        }
+        let dir = if r.starts_with("http://") || r.starts_with("https://") {
+            match fetch_git_skill(r) {
+                Ok(d) => d,
+                Err(e) => {
+                    eprintln!("⚠️  team: skill '{}' fetch failed: {}", r, e);
+                    continue;
+                }
+            }
+        } else {
+            let p = PathBuf::from(r);
+            let p = if p.is_absolute() { p } else { PathBuf::from(team_dir).join(r) };
+            if p.is_file() {
+                p.parent().map(|x| x.to_path_buf()).unwrap_or(p)
+            } else {
+                p
+            }
+        };
+        if !dir.exists() {
+            eprintln!("⚠️  team: skill path not found: {}", dir.display());
+            continue;
+        }
+        let (name, description) = read_skill_meta(&dir);
+        out.push(ResolvedSkill { name, dir, description });
+    }
+    out
+}
+
+/// Parse SKILL.md YAML frontmatter for name/description (best-effort).
+fn read_skill_meta(dir: &std::path::Path) -> (String, String) {
+    let fallback = dir.file_name().and_then(|s| s.to_str()).unwrap_or("skill").to_string();
+    let md = std::fs::read_to_string(dir.join("SKILL.md")).unwrap_or_default();
+    let mut name = fallback;
+    let mut desc = String::new();
+    if let Some(rest) = md.strip_prefix("---") {
+        if let Some(end) = rest.find("\n---") {
+            let fm = rest[..end].trim_start_matches('\n');
+            if let Ok(v) = serde_yml::from_str::<Value>(fm) {
+                if let Some(n) = v.get("name").and_then(|x| x.as_str()) {
+                    name = n.to_string();
+                }
+                if let Some(d) = v.get("description").and_then(|x| x.as_str()) {
+                    desc = d.to_string();
+                }
+            }
+        }
+    }
+    (name, desc)
+}
+
+/// Sparse-clone a GitHub `tree/<ref>/<subpath>` URL (or a bare repo URL) into the
+/// shared skills cache and return the skill directory. Cache key = owner/repo/ref;
+/// repeated refs to the same repo reuse the clone (sparse-checkout adds subpaths).
+fn fetch_git_skill(url: &str) -> Result<PathBuf, String> {
+    let (owner, repo, gitref, subpath) = parse_github(url)?;
+    let repo_cache = skills_cache_dir().join(&owner).join(&repo).join(&gitref);
+    let resolved = if subpath.is_empty() { repo_cache.clone() } else { repo_cache.join(&subpath) };
+    // Cache hit: the subpath already materialised.
+    if resolved.join("SKILL.md").is_file() || (subpath.is_empty() && resolved.exists()) {
+        return Ok(resolved);
+    }
+    let repo_url = format!("https://github.com/{}/{}", owner, repo);
+    if !repo_cache.join(".git").exists() {
+        if let Some(p) = repo_cache.parent() {
+            std::fs::create_dir_all(p).map_err(|e| e.to_string())?;
+        }
+        let _ = std::fs::remove_dir_all(&repo_cache);
+        let out = std::process::Command::new("git")
+            .args(["clone", "--depth", "1", "--filter=blob:none", "--sparse", "--branch", &gitref, &repo_url])
+            .arg(&repo_cache)
+            .output()
+            .map_err(|e| format!("spawn git: {}", e))?;
+        if !out.status.success() {
+            return Err(format!("git clone: {}", String::from_utf8_lossy(&out.stderr).trim()));
+        }
+    }
+    if !subpath.is_empty() {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo_cache)
+            .args(["sparse-checkout", "set", &subpath])
+            .output()
+            .map_err(|e| format!("spawn git: {}", e))?;
+        if !out.status.success() {
+            return Err(format!("git sparse-checkout: {}", String::from_utf8_lossy(&out.stderr).trim()));
+        }
+    }
+    Ok(resolved)
+}
+
+/// Parse a GitHub URL into (owner, repo, ref, subpath). Supports the `tree/<ref>/
+/// <subpath>` form and a bare `owner/repo` (defaults ref=main, no subpath).
+fn parse_github(url: &str) -> Result<(String, String, String, String), String> {
+    let u = url.trim().trim_end_matches('/');
+    let rest = u
+        .strip_prefix("https://github.com/")
+        .or_else(|| u.strip_prefix("http://github.com/"))
+        .ok_or_else(|| format!("only github.com skill URLs are supported: {}", url))?;
+    let parts: Vec<&str> = rest.split('/').collect();
+    if parts.len() < 2 {
+        return Err(format!("expected github.com/owner/repo…: {}", url));
+    }
+    let owner = parts[0].to_string();
+    let repo = parts[1].trim_end_matches(".git").to_string();
+    if parts.len() >= 4 && (parts[2] == "tree" || parts[2] == "blob") {
+        Ok((owner, repo, parts[3].to_string(), parts[4..].join("/")))
+    } else {
+        Ok((owner, repo, "main".to_string(), String::new()))
+    }
+}
+
 /// Env the agent process exports so its `heartbeat.sh` hook can ping the daemon
 /// (who am I, which room, where). Injected on EVERY backend's launch line.
 fn hb_env(name: &str, room: &str, cfg: &TeamConfig) -> Vec<(String, String)> {
@@ -591,7 +932,7 @@ fn hb_env(name: &str, room: &str, cfg: &TeamConfig) -> Vec<(String, String)> {
 
 fn prepare_kiro(
     name: &str, role: &str, goal: &str, manage: bool,
-    cfg: &TeamConfig, room: &str, paths: &Paths, model: Option<&str>,
+    cfg: &TeamConfig, room: &str, paths: &Paths, model: Option<&str>, extras: &Extras,
 ) -> Result<Prepared, String> {
     let home = &paths.kiro_home;
     std::fs::create_dir_all(home.join("agents")).map_err(|e| e.to_string())?;
@@ -613,15 +954,32 @@ fn prepare_kiro(
     allowed.extend(team);
 
     // Brief lives in our private home (NOT the user's workspace); kiro loads it
-    // by absolute path via `resources`.
+    // by absolute path via `resources`. Each resolved skill is added natively as
+    // a `skill://` resource (metadata at startup, content on demand).
+    let mut resources = vec![format!("file://{}", paths.brief.to_string_lossy())];
+    for sk in &extras.skills {
+        resources.push(format!("skill://{}/SKILL.md", sk.dir.to_string_lossy()));
+    }
+    // The team MCP server plus any extra per-agent servers from the team.yaml.
+    let mut mcp_servers = serde_json::json!({
+        "team": { "url": format!("{}/mcp", cfg.url), "headers": { "x-agent": name, "x-room": room } }
+    });
+    {
+        let obj = mcp_servers.as_object_mut().unwrap();
+        for m in &extras.mcp {
+            if !m.name.is_empty() {
+                obj.insert(m.name.clone(), kiro_mcp_value(m));
+            }
+        }
+    }
     let conf = serde_json::json!({
         "name": name,
         "description": format!("{} on the team bus", role),
         "prompt": full_prompt(role, goal),
         "tools": tools,
         "allowedTools": allowed,
-        "resources": [format!("file://{}", paths.brief.to_string_lossy())],
-        "mcpServers": { "team": { "url": format!("{}/mcp", cfg.url), "headers": { "x-agent": name, "x-room": room } } },
+        "resources": resources,
+        "mcpServers": mcp_servers,
         "hooks": {
             "postToolUse": [ { "matcher": "*", "command": paths.heartbeat.to_string_lossy() } ],
             "userPromptSubmit": [ { "command": paths.heartbeat.to_string_lossy() } ],
@@ -637,6 +995,7 @@ fn prepare_kiro(
     let m = model.unwrap_or("claude-sonnet-4.6");
     let mut env = vec![("KIRO_HOME".to_string(), home.to_string_lossy().to_string())];
     env.extend(hb_env(name, room, cfg));
+    env.extend(extras.env.iter().cloned());
     let cmd = format!(
         "kiro-cli chat --agent {} --model {} --trust-all-tools {}",
         name, m, shell_quote(KICK)
@@ -648,17 +1007,25 @@ fn prepare_kiro(
 #[allow(clippy::too_many_arguments)]
 fn prepare_claude(
     name: &str, role: &str, goal: &str, manage: bool,
-    cfg: &TeamConfig, room: &str, paths: &Paths, model: Option<&str>,
+    cfg: &TeamConfig, room: &str, paths: &Paths, model: Option<&str>, extras: &Extras,
 ) -> Result<Prepared, String> {
     let d = &paths.claude;
     std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
     let mcpfile = d.join(format!("{}.mcp.json", name));
+    let mut mcp_servers = serde_json::json!({
+        "team": { "type": "http", "url": format!("{}/mcp", cfg.url), "headers": { "x-agent": name, "x-room": room } }
+    });
+    {
+        let obj = mcp_servers.as_object_mut().unwrap();
+        for m in &extras.mcp {
+            if !m.name.is_empty() {
+                obj.insert(m.name.clone(), claude_mcp_value(m));
+            }
+        }
+    }
     std::fs::write(
         &mcpfile,
-        serde_json::to_string_pretty(&serde_json::json!({
-            "mcpServers": { "team": { "type": "http", "url": format!("{}/mcp", cfg.url), "headers": { "x-agent": name, "x-room": room } } }
-        }))
-        .unwrap(),
+        serde_json::to_string_pretty(&serde_json::json!({ "mcpServers": mcp_servers })).unwrap(),
     )
     .map_err(|e| e.to_string())?;
     let settingsfile = d.join(format!("{}.settings.json", name));
@@ -687,28 +1054,36 @@ fn prepare_claude(
     )
     .trim_end()
     .to_string();
-    let first_msg = format!("{} {}", role_line(role, goal), kick_with_brief(paths));
+    let first_msg = format!("{} {}{}", role_line(role, goal), kick_with_brief(paths), skills_index_text(&extras.skills));
     // Start interactive; then accept the folder-trust dialog, type the kick, submit.
     let post = vec![PostKey::Enter, PostKey::Text(first_msg), PostKey::Enter];
-    Ok((hb_env(name, room, cfg), cmd, post))
+    let mut env = hb_env(name, room, cfg);
+    env.extend(extras.env.iter().cloned());
+    Ok((env, cmd, post))
 }
 
 // ---- Codex ----
 #[allow(clippy::too_many_arguments)]
 fn prepare_codex(
-    name: &str, role: &str, goal: &str, manage: bool, cfg: &TeamConfig, room: &str, paths: &Paths,
+    name: &str, role: &str, goal: &str, manage: bool, cfg: &TeamConfig, room: &str, paths: &Paths, extras: &Extras,
 ) -> Result<Prepared, String> {
     let home = paths.codex.join(name);
     std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
     let gating = if manage { "" } else { "disabled_tools = [\"hire\", \"fire\"]\n" };
-    let config = format!(
+    let mut config = format!(
         "[mcp_servers.team]\nurl = \"{}/mcp\"\nenabled = true\nexperimental_use_rmcp_client = true\n{}\n[mcp_servers.team.http_headers]\n\"x-agent\" = \"{}\"\n\"x-room\" = \"{}\"\n",
         cfg.url, gating, name, room
     );
+    for m in &extras.mcp {
+        if !m.name.is_empty() {
+            config.push_str(&codex_mcp_toml(m));
+        }
+    }
     std::fs::write(home.join("config.toml"), config).map_err(|e| e.to_string())?;
     let mut env = vec![("CODEX_HOME".to_string(), home.to_string_lossy().to_string())];
     env.extend(hb_env(name, room, cfg));
-    let first_msg = format!("{} {}", role_line(role, goal), kick_with_brief(paths));
+    env.extend(extras.env.iter().cloned());
+    let first_msg = format!("{} {}{}", role_line(role, goal), kick_with_brief(paths), skills_index_text(&extras.skills));
     let cmd = format!("codex --dangerously-bypass-approvals-and-sandbox {}", shell_quote(&first_msg));
     Ok((env, cmd, vec![]))
 }
@@ -729,6 +1104,55 @@ fn shell_quote(s: &str) -> String {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[test]
+    fn parse_github_tree_url() {
+        let (o, r, gr, sub) = parse_github(
+            "https://github.com/anthropics/claude-code/tree/main/plugins/frontend-design/skills/frontend-design",
+        )
+        .unwrap();
+        assert_eq!(o, "anthropics");
+        assert_eq!(r, "claude-code");
+        assert_eq!(gr, "main");
+        assert_eq!(sub, "plugins/frontend-design/skills/frontend-design");
+    }
+
+    #[test]
+    fn parse_github_bare_repo_defaults_main() {
+        let (o, r, gr, sub) = parse_github("https://github.com/owner/repo").unwrap();
+        assert_eq!((o.as_str(), r.as_str(), gr.as_str(), sub.as_str()), ("owner", "repo", "main", ""));
+        assert!(parse_github("https://gitlab.com/x/y").is_err(), "only github.com supported");
+    }
+
+    #[test]
+    fn merge_env_agent_overrides_team() {
+        let team = serde_json::json!({ "A": "1", "B": "team" });
+        let agent = serde_json::json!({ "B": "agent", "C": "3" });
+        let m = merge_env(&team, Some(&agent));
+        assert_eq!(m["A"], "1");
+        assert_eq!(m["B"], "agent", "agent env wins");
+        assert_eq!(m["C"], "3");
+    }
+
+    #[test]
+    fn mcp_value_remote_and_local_per_backend() {
+        let remote = McpDef {
+            name: "gh".into(),
+            url: Some("https://x/mcp".into()),
+            headers: [("Authorization".to_string(), "Bearer t".to_string())].into_iter().collect(),
+            ..Default::default()
+        };
+        // kiro remote omits an explicit type; claude tags it http.
+        assert!(kiro_mcp_value(&remote).get("type").is_none());
+        assert_eq!(claude_mcp_value(&remote)["type"], "http");
+        assert_eq!(kiro_mcp_value(&remote)["url"], "https://x/mcp");
+
+        let local = McpDef { name: "pg".into(), command: Some("mcp-pg".into()), args: vec!["--stdio".into()], ..Default::default() };
+        let toml = codex_mcp_toml(&local);
+        assert!(toml.contains("[mcp_servers.pg]"));
+        assert!(toml.contains("command = \"mcp-pg\""));
+        assert!(toml.contains("args = [\"--stdio\"]"));
+    }
 
     // Records seed_employee calls so we can assert the default roster.
     struct RecordingBridge {
@@ -768,7 +1192,7 @@ mod tests {
     fn builtin_default_template_is_minimal_manager_worker() {
         // The default template is the minimal demo: a manager + one worker that
         // shows the delegate→report loop and can grow via the manager's hire().
-        let v: Value = serde_json::from_str(BUILTIN_TEMPLATE).unwrap();
+        let v: Value = serde_yml::from_str(BUILTIN_TEMPLATE).unwrap();
         let agents = v["agents"].as_array().unwrap();
         assert_eq!(agents.len(), 2, "minimal demo = manager + worker");
         let names: Vec<&str> = agents.iter().filter_map(|a| a["name"].as_str()).collect();
@@ -779,13 +1203,13 @@ mod tests {
     }
 
     #[test]
-    fn software_dev_template_has_seven_roles_hire_fire_off() {
-        // The software-dev roster is a built-in (teams/software-dev.json).
-        let v: Value = serde_json::from_str(SOFTWARE_DEV_TEMPLATE).unwrap();
+    fn software_dev_template_roster_and_tools() {
+        // The software-dev roster is a built-in (teams/software-dev/team.yaml).
+        let v: Value = serde_yml::from_str(SOFTWARE_DEV_TEMPLATE).unwrap();
         let agents = v["agents"].as_array().unwrap();
-        assert_eq!(agents.len(), 7, "lead+product+architect+coder+reviewer+tester+devops");
+        assert_eq!(agents.len(), 8, "manager+product+architect+frontend+backend+reviewer+tester+devops");
         let names: Vec<&str> = agents.iter().filter_map(|a| a["name"].as_str()).collect();
-        for expected in ["manager", "product", "architect", "coder", "reviewer", "tester", "devops"] {
+        for expected in ["manager", "product", "architect", "frontend", "backend", "reviewer", "tester", "devops"] {
             assert!(names.contains(&expected), "missing role '{expected}': {names:?}");
         }
         let managers = agents.iter().filter(|a| a["manage"] == true).count();
@@ -797,6 +1221,27 @@ mod tests {
             "each role's goal must carry its slice of the workflow"
         );
         assert!(agents.iter().all(|a| a["model"] == "auto"), "all models pinned to auto");
+
+        // Per-agent tools wired via the new schema.
+        let agent = |n: &str| agents.iter().find(|a| a["name"] == n).unwrap();
+        let mcp_names = |n: &str| -> Vec<String> {
+            agent(n)["mcp"].as_array().map(|a| {
+                a.iter().filter_map(|m| m["name"].as_str().map(String::from)).collect()
+            }).unwrap_or_default()
+        };
+        for dev in ["architect", "frontend", "backend", "reviewer", "tester", "devops"] {
+            assert!(mcp_names(dev).contains(&"context7".to_string()), "{dev} should have context7");
+        }
+        // reviewer & devops also reach the AWS knowledge base (cloud/IaC review + deploy).
+        for n in ["backend", "reviewer", "devops"] {
+            assert!(mcp_names(n).contains(&"aws-knowledge".to_string()), "{n} has AWS knowledge");
+        }
+        assert!(mcp_names("tester").contains(&"chrome-devtools".to_string()), "tester has chrome-devtools for e2e");
+        let fe_skills = agent("frontend")["skills"].as_array().unwrap();
+        assert!(
+            fe_skills.iter().any(|s| s.as_str().map(|x| x.contains("frontend-design")).unwrap_or(false)),
+            "frontend has the frontend-design skill"
+        );
     }
 
     #[test]
@@ -819,7 +1264,7 @@ mod tests {
 
     #[test]
     fn financial_research_template_has_lead_and_default_models() {
-        let v: Value = serde_json::from_str(FINANCIAL_RESEARCH_TEMPLATE).unwrap();
+        let v: Value = serde_yml::from_str(FINANCIAL_RESEARCH_TEMPLATE).unwrap();
         let agents = v["agents"].as_array().unwrap();
         assert!(agents.len() >= 5, "a multi-analyst research team");
         let names: Vec<&str> = agents.iter().filter_map(|a| a["name"].as_str()).collect();

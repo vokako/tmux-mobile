@@ -9,5 +9,5 @@ cat >/dev/null 2>&1 || true        # drain the hook event JSON on stdin
 [ -n "${TMUX_PANE:-}" ] || exit 0
 # Briefly wait for the TUI to return to its prompt, then nudge. Background + exit 0
 # immediately so we never block the agent's turn lifecycle.
-( sleep 0.6; tmux send-keys -t "$TMUX_PANE" "继续：调用 wait 等待群里的消息，不要主动停止。" Enter ) >/dev/null 2>&1 &
+( sleep 0.6; tmux send-keys -t "$TMUX_PANE" "Continue: call \`wait\` to receive team messages — do not stop on your own." Enter ) >/dev/null 2>&1 &
 exit 0

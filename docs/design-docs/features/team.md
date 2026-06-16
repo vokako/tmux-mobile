@@ -290,6 +290,49 @@ artifacts the app compiles in via `include_str!`: `AGENTS.md`, `hooks/`
 in this repo's gitignored `temp/team-standalone-py/` should anyone want the
 reference.)
 
+## 5c. Team definition: folders, YAML, env, MCP & skills
+
+A team definition is a **folder** `~/.config/tmux-mobile/teams/<name>/` holding a
+`team.yaml` (the roster + per-agent config) and optionally a `skills/` dir of
+local skills. The built-ins (`default`, `software-dev`, `financial-research`)
+ship the same shape in `team/templates/<name>/team.yaml`, embedded via
+`include_str!` and seeded once into the config dir (user edits never overwritten).
+The folder — not a flat file — is the unit so a team can carry its own assets.
+
+**Why a platform schema, adapted down.** We define ONE schema (`team.yaml`) and
+translate it to each backend's dialect in `team.rs`, rather than exposing kiro/
+claude/codex config directly. Fields: `env` (team-wide, optional) and per-agent
+`name`/`backend`/`role`/`goal`/`model`/`manage` plus the new `env`/`mcp`/`skills`.
+The full schema is documented at the top of `default/team.yaml`.
+
+- **env** — optional; default is none. Team-wide `env` is the base, per-agent
+  `env` overrides it (`merge_env`). It's set on the agent's process at launch, so
+  BOTH its MCP servers and skill use inherit it (backends do their own `$VAR`
+  expansion; we don't interpolate, and we ship no secrets).
+- **mcp** — extra MCP servers merged into the agent's config alongside the always-
+  present `team` server. Remote (`url`+`headers`) or local (`command`+`args`+`env`).
+  Adapted per backend: `kiro_mcp_value` (kiro `{url,headers}` / `{command,args,env}`),
+  `claude_mcp_value` (remote tagged `type:"http"`), `codex_mcp_toml` (`[mcp_servers.<name>]`).
+- **skills** — our own skill = a dir with a `SKILL.md` (YAML frontmatter
+  name/description). A skill ref is either a **local path** (relative to the team
+  folder) or a **GitHub URL**. `resolve_skills` turns each into a local dir:
+  GitHub `tree/<ref>/<subpath>` URLs are **sparse-cloned** (`--depth 1
+  --filter=blob:none --sparse` + `sparse-checkout set <subpath>`) into a shared
+  cache `~/.config/tmux-mobile/skills-cache/<owner>/<repo>/<ref>/` — keyed so
+  repeated refs reuse the clone, no re-pull. Adapted per backend: **kiro** gets a
+  native `skill://<dir>/SKILL.md` resource (progressive load); **claude/codex**
+  get a one-line skills index appended to their kick (name · description · path,
+  "read the SKILL.md before a matching task") since they have no per-invocation
+  skill flag in our launch path. Network/parse failures skip that skill, never
+  fail the launch.
+
+**Migration.** Legacy flat `teams/<name>.json` files are auto-migrated on startup
+(`migrate_legacy_json`): converted to `teams/<name>/team.yaml`, the original
+renamed `<name>.json.bak` (reversible). The frontend↔backend RPC contract is
+unchanged — it still passes JSON; only the on-disk format is YAML
+(`save_template` JSON→YAML, `read_team_def` YAML→JSON). The editor
+(`TeamTemplates.svelte`) gained a per-agent "advanced" section for env/mcp/skills.
+
 ## 6. The obligation bug we hit and fixed
 
 First live run spammed `@human 在线` dozens of times. Root cause: the human
