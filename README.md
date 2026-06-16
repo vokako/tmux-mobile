@@ -24,6 +24,7 @@ You're running [Kiro CLI](https://kiro.dev), Claude Code, or any coding agent in
 - **Chat view** — AI agent conversations rendered as chat bubbles, with markdown rendering, syntax-highlighted code blocks, collapsible tool calls, diff rendering, `/model` selector, and `/compact` summary cards
 - **File browser** — browse, preview, edit, upload/download files with bookmarks, git integration (status, diff, log, add, commit, push)
 - **Sessions** — browse all tmux sessions/windows/panes, create or kill sessions, pull-to-refresh
+- **Team (multi-agent)** — spin up a roster of coding agents (Kiro / Claude Code / Codex) that collaborate in a shared group chat; watch them work live, tap any agent to preview its pane
 - **Settings** — font size control, light/dark/auto theme with smooth transitions, language switching (EN/中文), server connection info (hostname, machine ID), debug toggle
 - **Multi-address reconnect** — server machine ID tracks alternate addresses, auto-failover on disconnect
 
@@ -126,6 +127,32 @@ Browse the server's filesystem starting from the session's working directory:
 - Server info display: hostname, machine ID, address
 - State restore on reload (page, session, view mode)
 - tmux socket support (`-S` path)
+
+### Team (multi-agent)
+
+Spin up a **roster of coding agents** that collaborate on a shared task and watch
+them work from your phone. Desktop-server only (the agent bus runs in-process).
+
+- **One group chat, many agents** — the human and several agents (Kiro CLI /
+  Claude Code / Codex) talk in a shared room over an append-only message bus.
+  Address an agent with `@name`; `@all` reaches everyone. Each agent runs in its
+  own tmux window, so you can **tap any agent to preview its live pane**.
+- **Per-workspace teams** — a team is tied to a working directory; multiple teams
+  run in parallel, each isolated in its own room and `tmm-team-<slug>` session.
+- **Roster templates** (YAML) — built-ins for a `default` starter, a `software-dev`
+  team (product / architect / frontend / backend / reviewer / tester / devops),
+  and `financial-research`. Define your own under
+  `~/.config/tmux-mobile/teams/<name>/team.yaml`: per-agent role/goal/model plus
+  optional **extra MCP servers** and **skills** (a local path or a GitHub URL,
+  fetched + cached), and **team-wide** `env` / `mcp` / `skills` / `prompt` that
+  apply to every agent. Edit it all in the in-app template editor.
+- **Live collaboration graph** — a ring of participants with status-coloured,
+  breathing nodes and arcs that trace messages between them.
+- **Liveness & self-heal** — agents report status (idle → thinking → working →
+  hardworking → stalled) via a heartbeat; a wedged agent is nudged back into the
+  loop automatically.
+
+See `docs/design-docs/features/team.md` for the architecture.
 
 ## npm Scripts
 
