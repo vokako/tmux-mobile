@@ -148,6 +148,26 @@
   .dot.status-human       { fill: var(--bg); stroke: var(--accent); stroke-width: 2.5; }
   .node.pulse .dot { transform: scale(1.55); }
 
+  /* Every present dot "breathes" continuously (a soft in-place scale loop) so
+     the graph is always alive — resting states (idle/online/you) breathe gently
+     and slowly, active states more and faster. Only stalled/offline stay still
+     (stuck / gone). The running animation owns `transform`, so it supersedes the
+     discrete .node.pulse scale — the comet arc still signals message events. */
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.22); }
+  }
+  @keyframes breathe-soft {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.1); }
+  }
+  .dot.status-idle        { animation: breathe-soft 3.4s ease-in-out infinite; }
+  .dot.status-online      { animation: breathe-soft 3.4s ease-in-out infinite; }
+  .dot.status-human       { animation: breathe-soft 3.4s ease-in-out infinite; }
+  .dot.status-thinking    { animation: breathe 2s   ease-in-out infinite; }
+  .dot.status-working     { animation: breathe 1.3s ease-in-out infinite; }
+  .dot.status-hardworking { animation: breathe 2.8s ease-in-out infinite; }
+
   .lbl { fill: var(--text2); font-size: 8px; font-weight: 600; }
 
   /* Connection decay is count-based: ARC_PASSES trips of the glowing dot, each
@@ -199,6 +219,6 @@
 
   @media (prefers-reduced-motion: reduce) {
     .arc-comet { animation: none; stroke-dasharray: none; }
-    .dot { transition: none; }
+    .dot { transition: none; animation: none; }
   }
 </style>

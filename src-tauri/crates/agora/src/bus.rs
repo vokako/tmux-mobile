@@ -214,7 +214,12 @@ impl Bus {
                     store::add_obligation(&conn, &self.room, b, from, &msg.id)?;
                 }
             }
-            store::set_status(&conn, &self.room, from, "working")?;
+            // Posting is a bus/coordination action, NOT heads-down work — keep
+            // the sender's activity status as-is (so a `thinking` agent that
+            // sends a message stays `thinking`, and a `working` one stays
+            // `working`); only real work tools promote to `working`. We still
+            // refresh liveness so the sender never looks stale.
+            store::touch(&conn, &self.room, from)?;
             msg
         };
         let _ = self.tx.send(msg.clone());
