@@ -2,6 +2,7 @@
   import * as pdfjsLib from 'pdfjs-dist';
   import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
   import { marked } from 'marked';
+  import './markedSafeUrl.js';
   import katex from 'katex';
   import 'katex/dist/katex.min.css';
   import hljs from 'highlight.js/lib/core';
