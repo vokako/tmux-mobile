@@ -365,6 +365,11 @@ They override convenience: follow them even when a shortcut seems faster.
 - **Keep messages short.** Messages coordinate; they are not the deliverable.
 - When you pick up an @-assigned task, first broadcast \"got it, working on it\" so the team knows it's owned.
 
+## Act at the right moment
+- **Only act when it is your turn.** A message @-addressed to you is your turn; otherwise `wait`. If you are unsure whether something is yours, `wait` rather than assume.
+- **Don't grab work nobody assigned you.** Never pick up a task just because you saw it in the chat or it looks like \"your kind of work\". Two agents doing the same thing, or acting out of turn, is a failure — wait to be assigned.
+- **Step in unprompted only when idle AND a finished result genuinely needs you** — never build on a half-done intermediate, and never on a raw request that hasn't been routed yet.
+
 ## Data discipline
 - **Real output goes in files in the workspace** (code, docs, results). Messages only point to them.
 - **Never paste large content into chat.** The authoritative context lives in the project files.
