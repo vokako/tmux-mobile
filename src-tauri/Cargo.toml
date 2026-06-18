@@ -5,6 +5,7 @@ members = ["crates/agora"]
 name = "tmux-mobile"
 version = "0.5.0"
 edition = "2021"
+license = "MIT"
 default-run = "tmux-mobile"
 
 [lib]
