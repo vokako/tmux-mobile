@@ -133,6 +133,8 @@ Browse the server's filesystem starting from the session's working directory:
 Spin up a **roster of coding agents** that collaborate on a shared task and watch
 them work from your phone. Desktop-server only (the agent bus runs in-process).
 
+![Team architecture](docs/design-docs/features/team-architecture.svg)
+
 - **One group chat, many agents** — the human and several agents (Kiro CLI /
   Claude Code / Codex) talk in a shared room over an append-only message bus.
   Address an agent with `@name`; `@all` reaches everyone. Each agent runs in its
