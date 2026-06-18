@@ -117,9 +117,6 @@ them work from your phone. Desktop-server only (the agent bus runs in-process).
 - **A live collaboration graph** — a ring of participants with breathing, status-coloured nodes; arcs trace the messages between them.
 - **They keep themselves alive** — agents quietly report whether they're idle, thinking, working, or stuck; the system nudges a stuck one back on track automatically.
 
-See `docs/design-docs/features/team.md` for the architecture (one-page diagram
-of bus + agent loop + hooks: [`team-architecture.svg`](docs/design-docs/features/team-architecture.svg)).
-
 ## npm Scripts
 
 | Script | Description |
