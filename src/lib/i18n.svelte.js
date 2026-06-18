@@ -173,6 +173,12 @@ const msgs = {
     collabHuman: 'you',
     collabPin: 'Pin to preview',
     teamSwap: 'Swap sides',
+
+    installTitle: 'Install tmux-mobile',
+    installDesc: 'Add it to your home screen for a fullscreen, app-like experience.',
+    installBtn: 'Install',
+    installLater: 'Not now',
+    installIosHint: 'Tap the Share button, then “Add to Home Screen”.',
   },
   zh: {
     sessions: '会 话',
@@ -337,6 +343,12 @@ const msgs = {
     collabHuman: '你',
     collabPin: '固定到预览',
     teamSwap: '左右交换',
+
+    installTitle: '安装 tmux-mobile',
+    installDesc: '添加到主屏幕，获得全屏的原生 App 体验。',
+    installBtn: '安装',
+    installLater: '以后再说',
+    installIosHint: '点击分享按钮，然后选择"添加到主屏幕"。',
   },
 };
 

@@ -5,6 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content, viewport-fit=cover" />
   <title>tmux-mobile</title>
   <link rel="icon" type="image/png" href="/favicon.png?v=2" />
+  <!-- PWA: web app manifest + platform hints so the browser offers "install"
+       (Chrome/Edge/Android fire `beforeinstallprompt`; iOS Safari uses these
+       apple-* tags for "Add to Home Screen"). The in-app InstallPrompt
+       component (browser-only) surfaces the offer; the service worker
+       (registered in main.js) satisfies installability. -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#0a0a0f" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="tmux-mobile" />
+  <link rel="apple-touch-icon" href="/pwa-192.png" />
   <!--
     Fonts are bundled (public/fonts/, copied verbatim to the build) and
     declared here so they resolve from the local origin — the Android APK

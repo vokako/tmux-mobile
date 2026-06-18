@@ -6,6 +6,7 @@
   import Files from './lib/Files.svelte';
   import Team from './lib/Team.svelte';
   import Icon from './lib/Icon.svelte';
+  import InstallPrompt from './lib/InstallPrompt.svelte';
   import { copyText } from './lib/clipboard.js';
   import { teamStatus } from './lib/ws.js';
   import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable } from './lib/ws.js';
@@ -960,6 +961,8 @@
       <div class="debug-content" bind:this={debugEl}></div>
     </div>
   {/if}
+
+  <InstallPrompt />
 </main>
 
 <style>
