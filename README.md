@@ -21,7 +21,6 @@
 You're running [Kiro CLI](https://kiro.dev), Claude Code, or any coding agent in a tmux session on your Mac. You walk away from your desk. **tmux-mobile** lets you keep watching and interacting from your phone:
 
 - **Terminal view** — xterm.js with theme-aware colors, touch scrolling with iOS-like momentum, shortcut keys with long-press repeat, collapsible window switcher with AI agent icons
-- **Chat view** — AI agent conversations rendered as chat bubbles, with markdown rendering, syntax-highlighted code blocks, collapsible tool calls, diff rendering, `/model` selector, and `/compact` summary cards
 - **File browser** — browse, preview, edit, upload/download files with bookmarks, git integration (status, diff, log, add, commit, push)
 - **Sessions** — browse all tmux sessions/windows/panes, create or kill sessions, pull-to-refresh
 - **Team (multi-agent)** — spin up a roster of coding agents (Kiro / Claude Code / Codex) that collaborate in a shared group chat; watch them work live, tap any agent to preview its pane
@@ -85,24 +84,6 @@ DISCONNECT_GRACE_SECS=0 npm run tauri:dev
 - Floating buttons (scroll-to-bottom, window switcher) with frosted glass style
 - Configurable font size and font family (Maple Mono NF CN)
 - Status bar showing session:pane and running command
-
-### Chat View
-
-Auto-detects supported CLI tools (currently Kiro CLI) and renders output as a messaging UI:
-
-- User messages → right-aligned bubbles with copy button
-- Agent responses → left-aligned bubbles with bot avatar, markdown rendered
-- Code blocks → syntax-highlighted cards
-- Tool calls → compact collapsible cards
-- Diffs → red/green line-by-line rendering
-- `/compact` → styled summary card with markdown rendering
-- `/model` → interactive model selector (tap to switch models)
-- Thinking state → debounced spinner animation
-- ANSI colors preserved throughout
-- Markdown rendering (tables, bold, italic, inline code, links, lists)
-- Immediate chat detection on session open
-
-The parser architecture is pluggable — add new CLI tools in `src/lib/parsers.js`.
 
 ### File Browser
 
@@ -207,11 +188,9 @@ src/
 ├── lib/
 │   ├── Settings.svelte     # Connection form with address history
 │   ├── Sessions.svelte     # Session/pane browser with refresh
-│   ├── Terminal.svelte     # ANSI terminal + Chat container, input bar
-│   ├── ChatView.svelte     # Chat bubble renderer (messages, model, compact)
+│   ├── Terminal.svelte     # ANSI terminal, input bar, shortcut keys
 │   ├── Files.svelte        # File browser, preview, editor, bookmarks
 │   ├── Icon.svelte         # SVG icon system (Lucide-based)
-│   ├── parsers.js          # Pluggable CLI output parsers
 │   ├── i18n.js             # Lightweight i18n (EN/中文), auto-detect locale
 │   └── ws.js               # WebSocket client (tmux + filesystem RPC)
 src-tauri/
