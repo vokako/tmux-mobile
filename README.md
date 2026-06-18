@@ -106,7 +106,7 @@ Browse the project on your Mac from the phone:
 
 ### Team (multi-agent)
 
-![Uploading longshot_2235-2248_2x.gif…]()
+<img width="3232" height="1816" alt="longshot_2235-2248_2x" src="https://github.com/user-attachments/assets/095b0a83-2e09-4cec-8f00-0861a2a97cee" />
 
 Spin up a **roster of coding agents** that collaborate on a shared task and watch
 them work from your phone. Desktop-server only (the agent bus runs in-process).
