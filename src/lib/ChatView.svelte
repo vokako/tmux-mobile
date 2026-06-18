@@ -3,6 +3,7 @@
   import Icon from './Icon.svelte';
   import { t } from './i18n.svelte.js';
   import { copyText } from './clipboard.js';
+  import { scrollFade } from './scrollFade.js';
 
   let { content = '', onSendKeys = null, command = '', fontSize = 14 } = $props();
 
@@ -296,7 +297,7 @@
 </script>
 
 <div class="chat-wrap" style="--chat-font-size: {fontSize}px">
-  <div class="chat" bind:this={chatEl} onscroll={checkAtBottom}>
+  <div class="chat subtle-scroll" bind:this={chatEl} onscroll={checkAtBottom} use:scrollFade>
     {#if messages.length === 0}
     <div class="empty">{t('noConversation')}</div>
   {:else}

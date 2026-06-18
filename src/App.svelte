@@ -1055,6 +1055,45 @@
     --font-ui: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif;
   }
   :global(body), main, nav, .settings-panel { transition: background-color 0.3s ease, color 0.3s ease; }
+
+  /* Subtle scrollbar — used by long-running scrollables (terminal command bar,
+     chat log, team agent panel). At rest the thumb is fully transparent so
+     it disappears into the content; it fades in while the user hovers, is
+     focused inside, or is actively scrolling. The `.scrolling` class is
+     toggled by the host component on `scroll` events with a short debounce
+     so touch scrolls also light up the bar.
+     Firefox: `scrollbar-color` only animates on layout, so we toggle the
+     thumb color via `:hover` / `.scrolling` instead of fading. */
+  :global(.subtle-scroll) {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+  :global(.subtle-scroll:hover),
+  :global(.subtle-scroll:focus-within),
+  :global(.subtle-scroll.scrolling) {
+    scrollbar-color: var(--scroll-thumb) transparent;
+  }
+  :global(.subtle-scroll::-webkit-scrollbar) {
+    width: 8px;
+    height: 8px;
+  }
+  :global(.subtle-scroll::-webkit-scrollbar-track) { background: transparent; }
+  :global(.subtle-scroll::-webkit-scrollbar-thumb) {
+    background: transparent;
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    transition: background-color 0.3s ease;
+  }
+  :global(.subtle-scroll:hover::-webkit-scrollbar-thumb),
+  :global(.subtle-scroll:focus-within::-webkit-scrollbar-thumb),
+  :global(.subtle-scroll.scrolling::-webkit-scrollbar-thumb) {
+    background-color: var(--scroll-thumb);
+  }
+  :global(.subtle-scroll::-webkit-scrollbar-thumb:hover) {
+    background-color: var(--scroll-thumb-hover);
+  }
+
   :global(html[data-theme="dark"]) {
     --bg: #0a0a0f; --bg2: #0f0f18; --bg3: #12121a;
     --text: #e2e8f0; --text2: rgba(226,232,240,0.5); --text3: rgba(226,232,240,0.3);
@@ -1066,6 +1105,9 @@
     --nav-bg: rgba(12,12,20,0.95); --pill-bg: rgba(255,255,255,0.04);
     --input-bg: rgba(255,255,255,0.04); --input-border: rgba(255,255,255,0.08);
     --code-bg: rgba(255,255,255,0.05);
+    /* Subtle-scroll thumb — very translucent so it doesn't occlude content,
+       even when active. Slightly stronger only on direct thumb hover. */
+    --scroll-thumb: rgba(226,232,240,0.16); --scroll-thumb-hover: rgba(226,232,240,0.32);
   }
   :global(html[data-theme="light"]) {
     --bg: #f5f5f7; --bg2: #eeeef0; --bg3: #e8e8ec;
@@ -1078,6 +1120,7 @@
     --nav-bg: rgba(245,245,247,0.95); --pill-bg: rgba(0,0,0,0.03);
     --input-bg: rgba(0,0,0,0.02); --input-border: rgba(0,0,0,0.08);
     --code-bg: rgba(0,0,0,0.03);
+    --scroll-thumb: rgba(26,26,46,0.16); --scroll-thumb-hover: rgba(26,26,46,0.30);
   }
   :global(::selection) { background: rgba(0, 212, 255, 0.25); }
 

@@ -58,8 +58,9 @@
   // below). It floats ON TOP of the content's right edge and does NOT
   // reserve layout space — calcFit deliberately uses the full width so the
   // pane gets the maximum column count; the trade-off is the scrollbar
-  // briefly overlapping the last glyph.
-  const SCROLLBAR_W = isMobile ? 20 : 14;
+  // briefly overlapping the last glyph. Kept narrow so it doesn't feel
+  // visually heavy; on mobile it stays a touch wider for fingertip drag.
+  const SCROLLBAR_W = isMobile ? 12 : 8;
   let kbBlurTimer = null;
   let kbLocked = true; // true = keyboard must not show; false = keyboard allowed
   let unlockUntil = 0; // grace window after explicit unlock; auto-lock paths must respect it
@@ -105,6 +106,11 @@
   const darkTheme = {
     background: '#0a0a0f', foreground: '#c9d1d9', cursor: '#00d4ff',
     selectionBackground: 'rgba(0, 212, 255, 0.18)',
+    // Overlay scrollbar slider — kept very translucent so it barely occludes
+    // terminal content at rest, lifting slightly on hover/drag.
+    scrollbarSliderBackground: 'rgba(201, 209, 217, 0.12)',
+    scrollbarSliderHoverBackground: 'rgba(201, 209, 217, 0.28)',
+    scrollbarSliderActiveBackground: 'rgba(201, 209, 217, 0.40)',
     black: '#0a0a0f', brightBlack: '#484848',
     red: '#ff5050', brightRed: '#ff6b6b',
     green: '#4ade80', brightGreen: '#6ee7a0',
@@ -117,6 +123,9 @@
   const lightTheme = {
     background: '#f5f5f7', foreground: '#1a1a2e', cursor: '#0088cc',
     selectionBackground: 'rgba(0, 136, 204, 0.18)',
+    scrollbarSliderBackground: 'rgba(26, 26, 46, 0.12)',
+    scrollbarSliderHoverBackground: 'rgba(26, 26, 46, 0.26)',
+    scrollbarSliderActiveBackground: 'rgba(26, 26, 46, 0.38)',
     black: '#f5f5f7', brightBlack: '#9ca3af',
     red: '#dc2626', brightRed: '#ef4444',
     green: '#16a34a', brightGreen: '#22c55e',
@@ -2340,13 +2349,19 @@
     height: 100%;
     transition: margin-top 0.15s ease;
   }
-  /* Keep xterm scrollbar always visible and touch-friendly on mobile */
+  /* xterm scrollbar: invisible at rest, fades in only while the user is
+     interacting (xterm toggles `.invisible` ↔ `.visible` on hover/active
+     scroll). On mobile we keep `pointer-events: auto` on the resting state
+     so a finger can still grab the slider area, even though it's barely
+     drawn. */
   .xterm-wrap :global(.xterm-scrollable-element > .invisible) {
-    opacity: 0.6 !important;
+    opacity: 0 !important;
     pointer-events: auto !important;
+    transition: opacity 0.35s ease 0.2s !important;
   }
   .xterm-wrap :global(.xterm-scrollable-element > .visible) {
     opacity: 1 !important;
+    transition: opacity 0.12s ease !important;
   }
   .xterm-wrap :global(.slider) {
     min-height: 40px !important;

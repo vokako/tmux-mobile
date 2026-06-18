@@ -16,8 +16,10 @@
   import CollabGraph from './CollabGraph.svelte';
   import DirPicker from './DirPicker.svelte';
   import { marked } from 'marked';
+  import './markedSafeUrl.js';
   import { t } from './i18n.svelte.js';
   import { layout } from './layout.svelte.js';
+  import { scrollFade } from './scrollFade.js';
   import {
     teamHistory, teamRoster, teamPost, teamStatus, teamStartTeam,
     teamCloseTeam, teamEmployees, teamTemplateSave, teamTemplateDelete,
@@ -539,7 +541,7 @@
     {/if}
 
     <!-- Message log -->
-    <div class="team-log" bind:this={listEl}>
+    <div class="team-log subtle-scroll" bind:this={listEl} use:scrollFade>
       {#if messages.length === 0}
         <div class="team-empty">{t('teamNoMessages')}</div>
       {:else}
