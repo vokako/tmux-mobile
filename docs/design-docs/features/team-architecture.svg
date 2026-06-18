@@ -1,0 +1,194 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="d1" viewBox="0 0 1280 640" width="1280" height="640">
+<defs>
+  <marker id="ab" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#3b82f6"/></marker>
+  <marker id="ag" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#22c55e"/></marker>
+  <marker id="agSE" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto-start-reverse"><polygon points="0 0,8 3,0 6" fill="#22c55e"/></marker>
+  <marker id="ap" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#8b5cf6"/></marker>
+  <marker id="ao" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#f97316"/></marker>
+  <marker id="ay" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#eab308"/></marker>
+</defs>
+<style>
+  /* Self-contained theme tokens. Light defaults, dark override via prefers-color-scheme. */
+  :root, svg {
+    --dg-bg:#ffffff; --dg-panel:#ffffff; --dg-stroke:#dbe1ea;
+    --dg-t1:#1a1d26; --dg-t2:#56607a; --dg-t3:#9aa4b4;
+    --dg-tx-green:#16a34a; --dg-tx-purple:#7c3aed; --dg-tx-blue:#2563eb; --dg-tx-amber:#a16207; --dg-tx-orange:#ea580c; --dg-tx-red:#dc2626;
+    --dg-blue-fill:#eef5ff; --dg-purple-fill:#f4f0ff; --dg-green-fill:#ecfdf5; --dg-amber-fill:#fefce8; --dg-orange-fill:#fff7ed; --dg-red-fill:#fef2f2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root, svg {
+      --dg-bg:#0b0b14; --dg-panel:#0f1420; --dg-stroke:#1e2736;
+      --dg-t1:#e6e9f0; --dg-t2:#8b96a8; --dg-t3:#5a6478;
+      --dg-tx-green:#22c55e; --dg-tx-purple:#c4b5fd; --dg-tx-blue:#93c5fd; --dg-tx-amber:#eab308; --dg-tx-orange:#fdba74; --dg-tx-red:#fca5a5;
+      --dg-blue-fill:#162036; --dg-purple-fill:#1a1530; --dg-green-fill:#0c1a12; --dg-amber-fill:#1c1a08; --dg-orange-fill:#1c1208; --dg-red-fill:#1c0c0c;
+    }
+  }
+  .d1 text{font-family:'JetBrains Mono','SF Mono','Fira Code',monospace;fill:var(--dg-t1)}
+  .d1 .s{fill:var(--dg-t2);font-size:10.5px}.d1 .m{font-size:12.5px}.d1 .t{font-size:14px;font-weight:600}
+  .d1 .dim{fill:var(--dg-t3);font-size:10px;letter-spacing:.05em}
+  .d1 .tg{fill:var(--dg-tx-green)}.d1 .tp{fill:var(--dg-tx-purple)}.d1 .tb{fill:var(--dg-tx-blue)}.d1 .ta{fill:var(--dg-tx-amber)}.d1 .to{fill:var(--dg-tx-orange)}.d1 .tr{fill:var(--dg-tx-red)}
+  .d1 .bg{fill:var(--dg-bg)}
+  .d1 rect.nn{fill:var(--dg-panel);stroke:var(--dg-stroke)}
+  .d1 rect.nmain{fill:var(--dg-panel);stroke:#8b5cf6}
+  .d1 rect.nb{fill:var(--dg-blue-fill);stroke:#3b82f6}
+  .d1 rect.np{fill:var(--dg-purple-fill);stroke:#8b5cf6}
+  .d1 rect.ng{fill:var(--dg-green-fill);stroke:#22c55e}
+  .d1 rect.na{fill:var(--dg-amber-fill);stroke:#eab308}
+  .d1 rect.no{fill:var(--dg-orange-fill);stroke:#f97316}
+  .d1 rect.nr{fill:var(--dg-red-fill);stroke:#ef4444}
+  .d1 .dash{stroke:var(--dg-t3)}
+</style>
+<rect class="bg" width="1280" height="640"/>
+
+<!-- ===== LEFT COLUMN: ENTRY + STARTUP CONFIG ===== -->
+<text class="dim" data-i18n-t="dg.infra" x="40" y="24">INFRASTRUCTURE</text>
+
+<!-- Phone -->
+<rect class="nb" x="44" y="36" width="200" height="48" rx="6" stroke-width="1.2"/>
+<text class="m" x="144" y="56" text-anchor="middle">Phone / Browser</text>
+<text class="s" x="144" y="72" text-anchor="middle">observe, steer</text>
+
+<!-- arrow phone → server -->
+<line x1="144" y1="84" x2="144" y2="106" stroke="#3b82f6" stroke-width="1.2" marker-end="url(#ab)"/>
+<text class="s" x="156" y="100">WS JSON-RPC</text>
+
+<!-- Server -->
+<rect class="nn" x="44" y="110" width="200" height="56" rx="6"/>
+<text class="m" x="144" y="130" text-anchor="middle">tmux-mobile server</text>
+<text class="s" x="144" y="146" text-anchor="middle">Rust · in-process</text>
+<text class="s" x="144" y="160" text-anchor="middle">WS · TeamBridge · Manager</text>
+
+<!-- arrow server → bus (curving right) -->
+<path d="M244,138 C266,138 270,72 290,72" fill="none" stroke="#3b82f6" stroke-width="1.2" marker-end="url(#ab)"/>
+
+<!-- ALSO LOADED config -->
+<rect class="nn" x="44" y="200" width="200" height="120" rx="6"/>
+<text class="dim" x="58" y="218">ALSO LOADED AT STARTUP</text>
+<text class="s" x="58" y="238">mcpServers:</text>
+<text class="s tg" x="62" y="254">@team (bus tools)</text>
+<text class="s" x="62" y="270">+ context7, aws-kb...</text>
+<text class="s" x="58" y="290">skills:</text>
+<text class="s" x="62" y="306">frontend-design...</text>
+
+<!-- FIRST MESSAGE KICK -->
+<rect class="nn" x="44" y="338" width="200" height="76" rx="6"/>
+<text class="dim" x="58" y="356">FIRST MESSAGE (KICK)</text>
+<text class="s" x="58" y="376">"connect to bus,</text>
+<text class="s" x="58" y="390">call wait,</text>
+<text class="s" x="58" y="404">never stop"</text>
+
+<!-- ===== CENTER: BUS + KIRO CLI LOOP + HOOKS + OTHER AGENTS ===== -->
+
+<!-- Bus -->
+<rect class="ng" x="290" y="44" width="670" height="56" rx="8" stroke-width="1.4"/>
+<text class="t tg" x="625" y="68" text-anchor="middle">Message Bus  ·  shared SQLite  ·  MCP :8787</text>
+<text class="s" x="625" y="86" text-anchor="middle">room per workspace · post() / wait() · requires_reply obligation</text>
+
+<!-- Kiro CLI box -->
+<rect class="nmain" x="290" y="120" width="670" height="334" rx="10" stroke-width="1.5"/>
+<text class="t" x="625" y="142" text-anchor="middle">Kiro CLI — inside one agent</text>
+<text class="dim" data-i18n-t="dg.loopall" x="625" y="158" text-anchor="middle">every agent runs this identical loop</text>
+
+<!-- Bus → Kiro CLI bidirectional connector -->
+<line x1="625" y1="100" x2="625" y2="120" stroke="#22c55e" stroke-width="1.2" stroke-dasharray="5,3" marker-start="url(#agSE)" marker-end="url(#agSE)"/>
+
+<!-- STARTUP card inside Kiro CLI -->
+<rect class="nn" x="306" y="170" width="638" height="58" rx="5"/>
+<text class="dim" data-i18n-t="dg.startup" x="320" y="186">LOADED INTO agent.json prompt</text>
+<text class="s tg" x="320" y="204">team_rules (global)</text>
+<text class="s tp" x="500" y="204">+ team prompt (yaml)</text>
+<text class="s tb" x="700" y="204">+ role + goal</text>
+<text class="s" x="320" y="220">→ wrapped in &lt;team-system-prompt&gt; / &lt;role-system-prompt&gt;</text>
+
+<!-- Horizontal loop -->
+<rect class="ng" x="320" y="254" width="100" height="44" rx="22" stroke-width="1.4"/>
+<text class="m" x="370" y="273" text-anchor="middle">wait()</text>
+<text class="s tg" x="370" y="288" text-anchor="middle">idle</text>
+<line x1="420" y1="276" x2="448" y2="276" stroke="#22c55e" stroke-width="1.3" marker-end="url(#ag)"/>
+<text class="s tg" x="434" y="270" text-anchor="middle">@me</text>
+
+<rect class="nb" x="450" y="254" width="100" height="44" rx="6" stroke-width="1.2"/>
+<text class="m" x="500" y="273" text-anchor="middle">reason</text>
+<text class="s tb" x="500" y="288" text-anchor="middle">thinking</text>
+<line x1="550" y1="276" x2="578" y2="276" stroke="#3b82f6" stroke-width="1.3" marker-end="url(#ab)"/>
+
+<rect class="na" x="580" y="254" width="160" height="44" rx="6" stroke-width="1.4"/>
+<text class="m" x="660" y="273" text-anchor="middle">execute tools</text>
+<text class="s ta" x="660" y="288" text-anchor="middle">working — heartbeat fires</text>
+<line x1="740" y1="276" x2="768" y2="276" stroke="#eab308" stroke-width="1.3" marker-end="url(#ay)"/>
+
+<rect class="np" x="770" y="254" width="120" height="44" rx="6" stroke-width="1.3"/>
+<text class="m" x="830" y="273" text-anchor="middle">post(result)</text>
+<text class="s tp" x="830" y="288" text-anchor="middle">@manager / @name</text>
+
+<!-- loop-back rail under boxes -->
+<path d="M830,300 L830,322 L370,322 L370,300" fill="none" stroke="#8b5cf6" stroke-width="1.3" stroke-dasharray="6,3" marker-end="url(#ap)"/>
+<text class="s tp" x="600" y="338" text-anchor="middle">loop · end every turn with wait</text>
+
+<!-- HOOKS row inside Kiro CLI -->
+<rect class="nn" x="306" y="358" width="320" height="84" rx="5"/>
+<text class="dim" x="320" y="376">STOP HOOK · KEEPALIVE</text>
+<text class="s" x="320" y="394">if a turn ends without calling wait,</text>
+<text class="s" x="320" y="410">the hook re-prompts the agent to</text>
+<text class="s" x="320" y="426">stay in the loop</text>
+
+<rect class="no" x="636" y="358" width="308" height="84" rx="5"/>
+<text class="dim" x="650" y="376">HEARTBEAT HOOK</text>
+<text class="s to" x="650" y="394">each real-work tool fires</text>
+<text class="s to" x="650" y="410">POST /api/heartbeat</text>
+<text class="s to" x="650" y="426">→ refreshes "working" status</text>
+<line x1="660" y1="300" x2="660" y2="356" stroke="#f97316" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#ao)"/>
+
+<!-- Other agents strip -->
+<rect class="np" x="290" y="478" width="670" height="84" rx="6" stroke-width="1"/>
+<text class="m" data-i18n-t="dg.others" x="306" y="500">other agents</text>
+<text class="s" data-i18n-t="dg.othersub" x="306" y="516">each = its own Kiro CLI · same loop</text>
+<text class="s" x="306" y="540">manager · product · architect · frontend · backend · reviewer · tester · . . .</text>
+<line x1="625" y1="100" x2="625" y2="478" stroke="none"/>
+
+<!-- ===== RIGHT COLUMN: EXTERNAL + STATUS LADDER + SELF-HEAL + LEGEND ===== -->
+
+<!-- External agents pointer (top of right column) -->
+<text class="dim" x="990" y="24">EXTERNAL AGENTS</text>
+<text class="s to" data-i18n-t="dg.externalnote" x="990" y="42">connect to the same bus</text>
+<text class="s to" x="990" y="56">via HTTP MCP</text>
+<text class="s to" x="990" y="70">x-agent · x-room headers</text>
+<line x1="960" y1="72" x2="990" y2="42" stroke="#f97316" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#ao)"/>
+
+<!-- Presence ladder -->
+<text class="dim" data-i18n-t="dg.ladder" x="990" y="106">PRESENCE LADDER</text>
+<text class="s" data-i18n-t="dg.laddersub" x="990" y="122">node color, driven by heartbeat</text>
+
+<g transform="translate(990,142)">
+  <circle cx="6" cy="0" r="4" fill="#5a6478"/><text class="s" x="20" y="4">idle (parked in wait)</text>
+  <circle cx="6" cy="22" r="4" fill="#3b82f6"/><text class="s" x="20" y="26">thinking (message in)</text>
+  <circle cx="6" cy="44" r="4" fill="#eab308"/><text class="s" x="20" y="48">working (real tool)</text>
+  <circle cx="6" cy="66" r="4" fill="#f97316"/><text class="s" x="20" y="70">hardworking &gt;90s</text>
+  <circle cx="6" cy="88" r="4" fill="#ef4444"/><text class="s" x="20" y="92">stalled &gt;30min</text>
+</g>
+
+<!-- Self-heal note -->
+<rect class="nr" x="990" y="262" width="270" height="68" rx="5"/>
+<text class="dim" x="1004" y="280">SELF-HEAL · SUPERVISOR</text>
+<text class="s tr" x="1004" y="298">silent &gt; 30min →</text>
+<text class="s tr" x="1004" y="314">Esc + nudge back into</text>
+<text class="s tr" x="1004" y="330">the wait loop</text>
+
+<!-- Legend (last) -->
+<text class="dim" data-i18n-t="dg.legendt" x="990" y="358">LEGEND</text>
+<g transform="translate(990,376)">
+  <line x1="0" y1="0" x2="22" y2="0" stroke="#3b82f6" stroke-width="1.3" marker-end="url(#ab)"/>
+  <text class="s" data-i18n-t="dg.lg1" x="32" y="4">RPC / internal</text>
+  <line x1="0" y1="22" x2="22" y2="22" stroke="#22c55e" stroke-width="1.3" stroke-dasharray="5,3" marker-end="url(#ag)"/>
+  <text class="s" data-i18n-t="dg.lg2" x="32" y="26">bus message</text>
+  <line x1="0" y1="44" x2="22" y2="44" stroke="#8b5cf6" stroke-width="1.3" stroke-dasharray="6,3" marker-end="url(#ap)"/>
+  <text class="s" data-i18n-t="dg.lg3" x="32" y="48">agent loop</text>
+  <line x1="0" y1="66" x2="22" y2="66" stroke="#f97316" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#ao)"/>
+  <text class="s" data-i18n-t="dg.lg4" x="32" y="70">heartbeat / hook</text>
+  <line x1="0" y1="88" x2="22" y2="88" class="dash" stroke-width="1" stroke-dasharray="3,2"/>
+  <text class="s" data-i18n-t="dg.lg5" x="32" y="92">config (loaded once)</text>
+</g>
+
+<!-- TMUX SESSION label tucked in -->
+<text class="dim" x="290" y="600">TMUX SESSION · tmm-team-&lt;slug&gt;</text>
+</svg>

@@ -9,6 +9,20 @@ The **Team** tab lets the human, from the phone, drop into a group chat with
 several coding agents (Kiro / Claude Code / Codex) and coordinate them — and tap
 any agent to preview its live tmux execution state in the Terminal tab.
 
+### Architecture overview
+
+The diagram below shows what runs where: the phone connects over WebSocket to the
+desktop server, which hosts the in-process message bus and supervises one
+**Kiro CLI** per agent inside a `tmm-team-<slug>` tmux session. Each agent runs
+the same loop — `wait` → reason → execute real tools (heartbeat fires) →
+`post` → loop back. The hooks (keepalive, heartbeat) and the supervisor's
+self-heal mechanism keep the loop alive; external standalone agents can join
+the same bus over HTTP MCP. Read this picture first; the prose below fills in
+the rationale.
+
+![Team architecture](team-architecture.svg)
+
+
 It is built on **agora**, an experimental group-chat message bus (originally a
 standalone project at `~/agora`). agora is:
 

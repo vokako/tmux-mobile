@@ -153,7 +153,8 @@ them work from your phone. Desktop-server only (the agent bus runs in-process).
   hardworking → stalled) via a heartbeat; a wedged agent is nudged back into the
   loop automatically.
 
-See `docs/design-docs/features/team.md` for the architecture.
+See `docs/design-docs/features/team.md` for the architecture (one-page diagram
+of bus + agent loop + hooks: [`team-architecture.svg`](docs/design-docs/features/team-architecture.svg)).
 
 ## npm Scripts
 
