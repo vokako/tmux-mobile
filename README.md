@@ -20,8 +20,8 @@
 
 You're running [Kiro CLI](https://kiro.dev), Claude Code, or any coding agent in a tmux session on your Mac. You walk away from your desk. **tmux-mobile** lets you keep watching and interacting from your phone:
 
-- **Terminal view** — xterm.js with theme-aware colors, touch scrolling with iOS-like momentum, shortcut keys with long-press repeat, collapsible window switcher with AI agent icons
-- **File browser** — browse, preview, edit, upload/download files with bookmarks, git integration (status, diff, log, add, commit, push)
+- **Terminal view** — watch and interact with your tmux session right from your phone, with touch scrolling, on-screen shortcut keys, and quick window switching
+- **File browser** — browse, preview, and edit project files from the phone, bookmark the directories you visit often, and run common git actions in place
 - **Sessions** — browse all tmux sessions/windows/panes, create or kill sessions, pull-to-refresh
 - **Team (multi-agent)** — spin up a roster of coding agents (Kiro / Claude Code / Codex) that collaborate in a shared group chat; watch them work live, tap any agent to preview its pane
 - **Settings** — font size control, light/dark/auto theme with smooth transitions, language switching (EN/中文), server connection info (hostname, machine ID), debug toggle
@@ -76,38 +76,33 @@ DISCONNECT_GRACE_SECS=0 npm run tauri:dev
 
 ### Terminal
 
-- xterm.js with theme-aware color schemes (light/dark)
-- Touch scrolling with velocity smoothing and iOS-like momentum physics
-- Shortcut buttons (Esc, ^C, ^D, Tab, arrows) with long-press repeat
-- Keyboard toggle button to show/hide on-screen keyboard
-- Collapsible window switcher — shows AI agent icons (Kiro/Claude) or command name, persists state
-- Floating buttons (scroll-to-bottom, window switcher) with frosted glass style
-- Configurable font size and font family (Maple Mono NF CN)
-- Status bar showing session:pane and running command
+The same tmux session you have at your desk, on your phone:
+
+- Smooth touch scrolling with momentum, like a native app
+- Shortcut keys (Esc, Ctrl-C, Ctrl-D, Tab, arrows) just above the keyboard, with long-press to repeat
+- Keyboard toggle so you can read without it in the way
+- Window switcher with agent icons (Kiro / Claude / Codex) — jump between panes in one tap
+- Floating "scroll to bottom" when you've scrolled up to look at history
+- Light/dark theme follows your device; font size and family are adjustable
+- Status bar shows the current session/pane and the running command
 
 ### File Browser
 
-Browse the server's filesystem starting from the session's working directory:
+Browse the project on your Mac from the phone:
 
-- Unified toolbar: all actions in one compact icon row
-- Directory navigation with breadcrumbs on separate path row
-- Bookmarks: star current directory, bookmark panel with scrollable paths
-- File preview: Markdown (rendered), CSV (table), code (syntax highlighted with Maple Mono font), HTML (iframe), PDF (pdf.js), images
-- Text file editor with syntax highlighting, undo stack, save, unsaved changes confirmation
-- File operations: create file/folder, rename, delete, upload, download
-- File info: path (tap to copy), type, size, modified, permissions
-- Show/hide hidden files, pull-to-refresh (mobile)
-- Swipe right from left edge to go back
-- **Git integration**: status view with per-file stage/unstage, GitHub-style diff viewer, commit log, add all/commit/push actions
+- Tap into folders, preview files in place — Markdown rendered, code with syntax colors, images, PDFs, CSV tables, HTML
+- Edit text files right there, with undo and a confirm-before-losing changes
+- Upload, download, rename, delete; star directories you visit often so they're one tap away
+- Show or hide hidden files; pull to refresh; swipe in from the left edge to go back
+- **Git in your pocket** — see status, stage files, browse the diff, scan the commit log, then commit and push, all without leaving the phone
 
 ### Connection
 
-- Address field: `ws://host:port` or `wss://host:port`
-- Address history: cached recent connections with token, quick switching
-- Auto-reconnect on network disconnect with multi-address failover (same machine ID)
-- Server info display: hostname, machine ID, address
-- State restore on reload (page, session, view mode)
-- tmux socket support (`-S` path)
+- Paste an address and a token, you're in — the server auto-generates the token on first launch
+- Recent connections are remembered for quick switching between Macs
+- If your IP or network changes, the app reconnects automatically using known alternate addresses for the same Mac
+- Reload the page and you come back to where you were — same session, same view
+- Works with a custom tmux socket if you use `-S`
 
 ### Team (multi-agent)
 
@@ -116,25 +111,11 @@ them work from your phone. Desktop-server only (the agent bus runs in-process).
 
 ![Team architecture](docs/design-docs/features/team-architecture.svg)
 
-- **One group chat, many agents** — the human and several agents (Kiro CLI /
-  Claude Code / Codex) talk in a shared room over an append-only message bus.
-  Address an agent with `@name`; `@all` reaches everyone. Each agent runs in its
-  own tmux window, so you can **tap any agent to preview its live pane**.
-- **Per-workspace teams** — a team is tied to a working directory; multiple teams
-  run in parallel, each isolated in its own room and `tmm-team-<slug>` session.
-- **Roster templates** (YAML) — built-ins for a `default` starter, `software-dev`
-  (product / architect / frontend / backend / reviewer / tester / devops),
-  `financial-research`, `deep-research`, `content-studio`, and `data-analysis`.
-  Define your own under
-  `~/.config/tmux-mobile/teams/<name>/team.yaml`: per-agent role/goal/model plus
-  optional **extra MCP servers** and **skills** (a local path or a GitHub URL,
-  fetched + cached), and **team-wide** `env` / `mcp` / `skills` / `prompt` that
-  apply to every agent. Edit it all in the in-app template editor.
-- **Live collaboration graph** — a ring of participants with status-coloured,
-  breathing nodes and arcs that trace messages between them.
-- **Liveness & self-heal** — agents report status (idle → thinking → working →
-  hardworking → stalled) via a heartbeat; a wedged agent is nudged back into the
-  loop automatically.
+- **One group chat, many agents** — you and several agents (Kiro CLI / Claude Code / Codex) work in the same conversation. Talk to one with `@name`, talk to everyone with `@all`. Each agent has its own pane, so you can tap any of them to watch what it's doing live.
+- **One team per project folder** — bind a team to a working directory; run several teams in parallel for different projects, each kept neatly separate.
+- **Ready-made and your own** — start from a built-in roster (`software-dev` with product/architect/frontend/backend/reviewer/tester/devops, plus `financial-research`, `deep-research`, `content-studio`, `data-analysis`), or design your own team — pick the roles, goals, tools, and skills you want — directly in the in-app template editor.
+- **A live collaboration graph** — a ring of participants with breathing, status-coloured nodes; arcs trace the messages between them.
+- **They keep themselves alive** — agents quietly report whether they're idle, thinking, working, or stuck; the system nudges a stuck one back on track automatically.
 
 See `docs/design-docs/features/team.md` for the architecture (one-page diagram
 of bus + agent loop + hooks: [`team-architecture.svg`](docs/design-docs/features/team-architecture.svg)).
@@ -180,70 +161,10 @@ npx tauri ios init && npx tauri ios dev
 
 Requires: Xcode, Apple Developer account for device builds.
 
-## Project Structure
+## API
 
-```
-src/
-├── App.svelte              # Main app, routing, nav, settings panel, theme
-├── lib/
-│   ├── Settings.svelte     # Connection form with address history
-│   ├── Sessions.svelte     # Session/pane browser with refresh
-│   ├── Terminal.svelte     # ANSI terminal, input bar, shortcut keys
-│   ├── Files.svelte        # File browser, preview, editor, bookmarks
-│   ├── Icon.svelte         # SVG icon system (Lucide-based)
-│   ├── i18n.js             # Lightweight i18n (EN/中文), auto-detect locale
-│   └── ws.js               # WebSocket client (tmux + filesystem RPC)
-src-tauri/
-├── src/
-│   ├── lib.rs              # Library crate, Tauri commands, mobile entry point
-│   ├── server.rs           # WebSocket server (JSON-RPC + auth + subscribe + fs)
-│   ├── tmux.rs             # tmux CLI wrapper with socket support
-│   ├── fs.rs               # Filesystem operations (list, read, write, upload, download)
-│   ├── config.rs           # Config file loader, bookmarks
-│   ├── main.rs             # Desktop entry point
-│   └── bin/server.rs       # Standalone server binary
-├── tauri.conf.json
-└── Cargo.toml
-```
-
-## WebSocket Protocol
-
-JSON-RPC over WebSocket. Connect with `ws://` or `wss://`. First message must authenticate:
-
-```json
-→ {"method": "auth", "params": {"token": "..."}}
-← {"result": {"authenticated": true, "machine_id": "uuid", "hostname": "my-mac"}}
-```
-
-### Methods
-
-| Method | Params | Description |
-|--------|--------|-------------|
-| `list_sessions` | — | List all tmux sessions |
-| `list_panes` | `session` | List all panes across all windows |
-| `capture_pane` | `target`, `lines?` | Capture pane content with ANSI colors |
-| `send_keys` | `target`, `keys`, `literal` | Send keystrokes |
-| `send_command` | `target`, `command` | Send text + Enter |
-| `new_session` | `name?` | Create session |
-| `kill_session` | `name` | Kill session |
-| `subscribe` | `target` | Stream pane updates (200ms polling) |
-| `unsubscribe` | `target` | Stop streaming |
-| `pane_command` | `target` | Get current command running in pane |
-| `set_socket` | `path` | Set tmux socket path at runtime |
-| `get_bookmarks` | — | Get saved directory bookmarks |
-| `save_bookmarks` | `bookmarks` | Save directory bookmarks |
-| `fs_cwd` | `session` | Get session working directory |
-| `fs_list` | `path`, `show_hidden?` | List directory contents |
-| `fs_stat` | `path` | File metadata |
-| `fs_read` | `path` | Read text file (≤512KB) |
-| `fs_write` | `path`, `content` | Write text file |
-| `fs_mkdir` | `path` | Create directory |
-| `fs_delete` | `path` | Delete file or directory |
-| `fs_rename` | `from`, `to` | Rename/move |
-| `fs_download` | `path` | Download file as base64 (≤50MB) — for inline preview |
-| `fs_download_url` | `path` | Signed URL for the HTTP `/dl` streaming endpoint (no size limit); used by file download action |
-| `fs_upload` | `path`, `data` | Upload file (base64) |
-| `git` | `subcmd`, `args[]`, `cwd?` | Git operations (whitelisted: status, diff, log, show, branch, rev-parse, push, add, commit, restore) |
+JSON-RPC over WebSocket. Full method reference + auth flow:
+[`docs/requirements/api-contracts/websocket-rpc.md`](docs/requirements/api-contracts/websocket-rpc.md).
 
 ## Prerequisites
 
@@ -259,13 +180,6 @@ If you have Tailscale, serve the web UI over HTTPS:
 tailscale serve --bg 5173
 # Access from any device: https://your-machine.tailnet-name.ts.net/
 # WebSocket: use wss:// with Tailscale domain or ws:// with Tailscale IP:9899
-```
-
-## Testing
-
-```bash
-tmux new-session -d -s test
-cd src-tauri && cargo test -- --test-threads=1
 ```
 
 ## License
