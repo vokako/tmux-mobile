@@ -43,6 +43,7 @@ const msgs = {
     connecting: 'Connecting…',
     shareLink: 'Share connection link',
     linkCopied: 'Link copied',
+    about: 'About — github.com/vokako/tmux-mobile',
     cancel: 'Cancel',
 
     reconnecting: 'Reconnecting...',
@@ -206,6 +207,7 @@ const msgs = {
     connecting: '连接中…',
     shareLink: '分享连接链接',
     linkCopied: '链接已复制',
+    about: '关于 — github.com/vokako/tmux-mobile',
     cancel: '取消',
 
     reconnecting: '重新连接中...',
