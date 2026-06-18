@@ -13,11 +13,21 @@ pub struct FileEntry {
     pub name: String,
     pub path: String,
     #[serde(rename = "type")]
-    pub file_type: String, // "file", "dir", "symlink"
+    pub file_type: String, // "file", "dir", "broken" (target type for navigation; "broken" = dangling symlink)
     pub size: u64,
     pub modified: u64, // unix timestamp
     pub permissions: String,
     pub hidden: bool,
+    /// True if this entry is a symbolic link (regardless of target type).
+    /// `file_type` reflects the *target* type so navigation Just Works
+    /// (clicking a symlink-to-dir behaves like a dir); `is_symlink` lets the
+    /// UI render an overlay/badge to distinguish links from regular entries.
+    #[serde(default)]
+    pub is_symlink: bool,
+    /// For symlinks: the raw target path (`readlink`). Empty otherwise.
+    /// Useful for tooltips and broken-link diagnostics.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub link_target: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -33,23 +43,37 @@ pub struct FileStat {
     pub writable: bool,
     pub is_text: bool,
     pub mime_hint: String,
+    #[serde(default)]
+    pub is_symlink: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub link_target: String,
 }
 
 pub fn resolve(p: &str) -> String {
     resolve_path(p).to_string_lossy().to_string()
 }
 
-fn resolve_path(p: &str) -> PathBuf {
-    let expanded = if p.starts_with('~') {
+/// Expand `~` to the user's home directory but do NOT canonicalize.
+///
+/// `list_dir` and `stat_file` use this so the path the user navigated to is
+/// preserved verbatim through the response — clicking a symlinked folder
+/// keeps you under the symlink path instead of jumping to the canonical
+/// target. (`fs::read_dir` and `fs::metadata` follow symlinks at the
+/// filesystem layer, so the contents/stat still reflect the real target.)
+fn expand_path(p: &str) -> PathBuf {
+    if p.starts_with('~') {
         if let Some(home) = dirs::home_dir() {
-            home.join(&p[1..].trim_start_matches('/'))
-        } else {
-            PathBuf::from(p)
+            return home.join(p[1..].trim_start_matches('/'));
         }
-    } else {
-        PathBuf::from(p)
-    };
-    // Canonicalize if exists, otherwise return as-is
+    }
+    PathBuf::from(p)
+}
+
+fn resolve_path(p: &str) -> PathBuf {
+    let expanded = expand_path(p);
+    // Canonicalize if exists, otherwise return as-is.
+    // Used by read/write/delete/rename/upload/download where canonicalization
+    // is harmless and helps normalize `..` traversal.
     expanded.canonicalize().unwrap_or(expanded)
 }
 
@@ -137,7 +161,11 @@ pub fn get_cwd(session: &str) -> Result<String, String> {
 }
 
 pub fn list_dir(path: &str, show_hidden: bool) -> Result<Vec<FileEntry>, String> {
-    let dir = resolve_path(path);
+    // Use expand_path (no canonicalize) so navigating into a symlinked
+    // directory keeps the symlink path in the address bar.
+    // `fs::read_dir` follows symlinks transparently at the OS level, so the
+    // contents listed are still the target's contents.
+    let dir = expand_path(path);
     let entries =
         fs::read_dir(&dir).map_err(|e| format!("Cannot read {}: {}", dir.display(), e))?;
 
@@ -149,37 +177,95 @@ pub fn list_dir(path: &str, show_hidden: bool) -> Result<Vec<FileEntry>, String>
             continue;
         }
 
-        let meta = match entry.metadata() {
-            Ok(m) => m,
+        // `entry.file_type()` does NOT traverse symlinks (uses dirent/lstat),
+        // so it returns Ok even for broken links — that's how we display
+        // dangling symlinks instead of silently dropping them.
+        let raw_ft = match entry.file_type() {
+            Ok(t) => t,
             Err(_) => continue,
         };
-        let file_type = if meta.is_dir() {
-            "dir"
-        } else if meta.file_type().is_symlink() {
-            "symlink"
+        let is_symlink = raw_ft.is_symlink();
+        let entry_path = entry.path();
+
+        let (file_type, size, modified, mode, link_target) = if is_symlink {
+            // Read the link target for display ("readlink" semantics).
+            let link_target = fs::read_link(&entry_path)
+                .ok()
+                .map(|t| t.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            // Try to follow the link to determine target type for navigation
+            // and to surface the target's size/mtime (more useful than the
+            // link's own metadata for the file list).
+            match fs::metadata(&entry_path) {
+                Ok(target_meta) => {
+                    let kind = if target_meta.is_dir() { "dir" } else { "file" };
+                    let m = target_meta
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    (
+                        kind,
+                        target_meta.len(),
+                        m,
+                        target_meta.permissions().mode(),
+                        link_target,
+                    )
+                }
+                Err(_) => {
+                    // Dangling symlink — fall back to the link's own metadata
+                    // (lstat). Marked "broken" so the UI can highlight it.
+                    let sm = fs::symlink_metadata(&entry_path).ok();
+                    let m = sm
+                        .as_ref()
+                        .and_then(|s| s.modified().ok())
+                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let mo = sm.as_ref().map(|s| s.permissions().mode()).unwrap_or(0);
+                    let sz = sm.as_ref().map(|s| s.len()).unwrap_or(0);
+                    ("broken", sz, m, mo, link_target)
+                }
+            }
         } else {
-            "file"
+            // Regular file or directory.
+            let meta = match entry.metadata() {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            let kind = if meta.is_dir() { "dir" } else { "file" };
+            let m = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            (
+                kind,
+                meta.len(),
+                m,
+                meta.permissions().mode(),
+                String::new(),
+            )
         };
-        let modified = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let mode = meta.permissions().mode();
 
         result.push(FileEntry {
-            path: entry.path().to_string_lossy().to_string(),
+            path: entry_path.to_string_lossy().to_string(),
             name,
             file_type: file_type.to_string(),
-            size: meta.len(),
+            size,
             modified,
             permissions: format_permissions(mode),
             hidden,
+            is_symlink,
+            link_target,
         });
     }
 
-    // Sort: dirs first, then alphabetical (case-insensitive)
+    // Sort: dirs first, then alphabetical (case-insensitive).
+    // "broken" symlinks sort with files (after dirs).
     result.sort_by(|a, b| {
         let dir_ord = (a.file_type != "dir").cmp(&(b.file_type != "dir"));
         dir_ord.then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
@@ -189,13 +275,40 @@ pub fn list_dir(path: &str, show_hidden: bool) -> Result<Vec<FileEntry>, String>
 }
 
 pub fn stat_file(path: &str) -> Result<FileStat, String> {
-    let p = resolve_path(path);
-    let meta = fs::metadata(&p).map_err(|e| format!("stat error: {}", e))?;
+    // Don't canonicalize: keep the path the caller asked for so symlink
+    // navigation paths stay stable through the response.
+    let p = expand_path(path);
+    // First check if it's a symlink (lstat). If yes, capture target for
+    // diagnostics and try to follow for the actual stat. Broken symlinks
+    // are surfaced with the link's own metadata + "broken" file_type.
+    let link_meta = fs::symlink_metadata(&p).map_err(|e| format!("stat error: {}", e))?;
+    let is_symlink = link_meta.file_type().is_symlink();
+    let link_target = if is_symlink {
+        fs::read_link(&p)
+            .ok()
+            .map(|t| t.to_string_lossy().to_string())
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let (meta, broken) = match fs::metadata(&p) {
+        Ok(m) => (m, false),
+        Err(_) if is_symlink => (link_meta.clone(), true),
+        Err(e) => return Err(format!("stat error: {}", e)),
+    };
+
     let name = p
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
-    let file_type = if meta.is_dir() { "dir" } else { "file" };
+    let file_type = if broken {
+        "broken"
+    } else if meta.is_dir() {
+        "dir"
+    } else {
+        "file"
+    };
     let mode = meta.permissions().mode();
     let modified = meta
         .modified()
@@ -203,7 +316,7 @@ pub fn stat_file(path: &str) -> Result<FileStat, String> {
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let is_text = if meta.is_file() {
+    let is_text = if !broken && meta.is_file() {
         is_text_file(&p, &name)
     } else {
         false
@@ -220,6 +333,8 @@ pub fn stat_file(path: &str) -> Result<FileStat, String> {
         writable: mode & 0o200 != 0,
         is_text,
         mime_hint: mime_hint(&p.to_string_lossy()),
+        is_symlink,
+        link_target,
     })
 }
 

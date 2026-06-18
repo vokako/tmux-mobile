@@ -532,6 +532,12 @@
       loadDir(entry.path);
       return;
     }
+    if (entry.type === 'broken') {
+      // Dangling symlink — nothing to preview, surface a clear error.
+      const tgt = entry.link_target ? ` → ${entry.link_target}` : '';
+      error = `Broken symlink: ${entry.name}${tgt}`;
+      return;
+    }
     // File open: use previewLoading (right pane), NOT loading — `loading` drives
     // the left directory list's spinner, and toggling it here would make the
     // whole list flash/re-render every time you click a file in the desktop
@@ -969,7 +975,8 @@
   }
 
   function fileIcon(entry) {
-    return entry.type === 'dir' ? 'folder' : 'file';
+    if (entry.type === 'dir') return 'folder';
+    return 'file';
   }
 
   function mimeCategory(mime) {
@@ -1210,16 +1217,23 @@
         <div class="loading">{t('loading')}</div>
       {:else}
         {#each entries as entry}
-          <div class="file-row">
+          <div class="file-row" class:broken={entry.type === 'broken'}>
             <button class="file-main" onclick={() => openEntry(entry)}>
-              <Icon name={fileIcon(entry)} size={16} />
-              <span class="file-name" class:dir-name={entry.type === 'dir'} title={entry.name}>{entry.name}</span>
+              <span class="file-icon" class:is-link={entry.is_symlink}>
+                <Icon name={fileIcon(entry)} size={16} />
+              </span>
+              <span
+                class="file-name"
+                class:dir-name={entry.type === 'dir'}
+                class:link-name={entry.is_symlink}
+                title={entry.is_symlink && entry.link_target ? `→ ${entry.link_target}` : entry.name}
+              >{entry.name}</span>
               {#if entry.type !== 'dir'}
                 <span class="file-size">{formatSize(entry.size)}</span>
               {/if}
             </button>
             <div class="file-actions">
-              {#if entry.type !== 'dir'}
+              {#if entry.type !== 'dir' && entry.type !== 'broken'}
                 <button class="act-btn" onclick={() => handleDownload(entry.path)} title="Download"><Icon name="download" size={12} /></button>
               {/if}
               <button class="act-btn" onclick={() => { renaming = entry.path; renameValue = entry.name; }} title="Rename"><Icon name="edit" size={12} /></button>
@@ -1608,6 +1622,34 @@
     font-size: 14px; min-width: 0; -webkit-tap-highlight-color: transparent;
   }
   .file-main:active { background: var(--input-bg); }
+  /* Symlink badge — small ↗ arrow overlaid on the bottom-right of the
+     file/folder icon. Renders for both symlink-to-dir and symlink-to-file
+     so the link nature is visible without changing the base icon. */
+  .file-icon {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    line-height: 0;
+  }
+  .file-icon.is-link::after {
+    content: '↗';
+    position: absolute;
+    right: -4px;
+    bottom: -4px;
+    font-size: 10px;
+    line-height: 1;
+    color: var(--accent);
+    background: var(--bg);
+    border-radius: 50%;
+    padding: 1px 2px;
+    pointer-events: none;
+    font-weight: 700;
+  }
+  .file-row.broken { opacity: 0.55; }
+  .file-row.broken .file-icon.is-link::after { color: var(--danger, #f87171); }
+  .link-name { font-style: italic; }
   .file-name {
     flex: 1; min-width: 0; white-space: nowrap;
     overflow-x: auto; overflow-y: hidden;
