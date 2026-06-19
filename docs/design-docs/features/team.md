@@ -291,6 +291,21 @@ per-tool hook in its config, so a working codex agent leans on this backstop
 (and shows `hardworking` then `stalled` meanwhile) — acceptable until a
 pane-output liveness probe is added.
 
+**Idle-sleep** (`team.rs::SleepState`, `IDLE_SLEEP_MS = 5 min`). The other
+extreme: when **every** non-offline agent has been parked in `wait` (status
+`idle`) for 5 min — the team has nothing to do — the supervisor sends `Escape`
+to each pane, which cancels the in-flight `wait` MCP call. The CLI returns to
+its shell prompt and stops thinking; without sleep the team would re-enter the
+50-second `wait` long-poll forever, burning a fresh LLM turn in every backend
+on each tick. Wake is anchored on bus seq: at sleep we snapshot the latest
+message seq, and any strictly-greater seq on a later tick — typically the
+human resuming the conversation — fires the standard `nudge_pane` (Esc +
+reconnect re-prompt + Enter) at every pane to put them back in `wait`. While
+slept the self-heal backstop is **off**: `last_seen` aging past 90 s into
+`stalled` is *expected* (no live `wait` to refresh it) and must not be treated
+as a wedged-agent signal, otherwise we would oscillate. Latency from a human
+post to the team being live again is bounded by the 3 s reconcile tick.
+
 ### Retired: the standalone `team/` Python launcher
 
 `team/` once shipped a Python launcher (`run.py` + `supervise.py` +

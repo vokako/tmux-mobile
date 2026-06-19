@@ -37,6 +37,13 @@ const RECONCILE_INTERVAL: Duration = Duration::from_secs(3);
 /// above the bus's 90s `unreachable` mark so we only ever auto-restart an agent
 /// that has been silent for a genuinely long time, not one merely between tools.
 const RECOVERY_STALE_MS: i64 = 1_800_000; // 30 minutes
+/// Idle-sleep threshold: when EVERY non-offline agent has been parked in `wait`
+/// (status=`idle`) for this long, the supervisor sends Esc to each pane to
+/// cancel the in-flight `wait` MCP call. The agent's CLI falls back to its
+/// shell prompt — no more 50-second wait/think cycles burning tokens. Any new
+/// message in the room (typically the human resuming) wakes the team back up
+/// via the standard reconnect nudge. Set to 0 to disable.
+const IDLE_SLEEP_MS: i64 = 5 * 60 * 1000; // 5 min
 
 // ─── Team templates (named rosters under <config>/tmux-mobile/teams/) ──────
 // A template is a JSON file `teams/<name>.json` = { "agents": [ {name, backend,
@@ -490,6 +497,7 @@ async fn reconcile_loop(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: Stri
     let mut fail_count: HashMap<String, u32> = HashMap::new();
     let mut last_nudge: HashMap<String, i64> = HashMap::new(); // self-heal cooldown
     let mut launched_any = false;
+    let mut sleep_state = SleepState::default();
     loop {
         // Stop the loop once the team is closed. close_team removes the room
         // from the registry AND kills the session — exit on either signal (the
@@ -546,6 +554,44 @@ async fn reconcile_loop(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: Stri
                 }
             }
         }
+        // ── Sleep / wake ─────────────────────────────────────────────────
+        // Once every non-offline agent has been parked in `wait` (status =
+        // "idle") for IDLE_SLEEP_MS, send Esc to each pane to cancel the
+        // in-flight wait. The CLI returns to its shell prompt and stops
+        // burning a fresh LLM turn every 50s. Any new bus message — typically
+        // the human resuming — wakes the team back up via `nudge_pane`. Skip
+        // the existing self-heal while slept: this silence is intentional, not
+        // a wedged agent.
+        let now = now_ms();
+        let online_idle = sleep_state.is_online_idle(&roster);
+        let latest_seq = latest_room_seq(&*bridge, &room);
+        match sleep_state.step(now, online_idle, latest_seq, IDLE_SLEEP_MS) {
+            SleepAction::Sleep => {
+                println!(
+                    "🜂 team: room '{}' all-idle ≥ {}s — sending Esc to {} agents to sleep",
+                    room,
+                    IDLE_SLEEP_MS / 1000,
+                    employees.iter().filter(|(_, _, s)| s != "disabled").count(),
+                );
+                for (name, _, state) in &employees {
+                    if state == "disabled" { continue; }
+                    if let Some(pane) = tmux::find_window_by_name(&session, name) {
+                        let _ = tmux::send_keys(&pane, "Escape", false);
+                    }
+                }
+            }
+            SleepAction::Wake => {
+                println!("🜂 team: room '{}' new message during sleep — waking agents", room);
+                for (name, _, state) in &employees {
+                    if state == "disabled" { continue; }
+                    if let Some(pane) = tmux::find_window_by_name(&session, name) {
+                        tokio::spawn(async move { nudge_pane(&pane).await; });
+                    }
+                }
+            }
+            SleepAction::None => {}
+        }
+
         // ── Self-heal backstop ────────────────────────────────────────────
         // An agent we have heard NOTHING from for RECOVERY_STALE_MS — no `wait`
         // (a parked agent touches ~every second), no per-tool heartbeat — is
@@ -554,21 +600,23 @@ async fn reconcile_loop(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: Stri
         // resume `wait`), then cool down for the same window before trying
         // again, so we never spam — and so a genuinely long single tool (which
         // emits no heartbeat until it returns) is interrupted at most rarely.
-        let now = now_ms();
-        for (name, (status, last_seen)) in &roster {
-            if status == "offline" || now - last_seen < RECOVERY_STALE_MS {
-                continue;
-            }
-            if now - last_nudge.get(name).copied().unwrap_or(0) < RECOVERY_STALE_MS {
-                continue; // already nudged recently; give it time
-            }
-            if let Some(pane) = tmux::find_window_by_name(&session, name) {
-                println!(
-                    "🜂 team: agent '{}' unreachable for {}s — self-heal nudging {}",
-                    name, (now - last_seen) / 1000, pane
-                );
-                tokio::spawn(async move { nudge_pane(&pane).await; });
-                last_nudge.insert(name.clone(), now);
+        // Skipped while slept: the silence is intentional.
+        if !sleep_state.slept {
+            for (name, (status, last_seen)) in &roster {
+                if status == "offline" || now - last_seen < RECOVERY_STALE_MS {
+                    continue;
+                }
+                if now - last_nudge.get(name).copied().unwrap_or(0) < RECOVERY_STALE_MS {
+                    continue; // already nudged recently; give it time
+                }
+                if let Some(pane) = tmux::find_window_by_name(&session, name) {
+                    println!(
+                        "🜂 team: agent '{}' unreachable for {}s — self-heal nudging {}",
+                        name, (now - last_seen) / 1000, pane
+                    );
+                    tokio::spawn(async move { nudge_pane(&pane).await; });
+                    last_nudge.insert(name.clone(), now);
+                }
             }
         }
 
@@ -589,6 +637,99 @@ fn roster_liveness(bridge: &dyn TeamBridge, room: &str) -> HashMap<String, (Stri
         }
     }
     out
+}
+
+/// Latest message sequence number in `room`, or 0 if the bus is empty / the
+/// room hasn't logged anything yet. Used as the anchor we compare against
+/// while slept: any seq strictly greater than the anchor means a new message
+/// has arrived (the human resuming, almost always) and the team should wake.
+fn latest_room_seq(bridge: &dyn TeamBridge, room: &str) -> i64 {
+    bridge
+        .history(room, 1)
+        .get("messages")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| arr.last())
+        .and_then(|m| m.get("seq"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0)
+}
+
+/// What `SleepState::step` decided this tick. The reconcile loop translates
+/// each action into pane keystrokes (Esc to sleep, the standard reconnect
+/// nudge to wake); separating decision from effect keeps the state machine
+/// trivial to unit-test without tmux.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SleepAction {
+    /// Nothing to do this tick.
+    None,
+    /// All agents have been idle past the threshold — send Esc to every pane.
+    Sleep,
+    /// We're slept and a new bus message just arrived — re-prompt every pane
+    /// back into `wait` (the existing `nudge_pane` primitive).
+    Wake,
+}
+
+/// State for the idle-sleep / new-message-wake state machine that lives inside
+/// `reconcile_loop`. Pulled into its own type so the decision logic can be
+/// covered by plain unit tests (no tmux, no bus). Once `slept` is set, only a
+/// new bus message clears it: status changes after sleep are EXPECTED (Esc'd
+/// agents have no live `wait`, so they age to "stalled" within ~90s) and must
+/// not be treated as a wake signal, otherwise we would oscillate.
+#[derive(Debug, Default, Clone, Copy)]
+struct SleepState {
+    /// First tick on which all online agents looked idle, or `None` if any of
+    /// them has been doing real work since.
+    idle_since: Option<i64>,
+    /// True between the Esc-everyone tick and the wake tick.
+    slept: bool,
+    /// Latest bus seq we saw at the moment we went to sleep. Wake when the
+    /// real latest is strictly greater than this.
+    sleep_anchor_seq: i64,
+}
+
+impl SleepState {
+    /// Advance one tick. `online_idle` is "every non-offline agent has status
+    /// `idle`" (caller computes from the roster); `latest_seq` is the latest
+    /// bus sequence; `threshold_ms` is `IDLE_SLEEP_MS` (test injection).
+    fn step(&mut self, now: i64, online_idle: bool, latest_seq: i64, threshold_ms: i64) -> SleepAction {
+        if self.slept {
+            // Once slept, ONLY a new message wakes us. (Status drift to
+            // "stalled" while the wait MCP call is cancelled is expected.)
+            if latest_seq > self.sleep_anchor_seq {
+                self.slept = false;
+                self.idle_since = None;
+                self.sleep_anchor_seq = latest_seq;
+                return SleepAction::Wake;
+            }
+            return SleepAction::None;
+        }
+        if !online_idle {
+            self.idle_since = None;
+            return SleepAction::None;
+        }
+        // Every online agent is idle. Start the clock if we haven't already,
+        // then trip Sleep once the threshold is met.
+        let started = *self.idle_since.get_or_insert(now);
+        if threshold_ms > 0 && now - started >= threshold_ms {
+            self.slept = true;
+            self.sleep_anchor_seq = latest_seq;
+            return SleepAction::Sleep;
+        }
+        SleepAction::None
+    }
+
+    /// Convenience: derive `online_idle` from the supervisor's roster snapshot
+    /// (`roster_liveness` output). Empty room or no online agent ⇒ false (so
+    /// we never sleep a team that hasn't even come online yet).
+    fn is_online_idle(&self, roster: &HashMap<String, (String, i64)>) -> bool {
+        let mut saw_online = false;
+        for (_, (status, _)) in roster {
+            if status == "offline" { continue; }
+            saw_online = true;
+            if status != "idle" { return false; }
+        }
+        saw_online
+    }
 }
 
 /// Wall-clock millis since the epoch — same basis as the bus's `last_seen`, so
@@ -1137,6 +1278,135 @@ fn shell_quote(s: &str) -> String {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    // ── SleepState ──────────────────────────────────────────────────────
+    // The state machine that mediates "all idle long enough → Esc the team"
+    // and "new message arrived → wake them". Pure: no tmux, no bus.
+
+    fn idle_roster() -> HashMap<String, (String, i64)> {
+        let mut r = HashMap::new();
+        r.insert("alice".into(), ("idle".into(), 0));
+        r.insert("bob".into(), ("idle".into(), 0));
+        r
+    }
+
+    #[test]
+    fn sleep_state_does_nothing_on_an_empty_room() {
+        // No agents at all (a freshly-started team that hasn't booted yet)
+        // must not be considered idle — there's no one to sleep.
+        let mut s = SleepState::default();
+        let empty: HashMap<String, (String, i64)> = HashMap::new();
+        assert!(!s.is_online_idle(&empty));
+        assert_eq!(s.step(0, false, 0, 60_000), SleepAction::None);
+        assert!(!s.slept);
+    }
+
+    #[test]
+    fn sleep_state_skips_if_any_agent_is_busy() {
+        // The whole point: ONE working agent cancels sleep for everyone.
+        let mut s = SleepState::default();
+        let mut r = idle_roster();
+        r.insert("worker".into(), ("working".into(), 0));
+        assert!(!s.is_online_idle(&r));
+        assert_eq!(s.step(0, false, 0, 60_000), SleepAction::None);
+        assert!(s.idle_since.is_none());
+    }
+
+    #[test]
+    fn sleep_state_offline_agents_dont_block_sleep() {
+        // Offline agents are deliberately gone — they don't count toward the
+        // "is anyone busy?" check. The remaining online agents alone decide.
+        let s = SleepState::default();
+        let mut r = idle_roster();
+        r.insert("ghost".into(), ("offline".into(), 0));
+        assert!(s.is_online_idle(&r));
+    }
+
+    #[test]
+    fn sleep_state_arms_then_fires_at_threshold() {
+        // First idle tick arms the timer; later ticks below threshold = no
+        // action; once we cross threshold = Sleep + state flips.
+        let mut s = SleepState::default();
+        assert_eq!(s.step(1_000, true, 0, 60_000), SleepAction::None);
+        assert_eq!(s.idle_since, Some(1_000));
+        assert!(!s.slept);
+
+        assert_eq!(s.step(30_000, true, 0, 60_000), SleepAction::None);
+        assert!(!s.slept);
+
+        assert_eq!(s.step(61_000, true, 5, 60_000), SleepAction::Sleep);
+        assert!(s.slept);
+        assert_eq!(s.sleep_anchor_seq, 5);
+    }
+
+    #[test]
+    fn sleep_state_threshold_zero_disables_sleep() {
+        // 0 means "feature off". We still arm idle_since (cheap), but never
+        // trip Sleep no matter how long the team has been idle.
+        let mut s = SleepState::default();
+        assert_eq!(s.step(0, true, 0, 0), SleepAction::None);
+        assert_eq!(s.step(86_400_000, true, 0, 0), SleepAction::None); // 1 day
+        assert!(!s.slept);
+    }
+
+    #[test]
+    fn sleep_state_resets_arming_when_an_agent_starts_working() {
+        // If the team started looking idle, then someone actually picks work
+        // back up before the threshold, we drop the timer entirely.
+        let mut s = SleepState::default();
+        s.step(1_000, true, 0, 60_000); // arm
+        assert_eq!(s.idle_since, Some(1_000));
+
+        s.step(2_000, false, 0, 60_000); // someone working
+        assert!(s.idle_since.is_none());
+
+        // And re-arming starts fresh, not from the original idle_since.
+        s.step(3_000, true, 0, 60_000);
+        assert_eq!(s.idle_since, Some(3_000));
+    }
+
+    #[test]
+    fn sleep_state_wakes_only_on_a_new_message_seq() {
+        // While slept, the rule is intentionally narrow: a strictly newer bus
+        // seq than the anchor wakes. Stale roster (status drifting from idle
+        // to stalled because the wait MCP call is dead) MUST NOT wake — that
+        // would oscillate forever.
+        let mut s = SleepState::default();
+        // Force slept state at anchor seq=10.
+        s.step(0, true, 10, 60_000);
+        s.step(60_001, true, 10, 60_000); // → Sleep
+        assert!(s.slept);
+        assert_eq!(s.sleep_anchor_seq, 10);
+
+        // Same seq, status drifts to stalled (online_idle now false). No wake.
+        assert_eq!(s.step(60_002, false, 10, 60_000), SleepAction::None);
+        assert!(s.slept);
+
+        // New message: seq jumps to 11. Wake.
+        assert_eq!(s.step(60_003, false, 11, 60_000), SleepAction::Wake);
+        assert!(!s.slept);
+        assert_eq!(s.sleep_anchor_seq, 11);
+        assert!(s.idle_since.is_none());
+    }
+
+    #[test]
+    fn sleep_state_can_re_sleep_after_a_wake_round_trip() {
+        // Sleep → wake → idle again → sleep again. Exercises the full cycle.
+        let mut s = SleepState::default();
+        s.step(0, true, 0, 60_000);
+        assert_eq!(s.step(60_000, true, 0, 60_000), SleepAction::Sleep);
+
+        // Human posts (seq 1) → wake.
+        assert_eq!(s.step(60_100, false, 1, 60_000), SleepAction::Wake);
+        assert!(!s.slept);
+
+        // Team handles it, returns to idle, threshold passes again → sleep.
+        s.step(60_200, true, 1, 60_000); // re-arm
+        assert_eq!(s.step(120_300, true, 2, 60_000), SleepAction::Sleep);
+        assert_eq!(s.sleep_anchor_seq, 2);
+    }
+
+    // ── existing tests follow ──
 
     #[test]
     fn parse_github_tree_url() {
