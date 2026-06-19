@@ -306,6 +306,15 @@ slept the self-heal backstop is **off**: `last_seen` aging past 90 s into
 as a wedged-agent signal, otherwise we would oscillate. Latency from a human
 post to the team being live again is bounded by the 3 s reconcile tick.
 
+When it sleeps, the supervisor also sets each agent's stored status to
+`sleeping` (`Bus::set_status` → `store::set_status`); `apply_presence` treats
+`sleeping` like `offline` — never aged into `stalled` — so the roster keeps the
+label until wake (where the supervisor sets it back to `idle` and the agent's
+own fresh `wait` refines it). The frontend renders `sleeping` as a sixth status
+on the ladder (indigo `--status-sleep`, dimmed slow-breathing node in the
+collab graph, a legend entry, and a roster-dot colour). It is **not** `offline`,
+so a sleeping agent stays visible in the roster and graph rather than vanishing.
+
 ### Retired: the standalone `team/` Python launcher
 
 `team/` once shipped a Python launcher (`run.py` + `supervise.py` +

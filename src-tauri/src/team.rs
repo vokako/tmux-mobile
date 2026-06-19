@@ -578,12 +578,18 @@ async fn reconcile_loop(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: Stri
                     if let Some(pane) = tmux::find_window_by_name(&session, name) {
                         let _ = tmux::send_keys(&pane, "Escape", false);
                     }
+                    // Mark it sleeping so the UI shows a distinct state and the
+                    // bus stops aging it into `stalled` (apply_presence skips it).
+                    let _ = bridge.set_agent_status(&room, name, "sleeping");
                 }
             }
             SleepAction::Wake => {
                 println!("🜂 team: room '{}' new message during sleep — waking agents", room);
                 for (name, _, state) in &employees {
                     if state == "disabled" { continue; }
+                    // Clear the sleep label immediately for a responsive UI; the
+                    // agent's own fresh `wait` will refine it to idle/thinking.
+                    let _ = bridge.set_agent_status(&room, name, "idle");
                     if let Some(pane) = tmux::find_window_by_name(&session, name) {
                         tokio::spawn(async move { nudge_pane(&pane).await; });
                     }
@@ -1466,6 +1472,7 @@ mod tests {
         fn history(&self, _room: &str, _l: i64) -> Value { serde_json::json!({}) }
         fn roster(&self, _room: &str) -> Value { serde_json::json!({ "roster": [] }) }
         fn post(&self, _room: &str, _f: &str, _b: &str, _r: bool) -> Result<Value, String> { Ok(Value::Null) }
+        fn set_agent_status(&self, _room: &str, _agent: &str, _status: &str) -> Result<(), String> { Ok(()) }
         fn employees(&self, _room: &str) -> Value { serde_json::json!({}) }
         fn seed_employee(&self, _room: &str, name: &str, spec: &Value) -> Result<(), String> {
             self.seeded.lock().unwrap().push((name.to_string(), spec.clone()));

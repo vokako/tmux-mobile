@@ -264,6 +264,11 @@ impl TeamBridge for TeamManager {
             .map_err(|e| e.to_string())
     }
 
+    fn set_agent_status(&self, room: &str, agent: &str, status: &str) -> Result<(), String> {
+        let bus = self.room_bus(room).ok_or_else(|| format!("unknown team '{room}'"))?;
+        bus.set_status(agent, status).map_err(|e| e.to_string())
+    }
+
     fn employees(&self, room: &str) -> serde_json::Value {
         let employees = self.room_bus(room).and_then(|b| b.employees().ok()).unwrap_or_default();
         serde_json::json!({ "employees": employees })

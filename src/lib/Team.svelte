@@ -831,6 +831,7 @@
   .roster-dot.status-working     { background: var(--status-warn); }
   .roster-dot.status-hardworking { background: var(--status-hot); }
   .roster-dot.status-stalled     { background: var(--status-danger); }
+  .roster-dot.status-sleeping    { background: var(--status-sleep); }
   .roster-dot.status-online      { background: var(--accent); }
 
   /* Collaboration graph panel (mobile only — toggled from the header button). */

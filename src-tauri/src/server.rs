@@ -50,6 +50,9 @@ pub trait TeamBridge: Send + Sync {
     fn roster(&self, room: &str) -> serde_json::Value;
     /// Post as a participant in `room`. Returns the stored message JSON.
     fn post(&self, room: &str, from: &str, body: &str, requires_reply: bool) -> Result<serde_json::Value, String>;
+    /// Force an agent's stored status in `room` (supervisor idle-sleep:
+    /// `"sleeping"` to park, `"idle"` to wake). No-op if the agent is unknown.
+    fn set_agent_status(&self, room: &str, agent: &str, status: &str) -> Result<(), String>;
     /// Desired-roster employees for `room`: `{ "employees": [...] }`.
     fn employees(&self, room: &str) -> serde_json::Value;
     /// Seed an employee into `room`'s desired roster (used by the supervisor).
@@ -1893,6 +1896,9 @@ mod tests {
         }
         fn post(&self, room: &str, from: &str, body: &str, requires_reply: bool) -> Result<serde_json::Value, String> {
             Ok(serde_json::json!({ "room": room, "from": from, "body": body, "requires_reply": requires_reply }))
+        }
+        fn set_agent_status(&self, _room: &str, _agent: &str, _status: &str) -> Result<(), String> {
+            Ok(())
         }
         fn employees(&self, _room: &str) -> serde_json::Value {
             serde_json::json!({ "employees": [] })

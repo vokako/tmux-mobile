@@ -96,6 +96,7 @@
     { cls: 'working',     key: 'collabWorking' },
     { cls: 'hardworking', key: 'collabHardworking' },
     { cls: 'stalled',     key: 'collabStalled' },
+    { cls: 'sleeping',    key: 'collabSleeping' },
   ];
 </script>
 
@@ -143,6 +144,7 @@
   .dot.status-working     { fill: var(--status-warn); }
   .dot.status-hardworking { fill: var(--status-hot); }
   .dot.status-stalled     { fill: var(--status-danger); }
+  .dot.status-sleeping    { fill: var(--status-sleep); }
   .dot.status-online      { fill: var(--accent); }
   .dot.status-offline     { fill: var(--text3); }
   .dot.status-human       { fill: var(--bg); stroke: var(--accent); stroke-width: 2.5; }
@@ -150,7 +152,8 @@
 
   /* Every present dot "breathes" continuously (a soft in-place scale loop) so
      the graph is always alive — resting states (idle/online/you) breathe gently
-     and slowly, active states more and faster. Only stalled/offline stay still
+     and slowly, active states more and faster. Sleeping breathes slowest of all
+     and dims (a parked, napping team). Only stalled/offline stay still
      (stuck / gone). The running animation owns `transform`, so it supersedes the
      discrete .node.pulse scale — the comet arc still signals message events. */
   @keyframes breathe {
@@ -167,6 +170,7 @@
   .dot.status-thinking    { animation: breathe 2s   ease-in-out infinite; }
   .dot.status-working     { animation: breathe 1.3s ease-in-out infinite; }
   .dot.status-hardworking { animation: breathe 2.8s ease-in-out infinite; }
+  .dot.status-sleeping    { animation: breathe-soft 5s ease-in-out infinite; opacity: 0.5; }
 
   .lbl { fill: var(--text2); font-size: 8px; font-weight: 600; }
 
@@ -215,6 +219,7 @@
   .leg-dot.status-working     { background: var(--status-warn); }
   .leg-dot.status-hardworking { background: var(--status-hot); }
   .leg-dot.status-stalled     { background: var(--status-danger); }
+  .leg-dot.status-sleeping    { background: var(--status-sleep); }
   .leg-dot.status-human       { background: var(--bg); border: 2px solid var(--accent); box-sizing: border-box; }
 
   @media (prefers-reduced-motion: reduce) {

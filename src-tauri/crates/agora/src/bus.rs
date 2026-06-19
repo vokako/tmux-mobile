@@ -326,6 +326,17 @@ impl Bus {
         store::set_status(&conn, &self.room, agent, "working")
     }
 
+    /// Force an agent's stored status. Used by the supervisor's idle-sleep:
+    /// `"sleeping"` when it Esc-parks a quiet team, `"idle"` when it wakes them.
+    /// `apply_presence` treats `"sleeping"` like `"offline"` — it is never aged
+    /// into `stalled` — so a deliberately-parked agent keeps the sleep label
+    /// until it rejoins (a fresh `wait` sets `idle`/`thinking`). No-op (Ok) if
+    /// the agent has no roster row yet.
+    pub fn set_status(&self, agent: &str, status: &str) -> Result<()> {
+        let conn = self.lock();
+        store::set_status(&conn, &self.room, agent, status)
+    }
+
     pub fn history(&self, limit: i64) -> Result<Vec<Message>> {
         let conn = self.lock();
         store::history(&conn, &self.room, limit)
@@ -442,6 +453,9 @@ fn apply_presence(mut roster: Vec<AgentRow>) -> Vec<AgentRow> {
     for a in &mut roster {
         if a.status == "offline" {
             continue; // deliberately gone — don't relabel
+        }
+        if a.status == "sleeping" {
+            continue; // deliberately parked by the supervisor — don't age to stalled
         }
         let age = now - a.last_seen;
         if age > STALLED_TTL_MS {
@@ -568,5 +582,21 @@ mod tests {
         assert_eq!(by("crashed"), "stalled", "a parked agent that stops touching has a dead loop");
         assert_eq!(by("wedged"), "stalled");
         assert_eq!(by("left"), "offline", "explicit offline is never relabelled");
+    }
+
+    #[test]
+    fn sleeping_is_never_aged_into_stalled() {
+        // The supervisor parks a quiet team by setting status="sleeping" and
+        // Esc-ing the wait call, so the agent stops touching the bus. Even long
+        // past STALLED_TTL_MS it must stay "sleeping" (a deliberate state) and
+        // never be relabelled — otherwise the UI would show a red "stalled"
+        // node for a team that is simply idle and asleep.
+        let out = apply_presence(vec![
+            row("napper", "sleeping", STALLED_TTL_MS + 60_000),
+            row("dozer", "sleeping", 1_000),
+        ]);
+        let by = |n: &str| out.iter().find(|a| a.name == n).unwrap().status.clone();
+        assert_eq!(by("napper"), "sleeping");
+        assert_eq!(by("dozer"), "sleeping");
     }
 }
