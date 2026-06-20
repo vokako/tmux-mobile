@@ -315,6 +315,18 @@ on the ladder (indigo `--status-sleep`, dimmed slow-breathing node in the
 collab graph, a legend entry, and a roster-dot colour). It is **not** `offline`,
 so a sleeping agent stays visible in the roster and graph rather than vanishing.
 
+**Why `sleeping` is re-stamped every tick, not set once.** Our `Esc` takes
+~1–2 s to actually cancel the agent's in-flight `wait`. In that window the wait
+loop parks at least once more and writes `idle` (refreshing `last_seen`),
+clobbering the `sleeping` we set on the Sleep tick. Set once, that stale `idle`
+then ages into **`stalled`** (red) after 90 s — the exact bug observed: the team
+*was* asleep but showed `stalled`. The fix: while `slept`, the reconcile loop
+re-stamps `sleeping` on every 3 s tick. By the next tick the wait is truly
+stopped, nothing else writes the row, and since `apply_presence` never ages
+`sleeping`, the label sticks. The re-stamp is idempotent and cheap (one UPDATE
+per agent); it refreshes `last_seen` harmlessly (sleeping is exempt from aging,
+and wake keys off bus seq, not `last_seen`).
+
 ### Retired: the standalone `team/` Python launcher
 
 `team/` once shipped a Python launcher (`run.py` + `supervise.py` +

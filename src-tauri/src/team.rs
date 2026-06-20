@@ -578,9 +578,6 @@ async fn reconcile_loop(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: Stri
                     if let Some(pane) = tmux::find_window_by_name(&session, name) {
                         let _ = tmux::send_keys(&pane, "Escape", false);
                     }
-                    // Mark it sleeping so the UI shows a distinct state and the
-                    // bus stops aging it into `stalled` (apply_presence skips it).
-                    let _ = bridge.set_agent_status(&room, name, "sleeping");
                 }
             }
             SleepAction::Wake => {
@@ -596,6 +593,22 @@ async fn reconcile_loop(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: Stri
                 }
             }
             SleepAction::None => {}
+        }
+
+        // Re-assert "sleeping" every tick while slept. Our Esc takes ~1-2s to
+        // actually cancel the agent's in-flight `wait`; in that window the wait
+        // loop parks at least once more and writes "idle" (refreshing last_seen),
+        // clobbering the status we just set. Setting it only once on the Sleep
+        // tick therefore loses the race — the stale "idle" then ages into
+        // "stalled" (red) after 90s, which is exactly the bug we saw. Re-stamping
+        // it on every 3s tick wins: by the next tick the wait is truly stopped,
+        // nothing else writes the row, and apply_presence never ages "sleeping"
+        // itself, so the label sticks. Idempotent + cheap (one UPDATE per agent).
+        if sleep_state.slept {
+            for (name, _, state) in &employees {
+                if state == "disabled" { continue; }
+                let _ = bridge.set_agent_status(&room, name, "sleeping");
+            }
         }
 
         // ── Self-heal backstop ────────────────────────────────────────────
