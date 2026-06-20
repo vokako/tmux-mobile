@@ -223,6 +223,12 @@
   let showRecent = $state(false);
 
   $effect(() => {
+    // Depend on `visible` so this re-runs when the user opens the Files tab.
+    // Files is always mounted now (even before the socket connects), and this
+    // effect has no other reactive dep — without the `visible` gate it would
+    // fire once at mount (often pre-connection), fail, and never retry, leaving
+    // Recent empty forever.
+    if (!visible) return;
     getPrefs().then(p => { recentFiles = p.recentFiles || []; }).catch(() => {});
   });
 
@@ -371,6 +377,9 @@
   }
 
   $effect(() => {
+    // Same as recentFiles above: gate on `visible` so it loads (and retries)
+    // when the tab opens post-connection, not once at mount before connecting.
+    if (!visible) return;
     getBookmarks().then(r => { bookmarks = r.bookmarks || []; }).catch(() => {});
   });
 
