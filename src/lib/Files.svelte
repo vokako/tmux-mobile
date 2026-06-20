@@ -200,11 +200,18 @@
   let taEl;     // textarea
   let numsEl;   // gutter
   let hlEl;     // highlight <pre>
+  let layerEl;  // .editor-layer (sized to the highlight/textarea content box)
+  let mirrorEl; // off-screen per-line mirror used to measure wrapped line heights
+  // Per-logical-line pixel heights, measured from the mirror. The gutter renders
+  // one number block per entry at that height, so numbers stay aligned with the
+  // text whether or not lines wrap. Empty until first measure (the gutter then
+  // falls back to natural line height via the `h ? … : ''` guard).
+  let lineHeights = $state([]);
   // Soft-wrap toggle. Prose (markdown / plain text) defaults to wrapped — no
   // horizontal scrolling while writing, and line numbers are hidden since they
   // can't track wrapped rows. Code/config (yaml, json, rs, …) defaults to
   // no-wrap so the gutter stays exactly aligned (long lines scroll sideways).
-  let editWrap = $state(false);
+  let wrapLines = $state(false);
   function defaultWrapForMime(mime) {
     return mime === 'text/markdown' || mime === 'text/plain';
   }
@@ -542,6 +549,7 @@
       } else if (stat.is_text && stat.size <= 512 * 1024) {
         const r = await fsRead(path);
         currentFile = { ...file, content: r.content };
+        wrapLines = defaultWrapForMime(stat.mime_hint || '');
         view = 'preview';
       } else if (/\.pptx$/i.test(name)) {
         const r = await fsConvert(path);
@@ -609,7 +617,7 @@
     editContent = currentFile.content;
     editOriginal = currentFile.content;
     undoStack = [];
-    editWrap = defaultWrapForMime(currentFile?.stat?.mime_hint || '');
+    wrapLines = defaultWrapForMime(currentFile?.stat?.mime_hint || '');
     view = 'edit';
     navPush();
   }
@@ -643,9 +651,32 @@
     if (numsEl) numsEl.scrollTop = taEl.scrollTop;
     if (hlEl) {
       hlEl.scrollTop = taEl.scrollTop;
-      hlEl.scrollLeft = editWrap ? 0 : taEl.scrollLeft;
+      hlEl.scrollLeft = wrapLines ? 0 : taEl.scrollLeft;
     }
   }
+
+  // Measure each logical line's rendered height via the off-screen mirror, then
+  // feed the gutter so line numbers line up with (possibly wrapped) lines.
+  function measureLineHeights() {
+    if (view !== 'edit' || !mirrorEl || !layerEl) return;
+    const cw = layerEl.clientWidth - 24; // minus the 12px left+right padding
+    if (cw <= 0) return;
+    mirrorEl.style.width = cw + 'px';
+    lineHeights = Array.from(mirrorEl.children).map(c => c.offsetHeight);
+  }
+  // Re-measure when content, wrap mode, or font size changes (after the DOM
+  // reflows). The reads below register the reactive dependencies.
+  $effect(() => {
+    editContent; wrapLines; fontSize; view;
+    requestAnimationFrame(measureLineHeights);
+  });
+  // Re-measure on width changes (rotation, split-pane drag, keyboard show/hide).
+  $effect(() => {
+    if (!layerEl) return;
+    const ro = new ResizeObserver(() => measureLineHeights());
+    ro.observe(layerEl);
+    return () => ro.disconnect();
+  });
 
   async function saveFile() {
     try {
@@ -1056,6 +1087,22 @@
     try { return hljs.highlightAuto(text).value; } catch { return text.replace(/</g, '&lt;'); }
   }
 
+  // Highlight a SINGLE line for the per-line code views (preview + the gutter
+  // alignment fix). Per-line so each logical line is its own DOM row — the line
+  // number then sits at the top of that row and stays aligned even when the
+  // line soft-wraps. We skip highlightAuto here (too slow per-line and it would
+  // guess a different language each line); without a known language we just
+  // escape. Cross-line constructs (block comments, multiline strings) lose
+  // their context, an acceptable trade for reliable alignment + wrapping.
+  function highlightLine(line, mime) {
+    if (!line) return '';
+    const lang = hljsLang(mime);
+    if (lang && hljs.getLanguage(lang)) {
+      try { return hljs.highlight(line, { language: lang }).value; } catch {}
+    }
+    return line.replace(/</g, '&lt;');
+  }
+
   function renderMarkdown(text) {
     if (text == null) return '';
     // Protect code blocks/inline code from KaTeX processing
@@ -1328,14 +1375,16 @@
       {:else if currentFile.convertedHtml}
         <div class="md-render">{@html currentFile.convertedHtml}</div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'code'}
-        <div class="code-lined">
-          <div class="line-nums">{@html (currentFile.content ?? '').split('\n').map((_, i) => i + 1).join('\n')}</div>
-          <pre class="code-preview"><code>{@html highlightCode(currentFile.content, currentFile.stat?.mime_hint)}</code></pre>
+        <div class="code-lined" class:wrap={wrapLines}>
+          {#each (currentFile.content ?? '').split('\n') as line, i}
+            <div class="cl-row"><span class="cl-num">{i + 1}</span><code class="cl-code">{@html highlightLine(line, currentFile.stat?.mime_hint) || '\u200b'}</code></div>
+          {/each}
         </div>
       {:else}
-        <div class="code-lined">
-          <div class="line-nums">{@html (currentFile.content ?? '').split('\n').map((_, i) => i + 1).join('\n')}</div>
-          <pre class="code-preview"><code>{@html highlightCode(currentFile.content, currentFile.stat?.mime_hint)}</code></pre>
+        <div class="code-lined" class:wrap={wrapLines}>
+          {#each (currentFile.content ?? '').split('\n') as line, i}
+            <div class="cl-row"><span class="cl-num">{i + 1}</span><code class="cl-code">{@html highlightLine(line, currentFile.stat?.mime_hint) || '\u200b'}</code></div>
+          {/each}
         </div>
       {/if}
     </div>
@@ -1347,15 +1396,28 @@
       <button class="back-btn" onclick={backToPreview}><Icon name="chevron-left" size={16} /></button>
       <span class="preview-name">{currentFile.name}{isEdited ? ' *' : ''}</span>
       <div class="preview-actions">
-        <button class="act-btn" class:on={editWrap} onclick={() => { editWrap = !editWrap; requestAnimationFrame(syncEditorScroll); }} title={editWrap ? t('editorNoWrap') : t('editorWrap')}><Icon name={editWrap ? 'wrap-text' : 'no-wrap'} size={14} /></button>
+        <button class="act-btn" class:on={wrapLines} onclick={() => { wrapLines = !wrapLines; requestAnimationFrame(syncEditorScroll); }} title={wrapLines ? t('editorNoWrap') : t('editorWrap')}><Icon name={wrapLines ? 'wrap-text' : 'no-wrap'} size={14} /></button>
         <button class="act-btn" onclick={undo} disabled={!undoStack.length && editContent === editOriginal}><Icon name="undo" size={14} /></button>
         <button class="act-btn save" onclick={saveFile} disabled={!isEdited}><Icon name="save" size={14} /></button>
       </div>
     </div>
-    <div class="editor-wrap" class:wrap={editWrap} style="--file-font-size:{fontSize}px">
-      <div class="editor-nums" bind:this={numsEl}>{@html editContent.split('\n').map((_, i) => i + 1).join('\n')}</div>
-      <div class="editor-layer">
+    <div class="editor-wrap" class:wrap={wrapLines} style="--file-font-size:{fontSize}px">
+      <div class="editor-nums" bind:this={numsEl}>
+        {#each lineHeights as h, i}
+          <div class="eln" style={h ? `height:${h}px` : ''}>{i + 1}</div>
+        {/each}
+      </div>
+      <div class="editor-layer" bind:this={layerEl}>
         <pre class="editor-highlight" bind:this={hlEl} aria-hidden="true"><code>{@html highlightCode(editContent, currentFile?.stat?.mime_hint)}</code>{'\n'}</pre>
+        <!-- Off-screen mirror: one block per logical line, same width/font/wrap
+             as the highlight layer, so each block's measured height tells the
+             gutter how tall to make that line number — keeping numbers aligned
+             even when a line soft-wraps. -->
+        <div class="editor-mirror" bind:this={mirrorEl} aria-hidden="true">
+          {#each editContent.split('\n') as line}
+            <div class="emir">{line || '\u200b'}</div>
+          {/each}
+        </div>
         <textarea
           class="editor"
           bind:this={taEl}
@@ -1741,19 +1803,27 @@
 
   /* Preview body */
   .preview-body { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 12px; display: flex; flex-direction: column; min-height: 0; }
-  .code-preview {
-    margin: 0; font-family: var(--font-mono); font-size: var(--file-font-size, 13px);
-    line-height: 1.5; color: var(--text); white-space: pre-wrap; word-break: break-all; flex: 1;
-  }
-  .code-preview :global(code) { font-family: inherit; background: none; padding: 0; }
+  /* Per-line code view: each logical line is its own flex row (number + code),
+     so the line number sits at the top of its row and stays aligned even when
+     the code soft-wraps. No-wrap mode scrolls horizontally with the number
+     column pinned (sticky) on the left. */
   .code-lined {
-    display: flex; flex: 1; overflow: auto; -webkit-overflow-scrolling: touch;
+    flex: 1; overflow: auto; -webkit-overflow-scrolling: touch;
+    font-family: var(--font-mono); font-size: var(--file-font-size, 13px); line-height: 1.5;
+    padding: 12px 0;
   }
-  .line-nums {
-    padding: 0 8px; text-align: right; color: var(--text3); font-family: var(--font-mono);
-    font-size: var(--file-font-size, 13px); line-height: 1.5; white-space: pre; user-select: none; flex-shrink: 0;
-    border-right: 1px solid var(--border);
+  .cl-row { display: flex; align-items: flex-start; }
+  .cl-num {
+    position: sticky; left: 0; z-index: 1; flex-shrink: 0; min-width: 2.5em; padding: 0 8px;
+    text-align: right; color: var(--text3); user-select: none; white-space: pre;
+    background: var(--bg); border-right: 1px solid var(--border);
   }
+  .cl-code {
+    margin: 0 0 0 10px; flex: 1; min-width: 0; color: var(--text);
+    white-space: pre; font-family: inherit;
+  }
+  .cl-code :global(code) { font-family: inherit; background: none; padding: 0; }
+  .code-lined.wrap .cl-code { white-space: pre-wrap; word-break: break-word; }
   .html-preview {
     flex: 1; width: 100%; border: none; background: #fff; border-radius: 4px;
   }
@@ -1803,10 +1873,14 @@
     flex: 1; display: flex; overflow: hidden; -webkit-overflow-scrolling: touch; min-height: 0;
   }
   .editor-nums {
-    padding: 12px 8px; text-align: right; color: var(--text3); font-family: var(--font-mono);
+    padding: 12px 8px 12px 0; text-align: right; color: var(--text3); font-family: var(--font-mono);
     font-size: var(--file-font-size, 13px); line-height: 1.5; white-space: pre; user-select: none; flex-shrink: 0;
     border-right: 1px solid var(--border); overflow: hidden;
   }
+  /* One block per logical line; its height is set inline from the measured
+     mirror so the number aligns with the (possibly wrapped) line. The number
+     sits at the top of its block. */
+  .eln { padding: 0 8px; box-sizing: border-box; overflow: hidden; }
   .editor-layer { position: relative; flex: 1; min-width: 0; overflow: hidden; }
   .editor-highlight {
     margin: 0; padding: 12px; font-family: var(--font-mono); font-size: var(--file-font-size, 13px);
@@ -1814,17 +1888,26 @@
     pointer-events: none; position: absolute; inset: 0; overflow: hidden;
   }
   .editor-highlight :global(code) { font-family: inherit; background: none; padding: 0; }
+  /* Off-screen line-height probe: same font/line-height/wrap as the highlight
+     layer; width is set in JS to the layer's content width before measuring. */
+  .editor-mirror {
+    position: absolute; top: 0; left: -99999px; visibility: hidden; pointer-events: none;
+    font-family: var(--font-mono); font-size: var(--file-font-size, 13px); line-height: 1.5;
+    white-space: pre; padding: 0;
+  }
+  .editor-mirror .emir { white-space: pre; }
   .editor {
     position: absolute; inset: 0; width: 100%; height: 100%; padding: 12px; border: none; resize: none;
     background: transparent; color: transparent; caret-color: var(--text);
     font-family: var(--font-mono); font-size: var(--file-font-size, 13px); line-height: 1.5; outline: none;
     white-space: pre; overflow: auto; -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y;
   }
-  /* Wrapped (prose) mode: soft-wrap, no horizontal scroll, hide the gutter
-     (line numbers can't track wrapped rows). */
-  .editor-wrap.wrap .editor-nums { display: none; }
+  /* Wrapped mode: soft-wrap the text + mirror (so measured heights match), drop
+     horizontal scroll. The gutter stays visible — line numbers are aligned via
+     the measured per-line heights. */
   .editor-wrap.wrap .editor-highlight,
-  .editor-wrap.wrap .editor {
+  .editor-wrap.wrap .editor,
+  .editor-wrap.wrap .editor-mirror .emir {
     white-space: pre-wrap; word-break: break-word; overflow-x: hidden;
   }
   .editor-wrap.wrap .editor { touch-action: pan-y; }
