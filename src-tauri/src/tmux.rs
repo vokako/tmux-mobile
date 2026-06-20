@@ -465,7 +465,7 @@ pub fn send_command(target: &str, command: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn home_dir() -> String {
+pub fn home_dir() -> String {
     dirs::home_dir()
         .map(|h| h.to_string_lossy().to_string())
         .unwrap_or_else(|| std::env::var("HOME").unwrap_or_default())

@@ -1,7 +1,10 @@
 # File Browser Page
 
 ## Purpose
-Browse, preview, edit, and manage files on the remote server's filesystem. Starting directory is the active session's working directory.
+Browse, preview, edit, and manage files on the remote server's filesystem. The
+File Browser is always available (it does not require an open terminal pane).
+The starting directory follows the active terminal/team session's working
+directory, or the server's home directory when no session is open yet.
 
 ## Components
 - Unified toolbar: all actions in one compact icon row

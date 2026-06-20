@@ -433,7 +433,10 @@
   // Files becomes visible or the session changes.
   let lastSourceDir = '';
   $effect(() => {
-    if (!session || !visible) return;
+    if (!visible) return;
+    // session may be '' when Files is opened before any terminal pane exists —
+    // the server then reports the user's home directory. Once a terminal/team
+    // session appears, its cwd differs from home and we follow it.
     fsCwd(session).then(r => {
       if (r.path && r.path !== lastSourceDir) {
         lastSourceDir = r.path;

@@ -5,7 +5,7 @@ Server-side filesystem operations. File: `src-tauri/src/fs.rs`
 
 ## Operations
 - `resolve(path)` / `resolve_path(path)` — resolve path, handles `~` expansion
-- `get_cwd(session)` — get session working directory (delegates to `tmux::pane_cwd`)
+- `get_cwd(session)` — get session working directory (delegates to `tmux::pane_cwd`); an empty session or a session that can't report a path falls back to the server's home directory
 - `list_dir(path, show_hidden)` — list directory entries with name, is_dir, size, modified, mime_hint, is_text
 - `stat_file(path)` — file metadata (name, size, modified, permissions, mime_hint, is_text, is_dir)
 - `read_file(path)` — read text file (≤512KB limit)

@@ -157,7 +157,13 @@ fn is_text_file(path: &Path, name: &str) -> bool {
 }
 
 pub fn get_cwd(session: &str) -> Result<String, String> {
-    crate::tmux::pane_cwd(session)
+    // No session (Files opened standalone, before any terminal pane) → start in
+    // the user's home directory. A live session that fails to report a path
+    // (e.g. it was just killed) falls back the same way rather than erroring.
+    if session.trim().is_empty() {
+        return Ok(crate::tmux::home_dir());
+    }
+    Ok(crate::tmux::pane_cwd(session).unwrap_or_else(|_| crate::tmux::home_dir()))
 }
 
 pub fn list_dir(path: &str, show_hidden: bool) -> Result<Vec<FileEntry>, String> {

@@ -718,8 +718,8 @@
     if (terminalTarget) {
       t.push('terminal');
       if (chatSupported) t.push('chat');
-      t.push('files');
     }
+    t.push('files');
     return t;
   });
 
@@ -771,11 +771,9 @@
             {t('team')}
           </button>
         {/if}
-        {#if terminalTarget}
-          <button tabindex="-1" class:active={page === 'files'} onclick={() => switchTab('files')}>
-            {t('files')}
-          </button>
-        {/if}
+        <button tabindex="-1" class:active={page === 'files'} onclick={() => switchTab('files')}>
+          {t('files')}
+        </button>
       </div>
       <div class="nav-right">
         <button tabindex="-1" class="gear-btn" onclick={() => showSettings = !showSettings}><Icon name="gear" size={16} /></button>
@@ -899,10 +897,10 @@
     {:else if page === 'team'}
       <Team visible={page === 'team'} currentSession={terminalSession} {fontSize} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onTeamSession={(s) => teamSession = s} />
     {/if}
+    <div class="page-layer" class:hidden={page !== 'files'}>
+      <Files session={filesSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} />
+    </div>
     {#if terminalTarget}
-      <div class="page-layer" class:hidden={page !== 'files'}>
-        <Files session={filesSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} />
-      </div>
       <div class="page-layer" class:hidden={page !== 'terminal'}>
         <div class="terminal-body" class:split-capable={splitEligible && viewMode === 'terminal'}>
           {#if splitActive}
