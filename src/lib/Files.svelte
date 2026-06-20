@@ -192,6 +192,14 @@
   let editContent = $state('');
   let editOriginal = $state('');
   let undoStack = $state([]);
+  // Refs for the three stacked editor layers (line-number gutter, syntax
+  // highlight, and the transparent textarea on top). The textarea is the only
+  // scrollable layer; the gutter and highlight are kept in lockstep with it via
+  // syncEditorScroll so line numbers always line up with their lines — even
+  // when a long line scrolls horizontally instead of soft-wrapping.
+  let taEl;     // textarea
+  let numsEl;   // gutter
+  let hlEl;     // highlight <pre>
   let confirmDelete = $state(null);
   let deleteTimer;
   let newName = $state('');
@@ -602,6 +610,23 @@
     if (undoStack.length > 50) undoStack.shift();
     undoStack = undoStack;
     editContent = e.target.value;
+    // Content changed (line count / cursor may have moved) — realign the gutter
+    // and highlight layer on the next frame, after the DOM reflows.
+    requestAnimationFrame(syncEditorScroll);
+  }
+
+  // Keep the line-number gutter and highlight layer scrolled in lockstep with
+  // the textarea. The textarea owns the scroll (vertical + horizontal, since we
+  // no longer soft-wrap); the gutter follows vertically only (numbers stay
+  // pinned left) and the highlight follows both axes so the coloured text sits
+  // exactly under the caret.
+  function syncEditorScroll() {
+    if (!taEl) return;
+    if (numsEl) numsEl.scrollTop = taEl.scrollTop;
+    if (hlEl) {
+      hlEl.scrollTop = taEl.scrollTop;
+      hlEl.scrollLeft = taEl.scrollLeft;
+    }
   }
 
   async function saveFile() {
@@ -1309,13 +1334,15 @@
       </div>
     </div>
     <div class="editor-wrap" style="--file-font-size:{fontSize}px">
-      <div class="editor-nums">{@html editContent.split('\n').map((_, i) => i + 1).join('\n')}</div>
+      <div class="editor-nums" bind:this={numsEl}>{@html editContent.split('\n').map((_, i) => i + 1).join('\n')}</div>
       <div class="editor-layer">
-        <pre class="editor-highlight" aria-hidden="true"><code>{@html highlightCode(editContent, currentFile?.stat?.mime_hint)}</code>{'\n'}</pre>
+        <pre class="editor-highlight" bind:this={hlEl} aria-hidden="true"><code>{@html highlightCode(editContent, currentFile?.stat?.mime_hint)}</code>{'\n'}</pre>
         <textarea
           class="editor"
+          bind:this={taEl}
           value={editContent}
           oninput={onEditInput}
+          onscroll={syncEditorScroll}
           spellcheck="false"
           autocapitalize="off"
           autocomplete="off"
@@ -1753,25 +1780,25 @@
 
   /* Editor */
   .editor-wrap {
-    flex: 1; display: flex; overflow: auto; -webkit-overflow-scrolling: touch; min-height: 0; touch-action: pan-y;
+    flex: 1; display: flex; overflow: hidden; -webkit-overflow-scrolling: touch; min-height: 0;
   }
   .editor-nums {
     padding: 12px 8px; text-align: right; color: var(--text3); font-family: var(--font-mono);
     font-size: var(--file-font-size, 13px); line-height: 1.5; white-space: pre; user-select: none; flex-shrink: 0;
-    border-right: 1px solid var(--border);
+    border-right: 1px solid var(--border); overflow: hidden;
   }
-  .editor-layer { position: relative; flex: 1; min-width: 0; }
+  .editor-layer { position: relative; flex: 1; min-width: 0; overflow: hidden; }
   .editor-highlight {
     margin: 0; padding: 12px; font-family: var(--font-mono); font-size: var(--file-font-size, 13px);
-    line-height: 1.5; white-space: pre-wrap; word-break: break-all; color: var(--text);
-    pointer-events: none;
+    line-height: 1.5; white-space: pre; color: var(--text);
+    pointer-events: none; position: absolute; inset: 0; overflow: hidden;
   }
   .editor-highlight :global(code) { font-family: inherit; background: none; padding: 0; }
   .editor {
     position: absolute; inset: 0; width: 100%; height: 100%; padding: 12px; border: none; resize: none;
     background: transparent; color: transparent; caret-color: var(--text);
     font-family: var(--font-mono); font-size: var(--file-font-size, 13px); line-height: 1.5; outline: none;
-    white-space: pre-wrap; word-break: break-all; overflow: hidden;
+    white-space: pre; overflow: auto; -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y;
   }
   .info-body { flex: 1; overflow: auto; padding: 12px; }
   .info-row {
