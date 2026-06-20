@@ -453,6 +453,13 @@
   });
 
   let isEdited = $derived(view === 'edit' && editContent !== editOriginal);
+  // True when the preview is the per-line code/text view (where a wrap toggle
+  // makes sense) — not markdown/csv/html/pdf/image/converted output.
+  let isLinedPreview = $derived.by(() => {
+    if (!currentFile?.stat || currentFile?.convertedHtml) return false;
+    const cat = mimeCategory(currentFile.stat.mime_hint);
+    return cat === 'code' || cat === 'other';
+  });
 
   $effect(() => {
     cwd;
@@ -1353,6 +1360,9 @@
       <button class="back-btn" onclick={backToList}><Icon name="chevron-left" size={16} /></button>
       <span class="preview-name">{currentFile.name}</span>
       <div class="preview-actions">
+        {#if isLinedPreview}
+          <button class="act-btn" class:on={wrapLines} onclick={() => wrapLines = !wrapLines} title={wrapLines ? t('editorNoWrap') : t('editorWrap')}><Icon name={wrapLines ? 'wrap-text' : 'no-wrap'} size={14} /></button>
+        {/if}
         {#if currentFile.stat?.is_text && currentFile.stat?.writable}
           <button class="act-btn" onclick={startEdit}><Icon name="edit" size={14} /></button>
         {/if}
