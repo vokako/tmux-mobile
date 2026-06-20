@@ -200,6 +200,14 @@
   let taEl;     // textarea
   let numsEl;   // gutter
   let hlEl;     // highlight <pre>
+  // Soft-wrap toggle. Prose (markdown / plain text) defaults to wrapped — no
+  // horizontal scrolling while writing, and line numbers are hidden since they
+  // can't track wrapped rows. Code/config (yaml, json, rs, …) defaults to
+  // no-wrap so the gutter stays exactly aligned (long lines scroll sideways).
+  let editWrap = $state(false);
+  function defaultWrapForMime(mime) {
+    return mime === 'text/markdown' || mime === 'text/plain';
+  }
   let confirmDelete = $state(null);
   let deleteTimer;
   let newName = $state('');
@@ -592,6 +600,7 @@
     editContent = currentFile.content;
     editOriginal = currentFile.content;
     undoStack = [];
+    editWrap = defaultWrapForMime(currentFile?.stat?.mime_hint || '');
     view = 'edit';
     navPush();
   }
@@ -625,7 +634,7 @@
     if (numsEl) numsEl.scrollTop = taEl.scrollTop;
     if (hlEl) {
       hlEl.scrollTop = taEl.scrollTop;
-      hlEl.scrollLeft = taEl.scrollLeft;
+      hlEl.scrollLeft = editWrap ? 0 : taEl.scrollLeft;
     }
   }
 
@@ -1329,11 +1338,12 @@
       <button class="back-btn" onclick={backToPreview}><Icon name="chevron-left" size={16} /></button>
       <span class="preview-name">{currentFile.name}{isEdited ? ' *' : ''}</span>
       <div class="preview-actions">
+        <button class="act-btn" class:on={editWrap} onclick={() => { editWrap = !editWrap; requestAnimationFrame(syncEditorScroll); }} title={editWrap ? t('editorNoWrap') : t('editorWrap')}><Icon name={editWrap ? 'wrap-text' : 'no-wrap'} size={14} /></button>
         <button class="act-btn" onclick={undo} disabled={!undoStack.length && editContent === editOriginal}><Icon name="undo" size={14} /></button>
         <button class="act-btn save" onclick={saveFile} disabled={!isEdited}><Icon name="save" size={14} /></button>
       </div>
     </div>
-    <div class="editor-wrap" style="--file-font-size:{fontSize}px">
+    <div class="editor-wrap" class:wrap={editWrap} style="--file-font-size:{fontSize}px">
       <div class="editor-nums" bind:this={numsEl}>{@html editContent.split('\n').map((_, i) => i + 1).join('\n')}</div>
       <div class="editor-layer">
         <pre class="editor-highlight" bind:this={hlEl} aria-hidden="true"><code>{@html highlightCode(editContent, currentFile?.stat?.mime_hint)}</code>{'\n'}</pre>
@@ -1695,6 +1705,7 @@
     color: var(--text3); cursor: pointer; display: flex; -webkit-tap-highlight-color: transparent;
   }
   .act-btn:active { color: var(--accent); }
+  .act-btn.on { color: var(--accent); }
   .act-btn.del:active, .act-btn.del.confirm { color: var(--danger); }
   .del-text { font-size: 10px; font-weight: 600; }
   .act-btn.save { color: var(--accent); }
@@ -1800,6 +1811,14 @@
     font-family: var(--font-mono); font-size: var(--file-font-size, 13px); line-height: 1.5; outline: none;
     white-space: pre; overflow: auto; -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y;
   }
+  /* Wrapped (prose) mode: soft-wrap, no horizontal scroll, hide the gutter
+     (line numbers can't track wrapped rows). */
+  .editor-wrap.wrap .editor-nums { display: none; }
+  .editor-wrap.wrap .editor-highlight,
+  .editor-wrap.wrap .editor {
+    white-space: pre-wrap; word-break: break-word; overflow-x: hidden;
+  }
+  .editor-wrap.wrap .editor { touch-action: pan-y; }
   .info-body { flex: 1; overflow: auto; padding: 12px; }
   .info-row {
     display: flex; padding: 10px 0; border-bottom: 1px solid var(--border2);

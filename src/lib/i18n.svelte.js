@@ -15,6 +15,8 @@ const msgs = {
     terminal: 'Terminal',
     chat: 'Chat',
     files: 'Files',
+    editorWrap: 'Wrap lines',
+    editorNoWrap: 'No wrap',
     team: 'Team',
 
     theme: 'Theme',
@@ -186,6 +188,8 @@ const msgs = {
     terminal: '终 端',
     chat: '聊 天',
     files: '文 件',
+    editorWrap: '自动换行',
+    editorNoWrap: '不换行',
     team: '团 队',
 
     theme: '主题',
