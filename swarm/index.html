@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kiro · Multi-Agent Orchestration</title>
+<style>
+:root{
+  --bg:#0b0b14;--bg2:#12121f;--surface:#0f1420;
+  --border:#1e2736;--border2:#283040;
+  --t1:#e6e9f0;--t2:#8b96a8;--t3:#5a6478;
+  --accent:#8b5cf6;--accent2:#6d28d9;
+  --blue:#3b82f6;--green:#22c55e;--amber:#eab308;--orange:#f97316;--red:#ef4444;
+  --code-bg:#161825;--code-fg:#5eead4;
+  --mono:'JetBrains Mono','SF Mono','Fira Code','Cascadia Code',monospace;
+  --sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
+  /* diagram palette (used by inline SVG via var()) */
+  --dg-bg:#0b0b14;--dg-panel:#0f1420;--dg-stroke:#1e2736;
+  --dg-t1:#e6e9f0;--dg-t2:#8b96a8;--dg-t3:#5a6478;
+  --dg-tx-green:#22c55e;--dg-tx-purple:#c4b5fd;--dg-tx-blue:#93c5fd;--dg-tx-amber:#eab308;--dg-tx-orange:#fdba74;--dg-tx-red:#fca5a5;
+  --dg-blue-fill:#162036;--dg-purple-fill:#1a1530;--dg-green-fill:#0c1a12;--dg-amber-fill:#1c1a08;--dg-orange-fill:#1c1208;--dg-red-fill:#1c0c0c;
+}
+:root[data-theme="light"]{
+  --bg:#f7f8fb;--bg2:#eceff4;--surface:#ffffff;
+  --border:#e3e7ee;--border2:#eef1f6;
+  --t1:#151823;--t2:#535e76;--t3:#94a0b4;
+  --code-bg:#f0f2f7;--code-fg:#0d9488;
+}
+:root[data-theme="light"]{
+  --dg-bg:#ffffff;--dg-panel:#ffffff;--dg-stroke:#dbe1ea;
+  --dg-t1:#1a1d26;--dg-t2:#56607a;--dg-t3:#9aa4b4;
+  --dg-tx-green:#16a34a;--dg-tx-purple:#7c3aed;--dg-tx-blue:#2563eb;--dg-tx-amber:#a16207;--dg-tx-orange:#ea580c;--dg-tx-red:#dc2626;
+  --dg-blue-fill:#eef5ff;--dg-purple-fill:#f4f0ff;--dg-green-fill:#ecfdf5;--dg-amber-fill:#fefce8;--dg-orange-fill:#fff7ed;--dg-red-fill:#fef2f2;
+}
+*{box-sizing:border-box;margin:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--t1);font-family:var(--sans);line-height:1.72;-webkit-font-smoothing:antialiased;transition:background .25s ease,color .25s ease}
+a{color:var(--accent);text-decoration:none}
+.wrap{max-width:1480px;margin:0 auto;padding:0 clamp(20px,4vw,72px)}
+
+.controls{position:fixed;top:18px;right:20px;z-index:20;display:flex;gap:8px}
+.ctl-btn{width:38px;height:38px;border-radius:10px;
+  border:1px solid var(--border);background:var(--surface);color:var(--t2);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;transition:all .2s ease;
+  font-family:var(--mono);font-size:13px;font-weight:600;padding:0}
+.ctl-btn:hover{color:var(--t1);border-color:var(--accent)}
+
+header{display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:52px 0 40px}
+.eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--t3);margin-bottom:14px}
+h1{font-size:clamp(32px,5.6vw,54px);line-height:1.18;font-weight:700;color:var(--t1);margin-bottom:4px}
+h1 span{background:linear-gradient(135deg,var(--accent) 20%,var(--blue) 80%);-webkit-background-clip:text;background-clip:text;color:transparent}
+.lede{max-width:700px;margin:0 auto;font-size:clamp(15px,1.8vw,17px);color:var(--t2)}
+
+section{display:flex;flex-direction:column;justify-content:center;padding:60px 0;border-top:1px solid var(--border)}
+h2{font-size:clamp(20px,3vw,28px);font-weight:700;margin-bottom:6px}
+.section-sub{color:var(--t2);margin-bottom:18px;max-width:720px}
+.label{font-family:var(--mono);font-size:clamp(22px,3vw,32px);letter-spacing:.01em;color:var(--t1);margin-bottom:22px;font-weight:700}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:22px}
+.card h3{font-size:15px;margin-bottom:6px;font-weight:600}
+.card p{color:var(--t2);font-size:14px;margin:0}
+
+.fig{background:var(--dg-bg);border:1px solid var(--dg-stroke);border-radius:12px;padding:14px;margin-top:8px;overflow-x:auto;transition:background .25s ease,border-color .25s ease}
+.fig svg{display:block;width:100%;height:auto;max-height:72vh;margin:0 auto}
+.demo-fig{padding:0;background:transparent;border:none;display:flex;flex-direction:column;align-items:center;gap:12px}
+.demo-gif{display:block;max-width:100%;max-height:78vh;height:auto;width:auto;border-radius:12px;border:1px solid var(--dg-stroke)}
+#resources .qr-row{display:flex;gap:clamp(36px,8vw,120px);justify-content:center;align-items:flex-start;flex-wrap:wrap;margin-top:12px}
+#resources .qr-item{display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;text-decoration:none}
+#resources .qr-item:hover .qr-card{border-color:var(--accent)}
+#resources .qr-card{padding:16px;flex-shrink:0}
+#resources .qr-svg{width:clamp(140px,18vw,200px);height:clamp(140px,18vw,200px)}
+#resources .qr-name{font-weight:600;color:var(--t1);font-size:15px}
+#resources .qr-url{font-family:var(--mono);font-size:12px;color:var(--t3)}
+.slide-nav{position:fixed;left:max(8px,env(safe-area-inset-left));top:50%;transform:translateY(-50%);z-index:30;display:flex;flex-direction:column;gap:5px;align-items:center}
+.slide-nav button{appearance:none;-webkit-appearance:none;border:none;background:none;cursor:pointer;padding:0;font-family:var(--mono);font-size:10px;line-height:1;color:var(--t3);opacity:.5;width:18px;height:18px;display:flex;align-items:center;justify-content:center;border-radius:5px;transition:color .2s ease,opacity .2s ease,background .2s ease}
+.slide-nav button:hover{color:var(--t1);opacity:1}
+.slide-nav button.active{color:var(--accent);opacity:1;font-weight:700;background:var(--surface)}
+@media(max-width:560px){.slide-nav button{width:15px;height:15px;font-size:9px}}
+.figcap{color:var(--t3);font-size:12.5px;margin-top:14px;text-align:center;font-family:var(--mono)}
+
+code{font-family:var(--mono);font-size:.88em;background:var(--code-bg);border:1px solid var(--border);border-radius:4px;padding:1px 6px;color:var(--code-fg)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:680px){.two{grid-template-columns:1fr}}
+
+ul.items{list-style:none;padding:0}
+ul.items li{padding:11px 0 11px 22px;position:relative;color:var(--t2);border-bottom:1px solid var(--border);font-size:14.5px}
+ul.items li:last-child{border-bottom:none}
+ul.items li::before{content:"\2014";position:absolute;left:0;color:var(--t3)}
+ul.items li b{color:var(--t1);font-weight:600}
+
+footer{padding:44px 0 72px;color:var(--t3);font-size:12.5px;text-align:center;border-top:1px solid var(--border);font-family:var(--mono)}
+
+.about-row{display:flex;gap:48px;align-items:center;flex-wrap:wrap;margin-top:8px}
+.qr-card{background:#fff;padding:22px;border-radius:14px;border:1px solid var(--border);flex-shrink:0}
+.qr-svg{display:block;width:240px;height:240px}
+.about-text{flex:1;min-width:240px}
+.about-h{font-size:clamp(18px,2.4vw,22px);color:var(--t1);font-weight:600;margin-bottom:14px}
+.about-link{display:inline-block;font-family:var(--mono);font-size:clamp(15px,2vw,18px);font-weight:600;color:var(--accent);padding:10px 18px;border:1px solid var(--accent);border-radius:8px;margin-bottom:16px}
+.about-link:hover{background:var(--accent);color:#fff}
+.about-sub{color:var(--t2);font-size:15px}
+</style>
+<script>
+  (function(){
+    var t; try{ t = localStorage.getItem('theme'); }catch(e){}
+    if(!t){ t = 'light'; }
+    document.documentElement.setAttribute('data-theme', t);
+  })();
+  function toggleTheme(){
+    var cur = document.documentElement.getAttribute('data-theme');
+    var next = cur === 'light' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', next);
+    try{ localStorage.setItem('theme', next); }catch(e){}
+  }
+</script>
+</head>
+<body>
+<div class="controls">
+  <button class="ctl-btn" id="lang-toggle" aria-label="Switch language" onclick="toggleLang()">中</button>
+  <button class="ctl-btn" aria-label="Toggle light/dark theme" onclick="toggleTheme()">
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.2 A6.8 6.8 0 0 0 8 14.8 Z" fill="currentColor"/></svg>
+  </button>
+</div>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow" data-i18n="hero.eyebrow">Kiro Swarm Team</div>
+  <h1 data-i18n="hero.h1">A team of Kiro agents, working as <span>one</span></h1>
+</header>
+
+
+
+<section id="overview" data-dwell="10000">
+  <div class="label" data-i18n="ov.label">Kiro Swarm Team · System Overview</div>
+  <p class="section-sub" data-i18n="ov.sub">Agents share a message bus and coordinate with two primitives — <code>post</code> and <code>wait</code>. Each agent loads its prompt at startup, then loops: wait for an assignment, reason, run real tools, post a result. Hooks keep it alive; a supervisor heals it if it stalls.</p>
+  <div class="fig">
+    <svg xmlns="http://www.w3.org/2000/svg" class="d1" viewBox="0 0 1280 640" width="1280" height="640">
+<defs>
+  <marker id="ab" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#3b82f6"/></marker>
+  <marker id="ag" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#22c55e"/></marker>
+  <marker id="agSE" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto-start-reverse"><polygon points="0 0,8 3,0 6" fill="#22c55e"/></marker>
+  <marker id="ap" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#8b5cf6"/></marker>
+  <marker id="ao" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#f97316"/></marker>
+  <marker id="ay" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#eab308"/></marker>
+</defs>
+<style>
+  .d1 text{font-family:'JetBrains Mono','SF Mono','Fira Code',monospace;fill:var(--dg-t1)}
+  .d1 .s{fill:var(--dg-t2);font-size:10.5px}.d1 .m{font-size:12.5px}.d1 .t{font-size:14px;font-weight:600}
+  .d1 .dim{fill:var(--dg-t3);font-size:10px;letter-spacing:.05em}
+  .d1 .tg{fill:var(--dg-tx-green)}.d1 .tp{fill:var(--dg-tx-purple)}.d1 .tb{fill:var(--dg-tx-blue)}.d1 .ta{fill:var(--dg-tx-amber)}.d1 .to{fill:var(--dg-tx-orange)}.d1 .tr{fill:var(--dg-tx-red)}
+  .d1 .bg{fill:var(--dg-bg)}
+  .d1 rect.nn{fill:var(--dg-panel);stroke:var(--dg-stroke)}
+  .d1 rect.nmain{fill:var(--dg-panel);stroke:#8b5cf6}
+  .d1 rect.nb{fill:var(--dg-blue-fill);stroke:#3b82f6}
+  .d1 rect.np{fill:var(--dg-purple-fill);stroke:#8b5cf6}
+  .d1 rect.ng{fill:var(--dg-green-fill);stroke:#22c55e}
+  .d1 rect.na{fill:var(--dg-amber-fill);stroke:#eab308}
+  .d1 rect.no{fill:var(--dg-orange-fill);stroke:#f97316}
+  .d1 rect.nr{fill:var(--dg-red-fill);stroke:#ef4444}
+  .d1 .dash{stroke:var(--dg-t3)}
+</style>
+<rect class="bg" width="1280" height="640"/>
+
+<!-- ===== LEFT COLUMN: ENTRY + STARTUP CONFIG ===== -->
+<text class="dim" data-i18n-t="dg.infra" x="40" y="24">INFRASTRUCTURE</text>
+
+<!-- Phone -->
+<rect class="nb" x="44" y="36" width="200" height="48" rx="6" stroke-width="1.2"/>
+<text class="m" x="144" y="56" text-anchor="middle">Phone / Browser</text>
+<text class="s" x="144" y="72" text-anchor="middle">observe, steer</text>
+
+<!-- arrow phone → server -->
+<line x1="144" y1="84" x2="144" y2="106" stroke="#3b82f6" stroke-width="1.2" marker-end="url(#ab)"/>
+<text class="s" x="156" y="100">WS JSON-RPC</text>
+
+<!-- Server -->
+<rect class="nn" x="44" y="110" width="200" height="56" rx="6"/>
+<text class="m" x="144" y="130" text-anchor="middle">tmux-mobile server</text>
+<text class="s" x="144" y="146" text-anchor="middle">Rust · in-process</text>
+<text class="s" x="144" y="160" text-anchor="middle">WS · TeamBridge · Manager</text>
+
+<!-- arrow server → bus (curving right) -->
+<path d="M244,138 C266,138 270,72 290,72" fill="none" stroke="#3b82f6" stroke-width="1.2" marker-end="url(#ab)"/>
+
+<!-- ALSO LOADED config -->
+<rect class="nn" x="44" y="200" width="200" height="120" rx="6"/>
+<text class="dim" x="58" y="218">ALSO LOADED AT STARTUP</text>
+<text class="s" x="58" y="238">mcpServers:</text>
+<text class="s tg" x="62" y="254">@team (bus tools)</text>
+<text class="s" x="62" y="270">+ context7, aws-kb...</text>
+<text class="s" x="58" y="290">skills:</text>
+<text class="s" x="62" y="306">frontend-design...</text>
+
+<!-- FIRST MESSAGE KICK -->
+<rect class="nn" x="44" y="338" width="200" height="76" rx="6"/>
+<text class="dim" x="58" y="356">FIRST MESSAGE (KICK)</text>
+<text class="s" x="58" y="376">"connect to bus,</text>
+<text class="s" x="58" y="390">call wait,</text>
+<text class="s" x="58" y="404">never stop"</text>
+
+<!-- ===== CENTER: BUS + KIRO CLI LOOP + HOOKS + OTHER AGENTS ===== -->
+
+<!-- Bus -->
+<rect class="ng" x="290" y="44" width="670" height="56" rx="8" stroke-width="1.4"/>
+<text class="t tg" x="625" y="68" text-anchor="middle">Message Bus  ·  shared SQLite  ·  MCP :8787</text>
+<text class="s" x="625" y="86" text-anchor="middle">room per workspace · post() / wait() · requires_reply obligation</text>
+
+<!-- Kiro CLI box -->
+<rect class="nmain" x="290" y="120" width="670" height="334" rx="10" stroke-width="1.5"/>
+<text class="t" x="625" y="142" text-anchor="middle">Kiro CLI — inside one agent</text>
+<text class="dim" data-i18n-t="dg.loopall" x="625" y="158" text-anchor="middle">every agent runs this identical loop</text>
+
+<!-- Bus → Kiro CLI bidirectional connector -->
+<line x1="625" y1="100" x2="625" y2="120" stroke="#22c55e" stroke-width="1.2" stroke-dasharray="5,3" marker-start="url(#agSE)" marker-end="url(#agSE)"/>
+
+<!-- STARTUP card inside Kiro CLI -->
+<rect class="nn" x="306" y="170" width="638" height="58" rx="5"/>
+<text class="dim" data-i18n-t="dg.startup" x="320" y="186">LOADED INTO agent.json prompt</text>
+<text class="s tg" x="320" y="204">team_rules (global)</text>
+<text class="s tp" x="500" y="204">+ team prompt (yaml)</text>
+<text class="s tb" x="700" y="204">+ role + goal</text>
+<text class="s" x="320" y="220">→ wrapped in &lt;team-system-prompt&gt; / &lt;role-system-prompt&gt;</text>
+
+<!-- Horizontal loop -->
+<rect class="ng" x="320" y="254" width="100" height="44" rx="22" stroke-width="1.4"/>
+<text class="m" x="370" y="273" text-anchor="middle">wait()</text>
+<text class="s tg" x="370" y="288" text-anchor="middle">idle</text>
+<line x1="420" y1="276" x2="448" y2="276" stroke="#22c55e" stroke-width="1.3" marker-end="url(#ag)"/>
+<text class="s tg" x="434" y="270" text-anchor="middle">@me</text>
+
+<rect class="nb" x="450" y="254" width="100" height="44" rx="6" stroke-width="1.2"/>
+<text class="m" x="500" y="273" text-anchor="middle">reason</text>
+<text class="s tb" x="500" y="288" text-anchor="middle">thinking</text>
+<line x1="550" y1="276" x2="578" y2="276" stroke="#3b82f6" stroke-width="1.3" marker-end="url(#ab)"/>
+
+<rect class="na" x="580" y="254" width="160" height="44" rx="6" stroke-width="1.4"/>
+<text class="m" x="660" y="273" text-anchor="middle">execute tools</text>
+<text class="s ta" x="660" y="288" text-anchor="middle">working — heartbeat fires</text>
+<line x1="740" y1="276" x2="768" y2="276" stroke="#eab308" stroke-width="1.3" marker-end="url(#ay)"/>
+
+<rect class="np" x="770" y="254" width="120" height="44" rx="6" stroke-width="1.3"/>
+<text class="m" x="830" y="273" text-anchor="middle">post(result)</text>
+<text class="s tp" x="830" y="288" text-anchor="middle">@manager / @name</text>
+
+<!-- loop-back rail under boxes -->
+<path d="M830,300 L830,322 L370,322 L370,300" fill="none" stroke="#8b5cf6" stroke-width="1.3" stroke-dasharray="6,3" marker-end="url(#ap)"/>
+<text class="s tp" x="600" y="338" text-anchor="middle">loop · end every turn with wait</text>
+
+<!-- HOOKS row inside Kiro CLI -->
+<rect class="nn" x="306" y="358" width="320" height="84" rx="5"/>
+<text class="dim" x="320" y="376">STOP HOOK · KEEPALIVE</text>
+<text class="s" x="320" y="394">if a turn ends without calling wait,</text>
+<text class="s" x="320" y="410">the hook re-prompts the agent to</text>
+<text class="s" x="320" y="426">stay in the loop</text>
+
+<rect class="no" x="636" y="358" width="308" height="84" rx="5"/>
+<text class="dim" x="650" y="376">HEARTBEAT HOOK</text>
+<text class="s to" x="650" y="394">each real-work tool fires</text>
+<text class="s to" x="650" y="410">POST /api/heartbeat</text>
+<text class="s to" x="650" y="426">→ refreshes "working" status</text>
+<line x1="660" y1="300" x2="660" y2="356" stroke="#f97316" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#ao)"/>
+
+<!-- Other agents strip -->
+<rect class="np" x="290" y="478" width="670" height="84" rx="6" stroke-width="1"/>
+<text class="m" data-i18n-t="dg.others" x="306" y="500">other agents</text>
+<text class="s" data-i18n-t="dg.othersub" x="306" y="516">each = its own Kiro CLI · same loop</text>
+<text class="s" x="306" y="540">manager · product · architect · frontend · backend · reviewer · tester · . . .</text>
+<line x1="625" y1="100" x2="625" y2="478" stroke="none"/>
+
+<!-- ===== RIGHT COLUMN: EXTERNAL + STATUS LADDER + SELF-HEAL + LEGEND ===== -->
+
+<!-- External agents pointer (top of right column) -->
+<text class="dim" x="990" y="24">EXTERNAL AGENTS</text>
+<text class="s to" data-i18n-t="dg.externalnote" x="990" y="42">connect to the same bus</text>
+<text class="s to" x="990" y="56">via HTTP MCP</text>
+<text class="s to" x="990" y="70">x-agent · x-room headers</text>
+<line x1="960" y1="72" x2="990" y2="42" stroke="#f97316" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#ao)"/>
+
+<!-- Presence ladder -->
+<text class="dim" data-i18n-t="dg.ladder" x="990" y="106">PRESENCE LADDER</text>
+<text class="s" data-i18n-t="dg.laddersub" x="990" y="122">node color, driven by heartbeat</text>
+
+<g transform="translate(990,142)">
+  <circle cx="6" cy="0" r="4" fill="#5a6478"/><text class="s" x="20" y="4">idle (parked in wait)</text>
+  <circle cx="6" cy="22" r="4" fill="#3b82f6"/><text class="s" x="20" y="26">thinking (message in)</text>
+  <circle cx="6" cy="44" r="4" fill="#eab308"/><text class="s" x="20" y="48">working (real tool)</text>
+  <circle cx="6" cy="66" r="4" fill="#f97316"/><text class="s" x="20" y="70">hardworking &gt;90s</text>
+  <circle cx="6" cy="88" r="4" fill="#ef4444"/><text class="s" x="20" y="92">stalled &gt;30min</text>
+</g>
+
+<!-- Self-heal note -->
+<rect class="nr" x="990" y="262" width="270" height="68" rx="5"/>
+<text class="dim" x="1004" y="280">SELF-HEAL · SUPERVISOR</text>
+<text class="s tr" x="1004" y="298">silent &gt; 30min →</text>
+<text class="s tr" x="1004" y="314">Esc + nudge back into</text>
+<text class="s tr" x="1004" y="330">the wait loop</text>
+
+<!-- Legend (last) -->
+<text class="dim" data-i18n-t="dg.legendt" x="990" y="358">LEGEND</text>
+<g transform="translate(990,376)">
+  <line x1="0" y1="0" x2="22" y2="0" stroke="#3b82f6" stroke-width="1.3" marker-end="url(#ab)"/>
+  <text class="s" data-i18n-t="dg.lg1" x="32" y="4">RPC / internal</text>
+  <line x1="0" y1="22" x2="22" y2="22" stroke="#22c55e" stroke-width="1.3" stroke-dasharray="5,3" marker-end="url(#ag)"/>
+  <text class="s" data-i18n-t="dg.lg2" x="32" y="26">bus message</text>
+  <line x1="0" y1="44" x2="22" y2="44" stroke="#8b5cf6" stroke-width="1.3" stroke-dasharray="6,3" marker-end="url(#ap)"/>
+  <text class="s" data-i18n-t="dg.lg3" x="32" y="48">agent loop</text>
+  <line x1="0" y1="66" x2="22" y2="66" stroke="#f97316" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#ao)"/>
+  <text class="s" data-i18n-t="dg.lg4" x="32" y="70">heartbeat / hook</text>
+  <line x1="0" y1="88" x2="22" y2="88" class="dash" stroke-width="1" stroke-dasharray="3,2"/>
+  <text class="s" data-i18n-t="dg.lg5" x="32" y="92">config (loaded once)</text>
+</g>
+
+<!-- TMUX SESSION label tucked in -->
+<text class="dim" x="290" y="600">TMUX SESSION · tmm-team-&lt;slug&gt;</text>
+</svg>
+
+    <div class="figcap" data-i18n="ov.figcap">One agent shown in detail; all others run the same loop. Prompts are assembled at startup and baked into the agent config — no external file dependencies at runtime.</div>
+  </div>
+</section>
+
+<section id="demo">
+  <div class="label" data-i18n="demo.label">Multiple Kiro CLIs Working Together</div>
+  <div class="fig demo-fig">
+    <img class="demo-gif" src="https://github.com/vokako/tmux-mobile/releases/download/page-assets/team-demo-2.gif" alt="All Kiro agents at work in their own panes" loading="lazy" decoding="async" />
+    <div class="figcap" data-i18n="demo.cap">Every Kiro agent in its own pane, all at once</div>
+  </div>
+</section>
+
+<section id="demo2">
+  <div class="label" data-i18n="demo2.label">Kiro Swarm Team Message Flow Visualization</div>
+  <div class="fig demo-fig">
+    <img class="demo-gif" src="https://github.com/vokako/tmux-mobile/releases/download/page-assets/team-demo.gif" alt="Kiro agents talking on the message bus" loading="lazy" decoding="async" />
+    <div class="figcap" data-i18n="demo2.cap">Kiro agents coordinating live in the group chat — messages on the bus</div>
+  </div>
+</section>
+
+<section id="why">
+  <div class="label" data-i18n="why.label">01 — Why a Team</div>
+  <p class="section-sub" data-i18n="why.sub">One model doing everything produces unchecked work. A team introduces division of labor, structured handoffs, and adversarial review — the dynamics that make human engineering teams reliable.</p>
+  <div class="grid">
+    <div class="card"><h3 data-i18n="why.c1.h">Shared group chat</h3><p data-i18n="why.c1.p">Human and agents communicate in one append-only bus. Address with <code>@name</code>, broadcast with <code>@all</code>.</p></div>
+    <div class="card"><h3 data-i18n="why.c2.h">Division of labor</h3><p data-i18n="why.c2.p">Each agent owns a role and edits only its files. Tasks are file-disjoint, so work never collides.</p></div>
+    <div class="card"><h3 data-i18n="why.c3.h">Cooperation and opposition</h3><p data-i18n="why.c3.p">Roles collaborate on a shared goal while challenging each other's output. The tension is by design.</p></div>
+    <div class="card"><h3 data-i18n="why.c4.h">Liveness and self-heal</h3><p data-i18n="why.c4.p">A heartbeat-driven status ladder. A wedged agent is nudged back into the loop automatically — no babysitting.</p></div>
+  </div>
+</section>
+
+
+<section id="bus">
+  <div class="label" data-i18n="bus.label">02 — The Bus Protocol</div>
+  <p class="section-sub" data-i18n="bus.sub">The bus is deliberately minimal. Speak with <code>post</code>, listen with <code>wait</code>. Real deliverables live in workspace files — messages only coordinate.</p>
+  <div class="two">
+    <div class="card"><h3><code>post(body, requires_reply)</code></h3><p data-i18n="bus.c1.p">Say something. Address with <code>@name</code> or <code>@all</code>. Setting <code>requires_reply</code> blocks the recipient from waiting until they respond.</p></div>
+    <div class="card"><h3><code>wait()</code></h3><p data-i18n="bus.c2.p">Receive new messages and the roster. Refused while you owe a reply. Every turn ends with <code>wait</code> to stay online.</p></div>
+  </div>
+</section>
+
+<section id="discipline">
+  <div class="label" data-i18n="disc.label">03 — Collaboration Discipline</div>
+  <p class="section-sub" data-i18n="disc.sub">Loaded from the global rules at startup — the same for every team, kept separate from each team's own prompt. It governs how agents behave together, not what they build.</p>
+  <div class="grid">
+    <div class="card"><h3 data-i18n="disc.c1.h">Communication</h3><p data-i18n="disc.c1.p">End every turn with <code>wait</code>. Reply to anything addressed to you — decline with a reason if you must, but never go silent.</p></div>
+    <div class="card"><h3 data-i18n="disc.c2.h">Act at the right moment</h3><p data-i18n="disc.c2.p">Act only when it's your turn. Don't pick up work nobody assigned you, and don't duplicate what someone else is doing.</p></div>
+    <div class="card"><h3 data-i18n="disc.c3.h">Files over messages</h3><p data-i18n="disc.c3.p">Real output lives in workspace files; messages only point to it. If it's not in the repo, it doesn't exist.</p></div>
+    <div class="card"><h3 data-i18n="disc.c4.h">Evidence and honesty</h3><p data-i18n="disc.c4.p">Back a claim with the command you ran and its result. Find the root cause before changing code; say plainly what you didn't verify.</p></div>
+  </div>
+</section>
+
+<section id="status">
+  <div class="label" data-i18n="status.label">04 — Liveness</div>
+  <p class="section-sub" data-i18n="status.sub">Every agent reports its state via heartbeat. With no task it sleeps — pausing its listen on the bus until a new message arrives. Stalled agents are automatically recovered.</p>
+  <div class="fig">
+    <svg viewBox="0 0 1080 234" class="d2" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Status ladder">
+      <defs>
+        <marker id="ar" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#8b96a8"/></marker>
+      </defs>
+      <style>.d2 text{font-family:'JetBrains Mono','SF Mono',monospace;fill:var(--dg-t1)}.d2 .sm{fill:var(--dg-t2);font-size:11px}.d2 .md{font-size:13px}.d2 rect.nn{fill:var(--dg-panel);stroke:var(--dg-stroke)}.d2 rect.nb{fill:var(--dg-blue-fill);stroke:#3b82f6}.d2 rect.na{fill:var(--dg-amber-fill);stroke:#eab308}.d2 rect.no{fill:var(--dg-orange-fill);stroke:#f97316}.d2 rect.nr{fill:var(--dg-red-fill);stroke:#ef4444}.d2 .bg{fill:var(--dg-bg)}</style>
+      <rect class="bg" width="1080" height="234"/>
+      <g>
+        <rect class="nn" x="16" y="50" width="148" height="56" rx="7"/><circle cx="40" cy="78" r="5" fill="#475569"/><text class="md" x="54" y="74">sleep</text><text class="sm" x="54" y="94">no task · paused</text>
+      </g>
+      <g>
+        <rect class="nn" x="196" y="50" width="148" height="56" rx="7"/><circle cx="220" cy="78" r="5" fill="#8b96a8"/><text class="md" x="234" y="74">idle</text><text class="sm" x="234" y="94">parked in wait</text>
+      </g>
+      <g>
+        <rect class="nb" x="376" y="50" width="148" height="56" rx="7"/><circle cx="400" cy="78" r="5" fill="#3b82f6"/><text class="md" x="414" y="74">thinking</text><text class="sm" x="414" y="94">message received</text>
+      </g>
+      <g>
+        <rect class="na" x="556" y="50" width="148" height="56" rx="7"/><circle cx="580" cy="78" r="5" fill="#eab308"/><text class="md" x="594" y="74">working</text><text class="sm" x="594" y="94">tool in progress</text>
+      </g>
+      <g>
+        <rect class="no" x="736" y="50" width="148" height="56" rx="7"/><circle cx="760" cy="78" r="5" fill="#f97316"/><text class="md" x="774" y="74">hardworking</text><text class="sm" x="774" y="94">&gt; 90s busy</text>
+      </g>
+      <g>
+        <rect class="nr" x="916" y="50" width="148" height="56" rx="7"/><circle cx="940" cy="78" r="5" fill="#ef4444"/><text class="md" x="954" y="74">stalled</text><text class="sm" x="954" y="94">presumed stuck</text>
+      </g>
+      <line x1="164" y1="78" x2="194" y2="78" stroke="#8b96a8" stroke-width="1.2" marker-end="url(#ar)"/>
+      <line x1="344" y1="78" x2="374" y2="78" stroke="#8b96a8" stroke-width="1.2" marker-end="url(#ar)"/>
+      <line x1="524" y1="78" x2="554" y2="78" stroke="#8b96a8" stroke-width="1.2" marker-end="url(#ar)"/>
+      <line x1="704" y1="78" x2="734" y2="78" stroke="#8b96a8" stroke-width="1.2" marker-end="url(#ar)"/>
+      <line x1="884" y1="78" x2="914" y2="78" stroke="#8b96a8" stroke-width="1.2" marker-end="url(#ar)"/>
+      <text class="sm" data-i18n-t="st.sleep" x="16" y="150">sleep: with no task, the agent pauses its listen on the bus to save tokens — a new message wakes it back to idle.</text>
+      <text class="sm" data-i18n-t="st.l1" x="16" y="170">Heartbeat: each real-work tool hits /api/heartbeat, refreshing the working status.</text>
+      <text class="sm" data-i18n-t="st.l2" x="16" y="190">Silent &gt; 90s becomes hardworking/stalled. Silent &gt; 30min triggers an auto-nudge (Esc + reconnect).</text>
+      <text class="sm" data-i18n-t="st.l3" x="16" y="210">Bus tools (wait/post) do NOT flip thinking to working — only real work tools do.</text>
+    </svg>
+  </div>
+</section>
+
+<section id="sprint">
+  <div class="label" data-i18n="sprint.label">05 — Example: software-dev</div>
+  <p class="section-sub" data-i18n="sprint.sub">The manager is the sole human-facing intake and the only dispatcher. Work flows through a deterministic sequence — each role acts only in its own phase, only when handed off.</p>
+  <div class="fig">
+    <svg viewBox="0 0 960 320" class="d3" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sprint phases">
+      <defs>
+        <marker id="dp" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#8b5cf6"/></marker>
+      </defs>
+      <style>.d3 text{font-family:'JetBrains Mono','SF Mono',monospace;fill:var(--dg-t1)}.d3 .sm{fill:var(--dg-t2);font-size:10.5px}.d3 .md{font-size:12.5px}.d3 .ph{fill:var(--dg-t3);font-size:10.5px;font-weight:700;letter-spacing:.04em}.d3 .mut{fill:var(--dg-t3)}.d3 .bg{fill:var(--dg-bg)}.d3 rect.nn{fill:var(--dg-panel);stroke:var(--dg-stroke)}.d3 rect.np{fill:var(--dg-purple-fill);stroke:#8b5cf6}</style>
+      <rect class="bg" width="960" height="320"/>
+
+      <rect class="np" x="380" y="20" width="200" height="48" rx="7" stroke-width="1.4"/>
+      <text class="md" x="480" y="42" text-anchor="middle">manager</text>
+      <text class="sm" data-i18n-t="sp.mgr" x="480" y="58" text-anchor="middle">sole intake / dispatcher</text>
+      <text class="mut" data-i18n-t="sp.human" x="480" y="14" text-anchor="middle" font-size="11">human talks to manager only</text>
+
+      <g>
+        <rect class="nn" x="20" y="128" width="134" height="72" rx="6"/><text class="ph" x="30" y="122">1. REQUIREMENTS</text>
+        <text class="md" x="87" y="158" text-anchor="middle">product</text><text class="sm" x="87" y="178" text-anchor="middle">thorough research</text><text class="sm" x="87" y="192" text-anchor="middle">requirements.md</text>
+      </g>
+      <g>
+        <rect class="nn" x="172" y="128" width="134" height="72" rx="6"/><text class="ph" x="182" y="122">2. DESIGN</text>
+        <text class="md" x="239" y="158" text-anchor="middle">architect</text><text class="sm" x="239" y="178" text-anchor="middle">design note</text><text class="sm" x="239" y="192" text-anchor="middle">API contract</text>
+      </g>
+      <g>
+        <rect class="nn" x="324" y="128" width="134" height="72" rx="6"/><text class="ph" x="334" y="122">3. PLAN</text>
+        <text class="md" x="391" y="158" text-anchor="middle">manager</text><text class="sm" x="391" y="178" text-anchor="middle">file-disjoint tasks</text><text class="sm" x="391" y="192" text-anchor="middle">human approval</text>
+      </g>
+      <g>
+        <rect class="np" x="476" y="128" width="134" height="72" rx="6" stroke-width="1.2"/><text class="ph" x="486" y="122">4. BUILD</text>
+        <text class="md" x="543" y="158" text-anchor="middle">frontend</text><text class="md" x="543" y="176" text-anchor="middle">backend</text><text class="sm" x="543" y="192" text-anchor="middle">parallel, no overlap</text>
+      </g>
+      <g>
+        <rect class="nn" x="628" y="128" width="134" height="72" rx="6"/><text class="ph" x="638" y="122">5. REVIEW</text>
+        <text class="md" x="695" y="158" text-anchor="middle">reviewer</text><text class="sm" x="695" y="178" text-anchor="middle">spec + best practice</text><text class="sm" x="695" y="192" text-anchor="middle">single quality gate</text>
+      </g>
+      <g>
+        <rect class="nn" x="780" y="128" width="154" height="72" rx="6"/><text class="ph" x="790" y="122">6. TEST / 7. SHIP</text>
+        <text class="md" x="857" y="158" text-anchor="middle">tester / devops</text><text class="sm" x="857" y="178" text-anchor="middle">e2e validation</text><text class="sm" x="857" y="192" text-anchor="middle">IaC delivery</text>
+      </g>
+
+      <line x1="154" y1="164" x2="170" y2="164" stroke="#8b5cf6" stroke-width="1.2" marker-end="url(#dp)"/>
+      <line x1="306" y1="164" x2="322" y2="164" stroke="#8b5cf6" stroke-width="1.2" marker-end="url(#dp)"/>
+      <line x1="458" y1="164" x2="474" y2="164" stroke="#8b5cf6" stroke-width="1.2" marker-end="url(#dp)"/>
+      <line x1="610" y1="164" x2="626" y2="164" stroke="#8b5cf6" stroke-width="1.2" marker-end="url(#dp)"/>
+      <line x1="762" y1="164" x2="778" y2="164" stroke="#8b5cf6" stroke-width="1.2" marker-end="url(#dp)"/>
+
+      <text class="mut" data-i18n-t="sp.n1" x="480" y="266" text-anchor="middle">Each role acts only in its own phase — engineers build, only DevOps ships.</text>
+      <text class="mut" data-i18n-t="sp.n2" x="480" y="286" text-anchor="middle">Two prompt layers: the global rules set the discipline; this team's prompt sets the phases.</text>
+    </svg>
+  </div>
+</section>
+
+<section id="iso">
+  <div class="label" data-i18n="iso.label">06 — Isolation and Recovery</div>
+  <div class="grid">
+    <div class="card"><h3 data-i18n="iso.c1.h">Workspace-scoped</h3><p data-i18n="iso.c1.p">One team binds to one working directory. Multiple teams run in parallel with isolated rooms and sessions.</p></div>
+    <div class="card"><h3 data-i18n="iso.c2.h">Collision-proof slug</h3><p data-i18n="iso.c2.p">Room slug = directory basename + 6-char SHA-256 of the full canonical path. Same-name directories never collide.</p></div>
+    <div class="card"><h3 data-i18n="iso.c3.h">Self-gitignored runtime</h3><p data-i18n="iso.c3.p">All runtime files live in <code>&lt;workspace&gt;/.tmm/</code> with <code>.tmm/.gitignore</code> containing <code>*</code>. Zero project pollution.</p></div>
+    <div class="card"><h3 data-i18n="iso.c4.h">Restart recovery</h3><p data-i18n="iso.c4.p">Room-to-workspace mapping persists in <code>teams.json</code>. Server restart auto-reattaches to surviving tmux sessions.</p></div>
+  </div>
+</section>
+
+
+<section id="resources" data-dwell="10000">
+  <div class="label" data-i18n="res.label">Resources</div>
+  <div class="about-row">
+    <div class="qr-card"><svg class="qr-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29" shape-rendering="crispEdges" aria-label="QR https://github.com/vokako/tmux-mobile"><rect width="29" height="29" fill="#ffffff"/><path d="M0,0h1v1h-1zM1,0h1v1h-1zM2,0h1v1h-1zM3,0h1v1h-1zM4,0h1v1h-1zM5,0h1v1h-1zM6,0h1v1h-1zM14,0h1v1h-1zM15,0h1v1h-1zM18,0h1v1h-1zM19,0h1v1h-1zM22,0h1v1h-1zM23,0h1v1h-1zM24,0h1v1h-1zM25,0h1v1h-1zM26,0h1v1h-1zM27,0h1v1h-1zM28,0h1v1h-1zM0,1h1v1h-1zM6,1h1v1h-1zM8,1h1v1h-1zM9,1h1v1h-1zM11,1h1v1h-1zM13,1h1v1h-1zM14,1h1v1h-1zM15,1h1v1h-1zM17,1h1v1h-1zM19,1h1v1h-1zM20,1h1v1h-1zM22,1h1v1h-1zM28,1h1v1h-1zM0,2h1v1h-1zM2,2h1v1h-1zM3,2h1v1h-1zM4,2h1v1h-1zM6,2h1v1h-1zM10,2h1v1h-1zM11,2h1v1h-1zM19,2h1v1h-1zM20,2h1v1h-1zM22,2h1v1h-1zM24,2h1v1h-1zM25,2h1v1h-1zM26,2h1v1h-1zM28,2h1v1h-1zM0,3h1v1h-1zM2,3h1v1h-1zM3,3h1v1h-1zM4,3h1v1h-1zM6,3h1v1h-1zM9,3h1v1h-1zM10,3h1v1h-1zM11,3h1v1h-1zM13,3h1v1h-1zM18,3h1v1h-1zM22,3h1v1h-1zM24,3h1v1h-1zM25,3h1v1h-1zM26,3h1v1h-1zM28,3h1v1h-1zM0,4h1v1h-1zM2,4h1v1h-1zM3,4h1v1h-1zM4,4h1v1h-1zM6,4h1v1h-1zM8,4h1v1h-1zM10,4h1v1h-1zM14,4h1v1h-1zM15,4h1v1h-1zM17,4h1v1h-1zM18,4h1v1h-1zM19,4h1v1h-1zM22,4h1v1h-1zM24,4h1v1h-1zM25,4h1v1h-1zM26,4h1v1h-1zM28,4h1v1h-1zM0,5h1v1h-1zM6,5h1v1h-1zM10,5h1v1h-1zM13,5h1v1h-1zM15,5h1v1h-1zM16,5h1v1h-1zM19,5h1v1h-1zM20,5h1v1h-1zM22,5h1v1h-1zM28,5h1v1h-1zM0,6h1v1h-1zM1,6h1v1h-1zM2,6h1v1h-1zM3,6h1v1h-1zM4,6h1v1h-1zM5,6h1v1h-1zM6,6h1v1h-1zM8,6h1v1h-1zM10,6h1v1h-1zM12,6h1v1h-1zM14,6h1v1h-1zM16,6h1v1h-1zM18,6h1v1h-1zM20,6h1v1h-1zM22,6h1v1h-1zM23,6h1v1h-1zM24,6h1v1h-1zM25,6h1v1h-1zM26,6h1v1h-1zM27,6h1v1h-1zM28,6h1v1h-1zM9,7h1v1h-1zM12,7h1v1h-1zM13,7h1v1h-1zM15,7h1v1h-1zM17,7h1v1h-1zM18,7h1v1h-1zM20,7h1v1h-1zM0,8h1v1h-1zM2,8h1v1h-1zM4,8h1v1h-1zM6,8h1v1h-1zM10,8h1v1h-1zM12,8h1v1h-1zM14,8h1v1h-1zM15,8h1v1h-1zM16,8h1v1h-1zM17,8h1v1h-1zM19,8h1v1h-1zM20,8h1v1h-1zM24,8h1v1h-1zM27,8h1v1h-1zM1,9h1v1h-1zM3,9h1v1h-1zM4,9h1v1h-1zM7,9h1v1h-1zM8,9h1v1h-1zM12,9h1v1h-1zM16,9h1v1h-1zM20,9h1v1h-1zM22,9h1v1h-1zM25,9h1v1h-1zM28,9h1v1h-1zM0,10h1v1h-1zM2,10h1v1h-1zM3,10h1v1h-1zM6,10h1v1h-1zM8,10h1v1h-1zM9,10h1v1h-1zM10,10h1v1h-1zM13,10h1v1h-1zM16,10h1v1h-1zM17,10h1v1h-1zM20,10h1v1h-1zM21,10h1v1h-1zM22,10h1v1h-1zM24,10h1v1h-1zM26,10h1v1h-1zM27,10h1v1h-1zM28,10h1v1h-1zM0,11h1v1h-1zM1,11h1v1h-1zM2,11h1v1h-1zM4,11h1v1h-1zM5,11h1v1h-1zM7,11h1v1h-1zM9,11h1v1h-1zM10,11h1v1h-1zM12,11h1v1h-1zM17,11h1v1h-1zM18,11h1v1h-1zM20,11h1v1h-1zM23,11h1v1h-1zM24,11h1v1h-1zM27,11h1v1h-1zM3,12h1v1h-1zM5,12h1v1h-1zM6,12h1v1h-1zM8,12h1v1h-1zM16,12h1v1h-1zM17,12h1v1h-1zM18,12h1v1h-1zM21,12h1v1h-1zM22,12h1v1h-1zM25,12h1v1h-1zM27,12h1v1h-1zM28,12h1v1h-1zM1,13h1v1h-1zM7,13h1v1h-1zM11,13h1v1h-1zM13,13h1v1h-1zM16,13h1v1h-1zM20,13h1v1h-1zM21,13h1v1h-1zM22,13h1v1h-1zM25,13h1v1h-1zM28,13h1v1h-1zM1,14h1v1h-1zM2,14h1v1h-1zM5,14h1v1h-1zM6,14h1v1h-1zM8,14h1v1h-1zM10,14h1v1h-1zM11,14h1v1h-1zM12,14h1v1h-1zM14,14h1v1h-1zM17,14h1v1h-1zM22,14h1v1h-1zM24,14h1v1h-1zM25,14h1v1h-1zM27,14h1v1h-1zM28,14h1v1h-1zM1,15h1v1h-1zM2,15h1v1h-1zM3,15h1v1h-1zM4,15h1v1h-1zM7,15h1v1h-1zM9,15h1v1h-1zM10,15h1v1h-1zM11,15h1v1h-1zM13,15h1v1h-1zM14,15h1v1h-1zM16,15h1v1h-1zM17,15h1v1h-1zM18,15h1v1h-1zM20,15h1v1h-1zM21,15h1v1h-1zM22,15h1v1h-1zM25,15h1v1h-1zM27,15h1v1h-1zM0,16h1v1h-1zM3,16h1v1h-1zM5,16h1v1h-1zM6,16h1v1h-1zM7,16h1v1h-1zM11,16h1v1h-1zM12,16h1v1h-1zM14,16h1v1h-1zM15,16h1v1h-1zM16,16h1v1h-1zM17,16h1v1h-1zM19,16h1v1h-1zM20,16h1v1h-1zM22,16h1v1h-1zM23,16h1v1h-1zM25,16h1v1h-1zM27,16h1v1h-1zM28,16h1v1h-1zM5,17h1v1h-1zM7,17h1v1h-1zM9,17h1v1h-1zM14,17h1v1h-1zM16,17h1v1h-1zM17,17h1v1h-1zM18,17h1v1h-1zM21,17h1v1h-1zM22,17h1v1h-1zM25,17h1v1h-1zM26,17h1v1h-1zM28,17h1v1h-1zM0,18h1v1h-1zM6,18h1v1h-1zM7,18h1v1h-1zM8,18h1v1h-1zM13,18h1v1h-1zM21,18h1v1h-1zM23,18h1v1h-1zM24,18h1v1h-1zM27,18h1v1h-1zM28,18h1v1h-1zM1,19h1v1h-1zM2,19h1v1h-1zM4,19h1v1h-1zM9,19h1v1h-1zM11,19h1v1h-1zM12,19h1v1h-1zM15,19h1v1h-1zM16,19h1v1h-1zM17,19h1v1h-1zM19,19h1v1h-1zM20,19h1v1h-1zM21,19h1v1h-1zM22,19h1v1h-1zM23,19h1v1h-1zM24,19h1v1h-1zM25,19h1v1h-1zM27,19h1v1h-1zM0,20h1v1h-1zM2,20h1v1h-1zM6,20h1v1h-1zM8,20h1v1h-1zM10,20h1v1h-1zM15,20h1v1h-1zM16,20h1v1h-1zM17,20h1v1h-1zM19,20h1v1h-1zM20,20h1v1h-1zM21,20h1v1h-1zM22,20h1v1h-1zM23,20h1v1h-1zM24,20h1v1h-1zM8,21h1v1h-1zM10,21h1v1h-1zM11,21h1v1h-1zM12,21h1v1h-1zM13,21h1v1h-1zM16,21h1v1h-1zM19,21h1v1h-1zM20,21h1v1h-1zM24,21h1v1h-1zM26,21h1v1h-1zM27,21h1v1h-1zM28,21h1v1h-1zM0,22h1v1h-1zM1,22h1v1h-1zM2,22h1v1h-1zM3,22h1v1h-1zM4,22h1v1h-1zM5,22h1v1h-1zM6,22h1v1h-1zM11,22h1v1h-1zM12,22h1v1h-1zM14,22h1v1h-1zM19,22h1v1h-1zM20,22h1v1h-1zM22,22h1v1h-1zM24,22h1v1h-1zM25,22h1v1h-1zM27,22h1v1h-1zM28,22h1v1h-1zM0,23h1v1h-1zM6,23h1v1h-1zM10,23h1v1h-1zM13,23h1v1h-1zM14,23h1v1h-1zM15,23h1v1h-1zM16,23h1v1h-1zM17,23h1v1h-1zM18,23h1v1h-1zM20,23h1v1h-1zM24,23h1v1h-1zM25,23h1v1h-1zM0,24h1v1h-1zM2,24h1v1h-1zM3,24h1v1h-1zM4,24h1v1h-1zM6,24h1v1h-1zM8,24h1v1h-1zM9,24h1v1h-1zM12,24h1v1h-1zM14,24h1v1h-1zM15,24h1v1h-1zM16,24h1v1h-1zM17,24h1v1h-1zM20,24h1v1h-1zM21,24h1v1h-1zM22,24h1v1h-1zM23,24h1v1h-1zM24,24h1v1h-1zM27,24h1v1h-1zM28,24h1v1h-1zM0,25h1v1h-1zM2,25h1v1h-1zM3,25h1v1h-1zM4,25h1v1h-1zM6,25h1v1h-1zM10,25h1v1h-1zM14,25h1v1h-1zM17,25h1v1h-1zM18,25h1v1h-1zM20,25h1v1h-1zM23,25h1v1h-1zM24,25h1v1h-1zM26,25h1v1h-1zM27,25h1v1h-1zM28,25h1v1h-1zM0,26h1v1h-1zM2,26h1v1h-1zM3,26h1v1h-1zM4,26h1v1h-1zM6,26h1v1h-1zM8,26h1v1h-1zM11,26h1v1h-1zM12,26h1v1h-1zM14,26h1v1h-1zM16,26h1v1h-1zM19,26h1v1h-1zM23,26h1v1h-1zM24,26h1v1h-1zM25,26h1v1h-1zM28,26h1v1h-1zM0,27h1v1h-1zM6,27h1v1h-1zM9,27h1v1h-1zM10,27h1v1h-1zM11,27h1v1h-1zM12,27h1v1h-1zM14,27h1v1h-1zM15,27h1v1h-1zM17,27h1v1h-1zM18,27h1v1h-1zM19,27h1v1h-1zM20,27h1v1h-1zM21,27h1v1h-1zM24,27h1v1h-1zM27,27h1v1h-1zM0,28h1v1h-1zM1,28h1v1h-1zM2,28h1v1h-1zM3,28h1v1h-1zM4,28h1v1h-1zM5,28h1v1h-1zM6,28h1v1h-1zM8,28h1v1h-1zM10,28h1v1h-1zM12,28h1v1h-1zM15,28h1v1h-1zM17,28h1v1h-1zM19,28h1v1h-1zM20,28h1v1h-1zM21,28h1v1h-1zM23,28h1v1h-1zM24,28h1v1h-1zM27,28h1v1h-1zM28,28h1v1h-1z" fill="#000000"/></svg></div>
+    <div class="about-text">
+      <p class="about-h" data-i18n="about.h">Scan or click to open the GitHub repo</p>
+      <a class="about-link" href="https://github.com/vokako/tmux-mobile" target="_blank" rel="noopener">github.com/vokako/tmux-mobile</a>
+      <p class="about-sub" data-i18n="about.sub">Source code, docs, and issues — all in one place.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap" data-i18n="footer">
+    Multi-Agent Orchestration<br>
+    A shared bus, a roster of agents, one task.
+  </div>
+</footer>
+
+</div>
+<script>
+(function(){
+  var I18N = {
+    en: {
+      "hero.eyebrow":"Kiro Swarm Team",
+      "hero.h1":"A team of Kiro agents, working as <span>one</span>",
+      "res.label":"Resources","res.kiro":"Kiro Website","res.tmm":"Kiro Swarm Team Sample Source",
+      "hero.lede":"Several agents work one task together over a shared message bus: they split the work, review and push back on each other, and each runs its own loop. The diagram below shows how the pieces fit together.",
+      "ov.label":"Kiro Swarm Team · System Overview",
+      "demo.label":"Multiple Kiro CLIs Working Together",
+      "demo.cap":"Every Kiro agent in its own pane, all at once",
+      "demo2.label":"Kiro Swarm Team Message Flow Visualization",
+      "demo2.cap":"Kiro agents coordinating live in the group chat — messages on the bus",
+      "ov.h2":"How it all fits together",
+      "ov.sub":"Agents share a message bus and coordinate with two primitives — <code>post</code> and <code>wait</code>. Each agent loads its prompt at startup, then loops: wait for an assignment, reason, run real tools, post a result. Hooks keep it alive; a supervisor heals it if it stalls.",
+      "ov.figcap":"One agent shown in detail; all others run the same loop. Prompts are assembled at startup and baked into the agent config — no external file dependencies at runtime.",
+      "why.label":"01 — Why a Team",
+      "why.h2":"A single agent lacks accountability",
+      "why.sub":"One model doing everything produces unchecked work. A team introduces division of labor, structured handoffs, and adversarial review — the dynamics that make human engineering teams reliable.",
+      "why.c1.h":"Shared group chat","why.c1.p":"Human and agents communicate in one append-only bus. Address with <code>@name</code>, broadcast with <code>@all</code>.",
+      "why.c2.h":"Division of labor","why.c2.p":"Each agent owns a role and edits only its files. Tasks are file-disjoint, so work never collides.",
+      "why.c3.h":"Cooperation and opposition","why.c3.p":"Roles collaborate on a shared goal while challenging each other's output. The tension is by design.",
+      "why.c4.h":"Liveness and self-heal","why.c4.p":"A heartbeat-driven status ladder. A wedged agent is nudged back into the loop automatically — no babysitting.",
+      "bus.label":"02 — The Bus Protocol",
+      "bus.h2":"Two actions, nothing more",
+      "bus.sub":"The bus is deliberately minimal. Speak with <code>post</code>, listen with <code>wait</code>. Real deliverables live in workspace files — messages only coordinate.",
+      "bus.c1.p":"Say something. Address with <code>@name</code> or <code>@all</code>. Setting <code>requires_reply</code> blocks the recipient from waiting until they respond.",
+      "bus.c2.p":"Receive new messages and the roster. Refused while you owe a reply. Every turn ends with <code>wait</code> to stay online.",
+      "bus.li1":"<b>Work in files, not messages.</b> Code, docs, results go into the workspace. Messages point to them.",
+      "bus.li2":"<b>Act only when addressed.</b> Not mentioned? <code>wait</code>. Don't grab unassigned work.",
+      "bus.li3":"<b>Memory is the filesystem.</b> If it's not in the repo, it doesn't exist.",
+      "status.label":"04 — Liveness",
+      "status.h2":"Status ladder and self-healing",
+      "status.sub":"Every agent reports its state via heartbeat. With no task it sleeps — pausing its listen on the bus until a new message arrives. Stalled agents are automatically recovered.",
+      "sprint.label":"05 — Example: software-dev",
+      "sprint.h2":"Manager-led sprint with fixed phases",
+      "sprint.sub":"The manager is the sole human-facing intake and the only dispatcher. Work flows through a deterministic sequence — each role acts only in its own phase, only when handed off.",
+      "iso.label":"06 — Isolation and Recovery",
+      "iso.h2":"Clean boundaries, restart-safe",
+      "iso.c1.h":"Workspace-scoped","iso.c1.p":"One team binds to one working directory. Multiple teams run in parallel with isolated rooms and sessions.",
+      "iso.c2.h":"Collision-proof slug","iso.c2.p":"Room slug = directory basename + 6-char SHA-256 of the full canonical path. Same-name directories never collide.",
+      "iso.c3.h":"Self-gitignored runtime","iso.c3.p":"All runtime files live in <code>&lt;workspace&gt;/.tmm/</code> with <code>.tmm/.gitignore</code> containing <code>*</code>. Zero project pollution.",
+      "iso.c4.h":"Restart recovery","iso.c4.p":"Room-to-workspace mapping persists in <code>teams.json</code>. Server restart auto-reattaches to surviving tmux sessions.",
+      "about.label":"08 — Learn More","about.h":"Scan or click to open the GitHub repo","about.sub":"Source code, docs, and issues — all in one place.",
+      "footer":"Multi-Agent Orchestration<br>A shared bus, a roster of agents, one task.",
+      "disc.label":"03 — Collaboration Discipline","disc.h2":"The contract every agent is handed",
+      "disc.sub":"Loaded from the global rules at startup — the same for every team, kept separate from each team's own prompt. It governs how agents behave together, not what they build.",
+      "disc.c1.h":"Communication","disc.c1.p":"End every turn with <code>wait</code>. Reply to anything addressed to you — decline with a reason if you must, but never go silent.",
+      "disc.c2.h":"Act at the right moment","disc.c2.p":"Act only when it's your turn. Don't pick up work nobody assigned you, and don't duplicate what someone else is doing.",
+      "disc.c3.h":"Files over messages","disc.c3.p":"Real output lives in workspace files; messages only point to it. If it's not in the repo, it doesn't exist.",
+      "disc.c4.h":"Evidence and honesty","disc.c4.p":"Back a claim with the command you ran and its result. Find the root cause before changing code; say plainly what you didn't verify.",
+      "dg.infra":"INFRASTRUCTURE","dg.external":"external","dg.loopall":"every agent runs this identical loop",
+      "dg.startup":"LOADED AT STARTUP (into agent.json prompt)","dg.others":"other agents","dg.othersub":"each = its own Kiro CLI",
+      "dg.ladder":"PRESENCE LADDER","dg.laddersub":"node color, driven by heartbeat","dg.legendt":"LEGEND","dg.externalnote":"connect to the same bus",
+      "dg.lg1":"RPC / internal","dg.lg2":"bus message","dg.lg3":"agent loop","dg.lg4":"heartbeat / hook","dg.lg5":"config (loaded once)",
+      "st.sleep":"sleep: with no task, the agent pauses its listen on the bus to save tokens — a new message wakes it back to idle.",
+      "st.l1":"Heartbeat: each real-work tool hits /api/heartbeat, refreshing the working status.",
+      "st.l2":"Silent > 90s becomes hardworking/stalled. Silent > 30min triggers an auto-nudge (Esc + reconnect).",
+      "st.l3":"Bus tools (wait/post) do NOT flip thinking to working — only real work tools do.",
+      "sp.mgr":"sole intake / dispatcher","sp.human":"human talks to manager only",
+      "sp.n1":"Each role acts only in its own phase — engineers build, only DevOps ships.",
+      "sp.n2":"Two prompt layers: the global rules set the discipline; this team's prompt sets the phases."
+    },
+    zh: {
+      "hero.eyebrow":"Kiro Swarm Team",
+      "hero.h1":"一支 Kiro 团队，像<span>一个整体</span>那样协作",
+      "res.label":"了解更多","res.kiro":"Kiro 官网","res.tmm":"Kiro Swarm Team 示例源码",
+      "hero.lede":"几个 Agent 通过一条共享消息总线一起做同一件事：分工、互相评审和反驳，各自跑自己的循环。下面这张图画的就是它们怎么连起来的。",
+      "ov.label":"Kiro Swarm Team · 整体架构",
+      "demo.label":"多个 Kiro CLI 协同工作",
+      "demo.cap":"每个 Kiro Agent 都在自己的面里同时工作",
+      "demo2.label":"Kiro Swarm Team 通信信息流可视化",
+      "demo2.cap":"Kiro 团队在群聊里实时协作 — 消息在总线上流动",
+      "ov.h2":"整体是怎么跑起来的",
+      "ov.sub":"Agent 共享一条消息总线，用两个原语协作——<code>post</code> 与 <code>wait</code>。每个 Agent 启动时加载提示词，然后循环：等待任务、推理、调用真实工具、汇报结果。Hook 负责保活，卡死时由 supervisor 自愈。",
+      "ov.figcap":"图中详细展开一个 Agent；其余都跑同一套循环。提示词在启动时组装并写入 Agent 配置——运行时不依赖任何外部文件。",
+      "why.label":"01 — 为什么要团队",
+      "why.h2":"单个 Agent 缺乏制衡",
+      "why.sub":"一个模型包揽一切，产出无人把关。团队引入分工、结构化交接与对抗式评审——正是让人类工程团队可靠的那套机制。",
+      "why.c1.h":"共享群聊","why.c1.p":"人与 Agent 在一条 append-only 总线上沟通。用 <code>@name</code> 点名，<code>@all</code> 广播。",
+      "why.c2.h":"明确分工","why.c2.p":"每个 Agent 负责一个角色，只改自己的文件。任务按文件互斥拆分，绝不冲突。",
+      "why.c3.h":"协作与对抗","why.c3.p":"角色围绕同一目标协作，同时互相 challenge 对方的产出。这种张力是刻意设计的。",
+      "why.c4.h":"存活与自愈","why.c4.p":"由心跳驱动的状态阶梯。卡死的 Agent 会被自动 nudge 回循环——无需盯着。",
+      "bus.label":"02 — 总线协议",
+      "bus.h2":"只有两个动作",
+      "bus.sub":"总线刻意做到极简。用 <code>post</code> 说话，用 <code>wait</code> 收听。真正的产出落在工作区文件里——消息只用于协调。",
+      "bus.c1.p":"说一句话。用 <code>@name</code> 或 <code>@all</code> 点名。设置 <code>requires_reply</code> 会让对方在回复前无法 wait 离开。",
+      "bus.c2.p":"接收新消息和花名册。欠着回复时会被拒绝。每个回合都以 <code>wait</code> 结束以保持在线。",
+      "bus.li1":"<b>在文件里工作，不在消息里。</b>代码、文档、结果都写进工作区，消息只指向它们。",
+      "bus.li2":"<b>只在被点名时行动。</b>没被 @ 到？就 <code>wait</code>。不要抢没分配给你的活。",
+      "bus.li3":"<b>记忆就是文件系统。</b>没进仓库的，等于不存在。",
+      "status.label":"04 — 存活与自愈",
+      "status.h2":"状态阶梯与自愈",
+      "status.sub":"每个 Agent 通过心跳上报状态。没有任务时进入 sleep —— 暂停监听总线，直到有新消息把它唤醒。卡死的 Agent 会被自动恢复。",
+      "sprint.label":"05 — 示例：software-dev 团队",
+      "sprint.h2":"manager 主导、固定阶段的 sprint",
+      "sprint.sub":"manager 是唯一对人入口、唯一派活人。工作按确定的阶段流动——每个角色只在自己的阶段、被交接后才行动。",
+      "iso.label":"06 — 隔离与恢复",
+      "iso.h2":"边界清晰，可重启恢复",
+      "iso.c1.h":"按工作区隔离","iso.c1.p":"一个团队绑定一个工作目录。多个团队并行，各自独立 room 与会话。",
+      "iso.c2.h":"防碰撞 slug","iso.c2.p":"room slug = 目录名 + 完整路径的 6 位 SHA-256。同名目录永不碰撞。",
+      "iso.c3.h":"自我忽略的运行时","iso.c3.p":"所有运行时文件放在 <code>&lt;workspace&gt;/.tmm/</code>，内置 <code>.tmm/.gitignore</code>（<code>*</code>）。零项目污染。",
+      "iso.c4.h":"重启恢复","iso.c4.p":"room→工作区映射持久化在 <code>teams.json</code>。服务重启后自动重新接管仍存活的 tmux 会话。",
+      "about.label":"08 — 了解更多","about.h":"扫码或点击访问 GitHub 仓库","about.sub":"完整源码、文档、问题反馈，都在这里。",
+      "footer":"多 Agent 协作编排<br>一条共享总线，一组 Agent，一个任务。",
+      "disc.label":"03 — 协作纪律","disc.h2":"每个 Agent 都收到的同一份契约",
+      "disc.sub":"启动时从全局规则载入——所有团队通用，与各团队自己的 prompt 分开。它管的是 Agent 之间怎么协作，而不是做什么。",
+      "disc.c1.h":"沟通","disc.c1.p":"每个回合都以 <code>wait</code> 结束。被 @ 到必回——要拒绝就给理由，但绝不沉默。",
+      "disc.c2.h":"按时机行动","disc.c2.p":"只在轮到你时行动。不接没分配给你的活，也不重复别人正在做的事。",
+      "disc.c3.h":"文件优先","disc.c3.p":"真正的产出在工作区文件里；消息只是指路。没进仓库的，等于不存在。",
+      "disc.c4.h":"证据与诚实","disc.c4.p":"结论要附上你跑过的命令和结果。改代码前先找根因；没验证的就直说没验证。",
+      "dg.infra":"基础设施","dg.external":"外部 Agent","dg.loopall":"每个 Agent 都跑这套循环",
+      "dg.startup":"启动时载入（写进 agent.json）","dg.others":"其它 Agent","dg.othersub":"各自一个 Kiro CLI",
+      "dg.ladder":"状态阶梯","dg.laddersub":"节点颜色，由心跳驱动","dg.legendt":"图例","dg.externalnote":"接入同一条总线",
+      "dg.lg1":"RPC / 内部调用","dg.lg2":"总线消息","dg.lg3":"Agent 循环","dg.lg4":"心跳 / Hook","dg.lg5":"配置（仅启动加载）",
+      "st.sleep":"sleep：没有任务时，Agent 暂停监听总线以节省 token —— 新消息会把它唤醒回到 idle。",
+      "st.l1":"心跳：每个真实工作工具都会打到 /api/heartbeat，刷新 working 状态。",
+      "st.l2":"静默 > 90s 变 hardworking/stalled；> 30min 触发自动 nudge（Esc + 重连）。",
+      "st.l3":"总线工具（wait/post）不会把 thinking 顶成 working —— 只有真正干活的工具才会。",
+      "sp.mgr":"唯一入口 / 派活人","sp.human":"人只跟 manager 说",
+      "sp.n1":"每个角色只在自己的阶段行动——工程师写代码，只有 devops 负责上线。",
+      "sp.n2":"两层提示词：全局规则定纪律，本团队的 prompt 定阶段。"
+    }
+  };
+  window.__I18N = I18N;
+  function setLang(l){
+    document.documentElement.setAttribute('lang', l === 'zh' ? 'zh-CN' : 'en');
+    var dict = I18N[l] || I18N.en;
+    document.querySelectorAll('[data-i18n]').forEach(function(el){
+      var k = el.getAttribute('data-i18n');
+      if(dict[k] != null) el.innerHTML = dict[k];
+    });
+    document.querySelectorAll('[data-i18n-t]').forEach(function(el){
+      var k = el.getAttribute('data-i18n-t');
+      if(dict[k] != null) el.textContent = dict[k];
+    });
+    var btn = document.getElementById('lang-toggle');
+    if(btn) btn.textContent = l === 'zh' ? 'EN' : '中';
+    try{ localStorage.setItem('lang', l); }catch(e){}
+    window.__lang = l;
+  }
+  window.toggleLang = function(){ setLang(window.__lang === 'zh' ? 'en' : 'zh'); };
+  var init; try{ init = localStorage.getItem('lang'); }catch(e){}
+  if(!init){ init = 'en'; }
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', function(){ setLang(init); });
+  } else { setLang(init); }
+})();
+</script>
+<script>
+/* Continuous page: left section indicator — click to scroll, highlight on scroll. */
+(function(){
+  var slides = Array.from(document.querySelectorAll('header, section'));
+  if(!slides.length) return;
+  var nav = document.createElement('nav');
+  nav.className = 'slide-nav';
+  nav.setAttribute('aria-label', 'sections');
+  var btns = slides.map(function(s, i){
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = (i + 1);
+    b.setAttribute('aria-label', 'section ' + (i + 1));
+    b.addEventListener('click', function(){ s.scrollIntoView({behavior:'smooth', block:'start'}); });
+    nav.appendChild(b);
+    return b;
+  });
+  document.body.appendChild(nav);
+  function setActive(i){ for(var k = 0; k < btns.length; k++){ btns[k].classList.toggle('active', k === i); } }
+  if('IntersectionObserver' in window){
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){ if(e.isIntersecting){ setActive(slides.indexOf(e.target)); } });
+    }, { rootMargin: '-45% 0px -45% 0px', threshold: 0 });
+    slides.forEach(function(s){ io.observe(s); });
+  } else {
+    var sync = function(){
+      var y = window.scrollY + window.innerHeight/2, cur = 0;
+      for(var i = slides.length-1; i >= 0; i--){ if(slides[i].offsetTop <= y){ cur = i; break; } }
+      setActive(cur);
+    };
+    window.addEventListener('scroll', sync, {passive:true});
+    sync();
+  }
+  setActive(0);
+})();
+</script>
+</body>
+</html>
