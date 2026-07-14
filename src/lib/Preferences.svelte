@@ -39,14 +39,6 @@
 </script>
 
 <section class="preferences" aria-label={t('settings')}>
-  <header class="pref-head">
-    <div>
-      <h1>{t('settings')}</h1>
-      <p>{t('settingsHint')}</p>
-    </div>
-    <button class="close" onclick={onClose} aria-label={t('close')}><Icon name="x" size={18} /></button>
-  </header>
-
   <div class="pref-shell">
     <nav class="pref-tabs" aria-label={t('settings')}>
       {#each tabs as item}
@@ -54,11 +46,11 @@
           <Icon name={item.icon} size={15} /><span>{item.label()}</span>
         </button>
       {/each}
+      <button class="close" onclick={onClose} aria-label={t('close')}><Icon name="x" size={16} /></button>
     </nav>
 
     <div class="pref-content">
       {#if tab === 'appearance'}
-        <div class="section-head"><h2>{t('settingsAppearance')}</h2><p>{t('settingsAppearanceHint')}</p></div>
         <div class="setting-card">
           <div class="setting-row">
             <div><strong>{t('theme')}</strong><small>{t('themeHint')}</small></div>
@@ -85,7 +77,6 @@
           </div>
         </div>
       {:else if tab === 'terminal'}
-        <div class="section-head"><h2>{t('terminal')}</h2><p>{t('settingsTerminalHint')}</p></div>
         <div class="setting-card">
           <div class="setting-row">
             <div><strong>{t('fontFamily')}</strong><small>{t('fontFamilyHint')}</small></div>
@@ -110,7 +101,6 @@
           </div>
         </div>
       {:else}
-        <div class="section-head"><h2>{t('settingsConnection')}</h2><p>{t('settingsConnectionHint')}</p></div>
         <div class="setting-card">
           {#if connected}
             <div class="connection-title">
@@ -141,16 +131,13 @@
 
 <style>
   .preferences { position: fixed; inset: calc(49px + var(--sat)) 0 0; z-index: 19; display:flex; flex-direction:column; background:var(--bg); color:var(--text); }
-  .pref-head { min-height:46px; display:flex; align-items:center; justify-content:space-between; padding:7px 14px 7px 18px; border-bottom:1px solid var(--border); background:var(--surface); flex-shrink:0; }
-  h1,h2,p { margin:0; } h1{font-size:15px;font-weight:650;} .pref-head p,.section-head p{font-size:11px;color:var(--text3);margin-top:2px;}
-  .close { width:28px;height:28px;border:0;border-radius:7px;background:transparent;color:var(--text3);display:flex;align-items:center;justify-content:center;cursor:pointer; }
+  .close { width:28px;height:28px;margin-top:auto;border:0;border-radius:7px;background:transparent;color:var(--text3);display:flex;align-items:center;justify-content:center;cursor:pointer; }
   .close:hover { background:var(--pill-bg);color:var(--text); }
   .pref-shell { flex:1;min-height:0;display:flex; }
   .pref-tabs { width:158px;padding:10px 8px;border-right:1px solid var(--border);display:flex;flex-direction:column;gap:2px;background:var(--surface); }
   .pref-tabs button { display:flex;align-items:center;gap:8px;padding:7px 9px;border:0;border-radius:7px;background:none;color:var(--text3);font-size:12px;text-align:left;cursor:pointer; }
   .pref-tabs button.active { background:var(--accent-bg);color:var(--accent);font-weight:600; }
   .pref-content { flex:1;min-width:0;overflow:auto;padding:22px clamp(18px,4vw,36px); }
-  .section-head { max-width:680px;margin:0 auto 12px; } .section-head h2{font-size:16px;font-weight:650;}
   .setting-card { max-width:680px;margin:0 auto;border:1px solid var(--border);border-radius:9px;background:var(--surface);overflow:hidden; }
   .setting-row { min-height:54px;padding:9px 12px;display:flex;align-items:center;justify-content:space-between;gap:16px; }
   .setting-row+.setting-row { border-top:1px solid var(--border2); } .setting-row>div:first-child{display:flex;flex-direction:column;gap:4px;min-width:0;}
@@ -167,6 +154,6 @@
   .compact{border-top:1px solid var(--border2)}.toggle{border:0;border-radius:999px;background:var(--pill-bg);color:var(--text3);padding:3px 8px 3px 3px;display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px}.toggle span{width:14px;height:14px;border-radius:50%;background:var(--text3)}.toggle.on span{background:var(--accent)}
   .disconnect{display:block;width:min(680px,100%);margin:12px auto;padding:8px;border:1px solid var(--danger);border-radius:7px;background:none;color:var(--danger);cursor:pointer;font-size:11px;font-weight:600}
   .empty-connection{padding:28px 12px;display:flex;flex-direction:column;align-items:center;gap:9px;color:var(--text3);font-size:11px}.empty-connection button{padding:6px 10px;border:1px solid var(--accent);border-radius:6px;background:var(--accent-bg);color:var(--accent);cursor:pointer;font-size:11px}
-  @media(max-width:640px){.preferences{inset:calc(49px + var(--sat)) 0 0}.pref-head{min-height:42px;padding:5px 8px 5px 12px}.pref-head p{display:none}.pref-shell{flex-direction:column}.pref-tabs{width:100%;padding:5px 6px;border-right:0;border-bottom:1px solid var(--border);flex-direction:row}.pref-tabs button{flex:1;justify-content:center;padding:6px 4px}.pref-content{padding:13px 10px}.section-head{margin-bottom:9px}.setting-row{min-height:50px;padding:8px 10px;gap:10px}.text-input{width:min(220px,48vw)}.range-wrap{min-width:min(250px,52vw)}.connection-title{align-items:flex-start;flex-direction:column}.conn-actions{width:100%}.conn-actions button{flex:1;justify-content:center}}
+  @media(max-width:640px){.preferences{inset:calc(49px + var(--sat)) 0 0}.pref-shell{flex-direction:column}.pref-tabs{width:100%;padding:5px 6px;border-right:0;border-bottom:1px solid var(--border);flex-direction:row}.pref-tabs button{flex:1;justify-content:center;padding:6px 4px}.pref-tabs .close{flex:0 0 28px;margin:0 0 0 2px;padding:0}.pref-content{padding:13px 10px}.setting-row{min-height:50px;padding:8px 10px;gap:10px}.text-input{width:min(220px,48vw)}.range-wrap{min-width:min(250px,52vw)}.connection-title{align-items:flex-start;flex-direction:column}.conn-actions{width:100%}.conn-actions button{flex:1;justify-content:center}}
   @media(max-width:420px){.setting-row{align-items:flex-start;flex-direction:column;gap:7px}.setting-row>div:last-child,.text-input,.range-wrap{width:100%;min-width:0}.segmented button{flex:1}}
 </style>

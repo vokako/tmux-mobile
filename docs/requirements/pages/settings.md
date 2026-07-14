@@ -4,7 +4,8 @@
 Configure server connection, appearance, language, and app behavior.
 
 The gear button opens Settings as a full-window workspace below the app nav,
-not a small popover. Settings uses three tabs only:
+not a small popover. The workspace avoids redundant page/section headings and
+uses the compact tab navigation as its only title row. Settings uses three tabs:
 
 - **Appearance** — theme, language, responsive layout mode
 - **Terminal** — installed font family override, font size, line spacing
