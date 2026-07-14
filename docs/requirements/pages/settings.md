@@ -19,7 +19,7 @@ not a small popover. Settings uses three tabs only:
 - Theme selector: Auto / Light / Dark (pill buttons)
 - Font size control (+/−)
 - Terminal font name (free text; a locally-installed family, prepended to the system mono stack; empty = system default; per-device, persisted to localStorage `tmux_font`)
-- Terminal line spacing (1.00–1.60, persisted to localStorage `tmux_line_height`; applies live to every normal, split, and Team terminal)
+- Terminal line spacing (0.80–1.60, persisted to localStorage `tmux_line_height`; applies live to every normal, split, and Team terminal)
 - Debug toggle (On/Off)
 - Disconnect button
 

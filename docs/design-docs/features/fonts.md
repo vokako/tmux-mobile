@@ -104,7 +104,10 @@ stepper and desktop Cmd/Ctrl `+`, `-`, and `0` shortcuts use the same update
 path and always trigger xterm's deferred re-fit.
 
 Line spacing is a per-device preference stored as `tmux_line_height` and
-clamped to `1.00`–`1.60`. `terminal-prefs.svelte.js` owns the reactive value;
+clamped to `0.80`–`1.60`. xterm 6 normally rejects values below `1.00`, so the
+Vite config applies a signature-guarded transform that changes only the
+line-height lower bound (the tab-width bound remains unchanged).
+`terminal-prefs.svelte.js` owns the reactive value;
 every `Terminal.svelte` instance reads it when xterm is created and again in
 the existing font-metrics effect. This makes the setting apply immediately to
 single-pane, split, and embedded Team terminals without passing another prop
