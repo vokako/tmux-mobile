@@ -28,6 +28,7 @@
     listSessionsWithPanes, fsCwd,
   } from './ws.js';
   import TeamTemplates from './TeamTemplates.svelte';
+  import { teamSessionOf } from './team.svelte.js';
 
   let {
     visible = false,
@@ -120,7 +121,7 @@
 
   let activeTeam = $derived(teams.find(x => x.room === activeRoom) || null);
   // team session for the active team (window_name → agent for pane preview).
-  let teamSession = $derived(activeRoom ? `tmm-team-${activeRoom}` : '');
+  let teamSession = $derived(activeRoom ? teamSessionOf(activeRoom) : '');
   // Report the active team's session up so Files can follow the team's cwd.
   $effect(() => { onTeamSession(teamSession); });
 
@@ -205,15 +206,30 @@
   }
 
   // Switch the active team: reload its chat. Clears the current view first so
-  // we never show team A's messages under team B's header.
-  async function selectTeam(room) {
+  // we never show team A's messages under team B's header. Exported so App can
+  // jump here from a team session row (via bind:this).
+  //
+  // A room the manager doesn't know (stale tmm-team-* tmux session that was
+  // never recovered, or a hand-made session with the prefix) must NOT be
+  // silently swapped for teams[0] by refreshTeams' keep-valid fallback — the
+  // user tapped a specific team and landing in a different team's chat with no
+  // signal is worse than an error. Surface it and stay where we were.
+  export async function selectTeam(room) {
     switcherOpen = false;
     newTeam = false;
     if (room === activeRoom) return;
     activeRoom = room;
     messages = []; roster = []; employees = [];
     await refresh();
+    // refresh() → refreshTeams() re-points activeRoom at a valid team (or '')
+    // when the requested room is unknown; the view it loaded is consistent, so
+    // we keep it — but tell the user their tap was redirected.
+    if (room && activeRoom !== room) {
+      unknownRoom = room;
+      setTimeout(() => { if (unknownRoom === room) unknownRoom = ''; }, 4000);
+    }
   }
+  let unknownRoom = $state(''); // room the user asked for that the manager doesn't know
 
   // Splitter drag: adjust the grid/chat width ratio (desktop only).
   let splitRow = $state(null);
@@ -280,16 +296,22 @@
   // Live push: append messages for the ACTIVE room only (each Message carries
   // its room). join/leave/system → refresh presence immediately. Messages for
   // other rooms still bump the team list via the poll.
+  //
+  // While the tab is hidden (Team stays mounted, see App.svelte) we still
+  // append — that's what makes history/scroll survive a tab switch without a
+  // refetch — but we skip the roster RPC burst and the scroll nudge: the
+  // per-second poll doesn't run while hidden, and the visible-effect refreshes
+  // the roster once on show, so presence work done in the background is wasted.
   function onTeamMessage(m) {
     if (!m?.id) return;
     if (m.room && activeRoom && m.room !== activeRoom) return; // other team
     lastEvent = m; // drive the collaboration graph (it de-dupes by id)
-    if (m.kind === 'join' || m.kind === 'leave' || m.kind === 'system') {
+    if (visible && (m.kind === 'join' || m.kind === 'leave' || m.kind === 'system')) {
       refreshRoster();
     }
     if (messages.some(x => x.id === m.id)) return;
     messages = [...messages, m];
-    scrollToBottom();
+    if (visible) scrollToBottom();
   }
 
   $effect(() => {
@@ -297,14 +319,32 @@
     return () => removeTeamMessageListener(onTeamMessage);
   });
 
-  // While visible: full refresh once, then poll on a tight interval so the
-  // status bar + team list stay live. Stops when the tab hides.
+  // While visible: load once, then poll on a tight interval so the status bar
+  // + team list stay live. Stops when the tab hides.
+  //
+  // Re-shows do NOT re-run the full refresh(): Team stays mounted (App.svelte)
+  // and the push listener keeps `messages` current while hidden, so a refetch
+  // would only replace the array with the same content and reset the scroll
+  // position to the bottom — losing the reading position the always-mounted
+  // design exists to preserve. A cheap roster poll tick is enough on re-show.
   const ROSTER_POLL_MS = 1000;
+  let loadedOnce = false;
   $effect(() => {
     if (!visible) return;
-    refresh();
+    if (!loadedOnce) { loadedOnce = true; refresh(); }
+    else refreshRoster();
     const id = setInterval(refreshRoster, ROSTER_POLL_MS);
     return () => clearInterval(id);
+  });
+
+  // Pushes are lost while disconnected, so the skip-refetch-on-reshow policy
+  // above would leave a permanent gap in the log after a reconnect. Re-pull
+  // the full state once per reconnect (visible or not — a hidden gap would
+  // otherwise survive until the next remount).
+  $effect(() => {
+    const onReconn = () => { if (loadedOnce) refresh(); };
+    window.addEventListener('ws-reconnected', onReconn);
+    return () => window.removeEventListener('ws-reconnected', onReconn);
   });
 
   async function send() {
@@ -456,6 +496,9 @@
       </button>
     {/if}
   </div>
+  {#if unknownRoom}
+    <div class="team-notice">{t('teamUnknownRoom')}: {unknownRoom}</div>
+  {/if}
 {/snippet}
 
 {#snippet newTeamPanel()}
@@ -668,6 +711,14 @@
     display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
     padding: 6px 10px; flex-shrink: 0;
     border-bottom: 1px solid var(--border);
+  }
+  /* Transient banner: the tapped team session's room isn't known to the
+     manager, so the view was redirected to a valid team instead. */
+  .team-notice {
+    padding: 6px 10px; flex-shrink: 0;
+    font-size: 12px; color: var(--danger);
+    background: var(--danger-bg); border-bottom: 1px solid var(--border);
+    word-break: break-all;
   }
   .team-pick { position: relative; flex-shrink: 0; min-width: 0; }
   .team-pick-btn {

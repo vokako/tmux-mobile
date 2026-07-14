@@ -9,6 +9,10 @@
   import { t } from './i18n.svelte.js';
   import { listSessionsWithPanes, newWindow } from './ws.js';
   import { paneAgent } from './agents.js';
+  // Team sessions (tmm-team-<room>) are grouped apart from regular sessions and
+  // labelled by their workspace basename. Shared helpers, gated on the server
+  // actually having the team bus — consistent with the Sessions page.
+  import { isTeamSession, teamLabel } from './team.svelte.js';
 
   let {
     currentTarget = '',   // highlight the pane matching this target
@@ -20,6 +24,10 @@
   let loading = $state(true);
   let sessions = $state([]); // [{ name, panes: [pane] }]
   let busySession = $state(''); // session whose "+" is mid-create (disable it)
+
+  let teamSessions = $derived(sessions.filter(s => isTeamSession(s.name)));
+  let regularSessions = $derived(sessions.filter(s => !isTeamSession(s.name)));
+  let grouped = $derived(teamSessions.length > 0);
 
   async function load() {
     const { sessions: list, panes } = await listSessionsWithPanes();
@@ -70,38 +78,53 @@
     <div class="picker-empty">…</div>
   {:else if sessions.length === 0}
     <div class="picker-empty">{t('noSessions')}</div>
+  {:else if grouped}
+    <div class="picker-group">{t('groupTeams')}</div>
+    {#each teamSessions as s}
+      {@render sessionBlock(s)}
+    {/each}
+    {#if regularSessions.length > 0}
+      <div class="picker-group">{t('groupSessions')}</div>
+      {#each regularSessions as s}
+        {@render sessionBlock(s)}
+      {/each}
+    {/if}
   {:else}
     {#each sessions as s}
-      <div class="picker-session">
-        <span class="picker-session-name">{s.name}</span>
-      </div>
-      <div class="picker-panes">
-        {#each s.panes as p}
-          {@const isCur = currentTarget === `${p.session}:${p.window}.${p.pane}`}
-          {@const isTeam = p.session.startsWith('tmm-team-')}
-          <AgentChip
-            agent={paneAgent(p)}
-            label={isTeam
-              ? (p.window_name || p.current_command || `${p.window}.${p.pane}`)
-              : (p.current_command || p.window_name || `${p.window}.${p.pane}`)}
-            variant={isCur ? 'active' : 'default'}
-            title={`${p.session}:${p.window}.${p.pane}`}
-            onclick={(e) => { e.stopPropagation(); onPick(p); }}
-          />
-        {/each}
-        <button
-          class="picker-add"
-          title={t('newWindow')}
-          aria-label={t('newWindow')}
-          disabled={busySession === s.name}
-          onclick={(e) => { e.stopPropagation(); addWindow(s.name); }}
-        >
-          <Icon name="plus" size={12} />
-        </button>
-      </div>
+      {@render sessionBlock(s)}
     {/each}
   {/if}
 </div>
+
+{#snippet sessionBlock(s)}
+  {@const team = isTeamSession(s.name)}
+  <div class="picker-session">
+    <span class="picker-session-name" title={team ? s.name : null}>{team ? teamLabel(s.name) : s.name}</span>
+  </div>
+  <div class="picker-panes">
+    {#each s.panes as p}
+      {@const isCur = currentTarget === `${p.session}:${p.window}.${p.pane}`}
+      <AgentChip
+        agent={paneAgent(p)}
+        label={team
+          ? (p.window_name || p.current_command || `${p.window}.${p.pane}`)
+          : (p.current_command || p.window_name || `${p.window}.${p.pane}`)}
+        variant={isCur ? 'active' : 'default'}
+        title={`${p.session}:${p.window}.${p.pane}`}
+        onclick={(e) => { e.stopPropagation(); onPick(p); }}
+      />
+    {/each}
+    <button
+      class="picker-add"
+      title={t('newWindow')}
+      aria-label={t('newWindow')}
+      disabled={busySession === s.name}
+      onclick={(e) => { e.stopPropagation(); addWindow(s.name); }}
+    >
+      <Icon name="plus" size={12} />
+    </button>
+  </div>
+{/snippet}
 
 <style>
   .picker-backdrop { position: fixed; inset: 0; z-index: 30; }
@@ -120,6 +143,16 @@
     padding: 6px;
   }
   .picker.align-right { left: auto; right: 6px; }
+  /* Group dividers and per-session headers share one type treatment (size /
+     weight / case / spacing); only colour marks the hierarchy — the
+     Teams/Sessions dividers are accent-highlighted, individual session names
+     are muted. All session names (team + regular) use the same style. */
+  .picker-group {
+    padding: 6px 6px 2px;
+    font-size: 10px; font-weight: 600; color: var(--accent);
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .picker-group:first-child { padding-top: 2px; }
   .picker-session {
     display: flex; align-items: center; gap: 6px;
     font-size: 10px; font-weight: 600; color: var(--text3);

@@ -41,12 +41,20 @@ Core pain points teased out:
 
 ### Information density per row
 A single row contains, left-to-right:
-`dot · name · (AI icon OR cmd) · cwd-segment · rel-time · Nw-badge? · kill`
+`dot · name · (AI icon OR cmd) · rel-time · Nw-badge? · kill`
 
 Decisions on what survives truncation: `name` and `trailing cluster` are
 fixed-width (truncate name at 40% of row width); the middle `meta` section
 is `flex: 1` with `overflow: hidden` and absorbs whatever room is left.
-cwd drops before cmd.
+
+The cwd-segment was removed from the session row (2026-07): in the cramped
+line it was squeezed to the point of being unreadable, defeating its
+purpose. Full paths live on the expanded window rows instead, right-aligned
+so the informative tail (current folder) is always visible, horizontally
+scrollable for the rest.
+
+Team rows (`tmm-team-*`, see "Teams grouping" below) show no meta at all —
+just dot + workspace label + a trailing chat glyph.
 
 This is deliberately unglamorous — no icons just for decoration, no avatars,
 no progress bars. Density comes from trusting the user to read a row, not
@@ -102,6 +110,18 @@ Auto-detect session prefixes (`work-*`, `perso-*`) and group accordingly.
 Rejected: too much magic, too many false groupings, and users with a flat
 naming scheme get no benefit. The search box subsumes this: if you prefix
 your sessions `work-`, typing `work` already filters them.
+
+**Exception — Teams grouping (added 2026-07).** Team sessions
+(`tmm-team-<room>`, created by the team bus) ARE split into a labelled
+"Teams" group above "Sessions". This does not reopen the rejection above:
+the prefix here is not a user naming heuristic but an app-owned protocol
+(the server creates these names, `src-tauri/src/team.rs`), classification
+is additionally gated on the server actually having the team bus
+(`teamState.available` in `src/lib/team.svelte.js` — shared with
+PanePicker so all surfaces agree), and the rows behave differently (tap →
+Team chat, not a terminal), so mixing them into the flat list would mislead.
+False groupings are impossible short of a user hand-naming a session
+`tmm-team-*` on a bus-enabled server.
 
 ### "Task board" view with per-session cards & live previews
 Render a small xterm preview of each pane, so you can see "yes Kiro is

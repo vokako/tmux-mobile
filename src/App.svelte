@@ -12,6 +12,8 @@
   import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable } from './lib/ws.js';
   import { t, i18n, setLocale } from './lib/i18n.svelte.js';
   import { layout } from './lib/layout.svelte.js';
+  import { teamState } from './lib/team.svelte.js';
+  import { fonts, applyMonoVar } from './lib/fonts.svelte.js';
 
   // Tunable constants
   const KB_OPEN_THRESHOLD = 100; // px difference to detect keyboard open
@@ -33,11 +35,33 @@
   // Team (team multi-agent bus) is desktop-server-only. We probe once per
   // connection: team_status rejects with method-not-found when the server has
   // no bus, so a resolved probe means the tab should appear.
-  let teamAvailable = $state(false);
+  // Availability lives in the shared teamState (team.svelte.js) so session
+  // classification (Sessions, PanePicker) uses the same gate as the tab.
+  let teamAvailable = $derived(teamState.available);
+  // Imperative handle on the always-mounted Team component (bind:this), so the
+  // Sessions page can jump straight to a given team's chat via its exported
+  // selectTeam(). A function call (not a prop change) so clicking the same team
+  // session twice still re-selects it; nulled automatically on unmount.
+  let teamRef = $state(null);
   async function probeTeam() {
-    try { await teamStatus(); teamAvailable = true; }
-    catch { teamAvailable = false; }
+    try { await teamStatus(); teamState.available = true; teamState.probed = true; }
+    catch (e) {
+      // Only a definitive server answer (method-not-found: no team bus) may
+      // flip the flag off. Transient failures (RPC timeout, reconnect blip)
+      // keep the current value — flipping to false unmounts the always-mounted
+      // Team component and destroys the state it exists to preserve.
+      if (e?.code === -32601) { teamState.available = false; teamState.probed = true; }
+    }
   }
+  // The Team page-layer only mounts when teamAvailable, so page === 'team'
+  // without it would render an empty main area (the state restore sets `page`
+  // before the probe resolves, and a reconnect can land on a busless server).
+  // Once the probe has definitively answered "no bus", fall back to Sessions.
+  // While the probe is still pending we leave `page` alone — a brief blank
+  // beats kicking the user off the tab they were on.
+  $effect(() => {
+    if (page === 'team' && teamState.probed && !teamState.available) page = 'sessions';
+  });
 
   // ─── Split-screen (desktop + wide only) ────────────────────────────────
   // splitLayout 1 = the single-pane path (mobile + default desktop), exactly
@@ -117,6 +141,9 @@
     localStorage.setItem('tmux_fontsize', v);
   }
   let showSettings = $state(false);
+  // Apply the persisted custom terminal font (if any) before first paint of
+  // the terminal — rewrites --font-mono inline; a no-op for the default.
+  applyMonoVar();
   let serverInfo = $state({ hostname: '', machineId: '' });
   let activeAddress = $state(localStorage.getItem('tmux_address') || '');
   let debugMode = $state(!!localStorage.getItem('tmux_debug'));
@@ -134,19 +161,14 @@
     debugEl.scrollTop = debugEl.scrollHeight;
   };
 
-  // Cmd+/- zoom for desktop app
+  // Desktop cmd/ctrl +/- is handled below by routing to setFontSize. The old
+  // page-zoom approach (document.documentElement.style.zoom) coexisted with
+  // it — both handlers fired on every keypress, and the accumulated CSS zoom
+  // scaled the px-based --app-height past the real window, corrupting the
+  // terminal layout. Clear any zoom persisted by that old code.
   if (window.__TAURI_INTERNALS__) {
-    let zoomLevel = parseFloat(localStorage.getItem('tmux_zoom') || '1');
-    document.documentElement.style.zoom = zoomLevel;
-    document.addEventListener('keydown', (e) => {
-      if (!e.metaKey && !e.ctrlKey) return;
-      if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomLevel = Math.min(2, zoomLevel + 0.1); }
-      else if (e.key === '-') { e.preventDefault(); zoomLevel = Math.max(0.5, zoomLevel - 0.1); }
-      else if (e.key === '0') { e.preventDefault(); zoomLevel = 1; }
-      else return;
-      document.documentElement.style.zoom = zoomLevel;
-      localStorage.setItem('tmux_zoom', zoomLevel);
-    });
+    document.documentElement.style.zoom = '';
+    localStorage.removeItem('tmux_zoom');
   }
 
   // Intercept external link clicks → open in system browser instead of in-app navigation
@@ -195,6 +217,11 @@
       androidNativeKb = true; // suppress visualViewport handler on Android
       const kbh = e.detail?.height || 0;
       if (kbh > 0 && !hasFocusedTextInput()) {
+        // The IME can become visible during the keyboard-toggle pointer event,
+        // one task before xterm's hidden textarea receives focus. Dropping this
+        // one-shot native height leaves the terminal at full-screen size until
+        // the user closes and reopens the keyboard. Keep the stale-event guard,
+        // but defer the value briefly so focusin can validate and apply it.
         pendingNativeKb = kbh;
         clearTimeout(pendingNativeTimer);
         pendingNativeTimer = setTimeout(() => {
@@ -300,6 +327,9 @@
     const onResize = () => {
       wideEnough = window.innerWidth >= SPLIT_MIN_WIDTH;
       syncDesktopHeight();
+      // WKWebView can deliver the resize event before its layout viewport has
+      // adopted the new window size. Measure again on the next frame so a
+      // maximized/restored macOS window cannot retain the previous height.
       cancelAnimationFrame(resizeFrame);
       resizeFrame = requestAnimationFrame(syncDesktopHeight);
     };
@@ -540,6 +570,17 @@
     navPush();
   }
 
+  // Jump to the Team tab and select a specific room (from a team session row in
+  // Sessions). Team stays mounted (see the page-layer below), so selecting the
+  // room just reloads that room's chat — no full remount.
+  function openTeam(room) {
+    page = 'team';
+    viewMode = 'terminal';
+    workContext = 'team';
+    if (room) teamRef?.selectTeam(room);
+    navPush();
+  }
+
   function doDisconnect() {
     reconnecting = false;
     clearTimeout(reconnectTimer);
@@ -667,6 +708,10 @@
         reconnecting = true;
         tryReconnect();
       } else if (isConnected()) {
+        // A suspended mobile WebView can resume with WebSocket.readyState still
+        // OPEN even though pane pushes stopped while it was backgrounded. The
+        // server treats subscribe as idempotent and resets its change detector,
+        // guaranteeing a fresh pane_output without perturbing local refcounts.
         resubscribeAll();
         window.__dbg?.('resume: re-subscribed active panes');
         if (Date.now() - lastProbeTime > OPTIMIZE_INTERVAL_MS) optimizeConnection();
@@ -897,6 +942,21 @@
           </div>
         </div>
         <div class="sp-row">
+          <span class="sp-label">{t('fontFamily')}</span>
+          <!-- Free-text family name, applied on change/Enter. A font installed
+               on THIS device (e.g. 'Maple Mono NF CN'); unknown names fall
+               through to the system stack, so a typo degrades safely. -->
+          <input
+            class="sp-font-input"
+            type="text"
+            placeholder={t('fontFamilySystem')}
+            value={fonts.custom}
+            autocapitalize="off" autocomplete="off" spellcheck="false"
+            onchange={(e) => fonts.set(e.target.value)}
+            onkeydown={(e) => { if (e.key === 'Enter') { fonts.set(e.target.value); e.target.blur(); } }}
+          />
+        </div>
+        <div class="sp-row">
           <span class="sp-label">{t('layout')}</span>
           <div class="sp-btns">
             <button class:active={layout.mode === 'auto'} onclick={() => layout.set('auto')}>{t('layoutAuto')}</button>
@@ -931,9 +991,20 @@
     {#if page === 'settings'}
       <Settings {onConnected} />
     {:else if page === 'sessions'}
-      <Sessions {openTerminal} activeTarget={terminalTarget} visible={page === 'sessions'} />
-    {:else if page === 'team'}
-      <Team visible={page === 'team'} currentSession={terminalSession} {fontSize} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onTeamSession={(s) => teamSession = s} />
+      <Sessions {openTerminal} {openTeam} activeTarget={terminalTarget} visible={page === 'sessions'} />
+    {/if}
+    <!-- Team is kept mounted (like Files/Terminal below) and merely hidden when
+         inactive, so switching tabs preserves its state — the selected team
+         (activeRoom), loaded history, scroll position, and the embedded agent
+         terminals all survive. Putting it in the {#if} chain above would
+         destroy + recreate it on every tab switch, resetting activeRoom to the
+         first team and reloading everything. Gated on teamAvailable so it never
+         mounts on a server without the team bus (e.g. mobile). The visible prop
+         pauses its polling while hidden and triggers a refresh when shown. -->
+    {#if teamAvailable}
+      <div class="page-layer" class:hidden={page !== 'team'}>
+        <Team bind:this={teamRef} visible={page === 'team'} currentSession={terminalSession} {fontSize} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onTeamSession={(s) => teamSession = s} />
+      </div>
     {/if}
     <div class="page-layer" class:hidden={page !== 'files'}>
       <Files session={filesSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} />
@@ -1085,13 +1156,16 @@
     width: 100%; height: 100%; background: var(--bg);
     --sat: env(safe-area-inset-top); --sab: env(safe-area-inset-bottom); --app-height: 100dvh;
     /* Two font roles. --font-mono: code, terminal output, file paths, data —
-       fixed-width matters (alignment, glyph identity). Includes the bundled
-       Maple Mono (Latin) + Maple Mono CJK so code/paths render identically on
-       every device. --font-ui: everything else — labels, buttons, chat prose,
-       Chinese body text — proportional, using each platform's native UI font
-       (PingFang / YaHei / Noto Sans CJK for Chinese). Never put the monospace
-       CJK face in --font-ui: it makes Chinese UI text look like code. */
-    --font-mono: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
+       fixed-width matters (alignment via xterm's cell grid, not the font).
+       Default is each platform's native mono + the two bundled symbol
+       fillers; a user-set custom family (Settings → font name) is prepended
+       at runtime by fonts.svelte.js, which overwrites this var inline.
+       Keep this literal in sync with SYSTEM_STACK there. --font-ui:
+       everything else — labels, buttons, chat prose, Chinese body text —
+       proportional, using each platform's native UI font (PingFang / YaHei /
+       Noto Sans CJK for Chinese). Never put a monospace CJK face in
+       --font-ui: it makes Chinese UI text look like code. */
+    --font-mono: 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', Consolas, 'Roboto Mono', 'Droid Sans Mono', 'Noto Sans Mono', monospace;
     --font-ui: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif;
   }
   :global(#app) { width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
@@ -1241,6 +1315,10 @@
     position: absolute; top: 48px; right: 8px; z-index: 21;
     background: var(--bg); border: 1px solid var(--border);
     border-radius: 14px; padding: 6px; min-width: 240px;
+    /* Long unbreakable server addresses must not push the right-anchored
+       panel off the left edge of a narrow phone screen. */
+    max-width: calc(100vw - 16px);
+    max-height: calc(100dvh - 60px); overflow-y: auto;
     box-shadow: 0 12px 40px rgba(0,0,0,0.35);
     animation: sp-in 0.15s ease;
   }
@@ -1251,10 +1329,12 @@
   }
   .sp-conn-host {
     font-size: 14px; font-weight: 600; color: var(--text);
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .sp-conn-addr {
     font-size: 11px; font-family: var(--font-mono);
     color: var(--text3);
+    word-break: break-all;
   }
   .sp-conn-id {
     font-size: 10px; font-family: var(--font-mono);
@@ -1289,6 +1369,7 @@
     font-size: 12px; font-family: var(--font-mono);
     color: var(--text3); padding: 6px 8px; border: 1px solid var(--border2); border-radius: 6px;
     background: none; text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent;
+    word-break: break-all;
   }
   .sp-conn-url:active { background: var(--accent-bg); }
   .sp-conn-active { color: var(--accent); border-color: var(--accent); }
@@ -1328,6 +1409,15 @@
     font-size: 13px; font-weight: 600; font-family: var(--font-mono); color: var(--text2);
     min-width: 24px; text-align: center;
   }
+  .sp-font-input {
+    width: 150px; padding: 6px 10px;
+    border: 1px solid var(--input-border); border-radius: 7px;
+    background: var(--input-bg); color: var(--text);
+    font-size: 12px; font-family: var(--font-mono);
+    outline: none; -webkit-appearance: none;
+  }
+  .sp-font-input:focus { border-color: var(--accent); }
+  .sp-font-input::placeholder { color: var(--text3); }
   .sp-toggle {
     display: inline-flex; gap: 2px; background: var(--pill-bg); border-radius: 8px;
     padding: 2px; border: none; cursor: pointer; -webkit-tap-highlight-color: transparent; flex-shrink: 0;

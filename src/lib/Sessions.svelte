@@ -3,9 +3,15 @@
   import Icon from './Icon.svelte';
   import AgentChip from './AgentChip.svelte';
   import { t } from './i18n.svelte.js';
-  import { detectAgent, sessionHasAgent, paneAgent, paneText, AGENTS } from './agents.js';
+  import { sessionHasAgent, paneAgent, AGENTS } from './agents.js';
+  // Team-mode sessions (`tmm-team-<room>`) are grouped apart from regular
+  // sessions and their clicks route to the Team chat instead of a raw terminal.
+  // isTeamSession is gated on the shared teamState.available, so on a server
+  // without the team bus these fall back to ordinary sessions (consistently
+  // with PanePicker and the Team tab).
+  import { isTeamSession, teamRoomOf, teamLabel } from './team.svelte.js';
 
-  let { openTerminal, activeTarget = '', visible = false } = $props();
+  let { openTerminal, openTeam = () => {}, activeTarget = '', visible = false } = $props();
 
   const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
@@ -39,7 +45,6 @@
 
   // ─── Helpers ───────────────────────────────────────────
   const AGENT_BY_TAG = new Map(AGENTS.map(a => [a.tag, a]));
-  function aiTag(cmd) { return detectAgent(cmd)?.tag || ''; }
   function aiIcon(tag) { return AGENT_BY_TAG.get(tag)?.icon || ''; }
   function sessionAgents(sessionName) {
     const counts = new Map();
@@ -47,20 +52,11 @@
       const agent = paneAgent(pane);
       if (agent) counts.set(agent.tag, (counts.get(agent.tag) || 0) + 1);
     }
+    // Keep the global AGENTS order stable instead of letting pane/window order
+    // reshuffle icons whenever tmux adds or removes a window.
     return AGENTS
       .filter(agent => counts.has(agent.tag))
       .map(agent => ({ agent, count: counts.get(agent.tag) }));
-  }
-  // Trailing segment of a path, keeping `~` visible. E.g.:
-  //   /Users/clawd/work/proj     → proj
-  //   ~/work/project/260226_x    → 260226_x
-  //   ~                          → ~
-  function cwdShort(p) {
-    if (!p) return '';
-    if (p === '~' || p === '/') return p;
-    const clean = p.replace(/\/$/, '');
-    const parts = clean.split('/');
-    return parts[parts.length - 1] || clean;
   }
   function relTime(unixSec) {
     if (!unixSec) return '';
@@ -77,7 +73,7 @@
   //   attached pane > first pane with AI tag > first pane.
   function sessionSummary(s) {
     const ps = panes[s.name];
-    if (!ps || !ps.length) return { ai: '', cmd: '', cwd: '', count: s.windows, agents: [] };
+    if (!ps || !ps.length) return { ai: '', cmd: '', agents: [] };
     // Prefer pane that matches activeTarget; else first with AI tag; else first.
     const act = ps.find(p => activeTarget === `${p.session}:${p.window}.${p.pane}`);
     const tagged = ps.find(p => paneAgent(p));
@@ -85,13 +81,9 @@
     // Detect on the full pane signal (command + title + child argv). The
     // session row's big icon comes from this — title-only matching missed
     // interpreter-launched agents (codex = "node", claude = "2.1.141").
-    const ai = paneAgent(p)?.tag || '';
     return {
-      ai,
+      ai: paneAgent(p)?.tag || '',
       cmd: p.current_command || '',
-      cwd: cwdShort(p.current_path),
-      count: s.windows,
-      pane: p,
       agents: sessionAgents(s.name),
     };
   }
@@ -144,6 +136,8 @@
   // Single-click entry: open the session at its "primary" pane.
   // Multi-window sessions toggle expansion so user can choose.
   function activateSession(s) {
+    // Team session → open the team's chat instead of a raw terminal.
+    if (isTeamSession(s.name)) { openTeam(teamRoomOf(s.name)); return; }
     const ps = panes[s.name] || [];
     if (s.windows > 1 && ps.length > 1) {
       expanded[s.name] = !expanded[s.name];
@@ -158,6 +152,8 @@
   // elsewhere on the page would leave the user wondering what happened.
   // We pick the most-informative pane: first AI pane, else first pane.
   function chipOpen(s) {
+    // Team session → chat (chips normally exclude these; guard anyway).
+    if (isTeamSession(s.name)) { openTeam(teamRoomOf(s.name)); return; }
     // If this chip represents the currently-active session, return to the
     // exact pane the user was viewing (not whichever AI pane the summary
     // picked). Tapping the active chip = "go back to Terminal".
@@ -266,6 +262,7 @@
   let mruChips = $derived.by(() => {
     const activeName = activeTarget.split(':')[0];
     const eligible = sessions.filter(s =>
+      !isTeamSession(s.name) &&            // team sessions live in their own group + the Team tab
       sessionHasAgent(panes[s.name]) &&
       (s.name === activeName || s.last_opened)
     );
@@ -301,6 +298,13 @@
     );
   }
   let filtered = $derived(sessions.filter(s => sessionMatches(s, query)));
+
+  // Split the (filtered) list into team-mode sessions and the rest. When team
+  // sessions are present we render the two as labelled groups; otherwise the
+  // list stays a flat, headerless list exactly as before.
+  let teamGroup = $derived(filtered.filter(s => isTeamSession(s.name)));
+  let regularGroup = $derived(filtered.filter(s => !isTeamSession(s.name)));
+  let grouped = $derived(teamGroup.length > 0);
 
   // Auto-expand during search so panes matching the query are visible.
   let isSearching = $derived(!!query.trim());
@@ -392,24 +396,32 @@
       <div class="error">{error}</div>
     {/if}
 
-  <!-- Session list -->
-  <div class="list">
-    {#each filtered as s (s.name)}
-      {@const sum = sessionSummary(s)}
-      {@const isActive = activeTarget.startsWith(s.name + ':')}
-      {@const isExpanded = (isSearching && s.windows > 1) || expanded[s.name]}
-      {@const ps = panes[s.name] || []}
-      {@const visiblePanes = isSearching ? ps.filter(p => paneMatches(p, query)) : ps}
-      <div class="session" class:active={isActive}>
-        <div
-          class="session-row"
-          role="button"
-          tabindex="0"
-          onclick={() => activateSession(s)}
-          onkeydown={(e) => e.key === 'Enter' && activateSession(s)}
-        >
-          <span class="dot" class:attached={s.attached}></span>
-          <span class="name">{s.name}</span>
+  <!-- Session row template — shared by both groups (team + regular). The
+       `team` flag flips the leading icon, the displayed name (room vs the raw
+       tmm-team-* session), the trailing affordance (chat hint vs kill), and
+       disables pane expansion (a team row always opens the chat). -->
+  {#snippet sessionItem(s)}
+    {@const team = isTeamSession(s.name)}
+    {@const sum = sessionSummary(s)}
+    {@const isActive = activeTarget.startsWith(s.name + ':')}
+    {@const isExpanded = !team && ((isSearching && s.windows > 1) || expanded[s.name])}
+    {@const ps = panes[s.name] || []}
+    {@const visiblePanes = isSearching ? ps.filter(p => paneMatches(p, query)) : ps}
+    <div class="session" class:active={isActive} class:team-session={team}>
+      <div
+        class="session-row"
+        role="button"
+        tabindex="0"
+        onclick={() => activateSession(s)}
+        onkeydown={(e) => e.key === 'Enter' && activateSession(s)}
+      >
+        <span class="dot" class:attached={s.attached}></span>
+        <span class="name" class:name-grow={team} title={team ? s.name : null}>{team ? teamLabel(s.name) : s.name}</span>
+        <!-- Team rows show only the title. Regular rows keep a short cmd/AI
+             marker, but NOT the cwd path — in the cramped row it was squeezed
+             to the point of being unreadable. The full path lives on the
+             window rows below (right-aligned, scrollable). -->
+        {#if !team}
           <span class="meta">
             {#if sum.agents.length}
               <span class="session-agents" aria-label={sum.agents.map(item => `${item.agent.tag}${item.count > 1 ? ` ×${item.count}` : ''}`).join(', ')}>
@@ -423,11 +435,12 @@
             {:else if sum.cmd}
               <span class="cmd">{sum.cmd}</span>
             {/if}
-            {#if sum.pane?.current_path}
-              <span class="cwd" use:scrollEndIntoView>{sum.pane.current_path}</span>
-            {/if}
           </span>
-          <span class="trailing">
+        {/if}
+        <span class="trailing">
+          {#if team}
+            <span class="go-chat" aria-hidden="true"><Icon name="chat" size={13} /></span>
+          {:else}
             {#if s.last_opened}
               <span class="ago">{relTime(s.last_opened)}</span>
             {/if}
@@ -446,53 +459,82 @@
                 <Icon name="trash" size={12} />
               {/if}
             </button>
-          </span>
-        </div>
-
-        {#if isExpanded && visiblePanes.length}
-          <div class="pane-list">
-            {#each visiblePanes as p}
-              {@const pAi = paneAgent(p)?.tag || ''}
-              {@const isPaneActive = activeTarget === `${p.session}:${p.window}.${p.pane}`}
-              <div class="pane-row" class:active-pane={isPaneActive}>
-                <button class="pane" onclick={() => openPane(s, p)}>
-                  <span class="pane-id">{p.window}.{p.pane}</span>
-                  <span class="pane-cmd">{p.current_command}</span>
-                  {#if p.current_path}
-                    <span class="pane-cwd" use:scrollEndIntoView>{p.current_path}</span>
-                  {/if}
-                  {#if pAi}
-                    <img class="pane-ai-icon" class:claude={pAi === 'Claude'} src={aiIcon(pAi)} alt={pAi} />
-                  {/if}
-                </button>
-                <button
-                  class="pane-kill"
-                  class:confirm={confirmKillWindow === `${s.name}:${p.window}`}
-                  onclick={(e) => removeWindow(`${s.name}:${p.window}`, s.name, e)}
-                >
-                  {#if confirmKillWindow === `${s.name}:${p.window}`}
-                    <span class="kill-text">{t('del')}</span>
-                  {:else}
-                    <Icon name="trash" size={11} />
-                  {/if}
-                </button>
-              </div>
-            {/each}
-            <button class="pane-add" onclick={async () => {
-              try {
-                await newWindow(s.name);
-                const ps2 = await listPanes(s.name);
-                panes[s.name] = ps2;
-                const p = ps2[ps2.length - 1];
-                if (p) openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command);
-              } catch (e) { error = e.message; }
-            }}>
-              <Icon name="plus" size={12} /> {t('window')}
-            </button>
-          </div>
-        {/if}
+          {/if}
+        </span>
       </div>
-    {/each}
+
+      {#if isExpanded && visiblePanes.length}
+        <div class="pane-list">
+          {#each visiblePanes as p}
+            {@const pAi = paneAgent(p)?.tag || ''}
+            {@const isPaneActive = activeTarget === `${p.session}:${p.window}.${p.pane}`}
+            <div class="pane-row" class:active-pane={isPaneActive}>
+              <button class="pane" onclick={() => openPane(s, p)}>
+                <span class="pane-id">{p.window}.{p.pane}</span>
+                <span class="pane-cmd">{p.current_command}</span>
+                {#if p.current_path}
+                  <span class="pane-cwd" use:scrollEndIntoView>{p.current_path}</span>
+                {/if}
+                {#if pAi}
+                  <img class="pane-ai-icon" class:claude={pAi === 'Claude'} src={aiIcon(pAi)} alt={pAi} />
+                {/if}
+              </button>
+              <button
+                class="pane-kill"
+                class:confirm={confirmKillWindow === `${s.name}:${p.window}`}
+                onclick={(e) => removeWindow(`${s.name}:${p.window}`, s.name, e)}
+              >
+                {#if confirmKillWindow === `${s.name}:${p.window}`}
+                  <span class="kill-text">{t('del')}</span>
+                {:else}
+                  <Icon name="trash" size={11} />
+                {/if}
+              </button>
+            </div>
+          {/each}
+          <button class="pane-add" onclick={async () => {
+            try {
+              await newWindow(s.name);
+              const ps2 = await listPanes(s.name);
+              panes[s.name] = ps2;
+              const p = ps2[ps2.length - 1];
+              if (p) openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command);
+            } catch (e) { error = e.message; }
+          }}>
+            <Icon name="plus" size={12} /> {t('window')}
+          </button>
+        </div>
+      {/if}
+    </div>
+  {/snippet}
+
+  <!-- Session list. When team sessions are present we split into two labelled
+       groups (Teams first, then Sessions); otherwise it's the flat list. -->
+  <div class="list">
+    {#if grouped}
+      <div class="group-label">
+        <Icon name="bot" size={12} />
+        {t('groupTeams')}
+        <span class="group-count">{teamGroup.length}</span>
+      </div>
+      {#each teamGroup as s (s.name)}
+        {@render sessionItem(s)}
+      {/each}
+      {#if regularGroup.length > 0}
+        <div class="group-label">
+          <Icon name="terminal" size={12} />
+          {t('groupSessions')}
+          <span class="group-count">{regularGroup.length}</span>
+        </div>
+        {#each regularGroup as s (s.name)}
+          {@render sessionItem(s)}
+        {/each}
+      {/if}
+    {:else}
+      {#each filtered as s (s.name)}
+        {@render sessionItem(s)}
+      {/each}
+    {/if}
 
     {#if filtered.length === 0}
       <div class="empty">
@@ -691,6 +733,44 @@
     background: var(--accent-bg);
   }
 
+  /* ─── Group headers (team vs regular sessions) ─────── */
+  /* Both headers share this one style. Accent-highlighted text + icon (the
+     Icon inherits the colour via currentColor) so the two section dividers
+     read identically and stand out from the rows. */
+  .group-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 8px 2px;
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+  }
+  /* Tighten the very first header against the top of the list. */
+  .group-label:first-child { padding-top: 2px; }
+  .group-count {
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-bg);
+    border-radius: 999px;
+    padding: 0 6px;
+    font-size: 10px;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Team rows reuse the same status dot + title style as regular rows (no
+     leading bot glyph); only the trailing chat glyph hints that a tap opens
+     the conversation. The "Teams" group header is what marks the section. */
+  .go-chat {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px;
+    color: var(--text3);
+  }
+  .session.team-session .session-row:hover .go-chat { color: var(--accent); }
+
   .session-row {
     display: flex;
     align-items: center;
@@ -725,6 +805,9 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  /* Team rows carry no meta sub-text, so let the title use the full row width
+     (the 40% cap would otherwise leave an odd empty gap and clip the name). */
+  .name.name-grow { max-width: none; flex: 1; min-width: 0; }
 
   .meta {
     flex: 1;
@@ -743,20 +826,37 @@
   }
   .meta .ai-icon.claude { width: 15px; height: 15px; }
   .session-agents {
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 2px 3px 2px 1px; overflow: visible;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 3px 2px 1px;
+    overflow: visible;
   }
   .session-agent-icon {
-    position: relative; display: inline-flex; align-items: center;
-    justify-content: center; flex-shrink: 0;
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
   }
   .agent-count {
-    position: absolute; top: -5px; right: -6px;
-    min-width: 12px; height: 12px; padding: 0 3px;
-    display: inline-flex; align-items: center; justify-content: center;
-    border-radius: 999px; background: var(--accent); color: var(--bg);
-    font-size: 8px; font-weight: 700; line-height: 1;
-    font-variant-numeric: tabular-nums; box-shadow: 0 0 0 1px var(--bg);
+    position: absolute;
+    top: -5px;
+    right: -6px;
+    min-width: 12px;
+    height: 12px;
+    padding: 0 3px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--bg);
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    box-shadow: 0 0 0 1px var(--bg);
   }
   .meta .cmd {
     font-family: var(--font-mono);
@@ -766,23 +866,6 @@
     text-overflow: ellipsis;
     min-width: 0;
   }
-  .meta .cwd {
-    display: block;
-    color: var(--text3);
-    font-size: 11px;
-    font-family: var(--font-mono);
-    flex: 1;
-    min-width: 0;
-    white-space: nowrap;
-    /* Long paths horizontally scroll. Initial position is scrolled to the
-       right end (see scrollEndIntoView) so the informative tail is visible. */
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
-    touch-action: pan-x;
-  }
-  .meta .cwd::-webkit-scrollbar { display: none; }
 
   .trailing {
     display: flex;
@@ -876,8 +959,11 @@
     flex: 1;
     min-width: 0;
     white-space: nowrap;
-    /* Long paths horizontally scroll. Initial position is scrolled to the
-       right end (see scrollEndIntoView) so the tail is visible first. */
+    /* Right-align so the current folder (the informative tail of the path)
+       always sits flush against the right edge. Long paths still scroll
+       horizontally — scrollEndIntoView parks them at the right end on mount,
+       and the user can swipe left to reveal the full path. */
+    text-align: right;
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;

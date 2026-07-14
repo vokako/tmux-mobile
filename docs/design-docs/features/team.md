@@ -122,6 +122,53 @@ graph. One daemon serves all rooms.
   (`team_close_team` kills its tmux session; the chat log persists in the db, so
   re-starting the same workspace resumes its history).
 
+### Frontend session identity & availability (`src/lib/team.svelte.js`)
+
+The ONE frontend module that knows team tmux sessions are named
+`tmm-team-<room>` (room = `workspace_slug` = `<basename>-<6hex>`, see
+`team.rs`). Exports `TEAM_PREFIX`, `isTeamSession`, `teamRoomOf`,
+`teamSessionOf`, `teamLabel`, and the shared `teamState`
+(`{available, probed}`) rune. Sessions, PanePicker, and Team import from
+here — the prefix/slug scheme must never be re-derived locally (it drifted
+once: PanePicker grouped ungated while Sessions gated, showing the same
+session as "team" on one surface and "regular" on another).
+
+- `isTeamSession` is **gated on `teamState.available`**: on a busless
+  server, `tmm-team-*` names fall back to ordinary sessions everywhere.
+- `teamState` is written only by App's `probeTeam()`, and only a definitive
+  method-not-found (-32601, surfaced via `err.code` from `ws.js`) may flip
+  `available` to false. Transient RPC failures keep the current value —
+  flipping it unmounts the always-mounted Team component (below) and
+  destroys exactly the state it exists to preserve.
+
+### Team tab lifecycle (always-mounted)
+
+The Team component stays mounted while `teamState.available` (a hidden
+`page-layer`, like Files/Terminal) so switching tabs preserves `activeRoom`,
+the loaded history, reading scroll position, and the embedded agent
+terminals. Consequences, all deliberate:
+
+- **Re-shows don't refetch.** The `team_message` push listener keeps
+  `messages` current while hidden (appends only — no roster RPCs, no scroll
+  nudge while hidden); the visible-effect full-`refresh()` runs once, later
+  shows only tick the roster poll. This is what makes scroll position
+  actually survive a tab switch.
+- **Reconnect is the exception**: pushes are lost while disconnected, so a
+  `ws-reconnected` listener re-runs the full `refresh()` (visible or not)
+  to close the gap in the log.
+- **`page === 'team'` needs a fallback**: the layer only mounts when
+  available, so once the probe definitively answers "no bus", App resets
+  `page` to sessions (otherwise the main area would render blank — restore
+  sets `page` before the probe resolves).
+- **Sessions → Team jump**: Sessions calls `openTeam(room)` → App invokes
+  the exported `selectTeam(room)` via `bind:this` (imperative on purpose:
+  re-selecting the same room must still close the switcher/new-team panel;
+  `bind:this` nulls itself on unmount, unlike a hand-registered callback).
+  If the room isn't in the manager's team list (stale tmux session that was
+  never recovered), `refreshTeams`' keep-valid fallback re-points to a valid
+  team and the UI shows a transient "Unknown team: <room>" banner instead of
+  silently landing the user in a different team's chat.
+
 ## 3. Per-workspace teams (the "limited to a directory" requirement)
 
 A team is tied to a **workspace** = the agents' shared working directory (their

@@ -10,6 +10,7 @@
   import { detectParser } from './parsers.js';
   import { detectAgent, paneIsAgent, paneAgent, sessionHasAgent, AGENTS } from './agents.js';
   import { copyText } from './clipboard.js';
+  import { fonts } from './fonts.svelte.js';
 
   // Timing constants
   const WINDOW_LIST_POLL_MS = 5000;
@@ -153,6 +154,7 @@
   $effect(() => {
     if (!term) return;
     term.options.fontSize = fontSize;
+    term.options.fontFamily = fonts.stack; // follows the custom-font setting live
     // xterm re-measures cell geometry on the next render, not synchronously.
     // Defer refit by two frames so calcFit reads the new cell width/height.
     // doResizeRef is set by the main $effect after term is created.
@@ -646,10 +648,11 @@
       fontSize,
       // Literal stack, NOT var(--font-mono): this string is consumed by xterm.js
       // for canvas/WebGL glyph measurement, not parsed as CSS, so a CSS custom
-      // property would not resolve here. Keep in sync with --font-mono (App.svelte).
-      fontFamily: "'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace",
-      fontWeight: 300,
-      fontWeightBold: 600,
+      // property would not resolve here. fonts.stack = the same stack the CSS
+      // var carries (user's custom family first when set).
+      fontFamily: fonts.stack,
+      fontWeight: 'normal',
+      fontWeightBold: 'bold',
       theme: getTermTheme(),
       scrollback: 500,
       convertEol: true,
@@ -696,6 +699,7 @@
     // Forward keyboard input to tmux — skip when input box is open
     let isPasting = false;
     let isComposing = false;
+    let lastInputComposing = false; // per-event composition signal (see input listener)
     if (isMobile) {
       const ta = termEl?.querySelector('.xterm-helper-textarea');
       if (ta) {
@@ -707,9 +711,24 @@
           setTimeout(() => { isPasting = false; }, 200);
         });
         ta.addEventListener('compositionstart', () => { isComposing = true; });
-        ta.addEventListener('compositionend', () => { isComposing = false; });
-        ta.addEventListener('input', () => {
-          window.__dbg?.(`input: ta.input val=${JSON.stringify(ta.value).slice(0,30)} focused=${document.activeElement === ta} inputmode=${ta.getAttribute('inputmode')} locked=${kbLocked}`);
+        // Also reset lastInputComposing: Chromium's commit order is
+        // input(insertCompositionText) → compositionend with no trailing input
+        // event, so the flag would stay true and permanently suppress the
+        // auto-pair clear for IMEs that DO fire composition events (GBoard).
+        ta.addEventListener('compositionend', () => { isComposing = false; lastInputComposing = false; });
+        ta.addEventListener('input', (e) => {
+          // Some Android IMEs (suggestion-bar keyboards common on pads, e.g.
+          // Samsung Keyboard) drive the field with insertCompositionText
+          // input events WITHOUT ever firing compositionstart, so the
+          // isComposing flag above stays false for them. Track composition
+          // per-event as a second signal: while the IME is mid-word we must
+          // not force-clear the textarea below, or the IME's InputConnection
+          // desyncs from the real field content and later edits garble.
+          // Tracked per-event (not sticky) so IMEs that also never fire
+          // compositionend still get the auto-pair clear once they commit
+          // via a plain insertText.
+          lastInputComposing = !!(e.isComposing || (e.inputType || '').startsWith('insertComposition'));
+          window.__dbg?.(`input: ta.input type=${e.inputType} composing=${lastInputComposing} val=${JSON.stringify(ta.value).slice(0,30)} focused=${document.activeElement === ta} locked=${kbLocked}`);
         });
       }
     }
@@ -728,7 +747,11 @@
       // input (e.g. drops pinyin the user is currently typing).
       if (isMobile && !isPasting && !isComposing) {
         requestAnimationFrame(() => {
-          if (isComposing) return; // composition may have started in the meantime
+          // Re-check both signals here: onData fires synchronously inside the
+          // textarea's input dispatch BEFORE our own input listener updates
+          // lastInputComposing, so only this post-dispatch check sees the
+          // current event's composition state.
+          if (isComposing || lastInputComposing) return;
           const ta = termEl?.querySelector('.xterm-helper-textarea');
           if (ta && ta.value) ta.value = '';
         });
@@ -1424,8 +1447,11 @@
       recomputeSelUI();
       touchScrolling = true; // pin while selection is live
     });
-    // Safety net: reset transient gesture state and re-sync tmux whenever the
-    // WebView returns from suspension.
+    // Safety net: if the app is backgrounded mid-selection or mid-scroll, touchcancel
+    // may never fire and touchScrolling can stay stuck true, which freezes
+    // writeToXterm. A suspended WebView can also keep its WebSocket OPEN while
+    // pane pushes stop, so visibility recovery must pull a fresh snapshot rather
+    // than merely repainting the pre-suspend cache.
     let followedTailBeforeHide = true;
     let resumeGeneration = 0;
     const onVisible = () => {
@@ -1446,6 +1472,9 @@
       // backgrounding is rarely useful and could surprise the user.
       if (selection) clearSelection();
       if (resumeAtTail) {
+        // Layout/keyboard changes while suspended can make xterm emit a stale
+        // scroll position on resume. Preserve the user's intent (live tail)
+        // rather than interpreting that geometry change as manual scrollback.
         termAtBottom = true;
         hasNewContent = false;
         term?.scrollToBottom();
@@ -1453,6 +1482,11 @@
       doResizeRef?.();
       if (lastContent && resumeAtTail) writeToXterm(lastContent, lastCursor);
       term?.refresh(0, term.rows - 1);
+
+      // App.svelte re-sends the wire subscription on the same visibility event.
+      // This explicit snapshot closes the gap even if that OPEN socket is only
+      // half-alive: a successful send_keys/capture response proves the RPC path
+      // and immediately converges the display to tmux's actual contents.
       capturePane(target).then(r => {
         if (generation !== resumeGeneration || !term) return;
         const content = r.output ?? r.content;
@@ -1579,40 +1613,27 @@
       doResize();
     });
 
-    // Re-measure once the bundled web fonts finish loading.
+    // Re-measure once webfonts settle.
     //
-    // xterm measures the monospace cell WIDTH at open() time. With the fonts
-    // bundled as async woff2 (not installed system-wide), that first
-    // measurement runs against the system fallback font, whose advance width
-    // differs from Maple Mono. When Maple Mono then swaps in, xterm keeps the
-    // stale (fallback) cell width — so on devices whose fallback is narrower
-    // than Maple Mono (observed on some MIUI WebViews) the real glyphs are
-    // wider than their cell and visually collide ("characters stuck together,
-    // no gaps"); on devices whose fallback happens to match (vivo) it looked
-    // fine. document.fonts.ready resolves after all @font-face loads settle;
-    // we then clear xterm's cached glyph atlas + char-dimension cache and
-    // refit so the cell geometry matches the actual font.
+    // The TEXT font is now a system family (or a locally-installed custom
+    // font), so cell-width measurement at open() is already correct — the
+    // historical "characters stuck together" class of bugs (async text
+    // webfont swapping in after xterm measured the fallback) is gone by
+    // construction. Only the two bundled SYMBOL fonts load async; they don't
+    // drive cell metrics, but their glyphs land in the atlas, so refresh
+    // once after document.fonts.ready to repaint any tofu drawn before the
+    // symbol fonts decoded. Kept cheap: atlas clear + repaint, no refit.
     let fontReadyHandled = false;
     const remeasureAfterFonts = () => {
       if (fontReadyHandled || !term) return;
       fontReadyHandled = true;
       try {
-        // Force xterm to drop cached cell metrics + glyph atlas and recompute
-        // against the now-loaded font. clearTextureAtlas exists on the render
-        // service across the WebGL/canvas renderers; guard in case it doesn't.
         term._core?._renderService?.clearTextureAtlas?.();
-        term._core?._charSizeService?.measure?.();
       } catch {}
-      // Recompute cols/rows for the corrected cell size, then repaint.
-      doResize();
-      if (lastContent) writeToXterm(lastContent, lastCursor);
       term.refresh(0, term.rows - 1);
     };
     if (document.fonts?.ready) {
       document.fonts.ready.then(remeasureAfterFonts).catch(() => {});
-      // Belt-and-suspenders: also fire when the specific family reports loaded,
-      // in case `ready` resolved earlier against the fallback.
-      document.fonts.load?.('14px "Maple Mono"').then(remeasureAfterFonts).catch(() => {});
     }
 
     // Keyboard state (lock/unlock) is driven by keyboard-shift events.

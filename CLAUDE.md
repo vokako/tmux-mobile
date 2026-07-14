@@ -37,6 +37,7 @@ cd src-tauri && cargo test -- --test-threads=1   # Tests (needs tmux running)
 - [Filesystem Service](docs/requirements/backend/services/filesystem.md)
 
 ### Design Docs (the WHY & HOW)
+- [Fonts (system stack + symbol bundles + custom override)](docs/design-docs/features/fonts.md)
 - [Chat Parser Architecture](docs/design-docs/features/chat-parser.md)
 - [Terminal Touch Handling](docs/design-docs/pages/terminal-touch.md)
 - [Terminal Gesture State Machine](docs/design-docs/pages/terminal-gestures.md)
@@ -64,7 +65,7 @@ cd src-tauri && cargo test -- --test-threads=1   # Tests (needs tmux running)
 - **WebSocket lifecycle**: `connect()` cleans up existing. `onclose` rejects pending. `doDisconnect()` clears timers. Heartbeat ping every 15s; 2 consecutive RPC timeouts → auto-close → reconnect.
 - **Terminal touch**: All custom (xterm.js v6 has no touch support). Pause updates during touch. Selection is an *object* (`{anchor, head}`, both inclusive buffer-row/col) that persists until explicitly copied or cancelled; both endpoints are draggable via handles; copy is via an explicit floating toolbar (no tap-to-copy heuristics). See `docs/design-docs/pages/terminal-gestures.md` for the full state machine.
 - **Terminal keyboard**: Double-tap to open (NOT single-tap). `kbLocked` flag + `inputmode` attribute. `endTouchScroll` must NEVER change `kbLocked` (race condition with delayed timers). Only `unlockKeyboard()`, blur timer, keyboard-shift, and pane switch may change it.
-- **Mobile auto-pair textarea**: Force-clear xterm's hidden textarea after keyboard input (NOT paste). Use `paste` event flag to distinguish — NEVER use `data.length` (auto-paired `""` `()` have length 2, gets misclassified as paste).
+- **Mobile auto-pair textarea**: Force-clear xterm's hidden textarea after keyboard input (NOT paste, NOT mid-IME-composition). Use `paste` event flag to distinguish — NEVER use `data.length` (auto-paired `""` `()` have length 2, gets misclassified as paste). Composition needs TWO signals: `compositionstart/end` listeners AND per-event `insertCompositionText` inputType — some Android IMEs (Samsung/pad suggestion-bar keyboards) compose without ever firing compositionstart. `compositionend` must reset BOTH flags: Chromium commits as input(insertCompositionText) → compositionend with no trailing input event, so a sticky per-event flag would permanently suppress the clear for standard IMEs (GBoard).
 - **Tab swipe priority**: App-level left/right tab swipe is lowest priority. Suppressed when any child gesture is active (`defaultPrevented` or vertical movement > 10px).
 - **Chat parsing**: Use ANSI color codes as semantic markers BEFORE stripping.
 - **xterm DA filtering**: Filter device attribute responses before forwarding to tmux.

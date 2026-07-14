@@ -18,35 +18,33 @@
   <meta name="apple-mobile-web-app-title" content="tmux-mobile" />
   <link rel="apple-touch-icon" href="/pwa-192.png" />
   <!--
-    Fonts are bundled (public/fonts/, copied verbatim to the build) and
-    declared here so they resolve from the local origin — the Android APK
-    no longer depends on a CDN that may be slow or blocked. Declaring them
-    in the HTML head (rather than via runtime JS FontFace) means the
-    @font-face rules exist before first paint, so font-family references in
-    the app's CSS resolve immediately. `display: swap` shows fallback text
-    for the few ms the local woff2 takes to decode.
+    Font strategy: system monospace + bundled SYMBOL fonts only.
+
+    We used to bundle Maple Mono (latin + 5 MB CJK subset) for cross-device
+    identity, but the latin file was actually the Light (300) cut — normal
+    text rendered thin everywhere except machines with the full font
+    installed — and async webfont swap forced fragile xterm re-measure
+    logic. xterm renders a fixed cell grid, so alignment never depended on
+    the font anyway; every platform's native mono + CJK stack (SF Mono /
+    Cascadia / Roboto Mono, PingFang / YaHei / Noto CJK / MiSans) is
+    metric-safe and higher quality than a downloaded subset.
+
+    What system fonts genuinely lack:
+      - agent status markers etc. (⏺ ✳ ✻ …): noto-symbols2-subset
+        (symbol/arrow/braille blocks, ~70 KB)
+      - Nerd Font PUA icons (starship prompts etc.): symbols-nerd-mono
+        (nothing ships these)
+    Both are last in the stack: they only fill glyphs the system fonts
+    miss. `display: swap` shows fallback for the few ms of decode.
+
+    Users who prefer a specific mono font (e.g. Maple Mono NF CN) set it in
+    Settings → terminal font; see the custom-font notes in
+    docs/design-docs/features/fonts.md.
   -->
   <style>
     @font-face {
-      font-family: 'Maple Mono'; font-style: normal; font-weight: 300;
-      font-display: swap; src: url('/fonts/maple-mono-latin-300.woff2') format('woff2');
-    }
-    @font-face {
-      font-family: 'Maple Mono'; font-style: normal; font-weight: 600;
-      font-display: swap; src: url('/fonts/maple-mono-latin-600.woff2') format('woff2');
-    }
-    @font-face {
-      /* CJK subset (CJK basic block + punctuation + fullwidth, ~5 MB).
-         Bundled so Chinese renders identically on every device instead of
-         falling through to each platform's own font. Listed after
-         'Maple Mono' in every stack: Latin glyphs resolve from the Latin
-         files, CJK from this one. */
-      font-family: 'Maple Mono CJK'; font-style: normal; font-weight: 400;
-      font-display: swap; src: url('/fonts/maple-mono-cjk.woff2') format('woff2');
-    }
-    @font-face {
       font-family: 'Noto Sans Symbols 2'; font-style: normal; font-weight: 400;
-      font-display: swap; src: url('/fonts/noto-symbols2-400.woff2') format('woff2');
+      font-display: swap; src: url('/fonts/noto-symbols2-subset.woff2') format('woff2');
     }
     @font-face {
       font-family: 'Symbols Nerd Font Mono'; font-style: normal; font-weight: 400;

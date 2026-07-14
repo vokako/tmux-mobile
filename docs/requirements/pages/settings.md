@@ -11,6 +11,7 @@ Configure server connection, appearance, language, and app behavior.
 - Language selector: EN / 中文 (pill buttons)
 - Theme selector: Auto / Light / Dark (pill buttons)
 - Font size control (+/−)
+- Terminal font name (free text; a locally-installed family, prepended to the system mono stack; empty = system default; per-device, persisted to localStorage `tmux_font`)
 - Debug toggle (On/Off)
 - Disconnect button
 
@@ -30,7 +31,7 @@ Configure server connection, appearance, language, and app behavior.
 - Connection state (disconnected/connecting/connected)
 - Address history (localStorage)
 - Locale / language preference (localStorage `tmux_locale`)
-- Font size, theme preference (localStorage)
+- Font size, theme, terminal font name preference (localStorage)
 - Server info (hostname, machine_id)
 - State restore on reload (page, session, view mode)
 

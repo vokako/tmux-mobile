@@ -2,10 +2,10 @@ import '@xterm/xterm/css/xterm.css';
 import { mount } from 'svelte';
 import App from './App.svelte';
 
-// Fonts are bundled in public/fonts/ and declared via @font-face in
-// index.html (loaded from the local origin, not a CDN — see the comment
-// there). The browser loads each woff2 lazily when the app's CSS first
-// references its family, so there's nothing to do here at runtime.
+// Text fonts come from the system (see the font-strategy comment in
+// index.html); only two symbol fonts are bundled in public/fonts/ and
+// declared via @font-face there. The browser loads each woff2 lazily when
+// the CSS first references its family, so there's nothing to do here.
 
 const app = mount(App, { target: document.getElementById('app') });
 

@@ -409,8 +409,13 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
       if (data.id != null && pending.has(data.id)) {
         const { resolve: res, reject: rej } = pending.get(data.id);
         pending.delete(data.id);
-        if (data.error) rej(new Error(data.error.message));
-        else res(data.result);
+        if (data.error) {
+          const err = new Error(data.error.message);
+          // JSON-RPC error code, so callers can tell a definitive server answer
+          // (e.g. -32601 method-not-found → no team bus) from transport errors.
+          err.code = data.error.code;
+          rej(err);
+        } else res(data.result);
       }
     };
 

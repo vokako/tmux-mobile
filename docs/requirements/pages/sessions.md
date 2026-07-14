@@ -21,6 +21,24 @@ glance without requiring interaction.
   list. Horizontally scrollable. One tap on a chip opens that session at
   its primary AI pane.
 
+### Grouping: Teams vs Sessions
+When the server has the team bus (`teamState.available`) and at least one
+team session (`tmm-team-<room>`) exists, the list splits into two labelled
+groups — **Teams** first, then **Sessions** — each with an icon + count
+header. Without team sessions (or on a busless server) the list stays flat
+and headerless, exactly as before.
+
+- Classification is by the `tmm-team-` name prefix, **gated on the shared
+  `teamState.available`** (`src/lib/team.svelte.js`) so a busless server
+  shows these as ordinary sessions on every surface (Sessions, PanePicker).
+- A team row displays the workspace basename (the `-<6hex>` slug suffix is
+  stripped for display; the full room stays in the row `title`). Two
+  workspaces with the same basename therefore display alike — a known,
+  accepted trade-off (the title attribute disambiguates on desktop).
+- Tapping a team row opens the **Team chat** for that room (not a raw
+  terminal); the trailing affordance is a chat glyph instead of the kill
+  button, and team rows never expand a pane list.
+
 ### Session row (single line, dense)
 Left-to-right:
 - **Status dot** — accent color + glow when tmux `attached == true`,
@@ -29,8 +47,9 @@ Left-to-right:
 - **Inline summary** — the row's identity, chosen as:
   - If a pane in the session runs a known AI CLI → the AI's icon.
   - Otherwise → the primary pane's `current_command` (monospace).
-  - Followed by the trailing segment of the primary pane's `current_path`
-    (e.g. `~/260226_x`).
+  - The cwd path segment was removed from the session row (it was squeezed
+    to unreadability in the cramped line). Full paths live on the expanded
+    window rows (right-aligned, horizontally scrollable).
 
   The "primary pane" is: the pane matching `activeTarget` if open, else the
   first pane with an AI tag, else the first pane returned by the server.
@@ -112,12 +131,8 @@ Plus a `+ Window` button at the end of the pane list.
 ## Derived rendering rules
 
 ### `sessionSummary(session)`
-Picks the "primary pane" as described above and returns `{ ai, cmd, cwd }`.
+Picks the "primary pane" as described above and returns `{ ai, cmd }`.
 The session row uses this to render inline context without opening the list.
-
-### `cwdShort(path)`
-Trailing path segment; `~` and `/` kept verbatim. Rendered with a `~/` prefix
-in the session row to keep it short but clearly-a-path.
 
 ### `relTime(unixSec)`
 `< 45s` → `now`, `< 1h` → `Nm`, `< 24h` → `Nh`, `< 7d` → `Nd`, otherwise
