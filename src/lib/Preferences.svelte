@@ -35,6 +35,14 @@
     { id: 'appearance', label: () => t('settingsAppearance'), icon: 'palette' },
     { id: 'connection', label: () => t('settingsConnection'), icon: 'link' },
   ];
+  let fontInput = $state(fonts.custom);
+  let fontInvalid = $state(false);
+
+  function saveFont() {
+    fontInput = fontInput.trim();
+    fontInvalid = !fonts.set(fontInput);
+    return !fontInvalid;
+  }
 
   function setLineHeight(value) {
     terminalPrefs.setLineHeight(Math.round(value * 100) / 100);
@@ -85,10 +93,17 @@
           </div>
           <div class="setting-row">
             <div><strong>{t('fontFamily')}</strong><small>{t('fontFamilyHint')}</small></div>
-            <input class="text-input" type="text" placeholder={t('fontFamilySystem')} value={fonts.custom}
+            <div class="font-control">
+              <input class="text-input" class:invalid={fontInvalid} type="text" list="font-families"
+                placeholder={t('fontFamilySystem')} bind:value={fontInput} aria-invalid={fontInvalid}
               autocapitalize="off" autocomplete="off" spellcheck="false"
-              onchange={(e) => fonts.set(e.target.value)}
-              onkeydown={(e) => { if (e.key === 'Enter') { fonts.set(e.target.value); e.target.blur(); } }} />
+                oninput={() => fontInvalid = false} onchange={saveFont}
+                onkeydown={(e) => { if (e.key === 'Enter' && saveFont()) e.currentTarget.blur(); }} />
+              <datalist id="font-families">
+                {#each fonts.common as family}<option value={family}></option>{/each}
+              </datalist>
+              {#if fontInvalid}<small class="font-error">{t('fontFamilyInvalid')}</small>{/if}
+            </div>
           </div>
           <div class="setting-row">
             <div><strong>{t('font')}</strong><small>{t('fontSizeHint')}</small></div>
@@ -99,7 +114,7 @@
           <div class="setting-row">
             <div><strong>{t('lineHeight')}</strong><small>{t('lineHeightHint')}</small></div>
             <div class="range-wrap">
-              <input type="range" min="0.8" max="1.6" step="0.05" value={terminalPrefs.lineHeight} oninput={(e) => setLineHeight(+e.currentTarget.value)} />
+              <input type="range" min="0.6" max="1.6" step="0.05" value={terminalPrefs.lineHeight} oninput={(e) => setLineHeight(+e.currentTarget.value)} />
               <span>{terminalPrefs.lineHeight.toFixed(2)}</span>
               <button class="reset" onclick={() => setLineHeight(1)}>↺</button>
             </div>
@@ -155,6 +170,7 @@
   .segmented button:active,.stepper button:active,.reset:active,.conn-actions button:active { border-color:var(--accent);color:var(--accent); }
   .text-input { width:min(230px,42vw);height:28px;padding:4px 8px;border:1px solid var(--input-border);border-radius:7px;background:var(--input-bg);color:var(--text);font:11px var(--font-mono);outline:none; }
   .text-input:focus{border-color:var(--accent);}
+  .font-control{display:flex;flex-direction:column;align-items:flex-end;gap:3px}.text-input.invalid{border-color:var(--danger)}.font-error{color:var(--danger)}
   .stepper { display:flex;align-items:center;gap:4px; }.stepper button{width:24px;padding:0;font-size:14px}.stepper span{min-width:42px;text-align:center;font-family:var(--font-mono);font-size:11px;}
   .range-wrap { display:flex;align-items:center;gap:7px;min-width:min(280px,46vw); }
   .range-wrap input { flex:1;height:14px;margin:0;appearance:none;-webkit-appearance:none;background:transparent;cursor:pointer; }
@@ -169,5 +185,5 @@
   .disconnect{display:block;width:min(720px,100%);margin:8px auto;padding:7px;border:1px solid color-mix(in srgb,var(--danger) 55%,transparent);border-radius:7px;background:none;color:var(--danger);cursor:pointer;font-size:11px;font-weight:600}
   .empty-connection{padding:28px 12px;display:flex;flex-direction:column;align-items:center;gap:9px;color:var(--text3);font-size:11px}.empty-connection button{padding:6px 10px;border:1px solid var(--accent);border-radius:6px;background:var(--accent-bg);color:var(--accent);cursor:pointer;font-size:11px}
   @media(max-width:640px){.preferences{inset:calc(49px + var(--sat)) 0 0}.pref-content{padding:9px 8px}.setting-row{min-height:50px;padding:8px 10px;gap:10px}.text-input{width:min(220px,48vw)}.range-wrap{min-width:min(250px,52vw)}.connection-title{align-items:flex-start;flex-direction:column}.conn-actions{width:100%}.conn-actions button{flex:1;justify-content:center}}
-  @media(max-width:420px){.setting-row{align-items:flex-start;flex-direction:column;gap:7px}.setting-row>div:last-child,.text-input,.range-wrap{width:100%;min-width:0}.segmented button{flex:1}}
+  @media(max-width:420px){.setting-row{align-items:flex-start;flex-direction:column;gap:7px}.setting-row>div:last-child,.text-input,.range-wrap{width:100%;min-width:0}.font-control{align-items:flex-start}.segmented button{flex:1}}
 </style>

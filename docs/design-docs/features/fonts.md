@@ -79,8 +79,12 @@ every system family).
 ## Personal preference: the custom font setting
 
 Settings → "Font name" (`fonts.svelte.js`, localStorage `tmux_font`).
-A free-text family name that is prepended (quoted) to the stack and
-applied two ways:
+The editable control suggests common families that are actually installed on
+the current device and also accepts another family typed by the user. Before a
+new value is applied, canvas text metrics verify that the browser can resolve
+it without falling through to generic fonts. Invalid input is shown inline and
+does not replace the active or persisted preference. A valid family name is
+prepended (quoted) to the stack and applied two ways:
 
 - rewrites the `--font-mono` CSS var inline on `<html>` (all mono UI), and
 - flows into `term.options.fontFamily` via the fontSize/`fonts.stack`
@@ -104,7 +108,7 @@ stepper and desktop Cmd/Ctrl `+`, `-`, and `0` shortcuts use the same update
 path and always trigger xterm's deferred re-fit.
 
 Line spacing is a per-device preference stored as `tmux_line_height` and
-clamped to `0.80`–`1.60`. xterm 6 normally rejects values below `1.00`, so the
+clamped to `0.60`–`1.60`. xterm 6 normally rejects values below `1.00`, so the
 Vite config applies a signature-guarded transform that changes only the
 line-height lower bound (the tab-width bound remains unchanged).
 `terminal-prefs.svelte.js` owns the reactive value;

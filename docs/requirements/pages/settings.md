@@ -20,8 +20,8 @@ rounded shape, muted idle state, and accent active state. Settings uses two tabs
 - Language selector: EN / 中文 (pill buttons)
 - Theme selector: Auto / Light / Dark (pill buttons)
 - Font size control (+/−)
-- Terminal font name (free text; a locally-installed family, prepended to the system mono stack; empty = system default; per-device, persisted to localStorage `tmux_font`)
-- Terminal line spacing (0.80–1.60, persisted to localStorage `tmux_line_height`; applies live to every normal, split, and Team terminal)
+- Terminal font family (editable list of common locally-installed fonts; accepts another family typed by the user; only a valid local font is applied and persisted to localStorage `tmux_font`; empty = system default)
+- Terminal line spacing (0.60–1.60, persisted to localStorage `tmux_line_height`; applies live to every normal, split, and Team terminal)
 - Line-spacing slider uses the themed surface track and accent thumb, never the browser's native white track
 - Debug toggle (On/Off)
 - Disconnect button
@@ -34,6 +34,7 @@ rounded shape, muted idle state, and accent active state. Settings uses two tabs
 - Switch settings tab → remember the last tab in localStorage and restore it on the next open
 - A previously saved Terminal tab migrates to Appearance
 - Adjust font size → updates Terminal view
+- Choose or enter a font → validate it against fonts available on the current device, then apply and remember it; invalid input leaves the active font unchanged
 - Tap disconnect → `doDisconnect()`
 
 ## API Calls

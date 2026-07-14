@@ -13,6 +13,24 @@
 
 const KEY = 'tmux_font';
 
+const COMMON_FAMILIES = [
+  'Maple Mono NF CN',
+  'Maple Mono',
+  'SF Mono',
+  'Menlo',
+  'Monaco',
+  'Cascadia Mono',
+  'JetBrains Mono',
+  'Fira Code',
+  'Hack',
+  'IBM Plex Mono',
+  'Roboto Mono',
+  'Noto Sans Mono',
+  'Source Code Pro',
+  'Ubuntu Mono',
+  'Consolas',
+];
+
 // Symbol fillers + per-platform fallbacks. The generic `monospace` keyword
 // stays last so an unknown/typo'd custom family degrades safely.
 const SYSTEM_STACK =
@@ -28,18 +46,42 @@ function quote(name) {
   return clean ? `'${clean}'` : '';
 }
 
+function isAvailable(name) {
+  const family = (name || '').trim().replace(/['"]/g, '');
+  if (!family) return true;
+
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context) return false;
+
+  const sample = 'mmmmmmmmmmlliWW00@#中文';
+  for (const fallback of ['monospace', 'serif', 'sans-serif']) {
+    context.font = `72px ${fallback}`;
+    const fallbackWidth = context.measureText(sample).width;
+    context.font = `72px ${quote(family)}, ${fallback}`;
+    if (context.measureText(sample).width !== fallbackWidth) return true;
+  }
+  return false;
+}
+
 export const fonts = {
   /** The user's custom family name ('' = system default). */
   get custom() {
     return custom;
   },
+  get common() {
+    return COMMON_FAMILIES.filter(isAvailable);
+  },
   set(name) {
-    custom = (name || '').trim();
+    const next = (name || '').trim().replace(/['"]/g, '');
+    if (!isAvailable(next)) return false;
+    custom = next;
     try {
       if (custom) localStorage.setItem(KEY, custom);
       else localStorage.removeItem(KEY);
     } catch {}
     applyMonoVar();
+    return true;
   },
   /** Full CSS font-family stack (custom family first when set). */
   get stack() {

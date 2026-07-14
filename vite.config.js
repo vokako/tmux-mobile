@@ -3,7 +3,7 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 
 function allowCompactXtermLines() {
   const original = 'if(i<1)throw new Error(`${e} cannot be less than 1, value: ${i}`)';
-  const patched = 'if(i<(e==="lineHeight"?.8:1))throw new Error(`${e} cannot be less than ${e==="lineHeight"?.8:1}, value: ${i}`)';
+  const patched = 'if(i<(e==="lineHeight"?.6:1))throw new Error(`${e} cannot be less than ${e==="lineHeight"?.6:1}, value: ${i}`)';
 
   return {
     name: 'allow-compact-xterm-lines',
