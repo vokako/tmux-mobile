@@ -41,6 +41,16 @@
   const AGENT_BY_TAG = new Map(AGENTS.map(a => [a.tag, a]));
   function aiTag(cmd) { return detectAgent(cmd)?.tag || ''; }
   function aiIcon(tag) { return AGENT_BY_TAG.get(tag)?.icon || ''; }
+  function sessionAgents(sessionName) {
+    const counts = new Map();
+    for (const pane of panes[sessionName] || []) {
+      const agent = paneAgent(pane);
+      if (agent) counts.set(agent.tag, (counts.get(agent.tag) || 0) + 1);
+    }
+    return AGENTS
+      .filter(agent => counts.has(agent.tag))
+      .map(agent => ({ agent, count: counts.get(agent.tag) }));
+  }
   // Trailing segment of a path, keeping `~` visible. E.g.:
   //   /Users/clawd/work/proj     → proj
   //   ~/work/project/260226_x    → 260226_x
@@ -67,7 +77,7 @@
   //   attached pane > first pane with AI tag > first pane.
   function sessionSummary(s) {
     const ps = panes[s.name];
-    if (!ps || !ps.length) return { ai: '', cmd: '', cwd: '', count: s.windows };
+    if (!ps || !ps.length) return { ai: '', cmd: '', cwd: '', count: s.windows, agents: [] };
     // Prefer pane that matches activeTarget; else first with AI tag; else first.
     const act = ps.find(p => activeTarget === `${p.session}:${p.window}.${p.pane}`);
     const tagged = ps.find(p => paneAgent(p));
@@ -82,6 +92,7 @@
       cwd: cwdShort(p.current_path),
       count: s.windows,
       pane: p,
+      agents: sessionAgents(s.name),
     };
   }
 
@@ -353,6 +364,7 @@
             {@const isActive = activeTarget.startsWith(s.name + ':')}
             <AgentChip
               agent={AGENT_BY_TAG.get(sum.ai)}
+              agents={sum.agents}
               label={s.name}
               variant={isActive ? 'active' : 'default'}
               onclick={() => chipOpen(s)}
@@ -399,8 +411,15 @@
           <span class="dot" class:attached={s.attached}></span>
           <span class="name">{s.name}</span>
           <span class="meta">
-            {#if sum.ai}
-              <img class="ai-icon" class:claude={sum.ai === 'Claude'} src={aiIcon(sum.ai)} alt={sum.ai} />
+            {#if sum.agents.length}
+              <span class="session-agents" aria-label={sum.agents.map(item => `${item.agent.tag}${item.count > 1 ? ` ×${item.count}` : ''}`).join(', ')}>
+                {#each sum.agents as item (item.agent.tag)}
+                  <span class="session-agent-icon">
+                    <img class="ai-icon" class:claude={item.agent.tag === 'Claude'} src={item.agent.icon} alt={item.agent.tag} />
+                    {#if item.count > 1}<span class="agent-count">{item.count}</span>{/if}
+                  </span>
+                {/each}
+              </span>
             {:else if sum.cmd}
               <span class="cmd">{sum.cmd}</span>
             {/if}
@@ -723,6 +742,22 @@
     flex-shrink: 0;
   }
   .meta .ai-icon.claude { width: 15px; height: 15px; }
+  .session-agents {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 3px 2px 1px; overflow: visible;
+  }
+  .session-agent-icon {
+    position: relative; display: inline-flex; align-items: center;
+    justify-content: center; flex-shrink: 0;
+  }
+  .agent-count {
+    position: absolute; top: -5px; right: -6px;
+    min-width: 12px; height: 12px; padding: 0 3px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 999px; background: var(--accent); color: var(--bg);
+    font-size: 8px; font-weight: 700; line-height: 1;
+    font-variant-numeric: tabular-nums; box-shadow: 0 0 0 1px var(--bg);
+  }
   .meta .cmd {
     font-family: var(--font-mono);
     font-size: 11px;
