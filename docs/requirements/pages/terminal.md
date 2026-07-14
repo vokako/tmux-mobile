@@ -6,7 +6,7 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
 ## Components
 - Expanded window-switcher chips and every mobile shortcut-key button share a 24px control height and pill geometry. Shortcut rows add no vertical padding, preserving terminal viewport space.
 - xterm.js v6 terminal emulator with theme-aware color schemes (light/dark)
-- Shortcut buttons: Esc, ^C, ^D, Tab, arrows — with long-press repeat
+- Shortcut buttons: Esc, Ctrl, ^C, Tab, arrows — with long-press repeat for repeatable keys
 - Keyboard toggle button (show/hide on-screen keyboard)
 - Collapsible window switcher:
   - **Collapsed**: a single chip in the top-right corner (uses the shared
@@ -39,6 +39,7 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
 - **Tap on selection** → copy to clipboard (tap outside clears)
 - **Swipe right edge** → scrollbar drag
 - **Tap shortcut button** → sends key sequence; long-press repeats
+- **Tap Ctrl** → arms a one-shot modifier; the next letter typed on the system keyboard sends Ctrl+letter, then Ctrl releases; tapping Ctrl again cancels it
 - **Horizontal swipe (App level)** → switch tabs (lowest priority, suppressed by all above)
 
 ## API Calls

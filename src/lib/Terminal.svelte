@@ -70,6 +70,12 @@
   const UNLOCK_RETRY_MAX = 2;
   let endTouchScrollTimer = null;
   let kbTa = null; // set in $effect after term.open
+  let ctrlArmed = $state(false);
+
+  $effect(() => {
+    target;
+    ctrlArmed = false;
+  });
 
   function unlockKeyboard() {
     clearTimeout(kbBlurTimer);
@@ -759,8 +765,12 @@
           if (ta && ta.value) ta.value = '';
         });
       }
+      const ctrlByte = ctrlArmed && !isPasting && data.length === 1 && /[a-z]/i.test(data)
+        ? String.fromCharCode(data.toLowerCase().charCodeAt(0) - 96)
+        : null;
+      if (ctrlByte != null) ctrlArmed = false;
       isPasting = false;
-      enqueueKeys(data, true);
+      enqueueKeys(ctrlByte ?? data, true);
     });
     // Block xterm from processing keys when input box is open
     term.attachCustomKeyEventHandler(() => true);
@@ -1899,11 +1909,18 @@
     enqueueKeys(key, false);
   }
 
+  function toggleCtrl() {
+    stopRepeat();
+    ctrlArmed = !ctrlArmed;
+    navigator.vibrate?.(8);
+  }
+
   // Long-press repeat for shortcut keys
   let repeatTimer = null;
   let repeatInterval = null;
 
   function startRepeat(key) {
+    ctrlArmed = false;
     const ta = termEl?.querySelector('.xterm-helper-textarea');
     window.__dbg?.(`kb: shortcut "${key}" locked=${kbLocked} inputmode=${ta?.getAttribute('inputmode')} focused=${document.activeElement === ta}`);
     navigator.vibrate?.(8); // haptic tick on press; silent during repeat interval
@@ -2136,14 +2153,14 @@
         <div class="shortcut-rows" use:nonPassiveShortcuts ontouchend={stopRepeat} ontouchcancel={stopRepeat} oncontextmenu={(e) => e.preventDefault()} onmouseup={stopRepeat}>
           <div class="shortcuts">
             <button tabindex="-1" ontouchstart={() => startRepeat('Escape')}>Esc</button>
-            <button tabindex="-1" ontouchstart={() => startRepeat('C-d')}>^D</button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('Tab')}>Tab</button>
             <button tabindex="-1" ontouchstart={() => startRepeat('C-a')}><Icon name="skip-left" size={13} /></button>
             <button tabindex="-1" ontouchstart={() => startRepeat('Up')}><Icon name="arrow-up" size={13} /></button>
             <button tabindex="-1" ontouchstart={() => startRepeat('C-e')}><Icon name="skip-right" size={13} /></button>
             <button tabindex="-1" ontouchstart={() => startRepeat('BSpace')}><Icon name="delete" size={13} /></button>
           </div>
           <div class="shortcuts">
-            <button tabindex="-1" ontouchstart={() => startRepeat('Tab')}>Tab</button>
+            <button class="modifier" class:active={ctrlArmed} aria-pressed={ctrlArmed} tabindex="-1" ontouchstart={toggleCtrl}>Ctrl</button>
             <button tabindex="-1" ontouchstart={() => startRepeat('C-c')}>^C</button>
             <button tabindex="-1" ontouchstart={() => startRepeat('Left')}><Icon name="arrow-left" size={13} /></button>
             <button tabindex="-1" ontouchstart={() => startRepeat('Down')}><Icon name="arrow-down" size={13} /></button>
@@ -2609,6 +2626,12 @@
     color: var(--accent);
     border-color: var(--accent);
     transform: translateY(1px);
+    box-shadow: none;
+  }
+  .shortcuts button.modifier.active {
+    background: var(--accent-bg);
+    color: var(--accent);
+    border-color: var(--accent);
     box-shadow: none;
   }
   :global(html.keyboard-open) .shortcuts .kb-toggle {
