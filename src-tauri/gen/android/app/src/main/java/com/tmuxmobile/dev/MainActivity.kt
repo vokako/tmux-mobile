@@ -4,6 +4,7 @@ import android.os.Bundle
 import android.graphics.Rect
 import android.content.Intent
 import android.webkit.JavascriptInterface
+import android.webkit.WebView
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -11,24 +12,20 @@ import androidx.core.content.FileProvider
 import java.io.File
 
 class MainActivity : TauriActivity() {
+  override fun onWebViewCreate(webView: WebView) {
+    super.onWebViewCreate(webView)
+    // Wry calls this before the initial page load. addJavascriptInterface
+    // only becomes visible to JavaScript after a page load, so attaching here
+    // is required; finding the WebView later from onCreate is already too late.
+    webView.addJavascriptInterface(FileOpener(), "AndroidFileOpener")
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
 
     val rootView = window.decorView.rootView
     val density = resources.displayMetrics.density
-
-    // Add JS interface for opening files (retry until WebView is in hierarchy)
-    var attachAttempts = 0
-    fun attachFileOpener() {
-      val webView = findWebView(rootView)
-      if (webView != null) {
-        webView.addJavascriptInterface(FileOpener(), "AndroidFileOpener")
-      } else if (++attachAttempts < 50) {
-        rootView.postDelayed(::attachFileOpener, 100)
-      }
-    }
-    rootView.post(::attachFileOpener)
 
     // Send status bar + navigation bar insets to WebView (convert to CSS px)
     ViewCompat.setOnApplyWindowInsetsListener(rootView) { _, insets ->
