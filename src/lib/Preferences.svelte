@@ -156,7 +156,13 @@
   .text-input { width:min(230px,42vw);height:28px;padding:4px 8px;border:1px solid var(--input-border);border-radius:7px;background:var(--input-bg);color:var(--text);font:11px var(--font-mono);outline:none; }
   .text-input:focus{border-color:var(--accent);}
   .stepper { display:flex;align-items:center;gap:4px; }.stepper button{width:24px;padding:0;font-size:14px}.stepper span{min-width:42px;text-align:center;font-family:var(--font-mono);font-size:11px;}
-  .range-wrap { display:flex;align-items:center;gap:7px;min-width:min(280px,46vw); }.range-wrap input{flex:1;accent-color:var(--accent)}.range-wrap span{width:31px;font:10px var(--font-mono);color:var(--text2)}.reset{width:24px;padding:0}
+  .range-wrap { display:flex;align-items:center;gap:7px;min-width:min(280px,46vw); }
+  .range-wrap input { flex:1;height:14px;margin:0;appearance:none;-webkit-appearance:none;background:transparent;cursor:pointer; }
+  .range-wrap input::-webkit-slider-runnable-track { height:3px;border-radius:999px;background:var(--surface2);border:1px solid var(--border2); }
+  .range-wrap input::-webkit-slider-thumb { appearance:none;-webkit-appearance:none;width:12px;height:12px;margin-top:-5px;border:2px solid var(--bg);border-radius:50%;background:var(--accent);box-shadow:0 0 0 1px var(--accent); }
+  .range-wrap input::-moz-range-track { height:3px;border-radius:999px;background:var(--surface2);border:1px solid var(--border2); }
+  .range-wrap input::-moz-range-thumb { width:10px;height:10px;border:2px solid var(--bg);border-radius:50%;background:var(--accent);box-shadow:0 0 0 1px var(--accent); }
+  .range-wrap span{width:31px;font:10px var(--font-mono);color:var(--text2)}.reset{width:24px;padding:0}
   .connection-title{padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px}.connection-title>div:first-child{display:flex;flex-direction:column;gap:3px}.conn-actions{display:flex;gap:4px}.conn-actions button{display:flex;align-items:center;gap:4px}
   .address-list{padding:0 12px 10px;display:flex;flex-direction:column;gap:3px}.address-list button{padding:7px 9px;border:1px solid var(--border2);border-radius:7px;background:var(--input-bg);color:var(--text3);font:11px var(--font-mono);text-align:left;word-break:break-all;cursor:pointer}.address-list button.active{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}
   .compact{border-top:1px solid var(--border2)}.toggle{height:24px;border:1px solid var(--border2);border-radius:999px;background:transparent;color:var(--text3);padding:3px 8px 3px 4px;display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px}.toggle span{width:12px;height:12px;border-radius:50%;background:var(--text3)}.toggle.on{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}.toggle.on span{background:var(--accent)}

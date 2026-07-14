@@ -22,6 +22,7 @@ rounded shape, muted idle state, and accent active state. Settings uses two tabs
 - Font size control (+/−)
 - Terminal font name (free text; a locally-installed family, prepended to the system mono stack; empty = system default; per-device, persisted to localStorage `tmux_font`)
 - Terminal line spacing (0.80–1.60, persisted to localStorage `tmux_line_height`; applies live to every normal, split, and Team terminal)
+- Line-spacing slider uses the themed surface track and accent thumb, never the browser's native white track
 - Debug toggle (On/Off)
 - Disconnect button
 

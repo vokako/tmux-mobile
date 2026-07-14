@@ -46,6 +46,11 @@ deliberate; everything around it is `team`.
 
 ## 2. Integration shape — and why
 
+The Team switcher follows Terminal's expanded switcher geometry: one 31px bar
+made from 24px chips, 3px vertical padding, and the bottom divider. Agent chips
+scroll inside their own middle strip; team selection and actions stay fixed,
+and the bar never wraps taller as agents are added.
+
 The decisive choice: **vendor agora as an in-process, desktop-only sub-crate and
 share ONE `Bus` between the agents' MCP daemon and the phone's WS server.**
 

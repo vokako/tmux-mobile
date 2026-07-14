@@ -440,8 +440,8 @@
 </script>
 
 {#snippet teamSwitcher()}
-  <!-- Header: active-team dropdown + close, then the live agent status chips on
-       the SAME row (wrapping to the next line when they overflow). -->
+  <!-- Header: fixed team/actions around a horizontally scrolling agent strip,
+       matching Terminal's one-row window switcher. -->
   <div class="team-header">
     <div class="team-pick">
       <button class="team-pick-btn" onclick={() => switcherOpen = !switcherOpen}>
@@ -480,15 +480,18 @@
       {/if}
     {/if}
     <!-- Agent status chips: dot + name only; tap to preview the agent's pane.
-         flex-wrap drops overflow onto the next line. Hidden when the graph is
+         They scroll inside their own strip like Terminal's window chips, so
+         the header stays one fixed-height row. Hidden when the graph is
          visible (desktop grid, or mobile panel open) — agents show there. -->
     {#if !newTeam && activeRoom && !splitEligible && !collabOpen}
-      {#each agents as a}
-        <button class="roster-chip" onclick={() => previewAgent(a.name)} title={a.role || a.name}>
-          <span class="roster-dot status-{a.status}"></span>
-          <span class="roster-name">{a.name}</span>
-        </button>
-      {/each}
+      <div class="team-header-scroll">
+        {#each agents as a}
+          <button class="roster-chip" onclick={() => previewAgent(a.name)} title={a.role || a.name}>
+            <span class="roster-dot status-{a.status}"></span>
+            <span class="roster-name">{a.name}</span>
+          </button>
+        {/each}
+      </div>
     {/if}
     {#if activeTeam}
       <button class="team-close" class:confirm={confirmClose} onclick={closeActiveTeam} title={t('teamClose')} aria-label={t('teamClose')}>
@@ -708,10 +711,15 @@
 
   /* Team switcher header */
   .team-header {
-    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-    padding: 6px 10px; flex-shrink: 0;
-    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 4px; flex-wrap: nowrap;
+    padding: 3px 4px 3px 6px; flex-shrink: 0;
+    border-bottom: 1px solid var(--border2); background: var(--surface);
   }
+  .team-header-scroll {
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px;
+    overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  .team-header-scroll::-webkit-scrollbar { display: none; }
   /* Transient banner: the tapped team session's room isn't known to the
      manager, so the view was redirected to a valid team instead. */
   .team-notice {
@@ -723,16 +731,17 @@
   .team-pick { position: relative; flex-shrink: 0; min-width: 0; }
   .team-pick-btn {
     display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
-    padding: 5px 10px; border: 1px solid var(--border2); border-radius: 8px;
+    height: 24px; padding: 3px 8px; box-sizing: border-box;
+    border: 1px solid var(--border2); border-radius: 999px;
     background: var(--input-bg); color: var(--text2);
-    font-size: 12px; font-weight: 600; cursor: pointer;
+    font-size: 11px; line-height: 1.3; font-weight: 600; cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
   .team-pick-btn:active { border-color: var(--accent); color: var(--accent); }
   .team-pick-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .team-pick-backdrop { position: fixed; inset: 0; z-index: 30; background: transparent; border: none; }
   .team-pick-menu {
-    position: absolute; top: 34px; left: 0; z-index: 31;
+    position: absolute; top: 28px; left: 0; z-index: 31;
     min-width: 200px; max-width: 280px; max-height: 50vh; overflow-y: auto;
     background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
     box-shadow: 0 12px 40px rgba(0,0,0,0.4); padding: 4px;
@@ -752,9 +761,9 @@
   .team-pick-empty { padding: 8px 9px; color: var(--text3); font-size: 12px; }
   .team-pick-new { color: var(--accent); border-top: 1px solid var(--border2); border-radius: 0 0 7px 7px; margin-top: 2px; }
   .team-close, .team-swap, .team-hbtn {
-    flex-shrink: 0; width: 28px; height: 28px; padding: 0;
-    border: 1px solid var(--border2); border-radius: 8px;
-    background: var(--input-bg); color: var(--text3);
+    flex-shrink: 0; width: 24px; height: 24px; padding: 0;
+    border: 1px solid var(--border2); border-radius: 999px;
+    background: var(--input-bg); color: var(--text3); box-sizing: border-box;
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     -webkit-tap-highlight-color: transparent;
   }
@@ -867,10 +876,10 @@
   @keyframes team-spin { to { transform: rotate(360deg); } }
   .roster-chip {
     display: inline-flex; align-items: center; gap: 6px;
-    padding: 3px 9px; height: 26px;
+    padding: 3px 8px; height: 24px; box-sizing: border-box;
     border: 1px solid var(--border2); border-radius: 999px;
     background: var(--input-bg); color: var(--text2);
-    font-size: 12px; font-weight: 500; cursor: pointer; flex-shrink: 0;
+    font-size: 11px; line-height: 1.3; font-weight: 500; cursor: pointer; flex-shrink: 0;
     white-space: nowrap; -webkit-tap-highlight-color: transparent;
     transition: border-color 0.15s ease, color 0.15s ease;
   }

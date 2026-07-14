@@ -2577,17 +2577,23 @@
   .shortcuts {
     display: flex;
     gap: 3px;
+    height: 31px;
+    padding: 3px 0 4px;
+    box-sizing: border-box;
   }
   .shortcuts::-webkit-scrollbar { display: none; }
 
   .shortcuts button {
     flex: 1;
-    padding: 5px 0;
+    height: 24px;
+    padding: 0;
+    box-sizing: border-box;
     border: 1px solid var(--input-border);
-    border-radius: 7px;
+    border-radius: 999px;
     background: var(--input-bg);
     color: var(--text2);
-    font-size: 12px;
+    font-size: 11px;
+    line-height: 1.3;
     font-family: var(--font-mono);
     font-weight: 500;
     cursor: pointer;
