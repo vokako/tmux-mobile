@@ -1,5 +1,27 @@
 # Unresolved Issues
 
+## Prefs/bookmarks: cross-client last-writer-wins
+- **Priority**: Low
+- **Area**: Filesystem service / Files page
+- **Details**: `save_bookmarks` / `set_pref('recentFiles')` persist the whole
+  array; the server (`config.rs`) blindly replaces it. The client now guards
+  its own races (generation counter + never-write-before-first-load, see
+  `docs/requirements/pages/file-browser.md`), but two clients connected at
+  once (phone + desktop) can still clobber each other's writes: both load at
+  t0, phone stars A, desktop stars B from its pre-A snapshot → A is silently
+  dropped. Deeper fix: server-side add/remove RPCs (`bookmark_toggle`,
+  `fs_add_recent`) or merge semantics in `set_prefs`, after which the client
+  guards become unnecessary.
+
+## Team label collisions on same-basename workspaces
+- **Priority**: Low
+- **Area**: Sessions / PanePicker / team.svelte.js
+- **Details**: `teamLabel()` strips the `-<6hex>` slug suffix for display, so
+  `/a/demo` and `/b/demo` both render "demo" (the full room only lives in the
+  row `title`, unreachable on touch). Accepted for now (rare case). Fix would
+  be joining against `team_status().teams[].workspace` and disambiguating with
+  a parent-dir segment when basenames collide.
+
 ## Team feature — open issues (review 2026-06-15)
 
 ### ~~close_team leaks the room's bus + re-broadcast pump~~ — FIXED

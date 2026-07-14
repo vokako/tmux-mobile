@@ -104,6 +104,14 @@ doesn't need to change — Gradle instantiates the task via the
   `.../buildSrc/.gradle` is required after editing BuildTask.kt to
   force Kotlin recompilation — Gradle sometimes caches stale class
   files from the prior `project.exec` version.
+- **Stale configuration-cache entries break the build after toolchain
+  updates** (seen 2026-07 after a Kotlin plugin update): Gradle fails at
+  configuration time with `Class 'org.jetbrains.kotlin.gradle.plugin.
+  internal.CustomPropertiesFileValueSource$Parameters' not found in class
+  loader` — the serialized cache references a class from the previous
+  Kotlin plugin version. Fix: `rm -rf src-tauri/gen/android/.gradle/
+  configuration-cache` (plus the buildSrc caches above) and rebuild. The
+  first rebuild re-stores a fresh cache entry; later builds are fast again.
 
 ### Alternatives Considered
 - **Disable config cache in project `gradle.properties`**: Rejected.
