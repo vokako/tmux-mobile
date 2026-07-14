@@ -5,7 +5,9 @@ Configure server connection, appearance, language, and app behavior.
 
 The gear button opens Settings as a full-window workspace below the app nav,
 not a small popover. The workspace avoids redundant page/section headings and
-uses the compact tab navigation as its only title row. Settings uses three tabs:
+uses the compact tab navigation as its only title row. The tab bar and choice
+controls reuse Terminal's 24px outlined chip language, including its spacing,
+rounded shape, muted idle state, and accent active state. Settings uses three tabs:
 
 - **Appearance** — theme, language, responsive layout mode
 - **Terminal** — installed font family override, font size, line spacing
