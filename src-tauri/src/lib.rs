@@ -13,6 +13,12 @@ pub mod team;
 #[cfg(desktop)]
 use config::Config;
 
+#[derive(serde::Serialize)]
+struct DownloadEntry {
+    name: String,
+    modified: u64,
+}
+
 #[tauri::command]
 fn get_local_config() -> serde_json::Value {
     config::get_config_json()
@@ -46,7 +52,7 @@ fn save_to_downloads(name: String, data: Vec<u8>) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn list_downloads() -> Result<Vec<String>, String> {
+fn list_downloads() -> Result<Vec<DownloadEntry>, String> {
     let dir = std::path::PathBuf::from("/storage/emulated/0/Download/TmuxMobile");
     std::fs::create_dir_all(&dir).ok();
     let mut files = Vec::new();
@@ -54,12 +60,26 @@ fn list_downloads() -> Result<Vec<String>, String> {
         for entry in entries.flatten() {
             if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
                 if let Some(name) = entry.file_name().to_str() {
-                    files.push(name.to_string());
+                    let modified = entry
+                        .metadata()
+                        .ok()
+                        .and_then(|meta| meta.modified().ok())
+                        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|duration| duration.as_millis() as u64)
+                        .unwrap_or(0);
+                    files.push(DownloadEntry {
+                        name: name.to_string(),
+                        modified,
+                    });
                 }
             }
         }
     }
-    files.sort();
+    files.sort_by(|a, b| {
+        b.modified
+            .cmp(&a.modified)
+            .then_with(|| a.name.cmp(&b.name))
+    });
     Ok(files)
 }
 

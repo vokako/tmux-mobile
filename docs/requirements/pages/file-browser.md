@@ -74,6 +74,8 @@ These are client-side guards only; two *different* clients can still race
 - Markdown preview resolves relative image paths, infers MIME from image extension (not parent file)
 - HTML preview iframe: `allow-same-origin` only, NO `allow-scripts` (sandbox escape prevention)
 - Android downloads go to `/storage/emulated/0/Download/TmuxMobile/`, opened via FileProvider + Intent
+- Android's downloaded-files list is sorted by filesystem modification time descending (newest first)
+- Download progress ring and label use the same clamped integer percentage; the ring has exact, non-rounded endpoints
 - Android file opening uses `AndroidFileOpener` JS interface, NOT `tauri-plugin-opener`
 - Filenames sanitized server-side (`sanitize_filename()`) to prevent path traversal
 - Error states (downloading, uploading) always reset in catch blocks

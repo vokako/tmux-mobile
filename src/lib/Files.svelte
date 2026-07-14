@@ -148,7 +148,7 @@
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       const files = await invoke('list_downloads');
-      localFiles = files.map(name => ({ name }));
+      localFiles = files.map(file => typeof file === 'string' ? { name: file, modified: 0 } : file);
       localDir = '/storage/emulated/0/Download/TmuxMobile/';
       view = 'local';
       navPush();
@@ -807,6 +807,7 @@
   // and the final write step (95–100). No more synthetic timer that always
   // hovered at 80% — that was the user-visible "stuck at 80%" bug.
   let dlProgress = $state(0);
+  let displayedDlProgress = $derived(Math.max(0, Math.min(100, Math.round(dlProgress))));
 
   async function openDownloaded() {
     if (!downloadedPath) return;
@@ -1655,11 +1656,11 @@
       <svg class="dl-ring" width="28" height="28" viewBox="0 0 28 28">
         <circle cx="14" cy="14" r="11" fill="none" stroke="var(--border)" stroke-width="2.5" />
         <circle cx="14" cy="14" r="11" fill="none" stroke="var(--accent)" stroke-width="2.5"
-          stroke-linecap="round" transform="rotate(-90 14 14)"
+          transform="rotate(-90 14 14)"
           stroke-dasharray={2 * Math.PI * 11}
-          stroke-dashoffset={2 * Math.PI * 11 * (1 - dlProgress / 100)} />
+          stroke-dashoffset={2 * Math.PI * 11 * (1 - displayedDlProgress / 100)} />
       </svg>
-      <span class="dl-pct">{Math.round(dlProgress)}%</span>
+      <span class="dl-pct">{displayedDlProgress}%</span>
       <span class="dl-name">{downloading}</span>
     </div>
   {:else if downloadToast}
@@ -1999,7 +2000,9 @@
     font-family: var(--font-mono); font-size: 11px; color: var(--text2);
   }
   .dl-ring { flex-shrink: 0; }
-  /* No transition on the progress arc — it must track dlProgress exactly.
+  /* No transition on the progress arc — it must track the displayed integer
+     percentage exactly. Square arc ends avoid the extra visual length that
+     rounded caps add at both ends, especially below 10%.
      A `transition: stroke-dashoffset` made the arc lag the % number on fast
      (LAN) downloads: the number would read 94% while the arc was still easing
      through ~1/3. The two are now always in sync. */
