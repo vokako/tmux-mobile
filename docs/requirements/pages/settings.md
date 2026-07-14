@@ -31,6 +31,7 @@ rounded shape, muted idle state, and accent active state. Settings uses three ta
 - Tap history entry → auto-fill and connect
 - Switch language → immediate UI text update, persisted to localStorage
 - Switch theme → immediate CSS variable transition
+- Switch settings tab → remember the last tab in localStorage and restore it on the next open
 - Adjust font size → updates Terminal view
 - Tap disconnect → `doDisconnect()`
 

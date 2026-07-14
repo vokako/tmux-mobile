@@ -26,7 +26,10 @@
     onConnectionSetup = () => {},
   } = $props();
 
-  let tab = $state('appearance');
+  const TAB_KEY = 'tmux_settings_tab';
+  const TAB_IDS = new Set(['appearance', 'terminal', 'connection']);
+  const storedTab = localStorage.getItem(TAB_KEY);
+  let tab = $state(TAB_IDS.has(storedTab) ? storedTab : 'appearance');
   const tabs = [
     { id: 'appearance', label: () => t('settingsAppearance'), icon: 'palette' },
     { id: 'terminal', label: () => t('terminal'), icon: 'terminal' },
@@ -36,13 +39,18 @@
   function setLineHeight(value) {
     terminalPrefs.setLineHeight(Math.round(value * 100) / 100);
   }
+
+  function selectTab(value) {
+    tab = value;
+    localStorage.setItem(TAB_KEY, value);
+  }
 </script>
 
 <section class="preferences" aria-label={t('settings')}>
   <div class="pref-shell">
     <nav class="pref-tabs" aria-label={t('settings')}>
       {#each tabs as item}
-        <button class:active={tab === item.id} onclick={() => tab = item.id}>
+        <button class:active={tab === item.id} onclick={() => selectTab(item.id)}>
           <Icon name={item.icon} size={15} /><span>{item.label()}</span>
         </button>
       {/each}
