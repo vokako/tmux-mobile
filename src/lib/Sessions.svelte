@@ -428,7 +428,7 @@
                 {#each sum.agents as item (item.agent.tag)}
                   <span class="session-agent-icon">
                     <img class="ai-icon" class:claude={item.agent.tag === 'Claude'} src={item.agent.icon} alt={item.agent.tag} />
-                    {#if item.count > 1}<span class="agent-count">{item.count}</span>{/if}
+                    {#if item.count > 1}<span class="agent-count">×{item.count}</span>{/if}
                   </span>
                 {/each}
               </span>
@@ -833,30 +833,20 @@
     overflow: visible;
   }
   .session-agent-icon {
-    position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    gap: 1px;
     flex-shrink: 0;
   }
   .agent-count {
-    position: absolute;
-    top: -5px;
-    right: -6px;
-    min-width: 12px;
-    height: 12px;
-    padding: 0 3px;
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    border-radius: 999px;
-    background: var(--accent);
-    color: var(--bg);
+    color: var(--text3);
     font-size: 8px;
-    font-weight: 700;
+    font-weight: 600;
     line-height: 1;
     font-variant-numeric: tabular-nums;
-    box-shadow: 0 0 0 1px var(--bg);
   }
   .meta .cmd {
     font-family: var(--font-mono);

@@ -40,10 +40,7 @@
   {#if agents.length}
     <span class="chip-agents">
       {#each agents as item (item.agent.tag)}
-        <span class="chip-agent">
-          <img class="chip-icon" class:claude={item.agent.tag === 'Claude'} src={item.agent.icon} alt={item.agent.tag} />
-          {#if item.count > 1}<span class="chip-count">{item.count}</span>{/if}
-        </span>
+        <img class="chip-icon" class:claude={item.agent.tag === 'Claude'} src={item.agent.icon} alt={item.agent.tag} />
       {/each}
     </span>
   {:else if agent}
@@ -120,26 +117,6 @@
     filter: brightness(0.9);
   }
   .chip-agents { display: inline-flex; align-items: center; gap: 3px; overflow: visible; }
-  .chip-agent { position: relative; display: inline-flex; flex-shrink: 0; }
-  .chip-count {
-    position: absolute;
-    top: -5px;
-    right: -5px;
-    min-width: 11px;
-    height: 11px;
-    padding: 0 2px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 999px;
-    background: var(--accent);
-    color: var(--bg);
-    font-size: 7px;
-    font-weight: 700;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-    box-shadow: 0 0 0 1px var(--input-bg);
-  }
 
   .chip-label {
     overflow: hidden;
