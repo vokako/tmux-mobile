@@ -2579,8 +2579,8 @@
   .shortcuts {
     display: flex;
     gap: 3px;
-    height: var(--ui-bar-height);
-    padding: 3px 0 4px;
+    height: var(--ui-control-height);
+    padding: 0;
     box-sizing: border-box;
   }
   .shortcuts::-webkit-scrollbar { display: none; }

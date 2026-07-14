@@ -4,7 +4,7 @@
 Primary view for interacting with tmux panes. Renders terminal output with ANSI colors, provides touch-optimized scrolling and input for mobile devices.
 
 ## Components
-- Expanded window-switcher chips and every mobile shortcut-key button share a 24px control height and pill geometry.
+- Expanded window-switcher chips and every mobile shortcut-key button share a 24px control height and pill geometry. Shortcut rows add no vertical padding, preserving terminal viewport space.
 - xterm.js v6 terminal emulator with theme-aware color schemes (light/dark)
 - Shortcut buttons: Esc, ^C, ^D, Tab, arrows — with long-press repeat
 - Keyboard toggle button (show/hide on-screen keyboard)
