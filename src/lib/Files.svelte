@@ -155,24 +155,32 @@
     } catch (e) { error = e.message; }
   }
 
-  async function waitForFileOpener(maxWait = 2000) {
-    if (window.AndroidFileOpener) return true;
+  function getFileOpener() {
+    try {
+      const opener = window.AndroidFileOpener;
+      return opener?.ping?.() === 'ok' ? opener : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function waitForFileOpener(maxWait = 5000) {
+    let opener = getFileOpener();
+    if (opener) return opener;
     const start = Date.now();
     while (Date.now() - start < maxWait) {
       await new Promise(r => setTimeout(r, 100));
-      if (window.AndroidFileOpener) return true;
+      opener = getFileOpener();
+      if (opener) return opener;
     }
-    return false;
+    return null;
   }
 
   async function openFileNative(path) {
-    if (!window.AndroidFileOpener) await waitForFileOpener();
-    if (window.AndroidFileOpener) {
-      const result = window.AndroidFileOpener.openFile(path);
-      if (result !== 'ok') throw new Error(result);
-    } else {
-      throw new Error('No file opener available');
-    }
+    const opener = getFileOpener() || await waitForFileOpener();
+    if (!opener) throw new Error('No file opener available after app resume');
+    const result = opener.openFile(path);
+    if (result !== 'ok') throw new Error(result);
   }
 
   async function openLocalFile(name) {
@@ -818,8 +826,8 @@
         await tauriReady;
         await tauriOpener.openPath(downloadedPath);
       }
+      dismissDownload();
     } catch (e) { error = t('openFailed') + (e.message || e); }
-    dismissDownload();
   }
 
   function dismissDownload() {

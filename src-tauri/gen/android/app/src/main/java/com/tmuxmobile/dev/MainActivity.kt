@@ -12,12 +12,28 @@ import androidx.core.content.FileProvider
 import java.io.File
 
 class MainActivity : TauriActivity() {
+  private val fileOpener = FileOpener()
+  private var appWebView: WebView? = null
+
   override fun onWebViewCreate(webView: WebView) {
     super.onWebViewCreate(webView)
     // Wry calls this before the initial page load. addJavascriptInterface
     // only becomes visible to JavaScript after a page load, so attaching here
     // is required; finding the WebView later from onCreate is already too late.
-    webView.addJavascriptInterface(FileOpener(), "AndroidFileOpener")
+    appWebView = webView
+    webView.addJavascriptInterface(fileOpener, "AndroidFileOpener")
+  }
+
+  override fun onResume() {
+    super.onResume()
+    appWebView?.post {
+      appWebView?.addJavascriptInterface(fileOpener, "AndroidFileOpener")
+    }
+  }
+
+  override fun onDestroy() {
+    appWebView = null
+    super.onDestroy()
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -72,6 +88,9 @@ class MainActivity : TauriActivity() {
   }
 
   inner class FileOpener {
+    @JavascriptInterface
+    fun ping(): String = "ok"
+
     @JavascriptInterface
     fun openFile(filePath: String): String {
       return try {

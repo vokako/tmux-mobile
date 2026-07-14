@@ -77,5 +77,6 @@ These are client-side guards only; two *different* clients can still race
 - Android's downloaded-files list is sorted by filesystem modification time descending (newest first)
 - Download progress ring and label use the same clamped integer percentage; the ring has exact, non-rounded endpoints
 - Android file opening uses the `AndroidFileOpener` JS interface injected before initial page load by `onWebViewCreate`, NOT `tauri-plugin-opener`
+- Android reattaches and health-checks the file opener after app resume; a failed download-complete Open remains retryable
 - Filenames sanitized server-side (`sanitize_filename()`) to prevent path traversal
 - Error states (downloading, uploading) always reset in catch blocks

@@ -9,7 +9,8 @@ Use custom `@JavascriptInterface` in `MainActivity.kt` for file opening instead 
 ## How It Works
 - `MainActivity.kt` → `FileOpener` inner class → `@JavascriptInterface` → `FileProvider.getUriForFile` → `Intent.ACTION_VIEW`
 - `onWebViewCreate(webView)` injects `AndroidFileOpener` before Wry loads the app page
-- Frontend: `waitForFileOpener()` polls for `window.AndroidFileOpener` (up to 2s) before file open
+- `onResume()` idempotently reattaches the same bridge instance after returning from another app
+- Frontend validates the bridge with `ping()` and polls for up to 5s before file open
 - Downloads go to `/storage/emulated/0/Download/TmuxMobile/`
 - Keyboard height via `OnGlobalLayoutListener`, safe area insets via `WindowInsetsCompat`
 - Cleartext ws:// enabled via `network_security_config.xml`
@@ -21,6 +22,7 @@ Use custom `@JavascriptInterface` in `MainActivity.kt` for file opening instead 
 ## Trade-offs
 - Custom native code to maintain in `MainActivity.kt`
 - Depends on Wry's Android `onWebViewCreate` lifecycle hook
+- Download-complete Open failures keep the toast available so the user can retry
 - `gen/android/` files survive `tauri android init` only if backed up
 
 ## Lessons Learned
