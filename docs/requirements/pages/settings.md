@@ -3,6 +3,13 @@
 ## Purpose
 Configure server connection, appearance, language, and app behavior.
 
+The gear button opens Settings as a full-window workspace below the app nav,
+not a small popover. Settings uses three tabs only:
+
+- **Appearance** — theme, language, responsive layout mode
+- **Terminal** — installed font family override, font size, line spacing
+- **Connection** — current server/addresses, optimize/share/disconnect, debug
+
 ## Components
 - Address field: `ws://host:port` or `wss://host:port`
 - Token field
@@ -12,6 +19,7 @@ Configure server connection, appearance, language, and app behavior.
 - Theme selector: Auto / Light / Dark (pill buttons)
 - Font size control (+/−)
 - Terminal font name (free text; a locally-installed family, prepended to the system mono stack; empty = system default; per-device, persisted to localStorage `tmux_font`)
+- Terminal line spacing (1.00–1.60, persisted to localStorage `tmux_line_height`; applies live to every normal, split, and Team terminal)
 - Debug toggle (On/Off)
 - Disconnect button
 

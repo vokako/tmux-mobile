@@ -96,6 +96,20 @@ everyone: install the font on the device (macOS: double-click; Android
 can't install system fonts — an Android device that must have Maple would
 need it re-bundled, which we explicitly traded away).
 
+## Terminal size and line spacing
+
+Settings → Terminal keeps font size and line spacing alongside the custom
+font name. Font size remains the application-level `fontSize` state so the
+stepper and desktop Cmd/Ctrl `+`, `-`, and `0` shortcuts use the same update
+path and always trigger xterm's deferred re-fit.
+
+Line spacing is a per-device preference stored as `tmux_line_height` and
+clamped to `1.00`–`1.60`. `terminal-prefs.svelte.js` owns the reactive value;
+every `Terminal.svelte` instance reads it when xterm is created and again in
+the existing font-metrics effect. This makes the setting apply immediately to
+single-pane, split, and embedded Team terminals without passing another prop
+through each container.
+
 ## Alternatives considered
 
 - **Keep bundling, fix the weight bug** (bundle Regular/Bold cuts):

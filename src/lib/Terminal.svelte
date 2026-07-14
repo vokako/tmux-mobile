@@ -11,6 +11,7 @@
   import { detectAgent, paneIsAgent, paneAgent, sessionHasAgent, AGENTS } from './agents.js';
   import { copyText } from './clipboard.js';
   import { fonts } from './fonts.svelte.js';
+  import { terminalPrefs } from './terminal-prefs.svelte.js';
 
   // Timing constants
   const WINDOW_LIST_POLL_MS = 5000;
@@ -155,6 +156,7 @@
     if (!term) return;
     term.options.fontSize = fontSize;
     term.options.fontFamily = fonts.stack; // follows the custom-font setting live
+    term.options.lineHeight = terminalPrefs.lineHeight;
     // xterm re-measures cell geometry on the next render, not synchronously.
     // Defer refit by two frames so calcFit reads the new cell width/height.
     // doResizeRef is set by the main $effect after term is created.
@@ -646,6 +648,7 @@
       cursorStyle: 'block',
       disableStdin: false,
       fontSize,
+      lineHeight: terminalPrefs.lineHeight,
       // Literal stack, NOT var(--font-mono): this string is consumed by xterm.js
       // for canvas/WebGL glyph measurement, not parsed as CSS, so a CSS custom
       // property would not resolve here. fonts.stack = the same stack the CSS

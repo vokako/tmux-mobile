@@ -7,13 +7,14 @@
   import Team from './lib/Team.svelte';
   import Icon from './lib/Icon.svelte';
   import InstallPrompt from './lib/InstallPrompt.svelte';
+  import Preferences from './lib/Preferences.svelte';
   import { copyText } from './lib/clipboard.js';
   import { teamStatus } from './lib/ws.js';
   import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable } from './lib/ws.js';
-  import { t, i18n, setLocale } from './lib/i18n.svelte.js';
+  import { t } from './lib/i18n.svelte.js';
   import { layout } from './lib/layout.svelte.js';
   import { teamState } from './lib/team.svelte.js';
-  import { fonts, applyMonoVar } from './lib/fonts.svelte.js';
+  import { applyMonoVar } from './lib/fonts.svelte.js';
 
   // Tunable constants
   const KB_OPEN_THRESHOLD = 100; // px difference to detect keyboard open
@@ -146,6 +147,15 @@
   applyMonoVar();
   let serverInfo = $state({ hostname: '', machineId: '' });
   let activeAddress = $state(localStorage.getItem('tmux_address') || '');
+  let prefAddresses = $derived.by(() => {
+    if (!serverInfo.machineId) return [];
+    try {
+      const machines = JSON.parse(localStorage.getItem('tmux_machines') || '{}');
+      return Array.isArray(machines[serverInfo.machineId]) ? machines[serverInfo.machineId] : [];
+    } catch {
+      return [];
+    }
+  });
   let debugMode = $state(!!localStorage.getItem('tmux_debug'));
   let debugEl = $state(null);
 
@@ -859,7 +869,7 @@
         </button>
       </div>
       <div class="nav-right">
-        <button tabindex="-1" class="gear-btn" onclick={() => showSettings = !showSettings}><Icon name="gear" size={16} /></button>
+        <button tabindex="-1" class="gear-btn" class:active={showSettings} onclick={() => showSettings = !showSettings}><Icon name="gear" size={16} /></button>
       </div>
     {:else}
       <div class="brand">
@@ -867,116 +877,31 @@
         <span class="brand-text">tmux<span class="brand-accent">mobile</span></span>
       </div>
       <div class="nav-right">
-        <button tabindex="-1" class="gear-btn" onclick={() => showSettings = !showSettings}><Icon name="gear" size={16} /></button>
+        <button tabindex="-1" class="gear-btn" class:active={showSettings} onclick={() => showSettings = !showSettings}><Icon name="gear" size={16} /></button>
       </div>
     {/if}
   </nav>
 
   {#if showSettings}
-    <div class="settings-panel">
-      {#if connected}
-        {@const mid = serverInfo.machineId}
-        {@const urls = mid ? (JSON.parse(localStorage.getItem('tmux_machines') || '{}')[mid] || []) : []}
-        <div class="sp-conn">
-          <div class="sp-conn-row">
-            <div class="sp-conn-host">{serverInfo.hostname || 'unknown'}</div>
-            {#if urls.length > 1}
-              {@const currentType = ADDRESS_LABELS[classifyAddress(activeAddress)]}
-              <button class="sp-optimize" onclick={optimizeConnection} disabled={optimizing}>
-                {#if optimizing}
-                  <span class="reconnect-spinner"></span> {t('sniffing')}
-                {:else}
-                  {currentType} · {t('sniff')}
-                {/if}
-              </button>
-            {/if}
-            <button class="sp-share" class:done={linkCopied} onclick={shareConnectionLink} title={t('shareLink')} aria-label={t('shareLink')}>
-              <Icon name={linkCopied ? 'check' : 'copy'} size={13} />
-            </button>
-          </div>
-          {#if urls.length > 1}
-            <div class="sp-conn-urls">
-              {#each urls as u}
-                <button class="sp-conn-url" class:sp-conn-active={u === activeAddress} onclick={() => {
-                  if (u !== activeAddress) {
-                    localStorage.setItem('tmux_address', u);
-                    activeAddress = u;
-                    showSettings = false;
-                    disconnect();
-                    connect(u, localStorage.getItem('tmux_token') || '').then(() => {
-                      serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
-                      resubscribeAll();
-                    }).catch(() => { reconnecting = true; tryReconnect(); });
-                  }
-                }}>{u}</button>
-              {/each}
-            </div>
-          {:else}
-            <div class="sp-conn-addr">{activeAddress}</div>
-          {/if}
-          <div class="sp-conn-id">{mid?.slice(0, 8) || '—'}</div>
-        </div>
-      {/if}
-      <div class="sp-rows">
-        <div class="sp-row">
-          <span class="sp-label">{t('theme')}</span>
-          <div class="sp-btns">
-            <button class:active={theme === 'system'} onclick={() => setTheme('system')}>{t('themeAuto')}</button>
-            <button class:active={theme === 'light'} onclick={() => setTheme('light')}>{t('themeLight')}</button>
-            <button class:active={theme === 'dark'} onclick={() => setTheme('dark')}>{t('themeDark')}</button>
-          </div>
-        </div>
-        <div class="sp-row">
-          <span class="sp-label">{t('language')}</span>
-          <div class="sp-btns">
-            <button class:active={i18n.lang === 'en'} onclick={() => setLocale('en')}>EN</button>
-            <button class:active={i18n.lang === 'zh'} onclick={() => setLocale('zh')}>中文</button>
-          </div>
-        </div>
-        <div class="sp-row">
-          <span class="sp-label">{t('font')}</span>
-          <div class="sp-font-row">
-            <button class="sp-font-btn" onclick={() => setFontSize(fontSize - 1)}>−</button>
-            <span class="sp-font-val">{fontSize}</span>
-            <button class="sp-font-btn" onclick={() => setFontSize(fontSize + 1)}>+</button>
-          </div>
-        </div>
-        <div class="sp-row">
-          <span class="sp-label">{t('fontFamily')}</span>
-          <!-- Free-text family name, applied on change/Enter. A font installed
-               on THIS device (e.g. 'Maple Mono NF CN'); unknown names fall
-               through to the system stack, so a typo degrades safely. -->
-          <input
-            class="sp-font-input"
-            type="text"
-            placeholder={t('fontFamilySystem')}
-            value={fonts.custom}
-            autocapitalize="off" autocomplete="off" spellcheck="false"
-            onchange={(e) => fonts.set(e.target.value)}
-            onkeydown={(e) => { if (e.key === 'Enter') { fonts.set(e.target.value); e.target.blur(); } }}
-          />
-        </div>
-        <div class="sp-row">
-          <span class="sp-label">{t('layout')}</span>
-          <div class="sp-btns">
-            <button class:active={layout.mode === 'auto'} onclick={() => layout.set('auto')}>{t('layoutAuto')}</button>
-            <button class:active={layout.mode === 'desktop'} onclick={() => layout.set('desktop')}>{t('layoutDesktop')}</button>
-            <button class:active={layout.mode === 'mobile'} onclick={() => layout.set('mobile')}>{t('layoutMobile')}</button>
-          </div>
-        </div>
-        <div class="sp-row">
-          <span class="sp-label">{t('debug')}</span>
-          <button class="sp-toggle" class:on={debugMode} onclick={() => { debugMode = !debugMode; localStorage.setItem('tmux_debug', debugMode ? '1' : ''); }}>
-            <span class="sp-toggle-opt sp-toggle-off">{t('off')}</span>
-            <span class="sp-toggle-opt sp-toggle-on">{t('on')}</span>
-          </button>
-        </div>
-      </div>
-      {#if connected}
-      <button class="sp-disconnect" onclick={() => { showSettings = false; doDisconnect(); }}>{t('disconnect')}</button>
-      {/if}
-    </div>
-    <button class="sp-overlay" onclick={() => showSettings = false} aria-label="Close settings"></button>
+    <Preferences {connected} {theme} {fontSize} {debugMode} {serverInfo} {activeAddress} addresses={prefAddresses}
+      {optimizing} {linkCopied}
+      onClose={() => showSettings = false}
+      onTheme={setTheme}
+      onFontSize={setFontSize}
+      onDebug={(value) => { debugMode = value; localStorage.setItem('tmux_debug', value ? '1' : ''); }}
+      onOptimize={optimizeConnection}
+      onShare={shareConnectionLink}
+      onAddress={(address) => {
+        localStorage.setItem('tmux_address', address);
+        activeAddress = address;
+        disconnect();
+        connect(address, localStorage.getItem('tmux_token') || '').then(() => {
+          serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
+          resubscribeAll();
+        }).catch(() => { reconnecting = true; tryReconnect(); });
+      }}
+      onDisconnect={() => { showSettings = false; doDisconnect(); }}
+      onConnectionSetup={() => { showSettings = false; page = 'settings'; }} />
   {/if}
 
   {#if reconnecting && page !== 'settings'}
@@ -1169,7 +1094,7 @@
     --font-ui: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif;
   }
   :global(#app) { width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
-  :global(body), main, nav, .settings-panel { transition: background-color 0.3s ease, color 0.3s ease; }
+  :global(body), main, nav { transition: background-color 0.3s ease, color 0.3s ease; }
 
   /* Subtle scrollbar — used by long-running scrollables (terminal command bar,
      chat log, team agent panel). At rest the thumb is fully transparent so
@@ -1306,134 +1231,8 @@
     -webkit-tap-highlight-color: transparent;
   }
   .gear-btn:active { color: var(--accent); }
+  .gear-btn.active { color: var(--accent); background: var(--accent-bg); }
 
-  .sp-overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 20;
-    border: none; cursor: default;
-  }
-  .settings-panel {
-    position: absolute; top: 48px; right: 8px; z-index: 21;
-    background: var(--bg); border: 1px solid var(--border);
-    border-radius: 14px; padding: 6px; min-width: 240px;
-    /* Long unbreakable server addresses must not push the right-anchored
-       panel off the left edge of a narrow phone screen. */
-    max-width: calc(100vw - 16px);
-    max-height: calc(100dvh - 60px); overflow-y: auto;
-    box-shadow: 0 12px 40px rgba(0,0,0,0.35);
-    animation: sp-in 0.15s ease;
-  }
-  @keyframes sp-in { from { opacity: 0; transform: translateY(-8px) scale(0.95); } to { opacity: 1; transform: none; } }
-  .sp-conn {
-    padding: 12px 14px; margin-bottom: 4px; border-bottom: 1px solid var(--border2);
-    display: flex; flex-direction: column; gap: 3px;
-  }
-  .sp-conn-host {
-    font-size: 14px; font-weight: 600; color: var(--text);
-    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  .sp-conn-addr {
-    font-size: 11px; font-family: var(--font-mono);
-    color: var(--text3);
-    word-break: break-all;
-  }
-  .sp-conn-id {
-    font-size: 10px; font-family: var(--font-mono);
-    color: var(--text3); opacity: 0.6;
-  }
-  .sp-share {
-    margin-left: auto; flex-shrink: 0;
-    width: 26px; height: 26px; padding: 0;
-    border: 1px solid var(--border); border-radius: 7px;
-    background: none; color: var(--text3);
-    cursor: pointer; -webkit-tap-highlight-color: transparent;
-    display: inline-flex; align-items: center; justify-content: center;
-    transition: color 0.15s ease, border-color 0.15s ease;
-  }
-  .sp-share:active { color: var(--accent); border-color: var(--accent); }
-  .sp-share.done { color: var(--status-ok); border-color: var(--status-ok); }
-  .sp-conn-row {
-    display: flex; align-items: center; gap: 8px;
-  }
-  .sp-optimize {
-    display: flex; align-items: center; gap: 4px; margin-left: auto;
-    padding: 3px 8px; border: 1px solid var(--border2); border-radius: 6px;
-    background: none; color: var(--text3); font-size: 10px; font-weight: 500;
-    cursor: pointer; -webkit-tap-highlight-color: transparent; white-space: nowrap;
-  }
-  .sp-optimize:active { background: var(--accent-bg); color: var(--accent); }
-  .sp-optimize:disabled { opacity: 0.5; cursor: default; }
-  .sp-conn-urls {
-    display: flex; flex-direction: column; gap: 2px; margin-top: 4px;
-  }
-  .sp-conn-url {
-    font-size: 12px; font-family: var(--font-mono);
-    color: var(--text3); padding: 6px 8px; border: 1px solid var(--border2); border-radius: 6px;
-    background: none; text-align: left; cursor: pointer; -webkit-tap-highlight-color: transparent;
-    word-break: break-all;
-  }
-  .sp-conn-url:active { background: var(--accent-bg); }
-  .sp-conn-active { color: var(--accent); border-color: var(--accent); }
-  /* Settings rows: one item per line, label left, control right-aligned.
-     A shared row grid keeps every control's right edge flush so the panel
-     reads as an aligned table rather than a stack of ad-hoc layouts. */
-  .sp-rows { padding: 6px; display: flex; flex-direction: column; }
-  .sp-row {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 12px; min-height: 40px; padding: 4px 8px;
-  }
-  .sp-row + .sp-row { border-top: 1px solid var(--border2); }
-  .sp-label {
-    font-size: 11px; font-weight: 600; color: var(--text3);
-    text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;
-  }
-  .sp-btns {
-    display: inline-flex; gap: 2px; background: var(--pill-bg); border-radius: 8px; padding: 2px;
-  }
-  .sp-btns button {
-    padding: 6px 12px; border: none; border-radius: 6px; background: transparent;
-    color: var(--text3); font-size: 12px; font-weight: 500; cursor: pointer;
-    -webkit-tap-highlight-color: transparent; transition: all 0.15s;
-  }
-  .sp-btns button.active { background: var(--accent-bg); color: var(--accent); }
-  .sp-font-row {
-    display: flex; align-items: center; gap: 4px;
-  }
-  .sp-font-btn {
-    width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 7px;
-    background: var(--pill-bg); color: var(--text2); font-size: 15px; font-weight: 600;
-    cursor: pointer; display: flex; align-items: center; justify-content: center;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .sp-font-btn:active { background: var(--accent-bg); color: var(--accent); }
-  .sp-font-val {
-    font-size: 13px; font-weight: 600; font-family: var(--font-mono); color: var(--text2);
-    min-width: 24px; text-align: center;
-  }
-  .sp-font-input {
-    width: 150px; padding: 6px 10px;
-    border: 1px solid var(--input-border); border-radius: 7px;
-    background: var(--input-bg); color: var(--text);
-    font-size: 12px; font-family: var(--font-mono);
-    outline: none; -webkit-appearance: none;
-  }
-  .sp-font-input:focus { border-color: var(--accent); }
-  .sp-font-input::placeholder { color: var(--text3); }
-  .sp-toggle {
-    display: inline-flex; gap: 2px; background: var(--pill-bg); border-radius: 8px;
-    padding: 2px; border: none; cursor: pointer; -webkit-tap-highlight-color: transparent; flex-shrink: 0;
-  }
-  .sp-toggle-opt {
-    padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 500;
-    color: var(--text3); transition: all 0.15s;
-  }
-  .sp-toggle.on .sp-toggle-on { background: var(--accent-bg); color: var(--accent); }
-  .sp-toggle:not(.on) .sp-toggle-off { background: var(--accent-bg); color: var(--accent); }
-  .sp-disconnect {
-    width: calc(100% - 12px); margin: 6px; padding: 10px; border: 1px solid var(--danger);
-    border-radius: 8px; background: none; color: var(--danger);
-    font-size: 13px; font-weight: 600; cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-  }
 
   .brand {
     display: flex;
