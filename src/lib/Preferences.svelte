@@ -27,12 +27,12 @@
   } = $props();
 
   const TAB_KEY = 'tmux_settings_tab';
-  const TAB_IDS = new Set(['appearance', 'terminal', 'connection']);
   const storedTab = localStorage.getItem(TAB_KEY);
-  let tab = $state(TAB_IDS.has(storedTab) ? storedTab : 'appearance');
+  const initialTab = storedTab === 'connection' ? 'connection' : 'appearance';
+  let tab = $state(initialTab);
+  if (storedTab && storedTab !== initialTab) localStorage.setItem(TAB_KEY, initialTab);
   const tabs = [
     { id: 'appearance', label: () => t('settingsAppearance'), icon: 'palette' },
-    { id: 'terminal', label: () => t('terminal'), icon: 'terminal' },
     { id: 'connection', label: () => t('settingsConnection'), icon: 'link' },
   ];
 
@@ -83,9 +83,6 @@
               <button class:active={layout.mode === 'mobile'} onclick={() => layout.set('mobile')}>{t('layoutMobile')}</button>
             </div>
           </div>
-        </div>
-      {:else if tab === 'terminal'}
-        <div class="setting-card">
           <div class="setting-row">
             <div><strong>{t('fontFamily')}</strong><small>{t('fontFamilyHint')}</small></div>
             <input class="text-input" type="text" placeholder={t('fontFamilySystem')} value={fonts.custom}

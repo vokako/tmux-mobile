@@ -7,10 +7,9 @@ The gear button opens Settings as a full-window workspace below the app nav,
 not a small popover. The workspace avoids redundant page/section headings and
 uses the compact tab navigation as its only title row. The tab bar and choice
 controls reuse Terminal's 24px outlined chip language, including its spacing,
-rounded shape, muted idle state, and accent active state. Settings uses three tabs:
+rounded shape, muted idle state, and accent active state. Settings uses two tabs:
 
-- **Appearance** — theme, language, responsive layout mode
-- **Terminal** — installed font family override, font size, line spacing
+- **Appearance** — theme, language, responsive layout, terminal font and spacing
 - **Connection** — current server/addresses, optimize/share/disconnect, debug
 
 ## Components
@@ -32,6 +31,7 @@ rounded shape, muted idle state, and accent active state. Settings uses three ta
 - Switch language → immediate UI text update, persisted to localStorage
 - Switch theme → immediate CSS variable transition
 - Switch settings tab → remember the last tab in localStorage and restore it on the next open
+- A previously saved Terminal tab migrates to Appearance
 - Adjust font size → updates Terminal view
 - Tap disconnect → `doDisconnect()`
 
