@@ -1134,6 +1134,18 @@
     background-color: var(--scroll-thumb-hover);
   }
 
+  :global(html) {
+    --ui-bar-height: 31px;
+    --ui-control-height: 24px;
+    --ui-gap: 4px;
+    --ui-bar-padding: 3px 4px 3px 6px;
+    --ui-radius-pill: 999px;
+    --ui-radius-control: 7px;
+    --ui-radius-panel: 9px;
+    --ui-font-control: 11px;
+    --ui-motion-fast: 0.15s ease;
+  }
+
   :global(html[data-theme="dark"]) {
     --bg: #0a0a0f; --bg2: #0f0f18; --bg3: #12121a;
     --text: #e2e8f0; --text2: rgba(226,232,240,0.5); --text3: rgba(226,232,240,0.3);
@@ -1163,6 +1175,16 @@
     --scroll-thumb: rgba(26,26,46,0.16); --scroll-thumb-hover: rgba(26,26,46,0.30);
   }
   :global(::selection) { background: rgba(0, 212, 255, 0.25); }
+  :global(button:focus-visible),
+  :global(input:focus-visible),
+  :global(textarea:focus-visible) {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  :global(button:disabled) {
+    opacity: 0.45;
+    cursor: default;
+  }
 
   main {
     display: flex;

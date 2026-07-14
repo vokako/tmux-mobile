@@ -711,12 +711,12 @@
 
   /* Team switcher header */
   .team-header {
-    display: flex; align-items: center; gap: 4px; flex-wrap: nowrap;
-    padding: 3px 4px 3px 6px; flex-shrink: 0;
+    display: flex; align-items: center; gap: var(--ui-gap); flex-wrap: nowrap;
+    min-height: var(--ui-bar-height); padding: var(--ui-bar-padding); flex-shrink: 0; box-sizing: border-box;
     border-bottom: 1px solid var(--border2); background: var(--surface);
   }
   .team-header-scroll {
-    flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px;
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--ui-gap);
     overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
   }
   .team-header-scroll::-webkit-scrollbar { display: none; }
@@ -731,10 +731,10 @@
   .team-pick { position: relative; flex-shrink: 0; min-width: 0; }
   .team-pick-btn {
     display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
-    height: 24px; padding: 3px 8px; box-sizing: border-box;
-    border: 1px solid var(--border2); border-radius: 999px;
+    height: var(--ui-control-height); padding: 3px 8px; box-sizing: border-box;
+    border: 1px solid var(--border2); border-radius: var(--ui-radius-pill);
     background: var(--input-bg); color: var(--text2);
-    font-size: 11px; line-height: 1.3; font-weight: 600; cursor: pointer;
+    font-size: var(--ui-font-control); line-height: 1.3; font-weight: 600; cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
   .team-pick-btn:active { border-color: var(--accent); color: var(--accent); }
@@ -761,8 +761,8 @@
   .team-pick-empty { padding: 8px 9px; color: var(--text3); font-size: 12px; }
   .team-pick-new { color: var(--accent); border-top: 1px solid var(--border2); border-radius: 0 0 7px 7px; margin-top: 2px; }
   .team-close, .team-swap, .team-hbtn {
-    flex-shrink: 0; width: 24px; height: 24px; padding: 0;
-    border: 1px solid var(--border2); border-radius: 999px;
+    flex-shrink: 0; width: var(--ui-control-height); height: var(--ui-control-height); padding: 0;
+    border: 1px solid var(--border2); border-radius: var(--ui-radius-pill);
     background: var(--input-bg); color: var(--text3); box-sizing: border-box;
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     -webkit-tap-highlight-color: transparent;
@@ -876,10 +876,10 @@
   @keyframes team-spin { to { transform: rotate(360deg); } }
   .roster-chip {
     display: inline-flex; align-items: center; gap: 6px;
-    padding: 3px 8px; height: 24px; box-sizing: border-box;
-    border: 1px solid var(--border2); border-radius: 999px;
+    padding: 3px 8px; height: var(--ui-control-height); box-sizing: border-box;
+    border: 1px solid var(--border2); border-radius: var(--ui-radius-pill);
     background: var(--input-bg); color: var(--text2);
-    font-size: 11px; line-height: 1.3; font-weight: 500; cursor: pointer; flex-shrink: 0;
+    font-size: var(--ui-font-control); line-height: 1.3; font-weight: 500; cursor: pointer; flex-shrink: 0;
     white-space: nowrap; -webkit-tap-highlight-color: transparent;
     transition: border-color 0.15s ease, color 0.15s ease;
   }

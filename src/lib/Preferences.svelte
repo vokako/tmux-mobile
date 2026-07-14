@@ -137,20 +137,20 @@
 <style>
   .preferences { position: fixed; inset: calc(49px + var(--sat)) 0 0; z-index: 19; display:flex; flex-direction:column; background:var(--bg); color:var(--text); }
   .pref-shell { flex:1;min-height:0;display:flex;flex-direction:column; }
-  .pref-tabs { display:flex;align-items:center;gap:4px;padding:3px 4px 3px 6px;border-bottom:1px solid var(--border2);background:var(--surface);flex-shrink:0;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch; }
+  .pref-tabs { display:flex;align-items:center;gap:var(--ui-gap);min-height:var(--ui-bar-height);padding:var(--ui-bar-padding);box-sizing:border-box;border-bottom:1px solid var(--border2);background:var(--surface);flex-shrink:0;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch; }
   .pref-tabs::-webkit-scrollbar { display:none; }
-  .pref-tabs button { flex-shrink:0;height:24px;display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:3px 8px;border:1px solid var(--border2);border-radius:999px;background:transparent;color:var(--text3);font-size:11px;font-weight:500;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent; }
+  .pref-tabs button { flex-shrink:0;height:var(--ui-control-height);display:inline-flex;align-items:center;justify-content:center;gap:var(--ui-gap);padding:3px 8px;border:1px solid var(--border2);border-radius:var(--ui-radius-pill);background:transparent;color:var(--text3);font-size:var(--ui-font-control);font-weight:500;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent; }
   .pref-tabs button.active { border-color:var(--accent);background:var(--accent-bg);color:var(--accent);font-weight:600; }
   .pref-tabs button:active { border-color:var(--accent);color:var(--accent); }
-  .pref-tabs .close { width:24px;padding:0;margin-left:auto;border-color:transparent;background:transparent; }
+  .pref-tabs .close { width:var(--ui-control-height);padding:0;margin-left:auto;border-color:transparent;background:transparent; }
   .pref-tabs .close:active { background:var(--surface2); }
   .pref-content { flex:1;min-width:0;overflow:auto;padding:14px clamp(12px,3vw,24px); }
-  .setting-card { max-width:720px;margin:0 auto;border:1px solid var(--border2);border-radius:8px;background:var(--surface);overflow:hidden; }
+  .setting-card { max-width:720px;margin:0 auto;border:1px solid var(--border2);border-radius:var(--ui-radius-panel);background:var(--surface);overflow:hidden; }
   .setting-row { min-height:52px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:16px; }
   .setting-row+.setting-row { border-top:1px solid var(--border2); } .setting-row>div:first-child{display:flex;flex-direction:column;gap:4px;min-width:0;}
   strong{font-size:12px;} small{font-size:10px;color:var(--text3);font-weight:400;line-height:1.35;}
   .segmented { display:flex;gap:4px;flex-shrink:0; }
-  .segmented button,.stepper button,.reset,.conn-actions button { height:24px;border:1px solid var(--border2);background:transparent;color:var(--text3);padding:3px 8px;border-radius:999px;cursor:pointer;font-size:11px;white-space:nowrap; }
+  .segmented button,.stepper button,.reset,.conn-actions button { height:var(--ui-control-height);border:1px solid var(--border2);background:transparent;color:var(--text3);padding:3px 8px;border-radius:var(--ui-radius-pill);cursor:pointer;font-size:var(--ui-font-control);white-space:nowrap; }
   .segmented button.active { border-color:var(--accent);background:var(--accent-bg);color:var(--accent); }
   .segmented button:active,.stepper button:active,.reset:active,.conn-actions button:active { border-color:var(--accent);color:var(--accent); }
   .text-input { width:min(230px,42vw);height:28px;padding:4px 8px;border:1px solid var(--input-border);border-radius:7px;background:var(--input-bg);color:var(--text);font:11px var(--font-mono);outline:none; }

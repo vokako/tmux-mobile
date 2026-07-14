@@ -2246,8 +2246,10 @@
   .win-bar {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 3px 4px 3px 6px;
+    gap: var(--ui-gap);
+    min-height: var(--ui-bar-height);
+    padding: var(--ui-bar-padding);
+    box-sizing: border-box;
     border-bottom: 1px solid var(--border2);
     background: var(--surface);
     flex-shrink: 0;
@@ -2261,11 +2263,11 @@
     max-width: 160px;
     padding: 3px 7px;
     border: none;
-    border-radius: 999px;
+    border-radius: var(--ui-radius-pill);
     background: var(--accent-bg);
     color: var(--accent);
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--ui-font-control);
     font-weight: 600;
     white-space: nowrap;
     cursor: pointer;
@@ -2281,7 +2283,7 @@
     min-width: 0;
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--ui-gap);
     overflow-x: auto;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
@@ -2289,10 +2291,10 @@
   .win-bar-scroll::-webkit-scrollbar { display: none; }
   .win-bar-collapse {
     flex-shrink: 0;
-    width: 24px; height: 24px;
+    width: var(--ui-control-height); height: var(--ui-control-height);
     padding: 0;
     border: none;
-    border-radius: 999px;
+    border-radius: var(--ui-radius-pill);
     background: transparent;
     color: var(--text3);
     cursor: pointer;
@@ -2577,7 +2579,7 @@
   .shortcuts {
     display: flex;
     gap: 3px;
-    height: 31px;
+    height: var(--ui-bar-height);
     padding: 3px 0 4px;
     box-sizing: border-box;
   }
@@ -2585,14 +2587,14 @@
 
   .shortcuts button {
     flex: 1;
-    height: 24px;
+    height: var(--ui-control-height);
     padding: 0;
     box-sizing: border-box;
     border: 1px solid var(--input-border);
-    border-radius: 999px;
+    border-radius: var(--ui-radius-pill);
     background: var(--input-bg);
     color: var(--text2);
-    font-size: 11px;
+    font-size: var(--ui-font-control);
     line-height: 1.3;
     font-family: var(--font-mono);
     font-weight: 500;

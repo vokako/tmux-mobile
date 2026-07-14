@@ -1707,19 +1707,19 @@
   /* Toolbar — same vertical rhythm as the Terminal window-switcher bar
      and the Sessions top-row (24 px buttons + 3 px padding = ~31 px total). */
   .toolbar {
-    display: flex; align-items: center; gap: 4px; padding: 3px 6px;
-    border-bottom: 1px solid var(--border); flex-shrink: 0;
+    display: flex; align-items: center; gap: var(--ui-gap); min-height: var(--ui-bar-height); padding: var(--ui-bar-padding); box-sizing: border-box;
+    border-bottom: 1px solid var(--border2); background: var(--surface); flex-shrink: 0;
   }
   .tool-btn {
-    width: 24px; height: 24px;
-    padding: 0; border: none; border-radius: 6px;
-    background: var(--surface2); color: var(--text2); cursor: pointer;
-    font-size: 12px; display: flex; align-items: center; justify-content: center;
+    width: var(--ui-control-height); height: var(--ui-control-height);
+    padding: 0; border: 1px solid var(--border2); border-radius: var(--ui-radius-pill);
+    background: var(--input-bg); color: var(--text2); cursor: pointer;
+    font-size: var(--ui-font-control); display: flex; align-items: center; justify-content: center;
     flex-shrink: 0;
     -webkit-tap-highlight-color: transparent;
   }
-  .tool-btn:active { background: var(--accent-bg); color: var(--accent); }
-  .tool-btn.tool-active { background: var(--accent-bg); color: var(--accent); }
+  .tool-btn:active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+  .tool-btn.tool-active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
   .tool-btn.starred { color: var(--accent); }
 
   /* Path row */

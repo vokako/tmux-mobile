@@ -60,16 +60,16 @@
   .chip {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--ui-gap);
     /* 24 px chip with line-height 1.3 leaves ~4 px slack for g/p/y
        descenders at 11 px font. Don't force line-height: 1 — glyphs clip. */
     padding: 3px 8px;
-    height: 24px;
+    height: var(--ui-control-height);
     border: 1px solid var(--border2);
-    border-radius: 999px;
+    border-radius: var(--ui-radius-pill);
     background: var(--input-bg);
     color: var(--text2);
-    font-size: 11px;
+    font-size: var(--ui-font-control);
     font-weight: 500;
     line-height: 1.3;
     cursor: pointer;
@@ -78,7 +78,7 @@
     max-width: 140px;
     box-sizing: border-box;
     -webkit-tap-highlight-color: transparent;
-    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+    transition: border-color var(--ui-motion-fast), background var(--ui-motion-fast), color var(--ui-motion-fast);
   }
   .chip:active {
     background: var(--accent-bg);

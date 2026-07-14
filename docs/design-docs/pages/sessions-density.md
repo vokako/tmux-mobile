@@ -1,5 +1,17 @@
 # Sessions Page — Density & Navigation Redesign
 
+## Shared UI tokens
+
+High-frequency navigation surfaces use the global `--ui-*` tokens defined in
+`App.svelte`: 31px bars, 24px controls, 4px gaps, pill controls, 7px compact
+corners, 9px panel corners, 11px control text, and one fast transition timing.
+Terminal, Team, Settings, Sessions, Files, and `AgentChip` consume these tokens
+so later density changes remain synchronized instead of drifting per page.
+
+Keyboard focus uses one accent outline globally, and disabled buttons share one
+opacity/cursor treatment. Page-specific active states may still differ by
+meaning, but should use the same accent border/background pair.
+
 ## Context
 Original sessions page was built around a conventional "folder with children"
 metaphor: each tmux session is a card, auto-expanded on load, panes listed

@@ -628,19 +628,20 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    min-height: 24px;
-    padding: 3px 8px;
+    min-height: var(--ui-bar-height);
+    padding: var(--ui-bar-padding);
+    box-sizing: border-box;
     border-bottom: 1px solid var(--border2);
     background: var(--surface);
     flex-shrink: 0;
   }
   .icon-btn {
     flex-shrink: 0;
-    width: 24px;
-    height: 24px;
+    width: var(--ui-control-height);
+    height: var(--ui-control-height);
     padding: 0;
     border: 1px solid var(--border2);
-    border-radius: 999px;
+    border-radius: var(--ui-radius-pill);
     background: var(--input-bg);
     color: var(--text3);
     cursor: pointer;
@@ -648,7 +649,7 @@
     align-items: center;
     justify-content: center;
     -webkit-tap-highlight-color: transparent;
-    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+    transition: color var(--ui-motion-fast), border-color var(--ui-motion-fast), background var(--ui-motion-fast);
   }
   .icon-btn:active {
     color: var(--accent);
@@ -665,10 +666,10 @@
     align-items: center;
     gap: 6px;
     padding: 0 4px 0 10px;
-    height: 24px;
+    height: var(--ui-control-height);
     background: var(--input-bg);
     border: 1px solid var(--border2);
-    border-radius: 999px;
+    border-radius: var(--ui-radius-pill);
     color: var(--text3);
     transition: border-color 0.15s ease;
   }
@@ -722,10 +723,10 @@
   }
   .session {
     border: 1px solid transparent;
-    border-radius: 12px;
+    border-radius: var(--ui-radius-panel);
     background: transparent;
     overflow: hidden;
-    transition: border-color 0.15s ease, background 0.15s ease;
+    transition: border-color var(--ui-motion-fast), background var(--ui-motion-fast);
   }
   .session:active { transform: scale(0.996); }
   .session.active {
