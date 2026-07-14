@@ -54,6 +54,20 @@ directory, or the server's home directory when no session is open yet.
 - Show hidden files toggle
 - Git status, diff, log data
 
+### Bookmarks / recent-files write discipline
+Both lists persist whole-array last-writer-wins (`save_bookmarks`,
+`set_pref('recentFiles')`) and RPCs are concurrent, so the client guards
+against clobbering (`src/lib/Files.svelte`):
+1. Never persist before the first successful load (a write of the default
+   `[]` would erase the server list); if the lazy load fails, skip
+   persisting rather than wipe.
+2. Every local mutation bumps a generation counter; fetch continuations
+   only assign if their generation is still current — an in-flight read
+   must not overwrite a newer local mutation.
+3. The lazy first load is single-flighted (one shared promise).
+These are client-side guards only; two *different* clients can still race
+(server-side merge semantics would be the deeper fix — see unresolved.md).
+
 ## Edge Cases
 - Base64 upload uses chunked encoding (8192 bytes/chunk) to avoid stack overflow
 - Files > 5 MB (or not previewable by mime/name) open the info page instead of auto-loading preview; user confirms via preview button to avoid heavy transfers on mobile
