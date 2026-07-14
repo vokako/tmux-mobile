@@ -1424,19 +1424,49 @@
       recomputeSelUI();
       touchScrolling = true; // pin while selection is live
     });
-    // Safety net: if the app is backgrounded mid-selection or mid-scroll, touchcancel
-    // may never fire and touchScrolling can stay stuck true, which freezes
-    // writeToXterm. Reset transient gesture state whenever we regain visibility.
+    // Safety net: reset transient gesture state and re-sync tmux whenever the
+    // WebView returns from suspension.
+    let followedTailBeforeHide = true;
+    let resumeGeneration = 0;
     const onVisible = () => {
-      if (document.visibilityState !== 'visible') return;
+      if (document.visibilityState !== 'visible') {
+        followedTailBeforeHide = termAtBottom;
+        resumeGeneration++;
+        return;
+      }
+      const generation = ++resumeGeneration;
+      const resumeAtTail = followedTailBeforeHide;
       touchScrolling = false;
       onScrollbar = false;
       touchMode = 'idle';
       dragHandle = null;
+      stopMomentum();
+      stopEdgeScroll();
       // Drop the selection — re-attaching to a clipboard from before
       // backgrounding is rarely useful and could surprise the user.
       if (selection) clearSelection();
-      if (lastContent && termAtBottom) writeToXterm(lastContent, lastCursor);
+      if (resumeAtTail) {
+        termAtBottom = true;
+        hasNewContent = false;
+        term?.scrollToBottom();
+      }
+      doResizeRef?.();
+      if (lastContent && resumeAtTail) writeToXterm(lastContent, lastCursor);
+      term?.refresh(0, term.rows - 1);
+      capturePane(target).then(r => {
+        if (generation !== resumeGeneration || !term) return;
+        const content = r.output ?? r.content;
+        if (content == null) return;
+        const changed = content !== lastContent;
+        lastContent = content;
+        paneContent = content;
+        if (resumeAtTail) {
+          writeToXterm(content, lastCursor);
+          requestAnimationFrame(() => term?.scrollToBottom());
+        } else if (changed) {
+          hasNewContent = true;
+        }
+      }).catch(() => {});
     };
     document.addEventListener('visibilitychange', onVisible);
 

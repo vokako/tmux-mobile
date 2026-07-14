@@ -168,16 +168,15 @@
   $effect(() => {
     // Android Tauri app: native event provides exact keyboard height
     let androidNativeKb = false;
-    const nativeHandler = (e) => {
-      androidNativeKb = true; // suppress visualViewport handler on Android
-      const kbh = e.detail?.height || 0;
-      // Guard: ignore keyboard-open events when no text input is focused
-      // (Android OnGlobalLayoutListener can fire stale heights during layout transitions)
+    let pendingNativeKb = 0;
+    let pendingNativeTimer = 0;
+    const hasFocusedTextInput = () => {
       const activeTag = document.activeElement?.tagName;
-      if (kbh > 0 && activeTag !== 'TEXTAREA' && activeTag !== 'INPUT') {
-        window.__dbg?.(`androidKb: IGNORED kbh=${kbh} (activeEl=${activeTag})`);
-        return;
-      }
+      return activeTag === 'TEXTAREA' || activeTag === 'INPUT';
+    };
+    const applyNativeKeyboardHeight = (kbh) => {
+      pendingNativeKb = 0;
+      clearTimeout(pendingNativeTimer);
       if (kbh === 0 && window.innerHeight > fullHeight) fullHeight = window.innerHeight;
       const h = kbh > 0 ? (fullHeight - kbh) + 'px' : fullHeight + 'px';
       document.documentElement.style.setProperty('--app-height', h);
@@ -191,6 +190,21 @@
       });
       // No explicit refit needed — updating --app-height changes the terminal
       // container size, which Terminal.svelte's ResizeObserver picks up.
+    };
+    const nativeHandler = (e) => {
+      androidNativeKb = true; // suppress visualViewport handler on Android
+      const kbh = e.detail?.height || 0;
+      if (kbh > 0 && !hasFocusedTextInput()) {
+        pendingNativeKb = kbh;
+        clearTimeout(pendingNativeTimer);
+        pendingNativeTimer = setTimeout(() => {
+          if (pendingNativeKb === kbh && hasFocusedTextInput()) applyNativeKeyboardHeight(kbh);
+          else if (pendingNativeKb === kbh) pendingNativeKb = 0;
+        }, 500);
+        window.__dbg?.(`androidKb: DEFER kbh=${kbh} (activeEl=${document.activeElement?.tagName})`);
+        return;
+      }
+      applyNativeKeyboardHeight(kbh);
     };
     window.addEventListener('androidKeyboardHeight', nativeHandler);
 
@@ -239,12 +253,20 @@
     }
 
     // Log focus/blur on inputs (keyboard open/close trigger)
-    const onFocusIn = (e) => window.__dbg?.(`focusIn: ${e.target?.tagName}[${e.target?.className?.slice(0,20)}] activeEl=${document.activeElement?.tagName}`);
+    const onFocusIn = (e) => {
+      window.__dbg?.(`focusIn: ${e.target?.tagName}[${e.target?.className?.slice(0,20)}] activeEl=${document.activeElement?.tagName}`);
+      if (pendingNativeKb > 0 && hasFocusedTextInput()) {
+        const kbh = pendingNativeKb;
+        window.__dbg?.(`androidKb: applying deferred kbh=${kbh} on focusin`);
+        applyNativeKeyboardHeight(kbh);
+      }
+    };
     const onFocusOut = (e) => window.__dbg?.(`focusOut: ${e.target?.tagName}[${e.target?.className?.slice(0,20)}]`);
     document.addEventListener('focusin', onFocusIn);
     document.addEventListener('focusout', onFocusOut);
 
     return () => {
+      clearTimeout(pendingNativeTimer);
       window.removeEventListener('androidKeyboardHeight', nativeHandler);
       document.removeEventListener('focusin', onFocusIn);
       document.removeEventListener('focusout', onFocusOut);
@@ -270,13 +292,27 @@
   // fight that handler.
   $effect(() => {
     const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    let resizeFrame = 0;
+    const syncDesktopHeight = () => {
+      if (isTouch) return;
+      document.documentElement.style.setProperty('--app-height', window.innerHeight + 'px');
+    };
     const onResize = () => {
       wideEnough = window.innerWidth >= SPLIT_MIN_WIDTH;
-      if (!isTouch) document.documentElement.style.setProperty('--app-height', window.innerHeight + 'px');
+      syncDesktopHeight();
+      cancelAnimationFrame(resizeFrame);
+      resizeFrame = requestAnimationFrame(syncDesktopHeight);
     };
     onResize(); // set the correct height on mount, not just on the first resize
     window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    window.addEventListener('pageshow', onResize);
+    if (!isTouch) window.visualViewport?.addEventListener('resize', onResize);
+    return () => {
+      cancelAnimationFrame(resizeFrame);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('pageshow', onResize);
+      if (!isTouch) window.visualViewport?.removeEventListener('resize', onResize);
+    };
   });
 
   // Desktop: route cmd/ctrl +/-/0 to the app's font-size logic instead of
@@ -630,8 +666,10 @@
       if (!isConnected() && !reconnecting) {
         reconnecting = true;
         tryReconnect();
-      } else if (isConnected() && Date.now() - lastProbeTime > OPTIMIZE_INTERVAL_MS) {
-        optimizeConnection();
+      } else if (isConnected()) {
+        resubscribeAll();
+        window.__dbg?.('resume: re-subscribed active panes');
+        if (Date.now() - lastProbeTime > OPTIMIZE_INTERVAL_MS) optimizeConnection();
       }
     };
     document.addEventListener('visibilitychange', handler);
@@ -1044,6 +1082,7 @@
   :global(*) { box-sizing: border-box; }
   :global(html) {
     overflow: hidden; overscroll-behavior: none;
+    width: 100%; height: 100%; background: var(--bg);
     --sat: env(safe-area-inset-top); --sab: env(safe-area-inset-bottom); --app-height: 100dvh;
     /* Two font roles. --font-mono: code, terminal output, file paths, data —
        fixed-width matters (alignment, glyph identity). Includes the bundled
@@ -1055,6 +1094,7 @@
     --font-mono: 'Maple Mono NF CN', 'Maple Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', 'Maple Mono CJK', 'SF Mono', Menlo, 'Courier New', monospace;
     --font-ui: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif;
   }
+  :global(#app) { width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
   :global(body), main, nav, .settings-panel { transition: background-color 0.3s ease, color 0.3s ease; }
 
   /* Subtle scrollbar — used by long-running scrollables (terminal command bar,

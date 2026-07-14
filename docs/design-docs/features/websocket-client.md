@@ -49,6 +49,15 @@ Custom WebSocket client (`ws.js`) with auto-reconnect, pending promise cleanup, 
   When nothing is pending and inbound has been silent past the threshold,
   the disconnect fires as before.
 - Auto-reconnect with exponential backoff
+- **Foreground recovery also handles an apparently-open socket.** Mobile
+  WebViews can suspend with `WebSocket.readyState === OPEN`, then resume after
+  pane pushes or xterm's live-tail state has gone stale. On every transition
+  back to `visible`, the app idempotently re-sends all active subscriptions;
+  each mounted Terminal also resets transient touch state, re-fits/repaints,
+  and pulls one `capture_pane` snapshot. If it was following the tail before
+  suspension it resumes following the tail; deliberate scrollback remains
+  pinned and only receives the new-output indicator. This recovery applies to
+  Android, browser/PWA, and desktop WebViews through `visibilitychange`.
 - Multi-address failover: server `machine_id` tracks alternate addresses
 - Optional E2E encryption layer
 - `JSON.parse` wrapped in try-catch in `onmessage`

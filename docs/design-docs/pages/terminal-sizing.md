@@ -73,6 +73,15 @@ patches — symptom fixes, not a root-cause fix.
 **One source of truth:** a `ResizeObserver(termEl)` is the only
 trigger for re-fit.
 
+The Android native height event still owns the upstream CSS viewport size.
+Its stale-event guard must not discard an IME-open event merely because the
+keyboard-toggle button is still the active element: Android can report the
+height one task before xterm's hidden textarea receives focus. Such a height is
+held for up to 500 ms and applied on the following text-input `focusin`; if no
+focus arrives it is discarded as stale. A native height of zero always applies
+immediately and clears any deferred open event. Once `--app-height` changes,
+the `ResizeObserver(termEl)` remains the sole terminal re-fit trigger.
+
 Rationale: every cause of container size change above ultimately
 manifests as a change in `termEl.clientWidth` or `termEl.clientHeight`.
 `ResizeObserver` observes exactly that, and its callback fires only
