@@ -21,6 +21,7 @@ directory, or the server's home directory when no session is open yet.
 ## Interactions
 - Tap directory → navigate into it
 - Tap file → preview (or info page if file size > 5 MB or not previewable)
+- Background/resume and WebSocket reconnect refresh directory data without closing the active preview or editor
 - From info page → tap preview (eye) button to load preview on demand
 - Long file names in the list scroll horizontally on touch drag
 - Tap edit → open text editor

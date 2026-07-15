@@ -26,6 +26,7 @@
   import { t } from './i18n.svelte.js';
   import { layout } from './layout.svelte.js';
   import { copyText } from './clipboard.js';
+  import { directoryLoadState } from './file-view-state.js';
   import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsDownloadHttp, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref, fsConvert } from './ws.js';
 
   // Tauri plugin imports (tree-shaken in browser builds)
@@ -547,27 +548,25 @@
     if (visible && view === 'preview') reloadPreview();
   });
 
-  async function loadDir(path) {
+  async function loadDir(path, purpose = 'navigate') {
     loading = true;
     error = '';
     try {
       const r = await fsList(path, showHidden);
       entries = r.entries;
       cwd = path;
-      view = 'list';
-      currentFile = null;
+      ({ view, currentFile } = directoryLoadState({ view, currentFile }, purpose));
     } catch (e) {
       error = e.message;
     }
     loading = false;
   }
 
-  // After a reconnect, the directory listing may be stale (files added /
-  // removed by other tools while we were offline). Re-list when visible.
-  // Inactive Files page picks up fresh data from its existing visibility
-  // $effect the next time the user navigates here.
+  // After a reconnect, refresh the directory data without treating it as
+  // navigation. The active preview/editor belongs to the user and must survive
+  // an app resume even though the underlying file list may have changed.
   $effect(() => {
-    const onReconn = () => { if (visible && cwd) loadDir(cwd); };
+    const onReconn = () => { if (visible && cwd) loadDir(cwd, 'refresh'); };
     window.addEventListener('ws-reconnected', onReconn);
     return () => window.removeEventListener('ws-reconnected', onReconn);
   });

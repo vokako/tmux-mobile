@@ -8,6 +8,7 @@
     "dev": "vite dev",
     "build": "vite build",
     "test:colors": "node --test src/lib/ansi-colors.test.js",
+    "test:file-view-state": "node --test src/lib/file-view-state.test.js",
     "test:line-geometry": "node --test src/lib/terminal-line-geometry.test.js",
     "test:terminal-viewport": "node --test src/lib/terminal-viewport.test.js",
     "test:ui-zoom": "node --test src/lib/ui-zoom.test.js",
