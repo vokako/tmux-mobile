@@ -24,7 +24,7 @@ rounded shape, muted idle state, and accent active state. Settings uses two tabs
 - Terminal font family (editable list of common locally-installed fonts; accepts another family typed by the user; only a valid local font is applied and persisted to localStorage `tmux_font`; empty = system default)
 - Terminal line spacing (0.60–1.60, persisted to localStorage `tmux_line_height`; applies live to every normal, split, and Team terminal)
 - Line-spacing slider uses the themed surface track and accent thumb, never the browser's native white track
-- Debug toggle (On/Off)
+- Debug toggle (On/Off); the floating log panel is draggable from its header on touch and desktop pointer input, clamps to the visible viewport, and remembers its last position
 - Disconnect button
 
 ## Interactions

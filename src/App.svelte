@@ -191,6 +191,63 @@
   });
   let debugMode = $state(!!localStorage.getItem('tmux_debug'));
   let debugEl = $state(null);
+  const DEBUG_POSITION_KEY = 'tmux_debug_position';
+  let debugPosition = $state((() => {
+    try {
+      const value = JSON.parse(localStorage.getItem(DEBUG_POSITION_KEY) || 'null');
+      return Number.isFinite(value?.left) && Number.isFinite(value?.top) ? value : null;
+    } catch { return null; }
+  })());
+
+  function clampDebugPosition(element, left, top) {
+    const rect = element.getBoundingClientRect();
+    const margin = 4;
+    return {
+      left: Math.max(margin, Math.min(left, window.innerWidth - rect.width - margin)),
+      top: Math.max(margin, Math.min(top, window.innerHeight - 28 - margin)),
+    };
+  }
+
+  function keepDebugPanelVisible(element) {
+    const clamp = () => {
+      if (!debugPosition) return;
+      const next = clampDebugPosition(element, debugPosition.left, debugPosition.top);
+      if (next.left === debugPosition.left && next.top === debugPosition.top) return;
+      debugPosition = next;
+      localStorage.setItem(DEBUG_POSITION_KEY, JSON.stringify(next));
+    };
+    requestAnimationFrame(clamp);
+    window.addEventListener('resize', clamp);
+    window.addEventListener('app-zoom-change', clamp);
+    return {
+      destroy() {
+        window.removeEventListener('resize', clamp);
+        window.removeEventListener('app-zoom-change', clamp);
+      },
+    };
+  }
+
+  function startDebugPointerDrag(event) {
+    if (event.pointerType === 'touch' || event.button !== 0 || event.target.closest('button')) return;
+    const element = event.currentTarget.parentElement;
+    const rect = element.getBoundingClientRect();
+    const offsetX = event.clientX - rect.left;
+    const offsetY = event.clientY - rect.top;
+    const onMove = (moveEvent) => {
+      if (moveEvent.buttons === 0) { onEnd(); return; }
+      debugPosition = clampDebugPosition(element, moveEvent.clientX - offsetX, moveEvent.clientY - offsetY);
+    };
+    const onEnd = () => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onEnd);
+      document.removeEventListener('pointercancel', onEnd);
+      if (debugPosition) localStorage.setItem(DEBUG_POSITION_KEY, JSON.stringify(debugPosition));
+    };
+    event.preventDefault();
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onEnd);
+    document.addEventListener('pointercancel', onEnd);
+  }
 
   // Global debug log — writes directly to DOM to avoid reactivity issues
   window.__dbg = (msg) => {
@@ -992,7 +1049,9 @@
 
   {#if debugMode}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="debug-overlay"
+    <div class="debug-overlay" use:keepDebugPanelVisible
+      style:left={debugPosition ? debugPosition.left + 'px' : undefined}
+      style:top={debugPosition ? debugPosition.top + 'px' : undefined}
       ontouchstart={(e) => {
         const el = e.currentTarget;
         // Only drag from the header area (top 24px)
@@ -1002,13 +1061,22 @@
         e.preventDefault();
         const startX = e.touches[0].clientX - el.offsetLeft;
         const startY = e.touches[0].clientY - el.offsetTop;
-        const onMove = (ev) => { el.style.left = (ev.touches[0].clientX - startX) + 'px'; el.style.top = (ev.touches[0].clientY - startY) + 'px'; };
-        const onEnd = () => { document.removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onEnd); };
+        const onMove = (ev) => {
+          ev.preventDefault();
+          debugPosition = clampDebugPosition(el, ev.touches[0].clientX - startX, ev.touches[0].clientY - startY);
+        };
+        const onEnd = () => {
+          document.removeEventListener('touchmove', onMove);
+          document.removeEventListener('touchend', onEnd);
+          document.removeEventListener('touchcancel', onEnd);
+          if (debugPosition) localStorage.setItem(DEBUG_POSITION_KEY, JSON.stringify(debugPosition));
+        };
         document.addEventListener('touchmove', onMove, { passive: false });
         document.addEventListener('touchend', onEnd);
+        document.addEventListener('touchcancel', onEnd);
       }}
     >
-      <div class="debug-header">DEBUG <button onclick={() => { if (debugEl) copyText(debugEl.innerText); }}>copy</button> <button onclick={() => { if (debugEl) debugEl.innerHTML = ''; }}>clear</button> <button onclick={() => { debugMode = false; localStorage.removeItem('tmux_debug'); }}>✕</button></div>
+      <div class="debug-header" onpointerdown={startDebugPointerDrag}>DEBUG <button onclick={() => { if (debugEl) copyText(debugEl.innerText); }}>copy</button> <button onclick={() => { if (debugEl) debugEl.innerHTML = ''; }}>clear</button> <button onclick={() => { debugMode = false; localStorage.removeItem('tmux_debug'); }}>✕</button></div>
       <div class="debug-content" bind:this={debugEl}></div>
     </div>
   {/if}
@@ -1045,6 +1113,7 @@
     font-size: 10px;
     color: #0f0;
     cursor: grab;
+    -webkit-app-region: no-drag;
     border-bottom: 1px solid rgba(0, 255, 0, 0.15);
     flex-shrink: 0;
     touch-action: none;
