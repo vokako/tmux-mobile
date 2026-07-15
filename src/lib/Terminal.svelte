@@ -2077,19 +2077,19 @@
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div class="shortcut-rows" use:nonPassiveShortcuts ontouchend={stopRepeat} ontouchcancel={stopRepeat} oncontextmenu={(e) => e.preventDefault()} onmouseup={stopRepeat}>
           <div class="shortcuts">
-            <button tabindex="-1" ontouchstart={() => startRepeat('Escape')}>Esc</button>
-            <button tabindex="-1" ontouchstart={() => startRepeat('Tab')}>Tab</button>
-            <button tabindex="-1" ontouchstart={() => startRepeat('C-a')}><Icon name="skip-left" size={13} /></button>
-            <button tabindex="-1" ontouchstart={() => startRepeat('Up')}><Icon name="arrow-up" size={13} /></button>
-            <button tabindex="-1" ontouchstart={() => startRepeat('C-e')}><Icon name="skip-right" size={13} /></button>
-            <button tabindex="-1" ontouchstart={() => startRepeat('BSpace')}><Icon name="delete" size={13} /></button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('Escape')}><span>Esc</span></button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('Tab')}><span>Tab</span></button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('C-a')}><span><Icon name="skip-left" size={13} /></span></button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('Up')}><span><Icon name="arrow-up" size={13} /></span></button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('C-e')}><span><Icon name="skip-right" size={13} /></span></button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('BSpace')}><span><Icon name="delete" size={13} /></span></button>
           </div>
           <div class="shortcuts">
-            <button class="modifier" class:active={ctrlArmed} aria-pressed={ctrlArmed} tabindex="-1" ontouchstart={toggleCtrl}>Ctrl</button>
-            <button tabindex="-1" ontouchstart={() => startRepeat('C-c')}>^C</button>
-            <button tabindex="-1" ontouchstart={() => startRepeat('Left')}><Icon name="arrow-left" size={13} /></button>
-            <button tabindex="-1" ontouchstart={() => startRepeat('Down')}><Icon name="arrow-down" size={13} /></button>
-            <button tabindex="-1" ontouchstart={() => startRepeat('Right')}><Icon name="arrow-right" size={13} /></button>
+            <button class="modifier" class:active={ctrlArmed} aria-pressed={ctrlArmed} tabindex="-1" ontouchstart={toggleCtrl}><span>Ctrl</span></button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('C-c')}><span>^C</span></button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('Left')}><span><Icon name="arrow-left" size={13} /></span></button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('Down')}><span><Icon name="arrow-down" size={13} /></span></button>
+            <button tabindex="-1" ontouchstart={() => startRepeat('Right')}><span><Icon name="arrow-right" size={13} /></span></button>
             <button class="kb-toggle" tabindex="-1" onpointerdown={(e) => {
               // Stop the touch from bubbling into terminal-touch handlers.
               // Note: we deliberately do NOT call e.preventDefault() here.
@@ -2122,7 +2122,7 @@
                 kbLocked = true;
                 ta.blur();
               }
-            }}><Icon name="keyboard" size={13} /></button>
+            }}><span><Icon name="keyboard" size={13} /></span></button>
           </div>
         </div>
       </div>
@@ -2520,6 +2520,12 @@
     border-color: var(--accent);
     transform: translateY(1px);
     box-shadow: none;
+  }
+  .shortcuts button > span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transform: translateY(1px);
   }
   .shortcuts button.modifier.active {
     background: var(--accent-bg);

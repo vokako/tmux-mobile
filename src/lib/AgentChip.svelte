@@ -37,23 +37,25 @@
     : label || agent?.tag || '')}
   onclick={(e) => onclick(e)}
 >
-  {#if agents.length}
-    <span class="chip-agents">
-      {#each agents as item (item.agent.tag)}
-        <img class="chip-icon" class:claude={item.agent.tag === 'Claude'} src={item.agent.icon} alt={item.agent.tag} />
-      {/each}
-    </span>
-  {:else if agent}
-    <img class="chip-icon" class:claude={agent.tag === 'Claude'} src={agent.icon} alt={agent.tag} />
-  {:else if iconName}
-    <Icon name={iconName} size={12} />
-  {/if}
-  {#if label}
-    <span class="chip-label">{label}</span>
-  {/if}
-  {#if chevron}
-    <Icon name="chevron-{chevron}" size={10} />
-  {/if}
+  <span class="chip-content">
+    {#if agents.length}
+      <span class="chip-agents">
+        {#each agents as item (item.agent.tag)}
+          <img class="chip-icon" class:claude={item.agent.tag === 'Claude'} src={item.agent.icon} alt={item.agent.tag} />
+        {/each}
+      </span>
+    {:else if agent}
+      <img class="chip-icon" class:claude={agent.tag === 'Claude'} src={agent.icon} alt={agent.tag} />
+    {:else if iconName}
+      <Icon name={iconName} size={12} />
+    {/if}
+    {#if label}
+      <span class="chip-label">{label}</span>
+    {/if}
+    {#if chevron}
+      <Icon name="chevron-{chevron}" size={10} />
+    {/if}
+  </span>
 </button>
 
 <style>
@@ -103,6 +105,14 @@
     color: var(--accent);
     border-color: var(--accent);
     background: var(--accent-bg);
+  }
+
+  .chip-content {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ui-gap);
+    min-width: 0;
+    transform: translateY(1px);
   }
 
   .chip-icon {
