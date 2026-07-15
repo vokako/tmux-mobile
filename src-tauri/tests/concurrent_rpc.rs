@@ -29,6 +29,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message;
 
+use tmux_mobile::agent_notifications::AgentNotificationHub;
 use tmux_mobile::server::{
     decode_wire_payload, handle_connection, AuthTracker, ResizeTracker, ResizeTrackerInner,
 };
@@ -59,7 +60,8 @@ async fn spawn_server_once(token: &str) -> SocketAddr {
             let rt = resize_tracker.clone();
             // grace=0 keeps test teardown synchronous (no lingering timer tasks).
             // None = no agora bus (this exercises the terminal RPC path only).
-            tokio::spawn(handle_connection(stream, peer, t, m, at, rt, 0, None));
+            let notifications = Arc::new(AgentNotificationHub::load());
+            tokio::spawn(handle_connection(stream, peer, t, m, at, rt, 0, None, notifications));
         }
     });
     addr

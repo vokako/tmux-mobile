@@ -1151,6 +1151,9 @@ fn prepare_kiro(
     )
     .map_err(|e| e.to_string())?;
 
+    let notifications = crate::agent_notifications::AgentNotificationHub::load();
+    notifications.ensure_helper()?;
+    let notify = notifications.helper_command("kiro");
     let tools = vec!["*".to_string(), "@team".to_string()];
 
     // Skills are loaded as native skill:// resources.
@@ -1180,7 +1183,10 @@ fn prepare_kiro(
         "hooks": {
             "postToolUse": [ { "matcher": "*", "command": paths.heartbeat.to_string_lossy() } ],
             "userPromptSubmit": [ { "command": paths.heartbeat.to_string_lossy() } ],
-            "stop": [ { "command": paths.keepalive.to_string_lossy() } ]
+            "stop": [
+                { "command": paths.keepalive.to_string_lossy() },
+                { "command": notify }
+            ]
         },
     });
     std::fs::write(
@@ -1208,6 +1214,9 @@ fn prepare_claude(
 ) -> Result<Prepared, String> {
     let d = &paths.claude;
     std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
+    let notifications = crate::agent_notifications::AgentNotificationHub::load();
+    notifications.ensure_helper()?;
+    let notify = notifications.helper_command("claude");
     let mcpfile = d.join(format!("{}.mcp.json", name));
     let mut mcp_servers = serde_json::json!({
         "team": { "type": "http", "url": format!("{}/mcp", cfg.url), "headers": { "x-agent": name, "x-room": room } }
@@ -1232,7 +1241,12 @@ fn prepare_claude(
             "hooks": {
                 "PostToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": paths.heartbeat.to_string_lossy() } ] } ],
                 "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": paths.heartbeat.to_string_lossy() } ] } ],
-                "Stop": [ { "hooks": [ { "type": "command", "command": paths.keepalive.to_string_lossy() } ] } ]
+                "Notification": [ { "matcher": "permission_prompt|idle_prompt|agent_needs_input|agent_completed", "hooks": [ { "type": "command", "command": notify } ] } ],
+                "Stop": [ { "hooks": [
+                    { "type": "command", "command": paths.keepalive.to_string_lossy() },
+                    { "type": "command", "command": notify }
+                ] } ],
+                "StopFailure": [ { "hooks": [ { "type": "command", "command": notify } ] } ]
             }
         }))
         .unwrap(),
@@ -1263,6 +1277,9 @@ fn prepare_codex(
 ) -> Result<Prepared, String> {
     let home = paths.codex.join(name);
     std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
+    let notifications = crate::agent_notifications::AgentNotificationHub::load();
+    notifications.ensure_helper()?;
+    let notify = notifications.helper_command("codex");
     let mut config = format!(
         "[mcp_servers.team]\nurl = \"{}/mcp\"\nenabled = true\nexperimental_use_rmcp_client = true\n\n[mcp_servers.team.http_headers]\n\"x-agent\" = \"{}\"\n\"x-room\" = \"{}\"\n",
         cfg.url, name, room
@@ -1273,6 +1290,15 @@ fn prepare_codex(
         }
     }
     std::fs::write(home.join("config.toml"), config).map_err(|e| e.to_string())?;
+    std::fs::write(
+        home.join("hooks.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "hooks": {
+                "PermissionRequest": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
+                "Stop": [ { "hooks": [ { "type": "command", "command": notify } ] } ]
+            }
+        })).unwrap(),
+    ).map_err(|e| e.to_string())?;
     let mut env = vec![("CODEX_HOME".to_string(), home.to_string_lossy().to_string())];
     env.extend(hb_env(name, room, cfg));
     env.extend(extras.env.iter().cloned());

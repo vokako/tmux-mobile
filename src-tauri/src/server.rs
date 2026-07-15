@@ -1,3 +1,4 @@
+use crate::agent_notifications::AgentNotificationHub;
 use crate::fs as rfs;
 use crate::tmux;
 use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit, Nonce};
@@ -93,6 +94,7 @@ pub trait TeamBridge: Send + Sync {
 }
 
 pub type OptTeam = Option<Arc<dyn TeamBridge>>;
+pub type NotificationHub = Arc<AgentNotificationHub>;
 
 // Brute-force protection: track failed auth attempts per IP
 pub type AuthTracker = Arc<Mutex<HashMap<IpAddr, (u32, tokio::time::Instant)>>>;
@@ -1053,6 +1055,54 @@ fn handle_team_request(req: &Request, team: Option<&dyn TeamBridge>) -> Response
 /// Push newly-broadcast team messages to this client as `team_message`
 /// notifications, so the Team tab updates live without polling. Mirrors the
 /// dashboard's SSE stream, but rides the existing encrypted Outbound channel.
+async fn notification_push_loop(out_tx: tokio::sync::mpsc::UnboundedSender<Outbound>, hub: NotificationHub) {
+    let mut rx = hub.subscribe();
+    loop {
+        match rx.recv().await {
+            Ok(snapshot_json) => {
+                let frame = serde_json::json!({
+                    "id": null,
+                    "method": "agent_notification",
+                    "params": serde_json::from_str::<serde_json::Value>(&snapshot_json).unwrap_or(serde_json::json!({ "unread": [] })),
+                });
+                if out_tx.send(Outbound::Encrypted(serde_json::to_string(&frame).unwrap())).is_err() { return; }
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+        }
+    }
+}
+
+fn handle_notification_request(req: &Request, hub: &AgentNotificationHub) -> Response {
+    let id = req.id;
+    match req.method.as_str() {
+        "agent_notifications_list" => Response::ok(id, hub.snapshot()),
+        "agent_notifications_mark_read" => {
+            let session = match require_str(&req.params, "session") {
+                Ok(value) => value,
+                Err(error) => return Response::err(id, ERR_INVALID_PARAMS, error),
+            };
+            let Some(window) = req.params.get("window").and_then(|value| value.as_u64()) else {
+                return Response::err(id, ERR_INVALID_PARAMS, "missing required param: window".into());
+            };
+            match hub.mark_read(session, window as usize) {
+                Ok(snapshot) => Response::ok(id, snapshot),
+                Err(error) => Response::err(id, ERR_INTERNAL, error),
+            }
+        }
+        "agent_hooks_status" => Response::ok(id, serde_json::to_value(hub.hook_status()).unwrap()),
+        "agent_hooks_install" => match hub.install_hooks() {
+            Ok(status) => Response::ok(id, serde_json::to_value(status).unwrap()),
+            Err(error) => Response::err(id, ERR_INTERNAL, error),
+        },
+        "agent_hooks_remove" => match hub.remove_hooks() {
+            Ok(status) => Response::ok(id, serde_json::to_value(status).unwrap()),
+            Err(error) => Response::err(id, ERR_INTERNAL, error),
+        },
+        other => Response::err(id, ERR_METHOD_NOT_FOUND, format!("unknown agent notification method: {other}")),
+    }
+}
+
 async fn team_push_loop(out_tx: tokio::sync::mpsc::UnboundedSender<Outbound>, team: Arc<dyn TeamBridge>) {
     let mut rx = team.subscribe();
     loop {
@@ -1257,7 +1307,7 @@ where
     let _ = stream.flush().await;
 }
 
-pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, grace_secs: u64, team: OptTeam) {
+pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, grace_secs: u64, team: OptTeam, notifications: NotificationHub) {
     // Peek at the request prelude to distinguish HTTP download from
     // WebSocket. 256 bytes covers the request line even with a reverse-proxy
     // path prefix; peek doesn't consume, so the WS handshake still sees the
@@ -1299,10 +1349,10 @@ pub async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: Arc<S
         }
     };
 
-    handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, resize_tracker, conn_id, conn_started_at, grace_secs, team).await;
+    handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, resize_tracker, conn_id, conn_started_at, grace_secs, team, notifications).await;
 }
 
-async fn handle_connection_ws<S>(ws_stream: tokio_tungstenite::WebSocketStream<S>, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, conn_id: u64, conn_started_at: std::time::Instant, grace_secs: u64, team: OptTeam)
+async fn handle_connection_ws<S>(ws_stream: tokio_tungstenite::WebSocketStream<S>, addr: SocketAddr, token: Arc<String>, machine_id: Arc<String>, auth_tracker: AuthTracker, resize_tracker: ResizeTracker, conn_id: u64, conn_started_at: std::time::Instant, grace_secs: u64, team: OptTeam, notifications: NotificationHub)
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
@@ -1326,6 +1376,7 @@ where
     // enqueues Encrypted frames, which need the session cipher in place).
     // Aborted at teardown alongside the other per-connection tasks.
     let mut team_push_handle: Option<tokio::task::JoinHandle<()>> = None;
+    let mut notification_push_handle: Option<tokio::task::JoinHandle<()>> = None;
     // Receive-side cipher lives in this task and guards strict decrypt
     // ordering. Send-side cipher is handed off to the dedicated send task
     // (below) so business tasks can finish out of order without corrupting
@@ -1560,6 +1611,7 @@ where
                             if let Some(ref a) = team {
                                 team_push_handle = Some(tokio::spawn(team_push_loop(out_tx.clone(), a.clone())));
                             }
+                            notification_push_handle = Some(tokio::spawn(notification_push_loop(out_tx.clone(), notifications.clone())));
                             continue;
                         } else {
                             let mut tracker = auth_tracker.lock().await;
@@ -1581,6 +1633,7 @@ where
                         if let Some(ref a) = team {
                             team_push_handle = Some(tokio::spawn(team_push_loop(out_tx.clone(), a.clone())));
                         }
+                        notification_push_handle = Some(tokio::spawn(notification_push_loop(out_tx.clone(), notifications.clone())));
                         continue;
                     } else {
                         let mut tracker = auth_tracker.lock().await;
@@ -1606,6 +1659,7 @@ where
                 let out_tx_c = out_tx.clone();
                 let token_c = token.clone();
                 let team_c = team.clone();
+                let notifications_c = notifications.clone();
                 tokio::spawn(async move {
                     let response = match req.method.as_str() {
                         "subscribe" => {
@@ -1617,6 +1671,7 @@ where
                             handle_unsubscribe(&req.params, &mut map)
                         }
                         m if m.starts_with("team_") => handle_team_request(&req, team_c.as_deref()),
+                        m if m.starts_with("agent_notifications_") || m.starts_with("agent_hooks_") => handle_notification_request(&req, &notifications_c),
                         "resize_pane" => {
                             let id = req.id;
                             let p = &req.params;
@@ -1682,6 +1737,9 @@ where
     sub_handle.abort();
     ping_handle.abort();
     if let Some(h) = team_push_handle.take() {
+        h.abort();
+    }
+    if let Some(h) = notification_push_handle.take() {
         h.abort();
     }
     drop(out_tx); // close the channel so the send task finishes
@@ -1796,6 +1854,9 @@ pub async fn start_with_socket(
     let machine_id = Arc::new(machine_id.to_string());
     let auth_tracker: AuthTracker = Arc::new(Mutex::new(HashMap::new()));
     let resize_tracker: ResizeTracker = Arc::new(std::sync::Mutex::new(ResizeTrackerInner::default()));
+    let notifications = Arc::new(AgentNotificationHub::load());
+    notifications.ensure_helper().map_err(|error| format!("Failed to prepare agent notification helper: {error}"))?;
+    tokio::spawn(notifications.clone().run());
 
     // Load TLS config if cert+key provided
     let tls_acceptor = match (&tls_cert, &tls_key) {
@@ -1842,6 +1903,7 @@ pub async fn start_with_socket(
         let control_mgr = resize_tracker.clone();
         let grace = disconnect_grace_secs;
         let team_c = team.clone();
+        let notifications_c = notifications.clone();
         if let Some(ref acceptor) = tls_acceptor {
             let acceptor = acceptor.clone();
             tokio::spawn(async move {
@@ -1874,13 +1936,13 @@ pub async fn start_with_socket(
                         let conn_id = CONN_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         let conn_started_at = std::time::Instant::now();
                         println!("📱 Client connected (TLS): {} (conn_id={})", addr, conn_id);
-                        handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, control_mgr, conn_id, conn_started_at, grace, team_c).await;
+                        handle_connection_ws(ws_stream, addr, token, machine_id, auth_tracker, control_mgr, conn_id, conn_started_at, grace, team_c, notifications_c).await;
                     }
                     Err(e) => eprintln!("❌ TLS handshake failed for {}: {}", addr, e),
                 }
             });
         } else {
-            tokio::spawn(handle_connection(stream, addr, token, machine_id, auth_tracker, control_mgr, grace, team_c));
+            tokio::spawn(handle_connection(stream, addr, token, machine_id, auth_tracker, control_mgr, grace, team_c, notifications_c));
         }
     }
 }

@@ -278,6 +278,24 @@ pub fn list_all_panes() -> Result<Vec<TmuxPane>, String> {
     Ok(parse_pane_lines(&output))
 }
 
+/// Resolve tmux's stable pane id (for example `%18`) to the current target.
+/// Agent lifecycle hooks inherit `TMUX_PANE`, so this is the authoritative
+/// association between an agent event and the window shown by the client.
+pub fn resolve_pane_id(pane_id: &str) -> Result<(String, usize, usize), String> {
+    if !pane_id.starts_with('%') || !pane_id[1..].chars().all(|c| c.is_ascii_digit()) {
+        return Err("invalid tmux pane id".into());
+    }
+    let output = run_tmux(&[
+        "display-message", "-t", pane_id, "-p",
+        "#{session_name}<TMM_SEP>#{window_index}<TMM_SEP>#{pane_index}",
+    ])?;
+    let mut fields = output.trim().split("<TMM_SEP>");
+    let session = fields.next().filter(|s| !s.is_empty()).ok_or("missing session")?.to_string();
+    let window = fields.next().ok_or("missing window")?.parse().map_err(|_| "invalid window")?;
+    let pane = fields.next().ok_or("missing pane")?.parse().map_err(|_| "invalid pane")?;
+    Ok((session, window, pane))
+}
+
 /// Get current command of a pane
 pub fn pane_command(target: &str) -> Result<String, String> {
     run_tmux(&[

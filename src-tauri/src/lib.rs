@@ -1,3 +1,4 @@
+pub mod agent_notifications;
 pub mod config;
 pub mod fs;
 pub mod server;

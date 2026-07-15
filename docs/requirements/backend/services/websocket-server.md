@@ -49,3 +49,10 @@ Rust-based WebSocket server providing JSON-RPC interface to tmux and filesystem 
 - Path traversal protection on download filenames (`sanitize_filename()`)
 - Git operations whitelisted to safe subset, shell metacharacters rejected in args
 - iframe sandbox: `allow-same-origin` only (no scripts)
+
+## Agent Notification RPC
+
+- `agent_notifications_list` returns the server-persisted unread window snapshot.
+- `agent_notifications_mark_read(session, window)` clears one window and broadcasts the resulting snapshot.
+- `agent_hooks_status`, `agent_hooks_install`, and `agent_hooks_remove` manage only tmux-mobile-owned Claude Code, Codex, and Kiro hooks.
+- `agent_notification` is a server push carrying the complete unread snapshot; clients re-list after authentication/reconnect.
