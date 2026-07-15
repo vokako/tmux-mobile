@@ -1841,7 +1841,7 @@
              so it's always visible without stealing a whole row. The window
              chips scroll independently to its right. -->
         <AgentChip
-          attention={sessionHasNotification(session)}
+          attention={sessionHasNotification(session, currentWindow)}
           label={session}
           variant="active"
           title={session}

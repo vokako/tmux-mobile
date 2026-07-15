@@ -35,8 +35,11 @@ export function notificationForWindow(session, window) {
   return agentNotifications.unread.find(item => item.session === session && Number(item.window) === Number(window)) || null;
 }
 
-export function sessionHasNotification(session) {
-  return agentNotifications.unread.some(item => item.session === session);
+export function sessionHasNotification(session, excludedWindow = null) {
+  return agentNotifications.unread.some(item => (
+    item.session === session
+    && (excludedWindow == null || Number(item.window) !== Number(excludedWindow))
+  ));
 }
 
 export async function markWindowRead(session, window) {
