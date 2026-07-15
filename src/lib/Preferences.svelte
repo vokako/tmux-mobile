@@ -65,6 +65,9 @@
           <Icon name={item.icon} size={15} /><span>{item.label()}</span>
         </button>
       {/each}
+      <button class:active={debugMode} aria-pressed={debugMode} onclick={() => onDebug(!debugMode)} title={t('debugHint')}>
+        <Icon name="terminal" size={15} /><span>{t('debug')}</span>
+      </button>
       <button class="close" onclick={onClose} aria-label={t('close')}><Icon name="x" size={16} /></button>
     </nav>
 
@@ -149,10 +152,6 @@
           {:else}
             <div class="empty-connection"><Icon name="link" size={20} /><span>{t('notConnected')}</span><button onclick={onConnectionSetup}>{t('connectionSetup')}</button></div>
           {/if}
-          <div class="setting-row compact">
-            <div><strong>{t('debug')}</strong><small>{t('debugHint')}</small></div>
-            <button class="toggle" class:on={debugMode} onclick={() => onDebug(!debugMode)}><span></span>{debugMode ? t('on') : t('off')}</button>
-          </div>
         </div>
         {#if connected}<button class="disconnect" onclick={onDisconnect}>{t('disconnect')}</button>{/if}
       {/if}
@@ -192,7 +191,6 @@
   .range-wrap span{width:31px;font:10px var(--font-mono);color:var(--text2)}.reset{width:24px;padding:0}
   .connection-title{padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px}.connection-title>div:first-child{display:flex;flex-direction:column;gap:3px}.conn-actions{display:flex;gap:4px}.conn-actions button{display:flex;align-items:center;gap:4px}
   .address-list{padding:0 12px 10px;display:flex;flex-direction:column;gap:3px}.address-list button{padding:7px 9px;border:1px solid var(--border2);border-radius:7px;background:var(--input-bg);color:var(--text3);font:11px var(--font-mono);text-align:left;word-break:break-all;cursor:pointer}.address-list button.active{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}
-  .compact{border-top:1px solid var(--border2)}.toggle{height:24px;border:1px solid var(--border2);border-radius:999px;background:transparent;color:var(--text3);padding:3px 8px 3px 4px;display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px}.toggle span{width:12px;height:12px;border-radius:50%;background:var(--text3)}.toggle.on{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}.toggle.on span{background:var(--accent)}
   .disconnect{display:block;width:min(720px,100%);margin:8px auto;padding:7px;border:1px solid color-mix(in srgb,var(--danger) 55%,transparent);border-radius:7px;background:none;color:var(--danger);cursor:pointer;font-size:11px;font-weight:600}
   .empty-connection{padding:28px 12px;display:flex;flex-direction:column;align-items:center;gap:9px;color:var(--text3);font-size:11px}.empty-connection button{padding:6px 10px;border:1px solid var(--accent);border-radius:6px;background:var(--accent-bg);color:var(--accent);cursor:pointer;font-size:11px}
   @media(max-width:640px){.preferences{inset:calc(49px + var(--sat)) 0 0}.pref-content{padding:9px 8px}.setting-row{min-height:50px;padding:8px 10px;gap:10px}.text-input{width:min(220px,48vw)}.range-wrap{min-width:min(250px,52vw)}.connection-title{align-items:flex-start;flex-direction:column}.conn-actions{width:100%}.conn-actions button{flex:1;justify-content:center}}
