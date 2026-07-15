@@ -9,41 +9,44 @@ AI CLIs (Kiro, Claude Code, etc.) ship ANSI truecolor / 256-color codes tuned fo
 Unchanged, a Kiro "Tasks" panel with BG `rgb(238,238,238)` reads as a **blinding near-white block** on our dark background, and in light mode the previous behavior (flat `255 - c` RGB inversion) produced **pure-black blocks and wrong hues**.
 
 ## Decision
-Adapt colors at write-time, in JS, before handing to xterm.js. Instead of a blanket inversion, **preserve hue + saturation** and only move a color's luminance when:
+Adapt colors at write-time, in JS, before handing to xterm.js. Instead of a blanket inversion, an SGR state machine tracks the effective foreground, background, and reverse-video state. It **preserves hue + saturation** and only moves a color's luminance when:
 
-- It's a **FG** that lacks contrast against the terminal bg (WCAG contrast < 3.5) — push it into the readable band for this theme.
+- The effective **FG/BG pair** lacks WCAG AA contrast (< 4.5:1) — move the foreground toward the nearest readable lightness while preserving hue and saturation.
 - It's a **BG block** that either clashes with the terminal bg (too bright in dark mode, too dark in light mode) or blends into it (too close to the terminal bg in light mode) — push it to a mid-luminance band that reads as a "block" without dominating.
 
-Decisions use **WCAG relative luminance** (perceptually correct); construction uses HSL L (cheap to edit hue/saturation separately). Thresholds are tuned against a real Kiro capture (see `temp/color_test.js`).
+Decisions use **WCAG relative luminance** (perceptually correct); construction uses HSL L (cheap to edit hue/saturation separately). Thresholds are covered by the executable matrix in `src/lib/ansi-colors.test.js`.
 
 ## How It Works
-1. Regex-replace every `\x1b[38;2;r;g;bm` / `\x1b[48;2;r;g;bm` truecolor sequence.
-2. Regex-replace every `\x1b[38;5;nm` / `\x1b[48;5;nm` 256-color indexed sequence for indices 16-255 (0-15 are left to xterm.js's theme).
-3. For each RGB, compute WCAG L. Apply the FG or BG decision above.
-4. When a change is needed, convert to HSL (preserving h, s), set a target L, convert back to RGB.
-5. Output rewrites indexed colors as truecolor for consistency.
+1. Parse every SGR sequence and update the current foreground, background, reset, and reverse-video state.
+2. Resolve basic ANSI 0–15 colors through the active xterm theme; resolve indexed 16–255 colors through the standard palette; read 24-bit colors directly.
+3. Adapt an explicit background block against the terminal background, while leaving the default background untouched.
+4. Compute the effective displayed FG/BG pair (including reverse video). If contrast is below 4.5:1, binary-search HSL lightness toward the higher-contrast black/white direction, stopping at the smallest passing change on that path.
+5. Append explicit truecolor FG/BG overrides after the original SGR sequence, preserving non-color attributes while making the mapped pair deterministic.
 
 Cache by (text, theme) so a stable pane doesn't re-transform on every frame.
 
 ### Key constants
 | Name | Value | Role |
 |------|-------|------|
-| `MIN_FG_CONTRAST` | 3.5 | FG ≥ this vs terminal bg → leave alone |
+| `MIN_TEXT_CONTRAST` | 4.5 | Effective FG/BG pair must meet WCAG AA normal-text contrast |
 | `BG_CLASH_RATIO_DARK` | 4.5 | Dark BG > 4.5× brighter than term bg → recolor |
 | `BG_CLASH_RATIO_LIGHT` | 1.8 | Light BG > 1.8× darker than term bg → recolor |
 | `BG_BLEND_RATIO_LIGHT` | 1.15 | Light BG within 1.15× of term bg → recolor (invisible) |
-| `HSL_L_{BG,FG}_{DARK,LIGHT}` | 0.28-0.75 | Target HSL L by role × theme |
+| `HSL_L_BG_{DARK,LIGHT}` | 0.30 / 0.75 | Target HSL L for explicit background blocks |
 
 ## Alternatives Considered
 - **Flat RGB inversion** (old behavior). Rejected: destroys hue, produces near-black UI blocks in light mode, and leaves Kiro's bright UI blocks blinding in dark mode.
-- **xterm.js `minimumContrastRatio`**. Rejected for now: xterm adjusts FG *for every cell at render time* which is robust but opaque — hard to tune, and it can't help with glaring BG blocks which are the loudest complaint.
+- **xterm.js `minimumContrastRatio` plus background-only preprocessing**. Rejected after testing: xterm adjusts FG *for every cell at render time*, but keeps pair decisions split across two systems, cannot help with glaring BG blocks by itself, and does not cover reverse-video semantics deterministically.
 - **Do-nothing**. Rejected: that's what produced the user-reported bug.
-- **SGR state machine that re-balances FG+BG as a pair**. Deferred. Solves the remaining limitation (see below) but is a much bigger change; tracked in `docs/unresolved.md`.
 
 ## Trade-offs
-- **Independent FG/BG adjustment** means hand-picked pairs can lose contrast in edge cases (e.g. purple bg + yellow fg in light mode). Typical AI CLI output uses FG-only colors on the default terminal bg, so this is rare.
 - Target luminance values are global constants; colors from different CLIs map to the same targets. Saturated colors (pure green, pure red) land at slightly different WCAG L than greys because HSL L → WCAG L is non-linear; the effect is that saturated colors end up *slightly* brighter than their grey peers, which actually helps semantic colors stand out.
-- Always running adaptation (vs the old "light-only" path) adds a regex pass per terminal frame. Benchmarks on a ~10 KB pane were sub-millisecond and there is a content-based cache for repeat frames, so the cost is effectively zero for static panes.
+- Always running adaptation (vs the old "light-only" path) adds one SGR scan per changed terminal snapshot. The Terminal component caches the last `(content, theme)` result. A local benchmark maps a 21.5 KiB ANSI snapshot in ~0.52 ms on the development Mac.
+- The adapter emits explicit truecolor overrides after color-changing SGR sequences. This makes theme results deterministic, but terminals that intentionally combine bold with the basic 8-color palette receive the theme's resolved base color rather than asking xterm to synthesize a separate bold-as-bright variant.
+
+## Verification
+
+`npm run test:colors` covers dark and light themes, truecolor, indexed and basic ANSI colors, reset behavior, reverse video, default-background preservation, and a 288-pair representative color matrix. Every mapped pair must retain at least 4.5:1 contrast.
 
 ## Lessons Learned
 - The original symptom was reported as "dark mode renders as white background, light mode as black background" — it was literally the symptom of a blind RGB inversion; the fix required separating the *role* (FG vs BG) from the *color space* (perceptual vs nominal).

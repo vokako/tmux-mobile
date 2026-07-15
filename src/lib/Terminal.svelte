@@ -12,6 +12,7 @@
   import { copyText } from './clipboard.js';
   import { fonts } from './fonts.svelte.js';
   import { terminalPrefs } from './terminal-prefs.svelte.js';
+  import { adaptAnsiColors } from './ansi-colors.js';
 
   // Timing constants
   const WINDOW_LIST_POLL_MS = 5000;
@@ -329,107 +330,6 @@
   // Count lines without allocating a split array
   function countLines(s) { let n = 1; for (let i = 0; i < s.length; i++) if (s[i] === '\n') n++; return n; }
 
-  // Adapt ANSI RGB / 256-color codes so the terminal content stays readable
-  // regardless of theme. The old behavior was a flat RGB inversion in light
-  // mode, which produced near-black blocks (e.g. Kiro Tasks panel) and broke
-  // hue. This version preserves hue + saturation; it only reshapes luminance
-  // when a color would either (a) lack contrast against the terminal bg (FG),
-  // or (b) clash with / blend into the terminal bg (BG block).
-  //
-  // Notes / limits:
-  // - We process each ANSI color independently; FG and BG aren't re-balanced
-  //   as pairs, so hand-picked FG/BG color combos can lose contrast in
-  //   extreme cases (e.g. purple bg + yellow fg in light mode). Full pair
-  //   handling would need a small SGR state machine; tracked in unresolved.
-  // - 256-color indices 16..255 are converted through the standard palette and
-  //   rewritten as truecolor. Indices 0..15 are left to xterm.js's theme.
-  const TERM_BG_L_DARK = 0.02;      // WCAG L of dark theme bg (#0a0a0f)
-  const TERM_BG_L_LIGHT = 0.91;     // WCAG L of light theme bg (#f5f5f7)
-  const MIN_FG_CONTRAST = 3.5;      // WCAG AA large-text threshold
-  const BG_CLASH_RATIO_DARK = 4.5;  // dark bg block > 4.5× term bg → too bright
-  const BG_CLASH_RATIO_LIGHT = 1.8; // light bg block < 1/1.8× term bg → too dark
-  const BG_BLEND_RATIO_LIGHT = 1.15;// light bg within 1.15× of term bg → invisible
-  const HSL_L_BG_DARK = 0.30;
-  const HSL_L_BG_LIGHT = 0.75;
-  const HSL_L_FG_DARK = 0.72;
-  const HSL_L_FG_LIGHT = 0.28;
-
-  function _toLinChannel(c) {
-    c /= 255;
-    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-  }
-  function _luminance(r, g, b) {
-    return 0.2126 * _toLinChannel(r) + 0.7152 * _toLinChannel(g) + 0.0722 * _toLinChannel(b);
-  }
-  function _contrast(l1, l2) {
-    const a = Math.max(l1, l2), b = Math.min(l1, l2);
-    return (a + 0.05) / (b + 0.05);
-  }
-  function _rgbToHsl(r, g, b) {
-    r /= 255; g /= 255; b /= 255;
-    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
-    let h = 0, s = 0;
-    const l = (mx + mn) / 2;
-    if (mx !== mn) {
-      const d = mx - mn;
-      s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
-      if (mx === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
-      else if (mx === g) h = ((b - r) / d + 2) / 6;
-      else h = ((r - g) / d + 4) / 6;
-    }
-    return [h, s, l];
-  }
-  function _hslToRgb(h, s, l) {
-    let r, g, b;
-    if (s === 0) { r = g = b = l; }
-    else {
-      const hue2rgb = (p, q, t) => {
-        if (t < 0) t += 1;
-        if (t > 1) t -= 1;
-        if (t < 1/6) return p + (q - p) * 6 * t;
-        if (t < 0.5) return q;
-        if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
-        return p;
-      };
-      const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-      const p = 2 * l - q;
-      r = hue2rgb(p, q, h + 1/3);
-      g = hue2rgb(p, q, h);
-      b = hue2rgb(p, q, h - 1/3);
-    }
-    return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
-  }
-  function _idx256ToRgb(n) {
-    if (n < 16) return null;
-    if (n >= 232) {
-      const v = (n - 232) * 10 + 8;
-      return [v, v, v];
-    }
-    const i = n - 16;
-    return [Math.floor(i / 36) * 51, Math.floor((i % 36) / 6) * 51, (i % 6) * 51];
-  }
-  function _adjustColor(r, g, b, isBg, isDark) {
-    const L = _luminance(r, g, b);
-    const [h, s] = _rgbToHsl(r, g, b);
-    if (isBg) {
-      const termL = isDark ? TERM_BG_L_DARK : TERM_BG_L_LIGHT;
-      if (isDark) {
-        if ((L + 0.05) / (termL + 0.05) > BG_CLASH_RATIO_DARK) {
-          return _hslToRgb(h, s, HSL_L_BG_DARK);
-        }
-        return [r, g, b];
-      }
-      const ratio = (termL + 0.05) / (L + 0.05);
-      if (ratio > BG_CLASH_RATIO_LIGHT || ratio < BG_BLEND_RATIO_LIGHT) {
-        return _hslToRgb(h, s, HSL_L_BG_LIGHT);
-      }
-      return [r, g, b];
-    }
-    const bgL = isDark ? TERM_BG_L_DARK : TERM_BG_L_LIGHT;
-    if (_contrast(L, bgL) >= MIN_FG_CONTRAST) return [r, g, b];
-    return _hslToRgb(h, s, isDark ? HSL_L_FG_DARK : HSL_L_FG_LIGHT);
-  }
-
   // Compute xterm row (1-based) + required padding for cursor placement.
   // Shared by full-rewrite and cursor-only paths to ensure they stay in sync.
   function computeCursorLayout(content, cursor, rows) {
@@ -449,44 +349,19 @@
     };
   }
 
-  // Write content + position cursor in xterm.js.
-  // Color adaptation runs per line, with a Map cache keyed by (rawLine, theme).
-  // Hit rate is high in streaming scenarios because most lines repeat verbatim
-  // between snapshots — only the few changing lines re-run the regex pass.
-  // We bound the cache so unbounded scrollback doesn't grow it forever.
-  const _colorCache = new Map();
-  const _COLOR_CACHE_MAX = 4000;
-  function adaptLine(rawLine, isDark) {
-    const key = (isDark ? 'd:' : 'l:') + rawLine;
-    const hit = _colorCache.get(key);
-    if (hit !== undefined) return hit;
-    let out = rawLine.replace(/\x1b\[(3|4)8;2;(\d+);(\d+);(\d+)m/g, (_m, type, r, g, b) => {
-      const isBg = type === '4';
-      const [nr, ng, nb] = _adjustColor(+r, +g, +b, isBg, isDark);
-      return `\x1b[${type}8;2;${nr};${ng};${nb}m`;
-    });
-    out = out.replace(/\x1b\[(3|4)8;5;(\d+)m/g, (m, type, n) => {
-      const rgb = _idx256ToRgb(+n);
-      if (!rgb) return m;
-      const isBg = type === '4';
-      const [nr, ng, nb] = _adjustColor(rgb[0], rgb[1], rgb[2], isBg, isDark);
-      return `\x1b[${type}8;2;${nr};${ng};${nb}m`;
-    });
-    if (_colorCache.size >= _COLOR_CACHE_MAX) {
-      // Drop oldest entry. Map iteration is insertion-ordered.
-      const firstKey = _colorCache.keys().next().value;
-      if (firstKey !== undefined) _colorCache.delete(firstKey);
-    }
-    _colorCache.set(key, out);
-    return out;
-  }
+  // Write content + position cursor in xterm.js. The color adapter tracks
+  // effective SGR foreground/background pairs across the complete snapshot.
+  let lastColorInput = '';
+  let lastColorTheme = '';
+  let lastColorOutput = '';
   function adaptColors(text) {
-    const isDark = theme !== 'light';
-    if (text.indexOf('\n') < 0) return adaptLine(text, isDark);
-    // Split, adapt per line, rejoin. \n is preserved at line boundaries.
-    const lines = text.split('\n');
-    for (let i = 0; i < lines.length; i++) lines[i] = adaptLine(lines[i], isDark);
-    return lines.join('\n');
+    const terminalTheme = getTermTheme();
+    const themeKey = `${terminalTheme.foreground}/${terminalTheme.background}`;
+    if (text === lastColorInput && themeKey === lastColorTheme) return lastColorOutput;
+    lastColorInput = text;
+    lastColorTheme = themeKey;
+    lastColorOutput = adaptAnsiColors(text, terminalTheme);
+    return lastColorOutput;
   }
 
   // Coalesce high-frequency snapshots into one render per animation frame.
