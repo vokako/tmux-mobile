@@ -174,3 +174,8 @@ equation is satisfied, no more resize is sent.
 - Screen symptoms like "only the top half shows content" on mobile
   almost always point to a cols/rows ↔ container mismatch, not to a
   rendering bug. Check the sizing path first.
+- Pane/window switching may clear mobile keyboard state, but it must never
+  restore `--app-height` from the mobile `fullHeight` cache on desktop. That
+  cache is initialized for keyboard handling and can predate a macOS window
+  maximize; writing it during a pane switch shrinks the real terminal box even
+  though xterm's fit calculation remains correct.

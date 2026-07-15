@@ -14,6 +14,7 @@
   import { terminalPrefs } from './terminal-prefs.svelte.js';
   import { adaptAnsiColors } from './ansi-colors.js';
   import { compactLineGeometry } from './terminal-line-geometry.js';
+  import { restoreViewportAfterPaneSwitch } from './terminal-viewport.js';
 
   // Timing constants
   const WINDOW_LIST_POLL_MS = 5000;
@@ -73,6 +74,16 @@
   let endTouchScrollTimer = null;
   let kbTa = null; // set in $effect after term.open
   let ctrlArmed = $state(false);
+
+  function preparePaneSwitch() {
+    document.activeElement?.blur();
+    touchScrolling = false;
+    restoreViewportAfterPaneSwitch({
+      isMobile,
+      fullHeight: window.__fullHeight?.() || window.innerHeight,
+      root: document.documentElement,
+    });
+  }
 
   $effect(() => {
     target;
@@ -1849,11 +1860,7 @@
             onPick={(p) => {
               showPanePicker = false;
               if (`${p.session}:${p.window}.${p.pane}` !== target && onSwitchPane) {
-                document.activeElement?.blur();
-                touchScrolling = false;
-                const fh = window.__fullHeight?.() || window.innerHeight;
-                document.documentElement.style.setProperty('--app-height', fh + 'px');
-                document.documentElement.classList.remove('keyboard-open');
+                preparePaneSwitch();
                 onSwitchPane(`${p.session}:${p.window}.${p.pane}`, p.current_command);
               }
             }}
@@ -1871,11 +1878,7 @@
               onclick={(e) => {
                 e.stopPropagation();
                 if (String(w.window) !== currentWindow && onSwitchPane) {
-                  document.activeElement?.blur();
-                  touchScrolling = false;
-                  const fh = window.__fullHeight?.() || window.innerHeight;
-                  document.documentElement.style.setProperty('--app-height', fh + 'px');
-                  document.documentElement.classList.remove('keyboard-open');
+                  preparePaneSwitch();
                   onSwitchPane(`${w.session}:${w.window}.${w.pane}`, w.current_command);
                 }
               }}
@@ -1894,11 +1897,7 @@
                 windowPanes = ps;
                 const p = ps[ps.length - 1];
                 if (p && onSwitchPane) {
-                  document.activeElement?.blur();
-                  touchScrolling = false;
-                  const fh = window.__fullHeight?.() || window.innerHeight;
-                  document.documentElement.style.setProperty('--app-height', fh + 'px');
-                  document.documentElement.classList.remove('keyboard-open');
+                  preparePaneSwitch();
                   onSwitchPane(`${p.session}:${p.window}.${p.pane}`, p.current_command);
                 }
               } catch {}
