@@ -39,6 +39,9 @@ multi-listener.
   `window.resize` effect keeps it live). Narrowing below 900 px collapses to the
   single Terminal on cell 0's pane; widening restores. Mobile never mounts
   SplitView.
+- **Desktop launch size**: the Tauri window opens at `1200 × 760`, a landscape
+  size above the split threshold that still fits common laptop work areas.
+  This is only the initial size; users can freely resize the window narrower.
 - **Layout toolbar**: a thin row at the top of the terminal page (`1·2·3·4·6`),
   rendered only when `splitEligible`. Reuses the surface/pill visual language.
 - **Persistence**: `splitLayout` + `splitCells` ride in `tmux_state`. Restore is
