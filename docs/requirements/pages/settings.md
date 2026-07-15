@@ -9,7 +9,7 @@ uses the compact tab navigation as its only title row. The tab bar and choice
 controls reuse Terminal's 24px outlined chip language, including its spacing,
 rounded shape, muted idle state, and accent active state. Settings uses two tabs:
 
-- **Appearance** — theme, language, responsive layout, terminal font and spacing
+- **Appearance** — theme, language, responsive layout, desktop interface scale, terminal font and spacing
 - **Connection** — current server/addresses, optimize/share/disconnect, debug
 
 ## Components
@@ -19,7 +19,8 @@ rounded shape, muted idle state, and accent active state. Settings uses two tabs
 - Server info: hostname, machine ID, address
 - Language selector: EN / 中文 (pill buttons)
 - Theme selector: Auto / Light / Dark (pill buttons)
-- Font size control (+/−)
+- Desktop interface scale (60%–180%, persisted to localStorage `tmux_ui_zoom`; Cmd/Ctrl `+`, `-`, and `0` use the same value)
+- Terminal font size control (+/−), independent from interface scale
 - Terminal font family (editable list of common locally-installed fonts; accepts another family typed by the user; only a valid local font is applied and persisted to localStorage `tmux_font`; empty = system default)
 - Terminal line spacing (0.60–1.60, persisted to localStorage `tmux_line_height`; applies live to every normal, split, and Team terminal)
 - Line-spacing slider uses the themed surface track and accent thumb, never the browser's native white track
@@ -33,7 +34,8 @@ rounded shape, muted idle state, and accent active state. Settings uses two tabs
 - Switch theme → immediate CSS variable transition
 - Switch settings tab → remember the last tab in localStorage and restore it on the next open
 - A previously saved Terminal tab migrates to Appearance
-- Adjust font size → updates Terminal view
+- Adjust interface scale → updates the complete Tauri desktop WebView; terminal grid refits after the native zoom settles
+- Adjust terminal font size → updates Terminal view without changing the surrounding UI
 - Choose or enter a font → validate it against fonts available on the current device, then apply and remember it; invalid input leaves the active font unchanged
 - Tap disconnect → `doDisconnect()`
 
@@ -45,7 +47,7 @@ rounded shape, muted idle state, and accent active state. Settings uses two tabs
 - Connection state (disconnected/connecting/connected)
 - Address history (localStorage)
 - Locale / language preference (localStorage `tmux_locale`)
-- Font size, theme, terminal font name preference (localStorage)
+- Interface scale, terminal font size, theme, terminal font name preference (localStorage)
 - Server info (hostname, machine_id)
 - State restore on reload (page, session, view mode)
 

@@ -9,6 +9,8 @@
     connected = false,
     theme = 'system',
     fontSize = 14,
+    uiZoom = 1,
+    showUiZoom = false,
     debugMode = false,
     serverInfo = { hostname: '', machineId: '' },
     activeAddress = '',
@@ -17,6 +19,7 @@
     linkCopied = false,
     onClose = () => {},
     onTheme = () => {},
+    onUiZoom = () => {},
     onFontSize = () => {},
     onDebug = () => {},
     onOptimize = () => {},
@@ -91,6 +94,14 @@
               <button class:active={layout.mode === 'mobile'} onclick={() => layout.set('mobile')}>{t('layoutMobile')}</button>
             </div>
           </div>
+          {#if showUiZoom}
+            <div class="setting-row">
+              <div><strong>{t('uiZoom')}</strong><small>{t('uiZoomHint')}</small></div>
+              <div class="stepper">
+                <button onclick={() => onUiZoom(uiZoom - 0.1)}>−</button><span>{Math.round(uiZoom * 100)}%</span><button onclick={() => onUiZoom(uiZoom + 0.1)}>+</button>
+              </div>
+            </div>
+          {/if}
           <div class="setting-row">
             <div><strong>{t('fontFamily')}</strong><small>{t('fontFamilyHint')}</small></div>
             <div class="font-control">

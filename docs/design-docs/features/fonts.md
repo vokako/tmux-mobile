@@ -102,10 +102,11 @@ need it re-bundled, which we explicitly traded away).
 
 ## Terminal size and line spacing
 
-Settings → Terminal keeps font size and line spacing alongside the custom
-font name. Font size remains the application-level `fontSize` state so the
-stepper and desktop Cmd/Ctrl `+`, `-`, and `0` shortcuts use the same update
-path and always trigger xterm's deferred re-fit.
+Settings → Appearance keeps terminal font size and line spacing alongside the
+custom font name. Terminal font size remains the application-level `fontSize`
+state and the stepper triggers xterm's deferred re-fit. Desktop Cmd/Ctrl `+`,
+`-`, and `0` do not change this value; they control the independent native
+WebView interface scale instead.
 
 Line spacing is a per-device preference stored as `tmux_line_height` and
 clamped to `0.60`–`1.60`. xterm 6 normally rejects values below `1.00`, so the

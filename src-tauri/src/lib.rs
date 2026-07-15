@@ -144,7 +144,8 @@ pub fn run() {
             // rebuild a minimal menu that keeps the essentials (copy / paste /
             // cut / select-all / undo / redo / quit + window controls) but
             // omits Zoom. ⌘+/⌘-/⌘0 then reach only the frontend, which
-            // adjusts the terminal font size and refits xterm correctly.
+            // applies one persisted native WebView scale and refits xterm to
+            // the resulting container without changing terminal font size.
             #[cfg(target_os = "macos")]
             {
                 use tauri::menu::{Menu, Submenu, PredefinedMenuItem as P};

@@ -15,6 +15,7 @@
   import { layout } from './lib/layout.svelte.js';
   import { teamState } from './lib/team.svelte.js';
   import { applyMonoVar } from './lib/fonts.svelte.js';
+  import { normalizeUiZoom, stepUiZoom, UI_ZOOM_DEFAULT } from './lib/ui-zoom.js';
 
   // Tunable constants
   const KB_OPEN_THRESHOLD = 100; // px difference to detect keyboard open
@@ -128,19 +129,51 @@
   const chatSupported = false;
   let theme = $state(localStorage.getItem('tmux_theme') || 'system');
   let fontSize = $state(parseInt(localStorage.getItem('tmux_fontsize')) || 14);
+  const isTauriDesktop = !!window.__TAURI_INTERNALS__ && !/android/i.test(navigator.userAgent);
+  const initialUiZoom = normalizeUiZoom(localStorage.getItem('tmux_ui_zoom'));
+  let uiZoom = $state(initialUiZoom);
+  let zoomApplyVersion = 0;
+  let zoomApplyQueue = Promise.resolve();
+  const currentWebview = isTauriDesktop
+    ? import('@tauri-apps/api/webview').then(({ getCurrentWebview }) => getCurrentWebview())
+    : null;
   const FONT_MIN = 6, FONT_MAX = 40;
-  // Single source of truth for font-size changes (settings panel + the
-  // desktop cmd/ctrl +/- shortcut both route through here). Changing
-  // fontSize flows to Terminal as a prop, which re-fits xterm's cell
-  // geometry properly — unlike browser page zoom (cmd +/-), which scales
-  // the whole page without telling xterm to re-measure, leaving the cell
-  // grid misaligned (the "height looks wrong" bug).
+  // Terminal font size is independent from desktop UI zoom. Changing it
+  // flows to every Terminal instance and triggers xterm's deferred re-fit.
   function setFontSize(n) {
     const v = Math.max(FONT_MIN, Math.min(FONT_MAX, n));
     if (v === fontSize) return;
     fontSize = v;
     localStorage.setItem('tmux_fontsize', v);
   }
+  async function setUiZoom(value) {
+    if (!isTauriDesktop) return;
+    const next = normalizeUiZoom(value);
+    uiZoom = next;
+    localStorage.setItem('tmux_ui_zoom', String(next));
+    const version = ++zoomApplyVersion;
+    zoomApplyQueue = zoomApplyQueue.then(async () => {
+      try {
+        const webview = await currentWebview;
+        await webview.setZoom(next);
+        if (version !== zoomApplyVersion) return;
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          document.documentElement.style.setProperty('--app-height', window.innerHeight + 'px');
+          window.dispatchEvent(new CustomEvent('app-zoom-change', { detail: { scale: next } }));
+        }));
+      } catch (error) {
+        if (version === zoomApplyVersion) {
+          uiZoom = UI_ZOOM_DEFAULT;
+          localStorage.setItem('tmux_ui_zoom', String(UI_ZOOM_DEFAULT));
+        }
+        window.__dbg?.('zoom: failed ' + error);
+      }
+    });
+    await zoomApplyQueue;
+  }
+
+  if (isTauriDesktop) setUiZoom(initialUiZoom);
+
   let showSettings = $state(false);
   // Apply the persisted custom terminal font (if any) before first paint of
   // the terminal — rewrites --font-mono inline; a no-op for the default.
@@ -171,11 +204,9 @@
     debugEl.scrollTop = debugEl.scrollHeight;
   };
 
-  // Desktop cmd/ctrl +/- is handled below by routing to setFontSize. The old
-  // page-zoom approach (document.documentElement.style.zoom) coexisted with
-  // it — both handlers fired on every keypress, and the accumulated CSS zoom
-  // scaled the px-based --app-height past the real window, corrupting the
-  // terminal layout. Clear any zoom persisted by that old code.
+  // Remove the legacy CSS zoom. Desktop UI scaling now uses WKWebView's
+  // native pageZoom through Tauri, so viewport geometry and visual scale stay
+  // in the same coordinate system.
   if (window.__TAURI_INTERNALS__) {
     document.documentElement.style.zoom = '';
     localStorage.removeItem('tmux_zoom');
@@ -355,28 +386,21 @@
     };
   });
 
-  // Desktop: route cmd/ctrl +/-/0 to the app's font-size logic instead of
-  // letting the WebView page-zoom. Page zoom scales the DOM without telling
-  // xterm to re-measure its cell grid, so the terminal renders with a
-  // mismatched cell height/width (the "height is wrong after cmd+-" bug).
-  // Driving fontSize re-fits xterm correctly via the Terminal prop. Mobile
-  // has no such shortcut, so this only matters on desktop.
+  // Desktop Cmd/Ctrl +/-/0 scales the complete WebView. Terminal font size
+  // remains an independent setting; changing UI scale therefore does not
+  // replace xterm's renderer or disturb its hidden textarea focus.
   $effect(() => {
-    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-    if (isTouch) return;
+    if (!isTauriDesktop) return;
     const onKey = (e) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
-      // Equals/Plus (zoom in), Minus (zoom out), 0 (reset). Match by key so
-      // it works across layouts; include numpad variants.
       if (e.key === '=' || e.key === '+') {
-        e.preventDefault(); setFontSize(fontSize + 1); // reads current $state
+        e.preventDefault(); setUiZoom(stepUiZoom(uiZoom, 1));
       } else if (e.key === '-' || e.key === '_') {
-        e.preventDefault(); setFontSize(fontSize - 1);
+        e.preventDefault(); setUiZoom(stepUiZoom(uiZoom, -1));
       } else if (e.key === '0') {
-        e.preventDefault(); setFontSize(14);
+        e.preventDefault(); setUiZoom(UI_ZOOM_DEFAULT);
       }
     };
-    // Capture phase so we beat the WebView's built-in zoom handler.
     window.addEventListener('keydown', onKey, { capture: true });
     return () => window.removeEventListener('keydown', onKey, { capture: true });
   });
@@ -887,6 +911,7 @@
       {optimizing} {linkCopied}
       onClose={() => showSettings = false}
       onTheme={setTheme}
+      {uiZoom} showUiZoom={isTauriDesktop} onUiZoom={setUiZoom}
       onFontSize={setFontSize}
       onDebug={(value) => { debugMode = value; localStorage.setItem('tmux_debug', value ? '1' : ''); }}
       onOptimize={optimizeConnection}

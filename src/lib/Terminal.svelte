@@ -1427,6 +1427,18 @@
     // estimate that can be off by 1-2 rows, which is why initial paint
     // sometimes left the bottom rows blank. We run one more fit on
     // term.onRender's first fire so the first real fit uses real metrics.
+    let resizeSendTimer = 0;
+    function queuePaneResize(cols, rows) {
+      pendingCols = cols;
+      pendingRows = rows;
+      pendingResizeTs = Date.now();
+      clearTimeout(resizeSendTimer);
+      resizeSendTimer = setTimeout(() => {
+        resizeSendTimer = 0;
+        resizePane(target, pendingCols, pendingRows).catch(() => {});
+      }, 120);
+    }
+
     function doResize() {
       syncCompactLineGeometry();
       const fit = calcFit();
@@ -1438,10 +1450,7 @@
         if (selection) recomputeSelUI();
         return;
       }
-      pendingCols = fit.cols;
-      pendingRows = fit.rows;
-      pendingResizeTs = Date.now();
-      resizePane(target, fit.cols, fit.rows).catch(() => {});
+      queuePaneResize(fit.cols, fit.rows);
       term.resize(fit.cols, fit.rows);
       // Resize wipes xterm's buffer-row mapping — re-anchor our selection
       // before the rewrite so the visuals stay consistent.
@@ -1457,6 +1466,8 @@
     // Single observer for all container-size changes.
     const resizeObs = new ResizeObserver(() => doResize());
     resizeObs.observe(termEl);
+    const onAppZoom = () => doResize();
+    window.addEventListener('app-zoom-change', onAppZoom);
 
     // First real paint → real cell metrics available → refit once so the
     // initial ResizeObserver tick (which ran with estimated metrics) gets
@@ -1534,10 +1545,7 @@
       if (term) {
         const fit = calcFit();
         if (fit) {
-          pendingCols = fit.cols;
-          pendingRows = fit.rows;
-          pendingResizeTs = Date.now();
-          resizePane(target, fit.cols, fit.rows).catch(() => {});
+          queuePaneResize(fit.cols, fit.rows);
           // term.resize is a no-op if dims already match, which is fine.
           term.resize(fit.cols, fit.rows);
           if (lastContent) writeToXterm(lastContent, lastCursor);
@@ -1601,6 +1609,8 @@
 
     return () => {
       resizeObs.disconnect();
+      clearTimeout(resizeSendTimer);
+      window.removeEventListener('app-zoom-change', onAppZoom);
       try { onFirstRender.dispose(); } catch {}
       try { onSelChange.dispose(); } catch {}
       doResizeRef = null;

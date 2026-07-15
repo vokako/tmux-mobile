@@ -49,8 +49,9 @@ multi-listener.
   `ws-reconnected` event.
 
 ## Interactions
-- **fontSize**: one global prop → every cell re-fits; the cmd/ctrl +/- handler is
-  unchanged.
+- **fontSize**: one global prop → every cell re-fits when the terminal font-size
+  setting changes. Cmd/Ctrl +/- scales the complete desktop WebView instead;
+  every cell observes its resulting container size and re-fits.
 - **Chat**: split cells are always `viewMode="terminal"`; chat stays single-pane.
 - **Files**: unchanged; overlays the whole terminal page and keys off the single
   `terminalSession`.

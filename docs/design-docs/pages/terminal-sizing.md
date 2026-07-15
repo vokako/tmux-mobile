@@ -114,8 +114,7 @@ function doResize() {
   const fit = calcFit();
   if (!fit) return;
   if (fit.cols === term.cols && fit.rows === term.rows) return;
-  pendingCols = fit.cols; pendingRows = fit.rows; pendingResizeTs = Date.now();
-  resizePane(target, fit.cols, fit.rows).catch(() => {});
+  queuePaneResize(fit.cols, fit.rows);
   term.resize(fit.cols, fit.rows);
   if (lastContent) writeToXterm(lastContent, lastCursor);
 }
@@ -131,7 +130,13 @@ const onFirstRender = term.onRender(() => {
 });
 ```
 
-Cleanup disposes the observer and the onRender listener.
+`queuePaneResize` updates xterm immediately but debounces the server RPC for
+120 ms. A burst of WebView zoom/layout observations therefore sends only the
+final tmux size, preventing stale intermediate resize echoes from replacing the
+new grid. The explicit `app-zoom-change` event runs one final fit after Tauri's
+native WebView zoom promise and two layout frames have settled.
+
+Cleanup disposes the observer, listeners, and pending resize timer.
 
 `doResize` is exposed via a module-level `doResizeRef` so the
 `fontSize` $effect (which doesn't live inside the same $effect scope)
