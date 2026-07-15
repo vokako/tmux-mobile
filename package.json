@@ -10,6 +10,7 @@
     "test:colors": "node --test src/lib/ansi-colors.test.js",
     "test:line-geometry": "node --test src/lib/terminal-line-geometry.test.js",
     "test:ui-zoom": "node --test src/lib/ui-zoom.test.js",
+    "test:ws-lifecycle": "node --test src/lib/ws-lifecycle.test.js",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",

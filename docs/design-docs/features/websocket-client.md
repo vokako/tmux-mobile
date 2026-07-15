@@ -49,6 +49,19 @@ Custom WebSocket client (`ws.js`) with auto-reconnect, pending promise cleanup, 
   When nothing is pending and inbound has been silent past the threshold,
   the disconnect fires as before.
 - Auto-reconnect with exponential backoff
+- **Transport loss is reported even when no close event arrives.** Once a socket
+  has authenticated, the first RPC that finds no current OPEN socket requests
+  recovery through the same one-shot disconnect callback as `onclose`.
+  Repeated polling and keypresses cannot start duplicate reconnect loops; a
+  deliberate `disconnect()` disables recovery before closing.
+- **Socket identity owns every callback, cipher, and asynchronous send.** A
+  replaced socket's late close/message handler is ignored, AES-GCM counters
+  live on that socket instead of in module-global state, and all encrypted RPC
+  and subscription sends share one per-socket promise queue so nonce order and
+  wire-frame order cannot diverge. Encryption that finishes after replacement
+  cannot send through the new socket. This prevents
+  an old connection from clearing or corrupting a successful in-app reconnect
+  until the whole process is restarted.
 - **Foreground recovery also handles an apparently-open socket.** Mobile
   WebViews can suspend with `WebSocket.readyState === OPEN`, then resume after
   pane pushes or xterm's live-tail state has gone stale. On every transition

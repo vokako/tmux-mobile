@@ -444,8 +444,6 @@
     }
   });
 
-  let manualDisconnect = false;
-
   let reconnecting = $state(false);
   let reconnectAttempt = $state(0);   // 1-indexed when visible; 0 means not attempting
   let reconnectClass = $state('');    // LAN / Tailscale / WAN label for the current try
@@ -476,11 +474,6 @@
   }
 
   setOnDisconnect(() => {
-    if (manualDisconnect) {
-      manualDisconnect = false;
-      connected = false;
-      return;
-    }
     // Keep connected=true during reconnect to avoid UI flicker
     reconnecting = true;
     armReconnectWatchdog();
@@ -587,6 +580,8 @@
   }
 
   function onConnected() {
+    reconnecting = false;
+    clearReconnectTimers();
     connected = true;
     serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
     page = 'sessions';
@@ -617,8 +612,7 @@
 
   function doDisconnect() {
     reconnecting = false;
-    clearTimeout(reconnectTimer);
-    manualDisconnect = true;
+    clearReconnectTimers();
     disconnect();
     connected = false;
     page = 'settings';

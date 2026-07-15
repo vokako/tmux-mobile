@@ -77,7 +77,8 @@ function removeListener(map, target, cb) {
   if (set.size === 0) map.delete(target);
 }
 let onDisconnect = null;
-let sessionCipher = null; // {key, sendCounter, recvCounter}
+let recoveryEnabled = false;
+let disconnectNotified = false;
 // Idle-probe state. lastInboundAt is updated on every inbound message
 // (any frame: handshake, RPC reply, push). idleProbeTimer is the periodic
 // checker that fires a `ping` RPC if nothing has arrived for too long.
@@ -95,6 +96,13 @@ export function removePaneClosedListener(target, cb) { removeListener(paneClosed
 export function addTeamMessageListener(cb) { teamMessageListeners.add(cb); }
 export function removeTeamMessageListener(cb) { teamMessageListeners.delete(cb); }
 export function setOnDisconnect(cb) { onDisconnect = cb; }
+
+function notifyDisconnect(reason) {
+  if (!recoveryEnabled || disconnectNotified) return;
+  disconnectNotified = true;
+  window.__dbg?.(`ws: recovery requested (${reason})`);
+  onDisconnect?.();
+}
 
 // --- Crypto helpers (Web Crypto API) ---
 
@@ -192,24 +200,40 @@ async function decodeWirePayload(bytes) {
 
 // Encrypt a JSON string and return a Uint8Array suitable for ws.send().
 // The plaintext is the wire-framed payload (compressed or not).
-async function encryptMsg(text) {
-  if (!sessionCipher) return text; // plain path: caller sends it as text
+async function encryptMsg(text, cipher) {
+  if (!cipher) return text; // plain path: caller sends it as text
   const plaintext = await encodeWirePayload(text);
-  const nonce = makeNonce(sessionCipher.sendCounter++);
-  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, sessionCipher.key, plaintext);
+  const nonce = makeNonce(cipher.sendCounter++);
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, cipher.key, plaintext);
   return new Uint8Array(ct);
 }
 
 // Decrypt an inbound binary ciphertext into the original JSON string.
-async function decryptMsg(buf) {
-  if (!sessionCipher) {
+async function decryptMsg(buf, cipher) {
+  if (!cipher) {
     // Plain-token fallback: buf is already the decoded text.
     return typeof buf === 'string' ? buf : new TextDecoder().decode(buf);
   }
   const ctBytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
-  const nonce = makeNonce(sessionCipher.recvCounter++);
-  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, sessionCipher.key, ctBytes);
+  const nonce = makeNonce(cipher.recvCounter++);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, cipher.key, ctBytes);
   return decodeWirePayload(new Uint8Array(pt));
+}
+
+function sendOnSocket(socket, message) {
+  const send = socket._sendQueue.then(async () => {
+    const out = await encryptMsg(message, socket._cipher);
+    if (ws !== socket || socket.readyState !== WebSocket.OPEN) {
+      const error = new Error('connection changed before send');
+      error.code = 'DISCONNECTED';
+      throw error;
+    }
+    socket.send(out);
+  });
+  // Keep the socket queue usable after one send fails; callers still receive
+  // the original rejection through the returned promise.
+  socket._sendQueue = send.catch(() => {});
+  return send;
 }
 
 // Issue a ping RPC if the inbound channel has been silent past the
@@ -272,17 +296,25 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
     stopIdleProbe();
     rejectAllPending('superseded by new connect');
   }
-  sessionCipher = null;
+  recoveryEnabled = false;
+  disconnectNotified = false;
   rpcTimeouts = 0;
   wsUrl = url;
   window.__dbg?.(`ws: connecting to ${url} (timeout=${timeoutMs}ms)`);
 
   return new Promise((resolve, reject) => {
+    let socket;
     try {
       ws = new WebSocket(url);
+      socket = ws;
+      // Every handler below closes over this identity. A stale close or an
+      // async encrypted send from an older connection must never mutate or
+      // write through the module-level pointer after reconnect replaced it.
       // Receive ciphertext as ArrayBuffer rather than Blob so we can decrypt
       // synchronously without a Blob → arrayBuffer round-trip per message.
-      ws.binaryType = 'arraybuffer';
+      socket.binaryType = 'arraybuffer';
+      socket._sendQueue = Promise.resolve();
+      socket._cipher = null;
     } catch (e) {
       window.__dbg?.(`ws: connect error: ${e.message}`);
       reject(e);
@@ -291,11 +323,12 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
 
     const timeout = setTimeout(() => {
       window.__dbg?.('ws: connect timeout');
-      try { ws?.close(); } catch {}
+      try { socket?.close(); } catch {}
       reject(new Error('connection timeout'));
     }, timeoutMs);
 
     let authed = false;
+    let cipher = null;
     let serverNonce = null;
     let machineId = null;
     let hostname = null;
@@ -303,6 +336,9 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
     function authSuccess() {
       clearTimeout(timeout);
       authed = true;
+      socket._cipher = cipher;
+      recoveryEnabled = true;
+      disconnectNotified = false;
       window.__dbg?.(`ws: authenticated (machine=${machineId})`);
       // Liveness is the server's job at the protocol layer: it sends WS
       // PING every 15 s and tears down TCP after a 45 s deadline. That
@@ -314,10 +350,11 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
     }
 
     // Expose getters
-    ws._getMachineId = () => machineId;
-    ws._getHostname = () => hostname;
+    socket._getMachineId = () => machineId;
+    socket._getHostname = () => hostname;
 
-    ws.onmessage = async (event) => {
+    socket.onmessage = async (event) => {
+      if (ws !== socket) return;
       // Any inbound message resets the idle clock — the link is alive,
       // even if the message is just a handshake / push / heartbeat.
       lastInboundAt = Date.now();
@@ -337,33 +374,35 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
           const clientNonce = crypto.getRandomValues(new Uint8Array(16));
           const proof = await computeProof(token, serverNonce, clientNonce);
           const key = await deriveKey(token, serverNonce, clientNonce);
-          sessionCipher = { key, sendCounter: 0, recvCounter: 0 };
-          ws.send(JSON.stringify({
+          if (ws !== socket) return;
+          cipher = { key, sendCounter: 0, recvCounter: 0 };
+          socket.send(JSON.stringify({
             method: 'auth',
             params: { client_nonce: bytesToHex(clientNonce), proof: bytesToHex(proof) }
           }));
         } else {
           // Fallback: plain token auth (http:// context, no Web Crypto)
-          ws.send(JSON.stringify({ method: 'auth', params: { token } }));
+          socket.send(JSON.stringify({ method: 'auth', params: { token } }));
         }
         return;
       }
 
       // Step 2: Auth response
       if (!authed && serverNonce) {
-        if (sessionCipher) {
+        if (cipher) {
           // Encrypted auth response — must arrive as a binary frame.
           if (!isBinary) {
-            clearTimeout(timeout); sessionCipher = null;
+            clearTimeout(timeout); cipher = null;
             reject(new Error('auth failed: expected binary auth response'));
             return;
           }
           try {
-            const pt = await decryptMsg(event.data);
+            const pt = await decryptMsg(event.data, cipher);
+            if (ws !== socket) return;
             const resp = JSON.parse(pt);
             if (resp.result?.authenticated) { machineId = resp.result.machine_id; hostname = resp.result.hostname; authSuccess(); return; }
           } catch {}
-          clearTimeout(timeout); sessionCipher = null; reject(new Error('auth failed')); return;
+          clearTimeout(timeout); cipher = null; reject(new Error('auth failed')); return;
         } else {
           // Plain (token) response — text frame.
           if (data?.result?.authenticated) { machineId = data.result.machine_id; hostname = data.result.hostname; authSuccess(); return; }
@@ -374,10 +413,11 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
       // Post-auth: every encrypted message arrives as a binary frame and
       // gets decrypted + wire-decoded into JSON. Plain-token connections
       // continue to receive text frames (data is already parsed above).
-      if (authed && sessionCipher) {
+      if (authed && cipher) {
         if (!isBinary) return; // ignore unexpected text frames after encrypted auth
         let pt;
-        try { pt = await decryptMsg(event.data); } catch { return; }
+        try { pt = await decryptMsg(event.data, cipher); } catch { return; }
+        if (ws !== socket) return;
         try { data = JSON.parse(pt); } catch { return; }
       }
 
@@ -419,13 +459,16 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
       }
     };
 
-    ws.onclose = (ev) => {
+    socket.onclose = (ev) => {
       clearTimeout(timeout);
+      if (ws !== socket) {
+        window.__dbg?.('ws: ignored stale socket close');
+        return;
+      }
       stopIdleProbe();
       const wasAuthed = authed;
       authed = false;
       ws = null;
-      sessionCipher = null;
       rejectAllPending(wasAuthed ? 'connection lost' : 'connection closed during auth');
       // Surface close-frame metadata so we can tell client-initiated from
       // server-initiated from network-killed disconnects:
@@ -438,10 +481,11 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
       //   custom 4xxx codes = the server's `break`/`return` paths just
       //          drop the connection without a code, you'll see 1006.
       window.__dbg?.(`ws: closed code=${ev?.code ?? '?'} reason=${ev?.reason ? JSON.stringify(ev.reason) : '""'} clean=${!!ev?.wasClean} wasAuthed=${wasAuthed} idleSinceMs=${lastInboundAt ? Date.now() - lastInboundAt : 'n/a'}`);
-      if (wasAuthed) onDisconnect?.();
+      if (wasAuthed) notifyDisconnect('socket closed');
+      else reject(new Error('connection closed during auth'));
     };
 
-    ws.onerror = () => {
+    socket.onerror = () => {
       clearTimeout(timeout);
       window.__dbg?.('ws: error');
       if (!authed) reject(new Error('connection failed'));
@@ -450,8 +494,18 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
 }
 
 export function disconnect() {
-  ws?.close();
+  const socket = ws;
   ws = null;
+  recoveryEnabled = false;
+  disconnectNotified = false;
+  stopIdleProbe();
+  rejectAllPending('disconnected');
+  if (!socket) return;
+  socket.onclose = null;
+  socket.onerror = null;
+  socket.onmessage = null;
+  socket.onopen = null;
+  try { socket.close(); } catch {}
 }
 
 export function isConnected() {
@@ -471,20 +525,28 @@ let rpcTimeouts = 0;
 function forceDisconnect(reason) {
   if (!ws) return;
   window.__dbg?.(`ws: forcing disconnect (${reason || 'unknown'})`);
-  try { ws.onclose = null; ws.close(); } catch {}
+  const socket = ws;
   ws = null;
-  sessionCipher = null;
+  socket.onclose = null;
+  socket.onerror = null;
+  socket.onmessage = null;
+  socket.onopen = null;
+  try { socket.close(); } catch {}
   stopIdleProbe();
   rejectAllPending(reason || 'forced disconnect');
-  onDisconnect?.();
+  notifyDisconnect(reason || 'forced disconnect');
 }
 
 function call(method, params = {}, timeoutMs = RPC_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      reject(new Error('not connected'));
+      notifyDisconnect('RPC attempted without an open socket');
+      const error = new Error('not connected');
+      error.code = 'DISCONNECTED';
+      reject(error);
       return;
     }
+    const socket = ws;
     const id = ++requestId;
     const timer = setTimeout(() => {
       pending.delete(id);
@@ -519,10 +581,11 @@ function call(method, params = {}, timeoutMs = RPC_TIMEOUT_MS) {
       reject: (e) => { clearTimeout(timer); reject(e); },
     });
     const msg = JSON.stringify({ id, method, params });
-    encryptMsg(msg).then(out => ws?.send(out)).catch((e) => {
+    sendOnSocket(socket, msg).catch((error) => {
       pending.delete(id);
       clearTimeout(timer);
-      reject(e);
+      notifyDisconnect('RPC send lost its socket');
+      reject(error);
     });
   });
 }
@@ -611,12 +674,14 @@ const subRefcount = new Map(); // target -> count
 function sendSubscribe(target) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   const msg = JSON.stringify({ method: 'subscribe', params: { target } });
-  encryptMsg(msg).then(out => ws?.send(out)).catch(() => {});
+  const socket = ws;
+  sendOnSocket(socket, msg).catch(() => {});
 }
 function sendUnsubscribe(target) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   const msg = JSON.stringify({ method: 'unsubscribe', params: { target } });
-  encryptMsg(msg).then(out => ws?.send(out)).catch(() => {});
+  const socket = ws;
+  sendOnSocket(socket, msg).catch(() => {});
 }
 
 export function subscribe(target) {
