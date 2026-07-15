@@ -728,6 +728,7 @@
       await connect(best, token);
       serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
       resubscribeAll();
+      syncAgentNotifications();
       window.dispatchEvent(new Event('ws-reconnected'));
     } catch {
       // Switch failed — trigger normal reconnect which will try all addresses
@@ -839,6 +840,7 @@
       connected = true;
       serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
       probeTeam();
+      syncAgentNotifications();
       try {
         const s = JSON.parse(localStorage.getItem('tmux_state') || '{}');
         if (s.terminalTarget) {
