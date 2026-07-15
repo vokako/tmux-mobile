@@ -85,18 +85,13 @@ from visuals carrying meaning that isn't there.
   currently-active one. Single tap switches. AI-filtered because that's the
   workflow that actually benefits from a 1-tap surface — plain zsh/node/vim
   sessions are easily reached via search / the full list.
-- The same chip strip is embedded in the **Terminal page's window switcher**
-  when expanded: a horizontal tab bar pinned to the top of the Terminal
-  view, holding both the current session's windows and up to 5 other AI
-  sessions in one scroll strip, separated by a vertical rule. Collapsed
-  state falls back to the existing small floating AI-icon button in the
-  top-right (minimal footprint when not in use). One scroll switcher for
-  everything — current-session windows and other-session AI chips share
-  the same click handler (`onSwitchPane`), so the user doesn't need to
-  learn two patterns. Horizontal layout was chosen over the previous
-  vertical floating panel because the vertical form took half the viewport
-  height when expanded; the horizontal bar is ~40 px tall and doesn't
-  eat terminal real estate the way the vertical one did.
+- The Terminal page does not duplicate the MRU strip. Its expanded switcher
+  starts with a text-only active `AgentChip` for the current session; tapping
+  that chip opens the all-session pane picker. The scrollable remainder holds
+  only windows from the current session. This keeps cross-session navigation
+  in one discoverable control and leaves the Terminal strip focused on window
+  switching. The collapsed state remains the small floating current-window
+  chip in the top-right.
 
 ### Sort order (unchanged from previous)
 1. Currently-active session (pinned top)
@@ -241,8 +236,8 @@ just because dropdowns use that convention; match the axis of motion.
 After the first horizontal-bar draft, chip styling was duplicated between
 Sessions.svelte and Terminal.svelte with slightly different sizing rules.
 Inevitable drift: one page's chip looked noticeably bigger than the
-other, the cross-session chip had a different font than the current-
-session chip, etc. Extracted `src/lib/AgentChip.svelte` — one component
+other, and Terminal's session-name tag had a different font from the
+Sessions-page chip. Extracted `src/lib/AgentChip.svelte` — one component
 that holds all chip visuals (size, padding, border, font, agent icon,
 optional chevron, optional label). Consumer pages pick a variant and
 pass props; they cannot accidentally diverge on spacing.

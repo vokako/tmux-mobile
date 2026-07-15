@@ -16,12 +16,12 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
     expand from). Positioned absolute so it does not steal a row from
     the terminal viewport.
   - **Expanded**: horizontal tab bar pinned to the top of the Terminal
-    view. Holds chips for (1) every window in the current session,
-    (2) a `+ new window` button, (3) a vertical separator, (4) up to 5
-    most-recently-opened AI sessions (Kiro/Claude/OpenClaw) as chips.
-    Scrolls horizontally. A chevron-right button on the right collapses
-    the bar back into the single chip (toward where the collapsed chip
-    will live).
+    view. The first chip is the current session name, rendered with the same
+    text-only active style as the Sessions page chip strip; tapping it opens
+    the all-session pane picker. The remaining scrollable chips contain only
+    windows from the current session plus the `+ new window` button. A
+    chevron-right button on the right collapses the bar back into the single
+    chip (toward where the collapsed chip will live).
   - All chips in both states are the same `AgentChip` component — same
     height, same padding, same font. The switcher has one size in its
     expanded state and a smaller footprint in its collapsed state, not
@@ -50,9 +50,6 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
 - `capture_pane(target, lines)` — initial content load
 - `pane_command(target)` — get running command for status bar
 - `list_panes(session)` — populate window switcher (current session)
-- `list_sessions` — populate cross-session AI chips (expanded switcher only)
-- `list_panes(other_session)` — per AI-candidate session, to find the primary
-  pane for chip targets (expanded switcher only)
 - `resize_pane(target, cols, rows)` — resize pane to match client viewport (auto-restores on disconnect)
 
 ## State Management

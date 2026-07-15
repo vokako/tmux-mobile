@@ -1,5 +1,5 @@
 <script>
-  import { subscribe, unsubscribe, addPaneOutputListener, removePaneOutputListener, addPaneClosedListener, removePaneClosedListener, sendCommand, sendKeys, listPanes, listSessionsWithPanes, capturePane, resizePane, newWindow } from './ws.js';
+  import { subscribe, unsubscribe, addPaneOutputListener, removePaneOutputListener, addPaneClosedListener, removePaneClosedListener, sendCommand, sendKeys, listPanes, capturePane, resizePane, newWindow } from './ws.js';
   import { Terminal } from '@xterm/xterm';
   import { WebLinksAddon } from '@xterm/addon-web-links';
   import ChatView from './ChatView.svelte';
@@ -8,7 +8,7 @@
   import PanePicker from './PanePicker.svelte';
   import { t } from './i18n.svelte.js';
   import { detectParser } from './parsers.js';
-  import { detectAgent, paneIsAgent, paneAgent, sessionHasAgent, AGENTS } from './agents.js';
+  import { detectAgent, paneIsAgent, paneAgent, AGENTS } from './agents.js';
   import { copyText } from './clipboard.js';
   import { fonts } from './fonts.svelte.js';
   import { terminalPrefs } from './terminal-prefs.svelte.js';
@@ -204,47 +204,6 @@
   });
   let currentWindow = $derived(target.split(':')[1]?.split('.')[0] || '');
 
-  // Other AI sessions — shown as chips in the expanded window-switcher so
-  // users can jump between parallel coding-agent sessions (Kiro/Claude/…)
-  // without backing out to the Sessions page. Loaded only when the switcher
-  // is expanded to avoid an unnecessary RPC tick on every Terminal view.
-  let otherAgentSessions = $state([]); // [{ name, pane, agent }]
-  const OTHER_AGENT_MAX = 5;
-
-  async function loadOtherAgentSessions() {
-    try {
-      // Single round-trip: sessions + all panes in one RPC instead of
-      // listSessions + N × listPanes (which on a slow link stacked N+1
-      // requests behind every poll tick).
-      const { sessions, panes } = await listSessionsWithPanes();
-      const cur = session;
-      const panesBySession = new Map();
-      for (const p of panes) {
-        const arr = panesBySession.get(p.session);
-        if (arr) arr.push(p); else panesBySession.set(p.session, [p]);
-      }
-      // Sort MRU-first (matches Sessions page order), filter current, keep
-      // sessions that have last_opened so we don't surface never-used ones.
-      const candidates = sessions
-        .filter(s => s.name !== cur && s.last_opened)
-        .sort((a, b) => (b.last_opened || 0) - (a.last_opened || 0));
-      const results = [];
-      for (const s of candidates) {
-        if (results.length >= OTHER_AGENT_MAX) break;
-        const sPanes = panesBySession.get(s.name) || [];
-        // Prefer a pane currently running the agent; fall back to first pane.
-        const p = sPanes.find(paneIsAgent) || (sessionHasAgent(sPanes) ? sPanes[0] : null);
-        if (p) {
-          const agent = paneAgent(p);
-          if (agent) results.push({ name: s.name, pane: p, agent });
-        }
-      }
-      otherAgentSessions = results;
-    } catch {
-      otherAgentSessions = [];
-    }
-  }
-
   // Group panes by window. Representative pane preference:
   //   agent pane > active pane > first listed.
   // The old "first listed" pick made a window whose layout is
@@ -271,14 +230,12 @@
   // Whether the window switcher is worth showing at all. A lone plain shell
   // with no agent anywhere has nothing to switch to — showing an (almost)
   // empty bar just steals vertical space. Show it only when there's a real
-  // choice: multiple windows, the current window is an agent, or other agent
-  // sessions exist (the latter is only known while expanded, since we don't
-  // poll cross-session data when collapsed).
+  // choice: multiple windows or the current window is an agent.
   // Embedded (split cell) always shows the bar — it's the cell's header.
   // Standalone keeps the "only when there's something to switch to" rule.
   let showSwitcher = $derived(
     !chromeless &&
-    (embedded || windows.length > 1 || !!currentWinAgent || otherAgentSessions.length > 0)
+    (embedded || windows.length > 1 || !!currentWinAgent)
   );
 
   $effect(() => {
@@ -297,24 +254,12 @@
       try {
         const p = await listPanes(session);
         windowPanes = p;
-        // Cross-session AI chips: only when the switcher is expanded AND not
-        // a split cell (in split mode every cell already shows the bar; we
-        // don't want N cells each fanning out a listSessionsWithPanes tick).
-        if (showWindowCmd && !embedded) await loadOtherAgentSessions();
       } catch {}
       polling = false;
     };
     load();
     const id = setInterval(load, WINDOW_LIST_POLL_MS);
     return () => clearInterval(id);
-  });
-
-  // When the user expands the switcher, fetch immediately (don't wait for
-  // the next poll tick).
-  $effect(() => {
-    if (showWindowCmd && session && viewMode === 'terminal') {
-      loadOtherAgentSessions();
-    }
   });
 
   // Read xterm's actual rendered cell dimensions (falls back to font-size-based estimate
@@ -1973,18 +1918,19 @@
   {#if showSwitcher}
     {#if showWindowCmd || embedded}
       <!--
-        Expanded switcher: a top-of-page horizontal tab bar that holds
-        BOTH the current session's windows and up-to-5 other AI sessions
-        as chips. One concept: "everywhere I can switch to".
+        Expanded switcher: a top-of-page horizontal tab bar for the current
+        session's windows. The session chip opens the all-session picker.
       -->
       <div class="win-bar">
         <!-- Session name as a fixed tag at the far left of the switcher row,
              so it's always visible without stealing a whole row. The window
              chips scroll independently to its right. -->
-        <button class="win-session" title={session} onclick={(e) => { e.stopPropagation(); showPanePicker = !showPanePicker; }}>
-          <span class="win-session-name">{session}</span>
-          <Icon name="chevron-down" size={9} />
-        </button>
+        <AgentChip
+          label={session}
+          variant="active"
+          title={session}
+          onclick={(e) => { e.stopPropagation(); showPanePicker = !showPanePicker; }}
+        />
         {#if showPanePicker}
           <PanePicker
             currentTarget={target}
@@ -2047,27 +1993,6 @@
             }}
           />
 
-          {#if otherAgentSessions.length > 0}
-            <span class="win-sep" aria-hidden="true"></span>
-            {#each otherAgentSessions as o}
-              <AgentChip
-                agent={o.agent}
-                label={o.name}
-                title={`${o.name}  (${o.agent.tag})`}
-                onclick={(e) => {
-                  e.stopPropagation();
-                  if (onSwitchPane) {
-                    document.activeElement?.blur();
-                    touchScrolling = false;
-                    const fh = window.__fullHeight?.() || window.innerHeight;
-                    document.documentElement.style.setProperty('--app-height', fh + 'px');
-                    document.documentElement.classList.remove('keyboard-open');
-                    onSwitchPane(`${o.pane.session}:${o.pane.window}.${o.pane.pane}`, o.pane.current_command);
-                  }
-                }}
-              />
-            {/each}
-          {/if}
         </div>
 
         {#if !embedded && splitEligible && onSetLayout}
@@ -2258,8 +2183,7 @@
   }
 
   /* Expanded: horizontal tab bar pinned to the top of the Terminal view.
-     Holds current-session windows AND cross-session AI chips in one scroll
-     strip. Chip visuals live in AgentChip. */
+     Holds current-session windows; chip visuals live in AgentChip. */
   .win-bar {
     display: flex;
     align-items: center;
@@ -2271,29 +2195,6 @@
     background: var(--surface);
     flex-shrink: 0;
     position: relative; /* anchor for the PanePicker popover */
-  }
-  .win-session {
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    max-width: 160px;
-    padding: 3px 7px;
-    border: none;
-    border-radius: var(--ui-radius-pill);
-    background: var(--accent-bg);
-    color: var(--accent);
-    font-family: var(--font-mono);
-    font-size: var(--ui-font-control);
-    font-weight: 600;
-    white-space: nowrap;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .win-session:active { background: var(--accent); color: var(--bg); }
-  .win-session-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
   .win-bar-scroll {
     flex: 1;
@@ -2338,14 +2239,6 @@
   }
   .win-split-opt.active { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
   .win-split-opt:active { border-color: var(--accent); }
-
-  .win-sep {
-    flex-shrink: 0;
-    width: 1px;
-    height: 14px;
-    background: var(--border2);
-    margin: 0 2px;
-  }
 
   .input-status {
     display: flex;
