@@ -56,6 +56,11 @@ export function paneAgent(p) {
   return detectAgent(paneText(p));
 }
 
+export function paneChipLabel(p, fallback = '') {
+  if (paneAgent(p)) return '';
+  return p?.current_command || p?.window_name || fallback;
+}
+
 // Convenience: "is this pane running an AI CLI?"
 export function paneIsAgent(p) {
   return paneAgent(p) !== null;

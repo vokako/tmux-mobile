@@ -24,6 +24,7 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
     windows from the current session plus the `+ new window` button. A
     chevron-right button on the right collapses the bar back into the single
     chip (toward where the collapsed chip will live).
+  - Recognized coding-agent panes render as icon-only chips in both the current-session bar and the all-session pane picker; process names such as `kiro-cli-chat` and `node` remain available in the desktop hover title but are not shown beside the logo.
   - All chips in both states are the same `AgentChip` component — same
     height, same padding, same font. The switcher has one size in its
     expanded state and a smaller footprint in its collapsed state, not

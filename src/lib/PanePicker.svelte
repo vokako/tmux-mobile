@@ -8,7 +8,7 @@
   import Icon from './Icon.svelte';
   import { t } from './i18n.svelte.js';
   import { listSessionsWithPanes, newWindow } from './ws.js';
-  import { paneAgent } from './agents.js';
+  import { paneAgent, paneChipLabel } from './agents.js';
   import { notificationForWindow, sessionHasNotification } from './agent-notifications.svelte.js';
   // Team sessions (tmm-team-<room>) are grouped apart from regular sessions and
   // labelled by their workspace basename. Shared helpers, gated on the server
@@ -110,15 +110,14 @@
     {#each s.panes as p}
       {@const isCur = currentTarget === `${p.session}:${p.window}.${p.pane}`}
       {@const notice = notificationForWindow(p.session, p.window)}
+      {@const pAgent = paneAgent(p)}
       <AgentChip
         attention={!!notice}
         urgent={notice && notice.kind !== 'completed'}
-        agent={paneAgent(p)}
-        label={team
-          ? (p.window_name || p.current_command || `${p.window}.${p.pane}`)
-          : (p.current_command || p.window_name || `${p.window}.${p.pane}`)}
+        agent={pAgent}
+        label={paneChipLabel(p, `${p.window}.${p.pane}`)}
         variant={isCur ? 'active' : 'default'}
-        title={`${p.session}:${p.window}.${p.pane}`}
+        title={`${p.session}:${p.window}.${p.pane} · ${p.current_command || p.window_name || ''}`}
         onclick={(e) => { e.stopPropagation(); onPick(p); }}
       />
     {/each}
