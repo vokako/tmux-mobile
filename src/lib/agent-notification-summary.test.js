@@ -4,9 +4,9 @@ import assert from 'node:assert/strict';
 globalThis.$state = value => value;
 globalThis.window = { addEventListener() {} };
 
-const { agentNotifications, sessionHasNotification } = await import('./agent-notifications.svelte.js');
+const { agentNotifications, otherSessionHasNotification, sessionHasNotification } = await import('./agent-notifications.svelte.js');
 
-test('session summary excludes the active window', () => {
+test('session and cross-session summaries stay distinct', () => {
   agentNotifications.unread = [
     { session: 'work', window: 2 },
     { session: 'other', window: 1 },
@@ -14,7 +14,10 @@ test('session summary excludes the active window', () => {
 
   assert.equal(sessionHasNotification('work'), true);
   assert.equal(sessionHasNotification('work', '2'), false);
+  assert.equal(otherSessionHasNotification('work'), true);
+  assert.equal(otherSessionHasNotification('other'), true);
 
-  agentNotifications.unread.push({ session: 'work', window: 3 });
+  agentNotifications.unread = [{ session: 'work', window: 3 }];
   assert.equal(sessionHasNotification('work', 2), true);
+  assert.equal(otherSessionHasNotification('work'), false);
 });

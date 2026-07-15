@@ -5,7 +5,7 @@
   import ChatView from './ChatView.svelte';
   import Icon from './Icon.svelte';
   import AgentChip from './AgentChip.svelte';
-  import { notificationForWindow, sessionHasNotification } from './agent-notifications.svelte.js';
+  import { notificationForWindow, otherSessionHasNotification } from './agent-notifications.svelte.js';
   import PanePicker from './PanePicker.svelte';
   import { t } from './i18n.svelte.js';
   import { detectParser } from './parsers.js';
@@ -1841,7 +1841,7 @@
              so it's always visible without stealing a whole row. The window
              chips scroll independently to its right. -->
         <AgentChip
-          attention={sessionHasNotification(session, currentWindow)}
+          attention={otherSessionHasNotification(session)}
           label={session}
           variant="active"
           title={session}

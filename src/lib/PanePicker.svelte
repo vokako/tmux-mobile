@@ -32,7 +32,6 @@
 
   let currentMatch = $derived(/^(.+):(\d+)\./u.exec(currentTarget));
   let currentSession = $derived(currentMatch?.[1] || '');
-  let currentWindow = $derived(currentMatch?.[2] ?? null);
 
   async function load() {
     const { sessions: list, panes } = await listSessionsWithPanes();
@@ -105,7 +104,7 @@
   {@const team = isTeamSession(s.name)}
   <div class="picker-session">
     <span class="picker-session-name" title={team ? s.name : null}>{team ? teamLabel(s.name) : s.name}</span>
-    {#if sessionHasNotification(s.name, s.name === currentSession ? currentWindow : null)}<span class="picker-attention" aria-label="Agent needs attention"></span>{/if}
+    {#if s.name !== currentSession && sessionHasNotification(s.name)}<span class="picker-attention" aria-label="Agent needs attention"></span>{/if}
   </div>
   <div class="picker-panes">
     {#each s.panes as p}

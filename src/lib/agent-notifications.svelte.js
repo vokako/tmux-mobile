@@ -42,6 +42,10 @@ export function sessionHasNotification(session, excludedWindow = null) {
   ));
 }
 
+export function otherSessionHasNotification(session) {
+  return agentNotifications.unread.some(item => item.session !== session);
+}
+
 export async function markWindowRead(session, window) {
   if (!session || window == null || !notificationForWindow(session, window)) return;
   try { applySnapshot(await agentNotificationsMarkRead(session, Number(window))); } catch {}
