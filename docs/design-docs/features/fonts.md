@@ -79,11 +79,13 @@ every system family).
 ## Personal preference: the custom font setting
 
 Settings → "Font name" (`fonts.svelte.js`, localStorage `tmux_font`).
-The editable control suggests common families that are actually installed on
-the current device and also accepts another family typed by the user. Before a
-new value is applied, canvas text metrics verify that the browser can resolve
-it without falling through to generic fonts. Invalid input is shown inline and
-does not replace the active or persisted preference. A valid family name is
+The editable control suggests common families and also accepts another family
+typed by the user. Before a new value is applied, a temporary `FontFace` with
+`local("<family>")` asks the platform font registry to resolve it. Canvas width
+comparison remains only as a compatibility fallback: it falsely rejects an
+installed monospace family such as Maple Mono NF CN when its advances equal the
+generic fallback. Invalid input is shown inline and does not replace the active
+or persisted preference. A valid family name is
 prepended (quoted) to the stack and applied two ways:
 
 - rewrites the `--font-mono` CSS var inline on `<html>` (all mono UI), and

@@ -15,6 +15,7 @@
   import { adaptAnsiColors } from './ansi-colors.js';
   import { compactLineGeometry } from './terminal-line-geometry.js';
   import { restoreViewportAfterPaneSwitch } from './terminal-viewport.js';
+  import { cycleItem } from './shortcuts.js';
 
   // Timing constants
   const WINDOW_LIST_POLL_MS = 5000;
@@ -231,6 +232,21 @@
       if (pScore > curScore) map.set(p.window, p);
     }
     return [...map.values()];
+  });
+
+  $effect(() => {
+    if (!active || chromeless) return;
+    const onWindowShortcut = (event) => {
+      const items = windows;
+      if (!onSwitchPane || items.length < 2) return;
+      const current = items.find(item => String(item.window) === currentWindow) || items[0];
+      const next = cycleItem(items, current, event.detail.direction);
+      if (!next || String(next.window) === currentWindow) return;
+      preparePaneSwitch();
+      onSwitchPane(`${next.session}:${next.window}.${next.pane}`, next.current_command);
+    };
+    window.addEventListener('terminal-window-shortcut', onWindowShortcut);
+    return () => window.removeEventListener('terminal-window-shortcut', onWindowShortcut);
   });
 
   // Agent (if any) running in the currently-shown window.

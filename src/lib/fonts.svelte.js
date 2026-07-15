@@ -1,3 +1,5 @@
+import { localFontSource, normalizeFontFamily } from './font-validation.js';
+
 // Terminal monospace font: system stack by default, user-overridable.
 //
 // Default = each platform's native mono (SF Mono / Cascadia / Roboto Mono …)
@@ -46,22 +48,33 @@ function quote(name) {
   return clean ? `'${clean}'` : '';
 }
 
-function isAvailable(name) {
-  const family = (name || '').trim().replace(/['"]/g, '');
+async function isAvailable(name) {
+  const family = normalizeFontFamily(name);
   if (!family) return true;
 
+  // Width comparison gives false negatives for monospace families: an installed
+  // font can have the exact same advances as the fallback. Ask the browser to
+  // load the local face by name instead; this checks the font registry itself.
+  if (typeof FontFace === 'function') {
+    try {
+      await new FontFace('__tmux_font_probe__', localFontSource(family)).load();
+      return true;
+    } catch {}
+  }
+
+  // Compatibility fallback for WebViews without FontFace. Multiple proportional
+  // fallbacks make an equal-width coincidence less likely, but this is no longer
+  // the primary validation path on macOS or modern Android.
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
   if (!context) return false;
-
   const sample = 'mmmmmmmmmmlliWW00@#中文';
-  for (const fallback of ['monospace', 'serif', 'sans-serif']) {
+  return ['serif', 'sans-serif'].some(fallback => {
     context.font = `72px ${fallback}`;
     const fallbackWidth = context.measureText(sample).width;
     context.font = `72px ${quote(family)}, ${fallback}`;
-    if (context.measureText(sample).width !== fallbackWidth) return true;
-  }
-  return false;
+    return context.measureText(sample).width !== fallbackWidth;
+  });
 }
 
 export const fonts = {
@@ -70,11 +83,11 @@ export const fonts = {
     return custom;
   },
   get common() {
-    return COMMON_FAMILIES.filter(isAvailable);
+    return COMMON_FAMILIES;
   },
-  set(name) {
-    const next = (name || '').trim().replace(/['"]/g, '');
-    if (!isAvailable(next)) return false;
+  async set(name) {
+    const next = normalizeFontFamily(name);
+    if (!await isAvailable(next)) return false;
     custom = next;
     try {
       if (custom) localStorage.setItem(KEY, custom);

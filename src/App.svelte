@@ -16,6 +16,8 @@
   import { teamState } from './lib/team.svelte.js';
   import { applyMonoVar } from './lib/fonts.svelte.js';
   import { normalizeUiZoom, stepUiZoom, UI_ZOOM_DEFAULT } from './lib/ui-zoom.js';
+  import { cycleItem, shortcutFromEvent } from './lib/shortcuts.js';
+  import { isShortcutInputTarget, shortcuts } from './lib/shortcuts.svelte.js';
 
   // Tunable constants
   const KB_OPEN_THRESHOLD = 100; // px difference to detect keyboard open
@@ -882,11 +884,11 @@
   // Swipe left/right to switch tabs with slide animation
   const tabs = $derived(() => {
     const t = ['sessions'];
-    if (teamAvailable) t.push('team');
     if (terminalTarget) {
       t.push('terminal');
       if (chatSupported) t.push('chat');
     }
+    if (teamAvailable) t.push('team');
     t.push('files');
     return t;
   });
@@ -914,6 +916,42 @@
       });
     }
   }
+
+  $effect(() => {
+    if (!isTauriDesktop) return;
+    const onShortcut = (event) => {
+      if (isShortcutInputTarget(event.target)) return;
+      const action = shortcuts.action(shortcutFromEvent(event));
+      if (!action) return;
+
+      const consume = () => {
+        event.preventDefault();
+        event.stopPropagation();
+      };
+      if (action === 'previousPage' || action === 'nextPage') {
+        const available = tabs();
+        const current = page === 'terminal' && viewMode === 'chat' ? 'chat' : page;
+        if (!available.includes(current)) return;
+        const step = action === 'previousPage' ? -1 : 1;
+        consume();
+        switchTab(cycleItem(available, current, step));
+      } else if (action === 'openTerminal') {
+        if (!terminalTarget) return;
+        consume();
+        switchTab('terminal');
+      } else if (action === 'openFiles') {
+        consume();
+        switchTab('files');
+      } else if ((action === 'previousWindow' || action === 'nextWindow') && page === 'terminal' && viewMode === 'terminal') {
+        consume();
+        window.dispatchEvent(new CustomEvent('terminal-window-shortcut', {
+          detail: { direction: action === 'previousWindow' ? -1 : 1 },
+        }));
+      }
+    };
+    window.addEventListener('keydown', onShortcut, { capture: true });
+    return () => window.removeEventListener('keydown', onShortcut, { capture: true });
+  });
 </script>
 
 <main>
@@ -962,7 +1000,7 @@
       {optimizing} {linkCopied}
       onClose={() => showSettings = false}
       onTheme={setTheme}
-      {uiZoom} showUiZoom={isTauriDesktop} onUiZoom={setUiZoom}
+      {uiZoom} showUiZoom={isTauriDesktop} showShortcuts={isTauriDesktop} onUiZoom={setUiZoom}
       onFontSize={setFontSize}
       onDebug={(value) => { debugMode = value; localStorage.setItem('tmux_debug', value ? '1' : ''); }}
       onOptimize={optimizeConnection}

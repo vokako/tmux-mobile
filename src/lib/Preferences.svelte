@@ -4,6 +4,8 @@
   import { layout } from './layout.svelte.js';
   import { fonts } from './fonts.svelte.js';
   import { terminalPrefs } from './terminal-prefs.svelte.js';
+  import { SHORTCUT_DEFAULTS, shortcutFromEvent, shortcutLabel } from './shortcuts.js';
+  import { shortcuts } from './shortcuts.svelte.js';
 
   let {
     connected = false,
@@ -11,6 +13,7 @@
     fontSize = 14,
     uiZoom = 1,
     showUiZoom = false,
+    showShortcuts = false,
     debugMode = false,
     serverInfo = { hostname: '', machineId: '' },
     activeAddress = '',
@@ -31,20 +34,40 @@
 
   const TAB_KEY = 'tmux_settings_tab';
   const storedTab = localStorage.getItem(TAB_KEY);
-  const initialTab = storedTab === 'connection' ? 'connection' : 'appearance';
+  const validStoredTab = storedTab === 'connection' || storedTab === 'shortcuts';
+  const initialTab = validStoredTab ? storedTab : 'appearance';
   let tab = $state(initialTab);
   if (storedTab && storedTab !== initialTab) localStorage.setItem(TAB_KEY, initialTab);
-  const tabs = [
+  const tabs = $derived([
     { id: 'appearance', label: () => t('settingsAppearance'), icon: 'palette' },
+    ...(showShortcuts ? [{ id: 'shortcuts', label: () => t('settingsShortcuts'), icon: 'command' }] : []),
     { id: 'connection', label: () => t('settingsConnection'), icon: 'link' },
+  ]);
+  const shortcutActions = [
+    ['previousPage', 'shortcutPreviousPage'],
+    ['nextPage', 'shortcutNextPage'],
+    ['previousWindow', 'shortcutPreviousWindow'],
+    ['nextWindow', 'shortcutNextWindow'],
+    ['openTerminal', 'shortcutOpenTerminal'],
+    ['openFiles', 'shortcutOpenFiles'],
   ];
   let fontInput = $state(fonts.custom);
   let fontInvalid = $state(false);
+  let recordingShortcut = $state('');
+  let shortcutError = $state('');
 
-  function saveFont() {
+  $effect(() => {
+    if (!showShortcuts && tab === 'shortcuts') selectTab('appearance');
+  });
+
+  async function saveFont() {
     fontInput = fontInput.trim();
-    fontInvalid = !fonts.set(fontInput);
+    fontInvalid = !await fonts.set(fontInput);
     return !fontInvalid;
+  }
+
+  async function handleFontKeydown(event) {
+    if (event.key === 'Enter' && await saveFont()) event.currentTarget.blur();
   }
 
   function setLineHeight(value) {
@@ -53,7 +76,29 @@
 
   function selectTab(value) {
     tab = value;
+    recordingShortcut = '';
+    shortcutError = '';
     localStorage.setItem(TAB_KEY, value);
+  }
+
+  function recordShortcut(action, event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === 'Escape') { recordingShortcut = ''; shortcutError = ''; return; }
+    if (event.key === 'Backspace' || event.key === 'Delete') {
+      shortcuts.set(action, '');
+      recordingShortcut = '';
+      shortcutError = '';
+      return;
+    }
+    const value = shortcutFromEvent(event);
+    if (!value) return;
+    if (!shortcuts.set(action, value)) {
+      shortcutError = t('shortcutConflict');
+      return;
+    }
+    recordingShortcut = '';
+    shortcutError = '';
   }
 </script>
 
@@ -112,7 +157,7 @@
                 placeholder={t('fontFamilySystem')} bind:value={fontInput} aria-invalid={fontInvalid}
               autocapitalize="off" autocomplete="off" spellcheck="false"
                 oninput={() => fontInvalid = false} onchange={saveFont}
-                onkeydown={(e) => { if (e.key === 'Enter' && saveFont()) e.currentTarget.blur(); }} />
+                onkeydown={handleFontKeydown} />
               <datalist id="font-families">
                 {#each fonts.common as family}<option value={family}></option>{/each}
               </datalist>
@@ -134,6 +179,23 @@
             </div>
           </div>
         </div>
+      {:else if tab === 'shortcuts'}
+        <div class="setting-card shortcut-card">
+          {#each shortcutActions as [action, label]}
+            <div class="setting-row">
+              <div><strong>{t(label)}</strong><small>{t(action.includes('Window') ? 'shortcutTerminalScope' : 'shortcutGlobalScope')}</small></div>
+              <button
+                class="shortcut-key"
+                class:recording={recordingShortcut === action}
+                data-shortcut-recorder
+                onclick={() => { recordingShortcut = action; shortcutError = ''; }}
+                onkeydown={(event) => recordShortcut(action, event)}
+              >{recordingShortcut === action ? t('shortcutPressKeys') : shortcutLabel(shortcuts.get(action))}</button>
+            </div>
+          {/each}
+        </div>
+        {#if shortcutError}<div class="shortcut-error">{shortcutError}</div>{/if}
+        <button class="shortcut-reset" onclick={() => { shortcuts.reset(); shortcutError = ''; }}>{t('shortcutReset')}</button>
       {:else}
         <div class="setting-card">
           {#if connected}
@@ -189,6 +251,8 @@
   .range-wrap input::-moz-range-track { height:3px;border-radius:999px;background:var(--surface2);border:1px solid var(--border2); }
   .range-wrap input::-moz-range-thumb { width:10px;height:10px;border:2px solid var(--bg);border-radius:50%;background:var(--accent);box-shadow:0 0 0 1px var(--accent); }
   .range-wrap span{width:31px;font:10px var(--font-mono);color:var(--text2)}.reset{width:24px;padding:0}
+  .shortcut-key{min-width:74px;height:var(--ui-control-height);padding:3px 10px;border:1px solid var(--border2);border-radius:var(--ui-radius-pill);background:var(--input-bg);color:var(--text);font:600 11px var(--font-mono);cursor:pointer}.shortcut-key.recording{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}
+  .shortcut-error{max-width:720px;margin:7px auto 0;color:var(--danger);font-size:10px;text-align:center}.shortcut-reset{display:block;margin:8px auto;padding:5px 10px;border:1px solid var(--border2);border-radius:var(--ui-radius-pill);background:transparent;color:var(--text3);font-size:11px;cursor:pointer}
   .connection-title{padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px}.connection-title>div:first-child{display:flex;flex-direction:column;gap:3px}.conn-actions{display:flex;gap:4px}.conn-actions button{display:flex;align-items:center;gap:4px}
   .address-list{padding:0 12px 10px;display:flex;flex-direction:column;gap:3px}.address-list button{padding:7px 9px;border:1px solid var(--border2);border-radius:7px;background:var(--input-bg);color:var(--text3);font:11px var(--font-mono);text-align:left;word-break:break-all;cursor:pointer}.address-list button.active{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}
   .disconnect{display:block;width:min(720px,100%);margin:8px auto;padding:7px;border:1px solid color-mix(in srgb,var(--danger) 55%,transparent);border-radius:7px;background:none;color:var(--danger);cursor:pointer;font-size:11px;font-weight:600}

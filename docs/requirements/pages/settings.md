@@ -7,9 +7,10 @@ The gear button opens Settings as a full-window workspace below the app nav,
 not a small popover. The workspace avoids redundant page/section headings and
 uses the compact tab navigation as its only title row. The tab bar and choice
 controls reuse Terminal's 24px outlined chip language, including its spacing,
-rounded shape, muted idle state, and accent active state. Settings uses two tabs:
+rounded shape, muted idle state, and accent active state. Desktop Settings uses three tabs (mobile hides Shortcuts):
 
 - **Appearance** — theme, language, responsive layout, desktop interface scale, terminal font and spacing
+- **Shortcuts** — configurable desktop navigation and Terminal window bindings
 - **Connection** — current server/addresses, optimize/share/disconnect, debug
 
 ## Components
@@ -25,6 +26,8 @@ rounded shape, muted idle state, and accent active state. Settings uses two tabs
 - Terminal line spacing (0.60–1.60, persisted to localStorage `tmux_line_height`; applies live to every normal, split, and Team terminal)
 - Line-spacing slider uses the themed surface track and accent thumb, never the browser's native white track
 - Debug toggle lives in the top chip bar and shows its enabled state there; the floating log panel is draggable from its header on touch and desktop pointer input, clamps to the visible viewport, and remembers its last position
+- Desktop shortcuts default to Cmd+U / Cmd+I for previous/next page, Option+U / Option+I for previous/next Terminal window, Cmd+T for Terminal, and Cmd+F for Files
+- Shortcut bindings can be recorded, cleared with Delete/Backspace, reset to defaults, or disabled; duplicate bindings are rejected
 - Disconnect button
 
 ## Interactions
@@ -36,7 +39,7 @@ rounded shape, muted idle state, and accent active state. Settings uses two tabs
 - A previously saved Terminal tab migrates to Appearance
 - Adjust interface scale → updates the complete Tauri desktop WebView; terminal grid refits after the native zoom settles
 - Adjust terminal font size → updates Terminal view without changing the surrounding UI
-- Choose or enter a font → validate it against fonts available on the current device, then apply and remember it; invalid input leaves the active font unchanged
+- Choose or enter a font → validate it against the device font registry, then apply and remember it; invalid input leaves the active font unchanged
 - Tap disconnect → `doDisconnect()`
 
 ## API Calls
