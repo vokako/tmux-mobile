@@ -10,7 +10,7 @@
   // without the team bus these fall back to ordinary sessions (consistently
   // with PanePicker and the Team tab).
   import { isTeamSession, teamRoomOf, teamLabel } from './team.svelte.js';
-  import { agentNotifications, sessionHasNotification } from './agent-notifications.svelte.js';
+  import { agentNotifications, notificationForWindow, sessionHasNotification } from './agent-notifications.svelte.js';
 
   let { openTerminal, openTeam = () => {}, activeTarget = '', visible = false } = $props();
 
@@ -476,6 +476,7 @@
           {#each visiblePanes as p}
             {@const pAi = paneAgent(p)?.tag || ''}
             {@const isPaneActive = activeTarget === `${p.session}:${p.window}.${p.pane}`}
+            {@const paneNotice = notificationForWindow(p.session, p.window)}
             <div class="pane-row" class:active-pane={isPaneActive}>
               <button class="pane" onclick={() => openPane(s, p)}>
                 <span class="pane-id">{p.window}.{p.pane}</span>
@@ -483,6 +484,7 @@
                 {#if p.current_path}
                   <span class="pane-cwd" use:scrollEndIntoView>{p.current_path}</span>
                 {/if}
+                {#if paneNotice}<span class="attention-dot" aria-label="Agent needs attention"></span>{/if}
                 {#if pAi}
                   <img class="pane-ai-icon" class:claude={pAi === 'Claude'} src={aiIcon(pAi)} alt={pAi} />
                 {/if}

@@ -9,6 +9,7 @@
   import { t } from './i18n.svelte.js';
   import { listSessionsWithPanes, newWindow } from './ws.js';
   import { paneAgent } from './agents.js';
+  import { notificationForWindow, sessionHasNotification } from './agent-notifications.svelte.js';
   // Team sessions (tmm-team-<room>) are grouped apart from regular sessions and
   // labelled by their workspace basename. Shared helpers, gated on the server
   // actually having the team bus — consistent with the Sessions page.
@@ -100,11 +101,15 @@
   {@const team = isTeamSession(s.name)}
   <div class="picker-session">
     <span class="picker-session-name" title={team ? s.name : null}>{team ? teamLabel(s.name) : s.name}</span>
+    {#if sessionHasNotification(s.name)}<span class="picker-attention" aria-label="Agent needs attention"></span>{/if}
   </div>
   <div class="picker-panes">
     {#each s.panes as p}
       {@const isCur = currentTarget === `${p.session}:${p.window}.${p.pane}`}
+      {@const notice = notificationForWindow(p.session, p.window)}
       <AgentChip
+        attention={!!notice}
+        urgent={notice && notice.kind !== 'completed'}
         agent={paneAgent(p)}
         label={team
           ? (p.window_name || p.current_command || `${p.window}.${p.pane}`)
@@ -160,6 +165,13 @@
     padding: 6px 6px 2px;
   }
   .picker-session-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .picker-attention {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--danger);
+    flex-shrink: 0;
+  }
   .picker-add {
     flex-shrink: 0;
     width: 24px; height: 24px; padding: 0;

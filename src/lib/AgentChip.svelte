@@ -134,8 +134,8 @@
 
   .attention {
     position: absolute;
-    top: 1px;
-    right: 1px;
+    top: -2px;
+    right: -2px;
     width: 5px;
     height: 5px;
     border-radius: 50%;

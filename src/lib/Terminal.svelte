@@ -5,7 +5,7 @@
   import ChatView from './ChatView.svelte';
   import Icon from './Icon.svelte';
   import AgentChip from './AgentChip.svelte';
-  import { notificationForWindow } from './agent-notifications.svelte.js';
+  import { notificationForWindow, sessionHasNotification } from './agent-notifications.svelte.js';
   import PanePicker from './PanePicker.svelte';
   import { t } from './i18n.svelte.js';
   import { detectParser } from './parsers.js';
@@ -1841,6 +1841,7 @@
              so it's always visible without stealing a whole row. The window
              chips scroll independently to its right. -->
         <AgentChip
+          attention={sessionHasNotification(session)}
           label={session}
           variant="active"
           title={session}
@@ -1941,6 +1942,8 @@
       -->
       <div class="win-collapsed-anchor">
         <AgentChip
+          attention={!!notificationForWindow(cur?.session, cur?.window)}
+          urgent={notificationForWindow(cur?.session, cur?.window)?.kind !== 'completed'}
           agent={curAgent}
           label={curAgent ? '' : (cur?.current_command || cur?.window_name || '?')}
           chevron="left"
