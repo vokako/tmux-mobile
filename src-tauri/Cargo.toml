@@ -7,6 +7,10 @@ version = "0.6.0"
 edition = "2021"
 license = "MIT"
 default-run = "tmux-mobile"
+# Both binaries are declared explicitly below. Disabling auto-discovery keeps
+# macOS AppleDouble files such as `src/bin/._server.rs` from becoming phantom
+# bundle targets on filesystems that generate resource-fork sidecars.
+autobins = false
 
 [lib]
 name = "tmux_mobile"

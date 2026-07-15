@@ -1,3 +1,5 @@
+# macOS AppleDouble resource-fork sidecars (common on network filesystems)
+._*
 /src-tauri/target
 /target
 /dist
