@@ -646,31 +646,31 @@
     // Block xterm from processing keys when input box is open
     term.attachCustomKeyEventHandler(() => true);
 
-    // Desktop: forward every unclaimed Ctrl / Option combination straight
-    // to tmux. WKWebView's hidden textarea otherwise consumes macOS editing
-    // bindings and Option dead keys before xterm can emit onData. App-level
-    // shortcuts run first on window capture and stop propagation, so only
-    // combinations the app did not claim reach this terminal-local handler.
-    let onDesktopKeydown = null;
+    // Forward every unclaimed hardware Ctrl / Option combination straight to
+    // tmux. Browser/WKWebView textareas otherwise consume editing bindings
+    // such as Ctrl+X / Ctrl+F and Option dead keys before xterm emits onData.
+    // Touch capability is not a reliable hardware-keyboard test: desktop
+    // Chromium and WKWebView may expose touch APIs, and phones can have a
+    // physical keyboard. App shortcuts run first in window capture.
+    const onHardwareKeydown = (event) => {
+      const data = encodeTerminalShortcut(event);
+      if (!data) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      window.__dbg?.(`kb(hardware): passthrough ${event.code || event.key} → ${JSON.stringify(data)}`);
+      enqueueKeys(data, true);
+    };
+    termEl.addEventListener('keydown', onHardwareKeydown, { capture: true });
+
+    let focusTerm = null;
     if (!isMobile) {
-      onDesktopKeydown = (event) => {
-        const data = encodeTerminalShortcut(event);
-        if (!data) return;
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        window.__dbg?.(`kb(desktop): passthrough ${event.code || event.key} → ${JSON.stringify(data)}`);
-        enqueueKeys(data, true);
-      };
-      // Capture phase on the wrapper so it fires before the textarea default.
-      termEl.addEventListener('keydown', onDesktopKeydown, { capture: true });
       // Desktop has no on-screen keyboard / toggle, so focus the xterm sink
       // on click so ordinary typing (and our handler) works. Auto-focus on
       // mount ONLY for the active terminal — otherwise multiple split cells
       // race for the single document focus and input lands nowhere.
-      const focusTerm = () => { try { term.focus(); } catch {} };
+      focusTerm = () => { try { term.focus(); } catch {} };
       termEl.addEventListener('mousedown', focusTerm);
       if (active) requestAnimationFrame(focusTerm);
-      onDesktopKeydown._focusTerm = focusTerm; // kept for cleanup reference
     }
 
     let lastContent = '';
@@ -1637,10 +1637,8 @@
       termEl.removeEventListener('touchmove', onTouchMove);
       termEl.removeEventListener('touchend', onTouchEnd);
       termEl.removeEventListener('touchcancel', onTouchCancel);
-      if (onDesktopKeydown) {
-        termEl.removeEventListener('keydown', onDesktopKeydown, { capture: true });
-        if (onDesktopKeydown._focusTerm) termEl.removeEventListener('mousedown', onDesktopKeydown._focusTerm);
-      }
+      termEl.removeEventListener('keydown', onHardwareKeydown, { capture: true });
+      if (focusTerm) termEl.removeEventListener('mousedown', focusTerm);
       // Server's resize_tracker auto-restores this window via `resize-window -A` on WS disconnect
       unsubscribe(target);
       removePaneOutputListener(target, onPaneOutputCb);

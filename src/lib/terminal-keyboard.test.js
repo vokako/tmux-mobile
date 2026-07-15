@@ -8,6 +8,8 @@ function key(key, modifiers = {}) {
 
 test('encodes Ctrl letters and punctuation as C0 bytes', () => {
   assert.equal(encodeTerminalShortcut(key('c', { ctrlKey: true })), '\x03');
+  assert.equal(encodeTerminalShortcut(key('f', { ctrlKey: true })), '\x06');
+  assert.equal(encodeTerminalShortcut(key('x', { ctrlKey: true })), '\x18');
   assert.equal(encodeTerminalShortcut(key('[', { ctrlKey: true })), '\x1b');
   assert.equal(encodeTerminalShortcut(key('\\', { ctrlKey: true })), '\x1c');
 });
