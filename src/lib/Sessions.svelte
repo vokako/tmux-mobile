@@ -10,6 +10,7 @@
   // without the team bus these fall back to ordinary sessions (consistently
   // with PanePicker and the Team tab).
   import { isTeamSession, teamRoomOf, teamLabel } from './team.svelte.js';
+  import { agentNotifications, sessionHasNotification } from './agent-notifications.svelte.js';
 
   let { openTerminal, openTeam = () => {}, activeTarget = '', visible = false } = $props();
 
