@@ -34,6 +34,12 @@ Never combine `allow-scripts` + `allow-same-origin` — negates sandbox entirely
 ### Path Traversal
 All filenames from remote servers sanitized with `sanitize_filename()` (Rust `Path::file_name()`) before joining to download directory.
 
+### Git command arguments
+The Git RPC keeps an explicit subcommand allowlist, then passes every argument
+directly through Rust `Command::args` without a shell. Shell metacharacters are
+therefore ordinary argument data (the log view uses `|` in `--format`); only
+NUL is rejected because operating-system argv cannot represent it.
+
 ### Markdown Image MIME
 Infer MIME from image file extension, not from parent markdown file's mime_hint.
 

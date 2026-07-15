@@ -80,3 +80,4 @@ These are client-side guards only; two *different* clients can still race
 - Android reattaches and health-checks the file opener after app resume; a failed download-complete Open remains retryable
 - Filenames sanitized server-side (`sanitize_filename()`) to prevent path traversal
 - Error states (downloading, uploading) always reset in catch blocks
+- Git arguments are passed directly as argv, not through a shell; log format separators such as `|` are valid argument data

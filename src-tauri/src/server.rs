@@ -403,6 +403,10 @@ fn require_str<'a>(params: &'a serde_json::Value, key: &str) -> Result<&'a str, 
         .ok_or_else(|| format!("missing required param: {}", key))
 }
 
+fn valid_process_arg(arg: &str) -> bool {
+    !arg.contains('\0')
+}
+
 fn handle_request(req: &Request, token: &str) -> Response {
     let id = req.id;
     let p = &req.params;
@@ -750,9 +754,11 @@ fn handle_request(req: &Request, token: &str) -> Response {
             if !ALLOWED.contains(&subcmd) {
                 return Response::err(id, ERR_INVALID_PARAMS, format!("git subcommand not allowed: {}", subcmd));
             }
-            // Reject args containing shell metacharacters
+            // Arguments go directly to Command::args; no shell parses them.
+            // Characters such as `|` are data (git log format separators),
+            // not operators. Only NUL is impossible to represent in argv.
             for arg in &args {
-                if arg.contains(|c: char| matches!(c, ';' | '&' | '$' | '`' | '|' | '>' | '<' | '\n' | '\r')) {
+                if !valid_process_arg(arg) {
                     return Response::err(id, ERR_INVALID_PARAMS, "invalid characters in argument".into());
                 }
             }
@@ -1949,6 +1955,13 @@ mod tests {
     }
 
     #[test]
+    fn git_arguments_allow_literal_log_separators() {
+        assert!(valid_process_arg("--format=%h|%s|%ar|%an"));
+        assert!(valid_process_arg("subject; $HOME & <literal>"));
+        assert!(!valid_process_arg("bad\0argument"));
+    }
+
+    #[test]
     fn team_request_without_bus_is_method_not_found() {
         let r = handle_team_request(&req("team_roster", serde_json::json!({})), None);
         assert_eq!(r.error.as_ref().map(|e| e.code), Some(ERR_METHOD_NOT_FOUND));
@@ -2241,4 +2254,3 @@ mod tests {
         assert!(plaintext.len() < json.len(), "wire payload should shrink");
     }
 }
-
