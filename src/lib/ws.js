@@ -64,6 +64,7 @@ const paneClosedListeners = new Map(); // target -> Set<cb(target)>
 // Team group-chat message push listeners (Team tab). Unkeyed — one stream
 // for the whole room — so a plain Set, not a per-target map.
 const teamMessageListeners = new Set(); // Set<cb(message)>
+const agentNotificationListeners = new Set(); // Set<cb(snapshot)>
 
 function addListener(map, target, cb) {
   let set = map.get(target);
@@ -95,6 +96,8 @@ export function addPaneClosedListener(target, cb) { addListener(paneClosedListen
 export function removePaneClosedListener(target, cb) { removeListener(paneClosedListeners, target, cb); }
 export function addTeamMessageListener(cb) { teamMessageListeners.add(cb); }
 export function removeTeamMessageListener(cb) { teamMessageListeners.delete(cb); }
+export function addAgentNotificationListener(cb) { agentNotificationListeners.add(cb); }
+export function removeAgentNotificationListener(cb) { agentNotificationListeners.delete(cb); }
 export function setOnDisconnect(cb) { onDisconnect = cb; }
 
 function notifyDisconnect(reason) {
@@ -446,6 +449,11 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
         return;
       }
 
+      if (data.method === 'agent_notification') {
+        for (const cb of agentNotificationListeners) cb(data.params || { unread: [] });
+        return;
+      }
+
       if (data.id != null && pending.has(data.id)) {
         const { resolve: res, reject: rej } = pending.get(data.id);
         pending.delete(data.id);
@@ -648,6 +656,12 @@ export const gitCmd = (subcmd, args = [], cwd) => call('git', { subcmd, args, cw
 // team-agnostic (they list teams); the rest take the active room.
 export const teamStatus = () => call('team_status');
 export const teamTeams = () => call('team_teams');
+export const agentNotificationsList = () => call('agent_notifications_list');
+export const agentNotificationsMarkRead = (session, window) => call('agent_notifications_mark_read', { session, window });
+export const agentHooksStatus = () => call('agent_hooks_status');
+export const agentHooksInstall = () => call('agent_hooks_install');
+export const agentHooksRemove = () => call('agent_hooks_remove');
+
 export const teamHistory = (room, limit = 100) => call('team_history', { room, limit });
 export const teamRoster = (room) => call('team_roster', { room });
 export const teamEmployees = (room) => call('team_employees', { room });

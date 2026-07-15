@@ -1,0 +1,45 @@
+import {
+  addAgentNotificationListener,
+  agentNotificationsList,
+  agentNotificationsMarkRead,
+  removeAgentNotificationListener,
+} from './ws.js';
+
+export const agentNotifications = $state({ unread: [] });
+
+function applySnapshot(snapshot) {
+  agentNotifications.unread = Array.isArray(snapshot?.unread) ? snapshot.unread : [];
+}
+
+function onNotification(snapshot) {
+  applySnapshot(snapshot);
+}
+
+let listening = false;
+
+export async function syncAgentNotifications() {
+  if (!listening) {
+    addAgentNotificationListener(onNotification);
+    listening = true;
+  }
+  try { applySnapshot(await agentNotificationsList()); } catch {}
+}
+
+export function stopAgentNotifications() {
+  if (listening) removeAgentNotificationListener(onNotification);
+  listening = false;
+  agentNotifications.unread = [];
+}
+
+export function notificationForWindow(session, window) {
+  return agentNotifications.unread.find(item => item.session === session && Number(item.window) === Number(window)) || null;
+}
+
+export function sessionHasNotification(session) {
+  return agentNotifications.unread.some(item => item.session === session);
+}
+
+export async function markWindowRead(session, window) {
+  if (!session || window == null || !notificationForWindow(session, window)) return;
+  try { applySnapshot(await agentNotificationsMarkRead(session, Number(window))); } catch {}
+}

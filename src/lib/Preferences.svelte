@@ -6,6 +6,7 @@
   import { terminalPrefs } from './terminal-prefs.svelte.js';
   import { SHORTCUT_DEFAULTS, shortcutFromEvent, shortcutLabel } from './shortcuts.js';
   import { shortcuts } from './shortcuts.svelte.js';
+  import { agentHooksInstall, agentHooksRemove, agentHooksStatus } from './ws.js';
 
   let {
     connected = false,
@@ -55,10 +56,30 @@
   let fontInvalid = $state(false);
   let recordingShortcut = $state('');
   let shortcutError = $state('');
+  let hookStatus = $state(null);
+  let hookBusy = $state(false);
+  let hookError = $state('');
+  let hookLoaded = false;
 
   $effect(() => {
     if (!showShortcuts && tab === 'shortcuts') selectTab('appearance');
+    if (connected && tab === 'connection' && !hookLoaded) loadHookStatus();
   });
+
+  async function loadHookStatus() {
+    hookLoaded = true;
+    hookError = '';
+    try { hookStatus = await agentHooksStatus(); }
+    catch (error) { hookError = error.message; }
+  }
+
+  async function updateHooks(install) {
+    hookBusy = true;
+    hookError = '';
+    try { hookStatus = install ? await agentHooksInstall() : await agentHooksRemove(); }
+    catch (error) { hookError = error.message; }
+    finally { hookBusy = false; }
+  }
 
   async function saveFont() {
     fontInput = fontInput.trim();
@@ -211,6 +232,29 @@
                 <button class:active={address === activeAddress} onclick={() => address !== activeAddress && onAddress(address)}>{address}</button>
               {/each}
             </div>
+            <div class="setting-row hook-row">
+              <div>
+                <strong>{t('agentNotifications')}</strong>
+                <small>{t('agentNotificationsHint')}</small>
+              </div>
+              <div class="hook-control">
+                {#if hookStatus}
+                  <span class="hook-backends">
+                    <span class:on={hookStatus.claude?.installed}>Claude</span>
+                    <span class:on={hookStatus.codex?.installed}>Codex</span>
+                    <span class:on={hookStatus.kiro?.installed}>Kiro</span>
+                  </span>
+                  {#if hookStatus.claude?.installed && hookStatus.codex?.installed && hookStatus.kiro?.installed}
+                    <button class="hook-action" disabled={hookBusy} onclick={() => updateHooks(false)}>{t('agentHooksRemove')}</button>
+                  {:else}
+                    <button class="hook-action primary" disabled={hookBusy} onclick={() => updateHooks(true)}>{hookBusy ? '…' : t('agentHooksInstall')}</button>
+                  {/if}
+                {:else}
+                  <button class="hook-action" disabled={hookBusy} onclick={loadHookStatus}>{hookBusy ? '…' : t('agentHooksCheck')}</button>
+                {/if}
+              </div>
+            </div>
+            {#if hookError}<div class="hook-error">{hookError}</div>{/if}
           {:else}
             <div class="empty-connection"><Icon name="link" size={20} /><span>{t('notConnected')}</span><button onclick={onConnectionSetup}>{t('connectionSetup')}</button></div>
           {/if}
@@ -255,8 +299,9 @@
   .shortcut-error{max-width:720px;margin:7px auto 0;color:var(--danger);font-size:10px;text-align:center}.shortcut-reset{display:block;margin:8px auto;padding:5px 10px;border:1px solid var(--border2);border-radius:var(--ui-radius-pill);background:transparent;color:var(--text3);font-size:11px;cursor:pointer}
   .connection-title{padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px}.connection-title>div:first-child{display:flex;flex-direction:column;gap:3px}.conn-actions{display:flex;gap:4px}.conn-actions button{display:flex;align-items:center;gap:4px}
   .address-list{padding:0 12px 10px;display:flex;flex-direction:column;gap:3px}.address-list button{padding:7px 9px;border:1px solid var(--border2);border-radius:7px;background:var(--input-bg);color:var(--text3);font:11px var(--font-mono);text-align:left;word-break:break-all;cursor:pointer}.address-list button.active{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}
+  .hook-row{border-top:1px solid var(--border2)}.hook-control{display:flex;align-items:center;gap:7px;flex-shrink:0}.hook-backends{display:flex;gap:3px}.hook-backends span{padding:2px 5px;border-radius:var(--ui-radius-pill);background:var(--surface2);color:var(--text3);font-size:9px}.hook-backends span.on{background:var(--accent-bg);color:var(--accent)}.hook-action{height:var(--ui-control-height);padding:3px 8px;border:1px solid var(--border2);border-radius:var(--ui-radius-pill);background:transparent;color:var(--text3);font-size:var(--ui-font-control);cursor:pointer}.hook-action.primary{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}.hook-action:disabled{opacity:.5}.hook-error{padding:0 12px 8px;color:var(--danger);font-size:10px}
   .disconnect{display:block;width:min(720px,100%);margin:8px auto;padding:7px;border:1px solid color-mix(in srgb,var(--danger) 55%,transparent);border-radius:7px;background:none;color:var(--danger);cursor:pointer;font-size:11px;font-weight:600}
   .empty-connection{padding:28px 12px;display:flex;flex-direction:column;align-items:center;gap:9px;color:var(--text3);font-size:11px}.empty-connection button{padding:6px 10px;border:1px solid var(--accent);border-radius:6px;background:var(--accent-bg);color:var(--accent);cursor:pointer;font-size:11px}
-  @media(max-width:640px){.preferences{inset:calc(49px + var(--sat)) 0 0}.pref-content{padding:9px 8px}.setting-row{min-height:50px;padding:8px 10px;gap:10px}.text-input{width:min(220px,48vw)}.range-wrap{min-width:min(250px,52vw)}.connection-title{align-items:flex-start;flex-direction:column}.conn-actions{width:100%}.conn-actions button{flex:1;justify-content:center}}
+  @media(max-width:640px){.preferences{inset:calc(49px + var(--sat)) 0 0}.pref-content{padding:9px 8px}.setting-row{min-height:50px;padding:8px 10px;gap:10px}.text-input{width:min(220px,48vw)}.range-wrap{min-width:min(250px,52vw)}.connection-title{align-items:flex-start;flex-direction:column}.conn-actions{width:100%}.conn-actions button{flex:1;justify-content:center}.hook-row{align-items:flex-start;flex-direction:column}.hook-control{width:100%;justify-content:space-between}}
   @media(max-width:420px){.setting-row{align-items:flex-start;flex-direction:column;gap:7px}.setting-row>div:last-child,.text-input,.range-wrap{width:100%;min-width:0}.font-control{align-items:flex-start}.segmented button{flex:1}}
 </style>

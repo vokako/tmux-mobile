@@ -366,7 +366,11 @@
           {#each mruChips as s}
             {@const sum = sessionSummary(s)}
             {@const isActive = activeTarget.startsWith(s.name + ':')}
+            {@const chipNotice = sessionHasNotification(s.name)}
+            {@const chipUrgent = agentNotifications.unread.some(item => item.session === s.name && item.kind !== 'completed')}
             <AgentChip
+              attention={chipNotice}
+              urgent={chipUrgent}
               agent={AGENT_BY_TAG.get(sum.ai)}
               agents={sum.agents}
               label={s.name}
@@ -404,6 +408,8 @@
     {@const team = isTeamSession(s.name)}
     {@const sum = sessionSummary(s)}
     {@const isActive = activeTarget.startsWith(s.name + ':')}
+    {@const hasNotice = sessionHasNotification(s.name)}
+    {@const urgentNotice = agentNotifications.unread.some(item => item.session === s.name && item.kind !== 'completed')}
     {@const isExpanded = !team && ((isSearching && s.windows > 1) || expanded[s.name])}
     {@const ps = panes[s.name] || []}
     {@const visiblePanes = isSearching ? ps.filter(p => paneMatches(p, query)) : ps}
@@ -416,6 +422,7 @@
         onkeydown={(e) => e.key === 'Enter' && activateSession(s)}
       >
         <span class="dot" class:attached={s.attached}></span>
+        {#if hasNotice}<span class="attention-dot" class:urgent={urgentNotice} aria-label="Agent needs attention"></span>{/if}
         <span class="name" class:name-grow={team} title={team ? s.name : null}>{team ? teamLabel(s.name) : s.name}</span>
         <!-- Team rows show only the title. Regular rows keep a short cmd/AI
              marker, but NOT the cwd path — in the cramped row it was squeezed
@@ -795,6 +802,14 @@
     background: var(--accent);
     box-shadow: 0 0 6px var(--accent-glow);
   }
+  .attention-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+  }
+  .attention-dot.urgent { background: var(--danger); }
 
   .name {
     font-weight: 600;

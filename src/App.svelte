@@ -18,6 +18,7 @@
   import { normalizeUiZoom, stepUiZoom, UI_ZOOM_DEFAULT } from './lib/ui-zoom.js';
   import { cycleItem, shortcutFromEvent } from './lib/shortcuts.js';
   import { isShortcutInputTarget, shortcuts } from './lib/shortcuts.svelte.js';
+  import { markWindowRead, stopAgentNotifications, syncAgentNotifications } from './lib/agent-notifications.svelte.js';
 
   // Tunable constants
   const KB_OPEN_THRESHOLD = 100; // px difference to detect keyboard open
@@ -568,6 +569,7 @@
     if (useAddr !== primaryAddr) { localStorage.setItem('tmux_address', useAddr); activeAddress = useAddr; }
     resubscribeAll();
     probeTeam();
+    syncAgentNotifications();
     // Tell Terminal to reset stale resize state + re-fit against the new server.
     window.dispatchEvent(new Event('ws-reconnected'));
   }
@@ -646,6 +648,12 @@
     page = 'sessions';
     localStorage.removeItem('tmux_disconnected');
     probeTeam();
+    syncAgentNotifications();
+  }
+
+  function readTarget(target) {
+    const match = /^(.+):(\d+)\./.exec(target || '');
+    if (match) markWindowRead(match[1], Number(match[2]));
   }
 
   function openTerminal(session, target, command = '') {
@@ -655,6 +663,7 @@
     workContext = 'terminal';
     page = 'terminal';
     viewMode = 'terminal';
+    readTarget(target);
     navPush();
   }
 
@@ -673,6 +682,7 @@
     reconnecting = false;
     clearReconnectTimers();
     disconnect();
+    stopAgentNotifications();
     connected = false;
     page = 'settings';
     localStorage.removeItem('tmux_state');
@@ -1078,7 +1088,7 @@
           {:else}
             <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {viewMode} {fontSize}
               splitEligible={splitEligible && viewMode === 'terminal'} {splitActive} {splitLayout} onSetLayout={setLayout}
-              onSwitchPane={(t, cmd) => { terminalTarget = t; terminalSession = t.split(':')[0]; terminalCommand = cmd || ''; }} onPaneExit={() => { terminalTarget = ''; page = 'sessions'; }} />
+              onSwitchPane={(t, cmd) => { terminalTarget = t; terminalSession = t.split(':')[0]; terminalCommand = cmd || ''; readTarget(t); }} onPaneExit={() => { terminalTarget = ''; page = 'sessions'; }} />
           {/if}
         </div>
       </div>

@@ -26,6 +26,8 @@
     iconName = '',        // Lucide icon name, used by 'add' and collapsed chip
     chevron = '',         // '' | 'up' | 'down' — small indicator appended at end
     title = '',           // HTML title attribute
+    attention = false,    // unread agent lifecycle notification
+    urgent = false,       // permission/input/failure requires stronger color
     onclick = () => {},
   } = $props();
 </script>
@@ -38,6 +40,7 @@
   onclick={(e) => onclick(e)}
 >
   <span class="chip-content">
+    {#if attention}<span class="attention" class:urgent aria-hidden="true"></span>{/if}
     {#if agents.length}
       <span class="chip-agents">
         {#each agents as item (item.agent.tag)}
@@ -81,6 +84,7 @@
     box-sizing: border-box;
     -webkit-tap-highlight-color: transparent;
     transition: border-color var(--ui-motion-fast), background var(--ui-motion-fast), color var(--ui-motion-fast);
+    position: relative;
   }
   .chip:active {
     background: var(--accent-bg);
@@ -127,6 +131,19 @@
     filter: brightness(0.9);
   }
   .chip-agents { display: inline-flex; align-items: center; gap: 3px; overflow: visible; }
+
+  .attention {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 1.5px var(--bg);
+    z-index: 1;
+  }
+  .attention.urgent { background: var(--danger); }
 
   .chip-label {
     overflow: hidden;

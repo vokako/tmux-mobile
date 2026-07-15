@@ -26,6 +26,7 @@ rounded shape, muted idle state, and accent active state. Desktop Settings uses 
 - Terminal line spacing (0.60–1.60, persisted to localStorage `tmux_line_height`; applies live to every normal, split, and Team terminal)
 - Line-spacing slider uses the themed surface track and accent thumb, never the browser's native white track
 - Debug toggle lives in the top chip bar and shows its enabled state there; the floating log panel is draggable from its header on touch and desktop pointer input, clamps to the visible viewport, and remembers its last position
+- Connection includes Agent notification hook status and additive install/remove actions for Claude Code, Codex, and Kiro `kiro_default`; Codex may require one-time trust from `/hooks`
 - Desktop shortcuts default to Cmd+U / Cmd+I for previous/next page, Option+U / Option+I for previous/next Terminal window, Cmd+T for Terminal, and Cmd+F for Files
 - Shortcut bindings can be recorded, cleared with Delete/Backspace, reset to defaults, or disabled; duplicate bindings are rejected
 - Disconnect button
@@ -40,6 +41,7 @@ rounded shape, muted idle state, and accent active state. Desktop Settings uses 
 - Adjust interface scale → updates the complete Tauri desktop WebView; terminal grid refits after the native zoom settles
 - Adjust terminal font size → updates Terminal view without changing the surrounding UI
 - Choose or enter a font → validate it against the device font registry, then apply and remember it; invalid input leaves the active font unchanged
+- Install Agent notifications → preserve unrelated agent settings/hooks and add the tmux-mobile lifecycle helper
 - Tap disconnect → `doDisconnect()`
 
 ## API Calls

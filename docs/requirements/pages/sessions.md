@@ -8,6 +8,8 @@ glance without requiring interaction.
 
 ## Components
 
+- Session rows and MRU chips show a compact attention dot when any window has an unread coding-agent lifecycle notification; permission/input/failure uses the danger color, completion uses the accent color.
+
 ### Top row
 - **Single row combining MRU chips and search**. Chips fill the left, a
   round search icon button sits on the right. Tapping search swaps the

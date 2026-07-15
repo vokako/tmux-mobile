@@ -5,6 +5,7 @@
   import ChatView from './ChatView.svelte';
   import Icon from './Icon.svelte';
   import AgentChip from './AgentChip.svelte';
+  import { notificationForWindow } from './agent-notifications.svelte.js';
   import PanePicker from './PanePicker.svelte';
   import { t } from './i18n.svelte.js';
   import { detectParser } from './parsers.js';
@@ -1861,7 +1862,10 @@
         <div class="win-bar-scroll">
           {#each windows as w}
             {@const wAgent = paneAgent(w)}
+            {@const notice = notificationForWindow(w.session, w.window)}
             <AgentChip
+              attention={!!notice}
+              urgent={notice && notice.kind !== 'completed'}
               agent={wAgent}
               label={wAgent ? '' : (w.current_command || w.window_name)}
               variant={String(w.window) === currentWindow ? 'active' : 'default'}
