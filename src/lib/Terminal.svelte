@@ -16,6 +16,7 @@
   import { compactLineGeometry } from './terminal-line-geometry.js';
   import { restoreViewportAfterPaneSwitch } from './terminal-viewport.js';
   import { cycleItem } from './shortcuts.js';
+  import { encodeTerminalShortcut } from './terminal-keyboard.js';
 
   // Timing constants
   const WINDOW_LIST_POLL_MS = 5000;
@@ -644,46 +645,20 @@
     // Block xterm from processing keys when input box is open
     term.attachCustomKeyEventHandler(() => true);
 
-    // Desktop: forward Ctrl-key combos straight to tmux.
-    //
-    // Problem: xterm's input sink is a real <textarea>. On macOS WKWebView
-    // (and to a lesser extent other browsers) the OS-level emacs text
-    // bindings — Ctrl-A/E/K/U/W/D … — are consumed by the text field
-    // BEFORE the keydown reaches JS, so xterm never emits onData and
-    // Ctrl-C / Ctrl-U / Ctrl-D silently do nothing in the remote shell.
-    //
-    // Fix: a capture-phase keydown listener converts Ctrl+<letter> (and a
-    // few friends) into the corresponding C0 control byte and sends it via
-    // the same queue as normal input, then preventDefault +
-    // stopImmediatePropagation so neither the OS binding nor xterm's own
-    // handler also acts on it. Capture phase is essential: it runs before
-    // the textarea's default action.
+    // Desktop: forward every unclaimed Ctrl / Option combination straight
+    // to tmux. WKWebView's hidden textarea otherwise consumes macOS editing
+    // bindings and Option dead keys before xterm can emit onData. App-level
+    // shortcuts run first on window capture and stop propagation, so only
+    // combinations the app did not claim reach this terminal-local handler.
     let onDesktopKeydown = null;
     if (!isMobile) {
-      onDesktopKeydown = (e) => {
-        // Only the Ctrl modifier (allow Shift for Ctrl-Shift-letter → same
-        // control byte). Cmd/Alt combos are left to the browser (copy/paste,
-        // word nav) — tmux doesn't use them.
-        if (!e.ctrlKey || e.metaKey || e.altKey) return;
-        let byte = null;
-        const k = e.key;
-        if (k.length === 1) {
-          const code = k.toLowerCase().charCodeAt(0);
-          if (code >= 97 && code <= 122) {
-            byte = String.fromCharCode(code - 96); // Ctrl-A=0x01 … Ctrl-Z=0x1a
-          } else if (k === ' ') {
-            byte = '\x00'; // Ctrl-Space = NUL
-          } else if (k === '\\') {
-            byte = '\x1c';
-          } else if (k === ']') {
-            byte = '\x1d';
-          }
-        }
-        if (byte == null) return; // not a combo we translate — leave it alone
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        window.__dbg?.(`kb(desktop): Ctrl-${k} → 0x${byte.charCodeAt(0).toString(16)}`);
-        enqueueKeys(byte, true);
+      onDesktopKeydown = (event) => {
+        const data = encodeTerminalShortcut(event);
+        if (!data) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        window.__dbg?.(`kb(desktop): passthrough ${event.code || event.key} → ${JSON.stringify(data)}`);
+        enqueueKeys(data, true);
       };
       // Capture phase on the wrapper so it fires before the textarea default.
       termEl.addEventListener('keydown', onDesktopKeydown, { capture: true });

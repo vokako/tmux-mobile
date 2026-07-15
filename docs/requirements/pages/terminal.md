@@ -41,6 +41,11 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
 - **Tap Ctrl** → arms a one-shot modifier; the next letter typed on the system keyboard sends Ctrl+letter, then Ctrl releases; tapping Ctrl again cancels it
 - **Horizontal swipe (App level)** → switch tabs (lowest priority, suppressed by all above)
 
+## Interactions (Desktop)
+- App-configured shortcuts are consumed before terminal input
+- Every unassigned Ctrl / Option combination is encoded as terminal input and sent to tmux, including letters, punctuation, navigation keys, and F1–F12
+- Cmd combinations remain owned by the macOS app/browser unless explicitly configured as an app shortcut
+
 ## API Calls
 - `subscribe(target)` — start streaming pane output (200ms polling, includes cursor position and command changes)
 - `unsubscribe(target)` — stop streaming
