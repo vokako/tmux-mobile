@@ -131,7 +131,7 @@
           <Icon name={item.icon} size={15} /><span>{item.label()}</span>
         </button>
       {/each}
-      <button class:active={debugMode} aria-pressed={debugMode} onclick={() => onDebug(!debugMode)} title={t('debugHint')}>
+      <button class="debug-toggle" class:active={debugMode} aria-pressed={debugMode} onclick={() => onDebug(!debugMode)} title={t('debugHint')}>
         <Icon name="terminal" size={15} /><span>{t('debug')}</span>
       </button>
       <button class="close" onclick={onClose} aria-label={t('close')}><Icon name="x" size={16} /></button>
@@ -272,6 +272,7 @@
   .pref-tabs::-webkit-scrollbar { display:none; }
   .pref-tabs button { flex-shrink:0;height:var(--ui-control-height);display:inline-flex;align-items:center;justify-content:center;gap:var(--ui-gap);padding:3px 8px;border:1px solid var(--border2);border-radius:var(--ui-radius-pill);background:transparent;color:var(--text3);font-size:var(--ui-font-control);font-weight:500;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent; }
   .pref-tabs button.active { border-color:var(--accent);background:var(--accent-bg);color:var(--accent);font-weight:600; }
+  .pref-tabs .debug-toggle.active { background:var(--accent);color:var(--bg); }
   .pref-tabs button:active { border-color:var(--accent);color:var(--accent); }
   .pref-tabs .close { width:var(--ui-control-height);padding:0;margin-left:auto;border-color:transparent;background:transparent; }
   .pref-tabs .close:active { background:var(--surface2); }
