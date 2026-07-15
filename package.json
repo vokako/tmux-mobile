@@ -8,6 +8,7 @@
     "dev": "vite dev",
     "build": "vite build",
     "test:colors": "node --test src/lib/ansi-colors.test.js",
+    "test:line-geometry": "node --test src/lib/terminal-line-geometry.test.js",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",

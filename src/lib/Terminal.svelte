@@ -13,6 +13,7 @@
   import { fonts } from './fonts.svelte.js';
   import { terminalPrefs } from './terminal-prefs.svelte.js';
   import { adaptAnsiColors } from './ansi-colors.js';
+  import { compactLineGeometry } from './terminal-line-geometry.js';
 
   // Timing constants
   const WINDOW_LIST_POLL_MS = 5000;
@@ -272,6 +273,27 @@
       w: core?._renderService?.dimensions?.css?.cell?.width || (t.options.fontSize * CELL_W_RATIO),
       h: core?._renderService?.dimensions?.css?.cell?.height || (t.options.fontSize * CELL_H_RATIO),
     };
+  }
+
+  function syncCompactLineGeometry() {
+    if (!term || !termEl) return;
+    const core = term._core;
+    const dimensions = core?._renderService?.dimensions;
+    const devicePixelRatio = core?._coreBrowserService?.dpr || window.devicePixelRatio || 1;
+    const geometry = compactLineGeometry(
+      dimensions?.device?.char?.height,
+      dimensions?.css?.cell?.height,
+      devicePixelRatio,
+      term.options.lineHeight,
+    );
+    termEl.classList.toggle('compact-lines', !!geometry);
+    if (!geometry) {
+      termEl.style.removeProperty('--xterm-char-height');
+      termEl.style.removeProperty('--xterm-line-offset');
+      return;
+    }
+    termEl.style.setProperty('--xterm-char-height', `${geometry.charCssHeight}px`);
+    termEl.style.setProperty('--xterm-line-offset', `${geometry.offset}px`);
   }
 
   // Calculate optimal cols/rows based on current container size
@@ -1406,6 +1428,7 @@
     // sometimes left the bottom rows blank. We run one more fit on
     // term.onRender's first fire so the first real fit uses real metrics.
     function doResize() {
+      syncCompactLineGeometry();
       const fit = calcFit();
       if (!fit) return;
       window.__dbg?.(`resize: fit=${fit.cols}x${fit.rows} cur=${term.cols}x${term.rows} elH=${termEl.clientHeight}`);
@@ -1441,6 +1464,7 @@
     // the first call.
     let firstRenderDone = false;
     const onFirstRender = term.onRender(() => {
+      syncCompactLineGeometry();
       if (firstRenderDone) return;
       firstRenderDone = true;
       doResize();
@@ -1580,6 +1604,9 @@
       try { onFirstRender.dispose(); } catch {}
       try { onSelChange.dispose(); } catch {}
       doResizeRef = null;
+      termEl?.classList.remove('compact-lines');
+      termEl?.style.removeProperty('--xterm-char-height');
+      termEl?.style.removeProperty('--xterm-line-offset');
       clearTimeout(endTouchScrollTimer);
       if (longPressTimer) clearTimeout(longPressTimer);
       clearTimeout(kbBlurTimer);
@@ -2189,6 +2216,15 @@
   .xterm-wrap {
     height: 100%;
     transition: margin-top 0.15s ease;
+  }
+  :global(.xterm-wrap.compact-lines .xterm-glyph) {
+    display: inline-block;
+    height: var(--xterm-char-height) !important;
+    line-height: var(--xterm-char-height) !important;
+    transform: translateY(calc(-1 * var(--xterm-line-offset)));
+    font-weight: inherit !important;
+    text-decoration: inherit;
+    text-decoration-color: inherit;
   }
   /* xterm scrollbar: invisible at rest, fades in only while the user is
      interacting (xterm toggles `.invisible` ↔ `.visible` on hover/active

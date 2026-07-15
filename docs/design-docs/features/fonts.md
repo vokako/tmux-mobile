@@ -117,6 +117,20 @@ the existing font-metrics effect. This makes the setting apply immediately to
 single-pane, split, and embedded Team terminals without passing another prop
 through each container.
 
+xterm's DOM renderer normally assumes `lineHeight >= 1`: it shortens each row
+for compact values but leaves the glyph top-aligned at the original font
+height, so clipping is visually one-sided. The Vite transform adds a dedicated
+`xterm-glyph` child inside each xterm cell (signature-guarded for xterm 6), and
+`Terminal.svelte` centers that original-height glyph box over the compact cell.
+The row's existing overflow clipping then removes exactly half of the excess
+above and below. Cell backgrounds, block/bar/underline cursors, selection
+overlays, decorations, and touch coordinates stay on the unmoved outer cell;
+foreground color, weight, italics, letter spacing, and text decorations inherit
+into the glyph child. The visible IME composition text uses the same inner
+glyph layer, leaving its containing box and IME candidate-window anchor
+unchanged. `npm run test:line-geometry` verifies the split, while `npm run
+build` verifies both xterm renderer signatures before shipping.
+
 ## Alternatives considered
 
 - **Keep bundling, fix the weight bug** (bundle Regular/Bold cuts):
