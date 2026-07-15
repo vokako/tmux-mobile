@@ -12,7 +12,7 @@ Rust-based WebSocket server providing JSON-RPC interface to tmux and filesystem 
 ## Authentication
 - Two modes: encrypted (AES-256-GCM with HKDF key derivation) and legacy plain token
 - Server sends `server_nonce` on connect; client responds with `client_nonce` + HMAC proof, or plain token
-- Encrypted mode: all subsequent messages wrapped in AES-256-GCM + base64
+- Encrypted mode: all subsequent messages are binary AES-256-GCM frames; decrypted payloads use a one-byte raw-JSON/raw-deflate framing tag
 - Token auto-generated on first run, persisted in `~/.config/tmux-mobile/config.toml`
 - Environment variable `TOKEN` overrides config
 - Rate limiting: per-IP auth failure tracking with lockout after repeated failures
@@ -21,7 +21,7 @@ Rust-based WebSocket server providing JSON-RPC interface to tmux and filesystem 
 - `subscribe(target)` starts a polling loop (200ms interval)
 - Polls `capture_pane_with_width` (ANSI escapes + joined soft-wrapped lines + CJK width fix)
 - Also polls `cursor_info` for cursor position
-- Pushes `pane_output` with content (only when changed) and cursor position
+- Pushes `pane_output` with content (only when changed), cursor position, and `current_command` on the first push or when it changes
 - Pushes `pane_closed` after repeated capture failures (pane gone)
 - One subscription map per connection (multiple targets supported)
 - `unsubscribe` or disconnect stops the loop

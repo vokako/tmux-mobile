@@ -22,24 +22,11 @@
   be joining against `team_status().teams[].workspace` and disambiguating with
   a parent-dir segment when basenames collide.
 
-## Team feature — open issues (review 2026-06-15)
-
-### ~~close_team leaks the room's bus + re-broadcast pump~~ — FIXED
-- The `Team` now stores its pump `JoinHandle`; `close_team` aborts it (and the
-  double-checked-insert path aborts the duplicate pump). No leak, no duplicate
-  pushes on reopen.
-
-### ~~Supervisor retries a failing launch every 3s forever~~ — FIXED
-- The reconcile loop now counts per-agent launch failures and stops retrying
-  after `MAX_LAUNCH_FAILURES` (3). (Still not surfaced in the UI — see below.)
-
-### ~~A closed team that wasn't fully launched never stops its supervisor~~ — FIXED
-- The loop now exits when `!bridge.room_exists(room)` too, not only on
-  `launched_any && session gone`.
+## Team feature
 
 ### Launch failures / fired agents not surfaced in the UI
 - **Priority**: Low · **Area**: Team
-- After the failure cap (above) the supervisor stops trying, but the UI shows no
+- After `MAX_LAUNCH_FAILURES` (3) failed launches the supervisor stops trying, but the UI shows no
   "failed" state — the agent just never appears as a chip/grid cell. Likewise a
   `fire`d or crashed agent. Fix: include a per-agent state (failed/offline) in
   the teams/roster payload and badge it in the roster + grid.
@@ -63,42 +50,6 @@
 - The system prompt + roster are baked into a team's brief/seed at launch.
   Editing them only affects teams started afterward; running agents must be
   restarted to pick up changes. By design, but not surfaced to the user.
-
-### ~~rmcp client reconnect behavior on server restart~~ — FIXED + VERIFIED
-- **Root cause (confirmed on the live system):** the in-process MCP daemon ran
-  in rmcp's default **stateful** mode (`LocalSessionManager`, in-memory session
-  ids). A backend restart wipes the session map, so a recovered agent still
-  presenting its old `Mcp-Session-Id` is rejected (`401 Session not found`; a
-  no-session request gets `422 expect initialize`). rmcp 0.3.2 does **not**
-  auto-re-handshake, so the agent hangs on `wait` forever. Its `last_seen` goes
-  stale → `apply_presence` marks the whole roster `offline` → the Team UI's
-  "coming online" spinner (gated on `agents.length === 0`) spins indefinitely.
-- **Fix 1 — stateless daemon** (`crates/agora/src/web.rs`): serve MCP with
-  `StreamableHttpServerConfig { stateful_mode: false }`. Our tool surface is
-  genuinely stateless (identity per-request from `x-agent`/`x-room` headers, all
-  state in SQLite) and the agent loop is pure request/response (`post`/`wait`),
-  so we lose nothing (no server→client push needed) and any *fresh* request now
-  works with no init/session. Verified by `tests/stateless_probe.rs` and a live
-  curl (bare `tools/call` → `200` + result).
-- **Fix 2 — adopt + nudge on recovery** (`team_bridge::recover_running_teams`
-  → `team::nudge_session_agents`): recovery **keeps** the surviving agent windows
-  (so each agent's conversation context + in-flight work is preserved) and nudges
-  each one to reconnect. The agent's MCP *client* lost its socket to the old
-  daemon and is hung inside a `wait` call; verified with kiro-cli 2.7.0, the
-  client neither times out nor retries on its own **but reconnects fine once the
-  dead call is cancelled and a new turn starts**. The nudge is `Esc` (cancel the
-  in-flight call → back to the prompt) + a short re-prompt that calls `wait`
-  again. Harmless if an agent was healthy (just restarts its wait loop). Done
-  once from recovery, NOT in the reconcile loop — the loop's presence check can't
-  tell a healthy agent from one hung on a dead socket (a just-restarted agent
-  still looks "online" for ~30 s until its presence TTL lapses, so an in-loop
-  nudge gated on online-status never fires).
-  - **Why not kill+relaunch?** Killing the windows and relaunching fresh agents
-    would also work (Fix-1 makes the fresh handshake succeed), but it throws away
-    each agent's CLI conversation + any in-progress task. Adoption keeps them.
-- **Verified end-to-end**: kill server with 3 agents online → agents hang on a
-  dead `wait` → restart server → recovery adopts the windows + nudges → all 3
-  back to `idle`, last_seen <1s, no duplicate windows, context intact.
 
 ### Stale Chinese default.json on existing installs
 - **Priority**: Low · **Area**: Team / templates
@@ -136,16 +87,6 @@
 - **Priority**: Low
 - **Area**: Window switcher
 - **Details**: The `windows` derived in `Terminal.svelte` dedupes by window id using the first pane it encounters, not the active one. `current_command` / `pane_title` / AI icon badge may therefore come from a background pane. Prefer `pane_active` when choosing the representative pane.
-
-## paneCommand polling 3s lag
-- **Priority**: Low (no user impact while chat UI is disabled)
-- **Area**: Chat detection
-- **Details**: `paneCommand` is polled every 3s, so chat-mode detection (Kiro start/exit) lags up to 3s. Could piggyback on pane output push for near-instant detection, or tighten poll to 1s as a minimum-effort fix. **Note**: chat UI is currently disabled so this lag has no visible effect; revisit when re-enabling chat.
-
-## Scroll-to-bottom button lacks new-content indicator
-- **Priority**: Low
-- **Area**: Terminal / UX
-- **Details**: When the user scrolls up to read history and new output arrives, the current `scroll-btn` stays visually identical. A red dot / highlight on the button when `hasNewContent` is true would make it obvious that new output is waiting. This only becomes useful once the main-branch defer-rendering behavior lands (currently HEAD writes immediately on output, which re-clears scrollback and pulls termAtBottom back to true). Revisit after the defer-render change is merged. Affects: `src/lib/Terminal.svelte:setOnPaneOutput`, `.scroll-btn` in `<style>`.
 
 ## DA-response leakage: `?62;22;52c` appears as text in the prompt
 - **Priority**: Medium

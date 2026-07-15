@@ -59,9 +59,9 @@ Custom WebSocket client (`ws.js`) with auto-reconnect, pending promise cleanup, 
   live on that socket instead of in module-global state, and all encrypted RPC
   and subscription sends share one per-socket promise queue so nonce order and
   wire-frame order cannot diverge. Encryption that finishes after replacement
-  cannot send through the new socket. This prevents
-  an old connection from clearing or corrupting a successful in-app reconnect
-  until the whole process is restarted.
+  cannot send through the new socket. This prevents an old connection from
+  clearing or corrupting a successful in-app reconnect — the failure mode that
+  previously required restarting the whole app process.
 - **Foreground recovery also handles an apparently-open socket.** Mobile
   WebViews can suspend with `WebSocket.readyState === OPEN`, then resume after
   pane pushes or xterm's live-tail state has gone stale. On every transition
@@ -107,8 +107,8 @@ Custom WebSocket client (`ws.js`) with auto-reconnect, pending promise cleanup, 
   WS layer instead of with it. WS PING/PONG is the first-principles
   answer: it's exactly what the protocol designers gave us for this,
   and it runs at a layer that is unaffected by our JSON-RPC queueing.
-- Client-side polling RPCs that Terminal fires in the background
-  (`pane_command`, `list_panes`) are still plain `call()`s and can
+- Client-side polling RPCs such as Terminal's `list_panes` are still plain
+  `call()`s and can
   independently trigger the "3 consecutive timeouts" disconnect rule.
   On WAN a 50 MB download response monopolizes the send mutex long
   enough that 3 pollers time out before the download frame finishes —

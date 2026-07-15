@@ -27,28 +27,26 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
     expanded state and a smaller footprint in its collapsed state, not
     two different visual languages.
   - State (collapsed vs expanded) is persisted in localStorage.
-- Floating buttons: scroll-to-bottom (frosted glass style)
-- Floating buttons: scroll-to-bottom (frosted glass style)
+- Floating scroll-to-bottom button (frosted glass style) with an accent state and red dot when deferred output is waiting
 - Status bar: session:pane and running command
 
 ## Interactions (Mobile)
 - **Double-tap terminal** → open keyboard (single tap does nothing)
 - **Keyboard toggle button** → explicit open/close keyboard
 - **Vertical swipe** → scroll terminal content (momentum physics)
-- **Long-press (500ms)** → select word at touch point, drag to extend
-- **Tap on selection** → copy to clipboard (tap outside clears)
+- **Long-press (500ms)** → select a word, then drag either endpoint handle to extend or reverse the selection
+- **Selection toolbar** → explicitly copy the selected text; tapping outside or switching panes cancels the selection
 - **Swipe right edge** → scrollbar drag
 - **Tap shortcut button** → sends key sequence; long-press repeats
 - **Tap Ctrl** → arms a one-shot modifier; the next letter typed on the system keyboard sends Ctrl+letter, then Ctrl releases; tapping Ctrl again cancels it
 - **Horizontal swipe (App level)** → switch tabs (lowest priority, suppressed by all above)
 
 ## API Calls
-- `subscribe(target)` — start streaming pane output (200ms polling, includes cursor position)
+- `subscribe(target)` — start streaming pane output (200ms polling, includes cursor position and command changes)
 - `unsubscribe(target)` — stop streaming
 - `send_keys(target, keys, literal)` — send keystrokes
 - `send_command(target, command)` — send text + Enter
 - `capture_pane(target, lines)` — initial content load
-- `pane_command(target)` — get running command for status bar
 - `list_panes(session)` — populate window switcher (current session)
 - `resize_pane(target, cols, rows)` — resize pane to match client viewport (auto-restores on disconnect)
 
@@ -58,13 +56,13 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
 - Window switcher collapsed/expanded (persisted)
 - `touchScrolling` flag — pauses content updates during touch
 - `kbLocked` flag + `inputmode` attribute — keyboard control (see design doc)
-- `isSelecting` — word selection mode active
-- Font size (from settings)
+- Persistent selection object `{anchor, head}` in inclusive buffer coordinates, plus derived handle/toolbar geometry
+- Terminal font size, family, and line spacing (from settings); desktop interface scale is independent
 
 ## Edge Cases
 - Content updates paused during touch interaction, caught up via `endTouchScroll()`
 - `endTouchScroll` does NOT manipulate `kbLocked` — prevents race conditions with delayed timers
-- xterm.js Device Attribute responses (`\x1b[?62;22c`) filtered before forwarding to tmux
+- Complete xterm.js Device Attribute response chunks (`\x1b[?62;22c`) are filtered before forwarding to tmux; split-chunk leakage remains tracked in `docs/unresolved.md`
 - Mobile keyboard: double-tap to open. Three-layer control — `inputmode="none"` (browser hint), `kbLocked` focus guard (immediate blur), `keyboard-shift kbHeight=0` listener (catches system keyboard dismiss). Only `unlockKeyboard()`, blur timer, keyboard-shift, and pane switch may change `kbLocked`.
 - Nav buttons have `tabindex="-1"` to prevent focus stealing from textarea
 - All shortcut buttons use non-passive `touchstart: preventDefault()` to block synthetic `mousedown` focus stealing

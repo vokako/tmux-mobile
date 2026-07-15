@@ -11,7 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Tauri_2-Rust-orange?style=flat-square" alt="Tauri 2">
   <img src="https://img.shields.io/badge/Svelte_5-Frontend-ff3e00?style=flat-square" alt="Svelte 5">
-  <img src="https://img.shields.io/badge/ansi--to--html-Terminal-00d4ff?style=flat-square" alt="Terminal">
+  <img src="https://img.shields.io/badge/xterm.js_6-Terminal-00d4ff?style=flat-square" alt="xterm.js 6">
 </p>
 
 ---
@@ -24,8 +24,8 @@ You're running [Kiro CLI](https://kiro.dev), Claude Code, or any coding agent in
 - **File browser** — browse, preview, and edit project files from the phone, bookmark the directories you visit often, and run common git actions in place
 - **Sessions** — browse all tmux sessions/windows/panes, create or kill sessions, pull-to-refresh
 - **Team (multi-agent)** — spin up a roster of coding agents (Kiro / Claude Code / Codex) that collaborate in a shared group chat; watch them work live, tap any agent to preview its pane
-- **Settings** — font size control, light/dark/auto theme with smooth transitions, language switching (EN/中文), server connection info (hostname, machine ID), debug toggle
-- **Multi-address reconnect** — server machine ID tracks alternate addresses, auto-failover on disconnect
+- **Settings** — terminal font/family/line-spacing controls, native desktop interface scaling, light/dark/auto theme, language switching (EN/中文), connection info, and diagnostics
+- **Multi-address reconnect** — server machine ID tracks alternate addresses, auto-failover on disconnect; socket, encryption, and queued-send state are isolated across reconnects
 
 The server runs on your Mac, the UI runs in any browser or as a native app (macOS, Android).
 
@@ -79,11 +79,11 @@ DISCONNECT_GRACE_SECS=0 npm run tauri:dev
 The same tmux session you have at your desk, on your phone:
 
 - Smooth touch scrolling with momentum, like a native app
-- Shortcut keys (Esc, Ctrl-C, Ctrl-D, Tab, arrows) just above the keyboard, with long-press to repeat
+- Shortcut keys (Esc, Tab, Ctrl-C, arrows) plus a one-shot Ctrl modifier for any letter, with long-press repeat where applicable
 - Keyboard toggle so you can read without it in the way
 - Window switcher with agent icons (Kiro / Claude / Codex) — jump between panes in one tap
-- Floating "scroll to bottom" when you've scrolled up to look at history
-- Light/dark theme follows your device; font size and family are adjustable
+- Floating "scroll to bottom" with a new-output indicator when you've scrolled up to look at history
+- Light/dark theme follows your device; terminal font size, installed font family, and line spacing are adjustable
 - Status bar shows the current session/pane and the running command
 
 ### File Browser
@@ -101,6 +101,7 @@ Browse the project on your Mac from the phone:
 - Paste an address and a token, you're in — the server auto-generates the token on first launch
 - Recent connections are remembered for quick switching between Macs
 - If your IP or network changes, the app reconnects automatically using known alternate addresses for the same Mac
+- On macOS, Cmd `+` / `-` / `0` scales the complete interface; terminal font size remains an independent setting
 - Reload the page and you come back to where you were — same session, same view
 - Works with a custom tmux socket if you use `-S`
 
@@ -153,12 +154,9 @@ Requires: Android SDK, NDK 28+, Java 17+.
 
 ### iOS
 
-```bash
-rustup target add aarch64-apple-ios aarch64-apple-ios-sim
-npx tauri ios init && npx tauri ios dev
-```
-
-Requires: Xcode, Apple Developer account for device builds.
+Not implemented yet. The expected bootstrap is tracked in
+[`docs/unresolved.md`](docs/unresolved.md); it still needs Tauri iOS project
+initialization, Xcode/xcodegen integration, signing, and device validation.
 
 ## API
 

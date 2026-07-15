@@ -9,11 +9,13 @@ JSON-RPC over WebSocket (`ws://` or `wss://`).
 ```
 ← {"server_nonce": "<hex>"}                          // server sends nonce
 → {"method": "auth", "params": {"client_nonce": "<hex>", "proof": "<hex>"}}
-← <base64-encrypted> {"result": {"authenticated": true, "machine_id": "uuid", "hostname": "my-mac"}}
+← <binary AES-GCM frame containing the authenticated result>
 ```
 - Key derivation: HKDF-SHA256(token, server_nonce + client_nonce)
 - Proof: HMAC-SHA256(key, server_nonce)
-- All subsequent messages encrypted with AES-256-GCM using derived key
+- All subsequent messages are binary AES-256-GCM frames using the derived key
+- Decrypted payload starts with a one-byte framing tag: raw UTF-8 JSON or raw-deflate JSON (compression is used only when it reduces payload size)
+- Each direction uses a monotonic nonce counter; clients must serialize encrypted sends so wire order matches nonce order
 
 ### Legacy Plain Auth (fallback, no Web Crypto)
 ```
@@ -85,7 +87,7 @@ Shell metacharacters rejected in args.
 ## Server Push Messages
 | Method | Params | Description |
 |--------|--------|-------------|
-| `pane_output` | `target`, `content?`, `cursor` | Pushed on content/cursor change during subscription |
+| `pane_output` | `target`, `content?`, `cursor`, `current_command?` | Pushed on content/cursor change; `current_command` appears on the first push and when the command changes |
 | `pane_closed` | `target` | Pushed when pane becomes unreachable (after repeated capture failures) |
 
 Cursor object: `{x, y, w, h, t}` (x/y position, width, height, trailing trimmed lines).
