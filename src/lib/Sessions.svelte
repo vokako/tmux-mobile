@@ -804,11 +804,10 @@
     box-shadow: 0 0 6px var(--accent-glow);
   }
   .attention-dot {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
     border-radius: 50%;
     background: var(--danger);
-    box-shadow: 0 0 5px color-mix(in srgb, var(--danger) 55%, transparent);
     flex-shrink: 0;
   }
 
