@@ -423,7 +423,6 @@
         onkeydown={(e) => e.key === 'Enter' && activateSession(s)}
       >
         <span class="dot" class:attached={s.attached}></span>
-        {#if hasNotice}<span class="attention-dot" class:urgent={urgentNotice} aria-label="Agent needs attention"></span>{/if}
         <span class="name" class:name-grow={team} title={team ? s.name : null}>{team ? teamLabel(s.name) : s.name}</span>
         <!-- Team rows show only the title. Regular rows keep a short cmd/AI
              marker, but NOT the cwd path — in the cramped row it was squeezed
@@ -446,6 +445,7 @@
           </span>
         {/if}
         <span class="trailing">
+          {#if hasNotice}<span class="attention-dot" aria-label="Agent needs attention"></span>{/if}
           {#if team}
             <span class="go-chat" aria-hidden="true"><Icon name="chat" size={13} /></span>
           {:else}
@@ -807,10 +807,10 @@
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--accent);
+    background: var(--danger);
+    box-shadow: 0 0 5px color-mix(in srgb, var(--danger) 55%, transparent);
     flex-shrink: 0;
   }
-  .attention-dot.urgent { background: var(--danger); }
 
   .name {
     font-weight: 600;

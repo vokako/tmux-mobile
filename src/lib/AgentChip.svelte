@@ -134,13 +134,13 @@
 
   .attention {
     position: absolute;
-    top: -2px;
-    right: -2px;
-    width: 6px;
-    height: 6px;
+    top: 2px;
+    right: 2px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 0 1.5px var(--bg);
+    background: var(--danger);
+    box-shadow: 0 0 0 1px var(--bg), 0 0 5px color-mix(in srgb, var(--danger) 55%, transparent);
     z-index: 1;
   }
   .attention.urgent { background: var(--danger); }
