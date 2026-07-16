@@ -335,7 +335,10 @@ notification helper records completion. Kiro and Claude use the same keepalive
 mechanism through their native hook dialects. The script sends literal prompt
 text and Enter as separate tmux operations: Codex can keep the text in its
 composer but drop an Enter sent in the same operation during the turn-complete
-redraw.
+redraw. Hook scripts consume one JSON line from stdin rather than waiting for
+EOF, avoiding a deadlock with CLIs that keep the hook pipe open until exit.
+Generated commands run lifecycle scripts through `/bin/bash`; direct execution
+can be killed by macOS provenance enforcement for app-created files.
 
 Keepalive sustains the loop while the team is active. It does not prevent the
 supervisor's deliberate all-idle sleep: once every agent is parked, the
@@ -354,6 +357,20 @@ through `CODEX_HOME`. Each private Codex home therefore links the system
 `~/.codex`); Team MCP settings are layered with CLI `-c` overrides instead of
 rewriting that config. Links follow provider/token refreshes without copying
 credential contents into the workspace. Missing files remain a no-op.
+
+**Permission and first-use startup.** Team workspaces are explicitly selected by
+the operator, so all three backends run without per-tool approval prompts:
+Kiro uses `--trust-all-tools` plus
+`chat.disableTrustAllConfirmation=true`; Claude uses
+`--dangerously-skip-permissions` plus
+`skipDangerousModePermissionPrompt=true`; Codex uses
+`--dangerously-bypass-approvals-and-sandbox` and
+`--dangerously-bypass-hook-trust`. Claude still has a separate workspace trust
+dialog with no public skip flag. Its complete initial prompt is therefore passed
+on the launch command, while a two-minute background watcher confirms only when
+all stable trust-dialog markers are visible and exits early once the Claude UI
+is ready. Already-trusted Claude workspaces and all Codex/Kiro launches receive
+no synthetic startup keystrokes.
 
 ## 5b. Agent liveness, presence & self-heal
 

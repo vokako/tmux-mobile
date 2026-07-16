@@ -221,7 +221,10 @@ impl AgentNotificationHub {
 
     pub fn install_hooks(&self) -> Result<HookStatus, String> {
         self.write_helper()?;
-        let helper = shell_quote(&self.helper_path().to_string_lossy());
+        let helper = format!(
+            "/bin/sh {}",
+            shell_quote(&self.helper_path().to_string_lossy())
+        );
         install_claude(&claude_path(), &helper)?;
         install_codex(&codex_path(), &helper)?;
         install_kiro(&kiro_path(), &helper)?;
@@ -241,7 +244,7 @@ impl AgentNotificationHub {
 
     pub fn helper_command(&self, backend: &str) -> String {
         format!(
-            "{} {} # {}",
+            "/bin/sh {} {} # {}",
             shell_quote(&self.helper_path().to_string_lossy()),
             backend,
             OWNER_MARKER
@@ -271,7 +274,9 @@ inbox={inbox}
 mkdir -p "$inbox" || exit 0
 tmp=$(mktemp "$inbox/.tmp.XXXXXX") || exit 0
 trap 'rm -f "$tmp"' EXIT
-payload=$(cat) || exit 0
+payload=
+IFS= read -r payload || true
+[ -n "$payload" ] || exit 0
 printf '{{"backend":"%s","pane_id":"%s","payload":%s}}\n' "$backend" "$pane" "$payload" > "$tmp" || exit 0
 mv "$tmp" "$inbox/$(date +%s)-$$.json" || exit 0
 trap - EXIT
@@ -757,10 +762,35 @@ mod tests {
             .next()
             .is_none());
 
-        // No server or inbox consumer is running for this isolated root. The
-        // hook still succeeds and leaves one durable event for the next start.
-        let without_server = run(Some("%42"));
-        assert!(without_server.status.success());
+        // No server or inbox consumer is running for this isolated root. Keep
+        // stdin open after one JSON line to model CLIs that wait for the hook
+        // before closing their pipe; the helper must still exit promptly.
+        let mut command = Command::new(&helper);
+        command
+            .arg("codex")
+            .env("TMUX_PANE", "%42")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = command.spawn().unwrap();
+        let mut stdin = child.stdin.take().unwrap();
+        stdin
+            .write_all(b"{\"hook_event_name\":\"Stop\"}\n")
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "helper waited for stdin EOF"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert!(status.success());
+        drop(stdin);
+
         let event = std::fs::read_dir(root.join("inbox"))
             .unwrap()
             .next()

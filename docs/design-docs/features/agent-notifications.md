@@ -28,7 +28,12 @@ surface. It writes a temporary file and renames it into the inbox so the server
 never reads a partial payload. The hook does not connect to the desktop server:
 if the server is stopped, the event remains in the inbox and is consumed on the
 next start. Notification delivery is advisory, so helper setup/write failures
-are silently ignored and always return success to the Agent CLI.
+are silently ignored and always return success to the Agent CLI. Hook payloads
+are single-line JSON; helpers read one line rather than waiting for stdin EOF,
+because some interactive CLIs keep the pipe open until the hook exits. Hook
+commands invoke the helper through `/bin/sh` instead of executing it directly:
+macOS may attach `com.apple.provenance` to app-generated scripts and kill direct
+execution with status 137.
 
 ## Backend Mapping
 

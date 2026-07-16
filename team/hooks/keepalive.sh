@@ -5,7 +5,7 @@
 # in `wait` (i.e. it fell out of the loop). Using $TMUX_PANE it re-prompts its own
 # pane, so it is fully self-contained. No-op outside tmux.
 #
-cat >/dev/null 2>&1 || true        # drain the hook event JSON on stdin
+IFS= read -r _hook_payload || true  # consume one JSON line; never wait for EOF
 [ -n "${TMUX_PANE:-}" ] || exit 0
 # Briefly wait for the TUI to return to its prompt, then type and submit in
 # separate steps. Codex can drop Enter when text + Enter arrive in one tmux

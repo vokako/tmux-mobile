@@ -273,8 +273,8 @@ pub fn delete_template(name: &str) -> Result<(), String> {
 }
 
 /// Per-team config home under `<workspace>/.tmm/`. Lives inside the project but
-/// is self-gitignored (`.tmm/.gitignore` = `*`). Each backend's config files,
-/// the shared brief, and hooks live here — never scattered in `~/.config/`.
+/// is self-gitignored (`.tmm/.gitignore` = `*`). Each backend's config files and
+/// hooks live here; prompts are passed inline.
 struct Paths {
     /// Agents' working directory (the user's project) — agents run `-c` here.
     workspace: PathBuf,
@@ -796,7 +796,7 @@ fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &str, session:
     let skills = resolve_skills(&skill_refs, team_dir_ref);
     let extras = Extras { env, mcp, skills };
 
-    let (env, cmd, post_keys) = match backend {
+    let (env, cmd, startup_confirmation) = match backend {
         "kiro" => prepare_kiro(name, role, goal, team_prompt, cfg, room, paths, model, &extras)?,
         "claude" => prepare_claude(name, role, goal, team_prompt, cfg, room, paths, model, &extras)?,
         "codex" => prepare_codex(name, role, goal, team_prompt, cfg, room, paths, &extras)?,
@@ -817,13 +817,8 @@ fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &str, session:
     let full = if prefix.is_empty() { cmd.clone() } else { format!("{} {}", prefix, cmd) };
     tmux::send_command(&pane, &full)?;
 
-    // Post-launch scripted steps (e.g. Claude's folder-trust accept + kick).
-    for step in post_keys {
-        std::thread::sleep(Duration::from_secs(4));
-        match step {
-            PostKey::Enter => { let _ = tmux::send_keys(&pane, "Enter", false); }
-            PostKey::Text(t) => { let _ = tmux::send_keys(&pane, &t, true); }
-        }
+    if let Some(confirmation) = startup_confirmation {
+        confirm_startup_prompt(pane.clone(), confirmation);
     }
     Ok(pane)
 }
@@ -875,14 +870,47 @@ async fn nudge_pane(pane: &str) {
     let _ = tmux::send_keys(pane, "Enter", false);
 }
 
-enum PostKey {
-    Enter,
-    Text(String),
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StartupConfirmation {
+    markers: Vec<&'static str>,
+    ready_markers: Vec<&'static str>,
+    timeout: Duration,
 }
 
 /// What a backend `prepare_*` returns: (env vars, launch command, post-launch
-/// scripted keys). Aliased to keep the per-backend signatures readable.
-type Prepared = (Vec<(String, String)>, String, Vec<PostKey>);
+/// confirmation). Aliased to keep the per-backend signatures readable.
+type Prepared = (Vec<(String, String)>, String, Option<StartupConfirmation>);
+
+fn startup_prompt_visible(content: &str, confirmation: &StartupConfirmation) -> bool {
+    confirmation.markers.iter().all(|marker| content.contains(marker))
+}
+
+fn startup_already_ready(content: &str, confirmation: &StartupConfirmation) -> bool {
+    confirmation
+        .ready_markers
+        .iter()
+        .any(|marker| content.contains(marker))
+}
+
+/// Confirm a known first-use dialog without serializing the supervisor's launch
+/// loop. No key is sent when the workspace is already trusted or the UI differs.
+fn confirm_startup_prompt(pane: String, confirmation: StartupConfirmation) {
+    std::thread::spawn(move || {
+        let deadline = std::time::Instant::now() + confirmation.timeout;
+        while std::time::Instant::now() < deadline {
+            if let Ok(content) = tmux::capture_pane(&pane, Some(80)) {
+                if startup_prompt_visible(&content, &confirmation) {
+                    let _ = tmux::send_keys(&pane, "Enter", false);
+                    return;
+                }
+                if startup_already_ready(&content, &confirmation) {
+                    return;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+    });
+}
 
 const TEAM_ADDRESSING_CONTRACT: &str = "\
 ## Dispatch
@@ -944,6 +972,7 @@ struct ResolvedSkill {
 }
 
 /// Per-agent extras threaded from the spec into each backend's launcher.
+#[derive(Default)]
 struct Extras {
     env: Vec<(String, String)>,
     mcp: Vec<McpDef>,
@@ -1327,10 +1356,10 @@ fn prepare_kiro(
         "resources": resources,
         "mcpServers": mcp_servers,
         "hooks": {
-            "postToolUse": [ { "matcher": "*", "command": paths.heartbeat.to_string_lossy() } ],
-            "userPromptSubmit": [ { "command": paths.heartbeat.to_string_lossy() } ],
+            "postToolUse": [ { "matcher": "*", "command": bash_script_command(&paths.heartbeat) } ],
+            "userPromptSubmit": [ { "command": bash_script_command(&paths.heartbeat) } ],
             "stop": [
-                { "command": paths.keepalive.to_string_lossy() },
+                { "command": bash_script_command(&paths.keepalive) },
                 { "command": notify }
             ]
         },
@@ -1349,7 +1378,7 @@ fn prepare_kiro(
         "kiro-cli chat --agent {} --model {} --trust-all-tools {}",
         name, m, shell_quote(&cfg.team_kick)
     );
-    Ok((env, cmd, vec![]))
+    Ok((env, cmd, None))
 }
 
 // ---- Claude Code ----
@@ -1384,12 +1413,13 @@ fn prepare_claude(
     std::fs::write(
         &settingsfile,
         serde_json::to_string_pretty(&serde_json::json!({
+            "skipDangerousModePermissionPrompt": true,
             "hooks": {
-                "PostToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": paths.heartbeat.to_string_lossy() } ] } ],
-                "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": paths.heartbeat.to_string_lossy() } ] } ],
+                "PostToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": bash_script_command(&paths.heartbeat) } ] } ],
+                "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": bash_script_command(&paths.heartbeat) } ] } ],
                 "Notification": [ { "matcher": "permission_prompt|idle_prompt|agent_needs_input|agent_completed", "hooks": [ { "type": "command", "command": notify } ] } ],
                 "Stop": [ { "hooks": [
-                    { "type": "command", "command": paths.keepalive.to_string_lossy() },
+                    { "type": "command", "command": bash_script_command(&paths.keepalive) },
                     { "type": "command", "command": notify }
                 ] } ],
                 "StopFailure": [ { "hooks": [ { "type": "command", "command": notify } ] } ]
@@ -1400,21 +1430,32 @@ fn prepare_claude(
     .map_err(|e| e.to_string())?;
 
     let m = model.unwrap_or("sonnet");
+    let first_msg = format!("{}\n\n{}{}", build_agent_prompt(role, goal, team_prompt, cfg), cfg.team_kick, skills_index_text(&extras.skills));
     let cmd = format!(
-        "claude --mcp-config {} --strict-mcp-config --settings {} --model {} --dangerously-skip-permissions",
+        "claude --mcp-config {} --strict-mcp-config --settings {} --model {} --dangerously-skip-permissions {}",
         shell_quote(&mcpfile.to_string_lossy()),
         shell_quote(&settingsfile.to_string_lossy()),
-        m
+        m,
+        shell_quote(&first_msg)
     )
     .trim_end()
     .to_string();
-    let first_msg = format!("{}\n\n{}{}", build_agent_prompt(role, goal, team_prompt, cfg), cfg.team_kick, skills_index_text(&extras.skills));
-    // Start interactive; then accept the folder-trust dialog, type the kick, submit.
-    let post = vec![PostKey::Enter, PostKey::Text(first_msg), PostKey::Enter];
+    // Tool permissions are bypassed by the CLI flag. Workspace trust is a
+    // separate first-use dialog with no public skip flag, so confirm it only
+    // after all stable prompt markers are visible.
+    let confirmation = StartupConfirmation {
+        markers: vec![
+            "Accessing workspace:",
+            "Yes, I trust this folder",
+            "Enter to confirm",
+        ],
+        ready_markers: vec!["bypass permissions on"],
+        timeout: Duration::from_secs(120),
+    };
     let mut env = hb_env(name, room, cfg);
     env.extend(extras.env.iter().cloned());
     env.push(("MCP_TOOL_TIMEOUT".to_string(), team_mcp_tool_timeout_ms().to_string()));
-    Ok((env, cmd, post))
+    Ok((env, cmd, Some(confirmation)))
 }
 
 // ---- Codex ----
@@ -1458,9 +1499,7 @@ fn prepare_codex(
         config_args.join(" "),
         shell_quote(&first_msg)
     );
-    // Codex asks whether to trust a workspace on first use. The workspace was
-    // explicitly selected by the Team operator, so accept that one prompt.
-    Ok((env, cmd, vec![PostKey::Enter]))
+    Ok((env, cmd, None))
 }
 
 fn codex_hooks_value(keepalive: &Path, notify: &str) -> Value {
@@ -1470,11 +1509,15 @@ fn codex_hooks_value(keepalive: &Path, notify: &str) -> Value {
                 { "type": "command", "command": notify }
             ] } ],
             "Stop": [ { "hooks": [
-                { "type": "command", "command": keepalive.to_string_lossy() },
+                { "type": "command", "command": bash_script_command(keepalive) },
                 { "type": "command", "command": notify }
             ] } ]
         }
     })
+}
+
+fn bash_script_command(path: &Path) -> String {
+    format!("/bin/bash {}", shell_quote(&path.to_string_lossy()))
 }
 
 /// Single-quote a string for the shell (the agent launch line is sent to a
@@ -1707,8 +1750,110 @@ mod tests {
         let stop = hooks["hooks"]["Stop"][0]["hooks"].as_array().unwrap();
 
         assert_eq!(stop.len(), 2);
-        assert_eq!(stop[0]["command"], "/team/keepalive.sh");
+        assert_eq!(stop[0]["command"], "/bin/bash /team/keepalive.sh");
         assert_eq!(stop[1]["command"], "notify codex");
+    }
+
+    #[test]
+    fn backend_launch_permissions_and_startup_confirmations() {
+        let root = std::env::temp_dir().join(format!(
+            "teamtest-backend-permissions-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let paths = Paths::new(root.to_str().unwrap());
+        prepare_home(&paths).unwrap();
+        let extras = Extras::default();
+        let cfg = cfg();
+
+        let (_, kiro_cmd, kiro_confirmation) = prepare_kiro(
+            "lead",
+            "lead",
+            "coordinate",
+            "",
+            &cfg,
+            "room",
+            &paths,
+            None,
+            &extras,
+        )
+        .unwrap();
+        assert!(kiro_cmd.contains("--trust-all-tools"));
+        assert!(kiro_confirmation.is_none());
+        let kiro_settings: Value = serde_json::from_slice(
+            &std::fs::read(paths.kiro_home.join("settings/cli.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            kiro_settings["chat.disableTrustAllConfirmation"],
+            Value::Bool(true)
+        );
+        let kiro_agent: Value = serde_json::from_slice(
+            &std::fs::read(paths.kiro_home.join("agents/lead.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            kiro_agent["hooks"]["stop"][0]["command"],
+            format!("/bin/bash {}", paths.keepalive.display())
+        );
+
+        let (_, claude_cmd, claude_confirmation) = prepare_claude(
+            "planner",
+            "planner",
+            "plan",
+            "",
+            &cfg,
+            "room",
+            &paths,
+            None,
+            &extras,
+        )
+        .unwrap();
+        assert!(claude_cmd.contains("--dangerously-skip-permissions"));
+        assert!(claude_cmd.contains("kick"), "initial prompt is a CLI argument");
+        let claude_settings: Value = serde_json::from_slice(
+            &std::fs::read(paths.claude.join("planner.settings.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            claude_settings["skipDangerousModePermissionPrompt"],
+            Value::Bool(true)
+        );
+        assert_eq!(
+            claude_settings["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"],
+            format!("/bin/bash {}", paths.heartbeat.display())
+        );
+        let confirmation = claude_confirmation.unwrap();
+        assert_eq!(confirmation.timeout, Duration::from_secs(120));
+        assert!(startup_prompt_visible(
+            "Accessing workspace:\nYes, I trust this folder\nEnter to confirm",
+            &confirmation
+        ));
+        assert!(!startup_prompt_visible(
+            "Claude is ready for input",
+            &confirmation
+        ));
+        assert!(startup_already_ready(
+            "bypass permissions on (shift+tab to cycle)",
+            &confirmation
+        ));
+
+        let (_, codex_cmd, codex_confirmation) = prepare_codex(
+            "builder",
+            "builder",
+            "build",
+            "",
+            &cfg,
+            "room",
+            &paths,
+            &extras,
+        )
+        .unwrap();
+        assert!(codex_cmd.contains("--dangerously-bypass-approvals-and-sandbox"));
+        assert!(codex_cmd.contains("--dangerously-bypass-hook-trust"));
+        assert!(codex_confirmation.is_none());
+
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

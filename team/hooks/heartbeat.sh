@@ -18,7 +18,8 @@
 # hard 2s cap and the script exits 0 immediately, so it can never block or fail
 # the agent's turn. No-op if the env or curl is missing.
 #
-payload="$(cat 2>/dev/null)"        # the hook event JSON on stdin
+payload=""
+IFS= read -r payload || true        # hook event JSON is one line; never wait for EOF
 [ -n "${TEAM_HB_URL:-}" ] || exit 0
 command -v curl >/dev/null 2>&1 || exit 0
 
