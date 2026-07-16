@@ -13,12 +13,12 @@ any agent to preview its live tmux execution state in the Terminal tab.
 
 The diagram below shows what runs where: the phone connects over WebSocket to the
 desktop server, which hosts the in-process message bus and supervises one
-**Kiro CLI** per agent inside a `tmm-team-<slug>` tmux session. Each agent runs
-the same loop — `wait` → reason → execute real tools (heartbeat fires) →
-`post` → loop back. The hooks (keepalive, heartbeat) and the supervisor's
-self-heal mechanism keep the loop alive; external standalone agents can join
-the same bus over HTTP MCP. Read this picture first; the prose below fills in
-the rationale.
+configured backend CLI (**Kiro / Claude Code / Codex**) per agent inside a
+`tmm-team-<slug>` tmux session. Each agent runs the same loop — `wait` → reason
+→ execute real tools (heartbeat fires where supported) → `post` → loop back.
+The hooks (keepalive, heartbeat) and the supervisor's self-heal mechanism keep
+the loop alive; external standalone agents can join the same bus over HTTP MCP.
+Read this picture first; the prose below fills in the rationale.
 
 ![Team architecture](team-architecture.svg)
 
@@ -31,6 +31,11 @@ standalone project at `~/agora`). agora is:
   `post` to speak. Addressing is by `@name` in the body; `requires_reply=true`
   makes the bus refuse an agent's `wait` until it answers (the "obligation
   graph"). Enforced in the bus, not per-agent — agent-agnostic.
+- `@all` is stronger than a normal mention: it expands to every registered
+  agent except the sender and always creates reply obligations, even if an MCP
+  caller omits `requires_reply=true`. Plain broadcasts never infer recipients
+  from phrases such as "everyone"; manager-led prompts require the lead to
+  translate explicit group intent into `@all`.
 - Served as an **HTTP MCP server** (`/mcp`) for agents (zero-touch: a role prompt
   + an `x-agent` header) plus a dashboard / SSE / JSON API for humans.
 
@@ -189,12 +194,27 @@ home all share one identifier.
   app recognize team sessions (e.g. the PanePicker labels their panes by agent
   name, not `current_command`).
 - Multiple teams coexist: different workspaces → different `tmm-team-<slug>`
-  sessions, each with its own config home `~/.config/tmux-mobile/team/<slug>/`.
-- **We never write our brief into the user's project.** `AGENTS.md` + the
-  keepalive hook live in the private per-team home; kiro loads the brief via an
-  absolute `resources` path, claude/codex are pointed at it in their kick. The
-  user's workspace stays clean — agents only `cd` into it and read/write the
-  files the task actually needs.
+  sessions, each with a self-gitignored runtime home at `<workspace>/.tmm/`.
+- Team does not add tracked source or instructions to the user's project.
+  Backend config and hooks live under `.tmm/`; prompts are passed inline.
+
+### Workspace history and recovery
+
+The complete append-only room log remains authoritative in the shared SQLite
+database (`team_db`, default `~/.config/tmux-mobile/team.db`). Closing a team or
+explicitly starting the same workspace clears only process-lifetime state
+(roster, obligations, and desired employees); messages are retained. A backend
+restart with a live tmux session retains both messages and runtime state.
+
+Each room also mirrors its full transcript to
+`<workspace>/.tmm/team-history.jsonl`, one serialized message envelope per line.
+Room registration first rebuilds the file atomically from SQLite, then the live
+message pump appends each higher sequence number exactly once. If the broadcast
+receiver lags, it rebuilds from SQLite instead of accepting a gap. The mirror is
+not a second source of truth and is not imported into SQLite; it is a durable,
+agent-readable context file. Every generated agent prompt points to it so a new
+CLI launched after close/reopen can inspect prior decisions and handoffs even
+though its own provider conversation is new.
 
 ## 4. Agent ↔ tmux pane link (the "preview execution state" requirement)
 
@@ -225,14 +245,14 @@ within `tmm-team-<slug>`. Two surfaces use it:
 
 ## 5. The in-process supervisor (`src-tauri/src/team.rs`)
 
-`team::start(bridge, cfg, workspace)` runs as a tokio task. On "Start team"
-(`team_start_team`, one-shot guarded) it:
+`team::start(bridge, cfg, room, workspace, template)` runs as a tokio task. On
+"Start team" (`team_start_team`, one-shot guarded) it:
 
-1. derives `slug` + session `tmm-team-<slug>`, writes the brief + keepalive hook
-   into the private per-team home (embedded via `include_str!`, so a packaged
-   `.app` needs no external files);
-2. seeds the built-in roster (manager / worker / reviewer) as employees, unless a
-   team is already present (restart-safe);
+1. derives `slug` + session `tmm-team-<slug>`, writes the embedded hooks into
+   `<workspace>/.tmm/`, and composes each backend's prompt inline (a packaged
+   `.app` needs no external runtime files);
+2. seeds the selected template's fixed roster as employees, unless a team is
+   already present (restart-safe);
 3. runs a 3 s reconcile loop launching each employee into a named window;
    `disabled` employees' windows are killed. Same loop serves the initial team
    AND the manager's runtime `hire`/`fire`.
@@ -245,11 +265,14 @@ CLI conversation context and any in-progress work. But an adopted agent is hung:
 its MCP **client** connection died with the old daemon, and (verified with
 kiro-cli 2.7.0) the client neither times out nor retries on its own — it sits
 forever inside a dead `wait` call. It *will* reconnect, though, once that call is
-cancelled and a fresh turn starts. So recovery calls `team::nudge_session_agents`,
-which for each agent window sends `Esc` (cancel the in-flight call → back to the
-prompt) then a short re-prompt that makes it call `wait` again, re-establishing
-the connection against the stateless daemon. Nudging is harmless if an agent
-happened to be healthy (it just restarts its wait loop).
+cancelled and a fresh turn starts. Recovery snapshots the existing agent windows
+before restarting the supervisor, then calls `team::nudge_adopted_agents` on
+that frozen list. Each adopted window receives `Esc` (cancel the in-flight call
+→ back to the prompt) and a short re-prompt that makes it call `wait` again,
+re-establishing the connection against the stateless daemon. The frozen list is
+important: the supervisor may fill a missing roster window during the nudge
+delay, and interrupting that fresh CLI can cancel its first-run setup before it
+joins the bus.
 
 This *reconnect* nudge lives in recovery, **not** in the reconcile loop's fast
 path, because right after a restart the loop's presence check can't distinguish
@@ -276,10 +299,61 @@ the nudged agents' fresh requests succeed with no `initialize`. See
 `unresolved.md` (the resolved "rmcp reconnect" item) for the full root-cause
 trail and the verified end-to-end test.
 
-The agent config dialects (kiro agent JSON, claude `--mcp-config`/`--settings`,
-codex `config.toml`), the keepalive Stop-hook, and the role/goal prompts carry
-over from agora's verified launcher. The MCP server the agents connect to is
-named **`team`** in their configs (so MCP tool names are `mcp__team__hire` etc).
+The agent config dialects (kiro agent JSON, claude
+`--mcp-config`/`--settings`, Codex launch-time `-c` overrides), the keepalive
+Stop-hook, and the role/goal prompts carry over from agora's verified launcher.
+The MCP server the agents connect to is named **`team`** in their configs (so
+MCP tool names are `mcp__team__hire` etc).
+
+**Wait timeout boundary.** `wait` is one stateless Streamable HTTP request from
+the agent CLI to the localhost MCP daemon; it does not pass through the phone's
+WebSocket connection. The bus still caps each internal liveness slice at 50
+seconds, but the MCP handler ignores empty slices and keeps the same tool call
+parked for up to 240 seconds. A message broadcast wakes it immediately; 240
+seconds is only the no-message ceiling. Codex's per-server `tool_timeout_sec`
+and Claude's `MCP_TOOL_TIMEOUT` are both set to 270 seconds, leaving 30 seconds
+of transport margin. Kiro's known failure mode is different: after the daemon
+process dies, its old request may never time out; restart recovery therefore
+cancels that call with `Esc` and starts a fresh stateless wait, as described
+above.
+
+This is deliberately implemented in the one shared in-process HTTP daemon, not
+as one stdio proxy per agent. A stdio proxy would still be subject to the Agent
+CLI's outer tool timeout while adding a process, pipes, memory, and another
+restart lifecycle for every agent. The shared handler adds none of those. Each
+waiting agent holds one lightweight async HTTP request. Broadcast provides
+zero-poll message wakeup; the fallback presence/SQLite poll runs every 15
+seconds instead of every second, remaining far below the 90-second stale
+threshold while reducing idle database activity by about 15x.
+
+All three backends run the keepalive command on their turn-complete/Stop
+lifecycle. This is enforcement, not redundant prompting: Codex may correctly
+reply, perform one 240-second `wait`, then end the turn when that wait is empty
+despite an instruction to wait forever. Its Stop event therefore runs two
+commands in parallel: `keepalive.sh` re-prompts the TUI into `wait`, while the
+notification helper records completion. Kiro and Claude use the same keepalive
+mechanism through their native hook dialects. The script sends literal prompt
+text and Enter as separate tmux operations: Codex can keep the text in its
+composer but drop an Enter sent in the same operation during the turn-complete
+redraw.
+
+Keepalive sustains the loop while the team is active. It does not prevent the
+supervisor's deliberate all-idle sleep: once every agent is parked, the
+supervisor interrupts their waits to stop token use and marks them `sleeping`;
+the next human message nudges them back into `wait`. A Codex pane resting at its
+prompt in that state is healthy, not disconnected.
+
+**Authentication stays global even though runtime config is private.** Claude
+Code keeps its normal home and receives Team config through command-line files,
+so its global credentials/keychain remain available. Kiro authentication is
+stored outside `KIRO_HOME` and likewise remains available when Team points that
+variable at its private agent config. Codex authentication can depend on its
+provider config, a provider `.env`, file login, or the OS keyring, all selected
+through `CODEX_HOME`. Each private Codex home therefore links the system
+`config.toml`, `.env`, and `auth.json` when present (`$CODEX_HOME`, otherwise
+`~/.codex`); Team MCP settings are layered with CLI `-c` overrides instead of
+rewriting that config. Links follow provider/token refreshes without copying
+credential contents into the workspace. Missing files remain a no-op.
 
 ## 5b. Agent liveness, presence & self-heal
 
@@ -297,8 +371,9 @@ sources, plus a tiered overlay that never silently removes a busy agent. The
 display status is a five-rung ladder — **idle → thinking → working →
 hardworking → stalled** (plus terminal `offline`):
 
-1. **Parked in `wait`** → status `idle`; the wait loop calls `store::touch`
-   ~every second, so an `idle` agent is always fresh.
+1. **Parked in `wait`** → status `idle`; the wait loop refreshes `last_seen`
+   about every 15 seconds, so an `idle` agent stays well inside the 90-second
+   freshness window.
 2. **`wait` delivers a message** → status `thinking`: it just received work and a
    quick reply is expected. **`post`** → `working` + `last_seen`.
 3. **Heads-down working** → the agent's **tool hooks** POST `/api/heartbeat`
@@ -331,7 +406,7 @@ Colors run a heat gradient: idle green → thinking blue → working amber →
 hardworking orange (`--status-hot`) → stalled red.
 
 **Self-heal backstop** (`team.rs::reconcile_loop`, `RECOVERY_STALE_MS = 30 min`).
-Because a parked agent touches every second and a working one heartbeats per
+Because a parked agent touches every 15 seconds and a working one heartbeats per
 tool, `last_seen` older than 30 min means genuinely *nothing* — a dead MCP
 socket, a crashed loop, a stop we never caught. For such an agent (window still
 present) the supervisor runs the same `nudge_pane` recovery uses — `Esc` to
@@ -348,12 +423,13 @@ extreme: when **every** non-offline agent has been parked in `wait` (status
 `idle`) for 5 min — the team has nothing to do — the supervisor sends `Escape`
 to each pane, which cancels the in-flight `wait` MCP call. The CLI returns to
 its shell prompt and stops thinking; without sleep the team would re-enter the
-50-second `wait` long-poll forever, burning a fresh LLM turn in every backend
-on each tick. Wake is anchored on bus seq: at sleep we snapshot the latest
-message seq, and any strictly-greater seq on a later tick — typically the
-human resuming the conversation — fires the standard `nudge_pane` (Esc +
-reconnect re-prompt + Enter) at every pane to put them back in `wait`. While
-slept the self-heal backstop is **off**: `last_seen` aging past 90 s into
+240-second coalesced `wait` forever, burning one fresh LLM turn on each
+completion. In a normal idle cycle only one empty call completes; the next is
+cancelled by five-minute sleep. Wake is anchored on bus seq: at sleep we
+snapshot the latest message seq, and any strictly-greater seq on a later tick —
+typically the human resuming the conversation — fires the standard `nudge_pane`
+(Esc + reconnect re-prompt + Enter) at every pane to put them back in `wait`.
+While slept the self-heal backstop is **off**: `last_seen` aging past 90 s into
 `stalled` is *expected* (no live `wait` to refresh it) and must not be treated
 as a wedged-agent signal, otherwise we would oscillate. Latency from a human
 post to the team being live again is bounded by the 3 s reconcile tick.
@@ -385,8 +461,8 @@ and wake keys off bus seq, not `last_seen`).
 `team_backends.py` + `team.yaml`) — the original agora demo path, kept for
 headless use. It has been **removed**: `team.rs` is a faithful in-process Rust
 port that does everything it did and more (multi-room via `x-room`, the
-heartbeat hook, the private per-team home), so the Python copy only drifted out
-of sync and risked misleading the next reader. `team/` now holds only the
+heartbeat hook, the private per-team runtime home), so the Python copy only
+drifted out of sync and risked misleading the next reader. `team/` now holds only the
 artifacts the app compiles in via `include_str!`: `AGENTS.md`, `hooks/`
 (`keepalive.sh`, `heartbeat.sh`), and `templates/`. (The retired scripts live on
 in this repo's gitignored `temp/team-standalone-py/` should anyone want the
@@ -396,10 +472,34 @@ reference.)
 
 A team definition is a **folder** `~/.config/tmux-mobile/teams/<name>/` holding a
 `team.yaml` (the roster + per-agent config) and optionally a `skills/` dir of
-local skills. The built-ins (`default`, `software-dev`, `financial-research`)
-ship the same shape in `team/templates/<name>/team.yaml`, embedded via
-`include_str!` and seeded once into the config dir (user edits never overwritten).
-The folder — not a flat file — is the unit so a team can carry its own assets.
+local skills. Built-ins ship the same shape in
+`team/templates/<name>/team.yaml`, embedded via `include_str!` and seeded once
+into the config dir (user edits never overwritten). The folder — not a flat
+file — is the unit so a team can carry its own assets.
+
+**Mixed engineering roster.** `mixed-engineering` is deliberately a lean fixed
+team rather than another large all-purpose roster:
+
+- **Kiro lead** owns requirements, acceptance criteria, decomposition, and
+  handoffs. This follows Kiro's official
+  [Specs](https://kiro.dev/docs/specs/),
+  [Steering](https://kiro.dev/docs/steering/), and
+  [custom-agent](https://kiro.dev/docs/cli/custom-agents/) model.
+- **Claude architect/reviewer** explores before proposing the design, makes
+  contracts explicit, then independently reviews the resulting diff. Claude
+  Code's official [best practices](https://code.claude.com/docs/en/best-practices)
+  and [subagent guidance](https://code.claude.com/docs/en/sub-agents) emphasize
+  planning, context isolation, verification, and independent review.
+- **Codex builder/verifier** receives a bounded implementation task with exact
+  constraints and done criteria, then implements, tests, and reports command
+  evidence. The current [Codex manual](https://developers.openai.com/codex/codex-manual.md)
+  recommends explicit goals, context, constraints, done criteria, testing, and
+  review, while reserving parallel writes for genuinely independent work.
+
+This roster is fixed because runtime `hire()` currently creates Kiro agents
+only; relying on dynamic hiring would silently lose the requested backend mix.
+All three model fields stay blank so each CLI uses its configured system
+default. Their global authentication is inherited as described in §5.
 
 **Why a platform schema, adapted down.** We define ONE schema (`team.yaml`) and
 translate it to each backend's dialect in `team.rs`, rather than exposing kiro/
@@ -408,12 +508,14 @@ apply to EVERY agent — `env`, `mcp`, `skills`, and `prompt` — and each agent
 `name`/`backend`/`role`/`goal`/`model`/`manage` plus its own `env`/`mcp`/`skills`.
 At seed time `seed_template` folds the team-wide config into each agent's spec:
 env merges (agent overrides), and team `mcp`/`skills` are prepended so a per-agent
-entry wins on a same-named MCP server (`merge_env` / `merge_list`). Team `prompt`
-is appended to the brief in `prepare_home` (global system prompt → AGENTS.md →
-team prompt), so it reaches every agent like a team-specific AGENTS.md. Putting a
-shared tool (e.g. context7) at the team level means writing it once instead of on
-every role. The full schema is documented at the top of `default/team.yaml`, and
-the editor's per-template "Team-wide" section edits env/mcp/skills/prompt.
+entry wins on a same-named MCP server (`merge_env` / `merge_list`). Team
+`prompt` is passed to `build_agent_prompt` and reaches every agent through its
+inline launch prompt. The separately editable global `system_prompt.md` is not
+yet connected to this launch path; that requirement remains tracked in
+`docs/unresolved.md`. Putting a shared tool (e.g. context7) at the team level
+means writing it once instead of on every role. The full schema is documented
+at the top of `default/team.yaml`, and the editor's per-template "Team-wide"
+section edits env/mcp/skills/prompt.
 
 - **env** — optional; default is none. Team-wide `env` is the base, per-agent
   `env` overrides it (`merge_env`). It's set on the agent's process at launch, so
@@ -422,7 +524,8 @@ the editor's per-template "Team-wide" section edits env/mcp/skills/prompt.
 - **mcp** — extra MCP servers merged into the agent's config alongside the always-
   present `team` server. Remote (`url`+`headers`) or local (`command`+`args`+`env`).
   Adapted per backend: `kiro_mcp_value` (kiro `{url,headers}` / `{command,args,env}`),
-  `claude_mcp_value` (remote tagged `type:"http"`), `codex_mcp_toml` (`[mcp_servers.<name>]`).
+  `claude_mcp_value` (remote tagged `type:"http"`), `codex_mcp_overrides`
+  (launch-time `-c mcp_servers.<name>...` values).
 - **skills** — our own skill = a dir with a `SKILL.md` (YAML frontmatter
   name/description). A skill ref is either a **local path** (relative to the team
   folder) or a **GitHub URL**. `resolve_skills` turns each into a local dir:
@@ -477,9 +580,12 @@ hidden.
 - **Roster status colors**: idle / thinking / working / **hardworking** (orange)
   / **stalled** (red) — see §5b — plus human. There is still no "owes a reply" /
   deadlock indicator (the data is in `/api/quiescence`).
-- **Liveness for codex** relies on the 30-min self-heal backstop (no per-tool
-  hook in codex config); a pane-output probe would tighten this. See §5b.
-- **Backends not all verified locally**: kiro + claude verified upstream; codex
-  needs `codex login`.
+- **Liveness for Codex** uses the generated Stop keepalive plus the same 30-min
+  self-heal backstop as other backends. Codex does not currently emit the
+  per-tool heartbeat used by Kiro and Claude, so a pane-output probe could make
+  long working turns more precise. See §5b.
+- **Backend verification**: the mixed Kiro / Claude / Codex roster and Codex
+  wait recovery have been exercised locally. Actual provider availability still
+  depends on each system CLI's global authentication.
 - **History window**: the tab loads `team_history(200)`; the full log lives in
-  SQLite.
+  SQLite and is mirrored to `<workspace>/.tmm/team-history.jsonl`.

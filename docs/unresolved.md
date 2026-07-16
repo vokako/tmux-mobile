@@ -38,6 +38,15 @@
   frame). No visual "offline/failed" treatment. Fix: badge offline cells, or
   drop disabled employees from the grid.
 
+### Missing agent window is skipped while presence is still online
+- **Priority**: Medium · **Area**: Team supervisor
+- The reconcile loop records an employee as launched when its persisted roster
+  presence is still non-offline, even if no tmux window exists. If a window is
+  killed shortly before server recovery, the stale `idle` row can therefore
+  suppress relaunch. The loop does not reconsider that in-memory entry. Fix:
+  require a matching live window before adopting an online employee, or retain
+  a retryable state until either the pane appears or presence expires.
+
 ### Manager hire() launches on a hardcoded backend, no model/x-room nuance
 - **Priority**: Low · **Area**: Team / agora hire + supervisor
 - `agora::bus::hire` seeds an employee with `backend` absent; our supervisor
@@ -45,11 +54,18 @@
   claude/codex, and the hired spec has no `model`. Acceptable for now; revisit
   if runtime hiring is used heavily.
 
-### System prompt / template edits don't affect already-running teams
+### Global system prompt is not injected into launched agents
+- **Priority**: Medium · **Area**: Team
+- `<config>/tmux-mobile/system_prompt.md` can be edited and is returned to the
+  Team UI, but `build_agent_prompt` never reads it. The requirement says it must
+  be prepended for every agent. Connect it to the launch path and cover the
+  resulting prompt with a test.
+
+### Template edits don't affect already-running teams
 - **Priority**: Low · **Area**: Team
-- The system prompt + roster are baked into a team's brief/seed at launch.
-  Editing them only affects teams started afterward; running agents must be
-  restarted to pick up changes. By design, but not surfaced to the user.
+- The selected template is folded into employee specs and inline prompts at
+  launch. Editing it only affects teams started afterward; running agents must
+  be restarted to pick up changes. By design, but not surfaced to the user.
 
 ### Stale Chinese default.json on existing installs
 - **Priority**: Low · **Area**: Team / templates

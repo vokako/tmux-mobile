@@ -6,8 +6,8 @@
 //!   whom*. Whether a reply is owed is tracked by the bus as an obligation graph
 //!   ("who owes whom a response"), derived from addressing — not from message types.
 //! - `to` empty = broadcast (everyone reads, nobody is obligated).
-//! - `to` set = directed; the recipients owe the sender a response, unless the
-//!   message itself discharges an existing obligation (see bus.rs).
+//! - `to` set = directed; reply obligations are controlled by the bus. `@all`
+//!   always requires replies, while named mentions may be informational.
 
 use serde::{Deserialize, Serialize};
 

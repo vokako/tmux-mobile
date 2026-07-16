@@ -57,7 +57,7 @@ pub fn router(provider: Arc<dyn crate::bus::BusProvider>) -> Router {
     // `wait`), needing no server→client push. So statelessness costs us nothing
     // and lets any fresh request work with no init — which is what lets a nudged
     // agent reconnect after a restart (see team_bridge::recover_running_teams
-    // and team::nudge_session_agents).
+    // and team::nudge_adopted_agents).
     let mcp_service = StreamableHttpService::new(
         {
             let provider = provider.clone();

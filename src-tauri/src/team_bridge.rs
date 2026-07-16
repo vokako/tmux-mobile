@@ -12,8 +12,11 @@
 use crate::team::{self, TeamConfig};
 use crate::server::TeamBridge;
 use agora::bus::{Bus, BusProvider};
+use agora::envelope::Message;
 use agora::store::SharedConn;
 use std::collections::HashMap;
+use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use tokio::sync::broadcast;
 
@@ -25,6 +28,7 @@ struct Team {
     workspace: String,
     template: String,  // roster template this team was started from
     session: String,   // tmm-team-<room>
+    history_path: Option<PathBuf>,
     started: bool,     // supervisor launched for this room
     pump: tokio::task::JoinHandle<()>, // the Message→JSON re-broadcast task
 }
@@ -66,9 +70,9 @@ impl TeamManager {
         };
         // room→workspace map lives next to the db so a restart knows where each
         // recovered team's agents work.
-        let meta_path = std::path::Path::new(db)
+        let meta_path = Path::new(db)
             .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
+            .unwrap_or_else(|| Path::new("."))
             .join("teams.json");
 
         let me = Arc::new(TeamManager {
@@ -123,13 +127,17 @@ impl TeamManager {
                 t.started = true;
             }
             if let Some(arc) = self.self_ref.get().and_then(|w| w.upgrade()) {
+                // Freeze the pre-recovery windows before the supervisor starts.
+                // A missing agent may launch during the nudge delay; that fresh
+                // CLI must not be interrupted during its first-run setup.
+                let adopted = crate::tmux::list_named_windows(&session);
                 let bridge: Arc<dyn TeamBridge> = arc;
                 team::start(bridge, self.cfg.clone(), room.clone(), workspace, template);
                 // The adopted agents are hung on a `wait` whose connection died
                 // with the old daemon; their MCP clients reconnect once unstuck
                 // but can't unstick themselves. Nudge each window to reconnect
                 // (Esc the dead call + re-prompt). One-shot, off the hot path.
-                team::nudge_session_agents(session.clone());
+                team::nudge_adopted_agents(adopted);
                 println!("🜂 team: recovered running team '{}' (adopting + nudging agents)", room);
             }
         }
@@ -177,21 +185,50 @@ impl TeamManager {
         }
         // All rooms share ONE connection (no per-room write contention).
         let bus = Bus::with_shared(self.conn.clone(), room.to_string());
+        // Subscribe before the snapshot. Messages committed during the snapshot
+        // are queued and then skipped by seq if already included, never missed.
+        let mut rx = bus.subscribe();
+        let history_path = workspace_history_path(workspace);
+        let mut mirrored_seq = history_path
+            .as_deref()
+            .map(|path| write_history_snapshot(&bus, path))
+            .transpose()?
+            .unwrap_or(0);
         // Pump this room's messages into the merged push channel. The handle is
         // stored on the Team so close_team can abort it (otherwise reopening the
         // same room would spawn a second pump → duplicate pushes).
         let pump = {
-            let mut rx = bus.subscribe();
             let tx = self.json_tx.clone();
+            let mirror_bus = bus.clone();
+            let mirror_path = history_path.clone();
             tokio::spawn(async move {
                 loop {
                     match rx.recv().await {
                         Ok(m) => {
+                            if let Some(path) = mirror_path.as_deref() {
+                                if m.seq > mirrored_seq {
+                                    match append_history_message(path, &m) {
+                                        Ok(()) => mirrored_seq = m.seq,
+                                        Err(e) => {
+                                            eprintln!("⚠️  team: history mirror append failed: {}", e);
+                                            if let Ok(seq) = write_history_snapshot(&mirror_bus, path) {
+                                                mirrored_seq = seq;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             if let Ok(s) = serde_json::to_string(&m) {
                                 let _ = tx.send(s);
                             }
                         }
-                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Lagged(_)) => {
+                            if let Some(path) = mirror_path.as_deref() {
+                                if let Ok(seq) = write_history_snapshot(&mirror_bus, path) {
+                                    mirrored_seq = seq;
+                                }
+                            }
+                        }
                         Err(broadcast::error::RecvError::Closed) => return,
                     }
                 }
@@ -211,6 +248,7 @@ impl TeamManager {
                     workspace: workspace.to_string(),
                     template: if template.is_empty() { "default".to_string() } else { template.to_string() },
                     session: format!("{}{}", SESSION_PREFIX, room),
+                    history_path,
                     started: false,
                     pump,
                 },
@@ -325,13 +363,12 @@ impl TeamBridge for TeamManager {
         if already {
             return serde_json::json!({ "started": false, "room": room, "workspace": ws });
         }
-        // Authoritative fresh start: forget any leftover roster/log for this room
-        // so the CHOSEN template — not stale DB rows from a previous team on the
-        // same workspace — defines who comes online. Recovery uses a different
-        // path and never resets, so a backend restart still adopts a live team.
+        // An explicit launch gets a fresh runtime roster while retaining the
+        // room transcript. The chosen template defines who comes online, and
+        // replacement agents can recover prior context from the history mirror.
         if let Some(bus) = self.room_bus(&room) {
-            if let Err(e) = bus.reset_room() {
-                eprintln!("⚠️  team: reset room '{}' failed: {}", room, e);
+            if let Err(e) = bus.reset_runtime() {
+                eprintln!("⚠️  team: reset runtime for room '{}' failed: {}", room, e);
             }
         }
         self.save_meta();
@@ -356,13 +393,15 @@ impl TeamBridge for TeamManager {
         match removed {
             Some(t) => {
                 t.pump.abort(); // stop the re-broadcast task (no leak / no dup on reopen)
-                // Kill the tmux session (best-effort), then forget the team's
-                // persisted state so a future start on the same workspace begins
-                // clean. (A backend restart resumes a LIVE team via recovery,
-                // which never goes through close — so this only forgets teams the
-                // operator explicitly closed.)
+                if let Some(path) = t.history_path.as_deref() {
+                    if let Err(e) = write_history_snapshot(&t.bus, path) {
+                        eprintln!("⚠️  team: final history mirror failed: {}", e);
+                    }
+                }
+                // Kill the tmux session and clear only runtime state. The SQLite
+                // log and workspace transcript survive for a later relaunch.
                 let _ = crate::tmux::kill_session(&t.session);
-                let _ = t.bus.reset_room();
+                let _ = t.bus.reset_runtime();
                 self.save_meta(); // drop it from the recovery map too
                 true
             }
@@ -418,6 +457,54 @@ impl TeamBridge for TeamManager {
     fn subscribe(&self) -> broadcast::Receiver<String> {
         self.json_tx.subscribe()
     }
+}
+
+fn workspace_history_path(workspace: &str) -> Option<PathBuf> {
+    let workspace = Path::new(workspace.trim());
+    if workspace.as_os_str().is_empty() || !workspace.is_dir() {
+        return None;
+    }
+    Some(workspace.join(".tmm").join("team-history.jsonl"))
+}
+
+fn write_history_snapshot(bus: &Bus, path: &Path) -> Result<i64, String> {
+    let messages = bus.history(i64::MAX).map_err(|e| e.to_string())?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("history path has no parent: {}", path.display()))?;
+    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let gitignore = parent.join(".gitignore");
+    if !gitignore.exists() {
+        std::fs::write(&gitignore, "*\n").map_err(|e| e.to_string())?;
+    }
+    let tmp = path.with_extension("jsonl.tmp");
+    {
+        let file = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
+        let mut writer = BufWriter::new(file);
+        for message in &messages {
+            serde_json::to_writer(&mut writer, message).map_err(|e| e.to_string())?;
+            writer.write_all(b"\n").map_err(|e| e.to_string())?;
+        }
+        writer.flush().map_err(|e| e.to_string())?;
+    }
+    #[cfg(windows)]
+    if path.exists() {
+        std::fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
+    std::fs::rename(&tmp, path).map_err(|e| e.to_string())?;
+    Ok(messages.last().map(|m| m.seq).unwrap_or(0))
+}
+
+fn append_history_message(path: &Path, message: &Message) -> Result<(), String> {
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| e.to_string())?;
+    let mut writer = BufWriter::new(file);
+    serde_json::to_writer(&mut writer, message).map_err(|e| e.to_string())?;
+    writer.write_all(b"\n").map_err(|e| e.to_string())?;
+    writer.flush().map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -482,20 +569,81 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reset_room_forgets_roster_and_log() {
-        // The fix for stale-state shadowing: a (re)start/close resets the room so
-        // a previously-seeded roster + chat log can't carry over.
+    async fn reset_runtime_forgets_roster_but_keeps_log() {
         let m = manager();
         m.ensure_room("alpha", "/tmp/alpha", "default").unwrap();
         let bus = m.room_bus("alpha").unwrap();
-        bus.seed_employee("manager", &serde_json::json!({ "role": "manager" })).unwrap();
+        bus.seed_employee("manager", &serde_json::json!({ "role": "manager" }))
+            .unwrap();
         m.post("alpha", "human", "hello", false).unwrap();
-        assert!(!m.employees("alpha")["employees"].as_array().unwrap().is_empty());
-        assert!(!m.history("alpha", 100)["messages"].as_array().unwrap().is_empty());
+        assert!(!m.employees("alpha")["employees"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert!(!m.history("alpha", 100)["messages"]
+            .as_array()
+            .unwrap()
+            .is_empty());
 
-        bus.reset_room().unwrap();
-        assert!(m.employees("alpha")["employees"].as_array().unwrap().is_empty(), "employees cleared");
-        assert!(m.history("alpha", 100)["messages"].as_array().unwrap().is_empty(), "log cleared");
+        bus.reset_runtime().unwrap();
+        assert!(
+            m.employees("alpha")["employees"]
+                .as_array()
+                .unwrap()
+                .is_empty(),
+            "employees cleared"
+        );
+        assert_eq!(
+            m.history("alpha", 100)["messages"][0]["body"],
+            "hello",
+            "log retained"
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_history_mirrors_live_messages_and_survives_close() {
+        let m = manager();
+        let workspace = m.meta_path.parent().unwrap().join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let workspace = workspace.to_string_lossy().into_owned();
+        let history_path = Path::new(&workspace).join(".tmm/team-history.jsonl");
+        let gitignore_path = Path::new(&workspace).join(".tmm/.gitignore");
+
+        m.ensure_room("alpha", &workspace, "default").unwrap();
+        m.post("alpha", "human", "first decision", false).unwrap();
+        m.post("alpha", "worker", "implemented it", false).unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let read_messages = || {
+            std::fs::read_to_string(&history_path)
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str::<Message>(line).unwrap())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            read_messages()
+                .iter()
+                .map(|m| m.body.as_str())
+                .collect::<Vec<_>>(),
+            ["first decision", "implemented it"]
+        );
+        assert_eq!(std::fs::read_to_string(gitignore_path).unwrap(), "*\n");
+
+        assert!(m.close_team("alpha"));
+        m.ensure_room("alpha", &workspace, "default").unwrap();
+        assert_eq!(
+            m.history("alpha", 100)["messages"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            read_messages().len(),
+            2,
+            "snapshot rebuild must not duplicate messages"
+        );
     }
 
     #[tokio::test]

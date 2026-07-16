@@ -1,11 +1,11 @@
 //! The bus: coordination logic over the store.
 //!
 //! The agent's whole mental model is two actions: `post(to, body)` and `wait`.
-//! Discipline is enforced by an obligation graph maintained here. When A posts to a
-//! recipient B:
+//! Discipline is enforced by an obligation graph maintained here. A reply-required
+//! named mention, or any `@all`, creates an obligation:
 //!
 //! - if A already owes B a response, the post discharges it (A is replying);
-//! - otherwise, B now owes A a response (A is asking).
+//! - otherwise, B owes A when the message requires a reply.
 //!
 //! Broadcasts (no recipient) create no obligations. Only registered agents can owe
 //! (the human operator is never obligated). `wait` is refused while you owe anyone.
@@ -19,17 +19,21 @@ use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
 /// Liveness ladder. `last_seen` is refreshed by every bus call (`post`, the
-/// `wait` loop touches it ~every second while parked) AND by the agent's tool
-/// hooks (`Bus::heartbeat` while it is heads-down working). The display status
-/// then ages along: fresh → its real status (idle/thinking/working); silent past
+/// `wait` loop updates it about every 15 seconds while parked) AND by the
+/// agent's tool hooks (`Bus::heartbeat` while it is heads-down working). The
+/// display status then ages along: fresh → its real status
+/// (idle/thinking/working); silent past
 /// `STALE_TTL_MS` → `hardworking` (deep, head-down work, no recent heartbeat);
 /// silent past `STALLED_TTL_MS` → `stalled` (needs a restart — the supervisor
 /// self-heals it). `STALE_TTL_MS` sits above a typical inter-tool/thinking gap so
 /// a heartbeating agent never flaps between working and hardworking.
 const STALE_TTL_MS: i64 = 90_000;
 const STALLED_TTL_MS: i64 = 1_800_000; // 30 min: → "stalled" (mirrors the supervisor self-heal)
-const MAX_WAIT_MS: u64 = 50_000;
-const POLL_INTERVAL_MS: u64 = 1_000;
+pub const MAX_WAIT_SLICE_MS: u64 = 50_000;
+/// Broadcast wakes message delivery immediately. This interval only refreshes
+/// presence and provides a missed-notification safety poll, so 15 seconds stays
+/// well below the 90-second stale threshold without hammering SQLite while idle.
+const POLL_INTERVAL_MS: u64 = 15_000;
 /// Push throttling: messages that aren't addressed to you and aren't from the
 /// human (i.e. other agents' chatter) are HELD rather than waking you. Hold them
 /// for at most this long before flushing anyway, so an agent is never starved of
@@ -180,14 +184,22 @@ impl Bus {
         Ok(out)
     }
 
-    /// Post a message. Recipients come from `@name` mentions in the body. If
-    /// `requires_reply` is set, each mentioned (registered) agent owes the sender a
-    /// reply — and `wait` will refuse to let them idle until they answer. A message that
-    /// mentions someone the sender owes always discharges that debt (it's a reply).
+    /// Post a message. Recipients come from `@name` mentions in the body. Named
+    /// mentions create obligations when `requires_reply` is set; `@all` always
+    /// obligates every other registered agent. `wait` refuses to idle until
+    /// obligations are answered. Mentioning someone the sender owes always
+    /// discharges that debt (it's a reply).
     pub fn post(&self, from: &str, body: &str, requires_reply: bool) -> Result<Message> {
         let msg = {
             let conn = self.lock();
             let mentions = mentioned_names(&conn, &self.room, body)?; // @name in body (+ "all")
+            // @all is the bus-level "everyone must answer" primitive. Unlike a
+            // named mention, callers cannot downgrade it to informational by
+            // forgetting (or explicitly clearing) requires_reply.
+            let requires_reply = requires_reply
+                || mentions
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case("all"));
             let recipients = self.resolve_recipients(&conn, from, &mentions)?;
             let msg = store::append(&conn, &self.room, from, &mentions, Kind::Msg, body)?;
 
@@ -230,7 +242,9 @@ impl Bus {
     /// idle while you still owe someone a reply.
     pub async fn wait(&self, agent: &str, timeout: Option<Duration>) -> Result<WaitOutcome> {
         let mut rx = self.tx.subscribe();
-        let budget = timeout.unwrap_or(Duration::from_millis(MAX_WAIT_MS)).min(Duration::from_millis(MAX_WAIT_MS));
+        let budget = timeout
+            .unwrap_or(Duration::from_millis(MAX_WAIT_SLICE_MS))
+            .min(Duration::from_millis(MAX_WAIT_SLICE_MS));
         let deadline = Instant::now() + budget;
 
         loop {
@@ -244,7 +258,6 @@ impl Bus {
             //    past MAX_PUSH_WINDOW_MS, so nothing is starved forever.
             let (delivered, roster, report_cursor) = {
                 let conn = self.lock();
-                store::touch(&conn, &self.room, agent).ok();
                 let cursor = store::get_agent(&conn, &self.room, agent)?.map(|a| a.cursor).unwrap_or(0);
                 let batch = store::messages_after(&conn, &self.room, cursor, 500)?;
                 let max_seq = batch.last().map(|m| m.seq).unwrap_or(cursor);
@@ -286,6 +299,7 @@ impl Bus {
                 let conn = self.lock();
                 let owed = store::owed_with_msg(&conn, &self.room, agent)?;
                 if !owed.is_empty() {
+                    store::touch(&conn, &self.room, agent)?;
                     let you_owe: Vec<String> = owed.iter().map(|(c, _)| c.clone()).collect();
                     let mut pending = Vec::new();
                     for (_creditor, msg_id) in &owed {
@@ -413,9 +427,15 @@ impl Bus {
         store::list_employees(&conn, &self.room)
     }
 
-    /// Forget all persisted state for this room (messages, roster, obligations,
-    /// employees). For an explicit (re)start or close of a team — NOT recovery,
-    /// which adopts a still-running team and its log as-is.
+    /// Clear roster, obligations, and employees while retaining chat history.
+    /// Used when a team is explicitly closed or relaunched with a fresh roster.
+    pub fn reset_runtime(&self) -> Result<()> {
+        let conn = self.lock();
+        store::clear_runtime_state(&conn, &self.room)
+    }
+
+    /// Forget all persisted state for this room, including chat history.
+    /// Normal Team lifecycle operations use [`Self::reset_runtime`] instead.
     pub fn reset_room(&self) -> Result<()> {
         let conn = self.lock();
         store::clear_room(&conn, &self.room)
@@ -598,5 +618,33 @@ mod tests {
         let by = |n: &str| out.iter().find(|a| a.name == n).unwrap().status.clone();
         assert_eq!(by("napper"), "sleeping");
         assert_eq!(by("dozer"), "sleeping");
+    }
+
+    #[test]
+    fn all_mention_obligates_every_other_agent_even_without_reply_flag() {
+        let bus = Bus::new(crate::store::open_in_memory().unwrap(), "main");
+        bus.join("lead", None).unwrap();
+        bus.join("architect", None).unwrap();
+        bus.join("builder", None).unwrap();
+
+        let msg = bus.post("lead", "@all report your role", false).unwrap();
+
+        assert_eq!(msg.to, vec!["all"]);
+        let conn = bus.lock();
+        assert_eq!(crate::store::owes(&conn, "main", "architect").unwrap(), vec!["lead"]);
+        assert_eq!(crate::store::owes(&conn, "main", "builder").unwrap(), vec!["lead"]);
+        assert!(crate::store::owes(&conn, "main", "lead").unwrap().is_empty());
+    }
+
+    #[test]
+    fn plain_broadcast_does_not_create_reply_obligations() {
+        let bus = Bus::new(crate::store::open_in_memory().unwrap(), "main");
+        bus.join("lead", None).unwrap();
+        bus.join("builder", None).unwrap();
+
+        bus.post("lead", "everyone report your role", true).unwrap();
+
+        let conn = bus.lock();
+        assert!(crate::store::owes(&conn, "main", "builder").unwrap().is_empty());
     }
 }

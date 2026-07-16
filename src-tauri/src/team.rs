@@ -22,12 +22,12 @@ use crate::server::TeamBridge;
 use crate::tmux;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-// Shared team brief + keepalive hook, embedded so a packaged .app has no
-// external file dependency. Written to the team work dir at startup.
+// Shared hooks, embedded so a packaged .app has no external file dependency.
+// Written to the self-gitignored Team runtime directory at startup.
 const KEEPALIVE_SH: &str = include_str!("../../team/hooks/keepalive.sh");
 const HEARTBEAT_SH: &str = include_str!("../../team/hooks/heartbeat.sh");
 
@@ -84,6 +84,11 @@ pub const CONTENT_STUDIO_TEMPLATE: &str = include_str!("../../team/templates/con
 /// answers a question from data with reproducible work and honest caveats.
 pub const DATA_ANALYSIS_TEMPLATE: &str = include_str!("../../team/templates/data-analysis/team.yaml");
 
+/// A lean mixed-backend engineering roster: Kiro coordinates requirements and
+/// delivery, Claude designs and reviews, and Codex implements and verifies.
+pub const MIXED_ENGINEERING_TEMPLATE: &str =
+    include_str!("../../team/templates/mixed-engineering/team.yaml");
+
 /// Built-in templates seeded into teams/ on first run: (file stem, contents).
 const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
     ("default", BUILTIN_TEMPLATE),
@@ -92,6 +97,7 @@ const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
     ("deep-research", DEEP_RESEARCH_TEMPLATE),
     ("content-studio", CONTENT_STUDIO_TEMPLATE),
     ("data-analysis", DATA_ANALYSIS_TEMPLATE),
+    ("mixed-engineering", MIXED_ENGINEERING_TEMPLATE),
 ];
 
 /// The teams/ template directory.
@@ -302,16 +308,16 @@ pub struct TeamConfig {
     pub url: String,
     /// Default model for kiro-backed agents.
     pub model: String,
-    /// Shared collaboration rules prepended to every agent's brief.
+    /// Shared collaboration rules prepended to every agent's inline prompt.
     pub team_rules: String,
     /// The kick message that connects an agent to the bus loop.
     pub team_kick: String,
 }
 
-/// Start the team for `workspace`: seed the default roster and spawn the
+/// Start the team for `workspace`: seed the selected roster and spawn the
 /// reconcile loop, launching agents into a per-workspace tmux session. The
-/// agents' working directory is `workspace` (the user's project); our config +
-/// brief live in a private per-team home, never written into the project.
+/// agents' working directory is `workspace` (the user's project); runtime hooks
+/// live under its self-gitignored `.tmm`, and prompts are passed inline.
 /// Best-effort — any failure is logged, never fatal.
 pub fn start(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: String, workspace: String, template: String) {
     tokio::spawn(async move {
@@ -489,7 +495,7 @@ fn merge_env(team_env: &Value, agent_env: Option<&Value>) -> Value {
 /// second. The previous in-memory-only tracking re-launched every agent on
 /// restart, piling up duplicate manager/worker/reviewer windows. Reconnecting
 /// adopted agents after a *server* restart is handled separately, once, by
-/// `nudge_session_agents` (called from recovery) — not here, because the loop's
+/// `nudge_adopted_agents` (called from recovery) — not here, because the loop's
 /// presence check can't tell a healthy agent from one hung on a dead socket.
 async fn reconcile_loop(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: String, session: String, paths: Paths) {
     const MAX_LAUNCH_FAILURES: u32 = 3; // give up relaunching an agent after this
@@ -613,7 +619,7 @@ async fn reconcile_loop(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: Stri
 
         // ── Self-heal backstop ────────────────────────────────────────────
         // An agent we have heard NOTHING from for RECOVERY_STALE_MS — no `wait`
-        // (a parked agent touches ~every second), no per-tool heartbeat — is
+        // (a parked agent touches about every 15 seconds), no per-tool heartbeat — is
         // wedged: a dead MCP socket, a crashed loop, or a stop we never caught.
         // Nudge its window once (Esc to cancel the stuck call + a re-prompt to
         // resume `wait`), then cool down for the same window before trying
@@ -838,12 +844,12 @@ fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &str, session:
 ///
 /// Runs in a spawned task: it sleeps between keystrokes (TUI needs a beat to
 /// settle) and we must not block the recovery path.
-pub fn nudge_session_agents(session: String) {
+pub fn nudge_adopted_agents(windows: Vec<(String, String)>) {
     tokio::spawn(async move {
         // Give a freshly-restarted daemon a moment to be listening before we
         // ask agents to reconnect.
         tokio::time::sleep(Duration::from_secs(2)).await;
-        for (name, pane) in tmux::list_named_windows(&session) {
+        for (name, pane) in windows {
             if name == "zsh" {
                 continue; // the session's initial shell, not an agent
             }
@@ -878,6 +884,14 @@ enum PostKey {
 /// scripted keys). Aliased to keep the per-backend signatures readable.
 type Prepared = (Vec<(String, String)>, String, Vec<PostKey>);
 
+const TEAM_ADDRESSING_CONTRACT: &str = "\
+## Dispatch
+- Reply when addressed by `@name` or `@all`; `@all` requires each agent's own reply.
+- Unaddressed messages are context. In manager-led teams only the lead responds;
+  when the human asks everyone, the lead re-posts the request with `@all`.
+- The durable team transcript is `.tmm/team-history.jsonl`. When joining a resumed
+  workspace, read it before acting so prior decisions and handoffs are restored.";
+
 /// Build the complete agent system prompt with XML-structured layers.
 /// - `<team-system-prompt>`: global rules (from config) + team-specific prompt
 /// - `<role-system-prompt>`: this agent's role + goal
@@ -886,6 +900,10 @@ fn build_agent_prompt(role: &str, goal: &str, team_prompt: &str, cfg: &TeamConfi
     if !cfg.team_rules.trim().is_empty() {
         team_section.push_str(cfg.team_rules.trim());
     }
+    if !team_section.is_empty() {
+        team_section.push_str("\n\n");
+    }
+    team_section.push_str(TEAM_ADDRESSING_CONTRACT);
     if !team_prompt.trim().is_empty() {
         if !team_section.is_empty() { team_section.push_str("\n\n---\n\n"); }
         team_section.push_str(team_prompt.trim());
@@ -964,31 +982,74 @@ fn claude_mcp_value(m: &McpDef) -> Value {
     }
 }
 
-/// codex `[mcp_servers.<name>]` TOML block for an extra server.
-fn codex_mcp_toml(m: &McpDef) -> String {
-    let mut s = format!("\n[mcp_servers.{}]\n", m.name);
+fn codex_key_segment(value: &str) -> String {
+    if !value.is_empty()
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+    {
+        value.to_string()
+    } else {
+        serde_json::to_string(value).unwrap()
+    }
+}
+
+fn codex_config_override(key: &str, value: Value) -> String {
+    let assignment = format!("{}={}", key, serde_json::to_string(&value).unwrap());
+    format!("-c {}", shell_quote(&assignment))
+}
+
+/// Codex CLI overrides for one extra MCP server. Team keeps the system
+/// config.toml intact and layers room-specific MCP settings at launch.
+fn codex_mcp_overrides(m: &McpDef) -> Vec<String> {
+    let name = codex_key_segment(&m.name);
+    let prefix = format!("mcp_servers.{}", name);
+    let mut args = Vec::new();
     if let Some(url) = &m.url {
-        s += &format!("url = \"{}\"\nenabled = true\nexperimental_use_rmcp_client = true\n", url);
-        if !m.headers.is_empty() {
-            s += &format!("\n[mcp_servers.{}.http_headers]\n", m.name);
-            for (k, v) in &m.headers {
-                s += &format!("\"{}\" = \"{}\"\n", k, v);
-            }
+        args.push(codex_config_override(&format!("{}.url", prefix), Value::String(url.clone())));
+        args.push(codex_config_override(&format!("{}.enabled", prefix), Value::Bool(true)));
+        args.push(codex_config_override(
+            &format!("{}.experimental_use_rmcp_client", prefix),
+            Value::Bool(true),
+        ));
+        for (key, value) in &m.headers {
+            args.push(codex_config_override(
+                &format!("{}.http_headers.{}", prefix, codex_key_segment(key)),
+                Value::String(value.clone()),
+            ));
         }
     } else if let Some(cmd) = &m.command {
-        s += &format!("command = \"{}\"\n", cmd);
+        args.push(codex_config_override(
+            &format!("{}.command", prefix),
+            Value::String(cmd.clone()),
+        ));
         if !m.args.is_empty() {
-            let args: Vec<String> = m.args.iter().map(|a| format!("\"{}\"", a)).collect();
-            s += &format!("args = [{}]\n", args.join(", "));
+            args.push(codex_config_override(
+                &format!("{}.args", prefix),
+                serde_json::to_value(&m.args).unwrap(),
+            ));
         }
-        if !m.env.is_empty() {
-            s += &format!("\n[mcp_servers.{}.env]\n", m.name);
-            for (k, v) in &m.env {
-                s += &format!("\"{}\" = \"{}\"\n", k, v);
-            }
+        for (key, value) in &m.env {
+            args.push(codex_config_override(
+                &format!("{}.env.{}", prefix, codex_key_segment(key)),
+                Value::String(value.clone()),
+            ));
         }
     }
-    s
+    args
+}
+
+fn codex_team_mcp_overrides(m: &McpDef) -> Vec<String> {
+    let mut args = codex_mcp_overrides(m);
+    args.push(codex_config_override(
+        "mcp_servers.team.tool_timeout_sec",
+        Value::from(team_mcp_tool_timeout_ms() / 1000),
+    ));
+    args
+}
+
+fn team_mcp_tool_timeout_ms() -> u64 {
+    agora::mcp::MCP_WAIT_MAX_MS + 30_000
 }
 
 /// A one-line skills index appended to the kick for backends without a native
@@ -1006,6 +1067,91 @@ fn skills_index_text(skills: &[ResolvedSkill]) -> String {
 
 fn skills_cache_dir() -> PathBuf {
     crate::config::config_dir().join("skills-cache")
+}
+
+fn system_codex_home() -> PathBuf {
+    std::env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".codex")))
+        .unwrap_or_else(|| PathBuf::from(".codex"))
+}
+
+/// Keep Team runtime state isolated while sharing the system Codex provider and
+/// login. Links follow config/token refreshes without copying credentials.
+fn inherit_codex_system_files(home: &Path) -> Result<(), String> {
+    inherit_codex_system_files_from(home, &system_codex_home())
+}
+
+fn link_codex_system_file(
+    home: &Path,
+    system_home: &Path,
+    filename: &str,
+    replace_team_owned: bool,
+) -> Result<(), String> {
+    let source = system_home.join(filename);
+    if !source.is_file() {
+        if replace_team_owned {
+            let target = home.join(filename);
+            match std::fs::symlink_metadata(&target) {
+                Ok(metadata) if metadata.file_type().is_file() || metadata.file_type().is_symlink() => {
+                    std::fs::remove_file(target).map_err(|e| e.to_string())?;
+                }
+                Ok(_) => return Err(format!("refusing to replace Codex path: {}", target.display())),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.to_string()),
+            }
+        }
+        return Ok(());
+    }
+    let source = std::fs::canonicalize(source).map_err(|e| e.to_string())?;
+
+    std::fs::create_dir_all(home).map_err(|e| e.to_string())?;
+    let target = home.join(filename);
+    match std::fs::symlink_metadata(&target) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink()
+                && std::fs::read_link(&target).is_ok_and(|path| path == source)
+            {
+                return Ok(());
+            }
+            if replace_team_owned && (metadata.file_type().is_file() || metadata.file_type().is_symlink()) {
+                std::fs::remove_file(&target).map_err(|e| e.to_string())?;
+            } else {
+                return Err(format!(
+                    "refusing to replace existing Codex path: {}",
+                    target.display()
+                ));
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
+    }
+
+    symlink_file(&source, &target).map_err(|e| {
+        format!(
+            "failed to inherit Codex system file from {}: {}",
+            source.display(),
+            e
+        )
+    })
+}
+
+fn inherit_codex_system_files_from(home: &Path, system_home: &Path) -> Result<(), String> {
+    // config.toml in the private home was Team-generated before MCP settings
+    // moved to CLI overrides, so it is the one path Team may replace.
+    link_codex_system_file(home, system_home, "config.toml", true)?;
+    link_codex_system_file(home, system_home, ".env", false)?;
+    link_codex_system_file(home, system_home, "auth.json", false)
+}
+
+#[cfg(unix)]
+fn symlink_file(source: &Path, target: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(source, target)
+}
+
+#[cfg(windows)]
+fn symlink_file(source: &Path, target: &Path) -> std::io::Result<()> {
+    std::os::windows::fs::symlink_file(source, target)
 }
 
 /// Resolve each skill reference to a local directory. A reference is either a
@@ -1267,6 +1413,7 @@ fn prepare_claude(
     let post = vec![PostKey::Enter, PostKey::Text(first_msg), PostKey::Enter];
     let mut env = hb_env(name, room, cfg);
     env.extend(extras.env.iter().cloned());
+    env.push(("MCP_TOOL_TIMEOUT".to_string(), team_mcp_tool_timeout_ms().to_string()));
     Ok((env, cmd, post))
 }
 
@@ -1277,34 +1424,57 @@ fn prepare_codex(
 ) -> Result<Prepared, String> {
     let home = paths.codex.join(name);
     std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
+    inherit_codex_system_files(&home)?;
     let notifications = crate::agent_notifications::AgentNotificationHub::load();
     notifications.ensure_helper()?;
     let notify = notifications.helper_command("codex");
-    let mut config = format!(
-        "[mcp_servers.team]\nurl = \"{}/mcp\"\nenabled = true\nexperimental_use_rmcp_client = true\n\n[mcp_servers.team.http_headers]\n\"x-agent\" = \"{}\"\n\"x-room\" = \"{}\"\n",
-        cfg.url, name, room
-    );
+    let team_mcp = McpDef {
+        name: "team".to_string(),
+        url: Some(format!("{}/mcp", cfg.url)),
+        headers: [
+            ("x-agent".to_string(), name.to_string()),
+            ("x-room".to_string(), room.to_string()),
+        ]
+        .into_iter()
+        .collect(),
+        ..McpDef::default()
+    };
+    let mut config_args = codex_team_mcp_overrides(&team_mcp);
     for m in &extras.mcp {
         if !m.name.is_empty() {
-            config.push_str(&codex_mcp_toml(m));
+            config_args.extend(codex_mcp_overrides(m));
         }
     }
-    std::fs::write(home.join("config.toml"), config).map_err(|e| e.to_string())?;
     std::fs::write(
         home.join("hooks.json"),
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "hooks": {
-                "PermissionRequest": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
-                "Stop": [ { "hooks": [ { "type": "command", "command": notify } ] } ]
-            }
-        })).unwrap(),
+        serde_json::to_vec_pretty(&codex_hooks_value(&paths.keepalive, &notify)).unwrap(),
     ).map_err(|e| e.to_string())?;
     let mut env = vec![("CODEX_HOME".to_string(), home.to_string_lossy().to_string())];
     env.extend(hb_env(name, room, cfg));
     env.extend(extras.env.iter().cloned());
     let first_msg = format!("{}\n\n{}{}", build_agent_prompt(role, goal, team_prompt, cfg), cfg.team_kick, skills_index_text(&extras.skills));
-    let cmd = format!("codex --dangerously-bypass-approvals-and-sandbox {}", shell_quote(&first_msg));
-    Ok((env, cmd, vec![]))
+    let cmd = format!(
+        "codex {} --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust {}",
+        config_args.join(" "),
+        shell_quote(&first_msg)
+    );
+    // Codex asks whether to trust a workspace on first use. The workspace was
+    // explicitly selected by the Team operator, so accept that one prompt.
+    Ok((env, cmd, vec![PostKey::Enter]))
+}
+
+fn codex_hooks_value(keepalive: &Path, notify: &str) -> Value {
+    serde_json::json!({
+        "hooks": {
+            "PermissionRequest": [ { "hooks": [
+                { "type": "command", "command": notify }
+            ] } ],
+            "Stop": [ { "hooks": [
+                { "type": "command", "command": keepalive.to_string_lossy() },
+                { "type": "command", "command": notify }
+            ] } ]
+        }
+    })
 }
 
 /// Single-quote a string for the shell (the agent launch line is sent to a
@@ -1473,6 +1643,75 @@ mod tests {
     }
 
     #[test]
+    fn codex_system_files_link_config_env_and_auth_idempotently() {
+        let root = std::env::temp_dir().join(format!("teamtest-codex-system-{}", uuid::Uuid::new_v4()));
+        let system_home = root.join("system");
+        let agent_home = root.join("agent");
+        std::fs::create_dir_all(&system_home).unwrap();
+        std::fs::write(system_home.join("config.toml"), "model_provider = \"custom\"").unwrap();
+        std::fs::write(system_home.join(".env"), "PROVIDER_TOKEN=secret").unwrap();
+        std::fs::write(system_home.join("auth.json"), "{}").unwrap();
+
+        inherit_codex_system_files_from(&agent_home, &system_home).unwrap();
+        inherit_codex_system_files_from(&agent_home, &system_home).unwrap();
+
+        for filename in ["config.toml", ".env", "auth.json"] {
+            let target = agent_home.join(filename);
+            assert!(std::fs::symlink_metadata(&target)
+                .unwrap()
+                .file_type()
+                .is_symlink());
+        }
+        assert_eq!(
+            std::fs::read_to_string(agent_home.join("config.toml")).unwrap(),
+            "model_provider = \"custom\""
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn codex_system_files_missing_source_removes_only_team_config() {
+        let root = std::env::temp_dir().join(format!("teamtest-codex-no-auth-{}", uuid::Uuid::new_v4()));
+        let agent_home = root.join("agent");
+        std::fs::create_dir_all(&agent_home).unwrap();
+        std::fs::write(agent_home.join("config.toml"), "[mcp_servers.team]").unwrap();
+
+        inherit_codex_system_files_from(&agent_home, &root.join("system")).unwrap();
+
+        assert!(!agent_home.join("config.toml").exists());
+        assert!(!agent_home.join(".env").exists());
+        assert!(!agent_home.join("auth.json").exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn codex_auth_does_not_replace_an_existing_private_file() {
+        let root = std::env::temp_dir().join(format!("teamtest-codex-existing-auth-{}", uuid::Uuid::new_v4()));
+        let system_home = root.join("system");
+        let agent_home = root.join("agent");
+        std::fs::create_dir_all(&system_home).unwrap();
+        std::fs::create_dir_all(&agent_home).unwrap();
+        std::fs::write(system_home.join("auth.json"), "system").unwrap();
+        std::fs::write(agent_home.join("auth.json"), "private").unwrap();
+
+        let error = inherit_codex_system_files_from(&agent_home, &system_home).unwrap_err();
+
+        assert!(error.contains("refusing to replace"));
+        assert_eq!(std::fs::read_to_string(agent_home.join("auth.json")).unwrap(), "private");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn codex_stop_hooks_keep_wait_loop_alive_and_notify() {
+        let hooks = codex_hooks_value(Path::new("/team/keepalive.sh"), "notify codex");
+        let stop = hooks["hooks"]["Stop"][0]["hooks"].as_array().unwrap();
+
+        assert_eq!(stop.len(), 2);
+        assert_eq!(stop[0]["command"], "/team/keepalive.sh");
+        assert_eq!(stop[1]["command"], "notify codex");
+    }
+
+    #[test]
     fn merge_env_agent_overrides_team() {
         let team = serde_json::json!({ "A": "1", "B": "team" });
         let agent = serde_json::json!({ "B": "agent", "C": "3" });
@@ -1496,10 +1735,29 @@ mod tests {
         assert_eq!(kiro_mcp_value(&remote)["url"], "https://x/mcp");
 
         let local = McpDef { name: "pg".into(), command: Some("mcp-pg".into()), args: vec!["--stdio".into()], ..Default::default() };
-        let toml = codex_mcp_toml(&local);
-        assert!(toml.contains("[mcp_servers.pg]"));
-        assert!(toml.contains("command = \"mcp-pg\""));
-        assert!(toml.contains("args = [\"--stdio\"]"));
+        let overrides = codex_mcp_overrides(&local).join(" ");
+        assert!(overrides.contains("mcp_servers.pg.command"));
+        assert!(overrides.contains("mcp-pg"));
+        assert!(overrides.contains("mcp_servers.pg.args"));
+        assert!(overrides.contains("--stdio"));
+    }
+
+    #[test]
+    fn team_tool_timeout_exceeds_coalesced_wait_budget() {
+        let team = McpDef {
+            name: "team".into(),
+            url: Some("http://127.0.0.1:8787/mcp".into()),
+            ..Default::default()
+        };
+        let overrides = codex_team_mcp_overrides(&team).join(" ");
+        let timeout_ms = team_mcp_tool_timeout_ms();
+        let timeout_secs = timeout_ms / 1000;
+
+        assert!(timeout_ms > agora::mcp::MCP_WAIT_MAX_MS);
+        assert!(overrides.contains(&format!(
+            "mcp_servers.team.tool_timeout_sec={timeout_secs}"
+        )));
+        assert_eq!(timeout_ms, 270_000);
     }
 
     // Records seed_employee calls so we can assert the default roster.
@@ -1594,7 +1852,7 @@ mod tests {
     }
 
     #[test]
-    fn both_builtin_templates_are_seeded() {
+    fn builtin_templates_are_seeded() {
         // Isolate config dir so we don't touch the real ~/.config.
         let dir = std::env::temp_dir().join(format!("teamtest-tpl-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1603,7 +1861,15 @@ mod tests {
         ensure_templates_seeded();
         let mut names = list_templates();
         names.sort();
-        for expected in ["default", "software-dev", "financial-research", "deep-research", "content-studio", "data-analysis"] {
+        for expected in [
+            "default",
+            "software-dev",
+            "financial-research",
+            "deep-research",
+            "content-studio",
+            "data-analysis",
+            "mixed-engineering",
+        ] {
             assert!(names.contains(&expected.to_string()), "{expected} seeded: {names:?}");
         }
 
@@ -1620,6 +1886,32 @@ mod tests {
 
         std::env::remove_var("XDG_CONFIG_HOME");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn mixed_engineering_template_uses_all_backends_with_explicit_handoffs() {
+        let v: Value = serde_yml::from_str(MIXED_ENGINEERING_TEMPLATE).unwrap();
+        let agents = v["agents"].as_array().unwrap();
+        assert_eq!(agents.len(), 3, "keep the mixed team lean");
+
+        for backend in ["kiro", "claude", "codex"] {
+            assert_eq!(
+                agents.iter().filter(|agent| agent["backend"] == backend).count(),
+                1,
+                "expected exactly one {backend} agent"
+            );
+        }
+        let agent = |name: &str| agents.iter().find(|agent| agent["name"] == name).unwrap();
+        assert_eq!(agent("lead")["backend"], "kiro");
+        assert_eq!(agent("architect")["backend"], "claude");
+        assert_eq!(agent("builder")["backend"], "codex");
+        assert!(agents.iter().all(|agent| agent["model"] == ""));
+        assert!(agents.iter().all(|agent| agent["manage"] == false));
+
+        let prompt = v["prompt"].as_str().unwrap();
+        for handoff in ["@lead", "@architect", "@builder", "verification", "review"] {
+            assert!(prompt.contains(handoff), "missing workflow handoff: {handoff}");
+        }
     }
 
     #[test]
@@ -1760,6 +2052,8 @@ mod tests {
         assert!(p.contains("</team-system-prompt>"));
         assert!(p.contains("<role-system-prompt>"));
         assert!(p.contains("Rule one."));
+        assert!(p.contains("`@all` requires each agent's own reply"));
+        assert!(p.contains(".tmm/team-history.jsonl"));
         assert!(p.contains("Blog style."));
         assert!(p.contains("architect"));
         assert!(p.contains("Design the system."));
@@ -1780,5 +2074,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
-
-

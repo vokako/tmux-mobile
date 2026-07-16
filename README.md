@@ -114,9 +114,9 @@ them work from your phone. Desktop-server only (the agent bus runs in-process).
 
 ![Team architecture](docs/design-docs/features/team-architecture.svg)
 
-- **One group chat, many agents** — you and several agents (Kiro CLI / Claude Code / Codex) work in the same conversation. Talk to one with `@name`, talk to everyone with `@all`. Each agent has its own pane, so you can tap any of them to watch what it's doing live.
+- **One group chat, many agents** — you and several agents (Kiro CLI / Claude Code / Codex) work in the same conversation. Talk to one with `@name`; use `@all` when every agent must reply. Each agent has its own pane, so you can tap any of them to watch what it's doing live.
 - **One team per project folder** — bind a team to a working directory; run several teams in parallel for different projects, each kept neatly separate.
-- **Ready-made and your own** — start from a built-in roster (`software-dev` with product/architect/frontend/backend/reviewer/tester/devops, plus `financial-research`, `deep-research`, `content-studio`, `data-analysis`), or design your own team — pick the roles, goals, tools, and skills you want — directly in the in-app template editor.
+- **Ready-made and your own** — start from a built-in roster (`mixed-engineering` combines Kiro, Claude, and Codex; `software-dev` covers a larger delivery team; research/content/data rosters are also included), or design your own team — pick the roles, goals, tools, and skills you want — directly in the in-app template editor.
 - **A live collaboration graph** — a ring of participants with breathing, status-coloured nodes; arcs trace the messages between them.
 - **They keep themselves alive** — agents quietly report whether they're idle, thinking, working, or stuck; the system nudges a stuck one back on track automatically.
 

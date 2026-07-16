@@ -16,7 +16,13 @@ use rmcp::service::RequestContext;
 use rmcp::{tool, tool_router, ErrorData, RoleServer, ServerHandler};
 use serde::Deserialize;
 use std::future::Future;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+/// One agent-facing `wait` tool call spans several short bus wait slices. This
+/// stays below the supervisor's five-minute idle-sleep threshold, so an idle
+/// team causes at most one empty model turn before the next call is cancelled.
+pub const MCP_WAIT_MAX_MS: u64 = 240_000;
+const MCP_WAIT_MIN_SLICE_MS: u64 = 15_000;
 
 #[derive(Clone)]
 pub struct AgoraMcp {
@@ -26,20 +32,22 @@ pub struct AgoraMcp {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct PostArgs {
-    /// The message. Address agents by writing @name in it (use @all for everyone);
-    /// other agents read it and decide whether to act. Keep it short; share real data
-    /// and artifacts as files in the workspace, not pasted here.
+    /// The message. Use @name for one agent or @all when everyone must reply.
+    /// Keep it short; share real artifacts as workspace files.
     pub body: String,
-    /// Set true to require the agents you @mention to reply: each is reminded — and
-    /// refused idle — until they answer you. Leave false (default) for informational
-    /// messages that need no reply.
+    /// Set true to require named agents you @mention to reply: each is reminded —
+    /// and refused idle — until they answer you. @all always requires every other
+    /// agent to reply, even when this flag is false. Leave false (default) for
+    /// informational messages to named agents that need no reply.
     #[serde(default)]
     pub requires_reply: bool,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct WaitArgs {
-    /// Max milliseconds to block before returning (server-capped at 50000).
+    /// Internal polling slice in milliseconds (range 15000-50000, default
+    /// 50000). Empty slices are ignored; one tool call remains parked for up to
+    /// 240000 milliseconds.
     #[serde(default)]
     pub timeout_ms: Option<u64>,
 }
@@ -150,6 +158,31 @@ fn render_roster(roster: &[crate::store::AgentRow]) -> String {
     }
 }
 
+async fn wait_across_idle_slices(
+    bus: &Bus,
+    agent: &str,
+    slice: Duration,
+    total: Duration,
+) -> anyhow::Result<WaitOutcome> {
+    let deadline = Instant::now() + total;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let outcome = bus.wait(agent, Some(slice.min(remaining))).await?;
+        match outcome {
+            WaitOutcome::Idle { .. } if Instant::now() < deadline => continue,
+            other => return Ok(other),
+        }
+    }
+}
+
+fn wait_slice(timeout_ms: Option<u64>) -> Duration {
+    Duration::from_millis(
+        timeout_ms
+            .unwrap_or(crate::bus::MAX_WAIT_SLICE_MS)
+            .clamp(MCP_WAIT_MIN_SLICE_MS, crate::bus::MAX_WAIT_SLICE_MS),
+    )
+}
+
 #[tool_router]
 impl AgoraMcp {
     pub fn new(provider: std::sync::Arc<dyn BusProvider>) -> Self {
@@ -159,8 +192,9 @@ impl AgoraMcp {
     #[tool(
         description = "Send a message to the group chat. Address agents by writing @name in \
         the message (use @all for everyone); other agents read it and decide whether to act. \
-        Set requires_reply=true to require those you @mention to reply — they are reminded \
-        (and refused idle) until they answer. Leave it false for informational messages. \
+        Set requires_reply=true to require named agents you @mention to reply — they are \
+        reminded (and refused idle) until they answer. @all always requires every other \
+        agent to reply. Leave it false for informational messages to named agents. \
         Keep messages short: share real data and artifacts as files in the shared workspace, \
         not pasted into chat."
     )]
@@ -178,7 +212,8 @@ impl AgoraMcp {
     #[tool(
         description = "Wait for new messages, then return them plus the current roster. You \
         are refused if you still owe someone a reply — the result names whom and includes the \
-        messages to answer; reply with `post` first, then wait. End every turn by calling \
+        messages to answer; reply with `post` first, then wait. Empty internal polling slices \
+        are ignored, so one call stays parked for up to four minutes. End every turn by calling \
         `wait` to stay in the conversation."
     )]
     async fn wait(
@@ -187,11 +222,14 @@ impl AgoraMcp {
         Parameters(args): Parameters<WaitArgs>,
     ) -> Result<String, ErrorData> {
         let (bus, me) = identity(&*self.provider, &parts)?;
-        let timeout = args.timeout_ms.map(Duration::from_millis);
-        let outcome = bus
-            .wait(&me, timeout)
-            .await
-            .map_err(|e| err(format!("wait failed: {e}")))?;
+        let outcome = wait_across_idle_slices(
+            &bus,
+            &me,
+            wait_slice(args.timeout_ms),
+            Duration::from_millis(MCP_WAIT_MAX_MS),
+        )
+        .await
+        .map_err(|e| err(format!("wait failed: {e}")))?;
         let text = match outcome {
             WaitOutcome::Delivered { messages, roster, .. } => {
                 let lines: Vec<String> = messages.iter().map(|m| render_msg(m, &me)).collect();
@@ -300,14 +338,15 @@ impl ServerHandler for AgoraMcp {
                 "You are in a shared group chat with other agents and a human operator. \
                  You have exactly two actions:\n\
                  • post(body, requires_reply): say something. Address agents by writing @name \
-                   in the body (@all = everyone). Set requires_reply=true to require those you \
-                   mention to reply — they are reminded until they do; otherwise it is \
-                   informational and others decide whether to act.\n\
+                   in the body. Set requires_reply=true to require named agents to reply. \
+                   @all addresses everyone and always requires every other agent to reply, \
+                   regardless of the flag; otherwise messages are informational.\n\
                  • wait(): receive new messages + the roster. You are refused while you owe \
                    someone a reply; reply first, then wait. Always end your turn with wait.\n\n\
                  Rules of the house:\n\
-                 1) Reply to anyone who addressed you (you may decline with a reason — but \
-                    don't go silent). Messages not addressed to you are just context.\n\
+                 1) Reply to anyone who addressed you. @all addresses you exactly like your \
+                    own name (you may decline with a reason — but don't go silent). Messages \
+                    not addressed to you are just context.\n\
                  2) Exchange real work through FILES in the shared workspace. Messages are \
                     only for coordination (\"wrote it to src/foo.py, please review\"). Never \
                     paste large content into the chat. The full, authoritative context lives \
@@ -361,5 +400,61 @@ mod tests {
         assert!(agent_can_manage(&provider, "main", "boss"), "manager may hire/fire");
         assert!(!agent_can_manage(&provider, "main", "worker"), "worker may not");
         assert!(!agent_can_manage(&provider, "main", "ghost"), "unseeded caller may not");
+    }
+
+    #[tokio::test]
+    async fn wait_coalesces_idle_slices_until_total_budget() {
+        let bus = Bus::new(store::open_in_memory().unwrap(), "main");
+        bus.join("worker", None).unwrap();
+        let started = Instant::now();
+
+        let outcome = wait_across_idle_slices(
+            &bus,
+            "worker",
+            Duration::from_millis(15),
+            Duration::from_millis(70),
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(outcome, WaitOutcome::Idle { .. }));
+        assert!(
+            started.elapsed() >= Duration::from_millis(60),
+            "an internal idle slice returned to the caller too early"
+        );
+    }
+
+    #[test]
+    fn wait_slice_is_bounded_away_from_busy_polling() {
+        assert_eq!(wait_slice(None), Duration::from_millis(50_000));
+        assert_eq!(wait_slice(Some(1)), Duration::from_millis(15_000));
+        assert_eq!(wait_slice(Some(500_000)), Duration::from_millis(50_000));
+    }
+
+    #[tokio::test]
+    async fn wait_delivers_message_after_an_ignored_idle_slice() {
+        let bus = Bus::new(store::open_in_memory().unwrap(), "main");
+        bus.join("worker", None).unwrap();
+        let sender = bus.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(45)).await;
+            sender.post("human", "@worker continue", false).unwrap();
+        });
+
+        let outcome = wait_across_idle_slices(
+            &bus,
+            "worker",
+            Duration::from_millis(20),
+            Duration::from_millis(200),
+        )
+        .await
+        .unwrap();
+
+        match outcome {
+            WaitOutcome::Delivered { messages, .. } => {
+                assert_eq!(messages.last().unwrap().body, "@worker continue");
+            }
+            other => panic!("expected delivery from the original wait call, got {other:?}"),
+        }
     }
 }

@@ -31,8 +31,10 @@ server. See `docs/design-docs/features/team.md` for architecture.
   auto-migrated). Schema: optional **team-wide** `env` / `mcp` / `skills` /
   `prompt` (applied to every agent) plus `agents:[{ name, backend, role, goal,
   model, manage, env?, mcp?, skills? }]`. Built-ins (`default`, `software-dev`,
-  `financial-research`, `deep-research`, `content-studio`, `data-analysis`) are
-  seeded on first run.
+  `financial-research`, `deep-research`, `content-studio`, `data-analysis`,
+  `mixed-engineering`) are seeded on first run. `mixed-engineering` is the
+  built-in mixed-backend roster: Kiro lead, Claude architect/reviewer, and
+  Codex builder/verifier.
 - The new-team panel picks which template to use (with a folder browser that can
   create + select a new workspace folder).
 - An **editor** (edit button beside the picker) adds/renames/deletes templates
@@ -41,7 +43,8 @@ server. See `docs/design-docs/features/team.md` for architecture.
   section (env/mcp/skills/prompt). On phones it is a near-fullscreen sheet: the
   template list collapses into a labelled dropdown and the global system prompt
   collapses. (`team_templates` / `team_template_save` / `team_template_delete`.)
-- An empty `model` on a kiro agent falls back to the server default model.
+- An empty `model` uses the backend launcher's default: the server's Team model
+  for Kiro, `sonnet` for Claude, and the global Codex configuration for Codex.
 
 ## Global system prompt
 - A single shared prompt at `<config>/tmux-mobile/system_prompt.md`, edited at
@@ -56,7 +59,8 @@ server. See `docs/design-docs/features/team.md` for architecture.
 - One chip per **present** agent (offline agents hidden; the human `human` is
   never shown as an addressable agent).
 - Each chip: a status dot (idle = green, thinking = blue, working = amber,
-  hardworking = orange, stalled = red), the agent name, and a terminal glyph.
+  hardworking = orange, stalled = red, sleeping = muted), the agent name, and a
+  terminal glyph.
 - **Tap a chip → preview that agent's tmux pane** in the Terminal tab. The agent
   runs in a window named after it in `tmm-team-<workspace-slug>`; the tab maps
   name → pane via `window_name` and opens it through the normal terminal path.
@@ -65,10 +69,10 @@ server. See `docs/design-docs/features/team.md` for architecture.
 - **Workspace field** — the agents' shared working directory. Defaults to the
   current terminal session's cwd (else the server's home); tap to edit before
   starting. This is the directory the team is limited to.
-- **Start team** button → `team_start_team(workspace)`: the desktop server seeds
-  the built-in roster (manager / worker / reviewer) and launches each agent into
-  its own named window of `tmm-team-<slug>`, all in-process. Shows "agents coming
-  online…" until they join.
+- **Start team** button → `team_start_team(workspace, template)`: the desktop
+  server seeds the selected roster and launches each agent into its own named
+  window of `tmm-team-<slug>`, all in-process. Shows "agents coming online…"
+  until they join.
 - Multiple workspaces → multiple independent teams (`tmm-team-<slug>` each).
 
 ### Message log (middle)
@@ -78,15 +82,21 @@ server. See `docs/design-docs/features/team.md` for architecture.
 - `join`/`leave`/`system` messages render as centered system notices.
 - Loaded from `team_history` on open; new messages arrive live via the
   `team_message` push (de-duplicated by message id).
+- The complete room log remains authoritative in the Team SQLite database
+  across close/relaunch. It is also mirrored as JSON Lines at
+  `<workspace>/.tmm/team-history.jsonl`, so replacement agents can inspect the
+  previous team's decisions and handoffs directly from their working directory.
 
 ### Compose (bottom)
 - A row of `@name` quick-mention chips (one per present agent) above the input.
 - A growing textarea + a round send button.
 - **Enter sends** (desktop); Shift+Enter inserts a newline. The send button is
   the primary path on a soft keyboard.
-- Posting with an `@mention` requires that agent to reply (the obligation rule);
-  a plain message is an informational broadcast. You can always discharge a debt
-  to anyone you `@`-mention, including the human.
+- Human `@name` posts default to requiring that agent's reply. `@all` always
+  requires every other registered agent to reply, even if an agent-side caller
+  omits `requires_reply`. Plain messages are informational broadcasts; wording
+  such as "everyone" is not inferred as dispatch. Mentioning a creditor,
+  including the human, discharges the reply obligation.
 - The sent message is NOT appended locally — it echoes back via the live push,
   so there is never a duplicate.
 
