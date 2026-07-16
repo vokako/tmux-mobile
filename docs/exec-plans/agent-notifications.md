@@ -29,6 +29,9 @@ UI cannot show a durable attention marker.
   owned by tmux-mobile.
 - Team-generated agent configurations include notification hooks.
 - Existing hooks and unrelated agent settings remain unchanged.
+- Hooks are inert outside tmux and never report failure when the desktop server
+  or local inbox is unavailable.
+- Reinstalling repairs stale tmux-mobile-owned helper commands.
 
 ## Files
 

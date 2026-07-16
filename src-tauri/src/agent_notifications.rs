@@ -261,20 +261,21 @@ impl AgentNotificationHub {
         let inbox = shell_quote(&self.root.join("inbox").to_string_lossy());
         let script = format!(
             r#"#!/bin/sh
-set -eu
 umask 077
+exec 2>/dev/null
 backend="${{1:-}}"
-case "$backend" in claude|codex|kiro) ;; *) exit 2 ;; esac
+case "$backend" in claude|codex|kiro) ;; *) exit 0 ;; esac
 pane="${{TMUX_PANE:-}}"
 case "$pane" in %*[!0-9]*|%|"") exit 0 ;; esac
 inbox={inbox}
-mkdir -p "$inbox"
-tmp=$(mktemp "$inbox/.tmp.XXXXXX")
+mkdir -p "$inbox" || exit 0
+tmp=$(mktemp "$inbox/.tmp.XXXXXX") || exit 0
 trap 'rm -f "$tmp"' EXIT
-payload=$(cat)
-printf '{{"backend":"%s","pane_id":"%s","payload":%s}}\n' "$backend" "$pane" "$payload" > "$tmp"
-mv "$tmp" "$inbox/$(date +%s)-$$.json"
+payload=$(cat) || exit 0
+printf '{{"backend":"%s","pane_id":"%s","payload":%s}}\n' "$backend" "$pane" "$payload" > "$tmp" || exit 0
+mv "$tmp" "$inbox/$(date +%s)-$$.json" || exit 0
 trap - EXIT
+exit 0
 "#
         );
         std::fs::write(self.helper_path(), script).map_err(|e| e.to_string())?;
@@ -484,9 +485,9 @@ fn add_claude_event(
         .or_insert_with(|| json!([]))
         .as_array_mut()
         .ok_or_else(|| format!("Claude {event} hooks must be an array"))?;
-    if entries.iter().any(|v| v.to_string().contains(OWNER_MARKER)) {
-        return Ok(());
-    }
+    // Replace our own entry instead of merely detecting it. Older releases
+    // could persist a quoted `~` path that shells cannot expand.
+    entries.retain(|value| !value.to_string().contains(OWNER_MARKER));
     let mut entry = json!({ "hooks": [command_hook(command)] });
     if let Some(matcher) = matcher {
         entry
@@ -527,9 +528,7 @@ fn add_codex_event(
         .or_insert_with(|| json!([]))
         .as_array_mut()
         .ok_or_else(|| format!("Codex {event} hooks must be an array"))?;
-    if entries.iter().any(|v| v.to_string().contains(OWNER_MARKER)) {
-        return Ok(());
-    }
+    entries.retain(|value| !value.to_string().contains(OWNER_MARKER));
     entries.push(json!({ "hooks": [command_hook(command)] }));
     Ok(())
 }
@@ -606,14 +605,9 @@ fn install_kiro_default(path: &Path, helper: &str) -> Result<(), String> {
         .or_insert_with(|| json!([]))
         .as_array_mut()
         .ok_or("kiro_default stop hooks must be an array")?;
-    if !stop
-        .iter()
-        .any(|value| value.to_string().contains(OWNER_MARKER))
-    {
-        stop.push(json!({ "command": format!("{helper} kiro # {OWNER_MARKER}") }));
-        write_json(path, &root)?;
-    }
-    Ok(())
+    stop.retain(|value| !value.to_string().contains(OWNER_MARKER));
+    stop.push(json!({ "command": format!("{helper} kiro # {OWNER_MARKER}") }));
+    write_json(path, &root)
 }
 
 fn remove_kiro_default_hook(path: &Path) -> Result<(), String> {
@@ -698,6 +692,94 @@ mod tests {
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("other"));
         assert!(!text.contains(OWNER_MARKER));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reinstall_replaces_stale_owned_hook_command() {
+        let root =
+            std::env::temp_dir().join(format!("tmm-agent-hook-migrate-{}", uuid::Uuid::new_v4()));
+        let path = root.join("hooks.json");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"hooks":{{"Stop":[{{"hooks":[{{"type":"command","command":"'~/.config/old-helper' codex # {OWNER_MARKER}"}}]}}]}}}}"#
+            ),
+        )
+        .unwrap();
+
+        install_codex(&path, "'/absolute/current-helper'").unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("~/.config/old-helper"));
+        assert!(text.contains("/absolute/current-helper"));
+        assert_eq!(text.matches(OWNER_MARKER).count(), 2);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn helper_is_tmux_scoped_and_best_effort_without_server() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        let root = std::env::temp_dir().join(format!("tmm-agent-helper-{}", uuid::Uuid::new_v4()));
+        let hub = AgentNotificationHub::load_at(root.clone());
+        hub.write_helper().unwrap();
+        let helper = hub.helper_path();
+
+        let run = |pane: Option<&str>| {
+            let mut command = Command::new(&helper);
+            command
+                .arg("codex")
+                .env_remove("TMUX_PANE")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            if let Some(pane) = pane {
+                command.env("TMUX_PANE", pane);
+            }
+            let mut child = command.spawn().unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(br#"{"hook_event_name":"Stop"}"#)
+                .unwrap();
+            child.wait_with_output().unwrap()
+        };
+
+        let outside_tmux = run(None);
+        assert!(outside_tmux.status.success());
+        assert!(std::fs::read_dir(root.join("inbox"))
+            .unwrap()
+            .next()
+            .is_none());
+
+        // No server or inbox consumer is running for this isolated root. The
+        // hook still succeeds and leaves one durable event for the next start.
+        let without_server = run(Some("%42"));
+        assert!(without_server.status.success());
+        let event = std::fs::read_dir(root.join("inbox"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let envelope: InboxEnvelope =
+            serde_json::from_slice(&std::fs::read(event).unwrap()).unwrap();
+        assert_eq!(envelope.backend, "codex");
+        assert_eq!(envelope.pane_id, "%42");
+
+        // Even a local delivery failure must never surface as an Agent hook
+        // failure; notifications are advisory.
+        std::fs::remove_dir_all(root.join("inbox")).unwrap();
+        std::fs::write(root.join("inbox"), "not a directory").unwrap();
+        let unavailable_inbox = run(Some("%42"));
+        assert!(unavailable_inbox.status.success());
+        assert!(unavailable_inbox.stderr.is_empty());
+
         let _ = std::fs::remove_dir_all(root);
     }
 

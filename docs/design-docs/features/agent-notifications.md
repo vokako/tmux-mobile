@@ -25,7 +25,10 @@ agent lifecycle hook
 The helper uses a filesystem inbox under tmux-mobile's config directory rather
 than a second HTTP listener. This avoids another exposed port and authentication
 surface. It writes a temporary file and renames it into the inbox so the server
-never reads a partial payload.
+never reads a partial payload. The hook does not connect to the desktop server:
+if the server is stopped, the event remains in the inbox and is consumed on the
+next start. Notification delivery is advisory, so helper setup/write failures
+are silently ignored and always return success to the Agent CLI.
 
 ## Backend Mapping
 
@@ -52,7 +55,8 @@ level because that is the navigation unit shown in Terminal's chip bar.
 
 Events without `TMUX_PANE`, or whose pane no longer exists when consumed, are
 discarded: guessing from cwd or process names can associate attention with the
-wrong session.
+wrong session. This also makes globally installed hooks inert when an Agent is
+running outside tmux.
 
 ## Unread Model
 
@@ -72,8 +76,10 @@ snapshot for a reconnecting client.
 
 Settings exposes install/status/remove actions in the Connection tab.
 Installation is additive: tmux-mobile identifies only hook entries that invoke
-its generated helper and preserves all unrelated user configuration. Codex may
-require the user to approve the new hook once from `/hooks`.
+its generated helper and preserves all unrelated user configuration. Reinstall
+replaces owned entries with the current absolute helper command, which repairs
+older quoted-tilde commands that shells cannot expand. Codex may require the
+user to approve the new hook once from `/hooks`.
 
 Team-managed agents receive the same hooks in their generated private backend
 configuration automatically. They do not depend on the user's global hook
