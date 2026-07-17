@@ -308,6 +308,8 @@ pub struct TeamConfig {
     pub url: String,
     /// Default model for kiro-backed agents.
     pub model: String,
+    /// User-editable rules shared by every team, refreshed at team start.
+    pub system_prompt: String,
     /// Shared collaboration rules prepended to every agent's inline prompt.
     pub team_rules: String,
     /// The kick message that connects an agent to the bus loop.
@@ -319,7 +321,8 @@ pub struct TeamConfig {
 /// agents' working directory is `workspace` (the user's project); runtime hooks
 /// live under its self-gitignored `.tmm`, and prompts are passed inline.
 /// Best-effort — any failure is logged, never fatal.
-pub fn start(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: String, workspace: String, template: String) {
+pub fn start(bridge: Arc<dyn TeamBridge>, mut cfg: TeamConfig, room: String, workspace: String, template: String) {
+    cfg.system_prompt = read_system_prompt();
     tokio::spawn(async move {
         let session = format!("tmm-team-{}", room);
         let paths = Paths::new(&workspace);
@@ -428,7 +431,11 @@ fn seed_template(bridge: &dyn TeamBridge, room: &str, template: &str, cfg: &Team
         if name.is_empty() { continue; }
         let backend = a.get("backend").and_then(|v| v.as_str()).unwrap_or("kiro");
         // Empty model on a kiro agent → server default; other backends keep null.
-        let model = a.get("model").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+        let model = a
+            .get("model")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
         let model = match (backend, model) {
             (_, Some(m)) => Value::String(m.to_string()),
             ("kiro", None) => Value::String(cfg.model.clone()),
@@ -773,7 +780,11 @@ fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &str, session:
     let backend = spec.get("backend").and_then(|v| v.as_str()).unwrap_or("kiro");
     let role = spec.get("role").and_then(|v| v.as_str()).unwrap_or(name);
     let goal = spec.get("goal").and_then(|v| v.as_str()).unwrap_or("");
-    let model = spec.get("model").and_then(|v| v.as_str());
+    let model = spec
+        .get("model")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     let team_prompt = spec.get("team_prompt").and_then(|v| v.as_str()).unwrap_or("");
 
     // Per-agent extras (env / extra MCP servers / skills) from the team.yaml.
@@ -799,7 +810,7 @@ fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &str, session:
     let (env, cmd, startup_confirmation) = match backend {
         "kiro" => prepare_kiro(name, role, goal, team_prompt, cfg, room, paths, model, &extras)?,
         "claude" => prepare_claude(name, role, goal, team_prompt, cfg, room, paths, model, &extras)?,
-        "codex" => prepare_codex(name, role, goal, team_prompt, cfg, room, paths, &extras)?,
+        "codex" => prepare_codex(name, role, goal, team_prompt, cfg, room, paths, model, &extras)?,
         other => return Err(format!("unknown backend: {}", other)),
     };
 
@@ -863,6 +874,13 @@ const RECONNECT_NUDGE: &str =
 /// supervisor's liveness self-heal. Sleeps between keystrokes (the TUI needs a
 /// beat to settle), so callers run it inside a spawned task.
 async fn nudge_pane(pane: &str) {
+    if let Ok(content) = tmux::capture_pane_plain(pane, Some(80)) {
+        if folder_trust_prompt_visible(&content) {
+            println!("🜂 team: confirming folder trust in recovered pane {}", pane);
+            let _ = tmux::send_keys(pane, "Enter", false);
+            return;
+        }
+    }
     let _ = tmux::send_keys(pane, "Escape", false);
     tokio::time::sleep(Duration::from_millis(500)).await;
     let _ = tmux::send_keys(pane, RECONNECT_NUDGE, true);
@@ -881,8 +899,29 @@ struct StartupConfirmation {
 /// confirmation). Aliased to keep the per-backend signatures readable.
 type Prepared = (Vec<(String, String)>, String, Option<StartupConfirmation>);
 
+const CLAUDE_FOLDER_TRUST_MARKERS: &[&str] = &[
+    "Accessing workspace:",
+    "Yes, I trust this folder",
+    "Enter to confirm",
+];
+
+const CODEX_FOLDER_TRUST_MARKERS: &[&str] = &[
+    "Do you trust the contents of this directory?",
+    "1. Yes, continue",
+    "Press enter to continue",
+];
+
+fn prompt_markers_visible(content: &str, markers: &[&str]) -> bool {
+    markers.iter().all(|marker| content.contains(marker))
+}
+
 fn startup_prompt_visible(content: &str, confirmation: &StartupConfirmation) -> bool {
-    confirmation.markers.iter().all(|marker| content.contains(marker))
+    prompt_markers_visible(content, &confirmation.markers)
+}
+
+fn folder_trust_prompt_visible(content: &str) -> bool {
+    prompt_markers_visible(content, CLAUDE_FOLDER_TRUST_MARKERS)
+        || prompt_markers_visible(content, CODEX_FOLDER_TRUST_MARKERS)
 }
 
 fn startup_already_ready(content: &str, confirmation: &StartupConfirmation) -> bool {
@@ -898,8 +937,9 @@ fn confirm_startup_prompt(pane: String, confirmation: StartupConfirmation) {
     std::thread::spawn(move || {
         let deadline = std::time::Instant::now() + confirmation.timeout;
         while std::time::Instant::now() < deadline {
-            if let Ok(content) = tmux::capture_pane(&pane, Some(80)) {
+            if let Ok(content) = tmux::capture_pane_plain(&pane, Some(80)) {
                 if startup_prompt_visible(&content, &confirmation) {
+                    println!("🜂 team: confirming folder trust in new pane {}", pane);
                     let _ = tmux::send_keys(&pane, "Enter", false);
                     return;
                 }
@@ -925,6 +965,12 @@ const TEAM_ADDRESSING_CONTRACT: &str = "\
 /// - `<role-system-prompt>`: this agent's role + goal
 fn build_agent_prompt(role: &str, goal: &str, team_prompt: &str, cfg: &TeamConfig) -> String {
     let mut team_section = String::new();
+    if !cfg.system_prompt.trim().is_empty() {
+        team_section.push_str(cfg.system_prompt.trim());
+    }
+    if !team_section.is_empty() {
+        team_section.push_str("\n\n");
+    }
     if !cfg.team_rules.trim().is_empty() {
         team_section.push_str(cfg.team_rules.trim());
     }
@@ -979,12 +1025,51 @@ struct Extras {
     skills: Vec<ResolvedSkill>,
 }
 
+fn env_reference(value: &str) -> Option<&str> {
+    let name = value
+        .strip_prefix("${")
+        .and_then(|s| s.strip_suffix('}'))
+        .or_else(|| value.strip_prefix('$'))?;
+    let mut chars = name.chars();
+    let first = chars.next()?;
+    if (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
+    {
+        Some(name)
+    } else {
+        None
+    }
+}
+
+fn header_env_reference(value: &str) -> Option<(&str, bool)> {
+    if let Some(name) = value.strip_prefix("Bearer ").and_then(env_reference) {
+        Some((name, true))
+    } else {
+        env_reference(value).map(|name| (name, false))
+    }
+}
+
+fn interpolated_headers(headers: &std::collections::BTreeMap<String, String>) -> Value {
+    let values: std::collections::BTreeMap<String, String> = headers
+        .iter()
+        .map(|(key, value)| {
+            let value = match header_env_reference(value) {
+                Some((name, true)) => format!("Bearer ${{{name}}}"),
+                Some((name, false)) => format!("${{{name}}}"),
+                None => value.clone(),
+            };
+            (key.clone(), value)
+        })
+        .collect();
+    serde_json::to_value(values).unwrap_or(Value::Null)
+}
+
 /// kiro mcpServers entry: remote = `{url,headers}`, local = `{command,args,env}`.
 fn kiro_mcp_value(m: &McpDef) -> Value {
     if let Some(url) = &m.url {
         let mut o = serde_json::json!({ "url": url });
         if !m.headers.is_empty() {
-            o["headers"] = serde_json::to_value(&m.headers).unwrap_or(Value::Null);
+            o["headers"] = interpolated_headers(&m.headers);
         }
         o
     } else if let Some(cmd) = &m.command {
@@ -1042,10 +1127,26 @@ fn codex_mcp_overrides(m: &McpDef) -> Vec<String> {
             Value::Bool(true),
         ));
         for (key, value) in &m.headers {
-            args.push(codex_config_override(
-                &format!("{}.http_headers.{}", prefix, codex_key_segment(key)),
-                Value::String(value.clone()),
-            ));
+            match header_env_reference(value) {
+                Some((name, true)) if key.eq_ignore_ascii_case("authorization") => {
+                    args.push(codex_config_override(
+                        &format!("{}.bearer_token_env_var", prefix),
+                        Value::String(name.to_string()),
+                    ));
+                }
+                Some((name, false)) => {
+                    args.push(codex_config_override(
+                        &format!("{}.env_http_headers.{}", prefix, codex_key_segment(key)),
+                        Value::String(name.to_string()),
+                    ));
+                }
+                _ => {
+                    args.push(codex_config_override(
+                        &format!("{}.http_headers.{}", prefix, codex_key_segment(key)),
+                        Value::String(value.clone()),
+                    ));
+                }
+            }
         }
     } else if let Some(cmd) = &m.command {
         args.push(codex_config_override(
@@ -1376,7 +1477,9 @@ fn prepare_kiro(
     env.extend(extras.env.iter().cloned());
     let cmd = format!(
         "kiro-cli chat --agent {} --model {} --trust-all-tools {}",
-        name, m, shell_quote(&cfg.team_kick)
+        shell_quote(name),
+        shell_quote(m),
+        shell_quote(&cfg.team_kick)
     );
     Ok((env, cmd, None))
 }
@@ -1435,7 +1538,7 @@ fn prepare_claude(
         "claude --mcp-config {} --strict-mcp-config --settings {} --model {} --dangerously-skip-permissions {}",
         shell_quote(&mcpfile.to_string_lossy()),
         shell_quote(&settingsfile.to_string_lossy()),
-        m,
+        shell_quote(m),
         shell_quote(&first_msg)
     )
     .trim_end()
@@ -1444,11 +1547,7 @@ fn prepare_claude(
     // separate first-use dialog with no public skip flag, so confirm it only
     // after all stable prompt markers are visible.
     let confirmation = StartupConfirmation {
-        markers: vec![
-            "Accessing workspace:",
-            "Yes, I trust this folder",
-            "Enter to confirm",
-        ],
+        markers: CLAUDE_FOLDER_TRUST_MARKERS.to_vec(),
         ready_markers: vec!["bypass permissions on"],
         timeout: Duration::from_secs(120),
     };
@@ -1461,7 +1560,7 @@ fn prepare_claude(
 // ---- Codex ----
 #[allow(clippy::too_many_arguments)]
 fn prepare_codex(
-    name: &str, role: &str, goal: &str, team_prompt: &str, cfg: &TeamConfig, room: &str, paths: &Paths, extras: &Extras,
+    name: &str, role: &str, goal: &str, team_prompt: &str, cfg: &TeamConfig, room: &str, paths: &Paths, model: Option<&str>, extras: &Extras,
 ) -> Result<Prepared, String> {
     let home = paths.codex.join(name);
     std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
@@ -1494,12 +1593,19 @@ fn prepare_codex(
     env.extend(hb_env(name, room, cfg));
     env.extend(extras.env.iter().cloned());
     let first_msg = format!("{}\n\n{}{}", build_agent_prompt(role, goal, team_prompt, cfg), cfg.team_kick, skills_index_text(&extras.skills));
-    let cmd = format!(
-        "codex {} --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust {}",
-        config_args.join(" "),
-        shell_quote(&first_msg)
-    );
-    Ok((env, cmd, None))
+    if let Some(value) = model {
+        config_args.push(format!("--model {}", shell_quote(value)));
+    }
+    config_args.push("--dangerously-bypass-approvals-and-sandbox".to_string());
+    config_args.push("--dangerously-bypass-hook-trust".to_string());
+    config_args.push(shell_quote(&first_msg));
+    let cmd = format!("codex {}", config_args.join(" "));
+    let confirmation = StartupConfirmation {
+        markers: CODEX_FOLDER_TRUST_MARKERS.to_vec(),
+        ready_markers: vec!["Starting MCP servers"],
+        timeout: Duration::from_secs(120),
+    };
+    Ok((env, cmd, Some(confirmation)))
 }
 
 fn codex_hooks_value(keepalive: &Path, notify: &str) -> Value {
@@ -1779,6 +1885,7 @@ mod tests {
         )
         .unwrap();
         assert!(kiro_cmd.contains("--trust-all-tools"));
+        assert!(kiro_cmd.contains("--model claude-sonnet-4.6"));
         assert!(kiro_confirmation.is_none());
         let kiro_settings: Value = serde_json::from_slice(
             &std::fs::read(paths.kiro_home.join("settings/cli.json")).unwrap(),
@@ -1810,6 +1917,7 @@ mod tests {
         )
         .unwrap();
         assert!(claude_cmd.contains("--dangerously-skip-permissions"));
+        assert!(claude_cmd.contains("--model sonnet"));
         assert!(claude_cmd.contains("kick"), "initial prompt is a CLI argument");
         let claude_settings: Value = serde_json::from_slice(
             &std::fs::read(paths.claude.join("planner.settings.json")).unwrap(),
@@ -1837,6 +1945,9 @@ mod tests {
             "bypass permissions on (shift+tab to cycle)",
             &confirmation
         ));
+        assert!(folder_trust_prompt_visible(
+            "Accessing workspace:\nYes, I trust this folder\nEnter to confirm"
+        ));
 
         let (_, codex_cmd, codex_confirmation) = prepare_codex(
             "builder",
@@ -1846,12 +1957,62 @@ mod tests {
             &cfg,
             "room",
             &paths,
+            None,
             &extras,
         )
         .unwrap();
         assert!(codex_cmd.contains("--dangerously-bypass-approvals-and-sandbox"));
         assert!(codex_cmd.contains("--dangerously-bypass-hook-trust"));
-        assert!(codex_confirmation.is_none());
+        assert!(!codex_cmd.contains("--model"));
+        let confirmation = codex_confirmation.unwrap();
+        assert!(startup_prompt_visible(
+            "Do you trust the contents of this directory?\n1. Yes, continue\nPress enter to continue",
+            &confirmation
+        ));
+        assert!(!startup_prompt_visible(
+            "Do you trust the contents of this directory?\n2. No, quit",
+            &confirmation
+        ));
+        assert!(folder_trust_prompt_visible(
+            "Do you trust the contents of this directory?\n1. Yes, continue\nPress enter to continue"
+        ));
+        assert!(!folder_trust_prompt_visible(
+            "A tool needs permission.\n1. Yes, continue\nPress enter to continue"
+        ));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn backend_model_selection_is_forwarded() {
+        let root = std::env::temp_dir().join(format!(
+            "teamtest-backend-models-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let paths = Paths::new(root.to_str().unwrap());
+        prepare_home(&paths).unwrap();
+        let extras = Extras::default();
+        let cfg = cfg();
+        let model = "provider/model name;not-a-command";
+        let expected = format!("--model {}", shell_quote(model));
+
+        let (_, kiro_cmd, _) = prepare_kiro(
+            "lead", "lead", "coordinate", "", &cfg, "room", &paths, Some(model), &extras,
+        )
+        .unwrap();
+        let (_, claude_cmd, _) = prepare_claude(
+            "planner", "planner", "plan", "", &cfg, "room", &paths, Some(model), &extras,
+        )
+        .unwrap();
+        let (_, codex_cmd, _) = prepare_codex(
+            "builder", "builder", "build", "", &cfg, "room", &paths, Some(model), &extras,
+        )
+        .unwrap();
+
+        assert!(kiro_cmd.contains(&expected), "{kiro_cmd}");
+        assert!(claude_cmd.contains(&expected), "{claude_cmd}");
+        assert!(codex_cmd.contains(&expected), "{codex_cmd}");
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -1871,13 +2032,36 @@ mod tests {
         let remote = McpDef {
             name: "gh".into(),
             url: Some("https://x/mcp".into()),
-            headers: [("Authorization".to_string(), "Bearer t".to_string())].into_iter().collect(),
+            headers: [
+                ("Authorization".to_string(), "Bearer $API_TOKEN".to_string()),
+                ("X-Features".to_string(), "${FEATURES}".to_string()),
+                ("X-Static".to_string(), "literal".to_string()),
+            ]
+            .into_iter()
+            .collect(),
             ..Default::default()
         };
         // kiro remote omits an explicit type; claude tags it http.
         assert!(kiro_mcp_value(&remote).get("type").is_none());
         assert_eq!(claude_mcp_value(&remote)["type"], "http");
         assert_eq!(kiro_mcp_value(&remote)["url"], "https://x/mcp");
+        assert_eq!(
+            kiro_mcp_value(&remote)["headers"]["Authorization"],
+            "Bearer ${API_TOKEN}"
+        );
+        assert_eq!(
+            claude_mcp_value(&remote)["headers"]["X-Features"],
+            "${FEATURES}"
+        );
+        assert_eq!(kiro_mcp_value(&remote)["headers"]["X-Static"], "literal");
+
+        let remote_overrides = codex_mcp_overrides(&remote).join(" ");
+        assert!(remote_overrides.contains("mcp_servers.gh.bearer_token_env_var"));
+        assert!(remote_overrides.contains("API_TOKEN"));
+        assert!(remote_overrides.contains("mcp_servers.gh.env_http_headers.X-Features"));
+        assert!(remote_overrides.contains("FEATURES"));
+        assert!(remote_overrides.contains("mcp_servers.gh.http_headers.X-Static"));
+        assert!(!remote_overrides.contains("Bearer $API_TOKEN"));
 
         let local = McpDef { name: "pg".into(), command: Some("mcp-pg".into()), args: vec!["--stdio".into()], ..Default::default() };
         let overrides = codex_mcp_overrides(&local).join(" ");
@@ -1937,7 +2121,7 @@ mod tests {
     }
 
     fn cfg() -> TeamConfig {
-        TeamConfig { url: "http://127.0.0.1:8787".into(), model: "claude-sonnet-4.6".into(), team_rules: String::new(), team_kick: "kick".into() }
+        TeamConfig { url: "http://127.0.0.1:8787".into(), model: "claude-sonnet-4.6".into(), system_prompt: String::new(), team_rules: String::new(), team_kick: "kick".into() }
     }
 
     #[test]
@@ -2088,23 +2272,30 @@ mod tests {
     }
 
     #[test]
-    fn seed_template_kiro_empty_model_falls_back_to_default() {
-        // Built-in templates now pin "auto", so the empty-model fallback is for
-        // USER-authored templates that leave model blank. Verify with a custom one.
+    fn seed_template_normalizes_models_and_kiro_default() {
         let dir = std::env::temp_dir().join(format!("teamtest-model-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::env::set_var("XDG_CONFIG_HOME", &dir);
 
         let agents = serde_json::json!([
-            { "name": "w", "backend": "kiro", "role": "w", "goal": "do things well", "model": "", "manage": false }
+            { "name": "k", "backend": "kiro", "role": "k", "goal": "do things well", "model": "   ", "manage": false },
+            { "name": "c", "backend": "claude", "role": "c", "goal": "do things well", "model": " sonnet ", "manage": false },
+            { "name": "x", "backend": "codex", "role": "x", "goal": "do things well", "model": " gpt-test ", "manage": false }
         ]);
         save_template("blankmodel", &agents).unwrap();
         let b = RecordingBridge { seeded: Mutex::new(vec![]), existing: vec![] };
         seed_template(&b, "myroom", "blankmodel", &cfg());
         let seeded = b.seeded.lock().unwrap();
-        assert!(!seeded.is_empty(), "custom template should seed agents");
-        // Empty model on a kiro agent inherits the server default.
-        assert!(seeded.iter().all(|(_, s)| s["model"] == "claude-sonnet-4.6"));
+        let model = |name: &str| {
+            seeded
+                .iter()
+                .find(|(agent, _)| agent == name)
+                .map(|(_, spec)| spec["model"].clone())
+                .unwrap()
+        };
+        assert_eq!(model("k"), "claude-sonnet-4.6");
+        assert_eq!(model("c"), "sonnet");
+        assert_eq!(model("x"), "gpt-test");
 
         std::env::remove_var("XDG_CONFIG_HOME");
         let _ = std::fs::remove_dir_all(&dir);
@@ -2189,6 +2380,7 @@ mod tests {
     fn build_agent_prompt_structure() {
         let cfg = TeamConfig {
             url: String::new(), model: String::new(),
+            system_prompt: "Global rule.".into(),
             team_rules: "Rule one.\nRule two.".into(),
             team_kick: "kick".into(),
         };
@@ -2196,6 +2388,7 @@ mod tests {
         assert!(p.contains("<team-system-prompt>"));
         assert!(p.contains("</team-system-prompt>"));
         assert!(p.contains("<role-system-prompt>"));
+        assert!(p.starts_with("<team-system-prompt>\nGlobal rule."));
         assert!(p.contains("Rule one."));
         assert!(p.contains("`@all` requires each agent's own reply"));
         assert!(p.contains(".tmm/team-history.jsonl"));

@@ -54,13 +54,6 @@
   claude/codex, and the hired spec has no `model`. Acceptable for now; revisit
   if runtime hiring is used heavily.
 
-### Global system prompt is not injected into launched agents
-- **Priority**: Medium · **Area**: Team
-- `<config>/tmux-mobile/system_prompt.md` can be edited and is returned to the
-  Team UI, but `build_agent_prompt` never reads it. The requirement says it must
-  be prepended for every agent. Connect it to the launch path and cover the
-  resulting prompt with a test.
-
 ### Template edits don't affect already-running teams
 - **Priority**: Low · **Area**: Team
 - The selected template is folded into employee specs and inline prompts at

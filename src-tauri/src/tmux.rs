@@ -361,6 +361,23 @@ pub fn capture_pane(target: &str, lines: Option<usize>) -> Result<String, String
     capture_pane_with_width(target, lines, 0).map(|(content, _)| content)
 }
 
+/// Capture pane text without ANSI escapes for prompt/control-flow detection.
+pub fn capture_pane_plain(target: &str, lines: Option<usize>) -> Result<String, String> {
+    let start_line = lines
+        .map(|n| format!("-{}", n))
+        .unwrap_or_else(|| format!("-{}", get_scrollback()));
+    let output = run_tmux(&[
+        "capture-pane",
+        "-t",
+        target,
+        "-p",
+        "-J",
+        "-S",
+        &start_line,
+    ])?;
+    Ok(output.trim_end().to_string())
+}
+
 /// Capture with a known pane width (avoids extra tmux call).
 /// Returns (content, lines_trimmed_from_end).
 pub fn capture_pane_with_width(

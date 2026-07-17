@@ -65,6 +65,7 @@ impl TeamManager {
         let cfg = TeamConfig {
             url: format!("http://127.0.0.1:{}", port),
             model: model.to_string(),
+            system_prompt: String::new(),
             team_rules: crate::config::Config::load().team_rules,
             team_kick: crate::config::Config::load().team_kick,
         };
@@ -528,7 +529,7 @@ mod tests {
             conn,
             teams: Mutex::new(HashMap::new()),
             json_tx,
-            cfg: TeamConfig { url: "http://127.0.0.1:0".into(), model: "m".into(), team_rules: String::new(), team_kick: String::new() },
+            cfg: TeamConfig { url: "http://127.0.0.1:0".into(), model: "m".into(), system_prompt: String::new(), team_rules: String::new(), team_kick: String::new() },
             meta_path: dir.join("teams.json"),
             self_ref: OnceLock::new(),
         });

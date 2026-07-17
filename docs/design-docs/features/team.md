@@ -365,12 +365,17 @@ Kiro uses `--trust-all-tools` plus
 `--dangerously-skip-permissions` plus
 `skipDangerousModePermissionPrompt=true`; Codex uses
 `--dangerously-bypass-approvals-and-sandbox` and
-`--dangerously-bypass-hook-trust`. Claude still has a separate workspace trust
-dialog with no public skip flag. Its complete initial prompt is therefore passed
-on the launch command, while a two-minute background watcher confirms only when
-all stable trust-dialog markers are visible and exits early once the Claude UI
-is ready. Already-trusted Claude workspaces and all Codex/Kiro launches receive
-no synthetic startup keystrokes.
+`--dangerously-bypass-hook-trust`. Claude and Codex still have separate
+folder-trust dialogs for a new workspace, and neither CLI exposes a public
+interactive-mode flag that skips them. Their complete initial prompts are
+therefore passed on the launch command, while a two-minute background watcher
+confirms only when all backend-specific trust-dialog markers are visible. An
+already-trusted workspace receives no synthetic startup keystroke. Recovery
+uses the same strict marker sets before sending its normal Escape/reconnect
+nudge, so a server restart can also release an agent that was parked at its
+first-use folder-trust dialog. Detection uses a plain tmux capture: the normal
+ANSI-preserving capture can insert color escapes inside visible prompt text and
+break exact marker matching.
 
 ## 5b. Agent liveness, presence & self-heal
 
@@ -527,19 +532,27 @@ At seed time `seed_template` folds the team-wide config into each agent's spec:
 env merges (agent overrides), and team `mcp`/`skills` are prepended so a per-agent
 entry wins on a same-named MCP server (`merge_env` / `merge_list`). Team
 `prompt` is passed to `build_agent_prompt` and reaches every agent through its
-inline launch prompt. The separately editable global `system_prompt.md` is not
-yet connected to this launch path; that requirement remains tracked in
-`docs/unresolved.md`. Putting a shared tool (e.g. context7) at the team level
-means writing it once instead of on every role. The full schema is documented
-at the top of `default/team.yaml`, and the editor's per-template "Team-wide"
-section edits env/mcp/skills/prompt.
+inline launch prompt. The separately editable global `system_prompt.md` is
+loaded whenever a team starts and prepended before the shared rules and
+team-specific prompt. Putting a shared tool (e.g. context7) at the team level
+means writing it once instead of on every role. The full schema is documented at
+the top of `default/team.yaml`, and the editor's per-template "Team-wide" section
+edits env/mcp/skills/prompt.
 
+- **model** — optional per agent. A non-empty value is passed through each
+  backend's native `--model` flag. Blank uses the configured Team model for
+  Kiro, `sonnet` for Claude, and the inherited Codex configuration. Values are
+  not validated against a fixed list because all three CLIs can expose dynamic
+  models or custom providers; the selected CLI reports unavailable model IDs.
 - **env** — optional; default is none. Team-wide `env` is the base, per-agent
   `env` overrides it (`merge_env`). It's set on the agent's process at launch, so
   BOTH its MCP servers and skill use inherit it (backends do their own `$VAR`
   expansion; we don't interpolate, and we ship no secrets).
 - **mcp** — extra MCP servers merged into the agent's config alongside the always-
   present `team` server. Remote (`url`+`headers`) or local (`command`+`args`+`env`).
+  Header values may reference an environment variable as `$VAR` or `${VAR}`
+  without exposing its value: Kiro/Claude receive `${VAR}` interpolation, while
+  Codex receives `bearer_token_env_var` or `env_http_headers` overrides.
   Adapted per backend: `kiro_mcp_value` (kiro `{url,headers}` / `{command,args,env}`),
   `claude_mcp_value` (remote tagged `type:"http"`), `codex_mcp_overrides`
   (launch-time `-c mcp_servers.<name>...` values).
@@ -580,9 +593,9 @@ Regression test: `can_discharge_debt_to_unregistered_human`.
 Desktop server reads (config.toml or env, `AGORA_*` accepted as legacy aliases):
 `team_bind`/`TEAM_BIND` (default `127.0.0.1:8787`), `team_db`/`TEAM_DB` (default
 `~/.config/tmux-mobile/team.db`), `team_room`/`TEAM_ROOM` (default `main`),
-`team_model`/`TEAM_MODEL` (default `claude-sonnet-4.6`). Bus startup is
-best-effort: on failure the terminal server still runs and the Team tab stays
-hidden.
+`team_model`/`TEAM_MODEL` (default `claude-sonnet-4.6`, used by Kiro agents whose
+template model is blank). Bus startup is best-effort: on failure the terminal
+server still runs and the Team tab stays hidden.
 
 > Security: the MCP `/mcp` and `/api/*` have **no auth** — only the phone path is
 > authenticated (it rides the token-authed WS). Keep `TEAM_BIND` on `127.0.0.1`

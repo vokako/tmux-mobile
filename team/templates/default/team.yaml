@@ -18,13 +18,13 @@
 #       role: coder
 #       goal: |                # the agent's brief / workflow
 #         ...
-#       model: ""              # blank = server default
+#       model: ""              # blank = backend default (TEAM_MODEL for Kiro)
 #       manage: false          # true = may hire/fire teammates
 #       env: { FOO: bar }      # OPTIONAL per-agent env (overrides team env)
 #       mcp:                   # OPTIONAL extra MCP servers for this agent
 #         - name: github
 #           url: https://api.example.com/mcp      # remote (http), OR:
-#           headers: { Authorization: "Bearer $TOKEN" }
+#           headers: { Authorization: "Bearer ${TOKEN}" }
 #         - name: pg
 #           command: mcp-server-postgres          # local (stdio)
 #           args: ["--stdio"]
