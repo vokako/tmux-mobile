@@ -14,6 +14,9 @@ field reaches every CLI:
   `${VAR}` interpolation and Codex requires its native environment-header keys.
 - Claude and Codex tool-permission bypass flags do not skip the first-use
   folder-trust dialog for a new workspace.
+- Codex has no generated per-tool heartbeat, and Kiro/Claude only heartbeat
+  after a tool returns, so a single tool running over 30 minutes can be mistaken
+  for a wedged agent and interrupted by self-heal.
 
 The remaining supported fields (`role`, `goal`, `manage`, `env`, `mcp`,
 `skills`, and the team-wide prompt) already flow through the seed and backend
@@ -43,6 +46,9 @@ adapter paths.
   persisting the credential value.
 - New and recovered Claude/Codex panes automatically confirm only their complete
   backend-specific folder-trust dialogs; unrelated prompts receive no key.
+- Kiro, Claude, and Codex heartbeat before and after every non-Team tool call
+  and when a prompt is submitted. A bounded 30-second lease keeps a single long
+  tool alive until its Post hook; Team wait/post calls never create a lease.
 - Tests cover all three model adapters, empty/default behavior, quoting, and
   global/team/role prompt ordering.
 - Existing environment, MCP, skill, hook, and authentication behavior is
@@ -53,6 +59,7 @@ adapter paths.
 - `src-tauri/src/team.rs`
 - `src-tauri/src/tmux.rs`
 - `src-tauri/src/team_bridge.rs`
+- `team/hooks/heartbeat.sh`
 - `team/templates/default/team.yaml`
 - `docs/design-docs/features/team.md`
 - `docs/unresolved.md`
@@ -66,6 +73,7 @@ cargo test team::tests::backend_model_selection_is_forwarded -- --test-threads=1
 cargo test team::tests::build_agent_prompt_structure -- --test-threads=1
 cargo test team::tests::mcp_value_remote_and_local_per_backend -- --test-threads=1
 cargo test team::tests::backend_launch_permissions_and_startup_confirmations -- --test-threads=1
+bash -n ../team/hooks/heartbeat.sh
 cargo test -- --test-threads=1
 git diff --check
 ```

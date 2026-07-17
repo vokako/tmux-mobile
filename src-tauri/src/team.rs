@@ -1457,11 +1457,13 @@ fn prepare_kiro(
         "resources": resources,
         "mcpServers": mcp_servers,
         "hooks": {
-            "postToolUse": [ { "matcher": "*", "command": bash_script_command(&paths.heartbeat) } ],
-            "userPromptSubmit": [ { "command": bash_script_command(&paths.heartbeat) } ],
+            "preToolUse": [ { "matcher": "*", "command": heartbeat_command(&paths.heartbeat, "pre") } ],
+            "postToolUse": [ { "matcher": "*", "command": heartbeat_command(&paths.heartbeat, "post") } ],
+            "userPromptSubmit": [ { "command": heartbeat_command(&paths.heartbeat, "pulse") } ],
             "stop": [
                 { "command": bash_script_command(&paths.keepalive) },
-                { "command": notify }
+                { "command": notify },
+                { "command": heartbeat_command(&paths.heartbeat, "post") }
             ]
         },
     });
@@ -1518,12 +1520,15 @@ fn prepare_claude(
         serde_json::to_string_pretty(&serde_json::json!({
             "skipDangerousModePermissionPrompt": true,
             "hooks": {
-                "PostToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": bash_script_command(&paths.heartbeat) } ] } ],
-                "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": bash_script_command(&paths.heartbeat) } ] } ],
+                "PreToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": heartbeat_command(&paths.heartbeat, "pre") } ] } ],
+                "PostToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": heartbeat_command(&paths.heartbeat, "post") } ] } ],
+                "PostToolUseFailure": [ { "matcher": "*", "hooks": [ { "type": "command", "command": heartbeat_command(&paths.heartbeat, "post") } ] } ],
+                "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": heartbeat_command(&paths.heartbeat, "pulse") } ] } ],
                 "Notification": [ { "matcher": "permission_prompt|idle_prompt|agent_needs_input|agent_completed", "hooks": [ { "type": "command", "command": notify } ] } ],
                 "Stop": [ { "hooks": [
                     { "type": "command", "command": bash_script_command(&paths.keepalive) },
-                    { "type": "command", "command": notify }
+                    { "type": "command", "command": notify },
+                    { "type": "command", "command": heartbeat_command(&paths.heartbeat, "post") }
                 ] } ],
                 "StopFailure": [ { "hooks": [ { "type": "command", "command": notify } ] } ]
             }
@@ -1587,7 +1592,7 @@ fn prepare_codex(
     }
     std::fs::write(
         home.join("hooks.json"),
-        serde_json::to_vec_pretty(&codex_hooks_value(&paths.keepalive, &notify)).unwrap(),
+        serde_json::to_vec_pretty(&codex_hooks_value(&paths.keepalive, &paths.heartbeat, &notify)).unwrap(),
     ).map_err(|e| e.to_string())?;
     let mut env = vec![("CODEX_HOME".to_string(), home.to_string_lossy().to_string())];
     env.extend(hb_env(name, room, cfg));
@@ -1608,15 +1613,25 @@ fn prepare_codex(
     Ok((env, cmd, Some(confirmation)))
 }
 
-fn codex_hooks_value(keepalive: &Path, notify: &str) -> Value {
+fn codex_hooks_value(keepalive: &Path, heartbeat: &Path, notify: &str) -> Value {
     serde_json::json!({
         "hooks": {
+            "PreToolUse": [ { "matcher": "*", "hooks": [
+                { "type": "command", "command": heartbeat_command(heartbeat, "pre") }
+            ] } ],
             "PermissionRequest": [ { "hooks": [
                 { "type": "command", "command": notify }
             ] } ],
+            "PostToolUse": [ { "matcher": "*", "hooks": [
+                { "type": "command", "command": heartbeat_command(heartbeat, "post") }
+            ] } ],
+            "UserPromptSubmit": [ { "hooks": [
+                { "type": "command", "command": heartbeat_command(heartbeat, "pulse") }
+            ] } ],
             "Stop": [ { "hooks": [
                 { "type": "command", "command": bash_script_command(keepalive) },
-                { "type": "command", "command": notify }
+                { "type": "command", "command": notify },
+                { "type": "command", "command": heartbeat_command(heartbeat, "post") }
             ] } ]
         }
     })
@@ -1624,6 +1639,10 @@ fn codex_hooks_value(keepalive: &Path, notify: &str) -> Value {
 
 fn bash_script_command(path: &Path) -> String {
     format!("/bin/bash {}", shell_quote(&path.to_string_lossy()))
+}
+
+fn heartbeat_command(path: &Path, mode: &str) -> String {
+    format!("{} {}", bash_script_command(path), mode)
 }
 
 /// Single-quote a string for the shell (the agent launch line is sent to a
@@ -1852,12 +1871,25 @@ mod tests {
 
     #[test]
     fn codex_stop_hooks_keep_wait_loop_alive_and_notify() {
-        let hooks = codex_hooks_value(Path::new("/team/keepalive.sh"), "notify codex");
+        let hooks = codex_hooks_value(
+            Path::new("/team/keepalive.sh"),
+            Path::new("/team/heartbeat.sh"),
+            "notify codex",
+        );
         let stop = hooks["hooks"]["Stop"][0]["hooks"].as_array().unwrap();
 
-        assert_eq!(stop.len(), 2);
+        assert_eq!(stop.len(), 3);
         assert_eq!(stop[0]["command"], "/bin/bash /team/keepalive.sh");
         assert_eq!(stop[1]["command"], "notify codex");
+        assert_eq!(stop[2]["command"], "/bin/bash /team/heartbeat.sh post");
+        assert_eq!(
+            hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+            "/bin/bash /team/heartbeat.sh pre"
+        );
+        assert_eq!(
+            hooks["hooks"]["PostToolUse"][0]["hooks"][0]["command"],
+            "/bin/bash /team/heartbeat.sh post"
+        );
     }
 
     #[test]
@@ -1903,6 +1935,22 @@ mod tests {
             kiro_agent["hooks"]["stop"][0]["command"],
             format!("/bin/bash {}", paths.keepalive.display())
         );
+        assert_eq!(
+            kiro_agent["hooks"]["stop"][2]["command"],
+            format!("/bin/bash {} post", paths.heartbeat.display())
+        );
+        assert_eq!(
+            kiro_agent["hooks"]["preToolUse"][0]["command"],
+            format!("/bin/bash {} pre", paths.heartbeat.display())
+        );
+        assert_eq!(
+            kiro_agent["hooks"]["postToolUse"][0]["command"],
+            format!("/bin/bash {} post", paths.heartbeat.display())
+        );
+        assert_eq!(
+            kiro_agent["hooks"]["userPromptSubmit"][0]["command"],
+            format!("/bin/bash {} pulse", paths.heartbeat.display())
+        );
 
         let (_, claude_cmd, claude_confirmation) = prepare_claude(
             "planner",
@@ -1929,7 +1977,23 @@ mod tests {
         );
         assert_eq!(
             claude_settings["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"],
-            format!("/bin/bash {}", paths.heartbeat.display())
+            format!("/bin/bash {} pulse", paths.heartbeat.display())
+        );
+        assert_eq!(
+            claude_settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+            format!("/bin/bash {} pre", paths.heartbeat.display())
+        );
+        assert_eq!(
+            claude_settings["hooks"]["PostToolUse"][0]["hooks"][0]["command"],
+            format!("/bin/bash {} post", paths.heartbeat.display())
+        );
+        assert_eq!(
+            claude_settings["hooks"]["PostToolUseFailure"][0]["hooks"][0]["command"],
+            format!("/bin/bash {} post", paths.heartbeat.display())
+        );
+        assert_eq!(
+            claude_settings["hooks"]["Stop"][0]["hooks"][2]["command"],
+            format!("/bin/bash {} post", paths.heartbeat.display())
         );
         let confirmation = claude_confirmation.unwrap();
         assert_eq!(confirmation.timeout, Duration::from_secs(120));
@@ -1979,6 +2043,22 @@ mod tests {
         assert!(!folder_trust_prompt_visible(
             "A tool needs permission.\n1. Yes, continue\nPress enter to continue"
         ));
+        let codex_hooks: Value = serde_json::from_slice(
+            &std::fs::read(paths.codex.join("builder/hooks.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            codex_hooks["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
+            format!("/bin/bash {} pre", paths.heartbeat.display())
+        );
+        assert_eq!(
+            codex_hooks["hooks"]["PostToolUse"][0]["hooks"][0]["command"],
+            format!("/bin/bash {} post", paths.heartbeat.display())
+        );
+        assert_eq!(
+            codex_hooks["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"],
+            format!("/bin/bash {} pulse", paths.heartbeat.display())
+        );
 
         let _ = std::fs::remove_dir_all(root);
     }

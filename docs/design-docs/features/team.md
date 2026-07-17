@@ -402,10 +402,18 @@ hardworking → stalled** (plus terminal `offline`):
    (agora `web.rs`; resolves `x-agent`/`x-room` like `/mcp`, calls
    `Bus::heartbeat`, which sets status `working` + `last_seen`). Sustained tool
    activity is what promotes `thinking` → `working`. Wired on the per-tool /
-   per-prompt hooks so a busy agent reports alive *between* `wait` calls: kiro
-   `postToolUse` + `userPromptSubmit`, claude `PostToolUse` + `UserPromptSubmit`.
-   The hook is `team/hooks/heartbeat.sh` — a fire-and-forget background
-   `curl -m 2` that exits 0 immediately, so it can never block or fail a turn.
+   per-prompt hooks so a busy agent reports alive *between* `wait` calls. Kiro,
+   Claude, and Codex all wire `PreToolUse`, `PostToolUse`, and
+   `UserPromptSubmit` in their native hook dialect. The hook is
+   `team/hooks/heartbeat.sh`: `pre` pulses immediately and starts one bounded
+   per-agent lease that pulses every 30 seconds, `post` stops the lease and
+   pulses once, and `pulse` handles a newly submitted prompt. This keeps a
+   single legitimately long tool fresh for its entire run instead of only at
+   its boundaries. Team bus tools are excluded so `wait` remains `idle` and the
+   idle-sleep state machine still works. Curl has a 2-second cap and runs in the
+   background. Stop on every backend and Claude's separate
+   `PostToolUseFailure` event also clear the lease; a hard CLI crash that emits
+   none of those events can retain it for at most 24 hours.
    The supervisor injects `TEAM_HB_URL`/`TEAM_AGENT`/`TEAM_ROOM` into every
    backend's launch env so the hook is self-contained.
 
@@ -428,17 +436,16 @@ Colors run a heat gradient: idle green → thinking blue → working amber →
 hardworking orange (`--status-hot`) → stalled red.
 
 **Self-heal backstop** (`team.rs::reconcile_loop`, `RECOVERY_STALE_MS = 30 min`).
-Because a parked agent touches every 15 seconds and a working one heartbeats per
-tool, `last_seen` older than 30 min means genuinely *nothing* — a dead MCP
-socket, a crashed loop, a stop we never caught. For such an agent (window still
-present) the supervisor runs the same `nudge_pane` recovery uses — `Esc` to
+Because a parked agent touches every 15 seconds and a working tool holds a
+30-second heartbeat lease, `last_seen` older than 30 min means genuinely
+*nothing* — a dead MCP socket, a crashed loop, a stop we never caught. For such
+an agent (window still present) the supervisor runs the same `nudge_pane`
+recovery uses — `Esc` to
 cancel the wedged call, then a re-prompt to resume `wait` — **once**, then cools
-down the same window for another 30 min so we never spam. Tradeoff: a single
-tool that legitimately runs >30 min emits no heartbeat and could be interrupted;
-the long cooldown + high threshold make this rare and recoverable. codex has no
-per-tool hook in its config, so a working codex agent leans on this backstop
-(and shows `hardworking` then `stalled` meanwhile) — acceptable until a
-pane-output liveness probe is added.
+down the same window for another 30 min so we never spam. Pure model thinking
+between tools still has no lifecycle callback, but the pre/post/prompt pulses
+reset the clock at every observable boundary; an active tool itself is never
+interrupted merely for crossing the 30-minute threshold.
 
 **Idle-sleep** (`team.rs::SleepState`, `IDLE_SLEEP_MS = 5 min`). The other
 extreme: when **every** non-offline agent has been parked in `wait` (status
@@ -610,10 +617,6 @@ server still runs and the Team tab stays hidden.
 - **Roster status colors**: idle / thinking / working / **hardworking** (orange)
   / **stalled** (red) — see §5b — plus human. There is still no "owes a reply" /
   deadlock indicator (the data is in `/api/quiescence`).
-- **Liveness for Codex** uses the generated Stop keepalive plus the same 30-min
-  self-heal backstop as other backends. Codex does not currently emit the
-  per-tool heartbeat used by Kiro and Claude, so a pane-output probe could make
-  long working turns more precise. See §5b.
 - **Backend verification**: the mixed Kiro / Claude / Codex roster and Codex
   wait recovery have been exercised locally. Actual provider availability still
   depends on each system CLI's global authentication.
