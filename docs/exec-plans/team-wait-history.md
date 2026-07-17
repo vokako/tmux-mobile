@@ -121,3 +121,165 @@ race. The MCP client transport can also remain hung after a connection is gone.
 - `src-tauri/src/team.rs`
 - `docs/design-docs/features/team.md`
 - `docs/exec-plans/team-wait-history.md`
+
+## Follow-up: non-interrupting restart recovery
+
+### Problem
+
+Backend restart recovery previously sent `Esc` and a reconnect prompt to every
+adopted Agent window after two seconds. That repairs a dead `wait`, but also
+cancels healthy thinking, tool execution, or editing that happened to span the
+restart.
+
+### Chosen approach
+
+Snapshot each adopted Agent's persisted `status + last_seen`, allow one
+15-second wait heartbeat plus margin, and compare again after 20 seconds. Nudge
+only idle-like (`idle`/`online`/`stalled`) Agents whose timestamp did not
+advance. Active, sleeping, offline, unknown, and already-recovered Agents are
+left untouched. Trust confirmation remains independent of presence, and the
+recovery text is the neutral `Continue.` rather than an instruction to abandon
+work and enter a wait-only loop.
+
+### Done when
+
+- Restart recovery never sends `Esc` to working/thinking/hardworking Agents.
+- An unchanged dead idle wait still reconnects.
+- A wait that heartbeats during the grace period is not touched.
+- Trust prompts can still be confirmed without roster presence.
+- The complete room transcript remains mirrored at
+  `.tmm/team-history.jsonl`. The later bounded-history follow-up supersedes
+  direct preload instructions in Agent prompts.
+
+## Follow-up: client boundary probes and zero-turn idle
+
+### Problem
+
+The 180-second workaround still completed one empty tool turn before the
+then-five-minute idle-sleep threshold, and the earlier Kiro boundary was inferred
+from an incident rather than its actual timeout configuration.
+
+### Approaches considered
+
+1. Use day- or week-scale waits for every client. Rejected as a common value:
+   Codex and Claude support it, but Kiro does not.
+2. Add a retrying stdio proxy per agent. Rejected again: it adds one process and
+   protocol hop per agent while remaining subject to the outer client timeout.
+3. Use the largest coordinated Kiro-safe budget. Chosen: ten-minute client
+   timeouts, a nine-minute server budget, and an eight-minute idle-sleep derived
+   from that budget. Normal idle teams are cancelled into sleep one minute
+   before the first empty wait completes, so they consume no repeated model
+   turns.
+
+### Evidence
+
+- Kiro 2.12.x source defines `MAX_MCP_TIMEOUT_MS = 600000` and uses the
+  per-server `timeout` field. A 330-second silent HTTP tool completed at that
+  value; values above the cap were rejected before the request reached the
+  server.
+- Codex 0.144.4 completed the 330-second probe with
+  `tool_timeout_sec=600.0`; its duration parser also accepted week-scale values.
+- Claude Code 2.1.201 completed the probe with a 600000 ms per-server timeout,
+  `MCP_TOOL_TIMEOUT=600000`, and
+  `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT=0`.
+
+### Done when
+
+- Kiro, Claude, and Codex generated Team configurations all carry a ten-minute
+  tool timeout.
+- Claude's independent network MCP idle timeout is disabled.
+- The server wait budget is nine minutes, leaving one minute of delivery margin.
+- Idle-sleep is derived as eight minutes, one minute before that wait completes.
+- The focused timeout/config tests and complete Rust test suite pass.
+
+## Follow-up: runtime path and Terminal notification cleanup
+
+### Problem
+
+The Kiro private runtime directory is still named `.tmm/kiro-home`, unlike the
+`.tmm/claude` and `.tmm/codex` directories. Team Agent lifecycle notifications
+also render attention dots in Terminal chrome, where the Team page already owns
+the collaboration status and the duplicate marker is distracting.
+
+### Approaches considered
+
+1. Rename every legacy Kiro directory during server startup. Rejected: an
+   adopted Kiro process may still be using that path, so startup migration could
+   move files underneath a live Agent.
+2. Use `.tmm/kiro` for new launches and ignore `.tmm/kiro-home`. Rejected:
+   existing Kiro state would be stranded.
+3. Migrate immediately before launching a Kiro Agent, and only when the legacy
+   directory exists and `.tmm/kiro` does not. Chosen: it preserves state,
+   never overwrites a canonical directory, and does not touch adopted panes.
+4. Drop Team notifications at ingestion. Rejected: hooks, persisted unread
+   state, system notifications, and non-Terminal consumers must remain intact.
+   The chosen implementation filters only Terminal switcher and pane-picker
+   presentation.
+
+### Done when
+
+- A legacy `.tmm/kiro-home` is renamed to `.tmm/kiro` before a new Kiro launch,
+  preserving its contents.
+- An existing `.tmm/kiro` is never overwritten and leaves a legacy directory
+  untouched for manual reconciliation.
+- Team notification dots are absent from Terminal session/window chrome and the
+  all-session pane picker; ordinary session dots are unchanged.
+- `Continue.` remains the exact recovery prompt.
+- Focused Node/Rust tests, the complete Rust suite, `npm run build`, and
+  `git diff --check` pass without restarting the server.
+
+### Files
+
+- `src-tauri/src/team.rs`
+- `src/lib/Terminal.svelte`
+- `src/lib/PanePicker.svelte`
+- `src/lib/terminal-team-notifications.test.js`
+- `docs/requirements/pages/terminal.md`
+- `docs/design-docs/features/team.md`
+- `docs/design-docs/features/agent-notifications.md`
+- `docs/unresolved.md`
+
+## Follow-up: bounded on-demand Agent history
+
+### Problem
+
+The internal `TEAM_ADDRESSING_CONTRACT` repeats collaboration policy already
+present in the user-visible `config.toml` `team_rules`, with slightly different
+rules for unsolicited action. Its resume instruction also tells every Agent to
+read the complete JSONL transcript, so a long-running room can consume a large
+provider context before the Agent knows whether old history is relevant.
+
+### Approaches considered
+
+1. Keep telling Agents to read `.tmm/team-history.jsonl`. Rejected: the file is
+   intentionally complete and has no context-size bound.
+2. Return a fixed recent history window. Better, but an Agent cannot recover an
+   older decision without increasing the one-shot context load.
+3. Expose a bounded, cursor-paginated `read_history` MCP tool. Chosen: default
+   pages are small, sequence cursors make older-page traversal stable, and the
+   Agent loads additional context only when needed. The old `history` route
+   remains callable but is omitted from tool discovery for compatibility.
+
+The editable `team_rules` remains the sole collaboration-policy source.
+Hardcoded prompt text is reduced to runtime facts: use `read_history` only when
+earlier context is missing, request only enough pages, and do not preload the
+complete transcript.
+
+### Done when
+
+- `read_history` returns the newest 20 messages by default, accepts at most 100,
+  and supports exclusive `before_seq` pagination toward older messages.
+- Responses include message sequence numbers and an exact next-page hint only
+  when older messages exist.
+- Tool discovery exposes `read_history`, not the compatibility `history` alias.
+- Agent startup no longer instructs providers to read the full JSONL archive.
+- Focused pagination/tool-list/prompt tests and the complete Rust suite pass.
+
+### Files
+
+- `src-tauri/crates/agora/src/store.rs`
+- `src-tauri/crates/agora/src/bus.rs`
+- `src-tauri/crates/agora/src/mcp.rs`
+- `src-tauri/src/team.rs`
+- `docs/requirements/pages/team.md`
+- `docs/design-docs/features/team.md`

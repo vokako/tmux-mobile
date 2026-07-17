@@ -14,16 +14,18 @@ server. See `docs/design-docs/features/team.md` for architecture.
 - A server with the bus present but no teams shows the "New team" panel.
 
 ## Multiple teams
-- Each team is an isolated chat **room** (id = workspace slug) — separate
-  conversation, roster, and agents. Many teams (one per project) coexist.
+- Each team is an isolated chat **room** whose stable id is derived from the
+  canonical workspace + selected template. Conversation, roster, Agent runtime
+  files, and tmux session are all scoped by that same id. Different templates
+  may therefore run concurrently in one project directory.
 - **Header dropdown** lists active teams (room · live agent count); pick one to
   switch the chat + agent grid to it. Live agent status chips sit on the same
   header row (dot + name; wrap on overflow; tap → preview pane).
 - **+ New team** opens the workspace picker (folder browser) + a **roster
   template** picker → `team_start_team(workspace, template)`.
 - **× Close team** stops the active team's agents (`team_close_team`, kills its
-  tmux session); its chat log persists, so re-starting the same workspace
-  resumes history.
+  tmux session); its chat log persists, so re-starting the same
+  workspace+template pair resumes history.
 
 ## Roster templates
 - A team launches from a **named roster template** — a folder
@@ -52,6 +54,15 @@ server. See `docs/design-docs/features/team.md` for architecture.
 - It is **prepended to the brief every agent reads at startup**, across all
   teams/roles — for project-wide conventions, tone, language preference, etc.
   Empty by default (no-op).
+- Final prompt order is `system_prompt.md` → user-visible `config.toml`
+  `team_rules` → template prompt → role/goal. Each layer has one owner:
+  `team_rules` is the cross-template collaboration contract, template text
+  defines roster-specific routing/workflow, and role/goal defines one Agent's
+  responsibility.
+- Kiro receives that prompt through its custom Agent `prompt`; Claude through
+  `--append-system-prompt`; Codex through `developer_instructions` after any
+  existing user developer instructions. The initial user message is only the
+  visible `config.toml` `team_kick` lifecycle command.
 
 ## Components
 
@@ -62,7 +73,7 @@ server. See `docs/design-docs/features/team.md` for architecture.
   hardworking = orange, stalled = red, sleeping = muted), the agent name, and a
   terminal glyph.
 - **Tap a chip → preview that agent's tmux pane** in the Terminal tab. The agent
-  runs in a window named after it in `tmm-team-<workspace-slug>`; the tab maps
+  runs in a window named after it in `tmm-team-<team-id>`; the tab maps
   name → pane via `window_name` and opens it through the normal terminal path.
 
 ### Start panel (until a team is running)
@@ -71,9 +82,10 @@ server. See `docs/design-docs/features/team.md` for architecture.
   starting. This is the directory the team is limited to.
 - **Start team** button → `team_start_team(workspace, template)`: the desktop
   server seeds the selected roster and launches each agent into its own named
-  window of `tmm-team-<slug>`, all in-process. Shows "agents coming online…"
+  window of `tmm-team-<team-id>`, all in-process. Shows "agents coming online…"
   until they join.
-- Multiple workspaces → multiple independent teams (`tmm-team-<slug>` each).
+- A workspace+template pair is idempotent and resumes the same Team history;
+  another template in that workspace gets a separate Team.
 
 ### Message log (middle)
 - Group-chat transcript, oldest at top, newest at bottom (auto-scrolls).
@@ -84,12 +96,23 @@ server. See `docs/design-docs/features/team.md` for architecture.
   `team_message` push (de-duplicated by message id).
 - The complete room log remains authoritative in the Team SQLite database
   across close/relaunch. It is also mirrored as JSON Lines at
-  `<workspace>/.tmm/team-history.jsonl`, so replacement agents can inspect the
-  previous team's decisions and handoffs directly from their working directory.
+  `<workspace>/.tmm/teams/<team-id>/team-history.jsonl`, so replacement agents
+  can inspect that Team's decisions and handoffs without seeing sibling Teams.
+- Agents recover missing context through the Team MCP
+  `read_history(limit, before_seq)` tool instead of preloading that complete
+  file. The default page is 20 messages, a page is capped at 100, and responses
+  provide an exclusive sequence cursor only when older messages remain. This
+  bounded recovery behavior lives in the tool's own description rather than a
+  second hidden runtime prompt.
 
 ### Compose (bottom)
 - A row of `@name` quick-mention chips (one per present agent) above the input.
-- A growing textarea + a round send button.
+- A growing textarea + a round send button. The empty textarea is always at
+  least one complete text row tall and shows no horizontal or vertical
+  scrollbar. It grows with content and scrolls internally only after its cap.
+- On desktop, a slim drag handle on the composer's top edge adjusts the
+  textarea's base height from 40–320 px (keyboard-accessible with Up/Down). The
+  height is remembered locally; mobile ignores it and retains auto-grow.
 - **Enter sends** (desktop); Shift+Enter inserts a newline. The send button is
   the primary path on a soft keyboard.
 - Human `@name` posts default to requiring that agent's reply. `@all` always

@@ -1,11 +1,12 @@
 //! Desktop-only glue between the tmux-mobile WS server and the team bus.
 //!
-//! Multi-team manager. Each **team** is an isolated chat **room** (= the
-//! workspace slug) backed by its own `agora::Bus` on the shared SQLite db. A
-//! single MCP daemon serves them all (agents pick a room via the `x-room`
-//! header); the phone passes the active room with each `team_*` RPC. Every
-//! room's messages funnel into one re-broadcast channel (each `Message` carries
-//! its `room`), and the phone filters to the team currently in view.
+//! Multi-team manager. Each **team** is an isolated chat **room**, identified
+//! by a stable workspace+template slug and backed by its own `agora::Bus` on the
+//! shared SQLite db. A single MCP daemon serves them all (agents pick a room via
+//! the `x-room` header); the phone passes the active room with each `team_*`
+//! RPC. Every room's messages funnel into one re-broadcast channel (each
+//! `Message` carries its `room`), and the phone filters to the team currently
+//! in view.
 //!
 //! Compiled ONLY on desktop (lib.rs `#[cfg(...)]`); mobile passes `None`.
 
@@ -42,7 +43,8 @@ pub struct TeamManager {
     json_tx: broadcast::Sender<String>,
     /// Server-level launcher config (bus URL + default model).
     cfg: TeamConfig,
-    /// Where room→workspace is persisted so restarts can recover teams.
+    /// Persistent room→workspace+template identity registry. It retains closed
+    /// Teams so the same pair can resume the same room history later.
     meta_path: std::path::PathBuf,
     self_ref: OnceLock<Weak<TeamManager>>,
 }
@@ -69,8 +71,8 @@ impl TeamManager {
             team_rules: crate::config::Config::load().team_rules,
             team_kick: crate::config::Config::load().team_kick,
         };
-        // room→workspace map lives next to the db so a restart knows where each
-        // recovered team's agents work.
+        // The room identity registry lives next to the db so restart recovery
+        // and close/relaunch both retain workspace+template ownership.
         let meta_path = Path::new(db)
             .parent()
             .unwrap_or_else(|| Path::new("."))
@@ -133,13 +135,11 @@ impl TeamManager {
                 // CLI must not be interrupted during its first-run setup.
                 let adopted = crate::tmux::list_named_windows(&session);
                 let bridge: Arc<dyn TeamBridge> = arc;
-                team::start(bridge, self.cfg.clone(), room.clone(), workspace, template);
-                // The adopted agents are hung on a `wait` whose connection died
-                // with the old daemon; their MCP clients reconnect once unstuck
-                // but can't unstick themselves. Nudge each window to reconnect
-                // (Esc the dead call + re-prompt). One-shot, off the hot path.
-                team::nudge_adopted_agents(adopted);
-                println!("🜂 team: recovered running team '{}' (adopting + nudging agents)", room);
+                team::start(bridge.clone(), self.cfg.clone(), room.clone(), workspace, template);
+                // After one heartbeat interval, reconnect only adopted idle
+                // waits that did not recover. Active work is never interrupted.
+                team::nudge_adopted_agents(bridge, room.clone(), adopted);
+                println!("🜂 team: recovered running team '{}' (adopting agents)", room);
             }
         }
     }
@@ -162,17 +162,53 @@ impl TeamManager {
     }
 
     /// Persist room→{workspace,template} for every known team (best-effort).
+    /// Existing closed entries are retained as durable identity mappings.
     fn save_meta(&self) {
-        let map: serde_json::Map<String, serde_json::Value> = self
-            .teams
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|(room, t)| (room.clone(), serde_json::json!({ "workspace": t.workspace, "template": t.template })))
-            .collect();
+        let mut map = std::fs::read_to_string(&self.meta_path)
+            .ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .and_then(|value| value.as_object().cloned())
+            .unwrap_or_default();
+        for (room, team) in self.teams.lock().unwrap().iter() {
+            map.insert(
+                room.clone(),
+                serde_json::json!({
+                    "workspace": team.workspace,
+                    "template": team.template,
+                }),
+            );
+        }
         if let Ok(s) = serde_json::to_string_pretty(&serde_json::Value::Object(map)) {
             let _ = std::fs::write(&self.meta_path, s);
         }
+    }
+
+    fn known_room_for(&self, workspace: &str, template: &str) -> Option<String> {
+        let meta = self.load_meta();
+        let matches = |room: &str| {
+            meta.get(room).is_some_and(|(known_workspace, known_template)| {
+                team::same_workspace(known_workspace, workspace)
+                    && known_template == template
+            })
+        };
+        let current = team::team_slug(workspace, template);
+        if matches(&current) {
+            return Some(current);
+        }
+        let legacy = team::workspace_slug(workspace);
+        if matches(&legacy) {
+            return Some(legacy);
+        }
+        let mut rooms: Vec<String> = meta
+            .iter()
+            .filter(|(_, (known_workspace, known_template))| {
+                team::same_workspace(known_workspace, workspace)
+                    && known_template == template
+            })
+            .map(|(room, _)| room.clone())
+            .collect();
+        rooms.sort();
+        rooms.into_iter().next()
     }
 
     /// Get an existing room's bus, or register it over the shared connection and
@@ -189,7 +225,7 @@ impl TeamManager {
         // Subscribe before the snapshot. Messages committed during the snapshot
         // are queued and then skipped by seq if already included, never missed.
         let mut rx = bus.subscribe();
-        let history_path = workspace_history_path(workspace);
+        let history_path = workspace_history_path(workspace, room);
         let mut mirrored_seq = history_path
             .as_deref()
             .map(|path| write_history_snapshot(&bus, path))
@@ -334,16 +370,40 @@ impl TeamBridge for TeamManager {
     fn start_team(&self, workspace: &str, template: &str) -> serde_json::Value {
         let ws = if workspace.trim().is_empty() { self.default_workspace() } else { workspace.trim().to_string() };
         let tpl = if template.trim().is_empty() { "default".to_string() } else { template.trim().to_string() };
-        let room = team::workspace_slug(&ws);
 
         // Self-heal the built-in templates (the teams/ dir may have been deleted)
         // and refuse up front if the chosen roster is missing/empty — otherwise
         // the team would "start" with zero agents and the UI would spin forever.
         team::ensure_templates_seeded();
         if team::read_template(&tpl).is_empty() {
-            return serde_json::json!({ "started": false, "room": room, "workspace": ws,
+            return serde_json::json!({ "started": false, "workspace": ws,
                 "error": format!("template '{}' not found or empty", tpl) });
         }
+
+        // Preserve idempotency and live legacy recovery. An old workspace-only
+        // room may already represent this exact pair; return it rather than
+        // launching a second copy under the new workspace+template ID.
+        let existing = self
+            .teams
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(_, t)| team::same_workspace(&t.workspace, &ws) && t.template == tpl)
+            .map(|(room, t)| (room.clone(), t.started));
+        if let Some((room, true)) = &existing {
+            return serde_json::json!({
+                "started": false,
+                "room": room,
+                "workspace": ws,
+                "template": tpl,
+                "active": true,
+            });
+        }
+
+        let room = existing
+            .map(|(room, _)| room)
+            .or_else(|| self.known_room_for(&ws, &tpl))
+            .unwrap_or_else(|| team::team_slug(&ws, &tpl));
 
         // Open/register the room, then mark it started (one-shot per room).
         if let Err(e) = self.ensure_room(&room, &ws, &tpl) {
@@ -403,7 +463,7 @@ impl TeamBridge for TeamManager {
                 // log and workspace transcript survive for a later relaunch.
                 let _ = crate::tmux::kill_session(&t.session);
                 let _ = t.bus.reset_runtime();
-                self.save_meta(); // drop it from the recovery map too
+                self.save_meta(); // retain identity; no live session means no recovery
                 true
             }
             None => false,
@@ -460,12 +520,15 @@ impl TeamBridge for TeamManager {
     }
 }
 
-fn workspace_history_path(workspace: &str) -> Option<PathBuf> {
+fn workspace_history_path(workspace: &str, room: &str) -> Option<PathBuf> {
     let workspace = Path::new(workspace.trim());
     if workspace.as_os_str().is_empty() || !workspace.is_dir() {
         return None;
     }
-    Some(workspace.join(".tmm").join("team-history.jsonl"))
+    Some(team::team_runtime_dir(
+        workspace.to_string_lossy().as_ref(),
+        room,
+    ).join("team-history.jsonl"))
 }
 
 fn write_history_snapshot(bus: &Bus, path: &Path) -> Result<i64, String> {
@@ -552,10 +615,18 @@ mod tests {
     #[tokio::test]
     async fn rooms_are_isolated() {
         let m = manager();
-        m.ensure_room("alpha", "/tmp/alpha", "default").unwrap();
-        m.ensure_room("beta", "/tmp/beta", "default").unwrap();
+        m.ensure_room("alpha", "/tmp/shared", "default").unwrap();
+        m.ensure_room("beta", "/tmp/shared", "triad").unwrap();
         m.post("alpha", "human", "hello alpha", false).unwrap();
         m.post("beta", "human", "hello beta", false).unwrap();
+        m.room_bus("alpha")
+            .unwrap()
+            .seed_employee("worker", &serde_json::json!({ "role": "alpha" }))
+            .unwrap();
+        m.room_bus("beta")
+            .unwrap()
+            .seed_employee("lead", &serde_json::json!({ "role": "beta" }))
+            .unwrap();
 
         let a = m.history("alpha", 100);
         let b = m.history("beta", 100);
@@ -567,6 +638,78 @@ mod tests {
         assert!(!a_bodies.iter().any(|s| s == "hello beta"), "beta leaked into alpha");
         assert!(b_bodies.iter().any(|s| s == "hello beta"));
         assert!(!b_bodies.iter().any(|s| s == "hello alpha"), "alpha leaked into beta");
+        assert_eq!(m.employee_specs("alpha")[0].0, "worker");
+        assert_eq!(m.employee_specs("beta")[0].0, "lead");
+    }
+
+    #[tokio::test]
+    async fn same_workspace_history_mirrors_are_disjoint() {
+        let m = manager();
+        let workspace = m.meta_path.parent().unwrap().join("shared-workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let workspace = workspace.to_string_lossy().into_owned();
+        let alpha = team::team_slug(&workspace, "default");
+        let beta = team::team_slug(&workspace, "triad");
+        let alpha_path =
+            team::team_runtime_dir(&workspace, &alpha).join("team-history.jsonl");
+        let beta_path =
+            team::team_runtime_dir(&workspace, &beta).join("team-history.jsonl");
+
+        m.ensure_room(&alpha, &workspace, "default").unwrap();
+        m.ensure_room(&beta, &workspace, "triad").unwrap();
+        m.post(&alpha, "human", "alpha only", false).unwrap();
+        m.post(&beta, "human", "beta only", false).unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        assert_ne!(alpha_path, beta_path);
+        let alpha_text = std::fs::read_to_string(alpha_path).unwrap();
+        let beta_text = std::fs::read_to_string(beta_path).unwrap();
+        assert!(alpha_text.contains("alpha only"));
+        assert!(!alpha_text.contains("beta only"));
+        assert!(beta_text.contains("beta only"));
+        assert!(!beta_text.contains("alpha only"));
+    }
+
+    #[tokio::test]
+    async fn start_reuses_an_active_legacy_workspace_template_pair() {
+        let m = manager();
+        let workspace = m.meta_path.parent().unwrap().join("legacy-workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let workspace = workspace.to_string_lossy().into_owned();
+        let legacy_room = team::workspace_slug(&workspace);
+        m.ensure_room(&legacy_room, &workspace, "default").unwrap();
+        m.teams.lock().unwrap().get_mut(&legacy_room).unwrap().started = true;
+
+        let result = m.start_team(&workspace, "default");
+
+        assert_eq!(result["room"], legacy_room);
+        assert_eq!(result["started"], false);
+        assert_eq!(m.teams.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn close_retains_each_workspace_template_room_identity() {
+        let m = manager();
+        let workspace = m.meta_path.parent().unwrap().join("identity-workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let workspace = workspace.to_string_lossy().into_owned();
+        let legacy = team::workspace_slug(&workspace);
+        let triad = team::team_slug(&workspace, "triad");
+
+        m.ensure_room(&legacy, &workspace, "default").unwrap();
+        m.ensure_room(&triad, &workspace, "triad").unwrap();
+        assert!(m.close_team(&legacy));
+        assert!(m.close_team(&triad));
+
+        assert_eq!(
+            m.known_room_for(&workspace, "default").as_deref(),
+            Some(legacy.as_str())
+        );
+        assert_eq!(
+            m.known_room_for(&workspace, "triad").as_deref(),
+            Some(triad.as_str())
+        );
+        assert!(m.teams.lock().unwrap().is_empty(), "closed Teams stay out of UI");
     }
 
     #[tokio::test]
@@ -607,8 +750,8 @@ mod tests {
         let workspace = m.meta_path.parent().unwrap().join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
         let workspace = workspace.to_string_lossy().into_owned();
-        let history_path = Path::new(&workspace).join(".tmm/team-history.jsonl");
-        let gitignore_path = Path::new(&workspace).join(".tmm/.gitignore");
+        let history_path = team::team_runtime_dir(&workspace, "alpha").join("team-history.jsonl");
+        let gitignore_path = team::team_runtime_dir(&workspace, "alpha").join(".gitignore");
 
         m.ensure_room("alpha", &workspace, "default").unwrap();
         m.post("alpha", "human", "first decision", false).unwrap();

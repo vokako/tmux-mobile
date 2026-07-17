@@ -65,9 +65,9 @@ pub trait TeamBridge: Send + Sync {
     /// supervisor uses this to exit cleanly when its team is closed.
     fn room_exists(&self, room: &str) -> bool;
     /// Start a team for `workspace` from `template` (named roster; empty =
-    /// "default"): derive its room (= workspace slug), seed the roster, launch
-    /// agents into a per-workspace tmux session. Idempotent per room. Returns
-    /// `{ room, started, workspace }`.
+    /// "default"): derive its stable room from workspace+template, seed the
+    /// roster, and launch agents into a per-Team tmux session. Idempotent for
+    /// the same workspace+template pair. Returns `{ room, started, workspace }`.
     fn start_team(&self, workspace: &str, template: &str) -> serde_json::Value;
     /// Stop a team: kill its tmux session and forget it (the chat log persists
     /// in the db). Returns true if the room was known.
@@ -1008,8 +1008,9 @@ fn handle_team_request(req: &Request, team: Option<&dyn TeamBridge>) -> Response
         }
         "team_roster" => Response::ok(id, bus.roster(room)),
         "team_employees" => Response::ok(id, bus.employees(room)),
-        // Operator action: spin up a team in `workspace` from `template` (its
-        // room = the workspace slug). Idempotent; returns { room, started, workspace }.
+        // Operator action: spin up a team in `workspace` from `template`.
+        // The stable workspace+template room keeps same-directory Teams
+        // isolated. Idempotent; returns { room, started, workspace }.
         "team_start_team" => {
             let workspace = p.get("workspace").and_then(|v| v.as_str())
                 .filter(|s| !s.is_empty())

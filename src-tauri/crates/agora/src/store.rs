@@ -160,13 +160,26 @@ pub fn messages_after(conn: &Connection, room: &str, after: i64, limit: i64) -> 
 }
 
 pub fn history(conn: &Connection, room: &str, limit: i64) -> Result<Vec<Message>> {
+    history_before(conn, room, None, limit)
+}
+
+/// Return the newest `limit` messages strictly before `before_seq`, ordered
+/// oldest first. `None` starts from the current room head.
+pub fn history_before(
+    conn: &Connection,
+    room: &str,
+    before_seq: Option<i64>,
+    limit: i64,
+) -> Result<Vec<Message>> {
     let mut stmt = conn.prepare(
         "SELECT * FROM (
             SELECT seq,id,ts,room,sender,to_json,kind,body
-            FROM messages WHERE room=?1 ORDER BY seq DESC LIMIT ?2
+            FROM messages
+            WHERE room=?1 AND (?2 IS NULL OR seq < ?2)
+            ORDER BY seq DESC LIMIT ?3
          ) ORDER BY seq ASC",
     )?;
-    let rows = stmt.query_map(params![room, limit], row_to_message)?;
+    let rows = stmt.query_map(params![room, before_seq, limit], row_to_message)?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 

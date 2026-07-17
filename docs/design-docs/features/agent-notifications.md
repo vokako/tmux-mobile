@@ -77,6 +77,13 @@ server then broadcasts the complete unread snapshot so every connected client
 converges. Listing notifications after authentication supplies the initial
 snapshot for a reconnecting client.
 
+Terminal chrome deliberately filters attention dots for recognized
+`tmm-team-*` sessions: Team already presents Agent status, and repeating the
+marker on its session/window chips adds noise. The filter is downstream of this
+unread model. Hook ingestion, server persistence, system notification delivery,
+and ordinary session dots are unchanged; Sessions remains a complete unread
+overview.
+
 ## Hook Management
 
 Settings exposes install/status/remove actions in the Connection tab.

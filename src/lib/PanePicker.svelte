@@ -9,7 +9,7 @@
   import { t } from './i18n.svelte.js';
   import { listSessionsWithPanes, newWindow } from './ws.js';
   import { paneAgent, paneChipLabel } from './agents.js';
-  import { notificationForWindow, sessionHasNotification } from './agent-notifications.svelte.js';
+  import { sessionHasNotification, terminalNotificationForWindow } from './agent-notifications.svelte.js';
   // Team sessions (tmm-team-<room>) are grouped apart from regular sessions and
   // labelled by their workspace basename. Shared helpers, gated on the server
   // actually having the team bus — consistent with the Sessions page.
@@ -104,12 +104,12 @@
   {@const team = isTeamSession(s.name)}
   <div class="picker-session">
     <span class="picker-session-name" title={team ? s.name : null}>{team ? teamLabel(s.name) : s.name}</span>
-    {#if s.name !== currentSession && sessionHasNotification(s.name)}<span class="picker-attention" aria-label="Agent needs attention"></span>{/if}
+    {#if !team && s.name !== currentSession && sessionHasNotification(s.name)}<span class="picker-attention" aria-label="Agent needs attention"></span>{/if}
   </div>
   <div class="picker-panes">
     {#each s.panes as p}
       {@const isCur = currentTarget === `${p.session}:${p.window}.${p.pane}`}
-      {@const notice = notificationForWindow(p.session, p.window)}
+      {@const notice = terminalNotificationForWindow(p.session, p.window)}
       {@const pAgent = paneAgent(p)}
       <AgentChip
         attention={!!notice}

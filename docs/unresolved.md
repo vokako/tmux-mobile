@@ -24,6 +24,16 @@
 
 ## Team feature
 
+### Team delivery cursor advances before client acknowledgement
+- **Priority**: Medium · **Area**: Team / agora bus
+- `Bus::wait` advances an agent's SQLite cursor before the MCP HTTP response is
+  delivered. If the connection drops after cursor advancement but before the
+  Agent CLI receives the ToolResult, reconnecting `wait` skips that message.
+  Longer waits do not create the race, but server restarts and transport loss
+  make it relevant. Fix requires an acknowledgement token or at-least-once
+  delivery with message-id deduplication; do not treat SQLite persistence alone
+  as proof of delivery.
+
 ### Launch failures / fired agents not surfaced in the UI
 - **Priority**: Low · **Area**: Team
 - After `MAX_LAUNCH_FAILURES` (3) failed launches the supervisor stops trying, but the UI shows no

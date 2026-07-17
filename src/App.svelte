@@ -895,11 +895,8 @@
   });
   // Swipe left/right to switch tabs with slide animation
   const tabs = $derived(() => {
-    const t = ['sessions'];
-    if (terminalTarget) {
-      t.push('terminal');
-      if (chatSupported) t.push('chat');
-    }
+    const t = ['sessions', 'terminal'];
+    if (terminalTarget && chatSupported) t.push('chat');
     if (teamAvailable) t.push('team');
     t.push('files');
     return t;
@@ -974,11 +971,9 @@
         <button tabindex="-1" class:active={page === 'sessions'} onclick={() => switchTab('sessions')}>
           {t('sessions')}
         </button>
-        {#if terminalTarget}
-          <button tabindex="-1" class:active={page === 'terminal' && viewMode === 'terminal'} onclick={() => switchTab('terminal')}>
-            {t('terminal')}
-          </button>
-        {/if}
+        <button tabindex="-1" class:active={page === 'terminal' && viewMode === 'terminal'} onclick={() => switchTab('terminal')}>
+          {t('terminal')}
+        </button>
         {#if terminalTarget && chatSupported}
           <button tabindex="-1" class:active={page === 'terminal' && viewMode === 'chat'} onclick={() => switchTab('chat')}>
             {t('chat')}
@@ -1060,8 +1055,8 @@
     <div class="page-layer" class:hidden={page !== 'files'}>
       <Files session={filesSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} />
     </div>
-    {#if terminalTarget}
-      <div class="page-layer" class:hidden={page !== 'terminal'}>
+    <div class="page-layer" class:hidden={page !== 'terminal'}>
+      {#if terminalTarget}
         <div class="terminal-body" class:split-capable={splitEligible && viewMode === 'terminal'}>
           {#if splitActive}
             <!-- In split mode the layout control floats top-right (no single
@@ -1093,8 +1088,13 @@
               onSwitchPane={(t, cmd) => { terminalTarget = t; terminalSession = t.split(':')[0]; terminalCommand = cmd || ''; readTarget(t); }} onPaneExit={() => { terminalTarget = ''; page = 'sessions'; }} />
           {/if}
         </div>
-      </div>
-    {/if}
+      {:else}
+        <div class="terminal-empty">
+          <Icon name="terminal" size={22} />
+          <span>{t('noTerminalSelected')}</span>
+        </div>
+      {/if}
+    </div>
   </div>
 
   {#if debugMode}
@@ -1460,6 +1460,12 @@
   }
 
   .terminal-body { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+  .terminal-empty {
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 9px; color: var(--text3); font-size: 13px;
+  }
+  .terminal-empty :global(svg) { opacity: 0.65; }
 
   /* Split-layout control: a single floating icon in the terminal's top-right
      corner (no full-width toolbar row). Opens a small popover with 1/2/3/4/6. */

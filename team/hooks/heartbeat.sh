@@ -8,7 +8,7 @@
 #   pulse  pulse once (used by userPromptSubmit)
 #
 # It deliberately IGNORES the team bus's own coordination tools (wait / post /
-# list_agents / history). Those are MCP tool calls too, so their postToolUse
+# list_agents / read_history). Those are MCP tool calls too, so their postToolUse
 # would fire a heartbeat and flip the agent to `working` the instant a `wait`
 # returns — overwriting the brief `thinking` state set when a message is
 # delivered. Skipping them lets `thinking` show until the agent runs a REAL

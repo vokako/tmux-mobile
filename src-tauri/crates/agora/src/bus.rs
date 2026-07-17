@@ -356,6 +356,11 @@ impl Bus {
         store::history(&conn, &self.room, limit)
     }
 
+    pub fn history_before(&self, before_seq: Option<i64>, limit: i64) -> Result<Vec<Message>> {
+        let conn = self.lock();
+        store::history_before(&conn, &self.room, before_seq, limit)
+    }
+
     // ---- runtime team management (manager-only via agent config) ----
 
     /// Hire a new employee (a skill-specialised worker). Validates the name is free.

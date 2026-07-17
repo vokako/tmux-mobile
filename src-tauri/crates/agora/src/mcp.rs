@@ -2,8 +2,8 @@
 //!
 //! Identity is bound per-connection via the `x-agent` header (set in each agent's
 //! MCP config), not via tool arguments. The agent's whole API is two tools:
-//! `post` and `wait`. `list_agents`/`history` exist for occasional catch-up but the
-//! roster is also returned by `wait`, so they rarely need to be called.
+//! `post` and `wait`. `list_agents` and bounded `read_history` exist for
+//! occasional inspection but should not be called on every turn.
 
 use crate::bus::{Bus, BusProvider, WaitOutcome};
 use rmcp::handler::server::router::tool::ToolRouter;
@@ -18,12 +18,14 @@ use serde::Deserialize;
 use std::future::Future;
 use std::time::{Duration, Instant};
 
-/// One agent-facing `wait` tool call spans several short bus wait slices. This
-/// stays below both Kiro's observed 240-second client boundary and the
-/// supervisor's five-minute idle-sleep threshold. Do not raise this to 240s:
-/// racing the client deadline left Kiro stuck in a completed server call.
-pub const MCP_WAIT_MAX_MS: u64 = 180_000;
+/// One agent-facing `wait` tool call spans several short bus wait slices. Kiro
+/// caps MCP timeouts at 600 seconds, so the server returns after nine minutes
+/// and leaves one minute for transport delivery. In normal idle operation the
+/// supervisor cancels this call at eight minutes and sleeps the team first.
+pub const MCP_WAIT_MAX_MS: u64 = 540_000;
 const MCP_WAIT_MIN_SLICE_MS: u64 = 15_000;
+const READ_HISTORY_DEFAULT_LIMIT: i64 = 20;
+const READ_HISTORY_MAX_LIMIT: i64 = 100;
 
 #[derive(Clone)]
 pub struct AgoraMcp {
@@ -34,7 +36,6 @@ pub struct AgoraMcp {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct PostArgs {
     /// The message. Use @name for one agent or @all when everyone must reply.
-    /// Keep it short; share real artifacts as workspace files.
     pub body: String,
     /// Set true to require named agents you @mention to reply: each is reminded —
     /// and refused idle — until they answer you. @all always requires every other
@@ -48,16 +49,20 @@ pub struct PostArgs {
 pub struct WaitArgs {
     /// Internal polling slice in milliseconds (range 15000-50000, default
     /// 50000). Empty slices are ignored; one tool call remains parked for up to
-    /// 180000 milliseconds.
+    /// 540000 milliseconds.
     #[serde(default)]
     pub timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct HistoryArgs {
-    /// How many recent messages to return (default 50, max 1000).
+pub struct ReadHistoryArgs {
+    /// How many messages to return (default 20, max 100).
     #[serde(default)]
     pub limit: Option<i64>,
+    /// Return messages strictly older than this sequence number. Omit for the
+    /// newest page; use the next-page hint from a result to continue backward.
+    #[serde(default)]
+    pub before_seq: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -146,6 +151,57 @@ fn render_msg(m: &crate::envelope::Message, me: &str) -> String {
     }
 }
 
+fn render_history_page(
+    bus: &Bus,
+    me: &str,
+    args: ReadHistoryArgs,
+) -> Result<String, ErrorData> {
+    if matches!(args.before_seq, Some(seq) if seq <= 0) {
+        return Err(err("before_seq must be a positive message sequence number"));
+    }
+    let limit = args
+        .limit
+        .unwrap_or(READ_HISTORY_DEFAULT_LIMIT)
+        .clamp(1, READ_HISTORY_MAX_LIMIT);
+    let mut messages = bus
+        .history_before(args.before_seq, limit + 1)
+        .map_err(|e| err(format!("read_history failed: {e}")))?;
+    let has_older = messages.len() > limit as usize;
+    if has_older {
+        messages.remove(0);
+    }
+    if messages.is_empty() {
+        return Ok(match args.before_seq {
+            Some(seq) => format!("(no team messages before seq {seq})"),
+            None => "(no team history)".to_string(),
+        });
+    }
+
+    let first_seq = messages.first().unwrap().seq;
+    let last_seq = messages.last().unwrap().seq;
+    let lines: Vec<String> = messages
+        .iter()
+        .map(|message| format!("[{}] {}", message.seq, render_msg(message, me)))
+        .collect();
+    let older = if has_older {
+        format!(
+            "\n\nOlder messages are available. Call `read_history(before_seq={first_seq}, limit={limit})` only if needed."
+        )
+    } else {
+        "\n\nThis is the oldest available page.".to_string()
+    };
+    Ok(format!(
+        "Team history seq {first_seq}-{last_seq} ({} messages):\n{}{}",
+        messages.len(),
+        lines.join("\n"),
+        older
+    ))
+}
+
+fn is_discoverable_tool(name: &str) -> bool {
+    name != "history"
+}
+
 fn render_roster(roster: &[crate::store::AgentRow]) -> String {
     let parts: Vec<String> = roster
         .iter()
@@ -195,9 +251,7 @@ impl AgoraMcp {
         the message (use @all for everyone); other agents read it and decide whether to act. \
         Set requires_reply=true to require named agents you @mention to reply — they are \
         reminded (and refused idle) until they answer. @all always requires every other \
-        agent to reply. Leave it false for informational messages to named agents. \
-        Keep messages short: share real data and artifacts as files in the shared workspace, \
-        not pasted into chat."
+        agent to reply. Leave it false for informational messages to named agents."
     )]
     async fn post(
         &self,
@@ -214,8 +268,7 @@ impl AgoraMcp {
         description = "Wait for new messages, then return them plus the current roster. You \
         are refused if you still owe someone a reply — the result names whom and includes the \
         messages to answer; reply with `post` first, then wait. Empty internal polling slices \
-        are ignored, so one call stays parked for up to three minutes. End every turn by calling \
-        `wait` to stay in the conversation."
+        are ignored, so one call stays parked for up to nine minutes."
     )]
     async fn wait(
         &self,
@@ -263,17 +316,31 @@ impl AgoraMcp {
         Ok(render_roster(&roster))
     }
 
-    #[tool(description = "Return recent messages, oldest first, to catch up on context.")]
+    #[tool(
+        description = "Read a small page of earlier Team messages only when prior context is \
+        missing. The newest 20 messages are returned by default, oldest first within the page. \
+        To go farther back, pass the `before_seq` from the result's next-page hint. Pages are \
+        capped at 100 messages to avoid flooding your context; stop as soon as you have enough."
+    )]
+    async fn read_history(
+        &self,
+        Extension(parts): Extension<http::request::Parts>,
+        Parameters(args): Parameters<ReadHistoryArgs>,
+    ) -> Result<String, ErrorData> {
+        let (bus, me) = identity(&*self.provider, &parts)?;
+        render_history_page(&bus, &me, args)
+    }
+
+    /// Compatibility for clients that cached the pre-read_history tool name.
+    /// It remains callable but is omitted from `list_tools`.
+    #[tool(description = "Deprecated compatibility alias for read_history.")]
     async fn history(
         &self,
         Extension(parts): Extension<http::request::Parts>,
-        Parameters(args): Parameters<HistoryArgs>,
+        Parameters(args): Parameters<ReadHistoryArgs>,
     ) -> Result<String, ErrorData> {
         let (bus, me) = identity(&*self.provider, &parts)?;
-        let limit = args.limit.unwrap_or(50).clamp(1, 1000);
-        let msgs = bus.history(limit).map_err(|e| err(format!("history failed: {e}")))?;
-        let lines: Vec<String> = msgs.iter().map(|m| render_msg(m, &me)).collect();
-        Ok(if lines.is_empty() { "(no history)".to_string() } else { lines.join("\n") })
+        render_history_page(&bus, &me, args)
     }
 
     #[tool(
@@ -335,26 +402,6 @@ impl ServerHandler for AgoraMcp {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
-            instructions: Some(
-                "You are in a shared group chat with other agents and a human operator. \
-                 You have exactly two actions:\n\
-                 • post(body, requires_reply): say something. Address agents by writing @name \
-                   in the body. Set requires_reply=true to require named agents to reply. \
-                   @all addresses everyone and always requires every other agent to reply, \
-                   regardless of the flag; otherwise messages are informational.\n\
-                 • wait(): receive new messages + the roster. You are refused while you owe \
-                   someone a reply; reply first, then wait. Always end your turn with wait.\n\n\
-                 Rules of the house:\n\
-                 1) Reply to anyone who addressed you. @all addresses you exactly like your \
-                    own name (you may decline with a reason — but don't go silent). Messages \
-                    not addressed to you are just context.\n\
-                 2) Exchange real work through FILES in the shared workspace. Messages are \
-                    only for coordination (\"wrote it to src/foo.py, please review\"). Never \
-                    paste large content into the chat. The full, authoritative context lives \
-                    in the project files, not in messages.\n\
-                 3) Keep messages short. Your team's collaboration playbook is in AGENTS.md."
-                    .to_string(),
-            ),
             ..Default::default()
         }
     }
@@ -365,6 +412,7 @@ impl ServerHandler for AgoraMcp {
         context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
         let mut tools = self.tool_router.list_all();
+        tools.retain(|tool| is_discoverable_tool(tool.name.as_ref()));
         if !self.caller_can_manage(&context) {
             tools.retain(|t| t.name.as_ref() != "hire" && t.name.as_ref() != "fire");
         }
@@ -389,6 +437,83 @@ mod tests {
     use super::*;
     use crate::bus::{Bus, SingleRoom};
     use crate::store;
+
+    #[test]
+    fn read_history_is_small_and_pages_toward_older_messages() {
+        let bus = Bus::new(store::open_in_memory().unwrap(), "main");
+        for n in 1..=125 {
+            bus.post("human", &format!("message-{n}"), false).unwrap();
+        }
+
+        let newest = render_history_page(
+            &bus,
+            "worker",
+            ReadHistoryArgs { limit: None, before_seq: None },
+        )
+        .unwrap();
+        assert!(newest.contains("seq 106-125 (20 messages)"));
+        assert!(newest.contains("[106] human: message-106"));
+        assert!(!newest.contains("message-105"));
+        assert!(newest.contains("read_history(before_seq=106, limit=20)"));
+
+        let older = render_history_page(
+            &bus,
+            "worker",
+            ReadHistoryArgs { limit: Some(1_000), before_seq: Some(106) },
+        )
+        .unwrap();
+        assert!(older.contains("seq 6-105 (100 messages)"));
+        assert_eq!(older.lines().filter(|line| line.starts_with('[')).count(), 100);
+        assert!(older.contains("read_history(before_seq=6, limit=100)"));
+
+        let oldest = render_history_page(
+            &bus,
+            "worker",
+            ReadHistoryArgs { limit: Some(20), before_seq: Some(6) },
+        )
+        .unwrap();
+        assert!(oldest.contains("seq 1-5 (5 messages)"));
+        assert!(oldest.contains("This is the oldest available page."));
+        assert!(!oldest.contains("Older messages are available."));
+    }
+
+    #[test]
+    fn read_history_rejects_invalid_cursor_and_hides_compatibility_alias() {
+        let bus = Bus::new(store::open_in_memory().unwrap(), "main");
+        assert!(render_history_page(
+            &bus,
+            "worker",
+            ReadHistoryArgs { limit: None, before_seq: Some(0) },
+        )
+        .is_err());
+
+        let mcp = AgoraMcp::new(std::sync::Arc::new(SingleRoom(bus)));
+        let names: Vec<String> = mcp
+            .tool_router
+            .list_all()
+            .into_iter()
+            .map(|tool| tool.name.to_string())
+            .collect();
+        assert!(names.iter().any(|name| name == "read_history"));
+        assert!(names.iter().any(|name| name == "history"));
+        assert!(is_discoverable_tool("read_history"));
+        assert!(!is_discoverable_tool("history"));
+
+        let read_history = mcp
+            .tool_router
+            .list_all()
+            .into_iter()
+            .find(|tool| tool.name == "read_history")
+            .unwrap();
+        let properties = read_history
+            .input_schema
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+            .unwrap();
+        assert!(properties.contains_key("limit"));
+        assert!(properties.contains_key("before_seq"));
+        assert!(mcp.get_info().instructions.is_none());
+    }
 
     #[test]
     fn only_manage_flagged_agents_can_hire_fire() {
@@ -434,10 +559,10 @@ mod tests {
 
     #[test]
     fn wait_budget_leaves_margin_before_kiro_client_boundary() {
-        const OBSERVED_KIRO_BOUNDARY_MS: u64 = 240_000;
+        const KIRO_MCP_TIMEOUT_LIMIT_MS: u64 = 600_000;
 
-        assert_eq!(MCP_WAIT_MAX_MS, 180_000);
-        assert!(MCP_WAIT_MAX_MS + 60_000 <= OBSERVED_KIRO_BOUNDARY_MS);
+        assert_eq!(MCP_WAIT_MAX_MS, 540_000);
+        assert!(MCP_WAIT_MAX_MS + 60_000 <= KIRO_MCP_TIMEOUT_LIMIT_MS);
     }
 
     #[tokio::test]

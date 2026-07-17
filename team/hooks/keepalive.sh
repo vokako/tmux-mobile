@@ -13,7 +13,7 @@ IFS= read -r _hook_payload || true  # consume one JSON line; never wait for EOF
 # we never block the agent's turn lifecycle.
 (
   sleep 0.6
-  tmux send-keys -t "$TMUX_PANE" -l "Continue: call \`wait\` to receive team messages — do not stop on your own."
+  tmux send-keys -t "$TMUX_PANE" -l "Continue: call \`wait\`."
   sleep 0.3
   tmux send-keys -t "$TMUX_PANE" Enter
 ) >/dev/null 2>&1 &

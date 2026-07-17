@@ -5,7 +5,7 @@
   // team_history / team_roster / team_post + the team_message push). The human
   // operator ("you") is just another participant: type to broadcast, or tap an
   // agent to @mention it. Tapping an agent's roster chip jumps to the tmux pane
-  // that agent runs in (per-workspace session tmm-team-<slug>, window named
+  // that agent runs in (per-Team session tmm-team-<team-id>, window named
   // after the agent), so you can preview its live execution state.
   //
   // Availability: a server without the bus (mobile, or desktop with team
@@ -29,6 +29,9 @@
   } from './ws.js';
   import TeamTemplates from './TeamTemplates.svelte';
   import { teamSessionOf } from './team.svelte.js';
+  import {
+    pickActiveRoom, readStoredActiveRoom, writeStoredActiveRoom,
+  } from './team-selection.js';
 
   let {
     visible = false,
@@ -92,10 +95,20 @@
   // the one in view. All chat data is scoped to activeRoom; pushes are filtered
   // by their message's room. `newTeam` toggles the start-a-new-team panel.
   let teams = $state([]);        // [{ room, workspace, session, started, agents }]
-  let activeRoom = $state('');   // '' = none selected yet
+  let activeRoom = $state(readStoredActiveRoom());
   let newTeam = $state(false);   // true = showing the "new team" workspace picker
   let switcherOpen = $state(false);
   let employees = $state([]);    // active team's desired roster (grid cells)
+  let roomGeneration = 0;
+  let fullRefreshId = 0;
+
+  function setActiveRoom(room, persist = true) {
+    if (activeRoom !== room) {
+      activeRoom = room;
+      roomGeneration += 1;
+    }
+    if (persist) writeStoredActiveRoom(room);
+  }
 
   let messages = $state([]);     // active room Message[] (oldest first)
   let roster = $state([]);       // active room AgentRow[]
@@ -107,6 +120,15 @@
   let sending = $state(false);
   let listEl = $state(null);
   let inputEl = $state(null);
+  const COMPOSE_MIN_HEIGHT = 40;
+  const COMPOSE_MOBILE_MAX_HEIGHT = 160;
+  const COMPOSE_DESKTOP_MAX_HEIGHT = 320;
+  const savedComposeHeight = Number.parseInt(localStorage.getItem('tmux_team_composeh') || '', 10);
+  let composeBaseHeight = $state(Number.isFinite(savedComposeHeight)
+    ? Math.min(COMPOSE_DESKTOP_MAX_HEIGHT, Math.max(COMPOSE_MIN_HEIGHT, savedComposeHeight))
+    : COMPOSE_MIN_HEIGHT);
+  let composeHeight = $state(COMPOSE_MIN_HEIGHT);
+  let composeDragging = $state(false);
   // Workspace for a NEW team. Defaulted (current session cwd > server default).
   let workspace = $state('');
   let showPicker = $state(false);   // folder-browser open in the new-team panel
@@ -139,8 +161,9 @@
   }
 
   // Refresh the team list + default workspace. Picks an active room if none.
-  async function refreshTeams() {
+  async function refreshTeams(shouldApply = () => true) {
     const s = await teamStatus();
+    if (!shouldApply()) return false;
     teams = s?.teams || [];
     templates = s?.templates || [];
     systemPrompt = s?.system_prompt || '';
@@ -156,25 +179,32 @@
       }
       workspace = ws || s?.default_workspace || '';
     }
-    // Auto-select: keep current if still present, else first team, else none.
-    if (!teams.some(x => x.room === activeRoom)) {
-      activeRoom = teams[0]?.room || '';
-    }
+    if (!shouldApply()) return false;
+    // Full loads establish a valid selection. Lightweight polls never call
+    // this path, so a transient status response cannot switch teams.
+    setActiveRoom(pickActiveRoom(teams, activeRoom, readStoredActiveRoom()));
     if (!activeRoom) newTeam = teams.length === 0; // no teams → straight to new-team panel
+    return true;
   }
 
   // Full load for the active room: history + roster + employees.
   async function refresh() {
+    const requestId = ++fullRefreshId;
+    const isCurrent = () => requestId === fullRefreshId;
     try {
-      await refreshTeams();
-      if (activeRoom) {
+      if (!await refreshTeams(isCurrent)) return;
+      const room = activeRoom;
+      const generation = roomGeneration;
+      if (room) {
         const [h, r, e] = await Promise.all([
-          teamHistory(activeRoom, 200), teamRoster(activeRoom), teamEmployees(activeRoom),
+          teamHistory(room, 200), teamRoster(room), teamEmployees(room),
         ]);
+        if (!isCurrent() || activeRoom !== room || roomGeneration !== generation) return;
         messages = h?.messages || [];
         roster = r?.roster || [];
         employees = e?.employees || [];
       } else {
+        if (!isCurrent()) return;
         messages = []; roster = []; employees = [];
       }
       scrollToBottom();
@@ -191,13 +221,18 @@
   async function refreshRoster() {
     if (pollInFlight) return;
     pollInFlight = true;
+    const generation = roomGeneration;
     try {
       const s = await teamStatus();
       teams = s?.teams || [];
       available = true;
-      if (!teams.some(x => x.room === activeRoom)) activeRoom = teams[0]?.room || '';
-      if (activeRoom) {
-        const [r, e] = await Promise.all([teamRoster(activeRoom), teamEmployees(activeRoom)]);
+      // A poll only observes the selected team. Selection changes are explicit
+      // or happen during a full load, never because one status tick omitted it.
+      if (generation !== roomGeneration) return;
+      const room = activeRoom;
+      if (room && teams.some(team => team.room === room)) {
+        const [r, e] = await Promise.all([teamRoster(room), teamEmployees(room)]);
+        if (activeRoom !== room || roomGeneration !== generation) return;
         roster = r?.roster || [];
         employees = e?.employees || [];
       }
@@ -218,7 +253,7 @@
     switcherOpen = false;
     newTeam = false;
     if (room === activeRoom) return;
-    activeRoom = room;
+    setActiveRoom(room, false);
     messages = []; roster = []; employees = [];
     await refresh();
     // refresh() → refreshTeams() re-points activeRoom at a valid team (or '')
@@ -252,7 +287,8 @@
     window.addEventListener('mouseup', onUp);
   }
 
-  // Start a NEW team for the chosen workspace; its room = the workspace slug.
+  // Start a Team for the chosen workspace+template pair. The backend derives a
+  // stable room ID, so different templates in one directory remain isolated.
   async function startTeam() {
     if (starting || !workspace.trim()) return;
     starting = true;
@@ -265,7 +301,7 @@
       if (res?.error) { startError = res.error; return; }
       newTeam = false;
       if (res?.room) {
-        activeRoom = res.room;
+        setActiveRoom(res.room, false);
         messages = []; roster = []; employees = [];
       }
       await refresh();
@@ -289,7 +325,7 @@
     switcherOpen = false;
     const room = activeRoom;
     try { await teamCloseTeam(room); } catch {}
-    activeRoom = '';
+    setActiveRoom('');
     await refresh();
   }
 
@@ -354,7 +390,8 @@
     try {
       await teamPost(activeRoom, body);
       draft = '';
-      if (inputEl) inputEl.style.height = 'auto'; // collapse back to one row
+      // Keep a manually chosen desktop height; mobile collapses to one row.
+      requestAnimationFrame(() => autogrow(inputEl));
       // The post echoes back via the team_message push, so we don't append
       // locally (avoids a duplicate).
     } catch {
@@ -378,11 +415,56 @@
     // bare Enter → default behavior (newline); textarea auto-grows via autogrow.
   }
 
-  // Grow the textarea with its content up to a max, then scroll internally.
+  // Grow with content. Desktop keeps the user's dragged base height; mobile
+  // always starts at one row. Scrollbars only appear after the relevant cap.
   function autogrow(el) {
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+    const max = splitEligible ? COMPOSE_DESKTOP_MAX_HEIGHT : COMPOSE_MOBILE_MAX_HEIGHT;
+    const base = splitEligible ? composeBaseHeight : COMPOSE_MIN_HEIGHT;
+    composeHeight = Math.min(max, Math.max(base, el.scrollHeight));
+    el.style.height = `${composeHeight}px`;
+    el.style.overflowY = el.scrollHeight > composeHeight + 1 ? 'auto' : 'hidden';
+  }
+
+  // Desktop composer resize. Dragging the top edge upward increases the
+  // textarea; pointer events cover mouse, trackpad, and pen without a parallel
+  // touch implementation.
+  function startComposeResize(e) {
+    if (!splitEligible) return;
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = composeBaseHeight;
+    composeDragging = true;
+    const move = (ev) => {
+      composeBaseHeight = Math.min(
+        COMPOSE_DESKTOP_MAX_HEIGHT,
+        Math.max(COMPOSE_MIN_HEIGHT, startHeight + startY - ev.clientY),
+      );
+      autogrow(inputEl);
+    };
+    const end = () => {
+      composeDragging = false;
+      localStorage.setItem('tmux_team_composeh', String(Math.round(composeBaseHeight)));
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+  }
+
+  function resizeComposeByKeyboard(e) {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    e.preventDefault();
+    const delta = e.key === 'ArrowUp' ? 20 : -20;
+    composeBaseHeight = Math.min(
+      COMPOSE_DESKTOP_MAX_HEIGHT,
+      Math.max(COMPOSE_MIN_HEIGHT, composeBaseHeight + delta),
+    );
+    localStorage.setItem('tmux_team_composeh', String(Math.round(composeBaseHeight)));
+    autogrow(inputEl);
   }
 
   function mention(name) {
@@ -392,11 +474,20 @@
     draft = `${draft}${sep}@${name} `;
     // Keep the keyboard up: the chip tap must not steal focus from the input.
     inputEl?.focus();
+    requestAnimationFrame(() => autogrow(inputEl));
   }
+
+  // Apply a saved desktop height when the composer mounts or the responsive
+  // layout changes. Mobile deliberately ignores the desktop preference.
+  $effect(() => {
+    splitEligible;
+    inputEl;
+    requestAnimationFrame(() => autogrow(inputEl));
+  });
 
   // Jump to the tmux pane an agent runs in. The team session names each agent's
   // window after the agent, so we find the pane whose window_name matches in
-  // our per-workspace session.
+  // this Team's own session.
   async function previewAgent(name) {
     try {
       const { panes } = await listSessionsWithPanes();
@@ -440,8 +531,9 @@
 </script>
 
 {#snippet teamSwitcher()}
-  <!-- Header: fixed team/actions around a horizontally scrolling agent strip,
-       matching Terminal's one-row window switcher. -->
+  <!-- Header: fixed team/actions around a wrapping agent strip. The strip grows
+       to three rows before scrolling vertically, so large rosters stay visible
+       without consuming the entire chat viewport. -->
   <div class="team-header">
     <div class="team-pick">
       <button class="team-pick-btn" onclick={() => switcherOpen = !switcherOpen}>
@@ -480,8 +572,7 @@
       {/if}
     {/if}
     <!-- Agent status chips: dot + name only; tap to preview the agent's pane.
-         They scroll inside their own strip like Terminal's window chips, so
-         the header stays one fixed-height row. Hidden when the graph is
+         Chips wrap inside their own bounded strip. Hidden when the graph is
          visible (desktop grid, or mobile panel open) — agents show there. -->
     {#if !newTeam && activeRoom && !splitEligible && !collabOpen}
       <div class="team-header-scroll">
@@ -609,7 +700,21 @@
     </div>
 
     <!-- Compose -->
-    <div class="team-compose">
+    <div
+      class="team-compose"
+      class:compose-dragging={composeDragging}
+      class:compose-resizable={splitEligible}
+    >
+      {#if splitEligible}
+        <button
+          type="button"
+          class="compose-resize"
+          aria-label={t('teamResizeMessage')}
+          title={t('teamResizeMessage')}
+          onpointerdown={startComposeResize}
+          onkeydown={resizeComposeByKeyboard}
+        ></button>
+      {/if}
       {#if agents.length}
         <div class="compose-mentions">
           <button class="mention-chip mention-all" onmousedown={(e) => e.preventDefault()} onclick={() => mention('all')}>@all</button>
@@ -711,15 +816,22 @@
 
   /* Team switcher header */
   .team-header {
-    display: flex; align-items: center; gap: var(--ui-gap); flex-wrap: nowrap;
+    display: flex; align-items: flex-start; gap: var(--ui-gap); flex-wrap: nowrap;
     min-height: var(--ui-bar-height); padding: var(--ui-bar-padding); flex-shrink: 0; box-sizing: border-box;
     border-bottom: 1px solid var(--border2); background: var(--surface);
   }
   .team-header-scroll {
-    flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--ui-gap);
-    overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    flex: 1 1 160px; min-width: 96px;
+    display: flex; align-items: flex-start; align-content: flex-start;
+    gap: var(--ui-gap); flex-wrap: wrap;
+    max-height: 80px; overflow-x: hidden; overflow-y: auto;
+    scrollbar-width: thin; overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
-  .team-header-scroll::-webkit-scrollbar { display: none; }
+  .team-header-scroll::-webkit-scrollbar { width: 4px; }
+  .team-header-scroll::-webkit-scrollbar-thumb {
+    border-radius: 2px; background: var(--border2);
+  }
   /* Transient banner: the tapped team session's room isn't known to the
      manager, so the view was redirected to a valid team instead. */
   .team-notice {
@@ -728,7 +840,10 @@
     background: var(--danger-bg); border-bottom: 1px solid var(--border);
     word-break: break-all;
   }
-  .team-pick { position: relative; flex-shrink: 0; min-width: 0; }
+  .team-pick {
+    position: relative; flex-shrink: 0; min-width: 0;
+    max-width: min(42%, 240px);
+  }
   .team-pick-btn {
     display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
     height: var(--ui-control-height); padding: 3px 8px; box-sizing: border-box;
@@ -993,10 +1108,29 @@
   /* Compose */
   .team-compose {
     flex-shrink: 0;
+    position: relative;
     border-top: 1px solid var(--border);
     padding: 8px 10px calc(8px + var(--sab));
     background: var(--nav-bg);
   }
+  .compose-resize {
+    position: absolute; z-index: 2;
+    top: -5px; left: 0; right: 0; height: 10px;
+    width: 100%; padding: 0; border: 0; background: transparent;
+    cursor: ns-resize; touch-action: none; outline: none;
+  }
+  .compose-resize::after {
+    content: ''; position: absolute; left: 50%; top: 3px;
+    width: 42px; height: 3px; transform: translateX(-50%);
+    border-radius: 2px; background: var(--border2);
+    transition: background 0.15s ease, width 0.15s ease;
+  }
+  .compose-resize:hover::after,
+  .compose-resize:focus-visible::after,
+  .compose-dragging .compose-resize::after {
+    width: 54px; background: var(--accent);
+  }
+  .compose-dragging { user-select: none; }
   .compose-mentions {
     display: flex; gap: 5px; overflow-x: auto; padding-bottom: 7px;
     scrollbar-width: none;
@@ -1011,16 +1145,18 @@
   .mention-chip:active { color: var(--accent); border-color: var(--accent); }
   .compose-row { display: flex; align-items: flex-end; gap: 8px; }
   .compose-input {
-    flex: 1; min-height: 38px; max-height: 160px;
-    padding: 9px 12px; border: 1px solid var(--input-border); border-radius: 8px;
+    flex: 1 1 0; width: 100%; min-width: 0;
+    min-height: 40px; max-height: 160px;
+    padding: 8px 12px; border: 1px solid var(--input-border); border-radius: 8px;
     background: var(--input-bg); color: var(--text); font-size: 14px;
     font-family: inherit; resize: none; line-height: 1.4;
-    overflow-y: auto;
+    overflow-x: hidden; overflow-y: hidden;
     outline: none;
   }
+  .compose-resizable .compose-input { max-height: 320px; }
   .compose-input:focus { border-color: var(--accent); }
   .compose-send {
-    width: 38px; height: 38px; flex-shrink: 0;
+    width: 40px; height: 40px; flex-shrink: 0;
     border: none; border-radius: 8px;
     background: var(--accent-bg); color: var(--accent);
     cursor: pointer; display: flex; align-items: center; justify-content: center;

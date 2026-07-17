@@ -14,7 +14,7 @@ any agent to preview its live tmux execution state in the Terminal tab.
 The diagram below shows what runs where: the phone connects over WebSocket to the
 desktop server, which hosts the in-process message bus and supervises one
 configured backend CLI (**Kiro / Claude Code / Codex**) per agent inside a
-`tmm-team-<slug>` tmux session. Each agent runs the same loop — `wait` → reason
+`tmm-team-<team-id>` tmux session. Each agent runs the same loop — `wait` → reason
 → execute real tools (heartbeat fires where supported) → `post` → loop back.
 The hooks (keepalive, heartbeat) and the supervisor's self-heal mechanism keep
 the loop alive; external standalone agents can join the same bus over HTTP MCP.
@@ -53,8 +53,18 @@ deliberate; everything around it is `team`.
 
 The Team switcher follows Terminal's expanded switcher geometry: one 31px bar
 made from 24px chips, 3px vertical padding, and the bottom divider. Agent chips
-scroll inside their own middle strip; team selection and actions stay fixed,
-and the bar never wraps taller as agents are added.
+wrap inside their own middle strip while team selection and actions stay fixed.
+The strip grows to three rows (80 px) and then scrolls vertically, balancing
+large-roster visibility against the chat viewport.
+
+The message composer is content-sized rather than browser-default-sized:
+`min-width: 0` lets its textarea shrink correctly inside the send-button flex
+row, and its 40 px border-box minimum fits one 14 px/1.4 line plus padding
+without producing an empty scrollbar. It stays `overflow: hidden` until content
+reaches the mobile (160 px) or desktop (320 px) cap. Desktop also exposes a
+top-edge resize separator; its base height persists in
+`localStorage.tmux_team_composeh`. Mobile ignores that preference so the soft
+keyboard always gets the compact auto-growing composer.
 
 The decisive choice: **vendor agora as an in-process, desktop-only sub-crate and
 share ONE `Bus` between the agents' MCP daemon and the phone's WS server.**
@@ -68,7 +78,7 @@ share ONE `Bus` between the agents' MCP daemon and the phone's WS server.**
    │     └── team::supervisor (in-process) ─────────────────────┼──► launches agents into tmux
    └───────────────────────────────────────────────────────────┘
         ▲ agents each run in their OWN named window of a
-          per-workspace session: tmm-team-<workspace-slug>
+          per-Team session: tmm-team-<team-id>
 ```
 
 **Launching is in-process** (`src-tauri/src/team.rs`): the phone's "Start team"
@@ -110,9 +120,10 @@ Why this shape, and what was rejected:
 
 ## 2b. Multiple teams = isolated rooms
 
-The bus is **room-aware**: each team is its own chat **room** (id = the
-workspace slug), fully isolated — separate message log, roster, and obligation
-graph. One daemon serves all rooms.
+The bus is **room-aware**: each Team is its own chat **room** (id = the stable
+canonical-workspace + template slug), fully isolated — separate message log,
+roster, obligation graph, tmux session, and runtime files. One daemon serves
+all rooms.
 
 - **agora crate**: a `BusProvider` trait (`room → Bus`) that `mcp.rs`/`web.rs`
   resolve per request — agents via an **`x-room` header**, the human API via a
@@ -130,12 +141,12 @@ graph. One daemon serves all rooms.
 - **Team tab UI**: a header dropdown lists active teams (room · agent count),
   "+ New team" opens the workspace picker, and "×" closes the active team
   (`team_close_team` kills its tmux session; the chat log persists in the db, so
-  re-starting the same workspace resumes its history).
+  re-starting the same workspace+template pair resumes its history).
 
 ### Frontend session identity & availability (`src/lib/team.svelte.js`)
 
 The ONE frontend module that knows team tmux sessions are named
-`tmm-team-<room>` (room = `workspace_slug` = `<basename>-<6hex>`, see
+`tmm-team-<room>` (new rooms use the stable workspace+template `team_slug`; see
 `team.rs`). Exports `TEAM_PREFIX`, `isTeamSession`, `teamRoomOf`,
 `teamSessionOf`, `teamLabel`, and the shared `teamState`
 (`{available, probed}`) rune. Sessions, PanePicker, and Team import from
@@ -158,6 +169,16 @@ The Team component stays mounted while `teamState.available` (a hidden
 the loaded history, reading scroll position, and the embedded agent
 terminals. Consequences, all deliberate:
 
+- **Selection is durable and user-owned.** The last valid room is stored in
+  `localStorage.tmux_team_active_room` and restored after a component remount
+  or app reload when that room still exists. Roster polls update the team list
+  but never switch `activeRoom`: a single transient status response that omits
+  the room must not move the user to the first team. Initial/full loads validate
+  the saved room, and an explicit close selects the next available room.
+- **Room responses are generation-guarded.** History, roster, and employee
+  requests capture the room and selection generation that started them. Their
+  results are discarded if the user switches teams before they finish, so a
+  slow response for team A cannot overwrite team B's view.
 - **Re-shows don't refetch.** The `team_message` push listener keeps
   `messages` current while hidden (appends only — no roster RPCs, no scroll
   nudge while hidden); the visible-effect full-`refresh()` runs once, later
@@ -183,44 +204,65 @@ terminals. Consequences, all deliberate:
 
 A team is tied to a **workspace** = the agents' shared working directory (their
 real project). The phone defaults it to the current terminal session's cwd
-(`fsCwd`), shows it, and lets the user edit it before starting. The room id IS
-the workspace slug, so the team, its session `tmm-team-<slug>`, and its config
-home all share one identifier.
+(`fsCwd`), shows it, and lets the user edit it before starting. A Team instance
+is the canonical workspace + selected template pair. Its stable room id scopes
+the SQLite bus, session, runtime home, hooks, and history mirror together.
 
-- The tmux session is **`tmm-team-<slug>`** where `slug` is the sanitized
-  workspace basename (`team::workspace_slug`, mirrored in `Team.svelte:slugify`
-  — they MUST agree, or pane preview can't find windows). tmux names can't
-  contain `:` or `.`, so the slug strips them. The `tmm-team-` prefix lets the
-  app recognize team sessions (e.g. the PanePicker labels their panes by agent
-  name, not `current_command`).
-- Multiple teams coexist: different workspaces → different `tmm-team-<slug>`
-  sessions, each with a self-gitignored runtime home at `<workspace>/.tmm/`.
+- The tmux session is **`tmm-team-<team-id>`**. `team::team_slug` combines
+  bounded readable workspace/template components with a hash of the canonical
+  pair; tmux names therefore remain safe while sanitized-name collisions remain
+  distinct. The frontend consumes the returned room and never re-derives it.
+- Multiple teams coexist across or within workspaces. Each new Team gets a
+  self-gitignored runtime home at
+  `<workspace>/.tmm/teams/<team-id>/`.
 - Team does not add tracked source or instructions to the user's project.
-  Backend config and hooks live under `.tmm/`; prompts are passed inline.
+  Backend config lives under that Team home in `kiro`, `claude`, and `codex`;
+  shared hooks and `team-history.jsonl` live beside them; prompts are passed
+  inline.
+- A recovered pre-instance-ID room keeps its workspace-only room id and old
+  `.tmm/` root layout. This prevents moving config underneath a live CLI.
+  `.tmm/kiro-home` migration is limited to that legacy layout and never
+  overwrites `.tmm/kiro`.
+- `teams.json` is the durable room identity registry, not merely a live-team
+  list. Closing a Team removes it from the in-memory/UI registry and kills its
+  session, but retains the workspace+template→room mapping so a later launch
+  resumes the same SQLite history. Startup recovery still adopts only rooms
+  with a surviving `tmm-team-*` session.
 
 ### Workspace history and recovery
 
 The complete append-only room log remains authoritative in the shared SQLite
 database (`team_db`, default `~/.config/tmux-mobile/team.db`). Closing a team or
-explicitly starting the same workspace clears only process-lifetime state
-(roster, obligations, and desired employees); messages are retained. A backend
-restart with a live tmux session retains both messages and runtime state.
+explicitly starting the same workspace+template pair clears only
+process-lifetime state (roster, obligations, and desired employees); messages
+are retained. A backend restart with a live tmux session retains both messages
+and runtime state.
 
-Each room also mirrors its full transcript to
-`<workspace>/.tmm/team-history.jsonl`, one serialized message envelope per line.
+Each new-format room also mirrors its full transcript to
+`<workspace>/.tmm/teams/<team-id>/team-history.jsonl`, one serialized message
+envelope per line. A recovered legacy room continues using
+`<workspace>/.tmm/team-history.jsonl`.
 Room registration first rebuilds the file atomically from SQLite, then the live
 message pump appends each higher sequence number exactly once. If the broadcast
 receiver lags, it rebuilds from SQLite instead of accepting a gap. The mirror is
 not a second source of truth and is not imported into SQLite; it is a durable,
-agent-readable context file. Every generated agent prompt points to it so a new
-CLI launched after close/reopen can inspect prior decisions and handoffs even
-though its own provider conversation is new.
+agent-readable archive for offline inspection and recovery tooling.
+
+Agents do not preload that complete file. The Team MCP surface exposes
+`read_history(limit, before_seq)`: it returns the newest 20 messages by default,
+caps a page at 100, includes stable message sequence numbers, and gives an exact
+exclusive `before_seq` call when an older page exists. The old `history` name
+remains callable for clients that cached it but is omitted from tool discovery.
+The bounded recovery guidance lives in `read_history`'s tool description, where
+it is available when the tool is selected without consuming every startup
+prompt. Collaboration policy remains solely in the user-visible `config.toml`
+`team_rules`; MCP server instructions and lifecycle nudges do not duplicate it.
 
 ## 4. Agent ↔ tmux pane link (the "preview execution state" requirement)
 
 Each agent runs in its own tmux window **named after the agent**
 (`tmux::new_named_window`). Agent → pane mapping is `window_name == agent.name`
-within `tmm-team-<slug>`. Two surfaces use it:
+within `tmm-team-<team-id>`. Two surfaces use it:
 
 - **Mobile / narrow**: the roster chip → `Team.svelte:previewAgent` →
   `openTerminal(...)`, jumping to that agent's pane in the Terminal tab (same
@@ -248,42 +290,34 @@ within `tmm-team-<slug>`. Two surfaces use it:
 `team::start(bridge, cfg, room, workspace, template)` runs as a tokio task. On
 "Start team" (`team_start_team`, one-shot guarded) it:
 
-1. derives `slug` + session `tmm-team-<slug>`, writes the embedded hooks into
-   `<workspace>/.tmm/`, and composes each backend's prompt inline (a packaged
-   `.app` needs no external runtime files);
+1. derives `team-id` + session `tmm-team-<team-id>`, writes the embedded hooks
+   into `<workspace>/.tmm/teams/<team-id>/`, and composes each backend's prompt
+   inline (a packaged `.app` needs no external runtime files);
 2. seeds the selected template's fixed roster as employees, unless a team is
    already present (restart-safe);
 3. runs a 3 s reconcile loop launching each employee into a named window;
    `disabled` employees' windows are killed. Same loop serves the initial team
    AND the manager's runtime `hire`/`fire`.
 
-**Restart recovery: adopt the windows, nudge the agents to reconnect.** When the
+**Restart recovery: adopt the windows, reconnect only dead idle waits.** When the
 backend restarts, `recover_running_teams` finds the surviving `tmm-team-*`
 sessions and re-runs the supervisor, which **adopts** the existing agent windows
 (`tmux::find_window_by_name`) instead of reopening them — so each agent keeps its
-CLI conversation context and any in-progress work. But an adopted agent is hung:
-its MCP **client** connection died with the old daemon, and (verified with
-kiro-cli 2.7.0) the client neither times out nor retries on its own — it sits
-forever inside a dead `wait` call. It *will* reconnect, though, once that call is
-cancelled and a fresh turn starts. Recovery snapshots the existing agent windows
-before restarting the supervisor, then calls `team::nudge_adopted_agents` on
-that frozen list. Each adopted window receives `Esc` (cancel the in-flight call
-→ back to the prompt) and a short re-prompt that makes it call `wait` again,
-re-establishing the connection against the stateless daemon. The frozen list is
-important: the supervisor may fill a missing roster window during the nudge
-delay, and interrupting that fresh CLI can cancel its first-run setup before it
-joins the bus.
+CLI conversation context and in-progress work. A parked `wait` may still be
+hung on the dead daemon, but a blanket `Esc` would also cancel healthy thinking
+or tool execution. Recovery therefore snapshots each adopted Agent's
+`status + last_seen`, handles a visible trust prompt independently after two
+seconds, then waits 20 seconds (one 15-second wait heartbeat plus margin).
+Only an Agent that was and remains `idle`/`online`/`stalled` with an unchanged
+`last_seen` receives `Esc`, followed by the neutral prompt `Continue.`.
+`thinking`, `working`, `hardworking`, `sleeping`, `offline`, unknown, and
+already-reconnected Agents are left untouched.
 
-This *reconnect* nudge lives in recovery, **not** in the reconcile loop's fast
-path, because right after a restart the loop's presence check can't distinguish
-a healthy agent from one hung on a dead socket — a just-restarted agent still
-reports its last status (`idle`/`working`) until its 90 s presence mark lapses,
-so an in-loop nudge gated on online-status would fire on healthy agents (a bug
-found in testing). (The loop *does* carry a separate **30-min self-heal**, §5b,
-but that fires only on genuinely long silence, well past this ambiguous window.)
-Killing + relaunching the agents fresh would also recover them (the
-stateless daemon makes the new handshake succeed), but it discards their context;
-adoption + nudge preserves it.
+The window list is frozen before the supervisor starts so a newly created pane
+cannot be mistaken for an adopted one. The separate 90-second dead-idle and
+30-minute working self-heal thresholds remain as backstops (§5b). Killing and
+relaunching agents would also reconnect them, but discards provider context;
+status-aware adoption preserves both context and active work.
 
 **Why the daemon is stateless.** The MCP daemon is served with
 `StreamableHttpServerConfig { stateful_mode: false }` (`crates/agora/src/web.rs`).
@@ -309,15 +343,23 @@ MCP tool names are `mcp__team__hire` etc).
 the agent CLI to the localhost MCP daemon; it does not pass through the phone's
 WebSocket connection. The bus still caps each internal liveness slice at 50
 seconds, but the MCP handler ignores empty slices and keeps the same tool call
-parked for up to 180 seconds. A message broadcast wakes it immediately; 180
-seconds is only the no-message ceiling. Codex's per-server `tool_timeout_sec`
-and Claude's `MCP_TOOL_TIMEOUT` are both set to 210 seconds, leaving 30 seconds
-of transport margin. Kiro appears to have a 240-second client boundary: using
-the same 240-second server budget caused a deadline race where the server call
-ended but the TUI remained stuck in the tool. The 180-second budget leaves a
-full minute of margin. After a daemon process dies, Kiro's old request may
-still never time out; restart recovery cancels that call with `Esc` and starts
-a fresh stateless wait, as described above.
+parked for up to 540 seconds. A message broadcast wakes it immediately; 540
+seconds is only the no-message ceiling. All three clients receive a 600-second
+outer timeout, leaving one minute for transport delivery: Kiro's per-server
+`timeout`, Codex's `tool_timeout_sec`, and Claude's per-server `timeout` plus
+`MCP_TOOL_TIMEOUT`. Claude's separate network MCP idle timeout is disabled with
+`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT=0`.
+
+Kiro 2.12.x is the common upper bound. Its implementation clamps MCP timeout
+configuration to `MAX_MCP_TIMEOUT_MS = 600000`; isolated runtime probes also
+completed a completely silent 330-second tool at 600000 ms. Larger values are
+not usable even when config validation accepts them. Codex accepted week-scale
+and much larger durations, while Claude completed the same 330-second probe and
+also accepts values beyond the JavaScript signed-32-bit timer boundary. Keeping
+all three at Kiro's ten-minute limit is therefore deliberate. After a daemon
+process dies, Kiro's old request may still never time out; restart recovery
+cancels that call with `Esc` and starts a fresh stateless wait, as described
+above.
 
 This is deliberately implemented in the one shared in-process HTTP daemon, not
 as one stdio proxy per agent. A stdio proxy would still be subject to the Agent
@@ -329,8 +371,8 @@ seconds instead of every second, remaining far below the 90-second stale
 threshold while reducing idle database activity by about 15x.
 
 All three backends run the keepalive command on their turn-complete/Stop
-lifecycle. This is enforcement, not redundant prompting: Codex may correctly
-reply, perform one 180-second `wait`, then end the turn when that wait is empty
+lifecycle. This is enforcement, not redundant prompting: a CLI may correctly
+reply, perform one bounded `wait`, then end the turn when that wait is empty
 despite an instruction to wait forever. Its Stop event therefore runs two
 commands in parallel: `keepalive.sh` re-prompts the TUI into `wait`, while the
 notification helper records completion. Kiro and Claude use the same keepalive
@@ -442,7 +484,7 @@ not one timeout for every state. A parked agent touches every 15 seconds; if
 that refresh stops, its stored `idle`/`online` status is exposed as `stalled`
 after 90 seconds and the supervisor immediately runs `nudge_pane` (`Esc`, then
 a reconnect prompt). This bounds recovery when an HTTP MCP call remains hung
-client-side even though the server's three-minute wait future ended or the
+client-side even though the server's nine-minute wait future ended or the
 server restarted. Messages are already durable in SQLite, so the reconnected
 wait reads them by cursor.
 
@@ -452,14 +494,16 @@ real model thinking between observable hooks while still recovering a dead
 process eventually. Nudges have a five-minute per-pane cooldown; a successful
 wait refreshes `last_seen` and naturally rearms recovery.
 
-**Idle-sleep** (`team.rs::SleepState`, `IDLE_SLEEP_MS = 5 min`). The other
+**Idle-sleep** (`team.rs::SleepState`, `IDLE_SLEEP_MS = 8 min`). The other
 extreme: when **every** non-offline agent has been parked in `wait` (status
-`idle`) for 5 min — the team has nothing to do — the supervisor sends `Escape`
+`idle`) for 8 min — the team has nothing to do — the supervisor sends `Escape`
 to each pane, which cancels the in-flight `wait` MCP call. The CLI returns to
 its shell prompt and stops thinking; without sleep the team would re-enter the
-180-second coalesced `wait` forever, burning one fresh LLM turn on each
-completion. In a normal idle cycle only one empty call completes; the next is
-cancelled by five-minute sleep. Wake is anchored on bus seq: at sleep we
+bounded `wait` forever, burning one fresh LLM turn on each completion.
+`IDLE_SLEEP_MS` is derived from the 540-second server budget with a one-minute
+margin, rather than being an independent duration. In a normal idle cycle no
+empty call completes: the first wait is cancelled at eight minutes, one minute
+before its deadline. Wake is anchored on bus seq: at sleep we
 snapshot the latest message seq, and any strictly-greater seq on a later tick —
 typically the human resuming the conversation — fires the standard `nudge_pane`
 (Esc + reconnect re-prompt + Enter) at every pane to put them back in `wait`.
@@ -544,12 +588,18 @@ At seed time `seed_template` folds the team-wide config into each agent's spec:
 env merges (agent overrides), and team `mcp`/`skills` are prepended so a per-agent
 entry wins on a same-named MCP server (`merge_env` / `merge_list`). Team
 `prompt` is passed to `build_agent_prompt` and reaches every agent through its
-inline launch prompt. The separately editable global `system_prompt.md` is
-loaded whenever a team starts and prepended before the shared rules and
-team-specific prompt. Putting a shared tool (e.g. context7) at the team level
-means writing it once instead of on every role. The full schema is documented at
-the top of `default/team.yaml`, and the editor's per-template "Team-wide" section
-edits env/mcp/skills/prompt.
+native high-priority instruction surface. The separately editable global
+`system_prompt.md` is loaded whenever a team starts and prepended before the
+shared rules and team-specific prompt. The exact order is `system_prompt.md`,
+`team_rules`, template `prompt`, then role/goal. Kiro stores the result in its
+custom Agent `prompt`; Claude receives `--append-system-prompt`; Codex receives
+a launch-time `developer_instructions` override that preserves existing user
+developer instructions first. Claude/Codex skill indexes join that same
+high-priority prompt. Their initial user message contains only `team_kick`,
+which is seeded visibly into `config.toml`. Putting a shared tool (e.g.
+context7) at the team level means writing it once instead of on every role. The
+full schema is documented at the top of `default/team.yaml`, and the editor's
+per-template "Team-wide" section edits env/mcp/skills/prompt.
 
 - **model** — optional per agent. A non-empty value is passed through each
   backend's native `--model` flag. Blank uses the configured Team model for
@@ -626,4 +676,5 @@ server still runs and the Team tab stays hidden.
   wait recovery have been exercised locally. Actual provider availability still
   depends on each system CLI's global authentication.
 - **History window**: the tab loads `team_history(200)`; the full log lives in
-  SQLite and is mirrored to `<workspace>/.tmm/team-history.jsonl`.
+  SQLite and is mirrored to the Team-specific
+  `<workspace>/.tmm/teams/<team-id>/team-history.jsonl`.

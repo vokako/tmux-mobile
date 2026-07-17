@@ -4,6 +4,7 @@ import {
   agentNotificationsMarkRead,
   removeAgentNotificationListener,
 } from './ws.js';
+import { isTeamSession } from './team.svelte.js';
 
 export const agentNotifications = $state({ unread: [] });
 
@@ -44,6 +45,18 @@ export function sessionHasNotification(session, excludedWindow = null) {
 
 export function otherSessionHasNotification(session) {
   return agentNotifications.unread.some(item => item.session !== session);
+}
+
+/** Terminal chrome suppresses Team dots without dropping their persisted data. */
+export function terminalNotificationForWindow(session, window) {
+  return isTeamSession(session) ? null : notificationForWindow(session, window);
+}
+
+export function otherTerminalSessionHasNotification(session) {
+  if (isTeamSession(session)) return false;
+  return agentNotifications.unread.some(item => (
+    item.session !== session && !isTeamSession(item.session)
+  ));
 }
 
 export async function markWindowRead(session, window) {

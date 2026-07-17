@@ -156,7 +156,12 @@ impl Config {
             team_kick: std::env::var("TEAM_KICK")
                 .ok()
                 .or(file_cfg.team_kick)
-                .unwrap_or_else(|| "You are connected to the team group chat. Call `wait` to receive messages; when someone @mentions you, reply with `post`; otherwise keep calling `wait`. Never stop on your own — always end your turn with `wait`.".to_string()),
+                .unwrap_or_else(|| {
+                    let kick = DEFAULT_TEAM_KICK.to_string();
+                    // Keep lifecycle behavior visible and operator-editable too.
+                    let _ = append_config_field("team_kick", &kick);
+                    kick
+                }),
         }
     }
 }
@@ -354,36 +359,30 @@ pub fn touch_session(name: &str) -> Result<(), String> {
 
 /// Default collaboration rules seeded into config.toml on first run.
 const DEFAULT_TEAM_RULES: &str = "\
-# Team contract (shared by every agent)
+# Team contract
 
-These are the rules every member of this team agrees to, regardless of role.
-They override convenience: follow them even when a shortcut seems faster.
+## Message ownership
+- End each active turn with `wait`.
+- Reply to anything directly @-addressed to you and address the asker in the reply.
+- An unaddressed human message is actionable only for the default recipient named by the selected team template. Everyone else treats it as context.
+- Otherwise act only on an explicit assignment or a handoff defined by the template.
+- Acknowledge each new assignment once before starting; then post only substantive progress, blockers, or results.
 
-## Communication discipline
-- **End every turn with `wait`.** Never stop on your own. If you have nothing to do, `wait`.
-- **Reply to anything @-addressed to you.** You may decline with a reason, but never go silent. A reply is another `post` that `@`s the asker.
-- **Keep messages short.** Messages coordinate; they are not the deliverable.
-- When you pick up an @-assigned task, first broadcast \"got it, working on it\" so the team knows it's owned.
+## Communication and artifacts
+- Keep coordination messages concise.
+- Conversational answers may be delivered directly in chat.
+- For work that creates durable artifacts or decisions, store them in appropriate workspace files and point to them from chat.
+- Do not create files merely to answer a conversational question.
+- Before editing shared files, announce ownership to avoid overlap.
 
-## Act at the right moment
-- **Only act when it is your turn.** A message @-addressed to you is your turn; otherwise `wait`. If you are unsure whether something is yours, `wait` rather than assume.
-- **Don't grab work nobody assigned you.** Never pick up a task just because you saw it in the chat or it looks like \"your kind of work\". Two agents doing the same thing, or acting out of turn, is a failure — wait to be assigned.
-- **Step in unprompted only when idle AND a finished result genuinely needs you** — never build on a half-done intermediate, and never on a raw request that hasn't been routed yet.
+## Quality and safety
+- Match verification to the task and report the evidence actually gathered.
+- Diagnose root cause before changing a failing system.
+- Never place credentials in prompts, config, commands, files, or logs; use environment-variable references.
+- Stay within the assigned scope and report uncertainty or blockers honestly.";
 
-## Data discipline
-- **Real output goes in files in the workspace** (code, docs, results). Messages only point to them.
-- **Never paste large content into chat.** The authoritative context lives in the project files.
-- Before editing a file others might touch, broadcast a one-line heads-up to avoid collisions.
-
-## Quality & honesty
-- **Evidence over confidence.** Before claiming something works, state which command proved it and that you ran it.
-- **Root cause over symptom.** Don't paper over an error — explain in one sentence why it happened before fixing it.
-- **Say what you actually did**, what you verified, and where you're unsure.
-- Leave the workspace at least as clean as you found it.
-
-## Scope
-- Do the task you were assigned. Don't expand scope or change unrelated things without saying so.
-- If the task is ambiguous, ask the asker directly (`@them`) rather than guessing silently.";
+const DEFAULT_TEAM_KICK: &str = "\
+Join the Team conversation now by calling `wait`. Follow the shared team rules and your assigned role.";
 
 /// Append a TOML field to config.toml (used to seed defaults on first run).
 fn append_config_field(key: &str, value: &str) -> std::io::Result<()> {

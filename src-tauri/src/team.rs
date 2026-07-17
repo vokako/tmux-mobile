@@ -32,6 +32,9 @@ const KEEPALIVE_SH: &str = include_str!("../../team/hooks/keepalive.sh");
 const HEARTBEAT_SH: &str = include_str!("../../team/hooks/heartbeat.sh");
 
 const RECONCILE_INTERVAL: Duration = Duration::from_secs(3);
+/// Kiro 2.12 caps a configured MCP timeout at ten minutes. Keep every backend
+/// on that shared boundary so the server can leave a full minute for delivery.
+const TEAM_MCP_TOOL_TIMEOUT_MS: u64 = 600_000;
 /// Self-heal threshold: no `wait` and no heartbeat for this long ⇒ the agent is
 /// wedged; the supervisor nudges its window (Esc + reconnect re-prompt). Well
 /// above the bus's 90s `unreachable` mark so we only ever auto-restart an agent
@@ -45,13 +48,17 @@ const WAIT_RECOVERY_STALE_MS: i64 = 90_000;
 /// Avoid repeatedly interrupting a pane if reconnect itself cannot make
 /// progress. A successful `wait` refreshes last_seen and naturally rearms this.
 const RECOVERY_COOLDOWN_MS: i64 = 5 * 60 * 1000;
+/// Allow one 15-second wait heartbeat after a backend restart before deciding
+/// that an adopted idle call is still attached to the dead daemon.
+const RESTART_RECOVERY_GRACE: Duration = Duration::from_secs(20);
+const RESTART_TRUST_CHECK_DELAY: Duration = Duration::from_secs(2);
 /// Idle-sleep threshold: when EVERY non-offline agent has been parked in `wait`
 /// (status=`idle`) for this long, the supervisor sends Esc to each pane to
 /// cancel the in-flight `wait` MCP call. The agent's CLI falls back to its
-/// shell prompt — no more 50-second wait/think cycles burning tokens. Any new
-/// message in the room (typically the human resuming) wakes the team back up
-/// via the standard reconnect nudge. Set to 0 to disable.
-const IDLE_SLEEP_MS: i64 = 5 * 60 * 1000; // 5 min
+/// shell prompt, so an empty wait never completes and consumes another turn.
+/// Any new message in the room (typically the human resuming) wakes the team
+/// back up via the standard reconnect nudge. Set to 0 to disable.
+const IDLE_SLEEP_MS: i64 = agora::mcp::MCP_WAIT_MAX_MS as i64 - 60_000;
 
 // ─── Team templates (named rosters under <config>/tmux-mobile/teams/) ──────
 // A template is a JSON file `teams/<name>.json` = { "agents": [ {name, backend,
@@ -286,8 +293,10 @@ pub fn delete_template(name: &str) -> Result<(), String> {
 struct Paths {
     /// Agents' working directory (the user's project) — agents run `-c` here.
     workspace: PathBuf,
-    /// Our private per-team config root: `<workspace>/.tmm/`
-    kiro_home: PathBuf,
+    /// Our private config root: `.tmm/` for legacy rooms, otherwise
+    /// `<workspace>/.tmm/teams/<team-id>/`.
+    home: PathBuf,
+    kiro: PathBuf,
     claude: PathBuf,
     codex: PathBuf,
     keepalive: PathBuf,
@@ -295,11 +304,12 @@ struct Paths {
 }
 
 impl Paths {
-    fn new(workspace: &str) -> Self {
-        let home = PathBuf::from(workspace).join(".tmm");
+    fn new(workspace: &str, room: &str) -> Self {
+        let home = team_runtime_dir(workspace, room);
         Paths {
             workspace: PathBuf::from(workspace),
-            kiro_home: home.join("kiro-home"),
+            home: home.clone(),
+            kiro: home.join("kiro"),
             claude: home.join("claude"),
             codex: home.join("codex"),
             keepalive: home.join("keepalive.sh"),
@@ -325,15 +335,15 @@ pub struct TeamConfig {
 }
 
 /// Start the team for `workspace`: seed the selected roster and spawn the
-/// reconcile loop, launching agents into a per-workspace tmux session. The
+/// reconcile loop, launching agents into a per-Team tmux session. The
 /// agents' working directory is `workspace` (the user's project); runtime hooks
-/// live under its self-gitignored `.tmm`, and prompts are passed inline.
+/// live under the Team's self-gitignored runtime home, and prompts are passed inline.
 /// Best-effort — any failure is logged, never fatal.
 pub fn start(bridge: Arc<dyn TeamBridge>, mut cfg: TeamConfig, room: String, workspace: String, template: String) {
     cfg.system_prompt = read_system_prompt();
     tokio::spawn(async move {
         let session = format!("tmm-team-{}", room);
-        let paths = Paths::new(&workspace);
+        let paths = Paths::new(&workspace, &room);
         let tpl = if template.trim().is_empty() { "default".to_string() } else { template };
         if let Err(e) = prepare_home(&paths) {
             eprintln!("⚠️  team: failed to prepare config home: {}", e);
@@ -369,6 +379,79 @@ pub fn workspace_slug(workspace: &str) -> String {
     format!("{}-{}", name, &hash[..6])
 }
 
+/// Stable identity for one Team instance. A workspace may run several
+/// templates concurrently; the pair, rather than the workspace alone, is the
+/// durable identity used by SQLite, tmux, runtime files, and history.
+pub fn team_slug(workspace: &str, template: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let canonical = std::fs::canonicalize(workspace)
+        .unwrap_or_else(|_| PathBuf::from(workspace));
+    let workspace_name = canonical
+        .file_name()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("root");
+    let workspace_name = slug_component(workspace_name, 20, "root");
+    let template_name = slug_component(template.trim(), 16, "default");
+    let mut hasher = Sha256::new();
+    hasher.update(canonical.to_string_lossy().as_bytes());
+    hasher.update([0]);
+    hasher.update(template.trim().as_bytes());
+    let hash = format!("{:x}", hasher.finalize());
+    format!("{}-{}-{}", workspace_name, template_name, &hash[..8])
+}
+
+fn slug_component(value: &str, max_len: usize, fallback: &str) -> String {
+    let mut value: String = value
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    value.truncate(max_len);
+    let value = value.trim_matches('-');
+    if value.is_empty() { fallback.to_string() } else { value.to_string() }
+}
+
+pub fn same_workspace(left: &str, right: &str) -> bool {
+    let normalize = |value: &str| {
+        std::fs::canonicalize(value).unwrap_or_else(|_| PathBuf::from(value))
+    };
+    normalize(left) == normalize(right)
+}
+
+/// Runtime root shared by every stateful surface of one Team. Workspace-only
+/// room IDs are the pre-instance-ID format and retain the root `.tmm` layout so
+/// a recovered live CLI is never moved underneath its process.
+pub fn team_runtime_dir(workspace: &str, room: &str) -> PathBuf {
+    let root = PathBuf::from(workspace).join(".tmm");
+    if room == workspace_slug(workspace) {
+        root
+    } else {
+        root.join("teams").join(runtime_segment(room))
+    }
+}
+
+fn runtime_segment(room: &str) -> String {
+    use sha2::{Digest, Sha256};
+    if !room.is_empty()
+        && room != "."
+        && room != ".."
+        && room
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+    {
+        room.to_string()
+    } else {
+        let hash = format!("{:x}", Sha256::digest(room.as_bytes()));
+        format!("team-{}", &hash[..12])
+    }
+}
+
 // ─── Global system prompt (shared across every team + agent) ──────────────
 // A single editable text at <config>/tmux-mobile/system_prompt.md, prepended to
 // the brief that EVERY agent reads at startup. Use it for project-wide
@@ -393,13 +476,14 @@ pub fn save_system_prompt(text: &str) -> Result<(), String> {
 /// Write hooks into our private per-team home (`<workspace>/.tmm/`).
 /// The agent prompt is now fully inline (no external brief file).
 fn prepare_home(p: &Paths) -> std::io::Result<()> {
-    std::fs::create_dir_all(&p.kiro_home)?;
-    // Self-gitignore: `.tmm/.gitignore` = `*`
     let tmm_dir = p.workspace.join(".tmm");
+    std::fs::create_dir_all(&tmm_dir)?;
+    // Self-gitignore: `.tmm/.gitignore` = `*`
     let gi = tmm_dir.join(".gitignore");
     if !gi.exists() {
         std::fs::write(&gi, "*\n")?;
     }
+    std::fs::create_dir_all(&p.home)?;
     std::fs::write(&p.keepalive, KEEPALIVE_SH)?;
     std::fs::write(&p.heartbeat, HEARTBEAT_SH)?;
     #[cfg(unix)]
@@ -409,6 +493,17 @@ fn prepare_home(p: &Paths) -> std::io::Result<()> {
         std::fs::set_permissions(&p.heartbeat, std::fs::Permissions::from_mode(0o755))?;
     }
     Ok(())
+}
+
+/// Adopt the pre-0.6 Kiro home only when no canonical home exists. This runs
+/// immediately before a new Kiro launch, never while merely adopting a pane
+/// that may still have `KIRO_HOME` pointed at the legacy directory.
+fn prepare_kiro_home(p: &Paths) -> std::io::Result<()> {
+    let legacy = p.workspace.join(".tmm").join("kiro-home");
+    if p.home == p.workspace.join(".tmm") && legacy.exists() && !p.kiro.exists() {
+        std::fs::rename(&legacy, &p.kiro)?;
+    }
+    std::fs::create_dir_all(&p.kiro)
 }
 
 /// Seed the chosen `template`'s roster as employees, unless the room already has
@@ -855,52 +950,89 @@ fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &str, session:
     Ok(pane)
 }
 
-/// After a *server* restart, nudge every agent window in `session` back online.
+/// After a *server* restart, reconnect adopted agents whose idle `wait` is
+/// still attached to the dead daemon.
 ///
 /// A recovered agent's MCP client lost its connection to the old (now dead)
 /// daemon and is hung inside a `wait` tool call. Verified with kiro-cli 2.7.0:
 /// the client neither times out nor retries on its own — but it reconnects fine
-/// once the dead call is cancelled and a new turn starts. So for each agent
-/// window we press Escape to cancel the in-flight call (returning the TUI to its
-/// prompt), then send a short re-prompt that makes it call `wait` again, which
-/// re-establishes the connection. Harmless if an agent happened to be healthy:
-/// it just restarts its wait loop. This is done ONCE from recovery rather than
-/// in the reconcile loop, whose presence check can't distinguish a healthy agent
-/// from one hung on a dead socket (a just-restarted agent still looks "online"
-/// for ~30 s until its presence TTL lapses).
+/// once the dead call is cancelled and a new turn starts. Working agents must
+/// not receive Escape: recovery snapshots presence, allows one normal heartbeat
+/// interval, and nudges only idle-like agents whose `last_seen` did not advance.
 ///
 /// Runs in a spawned task: it sleeps between keystrokes (TUI needs a beat to
 /// settle) and we must not block the recovery path.
-pub fn nudge_adopted_agents(windows: Vec<(String, String)>) {
+pub fn nudge_adopted_agents(
+    bridge: Arc<dyn TeamBridge>,
+    room: String,
+    windows: Vec<(String, String)>,
+) {
+    let before = roster_liveness(&*bridge, &room);
     tokio::spawn(async move {
-        // Give a freshly-restarted daemon a moment to be listening before we
-        // ask agents to reconnect.
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        // Trust prompts do not join the roster, so handle them independently
+        // while the presence grace period is still running.
+        tokio::time::sleep(RESTART_TRUST_CHECK_DELAY).await;
+        for (name, pane) in &windows {
+            if name != "zsh" {
+                confirm_folder_trust_if_visible(pane);
+            }
+        }
+
+        tokio::time::sleep(RESTART_RECOVERY_GRACE - RESTART_TRUST_CHECK_DELAY).await;
         for (name, pane) in windows {
             if name == "zsh" {
                 continue; // the session's initial shell, not an agent
             }
-            println!("🜂 team: nudging adopted agent '{}' ({}) to reconnect", name, pane);
+            if confirm_folder_trust_if_visible(&pane) {
+                continue;
+            }
+            let prior = before.get(&name).map(|(status, seen)| (status.as_str(), *seen));
+            // Read immediately before acting so a heartbeat that arrives while
+            // an earlier pane is being handled also protects this pane.
+            let current_roster = roster_liveness(&*bridge, &room);
+            let current = current_roster.get(&name).map(|(status, seen)| (status.as_str(), *seen));
+            if !should_reconnect_adopted_agent(prior, current) {
+                println!("🜂 team: adopted agent '{}' is active or recovered; leaving {} untouched", name, pane);
+                continue;
+            }
+            println!("🜂 team: adopted agent '{}' has an unchanged idle wait; reconnecting {}", name, pane);
             nudge_pane(&pane).await;
         }
     });
 }
 
-/// The re-prompt that gets a wedged/stopped agent calling `wait` again.
-const RECONNECT_NUDGE: &str =
-    "Reconnect to the team chat: call `wait` now, and keep calling it to stay in the conversation.";
+fn should_reconnect_adopted_agent(
+    before: Option<(&str, i64)>,
+    after: Option<(&str, i64)>,
+) -> bool {
+    let Some((before_status, before_seen)) = before else { return false };
+    let Some((after_status, after_seen)) = after else { return false };
+    let idle_like = |status: &str| matches!(status, "idle" | "online" | "stalled");
+    idle_like(before_status) && idle_like(after_status) && after_seen <= before_seen
+}
+
+/// Keep recovery neutral: the shared Team contract tells an idle agent to
+/// return to `wait`, while an agent with pending context resumes that work.
+const RECONNECT_NUDGE: &str = "Continue.";
+
+fn confirm_folder_trust_if_visible(pane: &str) -> bool {
+    if let Ok(content) = tmux::capture_pane_plain(pane, Some(80)) {
+        if folder_trust_prompt_visible(&content) {
+            println!("🜂 team: confirming folder trust in recovered pane {}", pane);
+            let _ = tmux::send_keys(pane, "Enter", false);
+            return true;
+        }
+    }
+    false
+}
 
 /// Press Esc (cancel any stuck in-flight call → back to the prompt), then send
 /// the reconnect re-prompt and submit it. Shared by restart-recovery and the
 /// supervisor's liveness self-heal. Sleeps between keystrokes (the TUI needs a
 /// beat to settle), so callers run it inside a spawned task.
 async fn nudge_pane(pane: &str) {
-    if let Ok(content) = tmux::capture_pane_plain(pane, Some(80)) {
-        if folder_trust_prompt_visible(&content) {
-            println!("🜂 team: confirming folder trust in recovered pane {}", pane);
-            let _ = tmux::send_keys(pane, "Enter", false);
-            return;
-        }
+    if confirm_folder_trust_if_visible(pane) {
+        return;
     }
     let _ = tmux::send_keys(pane, "Escape", false);
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -973,14 +1105,6 @@ fn confirm_startup_prompt(pane: String, confirmation: StartupConfirmation) {
     });
 }
 
-const TEAM_ADDRESSING_CONTRACT: &str = "\
-## Dispatch
-- Reply when addressed by `@name` or `@all`; `@all` requires each agent's own reply.
-- Unaddressed messages are context. In manager-led teams only the lead responds;
-  when the human asks everyone, the lead re-posts the request with `@all`.
-- The durable team transcript is `.tmm/team-history.jsonl`. When joining a resumed
-  workspace, read it before acting so prior decisions and handoffs are restored.";
-
 /// Build the complete agent system prompt with XML-structured layers.
 /// - `<team-system-prompt>`: global rules (from config) + team-specific prompt
 /// - `<role-system-prompt>`: this agent's role + goal
@@ -995,10 +1119,6 @@ fn build_agent_prompt(role: &str, goal: &str, team_prompt: &str, cfg: &TeamConfi
     if !cfg.team_rules.trim().is_empty() {
         team_section.push_str(cfg.team_rules.trim());
     }
-    if !team_section.is_empty() {
-        team_section.push_str("\n\n");
-    }
-    team_section.push_str(TEAM_ADDRESSING_CONTRACT);
     if !team_prompt.trim().is_empty() {
         if !team_section.is_empty() { team_section.push_str("\n\n---\n\n"); }
         team_section.push_str(team_prompt.trim());
@@ -1200,20 +1320,37 @@ fn codex_team_mcp_overrides(m: &McpDef) -> Vec<String> {
 }
 
 fn team_mcp_tool_timeout_ms() -> u64 {
-    agora::mcp::MCP_WAIT_MAX_MS + 30_000
+    TEAM_MCP_TOOL_TIMEOUT_MS
 }
 
-/// A one-line skills index appended to the kick for backends without a native
-/// skill mechanism (claude/codex). kiro instead gets `skill://` resources.
+/// A compact system-level skills index for backends without a native skill
+/// mechanism (claude/codex). Kiro instead gets `skill://` resources.
 fn skills_index_text(skills: &[ResolvedSkill]) -> String {
     if skills.is_empty() {
         return String::new();
     }
-    let mut s = String::from(" Skills available — read the named SKILL.md before a matching task:");
+    let mut s = String::from("Skills available — read the named SKILL.md before a matching task:");
     for sk in skills {
         s += &format!(" [{}] {} (at {}/SKILL.md);", sk.name, sk.description, sk.dir.display());
     }
     s
+}
+
+fn build_cli_system_prompt(
+    role: &str,
+    goal: &str,
+    team_prompt: &str,
+    cfg: &TeamConfig,
+    skills: &[ResolvedSkill],
+) -> String {
+    let mut prompt = build_agent_prompt(role, goal, team_prompt, cfg);
+    let skills = skills_index_text(skills);
+    if !skills.is_empty() {
+        prompt.push_str("\n\n<skills-system-prompt>\n");
+        prompt.push_str(&skills);
+        prompt.push_str("\n</skills-system-prompt>");
+    }
+    prompt
 }
 
 fn skills_cache_dir() -> PathBuf {
@@ -1293,6 +1430,41 @@ fn inherit_codex_system_files_from(home: &Path, system_home: &Path) -> Result<()
     link_codex_system_file(home, system_home, "config.toml", true)?;
     link_codex_system_file(home, system_home, ".env", false)?;
     link_codex_system_file(home, system_home, "auth.json", false)
+}
+
+fn codex_developer_instructions(home: &Path, team_instructions: &str) -> Result<String, String> {
+    let path = home.join("config.toml");
+    let existing = match std::fs::read_to_string(&path) {
+        Ok(content) => {
+            let config: toml::Value = toml::from_str(&content)
+                .map_err(|e| format!("failed to parse {}: {}", path.display(), e))?;
+            match config.get("developer_instructions") {
+                Some(value) => Some(
+                    value
+                        .as_str()
+                        .ok_or_else(|| {
+                            format!(
+                                "{} developer_instructions must be a string",
+                                path.display()
+                            )
+                        })?
+                        .trim()
+                        .to_string(),
+                ),
+                None => None,
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(format!("failed to read {}: {}", path.display(), error)),
+    };
+    let team = format!(
+        "<tmux-mobile-team-instructions>\n{}\n</tmux-mobile-team-instructions>",
+        team_instructions.trim()
+    );
+    Ok(match existing.filter(|value| !value.is_empty()) {
+        Some(existing) => format!("{}\n\n{}", existing, team),
+        None => team,
+    })
 }
 
 #[cfg(unix)]
@@ -1439,7 +1611,8 @@ fn prepare_kiro(
     name: &str, role: &str, goal: &str, team_prompt: &str,
     cfg: &TeamConfig, room: &str, paths: &Paths, model: Option<&str>, extras: &Extras,
 ) -> Result<Prepared, String> {
-    let home = &paths.kiro_home;
+    prepare_kiro_home(paths).map_err(|e| e.to_string())?;
+    let home = &paths.kiro;
     std::fs::create_dir_all(home.join("agents")).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(home.join("settings")).map_err(|e| e.to_string())?;
     std::fs::write(
@@ -1459,7 +1632,11 @@ fn prepare_kiro(
         .collect();
     // The team MCP server plus any extra per-agent servers from the team.yaml.
     let mut mcp_servers = serde_json::json!({
-        "team": { "url": format!("{}/mcp", cfg.url), "headers": { "x-agent": name, "x-room": room } }
+        "team": {
+            "url": format!("{}/mcp", cfg.url),
+            "timeout": team_mcp_tool_timeout_ms(),
+            "headers": { "x-agent": name, "x-room": room }
+        }
     });
     {
         let obj = mcp_servers.as_object_mut().unwrap();
@@ -1520,7 +1697,12 @@ fn prepare_claude(
     let notify = notifications.helper_command("claude");
     let mcpfile = d.join(format!("{}.mcp.json", name));
     let mut mcp_servers = serde_json::json!({
-        "team": { "type": "http", "url": format!("{}/mcp", cfg.url), "headers": { "x-agent": name, "x-room": room } }
+        "team": {
+            "type": "http",
+            "url": format!("{}/mcp", cfg.url),
+            "timeout": team_mcp_tool_timeout_ms(),
+            "headers": { "x-agent": name, "x-room": room }
+        }
     });
     {
         let obj = mcp_servers.as_object_mut().unwrap();
@@ -1559,13 +1741,14 @@ fn prepare_claude(
     .map_err(|e| e.to_string())?;
 
     let m = model.unwrap_or("sonnet");
-    let first_msg = format!("{}\n\n{}{}", build_agent_prompt(role, goal, team_prompt, cfg), cfg.team_kick, skills_index_text(&extras.skills));
+    let system_prompt = build_cli_system_prompt(role, goal, team_prompt, cfg, &extras.skills);
     let cmd = format!(
-        "claude --mcp-config {} --strict-mcp-config --settings {} --model {} --dangerously-skip-permissions {}",
+        "claude --mcp-config {} --strict-mcp-config --settings {} --model {} --dangerously-skip-permissions --append-system-prompt {} {}",
         shell_quote(&mcpfile.to_string_lossy()),
         shell_quote(&settingsfile.to_string_lossy()),
         shell_quote(m),
-        shell_quote(&first_msg)
+        shell_quote(&system_prompt),
+        shell_quote(&cfg.team_kick)
     )
     .trim_end()
     .to_string();
@@ -1580,6 +1763,7 @@ fn prepare_claude(
     let mut env = hb_env(name, room, cfg);
     env.extend(extras.env.iter().cloned());
     env.push(("MCP_TOOL_TIMEOUT".to_string(), team_mcp_tool_timeout_ms().to_string()));
+    env.push(("CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT".to_string(), "0".to_string()));
     Ok((env, cmd, Some(confirmation)))
 }
 
@@ -1611,6 +1795,11 @@ fn prepare_codex(
             config_args.extend(codex_mcp_overrides(m));
         }
     }
+    let system_prompt = build_cli_system_prompt(role, goal, team_prompt, cfg, &extras.skills);
+    config_args.push(codex_config_override(
+        "developer_instructions",
+        Value::String(codex_developer_instructions(&home, &system_prompt)?),
+    ));
     std::fs::write(
         home.join("hooks.json"),
         serde_json::to_vec_pretty(&codex_hooks_value(&paths.keepalive, &paths.heartbeat, &notify)).unwrap(),
@@ -1618,13 +1807,12 @@ fn prepare_codex(
     let mut env = vec![("CODEX_HOME".to_string(), home.to_string_lossy().to_string())];
     env.extend(hb_env(name, room, cfg));
     env.extend(extras.env.iter().cloned());
-    let first_msg = format!("{}\n\n{}{}", build_agent_prompt(role, goal, team_prompt, cfg), cfg.team_kick, skills_index_text(&extras.skills));
     if let Some(value) = model {
         config_args.push(format!("--model {}", shell_quote(value)));
     }
     config_args.push("--dangerously-bypass-approvals-and-sandbox".to_string());
     config_args.push("--dangerously-bypass-hook-trust".to_string());
-    config_args.push(shell_quote(&first_msg));
+    config_args.push(shell_quote(&cfg.team_kick));
     let cmd = format!("codex {}", config_args.join(" "));
     let confirmation = StartupConfirmation {
         markers: CODEX_FOLDER_TRUST_MARKERS.to_vec(),
@@ -1754,6 +1942,15 @@ mod tests {
     }
 
     #[test]
+    fn idle_sleep_precedes_the_first_empty_wait_result() {
+        assert_eq!(IDLE_SLEEP_MS, 8 * 60 * 1000);
+        assert_eq!(
+            agora::mcp::MCP_WAIT_MAX_MS as i64 - IDLE_SLEEP_MS,
+            60_000
+        );
+    }
+
+    #[test]
     fn sleep_state_resets_arming_when_an_agent_starts_working() {
         // If the team started looking idle, then someone actually picks work
         // back up before the threshold, we drop the timer entirely.
@@ -1855,6 +2052,40 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn restart_recovery_nudges_only_an_unchanged_idle_wait() {
+        assert_eq!(RECONNECT_NUDGE, "Continue.");
+        assert!(should_reconnect_adopted_agent(
+            Some(("idle", 1_000)),
+            Some(("idle", 1_000)),
+        ));
+        assert!(should_reconnect_adopted_agent(
+            Some(("online", 1_000)),
+            Some(("stalled", 1_000)),
+        ));
+
+        assert!(!should_reconnect_adopted_agent(
+            Some(("idle", 1_000)),
+            Some(("idle", 1_001)),
+        ));
+        assert!(!should_reconnect_adopted_agent(
+            Some(("idle", 1_000)),
+            Some(("working", 1_000)),
+        ));
+    }
+
+    #[test]
+    fn restart_recovery_never_interrupts_work_sleep_or_unknown_agents() {
+        for status in ["thinking", "working", "hardworking", "sleeping", "offline"] {
+            assert!(!should_reconnect_adopted_agent(
+                Some((status, 1_000)),
+                Some((status, 1_000)),
+            ), "{status} must not be interrupted");
+        }
+        assert!(!should_reconnect_adopted_agent(None, Some(("idle", 1_000))));
+        assert!(!should_reconnect_adopted_agent(Some(("idle", 1_000)), None));
+    }
+
     // ── existing tests follow ──
 
     #[test]
@@ -1919,6 +2150,32 @@ mod tests {
     }
 
     #[test]
+    fn codex_team_instructions_follow_existing_user_instructions() {
+        let root = std::env::temp_dir().join(format!(
+            "teamtest-codex-instructions-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("config.toml"),
+            "developer_instructions = \"Keep the user's convention.\"\n",
+        )
+        .unwrap();
+
+        let merged = codex_developer_instructions(&root, "Team contract.").unwrap();
+
+        assert!(merged.starts_with("Keep the user's convention."));
+        assert!(merged.contains(
+            "<tmux-mobile-team-instructions>\nTeam contract.\n</tmux-mobile-team-instructions>"
+        ));
+        assert!(
+            merged.find("Keep the user's convention.").unwrap()
+                < merged.find("Team contract.").unwrap()
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn codex_auth_does_not_replace_an_existing_private_file() {
         let root = std::env::temp_dir().join(format!("teamtest-codex-existing-auth-{}", uuid::Uuid::new_v4()));
         let system_home = root.join("system");
@@ -1965,12 +2222,12 @@ mod tests {
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&root).unwrap();
-        let paths = Paths::new(root.to_str().unwrap());
+        let paths = Paths::new(root.to_str().unwrap(), "backend-permissions");
         prepare_home(&paths).unwrap();
         let extras = Extras::default();
         let cfg = cfg();
 
-        let (_, kiro_cmd, kiro_confirmation) = prepare_kiro(
+        let (kiro_env, kiro_cmd, kiro_confirmation) = prepare_kiro(
             "lead",
             "lead",
             "coordinate",
@@ -1986,7 +2243,7 @@ mod tests {
         assert!(kiro_cmd.contains("--model claude-sonnet-4.6"));
         assert!(kiro_confirmation.is_none());
         let kiro_settings: Value = serde_json::from_slice(
-            &std::fs::read(paths.kiro_home.join("settings/cli.json")).unwrap(),
+            &std::fs::read(paths.kiro.join("settings/cli.json")).unwrap(),
         )
         .unwrap();
         assert_eq!(
@@ -1994,7 +2251,7 @@ mod tests {
             Value::Bool(true)
         );
         let kiro_agent: Value = serde_json::from_slice(
-            &std::fs::read(paths.kiro_home.join("agents/lead.json")).unwrap(),
+            &std::fs::read(paths.kiro.join("agents/lead.json")).unwrap(),
         )
         .unwrap();
         assert_eq!(
@@ -2017,8 +2274,17 @@ mod tests {
             kiro_agent["hooks"]["userPromptSubmit"][0]["command"],
             format!("/bin/bash {} pulse", paths.heartbeat.display())
         );
+        assert_eq!(
+            kiro_agent["mcpServers"]["team"]["timeout"],
+            TEAM_MCP_TOOL_TIMEOUT_MS
+        );
+        assert!(kiro_agent["prompt"]
+            .as_str()
+            .unwrap()
+            .contains("<role-system-prompt>"));
+        assert!(!kiro_env.iter().any(|(key, _)| key == "MCP_TOOL_TIMEOUT"));
 
-        let (_, claude_cmd, claude_confirmation) = prepare_claude(
+        let (claude_env, claude_cmd, claude_confirmation) = prepare_claude(
             "planner",
             "planner",
             "plan",
@@ -2032,7 +2298,12 @@ mod tests {
         .unwrap();
         assert!(claude_cmd.contains("--dangerously-skip-permissions"));
         assert!(claude_cmd.contains("--model sonnet"));
-        assert!(claude_cmd.contains("kick"), "initial prompt is a CLI argument");
+        assert!(claude_cmd.contains("--append-system-prompt"));
+        assert!(claude_cmd.contains("<role-system-prompt>"));
+        assert!(
+            claude_cmd.ends_with(" kick"),
+            "the positional startup message contains only the kick: {claude_cmd}"
+        );
         let claude_settings: Value = serde_json::from_slice(
             &std::fs::read(paths.claude.join("planner.settings.json")).unwrap(),
         )
@@ -2061,6 +2332,22 @@ mod tests {
             claude_settings["hooks"]["Stop"][0]["hooks"][2]["command"],
             format!("/bin/bash {} post", paths.heartbeat.display())
         );
+        let claude_mcp: Value = serde_json::from_slice(
+            &std::fs::read(paths.claude.join("planner.mcp.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            claude_mcp["mcpServers"]["team"]["timeout"],
+            TEAM_MCP_TOOL_TIMEOUT_MS
+        );
+        assert!(claude_env.contains(&(
+            "MCP_TOOL_TIMEOUT".to_string(),
+            TEAM_MCP_TOOL_TIMEOUT_MS.to_string()
+        )));
+        assert!(claude_env.contains(&(
+            "CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT".to_string(),
+            "0".to_string()
+        )));
         let confirmation = claude_confirmation.unwrap();
         assert_eq!(confirmation.timeout, Duration::from_secs(120));
         assert!(startup_prompt_visible(
@@ -2093,6 +2380,13 @@ mod tests {
         .unwrap();
         assert!(codex_cmd.contains("--dangerously-bypass-approvals-and-sandbox"));
         assert!(codex_cmd.contains("--dangerously-bypass-hook-trust"));
+        assert!(codex_cmd.contains("developer_instructions="));
+        assert!(codex_cmd.contains("<tmux-mobile-team-instructions>"));
+        assert!(codex_cmd.contains("<role-system-prompt>"));
+        assert!(
+            codex_cmd.ends_with(" kick"),
+            "the positional startup message contains only the kick: {codex_cmd}"
+        );
         assert!(!codex_cmd.contains("--model"));
         let confirmation = codex_confirmation.unwrap();
         assert!(startup_prompt_visible(
@@ -2136,7 +2430,7 @@ mod tests {
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&root).unwrap();
-        let paths = Paths::new(root.to_str().unwrap());
+        let paths = Paths::new(root.to_str().unwrap(), "backend-models");
         prepare_home(&paths).unwrap();
         let extras = Extras::default();
         let cfg = cfg();
@@ -2229,10 +2523,11 @@ mod tests {
         let timeout_secs = timeout_ms / 1000;
 
         assert!(timeout_ms > agora::mcp::MCP_WAIT_MAX_MS);
+        assert_eq!(timeout_ms - agora::mcp::MCP_WAIT_MAX_MS, 60_000);
         assert!(overrides.contains(&format!(
             "mcp_servers.team.tool_timeout_sec={timeout_secs}"
         )));
-        assert_eq!(timeout_ms, 210_000);
+        assert_eq!(timeout_ms, TEAM_MCP_TOOL_TIMEOUT_MS);
     }
 
     // Records seed_employee calls so we can assert the default roster.
@@ -2506,6 +2801,42 @@ mod tests {
     }
 
     #[test]
+    fn team_slug_is_stable_and_separates_templates_in_one_workspace() {
+        let workspace = "/Users/clawd/work/My Project";
+        let default = team_slug(workspace, "default");
+        let triad = team_slug(workspace, "triad");
+
+        assert_eq!(default, team_slug(workspace, "default"));
+        assert_ne!(default, triad);
+        assert!(default.contains("my-project-default-"), "{default}");
+        assert!(triad.contains("my-project-triad-"), "{triad}");
+        assert!(default
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_')));
+    }
+
+    #[test]
+    fn team_runtime_dirs_are_isolated_with_legacy_compatibility() {
+        let workspace = "/tmp/shared-project";
+        let legacy_room = workspace_slug(workspace);
+        let first = team_slug(workspace, "default");
+        let second = team_slug(workspace, "triad");
+
+        assert_eq!(
+            team_runtime_dir(workspace, &legacy_room),
+            PathBuf::from(workspace).join(".tmm")
+        );
+        assert_ne!(
+            team_runtime_dir(workspace, &first),
+            team_runtime_dir(workspace, &second)
+        );
+        assert_eq!(
+            team_runtime_dir(workspace, &first),
+            PathBuf::from(workspace).join(".tmm/teams").join(first)
+        );
+    }
+
+    #[test]
     fn shell_quote_plain_passthrough() {
         assert_eq!(shell_quote("kiro-cli"), "kiro-cli");
         assert_eq!(shell_quote("a/b_c.d"), "a/b_c.d");
@@ -2536,11 +2867,35 @@ mod tests {
         assert!(p.contains("<role-system-prompt>"));
         assert!(p.starts_with("<team-system-prompt>\nGlobal rule."));
         assert!(p.contains("Rule one."));
-        assert!(p.contains("`@all` requires each agent's own reply"));
-        assert!(p.contains(".tmm/team-history.jsonl"));
+        assert!(!p.contains("read_history"));
+        assert!(!p.contains("Team runtime"));
+        assert!(!p.contains("Unaddressed messages are context."));
+        assert!(!p.contains(".tmm/team-history.jsonl"));
         assert!(p.contains("Blog style."));
         assert!(p.contains("architect"));
         assert!(p.contains("Design the system."));
+    }
+
+    #[test]
+    fn cli_skill_index_is_part_of_the_system_prompt() {
+        let cfg = TeamConfig {
+            url: String::new(),
+            model: String::new(),
+            system_prompt: String::new(),
+            team_rules: "Shared rule.".into(),
+            team_kick: "kick".into(),
+        };
+        let skills = vec![ResolvedSkill {
+            name: "review".into(),
+            dir: PathBuf::from("/skills/review"),
+            description: "Review changes".into(),
+        }];
+
+        let prompt = build_cli_system_prompt("reviewer", "Review.", "", &cfg, &skills);
+
+        assert!(prompt.contains("<skills-system-prompt>"));
+        assert!(prompt.contains("[review] Review changes (at /skills/review/SKILL.md)"));
+        assert!(!prompt.contains("kick"));
     }
 
     #[test]
@@ -2548,13 +2903,89 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("teamtest-home-{}", std::process::id()));
         let ws = dir.join("proj");
         std::fs::create_dir_all(&ws).unwrap();
-        let paths = Paths::new(ws.to_str().unwrap());
+        let paths = Paths::new(ws.to_str().unwrap(), "team-a");
         prepare_home(&paths).unwrap();
         let gi = ws.join(".tmm").join(".gitignore");
         assert!(gi.exists());
         assert_eq!(std::fs::read_to_string(&gi).unwrap(), "*\n");
         assert!(paths.keepalive.exists());
         assert!(paths.heartbeat.exists());
+        assert!(!paths.kiro.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prepare_kiro_home_migrates_legacy_state() {
+        let dir = std::env::temp_dir().join(format!(
+            "teamtest-kiro-home-migration-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let ws = dir.join("proj");
+        let legacy = ws.join(".tmm").join("kiro-home");
+        std::fs::create_dir_all(legacy.join("state")).unwrap();
+        std::fs::write(legacy.join("state/session.json"), "preserved").unwrap();
+        let room = workspace_slug(ws.to_str().unwrap());
+        let paths = Paths::new(ws.to_str().unwrap(), &room);
+
+        prepare_kiro_home(&paths).unwrap();
+
+        assert!(!legacy.exists());
+        assert_eq!(
+            std::fs::read_to_string(paths.kiro.join("state/session.json")).unwrap(),
+            "preserved"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prepare_kiro_home_never_overwrites_canonical_state() {
+        let dir = std::env::temp_dir().join(format!(
+            "teamtest-kiro-home-existing-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let ws = dir.join("proj");
+        let legacy = ws.join(".tmm").join("kiro-home");
+        let room = workspace_slug(ws.to_str().unwrap());
+        let paths = Paths::new(ws.to_str().unwrap(), &room);
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::create_dir_all(&paths.kiro).unwrap();
+        std::fs::write(legacy.join("state"), "legacy").unwrap();
+        std::fs::write(paths.kiro.join("state"), "canonical").unwrap();
+
+        prepare_kiro_home(&paths).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(paths.kiro.join("state")).unwrap(),
+            "canonical"
+        );
+        assert_eq!(
+            std::fs::read_to_string(legacy.join("state")).unwrap(),
+            "legacy"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn new_team_home_does_not_adopt_legacy_kiro_state() {
+        let dir = std::env::temp_dir().join(format!(
+            "teamtest-kiro-instance-isolation-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let ws = dir.join("proj");
+        let legacy = ws.join(".tmm/kiro-home");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("state"), "another team").unwrap();
+        let room = team_slug(ws.to_str().unwrap(), "triad");
+        let paths = Paths::new(ws.to_str().unwrap(), &room);
+
+        prepare_kiro_home(&paths).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(legacy.join("state")).unwrap(),
+            "another team"
+        );
+        assert!(paths.kiro.is_dir());
+        assert!(!paths.kiro.join("state").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
