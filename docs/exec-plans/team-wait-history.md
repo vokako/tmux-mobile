@@ -75,3 +75,37 @@ Additional proof:
 - A short-budget test must span multiple idle slices before returning `Idle`.
 - A message posted after an idle slice must complete the original tool call,
   not require the agent to issue another `wait`.
+
+## Follow-up: dead client-side wait recovery
+
+### Problem
+
+A live incident in room `260717-lingting-687470` showed human messages persisted
+in SQLite and delivered to two agents, while the lead's cursor and `last_seen`
+stopped advancing. Its TUI displayed one `wait` call for over 50 minutes even
+though the server caps the handler at four minutes. The MCP client transport
+can therefore remain hung after the server future or connection is gone.
+
+### Approaches considered
+
+1. Add a stdio MCP proxy that retries HTTP calls. Rejected for the same reason
+   as above: another process and protocol hop still cannot force a wedged Agent
+   CLI tool call to consume the retry result.
+2. Reduce every wait duration. Rejected: it increases model/tool churn and does
+   not repair a client transport that never observes completion.
+3. Use the existing presence distinction to recover dead waits. Chosen:
+   `idle` waits refresh every 15 seconds and become `stalled` after 90 seconds,
+   while real work becomes `hardworking` and retains the 30-minute protection.
+
+### Done when
+
+- A stale `stalled` wait is eligible for a reconnect nudge after 90 seconds.
+- A `hardworking` agent is not eligible before the 30-minute backstop.
+- Sleeping/offline agents and recently nudged panes are excluded.
+- Focused tests and the complete Rust test suite pass.
+
+### Files
+
+- `src-tauri/src/team.rs`
+- `docs/design-docs/features/team.md`
+- `docs/exec-plans/team-wait-history.md`

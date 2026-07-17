@@ -435,17 +435,20 @@ heartbeating agent never flaps; `STALLED_TTL_MS = 30 min`):
 Colors run a heat gradient: idle green → thinking blue → working amber →
 hardworking orange (`--status-hot`) → stalled red.
 
-**Self-heal backstop** (`team.rs::reconcile_loop`, `RECOVERY_STALE_MS = 30 min`).
-Because a parked agent touches every 15 seconds and a working tool holds a
-30-second heartbeat lease, `last_seen` older than 30 min means genuinely
-*nothing* — a dead MCP socket, a crashed loop, a stop we never caught. For such
-an agent (window still present) the supervisor runs the same `nudge_pane`
-recovery uses — `Esc` to
-cancel the wedged call, then a re-prompt to resume `wait` — **once**, then cools
-down the same window for another 30 min so we never spam. Pure model thinking
-between tools still has no lifecycle callback, but the pre/post/prompt pulses
-reset the clock at every observable boundary; an active tool itself is never
-interrupted merely for crossing the 30-minute threshold.
+**Self-heal** (`team.rs::reconcile_loop`) uses the status distinction above,
+not one timeout for every state. A parked agent touches every 15 seconds; if
+that refresh stops, its stored `idle`/`online` status is exposed as `stalled`
+after 90 seconds and the supervisor immediately runs `nudge_pane` (`Esc`, then
+a reconnect prompt). This bounds recovery when an HTTP MCP call remains hung
+client-side even though the server's four-minute wait future ended or the
+server restarted. Messages are already durable in SQLite, so the reconnected
+wait reads them by cursor.
+
+A silent `working`/`thinking` agent is exposed as `hardworking` instead and is
+not interrupted until the 30-minute `RECOVERY_STALE_MS` backstop. This protects
+real model thinking between observable hooks while still recovering a dead
+process eventually. Nudges have a five-minute per-pane cooldown; a successful
+wait refreshes `last_seen` and naturally rearms recovery.
 
 **Idle-sleep** (`team.rs::SleepState`, `IDLE_SLEEP_MS = 5 min`). The other
 extreme: when **every** non-offline agent has been parked in `wait` (status

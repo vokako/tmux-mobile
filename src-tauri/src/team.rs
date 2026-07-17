@@ -37,6 +37,14 @@ const RECONCILE_INTERVAL: Duration = Duration::from_secs(3);
 /// above the bus's 90s `unreachable` mark so we only ever auto-restart an agent
 /// that has been silent for a genuinely long time, not one merely between tools.
 const RECOVERY_STALE_MS: i64 = 1_800_000; // 30 minutes
+/// A dead parked `wait` is distinguishable from real work: the bus exposes an
+/// idle/online row as `stalled` once its 15-second refresh stops for 90 seconds,
+/// while a silent working/thinking row remains `hardworking` for 30 minutes.
+/// Recover the former promptly instead of making a human message wait 30 min.
+const WAIT_RECOVERY_STALE_MS: i64 = 90_000;
+/// Avoid repeatedly interrupting a pane if reconnect itself cannot make
+/// progress. A successful `wait` refreshes last_seen and naturally rearms this.
+const RECOVERY_COOLDOWN_MS: i64 = 5 * 60 * 1000;
 /// Idle-sleep threshold: when EVERY non-offline agent has been parked in `wait`
 /// (status=`idle`) for this long, the supervisor sends Esc to each pane to
 /// cancel the in-flight `wait` MCP call. The agent's CLI falls back to its
@@ -625,26 +633,24 @@ async fn reconcile_loop(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: Stri
         }
 
         // ── Self-heal backstop ────────────────────────────────────────────
-        // An agent we have heard NOTHING from for RECOVERY_STALE_MS — no `wait`
-        // (a parked agent touches about every 15 seconds), no per-tool heartbeat — is
-        // wedged: a dead MCP socket, a crashed loop, or a stop we never caught.
-        // Nudge its window once (Esc to cancel the stuck call + a re-prompt to
-        // resume `wait`), then cool down for the same window before trying
-        // again, so we never spam — and so a genuinely long single tool (which
-        // emits no heartbeat until it returns) is interrupted at most rarely.
-        // Skipped while slept: the silence is intentional.
+        // A parked wait that stops its 15-second refresh is exposed by the bus
+        // as `stalled` after 90 seconds. Recover that case promptly: a dead MCP
+        // transport can otherwise leave persisted human messages unread for
+        // the old 30-minute generic threshold. A working/thinking agent instead
+        // becomes `hardworking` at 90 seconds and is still left alone until the
+        // 30-minute backstop. Skipped while slept: that silence is intentional.
         if !sleep_state.slept {
             for (name, (status, last_seen)) in &roster {
-                if status == "offline" || now - last_seen < RECOVERY_STALE_MS {
+                if !should_recover_agent(status, *last_seen, now, last_nudge.get(name).copied()) {
                     continue;
-                }
-                if now - last_nudge.get(name).copied().unwrap_or(0) < RECOVERY_STALE_MS {
-                    continue; // already nudged recently; give it time
                 }
                 if let Some(pane) = tmux::find_window_by_name(&session, name) {
                     println!(
-                        "🜂 team: agent '{}' unreachable for {}s — self-heal nudging {}",
-                        name, (now - last_seen) / 1000, pane
+                        "🜂 team: agent '{}' {} for {}s — self-heal nudging {}",
+                        name,
+                        status,
+                        (now - last_seen) / 1000,
+                        pane
                     );
                     tokio::spawn(async move { nudge_pane(&pane).await; });
                     last_nudge.insert(name.clone(), now);
@@ -653,6 +659,21 @@ async fn reconcile_loop(bridge: Arc<dyn TeamBridge>, cfg: TeamConfig, room: Stri
         }
 
         tokio::time::sleep(RECONCILE_INTERVAL).await;
+    }
+}
+
+fn should_recover_agent(status: &str, last_seen: i64, now: i64, last_nudge: Option<i64>) -> bool {
+    if status == "offline" || status == "sleeping" {
+        return false;
+    }
+    if now - last_nudge.unwrap_or(0) < RECOVERY_COOLDOWN_MS {
+        return false;
+    }
+    let stale_for = now - last_seen;
+    if status == "stalled" {
+        stale_for >= WAIT_RECOVERY_STALE_MS
+    } else {
+        stale_for >= RECOVERY_STALE_MS
     }
 }
 
@@ -1787,6 +1808,51 @@ mod tests {
         s.step(60_200, true, 1, 60_000); // re-arm
         assert_eq!(s.step(120_300, true, 2, 60_000), SleepAction::Sleep);
         assert_eq!(s.sleep_anchor_seq, 2);
+    }
+
+    #[test]
+    fn recovery_nudges_dead_wait_without_interrupting_long_work() {
+        let now = 2_000_000;
+
+        assert!(should_recover_agent(
+            "stalled",
+            now - WAIT_RECOVERY_STALE_MS,
+            now,
+            None
+        ));
+        assert!(!should_recover_agent(
+            "hardworking",
+            now - WAIT_RECOVERY_STALE_MS,
+            now,
+            None
+        ));
+        assert!(should_recover_agent(
+            "hardworking",
+            now - RECOVERY_STALE_MS,
+            now,
+            None
+        ));
+    }
+
+    #[test]
+    fn recovery_respects_sleep_offline_and_nudge_cooldown() {
+        let now = 2_000_000;
+        let stale = now - RECOVERY_STALE_MS;
+
+        assert!(!should_recover_agent("sleeping", stale, now, None));
+        assert!(!should_recover_agent("offline", stale, now, None));
+        assert!(!should_recover_agent(
+            "stalled",
+            stale,
+            now,
+            Some(now - RECOVERY_COOLDOWN_MS + 1)
+        ));
+        assert!(should_recover_agent(
+            "stalled",
+            stale,
+            now,
+            Some(now - RECOVERY_COOLDOWN_MS)
+        ));
     }
 
     // ── existing tests follow ──
