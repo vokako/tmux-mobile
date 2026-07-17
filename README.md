@@ -130,6 +130,16 @@ them work from your phone. Desktop-server only (the agent bus runs in-process).
 | `npm run build:android` | Android APK (aarch64) |
 | `npm run build:all` | Web + macOS + Android |
 | `npm run tauri:dev` | Desktop app + WS server (dev mode) |
+| `npm run tauri:dev:release` | Release-mode desktop app + WS server |
+
+Use the project scripts for Tauri. `pnpx tauri` invokes `pnpm dlx` and resolves
+the unrelated `tauri` package, while positional `release` is passed to the
+runner instead of enabling release mode. The supported command is
+`npm run tauri:dev:release`.
+
+Cargo uses the machine's normal parallelism by default. On a memory-constrained
+machine, reduce it for one run with
+`CARGO_BUILD_JOBS=2 npm run tauri:dev:release`.
 
 ## Build Targets
 

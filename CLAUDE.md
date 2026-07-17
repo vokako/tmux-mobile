@@ -15,11 +15,21 @@ Targets: Android (primary), macOS desktop, browser (web UI).
 ```bash
 npm run dev              # Vite dev server (web UI on 0.0.0.0:5173)
 npm run tauri:dev        # Desktop app + WS server (dev mode)
+npm run tauri:dev:release # Release-mode desktop app + WS server
 npm run build:mac        # macOS .app + .dmg
 npm run build:android    # Android APK (aarch64)
 cd src-tauri && cargo run --bin server   # Standalone WS server
 cd src-tauri && cargo test -- --test-threads=1   # Tests (needs tmux running)
 ```
+
+Run Tauri through these project scripts. Do not use `pnpx tauri`: `pnpx` is
+`pnpm dlx` and downloads the unrelated `tauri` package instead of invoking the
+installed `@tauri-apps/cli`. Release mode is the `--release` option, not a
+positional `release` argument.
+
+On a memory-constrained machine, lower Cargo concurrency per invocation without
+changing the project default:
+`CARGO_BUILD_JOBS=2 npm run tauri:dev:release`.
 
 ## Documentation Map
 
