@@ -309,13 +309,15 @@ MCP tool names are `mcp__team__hire` etc).
 the agent CLI to the localhost MCP daemon; it does not pass through the phone's
 WebSocket connection. The bus still caps each internal liveness slice at 50
 seconds, but the MCP handler ignores empty slices and keeps the same tool call
-parked for up to 240 seconds. A message broadcast wakes it immediately; 240
+parked for up to 180 seconds. A message broadcast wakes it immediately; 180
 seconds is only the no-message ceiling. Codex's per-server `tool_timeout_sec`
-and Claude's `MCP_TOOL_TIMEOUT` are both set to 270 seconds, leaving 30 seconds
-of transport margin. Kiro's known failure mode is different: after the daemon
-process dies, its old request may never time out; restart recovery therefore
-cancels that call with `Esc` and starts a fresh stateless wait, as described
-above.
+and Claude's `MCP_TOOL_TIMEOUT` are both set to 210 seconds, leaving 30 seconds
+of transport margin. Kiro appears to have a 240-second client boundary: using
+the same 240-second server budget caused a deadline race where the server call
+ended but the TUI remained stuck in the tool. The 180-second budget leaves a
+full minute of margin. After a daemon process dies, Kiro's old request may
+still never time out; restart recovery cancels that call with `Esc` and starts
+a fresh stateless wait, as described above.
 
 This is deliberately implemented in the one shared in-process HTTP daemon, not
 as one stdio proxy per agent. A stdio proxy would still be subject to the Agent
@@ -328,7 +330,7 @@ threshold while reducing idle database activity by about 15x.
 
 All three backends run the keepalive command on their turn-complete/Stop
 lifecycle. This is enforcement, not redundant prompting: Codex may correctly
-reply, perform one 240-second `wait`, then end the turn when that wait is empty
+reply, perform one 180-second `wait`, then end the turn when that wait is empty
 despite an instruction to wait forever. Its Stop event therefore runs two
 commands in parallel: `keepalive.sh` re-prompts the TUI into `wait`, while the
 notification helper records completion. Kiro and Claude use the same keepalive
@@ -440,7 +442,7 @@ not one timeout for every state. A parked agent touches every 15 seconds; if
 that refresh stops, its stored `idle`/`online` status is exposed as `stalled`
 after 90 seconds and the supervisor immediately runs `nudge_pane` (`Esc`, then
 a reconnect prompt). This bounds recovery when an HTTP MCP call remains hung
-client-side even though the server's four-minute wait future ended or the
+client-side even though the server's three-minute wait future ended or the
 server restarted. Messages are already durable in SQLite, so the reconnected
 wait reads them by cursor.
 
@@ -455,7 +457,7 @@ extreme: when **every** non-offline agent has been parked in `wait` (status
 `idle`) for 5 min — the team has nothing to do — the supervisor sends `Escape`
 to each pane, which cancels the in-flight `wait` MCP call. The CLI returns to
 its shell prompt and stops thinking; without sleep the team would re-enter the
-240-second coalesced `wait` forever, burning one fresh LLM turn on each
+180-second coalesced `wait` forever, burning one fresh LLM turn on each
 completion. In a normal idle cycle only one empty call completes; the next is
 cancelled by five-minute sleep. Wake is anchored on bus seq: at sleep we
 snapshot the latest message seq, and any strictly-greater seq on a later tick —

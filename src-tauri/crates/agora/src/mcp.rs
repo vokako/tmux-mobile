@@ -19,9 +19,10 @@ use std::future::Future;
 use std::time::{Duration, Instant};
 
 /// One agent-facing `wait` tool call spans several short bus wait slices. This
-/// stays below the supervisor's five-minute idle-sleep threshold, so an idle
-/// team causes at most one empty model turn before the next call is cancelled.
-pub const MCP_WAIT_MAX_MS: u64 = 240_000;
+/// stays below both Kiro's observed 240-second client boundary and the
+/// supervisor's five-minute idle-sleep threshold. Do not raise this to 240s:
+/// racing the client deadline left Kiro stuck in a completed server call.
+pub const MCP_WAIT_MAX_MS: u64 = 180_000;
 const MCP_WAIT_MIN_SLICE_MS: u64 = 15_000;
 
 #[derive(Clone)]
@@ -47,7 +48,7 @@ pub struct PostArgs {
 pub struct WaitArgs {
     /// Internal polling slice in milliseconds (range 15000-50000, default
     /// 50000). Empty slices are ignored; one tool call remains parked for up to
-    /// 240000 milliseconds.
+    /// 180000 milliseconds.
     #[serde(default)]
     pub timeout_ms: Option<u64>,
 }
@@ -213,7 +214,7 @@ impl AgoraMcp {
         description = "Wait for new messages, then return them plus the current roster. You \
         are refused if you still owe someone a reply — the result names whom and includes the \
         messages to answer; reply with `post` first, then wait. Empty internal polling slices \
-        are ignored, so one call stays parked for up to four minutes. End every turn by calling \
+        are ignored, so one call stays parked for up to three minutes. End every turn by calling \
         `wait` to stay in the conversation."
     )]
     async fn wait(
@@ -429,6 +430,14 @@ mod tests {
         assert_eq!(wait_slice(None), Duration::from_millis(50_000));
         assert_eq!(wait_slice(Some(1)), Duration::from_millis(15_000));
         assert_eq!(wait_slice(Some(500_000)), Duration::from_millis(50_000));
+    }
+
+    #[test]
+    fn wait_budget_leaves_margin_before_kiro_client_boundary() {
+        const OBSERVED_KIRO_BOUNDARY_MS: u64 = 240_000;
+
+        assert_eq!(MCP_WAIT_MAX_MS, 180_000);
+        assert!(MCP_WAIT_MAX_MS + 60_000 <= OBSERVED_KIRO_BOUNDARY_MS);
     }
 
     #[tokio::test]

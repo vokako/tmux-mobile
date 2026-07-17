@@ -2232,7 +2232,7 @@ mod tests {
         assert!(overrides.contains(&format!(
             "mcp_servers.team.tool_timeout_sec={timeout_secs}"
         )));
-        assert_eq!(timeout_ms, 270_000);
+        assert_eq!(timeout_ms, 210_000);
     }
 
     // Records seed_employee calls so we can assert the default roster.
