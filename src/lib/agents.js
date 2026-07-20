@@ -1,11 +1,18 @@
 // Known coding-agent CLIs that tmux-mobile treats as "AI sessions".
-// Adding a new agent = one entry here + the matching icon in /assets/.
+// Adding a new agent = one entry here + the matching icon in /assets/
+// (don't hand-draw: @lobehub/icons-static-svg publishes MIT-licensed brand
+// SVGs — download, recolor if needed, drop in).
 //
 // Detection is intentionally loose (case-insensitive substring) because tmux's
 // pane_current_command reports the short process name (e.g. "kiro-cli-chat")
 // while pane_title often carries the full argv line. We check both.
 
 export const AGENTS = [
+  // Kimi Code runs as `kimi-code`. It must match BEFORE the /kiro/ entry
+  // can fire: a kimi pane's child chain typically contains its
+  // "kiro-web-search" helper, and "kimi" in current_command always sits
+  // earlier in the pane text than any child-chain "kiro".
+  { tag: 'Kimi',     match: /kimi/i,     icon: '/assets/kimi.svg',     iconSize: 14 },
   { tag: 'Kiro',     match: /kiro/i,     icon: '/assets/kiro.svg',     iconSize: 14 },
   // Claude Code's binary is a version-named symlink
   // (~/.local/share/claude/versions/2.1.141), so pane_current_command
