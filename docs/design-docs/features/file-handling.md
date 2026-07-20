@@ -31,6 +31,18 @@ Public-internet paths (reverse proxy in front of the server) routinely kill long
 ### iframe Sandbox
 Never combine `allow-scripts` + `allow-same-origin` — negates sandbox entirely. Use `allow-same-origin` only for HTML preview.
 
+HTTP(S) links from previews must not navigate the embedded WebView. App-level
+links, Markdown, and converted HTML use the shared delegated handler in
+`external-links.js`; a raw HTML preview installs the same handler directly on
+the sandbox iframe's document because DOM events do not cross iframe boundaries.
+The handler evaluates the anchor's resolved `href`, not only its literal
+attribute, so relative and protocol-relative Markdown links cannot bypass it.
+It listens to both primary `click` and middle-button `auxclick`; other auxiliary
+buttons remain available for their normal context-menu behavior.
+Tauri opens links through `plugin-opener`; browser mode uses a separate
+`noopener` tab. A Tauri opener error is reported and never falls back to
+`window.open`, which could create another in-app WebView.
+
 ### Path Traversal
 All filenames from remote servers sanitized with `sanitize_filename()` (Rust `Path::file_name()`) before joining to download directory.
 

@@ -18,6 +18,7 @@
   import { restoreViewportAfterPaneSwitch } from './terminal-viewport.js';
   import { cycleItem } from './shortcuts.js';
   import { encodeTerminalShortcut } from './terminal-keyboard.js';
+  import { openExternalUrl } from './external-links.js';
 
   // Timing constants
   const WINDOW_LIST_POLL_MS = 5000;
@@ -543,11 +544,9 @@
     term.open(termEl);
     term.loadAddon(new WebLinksAddon((e, url) => {
       e.preventDefault();
-      if (window.__TAURI_INTERNALS__) {
-        import('@tauri-apps/plugin-opener').then(m => m.openUrl(url)).catch(() => window.open(url, '_blank'));
-      } else {
-        window.open(url, '_blank');
-      }
+      void openExternalUrl(url).catch((error) => {
+        console.error('Failed to open terminal link', error);
+      });
     }));
     termEl.style.background = getTermTheme().background;
 

@@ -58,6 +58,8 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
 
 ## Interactions (Desktop)
 - App-configured shortcuts are consumed before terminal input
+- Clicking an HTTP(S) URL opens the system browser and never navigates the app
+  WebView
 - Every unassigned hardware Ctrl / Option combination is encoded as terminal input and sent to tmux, including Ctrl+X, Ctrl+F, letters, punctuation, navigation keys, and F1–F12; touch-capable desktop browsers and devices with attached keyboards follow the same path
 - Cmd combinations remain owned by the macOS app/browser unless explicitly configured as an app shortcut
 

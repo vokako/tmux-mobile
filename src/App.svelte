@@ -19,6 +19,7 @@
   import { cycleItem, shortcutFromEvent } from './lib/shortcuts.js';
   import { isShortcutInputTarget, shortcuts } from './lib/shortcuts.svelte.js';
   import { markWindowRead, stopAgentNotifications, syncAgentNotifications } from './lib/agent-notifications.svelte.js';
+  import { installExternalLinkHandler } from './lib/external-links.js';
 
   // Tunable constants
   const KB_OPEN_THRESHOLD = 100; // px difference to detect keyboard open
@@ -272,20 +273,9 @@
     localStorage.removeItem('tmux_zoom');
   }
 
-  // Intercept external link clicks → open in system browser instead of in-app navigation
-  document.addEventListener('click', (e) => {
-    const a = e.target.closest('a[href]');
-    if (!a) return;
-    const href = a.getAttribute('href');
-    if (href && /^https?:\/\//.test(href)) {
-      e.preventDefault();
-      if (window.__TAURI_INTERNALS__) {
-        import('@tauri-apps/plugin-opener').then(m => m.openUrl(href)).catch(() => window.open(href, '_blank'));
-      } else {
-        window.open(href, '_blank');
-      }
-    }
-  });
+  // Keep every ordinary app link out of the embedded WebView. File-preview
+  // iframes need their own handler because events do not cross documents.
+  $effect(() => installExternalLinkHandler(document));
 
   // Keyboard height detection
   $effect(() => {

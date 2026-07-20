@@ -27,6 +27,7 @@
   import { layout } from './layout.svelte.js';
   import { copyText } from './clipboard.js';
   import { directoryLoadState } from './file-view-state.js';
+  import { installExternalLinkHandler } from './external-links.js';
   import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsDownloadHttp, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref, fsConvert } from './ws.js';
 
   // Tauri plugin imports (tree-shaken in browser builds)
@@ -1207,6 +1208,15 @@
   }
 
   let previewEl = $state(null);
+  let htmlPreviewEl = $state(null);
+  let removeHtmlPreviewLinks = () => {};
+
+  function attachHtmlPreviewLinks() {
+    removeHtmlPreviewLinks();
+    removeHtmlPreviewLinks = installExternalLinkHandler(htmlPreviewEl?.contentDocument);
+  }
+
+  $effect(() => () => removeHtmlPreviewLinks());
 
   function mimeFromName(name) {
     const ext = name.split('.').pop()?.toLowerCase();
@@ -1431,7 +1441,14 @@
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'csv'}
         <div class="csv-render">{@html renderCsv(currentFile.content)}</div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'html'}
-        <iframe class="html-preview" srcdoc={currentFile.content} sandbox="allow-same-origin" title="HTML Preview"></iframe>
+        <iframe
+          class="html-preview"
+          bind:this={htmlPreviewEl}
+          srcdoc={currentFile.content}
+          sandbox="allow-same-origin"
+          title="HTML Preview"
+          onload={attachHtmlPreviewLinks}
+        ></iframe>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'pdf'}
         <div class="pdf-container" bind:this={pdfContainer} style="margin: -12px; padding: 0;"></div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'image'}

@@ -21,6 +21,10 @@ directory, or the server's home directory when no session is open yet.
 ## Interactions
 - Tap directory → navigate into it
 - Tap file → preview (or info page if file size > 5 MB or not previewable)
+- Tap a link in Markdown, converted content, or an HTML preview whose resolved
+  destination is HTTP(S) → open it in the system browser; never navigate the
+  app WebView
+- Desktop left-click and middle-click both follow this external-browser path
 - Background/resume and WebSocket reconnect refresh directory data without closing the active preview or editor
 - From info page → tap preview (eye) button to load preview on demand
 - Long file names in the list scroll horizontally on touch drag
@@ -74,6 +78,8 @@ These are client-side guards only; two *different* clients can still race
 - Files > 5 MB (or not previewable by mime/name) open the info page instead of auto-loading preview; user confirms via preview button to avoid heavy transfers on mobile
 - Markdown preview resolves relative image paths, infers MIME from image extension (not parent file)
 - HTML preview iframe: `allow-same-origin` only, NO `allow-scripts` (sandbox escape prevention)
+- HTML preview installs a parent-owned capture handler in the sandbox document
+  so links open externally even though iframe click events cannot reach App
 - Android downloads go to `/storage/emulated/0/Download/TmuxMobile/`, opened via FileProvider + Intent
 - Android's downloaded-files list is sorted by filesystem modification time descending (newest first)
 - Download progress ring and label use the same clamped integer percentage; the ring has exact, non-rounded endpoints
