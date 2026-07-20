@@ -259,16 +259,12 @@
     return paneAgent(cur);
   });
 
-  // Whether the window switcher is worth showing at all. A lone plain shell
-  // with no agent anywhere has nothing to switch to — showing an (almost)
-  // empty bar just steals vertical space. Show it only when there's a real
-  // choice: multiple windows or the current window is an agent.
-  // Embedded (split cell) always shows the bar — it's the cell's header.
-  // Standalone keeps the "only when there's something to switch to" rule.
-  let showSwitcher = $derived(
-    !chromeless &&
-    (embedded || windows.length > 1 || !!currentWinAgent)
-  );
+  // The switcher is always shown (except chromeless agent-grid cells, which
+  // have no chrome at all). It isn't just for switching windows — it also
+  // carries the session picker, the new-window button, and the split-layout
+  // control, so hiding it for a single-window session strands those too.
+  // The collapsed state is a floating chip that steals no vertical space.
+  let showSwitcher = $derived(!chromeless);
 
   $effect(() => {
     if (!session || viewMode !== 'terminal') return;
