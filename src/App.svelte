@@ -1276,7 +1276,7 @@
 
   :global(html[data-theme="dark"]) {
     --bg: #0a0a0f; --bg2: #0f0f18; --bg3: #12121a;
-    --text: #e2e8f0; --text2: rgba(226,232,240,0.5); --text3: rgba(226,232,240,0.3);
+    --text: #e2e8f0; --text2: rgba(226,232,240,0.5); --text3: rgba(226,232,240,0.45);
     --border: rgba(255,255,255,0.06); --border2: rgba(255,255,255,0.04);
     --surface: rgba(255,255,255,0.03); --surface2: rgba(255,255,255,0.06);
     --accent: #00d4ff; --accent-bg: rgba(0,212,255,0.12); --accent-glow: rgba(0,212,255,0.1);
