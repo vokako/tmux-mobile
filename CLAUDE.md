@@ -62,6 +62,7 @@ changing the project default:
 - [PWA Install Offer (web)](docs/design-docs/features/pwa-install.md)
 - [File Handling & Security](docs/design-docs/features/file-handling.md)
 - [Terminal Color Adaptation](docs/design-docs/features/color-adaptation.md)
+- [xterm.js Build-Time Patch](docs/design-docs/features/xterm-patch.md)
 - [Team / multi-agent bus](docs/design-docs/features/team.md)
 
 ### Other
