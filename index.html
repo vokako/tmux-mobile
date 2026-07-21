@@ -9,7 +9,7 @@
        (Chrome/Edge/Android fire `beforeinstallprompt`; iOS Safari uses these
        apple-* tags for "Add to Home Screen"). The in-app InstallPrompt
        component (browser-only) surfaces the offer; the service worker
-       (registered in main.js) satisfies installability. -->
+       (registered in main.ts) satisfies installability. -->
   <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="theme-color" content="#0a0a0f" />
   <meta name="mobile-web-app-capable" content="yes" />
@@ -54,6 +54,6 @@
 </head>
 <body>
   <div id="app"></div>
-  <script type="module" src="/src/main.js"></script>
+  <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

@@ -8,7 +8,7 @@ import App from './App.svelte';
 // declared via @font-face there. The browser loads each woff2 lazily when
 // the CSS first references its family, so there's nothing to do here.
 
-const app = mount(App, { target: document.getElementById('app') });
+const app = mount(App, { target: document.getElementById('app')! });
 
 // PWA: register the service worker so the browser treats the web UI as
 // installable (enables the `beforeinstallprompt` offer surfaced by

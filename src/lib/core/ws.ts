@@ -53,10 +53,6 @@ interface AppSocket extends WebSocket {
   _getHostname?: () => string | null;
 }
 
-declare global {
-  interface Window { __dbg?: (msg: string) => void }
-}
-
 // ─── Wire framing for the encrypted binary path ─────────────────────────
 // Encrypted frames travel as binary; the plaintext (post-decrypt) starts
 // with a 1-byte tag telling us how to decode the rest:
