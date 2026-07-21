@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   // Team roster template editor (modal). Lists named templates; the selected
   // one's agents are editable in full (name, backend, role, goal, model,
   // manage). Add/remove agents, add/rename/delete templates, save.
@@ -7,13 +7,41 @@
   import Icon from '../ui/Icon.svelte';
   import { t } from '../core/i18n.svelte.ts';
 
+  export interface TplAgent {
+    name: string;
+    backend: string;
+    role: string;
+    goal: string;
+    model: string;
+    manage: boolean;
+    env?: Record<string, string>;
+    mcp?: unknown[];
+    skills?: string[];
+  }
+  export interface Template {
+    name: string;
+    agents: TplAgent[];
+    env?: Record<string, string>;
+    mcp?: unknown[];
+    skills?: string[];
+    prompt?: string;
+  }
+  type TemplateDef = Pick<Template, 'env' | 'mcp' | 'skills' | 'prompt'> & { agents: TplAgent[] };
+
   let {
-    templates = [],        // [{ name, agents:[…] }]
+    templates = [],
     systemPrompt = '',     // global system prompt (shared across all teams)
-    onSave = () => {},     // (name, agents)
-    onDelete = () => {},   // (name)
-    onSaveSystemPrompt = () => {}, // (text)
+    onSave = () => {},
+    onDelete = () => {},
+    onSaveSystemPrompt = () => {},
     onClose = () => {},
+  }: {
+    templates?: Template[];
+    systemPrompt?: string;
+    onSave?: (name: string, def: TemplateDef) => void | Promise<void>;
+    onDelete?: (name: string) => void | Promise<void>;
+    onSaveSystemPrompt?: (text: string) => void | Promise<void>;
+    onClose?: () => void;
   } = $props();
 
   const BACKENDS = ['kiro', 'claude', 'codex'];
@@ -21,7 +49,7 @@
   // Local editable copy so edits aren't lost on the 1s status poll re-render.
   // NOTE: `templates` is a Svelte $state proxy — structuredClone() throws a
   // DataCloneError on proxies, so deep-clone via JSON instead.
-  let drafts = $state(JSON.parse(JSON.stringify(templates ?? [])));
+  let drafts = $state<Template[]>(JSON.parse(JSON.stringify(templates ?? [])));
   let selIdx = $state(0);
   let dirty = $state(false);
   let saving = $state(false);
@@ -38,7 +66,7 @@
     catch {} finally { sysSaving = false; }
   }
 
-  let sel = $derived(drafts[selIdx] || null);
+  let sel = $derived<Template | null>(drafts[selIdx] || null);
 
   function markDirty() { dirty = true; }
 
@@ -50,7 +78,7 @@
     }];
     markDirty();
   }
-  function removeAgent(i) {
+  function removeAgent(i: number) {
     if (!sel) return;
     // Tap-to-confirm (like killing a session): first tap arms, second removes.
     if (confirmRmAgent !== i) {
@@ -62,15 +90,15 @@
     sel.agents = sel.agents.filter((_, idx) => idx !== i);
     markDirty();
   }
-  let confirmRmAgent = $state(null); // agent index armed for deletion
+  let confirmRmAgent = $state<number | null>(null); // agent index armed for deletion
   let confirmDelTpl = $state(false); // template delete armed
   let teamWideOpen = $state(false);  // team-wide config section expanded
   let pickerOpen = $state(false);    // mobile template dropdown open
 
   // Per-agent "advanced" (env / mcp / skills) expand state, keyed by index;
   // reset when switching templates.
-  let advSet = $state(new Set());
-  function toggleAdv(i) {
+  let advSet = $state<Set<number>>(new Set());
+  function toggleAdv(i: number) {
     const s = new Set(advSet);
     s.has(i) ? s.delete(i) : s.add(i);
     advSet = s;
@@ -78,10 +106,12 @@
   $effect(() => { selIdx; advSet = new Set(); confirmRmAgent = null; confirmDelTpl = false; teamWideOpen = false; pickerOpen = false; });
 
   // env (object) ⇄ KEY=VALUE lines; skills (array) ⇄ one-per-line.
-  const envToLines = (o) => (o && typeof o === 'object')
+  const envToLines = (o: Record<string, string> | undefined) => (o && typeof o === 'object')
     ? Object.entries(o).map(([k, v]) => `${k}=${v}`).join('\n') : '';
-  function setEnv(ag, s) {
-    const o = {};
+  type ConfigHolder = { env?: Record<string, string>; mcp?: unknown[]; skills?: string[] };
+
+  function setEnv(ag: ConfigHolder, s: string) {
+    const o: Record<string, string> = {};
     for (const line of s.split('\n')) {
       const t = line.trim();
       if (!t) continue;
@@ -90,15 +120,15 @@
     }
     ag.env = o; markDirty();
   }
-  const arrToLines = (a) => Array.isArray(a) ? a.join('\n') : '';
-  function setSkills(ag, s) {
+  const arrToLines = (a: string[] | undefined) => Array.isArray(a) ? a.join('\n') : '';
+  function setSkills(ag: ConfigHolder, s: string) {
     ag.skills = s.split('\n').map(x => x.trim()).filter(Boolean);
     markDirty();
   }
   // mcp is structured → edit as JSON; parse on change, ignore invalid input.
-  const mcpToText = (a) => (Array.isArray(a) && a.length) ? JSON.stringify(a, null, 2) : '';
-  let mcpErr = $state({});
-  function setMcp(ag, i, s) {
+  const mcpToText = (a: unknown[] | undefined) => (Array.isArray(a) && a.length) ? JSON.stringify(a, null, 2) : '';
+  let mcpErr = $state<Record<number | string, boolean>>({});
+  function setMcp(ag: ConfigHolder, i: number | string, s: string) {
     if (!s.trim()) { ag.mcp = []; mcpErr = { ...mcpErr, [i]: false }; markDirty(); return; }
     try {
       const v = JSON.parse(s);
@@ -240,16 +270,16 @@
           <div class="ag-adv tw-adv">
             <span class="ag-adv-label">{t('teamWidePrompt')}</span>
             <textarea class="ag-field ag-area" rows="3" placeholder={t('teamWidePromptHint')}
-              value={sel.prompt ?? ''} oninput={(e) => { sel.prompt = e.target.value; markDirty(); }}></textarea>
+              value={sel.prompt ?? ''} oninput={(e) => { sel.prompt = e.currentTarget.value; markDirty(); }}></textarea>
             <span class="ag-adv-label">{t('teamSkills')}</span>
             <textarea class="ag-field ag-area" rows="2" placeholder={t('teamSkillsHint')}
-              value={arrToLines(sel.skills)} oninput={(e) => setSkills(sel, e.target.value)}></textarea>
+              value={arrToLines(sel.skills)} oninput={(e) => setSkills(sel, e.currentTarget.value)}></textarea>
             <span class="ag-adv-label">{t('teamEnv')}</span>
             <textarea class="ag-field ag-area" rows="2" placeholder="KEY=VALUE"
-              value={envToLines(sel.env)} oninput={(e) => setEnv(sel, e.target.value)}></textarea>
+              value={envToLines(sel.env)} oninput={(e) => setEnv(sel, e.currentTarget.value)}></textarea>
             <span class="ag-adv-label">{t('teamMcp')} {#if mcpErr['__team__']}<span class="ag-adv-err">{t('teamMcpBad')}</span>{/if}</span>
             <textarea class="ag-field ag-area ag-mono" rows="4" placeholder={t('teamMcpHint')}
-              value={mcpToText(sel.mcp)} onchange={(e) => setMcp(sel, '__team__', e.target.value)}></textarea>
+              value={mcpToText(sel.mcp)} onchange={(e) => setMcp(sel, '__team__', e.currentTarget.value)}></textarea>
           </div>
         {/if}
 
@@ -292,13 +322,13 @@
               <div class="ag-adv">
                 <span class="ag-adv-label">{t('teamSkills')}</span>
                 <textarea class="ag-field ag-area" rows="2" placeholder={t('teamSkillsHint')}
-                  value={arrToLines(ag.skills)} oninput={(e) => setSkills(ag, e.target.value)}></textarea>
+                  value={arrToLines(ag.skills)} oninput={(e) => setSkills(ag, e.currentTarget.value)}></textarea>
                 <span class="ag-adv-label">{t('teamEnv')}</span>
                 <textarea class="ag-field ag-area" rows="2" placeholder="KEY=VALUE"
-                  value={envToLines(ag.env)} oninput={(e) => setEnv(ag, e.target.value)}></textarea>
+                  value={envToLines(ag.env)} oninput={(e) => setEnv(ag, e.currentTarget.value)}></textarea>
                 <span class="ag-adv-label">{t('teamMcp')} {#if mcpErr[i]}<span class="ag-adv-err">{t('teamMcpBad')}</span>{/if}</span>
                 <textarea class="ag-field ag-area ag-mono" rows="4" placeholder={t('teamMcpHint')}
-                  value={mcpToText(ag.mcp)} onchange={(e) => setMcp(ag, i, e.target.value)}></textarea>
+                  value={mcpToText(ag.mcp)} onchange={(e) => setMcp(ag, i, e.currentTarget.value)}></textarea>
               </div>
             {/if}
           </div>
