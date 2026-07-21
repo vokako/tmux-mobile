@@ -46,9 +46,9 @@ The default stack (App.svelte `--font-mono`, mirrored in
 `src/lib/fonts.svelte.js` `SYSTEM_STACK`):
 
 ```
-'Noto Sans Symbols 2', 'Symbols Nerd Font Mono',
 ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', Consolas,
-'Roboto Mono', 'Droid Sans Mono', 'Noto Sans Mono', monospace
+'Roboto Mono', 'Droid Sans Mono', 'Noto Sans Mono',
+'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', monospace
 ```
 
 Bundled (public/fonts/, @font-face in index.html):
@@ -64,11 +64,27 @@ Bundled (public/fonts/, @font-face in index.html):
   the common PUA ranges (~300 KB) if payload matters more than long-tail
   icon coverage; not done yet.
 
-The symbol fonts sit FIRST in the stack (they only contain symbols, so
-they can't hijack letters — a font earlier in the stack only wins for
-codepoints it actually has) which guarantees the markers come from the
-bundled files even when a system font has a lower-quality fallback glyph.
-They don't drive cell metrics; a one-shot `document.fonts.ready` →
+**Trap: the first available font in the stack defines the line box.** The
+symbol fonts originally sat FIRST in the stack, on the theory that a font
+earlier in the stack only wins for codepoints it actually has (true for glyph
+selection). But the CSS strut — and xterm 6's cell measurement via canvas
+`fontBoundingBoxAscent/Descent` — come from the FIRST available font
+regardless of which font renders the text. `Noto Sans Symbols 2` carries a
+1.7 em vertical box (ascent 1.07, descent 0.63 per em vs Menlo's 1.17 em
+total), so once its woff2 decoded, every terminal cell inflated ~45%, text
+sat high in the cell, and the full-cell block cursor protruded far below the
+glyphs ("cursor not vertically centered, sticks out at the bottom"; line
+spacing looked loose even at 1.00). The symbol fonts therefore sit AFTER the
+text families (still before generic `monospace`): codepoints missing from the
+text font — the agent markers ⏺, braille spinners, Nerd PUA icons — still
+resolve to the bundled files via per-codepoint fallback; the only change is
+that symbols a text font DOES contain (✳ ✻ ● ▲ on macOS Menlo) now render
+from that font, metric-matched to the text. `@font-face` metric overrides
+(`ascent-override`) were rejected as the fix: WKWebView (Tauri macOS) doesn't
+support them. When a custom font is set it is prepended, so the strut follows
+the user's text font either way.
+
+The symbol fonts don't drive cell metrics; a one-shot `document.fonts.ready` →
 texture-atlas clear + `term.refresh()` in Terminal.svelte repaints any
 tofu drawn before they decoded. The old re-measure/refit dance is gone by
 construction (the measuring font is present at `open()` time).

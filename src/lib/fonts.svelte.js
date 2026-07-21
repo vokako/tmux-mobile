@@ -35,10 +35,17 @@ const COMMON_FAMILIES = [
 
 // Symbol fillers + per-platform fallbacks. The generic `monospace` keyword
 // stays last so an unknown/typo'd custom family degrades safely.
+// The bundled symbol fonts must come AFTER the text families: the CSS line
+// box (strut) — and xterm's fontBoundingBox cell measurement — derive from
+// the FIRST available font in the stack, and 'Noto Sans Symbols 2' carries a
+// huge 1.7em vertical box that inflates every terminal row and makes the
+// block cursor protrude far below the text. Symbol codepoints missing from
+// the text families still fall through to the bundled files (per-codepoint
+// font matching), so only glyphs a text font actually has change source.
 const SYSTEM_STACK =
-  "'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', " +
   "ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', Consolas, " +
-  "'Roboto Mono', 'Droid Sans Mono', 'Noto Sans Mono', monospace";
+  "'Roboto Mono', 'Droid Sans Mono', 'Noto Sans Mono', " +
+  "'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', monospace";
 
 let custom = $state(localStorage.getItem(KEY) || '');
 

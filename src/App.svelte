@@ -1218,7 +1218,7 @@
        proportional, using each platform's native UI font (PingFang / YaHei /
        Noto Sans CJK for Chinese). Never put a monospace CJK face in
        --font-ui: it makes Chinese UI text look like code. */
-    --font-mono: 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', Consolas, 'Roboto Mono', 'Droid Sans Mono', 'Noto Sans Mono', monospace;
+    --font-mono: ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', Consolas, 'Roboto Mono', 'Droid Sans Mono', 'Noto Sans Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', monospace;
     --font-ui: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif;
   }
   :global(#app) { width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
