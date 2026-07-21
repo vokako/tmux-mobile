@@ -116,16 +116,19 @@
 - **Priority**: Medium (High for the gesture part)
 - **Area**: Frontend architecture
 - **Details**: 2026-07 audit findings, to be paid down in phases:
-  - `Terminal.svelte` (2632 lines): the touch-gesture state machine (~1300
+  - `Terminal.svelte` (2374 lines after 2026-07 slices): top-level pure
+    logic (selection model, cursor-layout math) extracted + tested; the
+    touch-gesture state machine (~1300
     lines, `touchToCell` / `recomputeSelUI` / `applySelectionToXterm` / ...)
     is nested inside an effect closure — zero test coverage, invariants
     (e.g. "endTouchScroll must never change kbLocked") guarded only by
     docs. Extraction plan: docs/design-docs/pages/terminal-gestures.md
     already specifies the state machine; add tests for pure geometry first,
     then extract behind an interface. Requires on-device regression.
-  - `Files.svelte`: ~~the git client~~ — done 2026-07, extracted to
-    `files/GitPanel.svelte` (Files 2150 -> 1860 lines). Still worthwhile:
-    bookmarks/recents modules and the preview renderers (PDF/CSV/HTML/MD).
+  - `Files.svelte`: ~~the git client~~ (GitPanel.svelte) and
+    ~~bookmarks/recents race guards~~ (persisted-list.ts, unit-tested) —
+    done 2026-07; Files 2150 -> 1825 lines. Still worthwhile: the preview
+    renderers (PDF/CSV/HTML/MD).
   - `App.svelte`: ~~reconnect state machine~~ — done 2026-07, extracted to
     `app/reconnect.ts` (framework-free, DI'd, 9 unit tests incl. cancel
     races and the watchdog). ~~Global design tokens + resets in one

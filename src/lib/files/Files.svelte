@@ -1649,8 +1649,6 @@
     text-overflow: ellipsis; white-space: nowrap;
   }
   .preview-actions { display: flex; gap: 4px; }
-  .zoom-ctl { display: flex; align-items: center; gap: 2px; }
-  .zoom-pct { font-size: 11px; color: var(--text3); min-width: 32px; text-align: center; }
 
   /* Preview body */
   .preview-body { flex: 1; overflow: auto; -webkit-overflow-scrolling: touch; padding: 12px; display: flex; flex-direction: column; min-height: 0; }
