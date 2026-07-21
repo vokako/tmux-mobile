@@ -127,9 +127,9 @@
     client (~15 fns) is cleanly extractable to `git.js` + `GitPanel.svelte`;
     bookmarks/recents/preview likewise.
   - `App.svelte` (1488 lines): reconnect state machine (~12 fns + timers)
-    should move to `app/connection.svelte.js` with tests; global design
-    tokens + resets (style lines ~1182–1300) belong in a global `app.css`,
-    not one component's style block.
+    should move to `app/connection.svelte.js` with tests. ~~Global design
+    tokens + resets in one component's style block~~ — done 2026-07: moved
+    to `src/app.css`.
   - ~~`src/lib/` is a single flat directory of 60+ files~~ — done 2026-07:
     reorganized into `core/ app/ terminal/ files/ sessions/ team/ ui/`.
   - Duplicated styles: light-theme `.scroll-btn` override copied in

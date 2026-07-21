@@ -1,0 +1,152 @@
+/* Global stylesheet: design tokens, resets, and app-wide utilities.
+   Loaded once from main.js, before the App component mounts.
+
+   Everything here is intentionally global — component-specific styles live
+   in each component's scoped <style> block. Rule of thumb:
+   - about the app (tokens, resets, theming)  -> here
+   - about one component's markup             -> that component
+   - repeated across components               -> a shared ui/ component */
+
+* { box-sizing: border-box; }
+
+html {
+  overflow: hidden; overscroll-behavior: none;
+  width: 100%; height: 100%; background: var(--bg);
+  --sat: env(safe-area-inset-top); --sab: env(safe-area-inset-bottom); --app-height: 100dvh;
+  /* Two font roles. --font-mono: code, terminal output, file paths, data —
+     fixed-width matters (alignment via xterm's cell grid, not the font).
+     Default is each platform's native mono + the two bundled symbol
+     fillers; a user-set custom family (Settings → font name) is prepended
+     at runtime by fonts.svelte.js, which overwrites this var inline.
+     Keep this literal in sync with SYSTEM_STACK there. --font-ui:
+     everything else — labels, buttons, chat prose, Chinese body text —
+     proportional, using each platform's native UI font (PingFang / YaHei /
+     Noto Sans CJK for Chinese). Never put a monospace CJK face in
+     --font-ui: it makes Chinese UI text look like code. */
+  --font-mono: ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', Consolas, 'Roboto Mono', 'Droid Sans Mono', 'Noto Sans Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', monospace;
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif;
+
+  /* Shared UI metrics */
+  --ui-bar-height: 31px;
+  --ui-control-height: 24px;
+  --ui-gap: 4px;
+  --ui-bar-padding: 3px 4px 3px 6px;
+  --ui-radius-pill: 999px;
+  --ui-radius-control: 7px;
+  --ui-radius-panel: 9px;
+  --ui-font-control: 11px;
+  --ui-motion-fast: 0.15s ease;
+}
+
+/* ─── Theme tokens ─────────────────────────────────────────────────────── */
+
+html[data-theme="dark"] {
+  --bg: #0a0a0f; --bg2: #0f0f18; --bg3: #12121a;
+  --text: #e2e8f0; --text2: rgba(226,232,240,0.5); --text3: rgba(226,232,240,0.45);
+  --border: rgba(255,255,255,0.06); --border2: rgba(255,255,255,0.04);
+  --surface: rgba(255,255,255,0.03); --surface2: rgba(255,255,255,0.06);
+  --accent: #00d4ff; --accent-bg: rgba(0,212,255,0.12); --accent-glow: rgba(0,212,255,0.1);
+  --danger: #ff5050; --danger-bg: rgba(255,80,80,0.08);
+  --status-ok: #4ade80; --status-warn: #fbbf24; --status-danger: #ff5050; --status-hot: #fb923c; --status-sleep: #818cf8;
+  --nav-bg: rgba(12,12,20,0.95); --pill-bg: rgba(255,255,255,0.04);
+  --input-bg: rgba(255,255,255,0.04); --input-border: rgba(255,255,255,0.08);
+  --code-bg: rgba(255,255,255,0.05);
+  /* Subtle-scroll thumb — very translucent so it doesn't occlude content,
+     even when active. Slightly stronger only on direct thumb hover. */
+  --scroll-thumb: rgba(226,232,240,0.16); --scroll-thumb-hover: rgba(226,232,240,0.32);
+}
+html[data-theme="light"] {
+  --bg: #f5f5f7; --bg2: #eeeef0; --bg3: #e8e8ec;
+  --text: #1a1a2e; --text2: rgba(26,26,46,0.55); --text3: rgba(26,26,46,0.35);
+  --border: rgba(0,0,0,0.08); --border2: rgba(0,0,0,0.05);
+  --surface: rgba(0,0,0,0.02); --surface2: rgba(0,0,0,0.04);
+  --accent: #0088cc; --accent-bg: rgba(0,136,204,0.08); --accent-glow: rgba(0,136,204,0.06);
+  --danger: #e53e3e; --danger-bg: rgba(229,62,62,0.06);
+  --status-ok: #16a34a; --status-warn: #ca8a04; --status-danger: #e53e3e; --status-hot: #ea580c; --status-sleep: #6366f1;
+  --nav-bg: rgba(245,245,247,0.95); --pill-bg: rgba(0,0,0,0.03);
+  --input-bg: rgba(0,0,0,0.02); --input-border: rgba(0,0,0,0.08);
+  --code-bg: rgba(0,0,0,0.03);
+  --scroll-thumb: rgba(26,26,46,0.16); --scroll-thumb-hover: rgba(26,26,46,0.30);
+}
+
+/* ─── Base elements ────────────────────────────────────────────────────── */
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+  height: var(--app-height, 100dvh);
+  -webkit-font-smoothing: antialiased;
+  position: fixed;
+  width: 100%;
+  top: 0;
+  left: 0;
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+#app { width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
+
+input, textarea { user-select: text; -webkit-user-select: text; }
+/* Form controls don't inherit font-family by default (UA gives them Arial/
+   system), so without this every <button>/<input>/<select> would ignore
+   --font-ui. Inherit it; the few controls that must be monospace (command
+   inputs, path fields, code editor) set --font-mono explicitly themselves. */
+button, input, textarea, select { font-family: inherit; }
+.preview-body, .md-render, .code-preview, .git-diff-body, .info-body, .bubble { user-select: text; -webkit-user-select: text; }
+
+::selection { background: rgba(0, 212, 255, 0.25); }
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ─── Shared utilities ─────────────────────────────────────────────────── */
+
+/* Subtle scrollbar — used by long-running scrollables (terminal command bar,
+   chat log, team agent panel). At rest the thumb is fully transparent so
+   it disappears into the content; it fades in while the user hovers, is
+   focused inside, or is actively scrolling. The `.scrolling` class is
+   toggled by the host component on `scroll` events with a short debounce
+   so touch scrolls also light up the bar.
+   Firefox: `scrollbar-color` only animates on layout, so we toggle the
+   thumb color via `:hover` / `.scrolling` instead of fading. */
+.subtle-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.subtle-scroll:hover,
+.subtle-scroll:focus-within,
+.subtle-scroll.scrolling {
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+.subtle-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.subtle-scroll::-webkit-scrollbar-track { background: transparent; }
+.subtle-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background-color 0.3s ease;
+}
+.subtle-scroll:hover::-webkit-scrollbar-thumb,
+.subtle-scroll:focus-within::-webkit-scrollbar-thumb,
+.subtle-scroll.scrolling::-webkit-scrollbar-thumb {
+  background-color: var(--scroll-thumb);
+}
+.subtle-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scroll-thumb-hover);
+}
