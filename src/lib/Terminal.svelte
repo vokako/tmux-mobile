@@ -550,6 +550,25 @@
         console.error('Failed to open terminal link', error);
       });
     }));
+
+    // Box-drawing / block-element glyphs (█ ▀ ▄ ▐▛…) must fill the ENTIRE
+    // cell rect or any lineHeight > 1 tears contiguous ASCII art (e.g. the
+    // Claude Code logo) into stripes — the DOM renderer draws them as font
+    // text, whose ink stays font-sized inside the taller cell. The WebGL
+    // addon rasterizes those codepoints to the cell rect instead
+    // (customGlyphs, on by default), the same trick kitty/wezterm use.
+    // Falls back to the DOM renderer wherever WebGL is unavailable.
+    const webglOwner = term;
+    (async () => {
+      try {
+        const { WebglAddon } = await import('@xterm/addon-webgl');
+        if (term !== webglOwner) return; // pane switched while importing
+        const addon = new WebglAddon();
+        addon.onContextLoss(() => { addon.dispose(); }); // DOM renderer takes over
+        webglOwner.loadAddon(addon);
+      } catch { /* stay on the DOM renderer */ }
+    })();
+
     termEl.style.background = getTermTheme().background;
 
     // Mobile keyboard control:
