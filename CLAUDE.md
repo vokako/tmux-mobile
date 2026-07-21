@@ -18,6 +18,7 @@ npm run tauri:dev        # Desktop app + WS server (dev mode)
 npm run tauri:dev:release # Release-mode desktop app + WS server
 npm run build:mac        # macOS .app + .dmg
 npm run build:android    # Android APK (aarch64)
+npm test                 # Frontend unit tests (node --test, all src/lib/*.test.js)
 cd src-tauri && cargo run --bin server   # Standalone WS server
 cd src-tauri && cargo test -- --test-threads=1   # Tests (needs tmux running)
 ```
@@ -91,7 +92,10 @@ changing the project default:
 tmux new-session -d -s test
 cd src-tauri && cargo test -- --test-threads=1
 ```
-Tests are sequential (shared tmux state), in `src-tauri/src/main.rs`.
+Rust tests are sequential (shared tmux state), spread across `src-tauri/src/*.rs`
+(`main.rs`, `server.rs`, `tmux.rs`, `team.rs`, `team_bridge.rs`) plus
+`src-tauri/crates/agora/tests/`. Frontend tests: `npm test` (node --test,
+`src/lib/*.test.js`, no tmux needed).
 
 ## Config
 File: `$XDG_CONFIG_HOME/tmux-mobile/config.toml` (fallback `~/.config/tmux-mobile/`) — token, host, port, tmux_socket, tls_cert, tls_key, scrollback, disconnect_grace_secs, team_bind, team_db, team_room, team_model.

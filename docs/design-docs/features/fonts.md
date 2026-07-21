@@ -159,7 +159,8 @@ overlays, decorations, and touch coordinates stay on the unmoved outer cell;
 foreground color, weight, italics, letter spacing, and text decorations inherit
 into the glyph child. The visible IME composition text uses the same inner
 glyph layer, leaving its containing box and IME candidate-window anchor
-unchanged. `npm run test:line-geometry` verifies the split, while `npm run
+unchanged. `npm test` runs the full frontend suite (including the
+line-geometry test that verifies the split), while `npm run
 build` verifies both xterm renderer signatures before shipping.
 
 ## Alternatives considered
