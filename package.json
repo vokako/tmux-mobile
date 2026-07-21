@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
-    "test": "node --test 'src/lib/**/*.test.js' 'src/lib/**/*.test.ts'",
+    "test": "node --test 'src/**/*.test.js' 'src/**/*.test.ts'",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "preview": "vite preview",
     "tauri": "tauri",
