@@ -1,0 +1,187 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createReconnectMachine } from './reconnect.ts';
+
+// Deterministic fake timers: run() executes due callbacks in schedule order.
+function fakeTimers() {
+  let now = 0;
+  let seq = 0;
+  const tasks = new Map();
+  return {
+    setTimeoutFn: (fn, ms) => {
+      const id = ++seq;
+      tasks.set(id, { at: now + (ms || 0), fn });
+      return id;
+    },
+    clearTimeoutFn: (id) => { tasks.delete(id); },
+    async advance(ms) {
+      now += ms;
+      for (const [id, t] of [...tasks.entries()].sort((a, b) => a[1].at - b[1].at)) {
+        if (t.at <= now) { tasks.delete(id); t.fn(); await Promise.resolve(); }
+      }
+      // settle microtasks queued by resolved promises
+      await new Promise(r => setTimeout(r, 0));
+    },
+    pendingCount: () => tasks.size,
+  };
+}
+
+function makeStorage(entries) {
+  const map = new Map(Object.entries(entries));
+  return { getItem: (k) => (map.has(k) ? map.get(k) : null) };
+}
+
+function harness({ storage, connectImpl, findBest = async (a) => a[0], viable = () => true, maxAttempts = 3 }) {
+  const timers = fakeTimers();
+  const events = [];
+  const unreachable = [];
+  const machine = createReconnectMachine({
+    connect: connectImpl,
+    findBestAddress: findBest,
+    isAddressViable: viable,
+    noteAddressUnreachable: (u) => unreachable.push(u),
+    classifyAddress: (url) => (url.includes('192.168.') ? 0 : url.includes('100.') ? 1 : 2),
+    addressLabels: ['LAN', 'Tailscale', 'WAN'],
+    storage,
+    onStateChange: (s) => events.push({ ...s }),
+    onSuccess: (use, primary) => events.push({ success: [use, primary] }),
+    onGiveUp: () => events.push({ gaveUp: true }),
+    maxAttempts,
+    watchdogMs: 180000,
+    setTimeoutFn: timers.setTimeoutFn,
+    clearTimeoutFn: timers.clearTimeoutFn,
+    debug: () => {},
+  });
+  return { machine, timers, events, unreachable };
+}
+
+test('single address success on first try', async () => {
+  const h = harness({
+    storage: makeStorage({ tmux_address: 'ws://192.168.1.2:9899', tmux_token: 't' }),
+    connectImpl: async () => 'machine-1',
+  });
+  h.machine.start();
+  await h.timers.advance(1);
+  const success = h.events.find(e => e.success);
+  assert.deepEqual(success.success, ['ws://192.168.1.2:9899', 'ws://192.168.1.2:9899']);
+  assert.equal(h.machine.isActive(), false);
+});
+
+test('multi-address first attempt probes in parallel and uses the winner', async () => {
+  const h = harness({
+    storage: makeStorage({
+      tmux_address: 'ws://192.168.1.2:9899',
+      tmux_token: 't',
+      tmux_machine_id: 'm1',
+      tmux_machines: JSON.stringify({ m1: ['ws://100.1.1.1:9899', 'ws://192.168.1.2:9899'] }),
+    }),
+    findBest: async () => 'ws://100.1.1.1:9899',
+    connectImpl: async (url) => { if (url !== 'ws://100.1.1.1:9899') throw new Error('wrong addr'); },
+  });
+  h.machine.start();
+  await h.timers.advance(1);
+  const success = h.events.find(e => e.success);
+  assert.deepEqual(success.success, ['ws://100.1.1.1:9899', 'ws://192.168.1.2:9899']);
+});
+
+test('failures retry with capped backoff, then give up after maxAttempts', async () => {
+  const h = harness({
+    storage: makeStorage({ tmux_address: 'ws://9.9.9.9:1', tmux_token: 't' }),
+    connectImpl: async () => { throw new Error('connection timeout'); },
+    maxAttempts: 3,
+  });
+  h.machine.start();
+  await h.timers.advance(1);      // attempt 1 fails → retry in 500ms
+  await h.timers.advance(500);    // attempt 2 fails → retry in 1000ms
+  await h.timers.advance(1000);   // attempt 3 fails → give up
+  assert.ok(h.events.some(e => e.gaveUp));
+  assert.equal(h.machine.isActive(), false);
+  // Reachability failures were recorded for the cooldown memory.
+  assert.equal(h.unreachable.length, 3);
+});
+
+test('auth errors do NOT mark the address unreachable', async () => {
+  const h = harness({
+    storage: makeStorage({ tmux_address: 'ws://9.9.9.9:1', tmux_token: 'bad' }),
+    connectImpl: async () => { throw new Error('auth failed'); },
+    maxAttempts: 1,
+  });
+  h.machine.start();
+  await h.timers.advance(1);
+  assert.ok(h.events.some(e => e.gaveUp));
+  assert.equal(h.unreachable.length, 0);
+});
+
+test('round-robin skips non-viable addresses on retries', async () => {
+  const tried = [];
+  const h = harness({
+    storage: makeStorage({
+      tmux_address: 'ws://192.168.1.2:9899',
+      tmux_token: 't',
+      tmux_machine_id: 'm1',
+      tmux_machines: JSON.stringify({ m1: ['ws://100.1.1.1:9899'] }),
+    }),
+    findBest: async () => null, // probe finds nothing → falls back to first
+    viable: (url) => url.startsWith('ws://100.'), // LAN address in cooldown
+    connectImpl: async (url) => { tried.push(url); throw new Error('connection timeout'); },
+    maxAttempts: 3,
+  });
+  h.machine.start();
+  await h.timers.advance(1);
+  await h.timers.advance(500);
+  await h.timers.advance(1000);
+  // Attempt 0 used the probe fallback (primary); retries 1..2 only used the
+  // viable (Tailscale) address, never the cooled-down LAN one.
+  assert.deepEqual(tried.slice(1), ['ws://100.1.1.1:9899', 'ws://100.1.1.1:9899']);
+});
+
+test('cancel mid-backoff stops the loop', async () => {
+  let calls = 0;
+  const h = harness({
+    storage: makeStorage({ tmux_address: 'ws://9.9.9.9:1', tmux_token: 't' }),
+    connectImpl: async () => { calls++; throw new Error('connection timeout'); },
+    maxAttempts: 5,
+  });
+  h.machine.start();
+  await h.timers.advance(1);      // attempt 1 fails, retry scheduled
+  h.machine.cancel();
+  await h.timers.advance(10000);  // scheduled retry must not run
+  assert.equal(calls, 1);
+  assert.equal(h.machine.isActive(), false);
+});
+
+test('a success that lands after cancel is ignored', async () => {
+  let resolveConnect;
+  const h = harness({
+    storage: makeStorage({ tmux_address: 'ws://9.9.9.9:1', tmux_token: 't' }),
+    connectImpl: () => new Promise(res => { resolveConnect = res; }),
+  });
+  h.machine.start();
+  await h.timers.advance(1);
+  h.machine.cancel();
+  resolveConnect('late');
+  await new Promise(r => setTimeout(r, 0));
+  assert.equal(h.events.some(e => e.success), false);
+});
+
+test('watchdog force-resets a stuck reconnect', async () => {
+  const h = harness({
+    storage: makeStorage({ tmux_address: 'ws://9.9.9.9:1', tmux_token: 't' }),
+    connectImpl: () => new Promise(() => {}), // hangs forever
+  });
+  h.machine.start();
+  await h.timers.advance(1);
+  await h.timers.advance(180000);
+  assert.ok(h.events.some(e => e.gaveUp));
+  assert.equal(h.machine.isActive(), false);
+});
+
+test('missing stored address gives up immediately', async () => {
+  const h = harness({
+    storage: makeStorage({}),
+    connectImpl: async () => {},
+  });
+  h.machine.start();
+  await h.timers.advance(1);
+  assert.ok(h.events.some(e => e.gaveUp));
+});

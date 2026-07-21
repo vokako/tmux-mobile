@@ -16,6 +16,7 @@
   import { teamState } from './lib/core/team.svelte.js';
   import { applyMonoVar } from './lib/app/fonts.svelte.js';
   import { normalizeUiZoom, stepUiZoom, UI_ZOOM_DEFAULT } from './lib/app/ui-zoom.ts';
+  import { createReconnectMachine } from './lib/app/reconnect.ts';
   import { cycleItem, shortcutFromEvent } from './lib/app/shortcuts.ts';
   import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.js';
   import { markWindowRead, stopAgentNotifications, syncAgentNotifications } from './lib/core/agent-notifications.svelte.js';
@@ -485,67 +486,46 @@
     }
   });
 
+  // Reconnect UI state, mirrored from the reconnect machine
+  // (src/lib/app/reconnect.ts — framework-free, unit-tested; owns every
+  // timer, the retry/backoff/probe strategy, and the stuck-watchdog).
   let reconnecting = $state(false);
   let reconnectAttempt = $state(0);   // 1-indexed when visible; 0 means not attempting
   let reconnectClass = $state('');    // LAN / Tailscale / WAN label for the current try
-  let reconnectTimer = null;
-  let reconnectWatchdog = null;
 
-  function clearReconnectTimers() {
-    clearTimeout(reconnectTimer);
-    clearTimeout(reconnectWatchdog);
-    reconnectTimer = null;
-    reconnectWatchdog = null;
-    reconnectAttempt = 0;
-    reconnectClass = '';
-  }
-
-  function armReconnectWatchdog() {
-    // Hard cap: if reconnecting never finishes (stuck promise, platform WebSocket hang),
-    // force-reset to settings so user can escape without killing the app.
-    clearTimeout(reconnectWatchdog);
-    reconnectWatchdog = setTimeout(() => {
-      if (!reconnecting) return;
-      window.__dbg?.('reconnect: watchdog fired — force reset');
-      reconnecting = false;
-      clearTimeout(reconnectTimer);
-      connected = false;
-      page = 'settings';
-    }, RECONNECT_WATCHDOG_MS);
-  }
+  const reconnectMachine = createReconnectMachine({
+    connect,
+    findBestAddress,
+    isAddressViable,
+    noteAddressUnreachable,
+    classifyAddress,
+    addressLabels: ADDRESS_LABELS,
+    storage: localStorage,
+    maxAttempts: RECONNECT_MAX_ATTEMPTS,
+    watchdogMs: RECONNECT_WATCHDOG_MS,
+    onStateChange: (st) => {
+      reconnecting = st.reconnecting;
+      reconnectAttempt = st.attempt;
+      reconnectClass = st.label;
+    },
+    onSuccess: (useAddr, primaryAddr) => onReconnectSuccess(useAddr, primaryAddr),
+    onGiveUp: () => { connected = false; page = 'settings'; },
+  });
 
   setOnDisconnect(() => {
     // Keep connected=true during reconnect to avoid UI flicker
-    reconnecting = true;
-    armReconnectWatchdog();
-    tryReconnect();
+    reconnectMachine.start();
   });
 
   function cancelReconnect() {
-    reconnecting = false;
-    reconnectAttempt = 0;
-    reconnectClass = '';
+    reconnectMachine.cancel();
     connected = false;
-    clearReconnectTimers();
     disconnect();
     page = 'settings';
   }
 
-  function getAltAddresses() {
-    const mid = localStorage.getItem('tmux_machine_id');
-    const primary = localStorage.getItem('tmux_address');
-    if (!mid) return [];
-    try {
-      const map = JSON.parse(localStorage.getItem('tmux_machines') || '{}');
-      return (map[mid] || []).filter(a => a !== primary);
-    } catch { return []; }
-  }
-
   function onReconnectSuccess(useAddr, primaryAddr) {
     connected = true;
-    reconnecting = false;
-    clearReconnectTimers();
-    window.__dbg?.('reconnect: success');
     serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
     if (useAddr !== primaryAddr) { localStorage.setItem('tmux_address', useAddr); activeAddress = useAddr; }
     resubscribeAll();
@@ -555,75 +535,8 @@
     window.dispatchEvent(new Event('ws-reconnected'));
   }
 
-  async function tryReconnect(attempt = 0) {
-    if (!reconnecting) return;
-    const primary = localStorage.getItem('tmux_address');
-    const token = localStorage.getItem('tmux_token') || '';
-    if (!primary) { reconnecting = false; clearReconnectTimers(); connected = false; page = 'settings'; return; }
-
-    const allAddrs = [primary, ...getAltAddresses()];
-    let useAddr;
-
-    // First attempt with multiple candidates: parallel probe → pick first reachable.
-    // Avoids burning 3s × N timeouts cycling through dead addresses serially.
-    if (attempt === 0 && allAddrs.length > 1) {
-      window.__dbg?.(`reconnect: probing ${allAddrs.length} addresses in parallel`);
-      try {
-        const best = await findBestAddress(allAddrs);
-        if (!reconnecting) return; // cancelled mid-probe
-        useAddr = best || allAddrs[0];
-      } catch {
-        useAddr = allAddrs[0];
-      }
-    } else {
-      // Round-robin, but skip addresses that recently failed a probe or
-      // connect (LAN/Tailscale IPs while on cellular keep failing until a
-      // network change, which clears the memory in ws.js). If everything
-      // is in cooldown, fall back to plain round-robin — a total outage
-      // shouldn't stop us from retrying at all.
-      const viable = allAddrs.filter(isAddressViable);
-      const pool = viable.length > 0 ? viable : allAddrs;
-      useAddr = pool[attempt % pool.length];
-    }
-
-    window.__dbg?.(`reconnect: attempt ${attempt + 1}/${RECONNECT_MAX_ATTEMPTS} → ${useAddr}`);
-    reconnectAttempt = attempt + 1;
-    reconnectClass = ADDRESS_LABELS[classifyAddress(useAddr)] || '';
-
-    // Per-attempt connect timeout scales with address class: LAN is fast and
-    // should fail fast; WAN (public internet, slow cellular, far regions)
-    // legitimately needs more time for TCP + TLS handshake.
-    const cls = classifyAddress(useAddr);
-    const attemptTimeout = cls === 0 ? 2000 : cls === 1 ? 3000 : 5000;
-
-    connect(useAddr, token, attemptTimeout).then(() => {
-      if (!reconnecting) return;
-      onReconnectSuccess(useAddr, primary);
-    }).catch((e) => {
-      if (!reconnecting) return;
-      window.__dbg?.(`reconnect: failed (${e.message})`);
-      // Reachability failures (timeout / refused, NOT auth errors) feed the
-      // same cooldown memory the prober uses, so the next attempts skip
-      // this address instead of re-burning its timeout.
-      if (/timeout|connection failed|closed during auth/i.test(e.message || '')) {
-        noteAddressUnreachable(useAddr);
-      }
-      if (attempt + 1 < RECONNECT_MAX_ATTEMPTS) {
-        const delay = Math.min(500 * (attempt + 1), 3000); // tighter backoff since timeouts are short
-        reconnectTimer = setTimeout(() => tryReconnect(attempt + 1), delay);
-      } else {
-        window.__dbg?.('reconnect: gave up');
-        reconnecting = false;
-        clearReconnectTimers();
-        connected = false;
-        page = 'settings';
-      }
-    });
-  }
-
   function onConnected() {
-    reconnecting = false;
-    clearReconnectTimers();
+    reconnectMachine.cancel();
     connected = true;
     serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
     page = 'sessions';
@@ -658,8 +571,7 @@
   }
 
   function doDisconnect() {
-    reconnecting = false;
-    clearReconnectTimers();
+    reconnectMachine.cancel();
     disconnect();
     stopAgentNotifications();
     connected = false;
@@ -711,8 +623,7 @@
       window.dispatchEvent(new Event('ws-reconnected'));
     } catch {
       // Switch failed — trigger normal reconnect which will try all addresses
-      reconnecting = true;
-      tryReconnect();
+      reconnectMachine.start();
     } finally {
       optimizing = false;
       lastProbeTime = Date.now();
@@ -781,9 +692,8 @@
   $effect(() => {
     const handler = () => {
       if (document.visibilityState !== 'visible') return;
-      if (!isConnected() && !reconnecting) {
-        reconnecting = true;
-        tryReconnect();
+      if (!isConnected() && !reconnectMachine.isActive()) {
+        reconnectMachine.start();
       } else if (isConnected()) {
         // A suspended mobile WebView can resume with WebSocket.readyState still
         // OPEN even though pane pushes stopped while it was backgrounded. The
@@ -988,7 +898,7 @@
         connect(address, localStorage.getItem('tmux_token') || '').then(() => {
           serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
           resubscribeAll();
-        }).catch(() => { reconnecting = true; tryReconnect(); });
+        }).catch(() => { reconnectMachine.start(); });
       }}
       onDisconnect={() => { showSettings = false; doDisconnect(); }}
       onConnectionSetup={() => { showSettings = false; page = 'settings'; }} />

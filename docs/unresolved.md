@@ -126,10 +126,10 @@
   - `Files.svelte`: ~~the git client~~ — done 2026-07, extracted to
     `files/GitPanel.svelte` (Files 2150 -> 1860 lines). Still worthwhile:
     bookmarks/recents modules and the preview renderers (PDF/CSV/HTML/MD).
-  - `App.svelte` (1488 lines): reconnect state machine (~12 fns + timers)
-    should move to `app/connection.svelte.js` with tests. ~~Global design
-    tokens + resets in one component's style block~~ — done 2026-07: moved
-    to `src/app.css`.
+  - `App.svelte`: ~~reconnect state machine~~ — done 2026-07, extracted to
+    `app/reconnect.ts` (framework-free, DI'd, 9 unit tests incl. cancel
+    races and the watchdog). ~~Global design tokens + resets in one
+    component's style block~~ — done 2026-07: moved to `src/app.css`.
   - ~~`src/lib/` is a single flat directory of 60+ files~~ — done 2026-07:
     reorganized into `core/ app/ terminal/ files/ sessions/ team/ ui/`.
   - Duplicated styles: light-theme `.scroll-btn` override copied in
