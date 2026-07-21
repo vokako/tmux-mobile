@@ -24,6 +24,7 @@
   import mermaid from 'mermaid';
   import Icon from '../ui/Icon.svelte';
   import GitPanel from './GitPanel.svelte';
+  import { createPersistedList } from './persisted-list.ts';
   import { t } from '../core/i18n.svelte.ts';
   import { layout } from '../app/layout.svelte.ts';
   import { copyText } from '../core/clipboard.ts';
@@ -242,29 +243,14 @@
   let recentFiles = $state([]);
   let showRecent = $state(false);
 
-  // ── Clobber/race guards for the two server-persisted lists ──────────────
-  // Both lists are whole-array last-writer-wins on the server, and reads/
-  // writes are concurrent RPCs (responses can be answered from state that
-  // predates a later write). Two rules keep a client from wiping data:
-  //   1. Never persist before the first successful load (a write of the
-  //      in-memory default [] would erase the server list).
-  //   2. A fetch response must never overwrite local mutations made while it
-  //      was in flight — each local mutation bumps a generation counter, and
-  //      fetch continuations only assign if their generation is still current.
-  // The lazy first load is also single-flighted so two rapid mutations before
-  // the first load don't each read-modify-write from a stale base.
-  let recentsLoaded = false, recentsGen = 0, recentsLoadPromise = null;
-  let bookmarksLoaded = false, bookmarksGen = 0, bookmarksLoadPromise = null;
-
-  function loadRecents() {
-    recentsLoadPromise ??= (async () => {
-      const gen = recentsGen;
-      const p = await getPrefs(); // throws propagate to callers
-      if (gen === recentsGen) recentFiles = p.recentFiles || [];
-      recentsLoaded = true;
-    })().finally(() => { recentsLoadPromise = null; });
-    return recentsLoadPromise;
-  }
+  // Both lists are server-persisted whole arrays with clobber/race guards
+  // (single-flighted first load, generation-counter staleness checks) —
+  // the shared discipline lives in persisted-list.ts; these are mirrors.
+  const recentsList = createPersistedList({
+    fetch: async () => (await getPrefs()).recentFiles || [],
+    persist: (items) => setPref('recentFiles', items),
+    onChange: (items) => { recentFiles = items; },
+  });
 
   $effect(() => {
     // Depend on `visible` so this re-runs when the user opens the Files tab.
@@ -273,18 +259,11 @@
     // fire once at mount (often pre-connection), fail, and never retry, leaving
     // Recent empty forever.
     if (!visible) return;
-    loadRecents().catch(() => {});
+    recentsList.load().catch(() => {});
   });
 
-  async function addRecent(path, name) {
-    // Rule 1: fetch-then-merge if the first load hasn't landed; if the server
-    // is unreachable, skip persisting entirely rather than wipe the list.
-    if (!recentsLoaded) {
-      try { await loadRecents(); } catch { return; }
-    }
-    recentsGen++; // rule 2: invalidate any fetch still in flight
-    recentFiles = [{ path, name }, ...recentFiles.filter(f => f.path !== path)].slice(0, 20);
-    setPref('recentFiles', recentFiles).catch(() => {});
+  function addRecent(path, name) {
+    return recentsList.mutate(items => [{ path, name }, ...items.filter(f => f.path !== path)].slice(0, 20));
   }
 
   // Git: the panel itself (status/log/diff/commit/push) lives in
@@ -306,38 +285,24 @@
     navPush();
   }
 
-  $effect(() => {
-    // Same as recentFiles above: gate on `visible` so it loads (and retries)
-    // when the tab opens post-connection, not once at mount before connecting.
-    if (!visible) return;
-    loadBookmarks().catch(() => {});
+  const bookmarksList = createPersistedList({
+    fetch: async () => (await getBookmarks()).bookmarks || [],
+    persist: (items) => saveBookmarks(items),
+    onChange: (items) => { bookmarks = items; },
   });
 
-  function loadBookmarks() {
-    bookmarksLoadPromise ??= (async () => {
-      const gen = bookmarksGen;
-      const r = await getBookmarks(); // throws propagate to callers
-      if (gen === bookmarksGen) bookmarks = r.bookmarks || [];
-      bookmarksLoaded = true;
-    })().finally(() => { bookmarksLoadPromise = null; });
-    return bookmarksLoadPromise;
-  }
+  $effect(() => {
+    // Same visible-gate rationale as the recents effect above.
+    if (!visible) return;
+    bookmarksList.load().catch(() => {});
+  });
 
   function isBookmarked(path) { return bookmarks.includes(path); }
 
-  async function toggleBookmark(path) {
-    // Same guards as addRecent (see the clobber/race comment there): never
-    // persist before the first load; bail (don't write) on a failed fetch.
-    if (!bookmarksLoaded) {
-      try { await loadBookmarks(); } catch { return; }
-    }
-    bookmarksGen++; // invalidate any fetch still in flight
-    if (isBookmarked(path)) {
-      bookmarks = bookmarks.filter(b => b !== path);
-    } else {
-      bookmarks = [...bookmarks, path];
-    }
-    await saveBookmarks(bookmarks).catch(() => {});
+  function toggleBookmark(path) {
+    return bookmarksList.mutate(items => (
+      items.includes(path) ? items.filter(b => b !== path) : [...items, path]
+    ));
   }
 
   // Swipe right to go back (pull-to-refresh was removed — same rationale
