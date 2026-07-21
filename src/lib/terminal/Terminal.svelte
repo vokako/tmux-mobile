@@ -13,6 +13,8 @@
   import { terminalPrefs } from '../app/terminal-prefs.svelte.ts';
   import { adaptAnsiColors } from './ansi-colors.ts';
   import { compactLineGeometry } from './terminal-line-geometry.ts';
+  import { selStart, selEnd } from './selection-model.ts';
+  import { countLines, computeCursorLayout } from './cursor-layout.ts';
   import { restoreViewportAfterPaneSwitch } from './terminal-viewport.ts';
   import { cycleItem } from '../app/shortcuts.ts';
   import { encodeTerminalShortcut } from './terminal-keyboard.ts';
@@ -341,49 +343,11 @@
   let copySelection = () => {};
   let clearSelection = () => {};
 
-  function selStart(s) {
-    if (!s) return null;
-    const { anchor, head } = s;
-    if (head.row < anchor.row || (head.row === anchor.row && head.col < anchor.col)) return head;
-    return anchor;
-  }
-  function selEnd(s) {
-    if (!s) return null;
-    const { anchor, head } = s;
-    if (head.row < anchor.row || (head.row === anchor.row && head.col < anchor.col)) return anchor;
-    return head;
-  }
   // Resize confirmation: after local resize, we expect server to echo cursor.w/cursor.h
   // matching pendingCols/pendingRows. Until confirmed, ignore server dims (stale).
   let pendingCols = 0, pendingRows = 0, pendingResizeTs = 0;
 
-  // Count lines without allocating a split array
-  function countLines(s) { let n = 1; for (let i = 0; i < s.length; i++) if (s[i] === '\n') n++; return n; }
 
-  // Compute xterm row (1-based) + required padding for cursor placement.
-  // Shared by full-rewrite and cursor-only paths to ensure they stay in sync.
-  // The written buffer must end at the pane's BOTTOM row: capture trims the
-  // pane's trailing blank rows (cursor.t), and without restoring them
-  // xterm's bottom-anchored viewport would show the tail of the CONTENT
-  // (scrollback history included) instead of the visible pane — a freshly
-  // cleared pane rendered with its prompt/cursor at the page bottom.
-  // Restoring them makes the viewport mirror the pane exactly: prompt at
-  // top, blanks below, history up in the scrollback.
-  function computeCursorLayout(content, cursor, rows) {
-    const N = countLines(content);
-    const trailing = cursor.t || 0;
-    const paneStart = Math.max(0, N + trailing - cursor.h);
-    const cursorLine = paneStart + cursor.y;
-    const needAfter = Math.max(0, cursorLine + 1 - N);
-    const contentLines = N + needAfter;
-    const bottomPad = Math.max(0, paneStart + cursor.h - contentLines);
-    const totalWritten = contentLines + bottomPad;
-    const sb = Math.max(0, totalWritten - rows);
-    return {
-      row: cursorLine - sb + 1,
-      afterPad: needAfter + bottomPad > 0 ? '\n'.repeat(needAfter + bottomPad) : '',
-    };
-  }
 
   // Write content + position cursor in xterm.js. The color adapter tracks
   // effective SGR foreground/background pairs across the complete snapshot.
