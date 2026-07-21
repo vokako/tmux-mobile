@@ -1,7 +1,7 @@
 <script>
   import { connect, disconnect } from '../core/ws.ts';
   import Icon from '../ui/Icon.svelte';
-  import { copyText } from '../core/clipboard.js';
+  import { copyText } from '../core/clipboard.ts';
   import { t } from '../core/i18n.svelte.js';
 
   let { onConnected } = $props();

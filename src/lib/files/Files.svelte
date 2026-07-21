@@ -2,7 +2,7 @@
   import * as pdfjsLib from 'pdfjs-dist';
   import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
   import { marked } from 'marked';
-  import '../core/markedSafeUrl.js';
+  import '../core/markedSafeUrl.ts';
   import katex from 'katex';
   import 'katex/dist/katex.min.css';
   import hljs from 'highlight.js/lib/core';
@@ -26,9 +26,9 @@
   import GitPanel from './GitPanel.svelte';
   import { t } from '../core/i18n.svelte.js';
   import { layout } from '../app/layout.svelte.js';
-  import { copyText } from '../core/clipboard.js';
+  import { copyText } from '../core/clipboard.ts';
   import { directoryLoadState } from './file-view-state.ts';
-  import { installExternalLinkHandler } from '../core/external-links.js';
+  import { installExternalLinkHandler } from '../core/external-links.ts';
   import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsDownloadHttp, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref, fsConvert } from '../core/ws.ts';
 
   // Tauri plugin imports (tree-shaken in browser builds)

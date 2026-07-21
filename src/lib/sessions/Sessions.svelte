@@ -3,7 +3,7 @@
   import Icon from '../ui/Icon.svelte';
   import AgentChip from '../ui/AgentChip.svelte';
   import { t } from '../core/i18n.svelte.js';
-  import { sessionHasAgent, paneAgent, AGENTS } from '../core/agents.js';
+  import { sessionHasAgent, paneAgent, AGENTS } from '../core/agents.ts';
   // Team-mode sessions (`tmm-team-<room>`) are grouped apart from regular
   // sessions and their clicks route to the Team chat instead of a raw terminal.
   // isTeamSession is gated on the shared teamState.available, so on a server

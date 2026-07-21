@@ -4,7 +4,7 @@
   import { layout } from './layout.svelte.js';
   import { fonts } from './fonts.svelte.js';
   import { terminalPrefs, LINE_HEIGHT_MIN, LINE_HEIGHT_MAX } from './terminal-prefs.svelte.js';
-  import { SHORTCUT_DEFAULTS, shortcutFromEvent, shortcutLabel } from './shortcuts.js';
+  import { SHORTCUT_DEFAULTS, shortcutFromEvent, shortcutLabel } from './shortcuts.ts';
   import { shortcuts } from './shortcuts.svelte.js';
   import { agentHooksInstall, agentHooksRemove, agentHooksStatus } from '../core/ws.ts';
 

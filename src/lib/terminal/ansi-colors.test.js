@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { adaptAnsiColors, contrastRatio } from './ansi-colors.js';
+import { adaptAnsiColors, contrastRatio } from './ansi-colors.ts';
 
 const darkTheme = {
   background: '#0a0a0f', foreground: '#c9d1d9', black: '#0a0a0f', red: '#ff5050', green: '#4ade80', yellow: '#fbbf24', blue: '#00d4ff', magenta: '#c084fc', cyan: '#22d3ee', white: '#c9d1d9', brightBlack: '#484848', brightRed: '#ff6b6b', brightGreen: '#6ee7a0', brightYellow: '#fcd34d', brightBlue: '#38bdf8', brightMagenta: '#d8b4fe', brightCyan: '#67e8f9', brightWhite: '#f1f5f9',

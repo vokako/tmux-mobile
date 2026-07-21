@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SHORTCUT_DEFAULTS, actionForShortcut, cycleItem, shortcutFromEvent, shortcutLabel } from './shortcuts.js';
+import { SHORTCUT_DEFAULTS, actionForShortcut, cycleItem, shortcutFromEvent, shortcutLabel } from './shortcuts.ts';
 
 function event(code, modifiers = {}) {
   return { code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...modifiers };

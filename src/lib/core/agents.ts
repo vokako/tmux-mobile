@@ -12,7 +12,22 @@
 // pane_current_command reports the short process name (e.g. "kiro-cli-chat")
 // while pane_title often carries the full argv line. We check both.
 
-export const AGENTS = [
+export interface Agent {
+  tag: string;
+  match: RegExp;
+  icon: string;
+  iconSize: number;
+}
+// Minimal pane shape needed for detection; real panes (ws.ts TmuxPane)
+// satisfy it, and so do partial objects in tests.
+export type PaneLike = {
+  current_command?: string;
+  pane_title?: string;
+  child_cmd?: string;
+  window_name?: string;
+} | null | undefined;
+
+export const AGENTS: Agent[] = [
   // Kimi Code runs as `kimi-code`. It must match BEFORE the /kiro/ entry
   // can fire: a kimi pane's child chain typically contains its
   // "kiro-web-search" helper, and "kimi" in current_command always sits
@@ -40,9 +55,9 @@ export const AGENTS = [
 // launched, while a late match is a subprocess. Real case: codex spawning
 // a "kiro-web-search" MCP tool put "kiro" deep in the chain and the
 // array-order rule painted the session as Kiro.
-export function detectAgent(text) {
+export function detectAgent(text: string | null | undefined): Agent | null {
   if (!text) return null;
-  let best = null;
+  let best: Agent | null = null;
   let bestIdx = Infinity;
   for (const a of AGENTS) {
     const idx = text.search(a.match);
@@ -58,28 +73,28 @@ export function detectAgent(text) {
 // pane shell's descendant argv reported by the server — the only reliable
 // signal for interpreter-launched CLIs (codex runs as plain "node"; claude
 // as a bare version number). current_command/pane_title alone miss those.
-export function paneText(p) {
+export function paneText(p: PaneLike): string {
   if (!p) return '';
   return (p.current_command || '') + ' ' + (p.pane_title || '') + ' ' + (p.child_cmd || '');
 }
 
 // Agent entry for a pane (or null).
-export function paneAgent(p) {
+export function paneAgent(p: PaneLike): Agent | null {
   return detectAgent(paneText(p));
 }
 
-export function paneChipLabel(p, fallback = '') {
+export function paneChipLabel(p: PaneLike, fallback = ''): string {
   if (paneAgent(p)) return '';
   return p?.current_command || p?.window_name || fallback;
 }
 
 // Convenience: "is this pane running an AI CLI?"
-export function paneIsAgent(p) {
+export function paneIsAgent(p: PaneLike): boolean {
   return paneAgent(p) !== null;
 }
 
 // Convenience: "does any pane in this session run an AI CLI?" Requires the
 // caller to have already fetched panes[sessionName].
-export function sessionHasAgent(panes) {
+export function sessionHasAgent(panes: PaneLike[] | null | undefined): boolean {
   return Array.isArray(panes) && panes.some(paneIsAgent);
 }

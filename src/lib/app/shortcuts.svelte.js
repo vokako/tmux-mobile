@@ -1,4 +1,4 @@
-import { SHORTCUT_DEFAULTS, SHORTCUT_STORAGE_KEY, actionForShortcut } from './shortcuts.js';
+import { SHORTCUT_DEFAULTS, SHORTCUT_STORAGE_KEY, actionForShortcut } from './shortcuts.ts';
 
 function loadShortcuts() {
   try {

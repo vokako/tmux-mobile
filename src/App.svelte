@@ -8,7 +8,7 @@
   import Icon from './lib/ui/Icon.svelte';
   import InstallPrompt from './lib/ui/InstallPrompt.svelte';
   import Preferences from './lib/app/Preferences.svelte';
-  import { copyText } from './lib/core/clipboard.js';
+  import { copyText } from './lib/core/clipboard.ts';
   import { teamStatus } from './lib/core/ws.ts';
   import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable } from './lib/core/ws.ts';
   import { t } from './lib/core/i18n.svelte.js';
@@ -16,10 +16,10 @@
   import { teamState } from './lib/core/team.svelte.js';
   import { applyMonoVar } from './lib/app/fonts.svelte.js';
   import { normalizeUiZoom, stepUiZoom, UI_ZOOM_DEFAULT } from './lib/app/ui-zoom.ts';
-  import { cycleItem, shortcutFromEvent } from './lib/app/shortcuts.js';
+  import { cycleItem, shortcutFromEvent } from './lib/app/shortcuts.ts';
   import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.js';
   import { markWindowRead, stopAgentNotifications, syncAgentNotifications } from './lib/core/agent-notifications.svelte.js';
-  import { installExternalLinkHandler } from './lib/core/external-links.js';
+  import { installExternalLinkHandler } from './lib/core/external-links.ts';
 
   // Tunable constants
   const KB_OPEN_THRESHOLD = 100; // px difference to detect keyboard open

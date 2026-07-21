@@ -10,7 +10,7 @@
   import CollabGraph from './CollabGraph.svelte';
   import { t } from '../core/i18n.svelte.js';
   import { listSessionsWithPanes } from '../core/ws.ts';
-  import { paneAgent } from '../core/agents.js';
+  import { paneAgent } from '../core/agents.ts';
 
   let {
     teamSession = '',     // tmm-team-<slug>: the session whose windows are agents

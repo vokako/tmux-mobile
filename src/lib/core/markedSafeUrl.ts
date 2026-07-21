@@ -18,11 +18,11 @@ marked.use({
     {
       name: 'safeUrl',
       level: 'inline',
-      start(src) {
+      start(src: string) {
         const i = src.search(/https?:\/\//);
         return i < 0 ? undefined : i;
       },
-      tokenizer(src) {
+      tokenizer(src: string) {
         const m = /^https?:\/\/[^\s<]+/.exec(src);
         if (!m) return;
         let url = m[0];
@@ -36,7 +36,7 @@ marked.use({
       },
       // href/text are substrings of the (already HTML-escaped) source, so we
       // pass them through unchanged — matching marked's own autolink output.
-      renderer(token) {
+      renderer(token: any) {
         return `<a href="${token.href}">${token.text}</a>`;
       },
     },

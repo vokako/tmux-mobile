@@ -7,16 +7,16 @@
   import { otherTerminalSessionHasNotification, terminalNotificationForWindow } from '../core/agent-notifications.svelte.js';
   import PanePicker from '../sessions/PanePicker.svelte';
   import { t } from '../core/i18n.svelte.js';
-  import { detectAgent, paneIsAgent, paneAgent, AGENTS } from '../core/agents.js';
-  import { copyText } from '../core/clipboard.js';
+  import { detectAgent, paneIsAgent, paneAgent, AGENTS } from '../core/agents.ts';
+  import { copyText } from '../core/clipboard.ts';
   import { fonts } from '../app/fonts.svelte.js';
   import { terminalPrefs } from '../app/terminal-prefs.svelte.js';
-  import { adaptAnsiColors } from './ansi-colors.js';
+  import { adaptAnsiColors } from './ansi-colors.ts';
   import { compactLineGeometry } from './terminal-line-geometry.ts';
   import { restoreViewportAfterPaneSwitch } from './terminal-viewport.ts';
-  import { cycleItem } from '../app/shortcuts.js';
-  import { encodeTerminalShortcut } from './terminal-keyboard.js';
-  import { openExternalUrl } from '../core/external-links.js';
+  import { cycleItem } from '../app/shortcuts.ts';
+  import { encodeTerminalShortcut } from './terminal-keyboard.ts';
+  import { openExternalUrl } from '../core/external-links.ts';
 
   // Timing constants
   const WINDOW_LIST_POLL_MS = 5000;

@@ -10,7 +10,7 @@
 // insecure contexts). If both paths fail we resolve false so callers can show
 // a useful error instead of silently swallowing the problem.
 
-export async function copyText(text) {
+export async function copyText(text: string | null | undefined): Promise<boolean> {
   if (text == null) return false;
   // Prefer the modern API. Requiring isSecureContext rejects Tauri's
   // tauri://localhost + Android WebView's http://tauri.localhost in some

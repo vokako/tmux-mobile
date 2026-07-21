@@ -5,33 +5,38 @@ const BG_BLEND_RATIO_LIGHT = 1.15;
 const HSL_L_BG_DARK = 0.30;
 const HSL_L_BG_LIGHT = 0.75;
 
+type Rgb = [number, number, number];
+type Hsl = [number, number, number];
+// The xterm theme subset we read: fg/bg plus the 16 ANSI palette entries.
+export type AnsiTheme = { foreground: string; background: string } & Record<string, string>;
+
 const ANSI_KEYS = [
   'black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white',
   'brightBlack', 'brightRed', 'brightGreen', 'brightYellow',
   'brightBlue', 'brightMagenta', 'brightCyan', 'brightWhite',
 ];
 
-function hexToRgb(hex) {
+function hexToRgb(hex: string): Rgb {
   const value = hex.replace('#', '');
-  return [0, 2, 4].map(offset => Number.parseInt(value.slice(offset, offset + 2), 16));
+  return [0, 2, 4].map(offset => Number.parseInt(value.slice(offset, offset + 2), 16)) as Rgb;
 }
 
-function toLinearChannel(value) {
+function toLinearChannel(value: number): number {
   const channel = value / 255;
   return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
 }
 
-export function relativeLuminance([red, green, blue]) {
+export function relativeLuminance([red, green, blue]: Rgb): number {
   return 0.2126 * toLinearChannel(red) + 0.7152 * toLinearChannel(green) + 0.0722 * toLinearChannel(blue);
 }
 
-export function contrastRatio(first, second) {
+export function contrastRatio(first: Rgb, second: Rgb): number {
   const high = Math.max(relativeLuminance(first), relativeLuminance(second));
   const low = Math.min(relativeLuminance(first), relativeLuminance(second));
   return (high + 0.05) / (low + 0.05);
 }
 
-function rgbToHsl([red, green, blue]) {
+function rgbToHsl([red, green, blue]: Rgb): Hsl {
   const r = red / 255;
   const g = green / 255;
   const b = blue / 255;
@@ -42,19 +47,19 @@ function rgbToHsl([red, green, blue]) {
 
   const delta = max - min;
   const saturation = lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min);
-  let hue;
+  let hue: number;
   if (max === r) hue = ((g - b) / delta + (g < b ? 6 : 0)) / 6;
   else if (max === g) hue = ((b - r) / delta + 2) / 6;
   else hue = ((r - g) / delta + 4) / 6;
   return [hue, saturation, lightness];
 }
 
-function hslToRgb([hue, saturation, lightness]) {
+function hslToRgb([hue, saturation, lightness]: Hsl): Rgb {
   if (saturation === 0) {
     const value = Math.round(lightness * 255);
     return [value, value, value];
   }
-  const hueToChannel = (low, high, position) => {
+  const hueToChannel = (low: number, high: number, position: number): number => {
     let p = position;
     if (p < 0) p += 1;
     if (p > 1) p -= 1;
@@ -68,11 +73,11 @@ function hslToRgb([hue, saturation, lightness]) {
     : lightness + saturation - lightness * saturation;
   const low = 2 * lightness - high;
   return [hue + 1 / 3, hue, hue - 1 / 3]
-    .map(position => Math.round(hueToChannel(low, high, position) * 255));
+    .map(position => Math.round(hueToChannel(low, high, position) * 255)) as Rgb;
 }
 
-function indexedColor(index, palette) {
-  if (index < 16) return palette[index];
+function indexedColor(index: number, palette: Rgb[]): Rgb {
+  if (index < 16) return palette[index]!; // index clamped to 0..255 by caller
   if (index >= 232) {
     const value = (index - 232) * 10 + 8;
     return [value, value, value];
@@ -85,7 +90,7 @@ function indexedColor(index, palette) {
   ];
 }
 
-function adaptBackground(rgb, terminalBackground, dark) {
+function adaptBackground(rgb: Rgb, terminalBackground: Rgb, dark: boolean): Rgb {
   const backgroundLuminance = relativeLuminance(rgb);
   const terminalLuminance = relativeLuminance(terminalBackground);
   const [hue, saturation] = rgbToHsl(rgb);
@@ -101,11 +106,11 @@ function adaptBackground(rgb, terminalBackground, dark) {
     : rgb;
 }
 
-function ensureTextContrast(foreground, background) {
+function ensureTextContrast(foreground: Rgb, background: Rgb): Rgb {
   if (contrastRatio(foreground, background) >= MIN_TEXT_CONTRAST) return foreground;
 
   const [hue, saturation, startLightness] = rgbToHsl(foreground);
-  const findPassingLightness = (endpoint) => {
+  const findPassingLightness = (endpoint: number): number | null => {
     const endpointColor = hslToRgb([hue, saturation, endpoint]);
     if (contrastRatio(endpointColor, background) < MIN_TEXT_CONTRAST) return null;
     let passing = endpoint;
@@ -119,41 +124,41 @@ function ensureTextContrast(foreground, background) {
     return passing;
   };
   const candidates = [findPassingLightness(0), findPassingLightness(1)]
-    .filter(lightness => lightness != null);
+    .filter((lightness): lightness is number => lightness != null);
   const targetLightness = candidates.reduce((best, lightness) => (
     Math.abs(lightness - startLightness) < Math.abs(best - startLightness) ? lightness : best
   ));
   return hslToRgb([hue, saturation, targetLightness]);
 }
 
-function trueColorSequence(role, rgb) {
+function trueColorSequence(role: number, rgb: Rgb): string {
   return `\x1b[${role};2;${rgb[0]};${rgb[1]};${rgb[2]}m`;
 }
 
-function readExtendedColor(params, offset, palette) {
+function readExtendedColor(params: number[], offset: number, palette: Rgb[]): { rgb: Rgb; consumed: number } | null {
   const mode = params[offset + 1];
   if (mode === 2 && params.length >= offset + 5) {
-    return { rgb: params.slice(offset + 2, offset + 5).map(value => Math.max(0, Math.min(255, value))), consumed: 5 };
+    return { rgb: params.slice(offset + 2, offset + 5).map(value => Math.max(0, Math.min(255, value))) as Rgb, consumed: 5 };
   }
   if (mode === 5 && params.length >= offset + 3) {
-    return { rgb: indexedColor(Math.max(0, Math.min(255, params[offset + 2])), palette), consumed: 3 };
+    return { rgb: indexedColor(Math.max(0, Math.min(255, params[offset + 2]!)), palette), consumed: 3 };
   }
   return null;
 }
 
-export function adaptAnsiColors(text, theme) {
+export function adaptAnsiColors(text: string, theme: AnsiTheme): string {
   const terminalForeground = hexToRgb(theme.foreground);
   const terminalBackground = hexToRgb(theme.background);
-  const palette = ANSI_KEYS.map(key => hexToRgb(theme[key]));
+  const palette = ANSI_KEYS.map(key => hexToRgb(theme[key]!));
   const dark = relativeLuminance(terminalBackground) < 0.5;
-  const state = { foreground: null, background: null, reverse: false };
+  const state: { foreground: Rgb | null; background: Rgb | null; reverse: boolean } = { foreground: null, background: null, reverse: false };
 
-  return text.replace(/\x1b\[([0-9;]*)m/g, (sequence, body) => {
-    const params = body === '' ? [0] : body.split(';').map(value => Number.parseInt(value || '0', 10));
+  return text.replace(/\x1b\[([0-9;]*)m/g, (sequence, body: string) => {
+    const params = body === '' ? [0] : body.split(';').map((value: string) => Number.parseInt(value || '0', 10));
     let colorsChanged = false;
     let fullReset = false;
     for (let index = 0; index < params.length; index++) {
-      const param = params[index];
+      const param = params[index]!;
       if (param === 0) {
         state.foreground = null;
         state.background = null;
@@ -173,16 +178,16 @@ export function adaptAnsiColors(text, theme) {
         state.background = null;
         colorsChanged = true;
       } else if (param >= 30 && param <= 37) {
-        state.foreground = palette[param - 30];
+        state.foreground = palette[param - 30]!;
         colorsChanged = true;
       } else if (param >= 90 && param <= 97) {
-        state.foreground = palette[param - 90 + 8];
+        state.foreground = palette[param - 90 + 8]!;
         colorsChanged = true;
       } else if (param >= 40 && param <= 47) {
-        state.background = palette[param - 40];
+        state.background = palette[param - 40]!;
         colorsChanged = true;
       } else if (param >= 100 && param <= 107) {
-        state.background = palette[param - 100 + 8];
+        state.background = palette[param - 100 + 8]!;
         colorsChanged = true;
       } else if (param === 38 || param === 48) {
         const color = readExtendedColor(params, index, palette);

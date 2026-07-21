@@ -1,4 +1,4 @@
-const CSI_FINAL_KEYS = {
+const CSI_FINAL_KEYS: Record<string, string> = {
   ArrowUp: 'A',
   ArrowDown: 'B',
   ArrowRight: 'C',
@@ -7,7 +7,7 @@ const CSI_FINAL_KEYS = {
   End: 'F',
 };
 
-const CSI_TILDE_KEYS = {
+const CSI_TILDE_KEYS: Record<string, number> = {
   Insert: 2,
   Delete: 3,
   PageUp: 5,
@@ -22,27 +22,27 @@ const CSI_TILDE_KEYS = {
   F12: 24,
 };
 
-const SS3_FUNCTION_KEYS = {
+const SS3_FUNCTION_KEYS: Record<string, string> = {
   F1: 'P',
   F2: 'Q',
   F3: 'R',
   F4: 'S',
 };
 
-function modifierParameter(event) {
+function modifierParameter(event: KeyboardEvent): number {
   return 1 + (event.shiftKey ? 1 : 0) + (event.altKey ? 2 : 0) + (event.ctrlKey ? 4 : 0);
 }
 
-function printableKey(event) {
+function printableKey(event: KeyboardEvent): string {
   if (event.key?.length === 1) return event.key;
   const letter = /^Key([A-Z])$/.exec(event.code || '');
-  if (letter) return event.shiftKey ? letter[1] : letter[1].toLowerCase();
+  if (letter) return event.shiftKey ? letter[1]! : letter[1]!.toLowerCase();
   const digit = /^Digit([0-9])$/.exec(event.code || '');
-  if (digit) return digit[1];
+  if (digit) return digit[1]!;
   return '';
 }
 
-function ctrlCharacter(key) {
+function ctrlCharacter(key: string): string {
   if (!key || key.length !== 1) return '';
   const lower = key.toLowerCase();
   const code = lower.charCodeAt(0);
@@ -56,7 +56,7 @@ function ctrlCharacter(key) {
   return '';
 }
 
-export function encodeTerminalShortcut(event) {
+export function encodeTerminalShortcut(event: KeyboardEvent): string {
   if (event.metaKey || (!event.ctrlKey && !event.altKey)) return '';
 
   const modifier = modifierParameter(event);

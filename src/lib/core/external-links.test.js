@@ -6,7 +6,7 @@ import {
   installExternalLinkHandler,
   isExternalWebUrl,
   openExternalUrl,
-} from './external-links.js';
+} from './external-links.ts';
 
 test('recognizes only absolute HTTP links as external web URLs', () => {
   assert.equal(isExternalWebUrl('https://example.com/path'), true);

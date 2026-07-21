@@ -14,9 +14,9 @@
 
 const IDLE_MS = 700;
 
-export function scrollFade(node, opts = {}) {
+export function scrollFade(node: HTMLElement, opts: { idle?: number } = {}) {
   const idle = typeof opts.idle === 'number' ? opts.idle : IDLE_MS;
-  let timer = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
   function onScroll() {
     node.classList.add('scrolling');
     if (timer) clearTimeout(timer);

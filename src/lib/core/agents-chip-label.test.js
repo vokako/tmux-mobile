@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { paneAgent, paneChipLabel } from './agents.js';
+import { paneAgent, paneChipLabel } from './agents.ts';
 
 test('recognized agent panes use icon-only chip labels', () => {
   const panes = [

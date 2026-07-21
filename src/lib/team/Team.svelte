@@ -16,10 +16,10 @@
   import CollabGraph from './CollabGraph.svelte';
   import DirPicker from './DirPicker.svelte';
   import { marked } from 'marked';
-  import '../core/markedSafeUrl.js';
+  import '../core/markedSafeUrl.ts';
   import { t } from '../core/i18n.svelte.js';
   import { layout } from '../app/layout.svelte.js';
-  import { scrollFade } from '../core/scrollFade.js';
+  import { scrollFade } from '../core/scrollFade.ts';
   import {
     teamHistory, teamRoster, teamPost, teamStatus, teamStartTeam,
     teamCloseTeam, teamEmployees, teamTemplateSave, teamTemplateDelete,
@@ -31,7 +31,7 @@
   import { teamSessionOf } from '../core/team.svelte.js';
   import {
     pickActiveRoom, readStoredActiveRoom, writeStoredActiveRoom,
-  } from './team-selection.js';
+  } from './team-selection.ts';
 
   let {
     visible = false,

@@ -14,7 +14,9 @@ const MODIFIER_CODES = new Set([
   'MetaLeft', 'MetaRight', 'ShiftLeft', 'ShiftRight',
 ]);
 
-export function shortcutFromEvent(event) {
+export type ShortcutAction = keyof typeof SHORTCUT_DEFAULTS;
+
+export function shortcutFromEvent(event: KeyboardEvent): string {
   if (!event.code || MODIFIER_CODES.has(event.code)) return '';
   if (!event.metaKey && !event.ctrlKey && !event.altKey) return '';
   const parts = [];
@@ -26,7 +28,7 @@ export function shortcutFromEvent(event) {
   return parts.join('+');
 }
 
-export function shortcutLabel(value) {
+export function shortcutLabel(value: string | null | undefined): string {
   if (!value) return '—';
   return value
     .replace('Meta', '⌘')
@@ -38,14 +40,14 @@ export function shortcutLabel(value) {
     .replaceAll('+', '');
 }
 
-export function actionForShortcut(bindings, value) {
+export function actionForShortcut(bindings: Record<string, string>, value: string): string {
   if (!value) return '';
-  return Object.keys(SHORTCUT_DEFAULTS).find(action => bindings[action] === value) || '';
+  return (Object.keys(SHORTCUT_DEFAULTS) as ShortcutAction[]).find(action => bindings[action] === value) || '';
 }
 
-export function cycleItem(items, current, direction) {
+export function cycleItem<T>(items: T[], current: T, direction: number): T | null {
   if (!items.length) return null;
   const index = items.indexOf(current);
   const start = index >= 0 ? index : 0;
-  return items[(start + direction + items.length) % items.length];
+  return items[(start + direction + items.length) % items.length]!; // modulo keeps the index in range
 }

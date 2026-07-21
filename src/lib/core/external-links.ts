@@ -1,16 +1,22 @@
-function browserWindow() {
+type RuntimeOptions = {
+  windowRef?: Window | null;
+  loadTauriOpener?: () => Promise<{ openUrl: (url: string) => Promise<void> }>;
+};
+
+function browserWindow(): Window | null {
   return typeof window === 'undefined' ? null : window;
 }
 
-export function isExternalWebUrl(value) {
+export function isExternalWebUrl(value: unknown): value is string {
   return typeof value === 'string' && /^https?:\/\//i.test(value);
 }
 
-export function isTauriWindow(windowRef = browserWindow()) {
-  return !!(windowRef?.__TAURI__ || windowRef?.__TAURI_INTERNALS__);
+export function isTauriWindow(windowRef: Window | null = browserWindow()): boolean {
+  const w = windowRef as (Window & { __TAURI__?: unknown; __TAURI_INTERNALS__?: unknown }) | null;
+  return !!(w?.__TAURI__ || w?.__TAURI_INTERNALS__);
 }
 
-export function externalWebUrlFromAnchor(anchor) {
+export function externalWebUrlFromAnchor(anchor: HTMLAnchorElement | null | undefined): string | null {
   if (!anchor) return null;
 
   const rawHref = anchor.getAttribute?.('href');
@@ -22,10 +28,10 @@ export function externalWebUrlFromAnchor(anchor) {
   return isExternalWebUrl(anchor.href) ? anchor.href : null;
 }
 
-export async function openExternalUrl(url, {
+export async function openExternalUrl(url: string, {
   windowRef = browserWindow(),
   loadTauriOpener = () => import('@tauri-apps/plugin-opener'),
-} = {}) {
+}: RuntimeOptions = {}) {
   if (!isExternalWebUrl(url)) return false;
 
   if (isTauriWindow(windowRef)) {
@@ -39,10 +45,10 @@ export async function openExternalUrl(url, {
   return true;
 }
 
-export async function handleExternalLinkClick(event, runtime) {
+export async function handleExternalLinkClick(event: MouseEvent, runtime?: RuntimeOptions): Promise<boolean> {
   if (event.type === 'auxclick' && event.button !== 1) return false;
 
-  const anchor = event.target?.closest?.('a[href]');
+  const anchor = (event.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
   const url = externalWebUrlFromAnchor(anchor);
   if (!url) return false;
 
@@ -51,11 +57,11 @@ export async function handleExternalLinkClick(event, runtime) {
   return true;
 }
 
-export function installExternalLinkHandler(root, runtime) {
+export function installExternalLinkHandler(root: Document | HTMLElement | null | undefined, runtime?: RuntimeOptions): () => void {
   if (!root?.addEventListener) return () => {};
 
-  const onActivate = (event) => {
-    void handleExternalLinkClick(event, runtime).catch((error) => {
+  const onActivate = (event: Event) => {
+    void handleExternalLinkClick(event as MouseEvent, runtime).catch((error) => {
       console.error('Failed to open external link', error);
     });
   };

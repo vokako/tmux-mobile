@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { encodeTerminalShortcut } from './terminal-keyboard.js';
+import { encodeTerminalShortcut } from './terminal-keyboard.ts';
 
 function key(key, modifiers = {}) {
   return { key, code: '', metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...modifiers };

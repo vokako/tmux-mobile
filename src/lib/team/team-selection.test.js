@@ -5,7 +5,7 @@ import {
   pickActiveRoom,
   readStoredActiveRoom,
   writeStoredActiveRoom,
-} from './team-selection.js';
+} from './team-selection.ts';
 
 const teams = [{ room: 'alpha' }, { room: 'beta' }];
 
