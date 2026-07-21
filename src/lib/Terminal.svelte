@@ -380,6 +380,13 @@
 
   // Compute xterm row (1-based) + required padding for cursor placement.
   // Shared by full-rewrite and cursor-only paths to ensure they stay in sync.
+  // The written buffer must end at the pane's BOTTOM row: capture trims the
+  // pane's trailing blank rows (cursor.t), and without restoring them
+  // xterm's bottom-anchored viewport would show the tail of the CONTENT
+  // (scrollback history included) instead of the visible pane — a freshly
+  // cleared pane rendered with its prompt/cursor at the page bottom.
+  // Restoring them makes the viewport mirror the pane exactly: prompt at
+  // top, blanks below, history up in the scrollback.
   function computeCursorLayout(content, cursor, rows) {
     const N = countLines(content);
     const trailing = cursor.t || 0;
@@ -387,13 +394,12 @@
     const cursorLine = paneStart + cursor.y;
     const needAfter = Math.max(0, cursorLine + 1 - N);
     const contentLines = N + needAfter;
-    const topPadCount = contentLines < rows ? rows - contentLines : 0;
-    const totalWritten = topPadCount + contentLines;
+    const bottomPad = Math.max(0, paneStart + cursor.h - contentLines);
+    const totalWritten = contentLines + bottomPad;
     const sb = Math.max(0, totalWritten - rows);
     return {
-      row: topPadCount + cursorLine - sb + 1,
-      topPad: topPadCount > 0 ? '\n'.repeat(topPadCount) : '',
-      afterPad: needAfter > 0 ? '\n'.repeat(needAfter) : '',
+      row: cursorLine - sb + 1,
+      afterPad: needAfter + bottomPad > 0 ? '\n'.repeat(needAfter + bottomPad) : '',
     };
   }
 
@@ -461,10 +467,9 @@
     const atBottom = buf.viewportY >= buf.baseY;
     const prevViewport = buf.viewportY;
 
-    let cursorSeq = '', topPad = '', afterPad = '';
+    let cursorSeq = '', afterPad = '';
     if (cursor) {
       const layout = computeCursorLayout(content, cursor, term.rows);
-      topPad = layout.topPad;
       afterPad = layout.afterPad;
       if (layout.row > 0 && layout.row <= term.rows) {
         cursorSeq = `\x1b[${layout.row};${cursor.x + 1}H`;
@@ -484,14 +489,15 @@
       body += lines[i] + '\x1b[0m\x1b[K';
       if (i < lines.length - 1) body += '\n';
     }
-    // topPad / afterPad are sequences of '\n'; we add \x1b[K after each so
-    // any stale cells on those rows are wiped without flashing.
-    const padTop = topPad ? topPad.replace(/\n/g, '\x1b[0m\x1b[K\n') : '';
+    // afterPad is a sequence of '\n'; we add \x1b[K after each so any stale
+    // cells on those rows are wiped without flashing. After the body,
+    // erase-below (\x1b[0J) wipes rows a previous, taller frame painted —
+    // content is top-aligned, so everything below it must be blank.
     const padAft = afterPad ? afterPad.replace(/\n/g, '\x1b[0m\x1b[K\n') : '';
     // Synchronized Output (mode 2026): tell xterm to defer rendering until
     // the whole batch is parsed. Effectively wraps the entire frame in a
     // single render commit, avoiding any partial-paint glimpses.
-    term.write('\x1b[?2026h\x1b[?25l\x1b[H' + padTop + body + padAft + cursorSeq + '\x1b[?25h\x1b[?2026l', () => {
+    term.write('\x1b[?2026h\x1b[?25l\x1b[H' + body + padAft + '\x1b[0m\x1b[0J' + cursorSeq + '\x1b[?25h\x1b[?2026l', () => {
       if (!term || touchScrolling) return;
       if (atBottom) {
         term.scrollToBottom();
