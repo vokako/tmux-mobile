@@ -1,5 +1,5 @@
 <script>
-  import { subscribe, unsubscribe, addPaneOutputListener, removePaneOutputListener, addPaneClosedListener, removePaneClosedListener, sendCommand, sendKeys, listPanes, capturePane, resizePane, newWindow } from './ws.js';
+  import { subscribe, unsubscribe, addPaneOutputListener, removePaneOutputListener, addPaneClosedListener, removePaneClosedListener, sendCommand, sendKeys, pasteText, listPanes, capturePane, resizePane, newWindow } from './ws.js';
   import { Terminal } from '@xterm/xterm';
   import { WebLinksAddon } from '@xterm/addon-web-links';
   import ChatView from './ChatView.svelte';
@@ -600,19 +600,24 @@
     let isPasting = false;
     let isComposing = false;
     let lastInputComposing = false; // per-event composition signal (see input listener)
+    let onTextInsert = null;
     {
       // Desktop included: printable keys are routed through the textarea
       // (see attachCustomKeyEventHandler), so paste/composition tracking and
       // the force-clear below apply on every platform.
       const ta = termEl?.querySelector('.xterm-helper-textarea');
       if (ta) {
+        // Capture phase: xterm's own paste handler is registered on this
+        // textarea BEFORE ours and emits onData SYNCHRONOUSLY from inside
+        // it — a same-phase listener would set the flag after onData
+        // already ran and the paste would be misrouted as keystrokes.
         ta.addEventListener('paste', () => {
           isPasting = true;
           // Safety reset: if onData never fires (xterm swallowed it, or paste
           // produced no data), the flag would persist and misclassify the
           // next keystroke as paste.
           setTimeout(() => { isPasting = false; }, 200);
-        });
+        }, { capture: true });
         ta.addEventListener('compositionstart', () => { isComposing = true; });
         // Also reset lastInputComposing: Chromium's commit order is
         // input(insertCompositionText) → compositionend with no trailing input
@@ -632,19 +637,34 @@
           // via a plain insertText.
           lastInputComposing = !!(e.isComposing || (e.inputType || '').startsWith('insertComposition'));
           window.__dbg?.(`input: ta.input type=${e.inputType} composing=${lastInputComposing} val=${JSON.stringify(ta.value).slice(0,30)} focused=${document.activeElement === ta} locked=${kbLocked}`);
-          // Forward plain text insertions ourselves: printable keydowns are
-          // handed back to the browser (see attachCustomKeyEventHandler) so
-          // CJK IMEs can convert punctuation, but xterm v6 IGNORES
-          // non-composition insertText events — without this, plain typing
-          // would pile up silently in the hidden textarea. e.data carries
-          // the IME-converted text (， 。). Composition input stays with
-          // xterm's CompositionHelper (→ onData): skip while EITHER
-          // composition signal is set (Chromium commits as
-          // insertCompositionText, WebKit as insertFromComposition — both
-          // filtered by inputType — but an IME that commits via plain
-          // insertText before compositionend must not be sent twice).
-          // Paste stays with xterm's paste handler (insertFromPaste).
-          if (e.inputType === 'insertText' && e.data && !lastInputComposing && !isComposing) {
+        });
+        // Forward plain text insertions ourselves: printable keydowns are
+        // handed back to the browser (see attachCustomKeyEventHandler) so
+        // CJK IMEs can convert punctuation. xterm v6 handles insertText
+        // only SOMETIMES (`!e.composed || !_keyDownSeen` — i.e. exactly the
+        // no-keydown IME commits WKWebView produces for CJK punctuation),
+        // so leaving both handlers live sent those characters TWICE. This
+        // listener sits on termEl in the CAPTURE phase — parent capture
+        // runs before the textarea target listeners — and claims the event
+        // with stopImmediatePropagation so xterm never sees it: exactly ONE
+        // forwarder for every non-composition insertText, on every engine.
+        // e.data carries the IME-converted text (， 。). Composition input
+        // stays with xterm's CompositionHelper (→ onData): skip while
+        // EITHER composition signal is set (Chromium commits as
+        // insertCompositionText, WebKit as insertFromComposition — both
+        // filtered by inputType — but an IME that commits via plain
+        // insertText before compositionend must not be sent twice).
+        // Paste stays with xterm's paste handler (insertFromPaste).
+        // Named + registered with capture on termEl (which survives pane
+        // switches): removed in the effect cleanup below, like
+        // onHardwareKeydown, so re-runs don't stack forwarders.
+        onTextInsert = (e) => {
+          if (e.target !== ta) return;
+          const composing = !!(e.isComposing || (e.inputType || '').startsWith('insertComposition'));
+          if (e.inputType === 'insertText' && e.data && !composing && !isComposing) {
+            e.stopImmediatePropagation();
+            lastInputComposing = false;
+            window.__dbg?.(`input: forward insertText ${JSON.stringify(e.data).slice(0,20)}`);
             ta.value = '';
             const ctrlByte = ctrlArmed && e.data.length === 1 && /[a-z]/i.test(e.data)
               ? String.fromCharCode(e.data.toLowerCase().charCodeAt(0) - 96)
@@ -652,7 +672,8 @@
             if (ctrlByte != null) ctrlArmed = false;
             enqueueKeys(ctrlByte ?? e.data, true);
           }
-        });
+        };
+        termEl.addEventListener('input', onTextInsert, { capture: true });
       }
     }
     term.onData(data => {
@@ -686,7 +707,25 @@
         ? String.fromCharCode(data.toLowerCase().charCodeAt(0) - 96)
         : null;
       if (ctrlByte != null) ctrlArmed = false;
-      isPasting = false;
+      if (isPasting) {
+        isPasting = false;
+        // Paste is NOT keystrokes: sent as keys, every line separator acts
+        // as an Enter press and each pasted line executes. Route it through
+        // tmux's paste buffer instead — `paste-buffer -p` wraps the block
+        // in bracketed-paste markers exactly when the pane app enabled
+        // mode ?2004 (shells, agent TUIs), matching what a real terminal
+        // emits; legacy apps still get the raw text. xterm has already
+        // normalized paste line endings to \r, same as a real terminal.
+        pasteText(target, data)
+          .then(noteSendSuccess)
+          .catch((e) => {
+            // Pre-paste_text server (-32601 method-not-found): fall back to
+            // the old keystroke path rather than dropping the paste.
+            if (e.code === -32601) { enqueueKeys(data, true); return; }
+            noteSendFailure('paste');
+          });
+        return;
+      }
       enqueueKeys(ctrlByte ?? data, true);
     });
     // Plain printable keys must go through the browser's input pipeline
@@ -1698,6 +1737,7 @@
       termEl.removeEventListener('touchend', onTouchEnd);
       termEl.removeEventListener('touchcancel', onTouchCancel);
       termEl.removeEventListener('keydown', onHardwareKeydown, { capture: true });
+      if (onTextInsert) termEl.removeEventListener('input', onTextInsert, { capture: true });
       if (focusTerm) termEl.removeEventListener('mousedown', focusTerm);
       // Server's resize_tracker auto-restores this window via `resize-window -A` on WS disconnect
       unsubscribe(target);

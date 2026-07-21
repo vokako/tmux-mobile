@@ -587,6 +587,50 @@ pub fn send_command(target: &str, command: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Paste text into a pane the way a real terminal does.
+///
+/// send_keys treats every byte as keystrokes, so newlines in a multi-line
+/// paste arrive as Enter presses and each line executes. Real terminals use
+/// bracketed paste: when the pane app enabled mode ?2004, the block is
+/// wrapped in \x1b[200~ … \x1b[201~ and treated as ONE paste. tmux tracks
+/// that state per pane, and `paste-buffer -p` inserts the wrapper exactly
+/// when the app asked for it — legacy apps get the raw text, unchanged.
+/// The text goes through `load-buffer -` (stdin) into a dedicated named
+/// buffer so user buffers are untouched; -d deletes it after pasting.
+pub fn paste_text(target: &str, text: &str) -> Result<(), String> {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let mut cmd = Command::new(find_tmux());
+    if let Some(socket) = get_socket() {
+        cmd.args(["-S", &socket]);
+    }
+    let mut child = cmd
+        .args(["load-buffer", "-b", "tmm-paste", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to run tmux: {}", e))?;
+    child
+        .stdin
+        .take()
+        .ok_or("tmux stdin unavailable")?
+        .write_all(text.as_bytes())
+        .map_err(|e| format!("Failed to write paste buffer: {}", e))?;
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("Failed to run tmux: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "tmux error: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    run_tmux(&["paste-buffer", "-p", "-d", "-b", "tmm-paste", "-t", target])?;
+    Ok(())
+}
+
 pub fn home_dir() -> String {
     dirs::home_dir()
         .map(|h| h.to_string_lossy().to_string())

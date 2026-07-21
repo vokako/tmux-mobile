@@ -169,4 +169,52 @@ mod tests {
         cleanup();
         let _ = std::fs::remove_file("/tmp/tmm_kbprobe_test.py");
     }
+
+    #[test]
+    fn t09_paste_text_brackets_iff_pane_requested() {
+        // paste_text must reproduce real terminal paste semantics: apps that
+        // enabled bracketed paste (mode ?2004) receive \x1b[200~ … \x1b[201~
+        // around the block (so pasted newlines are NOT executed line by
+        // line); apps that didn't get the raw text.
+        cleanup();
+        let probe = "import sys, tty, os, time\n\
+                     tty.setraw(0)\n\
+                     time.sleep(0.3)\n\
+                     if os.environ.get('BRACKET'): sys.stdout.write('\\x1b[?2004h'); sys.stdout.flush()\n\
+                     sys.stdout.write('PROBE_READY\\r\\n'); sys.stdout.flush()\n\
+                     [sys.stdout.write('GOT ' + repr(os.read(0, 256)) + '\\r\\n') or sys.stdout.flush() for _ in iter(int, 1)]";
+        std::fs::write("/tmp/tmm_pasteprobe_test.py", probe).unwrap();
+
+        // 1) bracketed-paste pane
+        std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", TEST_SESSION, "BRACKET=1 python3 /tmp/tmm_pasteprobe_test.py"])
+            .status()
+            .unwrap();
+        thread::sleep(Duration::from_millis(1500));
+        tmux::paste_text(TEST_SESSION, "line1\rline2\rline3").unwrap();
+        thread::sleep(Duration::from_millis(600));
+        let output = tmux::capture_pane(TEST_SESSION, Some(50)).unwrap();
+        println!("bracketed probe:\n{}", output);
+        assert!(output.contains("\\x1b[200~"), "missing bracketed paste start marker");
+        assert!(output.contains("\\x1b[201~"), "missing bracketed paste end marker");
+        assert!(output.contains("line1\\rline2\\rline3") || (output.contains("line1") && output.contains("line3")),
+            "pasted body lost");
+        cleanup();
+
+        // 2) legacy pane (no ?2004): raw text, no markers
+        std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", TEST_SESSION, "python3 /tmp/tmm_pasteprobe_test.py"])
+            .status()
+            .unwrap();
+        thread::sleep(Duration::from_millis(1500));
+        tmux::paste_text(TEST_SESSION, "plain\rpaste").unwrap();
+        thread::sleep(Duration::from_millis(600));
+        let output = tmux::capture_pane(TEST_SESSION, Some(50)).unwrap();
+        println!("legacy probe:\n{}", output);
+        assert!(!output.contains("\\x1b[200~"), "legacy pane must not receive paste markers");
+        assert!(output.contains("plain") && output.contains("paste"), "pasted body lost");
+        println!("✅ paste_text brackets iff the pane requested it");
+        cleanup();
+        let _ = std::fs::remove_file("/tmp/tmm_pasteprobe_test.py");
+    }
 }

@@ -480,6 +480,21 @@ fn handle_request(req: &Request, token: &str) -> Response {
             }
         }
 
+        "paste_text" => {
+            let target = match require_str(p, "target") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            let text = match require_str(p, "text") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            match tmux::paste_text(target, text) {
+                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
+                Err(e) => Response::err(id, ERR_INTERNAL, e),
+            }
+        }
+
         "send_command" => {
             let target = match require_str(p, "target") {
                 Ok(s) => s,

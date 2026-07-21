@@ -45,6 +45,7 @@ JSON-RPC over WebSocket (`ws://` or `wss://`).
 |--------|--------|----------|
 | `capture_pane` | `target`, `lines?` | `{output}` with ANSI colors |
 | `send_keys` | `target`, `keys`, `literal` | OK |
+| `paste_text` | `target`, `text` | OK. Real-terminal paste semantics via tmux `load-buffer` + `paste-buffer -p`: bracketed-paste markers (`\x1b[200~…\x1b[201~`) are added exactly when the pane app enabled mode `?2004`, so pasted newlines are not executed line by line. |
 | `send_command` | `target`, `command` | OK |
 | `pane_command` | `target` | `{command}` string |
 | `resize_pane` | `target`, `cols`, `rows` | OK (auto-restores on disconnect) |
