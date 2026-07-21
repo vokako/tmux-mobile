@@ -1,0 +1,34 @@
+{
+  // TypeScript config for a gradual JS -> TS migration.
+  //
+  // Two consumers execute the same source files:
+  //   - Vite (app build): esbuild strips types, never type-checks
+  //   - node --test (unit tests): Node's native type stripping (>= 23.6)
+  // Both need EXPLICIT `.ts` extensions in relative imports — hence
+  // allowImportingTsExtensions (which in turn requires noEmit; Vite emits).
+  //
+  // erasableSyntaxOnly keeps us inside the subset Node can strip: no enums,
+  // no namespaces, no constructor parameter properties. Types only.
+  //
+  // Type-checking happens exclusively via `npm run check` (svelte-check),
+  // which covers .ts, .svelte.ts and .svelte files.
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    // Mixed codebase during migration: .ts may import not-yet-converted .js
+    // freely; unconverted .js is not type-checked (convert, then it counts).
+    "allowJs": true,
+    "checkJs": false,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "lib": ["esnext", "dom", "dom.iterable"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.js", "src/**/*.svelte"]
+}

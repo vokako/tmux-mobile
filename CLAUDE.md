@@ -18,7 +18,8 @@ npm run tauri:dev        # Desktop app + WS server (dev mode)
 npm run tauri:dev:release # Release-mode desktop app + WS server
 npm run build:mac        # macOS .app + .dmg
 npm run build:android    # Android APK (aarch64)
-npm test                 # Frontend unit tests (node --test, all src/lib/**/*.test.js)
+npm test                 # Frontend unit tests (node --test, all src/lib/**/*.test.{js,ts})
+npm run check            # svelte-check: type-checks .ts/.svelte.ts/.svelte files
 cd src-tauri && cargo run --bin server   # Standalone WS server
 cd src-tauri && cargo test -- --test-threads=1   # Tests (needs tmux running)
 ```
@@ -67,6 +68,7 @@ changing the project default:
 - [Unresolved Issues](docs/unresolved.md)
 
 ## Key Patterns
+- **TypeScript migration (in progress)**: new modules are written in TS; existing `.js` is converted file-by-file (rename + types, no logic changes in the same commit). Rules: relative imports use **explicit `.ts` extensions** (the same files are executed by both Vite and `node --test`, which does native type stripping — needs Node ≥ 23.6); **erasable syntax only** (no enums/namespaces — `erasableSyntaxOnly` enforces this); type-checking is `npm run check` only (Vite/node never type-check). svelte-check requires TypeScript 5.x (7.x is the incompatible Go rewrite — both are pinned exact).
 - **Platform checks**: `isTauri` (Tauri vs browser), `isAndroid` (Android vs macOS). Always check `isAndroid` first.
 - **Tauri plugins**: Always `await tauriReady` before use. Dynamic imports gated behind platform checks.
 - **Android file opening**: Use `AndroidFileOpener` JS interface, NEVER `tauri-plugin-opener`.
