@@ -123,9 +123,9 @@
     docs. Extraction plan: docs/design-docs/pages/terminal-gestures.md
     already specifies the state machine; add tests for pure geometry first,
     then extract behind an interface. Requires on-device regression.
-  - `Files.svelte` (2150 lines): ~7 subsystems in one component; the git
-    client (~15 fns) is cleanly extractable to `git.js` + `GitPanel.svelte`;
-    bookmarks/recents/preview likewise.
+  - `Files.svelte`: ~~the git client~~ — done 2026-07, extracted to
+    `files/GitPanel.svelte` (Files 2150 -> 1860 lines). Still worthwhile:
+    bookmarks/recents modules and the preview renderers (PDF/CSV/HTML/MD).
   - `App.svelte` (1488 lines): reconnect state machine (~12 fns + timers)
     should move to `app/connection.svelte.js` with tests. ~~Global design
     tokens + resets in one component's style block~~ — done 2026-07: moved
