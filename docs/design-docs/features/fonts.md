@@ -127,9 +127,21 @@ state and the stepper triggers xterm's deferred re-fit. Desktop Cmd/Ctrl `+`,
 WebView interface scale instead.
 
 Line spacing is a per-device preference stored as `tmux_line_height` and
-clamped to `0.60`–`1.60`. xterm 6 normally rejects values below `1.00`, so the
-Vite config applies a signature-guarded transform that changes only the
-line-height lower bound (the tab-width bound remains unchanged).
+clamped to `0.40`–`1.60` (`LINE_HEIGHT_MIN`/`MAX` in
+`terminal-prefs.svelte.js`). xterm 6 normally rejects values below `1.00`, so
+the Vite config applies a signature-guarded transform that changes only the
+line-height lower bound (the tab-width bound remains unchanged); the patched
+bound must stay in sync with `LINE_HEIGHT_MIN`, or sub-minimum values throw in
+xterm's option setter and the slider silently does nothing below `1.00`.
+
+**Trap: Vite dep pre-bundling bypasses plugin transforms.** In dev, optimized
+deps are served from `node_modules/.vite/deps/` as esbuild output that never
+went through the plugin, so the patch only took effect in `npm run build` while
+`npm run dev` / `npm run tauri:dev` kept the stock `lineHeight >= 1` check.
+`@xterm/xterm` is therefore excluded via `optimizeDeps.exclude` (safe: the
+addons only type-import the core). Excluded deps get a `?v=<hash>` query on
+their module id in dev, so the transform strips the query before matching.
+
 `terminal-prefs.svelte.js` owns the reactive value;
 every `Terminal.svelte` instance reads it when xterm is created and again in
 the existing font-metrics effect. This makes the setting apply immediately to

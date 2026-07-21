@@ -3,7 +3,7 @@
   import { t, i18n, setLocale } from './i18n.svelte.js';
   import { layout } from './layout.svelte.js';
   import { fonts } from './fonts.svelte.js';
-  import { terminalPrefs } from './terminal-prefs.svelte.js';
+  import { terminalPrefs, LINE_HEIGHT_MIN, LINE_HEIGHT_MAX } from './terminal-prefs.svelte.js';
   import { SHORTCUT_DEFAULTS, shortcutFromEvent, shortcutLabel } from './shortcuts.js';
   import { shortcuts } from './shortcuts.svelte.js';
   import { agentHooksInstall, agentHooksRemove, agentHooksStatus } from './ws.js';
@@ -194,7 +194,7 @@
           <div class="setting-row">
             <div><strong>{t('lineHeight')}</strong><small>{t('lineHeightHint')}</small></div>
             <div class="range-wrap">
-              <input type="range" min="0.6" max="1.6" step="0.05" value={terminalPrefs.lineHeight} oninput={(e) => setLineHeight(+e.currentTarget.value)} />
+              <input type="range" min={LINE_HEIGHT_MIN} max={LINE_HEIGHT_MAX} step="0.05" value={terminalPrefs.lineHeight} oninput={(e) => setLineHeight(+e.currentTarget.value)} />
               <span>{terminalPrefs.lineHeight.toFixed(2)}</span>
               <button class="reset" onclick={() => setLineHeight(1)}>↺</button>
             </div>

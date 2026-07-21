@@ -23,7 +23,7 @@ rounded shape, muted idle state, and accent active state. Desktop Settings uses 
 - Desktop interface scale (60%–180%, persisted to localStorage `tmux_ui_zoom`; Cmd/Ctrl `+`, `-`, and `0` use the same value)
 - Terminal font size control (+/−), independent from interface scale
 - Terminal font family (editable list of common locally-installed fonts; accepts another family typed by the user; only a valid local font is applied and persisted to localStorage `tmux_font`; empty = system default)
-- Terminal line spacing (0.60–1.60, persisted to localStorage `tmux_line_height`; applies live to every normal, split, and Team terminal)
+- Terminal line spacing (0.40–1.60, persisted to localStorage `tmux_line_height`; applies live to every normal, split, and Team terminal)
 - Line-spacing slider uses the themed surface track and accent thumb, never the browser's native white track
 - Debug toggle lives in the top chip bar and uses a solid accent fill while enabled; the floating log panel is draggable from its header on touch and desktop pointer input, clamps to the visible viewport, and remembers its last position
 - Connection includes Agent notification hook status and additive install/remove actions for Claude Code, Codex, and Kiro `kiro_default`; Codex may require one-time trust from `/hooks`
