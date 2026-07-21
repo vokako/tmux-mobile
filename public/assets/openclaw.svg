@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 16 16" aria-label="Pixel lobster">
-  <rect width="16" height="16" fill="none"/>
+  <circle cx="8" cy="8" r="8" fill="#fff"/><circle cx="8" cy="8" r="7.65" fill="none" stroke="#000" stroke-opacity=".12" stroke-width=".7"/><g transform="translate(8 8) scale(.72) translate(-8 -8)">
   
   <g fill="#3a0a0d">
     <rect x="1" y="5" width="1" height="3"/>
@@ -57,4 +57,4 @@
     <rect x="6" y="4" width="1" height="1"/>
     <rect x="9" y="4" width="1" height="1"/>
   </g>
-</svg>
+</g></svg>

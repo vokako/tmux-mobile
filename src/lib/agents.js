@@ -1,7 +1,12 @@
 // Known coding-agent CLIs that tmux-mobile treats as "AI sessions".
-// Adding a new agent = one entry here + the matching icon in /assets/
-// (don't hand-draw: @lobehub/icons-static-svg publishes MIT-licensed brand
-// SVGs — download, recolor if needed, drop in).
+// Adding a new agent = one entry here + the matching icon in /assets/.
+// Icons are lobehub-style AVATARS (visible on light AND dark themes):
+// @lobehub/icons is React-only and its static packages ship no avatar
+// files, so we compose them ourselves as static SVGs — circle filled with
+// the brand's AVATAR_BACKGROUND + the official mark scaled by
+// AVATAR_ICON_MULTIPLE (constants from @lobehub/icons es/<Name>/style.js,
+// MIT). White-background avatars get a hairline ring so they read on
+// light surfaces.
 //
 // Detection is intentionally loose (case-insensitive substring) because tmux's
 // pane_current_command reports the short process name (e.g. "kiro-cli-chat")
@@ -20,7 +25,7 @@ export const AGENTS = [
   // "Claude Code" only when the shell doesn't overwrite the title (many
   // setups pin it to the hostname). Detect EITHER the word or a bare
   // semver-looking process name at the start of the command field.
-  { tag: 'Claude',   match: /claude|^\d+\.\d+\.\d+(?:\s|$)/i, icon: '/assets/claude.svg', iconSize: 16 },
+  { tag: 'Claude',   match: /claude|^\d+\.\d+\.\d+(?:\s|$)/i, icon: '/assets/claude.svg', iconSize: 14 },
   { tag: 'Codex',    match: /codex/i,    icon: '/assets/codex.svg',    iconSize: 14 },
   { tag: 'OpenClaw', match: /openclaw/i, icon: '/assets/openclaw.svg', iconSize: 14 },
 ];

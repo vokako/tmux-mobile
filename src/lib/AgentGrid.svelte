@@ -103,7 +103,7 @@
         {#if cell.collab}
           <Icon name="collab" size={11} />
         {:else if agent}
-          <img class="ag-icon" class:claude={agent.tag === 'Claude'} src={agent.icon} alt={agent.tag} />
+          <img class="ag-icon" src={agent.icon} alt={agent.tag} />
         {:else}
           <Icon name="bot" size={11} />
         {/if}
@@ -149,7 +149,7 @@
         <Icon name="collab" size={12} />
       {:else if expandedCell.pane}
         {@const a2 = paneAgent(expandedCell.pane)}
-        {#if a2}<img class="ag-icon" class:claude={a2.tag === 'Claude'} src={a2.icon} alt={a2.tag} />{:else}<Icon name="bot" size={12} />{/if}
+        {#if a2}<img class="ag-icon" src={a2.icon} alt={a2.tag} />{:else}<Icon name="bot" size={12} />{/if}
       {:else}
         <Icon name="bot" size={12} />
       {/if}
@@ -236,7 +236,6 @@
     overflow: hidden;
   }
   .ag-icon { width: 13px; height: 13px; flex-shrink: 0; }
-  .ag-icon.claude { width: 15px; height: 15px; }
   .ag-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ag-pending { color: var(--text3); }
   /* Flex column so the embedded <Terminal> (.terminal { flex: 1 }) is

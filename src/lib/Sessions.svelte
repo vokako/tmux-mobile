@@ -434,7 +434,7 @@
               <span class="session-agents" aria-label={sum.agents.map(item => `${item.agent.tag}${item.count > 1 ? ` ×${item.count}` : ''}`).join(', ')}>
                 {#each sum.agents as item (item.agent.tag)}
                   <span class="session-agent-icon">
-                    <img class="ai-icon" class:claude={item.agent.tag === 'Claude'} src={item.agent.icon} alt={item.agent.tag} />
+                    <img class="ai-icon" src={item.agent.icon} alt={item.agent.tag} />
                     {#if item.count > 1}<span class="agent-count">×{item.count}</span>{/if}
                   </span>
                 {/each}
@@ -486,7 +486,7 @@
                 {/if}
                 {#if paneNotice}<span class="attention-dot" aria-label="Agent needs attention"></span>{/if}
                 {#if pAi}
-                  <img class="pane-ai-icon" class:claude={pAi === 'Claude'} src={aiIcon(pAi)} alt={pAi} />
+                  <img class="pane-ai-icon" src={aiIcon(pAi)} alt={pAi} />
                 {/if}
               </button>
               <button
@@ -842,7 +842,6 @@
     width: 13px; height: 13px;
     flex-shrink: 0;
   }
-  .meta .ai-icon.claude { width: 15px; height: 15px; }
   .session-agents {
     display: inline-flex;
     align-items: center;
@@ -985,7 +984,6 @@
     width: 13px; height: 13px;
     flex-shrink: 0;
   }
-  .pane-ai-icon.claude { width: 15px; height: 15px; }
   .pane-kill {
     padding: 6px;
     border: none;
