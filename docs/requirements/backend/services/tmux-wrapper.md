@@ -34,4 +34,9 @@ Rust wrapper around tmux CLI commands. File: `src-tauri/src/tmux.rs`
 - Custom socket path support via `-S` flag (global `RwLock`, set/get via `set_socket`/`get_socket`)
 - Scrollback lines configurable via `set_scrollback`/`get_scrollback` (default 500, atomic)
 - tmux binary auto-detected: checks `/opt/homebrew/bin/tmux`, `/usr/local/bin/tmux`, then PATH
-- CJK double-width wrapping fix: detects lines ending before pane width due to wide chars
+- CJK double-width wrapping fix (`join_unflagged_wraps`): tmux `-J` misses a
+  wrap only when a 2-cell char didn't fit in the last column (column left
+  empty, WRAPPED flag not set). Join strictly on that signature: visible
+  width == pane_width − 1 AND the next line starts with a wide char. Never
+  join exactly-full lines — full-width TUI box borders (kimi) are complete
+  rows, and joining them shears every following row.

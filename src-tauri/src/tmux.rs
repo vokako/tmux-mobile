@@ -418,6 +418,19 @@ pub fn capture_pane_with_width(
         return Ok((trimmed.to_string(), trailing_empty));
     }
 
+    Ok((join_unflagged_wraps(trimmed, width), trailing_empty))
+}
+
+/// Join wrapped lines that tmux -J missed.
+///
+/// tmux -J already joins wraps that carry the WRAPPED flag. The one case it
+/// misses: a double-width char didn't fit in the last column, so tmux left
+/// that column empty WITHOUT setting the flag. Signature: visible width ==
+/// pane_width - 1 AND the next line starts with the wide char that didn't
+/// fit. Anything else — including exactly-full lines — is a complete row;
+/// joining it shifts every following row (kimi's full-width box borders
+/// swallowed their next line and the whole screen sheared).
+pub fn join_unflagged_wraps(trimmed: &str, width: usize) -> String {
     let raw_lines: Vec<&str> = trimmed.split('\n').collect();
     let mut result = String::with_capacity(trimmed.len());
     let mut i = 0;
@@ -427,8 +440,9 @@ pub fn capture_pane_with_width(
         }
         result.push_str(raw_lines[i]);
         while i + 1 < raw_lines.len() {
-            let vlen = visible_width(raw_lines[i]);
-            if (vlen == width || vlen == width - 1) && !raw_lines[i + 1].is_empty() {
+            if visible_width(raw_lines[i]) == width.saturating_sub(1)
+                && first_visible_char(raw_lines[i + 1]).is_some_and(is_wide_char)
+            {
                 i += 1;
                 result.push_str(raw_lines[i]);
             } else {
@@ -437,7 +451,25 @@ pub fn capture_pane_with_width(
         }
         i += 1;
     }
-    Ok((result, trailing_empty))
+    result
+}
+
+/// First visible (non-escape) character of a line, skipping ANSI escapes
+/// with the same rules as `visible_width`.
+fn first_visible_char(s: &str) -> Option<char> {
+    let mut in_esc = false;
+    for c in s.chars() {
+        if in_esc {
+            if c.is_ascii_alphabetic() {
+                in_esc = false;
+            }
+        } else if c == '\x1b' {
+            in_esc = true;
+        } else {
+            return Some(c);
+        }
+    }
+    None
 }
 
 /// Count visible character width, skipping ANSI escapes, counting CJK as 2.
@@ -804,5 +836,54 @@ mod tests {
         let long = format!("node {}", "x".repeat(2000));
         let t = table(&[(100, 1, "-zsh"), (200, 100, long.as_str())]);
         assert!(descendant_cmd(&t, 100).len() <= 200);
+    }
+
+    // ── join_unflagged_wraps ──────────────────────────────────────────
+
+    #[test]
+    fn full_width_box_border_is_not_joined() {
+        // kimi-style TUI frame: the border lines fill the pane exactly.
+        // They are complete rows — joining them sheared the whole screen.
+        let width = 10;
+        let content = "╭────────╮\n│ hello  │\n╰────────╯";
+        assert_eq!(visible_width("╭────────╮"), width);
+        assert_eq!(join_unflagged_wraps(content, width), content);
+    }
+
+    #[test]
+    fn unflagged_cjk_wrap_is_joined() {
+        // 4 CJK chars = 8 cells; width 9 leaves the last column empty and
+        // tmux forgets the WRAPPED flag. Next line starts with the wide
+        // char that didn't fit → join.
+        let content = "中文宽字\n符";
+        assert_eq!(visible_width("中文宽字"), 8);
+        assert_eq!(join_unflagged_wraps(content, 9), "中文宽字符");
+    }
+
+    #[test]
+    fn width_minus_one_text_line_is_not_joined() {
+        // A 9-cell ASCII line at width 10 is just a complete short row;
+        // the next line starting with ASCII must stay separate.
+        let content = "abcdefghi\njklmnop";
+        assert_eq!(join_unflagged_wraps(content, 10), content);
+    }
+
+    #[test]
+    fn chained_unflagged_wraps_join_across_segments() {
+        // Each captured segment is width-1 wide and the continuation
+        // starts wide → the chain collapses into one logical line.
+        let content = "中中中中\n文文文文\n字";
+        assert_eq!(join_unflagged_wraps(content, 9), "中中中中文文文文字");
+    }
+
+    #[test]
+    fn ansi_escapes_are_ignored_when_matching() {
+        // SGR-wrapped border: escapes must not count toward width and the
+        // continuation check must skip escapes to find the first char.
+        let border = "\x1b[31m╭────────╮\x1b[0m";
+        let content = format!("{}\n\x1b[31m│ x      │\x1b[0m", border);
+        assert_eq!(join_unflagged_wraps(&content, 10), content);
+        let wrap = "\x1b[31m中文宽字\x1b[0m\n\x1b[31m符\x1b[0m";
+        assert_eq!(join_unflagged_wraps(wrap, 9), "\x1b[31m中文宽字\x1b[0m\x1b[31m符\x1b[0m");
     }
 }
