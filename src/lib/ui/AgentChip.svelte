@@ -15,20 +15,32 @@
   Slots: takes either an agent entry (renders icon) or a `label` prop
   (renders monospace text). Agents take priority.
 -->
-<script>
+<script lang="ts">
   import Icon from './Icon.svelte';
+  import type { Agent } from '../core/agents.ts';
 
   let {
-    agent = null,         // Agent entry from agents.js: { tag, icon, iconSize }
-    agents = [],          // Aggregated entries: [{ agent, count }]
+    agent = null,         // Agent entry from agents.ts
+    agents = [],          // Aggregated entries
     label = '',           // Monospace text fallback (command name, session name)
-    variant = 'default',  // 'default' | 'active' | 'add'
+    variant = 'default',
     iconName = '',        // Lucide icon name, used by 'add' and collapsed chip
-    chevron = '',         // '' | 'up' | 'down' — small indicator appended at end
+    chevron = '',         // Small indicator appended at end
     title = '',           // HTML title attribute
     attention = false,    // unread agent lifecycle notification
     urgent = false,       // permission/input/failure requires stronger color
     onclick = () => {},
+  }: {
+    agent?: Agent | null;
+    agents?: { agent: Agent; count: number }[];
+    label?: string;
+    variant?: 'default' | 'active' | 'add';
+    iconName?: string;
+    chevron?: '' | 'up' | 'down';
+    title?: string;
+    attention?: boolean;
+    urgent?: boolean;
+    onclick?: (e: MouseEvent) => void;
   } = $props();
 </script>
 

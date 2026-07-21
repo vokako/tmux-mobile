@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   // Desktop split-screen: tiles N independent Terminal instances in a CSS
   // grid, each bound to any session:window.pane. Mounted only when
   // App.svelte decides split is active (desktop + wide). Each cell owns its
@@ -8,24 +8,36 @@
   import PanePicker from './PanePicker.svelte';
   import Icon from '../ui/Icon.svelte';
   import { t } from '../core/i18n.svelte.ts';
+  import type { TmuxPane } from '../core/ws.ts';
+
+  export interface SplitCell { id: number; target: string; session: string; command: string }
 
   let {
-    cells,            // [{ id, target, session, command }]
+    cells,            // one entry per grid cell
     layout,           // 2 | 3 | 4 | 6
     activeCellId,
     fontSize = 14,
-    onActivate = () => {},   // (cellId)
-    onAssign = () => {},     // (cellId, target, session, command)
-    onCloseCell = () => {},  // (cellId)
-    onPaneExit = () => {},   // (cellId)
+    onActivate = () => {},
+    onAssign = () => {},
+    onCloseCell = () => {},
+    onPaneExit = () => {},
+  }: {
+    cells: SplitCell[];
+    layout: number;
+    activeCellId: number;
+    fontSize?: number;
+    onActivate?: (cellId: number) => void;
+    onAssign?: (cellId: number, target: string, session: string, command: string) => void;
+    onCloseCell?: (cellId: number) => void;
+    onPaneExit?: (cellId: number) => void;
   } = $props();
 
   // Which cell's pane picker is open (null = none). PanePicker (shared with
   // Terminal's single-pane switcher) fetches + renders the list.
-  let pickerCellId = $state(null);
-  function openPicker(cellId) { pickerCellId = cellId; }
+  let pickerCellId = $state<number | null>(null);
+  function openPicker(cellId: number) { pickerCellId = cellId; }
   function closePicker() { pickerCellId = null; }
-  function pickPane(cellId, p) {
+  function pickPane(cellId: number, p: TmuxPane) {
     onAssign(cellId, `${p.session}:${p.window}.${p.pane}`, p.session, p.current_command);
     closePicker();
   }
@@ -52,7 +64,7 @@
               embedded={true}
               active={cell.id === activeCellId}
               {fontSize}
-              onSwitchPane={(t2, cmd) => onAssign(cell.id, t2, t2.split(':')[0], cmd)}
+              onSwitchPane={(t2: string, cmd: string) => onAssign(cell.id, t2, t2.split(':')[0] ?? '', cmd)}
               onPaneExit={() => onPaneExit(cell.id)}
               onClose={() => onCloseCell(cell.id)}
             />
@@ -68,7 +80,7 @@
       {#if pickerCellId === cell.id}
         <PanePicker
           currentTarget={cell.target}
-          onPick={(p) => pickPane(cell.id, p)}
+          onPick={(p: TmuxPane) => pickPane(cell.id, p)}
           onClose={closePicker}
         />
       {/if}

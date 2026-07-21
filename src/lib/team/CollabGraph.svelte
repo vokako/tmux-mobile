@@ -1,11 +1,15 @@
-<script>
+<script lang="ts">
   // Ring collaboration graph: every participant (the human + live agents) sits on
   // a circle, coloured by work status. Each new directed message lays down an arc
   // from sender → addressee that slowly fades over ~1 min, while a glowing point
   // streams along it. Driven by `agents` (roster) and `event` (latest message).
   import { t } from '../core/i18n.svelte.ts';
 
-  let { agents = [], event = null } = $props();
+  type GraphAgent = { name: string; status?: string };
+  type GraphEvent = { id?: string | number; kind?: string; from?: string; body?: string };
+  type Node = { name: string; status: string; x: number; y: number; lx: number; ly: number; anchor: string };
+
+  let { agents = [], event = null }: { agents?: GraphAgent[]; event?: GraphEvent | null } = $props();
 
   const CX = 100, CY = 100, R = 58, LR = 73;
   // Connection decay is COUNT-based: the glowing dot makes ARC_PASSES trips along
@@ -33,30 +37,30 @@
     });
   });
 
-  function nodeByName(name) {
+  function nodeByName(name: string | undefined | null): Node | null {
     if (!name) return null;
     const lc = name.toLowerCase();
     return nodes.find(nd => nd.name.toLowerCase() === lc) || null;
   }
 
-  let arcs = $state([]);
-  let pulses = $state(new Set());
+  let arcs = $state<{ id: number; d: string }[]>([]);
+  let pulses = $state<Set<string>>(new Set());
   let seq = 0;
 
-  function pulse(name) {
+  function pulse(name: string | undefined) {
     const nd = nodeByName(name);
     if (!nd) return;
     const next = new Set(pulses); next.add(nd.name); pulses = next;
     setTimeout(() => { const s = new Set(pulses); s.delete(nd.name); pulses = s; }, 700);
   }
 
-  function arcPath(a, b) {
+  function arcPath(a: Node, b: Node): string {
     const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
     const qx = mx + (CX - mx) * 0.5, qy = my + (CY - my) * 0.5;
     return `M${a.x.toFixed(1)} ${a.y.toFixed(1)} Q${qx.toFixed(1)} ${qy.toFixed(1)} ${b.x.toFixed(1)} ${b.y.toFixed(1)}`;
   }
 
-  function spawnArc(fromName, toName) {
+  function spawnArc(fromName: string | undefined, toName: string) {
     const a = nodeByName(fromName), b = nodeByName(toName);
     if (!a || !b || a.name === b.name) return;
     const id = ++seq;
@@ -65,15 +69,15 @@
     setTimeout(() => { arcs = arcs.filter(x => x.id !== id); }, ARC_LIFE_MS);
   }
 
-  function targetsOf(body) {
-    const out = [];
+  function targetsOf(body: string | undefined) {
+    const out: string[] = [];
     const re = /@([a-z0-9_*-]+)/gi;
-    let m;
-    while ((m = re.exec(body || '')) !== null) out.push(m[1].toLowerCase());
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(body || '')) !== null) out.push(m[1]!.toLowerCase());
     return out;
   }
 
-  let seenId = null;
+  let seenId: string | number | null = null;
   $effect(() => {
     const m = event;
     if (!m || !m.id || m.id === seenId) return;

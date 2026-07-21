@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   // Inline directory browser, extracted from the Sessions new-session picker so
   // the Team "new team" workspace field gets the same folder-browse UX.
   // Breadcrumb path + up button + folder list; choosing a folder navigates into
@@ -7,18 +7,24 @@
   import { t } from '../core/i18n.svelte.ts';
   import { fsList, fsMkdir } from '../core/ws.ts';
 
+  type DirEntry = { name: string; type: string; path: string };
+
   let {
     start = '~',           // initial directory to open at
-    onPick = () => {},     // (path) — confirmed directory (✓ button)
-    onNavigate = () => {}, // (path) — fires on every browse step, so the
-                           // caller's field tracks where the picker is even
-                           // before the user confirms with ✓
+    onPick = () => {},     // confirmed directory (✓ button)
+    onNavigate = () => {}, // fires on every browse step, so the caller's field
+                           // tracks where the picker is before the user confirms
     onClose = () => {},
+  }: {
+    start?: string;
+    onPick?: (path: string) => void;
+    onNavigate?: (path: string) => void;
+    onClose?: () => void;
   } = $props();
 
   let path = $state('');
-  let entries = $state([]);
-  let pathEl = $state(null);
+  let entries = $state<DirEntry[]>([]);
+  let pathEl = $state<HTMLElement | null>(null);
   // New-folder inline input.
   let creating = $state(false);
   let newName = $state('');
@@ -35,15 +41,15 @@
       createErr = '';
       await load(dir); // navigate into the new folder → it becomes the selection
     } catch (e) {
-      createErr = e?.message || 'failed';
+      createErr = (e as Error)?.message || 'failed';
     }
   }
 
-  async function load(p) {
+  async function load(p: string) {
     try {
       const r = await fsList(p, false);
       path = r.path || p;   // server resolves ~/relative → absolute
-      entries = (r.entries || []).filter(e => e.type === 'dir').sort((a, b) => a.name.localeCompare(b.name));
+      entries = (r.entries || []).filter((e: DirEntry) => e.type === 'dir').sort((a: DirEntry, b: DirEntry) => a.name.localeCompare(b.name));
       onNavigate(path);
     } catch {}
   }

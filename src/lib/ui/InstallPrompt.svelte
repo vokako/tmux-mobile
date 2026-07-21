@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   // PWA install offer — browser-only banner inviting the user to install the
   // web UI as a standalone app.
   //
@@ -15,6 +15,12 @@
   // cooldown window so we don't nag.
   import { t } from '../core/i18n.svelte.ts';
 
+  // Chromium-only event; not in TS DOM libs.
+  interface BeforeInstallPromptEvent extends Event {
+    prompt(): Promise<void>;
+    userChoice: Promise<unknown>;
+  }
+
   const DISMISS_KEY = 'tmux_pwa_dismissed';
   const DISMISS_COOLDOWN_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
 
@@ -23,7 +29,7 @@
   function isStandalone() {
     return (
       window.matchMedia?.('(display-mode: standalone)').matches ||
-      window.navigator.standalone === true
+      (window.navigator as Navigator & { standalone?: boolean }).standalone === true
     );
   }
 
@@ -54,16 +60,16 @@
   }
 
   let visible = $state(false);
-  let mode = $state(''); // 'prompt' (Chromium) | 'ios'
-  let deferredPrompt = null;
+  let mode = $state<'' | 'prompt' | 'ios'>('');
+  let deferredPrompt: BeforeInstallPromptEvent | null = null;
 
   $effect(() => {
     if (isTauri || isStandalone() || dismissedRecently()) return;
 
-    function onBeforeInstall(e) {
+    function onBeforeInstall(e: Event) {
       // Prevent the mini-infobar; we drive the offer ourselves.
       e.preventDefault();
-      deferredPrompt = e;
+      deferredPrompt = e as BeforeInstallPromptEvent;
       mode = 'prompt';
       visible = true;
     }
@@ -80,7 +86,7 @@
     window.addEventListener('appinstalled', onInstalled);
 
     // iOS never fires beforeinstallprompt — offer manual instructions.
-    let iosTimer = null;
+    let iosTimer: ReturnType<typeof setTimeout> | null = null;
     if (isIosSafari()) {
       // Small delay so the banner doesn't fight the first paint / connect UI.
       iosTimer = setTimeout(() => {
