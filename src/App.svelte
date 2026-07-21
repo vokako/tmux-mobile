@@ -33,7 +33,6 @@
   let terminalTarget = $state('');
   let terminalSession = $state('');
   let terminalCommand = $state('');
-  let viewMode = $state('terminal');
   // Which working context Files should follow: a terminal pane or the team.
   let teamSession = $state('');     // active team's tmux session (reported by Team)
   let workContext = $state('terminal'); // 'terminal' | 'team'
@@ -127,10 +126,6 @@
   function resubscribeAll() {
     wsResubscribeActive();
   }
-  // Chat view is disabled (placeholder kept so parser / ChatView code still
-  // compiles, to be re-enabled later if wanted). While this is false the
-  // chat tab, tab swipe target, and auto-switch effect are all hidden.
-  const chatSupported = false;
   let theme = $state(localStorage.getItem('tmux_theme') || 'system');
   let fontSize = $state(parseInt(localStorage.getItem('tmux_fontsize')) || 14);
   const isTauriDesktop = !!window.__TAURI_INTERNALS__ && !/android/i.test(navigator.userAgent);
@@ -478,17 +473,13 @@
     return () => mq.removeEventListener('change', handler);
   });
 
-  $effect(() => {
-    if (!chatSupported && viewMode === 'chat') viewMode = 'terminal';
-  });
-
   // Persist nav state for restore on reload. splitLayout/splitCells are only
   // meaningful on desktop; a desktop-saved state degrades to single-pane on a
   // phone because restore re-gates on splitEligible.
   $effect(() => {
     if (connected && terminalTarget) {
       localStorage.setItem('tmux_state', JSON.stringify({
-        page, viewMode, terminalTarget, terminalSession, terminalCommand,
+        page, terminalTarget, terminalSession, terminalCommand,
         splitLayout, splitCells
       }));
     }
@@ -652,7 +643,6 @@
     terminalCommand = command;
     workContext = 'terminal';
     page = 'terminal';
-    viewMode = 'terminal';
     readTarget(target);
     navPush();
   }
@@ -662,7 +652,6 @@
   // room just reloads that room's chat — no full remount.
   function openTeam(room) {
     page = 'team';
-    viewMode = 'terminal';
     workContext = 'team';
     if (room) teamRef?.selectTeam(room);
     navPush();
@@ -838,7 +827,6 @@
           terminalSession = s.terminalSession || '';
           terminalCommand = s.terminalCommand || '';
           page = s.page || 'terminal';
-          viewMode = 'terminal';
           // Restore split layout only on eligible (desktop + wide) clients;
           // a desktop-saved state silently stays single-pane on a phone.
           if (splitEligible && s.splitLayout > 1 && Array.isArray(s.splitCells) && s.splitCells.length) {
@@ -870,9 +858,7 @@
         return;
       }
       if (page === 'files' && filesGoBack && filesGoBack()) return;
-      if (page === 'files' || (page === 'terminal' && viewMode === 'chat')) {
-        viewMode = 'terminal'; page = 'terminal'; return;
-      }
+      if (page === 'files') { page = 'terminal'; return; }
       if (page === 'terminal' || page === 'team') { page = 'sessions'; return; }
       if (showSettings) { showSettings = false; return; }
       // At sessions root, re-push to prevent exit
@@ -886,7 +872,6 @@
   // Swipe left/right to switch tabs with slide animation
   const tabs = $derived(() => {
     const t = ['sessions', 'terminal'];
-    if (terminalTarget && chatSupported) t.push('chat');
     if (teamAvailable) t.push('team');
     t.push('files');
     return t;
@@ -898,13 +883,12 @@
     if (slideAnim) return;
     showSettings = false;
     const t = tabs();
-    const curName = page === 'terminal' ? (viewMode === 'chat' ? 'chat' : 'terminal') : page;
+    const curName = page;
     if (target === curName) return;
     const fromIdx = t.indexOf(curName);
     const toIdx = t.indexOf(target);
     // Apply page change immediately
-    if (target === 'chat') { page = 'terminal'; viewMode = 'chat'; workContext = 'terminal'; }
-    else if (target === 'terminal') { page = 'terminal'; viewMode = 'terminal'; workContext = 'terminal'; }
+    if (target === 'terminal') { page = 'terminal'; workContext = 'terminal'; }
     else { page = target; if (target === 'team') workContext = 'team'; }
     navPush();
     // Single slide-in animation from the correct direction
@@ -929,7 +913,7 @@
       };
       if (action === 'previousPage' || action === 'nextPage') {
         const available = tabs();
-        const current = page === 'terminal' && viewMode === 'chat' ? 'chat' : page;
+        const current = page;
         if (!available.includes(current)) return;
         const step = action === 'previousPage' ? -1 : 1;
         consume();
@@ -941,7 +925,7 @@
       } else if (action === 'openFiles') {
         consume();
         switchTab('files');
-      } else if ((action === 'previousWindow' || action === 'nextWindow') && page === 'terminal' && viewMode === 'terminal') {
+      } else if ((action === 'previousWindow' || action === 'nextWindow') && page === 'terminal') {
         consume();
         window.dispatchEvent(new CustomEvent('terminal-window-shortcut', {
           detail: { direction: action === 'previousWindow' ? -1 : 1 },
@@ -961,14 +945,9 @@
         <button tabindex="-1" class:active={page === 'sessions'} onclick={() => switchTab('sessions')}>
           {t('sessions')}
         </button>
-        <button tabindex="-1" class:active={page === 'terminal' && viewMode === 'terminal'} onclick={() => switchTab('terminal')}>
+        <button tabindex="-1" class:active={page === 'terminal'} onclick={() => switchTab('terminal')}>
           {t('terminal')}
         </button>
-        {#if terminalTarget && chatSupported}
-          <button tabindex="-1" class:active={page === 'terminal' && viewMode === 'chat'} onclick={() => switchTab('chat')}>
-            {t('chat')}
-          </button>
-        {/if}
         {#if teamAvailable}
           <button tabindex="-1" class:active={page === 'team'} onclick={() => switchTab('team')}>
             {t('team')}
@@ -1047,7 +1026,7 @@
     </div>
     <div class="page-layer" class:hidden={page !== 'terminal'}>
       {#if terminalTarget}
-        <div class="terminal-body" class:split-capable={splitEligible && viewMode === 'terminal'}>
+        <div class="terminal-body" class:split-capable={splitEligible}>
           {#if splitActive}
             <!-- In split mode the layout control floats top-right (no single
                  win-bar to host it; cells have their own headers). In single-
@@ -1073,8 +1052,8 @@
               onCloseCell={closeCell}
               onPaneExit={cellPaneExit} />
           {:else}
-            <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {viewMode} {fontSize}
-              splitEligible={splitEligible && viewMode === 'terminal'} {splitActive} {splitLayout} onSetLayout={setLayout}
+            <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {fontSize}
+              splitEligible={splitEligible} {splitActive} {splitLayout} onSetLayout={setLayout}
               onSwitchPane={(t, cmd) => { terminalTarget = t; terminalSession = t.split(':')[0]; terminalCommand = cmd || ''; readTarget(t); }} onPaneExit={() => { terminalTarget = ''; page = 'sessions'; }} />
           {/if}
         </div>

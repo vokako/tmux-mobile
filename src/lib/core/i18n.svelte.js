@@ -13,7 +13,6 @@ const msgs = {
   en: {
     sessions: 'Sessions',
     terminal: 'Terminal',
-    chat: 'Chat',
     files: 'Files',
     editorWrap: 'Wrap lines',
     editorNoWrap: 'No wrap',
@@ -111,15 +110,8 @@ const msgs = {
     minAbbr: 'm',
     hourAbbr: 'h',
     dayAbbr: 'd',
-
-    noConversation: 'No conversation detected. Waiting for CLI output…',
     thinking: 'Thinking…',
-    creatingSummary: 'Creating summary…',
-    conversationSummary: 'Conversation Summary',
-    selectModel: 'Select Model',
     copy: 'Copy',
-
-    message: 'message…',
 
     loading: 'Loading...',
     emptyDir: 'Empty directory',
@@ -230,7 +222,6 @@ const msgs = {
   zh: {
     sessions: '会 话',
     terminal: '终 端',
-    chat: '聊 天',
     files: '文 件',
     editorWrap: '自动换行',
     editorNoWrap: '不换行',
@@ -328,15 +319,8 @@ const msgs = {
     minAbbr: '分钟前',
     hourAbbr: '小时前',
     dayAbbr: '天前',
-
-    noConversation: '未检测到对话，等待 CLI 输出…',
     thinking: '思考中…',
-    creatingSummary: '生成摘要中…',
-    conversationSummary: '对话摘要',
-    selectModel: '选择模型',
     copy: '复制',
-
-    message: '消息…',
 
     loading: '加载中...',
     emptyDir: '空目录',

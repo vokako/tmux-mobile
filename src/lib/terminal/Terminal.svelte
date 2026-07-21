@@ -1,14 +1,12 @@
 <script>
-  import { subscribe, unsubscribe, addPaneOutputListener, removePaneOutputListener, addPaneClosedListener, removePaneClosedListener, sendCommand, sendKeys, pasteText, listPanes, capturePane, resizePane, newWindow } from '../core/ws.js';
+  import { subscribe, unsubscribe, addPaneOutputListener, removePaneOutputListener, addPaneClosedListener, removePaneClosedListener, sendKeys, pasteText, listPanes, capturePane, resizePane, newWindow } from '../core/ws.js';
   import { Terminal } from '@xterm/xterm';
   import { WebLinksAddon } from '@xterm/addon-web-links';
-  import ChatView from './ChatView.svelte';
   import Icon from '../ui/Icon.svelte';
   import AgentChip from '../ui/AgentChip.svelte';
   import { otherTerminalSessionHasNotification, terminalNotificationForWindow } from '../core/agent-notifications.svelte.js';
   import PanePicker from '../sessions/PanePicker.svelte';
   import { t } from '../core/i18n.svelte.js';
-  import { detectParser } from './parsers.js';
   import { detectAgent, paneIsAgent, paneAgent, AGENTS } from '../core/agents.js';
   import { copyText } from '../core/clipboard.js';
   import { fonts } from '../app/fonts.svelte.js';
@@ -50,11 +48,9 @@
   // `chromeless` = embedded with NO window-switcher bar (used by the desktop
   // agent grid, where each cell is pinned to one agent's pane — there is
   // nothing to switch to, so the bar would only steal vertical space).
-  let { target, session, command: initialCommand = '', viewMode = 'terminal', fontSize = 14, embedded = false, active = true, chromeless = false, onChatSupported = () => {}, onSwitchPane = null, onPaneExit = () => {}, onClose = null, splitEligible = false, splitActive = false, splitLayout = 1, onSetLayout = null } = $props();
+  let { target, session, command: initialCommand = '', fontSize = 14, embedded = false, active = true, chromeless = false, onSwitchPane = null, onPaneExit = () => {}, onClose = null, splitEligible = false, splitActive = false, splitLayout = 1, onSetLayout = null } = $props();
   let splitMenuOpen = $state(false);
 
-  let input = $state('');
-  let paneContent = $state('');
   let command = $state(initialCommand);
   $effect(() => { command = initialCommand; });
   let termEl;
@@ -189,23 +185,9 @@
   });
   let doResizeRef = null;
 
-  let parser = $derived(detectParser('', command));
-
-  $effect(() => { onChatSupported(!!parser); });
-
   // pane_output snapshots now carry `current_command` (server piggybacks it
   // on cursor reads — same tmux subprocess, zero extra cost). Update
   // `command` in the pane-output listener below; no separate polling RPC needed.
-
-  let waitingForInput = $derived.by(() => {
-    if (!paneContent || !parser) return false;
-    return parser.isWaitingForInput(paneContent);
-  });
-
-  let statusInfo = $derived.by(() => {
-    if (!paneContent || !parser) return null;
-    return parser.extractStatus(paneContent);
-  });
 
   // Window switcher
   let windowPanes = $state([]);
@@ -267,7 +249,7 @@
   let showSwitcher = $derived(!chromeless);
 
   $effect(() => {
-    if (!session || viewMode !== 'terminal') return;
+    if (!session) return;
     // Chromeless cells (agent grid) have no switcher, so the window-list poll
     // is pure waste — skip it entirely (N agent cells would otherwise each
     // poll listPanes every few seconds).
@@ -1450,7 +1432,6 @@
         if (content == null) return;
         const changed = content !== lastContent;
         lastContent = content;
-        paneContent = content;
         if (resumeAtTail) {
           writeToXterm(content, lastCursor);
           requestAnimationFrame(() => term?.scrollToBottom());
@@ -1661,7 +1642,6 @@
         const c = r.output || r.content;
         if (c && c !== lastContent) {
           lastContent = c;
-          paneContent = c;
           if (termAtBottom) writeToXterm(c, lastCursor);
           else hasNewContent = true;
         }
@@ -1676,13 +1656,12 @@
       if (t !== target) return;
       if (cursor) lastCursor = cursor;
       // Pane's running command, only present on first push and on changes.
-      // Drives the chat-parser detection (kiro / claude code / gemini).
+      // Drives the window-switcher agent icons and status-bar highlight.
       if (currentCommand !== undefined) {
         command = currentCommand;
       }
       if (content != null && content !== lastContent) {
         lastContent = content;
-        paneContent = content;
         // Defer rendering while user is reading scrollback; flush on scroll-to-bottom
         if (termAtBottom) writeToXterm(content, lastCursor);
         else hasNewContent = true;
@@ -1703,7 +1682,6 @@
       if (lastContent) return; // subscription already delivered content
       const c = r.output || r.content;
       if (c) {
-        paneContent = c;
         lastContent = c;
         writeToXterm(c, lastCursor);
       }
@@ -1750,57 +1728,12 @@
     };
   });
 
-  // Re-sync size when switching to terminal tab
+  // Re-sync size when the terminal (re)appears
   $effect(() => {
-    if (viewMode === 'terminal' && term) {
+    if (term) {
       requestAnimationFrame(() => term.refresh(0, term.rows - 1));
     }
   });
-
-  async function handleSubmit() {
-    if (viewMode === 'chat') {
-      if (!input.trim()) return;
-      try {
-        await sendCommand(target, input);
-        noteSendSuccess();
-        input = '';
-        document.querySelectorAll('.input-bar textarea').forEach(ta => ta.style.height = 'auto');
-      } catch (e) {
-        noteSendFailure('chat send');
-      }
-      return;
-    }
-    // Terminal mode
-    if (!input.trim()) {
-      try { await sendKeys(target, 'Enter', false); noteSendSuccess(); }
-      catch (e) { noteSendFailure('Enter'); }
-      document.activeElement?.blur();
-      return;
-    }
-    try {
-      await sendKeys(target, input, true);
-      noteSendSuccess();
-      input = '';
-      document.querySelectorAll('.input-bar textarea').forEach(ta => ta.style.height = 'auto');
-    } catch (e) {
-      noteSendFailure('submit');
-    }
-  }
-
-  async function handleKeydown(e) {
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
-      e.preventDefault();
-      await handleSubmit();
-    }
-  }
-
-  function autoResize(e) {
-    const el = e.target;
-    requestAnimationFrame(() => {
-      el.style.height = 'auto';
-      el.style.height = Math.min(el.scrollHeight, 120) + 'px';
-    });
-  }
 
   // Track consecutive send failures so the user gets a visible "unstable" toast
   // well before the heartbeat detector fires its 10-15s disconnect. One stray
@@ -2051,7 +1984,7 @@
     {/if}
   {/if}
 
-  <div class="term-wrap" class:hidden={viewMode !== 'terminal'}>
+  <div class="term-wrap">
     <div class="xterm-wrap" bind:this={termEl}></div>
     {#if isMobile && selection && selUI}
       {#if selUI.startInView}
@@ -2073,13 +2006,9 @@
       </button>
     {/if}
   </div>
-  {#if viewMode === 'chat'}
-    <ChatView content={paneContent} {command} {fontSize} onSendKeys={(keys) => sendKeys(target, keys, false)} />
-  {/if}
-
   {#if !chromeless}
   <div class="input-area">
-    {#if viewMode === 'terminal' && isMobile}
+    {#if isMobile}
       <div class="input-bar">
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div class="shortcut-rows" use:nonPassiveShortcuts ontouchend={stopRepeat} ontouchcancel={stopRepeat} oncontextmenu={(e) => e.preventDefault()} onmouseup={stopRepeat}>
@@ -2133,37 +2062,8 @@
           </div>
         </div>
       </div>
-    {:else if viewMode === 'terminal'}
-      <!-- Desktop: no input bar, keyboard goes directly to xterm.js -->
     {:else}
-      <div class="input-bar chat-input-bar">
-        <div class="input-status">
-          <span class="status-left">{target}{#if command} · <span class:kiro={/^kiro/i.test(command)}>{command}</span>{/if}</span>
-          {#if statusInfo?.pct != null}
-            <span class="status-pct">
-              <span class="pct-bar"><span class="pct-fill pct-{statusInfo.pct < 50 ? 'ok' : statusInfo.pct < 80 ? 'warn' : 'danger'}" style="width:{statusInfo.pct}%"></span></span>
-              <span class="pct-{statusInfo.pct < 50 ? 'ok' : statusInfo.pct < 80 ? 'warn' : 'danger'}">{statusInfo.pct}%</span>
-            </span>
-          {/if}
-        </div>
-        <div class="cmd-row">
-          {#if !waitingForInput}
-            <button class="stop-btn" onclick={() => sendSpecial('C-c')} aria-label="Interrupt"><Icon name="stop" size={12} /></button>
-          {/if}
-          <textarea
-            bind:value={input}
-            onkeydown={handleKeydown}
-            oninput={autoResize}
-            placeholder={t('message')}
-            autocapitalize="off"
-            autocomplete="off"
-            autocorrect="off"
-            spellcheck="false"
-            rows="1"
-          ></textarea>
-          <button class="send" onclick={handleSubmit}><Icon name="send" size={14} /></button>
-        </div>
-      </div>
+      <!-- Desktop: no input bar, keyboard goes directly to xterm.js -->
     {/if}
   </div>
   {/if}
@@ -2247,61 +2147,12 @@
   .win-split-opt.active { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
   .win-split-opt:active { border-color: var(--accent); }
 
-  .input-status {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 2px 12px;
-    font-size: 10px;
-    color: var(--text3);
-  }
-  .status-left .kiro { color: var(--accent); }
-  .status-left {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .status-pct {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    font-family: var(--font-mono);
-    font-weight: 500;
-    font-size: 12px;
-    margin-left: auto;
-  }
-  .pct-bar {
-    width: 48px;
-    height: 4px;
-    background: var(--surface2);
-    border-radius: 2px;
-    overflow: hidden;
-  }
-  .pct-fill {
-    display: block;
-    height: 100%;
-    border-radius: 2px;
-    transition: width 0.3s ease, background 0.3s ease;
-  }
-  .pct-ok { color: var(--status-ok); }
-  .pct-warn { color: var(--status-warn); }
-  .pct-danger { color: var(--status-danger); }
-  .pct-fill.pct-ok { background: var(--status-ok); }
-  .pct-fill.pct-warn { background: var(--status-warn); }
-  .pct-fill.pct-danger { background: var(--status-danger); }
 
   .term-wrap {
     flex: 1;
     min-height: 0;
     overflow: hidden;
     position: relative;
-  }
-  .term-wrap.hidden {
-    position: absolute;
-    left: -9999px;
-    visibility: hidden;
   }
 
   .toast {
@@ -2555,78 +2406,5 @@
     border-color: var(--accent);
   }
 
-  .cmd-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
 
-  .prompt {
-    color: var(--accent);
-    font-family: var(--font-mono);
-    font-size: 15px;
-    font-weight: 600;
-    flex-shrink: 0;
-    filter: drop-shadow(0 0 4px var(--accent-glow));
-  }
-
-  .cmd-row textarea {
-    flex: 1;
-    min-width: 0;
-    padding: 8px 0;
-    border: none;
-    background: transparent;
-    color: var(--text);
-    font-family: var(--font-mono);
-    font-size: 15px;
-    outline: none;
-    -webkit-appearance: none;
-    resize: none;
-    max-height: 120px;
-    overflow-y: auto;
-    line-height: 1.4;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
-  }
-  .cmd-row textarea::placeholder { color: var(--text3); }
-
-  .stop-btn {
-    width: 34px; height: 34px;
-    border: none;
-    border-radius: 9px;
-    background: var(--danger-bg);
-    color: var(--danger);
-    font-size: 12px;
-    cursor: pointer;
-    flex-shrink: 0;
-    -webkit-tap-highlight-color: transparent;
-    transition: all 0.15s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .stop-btn:active {
-    background: var(--danger-bg);
-    transform: scale(0.92);
-  }
-
-  .send {
-    width: 34px; height: 34px;
-    border: none;
-    border-radius: 9px;
-    background: var(--accent);
-    color: var(--bg);
-    font-size: 15px;
-    cursor: pointer;
-    flex-shrink: 0;
-    -webkit-tap-highlight-color: transparent;
-    transition: all 0.15s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .send:active {
-    transform: scale(0.92);
-    filter: brightness(0.85);
-  }
 </style>

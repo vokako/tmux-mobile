@@ -87,10 +87,10 @@
 - **Area**: Terminal
 - **Details**: `writeToXterm` calls `term.clear()` when `buf.baseY > 0`, dropping all xterm-side scrollback on each full rewrite. tmux only returns ~500 lines per capture, so scrollback effectively caps at the server snapshot length, and any extra history xterm had built up is lost after each push. Fix needs delta-based content updates instead of full rewrite, or server-side scrollback streaming. Affects: `src/lib/terminal/Terminal.svelte:writeToXterm`.
 
-## Chat parser runs on every pane output
-- **Priority**: Low (was Medium; chat UI now disabled so CPU cost has no user impact)
-- **Area**: Chat View / Parser
-- **Details**: `waitingForInput` and `statusInfo` are `$derived.by(paneContent)`, so the parser re-scans the entire pane content on every output event. For fast log streams this is CPU-heavy. Options: tail-only scan, debounce paneContent into a separate $state, or poll on an interval. Affects: `src/lib/terminal/Terminal.svelte:waitingForInput/statusInfo`, `src/lib/terminal/parsers.js`. **Note**: chat UI is currently disabled (`chatSupported = false`), so the derived values are computed but nothing visible depends on them. Revisit when re-enabling chat.
+## ~~Chat parser runs on every pane output~~
+- Resolved 2026-07 by deletion: the chat feature (ChatView + parsers.js and
+  the `waitingForInput`/`statusInfo` deriveds) was removed entirely, so no
+  parser runs on pane output anymore.
 
 ## xterm helper textarea listeners on font change
 - **Priority**: Low
@@ -140,14 +140,8 @@
     fine today, but a wall if split-screen ever needs two simultaneous
     server connections.
 
-## ChatView is dead code pending a keep-or-delete decision
-- **Priority**: Low
-- **Area**: Chat View
-- **Details**: `App.svelte:133` hardcodes `const chatSupported = false`, so
-  the chat tab is never offered and `ChatView.svelte` (823 lines) is
-  unreachable; `Terminal.svelte`'s `onChatSupported` prop has no caller.
-  Meanwhile `parsers.js` deriveds still re-scan every pane output (see
-  "Chat parser runs on every pane output" above). Either delete ChatView +
-  the chat branch in `switchTab` (git history keeps it recoverable) or
-  schedule re-enabling; keeping it half-dead taxes every reader. Owner
-  decision pending.
+## ~~ChatView is dead code pending a keep-or-delete decision~~
+- Resolved 2026-07: owner chose delete. ChatView.svelte, parsers.js, the
+  viewMode plumbing, the chat i18n keys, and the ws.js send_command wrapper
+  are all removed (recoverable from git history). The `send_command` RPC
+  still exists server-side.

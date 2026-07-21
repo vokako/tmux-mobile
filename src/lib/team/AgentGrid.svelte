@@ -126,7 +126,6 @@
               target={targetOf(cell.pane)}
               session={cell.pane.session}
               command={cell.pane.current_command || ''}
-              viewMode="terminal"
               embedded={true}
               chromeless={true}
               active={cell.name === activeName}
@@ -169,7 +168,6 @@
             target={targetOf(expandedCell.pane)}
             session={expandedCell.pane.session}
             command={expandedCell.pane.current_command || ''}
-            viewMode="terminal"
             embedded={true}
             chromeless={true}
             active={true}

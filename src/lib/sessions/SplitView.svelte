@@ -49,7 +49,6 @@
               target={cell.target}
               session={cell.session}
               command={cell.command}
-              viewMode="terminal"
               embedded={true}
               active={cell.id === activeCellId}
               {fontSize}
