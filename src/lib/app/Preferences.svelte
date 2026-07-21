@@ -1,10 +1,10 @@
-<script>
+<script lang="ts">
   import Icon from '../ui/Icon.svelte';
   import { t, i18n, setLocale } from '../core/i18n.svelte.ts';
   import { layout } from './layout.svelte.ts';
   import { fonts } from './fonts.svelte.ts';
   import { terminalPrefs, LINE_HEIGHT_MIN, LINE_HEIGHT_MAX } from './terminal-prefs.svelte.ts';
-  import { SHORTCUT_DEFAULTS, shortcutFromEvent, shortcutLabel } from './shortcuts.ts';
+  import { SHORTCUT_DEFAULTS, shortcutFromEvent, shortcutLabel, type ShortcutAction } from './shortcuts.ts';
   import { shortcuts } from './shortcuts.svelte.ts';
   import { agentHooksInstall, agentHooksRemove, agentHooksStatus } from '../core/ws.ts';
 
@@ -31,20 +31,43 @@
     onAddress = () => {},
     onDisconnect = () => {},
     onConnectionSetup = () => {},
+  }: {
+    connected?: boolean;
+    theme?: string;
+    fontSize?: number;
+    uiZoom?: number;
+    showUiZoom?: boolean;
+    showShortcuts?: boolean;
+    debugMode?: boolean;
+    serverInfo?: { hostname: string; machineId: string };
+    activeAddress?: string;
+    addresses?: string[];
+    optimizing?: boolean;
+    linkCopied?: boolean;
+    onClose?: () => void;
+    onTheme?: (theme: string) => void;
+    onUiZoom?: (value: number) => void;
+    onFontSize?: (size: number) => void;
+    onDebug?: (on: boolean) => void;
+    onOptimize?: () => void;
+    onShare?: () => void;
+    onAddress?: (address: string) => void;
+    onDisconnect?: () => void;
+    onConnectionSetup?: () => void;
   } = $props();
 
   const TAB_KEY = 'tmux_settings_tab';
   const storedTab = localStorage.getItem(TAB_KEY);
   const validStoredTab = storedTab === 'connection' || storedTab === 'shortcuts';
   const initialTab = validStoredTab ? storedTab : 'appearance';
-  let tab = $state(initialTab);
+  let tab = $state<string>(initialTab);
   if (storedTab && storedTab !== initialTab) localStorage.setItem(TAB_KEY, initialTab);
   const tabs = $derived([
     { id: 'appearance', label: () => t('settingsAppearance'), icon: 'palette' },
     ...(showShortcuts ? [{ id: 'shortcuts', label: () => t('settingsShortcuts'), icon: 'command' }] : []),
     { id: 'connection', label: () => t('settingsConnection'), icon: 'link' },
   ]);
-  const shortcutActions = [
+  const shortcutActions: [ShortcutAction, string][] = [
     ['previousPage', 'shortcutPreviousPage'],
     ['nextPage', 'shortcutNextPage'],
     ['previousWindow', 'shortcutPreviousWindow'],
@@ -54,9 +77,11 @@
   ];
   let fontInput = $state(fonts.custom);
   let fontInvalid = $state(false);
-  let recordingShortcut = $state('');
+  let recordingShortcut = $state<ShortcutAction | ''>('');
   let shortcutError = $state('');
-  let hookStatus = $state(null);
+  type HookAgentStatus = { installed?: boolean };
+  type HookStatus = { claude?: HookAgentStatus; codex?: HookAgentStatus; kiro?: HookAgentStatus };
+  let hookStatus = $state<HookStatus | null>(null);
   let hookBusy = $state(false);
   let hookError = $state('');
   let hookLoaded = false;
@@ -70,14 +95,14 @@
     hookLoaded = true;
     hookError = '';
     try { hookStatus = await agentHooksStatus(); }
-    catch (error) { hookError = error.message; }
+    catch (error) { hookError = (error as Error).message; }
   }
 
-  async function updateHooks(install) {
+  async function updateHooks(install: boolean) {
     hookBusy = true;
     hookError = '';
     try { hookStatus = install ? await agentHooksInstall() : await agentHooksRemove(); }
-    catch (error) { hookError = error.message; }
+    catch (error) { hookError = (error as Error).message; }
     finally { hookBusy = false; }
   }
 
@@ -87,22 +112,22 @@
     return !fontInvalid;
   }
 
-  async function handleFontKeydown(event) {
-    if (event.key === 'Enter' && await saveFont()) event.currentTarget.blur();
+  async function handleFontKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter' && await saveFont()) (event.currentTarget as HTMLElement | null)?.blur();
   }
 
-  function setLineHeight(value) {
+  function setLineHeight(value: number) {
     terminalPrefs.setLineHeight(Math.round(value * 100) / 100);
   }
 
-  function selectTab(value) {
+  function selectTab(value: string) {
     tab = value;
     recordingShortcut = '';
     shortcutError = '';
     localStorage.setItem(TAB_KEY, value);
   }
 
-  function recordShortcut(action, event) {
+  function recordShortcut(action: ShortcutAction, event: KeyboardEvent) {
     event.preventDefault();
     event.stopPropagation();
     if (event.key === 'Escape') { recordingShortcut = ''; shortcutError = ''; return; }
