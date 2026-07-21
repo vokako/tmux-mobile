@@ -19,7 +19,7 @@ export const teamState = state;
 
 /** True when `name` is a team session AND the server has the team bus. */
 export function isTeamSession(name) {
-  return state.available && name.startsWith(TEAM_PREFIX);
+  return state.available && !!name && name.startsWith(TEAM_PREFIX);
 }
 
 /** Room id for a team session name (inverse of teamSessionOf). */
