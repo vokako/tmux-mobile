@@ -6,16 +6,18 @@
 // handling stays touch-based regardless, so a tablet in "desktop" mode is still
 // fully touch-usable.
 
-const KEY = 'tmux_layout_mode';
-const isValid = (v) => v === 'desktop' || v === 'mobile' || v === 'auto';
+export type LayoutMode = 'auto' | 'desktop' | 'mobile';
 
-let initial = 'auto';
+const KEY = 'tmux_layout_mode';
+const isValid = (v: unknown): v is LayoutMode => v === 'desktop' || v === 'mobile' || v === 'auto';
+
+let initial: LayoutMode = 'auto';
 try {
   const s = localStorage.getItem(KEY);
   if (isValid(s)) initial = s;
 } catch {}
 
-let mode = $state(initial); // 'auto' | 'desktop' | 'mobile'
+let mode = $state<LayoutMode>(initial);
 
 const rawTouch =
   typeof window !== 'undefined' &&
@@ -27,7 +29,7 @@ export const layout = {
     return mode;
   },
   /** Set and persist the mode. */
-  set(v) {
+  set(v: LayoutMode) {
     if (!isValid(v)) return;
     mode = v;
     try {

@@ -9,7 +9,7 @@ const state = $state({
 
 export const terminalPrefs = {
   get lineHeight() { return state.lineHeight; },
-  setLineHeight(value) {
+  setLineHeight(value: number) {
     state.lineHeight = Math.max(LINE_HEIGHT_MIN, Math.min(LINE_HEIGHT_MAX, value));
     localStorage.setItem(LINE_HEIGHT_KEY, String(state.lineHeight));
   },

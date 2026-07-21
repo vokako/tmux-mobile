@@ -9,11 +9,11 @@
   import { t } from '../core/i18n.svelte.js';
   import { listSessionsWithPanes, newWindow } from '../core/ws.ts';
   import { paneAgent, paneChipLabel } from '../core/agents.ts';
-  import { sessionHasNotification, terminalNotificationForWindow } from '../core/agent-notifications.svelte.js';
+  import { sessionHasNotification, terminalNotificationForWindow } from '../core/agent-notifications.svelte.ts';
   // Team sessions (tmm-team-<room>) are grouped apart from regular sessions and
   // labelled by their workspace basename. Shared helpers, gated on the server
   // actually having the team bus — consistent with the Sessions page.
-  import { isTeamSession, teamLabel } from '../core/team.svelte.js';
+  import { isTeamSession, teamLabel } from '../core/team.svelte.ts';
 
   let {
     currentTarget = '',   // highlight the pane matching this target

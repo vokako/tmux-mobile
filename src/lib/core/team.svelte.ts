@@ -18,17 +18,17 @@ const state = $state({
 export const teamState = state;
 
 /** True when `name` is a team session AND the server has the team bus. */
-export function isTeamSession(name) {
+export function isTeamSession(name: string | null | undefined): boolean {
   return state.available && !!name && name.startsWith(TEAM_PREFIX);
 }
 
 /** Room id for a team session name (inverse of teamSessionOf). */
-export function teamRoomOf(name) {
+export function teamRoomOf(name: string): string {
   return name.slice(TEAM_PREFIX.length);
 }
 
 /** tmux session name for a room id (inverse of teamRoomOf). */
-export function teamSessionOf(room) {
+export function teamSessionOf(room: string): string {
   return TEAM_PREFIX + room;
 }
 
@@ -36,6 +36,6 @@ export function teamSessionOf(room) {
  *  disambiguating "-<6hex>" suffix workspace_slug appends for tmux safety.
  *  Collisions (two workspaces with the same basename) display alike — the
  *  full room stays in the row's title attribute. */
-export function teamLabel(name) {
+export function teamLabel(name: string): string {
   return teamRoomOf(name).replace(/-[0-9a-f]{6}$/, '');
 }

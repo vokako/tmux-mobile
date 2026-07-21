@@ -12,14 +12,14 @@
   import { teamStatus } from './lib/core/ws.ts';
   import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable } from './lib/core/ws.ts';
   import { t } from './lib/core/i18n.svelte.js';
-  import { layout } from './lib/app/layout.svelte.js';
-  import { teamState } from './lib/core/team.svelte.js';
+  import { layout } from './lib/app/layout.svelte.ts';
+  import { teamState } from './lib/core/team.svelte.ts';
   import { applyMonoVar } from './lib/app/fonts.svelte.js';
   import { normalizeUiZoom, stepUiZoom, UI_ZOOM_DEFAULT } from './lib/app/ui-zoom.ts';
   import { createReconnectMachine } from './lib/app/reconnect.ts';
   import { cycleItem, shortcutFromEvent } from './lib/app/shortcuts.ts';
-  import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.js';
-  import { markWindowRead, stopAgentNotifications, syncAgentNotifications } from './lib/core/agent-notifications.svelte.js';
+  import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.ts';
+  import { markWindowRead, stopAgentNotifications, syncAgentNotifications } from './lib/core/agent-notifications.svelte.ts';
   import { installExternalLinkHandler } from './lib/core/external-links.ts';
 
   // Tunable constants

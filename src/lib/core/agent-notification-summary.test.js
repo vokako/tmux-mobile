@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 globalThis.$state = value => value;
 globalThis.window = { addEventListener() {} };
 
-const { agentNotifications, otherSessionHasNotification, sessionHasNotification } = await import('./agent-notifications.svelte.js');
+const { agentNotifications, otherSessionHasNotification, sessionHasNotification } = await import('./agent-notifications.svelte.ts');
 
 test('session and cross-session summaries stay distinct', () => {
   agentNotifications.unread = [

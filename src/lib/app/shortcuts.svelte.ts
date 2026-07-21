@@ -1,12 +1,14 @@
-import { SHORTCUT_DEFAULTS, SHORTCUT_STORAGE_KEY, actionForShortcut } from './shortcuts.ts';
+import { SHORTCUT_DEFAULTS, SHORTCUT_STORAGE_KEY, actionForShortcut, type ShortcutAction } from './shortcuts.ts';
 
-function loadShortcuts() {
+type Bindings = Record<ShortcutAction, string>;
+
+function loadShortcuts(): Bindings {
   try {
     const stored = JSON.parse(localStorage.getItem(SHORTCUT_STORAGE_KEY) || '{}');
-    return Object.fromEntries(Object.keys(SHORTCUT_DEFAULTS).map(action => [
+    return Object.fromEntries((Object.keys(SHORTCUT_DEFAULTS) as ShortcutAction[]).map(action => [
       action,
       typeof stored[action] === 'string' ? stored[action] : SHORTCUT_DEFAULTS[action],
-    ]));
+    ])) as Bindings;
   } catch {
     return { ...SHORTCUT_DEFAULTS };
   }
@@ -18,7 +20,7 @@ function persist() {
   localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(state));
 }
 
-export function isShortcutInputTarget(target) {
+export function isShortcutInputTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   if (target.closest('[data-shortcut-recorder]')) return true;
   if (target.closest('.xterm')) return false;
@@ -26,9 +28,9 @@ export function isShortcutInputTarget(target) {
 }
 
 export const shortcuts = {
-  get(action) { return state[action] || ''; },
-  action(value) { return actionForShortcut(state, value); },
-  set(action, value) {
+  get(action: ShortcutAction) { return state[action] || ''; },
+  action(value: string) { return actionForShortcut(state, value); },
+  set(action: ShortcutAction, value: string) {
     if (!(action in SHORTCUT_DEFAULTS)) return false;
     const conflict = actionForShortcut(state, value);
     if (value && conflict && conflict !== action) return false;
@@ -37,7 +39,7 @@ export const shortcuts = {
     return true;
   },
   reset() {
-    for (const [action, value] of Object.entries(SHORTCUT_DEFAULTS)) state[action] = value;
+    for (const [action, value] of Object.entries(SHORTCUT_DEFAULTS) as [ShortcutAction, string][]) state[action] = value;
     persist();
   },
 };

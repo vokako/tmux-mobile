@@ -9,8 +9,8 @@
   // isTeamSession is gated on the shared teamState.available, so on a server
   // without the team bus these fall back to ordinary sessions (consistently
   // with PanePicker and the Team tab).
-  import { isTeamSession, teamRoomOf, teamLabel } from '../core/team.svelte.js';
-  import { agentNotifications, notificationForWindow, sessionHasNotification } from '../core/agent-notifications.svelte.js';
+  import { isTeamSession, teamRoomOf, teamLabel } from '../core/team.svelte.ts';
+  import { agentNotifications, notificationForWindow, sessionHasNotification } from '../core/agent-notifications.svelte.ts';
 
   let { openTerminal, openTeam = () => {}, activeTarget = '', visible = false } = $props();
 

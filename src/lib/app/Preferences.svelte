@@ -1,11 +1,11 @@
 <script>
   import Icon from '../ui/Icon.svelte';
   import { t, i18n, setLocale } from '../core/i18n.svelte.js';
-  import { layout } from './layout.svelte.js';
+  import { layout } from './layout.svelte.ts';
   import { fonts } from './fonts.svelte.js';
-  import { terminalPrefs, LINE_HEIGHT_MIN, LINE_HEIGHT_MAX } from './terminal-prefs.svelte.js';
+  import { terminalPrefs, LINE_HEIGHT_MIN, LINE_HEIGHT_MAX } from './terminal-prefs.svelte.ts';
   import { SHORTCUT_DEFAULTS, shortcutFromEvent, shortcutLabel } from './shortcuts.ts';
-  import { shortcuts } from './shortcuts.svelte.js';
+  import { shortcuts } from './shortcuts.svelte.ts';
   import { agentHooksInstall, agentHooksRemove, agentHooksStatus } from '../core/ws.ts';
 
   let {

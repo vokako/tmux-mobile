@@ -18,7 +18,7 @@
   import { marked } from 'marked';
   import '../core/markedSafeUrl.ts';
   import { t } from '../core/i18n.svelte.js';
-  import { layout } from '../app/layout.svelte.js';
+  import { layout } from '../app/layout.svelte.ts';
   import { scrollFade } from '../core/scrollFade.ts';
   import {
     teamHistory, teamRoster, teamPost, teamStatus, teamStartTeam,
@@ -28,7 +28,7 @@
     listSessionsWithPanes, fsCwd,
   } from '../core/ws.ts';
   import TeamTemplates from './TeamTemplates.svelte';
-  import { teamSessionOf } from '../core/team.svelte.js';
+  import { teamSessionOf } from '../core/team.svelte.ts';
   import {
     pickActiveRoom, readStoredActiveRoom, writeStoredActiveRoom,
   } from './team-selection.ts';
