@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   // Desktop-only agent grid for the Team tab. Tiles one read-only-by-default
   // terminal preview per team employee, laid out in a near-square grid
   // (w = ceil(√n), h = ceil(n/w)). Click a cell to activate it (focus + full
@@ -10,20 +10,32 @@
   import CollabGraph from './CollabGraph.svelte';
   import { t } from '../core/i18n.svelte.ts';
   import { listSessionsWithPanes } from '../core/ws.ts';
+  import type { TmuxPane } from '../core/ws.ts';
   import { paneAgent } from '../core/agents.ts';
+
+  type Employee = { name: string; state?: string } & Record<string, unknown>;
+  type Cell = { name: string; collab?: boolean; state?: string; pane?: TmuxPane | null };
 
   let {
     teamSession = '',     // tmm-team-<slug>: the session whose windows are agents
-    employees = [],       // [{ name, state, ... }] desired roster (all employees)
+    employees = [],       // desired roster (all employees)
     fontSize = 14,        // standard size; cells render two notches smaller
     visible = false,
     collab = false,       // show the collaboration graph as the first cell
     collabAgents = [],    // roster for the graph
     collabEvent = null,   // latest live message driving the graph's arcs
+  }: {
+    teamSession?: string;
+    employees?: Employee[];
+    fontSize?: number;
+    visible?: boolean;
+    collab?: boolean;
+    collabAgents?: { name: string; status?: string }[];
+    collabEvent?: { id?: string | number; kind?: string; from?: string; body?: string } | null;
   } = $props();
 
   // Any cell (agent terminal OR the graph) can be maximized to fill the pane.
-  let expandedName = $state(null);
+  let expandedName = $state<string | null>(null);
 
   // Cell font: two notches below the app's standard size (agent previews are
   // glanceable, not the primary editing surface), clamped to a legible floor.
@@ -32,13 +44,13 @@
   // name -> pane ({session,window,pane,current_command,window_name,...}).
   // Refreshed on a poll so a cell starts showing output as soon as its agent's
   // window exists (agents are launched a few seconds after Start team).
-  let panesByName = $state({});
-  let activeName = $state(null);
+  let panesByName = $state<Record<string, TmuxPane>>({});
+  let activeName = $state<string | null>(null);
 
   async function loadPanes() {
     try {
       const { panes } = await listSessionsWithPanes();
-      const map = {};
+      const map: Record<string, TmuxPane> = {};
       for (const p of panes || []) {
         if (p.session === teamSession && p.window_name) map[p.window_name] = p;
       }
@@ -59,7 +71,7 @@
   // window appears), so the grid shape is stable as the team comes up. FIRED
   // (disabled) employees are dropped — their window is killed, so a cell for
   // them would spin forever waiting for a pane that never returns.
-  let cells = $derived([
+  let cells = $derived<Cell[]>([
     ...(collab ? [{ name: '__collab__', collab: true }] : []),
     ...employees
       .filter(e => e.state !== 'disabled')
@@ -77,7 +89,7 @@
     activeName = first?.name ?? null;
   });
 
-  function targetOf(p) { return `${p.session}:${p.window}.${p.pane}`; }
+  function targetOf(p: TmuxPane) { return `${p.session}:${p.window}.${p.pane}`; }
 
   // The currently-maximized cell, if any; cleared if it leaves the grid.
   let expandedCell = $derived(cells.find(c => c.name === expandedName) || null);

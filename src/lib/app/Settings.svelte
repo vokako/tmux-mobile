@@ -1,10 +1,12 @@
-<script>
+<script lang="ts">
   import { connect, disconnect } from '../core/ws.ts';
   import Icon from '../ui/Icon.svelte';
   import { copyText } from '../core/clipboard.ts';
   import { t } from '../core/i18n.svelte.ts';
 
-  let { onConnected } = $props();
+  type HistoryEntry = { address: string; token: string };
+
+  let { onConnected }: { onConnected: () => void } = $props();
 
   let address = $state(localStorage.getItem('tmux_address') || 'ws://127.0.0.1:9899');
   let token = $state(localStorage.getItem('tmux_token') || '');
@@ -14,10 +16,10 @@
   let showToken = $state(false);
   let showHistory = $state(false);
 
-  let history = $state((() => {
+  let history = $state<HistoryEntry[]>((() => {
     const raw = JSON.parse(localStorage.getItem('tmux_address_history') || '[]');
     // Migrate: old format was string[], new is {address, token}[]
-    return raw.map(h => typeof h === 'string' ? { address: h, token: '' } : h);
+    return raw.map((h: string | HistoryEntry) => typeof h === 'string' ? { address: h, token: '' } : h);
   })());
 
   // Migrate old host+port (one-time)
@@ -32,7 +34,7 @@
   // Auto-fill from local config in Tauri desktop app
   $effect(() => {
     if (window.__TAURI__) {
-      window.__TAURI__.core.invoke('get_local_config').then(cfg => {
+      window.__TAURI__.core.invoke('get_local_config').then((cfg: { host: string; port: number; token: string; tmux_socket?: string }) => {
         if (!localStorage.getItem('tmux_token')) {
           const h = cfg.host === '0.0.0.0' ? '127.0.0.1' : cfg.host;
           address = `ws://${h}:${cfg.port}`;
@@ -43,7 +45,7 @@
     }
   });
 
-  function normalizeAddress(addr) {
+  function normalizeAddress(addr: string): string {
     let a = addr.trim();
     if (!a.startsWith('ws://') && !a.startsWith('wss://')) {
       // Auto-detect: HTTPS page requires wss://, otherwise ws://
@@ -53,7 +55,7 @@
     return a;
   }
 
-  function saveHistory(addr, tok) {
+  function saveHistory(addr: string, tok: string) {
     const entry = { address: addr.trim(), token: tok || '' };
     history = [entry, ...history.filter(h => h.address !== entry.address)].slice(0, 8);
     localStorage.setItem('tmux_address_history', JSON.stringify(history));
@@ -93,7 +95,7 @@
       } catch {}
       onConnected();
     } catch (e) {
-      if (!cancelled) error = e.message;
+      if (!cancelled) error = (e as Error).message;
     } finally {
       connecting = false;
     }
@@ -145,7 +147,7 @@
             {#each history as h}
               <div class="hist-row">
                 <button class="hist-item" onclick={() => { address = h.address; token = h.token; showHistory = false; }}>{h.address}</button>
-                <button class="hist-del" onclick={(e) => { e.stopPropagation(); const addr = h.address; history = history.filter(x => x.address !== addr); localStorage.setItem('tmux_address_history', JSON.stringify(history)); try { const machines = JSON.parse(localStorage.getItem('tmux_machines') || '{}'); for (const mid in machines) { machines[mid] = machines[mid].filter(u => u !== addr); if (!machines[mid].length) delete machines[mid]; } localStorage.setItem('tmux_machines', JSON.stringify(machines)); } catch {} }}><Icon name="x" size={11} /></button>
+                <button class="hist-del" onclick={(e) => { e.stopPropagation(); const addr = h.address; history = history.filter(x => x.address !== addr); localStorage.setItem('tmux_address_history', JSON.stringify(history)); try { const machines = JSON.parse(localStorage.getItem('tmux_machines') || '{}'); for (const mid in machines) { machines[mid] = machines[mid].filter((u: string) => u !== addr); if (!machines[mid].length) delete machines[mid]; } localStorage.setItem('tmux_machines', JSON.stringify(machines)); } catch {} }}><Icon name="x" size={11} /></button>
               </div>
             {/each}
           </div>
