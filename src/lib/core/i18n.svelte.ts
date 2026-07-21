@@ -4,12 +4,12 @@ const i18n = $state({ lang: localStorage.getItem('tmux_locale') || (navigator.la
 
 export { i18n };
 
-export function setLocale(l) {
+export function setLocale(l: 'en' | 'zh') {
   i18n.lang = l;
   localStorage.setItem('tmux_locale', l);
 }
 
-const msgs = {
+const msgs: Record<string, Record<string, string>> = {
   en: {
     sessions: 'Sessions',
     terminal: 'Terminal',
@@ -130,7 +130,6 @@ const msgs = {
     close: 'Close',
     split: 'Split',
     selected: 'Selected — tap to copy',
-    copy: 'Copy',
     connectionUnstable: 'Connection unstable',
     saved: 'Saved: ',
     open: 'Open',
@@ -339,7 +338,6 @@ const msgs = {
     close: '关闭',
     split: '分屏',
     selected: '已选中，点击复制',
-    copy: '复制',
     connectionUnstable: '网络连接不稳定',
     saved: '已保存：',
     open: '打开',
@@ -430,6 +428,6 @@ const msgs = {
   },
 };
 
-export function t(key) {
-  return msgs[i18n.lang]?.[key] ?? msgs.en[key] ?? key;
+export function t(key: string): string {
+  return msgs[i18n.lang]?.[key] ?? msgs.en![key] ?? key;
 }

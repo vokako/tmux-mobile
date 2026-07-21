@@ -7,7 +7,7 @@
   import Terminal from '../terminal/Terminal.svelte';
   import PanePicker from './PanePicker.svelte';
   import Icon from '../ui/Icon.svelte';
-  import { t } from '../core/i18n.svelte.js';
+  import { t } from '../core/i18n.svelte.ts';
 
   let {
     cells,            // [{ id, target, session, command }]

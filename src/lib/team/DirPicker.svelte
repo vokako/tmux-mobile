@@ -4,7 +4,7 @@
   // Breadcrumb path + up button + folder list; choosing a folder navigates into
   // it, the ✓ confirms the current directory. Calls onPick(path) on confirm.
   import Icon from '../ui/Icon.svelte';
-  import { t } from '../core/i18n.svelte.js';
+  import { t } from '../core/i18n.svelte.ts';
   import { fsList, fsMkdir } from '../core/ws.ts';
 
   let {

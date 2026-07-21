@@ -6,10 +6,10 @@
   import AgentChip from '../ui/AgentChip.svelte';
   import { otherTerminalSessionHasNotification, terminalNotificationForWindow } from '../core/agent-notifications.svelte.ts';
   import PanePicker from '../sessions/PanePicker.svelte';
-  import { t } from '../core/i18n.svelte.js';
+  import { t } from '../core/i18n.svelte.ts';
   import { detectAgent, paneIsAgent, paneAgent, AGENTS } from '../core/agents.ts';
   import { copyText } from '../core/clipboard.ts';
-  import { fonts } from '../app/fonts.svelte.js';
+  import { fonts } from '../app/fonts.svelte.ts';
   import { terminalPrefs } from '../app/terminal-prefs.svelte.ts';
   import { adaptAnsiColors } from './ansi-colors.ts';
   import { compactLineGeometry } from './terminal-line-geometry.ts';

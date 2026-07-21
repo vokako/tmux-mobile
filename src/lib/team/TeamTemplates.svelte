@@ -5,7 +5,7 @@
   // Persists via onSave(name, agents) / onDelete(name) which call the team_*
   // template RPCs and re-fetch.
   import Icon from '../ui/Icon.svelte';
-  import { t } from '../core/i18n.svelte.js';
+  import { t } from '../core/i18n.svelte.ts';
 
   let {
     templates = [],        // [{ name, agents:[…] }]

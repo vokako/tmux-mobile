@@ -12,7 +12,7 @@
   // - `goBack()` (instance export): host's back-navigation calls this first;
   //   returns true if the panel consumed the back (closed an open diff).
   import Icon from '../ui/Icon.svelte';
-  import { t } from '../core/i18n.svelte.js';
+  import { t } from '../core/i18n.svelte.ts';
   import { gitCmd } from '../core/ws.ts';
 
   let { cwd, fontSize = 14, onOpenFile, onClose } = $props();

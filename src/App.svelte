@@ -11,10 +11,10 @@
   import { copyText } from './lib/core/clipboard.ts';
   import { teamStatus } from './lib/core/ws.ts';
   import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable } from './lib/core/ws.ts';
-  import { t } from './lib/core/i18n.svelte.js';
+  import { t } from './lib/core/i18n.svelte.ts';
   import { layout } from './lib/app/layout.svelte.ts';
   import { teamState } from './lib/core/team.svelte.ts';
-  import { applyMonoVar } from './lib/app/fonts.svelte.js';
+  import { applyMonoVar } from './lib/app/fonts.svelte.ts';
   import { normalizeUiZoom, stepUiZoom, UI_ZOOM_DEFAULT } from './lib/app/ui-zoom.ts';
   import { createReconnectMachine } from './lib/app/reconnect.ts';
   import { cycleItem, shortcutFromEvent } from './lib/app/shortcuts.ts';

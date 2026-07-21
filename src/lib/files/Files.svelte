@@ -24,7 +24,7 @@
   import mermaid from 'mermaid';
   import Icon from '../ui/Icon.svelte';
   import GitPanel from './GitPanel.svelte';
-  import { t } from '../core/i18n.svelte.js';
+  import { t } from '../core/i18n.svelte.ts';
   import { layout } from '../app/layout.svelte.ts';
   import { copyText } from '../core/clipboard.ts';
   import { directoryLoadState } from './file-view-state.ts';

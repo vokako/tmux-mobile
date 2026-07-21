@@ -17,7 +17,7 @@
   import DirPicker from './DirPicker.svelte';
   import { marked } from 'marked';
   import '../core/markedSafeUrl.ts';
-  import { t } from '../core/i18n.svelte.js';
+  import { t } from '../core/i18n.svelte.ts';
   import { layout } from '../app/layout.svelte.ts';
   import { scrollFade } from '../core/scrollFade.ts';
   import {

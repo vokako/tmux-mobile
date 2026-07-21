@@ -49,13 +49,13 @@ const SYSTEM_STACK =
 
 let custom = $state(localStorage.getItem(KEY) || '');
 
-function quote(name) {
+function quote(name: string): string {
   // Wrap in single quotes for CSS; strip any quotes the user typed.
   const clean = name.trim().replace(/['"]/g, '');
   return clean ? `'${clean}'` : '';
 }
 
-async function isAvailable(name) {
+async function isAvailable(name: string): Promise<boolean> {
   const family = normalizeFontFamily(name);
   if (!family) return true;
 
@@ -92,7 +92,7 @@ export const fonts = {
   get common() {
     return COMMON_FAMILIES;
   },
-  async set(name) {
+  async set(name: string): Promise<boolean> {
     const next = normalizeFontFamily(name);
     if (!await isAvailable(next)) return false;
     custom = next;

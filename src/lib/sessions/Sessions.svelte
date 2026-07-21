@@ -2,7 +2,7 @@
   import { listSessions, listPanes, listSessionsWithPanes, newSession, killSession, newWindow, killWindow, fsList } from '../core/ws.ts';
   import Icon from '../ui/Icon.svelte';
   import AgentChip from '../ui/AgentChip.svelte';
-  import { t } from '../core/i18n.svelte.js';
+  import { t } from '../core/i18n.svelte.ts';
   import { sessionHasAgent, paneAgent, AGENTS } from '../core/agents.ts';
   // Team-mode sessions (`tmm-team-<room>`) are grouped apart from regular
   // sessions and their clicks route to the Team chat instead of a raw terminal.
