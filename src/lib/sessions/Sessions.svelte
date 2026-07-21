@@ -1,5 +1,6 @@
-<script>
+<script lang="ts">
   import { listSessions, listPanes, listSessionsWithPanes, newSession, killSession, newWindow, killWindow, fsList } from '../core/ws.ts';
+  import type { TmuxSession, TmuxPane } from '../core/ws.ts';
   import Icon from '../ui/Icon.svelte';
   import AgentChip from '../ui/AgentChip.svelte';
   import { t } from '../core/i18n.svelte.ts';
@@ -12,19 +13,24 @@
   import { isTeamSession, teamRoomOf, teamLabel } from '../core/team.svelte.ts';
   import { agentNotifications, notificationForWindow, sessionHasNotification } from '../core/agent-notifications.svelte.ts';
 
-  let { openTerminal, openTeam = () => {}, activeTarget = '', visible = false } = $props();
+  let { openTerminal, openTeam = () => {}, activeTarget = '', visible = false }: {
+    openTerminal: (session: string, target: string, command?: string) => void;
+    openTeam?: (room: string) => void;
+    activeTarget?: string;
+    visible?: boolean;
+  } = $props();
 
   const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
   // ─── State ─────────────────────────────────────────────
-  let sessions = $state([]);
-  let panes = $state({});           // session name → TmuxPane[]
-  let expanded = $state({});        // session name → bool (manually opened in multi-window view)
+  let sessions = $state<TmuxSession[]>([]);
+  let panes = $state<Record<string, TmuxPane[]>>({});
+  let expanded = $state<Record<string, boolean>>({}); // manually opened in multi-window view
   let error = $state('');
   let query = $state('');
   let searchOpen = $state(false);
-  let searchInputEl = $state(null);
-  let sessionsEl;
+  let searchInputEl = $state<HTMLInputElement | null>(null);
+  let sessionsEl: HTMLElement | undefined;
 
   // New session form
   let showNew = $state(false);
@@ -33,22 +39,23 @@
   let newCmd = $state('');
 
   // Folder picker (inside new form)
+  type DirEntry = { name: string; type: string; path: string };
   let showPicker = $state(false);
   let pickerPath = $state('');
-  let pickerEntries = $state([]);
-  let pickerPathEl = $state(null);
+  let pickerEntries = $state<DirEntry[]>([]);
+  let pickerPathEl = $state<HTMLElement | null>(null);
 
   // Confirm-to-kill gates
-  let confirmKill = $state(null);       // session name
-  let confirmKillWindow = $state(null); // "session:window"
+  let confirmKill = $state<string | null>(null);       // session name
+  let confirmKillWindow = $state<string | null>(null); // "session:window"
 
   let refreshing = $state(false);
 
   // ─── Helpers ───────────────────────────────────────────
-  const AGENT_BY_TAG = new Map(AGENTS.map(a => [a.tag, a]));
-  function aiIcon(tag) { return AGENT_BY_TAG.get(tag)?.icon || ''; }
-  function sessionAgents(sessionName) {
-    const counts = new Map();
+  const AGENT_BY_TAG = new Map(AGENTS.map(a => [a.tag, a] as const));
+  function aiIcon(tag: string) { return AGENT_BY_TAG.get(tag)?.icon || ''; }
+  function sessionAgents(sessionName: string) {
+    const counts = new Map<string, number>();
     for (const pane of panes[sessionName] || []) {
       const agent = paneAgent(pane);
       if (agent) counts.set(agent.tag, (counts.get(agent.tag) || 0) + 1);
@@ -57,9 +64,9 @@
     // reshuffle icons whenever tmux adds or removes a window.
     return AGENTS
       .filter(agent => counts.has(agent.tag))
-      .map(agent => ({ agent, count: counts.get(agent.tag) }));
+      .map(agent => ({ agent, count: counts.get(agent.tag)! }));
   }
-  function relTime(unixSec) {
+  function relTime(unixSec: number | undefined) {
     if (!unixSec) return '';
     const d = Math.max(0, Math.floor(Date.now() / 1000) - unixSec);
     if (d < 45) return t('justNow');
@@ -72,13 +79,13 @@
   // Summary derived from panes of a session — the "what is this session"
   // one-liner. Picks the most informative signal:
   //   attached pane > first pane with AI tag > first pane.
-  function sessionSummary(s) {
+  function sessionSummary(s: TmuxSession) {
     const ps = panes[s.name];
     if (!ps || !ps.length) return { ai: '', cmd: '', agents: [] };
     // Prefer pane that matches activeTarget; else first with AI tag; else first.
     const act = ps.find(p => activeTarget === `${p.session}:${p.window}.${p.pane}`);
     const tagged = ps.find(p => paneAgent(p));
-    const p = act || tagged || ps[0];
+    const p = (act || tagged || ps[0])!; // ps checked non-empty above
     // Detect on the full pane signal (command + title + child argv). The
     // session row's big icon comes from this — title-only matching missed
     // interpreter-launched agents (codex = "node", claude = "2.1.141").
@@ -116,14 +123,14 @@
         if (la !== lb) return lb - la;
         return 0;
       });
-      const grouped = {};
+      const grouped: Record<string, TmuxPane[]> = {};
       for (const p of allPanes) {
         (grouped[p.session] ||= []).push(p);
       }
       panes = grouped;
       error = '';
     } catch (e) {
-      error = e.message;
+      error = (e as Error).message;
     }
   }
 
@@ -136,7 +143,7 @@
   // ─── Open / navigation ────────────────────────────────
   // Single-click entry: open the session at its "primary" pane.
   // Multi-window sessions toggle expansion so user can choose.
-  function activateSession(s) {
+  function activateSession(s: TmuxSession) {
     // Team session → open the team's chat instead of a raw terminal.
     if (isTeamSession(s.name)) { openTeam(teamRoomOf(s.name)); return; }
     const ps = panes[s.name] || [];
@@ -152,7 +159,7 @@
   // The chip is an MRU fast-switch surface — toggling a row's expansion
   // elsewhere on the page would leave the user wondering what happened.
   // We pick the most-informative pane: first AI pane, else first pane.
-  function chipOpen(s) {
+  function chipOpen(s: TmuxSession) {
     // Team session → chat (chips normally exclude these; guard anyway).
     if (isTeamSession(s.name)) { openTeam(teamRoomOf(s.name)); return; }
     // If this chip represents the currently-active session, return to the
@@ -160,8 +167,8 @@
     // picked). Tapping the active chip = "go back to Terminal".
     if (activeTarget.startsWith(s.name + ':')) {
       const parts = activeTarget.split(':')[1]?.split('.') || [];
-      const win = parseInt(parts[0], 10);
-      const pane = parseInt(parts[1], 10);
+      const win = parseInt(parts[0] ?? '', 10);
+      const pane = parseInt(parts[1] ?? '', 10);
       const ps = panes[s.name] || [];
       const p = ps.find(x => x.window === win && x.pane === pane) || ps[0];
       if (!p) return;
@@ -174,12 +181,12 @@
     if (!p) return;
     openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command);
   }
-  function openPane(s, p) {
+  function openPane(s: TmuxSession, p: TmuxPane) {
     openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command);
   }
 
   // ─── Kill with tap-to-confirm ─────────────────────────
-  async function removeSession(name, e) {
+  async function removeSession(name: string, e?: Event) {
     e?.stopPropagation();
     if (confirmKill !== name) {
       confirmKill = name;
@@ -191,10 +198,10 @@
       await killSession(name);
       await refresh();
     } catch (err) {
-      error = err.message;
+      error = (err as Error).message;
     }
   }
-  async function removeWindow(target, session, e) {
+  async function removeWindow(target: string, session: string, e?: Event) {
     e?.stopPropagation();
     if (confirmKillWindow !== target) {
       confirmKillWindow = target;
@@ -206,7 +213,7 @@
       await killWindow(target);
       panes[session] = await listPanes(session);
       if ((panes[session] || []).length === 0) await refresh();
-    } catch (err) { error = err.message; }
+    } catch (err) { error = (err as Error).message; }
   }
 
   // ─── Create session ───────────────────────────────────
@@ -218,11 +225,11 @@
       newName = ''; newPath = ''; newCmd = ''; showNew = false;
       const ps = await listPanes(name);
       if (ps.length) {
-        const p = ps[0];
+        const p = ps[0]!;
         openTerminal(name, `${p.session}:${p.window}.${p.pane}`, p.current_command);
       }
       await refresh();
-    } catch (e) { error = e.message; }
+    } catch (e) { error = (e as Error).message; }
   }
 
   // ─── Folder picker ────────────────────────────────────
@@ -230,11 +237,11 @@
     showPicker = true;
     await loadPicker(newPath || '~');
   }
-  async function loadPicker(path) {
+  async function loadPicker(path: string) {
     try {
       const r = await fsList(path, false);
       pickerPath = path;
-      pickerEntries = r.entries.filter(e => e.type === 'dir').sort((a, b) => a.name.localeCompare(b.name));
+      pickerEntries = r.entries.filter((e: DirEntry) => e.type === 'dir').sort((a: DirEntry, b: DirEntry) => a.name.localeCompare(b.name));
     } catch {}
   }
   function pickerUp() {
@@ -276,7 +283,7 @@
 
   // Filter list by query. Matches against: session name, window name,
   // current_command, current_path, AI tag. Case-insensitive.
-  function sessionMatches(s, q) {
+  function sessionMatches(s: TmuxSession, q: string) {
     if (!q) return true;
     const ql = q.toLowerCase();
     if (s.name.toLowerCase().includes(ql)) return true;
@@ -288,7 +295,7 @@
       (paneAgent(p)?.tag || '').toLowerCase().includes(ql)
     );
   }
-  function paneMatches(p, q) {
+  function paneMatches(p: TmuxPane, q: string) {
     if (!q) return true;
     const ql = q.toLowerCase();
     return (
@@ -322,14 +329,14 @@
     searchOpen = false;
   }
 
-  function scrollIntoView(el) {
+  function scrollIntoView(el: HTMLElement) {
     setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'end' }), 50);
   }
 
   // Svelte action: after the element mounts, scroll its horizontal content
   // to the right end so the most-informative tail of a long path is
   // visible without the user having to scroll. Re-runs when content changes.
-  function scrollEndIntoView(el) {
+  function scrollEndIntoView(el: HTMLElement) {
     const update = () => { if (el) el.scrollLeft = el.scrollWidth; };
     update();
     return { update };
@@ -405,7 +412,7 @@
        `team` flag flips the leading icon, the displayed name (room vs the raw
        tmm-team-* session), the trailing affordance (chat hint vs kill), and
        disables pane expansion (a team row always opens the chat). -->
-  {#snippet sessionItem(s)}
+  {#snippet sessionItem(s: TmuxSession)}
     {@const team = isTeamSession(s.name)}
     {@const sum = sessionSummary(s)}
     {@const isActive = activeTarget.startsWith(s.name + ':')}
@@ -509,7 +516,7 @@
               panes[s.name] = ps2;
               const p = ps2[ps2.length - 1];
               if (p) openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command);
-            } catch (e) { error = e.message; }
+            } catch (e) { error = (e as Error).message; }
           }}>
             <Icon name="plus" size={12} /> {t('window')}
           </button>
