@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeUiZoom, stepUiZoom, UI_ZOOM_DEFAULT } from './ui-zoom.js';
+import { normalizeUiZoom, stepUiZoom, UI_ZOOM_DEFAULT } from './ui-zoom.ts';
 
 test('normalizes persisted UI zoom to supported tenths', () => {
   assert.equal(normalizeUiZoom('1.24'), 1.2);

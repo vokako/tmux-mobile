@@ -27,7 +27,7 @@
   import { t } from '../core/i18n.svelte.js';
   import { layout } from '../app/layout.svelte.js';
   import { copyText } from '../core/clipboard.js';
-  import { directoryLoadState } from './file-view-state.js';
+  import { directoryLoadState } from './file-view-state.ts';
   import { installExternalLinkHandler } from '../core/external-links.js';
   import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsDownloadHttp, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref, fsConvert } from '../core/ws.js';
 

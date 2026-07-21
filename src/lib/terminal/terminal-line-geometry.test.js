@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compactLineGeometry } from './terminal-line-geometry.js';
+import { compactLineGeometry } from './terminal-line-geometry.ts';
 
 test('compact lines split clipped height equally above and below', () => {
   const geometry = compactLineGeometry(20, 6, 2, 0.6);

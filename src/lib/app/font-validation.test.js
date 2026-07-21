@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { localFontSource, normalizeFontFamily } from './font-validation.js';
+import { localFontSource, normalizeFontFamily } from './font-validation.ts';
 
 test('keeps multi-word local font family names intact', () => {
   assert.equal(normalizeFontFamily("  'Maple Mono NF CN'  "), 'Maple Mono NF CN');

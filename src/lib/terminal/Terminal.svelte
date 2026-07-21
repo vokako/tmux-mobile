@@ -12,8 +12,8 @@
   import { fonts } from '../app/fonts.svelte.js';
   import { terminalPrefs } from '../app/terminal-prefs.svelte.js';
   import { adaptAnsiColors } from './ansi-colors.js';
-  import { compactLineGeometry } from './terminal-line-geometry.js';
-  import { restoreViewportAfterPaneSwitch } from './terminal-viewport.js';
+  import { compactLineGeometry } from './terminal-line-geometry.ts';
+  import { restoreViewportAfterPaneSwitch } from './terminal-viewport.ts';
   import { cycleItem } from '../app/shortcuts.js';
   import { encodeTerminalShortcut } from './terminal-keyboard.js';
   import { openExternalUrl } from '../core/external-links.js';

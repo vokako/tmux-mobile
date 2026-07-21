@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { restoreViewportAfterPaneSwitch } from './terminal-viewport.js';
+import { restoreViewportAfterPaneSwitch } from './terminal-viewport.ts';
 
 function createRoot() {
   const properties = new Map();

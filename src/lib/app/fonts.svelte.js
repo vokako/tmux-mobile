@@ -1,4 +1,4 @@
-import { localFontSource, normalizeFontFamily } from './font-validation.js';
+import { localFontSource, normalizeFontFamily } from './font-validation.ts';
 
 // Terminal monospace font: system stack by default, user-overridable.
 //

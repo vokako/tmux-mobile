@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { directoryLoadState } from './file-view-state.js';
+import { directoryLoadState } from './file-view-state.ts';
 
 const preview = {
   view: 'preview',

@@ -15,7 +15,7 @@
   import { layout } from './lib/app/layout.svelte.js';
   import { teamState } from './lib/core/team.svelte.js';
   import { applyMonoVar } from './lib/app/fonts.svelte.js';
-  import { normalizeUiZoom, stepUiZoom, UI_ZOOM_DEFAULT } from './lib/app/ui-zoom.js';
+  import { normalizeUiZoom, stepUiZoom, UI_ZOOM_DEFAULT } from './lib/app/ui-zoom.ts';
   import { cycleItem, shortcutFromEvent } from './lib/app/shortcuts.js';
   import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.js';
   import { markWindowRead, stopAgentNotifications, syncAgentNotifications } from './lib/core/agent-notifications.svelte.js';
