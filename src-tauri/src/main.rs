@@ -127,4 +127,46 @@ mod tests {
         println!("✅ Scrollback capture works");
         cleanup();
     }
+
+    #[test]
+    fn t08_literal_ctrl_bytes_reach_extended_keys_pane() {
+        // With `extended-keys on`, tmux DROPS raw C0 bytes sent via
+        // `send-keys -l` to panes in extended key mode (modifyOtherKeys /
+        // kitty — what every modern agent TUI enables). send_keys must
+        // translate them to named keys so they survive. The probe puts its
+        // tty in raw mode, enables modifyOtherKeys level 1 (tmux shows
+        // `Ext 1`, same as kiro-cli), and echoes the repr of every byte read.
+        cleanup();
+        let probe = "import sys, tty, os, time\n\
+                     tty.setraw(0)\n\
+                     time.sleep(0.3)\n\
+                     sys.stdout.write('\\x1b[>4;1m'); sys.stdout.flush()\n\
+                     sys.stdout.write('PROBE_READY\\r\\n'); sys.stdout.flush()\n\
+                     [sys.stdout.write('GOT ' + repr(os.read(0, 64)) + '\\r\\n') or sys.stdout.flush() for _ in iter(int, 1)]";
+        std::fs::write("/tmp/tmm_kbprobe_test.py", probe).unwrap();
+        std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", TEST_SESSION, "python3 /tmp/tmm_kbprobe_test.py"])
+            .status()
+            .unwrap();
+        thread::sleep(Duration::from_millis(1500));
+
+        // Mixed literal payload: text + Ctrl-C + text, plus a lone Ctrl-F and
+        // a Ctrl+Alt combo, exactly what the frontend key path produces.
+        tmux::send_keys(TEST_SESSION, "ab\x03cd", true).unwrap();
+        tmux::send_keys(TEST_SESSION, "\x06", true).unwrap();
+        tmux::send_keys(TEST_SESSION, "\x1b\x14", true).unwrap();
+        thread::sleep(Duration::from_millis(600));
+
+        let output = tmux::capture_pane(TEST_SESSION, Some(50)).unwrap();
+        println!("probe output:\n{}", output);
+        assert!(output.contains("PROBE_READY"), "probe did not start");
+        assert!(output.contains("'ab'"), "leading literal text lost");
+        assert!(output.contains("\\x03"), "Ctrl-C byte dropped by extended-keys pane");
+        assert!(output.contains("'cd'"), "trailing literal text lost");
+        assert!(output.contains("\\x06"), "Ctrl-F byte dropped by extended-keys pane");
+        assert!(output.contains("\\x1b\\x14"), "Ctrl+Alt-T (ESC + C0) dropped or split");
+        println!("✅ literal ctrl bytes reach an extended-keys pane");
+        cleanup();
+        let _ = std::fs::remove_file("/tmp/tmm_kbprobe_test.py");
+    }
 }

@@ -9,7 +9,13 @@ Rust wrapper around tmux CLI commands. File: `src-tauri/src/tmux.rs`
 - `capture_pane(target, lines?)` — capture content with ANSI escapes, joined soft-wrapped lines
 - `capture_pane_with_width(target, lines?, width)` — capture with CJK double-width character fix, returns (content, trailing_trimmed)
 - `cursor_info(target)` — get cursor position (x, y), pane height and width
-- `send_keys(target, keys, literal)` — send keystrokes
+- `send_keys(target, keys, literal)` — send keystrokes. Literal mode splits
+  C0 control bytes out as tmux *named* keys (`\x03` → `C-c`; ESC+C0 → `M-C-x`):
+  with `extended-keys on`, tmux silently drops raw C0 bytes sent via
+  `send-keys -l` to panes whose app enabled an extended keyboard protocol
+  (`#{pane_key_mode}` = `Ext …` — kiro/claude/codex all do). Named keys are
+  re-encoded by tmux to match the pane's key mode, so they reach both legacy
+  and extended panes. `\t` `\n` `\r` and standalone ESC stay literal.
 - `send_command(target, command)` — send text + Enter
 - `pane_command(target)` — get current running command
 - `pane_cwd(target)` — get pane working directory

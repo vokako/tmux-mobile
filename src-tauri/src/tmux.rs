@@ -482,14 +482,69 @@ fn is_wide_char(c: char) -> bool {
     )
 }
 
-/// 向 pane 发送按键
-pub fn send_keys(target: &str, keys: &str, literal: bool) -> Result<(), String> {
-    let mut args = vec!["send-keys", "-t", target];
-    if literal {
-        args.push("-l"); // literal mode，不解析特殊键
+/// tmux named key for a C0 control byte, for bytes that must not be sent
+/// literally (see send_keys). `\t` `\n` `\r` and ESC stay literal: they are
+/// ordinary text bytes (or, for ESC, the prefix of a longer sequence).
+fn c0_key_name(c: char) -> Option<&'static str> {
+    const CTRL_LETTERS: [&str; 26] = [
+        "C-a", "C-b", "C-c", "C-d", "C-e", "C-f", "C-g", "C-h", "C-i", "C-j",
+        "C-k", "C-l", "C-m", "C-n", "C-o", "C-p", "C-q", "C-r", "C-s", "C-t",
+        "C-u", "C-v", "C-w", "C-x", "C-y", "C-z",
+    ];
+    match c {
+        '\t' | '\n' | '\r' | '\x1b' => None,
+        '\0' => Some("C-Space"),
+        '\x01'..='\x1a' => Some(CTRL_LETTERS[c as usize - 1]),
+        '\x1c' => Some("C-\\"),
+        '\x1d' => Some("C-]"),
+        '\x1e' => Some("C-^"),
+        '\x1f' => Some("C-_"),
+        _ => None,
     }
-    args.push(keys);
-    run_tmux(&args)?;
+}
+
+/// 向 pane 发送按键
+///
+/// Literal mode splits C0 control bytes out as tmux *named* keys: with
+/// `extended-keys on`, tmux silently DROPS raw C0 bytes sent via
+/// `send-keys -l` to panes whose app enabled an extended keyboard protocol
+/// (modifyOtherKeys / kitty — `#{pane_key_mode}` = `Ext …`, which every
+/// modern agent TUI does). Named keys are re-encoded by tmux to match the
+/// pane's key mode, so they work for both legacy and extended panes.
+/// An ESC directly before a control byte is the client's Ctrl+Alt encoding;
+/// it becomes one `M-C-x` key so no stray ESC leaks into the pane.
+pub fn send_keys(target: &str, keys: &str, literal: bool) -> Result<(), String> {
+    if !literal {
+        run_tmux(&["send-keys", "-t", target, keys])?;
+        return Ok(());
+    }
+    let flush = |buf: &mut String| -> Result<(), String> {
+        if !buf.is_empty() {
+            run_tmux(&["send-keys", "-t", target, "-l", "--", buf])?;
+            buf.clear();
+        }
+        Ok(())
+    };
+    let mut buf = String::new();
+    let mut chars = keys.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            if let Some(name) = chars.peek().copied().and_then(c0_key_name) {
+                chars.next();
+                flush(&mut buf)?;
+                run_tmux(&["send-keys", "-t", target, &format!("M-{name}")])?;
+                continue;
+            }
+        }
+        match c0_key_name(c) {
+            Some(name) => {
+                flush(&mut buf)?;
+                run_tmux(&["send-keys", "-t", target, name])?;
+            }
+            None => buf.push(c),
+        }
+    }
+    flush(&mut buf)?;
     Ok(())
 }
 
