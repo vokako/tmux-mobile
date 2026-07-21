@@ -1,5 +1,5 @@
 <script>
-  import { connect, disconnect } from '../core/ws.js';
+  import { connect, disconnect } from '../core/ws.ts';
   import Icon from '../ui/Icon.svelte';
   import { copyText } from '../core/clipboard.js';
   import { t } from '../core/i18n.svelte.js';
@@ -75,12 +75,12 @@
       await connect(url, token);
       if (cancelled) return;
       if (socket.trim()) {
-        const { setSocket } = await import('../core/ws.js');
+        const { setSocket } = await import('../core/ws.ts');
         await setSocket(socket.trim()).catch(() => {});
       }
       // Save machine_id → address mapping
       try {
-        const { getMachineId } = await import('../core/ws.js');
+        const { getMachineId } = await import('../core/ws.ts');
         const mid = getMachineId?.();
         if (mid) {
           const map = JSON.parse(localStorage.getItem('tmux_machines') || '{}');

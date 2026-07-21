@@ -5,7 +5,7 @@
   // it, the ✓ confirms the current directory. Calls onPick(path) on confirm.
   import Icon from '../ui/Icon.svelte';
   import { t } from '../core/i18n.svelte.js';
-  import { fsList, fsMkdir } from '../core/ws.js';
+  import { fsList, fsMkdir } from '../core/ws.ts';
 
   let {
     start = '~',           // initial directory to open at

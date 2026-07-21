@@ -26,7 +26,7 @@
     teamSystemPromptSave,
     addTeamMessageListener, removeTeamMessageListener,
     listSessionsWithPanes, fsCwd,
-  } from '../core/ws.js';
+  } from '../core/ws.ts';
   import TeamTemplates from './TeamTemplates.svelte';
   import { teamSessionOf } from '../core/team.svelte.js';
   import {

@@ -1,5 +1,5 @@
 <script>
-  import { listSessions, listPanes, listSessionsWithPanes, newSession, killSession, newWindow, killWindow, fsList } from '../core/ws.js';
+  import { listSessions, listPanes, listSessionsWithPanes, newSession, killSession, newWindow, killWindow, fsList } from '../core/ws.ts';
   import Icon from '../ui/Icon.svelte';
   import AgentChip from '../ui/AgentChip.svelte';
   import { t } from '../core/i18n.svelte.js';

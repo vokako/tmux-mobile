@@ -1,5 +1,62 @@
 // WebSocket client for tmux-mobile server
 
+// ─── Protocol types ──────────────────────────────────────────────────────
+// Shapes mirror the Rust structs (src-tauri/src/tmux.rs) and the API
+// contract (docs/requirements/api-contracts/websocket-rpc.md). If a field
+// changes server-side, change it here — every consumer then fails to
+// type-check instead of silently reading `undefined`.
+export interface TmuxSession {
+  name: string;
+  windows: number;
+  attached: boolean;
+  created: string;
+  last_opened?: number;
+}
+export interface TmuxPane {
+  session: string;
+  window: number;
+  pane: number;
+  width: number;
+  height: number;
+  current_command: string;
+  window_name: string;
+  pane_title: string;
+  current_path: string;
+  active: boolean;
+  child_cmd?: string; // omitted when the pane runs a bare shell
+}
+// Cursor: x/y position, width, height, trailing trimmed lines.
+export interface Cursor { x: number; y: number; w: number; h: number; t: number }
+// Team messages / notification snapshots are consumed by still-unconverted
+// .js modules; keep them loose until those convert and pin the real shape.
+export type TeamMessage = any;
+export type AgentNotificationSnapshot = { unread: any[] } & Record<string, any>;
+export type PaneOutputCb = (
+  target: string,
+  content: string | undefined,
+  cursor: Cursor | undefined,
+  currentCommand: string | undefined,
+) => void;
+export type PaneClosedCb = (target: string) => void;
+// Errors surfaced by this module carry an optional `code`: a JSON-RPC error
+// code (number) for definitive server answers, or 'DISCONNECTED' (string)
+// for transport-level failures.
+export type RpcClientError = Error & { code?: number | string };
+
+type Cipher = { key: CryptoKey; sendCounter: number; recvCounter: number };
+// The raw WebSocket plus our per-connection attachments (send serialization
+// queue, negotiated cipher, identity getters).
+interface AppSocket extends WebSocket {
+  _sendQueue: Promise<void>;
+  _cipher: Cipher | null;
+  _getMachineId?: () => string | null;
+  _getHostname?: () => string | null;
+}
+
+declare global {
+  interface Window { __dbg?: (msg: string) => void }
+}
+
 // ─── Wire framing for the encrypted binary path ─────────────────────────
 // Encrypted frames travel as binary; the plaintext (post-decrypt) starts
 // with a 1-byte tag telling us how to decode the rest:
@@ -45,10 +102,10 @@ const TIMEOUT_DISCONNECT_INBOUND_SILENCE_MS = 10000;
 // app layer reacts via `onDisconnect`. Client-side JSON-RPC "ping" RPCs
 // are no longer needed here.
 
-let ws = null;
-let wsUrl = null;
+let ws: AppSocket | null = null;
+let wsUrl: string | null = null;
 let requestId = 0;
-const pending = new Map();
+const pending = new Map<number, { resolve: (v: any) => void; reject: (e: RpcClientError) => void }>();
 // Per-target listener registries. Each mounted Terminal registers a callback
 // keyed by its own target, so multiple terminals (split-screen) coexist —
 // pane_output / pane_closed are routed to the matching listeners instead of a
@@ -59,48 +116,48 @@ const pending = new Map();
 // cb the second registration silently replaced the first, so only one cell
 // refreshed. A Set fans out to all, and removing one cell's cb leaves the
 // other's intact.
-const paneOutputListeners = new Map(); // target -> Set<cb(target, content, cursor, current_command)>
-const paneClosedListeners = new Map(); // target -> Set<cb(target)>
+const paneOutputListeners = new Map<string, Set<PaneOutputCb>>();
+const paneClosedListeners = new Map<string, Set<PaneClosedCb>>();
 // Team group-chat message push listeners (Team tab). Unkeyed — one stream
 // for the whole room — so a plain Set, not a per-target map.
-const teamMessageListeners = new Set(); // Set<cb(message)>
-const agentNotificationListeners = new Set(); // Set<cb(snapshot)>
+const teamMessageListeners = new Set<(message: TeamMessage) => void>();
+const agentNotificationListeners = new Set<(snapshot: AgentNotificationSnapshot) => void>();
 
-function addListener(map, target, cb) {
+function addListener<CB>(map: Map<string, Set<CB>>, target: string, cb: CB) {
   let set = map.get(target);
   if (!set) { set = new Set(); map.set(target, set); }
   set.add(cb);
 }
-function removeListener(map, target, cb) {
+function removeListener<CB>(map: Map<string, Set<CB>>, target: string, cb: CB) {
   const set = map.get(target);
   if (!set) return;
   set.delete(cb);
   if (set.size === 0) map.delete(target);
 }
-let onDisconnect = null;
+let onDisconnect: (() => void) | null = null;
 let recoveryEnabled = false;
 let disconnectNotified = false;
 // Idle-probe state. lastInboundAt is updated on every inbound message
 // (any frame: handshake, RPC reply, push). idleProbeTimer is the periodic
 // checker that fires a `ping` RPC if nothing has arrived for too long.
 let lastInboundAt = 0;
-let idleProbeTimer = null;
+let idleProbeTimer: ReturnType<typeof setInterval> | null = null;
 let idleProbeInFlight = false;
 
 // These take the cb so the caller can register/unregister its own listener
 // without disturbing other cells on the same target. Callers MUST pass the
 // same function reference to remove that they passed to add.
-export function addPaneOutputListener(target, cb) { addListener(paneOutputListeners, target, cb); }
-export function removePaneOutputListener(target, cb) { removeListener(paneOutputListeners, target, cb); }
-export function addPaneClosedListener(target, cb) { addListener(paneClosedListeners, target, cb); }
-export function removePaneClosedListener(target, cb) { removeListener(paneClosedListeners, target, cb); }
-export function addTeamMessageListener(cb) { teamMessageListeners.add(cb); }
-export function removeTeamMessageListener(cb) { teamMessageListeners.delete(cb); }
-export function addAgentNotificationListener(cb) { agentNotificationListeners.add(cb); }
-export function removeAgentNotificationListener(cb) { agentNotificationListeners.delete(cb); }
-export function setOnDisconnect(cb) { onDisconnect = cb; }
+export function addPaneOutputListener(target: string, cb: PaneOutputCb) { addListener(paneOutputListeners, target, cb); }
+export function removePaneOutputListener(target: string, cb: PaneOutputCb) { removeListener(paneOutputListeners, target, cb); }
+export function addPaneClosedListener(target: string, cb: PaneClosedCb) { addListener(paneClosedListeners, target, cb); }
+export function removePaneClosedListener(target: string, cb: PaneClosedCb) { removeListener(paneClosedListeners, target, cb); }
+export function addTeamMessageListener(cb: (message: TeamMessage) => void) { teamMessageListeners.add(cb); }
+export function removeTeamMessageListener(cb: (message: TeamMessage) => void) { teamMessageListeners.delete(cb); }
+export function addAgentNotificationListener(cb: (snapshot: AgentNotificationSnapshot) => void) { agentNotificationListeners.add(cb); }
+export function removeAgentNotificationListener(cb: (snapshot: AgentNotificationSnapshot) => void) { agentNotificationListeners.delete(cb); }
+export function setOnDisconnect(cb: (() => void) | null) { onDisconnect = cb; }
 
-function notifyDisconnect(reason) {
+function notifyDisconnect(reason: string) {
   if (!recoveryEnabled || disconnectNotified) return;
   disconnectNotified = true;
   window.__dbg?.(`ws: recovery requested (${reason})`);
@@ -109,17 +166,17 @@ function notifyDisconnect(reason) {
 
 // --- Crypto helpers (Web Crypto API) ---
 
-function hexToBytes(hex) {
+function hexToBytes(hex: string): Uint8Array {
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < hex.length; i += 2) bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
   return bytes;
 }
 
-function bytesToHex(bytes) {
+function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function deriveKey(token, serverNonce, clientNonce) {
+async function deriveKey(token: string, serverNonce: Uint8Array, clientNonce: Uint8Array): Promise<CryptoKey> {
   const salt = new Uint8Array(32);
   salt.set(serverNonce, 0);
   salt.set(clientNonce, 16);
@@ -129,7 +186,7 @@ async function deriveKey(token, serverNonce, clientNonce) {
   return crypto.subtle.importKey('raw', bits, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 }
 
-async function computeProof(token, serverNonce, clientNonce) {
+async function computeProof(token: string, serverNonce: Uint8Array, clientNonce: Uint8Array): Promise<Uint8Array> {
   const salt = new Uint8Array(32);
   salt.set(serverNonce, 0);
   salt.set(clientNonce, 16);
@@ -145,7 +202,7 @@ async function computeProof(token, serverNonce, clientNonce) {
   return new Uint8Array(sig);
 }
 
-function makeNonce(counter) {
+function makeNonce(counter: number): Uint8Array {
   const n = new Uint8Array(12);
   const view = new DataView(n.buffer);
   // counter in bytes 4-11 (big-endian u64)
@@ -157,7 +214,7 @@ function makeNonce(counter) {
 // Compress a JSON string into the wire-plaintext byte stream:
 // [framing byte] [body bytes]. Returns Uint8Array. Falls back to plain
 // when the input is small or compresses to no benefit.
-async function encodeWirePayload(text) {
+async function encodeWirePayload(text: string): Promise<Uint8Array> {
   const utf8 = new TextEncoder().encode(text);
   if (utf8.length < COMPRESS_MIN_BYTES || typeof CompressionStream === 'undefined') {
     const out = new Uint8Array(1 + utf8.length);
@@ -167,7 +224,7 @@ async function encodeWirePayload(text) {
   }
   // CompressionStream is native (zlib via the platform), much faster than
   // any JS deflate library and zero CPU on V8's JIT.
-  const stream = new Blob([utf8]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+  const stream = new Blob([utf8 as unknown as BlobPart]).stream().pipeThrough(new CompressionStream('deflate-raw'));
   const compressed = new Uint8Array(await new Response(stream).arrayBuffer());
   if (compressed.length + 1 >= utf8.length + 1) {
     // Pathological: compressing made it bigger. Fall back to plain.
@@ -184,9 +241,9 @@ async function encodeWirePayload(text) {
 
 // Inverse of encodeWirePayload: decode a wire-plaintext byte buffer
 // (framing byte + body) back into the original JSON string.
-async function decodeWirePayload(bytes) {
+async function decodeWirePayload(bytes: Uint8Array): Promise<string> {
   if (!bytes || bytes.length < 1) throw new Error('empty wire payload');
-  const tag = bytes[0];
+  const tag = bytes[0]!; // length checked above
   const body = bytes.subarray(1);
   if (tag === WIRE_PLAIN_JSON) {
     return new TextDecoder().decode(body);
@@ -195,7 +252,7 @@ async function decodeWirePayload(bytes) {
     if (typeof DecompressionStream === 'undefined') {
       throw new Error('server sent deflate but DecompressionStream is unavailable');
     }
-    const stream = new Blob([body]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    const stream = new Blob([body as unknown as BlobPart]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
     return new Response(stream).text();
   }
   throw new Error(`unknown wire framing tag: 0x${tag.toString(16)}`);
@@ -203,31 +260,32 @@ async function decodeWirePayload(bytes) {
 
 // Encrypt a JSON string and return a Uint8Array suitable for ws.send().
 // The plaintext is the wire-framed payload (compressed or not).
-async function encryptMsg(text, cipher) {
+async function encryptMsg(text: string, cipher: Cipher | null): Promise<string | Uint8Array> {
   if (!cipher) return text; // plain path: caller sends it as text
   const plaintext = await encodeWirePayload(text);
   const nonce = makeNonce(cipher.sendCounter++);
-  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, cipher.key, plaintext);
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce as BufferSource }, cipher.key, plaintext as BufferSource);
   return new Uint8Array(ct);
 }
 
 // Decrypt an inbound binary ciphertext into the original JSON string.
-async function decryptMsg(buf, cipher) {
+async function decryptMsg(buf: string | ArrayBuffer | Uint8Array, cipher: Cipher | null): Promise<string> {
   if (!cipher) {
     // Plain-token fallback: buf is already the decoded text.
-    return typeof buf === 'string' ? buf : new TextDecoder().decode(buf);
+    return typeof buf === 'string' ? buf : new TextDecoder().decode(buf as ArrayBuffer);
   }
-  const ctBytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  // decryptMsg with a cipher is only ever called with binary frames.
+  const ctBytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf as ArrayBuffer);
   const nonce = makeNonce(cipher.recvCounter++);
-  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, cipher.key, ctBytes);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce as BufferSource }, cipher.key, ctBytes as BufferSource);
   return decodeWirePayload(new Uint8Array(pt));
 }
 
-function sendOnSocket(socket, message) {
+function sendOnSocket(socket: AppSocket, message: string): Promise<void> {
   const send = socket._sendQueue.then(async () => {
     const out = await encryptMsg(message, socket._cipher);
     if (ws !== socket || socket.readyState !== WebSocket.OPEN) {
-      const error = new Error('connection changed before send');
+      const error: RpcClientError = new Error('connection changed before send');
       error.code = 'DISCONNECTED';
       throw error;
     }
@@ -275,14 +333,14 @@ function stopIdleProbe() {
   idleProbeInFlight = false;
 }
 
-function rejectAllPending(reason) {
-  const err = new Error(reason || 'disconnected');
+function rejectAllPending(reason?: string) {
+  const err: RpcClientError = new Error(reason || 'disconnected');
   err.code = 'DISCONNECTED';
   for (const { reject: rej } of pending.values()) rej(err);
   pending.clear();
 }
 
-export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
+export function connect(url: string, token: string, timeoutMs = CONNECT_TIMEOUT_MS): Promise<string | null> {
   // Close any existing connection before creating a new one.
   // IMPORTANT: null ALL handlers (including onmessage) so any in-flight events on
   // the old socket don't fire handlers that still close over module-level `ws` and
@@ -305,10 +363,10 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
   wsUrl = url;
   window.__dbg?.(`ws: connecting to ${url} (timeout=${timeoutMs}ms)`);
 
-  return new Promise((resolve, reject) => {
-    let socket;
+  return new Promise<string | null>((resolve, reject) => {
+    let socket!: AppSocket;
     try {
-      ws = new WebSocket(url);
+      ws = new WebSocket(url) as AppSocket;
       socket = ws;
       // Every handler below closes over this identity. A stale close or an
       // async encrypted send from an older connection must never mutate or
@@ -319,7 +377,7 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
       socket._sendQueue = Promise.resolve();
       socket._cipher = null;
     } catch (e) {
-      window.__dbg?.(`ws: connect error: ${e.message}`);
+      window.__dbg?.(`ws: connect error: ${(e as Error).message}`);
       reject(e);
       return;
     }
@@ -331,10 +389,10 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
     }, timeoutMs);
 
     let authed = false;
-    let cipher = null;
-    let serverNonce = null;
-    let machineId = null;
-    let hostname = null;
+    let cipher: Cipher | null = null;
+    let serverNonce: Uint8Array | null = null;
+    let machineId: string | null = null;
+    let hostname: string | null = null;
 
     function authSuccess() {
       clearTimeout(timeout);
@@ -364,7 +422,9 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
       // event.data is either a string (text frames: handshake, plain auth
       // path) or an ArrayBuffer (binary frames: encrypted messages).
       const isBinary = event.data instanceof ArrayBuffer;
-      let data;
+      // Protocol-boundary escape hatch: frames are parsed from the wire and
+      // narrowed by the runtime checks below, not by the type system.
+      let data: any;
       if (!isBinary) {
         try { data = JSON.parse(event.data); } catch {}
       }
@@ -455,10 +515,10 @@ export function connect(url, token, timeoutMs = CONNECT_TIMEOUT_MS) {
       }
 
       if (data.id != null && pending.has(data.id)) {
-        const { resolve: res, reject: rej } = pending.get(data.id);
+        const { resolve: res, reject: rej } = pending.get(data.id)!; // guarded by pending.has above
         pending.delete(data.id);
         if (data.error) {
-          const err = new Error(data.error.message);
+          const err: RpcClientError = new Error(data.error.message);
           // JSON-RPC error code, so callers can tell a definitive server answer
           // (e.g. -32601 method-not-found → no team bus) from transport errors.
           err.code = data.error.code;
@@ -516,21 +576,21 @@ export function disconnect() {
   try { socket.close(); } catch {}
 }
 
-export function isConnected() {
+export function isConnected(): boolean {
   return ws?.readyState === WebSocket.OPEN;
 }
 
-export function getMachineId() {
+export function getMachineId(): string | null | undefined {
   return ws?._getMachineId?.();
 }
 
-export function getHostname() {
+export function getHostname(): string | null | undefined {
   return ws?._getHostname?.();
 }
 
 let rpcTimeouts = 0;
 
-function forceDisconnect(reason) {
+function forceDisconnect(reason?: string) {
   if (!ws) return;
   window.__dbg?.(`ws: forcing disconnect (${reason || 'unknown'})`);
   const socket = ws;
@@ -545,11 +605,11 @@ function forceDisconnect(reason) {
   notifyDisconnect(reason || 'forced disconnect');
 }
 
-function call(method, params = {}, timeoutMs = RPC_TIMEOUT_MS) {
-  return new Promise((resolve, reject) => {
+function call<T = any>(method: string, params: Record<string, unknown> = {}, timeoutMs = RPC_TIMEOUT_MS): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       notifyDisconnect('RPC attempted without an open socket');
-      const error = new Error('not connected');
+      const error: RpcClientError = new Error('not connected');
       error.code = 'DISCONNECTED';
       reject(error);
       return;
@@ -598,56 +658,56 @@ function call(method, params = {}, timeoutMs = RPC_TIMEOUT_MS) {
   });
 }
 
-export const listSessions = () => call('list_sessions');
-export const listPanes = (session) => call('list_panes', { session });
+export const listSessions = () => call<TmuxSession[]>('list_sessions');
+export const listPanes = (session: string) => call<TmuxPane[]>('list_panes', { session });
 // Single round-trip alternative for callers (Sessions page) that need both
 // the session list AND all their panes — saves N+1 RPCs vs listSessions
 // followed by N × listPanes.
-export const listSessionsWithPanes = () => call('list_sessions_with_panes');
-export const capturePane = (target, lines) => call('capture_pane', { target, lines });
-export const sendKeys = (target, keys, literal = true) => call('send_keys', { target, keys, literal });
-export const pasteText = (target, text) => call('paste_text', { target, text });
-export const newSession = (name, path, command) => call('new_session', { name, path, command });
-export const killSession = (name) => call('kill_session', { name });
-export const newWindow = (session) => call('new_window', { session });
-export const killWindow = (target) => call('kill_window', { target });
-export const paneCommand = (target) => call('pane_command', { target });
-export const resizePane = (target, cols, rows) => call('resize_pane', { target, cols, rows });
-export const setSocket = (socket) => call('set_socket', { socket });
+export const listSessionsWithPanes = () => call<{ sessions: TmuxSession[]; panes: TmuxPane[] }>('list_sessions_with_panes');
+export const capturePane = (target: string, lines?: number) => call('capture_pane', { target, lines });
+export const sendKeys = (target: string, keys: string, literal = true) => call('send_keys', { target, keys, literal });
+export const pasteText = (target: string, text: string) => call('paste_text', { target, text });
+export const newSession = (name: string, path?: string, command?: string) => call('new_session', { name, path, command });
+export const killSession = (name: string) => call('kill_session', { name });
+export const newWindow = (session: string) => call('new_window', { session });
+export const killWindow = (target: string) => call('kill_window', { target });
+export const paneCommand = (target: string) => call('pane_command', { target });
+export const resizePane = (target: string, cols: number, rows: number) => call('resize_pane', { target, cols, rows });
+export const setSocket = (socket: string) => call('set_socket', { socket });
 export const getBookmarks = () => call('get_bookmarks');
-export const saveBookmarks = (bookmarks) => call('save_bookmarks', { bookmarks });
+export const saveBookmarks = (bookmarks: string[]) => call('save_bookmarks', { bookmarks });
 export const getPrefs = () => call('get_prefs');
-export const setPref = (key, value) => call('set_pref', { key, value });
+export const setPref = (key: string, value: unknown) => call('set_pref', { key, value });
 
 // File system
-export const fsCwd = (session) => call('fs_cwd', { session });
-export const fsList = (path, show_hidden = false) => call('fs_list', { path, show_hidden });
-export const fsStat = (path) => call('fs_stat', { path });
-export const fsRead = (path) => call('fs_read', { path });
-export const fsWrite = (path, content) => call('fs_write', { path, content });
-export const fsMkdir = (path) => call('fs_mkdir', { path });
-export const fsDelete = (path) => call('fs_delete', { path });
-export const fsRename = (from, to) => call('fs_rename', { from, to });
+export const fsCwd = (session: string) => call('fs_cwd', { session });
+export const fsList = (path: string, show_hidden = false) => call('fs_list', { path, show_hidden });
+export const fsStat = (path: string) => call('fs_stat', { path });
+export const fsRead = (path: string) => call('fs_read', { path });
+export const fsWrite = (path: string, content: string) => call('fs_write', { path, content });
+export const fsMkdir = (path: string) => call('fs_mkdir', { path });
+export const fsDelete = (path: string) => call('fs_delete', { path });
+export const fsRename = (from: string, to: string) => call('fs_rename', { from, to });
 // Large transfers have a long explicit timeout — they're allowed to sit in
 // flight longer than the default RPC timeout. Liveness detection during the
 // transfer is handled at the WS protocol layer (server PING / browser PONG),
 // so even a 50 MB frame in the air won't make us give up on the socket.
-export const fsDownload = (path) => call('fs_download', { path }, 60000);
-export const fsDownloadUrl = (path) => call('fs_download_url', { path });
-export function fsDownloadHttp(path) {
+export const fsDownload = (path: string) => call('fs_download', { path }, 60000);
+export const fsDownloadUrl = (path: string) => call<{ url: string; name: string }>('fs_download_url', { path });
+export function fsDownloadHttp(path: string) {
   // Both ws:// and wss:// use the streaming HTTP /dl endpoint — the server
   // peeks the first bytes of every accepted (plain or TLS) connection and
   // branches HTTP vs WS. Streaming avoids the 50 MB cap on fs_download and
   // the base64 overhead. wsUrl maps cleanly: ws://host → http://host,
   // wss://host → https://host.
   return fsDownloadUrl(path).then(({ url, name }) => {
-    const base = wsUrl.replace(/^ws/, 'http').replace(/\/$/, '');
+    const base = wsUrl!.replace(/^ws/, 'http').replace(/\/$/, ''); // connect() set wsUrl before any RPC could run
     return { url: base + url, name };
   });
 }
-export const fsUpload = (path, data) => call('fs_upload', { path, data }, 60000);
-export const fsConvert = (path, format = 'html') => call('fs_convert', { path, format });
-export const gitCmd = (subcmd, args = [], cwd) => call('git', { subcmd, args, cwd });
+export const fsUpload = (path: string, data: string) => call('fs_upload', { path, data }, 60000);
+export const fsConvert = (path: string, format = 'html') => call('fs_convert', { path, format });
+export const gitCmd = (subcmd: string, args: string[] = [], cwd?: string) => call<{ code: number; stdout: string; stderr: string }>('git', { subcmd, args, cwd });
 
 // Team multi-agent bus (Team tab). Only available when the server has the
 // in-process bus wired (desktop); on a server without it these reject with a
@@ -657,25 +717,25 @@ export const gitCmd = (subcmd, args = [], cwd) => call('git', { subcmd, args, cw
 export const teamStatus = () => call('team_status');
 export const teamTeams = () => call('team_teams');
 export const agentNotificationsList = () => call('agent_notifications_list');
-export const agentNotificationsMarkRead = (session, window) => call('agent_notifications_mark_read', { session, window });
+export const agentNotificationsMarkRead = (session: string, window: number) => call('agent_notifications_mark_read', { session, window });
 export const agentHooksStatus = () => call('agent_hooks_status');
 export const agentHooksInstall = () => call('agent_hooks_install');
 export const agentHooksRemove = () => call('agent_hooks_remove');
 
-export const teamHistory = (room, limit = 100) => call('team_history', { room, limit });
-export const teamRoster = (room) => call('team_roster', { room });
-export const teamEmployees = (room) => call('team_employees', { room });
-export const teamPost = (room, body, requires_reply) => call('team_post', { room, body, requires_reply });
+export const teamHistory = (room: string, limit = 100) => call('team_history', { room, limit });
+export const teamRoster = (room: string) => call('team_roster', { room });
+export const teamEmployees = (room: string) => call('team_employees', { room });
+export const teamPost = (room: string, body: string, requires_reply?: boolean) => call('team_post', { room, body, requires_reply });
 // Operator actions: spin up a team for a workspace (room = its slug) from a
 // named roster template, or close one.
-export const teamStartTeam = (workspace, template) => call('team_start_team', { workspace, template });
-export const teamCloseTeam = (room) => call('team_close_team', { room });
+export const teamStartTeam = (workspace: string, template?: string) => call('team_start_team', { workspace, template });
+export const teamCloseTeam = (room: string) => call('team_close_team', { room });
 // Roster templates (named agent rosters; edited in the Templates settings panel).
 export const teamTemplates = () => call('team_templates');
-export const teamTemplateSave = (name, def) => call('team_template_save', { name, def });
-export const teamTemplateDelete = (name) => call('team_template_delete', { name });
+export const teamTemplateSave = (name: string, def: unknown) => call('team_template_save', { name, def });
+export const teamTemplateDelete = (name: string) => call('team_template_delete', { name });
 // Global system prompt prepended to every agent's brief (team_status returns it).
-export const teamSystemPromptSave = (text) => call('team_system_prompt_save', { text });
+export const teamSystemPromptSave = (text: string) => call('team_system_prompt_save', { text });
 
 // Subscription refcount per target. The server keeps ONE subscription entry
 // per target, so two split cells on the same window must NOT let the first
@@ -683,28 +743,28 @@ export const teamSystemPromptSave = (text) => call('team_system_prompt_save', { 
 // wire subscribe only on the 0→1 transition and unsubscribe only on 1→0.
 // (The set of who-wants-it is the count; resubscribe-on-reconnect re-sends
 // for every still-positive target.)
-const subRefcount = new Map(); // target -> count
+const subRefcount = new Map<string, number>();
 
-function sendSubscribe(target) {
+function sendSubscribe(target: string) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   const msg = JSON.stringify({ method: 'subscribe', params: { target } });
   const socket = ws;
   sendOnSocket(socket, msg).catch(() => {});
 }
-function sendUnsubscribe(target) {
+function sendUnsubscribe(target: string) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   const msg = JSON.stringify({ method: 'unsubscribe', params: { target } });
   const socket = ws;
   sendOnSocket(socket, msg).catch(() => {});
 }
 
-export function subscribe(target) {
+export function subscribe(target: string) {
   const n = (subRefcount.get(target) || 0) + 1;
   subRefcount.set(target, n);
   if (n === 1) sendSubscribe(target); // first subscriber → tell the server
 }
 
-export function unsubscribe(target) {
+export function unsubscribe(target: string) {
   const n = (subRefcount.get(target) || 0) - 1;
   if (n <= 0) {
     subRefcount.delete(target);
@@ -726,7 +786,7 @@ export function resubscribeActive() {
 const PROBE_TIMEOUT_MS = 3000;
 
 // Classify address: 0=LAN, 1=Tailscale, 2=Internet
-export function classifyAddress(url) {
+export function classifyAddress(url: string): number {
   try {
     const host = new URL(url).hostname;
     if (/^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host)) return 0;
@@ -746,7 +806,7 @@ export const ADDRESS_LABELS = ['LAN', 'Tailscale', 'WAN'];
 // cellular handoff) — that's exactly when a dead LAN address may have come
 // alive.
 const PROBE_FAIL_COOLDOWN_MS = 2 * 60 * 1000;
-const probeFailedAt = new Map(); // url -> timestamp of last failed probe
+const probeFailedAt = new Map<string, number>(); // url -> timestamp of last failed probe
 
 function clearProbeMemory() {
   probeFailedAt.clear();
@@ -755,23 +815,23 @@ function clearProbeMemory() {
 // True if the address has no fresh probe/connect failure on record.
 // Used by the reconnect round-robin to skip addresses that just proved
 // unreachable (e.g. LAN IPs while the phone is on cellular).
-export function isAddressViable(url) {
+export function isAddressViable(url: string): boolean {
   const failedAt = probeFailedAt.get(url);
   return !failedAt || Date.now() - failedAt > PROBE_FAIL_COOLDOWN_MS;
 }
 
 // Record a reachability failure observed outside probeAddress (e.g. a real
 // connect() attempt that timed out or failed before auth).
-export function noteAddressUnreachable(url) {
+export function noteAddressUnreachable(url: string | null | undefined) {
   if (url) probeFailedAt.set(url, Date.now());
 }
 window.addEventListener('online', clearProbeMemory);
 // Network type / subnet change (wifi↔cellular, AP switch) on supporting platforms.
-navigator.connection?.addEventListener?.('change', clearProbeMemory);
+(navigator as any).connection?.addEventListener?.('change', clearProbeMemory);
 
 // Lightweight probe: WebSocket handshake only, no auth
-function probeAddress(url) {
-  return new Promise(resolve => {
+function probeAddress(url: string): Promise<boolean> {
+  return new Promise<boolean>(resolve => {
     try {
       const probe = new WebSocket(url);
       const timer = setTimeout(() => { try { probe.close(); } catch {} resolve(false); }, PROBE_TIMEOUT_MS);
@@ -790,7 +850,7 @@ function probeAddress(url) {
 // back without a network change, and that clears the memory. If every
 // candidate is in cooldown (e.g. total outage just now), probe them all
 // anyway rather than returning nothing.
-export async function findBestAddress(addresses) {
+export async function findBestAddress(addresses: string[] | null | undefined): Promise<string | null> {
   if (!addresses || addresses.length <= 1) return addresses?.[0] || null;
   const sorted = [...addresses].sort((a, b) => classifyAddress(a) - classifyAddress(b));
   const now = Date.now();
@@ -804,7 +864,7 @@ export async function findBestAddress(addresses) {
   }
   const results = await Promise.all(candidates.map(url => probeAddress(url)));
   for (let i = 0; i < candidates.length; i++) {
-    if (results[i]) return candidates[i];
+    if (results[i]) return candidates[i]!;
   }
   return null;
 }

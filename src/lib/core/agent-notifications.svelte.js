@@ -3,7 +3,7 @@ import {
   agentNotificationsList,
   agentNotificationsMarkRead,
   removeAgentNotificationListener,
-} from './ws.js';
+} from './ws.ts';
 import { isTeamSession } from './team.svelte.js';
 
 export const agentNotifications = $state({ unread: [] });

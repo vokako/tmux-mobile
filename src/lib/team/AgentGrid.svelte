@@ -9,7 +9,7 @@
   import Icon from '../ui/Icon.svelte';
   import CollabGraph from './CollabGraph.svelte';
   import { t } from '../core/i18n.svelte.js';
-  import { listSessionsWithPanes } from '../core/ws.js';
+  import { listSessionsWithPanes } from '../core/ws.ts';
   import { paneAgent } from '../core/agents.js';
 
   let {

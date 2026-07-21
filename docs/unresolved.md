@@ -136,7 +136,7 @@
     ChatView + Terminal; markdown-render CSS copied in Files + ChatView +
     Team. Fix via shared `ui/` primitives (e.g. MarkdownBody), not a
     shared stylesheet.
-  - `ws.js` is a mutable module-level singleton (10 top-level `let`s);
+  - `ws.ts` is a mutable module-level singleton (10 top-level `let`s);
     fine today, but a wall if split-screen ever needs two simultaneous
     server connections.
 

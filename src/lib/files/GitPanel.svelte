@@ -13,7 +13,7 @@
   //   returns true if the panel consumed the back (closed an open diff).
   import Icon from '../ui/Icon.svelte';
   import { t } from '../core/i18n.svelte.js';
-  import { gitCmd } from '../core/ws.js';
+  import { gitCmd } from '../core/ws.ts';
 
   let { cwd, fontSize = 14, onOpenFile, onClose } = $props();
 

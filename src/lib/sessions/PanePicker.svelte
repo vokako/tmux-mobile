@@ -7,7 +7,7 @@
   import AgentChip from '../ui/AgentChip.svelte';
   import Icon from '../ui/Icon.svelte';
   import { t } from '../core/i18n.svelte.js';
-  import { listSessionsWithPanes, newWindow } from '../core/ws.js';
+  import { listSessionsWithPanes, newWindow } from '../core/ws.ts';
   import { paneAgent, paneChipLabel } from '../core/agents.js';
   import { sessionHasNotification, terminalNotificationForWindow } from '../core/agent-notifications.svelte.js';
   // Team sessions (tmm-team-<room>) are grouped apart from regular sessions and

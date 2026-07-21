@@ -9,8 +9,8 @@
   import InstallPrompt from './lib/ui/InstallPrompt.svelte';
   import Preferences from './lib/app/Preferences.svelte';
   import { copyText } from './lib/core/clipboard.js';
-  import { teamStatus } from './lib/core/ws.js';
-  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable } from './lib/core/ws.js';
+  import { teamStatus } from './lib/core/ws.ts';
+  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable } from './lib/core/ws.ts';
   import { t } from './lib/core/i18n.svelte.js';
   import { layout } from './lib/app/layout.svelte.js';
   import { teamState } from './lib/core/team.svelte.js';

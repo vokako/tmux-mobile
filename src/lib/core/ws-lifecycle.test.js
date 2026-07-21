@@ -40,7 +40,7 @@ Object.defineProperty(globalThis, 'crypto', {
   value: { subtle: null },
 });
 
-const wsClient = await import(`./ws.js?lifecycle=${Date.now()}`);
+const wsClient = await import(`./ws.ts?lifecycle=${Date.now()}`);
 
 async function authenticate() {
   const connecting = wsClient.connect('ws://test', 'token');

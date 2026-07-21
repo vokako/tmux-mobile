@@ -1,5 +1,5 @@
 <script>
-  import { subscribe, unsubscribe, addPaneOutputListener, removePaneOutputListener, addPaneClosedListener, removePaneClosedListener, sendKeys, pasteText, listPanes, capturePane, resizePane, newWindow } from '../core/ws.js';
+  import { subscribe, unsubscribe, addPaneOutputListener, removePaneOutputListener, addPaneClosedListener, removePaneClosedListener, sendKeys, pasteText, listPanes, capturePane, resizePane, newWindow } from '../core/ws.ts';
   import { Terminal } from '@xterm/xterm';
   import { WebLinksAddon } from '@xterm/addon-web-links';
   import Icon from '../ui/Icon.svelte';
