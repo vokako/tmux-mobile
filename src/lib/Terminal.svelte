@@ -575,7 +575,10 @@
     let isPasting = false;
     let isComposing = false;
     let lastInputComposing = false; // per-event composition signal (see input listener)
-    if (isMobile) {
+    {
+      // Desktop included: printable keys are routed through the textarea
+      // (see attachCustomKeyEventHandler), so paste/composition tracking and
+      // the force-clear below apply on every platform.
       const ta = termEl?.querySelector('.xterm-helper-textarea');
       if (ta) {
         ta.addEventListener('paste', () => {
@@ -604,6 +607,26 @@
           // via a plain insertText.
           lastInputComposing = !!(e.isComposing || (e.inputType || '').startsWith('insertComposition'));
           window.__dbg?.(`input: ta.input type=${e.inputType} composing=${lastInputComposing} val=${JSON.stringify(ta.value).slice(0,30)} focused=${document.activeElement === ta} locked=${kbLocked}`);
+          // Forward plain text insertions ourselves: printable keydowns are
+          // handed back to the browser (see attachCustomKeyEventHandler) so
+          // CJK IMEs can convert punctuation, but xterm v6 IGNORES
+          // non-composition insertText events — without this, plain typing
+          // would pile up silently in the hidden textarea. e.data carries
+          // the IME-converted text (， 。). Composition input stays with
+          // xterm's CompositionHelper (→ onData): skip while EITHER
+          // composition signal is set (Chromium commits as
+          // insertCompositionText, WebKit as insertFromComposition — both
+          // filtered by inputType — but an IME that commits via plain
+          // insertText before compositionend must not be sent twice).
+          // Paste stays with xterm's paste handler (insertFromPaste).
+          if (e.inputType === 'insertText' && e.data && !lastInputComposing && !isComposing) {
+            ta.value = '';
+            const ctrlByte = ctrlArmed && e.data.length === 1 && /[a-z]/i.test(e.data)
+              ? String.fromCharCode(e.data.toLowerCase().charCodeAt(0) - 96)
+              : null;
+            if (ctrlByte != null) ctrlArmed = false;
+            enqueueKeys(ctrlByte ?? e.data, true);
+          }
         });
       }
     }
@@ -615,12 +638,15 @@
       if (/^\x1b\[\d+;\d+R$/.test(data)) return;        // DSR cursor position
       if (/^\x1b\[\d+n$/.test(data)) return;             // DSR device status
       window.__dbg?.(`input: onData len=${data.length} paste=${isPasting} data=${JSON.stringify(data).slice(0,40)}`);
-      // Mobile: force-clear xterm's hidden textarea after keyboard input to prevent
-      // accumulation from auto-paired quotes/brackets. Skip paste so xterm.js can
-      // fully process the pasted content. Also skip while an IME composition is in
-      // progress — clearing textarea.value mid-composition breaks CJK/Japanese
-      // input (e.g. drops pinyin the user is currently typing).
-      if (isMobile && !isPasting && !isComposing) {
+      // Force-clear xterm's hidden textarea after keyboard input to prevent
+      // accumulation from auto-paired quotes/brackets. Applies to desktop
+      // too: printable keys are routed through the textarea input pipeline
+      // (see attachCustomKeyEventHandler) so the same accumulation applies.
+      // Skip paste so xterm.js can fully process the pasted content. Also
+      // skip while an IME composition is in progress — clearing
+      // textarea.value mid-composition breaks CJK/Japanese input (e.g.
+      // drops pinyin the user is currently typing).
+      if (!isPasting && !isComposing) {
         requestAnimationFrame(() => {
           // Re-check both signals here: onData fires synchronously inside the
           // textarea's input dispatch BEFORE our own input listener updates
@@ -638,8 +664,22 @@
       isPasting = false;
       enqueueKeys(ctrlByte ?? data, true);
     });
-    // Block xterm from processing keys when input box is open
-    term.attachCustomKeyEventHandler(() => true);
+    // Plain printable keys must go through the browser's input pipeline
+    // (textarea `input` event), NOT xterm's keydown fast path. CJK IMEs
+    // convert punctuation (， 。 、) at the input stage WITHOUT composition
+    // events; xterm's keydown handler sees the raw ASCII key (`,` `.`),
+    // emits it and calls preventDefault — the IME conversion is silently
+    // dropped and the user gets English punctuation. Returning false hands
+    // the key back to the browser; the inserted (possibly IME-converted)
+    // text then reaches onData via the input event, same as mobile typing.
+    // Modified combos and named keys (Enter, arrows, F-keys: key.length > 1)
+    // keep xterm's keydown path; Ctrl/Alt combos are claimed even earlier by
+    // the capture-phase hardware handler below.
+    term.attachCustomKeyEventHandler((event) => {
+      if (event.type !== 'keydown' && event.type !== 'keypress') return true;
+      if (event.ctrlKey || event.altKey || event.metaKey) return true;
+      return (event.key?.length ?? 0) !== 1;
+    });
 
     // Forward every unclaimed hardware Ctrl / Option combination straight to
     // tmux. Browser/WKWebView textareas otherwise consume editing bindings
