@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   // Git panel: status / staging / commit / push / log / diff for the
   // directory the file browser is currently in. Extracted from Files.svelte —
   // it owns all git state; the host only decides when the panel is shown.
@@ -15,15 +15,25 @@
   import { t } from '../core/i18n.svelte.ts';
   import { gitCmd } from '../core/ws.ts';
 
-  let { cwd, fontSize = 14, onOpenFile, onClose } = $props();
+  type GitFile = { status: string; file: string };
+  type GitCommit = { hash: string; subject: string; date: string; author: string };
+  type GitDiff = { file: string; diff: string; _root: string };
+  type PreviewEntry = { type: 'file'; path: string; name: string };
 
-  let gitTab = $state('status'); // 'status' | 'log'
-  let gitStatus = $state([]);
-  let gitLog = $state([]);
+  let { cwd, fontSize = 14, onOpenFile, onClose }: {
+    cwd: string;
+    fontSize?: number;
+    onOpenFile: (entry: PreviewEntry) => void;
+    onClose: () => void;
+  } = $props();
+
+  let gitTab = $state<'status' | 'log'>('status');
+  let gitStatus = $state<GitFile[]>([]);
+  let gitLog = $state<GitCommit[]>([]);
   let gitBranch = $state('');
-  let gitDiff = $state(null); // { file, diff, _root }
+  let gitDiff = $state<GitDiff | null>(null);
   let gitLoading = $state(false);
-  let gitListEl = $state(null);
+  let gitListEl = $state<HTMLElement | null>(null);
   let gitError = $state('');
   let pushResult = $state('');
   let commitMsg = $state('');
@@ -36,7 +46,7 @@
     return false;
   }
 
-  async function git(subcmd, ...args) {
+  async function git(subcmd: string, ...args: string[]): Promise<string> {
     if (!gitRoot) {
       const r = await gitCmd('rev-parse', ['--show-toplevel'], cwd);
       gitRoot = r.stdout.trim();
@@ -57,7 +67,7 @@
         status: line.slice(0, 2),
         file: line.slice(3),
       }));
-    } catch (e) { gitError = e.message; }
+    } catch (e) { gitError = (e as Error).message; }
     gitLoading = false;
     requestAnimationFrame(() => { if (gitListEl) gitListEl.scrollTop = scrollTop; });
   }
@@ -68,35 +78,35 @@
     try {
       const out = await git('log', '--oneline', '-30', '--format=%h|%s|%ar|%an');
       gitLog = out.split('\n').filter(Boolean).map(line => {
-        const [hash, subject, date, author] = line.split('|');
+        const [hash = '', subject = '', date = '', author = ''] = line.split('|');
         return { hash, subject, date, author };
       });
-    } catch (e) { gitError = e.message; }
+    } catch (e) { gitError = (e as Error).message; }
     gitLoading = false;
   }
 
-  async function showFileDiff(file, staged) {
+  async function showFileDiff(file: string, staged: boolean) {
     gitLoading = true;
     try {
       const isUntracked = gitStatus.find(f => f.file === file)?.status === '??';
       const isBinary = !isUntracked && (await git('diff', '--numstat', ...(staged ? ['--cached'] : []), '--', file)).startsWith('-');
       if (isUntracked || isBinary || file.match(/\.(png|jpe?g|gif|webp|svg|ico|bmp|avif|pdf|zip|tar|gz|mp[34]|mov|wav)$/i)) {
         gitLoading = false;
-        onOpenFile({ type: 'file', path: gitRoot + '/' + file, name: file.split('/').pop() });
+        onOpenFile({ type: 'file', path: gitRoot + '/' + file, name: file.split('/').pop() ?? file });
         return;
       }
       const diff = await git('diff', ...(staged ? ['--cached'] : []), '--', file);
       gitDiff = { file, diff: diff || '(no changes)', _root: gitRoot };
-    } catch (e) { gitDiff = { file, diff: e.message, _root: '' }; }
+    } catch (e) { gitDiff = { file, diff: (e as Error).message, _root: '' }; }
     gitLoading = false;
   }
 
-  async function showCommitDiff(hash) {
+  async function showCommitDiff(hash: string) {
     gitLoading = true;
     try {
       const diff = await git('show', '--stat', '--patch', hash);
       gitDiff = { file: hash, diff, _root: gitRoot };
-    } catch (e) { gitDiff = { file: hash, diff: e.message, _root: '' }; }
+    } catch (e) { gitDiff = { file: hash, diff: (e as Error).message, _root: '' }; }
     gitLoading = false;
   }
 
@@ -106,7 +116,7 @@
     try {
       const r = await git('push');
       pushResult = r.trim() || 'Pushed';
-    } catch (e) { pushResult = '✗ ' + e.message; }
+    } catch (e) { pushResult = '✗ ' + (e as Error).message; }
     gitLoading = false;
     setTimeout(() => { pushResult = ''; }, 3000);
   }
@@ -116,12 +126,12 @@
     loadGitStatus();
   }
 
-  async function gitAddFile(file) {
+  async function gitAddFile(file: string) {
     try { await git('add', file); } catch {}
     loadGitStatus();
   }
 
-  async function gitRestoreFile(file) {
+  async function gitRestoreFile(file: string) {
     try { await git('restore', '--staged', file); } catch {}
     loadGitStatus();
   }
@@ -136,7 +146,7 @@
       commitMsg = '';
       showCommitInput = false;
       loadGitStatus();
-    } catch (e) { pushResult = '✗ ' + e.message; }
+    } catch (e) { pushResult = '✗ ' + (e as Error).message; }
     gitLoading = false;
     setTimeout(() => { pushResult = ''; }, 3000);
   }
@@ -210,8 +220,8 @@
   <div class="git-diff-header">
     <span class="git-diff-name">{gitDiff.file}</span>
     <button class="act-btn" onclick={() => {
-      const root = gitDiff._root;
-      if (root) { onOpenFile({ type: 'file', path: root + '/' + gitDiff.file, name: gitDiff.file.split('/').pop() }); }
+      const d = gitDiff;
+      if (d?._root) { onOpenFile({ type: 'file', path: d._root + '/' + d.file, name: d.file.split('/').pop() ?? d.file }); }
     }}><Icon name="eye" size={14} /></button>
   </div>
   <div class="git-diff-body" style="--file-font-size:{fontSize}px">

@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   // Shared pane picker popover: lists every tmux pane grouped by session and
   // calls onPick(pane) when one is chosen. Used by SplitView (assign a cell)
   // and by Terminal's single-pane window switcher (jump to any pane without
@@ -8,6 +8,7 @@
   import Icon from '../ui/Icon.svelte';
   import { t } from '../core/i18n.svelte.ts';
   import { listSessionsWithPanes, newWindow } from '../core/ws.ts';
+  import type { TmuxPane } from '../core/ws.ts';
   import { paneAgent, paneChipLabel } from '../core/agents.ts';
   import { sessionHasNotification, terminalNotificationForWindow } from '../core/agent-notifications.svelte.ts';
   // Team sessions (tmm-team-<room>) are grouped apart from regular sessions and
@@ -15,15 +16,22 @@
   // actually having the team bus — consistent with the Sessions page.
   import { isTeamSession, teamLabel } from '../core/team.svelte.ts';
 
+  type SessionGroup = { name: string; panes: TmuxPane[] };
+
   let {
     currentTarget = '',   // highlight the pane matching this target
-    onPick = () => {},    // (pane) — pane has {session, window, pane, current_command, ...}
+    onPick = () => {},
     onClose = () => {},
-    align = 'left',       // 'left' | 'right' — which edge the panel anchors to
+    align = 'left',       // which edge the panel anchors to
+  }: {
+    currentTarget?: string;
+    onPick?: (pane: TmuxPane) => void;
+    onClose?: () => void;
+    align?: 'left' | 'right';
   } = $props();
 
   let loading = $state(true);
-  let sessions = $state([]); // [{ name, panes: [pane] }]
+  let sessions = $state<SessionGroup[]>([]);
   let busySession = $state(''); // session whose "+" is mid-create (disable it)
 
   let teamSessions = $derived(sessions.filter(s => isTeamSession(s.name)));
@@ -33,9 +41,9 @@
   let currentMatch = $derived(/^(.+):(\d+)\./u.exec(currentTarget));
   let currentSession = $derived(currentMatch?.[1] || '');
 
-  async function load() {
+  async function load(): Promise<SessionGroup[]> {
     const { sessions: list, panes } = await listSessionsWithPanes();
-    const bySession = new Map();
+    const bySession = new Map<string, TmuxPane[]>();
     for (const p of panes) {
       const arr = bySession.get(p.session);
       if (arr) arr.push(p); else bySession.set(p.session, [p]);
@@ -57,7 +65,7 @@
   // Create a new window in `sessionName`, then pick its newest pane — mirrors
   // Terminal's in-bar "+" so opening a fresh window and jumping to it is one
   // tap. We reload to find the just-created window (new-window returns no id).
-  async function addWindow(sessionName) {
+  async function addWindow(sessionName: string) {
     if (busySession) return;
     busySession = sessionName;
     try {
@@ -100,7 +108,7 @@
   {/if}
 </div>
 
-{#snippet sessionBlock(s)}
+{#snippet sessionBlock(s: SessionGroup)}
   {@const team = isTeamSession(s.name)}
   <div class="picker-session">
     <span class="picker-session-name" title={team ? s.name : null}>{team ? teamLabel(s.name) : s.name}</span>
@@ -113,7 +121,7 @@
       {@const pAgent = paneAgent(p)}
       <AgentChip
         attention={!!notice}
-        urgent={notice && notice.kind !== 'completed'}
+        urgent={!!notice && notice.kind !== 'completed'}
         agent={pAgent}
         label={paneChipLabel(p, `${p.window}.${p.pane}`)}
         variant={isCur ? 'active' : 'default'}
