@@ -43,7 +43,7 @@ mono + CJK (SF Mono / Cascadia / Roboto Mono; PingFang / YaHei / Noto CJK
 / MiSans) is metric-safe and higher quality than any downloadable subset.
 
 The default stack (App.svelte `--font-mono`, mirrored in
-`src/lib/fonts.svelte.js` `SYSTEM_STACK`):
+`src/lib/app/fonts.svelte.js` `SYSTEM_STACK`):
 
 ```
 ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', Consolas,

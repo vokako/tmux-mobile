@@ -14,7 +14,7 @@ Adapt colors at write-time, in JS, before handing to xterm.js. Instead of a blan
 - The effective **FG/BG pair** lacks WCAG AA contrast (< 4.5:1) — move the foreground toward the nearest readable lightness while preserving hue and saturation.
 - It's a **BG block** that either clashes with the terminal bg (too bright in dark mode, too dark in light mode) or blends into it (too close to the terminal bg in light mode) — push it to a mid-luminance band that reads as a "block" without dominating.
 
-Decisions use **WCAG relative luminance** (perceptually correct); construction uses HSL L (cheap to edit hue/saturation separately). Thresholds are covered by the executable matrix in `src/lib/ansi-colors.test.js`.
+Decisions use **WCAG relative luminance** (perceptually correct); construction uses HSL L (cheap to edit hue/saturation separately). Thresholds are covered by the executable matrix in `src/lib/terminal/ansi-colors.test.js`.
 
 ## How It Works
 1. Parse every SGR sequence and update the current foreground, background, reset, and reverse-video state.

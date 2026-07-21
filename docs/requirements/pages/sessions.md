@@ -31,7 +31,7 @@ header. Without team sessions (or on a busless server) the list stays flat
 and headerless, exactly as before.
 
 - Classification is by the `tmm-team-` name prefix, **gated on the shared
-  `teamState.available`** (`src/lib/team.svelte.js`) so a busless server
+  `teamState.available`** (`src/lib/core/team.svelte.js`) so a busless server
   shows these as ordinary sessions on every surface (Sessions, PanePicker).
 - A team row displays the workspace basename (the `-<6hex>` slug suffix is
   stripped for display; the full room stays in the row `title`). Two

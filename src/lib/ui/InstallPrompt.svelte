@@ -13,7 +13,7 @@
   // Never shown inside the Tauri shell (already native) or once the app is
   // already running standalone (installed). Dismissals are remembered for a
   // cooldown window so we don't nag.
-  import { t } from './i18n.svelte.js';
+  import { t } from '../core/i18n.svelte.js';
 
   const DISMISS_KEY = 'tmux_pwa_dismissed';
   const DISMISS_COOLDOWN_MS = 14 * 24 * 60 * 60 * 1000; // 14 days

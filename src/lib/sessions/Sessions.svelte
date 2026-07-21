@@ -1,16 +1,16 @@
 <script>
-  import { listSessions, listPanes, listSessionsWithPanes, newSession, killSession, newWindow, killWindow, fsList } from './ws.js';
-  import Icon from './Icon.svelte';
-  import AgentChip from './AgentChip.svelte';
-  import { t } from './i18n.svelte.js';
-  import { sessionHasAgent, paneAgent, AGENTS } from './agents.js';
+  import { listSessions, listPanes, listSessionsWithPanes, newSession, killSession, newWindow, killWindow, fsList } from '../core/ws.js';
+  import Icon from '../ui/Icon.svelte';
+  import AgentChip from '../ui/AgentChip.svelte';
+  import { t } from '../core/i18n.svelte.js';
+  import { sessionHasAgent, paneAgent, AGENTS } from '../core/agents.js';
   // Team-mode sessions (`tmm-team-<room>`) are grouped apart from regular
   // sessions and their clicks route to the Team chat instead of a raw terminal.
   // isTeamSession is gated on the shared teamState.available, so on a server
   // without the team bus these fall back to ordinary sessions (consistently
   // with PanePicker and the Team tab).
-  import { isTeamSession, teamRoomOf, teamLabel } from './team.svelte.js';
-  import { agentNotifications, notificationForWindow, sessionHasNotification } from './agent-notifications.svelte.js';
+  import { isTeamSession, teamRoomOf, teamLabel } from '../core/team.svelte.js';
+  import { agentNotifications, notificationForWindow, sessionHasNotification } from '../core/agent-notifications.svelte.js';
 
   let { openTerminal, openTeam = () => {}, activeTarget = '', visible = false } = $props();
 

@@ -124,7 +124,7 @@ your sessions `work-`, typing `work` already filters them.
 the prefix here is not a user naming heuristic but an app-owned protocol
 (the server creates these names, `src-tauri/src/team.rs`), classification
 is additionally gated on the server actually having the team bus
-(`teamState.available` in `src/lib/team.svelte.js` — shared with
+(`teamState.available` in `src/lib/core/team.svelte.js` — shared with
 PanePicker so all surfaces agree), and the rows behave differently (tap →
 Team chat, not a terminal), so mixing them into the flat list would mislead.
 False groupings are impossible short of a user hand-naming a session
@@ -237,7 +237,7 @@ After the first horizontal-bar draft, chip styling was duplicated between
 Sessions.svelte and Terminal.svelte with slightly different sizing rules.
 Inevitable drift: one page's chip looked noticeably bigger than the
 other, and Terminal's session-name tag had a different font from the
-Sessions-page chip. Extracted `src/lib/AgentChip.svelte` — one component
+Sessions-page chip. Extracted `src/lib/ui/AgentChip.svelte` — one component
 that holds all chip visuals (size, padding, border, font, agent icon,
 optional chevron, optional label). Consumer pages pick a variant and
 pass props; they cannot accidentally diverge on spacing.

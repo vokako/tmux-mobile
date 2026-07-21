@@ -4,10 +4,10 @@
   // App.svelte decides split is active (desktop + wide). Each cell owns its
   // own Terminal (own subscription, own xterm, own resize) — the ws.js
   // per-target listener registry is what lets them coexist.
-  import Terminal from './Terminal.svelte';
+  import Terminal from '../terminal/Terminal.svelte';
   import PanePicker from './PanePicker.svelte';
-  import Icon from './Icon.svelte';
-  import { t } from './i18n.svelte.js';
+  import Icon from '../ui/Icon.svelte';
+  import { t } from '../core/i18n.svelte.js';
 
   let {
     cells,            // [{ id, target, session, command }]

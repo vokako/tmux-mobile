@@ -1,24 +1,24 @@
 <script>
-  import { subscribe, unsubscribe, addPaneOutputListener, removePaneOutputListener, addPaneClosedListener, removePaneClosedListener, sendCommand, sendKeys, pasteText, listPanes, capturePane, resizePane, newWindow } from './ws.js';
+  import { subscribe, unsubscribe, addPaneOutputListener, removePaneOutputListener, addPaneClosedListener, removePaneClosedListener, sendCommand, sendKeys, pasteText, listPanes, capturePane, resizePane, newWindow } from '../core/ws.js';
   import { Terminal } from '@xterm/xterm';
   import { WebLinksAddon } from '@xterm/addon-web-links';
   import ChatView from './ChatView.svelte';
-  import Icon from './Icon.svelte';
-  import AgentChip from './AgentChip.svelte';
-  import { otherTerminalSessionHasNotification, terminalNotificationForWindow } from './agent-notifications.svelte.js';
-  import PanePicker from './PanePicker.svelte';
-  import { t } from './i18n.svelte.js';
+  import Icon from '../ui/Icon.svelte';
+  import AgentChip from '../ui/AgentChip.svelte';
+  import { otherTerminalSessionHasNotification, terminalNotificationForWindow } from '../core/agent-notifications.svelte.js';
+  import PanePicker from '../sessions/PanePicker.svelte';
+  import { t } from '../core/i18n.svelte.js';
   import { detectParser } from './parsers.js';
-  import { detectAgent, paneIsAgent, paneAgent, AGENTS } from './agents.js';
-  import { copyText } from './clipboard.js';
-  import { fonts } from './fonts.svelte.js';
-  import { terminalPrefs } from './terminal-prefs.svelte.js';
+  import { detectAgent, paneIsAgent, paneAgent, AGENTS } from '../core/agents.js';
+  import { copyText } from '../core/clipboard.js';
+  import { fonts } from '../app/fonts.svelte.js';
+  import { terminalPrefs } from '../app/terminal-prefs.svelte.js';
   import { adaptAnsiColors } from './ansi-colors.js';
   import { compactLineGeometry } from './terminal-line-geometry.js';
   import { restoreViewportAfterPaneSwitch } from './terminal-viewport.js';
-  import { cycleItem } from './shortcuts.js';
+  import { cycleItem } from '../app/shortcuts.js';
   import { encodeTerminalShortcut } from './terminal-keyboard.js';
-  import { openExternalUrl } from './external-links.js';
+  import { openExternalUrl } from '../core/external-links.js';
 
   // Timing constants
   const WINDOW_LIST_POLL_MS = 5000;

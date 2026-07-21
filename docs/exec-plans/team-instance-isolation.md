@@ -40,7 +40,7 @@ moving files under a running process.
 - `src-tauri/src/team.rs`
 - `src-tauri/src/team_bridge.rs`
 - `src-tauri/src/server.rs`
-- `src/lib/Team.svelte`
+- `src/lib/team/Team.svelte`
 - `docs/requirements/pages/team.md`
 - `docs/design-docs/features/team.md`
 

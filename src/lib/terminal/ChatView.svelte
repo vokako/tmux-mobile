@@ -1,9 +1,9 @@
 <script>
   import { detectParser, parseMessages, stripAnsi } from './parsers.js';
-  import Icon from './Icon.svelte';
-  import { t } from './i18n.svelte.js';
-  import { copyText } from './clipboard.js';
-  import { scrollFade } from './scrollFade.js';
+  import Icon from '../ui/Icon.svelte';
+  import { t } from '../core/i18n.svelte.js';
+  import { copyText } from '../core/clipboard.js';
+  import { scrollFade } from '../core/scrollFade.js';
 
   let { content = '', onSendKeys = null, command = '', fontSize = 14 } = $props();
 

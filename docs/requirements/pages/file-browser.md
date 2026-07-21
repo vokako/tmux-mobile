@@ -62,7 +62,7 @@ directory, or the server's home directory when no session is open yet.
 ### Bookmarks / recent-files write discipline
 Both lists persist whole-array last-writer-wins (`save_bookmarks`,
 `set_pref('recentFiles')`) and RPCs are concurrent, so the client guards
-against clobbering (`src/lib/Files.svelte`):
+against clobbering (`src/lib/files/Files.svelte`):
 1. Never persist before the first successful load (a write of the default
    `[]` would erase the server list); if the lazy load fails, skip
    persisting rather than wipe.

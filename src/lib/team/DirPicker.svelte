@@ -3,9 +3,9 @@
   // the Team "new team" workspace field gets the same folder-browse UX.
   // Breadcrumb path + up button + folder list; choosing a folder navigates into
   // it, the ✓ confirms the current directory. Calls onPick(path) on confirm.
-  import Icon from './Icon.svelte';
-  import { t } from './i18n.svelte.js';
-  import { fsList, fsMkdir } from './ws.js';
+  import Icon from '../ui/Icon.svelte';
+  import { t } from '../core/i18n.svelte.js';
+  import { fsList, fsMkdir } from '../core/ws.js';
 
   let {
     start = '~',           // initial directory to open at

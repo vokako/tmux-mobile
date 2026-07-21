@@ -3,11 +3,11 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const notifications = await readFile(
-  new URL('./agent-notifications.svelte.js', import.meta.url),
+  new URL('../core/agent-notifications.svelte.js', import.meta.url),
   'utf8',
 );
 const terminal = await readFile(new URL('./Terminal.svelte', import.meta.url), 'utf8');
-const picker = await readFile(new URL('./PanePicker.svelte', import.meta.url), 'utf8');
+const picker = await readFile(new URL('../sessions/PanePicker.svelte', import.meta.url), 'utf8');
 
 test('Terminal notification queries retain data but suppress Team sessions', () => {
   assert.match(

@@ -11,24 +11,24 @@
   // Availability: a server without the bus (mobile, or desktop with team
   // disabled) makes the team_* RPCs reject with method-not-found; we surface
   // that as an "unavailable" state and the App hides the tab.
-  import Icon from './Icon.svelte';
+  import Icon from '../ui/Icon.svelte';
   import AgentGrid from './AgentGrid.svelte';
   import CollabGraph from './CollabGraph.svelte';
   import DirPicker from './DirPicker.svelte';
   import { marked } from 'marked';
-  import './markedSafeUrl.js';
-  import { t } from './i18n.svelte.js';
-  import { layout } from './layout.svelte.js';
-  import { scrollFade } from './scrollFade.js';
+  import '../core/markedSafeUrl.js';
+  import { t } from '../core/i18n.svelte.js';
+  import { layout } from '../app/layout.svelte.js';
+  import { scrollFade } from '../core/scrollFade.js';
   import {
     teamHistory, teamRoster, teamPost, teamStatus, teamStartTeam,
     teamCloseTeam, teamEmployees, teamTemplateSave, teamTemplateDelete,
     teamSystemPromptSave,
     addTeamMessageListener, removeTeamMessageListener,
     listSessionsWithPanes, fsCwd,
-  } from './ws.js';
+  } from '../core/ws.js';
   import TeamTemplates from './TeamTemplates.svelte';
-  import { teamSessionOf } from './team.svelte.js';
+  import { teamSessionOf } from '../core/team.svelte.js';
   import {
     pickActiveRoom, readStoredActiveRoom, writeStoredActiveRoom,
   } from './team-selection.js';

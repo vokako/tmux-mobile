@@ -2,7 +2,7 @@
   import * as pdfjsLib from 'pdfjs-dist';
   import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
   import { marked } from 'marked';
-  import './markedSafeUrl.js';
+  import '../core/markedSafeUrl.js';
   import katex from 'katex';
   import 'katex/dist/katex.min.css';
   import hljs from 'highlight.js/lib/core';
@@ -22,13 +22,13 @@
   import markdown from 'highlight.js/lib/languages/markdown';
   import 'highlight.js/styles/github-dark.min.css';
   import mermaid from 'mermaid';
-  import Icon from './Icon.svelte';
-  import { t } from './i18n.svelte.js';
-  import { layout } from './layout.svelte.js';
-  import { copyText } from './clipboard.js';
+  import Icon from '../ui/Icon.svelte';
+  import { t } from '../core/i18n.svelte.js';
+  import { layout } from '../app/layout.svelte.js';
+  import { copyText } from '../core/clipboard.js';
   import { directoryLoadState } from './file-view-state.js';
-  import { installExternalLinkHandler } from './external-links.js';
-  import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsDownloadHttp, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref, fsConvert } from './ws.js';
+  import { installExternalLinkHandler } from '../core/external-links.js';
+  import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsDownloadHttp, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref, fsConvert } from '../core/ws.js';
 
   // Tauri plugin imports (tree-shaken in browser builds)
   let tauriFs, tauriDialog, tauriOpener, tauriPath;

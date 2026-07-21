@@ -1,25 +1,25 @@
 <script>
-  import Settings from './lib/Settings.svelte';
-  import Sessions from './lib/Sessions.svelte';
-  import Terminal from './lib/Terminal.svelte';
-  import SplitView from './lib/SplitView.svelte';
-  import Files from './lib/Files.svelte';
-  import Team from './lib/Team.svelte';
-  import Icon from './lib/Icon.svelte';
-  import InstallPrompt from './lib/InstallPrompt.svelte';
-  import Preferences from './lib/Preferences.svelte';
-  import { copyText } from './lib/clipboard.js';
-  import { teamStatus } from './lib/ws.js';
-  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable } from './lib/ws.js';
-  import { t } from './lib/i18n.svelte.js';
-  import { layout } from './lib/layout.svelte.js';
-  import { teamState } from './lib/team.svelte.js';
-  import { applyMonoVar } from './lib/fonts.svelte.js';
-  import { normalizeUiZoom, stepUiZoom, UI_ZOOM_DEFAULT } from './lib/ui-zoom.js';
-  import { cycleItem, shortcutFromEvent } from './lib/shortcuts.js';
-  import { isShortcutInputTarget, shortcuts } from './lib/shortcuts.svelte.js';
-  import { markWindowRead, stopAgentNotifications, syncAgentNotifications } from './lib/agent-notifications.svelte.js';
-  import { installExternalLinkHandler } from './lib/external-links.js';
+  import Settings from './lib/app/Settings.svelte';
+  import Sessions from './lib/sessions/Sessions.svelte';
+  import Terminal from './lib/terminal/Terminal.svelte';
+  import SplitView from './lib/sessions/SplitView.svelte';
+  import Files from './lib/files/Files.svelte';
+  import Team from './lib/team/Team.svelte';
+  import Icon from './lib/ui/Icon.svelte';
+  import InstallPrompt from './lib/ui/InstallPrompt.svelte';
+  import Preferences from './lib/app/Preferences.svelte';
+  import { copyText } from './lib/core/clipboard.js';
+  import { teamStatus } from './lib/core/ws.js';
+  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable } from './lib/core/ws.js';
+  import { t } from './lib/core/i18n.svelte.js';
+  import { layout } from './lib/app/layout.svelte.js';
+  import { teamState } from './lib/core/team.svelte.js';
+  import { applyMonoVar } from './lib/app/fonts.svelte.js';
+  import { normalizeUiZoom, stepUiZoom, UI_ZOOM_DEFAULT } from './lib/app/ui-zoom.js';
+  import { cycleItem, shortcutFromEvent } from './lib/app/shortcuts.js';
+  import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.js';
+  import { markWindowRead, stopAgentNotifications, syncAgentNotifications } from './lib/core/agent-notifications.svelte.js';
+  import { installExternalLinkHandler } from './lib/core/external-links.js';
 
   // Tunable constants
   const KB_OPEN_THRESHOLD = 100; // px difference to detect keyboard open

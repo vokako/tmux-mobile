@@ -5,12 +5,12 @@
   // interaction, like an active split cell); inactive cells stay read-only.
   // Unlike SplitView there is NO switcher chrome — each cell is pinned to its
   // agent's pane (window_name == agent name in the per-workspace team session).
-  import Terminal from './Terminal.svelte';
-  import Icon from './Icon.svelte';
+  import Terminal from '../terminal/Terminal.svelte';
+  import Icon from '../ui/Icon.svelte';
   import CollabGraph from './CollabGraph.svelte';
-  import { t } from './i18n.svelte.js';
-  import { listSessionsWithPanes } from './ws.js';
-  import { paneAgent } from './agents.js';
+  import { t } from '../core/i18n.svelte.js';
+  import { listSessionsWithPanes } from '../core/ws.js';
+  import { paneAgent } from '../core/agents.js';
 
   let {
     teamSession = '',     // tmm-team-<slug>: the session whose windows are agents

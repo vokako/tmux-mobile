@@ -231,9 +231,9 @@ the collaboration status and the duplicate marker is distracting.
 ### Files
 
 - `src-tauri/src/team.rs`
-- `src/lib/Terminal.svelte`
-- `src/lib/PanePicker.svelte`
-- `src/lib/terminal-team-notifications.test.js`
+- `src/lib/terminal/Terminal.svelte`
+- `src/lib/sessions/PanePicker.svelte`
+- `src/lib/terminal/terminal-team-notifications.test.js`
 - `docs/requirements/pages/terminal.md`
 - `docs/design-docs/features/team.md`
 - `docs/design-docs/features/agent-notifications.md`

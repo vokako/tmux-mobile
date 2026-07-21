@@ -7,6 +7,6 @@ const source = await readFile(new URL('./Sessions.svelte', import.meta.url), 'ut
 test('Sessions imports the notification state used by its template', () => {
   assert.match(
     source,
-    /import\s*\{[^}]*agentNotifications[^}]*sessionHasNotification[^}]*\}\s*from\s*['"]\.\/agent-notifications\.svelte\.js['"]/s,
+    /import\s*\{[^}]*agentNotifications[^}]*sessionHasNotification[^}]*\}\s*from\s*['"]\.\.\/core\/agent-notifications\.svelte\.js['"]/s,
   );
 });

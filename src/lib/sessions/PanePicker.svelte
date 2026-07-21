@@ -4,16 +4,16 @@
   // and by Terminal's single-pane window switcher (jump to any pane without
   // returning to the Sessions page). The caller owns open/close and positions
   // this via a wrapping element; we just render the panel + backdrop.
-  import AgentChip from './AgentChip.svelte';
-  import Icon from './Icon.svelte';
-  import { t } from './i18n.svelte.js';
-  import { listSessionsWithPanes, newWindow } from './ws.js';
-  import { paneAgent, paneChipLabel } from './agents.js';
-  import { sessionHasNotification, terminalNotificationForWindow } from './agent-notifications.svelte.js';
+  import AgentChip from '../ui/AgentChip.svelte';
+  import Icon from '../ui/Icon.svelte';
+  import { t } from '../core/i18n.svelte.js';
+  import { listSessionsWithPanes, newWindow } from '../core/ws.js';
+  import { paneAgent, paneChipLabel } from '../core/agents.js';
+  import { sessionHasNotification, terminalNotificationForWindow } from '../core/agent-notifications.svelte.js';
   // Team sessions (tmm-team-<room>) are grouped apart from regular sessions and
   // labelled by their workspace basename. Shared helpers, gated on the server
   // actually having the team bus — consistent with the Sessions page.
-  import { isTeamSession, teamLabel } from './team.svelte.js';
+  import { isTeamSession, teamLabel } from '../core/team.svelte.js';
 
   let {
     currentTarget = '',   // highlight the pane matching this target

@@ -3,7 +3,7 @@
   // a circle, coloured by work status. Each new directed message lays down an arc
   // from sender → addressee that slowly fades over ~1 min, while a glowing point
   // streams along it. Driven by `agents` (roster) and `event` (latest message).
-  import { t } from './i18n.svelte.js';
+  import { t } from '../core/i18n.svelte.js';
 
   let { agents = [], event = null } = $props();
 

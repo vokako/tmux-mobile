@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const source = await readFile(new URL('../App.svelte', import.meta.url), 'utf8');
+const source = await readFile(new URL('../../App.svelte', import.meta.url), 'utf8');
 
 test('Terminal navigation and page layer exist without an active target', () => {
   assert.match(source, /const t = \['sessions', 'terminal'\]/u);

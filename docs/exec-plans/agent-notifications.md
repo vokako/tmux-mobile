@@ -40,12 +40,12 @@ UI cannot show a durable attention marker.
 - `src-tauri/src/lib.rs`
 - `src-tauri/src/bin/server.rs`
 - `src-tauri/src/team.rs`
-- `src/lib/agent-notifications.svelte.js`
-- `src/lib/ws.js`
+- `src/lib/core/agent-notifications.svelte.js`
+- `src/lib/core/ws.js`
 - `src/App.svelte`
-- `src/lib/Sessions.svelte`
-- `src/lib/Terminal.svelte`
-- `src/lib/Settings.svelte`
+- `src/lib/sessions/Sessions.svelte`
+- `src/lib/terminal/Terminal.svelte`
+- `src/lib/app/Settings.svelte`
 - relevant requirements and design documentation
 
 ## Proof
