@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SHORTCUT_DEFAULTS, actionForShortcut, cycleItem, shortcutFromEvent, shortcutLabel } from './shortcuts.ts';
 
-function event(code, modifiers = {}) {
-  return { code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...modifiers };
+function event(code: string, modifiers: Partial<KeyboardEvent> = {}): KeyboardEvent {
+  return { code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...modifiers } as KeyboardEvent;
 }
 
 test('normalizes Command and Option shortcuts by physical key', () => {

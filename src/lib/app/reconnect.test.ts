@@ -1,20 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createReconnectMachine } from './reconnect.ts';
+import { createReconnectMachine, type ReconnectDeps, type ReconnectState } from './reconnect.ts';
 
 // Deterministic fake timers: run() executes due callbacks in schedule order.
 function fakeTimers() {
   let now = 0;
   let seq = 0;
-  const tasks = new Map();
+  const tasks = new Map<number, { at: number; fn: () => void }>();
   return {
-    setTimeoutFn: (fn, ms) => {
+    setTimeoutFn: ((fn: () => void, ms?: number) => {
       const id = ++seq;
       tasks.set(id, { at: now + (ms || 0), fn });
       return id;
-    },
-    clearTimeoutFn: (id) => { tasks.delete(id); },
-    async advance(ms) {
+    }) as unknown as typeof setTimeout,
+    clearTimeoutFn: ((id: number) => { tasks.delete(id); }) as unknown as typeof clearTimeout,
+    async advance(ms: number) {
       now += ms;
       for (const [id, t] of [...tasks.entries()].sort((a, b) => a[1].at - b[1].at)) {
         if (t.at <= now) { tasks.delete(id); t.fn(); await Promise.resolve(); }
@@ -26,17 +26,25 @@ function fakeTimers() {
   };
 }
 
-function makeStorage(entries) {
+function makeStorage(entries: Record<string, string>) {
   const map = new Map(Object.entries(entries));
-  return { getItem: (k) => (map.has(k) ? map.get(k) : null) };
+  return { getItem: (k: string) => (map.has(k) ? map.get(k)! : null) };
 }
 
-function harness({ storage, connectImpl, findBest = async (a) => a[0], viable = () => true, maxAttempts = 3 }) {
+type HarnessEvent = Partial<ReconnectState> & { success?: [string, string]; gaveUp?: boolean };
+function harness({ storage, connectImpl, findBest = async (a: string[]) => a[0] ?? null, viable = () => true, maxAttempts = 3 }: {
+  storage: Pick<Storage, 'getItem'>;
+  connectImpl: ReconnectDeps['connect'];
+  findBest?: ReconnectDeps['findBestAddress'];
+  viable?: ReconnectDeps['isAddressViable'];
+  maxAttempts?: number;
+}) {
   const timers = fakeTimers();
-  const events = [];
-  const unreachable = [];
+  const events: HarnessEvent[] = [];
+  const unreachable: string[] = [];
   const machine = createReconnectMachine({
     connect: connectImpl,
+    // eslint-disable-next-line — deliberate partial mocks below
     findBestAddress: findBest,
     isAddressViable: viable,
     noteAddressUnreachable: (u) => unreachable.push(u),
@@ -62,7 +70,7 @@ test('single address success on first try', async () => {
   });
   h.machine.start();
   await h.timers.advance(1);
-  const success = h.events.find(e => e.success);
+  const success = h.events.find(e => e.success)!;
   assert.deepEqual(success.success, ['ws://192.168.1.2:9899', 'ws://192.168.1.2:9899']);
   assert.equal(h.machine.isActive(), false);
 });
@@ -80,7 +88,7 @@ test('multi-address first attempt probes in parallel and uses the winner', async
   });
   h.machine.start();
   await h.timers.advance(1);
-  const success = h.events.find(e => e.success);
+  const success = h.events.find(e => e.success)!;
   assert.deepEqual(success.success, ['ws://100.1.1.1:9899', 'ws://192.168.1.2:9899']);
 });
 
@@ -113,7 +121,7 @@ test('auth errors do NOT mark the address unreachable', async () => {
 });
 
 test('round-robin skips non-viable addresses on retries', async () => {
-  const tried = [];
+  const tried: string[] = [];
   const h = harness({
     storage: makeStorage({
       tmux_address: 'ws://192.168.1.2:9899',
@@ -151,7 +159,7 @@ test('cancel mid-backoff stops the loop', async () => {
 });
 
 test('a success that lands after cancel is ignored', async () => {
-  let resolveConnect;
+  let resolveConnect!: (v: unknown) => void;
   const h = harness({
     storage: makeStorage({ tmux_address: 'ws://9.9.9.9:1', tmux_token: 't' }),
     connectImpl: () => new Promise(res => { resolveConnect = res; }),

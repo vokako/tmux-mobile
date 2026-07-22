@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-globalThis.$state = value => value;
+(globalThis as any).$state = (value: unknown) => value;
 
 const { teamState, isTeamSession, teamRoomOf, teamSessionOf, teamLabel, TEAM_PREFIX } =
   await import('./team.svelte.ts');

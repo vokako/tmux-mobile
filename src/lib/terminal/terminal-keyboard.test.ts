@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { encodeTerminalShortcut } from './terminal-keyboard.ts';
 
-function key(key, modifiers = {}) {
-  return { key, code: '', metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...modifiers };
+function key(key: string, modifiers: Partial<KeyboardEvent> = {}): KeyboardEvent {
+  return { key, code: '', metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...modifiers } as KeyboardEvent;
 }
 
 test('encodes Ctrl letters and punctuation as C0 bytes', () => {

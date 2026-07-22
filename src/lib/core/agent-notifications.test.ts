@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-globalThis.$state = value => value;
-globalThis.window = { addEventListener() {} };
+(globalThis as any).$state = (value: unknown) => value;
+(globalThis as any).window = { addEventListener() {} };
 
 const { agentNotifications, otherSessionHasNotification, sessionHasNotification, terminalNotificationForWindow, notificationForWindow, otherTerminalSessionHasNotification } = await import('./agent-notifications.svelte.ts');
 const { teamState } = await import('./team.svelte.ts');

@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import { restoreViewportAfterPaneSwitch } from './terminal-viewport.ts';
 
 function createRoot() {
-  const properties = new Map();
+  const properties = new Map<string, string>();
   const classes = new Set(['keyboard-open']);
   return {
     properties,
     classes,
-    style: { setProperty: (name, value) => properties.set(name, value) },
-    classList: { remove: (name) => classes.delete(name) },
-  };
+    style: { setProperty: (name: string, value: string) => properties.set(name, value) },
+    classList: { remove: (name: string) => classes.delete(name) },
+  } as unknown as HTMLElement & { properties: Map<string, string>; classes: Set<string> };
 }
 
 test('desktop pane switch leaves the current viewport height untouched', () => {

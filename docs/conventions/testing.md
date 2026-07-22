@@ -6,10 +6,10 @@ needed). Rust tests: `cd src-tauri && cargo test -- --test-threads=1`
 
 ## Two kinds of tests, two naming schemes
 
-### 1. Unit tests — `<module>.test.js`
+### 1. Unit tests — `<module>.test.ts`
 
 One test file per module, colocated, named EXACTLY after the module it
-tests (`ws.test.js` tests `ws.ts`; `agent-notifications.test.js` tests
+tests (`ws.test.ts` tests `ws.ts`; `agent-notifications.test.ts` tests
 `agent-notifications.svelte.ts`). They import the module and test
 behavior. If a module is worth extracting, its invariants are worth
 pinning here.
@@ -20,15 +20,15 @@ Runes modules (`*.svelte.ts`) are testable in node with the shim:
 globalThis.$state = value => value;
 ```
 
-### 2. Source-contract tests — `<Component>.source.test.js`
+### 2. Source-contract tests — `<Component>.source.test.ts`
 
 Svelte components can't execute under `node --test`, but some component
 wiring is too important to leave unpinned (which notification query a
 template calls, which navigation states exist, a CSS overflow contract).
 These tests `readFile` the component source and assert with regexes.
 
-- Named after the component, colocated (`Terminal.source.test.js` next
-  to `Terminal.svelte`; `App.source.test.js` next to `src/App.svelte`).
+- Named after the component, colocated (`Terminal.source.test.ts` next
+  to `Terminal.svelte`; `App.source.test.ts` next to `src/App.svelte`).
 - One component per file. A cross-component contract gets one file per
   component, each asserting that component's half.
 - When one fails after an intentional change, update the assertion —
@@ -39,9 +39,12 @@ These tests `readFile` the component source and assert with regexes.
 
 ## Rules
 
-- New module → its `<module>.test.js` lands in the same commit.
-- Tests may stay `.js` (node runs them without checking); convert to
-  `.test.ts` opportunistically when touching one. The glob picks up both.
+- New module → its `<module>.test.ts` lands in the same commit.
+- Tests are TypeScript (`.test.ts`) — node executes them natively via
+  type stripping, and `npm run check` verifies test code against the
+  typed modules it exercises. Deliberately-partial test doubles are cast
+  once at the boundary (`as unknown as X`) with a comment; don't build
+  full fakes just to satisfy the checker.
 - No test file without a clear subject; no subject with two test files.
 - Every regression fix starts with a failing test that reproduces it.
 
@@ -49,8 +52,8 @@ These tests `readFile` the component source and assert with regexes.
 
 | File | Pins |
 |------|------|
-| `src/App.source.test.js` | notification refresh on every connect path; terminal nav/page-layer structure |
-| `sessions/Sessions.source.test.js` | notification-state import wiring |
-| `sessions/PanePicker.source.test.js` | Team-dot suppression in the picker |
-| `terminal/Terminal.source.test.js` | Terminal chrome uses only Team-filtered queries |
-| `team/Team.source.test.js` | roster chip wrap/overflow CSS contract |
+| `src/App.source.test.ts` | notification refresh on every connect path; terminal nav/page-layer structure |
+| `sessions/Sessions.source.test.ts` | notification-state import wiring |
+| `sessions/PanePicker.source.test.ts` | Team-dot suppression in the picker |
+| `terminal/Terminal.source.test.ts` | Terminal chrome uses only Team-filtered queries |
+| `team/Team.source.test.ts` | roster chip wrap/overflow CSS contract |

@@ -1,21 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { adaptAnsiColors, contrastRatio } from './ansi-colors.ts';
+import { adaptAnsiColors, contrastRatio, type AnsiTheme } from './ansi-colors.ts';
 
-const darkTheme = {
+const darkTheme: AnsiTheme = {
   background: '#0a0a0f', foreground: '#c9d1d9', black: '#0a0a0f', red: '#ff5050', green: '#4ade80', yellow: '#fbbf24', blue: '#00d4ff', magenta: '#c084fc', cyan: '#22d3ee', white: '#c9d1d9', brightBlack: '#484848', brightRed: '#ff6b6b', brightGreen: '#6ee7a0', brightYellow: '#fcd34d', brightBlue: '#38bdf8', brightMagenta: '#d8b4fe', brightCyan: '#67e8f9', brightWhite: '#f1f5f9',
 };
-const lightTheme = {
+const lightTheme: AnsiTheme = {
   background: '#f5f5f7', foreground: '#1a1a2e', black: '#f5f5f7', red: '#dc2626', green: '#16a34a', yellow: '#ca8a04', blue: '#0088cc', magenta: '#9333ea', cyan: '#0891b2', white: '#1a1a2e', brightBlack: '#9ca3af', brightRed: '#ef4444', brightGreen: '#22c55e', brightYellow: '#eab308', brightBlue: '#2563eb', brightMagenta: '#a855f7', brightCyan: '#06b6d4', brightWhite: '#0f0f1a',
 };
 
-function lastPair(output) {
+type Rgb = [number, number, number];
+function lastPair(output: string): [Rgb, Rgb] {
   const matches = [...output.matchAll(/\x1b\[(38|48);2;(\d+);(\d+);(\d+)m/g)];
   const colors = new Map(matches.map(match => [match[1], match.slice(2).map(Number)]));
-  return [colors.get('38'), colors.get('48')];
+  return [colors.get('38') as Rgb, colors.get('48') as Rgb];
 }
 
-for (const [name, theme] of [['dark', darkTheme], ['light', lightTheme]]) {
+for (const [name, theme] of [['dark', darkTheme], ['light', lightTheme]] as const) {
   test(`${name}: truecolor foreground and background retain readable contrast`, () => {
     const output = adaptAnsiColors('\x1b[38;2;255;255;0;48;2;128;0;128mtext', theme);
     const [foreground, background] = lastPair(output);
@@ -70,16 +71,16 @@ test('light theme keeps the default background unchanged for foreground-only tex
   assert.deepEqual(background, [245, 245, 247]);
 });
 
-for (const [name, theme] of [['dark', darkTheme], ['light', lightTheme]]) {
+for (const [name, theme] of [['dark', darkTheme], ['light', lightTheme]] as const) {
   test(`${name}: default reverse video remains a visible block`, () => {
     const [foreground, background] = lastPair(adaptAnsiColors('\x1b[7mtext', theme));
-    const terminalBackground = theme.background.match(/[a-f\d]{2}/gi).map(value => Number.parseInt(value, 16));
+    const terminalBackground = theme.background.match(/[a-f\d]{2}/gi)!.map((value: string) => Number.parseInt(value, 16));
     assert.notDeepEqual(background, terminalBackground);
     assert.ok(contrastRatio(foreground, background) >= 4.5);
   });
 }
 
-for (const [name, theme] of [['dark', darkTheme], ['light', lightTheme]]) {
+for (const [name, theme] of [['dark', darkTheme], ['light', lightTheme]] as const) {
   test(`${name}: representative color matrix always meets text contrast`, () => {
     const samples = [
       [0, 0, 0], [255, 255, 255], [238, 238, 238], [26, 26, 46],

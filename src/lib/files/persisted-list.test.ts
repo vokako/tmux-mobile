@@ -2,9 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPersistedList } from './persisted-list.ts';
 
-function deferred() {
-  let resolve, reject;
-  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  let reject!: (e: unknown) => void;
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
   return { promise, resolve, reject };
 }
 
@@ -23,8 +24,8 @@ test('load fetches once and mirrors to onChange', async () => {
 });
 
 test('rule 1: mutation before first load fetches, merges, then persists', async () => {
-  const persisted = [];
-  const list = createPersistedList({
+  const persisted: string[][] = [];
+  const list = createPersistedList<string>({
     fetch: async () => ['server-item'],
     persist: async (v) => { persisted.push(v); },
     onChange: () => {},
@@ -49,10 +50,10 @@ test('rule 1: failed first fetch skips the persist entirely', async () => {
 });
 
 test('rule 2: an in-flight refresh must not clobber a newer local mutation', async () => {
-  const first = deferred();
-  const second = deferred();
+  const first = deferred<string[]>();
+  const second = deferred<string[]>();
   let call = 0;
-  const list = createPersistedList({
+  const list = createPersistedList<string>({
     fetch: () => (++call === 1 ? first.promise : second.promise),
     persist: async () => {},
     onChange: () => {},
@@ -76,7 +77,7 @@ test('rule 2: an in-flight refresh must not clobber a newer local mutation', asy
 });
 
 test('persist failures are swallowed and do not roll back local state', async () => {
-  const list = createPersistedList({
+  const list = createPersistedList<string>({
     fetch: async () => [],
     persist: async () => { throw new Error('write failed'); },
     onChange: () => {},

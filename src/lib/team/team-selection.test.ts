@@ -20,12 +20,12 @@ test('restores the stored room before falling back to the first team', () => {
 });
 
 test('reads, writes, and clears the stored room', () => {
-  const values = new Map();
+  const values = new Map<string, string>();
   const storage = {
-    getItem: key => values.get(key) ?? null,
-    setItem: (key, value) => values.set(key, value),
-    removeItem: key => values.delete(key),
-  };
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+  } as unknown as Storage;
 
   writeStoredActiveRoom('beta', storage);
   assert.equal(values.get(TEAM_ACTIVE_ROOM_KEY), 'beta');
@@ -40,7 +40,7 @@ test('ignores unavailable storage', () => {
     getItem() { throw new Error('unavailable'); },
     setItem() { throw new Error('unavailable'); },
     removeItem() { throw new Error('unavailable'); },
-  };
+  } as unknown as Storage;
 
   assert.equal(readStoredActiveRoom(storage), '');
   assert.doesNotThrow(() => writeStoredActiveRoom('alpha', storage));

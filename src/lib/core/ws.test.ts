@@ -6,16 +6,25 @@ class MockWebSocket {
   static OPEN = 1;
   static CLOSING = 2;
   static CLOSED = 3;
-  static instances = [];
+  static instances: MockWebSocket[] = [];
 
-  constructor(url) {
+  url: string;
+  readyState: number;
+  sent: unknown[];
+  binaryType = '';
+  onopen: ((ev?: unknown) => void) | null = null;
+  onclose: ((ev: { code: number; reason: string; wasClean: boolean }) => void) | null = null;
+  onerror: ((ev?: unknown) => void) | null = null;
+  onmessage: ((ev: { data: string }) => void) | null = null;
+
+  constructor(url: string) {
     this.url = url;
     this.readyState = MockWebSocket.CONNECTING;
     this.sent = [];
     MockWebSocket.instances.push(this);
   }
 
-  send(data) {
+  send(data: unknown) {
     if (this.readyState !== MockWebSocket.OPEN) throw new Error('socket is not open');
     this.sent.push(data);
   }
@@ -24,17 +33,17 @@ class MockWebSocket {
     this.readyState = MockWebSocket.CLOSED;
   }
 
-  message(data) {
+  message(data: unknown) {
     this.onmessage?.({ data: JSON.stringify(data) });
   }
 }
 
-globalThis.window = {
+(globalThis as any).window = {
   __dbg: () => {},
   addEventListener: () => {},
   removeEventListener: () => {},
 };
-globalThis.WebSocket = MockWebSocket;
+(globalThis as any).WebSocket = MockWebSocket;
 Object.defineProperty(globalThis, 'crypto', {
   configurable: true,
   value: { subtle: null },
@@ -44,7 +53,7 @@ const wsClient = await import(`./ws.ts?lifecycle=${Date.now()}`);
 
 async function authenticate() {
   const connecting = wsClient.connect('ws://test', 'token');
-  const socket = MockWebSocket.instances.at(-1);
+  const socket = MockWebSocket.instances.at(-1)!;
   socket.readyState = MockWebSocket.OPEN;
   socket.message({ server_nonce: '00'.repeat(16) });
   socket.message({ result: { authenticated: true, machine_id: 'machine', hostname: 'host' } });
@@ -79,7 +88,7 @@ test('a stale close handler cannot clear a replacement connection', async () => 
   let disconnects = 0;
   wsClient.setOnDisconnect(() => disconnects++);
   const first = await authenticate();
-  const staleClose = first.onclose;
+  const staleClose = first.onclose!;
   await authenticate();
 
   staleClose({ code: 1006, reason: '', wasClean: false });
@@ -94,7 +103,7 @@ test('an async send from an old socket is discarded after replacement', async ()
   wsClient.subscribe('s:0.0');
 
   const reconnecting = wsClient.connect('ws://test', 'token');
-  const second = MockWebSocket.instances.at(-1);
+  const second = MockWebSocket.instances.at(-1)!;
   second.readyState = MockWebSocket.OPEN;
   second.message({ server_nonce: '00'.repeat(16) });
   second.message({ result: { authenticated: true, machine_id: 'machine', hostname: 'host' } });
@@ -116,8 +125,8 @@ test('concurrent RPC frames preserve request order on one socket', async () => {
     await new Promise(resolve => setImmediate(resolve));
   }
 
-  const requests = socket.sent
-    .map(frame => typeof frame === 'string' ? JSON.parse(frame) : null)
+  const requests: any[] = socket.sent
+    .map((frame): any => typeof frame === 'string' ? JSON.parse(frame) : null)
     .filter(message => message?.method === 'send_keys');
   assert.deepEqual(requests.map(message => message.params.keys), ['a', 'b']);
 
