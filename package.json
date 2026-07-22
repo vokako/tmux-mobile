@@ -11,14 +11,15 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:dev:release": "tauri dev --release",
+    "tauri:dev": "node scripts/preflight.mjs dev && tauri dev",
+    "tauri:dev:release": "node scripts/preflight.mjs dev && tauri dev --release",
     "tauri:build": "tauri build",
     "tauri:android": "tauri android dev",
     "tauri:android:build": "tauri android build",
     "build:all": "npm run build && npm run tauri:build && npx tauri android build --target aarch64 --apk",
     "build:mac": "npm run tauri:build",
-    "build:android": "npx tauri android build --target aarch64 --apk"
+    "build:android": "npx tauri android build --target aarch64 --apk && node scripts/preflight.mjs android-apk",
+    "predev": "node scripts/preflight.mjs dev"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5",

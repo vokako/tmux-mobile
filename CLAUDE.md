@@ -33,6 +33,12 @@ On a memory-constrained machine, lower Cargo concurrency per invocation without
 changing the project default:
 `CARGO_BUILD_JOBS=2 npm run tauri:dev:release`.
 
+Dev commands run a port preflight (`scripts/preflight.mjs`): if 5173/9899 are
+already held they fail fast and print the owning PIDs instead of half-starting
+(a second vite instance corrupts the dep-optimizer cache → blank page on every
+open client). `build:android` ends with a postflight that heals this machine's
+gradle build-dir symlink if it dangles and prints the real APK path.
+
 ## Documentation Map
 
 ### Requirements (the WHAT)
