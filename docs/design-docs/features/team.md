@@ -43,7 +43,7 @@ standalone project at `~/agora`). agora is:
 
 "agora" is the upstream project's codename. Everything **we** built and
 everything the **user** sees is branded **Team** (the Team tab, `team_*` RPCs,
-`TEAM_*` config, `tmm-team-*` tmux sessions, `team.rs`/`team_bridge.rs`,
+`TEAM_*` config, `tmm-team-*` tmux sessions, `team/`/`team_bridge.rs`,
 `team/` scripts). The **vendored library crate keeps its real name `agora`**
 (`src-tauri/crates/agora/`) — renaming a faithful third-party copy would only
 obscure its origin. So `use agora::bus::Bus` inside `team_bridge.rs` is
@@ -81,7 +81,7 @@ share ONE `Bus` between the agents' MCP daemon and the phone's WS server.**
           per-Team session: tmm-team-<team-id>
 ```
 
-**Launching is in-process** (`src-tauri/src/team.rs`): the phone's "Start team"
+**Launching is in-process** (`src-tauri/src/team/`): the phone's "Start team"
 button calls `team_start_team` with a chosen **workspace** (the agents' working
 dir), and the desktop server itself seeds the default roster onto the bus and
 reconciles it into real agent windows in tmux — no separate script, no extra
@@ -106,7 +106,7 @@ Why this shape, and what was rejected:
   Verified: `cargo tree --target aarch64-linux-android -i agora` prints nothing;
   the host target shows it. The Android build is unaffected.
 
-- **A JSON-only trait at the boundary (`server::TeamBridge`).** `server.rs`
+- **A JSON-only trait at the boundary (`server::TeamBridge`).** `server/`
   compiles on mobile too, so it must not name any agora type. The trait speaks
   only `serde_json::Value`; the concrete impl (`team_bridge::TeamManager`) lives in a
   desktop-only module. Mobile passes `None` and the `team_*` methods return
@@ -147,7 +147,7 @@ all rooms.
 
 The ONE frontend module that knows team tmux sessions are named
 `tmm-team-<room>` (new rooms use the stable workspace+template `team_slug`; see
-`team.rs`). Exports `TEAM_PREFIX`, `isTeamSession`, `teamRoomOf`,
+`team/workspace.rs`). Exports `TEAM_PREFIX`, `isTeamSession`, `teamRoomOf`,
 `teamSessionOf`, `teamLabel`, and the shared `teamState`
 (`{available, probed}`) rune. Sessions, PanePicker, and Team import from
 here — the prefix/slug scheme must never be re-derived locally (it drifted
@@ -285,7 +285,7 @@ within `tmm-team-<team-id>`. Two surfaces use it:
     appears.
   No quick-switch chrome — the grid is fixed by agent count, by design.
 
-## 5. The in-process supervisor (`src-tauri/src/team.rs`)
+## 5. The in-process supervisor (`src-tauri/src/team/`)
 
 `team::start(bridge, cfg, room, workspace, template)` runs as a tokio task. On
 "Start team" (`team_start_team`, one-shot guarded) it:
@@ -479,7 +479,7 @@ heartbeating agent never flaps; `STALLED_TTL_MS = 30 min`):
 Colors run a heat gradient: idle green → thinking blue → working amber →
 hardworking orange (`--status-hot`) → stalled red.
 
-**Self-heal** (`team.rs::reconcile_loop`) uses the status distinction above,
+**Self-heal** (`team/reconcile.rs::reconcile_loop`) uses the status distinction above,
 not one timeout for every state. A parked agent touches every 15 seconds; if
 that refresh stops, its stored `idle`/`online` status is exposed as `stalled`
 after 90 seconds and the supervisor immediately runs `nudge_pane` (`Esc`, then
@@ -494,7 +494,7 @@ real model thinking between observable hooks while still recovering a dead
 process eventually. Nudges have a five-minute per-pane cooldown; a successful
 wait refreshes `last_seen` and naturally rearms recovery.
 
-**Idle-sleep** (`team.rs::SleepState`, `IDLE_SLEEP_MS = 8 min`). The other
+**Idle-sleep** (`team/reconcile.rs::SleepState`, `IDLE_SLEEP_MS = 8 min`). The other
 extreme: when **every** non-offline agent has been parked in `wait` (status
 `idle`) for 8 min — the team has nothing to do — the supervisor sends `Escape`
 to each pane, which cancels the in-flight `wait` MCP call. The CLI returns to
@@ -537,7 +537,7 @@ and wake keys off bus seq, not `last_seen`).
 
 `team/` once shipped a Python launcher (`run.py` + `supervise.py` +
 `team_backends.py` + `team.yaml`) — the original agora demo path, kept for
-headless use. It has been **removed**: `team.rs` is a faithful in-process Rust
+headless use. It has been **removed**: the `team/` supervisor is a faithful in-process Rust
 port that does everything it did and more (multi-room via `x-room`, the
 heartbeat hook, the private per-team runtime home), so the Python copy only
 drifted out of sync and risked misleading the next reader. `team/` now holds only the
@@ -580,7 +580,7 @@ All three model fields stay blank so each CLI uses its configured system
 default. Their global authentication is inherited as described in §5.
 
 **Why a platform schema, adapted down.** We define ONE schema (`team.yaml`) and
-translate it to each backend's dialect in `team.rs`, rather than exposing kiro/
+translate it to each backend's dialect in `team/backends.rs`, rather than exposing kiro/
 claude/codex config directly. The top level carries **team-wide** fields that
 apply to EVERY agent — `env`, `mcp`, `skills`, and `prompt` — and each agent adds
 `name`/`backend`/`role`/`goal`/`model`/`manage` plus its own `env`/`mcp`/`skills`.

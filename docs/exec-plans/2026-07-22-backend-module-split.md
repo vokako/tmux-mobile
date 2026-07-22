@@ -1,7 +1,7 @@
 # Backend module split: team.rs + server.rs
 
 Date: 2026-07-22
-Status: in progress
+Status: done (2026-07-22, 15 commits)
 
 ## Problem
 

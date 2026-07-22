@@ -4,7 +4,7 @@
 Rust-based WebSocket server providing JSON-RPC interface to tmux and filesystem operations.
 
 ## Implementation
-- File: `src-tauri/src/server.rs`
+- Module: `src-tauri/src/server/` (`mod.rs` listener/bridge trait, `wire.rs` framing+crypto, `rpc.rs` dispatch, `team_rpc.rs` team/notification RPCs, `download.rs` HTTP side-channel, `connection.rs` connection pump)
 - Dependencies: tokio, tokio-tungstenite, hmac, sha2, aes-gcm, base64
 - Starts on desktop only (`#[cfg(desktop)]`)
 - Standalone binary: `src-tauri/src/bin/server.rs`

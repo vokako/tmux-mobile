@@ -122,7 +122,7 @@ your sessions `work-`, typing `work` already filters them.
 (`tmm-team-<room>`, created by the team bus) ARE split into a labelled
 "Teams" group above "Sessions". This does not reopen the rejection above:
 the prefix here is not a user naming heuristic but an app-owned protocol
-(the server creates these names, `src-tauri/src/team.rs`), classification
+(the server creates these names, `src-tauri/src/team/workspace.rs`), classification
 is additionally gated on the server actually having the team bus
 (`teamState.available` in `src/lib/core/team.svelte.ts` — shared with
 PanePicker so all surfaces agree), and the rows behave differently (tap →
