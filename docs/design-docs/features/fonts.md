@@ -43,7 +43,7 @@ mono + CJK (SF Mono / Cascadia / Roboto Mono; PingFang / YaHei / Noto CJK
 / MiSans) is metric-safe and higher quality than any downloadable subset.
 
 The default stack (App.svelte `--font-mono`, mirrored in
-`src/lib/app/fonts.svelte.js` `SYSTEM_STACK`):
+`src/lib/app/fonts.svelte.ts` `SYSTEM_STACK`):
 
 ```
 ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', Consolas,
@@ -94,7 +94,7 @@ every system family).
 
 ## Personal preference: the custom font setting
 
-Settings → "Font name" (`fonts.svelte.js`, localStorage `tmux_font`).
+Settings → "Font name" (`fonts.svelte.ts`, localStorage `tmux_font`).
 The editable control suggests common families and also accepts another family
 typed by the user. Before a new value is applied, a temporary `FontFace` with
 `local("<family>")` asks the platform font registry to resolve it. Canvas width
@@ -128,7 +128,7 @@ WebView interface scale instead.
 
 Line spacing is a per-device preference stored as `tmux_line_height` and
 clamped to `0.40`–`1.60` (`LINE_HEIGHT_MIN`/`MAX` in
-`terminal-prefs.svelte.js`). xterm 6 normally rejects values below `1.00`, so
+`terminal-prefs.svelte.ts`). xterm 6 normally rejects values below `1.00`, so
 the Vite config applies a signature-guarded transform that changes only the
 line-height lower bound (the tab-width bound remains unchanged); the patched
 bound must stay in sync with `LINE_HEIGHT_MIN`, or sub-minimum values throw in
@@ -142,7 +142,7 @@ went through the plugin, so the patch only took effect in `npm run build` while
 addons only type-import the core). Excluded deps get a `?v=<hash>` query on
 their module id in dev, so the transform strips the query before matching.
 
-`terminal-prefs.svelte.js` owns the reactive value;
+`terminal-prefs.svelte.ts` owns the reactive value;
 every `Terminal.svelte` instance reads it when xterm is created and again in
 the existing font-metrics effect. This makes the setting apply immediately to
 single-pane, split, and embedded Team terminals without passing another prop
@@ -190,5 +190,5 @@ build` verifies both xterm renderer signatures before shipping.
 - The thin-text bug and the stuck-together-glyphs bug class are both gone
   by construction.
 - `--font-mono` default in App.svelte and `SYSTEM_STACK` in
-  fonts.svelte.js must stay in sync (single-source refactor not worth the
+  fonts.svelte.ts must stay in sync (single-source refactor not worth the
   indirection for one literal; both sites carry a pointer comment).

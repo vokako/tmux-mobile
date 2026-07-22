@@ -53,6 +53,9 @@
   let { target, session, command: initialCommand = '', fontSize = 14, embedded = false, active = true, chromeless = false, onSwitchPane = null, onPaneExit = () => {}, onClose = null, splitEligible = false, splitActive = false, splitLayout = 1, onSetLayout = null } = $props();
   let splitMenuOpen = $state(false);
 
+  // svelte-ignore state_referenced_locally — intentional: seeded from the
+  // prop (hence the name), then kept fresh by the $effect below and by
+  // pane_output pushes carrying current_command.
   let command = $state(initialCommand);
   $effect(() => { command = initialCommand; });
   let termEl;

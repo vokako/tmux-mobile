@@ -49,11 +49,14 @@
   // Local editable copy so edits aren't lost on the 1s status poll re-render.
   // NOTE: `templates` is a Svelte $state proxy — structuredClone() throws a
   // DataCloneError on proxies, so deep-clone via JSON instead.
+  // svelte-ignore state_referenced_locally — intentional: drafts is a local
+  // editable copy seeded once; the status poll must NOT overwrite edits.
   let drafts = $state<Template[]>(JSON.parse(JSON.stringify(templates ?? [])));
   let selIdx = $state(0);
   let dirty = $state(false);
   let saving = $state(false);
   // Global system prompt (editable; saved separately from templates).
+  // svelte-ignore state_referenced_locally — same seeding pattern as drafts.
   let sysDraft = $state(systemPrompt);
   let sysDirty = $state(false);
   let sysSaving = $state(false);
@@ -184,7 +187,8 @@
   }
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
+<!-- Backdrop is a pointer affordance only; the modal's close button is the keyboard path. -->
+<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
 <div class="tpl-overlay" onclick={onClose}></div>
 <div class="tpl-modal">
   <div class="tpl-head">

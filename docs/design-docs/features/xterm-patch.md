@@ -8,7 +8,7 @@ time. It makes three edits:
 
 1. **lineHeight lower bound**: xterm rejects `lineHeight < 1`; we relax the
    bound to `0.4` for `lineHeight` only, enabling the compact line-spacing
-   setting (see `terminal-prefs.svelte.js`, `LINE_HEIGHT_MIN` — the two bounds
+   setting (see `terminal-prefs.svelte.ts`, `LINE_HEIGHT_MIN` — the two bounds
    must stay in sync).
 2. **DOM glyph renderer**: wraps each row's text in an inner
    `<span class="xterm-glyph">` so compact rows can crop the *cell box*

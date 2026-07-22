@@ -316,6 +316,7 @@
     outline: none;
     transition: all 0.2s ease;
     -webkit-appearance: none;
+    appearance: none;
   }
   input:focus {
     border-color: var(--accent);

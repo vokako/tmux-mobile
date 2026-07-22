@@ -1414,6 +1414,8 @@
 {/snippet}
 
 
+<!-- Touch handlers implement the edge-swipe back gesture; not an interactive element. -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="files" bind:this={filesEl} ontouchstart={onTouchStart} ontouchend={onTouchEnd}>
   {#if splitEligible}
     <!-- Desktop: folder browser (left) | draggable splitter | preview (right). -->

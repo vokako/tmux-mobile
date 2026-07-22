@@ -704,6 +704,7 @@
     font-size: 13px;
     color: var(--text);
     -webkit-appearance: none;
+    appearance: none;
     line-height: 1;
   }
   .search-bar input::placeholder { color: var(--text3); }
@@ -1109,6 +1110,7 @@
     font-size: 14px;
     outline: none;
     -webkit-appearance: none;
+    appearance: none;
   }
   .new-form input:focus { border-color: var(--accent); }
   .new-form input::placeholder { color: var(--text3); }

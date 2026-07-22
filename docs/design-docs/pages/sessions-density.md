@@ -124,7 +124,7 @@ your sessions `work-`, typing `work` already filters them.
 the prefix here is not a user naming heuristic but an app-owned protocol
 (the server creates these names, `src-tauri/src/team.rs`), classification
 is additionally gated on the server actually having the team bus
-(`teamState.available` in `src/lib/core/team.svelte.js` — shared with
+(`teamState.available` in `src/lib/core/team.svelte.ts` — shared with
 PanePicker so all surfaces agree), and the rows behave differently (tap →
 Team chat, not a terminal), so mixing them into the flat list would mislead.
 False groupings are impossible short of a user hand-naming a session

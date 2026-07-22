@@ -143,7 +143,7 @@ all rooms.
   (`team_close_team` kills its tmux session; the chat log persists in the db, so
   re-starting the same workspace+template pair resumes its history).
 
-### Frontend session identity & availability (`src/lib/core/team.svelte.js`)
+### Frontend session identity & availability (`src/lib/core/team.svelte.ts`)
 
 The ONE frontend module that knows team tmux sessions are named
 `tmm-team-<room>` (new rooms use the stable workspace+template `team_slug`; see
