@@ -10,10 +10,11 @@ use serde_json::Value;
 use super::skills::{ResolvedSkill, skills_index_text};
 use super::workspace::Paths;
 use super::workspace::prepare_kiro_home;
-use super::{
-    build_agent_prompt, Prepared, StartupConfirmation, TeamConfig,
-    CLAUDE_FOLDER_TRUST_MARKERS, CODEX_FOLDER_TRUST_MARKERS, TEAM_MCP_TOOL_TIMEOUT_MS,
+use super::launch::{
+    build_agent_prompt, Prepared, StartupConfirmation,
+    CLAUDE_FOLDER_TRUST_MARKERS, CODEX_FOLDER_TRUST_MARKERS,
 };
+use super::{TeamConfig, TEAM_MCP_TOOL_TIMEOUT_MS};
 
 // ---- Kiro ----
 #[allow(clippy::too_many_arguments)] // agent config genuinely needs all of these
@@ -611,7 +612,7 @@ pub(super) fn shell_quote(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::{folder_trust_prompt_visible, startup_already_ready, startup_prompt_visible};
+    use super::super::launch::{folder_trust_prompt_visible, startup_already_ready, startup_prompt_visible};
     use super::super::workspace::prepare_home;
     use crate::server::TeamBridge;
     use std::sync::Mutex;

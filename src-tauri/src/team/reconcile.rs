@@ -10,7 +10,7 @@ use std::time::Duration;
 use crate::server::TeamBridge;
 use crate::tmux;
 
-use super::{folder_trust_prompt_visible, launch_agent};
+use super::launch::{folder_trust_prompt_visible, launch_agent};
 use super::workspace::Paths;
 use super::TeamConfig;
 
