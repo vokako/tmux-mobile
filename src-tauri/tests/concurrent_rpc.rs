@@ -7,8 +7,8 @@
 //!     (i.e. the send-cipher counter never reorders)
 //!
 //! Notes:
-//!   - We speak the full encrypted handshake (server_nonce → client_nonce
-//!     + HMAC proof → AES-GCM session), so these tests also exercise the
+//!   - We speak the full encrypted handshake (server_nonce → client_nonce +
+//!     HMAC proof → AES-GCM session), so these tests also exercise the
 //!     InitCipher / Plain / Encrypted funnel end-to-end.
 //!   - The tests don't touch tmux or fs; they hit the `ping` RPC, which is
 //!     handled synchronously inside handle_request and runs on the
@@ -590,3 +590,4 @@ async fn plain_token_auth_delivers_rpc_responses() {
     assert_eq!(resp["id"].as_u64(), Some(42));
     assert_eq!(resp["result"].as_str(), Some("pong"));
 }
+

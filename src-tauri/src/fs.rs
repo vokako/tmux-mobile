@@ -61,9 +61,9 @@ pub fn resolve(p: &str) -> String {
 /// target. (`fs::read_dir` and `fs::metadata` follow symlinks at the
 /// filesystem layer, so the contents/stat still reflect the real target.)
 fn expand_path(p: &str) -> PathBuf {
-    if p.starts_with('~') {
+    if let Some(rest) = p.strip_prefix('~') {
         if let Some(home) = dirs::home_dir() {
-            return home.join(p[1..].trim_start_matches('/'));
+            return home.join(rest.trim_start_matches('/'));
         }
     }
     PathBuf::from(p)

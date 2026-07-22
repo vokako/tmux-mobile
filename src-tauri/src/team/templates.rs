@@ -232,10 +232,6 @@ pub fn delete_template(name: &str) -> Result<(), String> {
     std::fs::remove_dir_all(team_dir(name)).map_err(|e| e.to_string())
 }
 
-/// Per-team config home under `<workspace>/.tmm/`. Lives inside the project but
-/// is self-gitignored (`.tmm/.gitignore` = `*`). Each backend's config files and
-/// hooks live here; prompts are passed inline.
-
 #[cfg(test)]
 mod tests {
     use super::*;

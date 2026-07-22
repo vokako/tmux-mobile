@@ -6,6 +6,9 @@ use std::path::PathBuf;
 
 use super::{HEARTBEAT_SH, KEEPALIVE_SH};
 
+/// Per-team config home under `<workspace>/.tmm/`. Lives inside the project but
+/// is self-gitignored (`.tmm/.gitignore` = `*`). Each backend's config files and
+/// hooks live here; prompts are passed inline.
 pub(super) struct Paths {
     /// Agents' working directory (the user's project) — agents run `-c` here.
     pub(super) workspace: PathBuf,

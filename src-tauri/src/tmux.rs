@@ -129,7 +129,7 @@ pub fn list_sessions() -> Result<Vec<TmuxSession>, String> {
         .map(|line| {
             let parts: Vec<&str> = line.split("<TMM_SEP>").collect();
             TmuxSession {
-                name: parts.get(0).unwrap_or(&"").to_string(),
+                name: parts.first().unwrap_or(&"").to_string(),
                 windows: parts.get(1).unwrap_or(&"0").parse().unwrap_or(0),
                 attached: parts.get(2).unwrap_or(&"0") == &"1",
                 created: parts.get(3).unwrap_or(&"0").to_string(),
@@ -241,7 +241,7 @@ fn parse_pane_lines(output: &str) -> Vec<TmuxPane> {
         .map(|line| {
             let parts: Vec<&str> = line.split("<TMM_SEP>").collect();
             let pane = TmuxPane {
-                session: parts.get(0).unwrap_or(&"").to_string(),
+                session: parts.first().unwrap_or(&"").to_string(),
                 window: parts.get(1).unwrap_or(&"0").parse().unwrap_or(0),
                 pane: parts.get(2).unwrap_or(&"0").parse().unwrap_or(0),
                 width: parts.get(3).unwrap_or(&"0").parse().unwrap_or(0),
@@ -318,7 +318,7 @@ pub fn cursor_info(target: &str) -> Result<(usize, usize, usize, usize), String>
         "#{cursor_x},#{cursor_y},#{pane_height},#{pane_width}",
     ])?;
     let parts: Vec<&str> = out.trim().split(',').collect();
-    let x = parts.get(0).unwrap_or(&"0").parse().unwrap_or(0);
+    let x = parts.first().unwrap_or(&"0").parse().unwrap_or(0);
     let y = parts.get(1).unwrap_or(&"0").parse().unwrap_or(0);
     let h = parts.get(2).unwrap_or(&"24").parse().unwrap_or(24);
     let w = parts.get(3).unwrap_or(&"80").parse().unwrap_or(80);
@@ -345,7 +345,7 @@ pub fn cursor_info_with_cmd(
         "#{cursor_x}<TMM_SEP>#{cursor_y}<TMM_SEP>#{pane_height}<TMM_SEP>#{pane_width}<TMM_SEP>#{pane_current_command}",
     ])?;
     let parts: Vec<&str> = out.trim_end_matches('\n').split("<TMM_SEP>").collect();
-    let x = parts.get(0).unwrap_or(&"0").parse().unwrap_or(0);
+    let x = parts.first().unwrap_or(&"0").parse().unwrap_or(0);
     let y = parts.get(1).unwrap_or(&"0").parse().unwrap_or(0);
     let h = parts.get(2).unwrap_or(&"24").parse().unwrap_or(24);
     let w = parts.get(3).unwrap_or(&"80").parse().unwrap_or(80);

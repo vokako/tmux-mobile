@@ -614,8 +614,8 @@ mod tests {
     use super::*;
     use super::super::launch::{folder_trust_prompt_visible, startup_already_ready, startup_prompt_visible};
     use super::super::workspace::prepare_home;
-    use crate::server::TeamBridge;
-    use std::sync::Mutex;
+    
+    
 
     #[test]
     fn codex_system_files_link_config_env_and_auth_idempotently() {
@@ -1031,7 +1031,7 @@ mod tests {
     }
 
     // Records seed_employee calls so we can assert the default roster.
-    use super::super::test_util::{cfg, RecordingBridge};
+    use super::super::test_util::cfg;
 
     #[test]
     fn shell_quote_plain_passthrough() {

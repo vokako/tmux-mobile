@@ -316,7 +316,7 @@ impl SleepState {
     /// we never sleep a team that hasn't even come online yet).
     fn is_online_idle(&self, roster: &HashMap<String, (String, i64)>) -> bool {
         let mut saw_online = false;
-        for (_, (status, _)) in roster {
+        for (status, _) in roster.values() {
             if status == "offline" { continue; }
             saw_online = true;
             if status != "idle" { return false; }

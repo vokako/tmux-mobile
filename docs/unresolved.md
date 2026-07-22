@@ -148,3 +148,22 @@
   viewMode plumbing, the chat i18n keys, and the ws.js send_command wrapper
   are all removed (recoverable from git history). The `send_command` RPC
   still exists server-side.
+
+## Backend clippy: structural findings deferred (2026-07-22)
+
+Left as-is during the team/server module split (fixing them means
+signature/behavior changes, which the mechanical-move discipline forbids
+in the same pass):
+
+- `too_many_arguments`: `server/connection.rs` `handle_connection` (9)
+  and `handle_connection_ws` (11), `team/backends.rs` `prepare_codex` (9).
+  The connection pair wants a `ConnContext` struct (token/machine_id/
+  trackers/grace/team/notifications travel together everywhere); the
+  backends one wants the existing `Extras` to absorb its loose params.
+- `large_enum_variant`: `server::Outbound` — `InitCipher([u8;16], HalfCipher)`
+  is ~700 bytes vs 24 for `Plain(String)`. One-shot variant per connection;
+  boxing `HalfCipher` is trivial but touches the hot send funnel, so do it
+  with a connection-path regression run, not blind.
+
+All are pre-existing smells surfaced (not introduced) by the split;
+everything mechanical from the same clippy run was fixed in-tree.

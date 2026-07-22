@@ -450,7 +450,7 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
             }
 
             let mut child = std::process::Command::new("git");
-            child.arg(&subcmd);
+            child.arg(subcmd);
             child.args(&args);
             if let Some(d) = cwd {
                 child.current_dir(d);
