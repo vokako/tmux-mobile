@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use crate::agent_notifications::AgentNotificationHub;
 
-use super::{require_str, NotificationHub, Outbound, Request, Response, TeamBridge,
-    ERR_INTERNAL, ERR_INVALID_PARAMS, ERR_METHOD_NOT_FOUND};
+use super::rpc::{require_str, Request, Response, ERR_INTERNAL, ERR_INVALID_PARAMS, ERR_METHOD_NOT_FOUND};
+use super::{NotificationHub, Outbound, TeamBridge};
 
 /// Dispatch `team_*` RPC methods to the in-process bus bridge. Returns a
 /// method-not-found error when no bus is wired (mobile builds, or desktop with
