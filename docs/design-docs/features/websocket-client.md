@@ -4,7 +4,7 @@
 Mobile connections are unreliable. WebSocket client must handle disconnects, reconnects, and edge cases gracefully.
 
 ## Decision
-Custom WebSocket client (`ws.js`) with auto-reconnect, pending promise cleanup, and multi-address failover.
+Custom WebSocket client (`ws.ts`) with auto-reconnect, pending promise cleanup, and multi-address failover.
 
 ## How It Works
 - **Pane-output routing is a per-target listener registry**, not a single
@@ -27,7 +27,7 @@ Custom WebSocket client (`ws.js`) with auto-reconnect, pending promise cleanup, 
   tracks `last_pong_at`; if it hasn't seen a pong in 45 s it tears down
   the connection. On the client that shows up as `ws.onclose` → reject
   pending RPCs → trigger reconnect UI. This removes all application-layer
-  heartbeat logic from ws.js (previously ~40 lines of `lastRxAt`,
+  heartbeat logic from ws.ts (previously ~40 lines of `lastRxAt`,
   `HEARTBEAT_QUIET_MS`, `pingInFlight`, etc. all gone). The key property
   it gets us: a 50 MB `fs_download` frame can be in flight for tens of
   seconds and the keepalive is completely unaffected — PING/PONG goes

@@ -73,6 +73,9 @@ against clobbering (`src/lib/files/Files.svelte`):
 These are client-side guards only; two *different* clients can still race
 (server-side merge semantics would be the deeper fix — see unresolved.md).
 
+Both rules are implemented once in `src/lib/files/persisted-list.ts`
+(unit-tested); bookmarks and recents are two configurations of it.
+
 ## Edge Cases
 - Base64 upload uses chunked encoding (8192 bytes/chunk) to avoid stack overflow
 - Files > 5 MB (or not previewable by mime/name) open the info page instead of auto-loading preview; user confirms via preview button to avoid heavy transfers on mobile

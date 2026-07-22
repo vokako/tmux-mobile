@@ -96,7 +96,7 @@ auth branch — do not rely on the send task's silent fallback.
   a second auth + second key-exchange handshake on connect. More moving
   parts for a narrow win.
 - **HTTP-only download endpoint** (a preexisting work-in-progress in
-  `ws.js`): still the right long-term direction for huge transfers
+  `ws.ts`): still the right long-term direction for huge transfers
   because it bypasses the WS framing entirely. Complementary to this
   change — concurrent WS RPC is the floor, HTTP download is the ceiling.
 - **Chunked frame downloads**: server splits `fs_download` into many

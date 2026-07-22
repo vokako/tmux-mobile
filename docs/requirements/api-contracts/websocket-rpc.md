@@ -33,8 +33,10 @@ JSON-RPC over WebSocket (`ws://` or `wss://`).
 ### Session Management
 | Method | Params | Response |
 |--------|--------|----------|
+| `ping` | — | `"pong"`. Used by the client's idle probe to detect half-open links. |
 | `list_sessions` | — | Array of `{name, windows, attached, created, last_opened?}` objects. `last_opened` is unix seconds of the last time this session was opened via tmux-mobile (`subscribe` RPC); absent if never opened. |
-| `list_panes` | `session` | Array of pane objects: `{session, window, pane, width, height, current_command, window_name, pane_title, current_path}`. `current_path` is tmux `#{pane_current_path}` (the pane process's cwd). |
+| `list_panes` | `session` | Array of pane objects: `{session, window, pane, width, height, current_command, window_name, pane_title, current_path, active, child_cmd?}`. `current_path` is tmux `#{pane_current_path}`; `active` marks the window's active pane; `child_cmd` is the foreground descendant argv (detects interpreter-launched agent CLIs), omitted for bare shells. |
+| `list_sessions_with_panes` | — | `{sessions, panes}` — the two lists above in one round-trip (saves 1+N RPCs on the Sessions page). |
 | `new_session` | `name?`, `path?`, `command?` | OK |
 | `kill_session` | `name` | OK |
 | `new_window` | `session` | OK |
@@ -85,11 +87,41 @@ Shell metacharacters rejected in args.
 | `get_prefs` | — | Preferences JSON |
 | `set_pref` | `key`, `value` | OK |
 
+### Agent Notifications (agent lifecycle hooks)
+| Method | Params | Response |
+|--------|--------|----------|
+| `agent_notifications_list` | — | Unread-notification snapshot `{unread: [{session, window, …}]}` |
+| `agent_notifications_mark_read` | `session`, `window` | Updated snapshot |
+| `agent_hooks_status` | — | Per-agent install state `{claude?: {installed}, codex?: {installed}, kiro?: {installed}}` |
+| `agent_hooks_install` | — | Installs the notify hooks into agent configs; returns updated status |
+| `agent_hooks_remove` | — | Removes them; returns updated status |
+
+### Team (desktop-only — method-not-found on servers without the bus)
+All chat operations are scoped to a team `room`; `team_status` / `team_teams`
+are team-agnostic. The Team tab hides itself when these return -32601.
+
+| Method | Params | Response |
+|--------|--------|----------|
+| `team_status` | — | `{available, teams, system_prompt, …}` |
+| `team_teams` | — | Team list (room, workspace, agents) |
+| `team_start_team` | `workspace`, `template?` | Starts a team for the workspace; returns its descriptor |
+| `team_close_team` | `room` | OK |
+| `team_history` | `room`, `limit?` | Message history |
+| `team_roster` | `room` | Live roster with agent states |
+| `team_employees` | `room` | Desired-roster employee list |
+| `team_post` | `room`, `body`, `requires_reply?` | Posts a chat message as the human |
+| `team_templates` | — | Named roster templates |
+| `team_template_save` | `name`, `def` | OK |
+| `team_template_delete` | `name` | OK |
+| `team_system_prompt_save` | `text` | OK |
+
 ## Server Push Messages
 | Method | Params | Description |
 |--------|--------|-------------|
 | `pane_output` | `target`, `content?`, `cursor`, `current_command?` | Pushed on content/cursor change; `current_command` appears on the first push and when the command changes |
 | `pane_closed` | `target` | Pushed when pane becomes unreachable (after repeated capture failures) |
+| `team_message` | `room`, `message` | New group-chat message in a team room |
+| `agent_notification` | notification snapshot | Unread agent-lifecycle notifications changed |
 
 Cursor object: `{x, y, w, h, t}` (x/y position, width, height, trailing trimmed lines).
 Content is omitted when only cursor position changed.

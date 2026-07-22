@@ -2,7 +2,7 @@
   // Desktop split-screen: tiles N independent Terminal instances in a CSS
   // grid, each bound to any session:window.pane. Mounted only when
   // App.svelte decides split is active (desktop + wide). Each cell owns its
-  // own Terminal (own subscription, own xterm, own resize) — the ws.js
+  // own Terminal (own subscription, own xterm, own resize) — the ws.ts
   // per-target listener registry is what lets them coexist.
   import Terminal from '../terminal/Terminal.svelte';
   import PanePicker from './PanePicker.svelte';

@@ -157,7 +157,7 @@ session as "team" on one surface and "regular" on another).
 - `isTeamSession` is **gated on `teamState.available`**: on a busless
   server, `tmm-team-*` names fall back to ordinary sessions everywhere.
 - `teamState` is written only by App's `probeTeam()`, and only a definitive
-  method-not-found (-32601, surfaced via `err.code` from `ws.js`) may flip
+  method-not-found (-32601, surfaced via `err.code` from `ws.ts`) may flip
   `available` to false. Transient RPC failures keep the current value —
   flipping it unmounts the always-mounted Team component (below) and
   destroys exactly the state it exists to preserve.
@@ -320,7 +320,7 @@ relaunching agents would also reconnect them, but discards provider context;
 status-aware adoption preserves both context and active work.
 
 **Why the daemon is stateless.** The MCP daemon is served with
-`StreamableHttpServerConfig { stateful_mode: false }` (`crates/agora/src/web.rs`).
+`StreamableHttpServerConfig { stateful_mode: false }` (`src-tauri/crates/agora/src/web.rs`).
 rmcp's default stateful mode keeps session ids in an in-memory
 `LocalSessionManager`; because the daemon runs *in-process* with the server,
 every restart wipes that map and any agent presenting an old `Mcp-Session-Id` is

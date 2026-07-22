@@ -126,6 +126,8 @@ them work from your phone. Desktop-server only (the agent bus runs in-process).
 |--------|-------------|
 | `npm run dev` | Vite dev server (web UI on 0.0.0.0:5173) |
 | `npm run build` | Production web build |
+| `npm test` | Frontend tests (node --test, no tmux needed) |
+| `npm run check` | Type-check (.ts / .svelte via svelte-check) |
 | `npm run build:mac` | macOS desktop app (.app + .dmg) |
 | `npm run build:android` | Android APK (aarch64) |
 | `npm run build:all` | Web + macOS + Android |

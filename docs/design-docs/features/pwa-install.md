@@ -20,7 +20,7 @@ a no-op service worker satisfy installability, and a small Svelte banner
 | `public/sw.js` | Service worker registered **only** to make the page installable. Network-passthrough `fetch` handler (no `respondWith`) — present purely because some Chromium versions gate installability on a fetch handler. `skipWaiting` + `clients.claim` so updates take over immediately. |
 | `public/pwa-192.png`, `pwa-512.png`, `pwa-maskable-512.png` | Generated from `src-tauri/icons/icon.png` (1024²) via `sips`. The maskable one scales the glyph to ~72% over an opaque black field so it survives Android's circular mask (the source icon has transparent rounded corners — unusable as maskable directly). |
 | `index.html` | `<link rel="manifest">` + `theme-color` + `apple-*` tags (iOS "Add to Home Screen" reads these; there's no JS install API on iOS). |
-| `src/main.js` | Registers `/sw.js` — gated on `!isTauri && 'serviceWorker' in navigator && window.isSecureContext`. |
+| `src/main.ts` | Registers `/sw.js` — gated on `!isTauri && 'serviceWorker' in navigator && window.isSecureContext`. |
 | `src/lib/ui/InstallPrompt.svelte` | The banner. Mounted once in `App.svelte`. |
 
 ## Why no offline caching

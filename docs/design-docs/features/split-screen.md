@@ -14,7 +14,7 @@ subscriptions; the only client change required was making pane-output delivery
 multi-listener.
 
 ## How It Works
-- **ws.js per-target registry** (the enabling change): `pane_output` / `pane_closed`
+- **ws.ts per-target registry** (the enabling change): `pane_output` / `pane_closed`
   are routed to a `Map<target, cb>` keyed listener instead of one shared
   callback. Each cell's `Terminal` registers its own target. See
   `websocket-client.md`.
@@ -55,7 +55,7 @@ multi-listener.
 - **fontSize**: one global prop → every cell re-fits when the terminal font-size
   setting changes. Cmd/Ctrl +/- scales the complete desktop WebView instead;
   every cell observes its resulting container size and re-fits.
-- **Chat**: split cells are always `viewMode="terminal"`; chat stays single-pane.
+- **Chat**: the separate chat view was removed 2026-07 (dead code); split cells are always plain terminals.
 - **Files**: unchanged; overlays the whole terminal page and keys off the single
   `terminalSession`.
 
