@@ -28,8 +28,8 @@ use std::time::Duration;
 
 // Shared hooks, embedded so a packaged .app has no external file dependency.
 // Written to the self-gitignored Team runtime directory at startup.
-const KEEPALIVE_SH: &str = include_str!("../../team/hooks/keepalive.sh");
-const HEARTBEAT_SH: &str = include_str!("../../team/hooks/heartbeat.sh");
+const KEEPALIVE_SH: &str = include_str!("../../../team/hooks/keepalive.sh");
+const HEARTBEAT_SH: &str = include_str!("../../../team/hooks/heartbeat.sh");
 
 const RECONCILE_INTERVAL: Duration = Duration::from_secs(3);
 /// Kiro 2.12 caps a configured MCP timeout at ten minutes. Keep every backend
@@ -68,14 +68,14 @@ const IDLE_SLEEP_MS: i64 = agora::mcp::MCP_WAIT_MAX_MS as i64 - 60_000;
 // is always something to edit.
 
 /// Default model placeholder substituted in when a kiro agent leaves model empty.
-pub const BUILTIN_TEMPLATE: &str = include_str!("../../team/templates/default/team.yaml");
+pub const BUILTIN_TEMPLATE: &str = include_str!("../../../team/templates/default/team.yaml");
 
 /// A ready-made software-development roster (tech-lead / product / architect /
 /// coder / reviewer / tester), seeded alongside the default so it appears in
 /// the app's template picker out of the box. The whole collaboration workflow
 /// lives in each agent's `goal` (role isolation) — team-brief.md stays a
 /// role-agnostic, workflow-free communication contract.
-pub const SOFTWARE_DEV_TEMPLATE: &str = include_str!("../../team/templates/software-dev/team.yaml");
+pub const SOFTWARE_DEV_TEMPLATE: &str = include_str!("../../../team/templates/software-dev/team.yaml");
 
 /// A financial-research roster modeled on Dexter (virattt/dexter): a research
 /// director plus fundamentals / market+sentiment / valuation(DCF) / memo /
@@ -84,25 +84,25 @@ pub const SOFTWARE_DEV_TEMPLATE: &str = include_str!("../../team/templates/softw
 /// sources, the deliverable is a file, chat is a scannable header) and its
 /// educational-only / not-investment-advice posture are baked into the goals.
 pub const FINANCIAL_RESEARCH_TEMPLATE: &str =
-    include_str!("../../team/templates/financial-research/team.yaml");
+    include_str!("../../../team/templates/financial-research/team.yaml");
 
 /// A deep-research roster: a director who decomposes the question, two parallel
 /// researchers, a synthesist, and a skeptic — every claim sourced, output to
 /// report.md.
-pub const DEEP_RESEARCH_TEMPLATE: &str = include_str!("../../team/templates/deep-research/team.yaml");
+pub const DEEP_RESEARCH_TEMPLATE: &str = include_str!("../../../team/templates/deep-research/team.yaml");
 
 /// A content-studio roster (editor-in-chief / researcher / writer / copy editor)
 /// for shipping a publish-ready article or docs in a shared house style.
-pub const CONTENT_STUDIO_TEMPLATE: &str = include_str!("../../team/templates/content-studio/team.yaml");
+pub const CONTENT_STUDIO_TEMPLATE: &str = include_str!("../../../team/templates/content-studio/team.yaml");
 
 /// A data-analysis roster (lead / data engineer / analyst / reporter) that
 /// answers a question from data with reproducible work and honest caveats.
-pub const DATA_ANALYSIS_TEMPLATE: &str = include_str!("../../team/templates/data-analysis/team.yaml");
+pub const DATA_ANALYSIS_TEMPLATE: &str = include_str!("../../../team/templates/data-analysis/team.yaml");
 
 /// A lean mixed-backend engineering roster: Kiro coordinates requirements and
 /// delivery, Claude designs and reviews, and Codex implements and verifies.
 pub const MIXED_ENGINEERING_TEMPLATE: &str =
-    include_str!("../../team/templates/mixed-engineering/team.yaml");
+    include_str!("../../../team/templates/mixed-engineering/team.yaml");
 
 /// Built-in templates seeded into teams/ on first run: (file stem, contents).
 const BUILTIN_TEMPLATES: &[(&str, &str)] = &[
