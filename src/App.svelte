@@ -10,7 +10,7 @@
   import Preferences from './lib/app/Preferences.svelte';
   import { copyText } from './lib/core/clipboard.ts';
   import { teamStatus } from './lib/core/ws.ts';
-  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable } from './lib/core/ws.ts';
+  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable, listPanes } from './lib/core/ws.ts';
   import { t } from './lib/core/i18n.svelte.ts';
   import { layout } from './lib/app/layout.svelte.ts';
   import { teamState } from './lib/core/team.svelte.ts';
@@ -560,6 +560,36 @@
     navPush();
   }
 
+  // The shown pane died (Ctrl-D, process exit). Stay in the terminal and
+  // fall back to the previous pane of the same session — switcher order,
+  // nearest below the closed window/pane index, else the first after it.
+  // Only when the session has no panes left (or is gone entirely) return
+  // to Sessions, and only if the user is actually looking at the terminal:
+  // pane_closed can arrive while they're on another tab (Terminal stays
+  // mounted in a hidden page-layer), and yanking them out of Files for a
+  // background pane death would be hostile.
+  async function paneExitFallback(closed) {
+    let remaining = [];
+    try {
+      const m = /:(\d+)\.(\d+)$/.exec(closed || '');
+      const cw = m ? Number(m[1]) : -1;
+      const cp = m ? Number(m[2]) : -1;
+      remaining = (await listPanes(terminalSession))
+        .filter((p) => `${p.session}:${p.window}.${p.pane}` !== closed)
+        .sort((a, b) => a.window - b.window || a.pane - b.pane);
+      const before = remaining.filter((p) => p.window < cw || (p.window === cw && p.pane < cp));
+      const pick = before[before.length - 1] || remaining[0];
+      if (pick) {
+        terminalTarget = `${pick.session}:${pick.window}.${pick.pane}`;
+        terminalCommand = pick.current_command || '';
+        readTarget(terminalTarget);
+        return;
+      }
+    } catch {} // list_panes fails when the whole session died with the pane
+    terminalTarget = '';
+    if (page === 'terminal') page = 'sessions';
+  }
+
   // Jump to the Team tab and select a specific room (from a team session row in
   // Sessions). Team stays mounted (see the page-layer below), so selecting the
   // room just reloads that room's chat — no full remount.
@@ -964,7 +994,7 @@
           {:else}
             <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {fontSize}
               splitEligible={splitEligible} {splitActive} {splitLayout} onSetLayout={setLayout}
-              onSwitchPane={(t, cmd) => { terminalTarget = t; terminalSession = t.split(':')[0]; terminalCommand = cmd || ''; readTarget(t); }} onPaneExit={() => { terminalTarget = ''; page = 'sessions'; }} />
+              onSwitchPane={(t, cmd) => { terminalTarget = t; terminalSession = t.split(':')[0]; terminalCommand = cmd || ''; readTarget(t); }} onPaneExit={paneExitFallback} />
           {/if}
         </div>
       {:else}

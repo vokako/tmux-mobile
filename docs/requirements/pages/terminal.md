@@ -92,3 +92,10 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
 - Android stale keyboard height events guarded by `activeElement` check
 - Mobile auto-pair input (quotes `""`, brackets `()[]`): xterm's hidden textarea is force-cleared via `requestAnimationFrame` after each keyboard input. Paste excluded via `paste` event flag (NOT `data.length`).
 - Tab swipe suppressed when any child gesture is active (`defaultPrevented` or vertical movement > 10px)
+- Shown pane dies (Ctrl-D / process exit → server `pane_closed`): stay on the
+  Terminal page and switch to the previous pane of the same session (switcher
+  order — nearest below the closed window/pane index, else first after it).
+  Return to Sessions only when the session has no panes left, and only if the
+  Terminal page is the one being viewed (a background pane death must not
+  yank the user out of another tab). Split cells keep their own behavior
+  (the cell empties).
