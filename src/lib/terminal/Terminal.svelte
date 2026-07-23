@@ -14,7 +14,7 @@
   import { adaptAnsiColors } from './ansi-colors.ts';
   import { compactLineGeometry } from './terminal-line-geometry.ts';
   import { selStart, selEnd } from './selection-model.ts';
-  import { countLines, computeCursorLayout } from './cursor-layout.ts';
+  import { computeCursorLayout } from './cursor-layout.ts';
   import { restoreViewportAfterPaneSwitch } from './terminal-viewport.ts';
   import { cycleItem } from '../app/shortcuts.ts';
   import { encodeTerminalShortcut } from './terminal-keyboard.ts';
@@ -418,7 +418,7 @@
 
     let cursorSeq = '', afterPad = '';
     if (cursor) {
-      const layout = computeCursorLayout(content, cursor, term.rows);
+      const layout = computeCursorLayout(content, cursor, term.rows, term.cols);
       afterPad = layout.afterPad;
       if (layout.row > 0 && layout.row <= term.rows) {
         cursorSeq = `\x1b[${layout.row};${cursor.x + 1}H`;
@@ -1633,8 +1633,9 @@
         if (termAtBottom) writeToXterm(content, lastCursor);
         else hasNewContent = true;
       } else if (cursor && term && lastContent && termAtBottom) {
-        // Cursor-only update — share layout calc with writeToXterm so topPad offset matches
-        const { row } = computeCursorLayout(lastContent, cursor, term.rows);
+        // Cursor-only update — share the wrap-aware layout math with
+        // writeToXterm so the row matches the frame already on screen.
+        const { row } = computeCursorLayout(lastContent, cursor, term.rows, term.cols);
         if (row > 0 && row <= term.rows) {
           term.write(`\x1b[${row};${cursor.x + 1}H`);
         }

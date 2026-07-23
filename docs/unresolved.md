@@ -1,5 +1,19 @@
 # Unresolved Issues
 
+## Emoji width mismatch: tmux (2 cells) vs xterm UnicodeV6 (1 cell)
+- **Priority**: Low
+- **Area**: Terminal rendering
+- **Details**: tmux measures emoji as 2 cells; xterm.js with no unicode addon
+  uses its UnicodeV6 table where emoji are width 1. A joined (`capture -J`)
+  line containing emoji can therefore re-wrap at a different point than tmux
+  displayed, shearing subsequent pane rows by one. Pre-existing, independent
+  of the cursor-layout fix (whose cursor row is measurement-independent when
+  the pane is full — see
+  `docs/design-docs/pages/terminal-cursor-layout.md`). Fix would be loading
+  `@xterm/addon-unicode11` AND switching `cellWidth` in
+  `src/lib/terminal/cursor-layout.ts` to the same table; verify against
+  tmux's actual wcwidth on macOS/Linux first.
+
 ## Prefs/bookmarks: cross-client last-writer-wins
 - **Priority**: Low
 - **Area**: Filesystem service / Files page

@@ -58,6 +58,7 @@ gradle build-dir symlink if it dangles and prints the real APK path.
 - [Terminal Touch Handling](docs/design-docs/pages/terminal-touch.md)
 - [Terminal Gesture State Machine](docs/design-docs/pages/terminal-gestures.md)
 - [Terminal Sizing (cols × rows)](docs/design-docs/pages/terminal-sizing.md)
+- [Terminal Cursor Layout (visual rows vs capture -J)](docs/design-docs/pages/terminal-cursor-layout.md)
 - [Sessions Page Density & Navigation](docs/design-docs/pages/sessions-density.md)
 - [Android Platform Integration](docs/design-docs/features/android-platform.md)
 - [WebSocket Client Robustness](docs/design-docs/features/websocket-client.md)
