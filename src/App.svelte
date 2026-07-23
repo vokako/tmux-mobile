@@ -541,8 +541,16 @@
     serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
     page = 'sessions';
     localStorage.removeItem('tmux_disconnected');
+    // A manual connect from Settings reaches a server with EMPTY subscription
+    // state, while Terminals stay mounted across the disconnect and keep their
+    // refcounts — so their subscribe() calls will never re-send the wire
+    // message themselves. Without this, the terminal shows a frozen snapshot
+    // (send_keys still works — it's a plain RPC) until a full reload.
+    // Mirrors onReconnectSuccess; on a first-ever connect both are no-ops.
+    resubscribeAll();
     probeTeam();
     syncAgentNotifications();
+    window.dispatchEvent(new Event('ws-reconnected'));
   }
 
   function readTarget(target) {

@@ -107,6 +107,19 @@ Custom WebSocket client (`ws.ts`) with auto-reconnect, pending promise cleanup, 
   WS layer instead of with it. WS PING/PONG is the first-principles
   answer: it's exactly what the protocol designers gave us for this,
   and it runs at a layer that is unaffected by our JSON-RPC queueing.
+- EVERY path that produces a fresh server connection must call
+  `resubscribeActive()` (and dispatch `ws-reconnected`): the server's
+  subscription table is per-connection state, but the client's
+  `subRefcount` survives the disconnect because Terminals stay mounted
+  in hidden page-layers. A refcount that is already > 0 means later
+  `subscribe()` calls never re-send the wire message — the terminal
+  freezes on its last snapshot while `send_keys` (a plain RPC) keeps
+  working, which users report as "typing is invisible but sending
+  works". The reconnect machine, address switch, and optimizer paths
+  all had it; the manual connect from Settings (`onConnected`) was the
+  one that didn't — found only because each path wires its own
+  post-connect sequence by hand. Symptom → suspect list: frozen display
+  + working input = wire-subscription/refcount divergence first.
 - Client-side polling RPCs such as Terminal's `list_panes` are still plain
   `call()`s and can
   independently trigger the "3 consecutive timeouts" disconnect rule.
