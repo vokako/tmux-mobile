@@ -299,6 +299,21 @@ within `tmm-team-<team-id>`. Two surfaces use it:
    `disabled` employees' windows are killed. Same loop serves the initial team
    AND the manager's runtime `hire`/`fire`.
 
+**Launch lines go through a script, never raw send-keys.** Claude/Codex carry
+their multi-KB system prompt inline on the command line (Kiro's lives in its
+agent JSON, so its line is ~100 bytes). Typing such a line into the pane with
+`send-keys` breaks when the user's shell runs a terminal-integration tty proxy:
+kiro-cli-term (figterm lineage — the pane shell shows as `zsh (kiro-cli-term)`)
+silently swallows input bursts ≳2 KB (bisected: 1.9 KB fine, 2 KB gone, 3/3
+runs; `zsh -f` takes 6 KB fine). The window is left at a bare prompt with
+NOTHING in scrollback, and because the reconcile loop adopts any window that
+merely has the right name, the dead agent looks launched — the "only Kiro
+came up" team. `launch_agent` therefore writes the full command to
+`<team-home>/launch-<name>.sh` (regenerated each launch; the team home is
+already self-gitignored and holds the same secrets as the backend configs
+beside it) and sends only `. '<script>'` (~60 bytes), immune to rc shims and
+to the tty's canonical-mode limit (MAX_CANON 1024) during shell-startup races.
+
 **Restart recovery: adopt the windows, reconnect only dead idle waits.** When the
 backend restarts, `recover_running_teams` finds the surviving `tmm-team-*`
 sessions and re-runs the supervisor, which **adopts** the existing agent windows

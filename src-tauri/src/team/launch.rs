@@ -66,12 +66,36 @@ pub(super) fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &st
         .collect::<Vec<_>>()
         .join(" ");
     let full = if prefix.is_empty() { cmd.clone() } else { format!("{} {}", prefix, cmd) };
-    tmux::send_command(&pane, &full)?;
+    // NEVER send the full launch line via send-keys: claude/codex inline the
+    // multi-KB system prompt on the command line, and terminal-integration
+    // shims that proxy the pane's tty (kiro-cli-term / figterm renames the
+    // shell to `zsh (kiro-cli-term)`) silently SWALLOW input bursts ≳2 KB —
+    // the window is left at a bare prompt with nothing in scrollback, the
+    // supervisor "adopts" that empty window as a live agent, and the team
+    // shows one working Kiro (short launch line) next to dead Claude/Codex.
+    // Reproduced at exactly ≥2000 bytes on 2026-07-23; `zsh -f` (no user rc)
+    // takes 6 KB fine. Writing the command to a script and sourcing it keeps
+    // the typed line ~60 bytes regardless of prompt size, immune to any rc
+    // shim and to tty canonical-mode limits (MAX_CANON 1024) during shell
+    // startup races.
+    let script = write_launch_script(&paths.home, name, &full)?;
+    tmux::send_command(&pane, &format!(". {}", shell_quote(&script.to_string_lossy())))?;
 
     if let Some(confirmation) = startup_confirmation {
         confirm_startup_prompt(pane.clone(), confirmation);
     }
     Ok(pane)
+}
+
+/// Write the full launch command to `<team home>/launch-<name>.sh`. The team
+/// home is self-gitignored, and the script carries the same data as the
+/// backend config files beside it (env values from team.yaml included), so
+/// this adds no new exposure. Overwritten on every (re)launch.
+pub(super) fn write_launch_script(home: &std::path::Path, name: &str, full_cmd: &str) -> Result<std::path::PathBuf, String> {
+    let path = home.join(format!("launch-{}.sh", name));
+    std::fs::write(&path, format!("# tmux-mobile team launcher (regenerated on every launch)\n{}\n", full_cmd))
+        .map_err(|e| format!("write {}: {}", path.display(), e))?;
+    Ok(path)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -165,6 +189,26 @@ pub(super) fn build_agent_prompt(role: &str, goal: &str, team_prompt: &str, cfg:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launch_script_keeps_typed_line_short() {
+        // The typed `. '<script>'` line must stay tiny no matter how large the
+        // inline system prompt grows — kiro-cli-term swallows ≥2 KB bursts.
+        let dir = std::env::temp_dir().join(format!("tmm-launch-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let huge_cmd = format!("TEAM_AGENT='x' claude --append-system-prompt '{}' 'kick'", "p".repeat(8000));
+        let script = write_launch_script(&dir, "planner", &huge_cmd).unwrap();
+        let written = std::fs::read_to_string(&script).unwrap();
+        assert!(written.contains(&huge_cmd));
+        assert!(script.file_name().unwrap().to_string_lossy() == "launch-planner.sh");
+        let typed = format!(". {}", shell_quote(&script.to_string_lossy()));
+        assert!(typed.len() < 200, "typed line must stay far below the ~2KB swallow threshold, got {}", typed.len());
+        // Relaunch overwrites, not appends.
+        let script2 = write_launch_script(&dir, "planner", "echo v2").unwrap();
+        let w2 = std::fs::read_to_string(&script2).unwrap();
+        assert!(w2.contains("echo v2") && !w2.contains("claude"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn build_agent_prompt_structure() {

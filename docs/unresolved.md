@@ -71,6 +71,18 @@
   require a matching live window before adopting an online employee, or retain
   a retryable state until either the pane appears or presence expires.
 
+### Adopt-by-window-name treats a bare shell as a live agent
+- **Priority**: Medium · **Area**: Team supervisor (reconcile.rs)
+- `find_window_by_name` adoption checks only the window's NAME. A window whose
+  agent CLI died (or, before the launch-script fix, never received its launch
+  line) is adopted as if running: `launched` gets an entry, the loop never
+  retries, and no error surfaces anywhere — this is what made the
+  kiro-cli-term input-swallow failure (see team.md §5 launch-script note)
+  invisible: the team looked started while builder/planner sat at bare
+  prompts. Fix: at adopt time require `pane_current_command != shell` (or a
+  recent heartbeat) before marking launched; otherwise kill the bare window
+  and relaunch through the normal failure-counting path.
+
 ### Manager hire() launches on a hardcoded backend, no model/x-room nuance
 - **Priority**: Low · **Area**: Team / agora hire + supervisor
 - `agora::bus::hire` seeds an employee with `backend` absent; our supervisor
