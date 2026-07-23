@@ -31,6 +31,8 @@ struct FileConfig {
     // Default model for kiro-backed team agents.
     #[serde(alias = "crew_model", alias = "agora_model")]
     team_model: Option<String>,
+    // Codex config profile for codex-backed team agents (codex --profile).
+    team_codex_profile: Option<String>,
     // Shared rules prepended to every team agent's brief (the "how we
     // collaborate" contract). Overrides the built-in default if set.
     team_rules: Option<String>,
@@ -52,6 +54,7 @@ pub struct Config {
     pub team_db: String,
     pub team_room: String,
     pub team_model: String,
+    pub team_codex_profile: String,
     pub team_rules: String,
     pub team_kick: String,
 }
@@ -144,6 +147,10 @@ impl Config {
                 .or_else(|| std::env::var("AGORA_MODEL").ok())
                 .or(file_cfg.team_model)
                 .unwrap_or_else(|| "claude-sonnet-4.6".into()),
+            team_codex_profile: std::env::var("TEAM_CODEX_PROFILE")
+                .ok()
+                .or(file_cfg.team_codex_profile)
+                .unwrap_or_default(),
             team_rules: std::env::var("TEAM_RULES")
                 .ok()
                 .or(file_cfg.team_rules)

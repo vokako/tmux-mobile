@@ -217,6 +217,7 @@ mod tests {
             system_prompt: "Global rule.".into(),
             team_rules: "Rule one.\nRule two.".into(),
             team_kick: "kick".into(),
+            codex_profile: String::new(),
         };
         let p = build_agent_prompt("architect", "Design the system.", "Blog style.", &cfg);
         assert!(p.contains("<team-system-prompt>"));

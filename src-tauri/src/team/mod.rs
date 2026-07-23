@@ -62,6 +62,10 @@ pub struct TeamConfig {
     pub team_rules: String,
     /// The kick message that connects an agent to the bus loop.
     pub team_kick: String,
+    /// Codex config profile (`codex --profile <name>`), empty = none. Needed
+    /// on machines whose codex auth lives in a profile layer (e.g. Bedrock
+    /// provider + token in .env) instead of a ChatGPT login.
+    pub codex_profile: String,
 }
 
 /// Start the team for `workspace`: seed the selected roster and spawn the

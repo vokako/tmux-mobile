@@ -292,7 +292,21 @@ fn inherit_codex_system_files_from(home: &Path, system_home: &Path) -> Result<()
     // moved to CLI overrides, so it is the one path Team may replace.
     link_codex_system_file(home, system_home, "config.toml", true)?;
     link_codex_system_file(home, system_home, ".env", false)?;
-    link_codex_system_file(home, system_home, "auth.json", false)
+    link_codex_system_file(home, system_home, "auth.json", false)?;
+    // Profile layers (`codex --profile <name>` reads `<name>.config.toml`).
+    // A machine whose codex auth lives in a profile (e.g. a Bedrock provider
+    // with the bearer token in .env, no ChatGPT login) needs these in the
+    // isolated home or the agent boots into the sign-in screen.
+    if let Ok(entries) = std::fs::read_dir(system_home) {
+        for entry in entries.flatten() {
+            let filename = entry.file_name();
+            let name = filename.to_string_lossy();
+            if name.ends_with(".config.toml") && entry.path().is_file() {
+                link_codex_system_file(home, system_home, &name, true)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn codex_developer_instructions(home: &Path, team_instructions: &str) -> Result<String, String> {
@@ -419,7 +433,7 @@ pub(super) fn prepare_kiro(
     env.extend(hb_env(name, room, cfg));
     env.extend(extras.env.iter().cloned());
     let cmd = format!(
-        "kiro-cli chat --agent {} --model {} --trust-all-tools {}",
+        "command kiro-cli chat --agent {} --model {} --trust-all-tools {}",
         shell_quote(name),
         shell_quote(m),
         shell_quote(&cfg.team_kick)
@@ -486,7 +500,7 @@ pub(super) fn prepare_claude(
     let m = model.unwrap_or("sonnet");
     let system_prompt = build_cli_system_prompt(role, goal, team_prompt, cfg, &extras.skills);
     let cmd = format!(
-        "claude --mcp-config {} --strict-mcp-config --settings {} --model {} --dangerously-skip-permissions --append-system-prompt {} {}",
+        "command claude --mcp-config {} --strict-mcp-config --settings {} --model {} --dangerously-skip-permissions --append-system-prompt {} {}",
         shell_quote(&mcpfile.to_string_lossy()),
         shell_quote(&settingsfile.to_string_lossy()),
         shell_quote(m),
@@ -553,10 +567,16 @@ pub(super) fn prepare_codex(
     if let Some(value) = model {
         config_args.push(format!("--model {}", shell_quote(value)));
     }
+    if !cfg.codex_profile.is_empty() {
+        config_args.push(format!("--profile {}", shell_quote(&cfg.codex_profile)));
+    }
     config_args.push("--dangerously-bypass-approvals-and-sandbox".to_string());
     config_args.push("--dangerously-bypass-hook-trust".to_string());
     config_args.push(shell_quote(&cfg.team_kick));
-    let cmd = format!("codex {}", config_args.join(" "));
+    // `command` bypasses shell functions/aliases: users commonly wrap `codex`
+    // in a function that injects its own flags (e.g. --profile), which would
+    // collide with ours ("cannot be used multiple times") or change behavior.
+    let cmd = format!("command codex {}", config_args.join(" "));
     let confirmation = StartupConfirmation {
         markers: CODEX_FOLDER_TRUST_MARKERS.to_vec(),
         ready_markers: vec!["Starting MCP servers"],
@@ -626,11 +646,12 @@ mod tests {
         std::fs::write(system_home.join("config.toml"), "model_provider = \"custom\"").unwrap();
         std::fs::write(system_home.join(".env"), "PROVIDER_TOKEN=secret").unwrap();
         std::fs::write(system_home.join("auth.json"), "{}").unwrap();
+        std::fs::write(system_home.join("personal.config.toml"), "model_provider = \"bedrock\"").unwrap();
 
         inherit_codex_system_files_from(&agent_home, &system_home).unwrap();
         inherit_codex_system_files_from(&agent_home, &system_home).unwrap();
 
-        for filename in ["config.toml", ".env", "auth.json"] {
+        for filename in ["config.toml", ".env", "auth.json", "personal.config.toml"] {
             let target = agent_home.join(filename);
             assert!(std::fs::symlink_metadata(&target)
                 .unwrap()
@@ -898,6 +919,15 @@ mod tests {
             "the positional startup message contains only the kick: {codex_cmd}"
         );
         assert!(!codex_cmd.contains("--model"));
+        assert!(!codex_cmd.contains("--profile"));
+        // Machines whose codex auth lives in a profile layer get --profile.
+        let mut cfg_profiled = cfg.clone();
+        cfg_profiled.codex_profile = "personal".into();
+        let (_, profiled_cmd, _) = prepare_codex(
+            "builder", "builder", "build", "", &cfg_profiled, "room", &paths, None, &extras,
+        )
+        .unwrap();
+        assert!(profiled_cmd.contains("--profile personal"));
         let confirmation = codex_confirmation.unwrap();
         assert!(startup_prompt_visible(
             "Do you trust the contents of this directory?\n1. Yes, continue\nPress enter to continue",
@@ -1058,6 +1088,7 @@ mod tests {
             system_prompt: String::new(),
             team_rules: "Shared rule.".into(),
             team_kick: "kick".into(),
+            codex_profile: String::new(),
         };
         let skills = vec![ResolvedSkill {
             name: "review".into(),

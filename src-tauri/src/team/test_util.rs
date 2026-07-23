@@ -40,5 +40,5 @@ impl TeamBridge for RecordingBridge {
 }
 
 pub(super) fn cfg() -> TeamConfig {
-    TeamConfig { url: "http://127.0.0.1:8787".into(), model: "claude-sonnet-4.6".into(), system_prompt: String::new(), team_rules: String::new(), team_kick: "kick".into() }
+    TeamConfig { url: "http://127.0.0.1:8787".into(), model: "claude-sonnet-4.6".into(), system_prompt: String::new(), team_rules: String::new(), team_kick: "kick".into(), codex_profile: String::new() }
 }

@@ -671,8 +671,21 @@ Desktop server reads (config.toml or env, `AGORA_*` accepted as legacy aliases):
 `team_bind`/`TEAM_BIND` (default `127.0.0.1:8787`), `team_db`/`TEAM_DB` (default
 `~/.config/tmux-mobile/team.db`), `team_room`/`TEAM_ROOM` (default `main`),
 `team_model`/`TEAM_MODEL` (default `claude-sonnet-4.6`, used by Kiro agents whose
-template model is blank). Bus startup is best-effort: on failure the terminal
-server still runs and the Team tab stays hidden.
+template model is blank), `team_codex_profile`/`TEAM_CODEX_PROFILE` (default
+empty; passed to codex as `--profile <name>`). Bus startup is best-effort: on
+failure the terminal server still runs and the Team tab stays hidden.
+
+The codex profile exists because codex auth is layered: a machine with no
+ChatGPT login may still be fully working through a profile file
+(`$CODEX_HOME/<name>.config.toml`, e.g. a Bedrock provider whose bearer token
+sits in `$CODEX_HOME/.env`) — `codex login status` says "Not logged in" while
+the user's `codex` runs fine, because their shell wraps `codex` in a function
+that injects `--profile <name>`. Team launches bypass shell functions/aliases
+on purpose (all three backends launch with a `command` prefix — a user wrapper
+that injects flags would double ours: `--profile cannot be used multiple
+times`), so the profile must be passed explicitly via this config key, and
+`inherit_codex_system_files` links every `*.config.toml` profile layer into
+the agent's isolated CODEX_HOME alongside config.toml/.env/auth.json.
 
 > Security: the MCP `/mcp` and `/api/*` have **no auth** — only the phone path is
 > authenticated (it rides the token-authed WS). Keep `TEAM_BIND` on `127.0.0.1`
