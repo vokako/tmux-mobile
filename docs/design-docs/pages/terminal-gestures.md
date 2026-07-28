@@ -53,6 +53,44 @@ Drag mapping details (all in `applyHandleDragAt` / grab-offset capture):
 - **Tap outside the selection** (clean tap on `down`, no scroll): clear.
 - **Long-press outside the selection**: clear, then create new selection.
 - **Pane switch / app background / xterm-native clear**: clear.
+- **Any local input** (keystroke, shortcut button, paste): clear — see below.
+
+## Input Returns to the Live Tail (`resumeLiveTail`)
+
+Four states suppress rendering: a pinned selection, an unsettled touch scroll
+(`touchScrolling`), a live momentum coast, and a viewport parked in scrollback
+(`termAtBottom === false`, frames deferred as `hasNewContent`). None of them
+used to end on input, which produced a display that looked broken: *you type
+and nothing appears.*
+
+Why it doesn't self-heal: the server only pushes a pane frame when the state
+differs from the last one it **sent** (`state_key == prev → skip`). It has no
+idea the client dropped a frame, so it never re-sends. `lastContent` keeps
+advancing while the screen stays frozen, and the typed characters surface only
+when some unrelated event (a resize, a visibility change, a pane switch)
+happens to repaint — which is exactly why "switch to another tab and back"
+appeared to fix it.
+
+So every send path (`enqueueKeys`, and the paste branch that goes to
+`paste_text` instead) calls `resumeLiveTail()` first: drop the selection, stop
+the momentum coast, unpin `touchScrolling`, snap to the bottom, repaint from
+`lastContent`. It early-returns when nothing is suppressed, so ordinary typing
+costs one boolean check. This matches real terminals, where any keystroke
+returns you to the live output and drops the selection.
+
+Two traps worth keeping written down:
+
+- **`unlockKeyboard()` used to `clearTimeout(endTouchScrollTimer)`.** That timer
+  is the *only* pending reset of `touchScrolling` (armed for
+  `TOUCH_END_DELAY_MS` = 500 ms after every scroll, longer with momentum).
+  Tapping the keyboard toggle inside that window therefore pinned the display
+  forever — the exact "I typed and the terminal froze" report. It now calls
+  `resumeLiveTail()` instead of cancelling the reset.
+- **Momentum outlives the snap.** Setting `termAtBottom = true` and
+  `scrollToBottom()` while a coast is still running is pointless: the next
+  coast frame scrolls straight back off the tail and re-arms the deferral.
+  `resumeLiveTail` must `stopMomentum()` (measured, not theorised — typing
+  mid-coast reproduced it).
 
 ## Coordinate Model
 - `selection = { anchor: {row, col}, head: {row, col} }`

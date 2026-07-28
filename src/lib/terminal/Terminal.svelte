@@ -97,7 +97,13 @@
 
   function unlockKeyboard() {
     clearTimeout(kbBlurTimer);
-    clearTimeout(endTouchScrollTimer);
+    // Opening the keyboard means the user is about to type, so settle any
+    // suppressed-rendering state instead of merely cancelling its timer.
+    // Cancelling was the old behaviour and it leaked: a tap on this button
+    // within TOUCH_END_DELAY_MS of a scroll killed the only pending
+    // endTouchScroll, leaving `touchScrolling` pinned forever — every later
+    // frame was dropped and the characters the user then typed never appeared.
+    resumeLiveTailRef?.();
     kbLocked = false;
     unlockUntil = Date.now() + 1500;
     unlockRetries = 0;
@@ -189,6 +195,9 @@
     });
   });
   let doResizeRef = null;
+  // Set by the main $effect (needs its `lastContent` closure). Releases every
+  // state that suppresses rendering — see resumeLiveTail().
+  let resumeLiveTailRef = null;
 
   // pane_output snapshots now carry `current_command` (server piggybacks it
   // on cursor reads — same tmux subprocess, zero extra cost). Update
@@ -658,6 +667,8 @@
       if (ctrlByte != null) ctrlArmed = false;
       if (isPasting) {
         isPasting = false;
+        // Paste is input too: same live-tail reset as a keystroke.
+        resumeLiveTail();
         // Paste is NOT keystrokes: sent as keys, every line separator acts
         // as an Enter press and each pasted line executes. Route it through
         // tmux's paste buffer instead — `paste-buffer -p` wraps the block
@@ -777,6 +788,38 @@
     let edgeScrollDir = 0;   // -1 up / +1 down / 0 none
     let lastDragX = 0, lastDragY = 0; // latest compensated drag point (px)
     const stopMomentum = () => { if (momentumId) { cancelAnimationFrame(momentumId); momentumId = null; } };
+
+    // Local input means "show me the live tail".
+    //
+    // Four states suppress rendering: a pinned selection, an unsettled touch
+    // scroll (`touchScrolling`), a live momentum coast, and a viewport parked
+    // in scrollback (`termAtBottom === false`, frames deferred as
+    // `hasNewContent`). None of them used to end on input, and the server
+    // never re-sends a frame it already delivered — so `lastContent` kept
+    // advancing while the screen stayed frozen, and the characters the user
+    // typed only surfaced when some unrelated event (resize, visibility
+    // change, pane switch) happened to repaint. Real terminals snap to the
+    // tail and drop the selection on input; do the same, on every send path.
+    function resumeLiveTail() {
+      if (!term) return;
+      if (!selection && !touchScrolling && termAtBottom && momentumId == null) return;
+      if (selection) clearSelection();
+      // A live coast would scroll the viewport straight back off the tail
+      // (measured: typing mid-coast re-armed the deferral one frame later).
+      stopMomentum();
+      if (touchScrolling) {
+        clearTimeout(endTouchScrollTimer);
+        endTouchScrollTimer = null;
+        touchScrolling = false;
+      }
+      if (!termAtBottom) {
+        termAtBottom = true;
+        hasNewContent = false;
+        term.scrollToBottom();
+      }
+      if (lastContent) writeToXterm(lastContent, lastCursor);
+    }
+    resumeLiveTailRef = resumeLiveTail;
 
     // Cell at touch coords, allowing 1 cell of overshoot in each direction so
     // drags out of the visible area still hit the closest edge. Caller decides
@@ -1662,6 +1705,7 @@
       try { onFirstRender.dispose(); } catch {}
       try { onSelChange.dispose(); } catch {}
       doResizeRef = null;
+      resumeLiveTailRef = null;
       termEl?.classList.remove('compact-lines');
       termEl?.style.removeProperty('--xterm-char-height');
       termEl?.style.removeProperty('--xterm-line-offset');
@@ -1731,6 +1775,8 @@
   let keySending = false;
 
   function enqueueKeys(keys, literal) {
+    // Any keystroke returns the display to the live tail (see resumeLiveTail).
+    resumeLiveTailRef?.();
     const last = keyQueue[keyQueue.length - 1];
     if (literal && last?.literal) {
       last.keys += keys;
