@@ -1,6 +1,7 @@
 pub mod agent_notifications;
 pub mod config;
 pub mod fs;
+pub mod pptx;
 pub mod server;
 pub mod tmux;
 

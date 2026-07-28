@@ -46,8 +46,27 @@ Tauri opens links through `plugin-opener`; browser mode uses a separate
 ### Path Traversal
 All filenames from remote servers sanitized with `sanitize_filename()` (Rust `Path::file_name()`) before joining to download directory.
 
-### Git command arguments
-The Git RPC keeps an explicit subcommand allowlist, then passes every argument
+### .pptx preview is extracted in-process
+`fs_convert` used to shell out to `python3 -c "import pptx …"`. That made the
+feature depend on a `python-pptx` install on the server machine; where it was
+missing, the preview surfaced a raw `ModuleNotFoundError` traceback in the UI.
+`src-tauri/src/pptx.rs` now reads the deck directly: a .pptx is a zip of XML, so
+the module has a small central-directory zip reader (store + deflate via the
+`flate2` dependency we already carry, CRC-verified) and a single-pass scan of
+`ppt/slides/slideN.xml` for `<a:p>` paragraphs and `<a:tbl>` tables. Same HTML
+card markup as before, so the frontend is untouched.
+
+Details worth keeping:
+- **Slide order comes from `<p:sldIdLst>`**, not file names — PowerPoint keeps
+  `slideN.xml` fixed when slides are reordered or deleted. Numeric sort is only
+  the fallback when `presentation.xml`/its rels are unreadable.
+- **Zip64 is rejected with a clear message** rather than mis-parsed; no deck
+  generator we've seen emits it under 4 GB.
+- Cross-checked against `python-pptx` on 17 real decks: identical slide counts,
+  no missing text. The native scan finds *more* text — it walks grouped shapes,
+  which `python-pptx`'s flat `slide.shapes` skips.
+
+### Git command argumentsThe Git RPC keeps an explicit subcommand allowlist, then passes every argument
 directly through Rust `Command::args` without a shell. Shell metacharacters are
 therefore ordinary argument data (the log view uses `|` in `--format`); only
 NUL is rejected because operating-system argv cannot represent it.

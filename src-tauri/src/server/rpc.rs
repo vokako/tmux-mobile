@@ -478,35 +478,12 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
                 return Response::err(id, ERR_INVALID_PARAMS, "only html format supported".into());
             }
             let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-            let script = match ext.as_str() {
-                "pptx" => r#"import sys,pptx,html as h;p=pptx.Presentation(sys.argv[1]);o=""
-for i,s in enumerate(p.slides):
- o+=f"<div style='border:1px solid #ccc;border-radius:8px;padding:16px;margin:12px 0'><b>Slide {i+1}</b><br>"
- for sh in s.shapes:
-  if sh.has_text_frame:
-   for pa in sh.text_frame.paragraphs:
-    t=h.escape("".join(r.text for r in pa.runs))
-    if t.strip():o+=f"<p>{t}</p>"
-  if sh.has_table:
-   o+="<table border=1 cellpadding=4 style='border-collapse:collapse;margin:8px 0'>"
-   for row in sh.table.rows:
-    o+="<tr>"+"".join(f"<td>{h.escape(c.text)}</td>" for c in row.cells)+"</tr>"
-   o+="</table>"
- o+="</div>"
-print(o)"#.to_string(),
-                _ => return Response::err(id, ERR_INVALID_PARAMS, format!("unsupported file type: .{}", ext)),
-            };
-            match std::process::Command::new("python3").arg("-c").arg(&script).arg(path).output() {
-                Ok(output) => {
-                    if output.status.success() {
-                        let html = String::from_utf8_lossy(&output.stdout).to_string();
-                        Response::ok(id, serde_json::json!({ "html": html }))
-                    } else {
-                        let err = String::from_utf8_lossy(&output.stderr).to_string();
-                        Response::err(id, ERR_INTERNAL, err)
-                    }
-                }
-                Err(e) => Response::err(id, ERR_INTERNAL, e.to_string()),
+            match ext.as_str() {
+                "pptx" => match crate::pptx::to_html(std::path::Path::new(path)) {
+                    Ok(html) => Response::ok(id, serde_json::json!({ "html": html })),
+                    Err(e) => Response::err(id, ERR_INTERNAL, e),
+                },
+                _ => Response::err(id, ERR_INVALID_PARAMS, format!("unsupported file type: .{}", ext)),
             }
         }
 
@@ -554,6 +531,28 @@ mod tests {
         assert!(valid_process_arg("--format=%h|%s|%ar|%an"));
         assert!(valid_process_arg("subject; $HOME & <literal>"));
         assert!(!valid_process_arg("bad\0argument"));
+    }
+
+    fn convert(path: &str) -> Response {
+        let req = Request {
+            id: Some(1),
+            method: "fs_convert".into(),
+            params: serde_json::json!({ "path": path }),
+        };
+        handle_request(&req, "")
+    }
+
+    #[test]
+    fn fs_convert_reports_errors_without_shelling_out() {
+        // Conversion runs in-process, so failures are short messages — not a
+        // Python traceback leaking into the preview pane.
+        let err = convert("/nonexistent/deck.pptx").error.expect("error");
+        assert_eq!(err.code, ERR_INTERNAL);
+        assert!(err.message.starts_with("open:"), "{}", err.message);
+
+        let err = convert("/tmp/notes.txt").error.expect("error");
+        assert_eq!(err.code, ERR_INVALID_PARAMS);
+        assert!(err.message.contains("unsupported file type: .txt"), "{}", err.message);
     }
 }
 

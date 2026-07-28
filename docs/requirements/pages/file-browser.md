@@ -47,7 +47,7 @@ directory, or the server's home directory when no session is open yet.
 - `fs_rename(from, to)` — rename/move
 - `fs_download(path)` — download as base64 (≤50MB)
 - `fs_upload(path, data)` — upload as base64
-- `fs_convert(path, format?)` — convert file to HTML for preview (currently pptx only, requires python3 + python-pptx)
+- `fs_convert(path, format?)` — convert file to HTML for preview (currently pptx only; extracted natively by the server, no external tooling required)
 - `git(subcmd, args, cwd)` — git operations
 - `get_bookmarks()` / `save_bookmarks(bookmarks)` — bookmark persistence
 
