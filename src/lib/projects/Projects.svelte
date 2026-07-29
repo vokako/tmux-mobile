@@ -9,7 +9,6 @@
   // same method-not-found contract the Team tab uses.
   import {
     listPanes,
-    projectAdopt,
     projectArchive,
     projectCreate,
     projectDown,
@@ -18,19 +17,25 @@
     projectSnapshots,
     projectUp,
   } from '../core/ws.ts';
+  import type { TmuxPane } from '../core/ws.ts';
   import type { ProjectRow, SnapshotMeta } from './projects.ts';
-  import { ageLabel, shortPath, sortRows, windowChips } from './projects.ts';
-  import { AGENTS } from '../core/agents.ts';
+  import { ageLabel, declaredWindowChips, liveWindowChips, shortPath, sortRows } from './projects.ts';
+  import { notificationForWindow } from '../core/agent-notifications.svelte.ts';
   import Icon from '../ui/Icon.svelte';
   import { t } from '../core/i18n.svelte.ts';
 
-  let { visible = false, openTerminal }: {
+  let { visible = false, openTerminal, panes = {}, onTracked = () => {}, onReady = () => {} }: {
     visible?: boolean;
     openTerminal: (session: string, target: string, command?: string) => void;
+    /** Live panes per session, already loaded by the Sessions page. */
+    panes?: Record<string, TmuxPane[]>;
+    /** Session names that are tracked, so the session list can stop repeating them. */
+    onTracked?: (sessions: string[], supported: boolean) => void;
+    /** Hands the reload function out, so adopting from a session row refreshes us. */
+    onReady?: (reload: () => Promise<void>) => void;
   } = $props();
 
   let rows = $state<ProjectRow[]>([]);
-  let unmanaged = $state<string[]>([]);
   let supported = $state(true);
   let error = $state('');
   let busy = $state<Record<string, boolean>>({});
@@ -39,29 +44,38 @@
   let addOpen = $state(false);
   let addPath = $state('');
   let collapsed = $state(false);
-  let adoptOpen = $state(false);
 
   const sorted = $derived(sortRows(rows));
 
-  function agentIcon(backend: string | null) {
-    if (!backend) return null;
-    return AGENTS.find((a) => a.tag.toLowerCase() === backend.toLowerCase()) ?? null;
+  // Live windows beat the declaration while the session exists: they are what
+  // you can actually tap into, including a window that has not settled yet.
+  function chipsFor(row: ProjectRow) {
+    if (!row.live) return declaredWindowChips(row.slots);
+    const live = panes[row.project.session] ?? [];
+    return live.length ? liveWindowChips(live) : declaredWindowChips(row.slots);
   }
 
   async function load() {
     try {
       const res = await projectList();
       rows = res?.projects ?? [];
-      unmanaged = res?.unmanaged ?? [];
       supported = true;
       error = '';
+      onTracked(rows.map((r) => r.project.session), true);
     } catch (e) {
       const code = (e as { code?: number })?.code;
       // -32601: this server has no project support. Not an error to show.
-      if (code === -32601) { supported = false; return; }
+      if (code === -32601) { supported = false; onTracked([], false); return; }
       error = (e as Error)?.message || String(e);
     }
   }
+
+  // Hand our reload out once, so tracking a session from the list below can
+  // refresh this section. Inside an effect because reading a prop at component
+  // init only captures its initial value.
+  $effect(() => {
+    onReady(load);
+  });
 
   // Reload whenever the section becomes visible: another client (or the
   // capturer) may have changed the declaration while we were away.
@@ -84,12 +98,35 @@
     }
   }
 
+  // A window's live pane target. The panes prop comes from the Sessions page's
+  // own poll, so right after `up` it does not know about the new session yet —
+  // ask tmux directly in that case.
+  async function paneTargets(session: string): Promise<TmuxPane[]> {
+    const known = panes[session] ?? [];
+    if (known.length) return known;
+    return await listPanes(session).catch(() => []);
+  }
+
   async function open(row: ProjectRow) {
     if (!row.live) {
       await run(row.project.id, () => projectUp(row.project.id));
     }
-    const panes = await listPanes(row.project.session).catch(() => []);
-    const pane = panes.find((p) => p.active) ?? panes[0];
+    const live = await paneTargets(row.project.session);
+    const pane = live.find((p) => p.active) ?? live[0];
+    if (pane) openTerminal(row.project.session, `${pane.session}:${pane.window}.${pane.pane}`, pane.current_command);
+  }
+
+  /// Tap a window chip: jump straight into that window. A closed project has to
+  /// come up first, and then we look the window up by name.
+  async function openWindow(row: ProjectRow, name: string, target: string | null) {
+    if (target) {
+      openTerminal(row.project.session, target);
+      return;
+    }
+    await run(row.project.id, () => projectUp(row.project.id));
+    const live = await paneTargets(row.project.session);
+    const pane = live.find((p) => p.window_name === name && p.active)
+      ?? live.find((p) => p.window_name === name);
     if (pane) openTerminal(row.project.session, `${pane.session}:${pane.window}.${pane.pane}`, pane.current_command);
   }
 
@@ -113,7 +150,7 @@
   }
 </script>
 
-{#if supported && (sorted.length > 0 || unmanaged.length > 0)}
+{#if supported && sorted.length > 0}
   <section class="projects">
     <div class="group-label">
       <button class="group-toggle" onclick={() => collapsed = !collapsed} aria-expanded={!collapsed}>
@@ -139,32 +176,18 @@
       {/if}
 
       {#each sorted as row (row.project.id)}
-        {@const chips = windowChips(row.slots)}
+        {@const chips = chipsFor(row)}
         <div class="proj" class:live={row.live}>
           <button class="proj-main" onclick={() => open(row)} title={row.project.path}>
             <span class="dot" class:on={row.live}></span>
             <span class="body">
               <span class="line">
                 <span class="name">{row.project.name}</span>
-                {#if row.project.adopted}<span class="tag">{t('projectAdopted')}</span>{/if}
                 <span class="age">{ageLabel(row.project.last_seen_at ?? row.project.last_up_at)}</span>
               </span>
               <span class="line sub">
                 <span class="path">{shortPath(row.project.path)}</span>
               </span>
-              {#if chips.length}
-                <span class="chips">
-                  {#each chips as chip (chip.name)}
-                    {@const icon = agentIcon(chip.agent)}
-                    <span class="chip" class:agent={!!icon}>
-                      {#if icon}<img src={icon.icon} alt="" width="11" height="11" />{/if}
-                      {chip.name}
-                    </span>
-                  {/each}
-                </span>
-              {:else}
-                <span class="line sub muted">{t('projectNoWindows')}</span>
-              {/if}
             </span>
           </button>
           <div class="acts">
@@ -178,6 +201,27 @@
             </button>
           </div>
         </div>
+
+        <!-- Windows are their own row so each one is tappable: a project is a
+             set of windows, and jumping to the one you want is the whole point.
+             Down projects list what `up` would restore; the tap brings the
+             project up and lands you in that window. -->
+        {#if chips.length}
+          <div class="wins" class:dim={!row.live}>
+            {#each chips as chip (chip.name + (chip.window ?? ''))}
+              {@const notice = row.live && chip.window != null
+                ? notificationForWindow(row.project.session, chip.window)
+                : null}
+              <button class="win" onclick={() => openWindow(row, chip.name, chip.target)}>
+                {#if chip.agentIcon}<img src={chip.agentIcon} alt={chip.agentTag} width="11" height="11" />{/if}
+                <span class="win-name">{chip.name}</span>
+                {#if notice}<span class="attention-dot" aria-label={t('newOutput')}></span>{/if}
+              </button>
+            {/each}
+          </div>
+        {:else}
+          <div class="wins"><span class="win-empty">{t('projectNoWindows')}</span></div>
+        {/if}
 
         {#if menuFor === row.project.id}
           <div class="menu">
@@ -204,34 +248,6 @@
         {/if}
       {/each}
 
-      {#if unmanaged.length > 0}
-        <!-- Collapsed by default: every one of these already appears in the
-             session list below, so expanding this group is an explicit "I want
-             to start tracking one of them" gesture rather than a second copy of
-             the list. -->
-        <div class="group-label sub-label">
-          <button class="group-toggle" onclick={() => adoptOpen = !adoptOpen} aria-expanded={adoptOpen}>
-            <Icon name={adoptOpen ? 'chevron-down' : 'chevron-right'} size={12} />
-            {t('projectAdoptable')}
-            <span class="group-count">{unmanaged.length}</span>
-          </button>
-        </div>
-        {#if adoptOpen}
-          {#each unmanaged as session (session)}
-            <div class="proj adopt">
-              <span class="body">
-                <span class="line"><span class="name">{session}</span></span>
-              </span>
-              <div class="acts">
-                <button class="act" disabled={busy[session]} onclick={() => run(session, () => projectAdopt(session))}>
-                  {t('projectAdopt')}
-                </button>
-              </div>
-            </div>
-          {/each}
-        {/if}
-      {/if}
-
       {#if error}
         <div class="err">{error}</div>
       {/if}
@@ -246,7 +262,6 @@
     font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
     color: var(--text3); padding: 2px 2px 2px 4px;
   }
-  .sub-label { margin-top: 6px; }
   .group-toggle {
     display: flex; align-items: center; gap: 6px;
     background: none; border: 0; padding: 2px 0; cursor: pointer;
@@ -287,21 +302,31 @@
   .body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .line { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
   .name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .tag {
-    font-size: 9px; letter-spacing: 0.04em; text-transform: uppercase;
-    color: var(--text3); border: 1px solid var(--border); border-radius: 4px; padding: 0 3px;
-  }
   .age { margin-left: auto; font-size: 10px; color: var(--text3); }
   .sub { font-family: var(--font-mono); font-size: 11px; color: var(--text2); }
-  .muted { color: var(--text3); }
   .path { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
-  .chip {
-    display: inline-flex; align-items: center; gap: 3px;
-    font-family: var(--font-mono); font-size: 10px; color: var(--text2);
-    background: var(--surface2); border-radius: 4px; padding: 1px 5px;
+
+  /* Window row: one tappable button per window. */
+  .wins {
+    display: flex; flex-wrap: wrap; gap: 4px;
+    padding: 0 8px 2px 25px;   /* aligns under the project name, past the dot */
   }
-  .chip.agent { color: var(--text); }
+  .wins.dim { opacity: 0.65; }
+  .win {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: var(--surface2); color: var(--text2);
+    border: 1px solid var(--border); border-radius: 5px;
+    padding: 2px 7px; cursor: pointer;
+    font-family: var(--font-mono); font-size: 10.5px;
+    transition: color var(--ui-motion-fast, 0.12s) ease, border-color var(--ui-motion-fast, 0.12s) ease;
+  }
+  .win:hover { color: var(--text); border-color: var(--border2); }
+  .win-name { max-width: 13ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .win-empty { font-family: var(--font-mono); font-size: 10.5px; color: var(--text3); }
+  .attention-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 5px var(--accent-glow);
+  }
 
   .acts { display: flex; align-items: center; gap: 4px; }
   .act {
@@ -337,8 +362,6 @@
     color: var(--danger); font-family: var(--font-ui); font-size: 11px;
   }
 
-  .adopt { align-items: center; }
-  .adopt .body { flex: 1; }
   .err {
     color: var(--danger); background: var(--danger-bg);
     border-radius: 6px; padding: 5px 8px; font-size: 11px;

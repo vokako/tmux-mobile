@@ -125,10 +125,14 @@ use crate::tmux;
 
 // ---- public API used by the RPC layer -----------------------------------
 
-/// Every project, each with its slots and whether its session is live, plus the
-/// tmux sessions no project claims yet (the adopt candidates).
+/// Every project, each with its slots and whether its session is live.
+///
+/// The client derives "untracked sessions" by subtracting these from
+/// `list_sessions`, so there is exactly one place that decides what a session
+/// is: tracked sessions live in the Projects section, everything else stays in
+/// the session list.
 pub fn list(include_archived: bool) -> Result<Value, String> {
-    let (projects, unmanaged) = with_store(|store| {
+    let projects = with_store(|store| {
         let projects = store.list_projects(include_archived)?;
         let mut out = Vec::with_capacity(projects.len());
         for p in &projects {
@@ -140,20 +144,9 @@ pub fn list(include_archived: bool) -> Result<Value, String> {
                 "live": live,
             }));
         }
-        let claimed: Vec<String> = store
-            .list_projects(true)?
-            .into_iter()
-            .map(|p| p.session)
-            .collect();
-        let unmanaged: Vec<String> = tmux::list_sessions()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|s| s.name)
-            .filter(|name| !claimed.contains(name))
-            .collect();
-        Ok((out, unmanaged))
+        Ok(out)
     })?;
-    Ok(json!({ "projects": projects, "unmanaged": unmanaged }))
+    Ok(json!({ "projects": projects }))
 }
 
 /// Create a project for a directory. Idempotent: an existing project for the
@@ -549,16 +542,9 @@ mod tests {
             .expect("api slot");
         assert_eq!(api["cwd"], "api", "cwd is stored relative to the project");
 
-        // The board only offers sessions nobody owns yet.
+        // The board lists it as a project, which is what removes it from the
+        // client's session list.
         let listed = list(false).unwrap();
-        assert!(
-            !listed["unmanaged"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|s| s == session),
-            "an adopted session is no longer an adopt candidate"
-        );
         assert_eq!(
             listed["projects"]
                 .as_array()

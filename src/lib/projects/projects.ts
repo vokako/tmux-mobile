@@ -2,6 +2,8 @@
 // component stays markup: the row ordering and the window-chip rules are the
 // parts worth testing, and `node --test` can reach them without a DOM.
 
+import { AGENTS, paneAgent, type Agent, type PaneLike } from '../core/agents.ts';
+
 export type SlotKind = 'shell' | 'agent';
 
 export interface Slot {
@@ -46,20 +48,77 @@ export function isRestorable(slot: Slot): boolean {
   return typeof slot.settled_at === 'number';
 }
 
+/** Minimal pane shape needed to build a live window chip. */
+export type ChipPane = PaneLike & {
+  session: string;
+  window: number;
+  pane: number;
+  active?: boolean;
+};
+
+export interface WindowChip {
+  name: string;
+  /** tmux window index — null for a declared window that is not running. */
+  window: number | null;
+  /** `session:window.pane`, or null when there is nothing to open yet. */
+  target: string | null;
+  agentIcon: string | null;
+  agentTag: string | null;
+}
+
+/** The AGENTS entry for a backend name we stored on a slot (`kiro`, `codex`…). */
+export function agentByBackend(backend: string | null | undefined): Agent | null {
+  if (!backend) return null;
+  return AGENTS.find((a) => a.tag.toLowerCase() === backend.toLowerCase()) ?? null;
+}
+
 /**
- * Chips under a project row: the windows `up` would recreate, in window order.
- * Unsettled windows are left out on purpose — showing a window we would not
- * restore would promise something the reconciler does not deliver.
+ * Chips for a LIVE project: one per tmux window, taken from its active pane, so
+ * tapping one opens exactly that window. This is the source of truth while the
+ * session exists — including windows that have not settled into the declaration
+ * yet, which you can still want to jump into.
  */
-export function windowChips(slots: Slot[]): { name: string; agent: string | null }[] {
+export function liveWindowChips(panes: ChipPane[]): WindowChip[] {
+  const byWindow = new Map<number, ChipPane>();
+  for (const p of panes) {
+    const seen = byWindow.get(p.window);
+    if (!seen || (p.active && !seen.active)) byWindow.set(p.window, p);
+  }
+  return [...byWindow.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([window, pane]) => {
+      const agent = paneAgent(pane);
+      return {
+        name: pane.window_name || String(window),
+        window,
+        target: `${pane.session}:${pane.window}.${pane.pane}`,
+        agentIcon: agent?.icon ?? null,
+        agentTag: agent?.tag ?? null,
+      };
+    });
+}
+
+/**
+ * Chips for a project that is DOWN: the windows `up` would recreate, in window
+ * order. Unsettled windows are left out on purpose — showing a window we would
+ * not restore would promise something the reconciler does not deliver. They have
+ * no target: there is nothing to open until the project is up.
+ */
+export function declaredWindowChips(slots: Slot[]): WindowChip[] {
   return slots
     .filter(isRestorable)
     .slice()
     .sort((a, b) => a.ord - b.ord)
-    .map((s) => ({
-      name: s.window_name,
-      agent: s.kind === 'agent' ? s.command || null : null,
-    }));
+    .map((s) => {
+      const agent = s.kind === 'agent' ? agentByBackend(s.command) : null;
+      return {
+        name: s.window_name,
+        window: null,
+        target: null,
+        agentIcon: agent?.icon ?? null,
+        agentTag: agent?.tag ?? null,
+      };
+    });
 }
 
 /**

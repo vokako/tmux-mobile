@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ageLabel, shortPath, sortRows, windowChips, type ProjectRow, type Slot } from './projects.ts';
+import { ageLabel, declaredWindowChips, liveWindowChips, shortPath, sortRows, type ChipPane, type ProjectRow, type Slot } from './projects.ts';
 
 function slot(name: string, ord: number, extra: Partial<Slot> = {}): Slot {
   return {
@@ -11,6 +11,18 @@ function slot(name: string, ord: number, extra: Partial<Slot> = {}): Slot {
     auto_run: false,
     first_seen_at: 1000,
     settled_at: 1200,
+    ...extra,
+  };
+}
+
+function pane(session: string, window: number, paneIdx: number, extra: Partial<ChipPane> = {}): ChipPane {
+  return {
+    session,
+    window,
+    pane: paneIdx,
+    window_name: `w${window}`,
+    current_command: 'zsh',
+    active: true,
     ...extra,
   };
 }
@@ -33,22 +45,49 @@ function row(id: string, live: boolean, lastSeen?: number): ProjectRow {
   };
 }
 
-test('window chips show only the windows up would restore', () => {
-  const chips = windowChips([
+test('a closed project shows only the windows up would restore', () => {
+  const chips = declaredWindowChips([
     slot('logs', 1),
     slot('editor', 0),
     slot('scratch', 2, { settled_at: undefined }),
     slot('kiro', 3, { kind: 'agent', command: 'kiro', auto_run: true }),
   ]);
   assert.deepEqual(
-    chips,
-    [
-      { name: 'editor', agent: null },
-      { name: 'logs', agent: null },
-      { name: 'kiro', agent: 'kiro' },
-    ],
-    'window order, no unsettled window, agents carry their backend',
+    chips.map((c) => c.name),
+    ['editor', 'logs', 'kiro'],
+    'window order, and no unsettled window',
   );
+  assert.equal(chips[2]?.agentTag, 'Kiro', 'the agent backend becomes its icon');
+  assert.equal(chips[0]?.target, null, 'nothing to open while the project is down');
+});
+
+test('a live project offers one tappable chip per window, from its active pane', () => {
+  const chips = liveWindowChips([
+    pane('app', 2, 1, { window_name: 'api', active: false }),
+    pane('app', 2, 2, { window_name: 'api', active: true, current_command: 'node' }),
+    pane('app', 1, 1, { window_name: 'editor' }),
+    // A window that has not settled into the declaration yet is still live and
+    // still worth jumping into.
+    pane('app', 3, 1, { window_name: 'scratch' }),
+  ]);
+  assert.deepEqual(
+    chips.map((c) => [c.name, c.target]),
+    [
+      ['editor', 'app:1.1'],
+      ['api', 'app:2.2'],
+      ['scratch', 'app:3.1'],
+    ],
+    'window order, active pane wins as the tap target',
+  );
+});
+
+test('a live agent window carries its icon from the running process', () => {
+  const chips = liveWindowChips([
+    pane('app', 1, 1, { window_name: 'agent', current_command: 'kiro-cli-chat' }),
+  ]);
+  assert.equal(chips.length, 1);
+  assert.equal(chips[0]?.agentTag, 'Kiro');
+  assert.ok(chips[0]?.agentIcon?.endsWith('kiro.svg'));
 });
 
 test('live projects sort first, then by when tmux last had them', () => {

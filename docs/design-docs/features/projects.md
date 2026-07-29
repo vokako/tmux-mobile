@@ -169,15 +169,30 @@ method-not-found — the same contract the Team tab uses to hide itself.
 ## UI
 
 `src/lib/projects/Projects.svelte` renders above the raw session list on the
-Sessions page: a project is the thing you keep, a session is only its current
-projection, so they belong on one screen with the declaration on top. Rows show
-the live dot, the path, and chips for the windows `up` would restore (agent
-windows carry their icon). The untracked-session group is collapsed by default —
-every entry already appears in the list below, so expanding it is an explicit
-"I want to track one of these" gesture rather than a second copy of the list.
+Sessions page, and the two halves divide the world between them: **a tracked
+session appears only in Projects, everything else only in the session list.**
+One session, one home — repeating a tracked session in both places was the
+duplication this feature exists to remove. Team sessions stay in the session
+list because Team owns their lifecycle (P2 converges them).
 
-Display logic that is worth testing (row ordering, which chips to show, path
-shortening) lives in `projects.ts` so `node --test` can reach it without a DOM.
+A project row is name + live dot + path, with its **windows on their own row as
+individual buttons**: a project is a set of windows and jumping into the one you
+want is the whole point. While the session is live the buttons come from the live
+panes — the source of truth for what you can actually open, including a window
+that has not settled into the declaration yet — and each carries the running
+agent's icon plus an attention dot when that window has an unread agent
+notification. While the project is down they come from the declaration instead
+(dimmed, no targets yet) and tapping one brings the project up and lands you in
+that window.
+
+Tracking happens **on the session row**, not in a separate list: the star button
+promotes that session in place, which is literally what tracking does. The panes
+the Sessions page already polls are passed down as a prop, so the window buttons
+cost no extra RPC.
+
+Display logic that is worth testing (row ordering, which windows to show and
+where each one points, path shortening) lives in `projects.ts` so `node --test`
+can reach it without a DOM.
 
 ## Verification
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { listSessions, listPanes, listSessionsWithPanes, newSession, killSession, newWindow, killWindow, fsList } from '../core/ws.ts';
+  import { listSessions, listPanes, listSessionsWithPanes, newSession, killSession, newWindow, killWindow, fsList, projectAdopt } from '../core/ws.ts';
   import type { TmuxSession, TmuxPane } from '../core/ws.ts';
   import Icon from '../ui/Icon.svelte';
   import AgentChip from '../ui/AgentChip.svelte';
@@ -306,7 +306,34 @@
       (paneAgent(p)?.tag || '').toLowerCase().includes(ql)
     );
   }
-  let filtered = $derived(sessions.filter(s => sessionMatches(s, query)));
+  // Sessions that a project already declares are shown by the Projects section
+  // above, with their windows and their up/down control. Repeating them here
+  // would mean one session living in two places — exactly the duplication the
+  // Projects section exists to remove. So this list is the UNTRACKED sessions:
+  // the ad-hoc ones, plus team sessions (Team owns their lifecycle).
+  let trackedSessions = $state<string[]>([]);
+  let projectsSupported = $state(false);
+  let reloadProjects = $state<(() => Promise<void>) | null>(null);
+  let tracking = $state<Record<string, boolean>>({});
+
+  async function trackSession(name: string, e: MouseEvent) {
+    e.stopPropagation();
+    tracking = { ...tracking, [name]: true };
+    try {
+      await projectAdopt(name);
+      await reloadProjects?.();
+    } catch (err) {
+      error = (err as Error).message;
+    } finally {
+      const next = { ...tracking };
+      delete next[name];
+      tracking = next;
+    }
+  }
+
+  let filtered = $derived(
+    sessions.filter(s => sessionMatches(s, query) && !trackedSessions.includes(s.name)),
+  );
 
   // Split the (filtered) list into team-mode sessions and the rest. When team
   // sessions are present we render the two as labelled groups; otherwise the
@@ -463,6 +490,19 @@
             {#if s.windows > 1}
               <span class="w-badge">{s.windows}w</span>
             {/if}
+            {#if projectsSupported}
+              <!-- Promote this session in place: tracking it is what moves it up
+                   into Projects, so the action belongs on the session itself. -->
+              <button
+                class="track"
+                disabled={tracking[s.name]}
+                onclick={(e) => trackSession(s.name, e)}
+                aria-label={t('projectAdopt')}
+                title={t('projectAdopt')}
+              >
+                <Icon name="star" size={12} />
+              </button>
+            {/if}
             <button
               class="kill"
               class:confirm={confirmKill === s.name}
@@ -532,7 +572,12 @@
     <!-- Declarative projects sit above the raw session list: a project is the
          thing you keep, a session is only its current projection. The section
          hides itself on a server without project support. -->
-    <Projects {visible} {openTerminal} />
+    <Projects
+      {visible}
+      {openTerminal}
+      {panes}
+      onTracked={(names, supported) => { trackedSessions = names; projectsSupported = supported; }}
+      onReady={(reload) => reloadProjects = reload} />
     {#if grouped}
       <div class="group-label">
         <Icon name="bot" size={12} />
@@ -908,9 +953,25 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .kill {
+  /* Track: promote this session into a project, in place. */
+  .track {
     padding: 6px;
     background: transparent;
+    border: none;
+    color: var(--text3);
+    cursor: pointer;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .track:hover:not(:disabled) { color: var(--accent); }
+  .track:disabled { opacity: 0.4; cursor: default; }
+
+  .kill {
+    padding: 6px;    background: transparent;
     border: none;
     color: var(--text3);
     cursor: pointer;
