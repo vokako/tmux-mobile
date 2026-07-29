@@ -281,7 +281,7 @@ Linear 平替。那是给多人团队用的。**我们的场景是一个人用�
 
 | 阶段 | 内容 | 解决什么 | 依赖 |
 |---|---|---|---|
-| **P0** | `state.db` + projects/slots + up/down/adopt + capture + snapshot | 重启丢 session、不敢关 workspace | 无新概念 |
+| **P0** ✅ | `state.db` + projects/slots + up/down/adopt + capture + snapshot | 重启丢 session、不敢关 workspace | 无新概念 |
 | **P1** | tasks（window 模式）+ `TMM_TASK_ID` 归属 + `task_events` + 看板 + 完成提醒 + 日志归档 | 指派—通知—step in 闭环 | P0、现有 hooks |
 | **P2** | agent 定义从 `team.yaml` 提取为独立单体 + slot 直接声明 agent + inject 模式 | 单个 agent 也能配 MCP/skill | P1 |
 | **P3** | schedules（cron） | 定时任务 | P1 |

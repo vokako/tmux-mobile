@@ -96,6 +96,23 @@ Shell metacharacters rejected in args.
 | `agent_hooks_install` | — | Installs the notify hooks into agent configs; returns updated status |
 | `agent_hooks_remove` | — | Removes them; returns updated status |
 
+### Projects (desktop-only — method-not-found on servers without `state.db`)
+A project is a workspace declaration; the tmux session is its projection. The
+Projects section hides itself when these return -32601. See
+[`docs/design-docs/features/projects.md`](../../design-docs/features/projects.md).
+
+| Method | Params | Response |
+|--------|--------|----------|
+| `project_list` | `include_archived?` | `{projects: [{project, slots, live}], unmanaged: [session]}` |
+| `project_create` | `path`, `name?` | The project (existing one for that path is returned, un-archived) |
+| `project_adopt` | `session`, `name?` | `{project, slots}` — takes a live session's windows as the declaration |
+| `project_up` | `id` | `{session, created_session, slots: [{window_name, status, error?}]}` |
+| `project_down` | `id` | `{session, live: false}` — kills the session, keeps the declaration |
+| `project_archive` | `id`, `archived?` | Hides/unhides without deleting |
+| `project_autostart` | `id`, `autostart?` | Flag only; no boot integration yet |
+| `project_snapshots` | `id` | `[{id, at, windows}]`, newest first (last 20 kept) |
+| `project_restore` | `id`, `snapshot_id` | Replaces the declaration with that topology (call `project_up` after) |
+
 ### Team (desktop-only — method-not-found on servers without the bus)
 All chat operations are scoped to a team `room`; `team_status` / `team_teams`
 are team-agnostic. The Team tab hides itself when these return -32601.

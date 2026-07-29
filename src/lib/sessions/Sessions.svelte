@@ -3,6 +3,7 @@
   import type { TmuxSession, TmuxPane } from '../core/ws.ts';
   import Icon from '../ui/Icon.svelte';
   import AgentChip from '../ui/AgentChip.svelte';
+  import Projects from '../projects/Projects.svelte';
   import { t } from '../core/i18n.svelte.ts';
   import { sessionHasAgent, paneAgent, AGENTS } from '../core/agents.ts';
   // Team-mode sessions (`tmm-team-<room>`) are grouped apart from regular
@@ -528,6 +529,10 @@
   <!-- Session list. When team sessions are present we split into two labelled
        groups (Teams first, then Sessions); otherwise it's the flat list. -->
   <div class="list">
+    <!-- Declarative projects sit above the raw session list: a project is the
+         thing you keep, a session is only its current projection. The section
+         hides itself on a server without project support. -->
+    <Projects {visible} {openTerminal} />
     {#if grouped}
       <div class="group-label">
         <Icon name="bot" size={12} />
