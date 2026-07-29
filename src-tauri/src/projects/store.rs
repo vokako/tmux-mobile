@@ -14,7 +14,7 @@ use std::path::Path;
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
@@ -76,6 +76,12 @@ pub struct Slot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
     pub auto_run: bool,
+    /// The agent's OWN conversation id, as reported by its lifecycle hooks.
+    /// This is what lets a restored window resume where it left off instead of
+    /// opening a blank prompt. Sticky: once learned it is kept until the window
+    /// reports a different one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_session_id: Option<String>,
     pub first_seen_at: u64,
     /// Set once the window has existed long enough to be worth restoring.
     /// Unsettled slots are remembered but never recreated by `up`.
@@ -215,6 +221,13 @@ impl Store {
                      CREATE INDEX projects_path ON projects(path);",
                 )
                 .map_err(|e| format!("migrate to 2: {e}"))?;
+        }
+        if version < 3 {
+            // Remember which conversation each agent window was in, so `up`
+            // resumes it instead of starting over.
+            self.conn
+                .execute_batch("ALTER TABLE slots ADD COLUMN agent_session_id TEXT;")
+                .map_err(|e| format!("migrate to 3: {e}"))?;
         }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)
@@ -360,7 +373,7 @@ impl Store {
             .conn
             .prepare(
                 "SELECT id, ord, window_name, cwd, kind, command, auto_run,
-                        first_seen_at, settled_at
+                        first_seen_at, settled_at, agent_session_id
                    FROM slots WHERE project_id = ?1 ORDER BY ord",
             )
             .map_err(|e| e.to_string())?;
@@ -376,6 +389,7 @@ impl Store {
                     auto_run: r.get::<_, i64>(6)? != 0,
                     first_seen_at: r.get::<_, i64>(7)? as u64,
                     settled_at: r.get::<_, Option<i64>>(8)?.map(|v| v as u64),
+                    agent_session_id: r.get(9)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -395,8 +409,8 @@ impl Store {
                 .prepare(
                     "INSERT INTO slots
                        (project_id, ord, window_name, cwd, kind, command, auto_run,
-                        first_seen_at, settled_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                        first_seen_at, settled_at, agent_session_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 )
                 .map_err(|e| e.to_string())?;
             for (i, s) in slots.iter().enumerate() {
@@ -410,6 +424,7 @@ impl Store {
                     s.auto_run as i64,
                     s.first_seen_at as i64,
                     s.settled_at.map(|v| v as i64),
+                    s.agent_session_id,
                 ])
                 .map_err(|e| format!("insert slot {}: {e}", s.window_name))?;
             }
@@ -530,6 +545,7 @@ mod tests {
             kind: SlotKind::Shell,
             command: None,
             auto_run: false,
+            agent_session_id: None,
             first_seen_at: 100,
             settled_at: Some(200),
         }

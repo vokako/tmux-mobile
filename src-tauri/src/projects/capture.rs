@@ -23,11 +23,31 @@ pub const SNAPSHOT_KEEP: usize = 20;
 /// What a live window looks like right now.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Observed {
+    /// tmux window index, used to ask the notification hub which conversation
+    /// this window's agent is in.
+    pub window: usize,
     pub window_name: String,
     /// Relative to the project path; empty means the project root.
     pub cwd: String,
     pub kind: SlotKind,
     pub command: Option<String>,
+    /// The agent's own conversation id, when a hook has reported one.
+    pub agent_session_id: Option<String>,
+}
+
+/// Where the agent conversation ids come from. Implemented by
+/// `AgentNotificationHub` (the hooks already carry `session_id`); the tests
+/// pass a stub. A trait keeps `projects` from naming the notification types.
+pub trait AgentSessions {
+    fn agent_session_for(&self, session: &str, window: usize) -> Option<String>;
+}
+
+/// No hub available (tests, or a capture that does not care).
+pub struct NoSessions;
+impl AgentSessions for NoSessions {
+    fn agent_session_for(&self, _session: &str, _window: usize) -> Option<String> {
+        None
+    }
 }
 
 /// Result of folding observation into the declaration.
@@ -44,7 +64,7 @@ pub struct Merge {
 ///
 /// One entry per window, taken from its ACTIVE pane: a window is a workspace
 /// slot, and the active pane is what the user considers "that window".
-pub fn observe(session: &str, project_path: &str) -> Result<Vec<Observed>, String> {
+pub fn observe(session: &str, project_path: &str, sessions: &dyn AgentSessions) -> Result<Vec<Observed>, String> {
     let panes = tmux::list_panes(session)?;
     let mut out: Vec<(usize, Observed)> = Vec::new();
     for pane in &panes {
@@ -54,7 +74,11 @@ pub fn observe(session: &str, project_path: &str) -> Result<Vec<Observed>, Strin
         if out.iter().any(|(w, _)| *w == pane.window) {
             continue;
         }
-        out.push((pane.window, observed_from(pane, project_path)));
+        let mut observed = observed_from(pane, project_path);
+        if observed.kind == SlotKind::Agent {
+            observed.agent_session_id = sessions.agent_session_for(session, pane.window);
+        }
+        out.push((pane.window, observed));
     }
     out.sort_by_key(|(w, _)| *w);
     Ok(out.into_iter().map(|(_, o)| o).collect())
@@ -66,17 +90,21 @@ fn observed_from(pane: &TmuxPane, project_path: &str) -> Observed {
     let text = format!("{} {} {}", pane.current_command, pane.pane_title, pane.child_cmd);
     match agents::detect(&text) {
         Some(agent) => Observed {
+            window: pane.window,
             window_name: pane.window_name.clone(),
             cwd: relative_cwd(&pane.current_path, project_path),
             kind: SlotKind::Agent,
             command: Some(agent.backend.to_string()),
+            agent_session_id: None,
         },
         None => Observed {
+            window: pane.window,
             window_name: pane.window_name.clone(),
             cwd: relative_cwd(&pane.current_path, project_path),
             kind: SlotKind::Shell,
             // Observed only — never replayed by `up` (decision 5).
             command: (!pane.child_cmd.is_empty()).then(|| pane.child_cmd.clone()),
+            agent_session_id: None,
         },
     }
 }
@@ -107,15 +135,23 @@ pub fn merge(existing: &[Slot], observed: &[Observed], now: u64, settle_secs: u6
         let ord = ord as i64;
         match existing.iter().find(|s| s.window_name == obs.window_name) {
             Some(prev) => {
+                // Sticky: a hook only reports the conversation id now and then,
+                // so an observation without one must not erase what we know.
+                let agent_session_id = obs
+                    .agent_session_id
+                    .clone()
+                    .or_else(|| prev.agent_session_id.clone())
+                    .filter(|_| obs.kind == SlotKind::Agent);
                 let moved_or_changed = prev.ord != ord
                     || prev.cwd != obs.cwd
                     || prev.kind != obs.kind
                     || prev.command != obs.command;
+                let learned_session = prev.agent_session_id != agent_session_id;
                 let settles_now = prev.settled_at.is_none() && now - prev.first_seen_at >= settle_secs;
                 if moved_or_changed {
                     topology_changed = true;
                 }
-                if moved_or_changed || settles_now {
+                if moved_or_changed || settles_now || learned_session {
                     dirty = true;
                 }
                 slots.push(Slot {
@@ -126,6 +162,7 @@ pub fn merge(existing: &[Slot], observed: &[Observed], now: u64, settle_secs: u6
                     kind: obs.kind,
                     command: obs.command.clone(),
                     auto_run: obs.kind == SlotKind::Agent,
+                    agent_session_id,
                     first_seen_at: prev.first_seen_at,
                     settled_at: prev.settled_at.or(settles_now.then_some(now)),
                 });
@@ -143,6 +180,7 @@ pub fn merge(existing: &[Slot], observed: &[Observed], now: u64, settle_secs: u6
                     kind: obs.kind,
                     command: obs.command.clone(),
                     auto_run: obs.kind == SlotKind::Agent,
+                    agent_session_id: obs.agent_session_id.clone(),
                     first_seen_at: now,
                     settled_at: None,
                 });
@@ -170,10 +208,12 @@ mod tests {
 
     fn obs(name: &str, cwd: &str) -> Observed {
         Observed {
+            window: 0,
             window_name: name.into(),
             cwd: cwd.into(),
             kind: SlotKind::Shell,
             command: None,
+            agent_session_id: None,
         }
     }
 
@@ -186,9 +226,41 @@ mod tests {
             kind: SlotKind::Shell,
             command: None,
             auto_run: false,
+            agent_session_id: None,
             first_seen_at: first_seen,
             settled_at: settled,
         }
+    }
+
+    fn agent_obs(name: &str, id: Option<&str>) -> Observed {
+        Observed {
+            window: 1,
+            window_name: name.into(),
+            cwd: String::new(),
+            kind: SlotKind::Agent,
+            command: Some("kiro".into()),
+            agent_session_id: id.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn a_learned_conversation_id_is_recorded_and_then_kept() {
+        let first = merge(&[], &[agent_obs("kiro", Some("conv-1"))], 1_000, 120);
+        assert_eq!(first.slots[0].agent_session_id.as_deref(), Some("conv-1"));
+        assert!(first.dirty);
+
+        // Hooks only report now and then: a quiet cycle must not erase it.
+        let quiet = merge(&first.slots, &[agent_obs("kiro", None)], 1_200, 120);
+        assert_eq!(quiet.slots[0].agent_session_id.as_deref(), Some("conv-1"));
+
+        // A different conversation in the same window replaces it.
+        let moved_on = merge(&quiet.slots, &[agent_obs("kiro", Some("conv-2"))], 1_400, 120);
+        assert_eq!(moved_on.slots[0].agent_session_id.as_deref(), Some("conv-2"));
+        assert!(moved_on.dirty, "the new id has to reach the database");
+
+        // The window stopped being an agent: the stale conversation goes.
+        let now_shell = merge(&moved_on.slots, &[obs("kiro", "")], 1_600, 120);
+        assert_eq!(now_shell.slots[0].agent_session_id, None);
     }
 
     #[test]
@@ -247,10 +319,12 @@ mod tests {
     fn becoming_an_agent_window_flips_auto_run_and_keeps_first_seen() {
         let existing = vec![slot("work", 0, 1_000, Some(1_120))];
         let observed = vec![Observed {
+            window: 0,
             window_name: "work".into(),
             cwd: String::new(),
             kind: SlotKind::Agent,
             command: Some("kiro".into()),
+            agent_session_id: None,
         }];
         let m = merge(&existing, &observed, 1_500, 120);
         assert!(m.topology_changed);

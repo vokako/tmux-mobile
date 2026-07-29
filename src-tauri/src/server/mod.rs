@@ -186,9 +186,14 @@ pub async fn start_with_socket(
 
     // Fold live tmux state back into the project declarations. Nobody
     // hand-writes a project; the capturer is what makes "close it and reopen it
-    // later" possible. Desktop-only (state.db is not built for mobile).
+    // later" possible. The notification hub supplies the agent conversation
+    // ids, so a restored window resumes instead of starting blank.
+    // Desktop-only (state.db is not built for mobile).
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    tokio::spawn(crate::projects::capture_loop());
+    {
+        crate::projects::set_agent_sessions(notifications.clone());
+        tokio::spawn(crate::projects::capture_loop());
+    }
 
     // Load TLS config if cert+key provided
     let tls_acceptor = match (&tls_cert, &tls_key) {

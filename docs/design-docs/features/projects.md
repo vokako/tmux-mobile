@@ -104,6 +104,45 @@ a subprocess the agent spawned — a real case was codex spawning a
 case even though its process name is a bare version number, because its argv
 path contains `.../claude/versions/<v>`.
 
+## Restoring the conversation, not just the window
+
+A rebuilt window with a blank agent prompt is only half a restore: the point of
+reopening a workspace is to carry on. So an agent slot remembers **which
+conversation** it was in and `up` resumes it.
+
+Flags come from the installed CLIs' own `--help`, not from memory:
+
+| backend | exact conversation | newest in this directory |
+|---|---|---|
+| kiro | `kiro-cli chat --resume-id <id>` | `kiro-cli chat --resume` |
+| claude | `claude --resume <id>` | `claude --continue` |
+| codex | `codex resume <id>` | — (see below) |
+
+`agents::launch_line` picks in that order: exact id → directory resume → clean
+start. Two decisions inside it are deliberate:
+
+- **`codex resume --last` is not used.** It continues the most recent recorded
+  session *machine-wide*, not per directory, so restoring project A could reopen
+  project B's conversation. Without a recorded id, codex starts fresh.
+- **kimi and openclaw get no resume flags** because theirs are unverified here.
+  Relaunching clean is honest; guessing a flag is not.
+
+Where the id comes from: the agent lifecycle hooks already carry `session_id`
+(`agent_notifications.rs` has been normalising it into `agent_session_id` all
+along, keyed by tmux session + window). The hub now keeps the last id per window
+in memory and the capturer stamps it onto the slot, so the durable copy lives in
+`state.db` — which is the point, since the thing that has to survive is exactly
+the reboot that loses tmux. `projects` never names the notification types: it
+declares an `AgentSessions` trait and the hub implements it.
+
+The stamp is **sticky**. A hook only reports at the end of a turn, so an
+observation without an id must not erase what we know; a *different* id replaces
+it, and a window that stops being an agent drops it.
+
+Known edge: a slot has no id until a hook fires while the project is tracked. An
+agent that has been idle since the server started falls back to the
+directory-scoped resume — correct for kiro and claude, a clean start for codex.
+
 ## Storage
 
 `state.db` — SQLite, ours, at `$XDG_CONFIG_HOME/tmux-mobile/state.db`
@@ -152,6 +191,11 @@ shortening) lives in `projects.ts` so `node --test` can reach it without a DOM.
 - The UI flow was exercised in a real browser against a live server: track
   `demoproj` → the session dies on Close → Open rebuilds `editor` and `api` at
   their original directories → the layout-history menu lists the snapshot.
+- Resume was verified with a real agent, not a mock: a kiro conversation was
+  told to remember the word PINEAPPLE, the session was tracked, killed and
+  reopened, and the restored agent — in a brand-new pane — answered PINEAPPLE
+  when asked what it had been told to remember. The slot held the same
+  conversation id that `kiro-cli chat -l` listed for that directory.
 
 ## Known edges
 

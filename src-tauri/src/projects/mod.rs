@@ -43,6 +43,23 @@ fn db_path() -> PathBuf {
 
 static STORE: OnceLock<Mutex<Store>> = OnceLock::new();
 
+/// Where agent conversation ids come from, installed once by the server (the
+/// notification hub). Unset in tests and on a server without hooks, in which
+/// case restored agents fall back to a directory-scoped resume.
+static SESSIONS: OnceLock<std::sync::Arc<dyn capture::AgentSessions + Send + Sync>> =
+    OnceLock::new();
+
+pub fn set_agent_sessions(sessions: std::sync::Arc<dyn capture::AgentSessions + Send + Sync>) {
+    let _ = SESSIONS.set(sessions);
+}
+
+fn agent_sessions() -> &'static (dyn capture::AgentSessions + Send + Sync) {
+    match SESSIONS.get() {
+        Some(s) => s.as_ref(),
+        None => &capture::NoSessions,
+    }
+}
+
 /// Run `f` against the process-wide store, opening it on first use. Errors are
 /// returned rather than panicking so a broken database degrades to "the
 /// Projects page is unavailable" instead of taking the server down.
@@ -205,7 +222,7 @@ pub fn adopt(session: &str, name: Option<&str>) -> Result<Value, String> {
             archived: false,
         };
         store.insert_project(&project)?;
-        let observed = capture::observe(session, &path)?;
+        let observed = capture::observe(session, &path, agent_sessions())?;
         let merged = capture::merge(&[], &observed, ts, capture::SETTLE_SECS);
         // Settle immediately: these windows already exist and are the reason
         // the user is adopting the session.
@@ -357,6 +374,7 @@ fn pick_workspace(cwds: &[String], home: &str) -> Option<String> {
 /// Returns the ids that were written.
 pub fn capture_once() -> Result<Vec<String>, String> {
     let ts = now();
+    let sessions = agent_sessions();
     with_store(|store| {
         let mut touched = Vec::new();
         for project in store.list_projects(false)? {
@@ -364,7 +382,7 @@ pub fn capture_once() -> Result<Vec<String>, String> {
                 continue;
             }
             store.mark_seen(&project.id, ts)?;
-            let observed = match capture::observe(&project.session, &project.path) {
+            let observed = match capture::observe(&project.session, &project.path, sessions) {
                 Ok(o) => o,
                 Err(_) => continue, // session vanished mid-scan; next tick retries
             };

@@ -52,6 +52,11 @@ pub struct HookStatus {
 #[derive(Default)]
 struct State {
     unread: HashMap<String, AgentNotification>,
+    /// window key → the agent's own conversation id, from the last hook that
+    /// carried one. In memory only: the durable copy is the project slot that
+    /// the capturer stamps with it (`src-tauri/src/projects`), because that is
+    /// what has to survive the reboot which loses tmux in the first place.
+    sessions: HashMap<String, String>,
 }
 
 #[derive(Clone)]
@@ -78,7 +83,7 @@ impl AgentNotificationHub {
         let (tx, _) = broadcast::channel(64);
         Self {
             root,
-            state: Arc::new(Mutex::new(State { unread })),
+            state: Arc::new(Mutex::new(State { unread, sessions: HashMap::new() })),
             tx,
         }
     }
@@ -92,8 +97,19 @@ impl AgentNotificationHub {
         snapshot_value(&state)
     }
 
-    pub fn mark_read(&self, session: &str, window: usize) -> Result<Value, String> {
-        let changed = {
+    /// The agent conversation id last reported by a hook in this tmux window,
+    /// if any. Used by the project capturer to stamp the slot, so `up` can
+    /// resume that conversation rather than open a fresh one.
+    pub fn agent_session_for(&self, session: &str, window: usize) -> Option<String> {
+        self.state
+            .lock()
+            .ok()?
+            .sessions
+            .get(&window_key(session, window))
+            .cloned()
+    }
+
+    pub fn mark_read(&self, session: &str, window: usize) -> Result<Value, String> {        let changed = {
             let mut state = self.state.lock().unwrap();
             state.unread.remove(&window_key(session, window)).is_some()
         };
@@ -163,6 +179,12 @@ impl AgentNotificationHub {
         let changed = {
             let mut state = self.state.lock().unwrap();
             let key = window_key(&item.session, item.window);
+            // Remember the conversation id even for a duplicate event: this map
+            // is how a restored window resumes the exact conversation instead
+            // of starting a blank one.
+            if let Some(id) = item.agent_session_id.clone() {
+                state.sessions.insert(key.clone(), id);
+            }
             let duplicate = state.unread.get(&key).is_some_and(|old| {
                 let same_turn = old.agent == item.agent
                     && old.pane_id == item.pane_id
@@ -291,6 +313,16 @@ exit 0
                 .map_err(|e| e.to_string())?;
         }
         Ok(())
+    }
+}
+
+/// Bridge to the project capturer, which asks by (session, window) because that
+/// is the granularity of a project slot. Implemented here so `projects` never
+/// names the notification types — it only knows its own trait.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+impl crate::projects::capture::AgentSessions for AgentNotificationHub {
+    fn agent_session_for(&self, session: &str, window: usize) -> Option<String> {
+        AgentNotificationHub::agent_session_for(self, session, window)
     }
 }
 

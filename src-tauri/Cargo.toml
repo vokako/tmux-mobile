@@ -66,11 +66,18 @@ socket2 = "0.5"
 agora = { path = "crates/agora" }
 rusqlite = { version = "0.32", features = ["bundled"] }
 
-# Used by `npm run tauri:dev:release` and `tauri build`. Keeps full
-# optimisation (same opt-level=3 as the default release profile) but turns on
-# incremental compilation so edit-rebuild cycles during `tauri:dev:release`
-# are ~5-15 s instead of ~30-60 s. Run-time memory and performance are
-# indistinguishable from plain release on this codebase. The `.fingerprint`
-# metadata costs a few MB of target/release/ disk; harmless.
+# `npm run tauri:dev:release` and `tauri build` use this profile.
+#
+# incremental was ON here to shorten edit-rebuild cycles, and it has been turned
+# OFF because it stopped working on this crate: every release build after a
+# source edit failed at link time with hundreds of
+#   Undefined symbols: "_anon.<hash>.<n>.llvm.<n>", referenced from … libtmux_mobile.rlib
+#   ld: symbol(s) not found for architecture arm64
+# and only `cargo clean -p tmux-mobile --release` (a full ~2 min rebuild of this
+# crate) recovered. That is the same cost as building non-incrementally, so
+# incremental bought nothing and cost a confusing failure on every edit. The
+# trigger is this crate's multi-crate-type output (staticlib + cdylib + rlib):
+# LLVM's anonymous per-CGU symbols get renamed between incremental runs while
+# the rlib still references the old names.
 [profile.release]
-incremental = true
+incremental = false

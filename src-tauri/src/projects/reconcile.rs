@@ -117,22 +117,26 @@ fn start_in_existing(project: &Project, slot: &Slot, target: &str) -> SlotResult
 
 /// Only agent slots and explicitly declared commands are replayed. Restoring a
 /// workspace must not re-execute whatever the user happened to be running last
-/// time (decision 5 in the exec plan).
-fn run_slot_command(slot: &Slot, target: &str) -> Result<(), String> {
+/// time (decision 5 in the exec plan). An agent goes back into the conversation
+/// it was in, not to a blank prompt — see `agents::launch_line`.
+pub(super) fn slot_command(slot: &Slot) -> Option<String> {
     if !slot.auto_run {
-        return Ok(());
+        return None;
     }
     let command = match slot.kind {
         SlotKind::Agent => slot
             .command
             .as_deref()
-            .and_then(agents::launch_for)
-            .map(str::to_string),
-        SlotKind::Shell => slot.command.clone(),
+            .and_then(|backend| agents::launch_line(backend, slot.agent_session_id.as_deref()))?,
+        SlotKind::Shell => slot.command.clone()?,
     };
-    match command {
-        Some(cmd) if !cmd.trim().is_empty() => tmux::send_command(target, &cmd),
-        _ => Ok(()),
+    (!command.trim().is_empty()).then_some(command)
+}
+
+fn run_slot_command(slot: &Slot, target: &str) -> Result<(), String> {
+    match slot_command(slot) {
+        Some(cmd) => tmux::send_command(target, &cmd),
+        None => Ok(()),
     }
 }
 
@@ -177,6 +181,7 @@ mod tests {
             kind: SlotKind::Shell,
             command: None,
             auto_run: false,
+            agent_session_id: None,
             first_seen_at: 1_000,
             settled_at: settled.then_some(1_200),
         }
@@ -211,6 +216,37 @@ mod tests {
         assert_eq!(shell_quote("/w/app"), "/w/app");
         assert_eq!(shell_quote("/w/my app"), "'/w/my app'");
         assert_eq!(shell_quote("it's"), r"'it'\''s'");
+    }
+
+    #[test]
+    fn a_restored_agent_window_resumes_its_conversation() {
+        let mut agent = slot("kiro", "", true);
+        agent.kind = SlotKind::Agent;
+        agent.command = Some("kiro".into());
+        agent.auto_run = true;
+
+        // No id learned yet: resume this directory's newest conversation.
+        assert_eq!(slot_command(&agent).as_deref(), Some("kiro-cli chat --resume"));
+
+        // With the id the hooks reported, go back to that exact one — a
+        // directory can hold several conversations (real case: two kiro
+        // sessions in this repo), so "most recent" is a guess and the id is not.
+        agent.agent_session_id = Some("aa816dcf-6615-4e41-86bb-1c9ec1c2c6a1".into());
+        assert_eq!(
+            slot_command(&agent).as_deref(),
+            Some("kiro-cli chat --resume-id aa816dcf-6615-4e41-86bb-1c9ec1c2c6a1")
+        );
+    }
+
+    #[test]
+    fn an_observed_shell_process_is_never_replayed() {
+        let mut shell = slot("dev", "", true);
+        shell.command = Some("npm run dev".into());
+        assert_eq!(slot_command(&shell), None, "auto_run is off for shells");
+
+        // Even a stale conversation id cannot make a shell slot run anything.
+        shell.agent_session_id = Some("conv-1".into());
+        assert_eq!(slot_command(&shell), None);
     }
 
     #[test]
