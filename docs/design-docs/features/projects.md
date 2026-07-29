@@ -38,6 +38,33 @@ Three verbs, all in `src-tauri/src/projects/`:
   its current windows immediately. An adopted project must be restorable even
   if the machine reboots a minute later.
 
+### Identity is the session, not the directory
+
+v1 made `path` UNIQUE and derived a project's directory from the session's
+**active pane**. Both were wrong, and together they made most real sessions
+un-trackable:
+
+- Several sessions parked in `$HOME` is the normal case, not a conflict. With
+  `UNIQUE(path)` the first one adopted claimed `~` and every later one failed
+  with *"`/Users/me` is already project 'Default'"*.
+- The focused window is often a shell in `$HOME` while the actual work sits in
+  another window. A session whose second window ran an agent in
+  `~/work/poc/260728-ds160` was recorded as a project rooted at `~`.
+
+So (schema v2): uniqueness lives on `session` — two projects fighting over one
+tmux session name is the real conflict — `path` is merely indexed, and the
+workspace directory is decided by `pick_workspace` over ALL windows: most
+frequent cwd wins, `$HOME` only wins when nothing else is on offer, ties break
+toward the shortest path (the one closest to a project root when windows sit in
+sibling subdirs). A window that does sit outside the project keeps an absolute
+cwd, so it is restored where it was.
+
+Migrations run with `PRAGMA foreign_keys=OFF` and this is not optional:
+libsqlite3-sys builds its bundled SQLite with `SQLITE_DEFAULT_FOREIGN_KEYS=1`,
+so enforcement is ON by default, and a schema rebuild's `DROP TABLE projects`
+then performs an implicit `DELETE FROM` that cascades every slot and snapshot
+away. The migration test caught exactly that.
+
 The reverse direction, `capture.rs`, is why nobody hand-writes a project: a
 20-second loop folds live tmux back into the declaration.
 
@@ -115,10 +142,11 @@ shortening) lives in `projects.ts` so `node --test` can reach it without a DOM.
 
 ## Verification
 
-- `cargo test --lib` — 23 project tests, including an end-to-end case against a
+- `cargo test --lib` — 25 project tests, including an end-to-end case against a
   real tmux server: adopt a two-window session, `down` it, `up` it, and assert
   both windows return with the right relative cwd; plus a second `up` that must
-  change nothing.
+  change nothing, two sessions sharing one directory becoming two projects, and
+  a v1→v2 migration that must keep its children.
 - The pure rules (settle, removal, reorder, agent detection) are unit-tested
   without tmux.
 - The UI flow was exercised in a real browser against a live server: track

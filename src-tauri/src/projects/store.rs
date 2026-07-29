@@ -14,7 +14,7 @@ use std::path::Path;
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
@@ -116,10 +116,24 @@ impl Store {
     }
 
     fn init(conn: Connection) -> Result<Self, String> {
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+        conn.execute_batch("PRAGMA journal_mode=WAL;")
             .map_err(|e| format!("pragma: {e}"))?;
         let mut store = Self { conn };
+        // Migrations MUST run with foreign keys off: a schema change rebuilds
+        // `projects`, and with enforcement on SQLite performs an implicit
+        // DELETE FROM before the DROP, which cascades every slot and snapshot
+        // away. Off has to be explicit — libsqlite3-sys builds its bundled
+        // SQLite with SQLITE_DEFAULT_FOREIGN_KEYS=1, so the connection default
+        // is ON, not the SQLite upstream default of OFF.
+        store
+            .conn
+            .execute_batch("PRAGMA foreign_keys=OFF;")
+            .map_err(|e| format!("pragma: {e}"))?;
         store.migrate()?;
+        store
+            .conn
+            .execute_batch("PRAGMA foreign_keys=ON;")
+            .map_err(|e| format!("pragma: {e}"))?;
         Ok(store)
     }
 
@@ -169,6 +183,38 @@ impl Store {
                      CREATE INDEX snapshots_project ON snapshots(project_id, at DESC);",
                 )
                 .map_err(|e| format!("migrate to 1: {e}"))?;
+        }
+        if version < 2 {
+            // v1 made `path` unique, which was wrong: two sessions may
+            // legitimately sit in the same directory (several of them parked in
+            // $HOME is the normal case), and adopting the second one failed with
+            // "already project X". A project's identity is its SESSION — that is
+            // the thing it projects onto, and two projects fighting over one
+            // session name is the real conflict. Paths are merely indexed.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE projects_v2 (
+                       id           TEXT PRIMARY KEY,
+                       name         TEXT NOT NULL,
+                       path         TEXT NOT NULL,
+                       icon         TEXT,
+                       session      TEXT NOT NULL UNIQUE,
+                       adopted      INTEGER NOT NULL DEFAULT 0,
+                       autostart    INTEGER NOT NULL DEFAULT 0,
+                       created_at   INTEGER NOT NULL,
+                       last_up_at   INTEGER,
+                       last_seen_at INTEGER,
+                       archived_at  INTEGER
+                     );
+                     INSERT INTO projects_v2
+                       SELECT id, name, path, icon, session, adopted, autostart,
+                              created_at, last_up_at, last_seen_at, archived_at
+                         FROM projects;
+                     DROP TABLE projects;
+                     ALTER TABLE projects_v2 RENAME TO projects;
+                     CREATE INDEX projects_path ON projects(path);",
+                )
+                .map_err(|e| format!("migrate to 2: {e}"))?;
         }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)
@@ -235,12 +281,26 @@ impl Store {
             .query_row(
                 "SELECT id, name, path, icon, session, adopted, autostart, created_at,
                         last_up_at, last_seen_at, archived_at
-                   FROM projects WHERE path = ?1",
+                   FROM projects WHERE path = ?1 ORDER BY created_at LIMIT 1",
                 params![path],
                 row_to_project,
             )
             .optional()
             .map_err(|e| format!("get project by path: {e}"))
+    }
+
+    /// A project's identity is the tmux session it projects onto.
+    pub fn project_by_session(&self, session: &str) -> Result<Option<Project>, String> {
+        self.conn
+            .query_row(
+                "SELECT id, name, path, icon, session, adopted, autostart, created_at,
+                        last_up_at, last_seen_at, archived_at
+                   FROM projects WHERE session = ?1",
+                params![session],
+                row_to_project,
+            )
+            .optional()
+            .map_err(|e| format!("get project by session: {e}"))
     }
 
     pub fn session_taken_by_other(&self, session: &str, id: &str) -> Result<bool, String> {
@@ -551,5 +611,67 @@ mod tests {
         assert!(store.session_taken_by_other("alpha", "beta").unwrap());
         assert!(!store.session_taken_by_other("alpha", "alpha").unwrap());
         assert!(!store.session_taken_by_other("nope", "beta").unwrap());
+        assert_eq!(store.project_by_session("alpha").unwrap().unwrap().id, "alpha");
+        assert!(store.project_by_session("nope").unwrap().is_none());
+    }
+
+    /// v1 shipped `path` as UNIQUE, which rejected the second session in a
+    /// directory. The migration must lift that constraint, put uniqueness on
+    /// `session` instead, and carry the existing rows across — including the
+    /// children, which a naive `DROP TABLE projects` would cascade away.
+    #[test]
+    fn migrating_a_v1_database_keeps_its_rows_and_moves_the_unique_constraint() {
+        let dir = std::env::temp_dir().join("tmm-store-migrate");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("state.db");
+
+        let v1 = Connection::open(&path).unwrap();
+        v1.execute_batch(
+            "CREATE TABLE projects (
+               id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE,
+               icon TEXT, session TEXT NOT NULL, adopted INTEGER NOT NULL DEFAULT 0,
+               autostart INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL,
+               last_up_at INTEGER, last_seen_at INTEGER, archived_at INTEGER);
+             CREATE TABLE slots (
+               id INTEGER PRIMARY KEY,
+               project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+               ord INTEGER NOT NULL, window_name TEXT NOT NULL,
+               cwd TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, command TEXT,
+               auto_run INTEGER NOT NULL DEFAULT 0, first_seen_at INTEGER NOT NULL,
+               settled_at INTEGER, UNIQUE (project_id, window_name));
+             CREATE TABLE snapshots (
+               id INTEGER PRIMARY KEY,
+               project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+               at INTEGER NOT NULL, topology_json TEXT NOT NULL);
+             INSERT INTO projects (id, name, path, session, created_at)
+               VALUES ('old', 'old', '/w/shared', 'old', 100);
+             INSERT INTO slots (project_id, ord, window_name, cwd, kind, first_seen_at, settled_at)
+               VALUES ('old', 0, 'editor', '', 'shell', 100, 200);
+             INSERT INTO snapshots (project_id, at, topology_json) VALUES ('old', 100, '[]');
+             PRAGMA user_version = 1;",
+        )
+        .unwrap();
+        drop(v1);
+
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.list_projects(false).unwrap().len(), 1, "row carried over");
+        assert_eq!(store.slots("old").unwrap().len(), 1, "children survived the rebuild");
+        assert_eq!(store.snapshots("old").unwrap().len(), 1);
+
+        let mut second = project("second");
+        second.path = "/w/shared".into(); // same directory as `old`
+        store
+            .insert_project(&second)
+            .expect("a second project in the same directory is allowed now");
+
+        let mut clash = project("clash");
+        clash.session = "old".into();
+        assert!(
+            store.insert_project(&clash).is_err(),
+            "two projects must not fight over one tmux session"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

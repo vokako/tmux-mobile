@@ -174,24 +174,23 @@ pub fn create(path: &str, name: Option<&str>) -> Result<Value, String> {
 /// Adopt a live tmux session: the user created it, so we keep its name and take
 /// its current windows as the declaration straight away — an adopted project
 /// must be restorable even if the machine reboots one minute later.
+///
+/// Identity is the SESSION, not the directory: several sessions parked in the
+/// same directory (typically `$HOME`) are still separate workspaces.
 pub fn adopt(session: &str, name: Option<&str>) -> Result<Value, String> {
     if !tmux::session_exists(session) {
         return Err(format!("no such tmux session: {session}"));
     }
-    let path = session_cwd(session)?;
-    let path = canonical(&path)?;
+    let path = canonical(&session_workspace(session)?)?;
     let ts = now();
     with_store(|store| {
-        if let Some(existing) = store.project_by_path(&path)? {
+        if let Some(existing) = store.project_by_session(session)? {
             return Err(format!(
-                "{} is already project '{}' (session {})",
-                path, existing.name, existing.session
+                "session {session} is already tracked as project '{}'",
+                existing.name
             ));
         }
-        if store.session_taken_by_other(session, "")? {
-            return Err(format!("session {session} already belongs to another project"));
-        }
-        let id = format!("{}-{}", slug(session), digest(&path));
+        let id = format!("{}-{}", slug(session), digest(session));
         let project = Project {
             id: id.clone(),
             name: name.unwrap_or(session).to_string(),
@@ -295,16 +294,61 @@ fn free_session_name(store: &Store, base: &str, id: &str) -> Result<String, Stri
     Ok(suffixed)
 }
 
-/// The working directory a session represents: its active pane's cwd.
-fn session_cwd(session: &str) -> Result<String, String> {
+/// The working directory a session represents.
+///
+/// NOT simply the active pane's cwd: the window that happens to be focused is
+/// often a shell parked in `$HOME`, which says nothing about the workspace (a
+/// real case: a session whose second window ran an agent in
+/// `~/work/poc/260728-ds160` while the focused first window sat in `$HOME`).
+/// Ask every window and let `pick_workspace` decide.
+fn session_workspace(session: &str) -> Result<String, String> {
     let panes = tmux::list_panes(session)?;
-    panes
-        .iter()
-        .find(|p| p.active)
-        .or_else(|| panes.first())
-        .map(|p| p.current_path.clone())
-        .filter(|p| !p.is_empty())
+    let mut cwds: Vec<(usize, String)> = Vec::new();
+    for pane in &panes {
+        if pane.current_path.is_empty() || cwds.iter().any(|(w, _)| *w == pane.window) {
+            continue;
+        }
+        // One vote per window, from its active pane where there is one.
+        if !pane.active && panes.iter().any(|p| p.window == pane.window && p.active) {
+            continue;
+        }
+        cwds.push((pane.window, pane.current_path.clone()));
+    }
+    cwds.sort_by_key(|(w, _)| *w);
+    let ordered: Vec<String> = cwds.into_iter().map(|(_, p)| p).collect();
+    pick_workspace(&ordered, &tmux::home_dir())
         .ok_or_else(|| format!("cannot determine a directory for session {session}"))
+}
+
+/// Choose the directory that best represents a set of window cwds.
+///
+/// Most frequent wins; `$HOME` only wins when nothing else is on offer (a
+/// parked shell is not a workspace); ties break toward the shortest path, which
+/// is the one closest to a project root when windows sit in sibling subdirs.
+fn pick_workspace(cwds: &[String], home: &str) -> Option<String> {
+    let mut counts: Vec<(&str, usize)> = Vec::new();
+    for cwd in cwds {
+        match counts.iter_mut().find(|(p, _)| *p == cwd.as_str()) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((cwd.as_str(), 1)),
+        }
+    }
+    let home_trimmed = home.trim_end_matches('/');
+    let best = |only_non_home: bool| -> Option<&str> {
+        counts
+            .iter()
+            .filter(|(p, _)| !only_non_home || p.trim_end_matches('/') != home_trimmed)
+            .copied()
+            .reduce(|a, b| {
+                if b.1 > a.1 || (b.1 == a.1 && b.0.len() < a.0.len()) {
+                    b
+                } else {
+                    a
+                }
+            })
+            .map(|(p, _)| p)
+    };
+    best(true).or_else(|| best(false)).map(str::to_string)
 }
 
 // ---- the capture loop ---------------------------------------------------
@@ -357,6 +401,19 @@ pub async fn capture_loop() {
 mod tests {
     use super::*;
 
+    /// Point the process-wide store at a throwaway database, wiped once per
+    /// test process. `STORE` is a `OnceLock`, so every test that touches it must
+    /// go through here — the first opener decides the path for the whole run.
+    fn use_test_store() {
+        static TEST_DB: OnceLock<()> = OnceLock::new();
+        TEST_DB.get_or_init(|| {
+            let dir = std::env::temp_dir().join("tmm-projects-test");
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::env::set_var("TMM_STATE_DB", dir.join("state.db"));
+        });
+    }
+
     #[test]
     fn slugs_are_tmux_safe_and_bounded() {
         assert_eq!(slug("my.project"), "my-project");
@@ -380,19 +437,78 @@ mod tests {
         assert_eq!(basename("app"), "app");
     }
 
+    #[test]
+    fn a_workspace_is_the_directory_the_windows_agree_on() {
+        let home = "/Users/me";
+        // The focused window sits in $HOME, the work happens elsewhere: the
+        // real session that exposed this bug.
+        assert_eq!(
+            pick_workspace(&["/Users/me".into(), "/Users/me/work/poc/ds160".into()], home).as_deref(),
+            Some("/Users/me/work/poc/ds160"),
+        );
+        // Nothing but $HOME on offer — then $HOME is the honest answer.
+        assert_eq!(
+            pick_workspace(&["/Users/me".into(), "/Users/me".into()], home).as_deref(),
+            Some("/Users/me"),
+        );
+        // Majority wins over a single deeper window.
+        assert_eq!(
+            pick_workspace(
+                &["/w/app".into(), "/w/app".into(), "/w/app/packages/api".into()],
+                home
+            )
+            .as_deref(),
+            Some("/w/app"),
+        );
+        // All different: the shortest is the one closest to a project root.
+        assert_eq!(
+            pick_workspace(&["/w/app/api".into(), "/w/app".into(), "/w/app/web".into()], home)
+                .as_deref(),
+            Some("/w/app"),
+        );
+        assert_eq!(pick_workspace(&[], home), None);
+    }
+
+    #[test]
+    fn two_sessions_in_the_same_directory_are_two_projects() {
+        let root = std::env::temp_dir().join("tmm-proj-share");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        use_test_store();
+        let path = root.canonicalize().unwrap().to_string_lossy().to_string();
+        for s in ["tmm-test-share-a", "tmm-test-share-b"] {
+            let _ = tmux::kill_session(s);
+            tmux::ensure_session(s, &path).unwrap();
+        }
+
+        let first = adopt("tmm-test-share-a", None).unwrap();
+        // Used to fail with "<path> is already project ..." — several sessions
+        // parked in one directory (typically $HOME) is the normal case.
+        let second = adopt("tmm-test-share-b", None).unwrap();
+        assert_eq!(first["project"]["path"], second["project"]["path"]);
+        assert_ne!(first["project"]["id"], second["project"]["id"]);
+
+        let again = adopt("tmm-test-share-a", None);
+        assert!(
+            again.is_err_and(|e| e.contains("already tracked")),
+            "the same session twice is the real conflict"
+        );
+
+        for s in ["tmm-test-share-a", "tmm-test-share-b"] {
+            let _ = tmux::kill_session(s);
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// The P0 acceptance criterion, end to end against a real tmux server:
     /// adopt a session the user made, kill it, and get it back.
     ///
-    /// This is the only test that touches the process-wide store, so it owns
-    /// the `TMM_STATE_DB` override. Any future test that needs the store must
-    /// point at the SAME path — `STORE` is a `OnceLock`, so the first opener
-    /// wins for the rest of the process.
     #[test]
     fn adopt_then_down_then_up_restores_the_workspace() {
         let root = std::env::temp_dir().join("tmm-proj-e2e");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("api")).unwrap();
-        std::env::set_var("TMM_STATE_DB", root.join("state.db"));
+        use_test_store();
         let path = root.canonicalize().unwrap().to_string_lossy().to_string();
         let session = "tmm-test-e2e";
         let _ = tmux::kill_session(session);
