@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="d1" viewBox="0 0 1140 480" width="1140" height="480">
+<defs>
+  <marker id="ab" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#3b82f6"/></marker>
+  <marker id="ag" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#22c55e"/></marker>
+  <marker id="ay" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#eab308"/></marker>
+  <marker id="ayS" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto-start-reverse"><polygon points="0 0,8 3,0 6" fill="#eab308"/></marker>
+  <marker id="ar" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#ef4444"/></marker>
+  <marker id="ao" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#f97316"/></marker>
+  <marker id="aoS" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto-start-reverse"><polygon points="0 0,8 3,0 6" fill="#f97316"/></marker>
+  <marker id="ad" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#9aa4b4"/></marker>
+</defs>
+<style>
+  :root, svg {
+    --dg-bg:#ffffff; --dg-panel:#ffffff; --dg-stroke:#dbe1ea;
+    --dg-t1:#1a1d26; --dg-t2:#56607a; --dg-t3:#9aa4b4;
+    --dg-blue-fill:#eef5ff; --dg-green-fill:#ecfdf5; --dg-amber-fill:#fefce8; --dg-orange-fill:#fff7ed; --dg-red-fill:#fef2f2;
+    --dg-tx-amber:#a16207; --dg-tx-green:#16a34a; --dg-tx-orange:#ea580c; --dg-tx-red:#dc2626;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root, svg {
+      --dg-bg:#0b0b14; --dg-panel:#0f1420; --dg-stroke:#1e2736;
+      --dg-t1:#e6e9f0; --dg-t2:#8b96a8; --dg-t3:#5a6478;
+      --dg-blue-fill:#162036; --dg-green-fill:#0c1a12; --dg-amber-fill:#1c1a08; --dg-orange-fill:#1c1208; --dg-red-fill:#1c0c0c;
+      --dg-tx-amber:#eab308; --dg-tx-green:#22c55e; --dg-tx-orange:#fdba74; --dg-tx-red:#fca5a5;
+    }
+  }
+  .d1 text{font-family:'JetBrains Mono','SF Mono','Fira Code',monospace;fill:var(--dg-t1)}
+  .d1 .s{fill:var(--dg-t2);font-size:10.5px}.d1 .f{font-size:10.5px}
+  .d1 .m{font-size:12.5px}.d1 .t{font-size:13.5px;font-weight:600}
+  .d1 .dim{fill:var(--dg-t3);font-size:10px;letter-spacing:.05em}
+  .d1 .ta{fill:var(--dg-tx-amber)}.d1 .tg{fill:var(--dg-tx-green)}.d1 .to{fill:var(--dg-tx-orange)}.d1 .tr{fill:var(--dg-tx-red)}
+  .d1 .bg{fill:var(--dg-bg)}
+  .d1 rect.nn{fill:var(--dg-panel);stroke:var(--dg-stroke)}
+  .d1 rect.nb{fill:var(--dg-blue-fill);stroke:#3b82f6}
+  .d1 rect.ng{fill:var(--dg-green-fill);stroke:#22c55e}
+  .d1 rect.na{fill:var(--dg-amber-fill);stroke:#eab308}
+  .d1 rect.no{fill:var(--dg-orange-fill);stroke:#f97316}
+  .d1 rect.nr{fill:var(--dg-red-fill);stroke:#ef4444}
+</style>
+<rect class="bg" width="1140" height="480"/>
+<text class="dim" x="40" y="26">TASK LIFECYCLE — every transition is also an event row, so the timeline comes for free</text>
+
+<rect class="nn" x="40" y="170" width="120" height="46" rx="6"/>
+<text class="m" x="100" y="198" text-anchor="middle">queued</text>
+
+<rect class="nb" x="220" y="170" width="140" height="46" rx="6" stroke-width="1.2"/>
+<text class="m" x="290" y="198" text-anchor="middle">dispatched</text>
+
+<rect class="nb" x="440" y="170" width="140" height="46" rx="6" stroke-width="1.6"/>
+<text class="m" x="510" y="198" text-anchor="middle">running</text>
+
+<rect class="na" x="680" y="50" width="140" height="46" rx="6" stroke-width="1.2"/>
+<text class="m" x="750" y="78" text-anchor="middle">waiting</text>
+
+<rect class="no" x="680" y="280" width="140" height="46" rx="6" stroke-width="1.2"/>
+<text class="m" x="750" y="308" text-anchor="middle">stalled</text>
+
+<rect class="ng" x="940" y="170" width="140" height="46" rx="6" stroke-width="1.6"/>
+<text class="m" x="1010" y="198" text-anchor="middle">done</text>
+
+<rect class="nr" x="940" y="280" width="140" height="46" rx="6" stroke-width="1.2"/>
+<text class="m" x="1010" y="308" text-anchor="middle">failed</text>
+
+<rect class="nn" x="300" y="370" width="140" height="46" rx="6" stroke-dasharray="5 4"/>
+<text class="m" x="370" y="398" text-anchor="middle">cancelled</text>
+
+<line x1="160" y1="193" x2="220" y2="193" stroke="#3b82f6" stroke-width="1.2" marker-end="url(#ab)"/>
+<text class="s" x="162" y="185">dispatch</text>
+
+<line x1="360" y1="193" x2="440" y2="193" stroke="#3b82f6" stroke-width="1.2" marker-end="url(#ab)"/>
+<text class="s" x="364" y="185">first pulse</text>
+
+<line x1="582" y1="178" x2="672" y2="94" stroke="#eab308" stroke-width="1.2" marker-end="url(#ay)" marker-start="url(#ayS)"/>
+<text class="s ta" x="586" y="110">needs you</text>
+<text class="s ta" x="630" y="146">you reply</text>
+
+<line x1="582" y1="208" x2="672" y2="282" stroke="#f97316" stroke-width="1.2" marker-end="url(#ao)" marker-start="url(#aoS)"/>
+<text class="s to" x="626" y="240">no heartbeat 5 min</text>
+<text class="s to" x="586" y="272">resumes</text>
+
+<line x1="580" y1="193" x2="940" y2="193" stroke="#22c55e" stroke-width="1.6" marker-end="url(#ag)"/>
+<text class="s tg" x="740" y="185">MCP task_done</text>
+
+<path d="M 584 204 L 900 268 L 934 290" fill="none" stroke="#ef4444" stroke-width="1.2" marker-end="url(#ar)"/>
+<text class="s tr" x="700" y="218">task_failed · pane died</text>
+
+<line x1="820" y1="303" x2="940" y2="303" stroke="#ef4444" stroke-width="1.2" marker-end="url(#ar)"/>
+<text class="s tr" x="836" y="295">gave up</text>
+
+<path d="M 490 216 L 490 393 L 446 393" fill="none" stroke="#9aa4b4" stroke-width="1.1" stroke-dasharray="4 3" marker-end="url(#ad)"/>
+<text class="s" x="500" y="330">you cancel</text>
+<text class="s" x="500" y="344">(window killed, log kept)</text>
+
+<rect class="nn" x="40" y="250" width="300" height="112" rx="6"/>
+<text class="t" x="54" y="272">what each edge really is</text>
+<text class="f" x="54" y="294">dispatch</text>
+<text class="s" x="140" y="294">new-window -e TMM_TASK_ID</text>
+<text class="s" x="140" y="308">or send-keys into a live slot</text>
+<text class="f" x="54" y="326">first pulse</text>
+<text class="s" x="140" y="326">PreToolUse / UserPromptSubmit</text>
+<text class="f" x="54" y="344">needs you</text>
+<text class="s" x="140" y="344">Notification: permission</text>
+<text class="s" x="140" y="358">required | needs input | Stop</text>
+
+<rect class="na" x="560" y="380" width="540" height="90" rx="6" stroke-width="1.2"/>
+<text class="t" x="576" y="402">Why Stop ≠ done</text>
+<text class="s" x="576" y="422">Our agents run INTERACTIVE, not headless — that is what lets you</text>
+<text class="s" x="576" y="437">take the keyboard mid-task. So the Stop hook fires at the END OF EVERY</text>
+<text class="s" x="576" y="452">TURN: it means "your move", not "the task is over". Stop → waiting;</text>
+<text class="s" x="576" y="467">done is the agent calling task_done, or you tapping Done on the card.</text>
+</svg>

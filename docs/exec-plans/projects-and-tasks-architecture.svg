@@ -1,0 +1,142 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="d1" viewBox="0 0 1180 660" width="1180" height="660">
+<defs>
+  <marker id="ab" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#3b82f6"/></marker>
+  <marker id="abS" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto-start-reverse"><polygon points="0 0,8 3,0 6" fill="#3b82f6"/></marker>
+  <marker id="ag" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#22c55e"/></marker>
+  <marker id="ap" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#8b5cf6"/></marker>
+  <marker id="ay" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#eab308"/></marker>
+  <marker id="ad" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#9aa4b4"/></marker>
+</defs>
+<style>
+  :root, svg {
+    --dg-bg:#ffffff; --dg-panel:#ffffff; --dg-stroke:#dbe1ea;
+    --dg-t1:#1a1d26; --dg-t2:#56607a; --dg-t3:#9aa4b4;
+    --dg-tx-green:#16a34a; --dg-tx-purple:#7c3aed; --dg-tx-blue:#2563eb; --dg-tx-amber:#a16207;
+    --dg-blue-fill:#eef5ff; --dg-purple-fill:#f4f0ff; --dg-green-fill:#ecfdf5; --dg-amber-fill:#fefce8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root, svg {
+      --dg-bg:#0b0b14; --dg-panel:#0f1420; --dg-stroke:#1e2736;
+      --dg-t1:#e6e9f0; --dg-t2:#8b96a8; --dg-t3:#5a6478;
+      --dg-tx-green:#22c55e; --dg-tx-purple:#c4b5fd; --dg-tx-blue:#93c5fd; --dg-tx-amber:#eab308;
+      --dg-blue-fill:#162036; --dg-purple-fill:#1a1530; --dg-green-fill:#0c1a12; --dg-amber-fill:#1c1a08;
+    }
+  }
+  .d1 text{font-family:'JetBrains Mono','SF Mono','Fira Code',monospace;fill:var(--dg-t1)}
+  .d1 .s{fill:var(--dg-t2);font-size:10.5px}.d1 .m{font-size:12.5px}.d1 .t{font-size:14px;font-weight:600}
+  .d1 .dim{fill:var(--dg-t3);font-size:10px;letter-spacing:.05em}
+  .d1 .tg{fill:var(--dg-tx-green)}.d1 .tp{fill:var(--dg-tx-purple)}.d1 .tb{fill:var(--dg-tx-blue)}.d1 .ta{fill:var(--dg-tx-amber)}
+  .d1 .bg{fill:var(--dg-bg)}
+  .d1 rect.nn{fill:var(--dg-panel);stroke:var(--dg-stroke)}
+  .d1 rect.nmain{fill:var(--dg-panel);stroke:#8b5cf6}
+  .d1 rect.nb{fill:var(--dg-blue-fill);stroke:#3b82f6}
+  .d1 rect.np{fill:var(--dg-purple-fill);stroke:#8b5cf6}
+  .d1 rect.ng{fill:var(--dg-green-fill);stroke:#22c55e}
+  .d1 rect.na{fill:var(--dg-amber-fill);stroke:#eab308}
+</style>
+<rect class="bg" width="1180" height="660"/>
+
+<text class="dim" x="32" y="24">CLIENT</text>
+<rect class="nb" x="32" y="36" width="180" height="50" rx="6" stroke-width="1.2"/>
+<text class="m" x="122" y="58" text-anchor="middle">Phone / Browser</text>
+<text class="s" x="122" y="74" text-anchor="middle">projects · board · attach</text>
+
+<rect class="np" x="232" y="36" width="200" height="50" rx="6" stroke-width="1.2"/>
+<text class="m" x="332" y="56" text-anchor="middle">agent definitions</text>
+<text class="s" x="332" y="72" text-anchor="middle">~/.config/.../agents/*.yaml</text>
+
+<line x1="122" y1="86" x2="122" y2="112" stroke="#3b82f6" stroke-width="1.2" marker-end="url(#ab)" marker-start="url(#abS)"/>
+<text class="s" x="132" y="104">WS JSON-RPC + push</text>
+
+<text class="dim" x="32" y="130">SERVER (one process, no new daemon)</text>
+<rect class="nmain" x="32" y="138" width="392" height="392" rx="8" stroke-width="1.4"/>
+<text class="t" x="48" y="162">tmux-mobile server · Rust</text>
+
+<rect class="nn" x="48" y="176" width="360" height="42" rx="5"/>
+<text class="m" x="60" y="194">RPC surface</text>
+<text class="s" x="60" y="210">project_* · task_* · schedule_* · agent_*</text>
+
+<rect class="nb" x="48" y="228" width="360" height="46" rx="5"/>
+<text class="m" x="60" y="246">Reconciler</text>
+<text class="s" x="60" y="262">declaration → tmux · idempotent · up / down</text>
+
+<rect class="nb" x="48" y="284" width="360" height="46" rx="5"/>
+<text class="m" x="60" y="302">Capturer</text>
+<text class="s" x="60" y="318">tmux → declaration · poll + tmux hooks · adopt</text>
+
+<rect class="ng" x="48" y="340" width="360" height="46" rx="5"/>
+<text class="m" x="60" y="358">Task dispatcher</text>
+<text class="s" x="60" y="374">new-window -e TMM_TASK_ID · or send-keys</text>
+
+<rect class="na" x="48" y="396" width="360" height="46" rx="5"/>
+<text class="m" x="60" y="414">Event ingest</text>
+<text class="s" x="60" y="430">hook helper → task_events + notification inbox</text>
+
+<rect class="nn" x="48" y="452" width="360" height="46" rx="5"/>
+<text class="m" x="60" y="470">Scheduler</text>
+<text class="s" x="60" y="486">cron (minute tick) → create_task | run_now</text>
+
+<line x1="228" y1="530" x2="228" y2="556" stroke="#22c55e" stroke-width="1.2" marker-end="url(#ag)" marker-start="url(#abS)"/>
+<rect class="ng" x="32" y="558" width="392" height="70" rx="6" stroke-width="1.2"/>
+<text class="m" x="48" y="580">state.db  (SQLite, ours)</text>
+<text class="s" x="48" y="596">projects · slots · tasks · task_events · schedules</text>
+<text class="s" x="48" y="612">snapshots — the queryable history</text>
+
+<line x1="332" y1="86" x2="332" y2="176" stroke="#8b5cf6" stroke-width="1.1" stroke-dasharray="4 3" marker-end="url(#ap)"/>
+
+<text class="dim" x="452" y="130">PROJECTION (disposable)</text>
+<rect class="nn" x="452" y="138" width="392" height="392" rx="8"/>
+<text class="t" x="468" y="162">tmux server</text>
+<text class="s" x="468" y="178">every pane is attachable from the phone at any time</text>
+
+<rect class="nb" x="468" y="190" width="360" height="176" rx="6" stroke-width="1.2"/>
+<text class="m" x="480" y="210">session  tmm-webapp</text>
+<text class="s" x="480" y="226">project webapp · /Users/me/work/webapp</text>
+<rect class="nn" x="480" y="236" width="336" height="34" rx="4"/>
+<text class="s" x="492" y="257">window 0 · shell</text>
+<text class="s" x="808" y="257" text-anchor="end">slot: shell</text>
+<rect class="np" x="480" y="276" width="336" height="34" rx="4"/>
+<text class="s" x="492" y="297">window 1 · kiro</text>
+<text class="s" x="808" y="297" text-anchor="end">slot: agent (long-lived)</text>
+<rect class="ng" x="480" y="316" width="336" height="34" rx="4"/>
+<text class="s" x="492" y="337">window 2 · task/41</text>
+<text class="s" x="808" y="337" text-anchor="end">one-shot task window</text>
+
+<rect class="nn" x="468" y="382" width="360" height="62" rx="6" stroke-dasharray="5 4"/>
+<text class="m" x="480" y="402">session  tmm-blog     (down)</text>
+<text class="s" x="480" y="424">killed — declaration kept, one tap brings it back</text>
+
+<text class="s" x="468" y="474">restart / crash / kill-server →</text>
+<text class="s" x="468" y="490">tmux state is lost, declaration is not: project up rebuilds it</text>
+
+<line x1="424" y1="251" x2="452" y2="251" stroke="#3b82f6" stroke-width="1.2" marker-end="url(#ab)"/>
+<text class="s" x="424" y="242">up</text>
+<line x1="452" y1="307" x2="424" y2="307" stroke="#3b82f6" stroke-width="1.2" marker-end="url(#ab)"/>
+<text class="s" x="446" y="326" text-anchor="end">capture</text>
+<line x1="424" y1="363" x2="452" y2="363" stroke="#22c55e" stroke-width="1.2" marker-end="url(#ag)"/>
+<text class="s" x="424" y="380">dispatch</text>
+
+<text class="dim" x="872" y="130">AGENT SIDE</text>
+<rect class="np" x="872" y="138" width="276" height="152" rx="8" stroke-width="1.2"/>
+<text class="t" x="888" y="162">agent CLI processes</text>
+<text class="s" x="888" y="182">kiro-cli · claude · codex — interactive,</text>
+<text class="s" x="888" y="198">in the real project dir, in a real pane</text>
+<text class="s tp" x="888" y="222">env inherited from the window:</text>
+<text class="s" x="888" y="238">TMM_TASK_ID=41 · TMUX_PANE=%17</text>
+<text class="s" x="888" y="262">MCP: team + task_done / task_failed</text>
+<text class="s" x="888" y="278">(the authoritative completion signal)</text>
+
+<line x1="828" y1="333" x2="872" y2="300" stroke="#8b5cf6" stroke-width="1.1" marker-end="url(#ap)"/>
+
+<rect class="na" x="872" y="316" width="276" height="112" rx="8" stroke-width="1.2"/>
+<text class="t" x="888" y="340">hook helper (sh)</text>
+<text class="s" x="888" y="360">installed into the user's real config,</text>
+<text class="s" x="888" y="376">owner-marked, removable  (exists today)</text>
+<text class="s ta" x="888" y="398">PreToolUse · UserPromptSubmit → pulse</text>
+<text class="s ta" x="888" y="414">Notification → permission / needs input</text>
+
+<line x1="1010" y1="290" x2="1010" y2="316" stroke="#eab308" stroke-width="1.1" marker-end="url(#ay)"/>
+
+<polyline points="1010,428 1010,578 452,578 452,419 424,419" fill="none" stroke="#eab308" stroke-width="1.2" marker-end="url(#ay)"/>
+<text class="s ta" x="560" y="570">hook events carry TMM_TASK_ID + pane id → attached to the right task</text>
+</svg>
