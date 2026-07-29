@@ -468,6 +468,15 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
             }
         }
 
+        // ---- projects (declarative workspaces) ----------------------------
+        // Desktop-only: state.db and the reconciler are not compiled for
+        // Android/iOS, where these methods report method-not-found and the
+        // client hides the page (same contract as the team_* methods).
+        "project_list" | "project_create" | "project_adopt" | "project_up" | "project_down"
+        | "project_archive" | "project_autostart" | "project_snapshots" | "project_restore" => {
+            handle_project_request(req.method.as_str(), id, p)
+        }
+
         "fs_convert" => {
             let path = match require_str(p, "path") {
                 Ok(s) => s,
@@ -495,8 +504,62 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
     }
 }
 
-// Subscription polling task: captures pane content and sends diffs
+/// The `project_*` methods. One function so the platform gate lives in exactly
+/// one place: on mobile every method reports method-not-found and the client
+/// hides the Projects page.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn handle_project_request(method: &str, id: Option<u64>, p: &serde_json::Value) -> Response {
+    use crate::projects;
 
+    let need_id = |key: &str| -> Result<String, String> { require_str(p, key).map(str::to_string) };
+    let flag = |key: &str, default: bool| p.get(key).and_then(|v| v.as_bool()).unwrap_or(default);
+
+    let outcome = match method {
+        "project_list" => projects::list(flag("include_archived", false)),
+        "project_create" => need_id("path").and_then(|path| {
+            projects::create(&path, p.get("name").and_then(|v| v.as_str()))
+        }),
+        "project_adopt" => need_id("session").and_then(|session| {
+            projects::adopt(&session, p.get("name").and_then(|v| v.as_str()))
+        }),
+        "project_up" => need_id("id").and_then(|id| projects::up(&id)),
+        "project_down" => need_id("id").and_then(|id| projects::down(&id)),
+        "project_archive" => {
+            need_id("id").and_then(|id| projects::set_archived(&id, flag("archived", true)))
+        }
+        "project_autostart" => {
+            need_id("id").and_then(|id| projects::set_autostart(&id, flag("autostart", true)))
+        }
+        "project_snapshots" => need_id("id").and_then(|id| projects::snapshots(&id)),
+        "project_restore" => need_id("id").and_then(|id| {
+            match p.get("snapshot_id").and_then(|v| v.as_i64()) {
+                Some(snapshot_id) => projects::restore(&id, snapshot_id),
+                None => Err("missing required param: snapshot_id".into()),
+            }
+        }),
+        other => Err(format!("unknown project method: {other}")),
+    };
+
+    match outcome {
+        Ok(value) => Response::ok(id, value),
+        // A missing/blank param is the client's fault, everything else is ours.
+        Err(e) if e.starts_with("missing required param") => {
+            Response::err(id, ERR_INVALID_PARAMS, e)
+        }
+        Err(e) => Response::err(id, ERR_INTERNAL, e),
+    }
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn handle_project_request(method: &str, id: Option<u64>, _p: &serde_json::Value) -> Response {
+    Response::err(
+        id,
+        ERR_METHOD_NOT_FOUND,
+        format!("{method} is unavailable on this platform"),
+    )
+}
+
+// Subscription polling task: captures pane content and sends diffs
 pub(super) fn handle_subscribe(params: &serde_json::Value, subs: &mut HashMap<String, String>) -> Response {
     let target = match require_str(params, "target") {
         Ok(s) => s,

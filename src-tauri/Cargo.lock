@@ -4585,6 +4585,7 @@ dependencies = [
  "hkdf",
  "hmac",
  "rand 0.8.5",
+ "rusqlite",
  "rustls-pemfile",
  "serde",
  "serde_json",

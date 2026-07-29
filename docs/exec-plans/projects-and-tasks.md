@@ -308,10 +308,18 @@ pane 级 `remain-on-exit on` 可设置。
    会让声明和现实产生歧义。规则先定为"以 window_name 为唯一键，改名视为删旧建新"，
    实际用一段时间再看要不要更聪明。
 
-## 11. 需要你拍板的四件事
+## 11. 已拍板的四个决定（2026-07-29 批准）
 
-1. **task 默认执行位**：一次性窗口（我推荐）还是注入常驻 agent。
-2. **看板粒度**：每 project 一块板 + 一个全局 inbox（我推荐），还是全局一块大板。
-3. **开机恢复**：先只做手机上手动一键（我推荐），`autostart` 字段留着但先不接 launchd。
-4. **Team 是否收敛成 project 的一个属性**（我推荐是，能少维护一整套概念；
-   `tmm-team-*` session 变成某个 project 的一个 slot 组）。
+1. **task 默认执行位 = 一次性窗口** `task/<id>`；`inject` 模式保留给"派活给常驻 agent"。
+2. **看板粒度 = 每 project 一块板 + 一个全局 inbox**。
+3. **开机恢复 = 手机上手动一键**；`projects.autostart` 字段先落库但不接 launchd。
+4. **Team 收敛为 project 的一个属性**（`tmm-team-*` session 变成某个 project 的一组 slot）——
+   放在 P2，P0/P1 不动现有 Team 代码。
+
+### P0 实现时补充的两个决定
+
+5. **只有 agent slot 和显式声明的命令会被 `up` 自动重跑。** 捕获到的普通前台进程
+   （`npm run dev`、`vim`）记在 slot 上供显示，但不自动重放 —— 恢复一个 workspace 不该
+   顺带执行你上次随手跑的命令。每个 slot 有 `auto_run` 标记，agent 默认开、shell 默认关。
+6. **`state.db` 与 `team.db` 分开。** 后者是 vendored `agora` 库的 bus schema，不混表。
+

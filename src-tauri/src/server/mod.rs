@@ -184,6 +184,12 @@ pub async fn start_with_socket(
     notifications.ensure_helper().map_err(|error| format!("Failed to prepare agent notification helper: {error}"))?;
     tokio::spawn(notifications.clone().run());
 
+    // Fold live tmux state back into the project declarations. Nobody
+    // hand-writes a project; the capturer is what makes "close it and reopen it
+    // later" possible. Desktop-only (state.db is not built for mobile).
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    tokio::spawn(crate::projects::capture_loop());
+
     // Load TLS config if cert+key provided
     let tls_acceptor = match (&tls_cert, &tls_key) {
         (Some(cert_path), Some(key_path)) => {

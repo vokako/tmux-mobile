@@ -797,6 +797,14 @@ pub fn new_named_window(session: &str, name: &str, cwd: &str) -> Result<String, 
     Ok(out.trim().to_string())
 }
 
+/// Rename the window at `target` (`session:index`, `session:^`, or a pane id).
+/// Used when reconciling a project: a freshly created session already owns one
+/// window named after the shell, and the first slot takes it over instead of
+/// leaving a stray window behind.
+pub fn rename_window(target: &str, name: &str) -> Result<(), String> {
+    run_tmux(&["rename-window", "-t", target, name]).map(|_| ())
+}
+
 /// Resize the window containing target pane to given cols × rows.
 /// Only effective when no terminal client is attached to the session.
 pub fn resize_pane(target: &str, cols: usize, rows: usize) -> Result<(), String> {

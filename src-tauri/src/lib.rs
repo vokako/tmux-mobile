@@ -12,6 +12,12 @@ pub mod team_bridge;
 #[cfg(all(desktop, not(any(target_os = "android", target_os = "ios"))))]
 pub mod team;
 
+// Declarative projects (state.db). Desktop-only for the same reason as team:
+// the phone is a client of a desktop server, so it never needs SQLite. The gate
+// matches the rusqlite dependency gate in Cargo.toml exactly.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub mod projects;
+
 #[cfg(desktop)]
 use config::Config;
 

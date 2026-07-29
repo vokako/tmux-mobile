@@ -1,0 +1,555 @@
+//! Persistence for declarative projects.
+//!
+//! `state.db` is ours and holds only what the machine observed: which projects
+//! exist, which windows they are made of, and the topology history. Anything a
+//! human writes by hand (agent definitions with their skills) stays in files —
+//! see `docs/exec-plans/projects-and-tasks.md` §5.
+//!
+//! Deliberately a separate database from `team.db`: that one is the vendored
+//! `agora` bus schema and we do not mix tables into it.
+
+use rusqlite::{params, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
+use std::path::Path;
+
+/// Bumped when the schema changes; `migrate` is the only place that knows the
+/// steps. Stored in SQLite's own `user_version` pragma.
+const SCHEMA_VERSION: i64 = 1;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Project {
+    pub id: String,
+    pub name: String,
+    /// Canonical workspace directory.
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// tmux session name this project projects onto.
+    pub session: String,
+    /// Adopted from a session the user had already created, so its name is the
+    /// user's and we never rename it.
+    pub adopted: bool,
+    pub autostart: bool,
+    pub created_at: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_up_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_seen_at: Option<u64>,
+    pub archived: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SlotKind {
+    Shell,
+    Agent,
+}
+
+impl SlotKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SlotKind::Shell => "shell",
+            SlotKind::Agent => "agent",
+        }
+    }
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "agent" => SlotKind::Agent,
+            _ => SlotKind::Shell,
+        }
+    }
+}
+
+/// One window's intent. `cwd` is relative to the project path (empty = the
+/// project root) so a moved workspace keeps working.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Slot {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<i64>,
+    pub ord: i64,
+    pub window_name: String,
+    pub cwd: String,
+    pub kind: SlotKind,
+    /// The command that owns the window. For an agent slot this is its launch
+    /// line and `up` re-runs it; for a shell slot it is what we observed and it
+    /// is NOT replayed (see decision 5 in the exec plan).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    pub auto_run: bool,
+    pub first_seen_at: u64,
+    /// Set once the window has existed long enough to be worth restoring.
+    /// Unsettled slots are remembered but never recreated by `up`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settled_at: Option<u64>,
+}
+
+impl Slot {
+    pub fn is_settled(&self) -> bool {
+        self.settled_at.is_some()
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SnapshotMeta {
+    pub id: i64,
+    pub at: u64,
+    /// Window names in order — enough for the client to label the entry.
+    pub windows: Vec<String>,
+}
+
+pub struct Store {
+    conn: Connection,
+}
+
+impl Store {
+    pub fn open(path: &Path) -> Result<Self, String> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+        }
+        let conn = Connection::open(path).map_err(|e| format!("open {}: {e}", path.display()))?;
+        Self::init(conn)
+    }
+
+    #[cfg(test)]
+    pub fn open_memory() -> Result<Self, String> {
+        Self::init(Connection::open_in_memory().map_err(|e| e.to_string())?)
+    }
+
+    fn init(conn: Connection) -> Result<Self, String> {
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .map_err(|e| format!("pragma: {e}"))?;
+        let mut store = Self { conn };
+        store.migrate()?;
+        Ok(store)
+    }
+
+    fn migrate(&mut self) -> Result<(), String> {
+        let version: i64 = self
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .map_err(|e| format!("read user_version: {e}"))?;
+        if version >= SCHEMA_VERSION {
+            return Ok(());
+        }
+        if version < 1 {
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE projects (
+                       id           TEXT PRIMARY KEY,
+                       name         TEXT NOT NULL,
+                       path         TEXT NOT NULL UNIQUE,
+                       icon         TEXT,
+                       session      TEXT NOT NULL,
+                       adopted      INTEGER NOT NULL DEFAULT 0,
+                       autostart    INTEGER NOT NULL DEFAULT 0,
+                       created_at   INTEGER NOT NULL,
+                       last_up_at   INTEGER,
+                       last_seen_at INTEGER,
+                       archived_at  INTEGER
+                     );
+                     CREATE TABLE slots (
+                       id            INTEGER PRIMARY KEY,
+                       project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                       ord           INTEGER NOT NULL,
+                       window_name   TEXT NOT NULL,
+                       cwd           TEXT NOT NULL DEFAULT '',
+                       kind          TEXT NOT NULL,
+                       command       TEXT,
+                       auto_run      INTEGER NOT NULL DEFAULT 0,
+                       first_seen_at INTEGER NOT NULL,
+                       settled_at    INTEGER,
+                       UNIQUE (project_id, window_name)
+                     );
+                     CREATE TABLE snapshots (
+                       id            INTEGER PRIMARY KEY,
+                       project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                       at            INTEGER NOT NULL,
+                       topology_json TEXT NOT NULL
+                     );
+                     CREATE INDEX snapshots_project ON snapshots(project_id, at DESC);",
+                )
+                .map_err(|e| format!("migrate to 1: {e}"))?;
+        }
+        self.conn
+            .pragma_update(None, "user_version", SCHEMA_VERSION)
+            .map_err(|e| format!("set user_version: {e}"))
+    }
+
+    // ---- projects -------------------------------------------------------
+
+    pub fn insert_project(&self, p: &Project) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO projects
+                   (id, name, path, icon, session, adopted, autostart, created_at, archived_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL)",
+                params![
+                    p.id,
+                    p.name,
+                    p.path,
+                    p.icon,
+                    p.session,
+                    p.adopted as i64,
+                    p.autostart as i64,
+                    p.created_at as i64,
+                ],
+            )
+            .map(|_| ())
+            .map_err(|e| format!("insert project: {e}"))
+    }
+
+    pub fn list_projects(&self, include_archived: bool) -> Result<Vec<Project>, String> {
+        let sql = if include_archived {
+            "SELECT id, name, path, icon, session, adopted, autostart, created_at,
+                    last_up_at, last_seen_at, archived_at
+               FROM projects ORDER BY COALESCE(last_seen_at, created_at) DESC"
+        } else {
+            "SELECT id, name, path, icon, session, adopted, autostart, created_at,
+                    last_up_at, last_seen_at, archived_at
+               FROM projects WHERE archived_at IS NULL
+              ORDER BY COALESCE(last_seen_at, created_at) DESC"
+        };
+        let mut stmt = self.conn.prepare(sql).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], row_to_project)
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("list projects: {e}"))
+    }
+
+    pub fn project(&self, id: &str) -> Result<Option<Project>, String> {
+        self.conn
+            .query_row(
+                "SELECT id, name, path, icon, session, adopted, autostart, created_at,
+                        last_up_at, last_seen_at, archived_at
+                   FROM projects WHERE id = ?1",
+                params![id],
+                row_to_project,
+            )
+            .optional()
+            .map_err(|e| format!("get project: {e}"))
+    }
+
+    pub fn project_by_path(&self, path: &str) -> Result<Option<Project>, String> {
+        self.conn
+            .query_row(
+                "SELECT id, name, path, icon, session, adopted, autostart, created_at,
+                        last_up_at, last_seen_at, archived_at
+                   FROM projects WHERE path = ?1",
+                params![path],
+                row_to_project,
+            )
+            .optional()
+            .map_err(|e| format!("get project by path: {e}"))
+    }
+
+    pub fn session_taken_by_other(&self, session: &str, id: &str) -> Result<bool, String> {
+        self.conn
+            .query_row(
+                "SELECT 1 FROM projects WHERE session = ?1 AND id <> ?2 LIMIT 1",
+                params![session, id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|hit| hit.is_some())
+            .map_err(|e| format!("check session: {e}"))
+    }
+
+    pub fn set_archived(&self, id: &str, archived: bool, now: u64) -> Result<(), String> {
+        let at = if archived { Some(now as i64) } else { None };
+        self.conn
+            .execute("UPDATE projects SET archived_at = ?2 WHERE id = ?1", params![id, at])
+            .map(|_| ())
+            .map_err(|e| format!("archive project: {e}"))
+    }
+
+    pub fn set_autostart(&self, id: &str, autostart: bool) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE projects SET autostart = ?2 WHERE id = ?1",
+                params![id, autostart as i64],
+            )
+            .map(|_| ())
+            .map_err(|e| format!("set autostart: {e}"))
+    }
+
+    pub fn mark_up(&self, id: &str, now: u64) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE projects SET last_up_at = ?2, last_seen_at = ?2 WHERE id = ?1",
+                params![id, now as i64],
+            )
+            .map(|_| ())
+            .map_err(|e| format!("mark up: {e}"))
+    }
+
+    pub fn mark_seen(&self, id: &str, now: u64) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE projects SET last_seen_at = ?2 WHERE id = ?1",
+                params![id, now as i64],
+            )
+            .map(|_| ())
+            .map_err(|e| format!("mark seen: {e}"))
+    }
+
+    // ---- slots ----------------------------------------------------------
+
+    pub fn slots(&self, project_id: &str) -> Result<Vec<Slot>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, ord, window_name, cwd, kind, command, auto_run,
+                        first_seen_at, settled_at
+                   FROM slots WHERE project_id = ?1 ORDER BY ord",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![project_id], |r| {
+                Ok(Slot {
+                    id: r.get(0)?,
+                    ord: r.get(1)?,
+                    window_name: r.get(2)?,
+                    cwd: r.get(3)?,
+                    kind: SlotKind::parse(&r.get::<_, String>(4)?),
+                    command: r.get(5)?,
+                    auto_run: r.get::<_, i64>(6)? != 0,
+                    first_seen_at: r.get::<_, i64>(7)? as u64,
+                    settled_at: r.get::<_, Option<i64>>(8)?.map(|v| v as u64),
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("list slots: {e}"))
+    }
+
+    /// Replace a project's whole slot list in one transaction. The declaration
+    /// is always written as a set, never patched row by row, so a capture can
+    /// never leave a half-applied topology behind.
+    pub fn replace_slots(&mut self, project_id: &str, slots: &[Slot]) -> Result<(), String> {
+        let tx = self.conn.transaction().map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM slots WHERE project_id = ?1", params![project_id])
+            .map_err(|e| format!("clear slots: {e}"))?;
+        {
+            let mut stmt = tx
+                .prepare(
+                    "INSERT INTO slots
+                       (project_id, ord, window_name, cwd, kind, command, auto_run,
+                        first_seen_at, settled_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                )
+                .map_err(|e| e.to_string())?;
+            for (i, s) in slots.iter().enumerate() {
+                stmt.execute(params![
+                    project_id,
+                    i as i64,
+                    s.window_name,
+                    s.cwd,
+                    s.kind.as_str(),
+                    s.command,
+                    s.auto_run as i64,
+                    s.first_seen_at as i64,
+                    s.settled_at.map(|v| v as i64),
+                ])
+                .map_err(|e| format!("insert slot {}: {e}", s.window_name))?;
+            }
+        }
+        tx.commit().map_err(|e| format!("commit slots: {e}"))
+    }
+
+    // ---- snapshots ------------------------------------------------------
+
+    /// Append a topology snapshot and prune to the newest `keep` entries.
+    pub fn add_snapshot(&self, project_id: &str, at: u64, slots: &[Slot], keep: usize) -> Result<(), String> {
+        let json = serde_json::to_string(slots).map_err(|e| e.to_string())?;
+        self.conn
+            .execute(
+                "INSERT INTO snapshots (project_id, at, topology_json) VALUES (?1, ?2, ?3)",
+                params![project_id, at as i64, json],
+            )
+            .map_err(|e| format!("insert snapshot: {e}"))?;
+        self.conn
+            .execute(
+                "DELETE FROM snapshots
+                  WHERE project_id = ?1
+                    AND id NOT IN (SELECT id FROM snapshots WHERE project_id = ?1
+                                    ORDER BY at DESC, id DESC LIMIT ?2)",
+                params![project_id, keep as i64],
+            )
+            .map(|_| ())
+            .map_err(|e| format!("prune snapshots: {e}"))
+    }
+
+    pub fn snapshots(&self, project_id: &str) -> Result<Vec<SnapshotMeta>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, at, topology_json FROM snapshots
+                  WHERE project_id = ?1 ORDER BY at DESC, id DESC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![project_id], |r| {
+                let json: String = r.get(2)?;
+                let windows = serde_json::from_str::<Vec<Slot>>(&json)
+                    .map(|s| s.into_iter().map(|s| s.window_name).collect())
+                    .unwrap_or_default();
+                Ok(SnapshotMeta {
+                    id: r.get(0)?,
+                    at: r.get::<_, i64>(1)? as u64,
+                    windows,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("list snapshots: {e}"))
+    }
+
+    /// The slot list stored in a snapshot, verified to belong to `project_id`.
+    pub fn snapshot_slots(&self, project_id: &str, snapshot_id: i64) -> Result<Option<Vec<Slot>>, String> {
+        let json: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT topology_json FROM snapshots WHERE id = ?1 AND project_id = ?2",
+                params![snapshot_id, project_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| format!("get snapshot: {e}"))?;
+        match json {
+            None => Ok(None),
+            Some(j) => serde_json::from_str::<Vec<Slot>>(&j)
+                .map(Some)
+                .map_err(|e| format!("parse snapshot: {e}")),
+        }
+    }
+}
+
+fn row_to_project(r: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
+    Ok(Project {
+        id: r.get(0)?,
+        name: r.get(1)?,
+        path: r.get(2)?,
+        icon: r.get(3)?,
+        session: r.get(4)?,
+        adopted: r.get::<_, i64>(5)? != 0,
+        autostart: r.get::<_, i64>(6)? != 0,
+        created_at: r.get::<_, i64>(7)? as u64,
+        last_up_at: r.get::<_, Option<i64>>(8)?.map(|v| v as u64),
+        last_seen_at: r.get::<_, Option<i64>>(9)?.map(|v| v as u64),
+        archived: r.get::<_, Option<i64>>(10)?.is_some(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn project(id: &str) -> Project {
+        Project {
+            id: id.into(),
+            name: id.into(),
+            path: format!("/tmp/{id}"),
+            icon: None,
+            session: id.into(),
+            adopted: false,
+            autostart: false,
+            created_at: 100,
+            last_up_at: None,
+            last_seen_at: None,
+            archived: false,
+        }
+    }
+
+    fn slot(name: &str, ord: i64) -> Slot {
+        Slot {
+            id: None,
+            ord,
+            window_name: name.into(),
+            cwd: String::new(),
+            kind: SlotKind::Shell,
+            command: None,
+            auto_run: false,
+            first_seen_at: 100,
+            settled_at: Some(200),
+        }
+    }
+
+    #[test]
+    fn projects_round_trip_and_archive_hides_without_deleting() {
+        let store = Store::open_memory().unwrap();
+        store.insert_project(&project("alpha")).unwrap();
+        store.insert_project(&project("beta")).unwrap();
+        assert_eq!(store.list_projects(false).unwrap().len(), 2);
+
+        store.set_archived("beta", true, 300).unwrap();
+        let visible = store.list_projects(false).unwrap();
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].id, "alpha");
+        let all = store.list_projects(true).unwrap();
+        assert_eq!(all.len(), 2);
+        assert!(all.iter().find(|p| p.id == "beta").unwrap().archived);
+
+        store.set_archived("beta", false, 400).unwrap();
+        assert_eq!(store.list_projects(false).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn replace_slots_is_a_set_write() {
+        let mut store = Store::open_memory().unwrap();
+        store.insert_project(&project("alpha")).unwrap();
+        store
+            .replace_slots("alpha", &[slot("shell", 0), slot("kiro", 1)])
+            .unwrap();
+        store.replace_slots("alpha", &[slot("kiro", 0)]).unwrap();
+        let slots = store.slots("alpha").unwrap();
+        assert_eq!(slots.len(), 1);
+        assert_eq!(slots[0].window_name, "kiro");
+        assert_eq!(slots[0].ord, 0);
+    }
+
+    #[test]
+    fn snapshots_prune_to_the_newest_and_restore_by_id() {
+        let store = Store::open_memory().unwrap();
+        store.insert_project(&project("alpha")).unwrap();
+        for i in 0..5u64 {
+            store
+                .add_snapshot("alpha", 1000 + i, &[slot(&format!("w{i}"), 0)], 3)
+                .unwrap();
+        }
+        let metas = store.snapshots("alpha").unwrap();
+        assert_eq!(metas.len(), 3, "pruned to keep=3");
+        assert_eq!(metas[0].at, 1004, "newest first");
+        assert_eq!(metas[0].windows, vec!["w4".to_string()]);
+
+        let restored = store.snapshot_slots("alpha", metas[2].id).unwrap().unwrap();
+        assert_eq!(restored[0].window_name, "w2");
+        assert!(
+            store.snapshot_slots("other", metas[0].id).unwrap().is_none(),
+            "a snapshot id from another project must not be readable"
+        );
+    }
+
+    #[test]
+    fn deleting_a_project_takes_its_slots_and_snapshots() {
+        let mut store = Store::open_memory().unwrap();
+        store.insert_project(&project("alpha")).unwrap();
+        store.replace_slots("alpha", &[slot("shell", 0)]).unwrap();
+        store.add_snapshot("alpha", 1000, &[slot("shell", 0)], 3).unwrap();
+        store
+            .conn
+            .execute("DELETE FROM projects WHERE id = 'alpha'", [])
+            .unwrap();
+        assert!(store.slots("alpha").unwrap().is_empty());
+        assert!(store.snapshots("alpha").unwrap().is_empty());
+    }
+
+    #[test]
+    fn session_conflicts_are_detectable() {
+        let store = Store::open_memory().unwrap();
+        store.insert_project(&project("alpha")).unwrap();
+        assert!(store.session_taken_by_other("alpha", "beta").unwrap());
+        assert!(!store.session_taken_by_other("alpha", "alpha").unwrap());
+        assert!(!store.session_taken_by_other("nope", "beta").unwrap());
+    }
+}

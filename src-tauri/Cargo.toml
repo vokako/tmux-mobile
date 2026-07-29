@@ -59,8 +59,12 @@ socket2 = "0.5"
 # agora: the multi-agent group-chat bus. Desktop-only — Android/iOS never run
 # the in-process MCP daemon (they connect to a desktop server over WS), so the
 # heavy deps (axum/rmcp/rusqlite) are excluded from the mobile build entirely.
+# `projects` (state.db) is desktop-only for the same reason: the phone is a
+# client of a desktop server, so it never needs SQLite compiled in. Version
+# pinned to agora's so both link ONE bundled SQLite.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 agora = { path = "crates/agora" }
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 # Used by `npm run tauri:dev:release` and `tauri build`. Keeps full
 # optimisation (same opt-level=3 as the default release profile) but turns on
