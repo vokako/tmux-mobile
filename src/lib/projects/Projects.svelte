@@ -178,50 +178,52 @@
       {#each sorted as row (row.project.id)}
         {@const chips = chipsFor(row)}
         <div class="proj" class:live={row.live}>
-          <button class="proj-main" onclick={() => open(row)} title={row.project.path}>
-            <span class="dot" class:on={row.live}></span>
-            <span class="body">
-              <span class="line">
-                <span class="name">{row.project.name}</span>
-                <span class="age">{ageLabel(row.project.last_seen_at ?? row.project.last_up_at)}</span>
+          <div class="proj-top">
+            <button class="proj-main" onclick={() => open(row)} title={row.project.path}>
+              <span class="dot" class:on={row.live}></span>
+              <span class="body">
+                <span class="line">
+                  <span class="name">{row.project.name}</span>
+                  <span class="age">{ageLabel(row.project.last_seen_at ?? row.project.last_up_at)}</span>
+                </span>
+                <span class="line sub">
+                  <span class="path">{shortPath(row.project.path)}</span>
+                </span>
               </span>
-              <span class="line sub">
-                <span class="path">{shortPath(row.project.path)}</span>
-              </span>
-            </span>
-          </button>
-          <div class="acts">
-            {#if row.live}
-              <button class="act" disabled={busy[row.project.id]} onclick={() => run(row.project.id, () => projectDown(row.project.id))}>{t('projectDown')}</button>
-            {:else}
-              <button class="act primary" disabled={busy[row.project.id]} onclick={() => run(row.project.id, () => projectUp(row.project.id))}>{t('projectUp')}</button>
-            {/if}
-            <button class="act icon" aria-label={t('projectHistory')} onclick={() => toggleMenu(row.project.id)}>
-              <Icon name="clock" size={13} />
             </button>
-          </div>
-        </div>
-
-        <!-- Windows are their own row so each one is tappable: a project is a
-             set of windows, and jumping to the one you want is the whole point.
-             Down projects list what `up` would restore; the tap brings the
-             project up and lands you in that window. -->
-        {#if chips.length}
-          <div class="wins" class:dim={!row.live}>
-            {#each chips as chip (chip.name + (chip.window ?? ''))}
-              {@const notice = row.live && chip.window != null
-                ? notificationForWindow(row.project.session, chip.window)
-                : null}
-              <button class="win" onclick={() => openWindow(row, chip.name, chip.target)}>
-                {#if chip.agentIcon}<img src={chip.agentIcon} alt={chip.agentTag} width="11" height="11" />{/if}
-                <span class="win-name">{chip.name}</span>
-                {#if notice}<span class="attention-dot" aria-label={t('newOutput')}></span>{/if}
+            <div class="acts">
+              {#if row.live}
+                <button class="act" disabled={busy[row.project.id]} onclick={() => run(row.project.id, () => projectDown(row.project.id))}>{t('projectDown')}</button>
+              {:else}
+                <button class="act primary" disabled={busy[row.project.id]} onclick={() => run(row.project.id, () => projectUp(row.project.id))}>{t('projectUp')}</button>
+              {/if}
+              <button class="act icon" aria-label={t('projectHistory')} onclick={() => toggleMenu(row.project.id)}>
+                <Icon name="clock" size={13} />
               </button>
-            {/each}
+            </div>
           </div>
-        {:else}
-          <div class="wins"><span class="win-empty">{t('projectNoWindows')}</span></div>
-        {/if}
+
+          <!-- Windows belong INSIDE the project card: they are what the project
+               is made of, not a separate list under it. Each one is tappable —
+               jumping to the window you want is the whole point. A down project
+               lists what `up` would restore, and the tap brings it up first. -->
+          {#if chips.length}
+            <div class="wins" class:dim={!row.live}>
+              {#each chips as chip (chip.name + (chip.window ?? ''))}
+                {@const notice = row.live && chip.window != null
+                  ? notificationForWindow(row.project.session, chip.window)
+                  : null}
+                <button class="win" onclick={() => openWindow(row, chip.name, chip.target)}>
+                  {#if chip.agentIcon}<img src={chip.agentIcon} alt={chip.agentTag} width="11" height="11" />{/if}
+                  <span class="win-name">{chip.name}</span>
+                  {#if notice}<span class="attention-dot" aria-label={t('newOutput')}></span>{/if}
+                </button>
+              {/each}
+            </div>
+          {:else}
+            <div class="wins"><span class="win-empty">{t('projectNoWindows')}</span></div>
+          {/if}
+        </div>
 
         {#if menuFor === row.project.id}
           <div class="menu">
@@ -285,11 +287,12 @@
   }
 
   .proj {
-    display: flex; align-items: stretch; gap: 6px;
+    display: flex; flex-direction: column; gap: 6px;
     background: var(--surface); border: 1px solid var(--border);
     border-radius: var(--ui-radius-panel, 8px); padding: 7px 8px;
   }
   .proj.live { border-color: var(--accent-bg); }
+  .proj-top { display: flex; align-items: stretch; gap: 6px; }
   .proj-main {
     flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 8px;
     background: none; border: 0; padding: 0; cursor: pointer; text-align: left; color: var(--text);
@@ -306,10 +309,11 @@
   .sub { font-family: var(--font-mono); font-size: 11px; color: var(--text2); }
   .path { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-  /* Window row: one tappable button per window. */
+  /* Window row: one tappable button per window, inside the project card and
+     indented to line up under the project name (past the status dot). */
   .wins {
     display: flex; flex-wrap: wrap; gap: 4px;
-    padding: 0 8px 2px 25px;   /* aligns under the project name, past the dot */
+    padding-left: 15px;
   }
   .wins.dim { opacity: 0.65; }
   .win {
