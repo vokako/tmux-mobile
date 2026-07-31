@@ -131,6 +131,11 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
     Ok(json!({ "window_name": window_name, "pane": pane, "backend": def.backend }))
 }
 
+/// The initial user message: an agent CLI boots into an interactive prompt
+/// and does nothing until spoken to — the brief in the system prompt is
+/// context, this line is the starter pistol (same trick as team_kick).
+const KICK: &str = "Start now: read your instructions and task brief, then begin working. When the task is complete, run `tmm done \"summary\"`.";
+
 struct Rendered {
     env: Vec<(String, String)>,
     cmd: String,
@@ -233,9 +238,10 @@ fn render_kiro(
     Ok(Rendered {
         env: vec![("KIRO_HOME".into(), home.to_string_lossy().to_string())],
         cmd: format!(
-            "command kiro-cli chat --agent {} --model {} --trust-all-tools",
+            "command kiro-cli chat --agent {} --model {} --trust-all-tools {}",
             shared::shell_quote(name),
             shared::shell_quote(model),
+            shared::shell_quote(KICK),
         ),
         confirmation: None,
     })
@@ -285,11 +291,12 @@ fn render_claude(
     Ok(Rendered {
         env: Vec::new(),
         cmd: format!(
-            "command claude --mcp-config {} --strict-mcp-config --settings {} --model {} --dangerously-skip-permissions --append-system-prompt {}",
+            "command claude --mcp-config {} --strict-mcp-config --settings {} --model {} --dangerously-skip-permissions --append-system-prompt {} {}",
             shared::shell_quote(&mcpfile.to_string_lossy()),
             shared::shell_quote(&settingsfile.to_string_lossy()),
             shared::shell_quote(model),
             shared::shell_quote(&full_prompt),
+            shared::shell_quote(KICK),
         ),
         confirmation: Some(shared::StartupConfirmation {
             markers: shared::CLAUDE_FOLDER_TRUST_MARKERS.to_vec(),
@@ -341,6 +348,7 @@ fn render_codex(
     }
     config_args.push("--dangerously-bypass-approvals-and-sandbox".into());
     config_args.push("--dangerously-bypass-hook-trust".into());
+    config_args.push(shared::shell_quote(KICK));
     Ok(Rendered {
         env: vec![("CODEX_HOME".into(), codex_home.to_string_lossy().to_string())],
         cmd: format!("command codex {}", config_args.join(" ")),

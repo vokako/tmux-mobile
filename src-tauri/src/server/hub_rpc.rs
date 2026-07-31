@@ -50,7 +50,14 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>) -
                 .and_then(|v| v.as_bool())
                 .unwrap_or_else(|| body.contains('@'));
             match bus.post(&room, from, body, requires_reply) {
-                Ok(msg) => Response::ok(id, msg),
+                Ok(msg) => {
+                    // DELIVERY: an idle agent sits at its prompt and reads
+                    // nothing — @mentions are typed into the mentioned agents'
+                    // panes so the chat actually reaches them. (An agent that
+                    // is mid-task sees the line queued in its input box.)
+                    deliver_mentions(session, from, body);
+                    Response::ok(id, msg)
+                }
                 Err(e) => Response::err(id, ERR_INTERNAL, e),
             }
         }
@@ -155,6 +162,44 @@ pub(super) fn handle_hub_request(req: &Request, _team: Option<&dyn TeamBridge>) 
 fn window_of_agent(session: &str, agent: &str) -> Option<usize> {
     let panes = crate::tmux::list_panes(session).ok()?;
     panes.iter().find(|p| p.window_name == agent).map(|p| p.window)
+}
+
+/// Type an @mentioned chat line into each mentioned agent's pane. This is the
+/// delivery half of the hub: the bus stores the record, but an interactive
+/// CLI only reacts to what lands in its input. Only windows that ARE agents
+/// receive delivery (typing into a shell would execute the message).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn deliver_mentions(session: &str, from: &str, body: &str) {
+    use crate::projects::agents;
+
+    let mentions: Vec<&str> = body
+        .split('@')
+        .skip(1)
+        .filter_map(|rest| rest.split_whitespace().next())
+        .map(|name| name.trim_end_matches([',', ':', ';', '.', '!', '?']))
+        .filter(|n| !n.is_empty())
+        .collect();
+    if mentions.is_empty() {
+        return;
+    }
+    let Ok(panes) = crate::tmux::list_panes(session) else { return };
+    let mut seen = std::collections::HashSet::new();
+    for p in &panes {
+        if !seen.insert(p.window) || !p.active {
+            continue;
+        }
+        let is_agent = agents::detect(&format!("{} {} {}", p.current_command, p.pane_title, p.window_name)).is_some();
+        if !is_agent || p.window_name == from {
+            continue;
+        }
+        let matched = mentions.iter().any(|m| *m == p.window_name || *m == "all");
+        if !matched {
+            continue;
+        }
+        let target = format!("{}:{}.{}", session, p.window, p.pane);
+        let line = format!("[tmm chat] {from}: {body}");
+        let _ = crate::tmux::send_command(&target, &line);
+    }
 }
 
 /// One row per live window: name, command, agent detection, derived status.

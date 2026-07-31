@@ -27,6 +27,8 @@ tmm done [summary]                   completion; also posts "✔ done — summar
 # human-facing
 tmm agent list                       windows + agent detection + derived state
 tmm project list                     ● live / ○ down, session + path
+tmm registry list                    centrally-defined agents
+tmm spawn <agent> [--brief <text>]   spawn a registry agent into this project
 ```
 
 Global flags: `--project <session>`, `--agent <name>`, `--server <ws://…>`,
@@ -96,6 +98,23 @@ so a crashed agent cannot stay `working` on its own last words. Notifications
 feed the store from the hub's inbox consumer *before* dedupe (dedupe is a
 notification-UI concern; telemetry wants every fact). Window records are
 dropped when the window disappears (`retain_windows` on every `hub_agents`).
+
+## Delivery: how a chat line reaches an agent
+
+The bus stores the record, but an interactive CLI only reacts to what lands in
+its input box. On `hub_post`, every `@name` (or `@all`) whose name matches an
+AGENT window in the session gets the line typed into its pane as
+`[tmm chat] from: body` — an idle agent wakes and acts on it, a busy agent
+sees it queued in its input. Shells never receive delivery (typing into a
+shell would EXECUTE the message), and the sender's own window is skipped.
+
+## Spawn: the starter pistol
+
+An agent CLI boots into an interactive prompt and does nothing until spoken
+to. The brief in the system prompt is context; the KICK — a fixed first user
+message passed as the CLI's positional arg ("Start now… run `tmm done` when
+complete") — is what makes it move. Without it the agent sat at its prompt
+forever (observed live before the fix).
 
 ## Verified
 
