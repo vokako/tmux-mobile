@@ -124,6 +124,17 @@ pub fn merge(existing: &[Slot], observed: &[Observed], now: u64, settle_secs: u6
     let mut slots = Vec::with_capacity(observed.len());
     let mut dirty = false;
 
+    // A window's identity in the declaration IS its name (`up` matches by
+    // name), so two live windows with the same name are indistinguishable —
+    // and writing both would violate UNIQUE(project_id, window_name). Keep the
+    // first observation of each name; the projection honestly recreates ONE
+    // window of that name.
+    let mut seen_names = std::collections::HashSet::new();
+    let observed: Vec<&Observed> = observed
+        .iter()
+        .filter(|o| seen_names.insert(o.window_name.clone()))
+        .collect();
+
     for (ord, obs) in observed.iter().enumerate() {
         let ord = ord as i64;
         match existing.iter().find(|s| s.window_name == obs.window_name) {
@@ -324,5 +335,16 @@ mod tests {
         assert_eq!(relative_cwd("/w/app/src", "/w/app/"), "src");
         assert_eq!(relative_cwd("/elsewhere", "/w/app"), "/elsewhere");
         assert_eq!(relative_cwd("", "/w/app"), "");
+    }
+
+    #[test]
+    fn duplicate_window_names_collapse_to_one_slot() {
+        // Two live windows named "zsh" are indistinguishable to a by-name
+        // declaration; writing both violated UNIQUE(project_id, window_name)
+        // and made every capture tick fail for the whole project.
+        let observed = vec![obs("zsh", ""), obs("zsh", "/elsewhere")];
+        let m = merge(&[], &observed, 100, SETTLE_SECS);
+        assert_eq!(m.slots.len(), 1);
+        assert_eq!(m.slots[0].window_name, "zsh");
     }
 }

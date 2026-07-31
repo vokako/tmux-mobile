@@ -91,7 +91,7 @@ pub(super) fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &st
 /// home is self-gitignored, and the script carries the same data as the
 /// backend config files beside it (env values from team.yaml included), so
 /// this adds no new exposure. Overwritten on every (re)launch.
-pub(super) fn write_launch_script(home: &std::path::Path, name: &str, full_cmd: &str) -> Result<std::path::PathBuf, String> {
+pub(crate) fn write_launch_script(home: &std::path::Path, name: &str, full_cmd: &str) -> Result<std::path::PathBuf, String> {
     let path = home.join(format!("launch-{}.sh", name));
     std::fs::write(&path, format!("# tmux-mobile team launcher (regenerated on every launch)\n{}\n", full_cmd))
         .map_err(|e| format!("write {}: {}", path.display(), e))?;
@@ -99,23 +99,23 @@ pub(super) fn write_launch_script(home: &std::path::Path, name: &str, full_cmd: 
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct StartupConfirmation {
-    pub(super) markers: Vec<&'static str>,
-    pub(super) ready_markers: Vec<&'static str>,
-    pub(super) timeout: Duration,
+pub(crate) struct StartupConfirmation {
+    pub(crate) markers: Vec<&'static str>,
+    pub(crate) ready_markers: Vec<&'static str>,
+    pub(crate) timeout: Duration,
 }
 
 /// What a backend `prepare_*` returns: (env vars, launch command, post-launch
 /// confirmation). Aliased to keep the per-backend signatures readable.
 pub(super) type Prepared = (Vec<(String, String)>, String, Option<StartupConfirmation>);
 
-pub(super) const CLAUDE_FOLDER_TRUST_MARKERS: &[&str] = &[
+pub(crate) const CLAUDE_FOLDER_TRUST_MARKERS: &[&str] = &[
     "Accessing workspace:",
     "Yes, I trust this folder",
     "Enter to confirm",
 ];
 
-pub(super) const CODEX_FOLDER_TRUST_MARKERS: &[&str] = &[
+pub(crate) const CODEX_FOLDER_TRUST_MARKERS: &[&str] = &[
     "Do you trust the contents of this directory?",
     "1. Yes, continue",
     "Press enter to continue",
@@ -143,7 +143,7 @@ pub(super) fn startup_already_ready(content: &str, confirmation: &StartupConfirm
 
 /// Confirm a known first-use dialog without serializing the supervisor's launch
 /// loop. No key is sent when the workspace is already trusted or the UI differs.
-pub(super) fn confirm_startup_prompt(pane: String, confirmation: StartupConfirmation) {
+pub(crate) fn confirm_startup_prompt(pane: String, confirmation: StartupConfirmation) {
     std::thread::spawn(move || {
         let deadline = std::time::Instant::now() + confirmation.timeout;
         while std::time::Instant::now() < deadline {

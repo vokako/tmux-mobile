@@ -27,14 +27,28 @@ use templates::team_dir;
 mod workspace;
 pub use workspace::{workspace_slug, team_slug, same_workspace, team_runtime_dir, read_system_prompt, save_system_prompt};
 use workspace::{Paths, prepare_home};
-mod skills;
-mod backends;
+pub(crate) mod skills;
+pub(crate) mod backends;
 #[cfg(test)]
 mod test_util;
 mod reconcile;
 pub use reconcile::nudge_adopted_agents;
 use reconcile::reconcile_loop;
-mod launch;
+pub(crate) mod launch;
+/// Facade for the pieces the agents-v2 spawn path reuses (projects/spawn.rs):
+/// per-backend MCP rendering, the launch-script pattern (2KB tty lesson) and
+/// startup-prompt confirmation. One import path so the reuse surface is
+/// explicit and greppable.
+pub(crate) mod backends_shared {
+    pub(crate) use super::backends::{
+        claude_mcp_value, codex_config_override, codex_mcp_overrides, inherit_codex_system_files,
+        kiro_mcp_value, shell_quote, McpDef,
+    };
+    pub(crate) use super::launch::{
+        confirm_startup_prompt, write_launch_script, StartupConfirmation,
+        CLAUDE_FOLDER_TRUST_MARKERS, CODEX_FOLDER_TRUST_MARKERS,
+    };
+}
 pub use templates::{
     ensure_templates_seeded, list_templates, read_team_def, read_template, read_all_templates,
     save_template, delete_template,

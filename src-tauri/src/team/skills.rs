@@ -7,15 +7,15 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-pub(super) struct ResolvedSkill {
-    pub(super) name: String,
-    pub(super) dir: PathBuf,
-    pub(super) description: String,
+pub(crate) struct ResolvedSkill {
+    pub(crate) name: String,
+    pub(crate) dir: PathBuf,
+    pub(crate) description: String,
 }
 
 /// A compact system-level skills index for backends without a native skill
 /// mechanism (claude/codex). Kiro instead gets `skill://` resources.
-pub(super) fn skills_index_text(skills: &[ResolvedSkill]) -> String {
+pub(crate) fn skills_index_text(skills: &[ResolvedSkill]) -> String {
     if skills.is_empty() {
         return String::new();
     }
@@ -34,7 +34,7 @@ fn skills_cache_dir() -> PathBuf {
 /// Resolve each skill reference to a local directory. A reference is either a
 /// local path (relative to the team folder, or absolute) or a GitHub URL, which
 /// is sparse-cloned into a shared cache (reused across teams/agents).
-pub(super) fn resolve_skills(refs: &[String], team_dir: &str) -> Vec<ResolvedSkill> {
+pub(crate) fn resolve_skills(refs: &[String], team_dir: &str) -> Vec<ResolvedSkill> {
     let mut out = Vec::new();
     for r in refs {
         let r = r.trim();

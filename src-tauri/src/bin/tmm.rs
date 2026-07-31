@@ -34,10 +34,12 @@ USAGE (agent):
   tmm log [--since <ts>] [--limit N] [-f]   read chat; --since is exclusive, -f follows
   tmm status <working|waiting|blocked> [note]   declare what you are doing
   tmm done [summary]                  declare completion
+  tmm spawn <agent> [--brief <text>]  spawn a registry agent into this project
 
 USAGE (human):
   tmm agent list                      agents in this project and their states
   tmm project list                    all projects
+  tmm registry list                   centrally-defined agents
 
 CONTEXT:
   --project <session>   which project (default: $TMM_PROJECT)
@@ -129,6 +131,34 @@ async fn main() {
             let r = rpc(&ctx, "hub_done", json!({ "session": session, "agent": agent, "summary": summary })).await;
             if ctx.json { println!("{r}"); } else { println!("✓ done"); }
         }
+        ("spawn", rest) => {
+            let session = need_project(&ctx);
+            let Some(agent) = rest.first().cloned() else {
+                fail(EXIT_USAGE, "spawn needs a registry agent name: tmm spawn reviewer --brief \"...\"");
+            };
+            let brief = flags.get("brief").cloned().flatten().unwrap_or_default();
+            let by = ctx.agent.clone().unwrap_or_default();
+            let r = rpc(&ctx, "hub_spawn", json!({ "session": session, "agent": agent, "brief": brief, "by": by })).await;
+            if ctx.json {
+                println!("{r}");
+            } else {
+                let win = r.get("window_name").and_then(|v| v.as_str()).unwrap_or(&agent);
+                println!("✓ spawned {win}");
+            }
+        }
+        ("registry", rest) if rest.first().map(String::as_str) == Some("list") => {
+            let r = rpc(&ctx, "registry_list", json!({})).await;
+            if ctx.json {
+                println!("{r}");
+            } else {
+                let empty = Vec::new();
+                for a in r.get("agents").and_then(|v| v.as_array()).unwrap_or(&empty) {
+                    let s = |k: &str| a.get(k).and_then(|v| v.as_str()).unwrap_or("");
+                    let hire = if a.get("can_hire").and_then(|v| v.as_bool()).unwrap_or(false) { " (can hire)" } else { "" };
+                    println!("{} [{}]{} — {}", s("name"), s("backend"), hire, s("system").chars().take(60).collect::<String>());
+                }
+            }
+        }
         ("agent", rest) if rest.first().map(String::as_str) == Some("list") => {
             let session = need_project(&ctx);
             let r = rpc(&ctx, "hub_agents", json!({ "session": session })).await;
@@ -187,7 +217,7 @@ fn need_agent(ctx: &Ctx) -> String {
 /// `--flag value` / `--flag` / `-f` → map; the rest are positionals.
 /// Flags known to take a value consume the next arg; boolean flags don't.
 fn split_flags(args: &[String]) -> (std::collections::HashMap<String, Option<String>>, Vec<String>) {
-    const VALUED: &[&str] = &["project", "agent", "server", "output", "since", "limit"];
+    const VALUED: &[&str] = &["project", "agent", "server", "output", "since", "limit", "brief"];
     let mut flags = std::collections::HashMap::new();
     let mut pos = Vec::new();
     let mut i = 0;

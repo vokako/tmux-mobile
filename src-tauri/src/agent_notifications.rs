@@ -156,6 +156,17 @@ impl AgentNotificationHub {
         let envelope: InboxEnvelope =
             serde_json::from_slice(&std::fs::read(path).map_err(|e| e.to_string())?)
                 .map_err(|e| format!("invalid envelope: {e}"))?;
+        // Tool events (pre/postToolUse from isolated-home agents, Phase B+)
+        // are TELEMETRY, not notifications: record the live activity line and
+        // stop — no unread dot, no dedupe, no persistence.
+        if let Some(tool_line) = tool_event_line(&envelope) {
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                let (session, window, _) = tmux::resolve_pane_id(&envelope.pane_id)?;
+                crate::projects::telemetry::record_tool(&session, window, &tool_line);
+            }
+            return Ok(());
+        }
         let normalized = normalize(&envelope)?;
         let (session, window, pane) = tmux::resolve_pane_id(&envelope.pane_id)?;
         let timestamp = unix_seconds();
@@ -328,6 +339,37 @@ impl crate::projects::capture::AgentSessions for AgentNotificationHub {
     fn agent_session_for(&self, session: &str, window: usize) -> Option<String> {
         AgentNotificationHub::agent_session_for(self, session, window)
     }
+}
+
+/// PreToolUse/PostToolUse across backends → a human activity line
+/// ("Edit src/lib.rs"), or None when this is a lifecycle notification.
+fn tool_event_line(envelope: &InboxEnvelope) -> Option<String> {
+    let payload = envelope.payload.as_object()?;
+    let event = payload.get("hook_event_name").and_then(Value::as_str)?;
+    if !matches!(event, "PreToolUse" | "PostToolUse" | "preToolUse" | "postToolUse") {
+        return None;
+    }
+    let tool = payload
+        .get("tool_name")
+        .or_else(|| payload.get("tool"))
+        .and_then(Value::as_str)
+        .unwrap_or("tool");
+    // Best-effort one-arg detail: the file for edits, the command for shells.
+    let detail = payload
+        .get("tool_input")
+        .and_then(Value::as_object)
+        .and_then(|i| {
+            i.get("file_path")
+                .or_else(|| i.get("path"))
+                .or_else(|| i.get("command"))
+                .and_then(Value::as_str)
+        })
+        .unwrap_or("");
+    Some(if detail.is_empty() {
+        tool.to_string()
+    } else {
+        format!("{} {}", tool, truncate(detail, 80))
+    })
 }
 
 struct Normalized {

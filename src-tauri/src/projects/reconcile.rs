@@ -83,7 +83,7 @@ fn create_or_keep(project: &Project, slot: &Slot) -> SlotResult {
                 status: "created",
                 error: None,
             };
-            if let Err(e) = run_slot_command(slot, &pane) {
+            if let Err(e) = run_slot_command(project, slot, &pane) {
                 result.error = Some(e);
             }
             result
@@ -109,7 +109,7 @@ fn start_in_existing(project: &Project, slot: &Slot, target: &str) -> SlotResult
             return result;
         }
     }
-    if let Err(e) = run_slot_command(slot, target) {
+    if let Err(e) = run_slot_command(project, slot, target) {
         result.error = Some(e);
     }
     result
@@ -133,9 +133,25 @@ pub(super) fn slot_command(slot: &Slot) -> Option<String> {
     (!command.trim().is_empty()).then_some(command)
 }
 
-fn run_slot_command(slot: &Slot, target: &str) -> Result<(), String> {
+fn run_slot_command(project: &Project, slot: &Slot, target: &str) -> Result<(), String> {
     match slot_command(slot) {
-        Some(cmd) => tmux::send_command(target, &cmd),
+        // Agents get their tmm identity: the project is the session, the agent
+        // name is the window. Resumed agents keep the user's own config (no
+        // isolated home — that is spawn's job), but tmm works in their window
+        // and telemetry can attribute their declarations.
+        Some(cmd) => {
+            let prefixed = if slot.kind == SlotKind::Agent {
+                format!(
+                    "TMM_PROJECT={} TMM_AGENT={} {}",
+                    shell_quote(&project.session),
+                    shell_quote(&slot.window_name),
+                    cmd
+                )
+            } else {
+                cmd
+            };
+            tmux::send_command(target, &prefixed)
+        }
         None => Ok(()),
     }
 }

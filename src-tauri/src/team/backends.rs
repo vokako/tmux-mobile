@@ -22,18 +22,18 @@ use super::{TeamConfig, TEAM_MCP_TOOL_TIMEOUT_MS};
 /// Either a remote HTTP server (`url` [+ `headers`]) or a local stdio server
 /// (`command` [+ `args`/`env`]).
 #[derive(serde::Deserialize, Default, Clone)]
-pub(super) struct McpDef {
-    pub(super) name: String,
+pub(crate) struct McpDef {
+    pub(crate) name: String,
     #[serde(default)]
-    pub(super) url: Option<String>,
+    pub(crate) url: Option<String>,
     #[serde(default)]
-    pub(super) headers: std::collections::BTreeMap<String, String>,
+    pub(crate) headers: std::collections::BTreeMap<String, String>,
     #[serde(default)]
-    pub(super) command: Option<String>,
+    pub(crate) command: Option<String>,
     #[serde(default)]
-    pub(super) args: Vec<String>,
+    pub(crate) args: Vec<String>,
     #[serde(default)]
-    pub(super) env: std::collections::BTreeMap<String, String>,
+    pub(crate) env: std::collections::BTreeMap<String, String>,
 }
 
 /// A skill resolved to a concrete local directory (containing SKILL.md), ready
@@ -86,7 +86,7 @@ fn interpolated_headers(headers: &std::collections::BTreeMap<String, String>) ->
 }
 
 /// kiro mcpServers entry: remote = `{url,headers}`, local = `{command,args,env}`.
-fn kiro_mcp_value(m: &McpDef) -> Value {
+pub(crate) fn kiro_mcp_value(m: &McpDef) -> Value {
     if let Some(url) = &m.url {
         let mut o = serde_json::json!({ "url": url });
         if !m.headers.is_empty() {
@@ -105,7 +105,7 @@ fn kiro_mcp_value(m: &McpDef) -> Value {
 }
 
 /// claude mcpServers entry: remote gets explicit `type:"http"`.
-fn claude_mcp_value(m: &McpDef) -> Value {
+pub(crate) fn claude_mcp_value(m: &McpDef) -> Value {
     if let Some(url) = &m.url {
         let mut o = serde_json::json!({ "type": "http", "url": url });
         if !m.headers.is_empty() {
@@ -129,14 +129,14 @@ fn codex_key_segment(value: &str) -> String {
     }
 }
 
-fn codex_config_override(key: &str, value: Value) -> String {
+pub(crate) fn codex_config_override(key: &str, value: Value) -> String {
     let assignment = format!("{}={}", key, serde_json::to_string(&value).unwrap());
     format!("-c {}", shell_quote(&assignment))
 }
 
 /// Codex CLI overrides for one extra MCP server. Team keeps the system
 /// config.toml intact and layers room-specific MCP settings at launch.
-fn codex_mcp_overrides(m: &McpDef) -> Vec<String> {
+pub(crate) fn codex_mcp_overrides(m: &McpDef) -> Vec<String> {
     let name = codex_key_segment(&m.name);
     let prefix = format!("mcp_servers.{}", name);
     let mut args = Vec::new();
@@ -229,7 +229,7 @@ fn system_codex_home() -> PathBuf {
 
 /// Keep Team runtime state isolated while sharing the system Codex provider and
 /// login. Links follow config/token refreshes without copying credentials.
-fn inherit_codex_system_files(home: &Path) -> Result<(), String> {
+pub(crate) fn inherit_codex_system_files(home: &Path) -> Result<(), String> {
     inherit_codex_system_files_from(home, &system_codex_home())
 }
 
@@ -619,7 +619,7 @@ fn heartbeat_command(path: &Path, mode: &str) -> String {
 
 /// Single-quote a string for the shell (the agent launch line is sent to a
 /// tmux pane's shell). Wraps in '…' and escapes embedded single quotes.
-pub(super) fn shell_quote(s: &str) -> String {
+pub(crate) fn shell_quote(s: &str) -> String {
     if s.is_empty() {
         return "''".to_string();
     }

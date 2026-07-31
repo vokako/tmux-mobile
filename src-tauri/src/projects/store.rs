@@ -14,7 +14,7 @@ use std::path::Path;
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
@@ -234,6 +234,31 @@ impl Store {
                 .execute_batch("DROP TABLE IF EXISTS snapshots;")
                 .map_err(|e| format!("migrate to 4: {e}"))?;
         }
+        if version < 5 {
+            // Agents-v2: the agent registry. One centrally-defined agent =
+            // backend + persona + skills + MCP servers + hire permission,
+            // materialized into an ISOLATED per-agent home at spawn time so the
+            // user's global CLI config never interferes. Skills are string refs
+            // (local name or github url — resolved by the shared skills
+            // resolver); MCP servers are embedded JSON defs. Both live in the
+            // agent row: composition is by value here, the assets themselves
+            // are external (skill dirs / the MCP servers they point at).
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE reg_agents (
+                       name       TEXT PRIMARY KEY,
+                       backend    TEXT NOT NULL,
+                       model      TEXT NOT NULL DEFAULT '',
+                       system     TEXT NOT NULL DEFAULT '',
+                       skills     TEXT NOT NULL DEFAULT '[]',
+                       mcp        TEXT NOT NULL DEFAULT '[]',
+                       can_hire   INTEGER NOT NULL DEFAULT 0,
+                       created_at INTEGER NOT NULL,
+                       updated_at INTEGER NOT NULL
+                     );",
+                )
+                .map_err(|e| format!("migrate to 5: {e}"))?;
+        }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| format!("set user_version: {e}"))
@@ -437,6 +462,143 @@ impl Store {
         tx.commit().map_err(|e| format!("commit slots: {e}"))
     }
 
+    // ---- agent registry (agents-v2) ------------------------------------
+
+    pub fn reg_list(&self) -> Result<Vec<RegAgent>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT name, backend, model, system, skills, mcp, can_hire FROM reg_agents ORDER BY name")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], row_to_reg_agent)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(rows)
+    }
+
+    pub fn reg_get(&self, name: &str) -> Result<Option<RegAgent>, String> {
+        self.conn
+            .query_row(
+                "SELECT name, backend, model, system, skills, mcp, can_hire FROM reg_agents WHERE name = ?1",
+                [name],
+                row_to_reg_agent,
+            )
+            .map(Some)
+            .or_else(|e| if e == rusqlite::Error::QueryReturnedNoRows { Ok(None) } else { Err(e.to_string()) })
+    }
+
+    /// Upsert by name — the registry is edited whole-row (like team templates).
+    pub fn reg_save(&self, a: &RegAgent, now: u64) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO reg_agents (name, backend, model, system, skills, mcp, can_hire, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+                 ON CONFLICT(name) DO UPDATE SET
+                   backend=?2, model=?3, system=?4, skills=?5, mcp=?6, can_hire=?7, updated_at=?8",
+                rusqlite::params![
+                    a.name,
+                    a.backend,
+                    a.model,
+                    a.system,
+                    a.skills,
+                    a.mcp,
+                    a.can_hire as i64,
+                    now as i64,
+                ],
+            )
+            .map(|_| ())
+            .map_err(|e| format!("save agent {}: {e}", a.name))
+    }
+
+    pub fn reg_delete(&self, name: &str) -> Result<bool, String> {
+        self.conn
+            .execute("DELETE FROM reg_agents WHERE name = ?1", [name])
+            .map(|n| n > 0)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Seed the built-in defs once (empty table only) so `+ agent` has
+    /// something to offer out of the box. Mirrors the prototype's roster.
+    pub fn reg_seed(&self, now: u64) -> Result<(), String> {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM reg_agents", [], |r| r.get(0))
+            .map_err(|e| e.to_string())?;
+        if count > 0 {
+            return Ok(());
+        }
+        let seeds = [
+            RegAgent {
+                name: "lead".into(),
+                backend: "kiro".into(),
+                model: String::new(),
+                system: "You are the project lead. Break the task down, do the core work yourself, and delegate well-scoped pieces to other agents when it genuinely helps. You may spawn agents with `tmm spawn <registry-name> --brief \"...\"` — check `tmm registry list` for who is available. Keep the human informed of decisions, not process.".into(),
+                skills: "[]".into(),
+                mcp: "[]".into(),
+                can_hire: true,
+            },
+            RegAgent {
+                name: "reviewer".into(),
+                backend: "claude".into(),
+                model: String::new(),
+                system: "You are a code reviewer. Read the diff or branch you are briefed on, verify the change does what it claims, and report concrete findings (file:line) — no style nitpicks unless they hide bugs. Reply to whoever briefed you.".into(),
+                skills: "[]".into(),
+                mcp: "[]".into(),
+                can_hire: false,
+            },
+            RegAgent {
+                name: "docs".into(),
+                backend: "codex".into(),
+                model: String::new(),
+                system: "You are the docs writer. Keep design docs and READMEs in sync with the change you are briefed on. Plain words, specifics over superlatives.".into(),
+                skills: "[]".into(),
+                mcp: "[]".into(),
+                can_hire: false,
+            },
+        ];
+        for s in &seeds {
+            self.reg_save(s, now)?;
+        }
+        Ok(())
+    }
+
+}
+
+/// A registry agent definition. `skills` and `mcp` are stored as JSON text
+/// (refs and defs respectively) — parsed only at spawn time.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RegAgent {
+    pub name: String,
+    pub backend: String,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default)]
+    pub system: String,
+    /// JSON array of skill refs (local names or github URLs).
+    #[serde(default = "empty_json_array")]
+    pub skills: String,
+    /// JSON array of MCP server defs ({name, command/url, args, env, headers}).
+    #[serde(default = "empty_json_array")]
+    pub mcp: String,
+    #[serde(default)]
+    pub can_hire: bool,
+}
+
+fn empty_json_array() -> String {
+    "[]".to_string()
+}
+
+fn row_to_reg_agent(r: &rusqlite::Row<'_>) -> rusqlite::Result<RegAgent> {
+    Ok(RegAgent {
+        name: r.get(0)?,
+        backend: r.get(1)?,
+        model: r.get(2)?,
+        system: r.get(3)?,
+        skills: r.get(4)?,
+        mcp: r.get(5)?,
+        can_hire: r.get::<_, i64>(6)? != 0,
+    })
 }
 
 fn row_to_project(r: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
@@ -603,5 +765,53 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn registry_crud_roundtrip() {
+        let store = Store::open_memory().unwrap();
+        store.reg_seed(100).unwrap();
+        let seeded = store.reg_list().unwrap();
+        assert_eq!(seeded.len(), 3, "lead/reviewer/docs seeds");
+        assert!(seeded.iter().any(|a| a.name == "lead" && a.can_hire));
+        // Seeding twice must not duplicate.
+        store.reg_seed(200).unwrap();
+        assert_eq!(store.reg_list().unwrap().len(), 3);
+
+        // Upsert edits in place.
+        let mut lead = store.reg_get("lead").unwrap().unwrap();
+        lead.model = "claude-opus-4.6".into();
+        store.reg_save(&lead, 300).unwrap();
+        assert_eq!(store.reg_get("lead").unwrap().unwrap().model, "claude-opus-4.6");
+        assert_eq!(store.reg_list().unwrap().len(), 3, "save by name is an upsert");
+
+        assert!(store.reg_delete("docs").unwrap());
+        assert!(!store.reg_delete("docs").unwrap(), "second delete is a no-op");
+        assert_eq!(store.reg_list().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn v4_to_v5_migration_adds_the_registry() {
+        // An existing v4 db (projects+slots only) must gain reg_agents.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL,
+               icon TEXT, session TEXT NOT NULL UNIQUE, adopted INTEGER NOT NULL DEFAULT 0,
+               autostart INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL,
+               last_up_at INTEGER, last_seen_at INTEGER, archived_at INTEGER);
+             CREATE TABLE slots (id INTEGER PRIMARY KEY,
+               project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+               ord INTEGER NOT NULL, window_name TEXT NOT NULL, cwd TEXT NOT NULL DEFAULT '',
+               kind TEXT NOT NULL, command TEXT, auto_run INTEGER NOT NULL DEFAULT 0,
+               first_seen_at INTEGER NOT NULL, settled_at INTEGER, agent_session_id TEXT,
+               UNIQUE (project_id, window_name));
+             PRAGMA user_version = 4;",
+        )
+        .unwrap();
+        let store = Store::init(conn).unwrap();
+        store.reg_seed(1).unwrap();
+        assert_eq!(store.reg_list().unwrap().len(), 3);
+        let v: i64 = store.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, 5);
     }
 }

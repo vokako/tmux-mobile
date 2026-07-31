@@ -109,6 +109,36 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>) -
         // detection + status derivation joined at read time.
         "hub_agents" => Response::ok(id, agent_states(session)),
 
+        // Spawn a registry agent into this project (tmm spawn / the UI's
+        // "+ agent"). can_hire-gated when an agent asks; capped per project.
+        "hub_spawn" => {
+            let agent = match require_str(p, "agent") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            let brief = p.get("brief").and_then(|v| v.as_str()).unwrap_or("");
+            let by = p.get("by").and_then(|v| v.as_str()).unwrap_or("");
+            match crate::projects::spawn::spawn(&crate::projects::spawn::SpawnRequest {
+                session, agent, brief, by,
+            }) {
+                Ok(result) => {
+                    // The spawn is chat-visible: the room is the record.
+                    if bus.open_room(&room).is_ok() {
+                        let who = if by.is_empty() { "human" } else { by };
+                        let win = result.get("window_name").and_then(|v| v.as_str()).unwrap_or(agent);
+                        let line = if brief.is_empty() {
+                            format!("⚡ spawned {win}")
+                        } else {
+                            format!("⚡ spawned {win} — {brief}")
+                        };
+                        let _ = bus.post(&room, who, &line, false);
+                    }
+                    Response::ok(id, result)
+                }
+                Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
+            }
+        }
+
         other => Response::err(id, ERR_METHOD_NOT_FOUND, format!("unknown hub method: {other}")),
     }
 }

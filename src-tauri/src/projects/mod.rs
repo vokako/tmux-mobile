@@ -11,6 +11,7 @@
 pub mod agents;
 pub mod capture;
 pub mod reconcile;
+pub mod spawn;
 pub mod store;
 pub mod telemetry;
 
@@ -354,6 +355,53 @@ pub fn set_autostart(id: &str, autostart: bool) -> Result<Value, String> {
     with_store(|store| {
         store.set_autostart(id, autostart)?;
         Ok(json!({ "id": id, "autostart": autostart }))
+    })
+}
+
+// ---- agent registry (agents-v2) ----------------------------------------
+
+pub fn registry_list() -> Result<Value, String> {
+    with_store(|store| {
+        store.reg_seed(now())?;
+        let agents = store.reg_list()?;
+        Ok(json!({ "agents": agents }))
+    })
+}
+
+pub fn registry_save(def: &Value) -> Result<Value, String> {
+    let agent: store::RegAgent =
+        serde_json::from_value(def.clone()).map_err(|e| format!("invalid agent def: {e}"))?;
+    if agent.name.trim().is_empty() {
+        return Err("agent name must not be empty".into());
+    }
+    if !matches!(agent.backend.as_str(), "kiro" | "claude" | "codex") {
+        return Err(format!("backend must be kiro|claude|codex, got '{}'", agent.backend));
+    }
+    // Validate the JSON columns now, not at spawn time.
+    serde_json::from_str::<Vec<String>>(&agent.skills).map_err(|e| format!("skills must be a JSON array of refs: {e}"))?;
+    serde_json::from_str::<Vec<Value>>(&agent.mcp).map_err(|e| format!("mcp must be a JSON array of defs: {e}"))?;
+    with_store(|store| {
+        store.reg_save(&agent, now())?;
+        Ok(json!({ "ok": true, "name": agent.name }))
+    })
+}
+
+pub fn registry_delete(name: &str) -> Result<Value, String> {
+    with_store(|store| {
+        let deleted = store.reg_delete(name)?;
+        Ok(json!({ "ok": deleted }))
+    })
+}
+
+/// Project row for a session (used by spawn to find the workspace).
+pub fn project_for_session(session: &str) -> Result<Option<store::Project>, String> {
+    with_store(|store| store.project_by_session(session))
+}
+
+pub fn registry_get(name: &str) -> Result<Option<store::RegAgent>, String> {
+    with_store(|store| {
+        store.reg_seed(now())?;
+        store.reg_get(name)
     })
 }
 

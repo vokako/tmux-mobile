@@ -473,7 +473,8 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
         // Android/iOS, where these methods report method-not-found and the
         // client hides the page (same contract as the team_* methods).
         "project_list" | "project_create" | "project_adopt" | "project_up" | "project_down"
-        | "project_archive" | "project_autostart" => {
+        | "project_archive" | "project_autostart"
+        | "registry_list" | "registry_save" | "registry_delete" => {
             handle_project_request(req.method.as_str(), id, p)
         }
 
@@ -535,6 +536,14 @@ fn handle_project_request(method: &str, id: Option<u64>, p: &serde_json::Value) 
         "project_autostart" => {
             need_id("id").and_then(|id| projects::set_autostart(&id, flag("autostart", true)))
         }
+        // Agent registry (agents-v2): centrally-defined agents, spawnable into
+        // any project. See docs/design-docs/features/tmm-cli.md.
+        "registry_list" => projects::registry_list(),
+        "registry_save" => match p.get("def") {
+            Some(def) => projects::registry_save(def),
+            None => Err("missing required param: def".into()),
+        },
+        "registry_delete" => need_id("name").and_then(|n| projects::registry_delete(&n)),
         other => Err(format!("unknown project method: {other}")),
     };
 
