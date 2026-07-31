@@ -58,6 +58,23 @@
   // pane_output pushes carrying current_command.
   let command = $state(initialCommand);
   $effect(() => { command = initialCommand; });
+
+  // Keyboard as an OVERLAY instead of a resize, for agent TUIs only.
+  //
+  // Opening the phone keyboard shrinks the viewport, which shrinks the terminal
+  // box, which changes cols×rows, which makes tmux resize the window — and a
+  // full-screen agent CLI answers that by repainting its entire conversation.
+  // On a long session that takes seconds, and every keyboard open AND close pays
+  // it. So for those apps we keep the terminal's box (see the `.keep-rows` rule
+  // in this file's CSS): the element stays its full height, bottom-anchored, and
+  // the keyboard simply covers its top rows. tmux is never told anything, so
+  // nothing reflows.
+  //
+  // Editors are deliberately NOT in this set: `vim` repaints cheaply and it
+  // genuinely needs to lay itself out inside the visible area, so it keeps the
+  // normal resize behaviour. The set is `AGENTS` — the same table that paints
+  // the agent icons — so "which apps are chat TUIs" is answered in one place.
+  const keepRowsOnKeyboard = $derived(isMobile && !!detectAgent(command));
   let termEl;
   let term;
   let termAtBottom = $state(true);
@@ -1534,6 +1551,13 @@
 
     function doResize() {
       syncCompactLineGeometry();
+      // Remember the height the terminal has with NO keyboard. While the
+      // keyboard is up and we are in overlay mode the element is pinned to this
+      // value, so it has to be captured whenever the keyboard is down — it
+      // changes with rotation, font size and split view.
+      if (!document.documentElement.classList.contains('keyboard-open')) {
+        termEl.style.setProperty('--kb-locked-h', `${termEl.clientHeight}px`);
+      }
       const fit = calcFit();
       if (!fit) return;
       window.__dbg?.(`resize: fit=${fit.cols}x${fit.rows} cur=${term.cols}x${term.rows} elH=${termEl.clientHeight}`);
@@ -1999,7 +2023,7 @@
   {/if}
 
   <div class="term-wrap">
-    <div class="xterm-wrap" bind:this={termEl}></div>
+    <div class="xterm-wrap" class:keep-rows={keepRowsOnKeyboard} bind:this={termEl}></div>
     {#if isMobile && selection && selUI}
       {#if selUI.startInView}
         <div class="sel-handle sel-handle-start" style="left: {selUI.startX}px; top: {selUI.startY}px; --cell-h: {selUI.cellH}px; --dot-shift-x: {selUI.startDotShiftX}px;" aria-hidden="true"></div>
@@ -2186,6 +2210,21 @@
   .xterm-wrap {
     height: 100%;
     transition: margin-top 0.15s ease;
+  }
+  /* Keyboard as an overlay (agent TUIs only — see keepRowsOnKeyboard).
+     `html.keyboard-open` is toggled by App.svelte in the same layout pass that
+     shrinks --app-height, so the pinned height applies immediately and the
+     element's box NEVER changes size: the ResizeObserver stays the single
+     re-fit trigger (docs/design-docs/pages/terminal-sizing.md) and simply has
+     nothing to report, which is why no resize_pane is sent and the agent does
+     not repaint. The terminal is still its full height — the keyboard just
+     covers the top of it, and .term-wrap already clips (overflow: hidden). */
+  :global(html.keyboard-open) .xterm-wrap.keep-rows {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: var(--kb-locked-h, 100%);
   }
   :global(.xterm-wrap.compact-lines .xterm-glyph) {
     display: inline-block;

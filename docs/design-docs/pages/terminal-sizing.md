@@ -32,6 +32,49 @@ Container size can change for many reasons on mobile:
 - Font-size change (changes cell dimensions, not container, but the
   equation still needs re-evaluation)
 
+## Keyboard as an overlay (agent TUIs)
+
+The mobile keyboard used to be a resize like any other: it shrinks the visual
+viewport, `--app-height` follows, the terminal box shrinks, the `ResizeObserver`
+re-fits, and `resize_pane` tells tmux. tmux resizing a window makes the
+foreground app redraw from scratch — and a full-screen agent CLI redraws its
+whole conversation, which takes seconds on a long session. The user pays that
+twice per keyboard toggle, on open and on close, which made typing on the phone
+feel broken.
+
+So for those apps the keyboard is treated as an **overlay** instead: the
+terminal keeps its box (and therefore its cols×rows), stays bottom-anchored, and
+the keyboard simply covers its top rows. tmux is never told anything, so nothing
+redraws. The visible part is the bottom of the screen, which is exactly where a
+chat TUI keeps its prompt.
+
+Mechanically it is two lines of CSS and one class, and it deliberately does NOT
+add a sizing trigger:
+
+- `keepRowsOnKeyboard = isMobile && !!detectAgent(command)` puts the
+  `.keep-rows` class on the xterm host. The set is `AGENTS` — the same table
+  that paints the agent icons — so "which apps are chat TUIs" has one answer.
+- `html.keyboard-open .xterm-wrap.keep-rows` pins `height: var(--kb-locked-h)`
+  with `position: absolute; bottom: 0`. `App.svelte` toggles that class in the
+  same layout pass that shrinks `--app-height`, so the pinned height applies
+  immediately: **the observed box never changes size**, the ResizeObserver
+  remains the single re-fit trigger, and it simply has nothing to report.
+- `--kb-locked-h` is written by `doResize` but only while the keyboard is DOWN,
+  so it always holds the real unkeyboarded height (it changes with rotation,
+  font size and split view). Capturing it with the keyboard up would pin the
+  shrunken height — the bug rather than the fix.
+
+Editors are deliberately excluded. `vim` repaints cheaply and genuinely needs to
+lay itself out inside the visible area, so it keeps the resize behaviour.
+
+Known edge: on a small screen with a tall keyboard the visible strip can be only
+a few rows. That is inherent to an overlay, and still better than a full repaint
+per keystroke session.
+
+Verified against a real tmux server: with a `kiro-cli` pane the tmux window
+stayed `151x27` across keyboard open AND close, while a `zsh` pane in the same
+app went `27 → 8 → 27` rows as it always did.
+
 ## Earlier (removed) approach
 
 The previous implementation had **six different code paths** all trying

@@ -16,6 +16,51 @@ test('Terminal chrome uses only Team-filtered notification queries', () => {
   assert.doesNotMatch(source, /\bnotificationForWindow\(/u);
 });
 
+test('the keyboard is an overlay for agent TUIs, not a resize', () => {
+  // The costly chain is: keyboard shrinks the viewport → the terminal box
+  // shrinks → cols×rows change → tmux resizes the window → a full-screen agent
+  // repaints its whole conversation. Pinning the box breaks it at step two.
+  assert.match(
+    source,
+    /const keepRowsOnKeyboard = \$derived\(isMobile && !!detectAgent\(command\)\)/u,
+    'the whitelist must be the shared agent table, not a hardcoded name',
+  );
+  assert.match(
+    source,
+    /<div class="xterm-wrap" class:keep-rows=\{keepRowsOnKeyboard\}/u,
+  );
+  // Pinned height + bottom anchor: the element keeps its size and the keyboard
+  // covers its top rows.
+  assert.match(
+    source,
+    /:global\(html\.keyboard-open\) \.xterm-wrap\.keep-rows \{[^}]*height: var\(--kb-locked-h, 100%\)/u,
+  );
+  assert.match(
+    source,
+    /:global\(html\.keyboard-open\) \.xterm-wrap\.keep-rows \{[^}]*bottom: 0/u,
+  );
+});
+
+test('the pinned height is captured only while the keyboard is down', () => {
+  // Capturing it with the keyboard up would pin the SHRUNK height, which is the
+  // bug rather than the fix.
+  const body = /function doResize\(\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1];
+  assert.ok(body, 'doResize must exist');
+  assert.match(
+    body,
+    /if \(!document\.documentElement\.classList\.contains\('keyboard-open'\)\) \{\s*termEl\.style\.setProperty\('--kb-locked-h'/u,
+  );
+});
+
+test('the keyboard-shift handler still never resizes', () => {
+  // Sizing has ONE trigger, the ResizeObserver
+  // (docs/design-docs/pages/terminal-sizing.md). The overlay works by keeping
+  // the observed box constant, so this handler must stay out of sizing.
+  const body = /const onKbShift = \(e\) => \{([\s\S]*?)\n    \};/u.exec(source)?.[1];
+  assert.ok(body, 'onKbShift must exist');
+  assert.doesNotMatch(body, /term\.resize\(|queuePaneResize\(|doResize\(/u);
+});
+
 test('every key send returns the display to the live tail', () => {
   // Rendering is suppressed by a pinned selection, an unsettled touch scroll
   // and a scrolled-up viewport. If input does not release them, the typed
