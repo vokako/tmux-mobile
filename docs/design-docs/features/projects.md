@@ -38,6 +38,34 @@ Three verbs, all in `src-tauri/src/projects/`:
   its current windows immediately. An adopted project must be restorable even
   if the machine reboots a minute later.
 
+### Every session is a project
+
+There is no such thing as an untracked session any more, and there is one way to
+make a workspace. Two consequences fall out of that:
+
+- **Auto-tracking.** `auto_adopt_once` runs on the capture tick and adopts any
+  session that isn't a project yet — so `tmux new -s foo` in a terminal shows up
+  as a project by itself, and on first run this is also the migration for
+  sessions that already existed. Three guards keep it from becoming a new source
+  of entropy: a session must have existed for `SESSION_SETTLE_SECS` (120 s, the
+  same reasoning as the window settle rule one level down — a workspace is
+  something you come back to, a two-minute shell is not); team sessions are never
+  adopted (Team creates and kills its own, so a declaration would fight it); and a
+  project you ARCHIVED is never re-adopted, or "remove from projects" would undo
+  itself on the next tick.
+- **One create path.** The old "new session" form now creates a *project* and
+  brings it up (`project_create` + `project_up`), so the second `+` in the
+  Projects header is gone. A bare `new_session` would have been pointless anyway:
+  the auto-tracker would adopt it seconds later. The form's Kiro/Claude/Codex
+  presets became `agent` — they seed one settled agent slot instead of a raw
+  command line, which is what makes the agent relaunch AND resume on every later
+  `up`. Free-form commands were dropped from the form on purpose: a shell command
+  is observed-only and never replayed, so offering to type one there would
+  promise something `up` does not do.
+
+The Track button is gone with them: tracking is not a decision the user has to
+make per session any more.
+
 ### Identity is the session, not the directory
 
 v1 made `path` UNIQUE and derived a project's directory from the session's
@@ -171,9 +199,9 @@ method-not-found — the same contract the Team tab uses to hide itself.
 `src/lib/projects/Projects.svelte` renders above the raw session list on the
 Sessions page, and the two halves divide the world between them: **a tracked
 session appears only in Projects, everything else only in the session list.**
-One session, one home — repeating a tracked session in both places was the
-duplication this feature exists to remove. Team sessions stay in the session
-list because Team owns their lifecycle (P2 converges them).
+Since every session becomes a project on its own, what remains in the session
+list is the short-lived (younger than the settle window), team sessions, and
+anything you deliberately removed from Projects. One session, one home.
 
 A project row is name + live dot + path, with its **windows on their own row as
 individual buttons**: a project is a set of windows and jumping into the one you
@@ -185,10 +213,10 @@ notification. While the project is down they come from the declaration instead
 (dimmed, no targets yet) and tapping one brings the project up and lands you in
 that window.
 
-Tracking happens **on the session row**, not in a separate list: the star button
-promotes that session in place, which is literally what tracking does. The panes
-the Sessions page already polls are passed down as a prop, so the window buttons
-cost no extra RPC.
+Tracking is automatic (see above), so there is no per-session Track control and
+no separate "new session" form: the single `+` creates a project and brings it
+up. The panes the Sessions page already polls are passed down as a prop, so the
+window buttons cost no extra RPC.
 
 Display logic that is worth testing (row ordering, which windows to show and
 where each one points, path shortening) lives in `projects.ts` so `node --test`

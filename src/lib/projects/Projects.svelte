@@ -10,7 +10,6 @@
   import {
     listPanes,
     projectArchive,
-    projectCreate,
     projectDown,
     projectList,
     projectRestore,
@@ -30,8 +29,8 @@
     /** Live panes per session, already loaded by the Sessions page. */
     panes?: Record<string, TmuxPane[]>;
     /** Session names that are tracked, so the session list can stop repeating them. */
-    onTracked?: (sessions: string[], supported: boolean) => void;
-    /** Hands the reload function out, so adopting from a session row refreshes us. */
+    onTracked?: (sessions: string[]) => void;
+    /** Hands the reload function out, so creating a project refreshes us. */
     onReady?: (reload: () => Promise<void>) => void;
   } = $props();
 
@@ -41,8 +40,6 @@
   let busy = $state<Record<string, boolean>>({});
   let menuFor = $state<string | null>(null);
   let snapshots = $state<SnapshotMeta[]>([]);
-  let addOpen = $state(false);
-  let addPath = $state('');
   let collapsed = $state(false);
 
   const sorted = $derived(sortRows(rows));
@@ -61,11 +58,11 @@
       rows = res?.projects ?? [];
       supported = true;
       error = '';
-      onTracked(rows.map((r) => r.project.session), true);
+      onTracked(rows.map((r) => r.project.session));
     } catch (e) {
       const code = (e as { code?: number })?.code;
       // -32601: this server has no project support. Not an error to show.
-      if (code === -32601) { supported = false; onTracked([], false); return; }
+      if (code === -32601) { supported = false; onTracked([]); return; }
       error = (e as Error)?.message || String(e);
     }
   }
@@ -141,13 +138,6 @@
     }
   }
 
-  async function addProject() {
-    const path = addPath.trim();
-    if (!path) return;
-    await run('__add', () => projectCreate(path));
-    addPath = '';
-    addOpen = false;
-  }
 </script>
 
 {#if supported && sorted.length > 0}
@@ -158,23 +148,9 @@
         {t('projects')}
         <span class="group-count">{sorted.length}</span>
       </button>
-      <button class="add-btn" onclick={() => addOpen = !addOpen} aria-label={t('projectAdd')}>
-        <Icon name="plus" size={13} />
-      </button>
     </div>
 
     {#if !collapsed}
-      {#if addOpen}
-        <div class="add-row">
-          <input
-            class="add-input"
-            bind:value={addPath}
-            placeholder={t('projectPathPlaceholder')}
-            onkeydown={(e) => { if (e.key === 'Enter') void addProject(); }} />
-          <button class="act" disabled={!addPath.trim() || busy['__add']} onclick={addProject}>{t('projectAdd')}</button>
-        </div>
-      {/if}
-
       {#each sorted as row (row.project.id)}
         {@const chips = chipsFor(row)}
         <div class="proj" class:live={row.live}>
@@ -272,18 +248,6 @@
   .group-count {
     background: var(--surface2); color: var(--text2);
     border-radius: 8px; padding: 0 5px; font-size: 10px; letter-spacing: 0;
-  }
-  .add-btn {
-    margin-left: auto; display: flex; align-items: center;
-    background: none; border: 0; color: var(--text3); cursor: pointer; padding: 2px 4px;
-  }
-  .add-btn:hover { color: var(--accent); }
-  .add-row { display: flex; gap: 6px; padding: 0 2px 4px; }
-  .add-input {
-    flex: 1; min-width: 0; height: var(--ui-control-height, 30px);
-    background: var(--input-bg); color: var(--text);
-    border: 1px solid var(--border); border-radius: 6px;
-    padding: 0 8px; font-family: var(--font-mono); font-size: 12px;
   }
 
   .proj {

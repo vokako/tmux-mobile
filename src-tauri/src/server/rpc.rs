@@ -517,7 +517,12 @@ fn handle_project_request(method: &str, id: Option<u64>, p: &serde_json::Value) 
     let outcome = match method {
         "project_list" => projects::list(flag("include_archived", false)),
         "project_create" => need_id("path").and_then(|path| {
-            projects::create(&path, p.get("name").and_then(|v| v.as_str()))
+            projects::create(
+                &path,
+                p.get("name").and_then(|v| v.as_str()),
+                p.get("session").and_then(|v| v.as_str()),
+                p.get("agent").and_then(|v| v.as_str()),
+            )
         }),
         "project_adopt" => need_id("session").and_then(|session| {
             projects::adopt(&session, p.get("name").and_then(|v| v.as_str()))

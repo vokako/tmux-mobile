@@ -24,6 +24,16 @@ use store::{Project, Slot, Store};
 /// How often the capturer folds live tmux state back into the declaration.
 const CAPTURE_INTERVAL: Duration = Duration::from_secs(20);
 
+/// Sessions we never adopt: Team creates and kills its own
+/// (`tmm-team-<team-id>`) sessions, so a project declaration would fight it.
+/// See `docs/design-docs/features/team.md`.
+const TEAM_SESSION_PREFIX: &str = "tmm-team-";
+
+/// How long a tmux session must have existed before it becomes a project on its
+/// own. Same reasoning as `capture::SETTLE_SECS` one level up: a workspace is
+/// something you come back to, a two-minute shell is not.
+pub const SESSION_SETTLE_SECS: u64 = 120;
+
 fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -151,32 +161,71 @@ pub fn list(include_archived: bool) -> Result<Value, String> {
 
 /// Create a project for a directory. Idempotent: an existing project for the
 /// same canonical path is returned (and un-archived) instead of duplicated.
-pub fn create(path: &str, name: Option<&str>) -> Result<Value, String> {
+///
+/// `session` is the tmux session name the user asked for (falling back to the
+/// directory basename); `agent` seeds the workspace with one agent window, which
+/// is how the create form's Kiro/Claude presets survive the move from
+/// "new session" to "new project".
+pub fn create(
+    path: &str,
+    name: Option<&str>,
+    session: Option<&str>,
+    agent: Option<&str>,
+) -> Result<Value, String> {
     let path = canonical(path)?;
-    let name = name.unwrap_or_else(|| basename(&path)).to_string();
+    let label = name
+        .or(session)
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| basename(&path))
+        .to_string();
+    let ts = now();
     with_store(|store| {
         if let Some(existing) = store.project_by_path(&path)? {
             if existing.archived {
-                store.set_archived(&existing.id, false, now())?;
+                store.set_archived(&existing.id, false, ts)?;
             }
             return Ok(json!(existing));
         }
-        let id = format!("{}-{}", slug(basename(&path)), digest(&path));
-        let session = free_session_name(store, &slug(basename(&path)), &id)?;
+        let wanted = session
+            .filter(|s| !s.trim().is_empty())
+            .map(slug)
+            .unwrap_or_else(|| slug(basename(&path)));
+        let id = format!("{}-{}", slug(&label), digest(&path));
+        let session = free_session_name(store, &wanted, &id)?;
         let project = Project {
             id: id.clone(),
-            name,
+            name: label,
             path,
             icon: None,
             session,
             adopted: false,
             autostart: false,
-            created_at: now(),
+            created_at: ts,
             last_up_at: None,
             last_seen_at: None,
             archived: false,
         };
         store.insert_project(&project)?;
+        // A seeded agent slot is settled straight away: the user asked for that
+        // agent, so `up` must create its window on the first run instead of
+        // waiting for the capturer to notice it.
+        if let Some(backend) = agent.filter(|b| agents::launch_for(b).is_some()) {
+            store.replace_slots(
+                &id,
+                &[Slot {
+                    id: None,
+                    ord: 0,
+                    window_name: backend.to_string(),
+                    cwd: String::new(),
+                    kind: store::SlotKind::Agent,
+                    command: Some(backend.to_string()),
+                    auto_run: true,
+                    agent_session_id: None,
+                    first_seen_at: ts,
+                    settled_at: Some(ts),
+                }],
+            )?;
+        }
         Ok(json!(project))
     })
 }
@@ -191,45 +240,93 @@ pub fn adopt(session: &str, name: Option<&str>) -> Result<Value, String> {
     if !tmux::session_exists(session) {
         return Err(format!("no such tmux session: {session}"));
     }
-    let path = canonical(&session_workspace(session)?)?;
     let ts = now();
+    with_store(|store| adopt_in(store, session, name, ts))
+}
+
+fn adopt_in(
+    store: &mut Store,
+    session: &str,
+    name: Option<&str>,
+    ts: u64,
+) -> Result<Value, String> {
+    let path = canonical(&session_workspace(session)?)?;
+    if let Some(existing) = store.project_by_session(session)? {
+        return Err(format!(
+            "session {session} is already tracked as project '{}'",
+            existing.name
+        ));
+    }
+    let id = format!("{}-{}", slug(session), digest(session));
+    let project = Project {
+        id: id.clone(),
+        name: name.unwrap_or(session).to_string(),
+        path: path.clone(),
+        icon: None,
+        session: session.to_string(),
+        adopted: true,
+        autostart: false,
+        created_at: ts,
+        last_up_at: Some(ts),
+        last_seen_at: Some(ts),
+        archived: false,
+    };
+    store.insert_project(&project)?;
+    let observed = capture::observe(session, &path, agent_sessions())?;
+    let merged = capture::merge(&[], &observed, ts, capture::SETTLE_SECS);
+    // Settle immediately: these windows already exist and are the reason
+    // the user is adopting the session.
+    let slots: Vec<Slot> = merged
+        .slots
+        .into_iter()
+        .map(|mut s| {
+            s.settled_at = Some(ts);
+            s
+        })
+        .collect();
+    store.replace_slots(&id, &slots)?;
+    store.add_snapshot(&id, ts, &slots, capture::SNAPSHOT_KEEP)?;
+    Ok(json!({ "project": project, "slots": slots }))
+}
+
+/// Adopt every tmux session that isn't a project yet, so a session made outside
+/// the app (`tmux new -s foo`) still survives a reboot. This is also the
+/// migration path: on first run it picks up everything that already existed.
+///
+/// Three guards keep it from becoming a new source of entropy:
+///
+/// * a session must have existed for `SESSION_SETTLE_SECS` — a `tmux new` for a
+///   30-second job must not leave a permanent declaration behind;
+/// * team sessions are never adopted (Team owns their lifecycle);
+/// * a session whose project was ARCHIVED is never re-adopted, or "remove from
+///   projects" would undo itself on the next tick.
+pub fn auto_adopt_once() -> Result<Vec<String>, String> {
+    auto_adopt_with(&tmux::session_created_times(), now())
+}
+
+/// The decision half of `auto_adopt_once`, taking the session ages as data so
+/// the guards are testable without waiting two minutes.
+fn auto_adopt_with(created: &[(String, u64)], ts: u64) -> Result<Vec<String>, String> {
     with_store(|store| {
-        if let Some(existing) = store.project_by_session(session)? {
-            return Err(format!(
-                "session {session} is already tracked as project '{}'",
-                existing.name
-            ));
-        }
-        let id = format!("{}-{}", slug(session), digest(session));
-        let project = Project {
-            id: id.clone(),
-            name: name.unwrap_or(session).to_string(),
-            path: path.clone(),
-            icon: None,
-            session: session.to_string(),
-            adopted: true,
-            autostart: false,
-            created_at: ts,
-            last_up_at: Some(ts),
-            last_seen_at: Some(ts),
-            archived: false,
-        };
-        store.insert_project(&project)?;
-        let observed = capture::observe(session, &path, agent_sessions())?;
-        let merged = capture::merge(&[], &observed, ts, capture::SETTLE_SECS);
-        // Settle immediately: these windows already exist and are the reason
-        // the user is adopting the session.
-        let slots: Vec<Slot> = merged
-            .slots
+        let known: Vec<String> = store
+            .list_projects(true)?
             .into_iter()
-            .map(|mut s| {
-                s.settled_at = Some(ts);
-                s
-            })
+            .map(|p| p.session)
             .collect();
-        store.replace_slots(&id, &slots)?;
-        store.add_snapshot(&id, ts, &slots, capture::SNAPSHOT_KEEP)?;
-        Ok(json!({ "project": project, "slots": slots }))
+        let mut adopted = Vec::new();
+        for (session, created_at) in created {
+            if session.starts_with(TEAM_SESSION_PREFIX)
+                || known.contains(session)
+                || ts.saturating_sub(*created_at) < SESSION_SETTLE_SECS
+            {
+                continue;
+            }
+            match adopt_in(store, session, None, ts) {
+                Ok(_) => adopted.push(session.clone()),
+                Err(e) => eprintln!("projects: cannot track session {session}: {e}"),
+            }
+        }
+        Ok(adopted)
     })
 }
 
@@ -402,6 +499,9 @@ pub fn capture_once() -> Result<Vec<String>, String> {
 pub async fn capture_loop() {
     loop {
         tokio::time::sleep(CAPTURE_INTERVAL).await;
+        if let Err(e) = auto_adopt_once() {
+            eprintln!("projects: auto-track failed: {e}");
+        }
         if let Err(e) = capture_once() {
             eprintln!("projects: capture failed: {e}");
         }
@@ -480,9 +580,53 @@ mod tests {
         assert_eq!(pick_workspace(&[], home), None);
     }
 
+    /// Auto-tracking is what makes "every session is a project" true, including
+    /// for sessions made outside the app — and it is the migration path for the
+    /// ones that already existed. The guards are the interesting part.
     #[test]
-    fn two_sessions_in_the_same_directory_are_two_projects() {
-        let root = std::env::temp_dir().join("tmm-proj-share");
+    fn auto_track_picks_up_outside_sessions_but_respects_the_guards() {
+        let root = std::env::temp_dir().join("tmm-proj-auto");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        use_test_store();
+        let path = root.canonicalize().unwrap().to_string_lossy().to_string();
+        let old = "tmm-test-auto-old";
+        let fresh = "tmm-test-auto-fresh";
+        let team = "tmm-team-test-auto";
+        for s in [old, fresh, team] {
+            let _ = tmux::kill_session(s);
+            tmux::ensure_session(s, &path).unwrap();
+        }
+
+        // Pretend `old` has been around long enough; the others were just made.
+        let ts = now();
+        let ages: Vec<(String, u64)> = vec![
+            (old.to_string(), ts - SESSION_SETTLE_SECS - 1),
+            (fresh.to_string(), ts),
+            (team.to_string(), ts - SESSION_SETTLE_SECS - 1),
+        ];
+        let adopted = auto_adopt_with(&ages, ts).unwrap();
+        assert_eq!(adopted, vec![old.to_string()], "only the settled non-team session");
+
+        // Running again must not duplicate it.
+        assert!(auto_adopt_with(&ages, ts).unwrap().is_empty());
+
+        // Removing a project from the list must stick: no re-tracking.
+        let id = with_store(|s| Ok(s.project_by_session(old)?.unwrap().id)).unwrap();
+        set_archived(&id, true).unwrap();
+        assert!(
+            auto_adopt_with(&ages, ts).unwrap().is_empty(),
+            "an archived project must not come back on the next tick"
+        );
+
+        for s in [old, fresh, team] {
+            let _ = tmux::kill_session(s);
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn two_sessions_in_the_same_directory_are_two_projects() {        let root = std::env::temp_dir().join("tmm-proj-share");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         use_test_store();

@@ -723,7 +723,8 @@ export const agentHooksRemove = () => call('agent_hooks_remove');
 // support and the Projects section hides itself.
 export const projectList = (includeArchived = false) =>
   call<{ projects: ProjectRow[] }>('project_list', { include_archived: includeArchived });
-export const projectCreate = (path: string, name?: string) => call('project_create', { path, name });
+export const projectCreate = (path: string, opts: { name?: string; session?: string; agent?: string } = {}) =>
+  call('project_create', { path, ...opts });
 export const projectAdopt = (session: string, name?: string) => call('project_adopt', { session, name });
 export const projectUp = (id: string) => call('project_up', { id });
 export const projectDown = (id: string) => call('project_down', { id });

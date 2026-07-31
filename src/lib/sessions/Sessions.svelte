@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { listSessions, listPanes, listSessionsWithPanes, newSession, killSession, newWindow, killWindow, fsList, projectAdopt } from '../core/ws.ts';
+  import { listSessions, listPanes, listSessionsWithPanes, killSession, newWindow, killWindow, fsList, projectCreate, projectUp } from '../core/ws.ts';
   import type { TmuxSession, TmuxPane } from '../core/ws.ts';
   import Icon from '../ui/Icon.svelte';
   import AgentChip from '../ui/AgentChip.svelte';
@@ -37,7 +37,7 @@
   let showNew = $state(false);
   let newName = $state('');
   let newPath = $state('');
-  let newCmd = $state('');
+  let newAgent = $state('');   // which agent the new project starts with
 
   // Folder picker (inside new form)
   type DirEntry = { name: string; type: string; path: string };
@@ -218,16 +218,27 @@
   }
 
   // ─── Create session ───────────────────────────────────
+  // Creating a workspace is ONE action: declare the project, then project it
+  // onto tmux. `new_session` is no longer called from here — a session that is
+  // not a project would just get auto-tracked seconds later, so there is no
+  // point in a second, weaker way to make one. The agent preset becomes the
+  // project's first window, which means it also relaunches (and resumes) on
+  // every later `up`.
   async function createSession() {
-    if (!newName.trim()) return;
+    if (!newName.trim() && !newPath.trim()) return;
     try {
-      await newSession(newName.trim(), newPath.trim() || undefined, newCmd.trim() || undefined);
-      const name = newName.trim();
-      newName = ''; newPath = ''; newCmd = ''; showNew = false;
-      const ps = await listPanes(name);
+      const created = await projectCreate(newPath.trim() || '~', {
+        name: newName.trim() || undefined,
+        session: newName.trim() || undefined,
+        agent: newAgent || undefined,
+      }) as { id: string; session: string };
+      newName = ''; newPath = ''; newAgent = ''; showNew = false;
+      await projectUp(created.id);
+      await reloadProjects?.();
+      const ps = await listPanes(created.session);
       if (ps.length) {
         const p = ps[0]!;
-        openTerminal(name, `${p.session}:${p.window}.${p.pane}`, p.current_command);
+        openTerminal(created.session, `${p.session}:${p.window}.${p.pane}`, p.current_command);
       }
       await refresh();
     } catch (e) { error = (e as Error).message; }
@@ -309,27 +320,15 @@
   // Sessions that a project already declares are shown by the Projects section
   // above, with their windows and their up/down control. Repeating them here
   // would mean one session living in two places — exactly the duplication the
-  // Projects section exists to remove. So this list is the UNTRACKED sessions:
-  // the ad-hoc ones, plus team sessions (Team owns their lifecycle).
+  // Projects section exists to remove.
+  //
+  // Every session becomes a project on its own now (the server auto-tracks
+  // anything older than two minutes), so what is left in this list is the
+  // short-lived and the deliberately untracked: a session you just made outside
+  // the app, team sessions (Team owns their lifecycle), and any project you
+  // removed from the list on purpose.
   let trackedSessions = $state<string[]>([]);
-  let projectsSupported = $state(false);
   let reloadProjects = $state<(() => Promise<void>) | null>(null);
-  let tracking = $state<Record<string, boolean>>({});
-
-  async function trackSession(name: string, e: MouseEvent) {
-    e.stopPropagation();
-    tracking = { ...tracking, [name]: true };
-    try {
-      await projectAdopt(name);
-      await reloadProjects?.();
-    } catch (err) {
-      error = (err as Error).message;
-    } finally {
-      const next = { ...tracking };
-      delete next[name];
-      tracking = next;
-    }
-  }
 
   let filtered = $derived(
     sessions.filter(s => sessionMatches(s, query) && !trackedSessions.includes(s.name)),
@@ -490,19 +489,6 @@
             {#if s.windows > 1}
               <span class="w-badge">{s.windows}w</span>
             {/if}
-            {#if projectsSupported}
-              <!-- Promote this session in place: tracking it is what moves it up
-                   into Projects, so the action belongs on the session itself. -->
-              <button
-                class="track"
-                disabled={tracking[s.name]}
-                onclick={(e) => trackSession(s.name, e)}
-                aria-label={t('projectAdopt')}
-                title={t('projectAdopt')}
-              >
-                <Icon name="star" size={12} />
-              </button>
-            {/if}
             <button
               class="kill"
               class:confirm={confirmKill === s.name}
@@ -576,7 +562,7 @@
       {visible}
       {openTerminal}
       {panes}
-      onTracked={(names, supported) => { trackedSessions = names; projectsSupported = supported; }}
+      onTracked={(names) => trackedSessions = names}
       onReady={(reload) => reloadProjects = reload} />
     {#if grouped}
       <div class="group-label">
@@ -646,18 +632,23 @@
           </div>
         </div>
       {/if}
+      <!-- The presets pick an AGENT, not a raw command line: the project stores
+           which agent lives in that window, so `up` relaunches it and resumes
+           its conversation. A free-form command would be observed-only and never
+           replayed (see docs/design-docs/features/projects.md). -->
       <div class="cmd-row-new">
-        <input type="text" bind:value={newCmd} placeholder={t('commandOpt')} autocapitalize="off" />
-        <button class="preset-btn" class:active={newCmd === 'kiro-cli-chat chat -a'} onclick={() => newCmd = newCmd === 'kiro-cli-chat chat -a' ? '' : 'kiro-cli-chat chat -a'}><img src="/assets/kiro.svg" alt="Kiro" width="16" height="16" /></button>
-        <button class="preset-btn" class:active={newCmd === 'claude --dangerously-skip-permissions'} onclick={() => newCmd = newCmd === 'claude --dangerously-skip-permissions' ? '' : 'claude --dangerously-skip-permissions'}><img src="/assets/claude.svg" alt="Claude" width="18" height="18" /></button>
+        <span class="agent-label">{t('projectAgentOpt')}</span>
+        <button class="preset-btn" class:active={newAgent === 'kiro'} onclick={() => newAgent = newAgent === 'kiro' ? '' : 'kiro'}><img src="/assets/kiro.svg" alt="Kiro" width="16" height="16" /></button>
+        <button class="preset-btn" class:active={newAgent === 'claude'} onclick={() => newAgent = newAgent === 'claude' ? '' : 'claude'}><img src="/assets/claude.svg" alt="Claude" width="18" height="18" /></button>
+        <button class="preset-btn" class:active={newAgent === 'codex'} onclick={() => newAgent = newAgent === 'codex' ? '' : 'codex'}><img src="/assets/codex.svg" alt="Codex" width="16" height="16" /></button>
       </div>
-      <button class="create-btn" onclick={createSession} disabled={!newName.trim()}>{t('create')}</button>
+      <button class="create-btn" onclick={createSession} disabled={!newName.trim() && !newPath.trim()}>{t('create')}</button>
     </div>
   {/if}
 
   <div class="bottom-bar">
     <button class="new-btn" onclick={() => showNew = !showNew}>
-      <Icon name="plus" size={16} /> {t('newSession')}
+      <Icon name="plus" size={16} /> {t('projectNew')}
     </button>
     <button class="refresh-icon" class:spinning={refreshing} onclick={doRefresh} aria-label="Refresh">
       <Icon name="refresh" size={16} />
@@ -952,23 +943,6 @@
     border-radius: 5px;
     font-variant-numeric: tabular-nums;
   }
-
-  /* Track: promote this session into a project, in place. */
-  .track {
-    padding: 6px;
-    background: transparent;
-    border: none;
-    color: var(--text3);
-    cursor: pointer;
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: color 0.15s ease;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .track:hover:not(:disabled) { color: var(--accent); }
-  .track:disabled { opacity: 0.4; cursor: default; }
 
   .kill {
     padding: 6px;    background: transparent;

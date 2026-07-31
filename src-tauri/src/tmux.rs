@@ -156,6 +156,32 @@ pub fn list_sessions() -> Result<Vec<TmuxSession>, String> {
     Ok(sessions)
 }
 
+/// `session_name -> session_created` (unix seconds) for every live session.
+/// The projects auto-tracker needs a session's AGE, which `list_sessions`
+/// cannot answer: its `created` field actually carries `session_activity`
+/// (it drives MRU sorting) and that ticks forward on every keystroke.
+pub fn session_created_times() -> Vec<(String, u64)> {
+    let out = match run_tmux(&[
+        "list-sessions",
+        "-F",
+        "#{session_name}<TMM_SEP>#{session_created}",
+    ]) {
+        Ok(out) => out,
+        Err(_) => return Vec::new(),
+    };
+    out.lines()
+        .filter_map(|line| {
+            let mut it = line.split("<TMM_SEP>");
+            match (it.next(), it.next()) {
+                (Some(name), Some(created)) if !name.is_empty() => {
+                    Some((name.to_string(), created.parse().unwrap_or(0)))
+                }
+                _ => None,
+            }
+        })
+        .collect()
+}
+
 /// 列出某个 session 的所有 pane
 pub fn list_panes(session: &str) -> Result<Vec<TmuxPane>, String> {
     let output = run_tmux(&[

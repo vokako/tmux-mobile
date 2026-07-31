@@ -104,7 +104,7 @@ Projects section hides itself when these return -32601. See
 | Method | Params | Response |
 |--------|--------|----------|
 | `project_list` | `include_archived?` | `{projects: [{project, slots, live}]}` — the client subtracts these from `list_sessions` to get the untracked ones |
-| `project_create` | `path`, `name?` | The project (existing one for that path is returned, un-archived) |
+| `project_create` | `path`, `name?`, `session?`, `agent?` | The project (existing one for that path is returned, un-archived). `agent` seeds one settled agent window (`kiro`/`claude`/`codex`) |
 | `project_adopt` | `session`, `name?` | `{project, slots}` — takes a live session's windows as the declaration |
 | `project_up` | `id` | `{session, created_session, slots: [{window_name, status, error?}]}` |
 | `project_down` | `id` | `{session, live: false}` — kills the session, keeps the declaration |
