@@ -240,9 +240,11 @@ CREATE TABLE snapshots (                   -- 历史可查、可回滚
 );
 ```
 
-snapshot 每次 capture 检测到 diff 时写一条，每 project 保留最近 20 条。
-"历史可查"因此有两个维度：**任务维度**（`task_events` 的时间线 + 归档日志）和
-**环境维度**（`snapshots` 能回滚到某天的窗口布局）。
+> **P0 实施后已删除 `snapshots`。** 实测两天只产生每项目 1 条（纳管那一刻写的，
+> 内容等于当前声明），而且 `restore` 只改声明不投影，活着的项目下一次 capture
+> 就把它覆盖回去。声明本身就是"最后一次观测到的状态"——关闭不动它、重启读回来，
+> 这正是"恢复关掉之前/重启之前的状态"要的东西。任务维度的历史（`task_events`
+> + 归档日志）保留在 P1 计划里。详见 `docs/design-docs/features/projects.md`。
 
 ## 6. 定时任务
 

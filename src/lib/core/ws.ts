@@ -5,7 +5,7 @@
 // contract (docs/requirements/api-contracts/websocket-rpc.md). If a field
 // changes server-side, change it here — every consumer then fails to
 // type-check instead of silently reading `undefined`.
-import type { ProjectRow, SnapshotMeta } from '../projects/projects.ts';
+import type { ProjectRow } from '../projects/projects.ts';
 export interface TmuxSession {
   name: string;
   windows: number;
@@ -730,9 +730,6 @@ export const projectUp = (id: string) => call('project_up', { id });
 export const projectDown = (id: string) => call('project_down', { id });
 export const projectArchive = (id: string, archived = true) => call('project_archive', { id, archived });
 export const projectAutostart = (id: string, autostart: boolean) => call('project_autostart', { id, autostart });
-export const projectSnapshots = (id: string) => call<SnapshotMeta[]>('project_snapshots', { id });
-export const projectRestore = (id: string, snapshotId: number) =>
-  call('project_restore', { id, snapshot_id: snapshotId });
 
 export const teamHistory = (room: string, limit = 100) => call('team_history', { room, limit });
 export const teamRoster = (room: string) => call('team_roster', { room });

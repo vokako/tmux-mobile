@@ -14,7 +14,7 @@ use std::path::Path;
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
@@ -93,14 +93,6 @@ impl Slot {
     pub fn is_settled(&self) -> bool {
         self.settled_at.is_some()
     }
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct SnapshotMeta {
-    pub id: i64,
-    pub at: u64,
-    /// Window names in order — enough for the client to label the entry.
-    pub windows: Vec<String>,
 }
 
 pub struct Store {
@@ -228,6 +220,19 @@ impl Store {
             self.conn
                 .execute_batch("ALTER TABLE slots ADD COLUMN agent_session_id TEXT;")
                 .map_err(|e| format!("migrate to 3: {e}"))?;
+        }
+        if version < 4 {
+            // Topology snapshots are gone. The declaration IS the last observed
+            // state — closing a project does not touch it and a restart reads it
+            // back — so a 20-deep history answered a question nobody had, while
+            // `restore` could not even deliver: it rewrote the declaration
+            // without projecting it, and on a live project the next capture tick
+            // threw that away because live tmux is the truth. Two days of real
+            // use produced exactly one snapshot per project: the one written at
+            // adopt, identical to the current declaration.
+            self.conn
+                .execute_batch("DROP TABLE IF EXISTS snapshots;")
+                .map_err(|e| format!("migrate to 4: {e}"))?;
         }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)
@@ -432,72 +437,6 @@ impl Store {
         tx.commit().map_err(|e| format!("commit slots: {e}"))
     }
 
-    // ---- snapshots ------------------------------------------------------
-
-    /// Append a topology snapshot and prune to the newest `keep` entries.
-    pub fn add_snapshot(&self, project_id: &str, at: u64, slots: &[Slot], keep: usize) -> Result<(), String> {
-        let json = serde_json::to_string(slots).map_err(|e| e.to_string())?;
-        self.conn
-            .execute(
-                "INSERT INTO snapshots (project_id, at, topology_json) VALUES (?1, ?2, ?3)",
-                params![project_id, at as i64, json],
-            )
-            .map_err(|e| format!("insert snapshot: {e}"))?;
-        self.conn
-            .execute(
-                "DELETE FROM snapshots
-                  WHERE project_id = ?1
-                    AND id NOT IN (SELECT id FROM snapshots WHERE project_id = ?1
-                                    ORDER BY at DESC, id DESC LIMIT ?2)",
-                params![project_id, keep as i64],
-            )
-            .map(|_| ())
-            .map_err(|e| format!("prune snapshots: {e}"))
-    }
-
-    pub fn snapshots(&self, project_id: &str) -> Result<Vec<SnapshotMeta>, String> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT id, at, topology_json FROM snapshots
-                  WHERE project_id = ?1 ORDER BY at DESC, id DESC",
-            )
-            .map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map(params![project_id], |r| {
-                let json: String = r.get(2)?;
-                let windows = serde_json::from_str::<Vec<Slot>>(&json)
-                    .map(|s| s.into_iter().map(|s| s.window_name).collect())
-                    .unwrap_or_default();
-                Ok(SnapshotMeta {
-                    id: r.get(0)?,
-                    at: r.get::<_, i64>(1)? as u64,
-                    windows,
-                })
-            })
-            .map_err(|e| e.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("list snapshots: {e}"))
-    }
-
-    /// The slot list stored in a snapshot, verified to belong to `project_id`.
-    pub fn snapshot_slots(&self, project_id: &str, snapshot_id: i64) -> Result<Option<Vec<Slot>>, String> {
-        let json: Option<String> = self
-            .conn
-            .query_row(
-                "SELECT topology_json FROM snapshots WHERE id = ?1 AND project_id = ?2",
-                params![snapshot_id, project_id],
-                |r| r.get(0),
-            )
-            .optional()
-            .map_err(|e| format!("get snapshot: {e}"))?;
-        match json {
-            None => Ok(None),
-            Some(j) => serde_json::from_str::<Vec<Slot>>(&j)
-                .map(Some)
-                .map_err(|e| format!("parse snapshot: {e}")),
-        }
-    }
 }
 
 fn row_to_project(r: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
@@ -585,39 +524,15 @@ mod tests {
     }
 
     #[test]
-    fn snapshots_prune_to_the_newest_and_restore_by_id() {
-        let store = Store::open_memory().unwrap();
-        store.insert_project(&project("alpha")).unwrap();
-        for i in 0..5u64 {
-            store
-                .add_snapshot("alpha", 1000 + i, &[slot(&format!("w{i}"), 0)], 3)
-                .unwrap();
-        }
-        let metas = store.snapshots("alpha").unwrap();
-        assert_eq!(metas.len(), 3, "pruned to keep=3");
-        assert_eq!(metas[0].at, 1004, "newest first");
-        assert_eq!(metas[0].windows, vec!["w4".to_string()]);
-
-        let restored = store.snapshot_slots("alpha", metas[2].id).unwrap().unwrap();
-        assert_eq!(restored[0].window_name, "w2");
-        assert!(
-            store.snapshot_slots("other", metas[0].id).unwrap().is_none(),
-            "a snapshot id from another project must not be readable"
-        );
-    }
-
-    #[test]
-    fn deleting_a_project_takes_its_slots_and_snapshots() {
+    fn deleting_a_project_takes_its_slots() {
         let mut store = Store::open_memory().unwrap();
         store.insert_project(&project("alpha")).unwrap();
         store.replace_slots("alpha", &[slot("shell", 0)]).unwrap();
-        store.add_snapshot("alpha", 1000, &[slot("shell", 0)], 3).unwrap();
         store
             .conn
             .execute("DELETE FROM projects WHERE id = 'alpha'", [])
             .unwrap();
         assert!(store.slots("alpha").unwrap().is_empty());
-        assert!(store.snapshots("alpha").unwrap().is_empty());
     }
 
     #[test]
@@ -673,7 +588,6 @@ mod tests {
         let store = Store::open(&path).unwrap();
         assert_eq!(store.list_projects(false).unwrap().len(), 1, "row carried over");
         assert_eq!(store.slots("old").unwrap().len(), 1, "children survived the rebuild");
-        assert_eq!(store.snapshots("old").unwrap().len(), 1);
 
         let mut second = project("second");
         second.path = "/w/shared".into(); // same directory as `old`

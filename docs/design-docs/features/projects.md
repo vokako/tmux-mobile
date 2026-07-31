@@ -90,29 +90,33 @@ cwd, so it is restored where it was.
 Migrations run with `PRAGMA foreign_keys=OFF` and this is not optional:
 libsqlite3-sys builds its bundled SQLite with `SQLITE_DEFAULT_FOREIGN_KEYS=1`,
 so enforcement is ON by default, and a schema rebuild's `DROP TABLE projects`
-then performs an implicit `DELETE FROM` that cascades every slot and snapshot
-away. The migration test caught exactly that.
+then performs an implicit `DELETE FROM` that cascades every child row away
+(slots, and the snapshots table that existed at the time). The migration test
+caught exactly that.
 
 The reverse direction, `capture.rs`, is why nobody hand-writes a project: a
 20-second loop folds live tmux back into the declaration.
 
-## The two capture rules
+## The capture rule
 
-Both exist because a declaration that remembers everything is as useless as one
-that remembers nothing.
+**A window must survive `SETTLE_SECS` (120 s) before it becomes restorable.**
+The window you opened to grep one file and closed again must not reappear on
+every future `up`. Unsettled slots are still persisted — `first_seen_at` has to
+survive a server restart — but `up` skips them and the UI does not show them as
+windows it will restore. A window that disappears simply leaves the declaration:
+it is not part of the workspace any more.
 
-1. **A window must survive `SETTLE_SECS` (120 s) before it becomes
-   restorable.** The window you opened to grep one file and closed again must
-   not reappear on every future `up`. Unsettled slots are still persisted —
-   `first_seen_at` has to survive a server restart — but `up` skips them and
-   the UI does not show them as windows it will restore.
-2. **A window that disappeared leaves the declaration, but its topology stays
-   in `snapshots`.** So "give me back yesterday's layout" is still answerable
-   without the declaration becoming a graveyard of soft-deleted rows.
-
-A snapshot is written only when the *topology* changed (window set, order, cwd,
-agent), never when a slot merely settled — otherwise every project would
-snapshot itself twice a minute. The newest 20 per project are kept.
+There is no history beyond that, on purpose. **The declaration IS the last
+observed state** — closing a project does not touch it (capture only reads live
+sessions) and a restart reads it back — which is exactly the "state before I
+closed it / before the reboot" people want. A 20-deep topology history existed
+here briefly and was removed: two days of real use produced one snapshot per
+project (the one written at adopt, identical to the current declaration), what
+people actually want back is *content* rather than window names (covered by the
+pane's scrollback and by agent resume), and its `restore` could not deliver
+anyway — it rewrote the declaration without projecting it, so on a live project
+the next capture tick threw the restored rows away. The only real cost of the
+removal: changes in the ≤20 s before a crash are lost.
 
 ## What `up` will and will not run
 
@@ -175,8 +179,8 @@ directory-scoped resume — correct for kiro and claude, a clean start for codex
 
 `state.db` — SQLite, ours, at `$XDG_CONFIG_HOME/tmux-mobile/state.db`
 (`TMM_STATE_DB` overrides it; that is how the tests stay off the real
-database). Tables: `projects`, `slots`, `snapshots`, with
-`PRAGMA user_version` as the migration marker.
+database). Tables: `projects` and `slots`, with `PRAGMA user_version` as the
+migration marker.
 
 Two boundaries worth keeping:
 
@@ -233,7 +237,7 @@ can reach it without a DOM.
   without tmux.
 - The UI flow was exercised in a real browser against a live server: track
   `demoproj` → the session dies on Close → Open rebuilds `editor` and `api` at
-  their original directories → the layout-history menu lists the snapshot.
+  their original directories.
 - Resume was verified with a real agent, not a mock: a kiro conversation was
   told to remember the word PINEAPPLE, the session was tracked, killed and
   reopened, and the restored agent — in a brand-new pane — answered PINEAPPLE
@@ -244,7 +248,7 @@ can reach it without a DOM.
 
 - `autostart` is stored but nothing acts on it yet (decision 3: manual restore
   first).
-- A window renamed by hand looks like "old window gone, new window appeared" —
-  the old one's history stays in snapshots, the new one has to settle again.
+- A window renamed by hand looks like "old window gone, new window appeared":
+  the old slot leaves the declaration and the new one has to settle again.
 - `up` restores windows, not panes: a split layout inside a window is not part
   of the declaration.

@@ -473,7 +473,7 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
         // Android/iOS, where these methods report method-not-found and the
         // client hides the page (same contract as the team_* methods).
         "project_list" | "project_create" | "project_adopt" | "project_up" | "project_down"
-        | "project_archive" | "project_autostart" | "project_snapshots" | "project_restore" => {
+        | "project_archive" | "project_autostart" => {
             handle_project_request(req.method.as_str(), id, p)
         }
 
@@ -535,13 +535,6 @@ fn handle_project_request(method: &str, id: Option<u64>, p: &serde_json::Value) 
         "project_autostart" => {
             need_id("id").and_then(|id| projects::set_autostart(&id, flag("autostart", true)))
         }
-        "project_snapshots" => need_id("id").and_then(|id| projects::snapshots(&id)),
-        "project_restore" => need_id("id").and_then(|id| {
-            match p.get("snapshot_id").and_then(|v| v.as_i64()) {
-                Some(snapshot_id) => projects::restore(&id, snapshot_id),
-                None => Err("missing required param: snapshot_id".into()),
-            }
-        }),
         other => Err(format!("unknown project method: {other}")),
     };
 

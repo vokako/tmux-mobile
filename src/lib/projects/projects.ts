@@ -37,12 +37,6 @@ export interface ProjectRow {
   live: boolean;
 }
 
-export interface SnapshotMeta {
-  id: number;
-  at: number;
-  windows: string[];
-}
-
 /** A window the user can expect back after `up` (see capture::SETTLE_SECS). */
 export function isRestorable(slot: Slot): boolean {
   return typeof slot.settled_at === 'number';

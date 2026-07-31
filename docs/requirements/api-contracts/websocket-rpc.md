@@ -110,8 +110,6 @@ Projects section hides itself when these return -32601. See
 | `project_down` | `id` | `{session, live: false}` — kills the session, keeps the declaration |
 | `project_archive` | `id`, `archived?` | Hides/unhides without deleting |
 | `project_autostart` | `id`, `autostart?` | Flag only; no boot integration yet |
-| `project_snapshots` | `id` | `[{id, at, windows}]`, newest first (last 20 kept) |
-| `project_restore` | `id`, `snapshot_id` | Replaces the declaration with that topology (call `project_up` after) |
 
 ### Team (desktop-only — method-not-found on servers without the bus)
 All chat operations are scoped to a team `room`; `team_status` / `team_teams`

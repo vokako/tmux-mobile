@@ -12,12 +12,10 @@
     projectArchive,
     projectDown,
     projectList,
-    projectRestore,
-    projectSnapshots,
     projectUp,
   } from '../core/ws.ts';
   import type { TmuxPane } from '../core/ws.ts';
-  import type { ProjectRow, SnapshotMeta } from './projects.ts';
+  import type { ProjectRow } from './projects.ts';
   import { ageLabel, declaredWindowChips, liveWindowChips, shortPath, sortRows } from './projects.ts';
   import { notificationForWindow } from '../core/agent-notifications.svelte.ts';
   import Icon from '../ui/Icon.svelte';
@@ -38,8 +36,7 @@
   let supported = $state(true);
   let error = $state('');
   let busy = $state<Record<string, boolean>>({});
-  let menuFor = $state<string | null>(null);
-  let snapshots = $state<SnapshotMeta[]>([]);
+  let confirmRemove = $state<string | null>(null);
   let collapsed = $state(false);
 
   const sorted = $derived(sortRows(rows));
@@ -127,16 +124,7 @@
     if (pane) openTerminal(row.project.session, `${pane.session}:${pane.window}.${pane.pane}`, pane.current_command);
   }
 
-  async function toggleMenu(id: string) {
-    if (menuFor === id) { menuFor = null; return; }
-    menuFor = id;
-    snapshots = [];
-    try {
-      snapshots = (await projectSnapshots(id)) ?? [];
-    } catch (e) {
-      error = (e as Error)?.message || String(e);
-    }
-  }
+
 
 </script>
 
@@ -173,8 +161,26 @@
               {:else}
                 <button class="act primary" disabled={busy[row.project.id]} onclick={() => run(row.project.id, () => projectUp(row.project.id))}>{t('projectUp')}</button>
               {/if}
-              <button class="act icon" aria-label={t('projectHistory')} onclick={() => toggleMenu(row.project.id)}>
-                <Icon name="clock" size={13} />
+              <!-- Two taps, because there is no un-remove in the UI and the
+                   server never auto-tracks a removed session again. The session
+                   itself is left alone — this forgets the declaration, it does
+                   not kill anything. -->
+              <button
+                class="act icon"
+                class:confirm={confirmRemove === row.project.id}
+                disabled={busy[row.project.id]}
+                aria-label={t('projectArchive')}
+                title={t('projectArchive')}
+                onclick={() => {
+                  if (confirmRemove !== row.project.id) { confirmRemove = row.project.id; return; }
+                  confirmRemove = null;
+                  void run(row.project.id, () => projectArchive(row.project.id, true));
+                }}>
+                {#if confirmRemove === row.project.id}
+                  <span class="confirm-text">{t('projectArchiveConfirm')}</span>
+                {:else}
+                  <Icon name="x" size={13} />
+                {/if}
               </button>
             </div>
           </div>
@@ -201,29 +207,6 @@
           {/if}
         </div>
 
-        {#if menuFor === row.project.id}
-          <div class="menu">
-            <div class="menu-title">{t('projectHistory')}</div>
-            {#if snapshots.length === 0}
-              <div class="menu-empty">{t('projectNoHistory')}</div>
-            {:else}
-              {#each snapshots as snap (snap.id)}
-                <button
-                  class="snap"
-                  onclick={() => run(row.project.id, async () => { await projectRestore(row.project.id, snap.id); menuFor = null; })}>
-                  <span class="snap-age">{ageLabel(snap.at)}</span>
-                  <span class="snap-windows">{snap.windows.join(' · ') || '—'}</span>
-                  <span class="snap-action">{t('projectRestore')}</span>
-                </button>
-              {/each}
-            {/if}
-            <button
-              class="menu-danger"
-              onclick={() => run(row.project.id, async () => { await projectArchive(row.project.id, true); menuFor = null; })}>
-              {t('projectArchive')}
-            </button>
-          </div>
-        {/if}
       {/each}
 
       {#if error}
@@ -309,26 +292,11 @@
   .act.primary { color: var(--accent); border-color: var(--accent-bg); }
   .act.icon { padding: 0 7px; display: flex; align-items: center; }
 
-  .menu {
-    display: flex; flex-direction: column; gap: 2px;
-    background: var(--surface2); border: 1px solid var(--border);
-    border-radius: var(--ui-radius-panel, 8px); padding: 6px;
+  .act.icon.confirm {
+    color: var(--danger); border-color: var(--danger);
+    padding: 0 8px;
   }
-  .menu-title, .menu-empty { font-size: 10px; color: var(--text3); padding: 0 2px 2px; }
-  .snap {
-    display: flex; align-items: center; gap: 8px;
-    background: none; border: 0; padding: 4px 2px; cursor: pointer;
-    color: var(--text2); font-family: var(--font-mono); font-size: 11px; text-align: left;
-  }
-  .snap:hover { color: var(--text); }
-  .snap-age { flex-shrink: 0; width: 34px; color: var(--text3); }
-  .snap-windows { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .snap-action { flex-shrink: 0; font-size: 10px; color: var(--accent); }
-  .menu-danger {
-    margin-top: 4px; align-self: flex-start;
-    background: none; border: 0; padding: 4px 2px; cursor: pointer;
-    color: var(--danger); font-family: var(--font-ui); font-size: 11px;
-  }
+  .confirm-text { font-family: var(--font-ui); font-size: 10.5px; white-space: nowrap; }
 
   .err {
     color: var(--danger); background: var(--danger-bg);

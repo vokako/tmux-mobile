@@ -1,15 +1,14 @@
 //! tmux → declaration. The reverse direction of `reconcile`.
 //!
 //! Nobody hand-writes a project: we watch the sessions we already know about
-//! and fold what we see back into the declaration. Two rules keep the
-//! declaration honest (exec plan §3):
+//! and fold what we see back into the declaration, which is therefore always
+//! the LAST OBSERVED state — that is what makes "close it and reopen it later"
+//! and "survive a reboot" work, with no history to keep.
 //!
-//! * a window must survive `SETTLE_SECS` before it is worth restoring — the
-//!   window you opened to grep something and closed again must not come back
-//!   on every future `up`;
-//! * a window that disappeared is dropped from the declaration, but the
-//!   topology it belonged to stays in `snapshots`, so "give me back yesterday's
-//!   layout" is still answerable.
+//! One rule keeps the declaration honest (exec plan §3): a window must survive
+//! `SETTLE_SECS` before it is worth restoring, so the window you opened to grep
+//! something and closed again does not come back on every future `up`. A window
+//! that disappears simply leaves the declaration.
 
 use super::agents;
 use super::store::{Slot, SlotKind};
@@ -17,8 +16,6 @@ use crate::tmux::{self, TmuxPane};
 
 /// How long a window must exist before it enters the declaration.
 pub const SETTLE_SECS: u64 = 120;
-/// Topology snapshots kept per project.
-pub const SNAPSHOT_KEEP: usize = 20;
 
 /// What a live window looks like right now.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,10 +50,7 @@ impl AgentSessions for NoSessions {
 /// Result of folding observation into the declaration.
 pub struct Merge {
     pub slots: Vec<Slot>,
-    /// The window set / cwd / agent changed — worth a snapshot.
-    pub topology_changed: bool,
-    /// Something changed at all (including a slot merely settling), so the
-    /// declaration must be written back.
+    /// Something changed, so the declaration must be written back.
     pub dirty: bool,
 }
 
@@ -128,7 +122,6 @@ pub fn relative_cwd(cwd: &str, project_path: &str) -> String {
 /// without a tmux server.
 pub fn merge(existing: &[Slot], observed: &[Observed], now: u64, settle_secs: u64) -> Merge {
     let mut slots = Vec::with_capacity(observed.len());
-    let mut topology_changed = false;
     let mut dirty = false;
 
     for (ord, obs) in observed.iter().enumerate() {
@@ -142,16 +135,13 @@ pub fn merge(existing: &[Slot], observed: &[Observed], now: u64, settle_secs: u6
                     .clone()
                     .or_else(|| prev.agent_session_id.clone())
                     .filter(|_| obs.kind == SlotKind::Agent);
-                let moved_or_changed = prev.ord != ord
+                let changed = prev.ord != ord
                     || prev.cwd != obs.cwd
                     || prev.kind != obs.kind
-                    || prev.command != obs.command;
-                let learned_session = prev.agent_session_id != agent_session_id;
+                    || prev.command != obs.command
+                    || prev.agent_session_id != agent_session_id;
                 let settles_now = prev.settled_at.is_none() && now - prev.first_seen_at >= settle_secs;
-                if moved_or_changed {
-                    topology_changed = true;
-                }
-                if moved_or_changed || settles_now || learned_session {
+                if changed || settles_now {
                     dirty = true;
                 }
                 slots.push(Slot {
@@ -169,9 +159,8 @@ pub fn merge(existing: &[Slot], observed: &[Observed], now: u64, settle_secs: u6
             }
             None => {
                 dirty = true;
-                // A brand-new window is remembered but not yet restorable, so
-                // it is not a topology change either — it becomes one when it
-                // settles.
+                // A brand-new window is remembered so its age survives a server
+                // restart, but it is not restorable until it settles.
                 slots.push(Slot {
                     id: None,
                     ord,
@@ -190,16 +179,13 @@ pub fn merge(existing: &[Slot], observed: &[Observed], now: u64, settle_secs: u6
 
     for prev in existing {
         if !observed.iter().any(|o| o.window_name == prev.window_name) {
+            // A window that is gone simply leaves the declaration: it is no
+            // longer part of the workspace, so `up` must not recreate it.
             dirty = true;
-            // Losing a settled window changes the topology; losing one that
-            // never settled is the throwaway window we promised to ignore.
-            if prev.is_settled() {
-                topology_changed = true;
-            }
         }
     }
 
-    Merge { slots, topology_changed, dirty }
+    Merge { slots, dirty }
 }
 
 #[cfg(test)]
@@ -264,13 +250,12 @@ mod tests {
     }
 
     #[test]
-    fn a_new_window_is_remembered_unsettled_and_is_not_a_topology_change() {
+    fn a_new_window_is_remembered_but_not_restorable_yet() {
         let m = merge(&[], &[obs("shell", "")], 1_000, 120);
         assert_eq!(m.slots.len(), 1);
         assert_eq!(m.slots[0].first_seen_at, 1_000);
         assert!(!m.slots[0].is_settled(), "not restorable yet");
         assert!(m.dirty, "must be persisted so first_seen_at survives a restart");
-        assert!(!m.topology_changed, "no snapshot for a window that may vanish");
     }
 
     #[test]
@@ -283,35 +268,33 @@ mod tests {
         let late = merge(&existing, &[obs("shell", "")], 1_120, 120);
         assert_eq!(late.slots[0].settled_at, Some(1_120));
         assert!(late.dirty);
-        assert!(!late.topology_changed, "settling alone is not a new topology");
     }
 
     #[test]
-    fn a_throwaway_window_leaves_no_trace_but_a_settled_one_is_a_change() {
-        let unsettled = vec![slot("shell", 0, 1_000, None)];
-        let gone = merge(&unsettled, &[], 1_200, 120);
-        assert!(gone.slots.is_empty());
-        assert!(gone.dirty);
-        assert!(!gone.topology_changed, "the grep window must not spam snapshots");
-
-        let settled = vec![slot("shell", 0, 1_000, Some(1_120))];
-        let lost = merge(&settled, &[], 1_300, 120);
-        assert!(lost.topology_changed, "losing a real window is history worth keeping");
+    fn a_window_that_is_gone_leaves_the_declaration() {
+        for existing in [
+            vec![slot("shell", 0, 1_000, None)],          // never settled
+            vec![slot("shell", 0, 1_000, Some(1_120))],   // was restorable
+        ] {
+            let gone = merge(&existing, &[], 1_300, 120);
+            assert!(gone.slots.is_empty(), "up must not recreate a window you closed");
+            assert!(gone.dirty);
+        }
     }
 
     #[test]
-    fn reordering_and_moving_cwd_are_topology_changes() {
+    fn reordering_and_moving_cwd_are_written_back() {
         let existing = vec![slot("a", 0, 1_000, Some(1_120)), slot("b", 1, 1_000, Some(1_120))];
         let same = merge(&existing, &[obs("a", ""), obs("b", "")], 1_400, 120);
         assert!(!same.dirty, "an unchanged capture writes nothing");
 
         let swapped = merge(&existing, &[obs("b", ""), obs("a", "")], 1_400, 120);
-        assert!(swapped.topology_changed);
+        assert!(swapped.dirty);
         assert_eq!(swapped.slots[0].window_name, "b");
         assert_eq!(swapped.slots[0].ord, 0);
 
         let moved = merge(&existing, &[obs("a", "src"), obs("b", "")], 1_400, 120);
-        assert!(moved.topology_changed);
+        assert!(moved.dirty);
         assert_eq!(moved.slots[0].cwd, "src");
     }
 
@@ -327,7 +310,7 @@ mod tests {
             agent_session_id: None,
         }];
         let m = merge(&existing, &observed, 1_500, 120);
-        assert!(m.topology_changed);
+        assert!(m.dirty);
         assert_eq!(m.slots[0].kind, SlotKind::Agent);
         assert!(m.slots[0].auto_run, "agents are relaunched, shells are not");
         assert_eq!(m.slots[0].first_seen_at, 1_000, "age is not reset by a change");

@@ -285,7 +285,6 @@ fn adopt_in(
         })
         .collect();
     store.replace_slots(&id, &slots)?;
-    store.add_snapshot(&id, ts, &slots, capture::SNAPSHOT_KEEP)?;
     Ok(json!({ "project": project, "slots": slots }))
 }
 
@@ -354,31 +353,6 @@ pub fn set_autostart(id: &str, autostart: bool) -> Result<Value, String> {
     with_store(|store| {
         store.set_autostart(id, autostart)?;
         Ok(json!({ "id": id, "autostart": autostart }))
-    })
-}
-
-pub fn snapshots(id: &str) -> Result<Value, String> {
-    with_store(|store| Ok(json!(store.snapshots(id)?)))
-}
-
-/// Replace the declaration with a stored topology. The session is left alone —
-/// call `up` afterwards to project the restored declaration onto tmux.
-pub fn restore(id: &str, snapshot_id: i64) -> Result<Value, String> {
-    let ts = now();
-    with_store(|store| {
-        let slots = store
-            .snapshot_slots(id, snapshot_id)?
-            .ok_or_else(|| format!("snapshot {snapshot_id} not found for {id}"))?;
-        let slots: Vec<Slot> = slots
-            .into_iter()
-            .map(|mut s| {
-                s.id = None;
-                s.settled_at = Some(ts);
-                s
-            })
-            .collect();
-        store.replace_slots(id, &slots)?;
-        Ok(json!({ "id": id, "slots": slots }))
     })
 }
 
@@ -482,13 +456,6 @@ pub fn capture_once() -> Result<Vec<String>, String> {
                 continue;
             }
             store.replace_slots(&project.id, &merged.slots)?;
-            if merged.topology_changed {
-                let settled: Vec<Slot> =
-                    merged.slots.iter().filter(|s| s.is_settled()).cloned().collect();
-                if !settled.is_empty() {
-                    store.add_snapshot(&project.id, ts, &settled, capture::SNAPSHOT_KEEP)?;
-                }
-            }
             touched.push(project.id);
         }
         Ok(touched)
@@ -711,13 +678,6 @@ mod tests {
         assert_eq!(windows.len(), 2, "declaration rebuilt the topology: {windows:?}");
         assert!(windows.contains(&"editor".to_string()));
         assert!(windows.contains(&"api".to_string()));
-
-        // A snapshot exists from the adopt, and restoring it is a no-op here.
-        let snaps = snapshots(&id).unwrap();
-        let snaps = snaps.as_array().unwrap();
-        assert_eq!(snaps.len(), 1);
-        restore(&id, snaps[0]["id"].as_i64().unwrap()).unwrap();
-        assert_eq!(with_store(|s| s.slots(&id)).unwrap().len(), 2);
 
         // Capturing a live project must not disturb a settled declaration.
         capture_once().unwrap();

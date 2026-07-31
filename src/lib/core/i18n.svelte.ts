@@ -26,9 +26,7 @@ const msgs: Record<string, Record<string, string>> = {
     projectNew: 'New Project',
     projectAgentOpt: 'Agent (optional)',
     projectArchive: 'Remove from projects',
-    projectHistory: 'Layout history',
-    projectNoHistory: 'No saved layouts yet',
-    projectRestore: 'Restore',
+    projectArchiveConfirm: 'Tap to remove',
     projectNoWindows: 'no restorable windows yet',
 
     theme: 'Theme',
@@ -242,9 +240,7 @@ const msgs: Record<string, Record<string, string>> = {
     projectNew: '新建项目',
     projectAgentOpt: 'Agent（可选）',
     projectArchive: '从项目中移除',
-    projectHistory: '布局历史',
-    projectNoHistory: '还没有保存的布局',
-    projectRestore: '恢复',
+    projectArchiveConfirm: '再点一次移除',
     projectNoWindows: '还没有可恢复的窗口',
 
     theme: '主题',
