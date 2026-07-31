@@ -25,6 +25,10 @@ path = "src/main.rs"
 name = "server"
 path = "src/bin/server.rs"
 
+[[bin]]
+name = "tmm"
+path = "src/bin/tmm.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

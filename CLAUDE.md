@@ -79,6 +79,7 @@ gradle build-dir symlink if it dangles and prints the real APK path.
 - [xterm.js Build-Time Patch](docs/design-docs/features/xterm-patch.md)
 - [Team / multi-agent bus](docs/design-docs/features/team.md)
 - [Projects (declarative workspaces)](docs/design-docs/features/projects.md)
+- [tmm CLI + project hub (agents-v2)](docs/design-docs/features/tmm-cli.md)
 
 ### Other
 - [Testing Conventions](docs/conventions/testing.md)

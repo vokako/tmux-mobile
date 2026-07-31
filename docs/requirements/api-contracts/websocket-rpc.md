@@ -111,6 +111,20 @@ Projects section hides itself when these return -32601. See
 | `project_archive` | `id`, `archived?` | Hides/unhides without deleting |
 | `project_autostart` | `id`, `autostart?` | Flag only; no boot integration yet |
 
+### Project Hub (desktop-only — the `tmm` CLI's surface)
+One chat room per project on the bus (`proj:<session>`), agent status
+declarations, derived agent states. Consumed by the `tmm` CLI (agents and
+humans) and the desktop hub UI. See
+[`docs/design-docs/features/tmm-cli.md`](../../design-docs/features/tmm-cli.md).
+
+| Method | Params | Response |
+|--------|--------|----------|
+| `hub_post` | `session`, `body`, `from?` (default `human`), `requires_reply?` | The stored message |
+| `hub_log` | `session`, `since_ts?` (exclusive, epoch ms), `limit?` | `{messages: […]}` |
+| `hub_status` | `session`, `agent` (window name), `state` (`working\|waiting\|blocked`), `note?` | `{ok, window}` |
+| `hub_done` | `session`, `agent`, `summary?` | `{ok, window}` — also posts `✔ done` to the room |
+| `hub_agents` | `session` | `{agents: [{window, name, command, agent, state, detail, since}]}` |
+
 ### Team (desktop-only — method-not-found on servers without the bus)
 All chat operations are scoped to a team `room`; `team_status` / `team_teams`
 are team-agnostic. The Team tab hides itself when these return -32601.

@@ -12,6 +12,7 @@ pub mod agents;
 pub mod capture;
 pub mod reconcile;
 pub mod store;
+pub mod telemetry;
 
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};

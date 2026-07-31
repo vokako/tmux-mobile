@@ -159,6 +159,10 @@ impl AgentNotificationHub {
         let normalized = normalize(&envelope)?;
         let (session, window, pane) = tmux::resolve_pane_id(&envelope.pane_id)?;
         let timestamp = unix_seconds();
+        // Feed the telemetry channel BEFORE dedupe: dedupe is a notification-UI
+        // concern; status derivation wants every observed fact.
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        crate::projects::telemetry::record_notification(&session, window, &normalized.kind, timestamp);
         let item = AgentNotification {
             id: format!("{}-{}-{}", timestamp, std::process::id(), pane),
             agent: normalized.agent,

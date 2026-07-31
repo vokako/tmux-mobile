@@ -11,6 +11,7 @@ use wire::HalfCipher;
 mod download;
 use download::{looks_like_dl_request, handle_http_download};
 mod team_rpc;
+mod hub_rpc;
 mod rpc;
 mod connection;
 pub use connection::handle_connection;
@@ -75,6 +76,10 @@ pub trait TeamBridge: Send + Sync {
     /// pre-serialized to a JSON string (the `room` field is inside each
     /// message). The client filters to the team currently in view.
     fn subscribe(&self) -> tokio::sync::broadcast::Receiver<String>;
+    /// Open (or re-open) a plain chat room on the bus — no tmux session, no
+    /// roster, no supervisor. This is the project-hub substrate: room id is
+    /// `proj:<session>` and the caller owns that convention. Idempotent.
+    fn open_room(&self, room: &str) -> Result<(), String>;
 }
 
 pub type OptTeam = Option<Arc<dyn TeamBridge>>;

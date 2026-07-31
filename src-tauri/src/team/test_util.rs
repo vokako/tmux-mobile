@@ -37,6 +37,7 @@ impl TeamBridge for RecordingBridge {
     fn subscribe(&self) -> tokio::sync::broadcast::Receiver<String> {
         tokio::sync::broadcast::channel(1).1
     }
+    fn open_room(&self, _room: &str) -> Result<(), String> { Ok(()) }
 }
 
 pub(super) fn cfg() -> TeamConfig {

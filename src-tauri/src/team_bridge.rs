@@ -22,6 +22,9 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 use tokio::sync::broadcast;
 
 const SESSION_PREFIX: &str = "tmm-team-";
+/// Rooms with this prefix are project hubs (agents-v2), not teams: they get
+/// bus storage + push but never a tmux session, roster seeding or supervisor.
+const PROJECT_ROOM_PREFIX: &str = "proj:";
 
 /// One live team: its bus + launch metadata.
 struct Team {
@@ -475,6 +478,9 @@ impl TeamBridge for TeamManager {
         let teams = self.teams.lock().unwrap();
         let list: Vec<serde_json::Value> = teams
             .values()
+            // Project hub rooms live on the same bus but are NOT teams: no
+            // tmux session, no roster. Keep them out of the Team switcher.
+            .filter(|t| !t.session.strip_prefix(SESSION_PREFIX).unwrap_or(&t.session).starts_with(PROJECT_ROOM_PREFIX))
             .map(|t| {
                 let agents = t.bus.roster().map(|r| r.iter().filter(|a| a.status != "offline").count()).unwrap_or(0);
                 serde_json::json!({
@@ -518,6 +524,17 @@ impl TeamBridge for TeamManager {
 
     fn subscribe(&self) -> broadcast::Receiver<String> {
         self.json_tx.subscribe()
+    }
+
+    fn open_room(&self, room: &str) -> Result<(), String> {
+        if !room.starts_with(PROJECT_ROOM_PREFIX) {
+            return Err(format!("open_room only serves {PROJECT_ROOM_PREFIX}* rooms, got '{room}'"));
+        }
+        // Empty workspace → no .tmm history mirror in the project dir; the
+        // chat log lives in team.db like every other room. recover() skips
+        // these rooms (no tmux session), which is fine: they are re-opened on
+        // the next post/read.
+        self.ensure_room(room, "", "project").map(|_| ()).map_err(|e| e.to_string())
     }
 }
 

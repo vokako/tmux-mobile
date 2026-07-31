@@ -254,6 +254,9 @@ mod tests {
             let _ = tx; // keep the sender alive only as long as needed for the type
             rx
         }
+        fn open_room(&self, _room: &str) -> Result<(), String> {
+            Ok(())
+        }
     }
 
     #[test]

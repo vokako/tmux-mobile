@@ -182,6 +182,31 @@ pub fn session_created_times() -> Vec<(String, u64)> {
         .collect()
 }
 
+/// (window index, last activity unix seconds) for every window of `session`.
+/// The telemetry fallback signal: a backend with no tool hooks still shows
+/// "working" while its pane produces output.
+pub fn window_activity_times(session: &str) -> Vec<(usize, u64)> {
+    let out = match run_tmux(&[
+        "list-windows",
+        "-t",
+        session,
+        "-F",
+        "#{window_index}<TMM_SEP>#{window_activity}",
+    ]) {
+        Ok(out) => out,
+        Err(_) => return Vec::new(),
+    };
+    out.lines()
+        .filter_map(|line| {
+            let mut it = line.split("<TMM_SEP>");
+            match (it.next(), it.next()) {
+                (Some(idx), Some(ts)) => Some((idx.parse().ok()?, ts.parse().unwrap_or(0))),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
 /// 列出某个 session 的所有 pane
 pub fn list_panes(session: &str) -> Result<Vec<TmuxPane>, String> {
     let output = run_tmux(&[

@@ -541,6 +541,7 @@ where
                             handle_unsubscribe(&req.params, &mut map)
                         }
                         m if m.starts_with("team_") => handle_team_request(&req, team_c.as_deref()),
+                        m if m.starts_with("hub_") => super::hub_rpc::handle_hub_request(&req, team_c.as_deref()),
                         m if m.starts_with("agent_notifications_") || m.starts_with("agent_hooks_") => handle_notification_request(&req, &notifications_c),
                         "resize_pane" => {
                             let id = req.id;
