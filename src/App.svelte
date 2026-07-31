@@ -68,6 +68,9 @@
   // beats kicking the user off the tab they were on.
   $effect(() => {
     if (page === 'team' && teamState.probed && !teamState.available) page = 'sessions';
+    // Same for the Hub: it needs the bus AND desktop width. Only redirect once
+    // the probe answered (or the client is simply not hub-shaped).
+    if (page === 'hub' && ((teamState.probed && !teamState.available) || layout.isTouchDevice)) page = 'sessions';
   });
 
   // ─── Split-screen (desktop + wide only) ────────────────────────────────
@@ -84,6 +87,14 @@
   const SPLIT_MIN_WIDTH = 900;
   let wideEnough = $state(typeof window !== 'undefined' && window.innerWidth >= SPLIT_MIN_WIDTH);
   let splitEligible = $derived(!layout.isTouchDevice && (layout.forceDesktop || wideEnough));
+  // Overlay geometry vars for fixed-position panels (Preferences): they must
+  // clear whatever shell chrome exists — top bar when disconnected, the left
+  // rail on connected desktop, nothing on connected mobile.
+  $effect(() => {
+    const root = document.documentElement.style;
+    root.setProperty('--shell-top', connected ? '0px' : '49px');
+    root.setProperty('--shell-left', connected && !layout.isTouchDevice ? '46px' : '0px');
+  });
   // The Hub is the desktop three-column view: needs a wide non-touch client
   // AND the server-side bus (hub_* degrades method-not-found without it, same
   // probe as Team).
@@ -789,9 +800,9 @@
             activeCellId = s.splitCells[0]?.id ?? null;
           }
         } else {
-          page = 'sessions';
+          page = layout.isTouchDevice ? 'sessions' : 'hub';
         }
-      } catch { page = 'sessions'; }
+      } catch { page = layout.isTouchDevice ? 'sessions' : 'hub'; }
     }).catch(() => {
       clearTimeout(timeout);
       page = 'settings';
@@ -892,35 +903,15 @@
   });
 </script>
 
-<main>
-  <nav>
-    {#if connected}
-      <img class="nav-icon" src={iconSrc} alt="" width="28" height="28" />
-      <div class="nav-pills">
-        <button tabindex="-1" class:active={page === 'sessions'} onclick={() => switchTab('sessions')}>
-          {t('sessions')}
-        </button>
-        {#if hubEligible}
-          <button tabindex="-1" class:active={page === 'hub'} onclick={() => switchTab('hub')}>
-            {t('hub')}
-          </button>
-        {/if}
-        <button tabindex="-1" class:active={page === 'terminal'} onclick={() => switchTab('terminal')}>
-          {t('terminal')}
-        </button>
-        {#if teamAvailable}
-          <button tabindex="-1" class:active={page === 'team'} onclick={() => switchTab('team')}>
-            {t('team')}
-          </button>
-        {/if}
-        <button tabindex="-1" class:active={page === 'files'} onclick={() => switchTab('files')}>
-          {t('files')}
-        </button>
-      </div>
-      <div class="nav-right">
-        <button tabindex="-1" class="gear-btn" class:active={showSettings} onclick={() => showSettings = !showSettings}><Icon name="gear" size={16} /></button>
-      </div>
-    {:else}
+<main class:with-rail={connected && !layout.isTouchDevice}>
+  <!-- Shell chrome. Three shapes, one per context (docs/design-docs/features/app-shell.md):
+       · connected desktop  → a left icon RAIL (the whole top bar is gone —
+         vertical space goes to the terminal, switching is one always-visible click)
+       · connected mobile   → a bottom TAB BAR in thumb reach, hidden while the
+         keyboard is up (html.keyboard-open) so immersive typing costs nothing
+       · disconnected       → the top brand bar with the gear (both platforms) -->
+  {#if !connected}
+    <nav class="topbar">
       <div class="brand">
         <img class="logo" src={iconSrc} alt="" width="24" height="24" />
         <span class="brand-text">tmux<span class="brand-accent">mobile</span></span>
@@ -928,8 +919,23 @@
       <div class="nav-right">
         <button tabindex="-1" class="gear-btn" class:active={showSettings} onclick={() => showSettings = !showSettings}><Icon name="gear" size={16} /></button>
       </div>
-    {/if}
-  </nav>
+    </nav>
+  {:else if !layout.isTouchDevice}
+    <nav class="rail">
+      <img class="rail-brand" src={iconSrc} alt="" width="26" height="26" />
+      {#if hubEligible}
+        <button tabindex="-1" class="rail-btn" class:active={page === 'hub'} title={t('hub')} onclick={() => switchTab('hub')}><Icon name="layout" size={17} /></button>
+      {/if}
+      <button tabindex="-1" class="rail-btn" class:active={page === 'sessions'} title={t('sessions')} onclick={() => switchTab('sessions')}><Icon name="sessions" size={17} /></button>
+      <button tabindex="-1" class="rail-btn" class:active={page === 'terminal'} title={t('terminal')} onclick={() => switchTab('terminal')}><Icon name="terminal" size={17} /></button>
+      {#if teamAvailable}
+        <button tabindex="-1" class="rail-btn" class:active={page === 'team'} title={t('team')} onclick={() => switchTab('team')}><Icon name="collab" size={17} /></button>
+      {/if}
+      <button tabindex="-1" class="rail-btn" class:active={page === 'files'} title={t('files')} onclick={() => switchTab('files')}><Icon name="files" size={17} /></button>
+      <div class="rail-spacer"></div>
+      <button tabindex="-1" class="rail-btn" class:active={showSettings} title={t('settings')} onclick={() => showSettings = !showSettings}><Icon name="gear" size={17} /></button>
+    </nav>
+  {/if}
 
   {#if showSettings}
     <Preferences {connected} {theme} {fontSize} {debugMode} {serverInfo} {activeAddress} addresses={prefAddresses}
@@ -1070,6 +1076,27 @@
   {/if}
 
   <InstallPrompt />
+  {#if connected && layout.isTouchDevice}
+    <nav class="tabbar">
+      <button tabindex="-1" class:active={page === 'sessions'} onclick={() => switchTab('sessions')}>
+        <Icon name="sessions" size={19} /><span>{t('sessions')}</span>
+      </button>
+      <button tabindex="-1" class:active={page === 'terminal'} onclick={() => switchTab('terminal')}>
+        <Icon name="terminal" size={19} /><span>{t('terminal')}</span>
+      </button>
+      {#if teamAvailable}
+        <button tabindex="-1" class:active={page === 'team'} onclick={() => switchTab('team')}>
+          <Icon name="collab" size={19} /><span>{t('team')}</span>
+        </button>
+      {/if}
+      <button tabindex="-1" class:active={page === 'files'} onclick={() => switchTab('files')}>
+        <Icon name="files" size={19} /><span>{t('files')}</span>
+      </button>
+      <button tabindex="-1" class:active={showSettings} onclick={() => showSettings = !showSettings}>
+        <Icon name="gear" size={19} /><span>{t('settings')}</span>
+      </button>
+    </nav>
+  {/if}
 </main>
 
 <style>
@@ -1138,7 +1165,8 @@
     background: linear-gradient(180deg, var(--bg) 0%, var(--bg2) 50%, var(--bg3) 100%);
   }
 
-  nav {
+  /* Disconnected top bar (brand + gear), both platforms. */
+  .topbar {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -1150,38 +1178,59 @@
     z-index: 10;
   }
 
-  .nav-pills {
+  /* Connected desktop: the left icon rail. The top bar is gone — every page
+     gets its vertical space back and switching is one always-visible click. */
+  .rail {
+    position: fixed;
+    left: 0; top: 0; bottom: 0;
+    width: 46px;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 2px;
-    background: var(--pill-bg);
-    border-radius: 10px;
-    padding: 2px;
+    gap: 4px;
+    padding: 10px 0 12px;
+    background: var(--nav-bg);
+    border-right: 1px solid var(--border);
+    z-index: 12;
   }
-  .nav-icon { margin-right: 6px; flex-shrink: 0; margin-top: -2px; margin-bottom: -2px; }
-
-  .nav-pills button {
-    padding: 7px 10px;
-    border: none;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--text2);
-    cursor: pointer;
-    font-size: 13px;
-    font-weight: 500;
-    transition: all 0.2s ease;
+  .rail-brand { border-radius: 7px; margin-bottom: 8px; flex: none; }
+  .rail-btn {
+    width: 34px; height: 32px;
+    display: grid; place-items: center;
+    border: none; border-radius: 9px; background: none;
+    color: var(--text3); cursor: pointer;
+    transition: color 160ms, background 160ms;
     -webkit-tap-highlight-color: transparent;
+  }
+  .rail-btn:hover { color: var(--text); background: var(--surface2); }
+  .rail-btn.active { color: var(--accent); background: var(--accent-bg); }
+  .rail-spacer { flex: 1; }
+  main.with-rail { padding-left: 46px; }
+
+  /* Connected mobile: bottom tab bar in thumb reach. Hidden while the
+     keyboard is up so immersive typing (terminal, editor) costs nothing —
+     the ONLY writer of that class is App's viewport handler. */
+  .tabbar {
     display: flex;
-    align-items: center;
-    white-space: nowrap;
+    align-items: stretch;
+    flex-shrink: 0;
+    background: var(--nav-bg);
+    border-top: 1px solid var(--border);
+    padding-bottom: var(--sab);
+    z-index: 10;
   }
-  .nav-pills button:active { transform: scale(0.97); }
-  .nav-pills button.active {
-    background: var(--accent-bg);
-    color: var(--accent);
-    box-shadow: 0 0 12px var(--accent-glow);
+  :global(html.keyboard-open) .tabbar { display: none; }
+  .tabbar button {
+    flex: 1;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 7px 0 5px;
+    border: none; background: none;
+    color: var(--text3); cursor: pointer;
+    font-size: 10px;
+    -webkit-tap-highlight-color: transparent;
   }
-  .nav-pills button:disabled { opacity: 0.3; cursor: default; }
+  .tabbar button.active { color: var(--accent); }
+  .tabbar button:active { transform: scale(0.95); }
 
   .nav-right {
     display: flex;

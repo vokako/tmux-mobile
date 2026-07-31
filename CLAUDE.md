@@ -73,6 +73,7 @@ gradle build-dir symlink if it dangles and prints the real APK path.
 - [Concurrent WS RPC (server)](docs/design-docs/features/concurrent-ws-rpc.md)
 - [Disconnect Grace (server)](docs/design-docs/features/disconnect-grace.md)
 - [Desktop Split-Screen](docs/design-docs/features/split-screen.md)
+- [App Shell (rail / bottom bar / brand bar)](docs/design-docs/features/app-shell.md)
 - [PWA Install Offer (web)](docs/design-docs/features/pwa-install.md)
 - [File Handling & Security](docs/design-docs/features/file-handling.md)
 - [Terminal Color Adaptation](docs/design-docs/features/color-adaptation.md)

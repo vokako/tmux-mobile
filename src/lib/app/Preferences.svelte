@@ -291,7 +291,10 @@
 </section>
 
 <style>
-  .preferences { position: fixed; inset: calc(49px + var(--sat)) 0 0; z-index: 19; display:flex; flex-direction:column; background:var(--bg); color:var(--text); }
+  /* Overlay geometry follows the shell shape: below the top bar when there is
+     one (disconnected), right of the rail on connected desktop, full-bleed on
+     connected mobile. The shell sets the two vars. */
+  .preferences { position: fixed; inset: calc(var(--shell-top, 0px) + var(--sat)) 0 0 var(--shell-left, 0px); z-index: 19; display:flex; flex-direction:column; background:var(--bg); color:var(--text); }
   .pref-shell { flex:1;min-height:0;display:flex;flex-direction:column; }
   .pref-tabs { display:flex;align-items:center;gap:var(--ui-gap);min-height:var(--ui-bar-height);padding:var(--ui-bar-padding);box-sizing:border-box;border-bottom:1px solid var(--border2);background:var(--surface);flex-shrink:0;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch; }
   .pref-tabs::-webkit-scrollbar { display:none; }
