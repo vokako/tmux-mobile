@@ -14,6 +14,7 @@ use super::TeamBridge;
 
 /// Bus room for a project's hub chat. The session name IS the project
 /// identity (UNIQUE(session) in state.db), so it is also the room key.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(super) fn project_room(session: &str) -> String {
     format!("proj:{session}")
 }

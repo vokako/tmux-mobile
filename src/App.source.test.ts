@@ -21,7 +21,10 @@ test('every authenticated connection path refreshes agent notifications', () => 
 });
 
 test('Terminal navigation and page layer exist without an active target', () => {
-  assert.match(source, /const t = \['sessions', 'terminal'\]/u);
+  // The tab list starts with sessions and always contains terminal; hub is
+  // desktop-eligible-only and sits between them when present.
+  assert.match(source, /const t = \['sessions'\]/u);
+  assert.match(source, /t\.push\('terminal'\)/u);
   assert.match(
     source,
     /<button tabindex="-1" class:active=\{page === 'terminal'[\s\S]*?\{t\('terminal'\)\}[\s\S]*?<\/button>/u,

@@ -1,6 +1,6 @@
 # Agents v2 —— 从「两套系统」到「一套 agent 操作系统」
 
-> 状态：**提案 v2**（2026-08-01，按 owner 反馈修订：消息底座全走 CLI 不走 MCP、hooks 作为遥测通道、server 可选原则、agent home 隔离原则）。
+> 状态：**已实施**（2026-08-01，commits 0af9084 / 77cce32 / c082e06 / d1eafcd）。实施与本文有两处有意偏差：(1) `tmm wait` 未做——双通道切分让它失去必要性（hooks 观察节奏，`tmm log --since` 瞬时拉取）；(2) 实施中新增两条不在提案里的机制：@mention 投递（消息打进被点名 agent 的 pane 输入——交互式 CLI 只对输入起反应）和 spawn KICK（CLI 位置参数作为第一条用户消息——agent 不被开口就永远停在提示符）。现状文档见 `docs/design-docs/features/tmm-cli.md`。
 > 配套原型：[`agents-v2-prototype.html`](agents-v2-prototype.html)（桌面三栏布局，浏览器直接打开）。
 > 前序文档：[`projects-and-tasks.md`](projects-and-tasks.md)（P0 已落地，本文取代其 P1+ 规划）。
 
