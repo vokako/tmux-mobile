@@ -1,9 +1,29 @@
 <!DOCTYPE html>
 <!--
   Agents v2 desktop layout prototype — static, no build step, open in a browser.
-  Companion to agents-v2.md §3.4. Theme tokens copied from src/app.css so it
-  looks like the real app. Click an agent in the sidebar to "select" it; the
-  ⛶ button toggles full-screen terminal (the geek escape hatch).
+  Companion to agents-v2.md §4.7.
+
+  Design plan (two-pass, per frontend-design skill):
+  · Subject: a command deck for a troupe of coding agents living in tmux
+    windows. Audience: a developer. Single job: see who is doing what, talk to
+    them, drop into any terminal.
+  · Palette (from src/app.css tokens + ANSI-derived agent identities):
+      ink        #0a0a0f   app background
+      ink-2      #0f0f18   panel background
+      snow       #e2e8f0   primary text
+      signal     #00d4ff   accent (existing brand)
+      kiro       #a78bfa   agent identity — violet
+      claude     #fb923c   agent identity — orange
+      codex      #94a3b8   agent identity — slate
+  · Type: mono (ui-monospace stack) is the STRUCTURAL voice — agent names,
+    window indexes, labels, the status line; sans carries chat prose. Tabular
+    numbers everywhere.
+  · Signature: a real tmux status line across the bottom — [session] with
+    numbered windows, `*` current / `-` last, exactly tmux's own notation.
+    Window rows in the sidebar reuse the `1:` indexes. Structure encodes truth:
+    these ARE tmux windows.
+  · Restraint: one pulse animation (working dots), 160ms hovers, no gradients,
+    no emoji icons (inline SVG), reduced-motion respected, focus-visible.
 -->
 <html lang="zh" data-theme="dark">
 <head>
@@ -13,108 +33,148 @@
   :root { color-scheme: dark; }
   html[data-theme="dark"] {
     --bg: #0a0a0f; --bg2: #0f0f18; --bg3: #12121a;
-    --text: #e2e8f0; --text2: rgba(226,232,240,0.5); --text3: rgba(226,232,240,0.45);
-    --border: rgba(255,255,255,0.06); --border2: rgba(255,255,255,0.04);
-    --surface: rgba(255,255,255,0.03); --surface2: rgba(255,255,255,0.06);
+    --text: #e2e8f0; --text2: rgba(226,232,240,0.62); --text3: rgba(226,232,240,0.42);
+    --border: rgba(255,255,255,0.07); --border2: rgba(255,255,255,0.04);
+    --surface: rgba(255,255,255,0.03); --surface2: rgba(255,255,255,0.07);
     --accent: #00d4ff; --accent-bg: rgba(0,212,255,0.12);
     --danger: #ff5050;
-    --status-ok: #4ade80; --status-warn: #fbbf24; --status-hot: #fb923c; --status-sleep: #818cf8;
-    --input-bg: rgba(255,255,255,0.04); --input-border: rgba(255,255,255,0.08);
+    --ok: #4ade80; --warn: #fbbf24;
+    --a-kiro: #a78bfa; --a-claude: #fb923c; --a-codex: #94a3b8;
+    --input-bg: rgba(255,255,255,0.04); --input-border: rgba(255,255,255,0.09);
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; height: 100vh; overflow: hidden; background: var(--bg); color: var(--text);
-    font: 14px/1.45 -apple-system, "SF Pro Text", "Segoe UI", Roboto, "PingFang SC", sans-serif;
+    font: 13.5px/1.5 -apple-system, "SF Pro Text", "Segoe UI", Roboto, "PingFang SC", sans-serif;
+    font-variant-numeric: tabular-nums;
     display: flex; flex-direction: column;
   }
-  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .mono { font-family: var(--mono); }
+  button { font: inherit; cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 6px; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+  svg.i { width: 14px; height: 14px; stroke: currentColor; stroke-width: 1.8; fill: none; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 
-  .app { flex: 1; display: grid; grid-template-columns: 240px minmax(360px, 1fr) minmax(420px, 1.2fr); min-height: 0; }
+  .app { flex: 1; display: grid; grid-template-columns: 248px minmax(360px, 1fr) minmax(420px, 1.2fr); min-height: 0; }
   .app.term-full { grid-template-columns: 1fr; }
   .app.term-full .sidebar, .app.term-full .hub { display: none; }
 
   /* ── Sidebar ─────────────────────────────── */
   .sidebar { background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
-  .brand { display: flex; align-items: center; gap: 8px; padding: 14px 16px 10px; font-weight: 600; letter-spacing: 0.2px; }
-  .brand .logo { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, #00d4ff, #0066ff); }
+  .brand { display: flex; align-items: center; gap: 9px; padding: 15px 16px 11px; font-family: var(--mono); font-size: 13px; font-weight: 600; letter-spacing: 0.3px; }
+  .brand .logo { width: 20px; height: 20px; border-radius: 5px; background: linear-gradient(135deg, #00d4ff, #0066ff); }
   .side-scroll { flex: 1; overflow-y: auto; padding: 4px 8px 8px; }
-  .side-h { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text3); padding: 10px 10px 4px; }
-  .proj { border-radius: 10px; margin-bottom: 2px; }
-  .proj > .p-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 10px; cursor: pointer; }
+  .side-h { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 1.6px; color: var(--text3); padding: 12px 10px 5px; }
+  .proj { margin-bottom: 2px; }
+  .proj > .p-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 9px; cursor: pointer; transition: background 160ms; }
   .proj > .p-row:hover { background: var(--surface2); }
   .proj.open > .p-row { background: var(--accent-bg); }
-  .p-row .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--status-ok); flex: none; }
+  .p-row .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
   .p-row .dot.off { background: var(--text3); }
-  .p-row .p-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .p-row .cnt { font-size: 11px; color: var(--text3); }
-  .wins { padding: 2px 0 6px 14px; }
-  .win { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: 8px; cursor: pointer; color: var(--text2); font-size: 13px; }
-  .win:hover { background: var(--surface2); }
+  .p-row .p-name { flex: 1; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .p-row .cnt { font-family: var(--mono); font-size: 11px; color: var(--text3); }
+  .wins { padding: 2px 0 6px 12px; }
+  .win { display: flex; align-items: center; gap: 7px; width: 100%; text-align: left; background: none; border: none;
+         padding: 5px 10px; border-radius: 8px; color: var(--text2); font-size: 13px; transition: background 160ms, color 160ms; }
+  .win:hover { background: var(--surface2); color: var(--text); }
   .win.sel { background: var(--surface2); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
+  .win .idx { font-family: var(--mono); font-size: 11.5px; color: var(--text3); width: 34px; flex: none; text-align: right; }
+  .win.sel .idx { color: var(--accent); }
   .win .st { width: 6px; height: 6px; border-radius: 50%; flex: none; }
-  .st.working { background: var(--status-ok); animation: pulse 1.6s infinite; }
-  .st.waiting { background: var(--status-warn); }
-  .st.idle { background: var(--status-sleep); }
+  .st.working { background: var(--ok); animation: pulse 1.8s infinite; }
+  .st.waiting { background: var(--warn); }
   .st.shell { background: var(--text3); }
-  @keyframes pulse { 50% { opacity: 0.35; } }
-  .win .agent-ico { font-size: 11px; opacity: 0.9; }
+  @keyframes pulse { 50% { opacity: 0.3; } }
+  .win .w-name { font-family: var(--mono); font-size: 12.5px; }
   .win .attn { margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: var(--danger); }
   .win.add { color: var(--text3); font-size: 12.5px; }
+  .win.add:hover { color: var(--accent); }
+  /* registry rows */
+  .reg { display: flex; align-items: center; gap: 8px; padding: 5px 10px; color: var(--text2); font-size: 12.5px; }
+  .reg .r-skills { color: var(--text3); font-size: 11.5px; margin-left: auto; font-family: var(--mono); }
+  .ava { width: 18px; height: 18px; border-radius: 6px; flex: none; display: grid; place-items: center;
+         font-family: var(--mono); font-size: 10px; font-weight: 700; color: var(--bg); }
+  .ava.kiro { background: var(--a-kiro); } .ava.claude { background: var(--a-claude); } .ava.codex { background: var(--a-codex); }
   .side-foot { border-top: 1px solid var(--border); padding: 8px; display: flex; gap: 6px; }
-  .side-foot button { flex: 1; background: none; border: none; color: var(--text2); padding: 8px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+  .side-foot button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+                      background: none; border: none; color: var(--text2); padding: 8px; border-radius: 8px; font-size: 12.5px; transition: background 160ms; }
   .side-foot button:hover { background: var(--surface2); }
 
   /* ── Hub (middle) ────────────────────────── */
   .hub { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
-  .hub-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
-  .hub-head h1 { font-size: 15px; margin: 0; font-weight: 600; }
-  .hub-head .path { font-size: 12px; color: var(--text3); }
+  .hub-head { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--border); }
+  .hub-head h1 { font-family: var(--mono); font-size: 15px; margin: 0; font-weight: 600; }
+  .hub-head .path { font-family: var(--mono); font-size: 11.5px; color: var(--text3); }
   .hub-head .spacer { flex: 1; }
-  .chip-btn { background: var(--surface); border: 1px solid var(--border); color: var(--text2); border-radius: 8px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+  .chip-btn { display: flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--border);
+              color: var(--text2); border-radius: 8px; padding: 5px 11px; font-size: 12.5px; transition: border-color 160ms, color 160ms; }
   .chip-btn:hover { border-color: var(--accent); color: var(--accent); }
 
-  .agent-cards { display: flex; gap: 8px; padding: 10px 16px; overflow-x: auto; border-bottom: 1px solid var(--border2); }
-  .acard { flex: none; width: 148px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 9px 11px; cursor: pointer; }
+  .agent-cards { display: flex; gap: 8px; padding: 12px 18px; overflow-x: auto; border-bottom: 1px solid var(--border2); }
+  .acard { flex: none; width: 158px; background: var(--surface); border: 1px solid var(--border); border-radius: 11px;
+           padding: 10px 12px; cursor: pointer; text-align: left; transition: border-color 160ms, background 160ms; }
   .acard:hover { border-color: var(--input-border); }
   .acard.sel { border-color: var(--accent); background: var(--accent-bg); }
-  .acard .a-top { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; }
-  .acard .a-state { font-size: 11px; color: var(--text2); margin-top: 3px; display: flex; align-items: center; gap: 5px; }
-  .acard .a-note { font-size: 11px; color: var(--text3); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .acard .a-top { display: flex; align-items: center; gap: 7px; font-family: var(--mono); font-weight: 600; font-size: 12.5px; }
+  .acard .a-state { font-family: var(--mono); font-size: 10.5px; color: var(--text2); margin-top: 5px; display: flex; align-items: center; gap: 5px; }
+  .acard .a-state .st { width: 6px; height: 6px; border-radius: 50%; }
+  .acard .a-note { font-size: 11.5px; color: var(--text3); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-  .feed { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; }
+  .feed { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 13px; }
   .msg { max-width: 82%; }
-  .msg .m-head { font-size: 11.5px; color: var(--text3); margin-bottom: 3px; display: flex; gap: 6px; align-items: baseline; }
-  .msg .m-head .who { color: var(--text2); font-weight: 600; }
-  .msg .bubble { background: var(--surface); border: 1px solid var(--border2); border-radius: 12px; padding: 8px 12px; font-size: 13.5px; }
+  .msg .m-head { font-size: 11px; color: var(--text3); margin-bottom: 3px; display: flex; gap: 7px; align-items: center; }
+  .msg .m-head .who { display: flex; align-items: center; gap: 5px; color: var(--text2); font-family: var(--mono); font-weight: 600; font-size: 11.5px; }
+  .msg .m-head .who .ava { width: 15px; height: 15px; border-radius: 5px; font-size: 8.5px; }
+  .msg .bubble { background: var(--surface); border: 1px solid var(--border2); border-radius: 12px; padding: 8px 12px; }
   .msg.me { align-self: flex-end; }
   .msg.me .bubble { background: var(--accent-bg); border-color: transparent; }
-  .msg .bubble .at { color: var(--accent); }
-  .sysline { align-self: center; font-size: 11.5px; color: var(--text3); background: var(--surface); border-radius: 999px; padding: 3px 12px; }
-  .sysline .mono { font-size: 11px; }
+  .msg .bubble .at { color: var(--accent); font-weight: 550; }
+  .sysline { align-self: center; display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text3);
+             background: var(--surface); border-radius: 999px; padding: 3px 13px; }
+  .sysline .mono { font-size: 10.5px; }
 
-  .composer { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }
-  .composer input { flex: 1; background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 10px; color: var(--text); padding: 9px 12px; font-size: 13.5px; outline: none; }
+  .composer { display: flex; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border); }
+  .composer input { flex: 1; background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 10px;
+                    color: var(--text); padding: 9px 13px; font-size: 13.5px; outline: none; transition: border-color 160ms; }
+  .composer input::placeholder { color: var(--text3); }
   .composer input:focus { border-color: var(--accent); }
-  .composer button { background: var(--accent-bg); color: var(--accent); border: none; border-radius: 10px; padding: 0 16px; cursor: pointer; font-weight: 600; }
+  .composer button { background: var(--accent-bg); color: var(--accent); border: none; border-radius: 10px; padding: 0 16px; font-weight: 600; }
 
   /* ── Terminal (right) ────────────────────── */
   .termcol { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #000; border-left: 1px solid var(--border); }
   .term-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--bg2); border-bottom: 1px solid var(--border); }
-  .term-head .t-title { font-size: 12.5px; color: var(--text2); }
+  .term-head .t-title { font-family: var(--mono); font-size: 12px; color: var(--text2); }
   .term-head .t-title b { color: var(--text); font-weight: 600; }
   .term-head .spacer { flex: 1; }
-  .icon-btn { background: none; border: 1px solid var(--border); color: var(--text2); border-radius: 7px; width: 28px; height: 26px; cursor: pointer; font-size: 13px; line-height: 1; }
+  .icon-btn { display: grid; place-items: center; background: none; border: 1px solid var(--border); color: var(--text2);
+              border-radius: 7px; width: 28px; height: 26px; transition: border-color 160ms, color 160ms; }
   .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
-  .screen { flex: 1; overflow-y: auto; padding: 12px 14px; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; line-height: 1.5; color: #d8e0ea; white-space: pre-wrap; }
+  .screen { flex: 1; overflow-y: auto; padding: 13px 15px; font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+            color: #d8e0ea; white-space: pre-wrap; }
   .screen .dim { color: #5a6577; }
   .screen .grn { color: #4ade80; }
   .screen .cyn { color: #00d4ff; }
   .screen .yel { color: #fbbf24; }
   .screen .cursor { display: inline-block; width: 7px; height: 14px; background: #d8e0ea; vertical-align: text-bottom; animation: pulse 1.1s infinite; }
 
-  /* narrow desktop: hub and terminal become either/or (plan §5.4) */
+  /* ── Signature: the tmux status line ─────── */
+  .statusline { display: flex; align-items: center; height: 26px; background: var(--bg3); border-top: 1px solid var(--border);
+                font-family: var(--mono); font-size: 11.5px; color: var(--text2); user-select: none; }
+  .statusline .sess { background: var(--accent); color: #06232b; font-weight: 700; padding: 0 10px; height: 100%;
+                      display: flex; align-items: center; }
+  .statusline .wlist { display: flex; height: 100%; }
+  .statusline .w { display: flex; align-items: center; padding: 0 9px; color: var(--text3); cursor: pointer; transition: color 160ms; }
+  .statusline .w:hover { color: var(--text); }
+  .statusline .w.cur { background: var(--surface2); color: var(--accent); }
+  .statusline .right { margin-left: auto; padding: 0 12px; color: var(--text3); display: flex; gap: 14px; }
+  .statusline .right .link { color: var(--ok); }
+
+  /* narrow desktop: hub and terminal become either/or (plan §6.4) */
   @media (max-width: 1100px) {
-    .app:not(.term-full) { grid-template-columns: 220px 1fr 0; }
+    .app:not(.term-full) { grid-template-columns: 224px 1fr 0; }
     .app:not(.term-full) .termcol { display: none; }
   }
 </style>
@@ -129,62 +189,63 @@
       <div class="side-h">Projects</div>
 
       <div class="proj open">
-        <div class="p-row"><span class="dot"></span><span class="p-name">blog</span><span class="cnt">4</span></div>
+        <div class="p-row"><span class="dot"></span><span class="p-name">blog</span><span class="cnt">4 win</span></div>
         <div class="wins">
-          <div class="win"><span class="st working"></span><span class="agent-ico">🟣</span>lead · kiro<span class="attn"></span></div>
-          <div class="win sel"><span class="st working"></span><span class="agent-ico">🟠</span>reviewer · claude</div>
-          <div class="win"><span class="st waiting"></span><span class="agent-ico">⚪</span>docs · codex</div>
-          <div class="win"><span class="st shell"></span>zsh</div>
-          <div class="win add">＋ agent / window</div>
+          <button class="win"><span class="idx">1:</span><span class="st working"></span><span class="ava kiro">L</span><span class="w-name">lead</span><span class="attn" title="需要你的输入"></span></button>
+          <button class="win sel"><span class="idx">2:</span><span class="st working"></span><span class="ava claude">R</span><span class="w-name">reviewer</span></button>
+          <button class="win"><span class="idx">3:</span><span class="st waiting"></span><span class="ava codex">D</span><span class="w-name">docs</span></button>
+          <button class="win"><span class="idx">4:</span><span class="st shell"></span><span class="w-name">zsh</span></button>
+          <button class="win add"><span class="idx"></span><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>添加 agent 或窗口</button>
         </div>
       </div>
 
       <div class="proj">
-        <div class="p-row"><span class="dot"></span><span class="p-name">tmux-mobile</span><span class="cnt">3</span></div>
+        <div class="p-row"><span class="dot"></span><span class="p-name">tmux-mobile</span><span class="cnt">3 win</span></div>
       </div>
       <div class="proj">
-        <div class="p-row"><span class="dot off"></span><span class="p-name">ds160</span><span class="cnt">2</span></div>
+        <div class="p-row"><span class="dot off"></span><span class="p-name">ds160</span><span class="cnt">2 win</span></div>
       </div>
       <div class="proj">
-        <div class="p-row"><span class="dot off"></span><span class="p-name">sshbjs</span><span class="cnt">1</span></div>
+        <div class="p-row"><span class="dot off"></span><span class="p-name">sshbjs</span><span class="cnt">1 win</span></div>
       </div>
 
-      <div class="side-h">Registry</div>
-      <div class="win"><span class="agent-ico">🟣</span>lead — kiro + git,pr skills</div>
-      <div class="win"><span class="agent-ico">🟠</span>reviewer — claude + review skill</div>
-      <div class="win"><span class="agent-ico">⚪</span>docs — codex + docs skill</div>
-      <div class="win add">＋ define agent</div>
+      <div class="side-h">Agent Registry</div>
+      <div class="reg"><span class="ava kiro">L</span>lead · kiro<span class="r-skills">git,pr</span></div>
+      <div class="reg"><span class="ava claude">R</span>reviewer · claude<span class="r-skills">review</span></div>
+      <div class="reg"><span class="ava codex">D</span>docs · codex<span class="r-skills">docs</span></div>
+      <button class="win add"><span class="idx"></span><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>定义新 agent</button>
     </div>
     <div class="side-foot">
-      <button>🔔 通知</button><button>⚙ 设置</button>
+      <button><svg class="i" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>通知</button>
+      <button><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>设置</button>
     </div>
   </aside>
 
   <!-- ═══ Middle: interaction hub ═══ -->
   <main class="hub">
     <div class="hub-head">
-      <h1>blog</h1><span class="path mono">~/work/blog</span>
+      <h1>blog</h1><span class="path">~/work/blog</span>
       <span class="spacer"></span>
-      <button class="chip-btn">＋ agent</button>
-      <button class="chip-btn">Down</button>
+      <button class="chip-btn"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>拉起 agent</button>
+      <button class="chip-btn">关闭项目</button>
     </div>
 
     <div class="agent-cards">
-      <div class="acard">
-        <div class="a-top">🟣 lead</div>
-        <div class="a-state"><span class="st working" style="width:6px;height:6px;border-radius:50%"></span>working</div>
-        <div class="a-note">正在重构文章列表页</div>
-      </div>
-      <div class="acard sel">
-        <div class="a-top">🟠 reviewer</div>
-        <div class="a-state"><span class="st working" style="width:6px;height:6px;border-radius:50%"></span>working</div>
-        <div class="a-note">review feat/list-page</div>
-      </div>
-      <div class="acard">
-        <div class="a-top">⚪ docs</div>
-        <div class="a-state"><span class="st waiting" style="width:6px;height:6px;border-radius:50%"></span>waiting</div>
+      <button class="acard">
+        <div class="a-top"><span class="ava kiro">L</span>lead</div>
+        <div class="a-state"><span class="st working"></span>working · 14:24</div>
+        <div class="a-note">Edit ArticleList.svelte</div>
+      </button>
+      <button class="acard sel">
+        <div class="a-top"><span class="ava claude">R</span>reviewer</div>
+        <div class="a-state"><span class="st working"></span>working · 14:21</div>
+        <div class="a-note">Read src/lib/list/anchor.ts</div>
+      </button>
+      <button class="acard">
+        <div class="a-top"><span class="ava codex">D</span>docs</div>
+        <div class="a-state"><span class="st waiting"></span>waiting · 14:18</div>
         <div class="a-note">等 lead 的接口定稿</div>
-      </div>
+      </button>
     </div>
 
     <div class="feed">
@@ -193,19 +254,19 @@
         <div class="bubble"><span class="at">@lead</span> 把文章列表页重构成虚拟滚动，完成后让 reviewer 过一遍</div>
       </div>
       <div class="msg">
-        <div class="m-head"><span class="who">🟣 lead</span><span>14:03</span></div>
+        <div class="m-head"><span class="who"><span class="ava kiro">L</span>lead</span><span>14:03</span></div>
         <div class="bubble">收到。方案：用 IntersectionObserver 做窗口化渲染，先改 <span class="mono">ArticleList.svelte</span>，预计 3 个文件。开始了。</div>
       </div>
-      <div class="sysline">🟣 lead 拉起了 🟠 reviewer —— <span class="mono">tmm spawn reviewer --brief "review feat/list-page"</span></div>
+      <div class="sysline">lead 拉起了 reviewer<span class="mono dim">·</span><span class="mono">tmm spawn reviewer --brief "review feat/list-page"</span></div>
       <div class="msg">
-        <div class="m-head"><span class="who">🟠 reviewer</span><span>14:21</span></div>
+        <div class="m-head"><span class="who"><span class="ava claude">R</span>reviewer</span><span>14:21</span></div>
         <div class="bubble"><span class="at">@lead</span> 看完了。两个问题：滚动锚点在窗口 resize 时会漂移；<span class="mono">estimateHeight</span> 没有缓存导致重排。已留行级评论。</div>
       </div>
       <div class="msg">
-        <div class="m-head"><span class="who">🟣 lead</span><span>14:24</span></div>
+        <div class="m-head"><span class="who"><span class="ava kiro">L</span>lead</span><span>14:24</span></div>
         <div class="bubble">两处都修了，重新 push。<span class="at">@你</span> 锚点策略我选了「顶部第一条可见文章」为基准，如果你希望保持滚动比例告诉我。</div>
       </div>
-      <div class="sysline">🟠 reviewer 状态 → waiting —— <span class="mono">tmm status waiting "等重新 push"</span></div>
+      <div class="sysline">reviewer → waiting<span class="mono dim">·</span><span class="mono">tmm status waiting "等重新 push"</span></div>
     </div>
 
     <div class="composer">
@@ -219,8 +280,8 @@
     <div class="term-head">
       <span class="t-title"><b>reviewer</b> · claude — blog:2.1</span>
       <span class="spacer"></span>
-      <button class="icon-btn" title="键盘">⌨</button>
-      <button class="icon-btn" id="fullBtn" title="全屏 terminal">⛶</button>
+      <button class="icon-btn" title="打开键盘"><svg class="i" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"/></svg></button>
+      <button class="icon-btn" id="fullBtn" title="全屏 terminal（Esc 退出）"><svg class="i" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
     </div>
     <div class="screen"><span class="cyn">╭─ claude</span> <span class="dim">· feat/list-page · 34k tokens</span>
 
@@ -246,16 +307,34 @@
   </section>
 </div>
 
+<!-- Signature element: the tmux status line, tmux's own notation.
+     `*` = current window, `-` = previous window — real information, not decor. -->
+<footer class="statusline">
+  <span class="sess">blog</span>
+  <div class="wlist">
+    <span class="w">1:lead</span>
+    <span class="w cur">2:reviewer*</span>
+    <span class="w">3:docs-</span>
+    <span class="w">4:zsh</span>
+  </div>
+  <div class="right">
+    <span>3 agents · 2 working</span>
+    <span class="link">server ✓</span>
+    <span>00:24</span>
+  </div>
+</footer>
+
 <script>
   // Minimal interactivity so the layout can be felt, not just seen.
   const app = document.getElementById('app');
   document.getElementById('fullBtn').onclick = () => app.classList.toggle('term-full');
   document.addEventListener('keydown', e => { if (e.key === 'Escape') app.classList.remove('term-full'); });
-  // Selecting an agent card or sidebar window highlights it (visual only).
-  document.querySelectorAll('.acard, .win').forEach(el => el.addEventListener('click', () => {
+  // Selecting an agent card / sidebar window / statusline window highlights it (visual only).
+  document.querySelectorAll('.acard, .win, .statusline .w').forEach(el => el.addEventListener('click', () => {
     if (el.classList.contains('add')) return;
-    el.closest('.agent-cards, .wins')?.querySelectorAll('.sel').forEach(s => s.classList.remove('sel'));
-    el.classList.add('sel');
+    const group = el.closest('.agent-cards, .wins, .wlist');
+    group?.querySelectorAll('.sel, .cur').forEach(s => s.classList.remove('sel', 'cur'));
+    el.classList.add(el.parentElement.classList.contains('wlist') ? 'cur' : 'sel');
   }));
 </script>
 </body>
