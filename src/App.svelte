@@ -5,6 +5,7 @@
   import SplitView from './lib/sessions/SplitView.svelte';
   import Files from './lib/files/Files.svelte';
   import Team from './lib/team/Team.svelte';
+  import Hub from './lib/hub/Hub.svelte';
   import Icon from './lib/ui/Icon.svelte';
   import InstallPrompt from './lib/ui/InstallPrompt.svelte';
   import Preferences from './lib/app/Preferences.svelte';
@@ -83,6 +84,10 @@
   const SPLIT_MIN_WIDTH = 900;
   let wideEnough = $state(typeof window !== 'undefined' && window.innerWidth >= SPLIT_MIN_WIDTH);
   let splitEligible = $derived(!layout.isTouchDevice && (layout.forceDesktop || wideEnough));
+  // The Hub is the desktop three-column view: needs a wide non-touch client
+  // AND the server-side bus (hub_* degrades method-not-found without it, same
+  // probe as Team).
+  let hubEligible = $derived(splitEligible && teamAvailable);
   let splitActive = $derived(splitEligible && splitLayout > 1 && splitCells.length > 0);
 
   function setLayout(n) {
@@ -819,7 +824,9 @@
   });
   // Swipe left/right to switch tabs with slide animation
   const tabs = $derived(() => {
-    const t = ['sessions', 'terminal'];
+    const t = ['sessions'];
+    if (hubEligible) t.push('hub');
+    t.push('terminal');
     if (teamAvailable) t.push('team');
     t.push('files');
     return t;
@@ -893,6 +900,11 @@
         <button tabindex="-1" class:active={page === 'sessions'} onclick={() => switchTab('sessions')}>
           {t('sessions')}
         </button>
+        {#if hubEligible}
+          <button tabindex="-1" class:active={page === 'hub'} onclick={() => switchTab('hub')}>
+            {t('hub')}
+          </button>
+        {/if}
         <button tabindex="-1" class:active={page === 'terminal'} onclick={() => switchTab('terminal')}>
           {t('terminal')}
         </button>
@@ -964,6 +976,15 @@
          first team and reloading everything. Gated on teamAvailable so it never
          mounts on a server without the team bus (e.g. mobile). The visible prop
          pauses its polling while hidden and triggers a refresh when shown. -->
+    {#if hubEligible}
+      <!-- Hub (agents-v2 desktop three-column view): kept mounted like Team so
+           the selected project, chat scroll, and embedded terminal survive tab
+           switches. Desktop-eligible only (needs width + the bus): mobile
+           keeps the tab layout untouched. -->
+      <div class="page-layer" class:hidden={page !== 'hub'}>
+        <Hub visible={page === 'hub'} {fontSize} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} />
+      </div>
+    {/if}
     {#if teamAvailable}
       <div class="page-layer" class:hidden={page !== 'team'}>
         <Team bind:this={teamRef} visible={page === 'team'} currentSession={terminalSession} {fontSize} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onTeamSession={(s) => teamSession = s} />

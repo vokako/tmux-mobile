@@ -731,6 +731,40 @@ export const projectDown = (id: string) => call('project_down', { id });
 export const projectArchive = (id: string, archived = true) => call('project_archive', { id, archived });
 export const projectAutostart = (id: string, autostart: boolean) => call('project_autostart', { id, autostart });
 
+// Project hub (agents-v2): per-project chat + derived agent states + spawn.
+// Same desktop-only degradation contract as project_* / team_*. Chat pushes
+// ride the existing team_message channel (each message carries its room —
+// a project's room is `proj:<session>`).
+export interface HubAgent {
+  window: number;
+  name: string;
+  command: string;
+  agent: string | null;
+  state: string;
+  detail: string;
+  since: number;
+}
+export const hubPost = (session: string, body: string, from = 'human') =>
+  call('hub_post', { session, body, from });
+export const hubLog = (session: string, sinceTs = 0, limit = 100) =>
+  call<{ messages: TeamMessage[] }>('hub_log', { session, since_ts: sinceTs, limit });
+export const hubAgents = (session: string) =>
+  call<{ agents: HubAgent[] }>('hub_agents', { session });
+export const hubSpawn = (session: string, agent: string, brief = '', by = '') =>
+  call('hub_spawn', { session, agent, brief, by });
+export interface RegAgent {
+  name: string;
+  backend: string;
+  model: string;
+  system: string;
+  skills: string;
+  mcp: string;
+  can_hire: boolean;
+}
+export const registryList = () => call<{ agents: RegAgent[] }>('registry_list');
+export const registrySave = (def: RegAgent) => call('registry_save', { def });
+export const registryDelete = (name: string) => call('registry_delete', { name });
+
 export const teamHistory = (room: string, limit = 100) => call('team_history', { room, limit });
 export const teamRoster = (room: string) => call('team_roster', { room });
 export const teamEmployees = (room: string) => call('team_employees', { room });
