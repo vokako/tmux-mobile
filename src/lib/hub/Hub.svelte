@@ -17,6 +17,19 @@
 
   let { visible = false, fontSize = 14, mobile = false, openTerminal = () => {} } = $props();
 
+  // A desktop browser squeezed to phone width must not overflow: the layout
+  // follows the VIEWPORT, not the device class. `mobile` (touch) still
+  // decides behavior defaults, but the single-column shape kicks in for any
+  // client narrower than the two-column minimum.
+  let narrow = $state(typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches);
+  $effect(() => {
+    const mq = window.matchMedia('(max-width: 760px)');
+    const onChange = () => { narrow = mq.matches; };
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  });
+  const compact = $derived(mobile || narrow);
+
   let rows = $state([]);            // ProjectRow[] (projects + live flag)
   let panes = $state([]);           // all tmux panes (for window lists)
   let selected = $state('');        // selected project session
@@ -68,9 +81,9 @@
     termCommand = p.current_command || '';
   }
 
-  // Mobile: tapping a card is "go watch it" — there is no embedded column.
+  // Compact: tapping a card is "go watch it" — there is no embedded column.
   function tapWindow(a) {
-    if (!mobile) { selectWindow(a); return; }
+    if (!compact) { selectWindow(a); return; }
     const p = panes.find((p) => p.session === selected && p.window === a.window && p.active)
       ?? panes.find((p) => p.session === selected && p.window === a.window);
     if (p) openTerminal(p.session, `${p.session}:${p.window}.${p.pane}`, p.current_command || '');
@@ -171,9 +184,9 @@
   };
 </script>
 
-<div class="hub-root" class:term-full={termFull} class:mobile>
+<div class="hub-root" class:term-full={termFull} class:compact>
   <div class="cols">
-    {#if !mobile}
+    {#if !compact}
     <!-- ── Sidebar ─────────────────────────── -->
     <aside class="sidebar">
       <div class="side-scroll">
@@ -219,8 +232,8 @@
 
     <!-- ── Middle: chat + agent cards ──────── -->
     <main class="mid">
-      {#if mobile}
-        <!-- Phone: the project picker is a chip row — the sidebar's job in
+      {#if compact}
+        <!-- Compact: the project picker is a chip row — the sidebar's job in
              one thumb-scrollable line. -->
         <div class="proj-chips">
           {#each rows as row (row.project.id)}
@@ -232,7 +245,7 @@
       {/if}
       <div class="mid-head">
         <h1>{selectedRow?.project.name ?? ''}</h1>
-        {#if !mobile}<span class="path">{selectedRow?.project.path ?? ''}</span>{/if}
+        {#if !compact}<span class="path">{selectedRow?.project.path ?? ''}</span>{/if}
         <span class="spacer"></span>
         {#if selected && !liveSelected}
           <button class="chip-btn" onclick={bringUp}>{t('projectOpen')}</button>
@@ -257,7 +270,7 @@
         <div class="cards">
           {#each agents.filter((a) => a.agent) as a (a.window)}
             {@const ag = agentByBackend(a.agent)}
-            <button class="acard" class:sel={!mobile && termTarget.startsWith(`${selected}:${a.window}.`)} onclick={() => tapWindow(a)}>
+            <button class="acard" class:sel={!compact && termTarget.startsWith(`${selected}:${a.window}.`)} onclick={() => tapWindow(a)}>
               <div class="a-top">
                 {#if ag}<span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>{/if}
                 {a.name}
@@ -293,7 +306,7 @@
       </div>
     </main>
 
-    {#if !mobile}
+    {#if !compact}
     <!-- ── Right: embedded terminal ────────── -->
     <section class="termcol">
       <div class="term-head">
@@ -319,7 +332,7 @@
     {/if}
   </div>
 
-  {#if !mobile}
+  {#if !compact}
   <!-- ── Signature: the tmux status line ──── -->
   <footer class="statusline">
     <span class="sess">{selected || '—'}</span>
@@ -337,7 +350,7 @@
 
 <style>
   .hub-root { height: 100%; display: flex; flex-direction: column; min-height: 0; background: var(--bg); }
-  .hub-root.mobile .cols { grid-template-columns: 1fr; }
+  .hub-root.compact .cols { grid-template-columns: minmax(0, 1fr); }
   .proj-chips {
     display: flex; gap: 6px; padding: 10px 12px 0; overflow-x: auto; flex: none;
     -webkit-overflow-scrolling: touch; scrollbar-width: none;
@@ -436,7 +449,7 @@
   /* Narrow desktop: the hub and terminal become either/or — chat keeps the
      room, the Terminal tab (or full-screen) covers watching. */
   @media (max-width: 1100px) {
-    .hub-root:not(.mobile):not(.term-full) .cols { grid-template-columns: 220px 1fr; }
-    .hub-root:not(.mobile):not(.term-full) .termcol { display: none; }
+    .hub-root:not(.compact):not(.term-full) .cols { grid-template-columns: 220px minmax(0, 1fr); }
+    .hub-root:not(.compact):not(.term-full) .termcol { display: none; }
   }
 </style>

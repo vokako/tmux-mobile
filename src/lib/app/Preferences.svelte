@@ -148,7 +148,12 @@
   }
 </script>
 
-<section class="preferences" aria-label={t('settings')}>
+<!-- Desktop: a centered modal over a dimmed backdrop — settings are a quick
+     dip, not a destination, so they must not read as a page replacing your
+     work. Mobile keeps the full-screen sheet (small screens have no room for
+     a floating card). Backdrop click and the X both close. -->
+<div class="pref-backdrop" onclick={onClose} role="presentation"></div>
+<section class="preferences" class:sheet={layout.isTouchDevice} aria-label={t('settings')}>
   <div class="pref-shell">
     <nav class="pref-tabs" aria-label={t('settings')}>
       {#each tabs as item}
@@ -291,10 +296,31 @@
 </section>
 
 <style>
-  /* Overlay geometry follows the shell shape: below the top bar when there is
-     one (disconnected), right of the rail on connected desktop, full-bleed on
-     connected mobile. The shell sets the two vars. */
-  .preferences { position: fixed; inset: calc(var(--shell-top, 0px) + var(--sat)) 0 0 var(--shell-left, 0px); z-index: 19; display:flex; flex-direction:column; background:var(--bg); color:var(--text); }
+  .pref-backdrop {
+    position: fixed; inset: 0; z-index: 18;
+    background: rgba(0,0,0,0.45);
+  }
+  /* Desktop: centered card. Mobile (.sheet): full-bleed below the shell
+     chrome, exactly as before — the shell sets the two vars. */
+  .preferences {
+    position: fixed; z-index: 19; display: flex; flex-direction: column;
+    background: var(--bg); color: var(--text);
+    left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: min(680px, calc(100vw - 32px));
+    height: min(640px, calc(100vh - 48px));
+    border: 1px solid var(--border); border-radius: 14px;
+    box-shadow: 0 18px 60px rgba(0,0,0,0.5);
+    overflow: hidden;
+  }
+  .preferences.sheet {
+    /* `inset` expands to top/right/bottom/left — declaring left/top after it
+       would cancel two of its components (that bug shipped for ~a minute:
+       the sheet floated bottom-right). Only neutralize the card properties. */
+    inset: calc(var(--shell-top, 0px) + var(--sat)) 0 0 var(--shell-left, 0px);
+    transform: none;
+    width: auto; height: auto;
+    border: none; border-radius: 0; box-shadow: none;
+  }
   .pref-shell { flex:1;min-height:0;display:flex;flex-direction:column; }
   .pref-tabs { display:flex;align-items:center;gap:var(--ui-gap);min-height:var(--ui-bar-height);padding:var(--ui-bar-padding);box-sizing:border-box;border-bottom:1px solid var(--border2);background:var(--surface);flex-shrink:0;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch; }
   .pref-tabs::-webkit-scrollbar { display:none; }
