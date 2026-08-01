@@ -203,11 +203,20 @@ fn deliver_mentions(session: &str, from: &str, body: &str) {
     }
 }
 
-/// One row per live window: name, command, agent detection, derived status.
+/// One row per live window: name, command, agent detection, derived status,
+/// and whether the window is MANAGED — spawned from the registry into an
+/// isolated home. Managed agents are chat participants; direct windows
+/// (shells, agents the user started by hand) are terminal things and the UI
+/// presents them only there. The marker is the isolated home dir itself:
+/// <workspace>/.tmm/agents/<window_name>/ exists iff spawn materialized it.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn agent_states(session: &str) -> serde_json::Value {
     use crate::projects::{agents, telemetry};
 
+    let ws = crate::projects::project_for_session(session)
+        .ok()
+        .flatten()
+        .map(|p| p.path);
     let panes = crate::tmux::list_panes(session).unwrap_or_default();
     let activity: std::collections::HashMap<usize, u64> =
         crate::tmux::window_activity_times(session).into_iter().collect();
@@ -233,11 +242,16 @@ fn agent_states(session: &str) -> serde_json::Value {
         .map(|p| {
             let agent = agents::detect(&format!("{} {} {}", p.current_command, p.pane_title, p.window_name));
             let st = telemetry::derive(session, p.window, activity.get(&p.window).copied().unwrap_or(0));
+            let managed = agent.is_some()
+                && ws.as_deref().is_some_and(|w| {
+                    std::path::Path::new(w).join(".tmm").join("agents").join(&p.window_name).is_dir()
+                });
             serde_json::json!({
                 "window": p.window,
                 "name": p.window_name,
                 "command": p.current_command,
                 "agent": agent.map(|a| a.backend),
+                "managed": managed,
                 "state": if agent.is_some() { st.state.as_str() } else { "shell" },
                 "detail": st.detail,
                 "since": st.since,

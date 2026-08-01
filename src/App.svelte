@@ -4,8 +4,8 @@
   import Terminal from './lib/terminal/Terminal.svelte';
   import SplitView from './lib/sessions/SplitView.svelte';
   import Files from './lib/files/Files.svelte';
-  import Team from './lib/team/Team.svelte';
   import Hub from './lib/hub/Hub.svelte';
+  import AgentsPage from './lib/hub/AgentsPage.svelte';
   import Icon from './lib/ui/Icon.svelte';
   import InstallPrompt from './lib/ui/InstallPrompt.svelte';
   import Preferences from './lib/app/Preferences.svelte';
@@ -35,10 +35,9 @@
   let terminalTarget = $state('');
   let terminalSession = $state('');
   let terminalCommand = $state('');
-  // Which working context Files should follow: a terminal pane or the team.
-  let teamSession = $state('');     // active team's tmux session (reported by Team)
-  let workContext = $state('terminal'); // 'terminal' | 'team'
-  let filesSession = $derived(workContext === 'team' && teamSession ? teamSession : terminalSession);
+  // Files follows the terminal's session (the Team context is gone with the
+  // Team tab — the Hub's projects ARE sessions, so terminal context covers it).
+  let filesSession = $derived(terminalSession);
   // Team (team multi-agent bus) is desktop-server-only. We probe once per
   // connection: team_status rejects with method-not-found when the server has
   // no bus, so a resolved probe means the tab should appear.
@@ -49,7 +48,6 @@
   // Sessions page can jump straight to a given team's chat via its exported
   // selectTeam(). A function call (not a prop change) so clicking the same team
   // session twice still re-selects it; nulled automatically on unmount.
-  let teamRef = $state(null);
   async function probeTeam() {
     try { await teamStatus(); teamState.available = true; teamState.probed = true; }
     catch (e) {
@@ -67,9 +65,9 @@
   // While the probe is still pending we leave `page` alone — a brief blank
   // beats kicking the user off the tab they were on.
   $effect(() => {
-    if (page === 'team' && teamState.probed && !teamState.available) page = 'sessions';
+    if (page === 'team') page = 'hub'; // Team tab retired — the Hub replaced it
     // Same for the Hub: it needs the bus. Only redirect once the probe answered.
-    if (page === 'hub' && teamState.probed && !teamState.available) page = 'sessions';
+    if ((page === 'hub' || page === 'agents') && teamState.probed && !teamState.available) page = 'sessions';
   });
 
   // ─── Split-screen (desktop + wide only) ────────────────────────────────
@@ -577,7 +575,6 @@
     terminalSession = session;
     terminalTarget = target;
     terminalCommand = command;
-    workContext = 'terminal';
     page = 'terminal';
     readTarget(target);
     navPush();
@@ -614,15 +611,6 @@
   }
 
   // Jump to the Team tab and select a specific room (from a team session row in
-  // Sessions). Team stays mounted (see the page-layer below), so selecting the
-  // room just reloads that room's chat — no full remount.
-  function openTeam(room) {
-    page = 'team';
-    workContext = 'team';
-    if (room) teamRef?.selectTeam(room);
-    navPush();
-  }
-
   function doDisconnect() {
     reconnectMachine.cancel();
     disconnect();
@@ -822,7 +810,7 @@
       }
       if (page === 'files' && filesGoBack && filesGoBack()) return;
       if (page === 'files') { page = 'terminal'; return; }
-      if (page === 'terminal' || page === 'team') { page = 'sessions'; return; }
+      if (page === 'terminal') { page = 'sessions'; return; }
       if (showSettings) { showSettings = false; return; }
       // At sessions root, re-push to prevent exit
       navPush();
@@ -837,7 +825,7 @@
     const t = ['sessions'];
     if (hubEligible) t.push('hub');
     t.push('terminal');
-    if (teamAvailable) t.push('team');
+    if (hubEligible) t.push('agents');
     t.push('files');
     return t;
   });
@@ -853,8 +841,7 @@
     const fromIdx = t.indexOf(curName);
     const toIdx = t.indexOf(target);
     // Apply page change immediately
-    if (target === 'terminal') { page = 'terminal'; workContext = 'terminal'; }
-    else { page = target; if (target === 'team') workContext = 'team'; }
+    page = target;
     navPush();
     // Single slide-in animation from the correct direction
     if (fromIdx >= 0 && toIdx >= 0) {
@@ -927,8 +914,8 @@
       {/if}
       <button tabindex="-1" class="rail-btn" class:active={page === 'sessions'} title={t('sessions')} onclick={() => switchTab('sessions')}><Icon name="sessions" size={17} /></button>
       <button tabindex="-1" class="rail-btn" class:active={page === 'terminal'} title={t('terminal')} onclick={() => switchTab('terminal')}><Icon name="terminal" size={17} /></button>
-      {#if teamAvailable}
-        <button tabindex="-1" class="rail-btn" class:active={page === 'team'} title={t('team')} onclick={() => switchTab('team')}><Icon name="collab" size={17} /></button>
+      {#if hubEligible}
+        <button tabindex="-1" class="rail-btn" class:active={page === 'agents'} title={t('agentsTitle')} onclick={() => switchTab('agents')}><Icon name="bot" size={17} /></button>
       {/if}
       <button tabindex="-1" class="rail-btn" class:active={page === 'files'} title={t('files')} onclick={() => switchTab('files')}><Icon name="files" size={17} /></button>
       <div class="rail-spacer"></div>
@@ -971,7 +958,7 @@
     {#if page === 'settings'}
       <Settings {onConnected} />
     {:else if page === 'sessions'}
-      <Sessions {openTerminal} {openTeam} activeTarget={terminalTarget} visible={page === 'sessions'} />
+      <Sessions {openTerminal} activeTarget={terminalTarget} visible={page === 'sessions'} />
     {/if}
     <!-- Team is kept mounted (like Files/Terminal below) and merely hidden when
          inactive, so switching tabs preserves its state — the selected team
@@ -990,9 +977,9 @@
         <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} />
       </div>
     {/if}
-    {#if teamAvailable}
-      <div class="page-layer" class:hidden={page !== 'team'}>
-        <Team bind:this={teamRef} visible={page === 'team'} currentSession={terminalSession} {fontSize} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onTeamSession={(s) => teamSession = s} />
+    {#if hubEligible}
+      <div class="page-layer" class:hidden={page !== 'agents'}>
+        <AgentsPage visible={page === 'agents'} />
       </div>
     {/if}
     <div class="page-layer" class:hidden={page !== 'files'}>
@@ -1088,9 +1075,9 @@
       <button tabindex="-1" class:active={page === 'terminal'} onclick={() => switchTab('terminal')}>
         <Icon name="terminal" size={19} /><span>{t('terminal')}</span>
       </button>
-      {#if teamAvailable}
-        <button tabindex="-1" class:active={page === 'team'} onclick={() => switchTab('team')}>
-          <Icon name="collab" size={19} /><span>{t('team')}</span>
+      {#if hubEligible}
+        <button tabindex="-1" class:active={page === 'agents'} onclick={() => switchTab('agents')}>
+          <Icon name="bot" size={19} /><span>{t('agentsTitle')}</span>
         </button>
       {/if}
       <button tabindex="-1" class:active={page === 'files'} onclick={() => switchTab('files')}>

@@ -11,12 +11,11 @@
   // isTeamSession is gated on the shared teamState.available, so on a server
   // without the team bus these fall back to ordinary sessions (consistently
   // with PanePicker and the Team tab).
-  import { isTeamSession, teamRoomOf, teamLabel } from '../core/team.svelte.ts';
+  import { isTeamSession, teamLabel } from '../core/team.svelte.ts';
   import { agentNotifications, notificationForWindow, sessionHasNotification } from '../core/agent-notifications.svelte.ts';
 
-  let { openTerminal, openTeam = () => {}, activeTarget = '', visible = false }: {
+  let { openTerminal, activeTarget = '', visible = false }: {
     openTerminal: (session: string, target: string, command?: string) => void;
-    openTeam?: (room: string) => void;
     activeTarget?: string;
     visible?: boolean;
   } = $props();
@@ -145,8 +144,6 @@
   // Single-click entry: open the session at its "primary" pane.
   // Multi-window sessions toggle expansion so user can choose.
   function activateSession(s: TmuxSession) {
-    // Team session → open the team's chat instead of a raw terminal.
-    if (isTeamSession(s.name)) { openTeam(teamRoomOf(s.name)); return; }
     const ps = panes[s.name] || [];
     if (s.windows > 1 && ps.length > 1) {
       expanded[s.name] = !expanded[s.name];
@@ -161,8 +158,6 @@
   // elsewhere on the page would leave the user wondering what happened.
   // We pick the most-informative pane: first AI pane, else first pane.
   function chipOpen(s: TmuxSession) {
-    // Team session → chat (chips normally exclude these; guard anyway).
-    if (isTeamSession(s.name)) { openTeam(teamRoomOf(s.name)); return; }
     // If this chip represents the currently-active session, return to the
     // exact pane the user was viewing (not whichever AI pane the summary
     // picked). Tapping the active chip = "go back to Terminal".

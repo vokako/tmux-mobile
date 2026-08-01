@@ -121,6 +121,18 @@ feed the store from the hub's inbox consumer *before* dedupe (dedupe is a
 notification-UI concern; telemetry wants every fact). Window records are
 dropped when the window disappears (`retain_windows` on every `hub_agents`).
 
+## Managed vs direct windows
+
+Two kinds of windows, presented apart (owner decision, 2026-08-01). MANAGED
+agents were spawned from the registry: isolated home, tmm-wired, kicked —
+they are chat participants (cards, DM targets). DIRECT windows are everything
+else: shells and agents the user started by hand — they are terminal things
+and appear only inside the terminal drawer's window list (tagged "direct").
+The marker is the isolated home itself: `hub_agents` sets `managed` iff
+`<workspace>/.tmm/agents/<window_name>/` exists. Shells never get chat
+affordances; a hand-started kiro can still be @-delivered to (useful), but
+the chat roster does not advertise it.
+
 ## Delivery: how a chat line reaches an agent
 
 The bus stores the record, but an interactive CLI only reacts to what lands in
