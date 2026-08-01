@@ -79,4 +79,9 @@
     opacity: 0.6;
   }
   .side-handle:focus-visible { outline: none; background: var(--accent-bg); }
+  /* Narrow layouts have no sidebar to resize (single-column pages keep their
+     list full-width) — the handle disappears with the geometry it controls. */
+  @media (max-width: 760px) {
+    .side-handle { display: none; }
+  }
 </style>
