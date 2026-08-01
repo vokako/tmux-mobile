@@ -19,13 +19,20 @@ Three shell shapes, chosen by context, never mixed:
 
 | context | chrome | why |
 |---|---|---|
-| connected desktop | **left icon rail** (46px, fixed): Hub / Sessions / Terminal / Team / Files, gear at the bottom | the VSCode/Slack pattern — switching stays one always-visible click, the top edge belongs to content, and the rail composes with the Hub's own sidebar instead of stacking a second horizontal bar over it |
+| connected desktop | **left icon rail** (46px, fixed): Hub / Sessions / Terminal / Agents / Files, gear at the bottom | the VSCode/Slack pattern — switching stays one always-visible click, the top edge belongs to content, and the rail composes with the Hub's own sidebar instead of stacking a second horizontal bar over it |
 | connected mobile | **bottom tab bar** (icons + labels, safe-area padded) | thumb reach; the top edge goes back to content. Hidden under `html.keyboard-open` so immersive typing (terminal, editor) costs nothing — the ONLY writer of that class is App's viewport handler, so there is no second source of truth |
 | disconnected | the old **top brand bar** with the gear (both platforms) | before auth there is nothing to navigate; brand + settings is the whole story |
 
-Desktop lands on the **Hub by default** (fresh state); a guard mirrors the
-Team guard and falls back to Sessions once the bus probe answers negative or
-the client turns out not hub-shaped (`page === 'hub' && !hubEligible`).
+Desktop lands on the **Hub by default** (fresh state); a guard falls back to
+Sessions once the bus probe answers negative (`hub`/`agents` need the bus).
+
+The Hub is CHAT-FIRST (owner-directed rework 2026-08-01): a project's default
+view is its conversation, full width; the terminal is a DRAWER behind a
+button — terminal is terminal, project is project, never parallel equals.
+Agent definitions live on their own Agents page (rail icon / bottom-bar tab).
+The Team tab is retired — the Hub's per-project chat + spawn + telemetry
+replaced it; the team_* backend stays (the bus IS the hub substrate) and
+legacy tmm-team-* sessions appear as plain sessions in the list.
 
 ## Mechanics worth recording
 
