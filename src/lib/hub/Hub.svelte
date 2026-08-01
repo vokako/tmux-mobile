@@ -15,7 +15,7 @@
   import { agentByBackend, sortRows } from '../projects/projects.ts';
   import { stateDotColor, mergeMessages, statuslineWindows, backendColor } from './hub.ts';
 
-  let { visible = false, fontSize = 14, openTerminal = () => {} } = $props();
+  let { visible = false, fontSize = 14, mobile = false, openTerminal = () => {} } = $props();
 
   let rows = $state([]);            // ProjectRow[] (projects + live flag)
   let panes = $state([]);           // all tmux panes (for window lists)
@@ -63,10 +63,17 @@
   function selectWindow(a) {
     const p = panes.find((p) => p.session === selected && p.window === a.window && p.active)
       ?? panes.find((p) => p.session === selected && p.window === a.window);
-    if (p) {
-      termTarget = `${p.session}:${p.window}.${p.pane}`;
-      termCommand = p.current_command || '';
-    }
+    if (!p) return;
+    termTarget = `${p.session}:${p.window}.${p.pane}`;
+    termCommand = p.current_command || '';
+  }
+
+  // Mobile: tapping a card is "go watch it" — there is no embedded column.
+  function tapWindow(a) {
+    if (!mobile) { selectWindow(a); return; }
+    const p = panes.find((p) => p.session === selected && p.window === a.window && p.active)
+      ?? panes.find((p) => p.session === selected && p.window === a.window);
+    if (p) openTerminal(p.session, `${p.session}:${p.window}.${p.pane}`, p.current_command || '');
   }
 
   async function loadFeed() {
@@ -164,8 +171,9 @@
   };
 </script>
 
-<div class="hub-root" class:term-full={termFull}>
+<div class="hub-root" class:term-full={termFull} class:mobile>
   <div class="cols">
+    {#if !mobile}
     <!-- ── Sidebar ─────────────────────────── -->
     <aside class="sidebar">
       <div class="side-scroll">
@@ -207,12 +215,24 @@
         {/each}
       </div>
     </aside>
+    {/if}
 
     <!-- ── Middle: chat + agent cards ──────── -->
     <main class="mid">
+      {#if mobile}
+        <!-- Phone: the project picker is a chip row — the sidebar's job in
+             one thumb-scrollable line. -->
+        <div class="proj-chips">
+          {#each rows as row (row.project.id)}
+            <button class="pchip" class:sel={row.project.session === selected} onclick={() => selectProject(row.project.session)}>
+              <span class="dot" class:off={!row.live}></span>{row.project.name}
+            </button>
+          {/each}
+        </div>
+      {/if}
       <div class="mid-head">
         <h1>{selectedRow?.project.name ?? ''}</h1>
-        <span class="path">{selectedRow?.project.path ?? ''}</span>
+        {#if !mobile}<span class="path">{selectedRow?.project.path ?? ''}</span>{/if}
         <span class="spacer"></span>
         {#if selected && !liveSelected}
           <button class="chip-btn" onclick={bringUp}>{t('projectOpen')}</button>
@@ -237,7 +257,7 @@
         <div class="cards">
           {#each agents.filter((a) => a.agent) as a (a.window)}
             {@const ag = agentByBackend(a.agent)}
-            <button class="acard" class:sel={termTarget.startsWith(`${selected}:${a.window}.`)} onclick={() => selectWindow(a)}>
+            <button class="acard" class:sel={!mobile && termTarget.startsWith(`${selected}:${a.window}.`)} onclick={() => tapWindow(a)}>
               <div class="a-top">
                 {#if ag}<span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>{/if}
                 {a.name}
@@ -273,6 +293,7 @@
       </div>
     </main>
 
+    {#if !mobile}
     <!-- ── Right: embedded terminal ────────── -->
     <section class="termcol">
       <div class="term-head">
@@ -295,8 +316,10 @@
         {/if}
       </div>
     </section>
+    {/if}
   </div>
 
+  {#if !mobile}
   <!-- ── Signature: the tmux status line ──── -->
   <footer class="statusline">
     <span class="sess">{selected || '—'}</span>
@@ -309,10 +332,26 @@
       <span>{agentCount} agents · {working} working</span>
     </div>
   </footer>
+  {/if}
 </div>
 
 <style>
   .hub-root { height: 100%; display: flex; flex-direction: column; min-height: 0; background: var(--bg); }
+  .hub-root.mobile .cols { grid-template-columns: 1fr; }
+  .proj-chips {
+    display: flex; gap: 6px; padding: 10px 12px 0; overflow-x: auto; flex: none;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .proj-chips::-webkit-scrollbar { display: none; }
+  .pchip {
+    display: flex; align-items: center; gap: 6px; flex: none;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 999px;
+    color: var(--text2); padding: 5px 12px; font-size: 12.5px; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .pchip.sel { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+  .pchip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--status-ok); }
+  .pchip .dot.off { background: var(--text3); }
   .cols { flex: 1; display: grid; grid-template-columns: 240px minmax(320px, 1fr) minmax(380px, 1.2fr); min-height: 0; }
   .term-full .cols { grid-template-columns: 1fr; }
   .term-full .sidebar, .term-full .mid { display: none; }
@@ -393,4 +432,11 @@
   .statusline .w:hover { color: var(--text); }
   .statusline .w.cur { background: var(--surface2); color: var(--accent); }
   .statusline .right { margin-left: auto; padding: 0 12px; color: var(--text3); white-space: nowrap; }
+
+  /* Narrow desktop: the hub and terminal become either/or — chat keeps the
+     room, the Terminal tab (or full-screen) covers watching. */
+  @media (max-width: 1100px) {
+    .hub-root:not(.mobile):not(.term-full) .cols { grid-template-columns: 220px 1fr; }
+    .hub-root:not(.mobile):not(.term-full) .termcol { display: none; }
+  }
 </style>

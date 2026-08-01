@@ -68,9 +68,8 @@
   // beats kicking the user off the tab they were on.
   $effect(() => {
     if (page === 'team' && teamState.probed && !teamState.available) page = 'sessions';
-    // Same for the Hub: it needs the bus AND desktop width. Only redirect once
-    // the probe answered (or the client is simply not hub-shaped).
-    if (page === 'hub' && ((teamState.probed && !teamState.available) || layout.isTouchDevice)) page = 'sessions';
+    // Same for the Hub: it needs the bus. Only redirect once the probe answered.
+    if (page === 'hub' && teamState.probed && !teamState.available) page = 'sessions';
   });
 
   // ─── Split-screen (desktop + wide only) ────────────────────────────────
@@ -95,10 +94,10 @@
     root.setProperty('--shell-top', connected ? '0px' : '49px');
     root.setProperty('--shell-left', connected && !layout.isTouchDevice ? '46px' : '0px');
   });
-  // The Hub is the desktop three-column view: needs a wide non-touch client
-  // AND the server-side bus (hub_* degrades method-not-found without it, same
-  // probe as Team).
-  let hubEligible = $derived(splitEligible && teamAvailable);
+  // The Hub needs only the server-side bus (hub_* degrades method-not-found
+  // without it, same probe as Team). Its LAYOUT adapts: three columns on
+  // desktop, a single chat column on touch devices.
+  let hubEligible = $derived(teamAvailable);
   let splitActive = $derived(splitEligible && splitLayout > 1 && splitCells.length > 0);
 
   function setLayout(n) {
@@ -988,7 +987,7 @@
            switches. Desktop-eligible only (needs width + the bus): mobile
            keeps the tab layout untouched. -->
       <div class="page-layer" class:hidden={page !== 'hub'}>
-        <Hub visible={page === 'hub'} {fontSize} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} />
+        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} />
       </div>
     {/if}
     {#if teamAvailable}
@@ -1081,6 +1080,11 @@
       <button tabindex="-1" class:active={page === 'sessions'} onclick={() => switchTab('sessions')}>
         <Icon name="sessions" size={19} /><span>{t('sessions')}</span>
       </button>
+      {#if hubEligible}
+        <button tabindex="-1" class:active={page === 'hub'} onclick={() => switchTab('hub')}>
+          <Icon name="layout" size={19} /><span>{t('hub')}</span>
+        </button>
+      {/if}
       <button tabindex="-1" class:active={page === 'terminal'} onclick={() => switchTab('terminal')}>
         <Icon name="terminal" size={19} /><span>{t('terminal')}</span>
       </button>
