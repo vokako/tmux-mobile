@@ -36,10 +36,17 @@ USAGE (agent):
   tmm done [summary]                  declare completion
   tmm spawn <agent> [--brief <text>]  spawn a registry agent into this project
 
-USAGE (human):
+USAGE (human or agent — self-management):
   tmm agent list                      agents in this project and their states
   tmm project list                    all projects
+  tmm project create <path> [--name n] [--session s] [--with-agent kiro|claude|codex]
+  tmm project up <session>            bring a project's tmux session up
+  tmm project down <session>          kill the session, keep the declaration
+  tmm project archive <session>       remove from projects (session survives)
   tmm registry list                   centrally-defined agents
+  tmm registry save --name <n> --backend <kiro|claude|codex> [--system <text>]
+                    [--model m] [--skills a,b] [--mcp <json>] [--can-hire]
+  tmm registry delete <name>
 
 CONTEXT:
   --project <session>   which project (default: $TMM_PROJECT)
@@ -195,11 +202,99 @@ async fn main() {
                 }
             }
         }
+        // ---- self-management: the app manages itself through the same CLI
+        // its agents use. An agent already holds a shell (it can run tmux or
+        // edit files directly), so these commands ADD no authority — they
+        // turn abilities it already has into a first-class, documented
+        // interface. can_hire stays a resource gate on spawn only.
+        ("project", rest) if rest.first().map(String::as_str) == Some("create") => {
+            let Some(path) = rest.get(1).cloned() else {
+                fail(EXIT_USAGE, "project create needs a path: tmm project create /path/to/dir [--name n] [--session s] [--with-agent kiro|claude|codex]");
+            };
+            let mut params = json!({ "path": path });
+            for (flag, key) in [("name", "name"), ("session", "session"), ("with-agent", "agent")] {
+                if let Some(Some(v)) = flags.get(flag) {
+                    params[key] = json!(v);
+                }
+            }
+            let r = rpc(&ctx, "project_create", params).await;
+            if ctx.json {
+                println!("{r}");
+            } else {
+                let proj = r.get("project").unwrap_or(&r);
+                println!("✓ project {} (id {})",
+                    proj.get("session").and_then(|v| v.as_str()).unwrap_or("?"),
+                    proj.get("id").and_then(|v| v.as_str()).unwrap_or("?"));
+            }
+        }
+        ("project", rest) if matches!(rest.first().map(String::as_str), Some("up" | "down" | "archive")) => {
+            let action = rest[0].clone();
+            let Some(name) = rest.get(1).cloned() else {
+                fail(EXIT_USAGE, &format!("project {action} needs a session name: tmm project {action} <session>"));
+            };
+            let id = resolve_project_id(&ctx, &name).await;
+            let method = match action.as_str() {
+                "up" => "project_up",
+                "down" => "project_down",
+                _ => "project_archive",
+            };
+            let r = rpc(&ctx, method, json!({ "id": id })).await;
+            if ctx.json { println!("{r}"); } else { println!("✓ {action} {name}"); }
+        }
+        ("registry", rest) if rest.first().map(String::as_str) == Some("save") => {
+            // Self-evolution: an agent can define NEW agents (or refine
+            // existing ones) and then spawn them.
+            let Some(Some(name)) = flags.get("name").cloned() else {
+                fail(EXIT_USAGE, "registry save needs --name and --backend (and usually --system):\n  tmm registry save --name tester --backend kiro --system \"You run the test suite …\" [--skills a,b] [--mcp '<json array>'] [--can-hire]");
+            };
+            let backend = flags.get("backend").cloned().flatten().unwrap_or_default();
+            // --skills is a comma list of refs; --mcp is a raw JSON array
+            // (server-validated either way).
+            let skills: Vec<String> = flags
+                .get("skills").cloned().flatten()
+                .map(|s| s.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect())
+                .unwrap_or_default();
+            let def = json!({
+                "name": name,
+                "backend": backend,
+                "model": flags.get("model").cloned().flatten().unwrap_or_default(),
+                "system": flags.get("system").cloned().flatten().unwrap_or_default(),
+                "skills": serde_json::to_string(&skills).unwrap(),
+                "mcp": flags.get("mcp").cloned().flatten().unwrap_or_else(|| "[]".into()),
+                "can_hire": flags.contains_key("can-hire"),
+            });
+            let r = rpc(&ctx, "registry_save", json!({ "def": def })).await;
+            if ctx.json { println!("{r}"); } else { println!("✓ saved {name}"); }
+        }
+        ("registry", rest) if rest.first().map(String::as_str) == Some("delete") => {
+            let Some(name) = rest.get(1).cloned() else {
+                fail(EXIT_USAGE, "registry delete needs a name: tmm registry delete <name>");
+            };
+            let r = rpc(&ctx, "registry_delete", json!({ "name": name })).await;
+            if ctx.json { println!("{r}"); } else { println!("✓ deleted {name}"); }
+        }
         _ => {
             eprint!("{USAGE}");
             std::process::exit(EXIT_USAGE);
         }
     }
+}
+
+/// Accepts a session name or a raw project id; resolves via project_list so
+/// humans and agents can address projects by the name they see in tmux.
+async fn resolve_project_id(ctx: &Ctx, name: &str) -> String {
+    let r = rpc(ctx, "project_list", json!({ "include_archived": true })).await;
+    let empty = Vec::new();
+    let rows = r.get("projects").and_then(|a| a.as_array()).unwrap_or(&empty);
+    for p in rows {
+        let proj = p.get("project").cloned().unwrap_or(Value::Null);
+        let id = proj.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let session = proj.get("session").and_then(|v| v.as_str()).unwrap_or("");
+        if session == name || id == name {
+            return id.to_string();
+        }
+    }
+    fail(EXIT_NOT_FOUND, &format!("no project with session or id '{name}' — try `tmm project list`"))
 }
 
 fn need_project(ctx: &Ctx) -> String {
@@ -217,7 +312,8 @@ fn need_agent(ctx: &Ctx) -> String {
 /// `--flag value` / `--flag` / `-f` → map; the rest are positionals.
 /// Flags known to take a value consume the next arg; boolean flags don't.
 fn split_flags(args: &[String]) -> (std::collections::HashMap<String, Option<String>>, Vec<String>) {
-    const VALUED: &[&str] = &["project", "agent", "server", "output", "since", "limit", "brief"];
+    const VALUED: &[&str] = &["project", "agent", "server", "output", "since", "limit", "brief",
+                          "name", "session", "with-agent", "backend", "model", "system", "skills", "mcp"];
     let mut flags = std::collections::HashMap::new();
     let mut pos = Vec::new();
     let mut i = 0;

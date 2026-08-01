@@ -24,12 +24,34 @@ tmm log [--since <ts>] [--limit N] [-f]   read chat; --since is exclusive (ms)
 tmm status <working|waiting|blocked> [note]
 tmm done [summary]                   completion; also posts "✔ done — summary"
 
-# human-facing
+# human-facing AND agent-facing — self-management
 tmm agent list                       windows + agent detection + derived state
 tmm project list                     ● live / ○ down, session + path
+tmm project create <path> [--name n] [--session s] [--with-agent kiro|claude|codex]
+tmm project up|down|archive <session>
 tmm registry list                    centrally-defined agents
+tmm registry save --name <n> --backend <b> [--system <text>] [--skills a,b] [--mcp <json>] [--can-hire]
+tmm registry delete <name>
 tmm spawn <agent> [--brief <text>]   spawn a registry agent into this project
 ```
+
+## Self-management: the app operates itself through its own CLI
+
+Everything the UI can do to projects and the registry, `tmm` can do — and the
+spawn prompt tells agents so. A lead can set up a whole project
+(`tmm project create` → `up`), define a NEW kind of agent
+(`tmm registry save`) and then spawn it: definition → instantiation →
+delegation, all inside one conversation. This adds no authority: an agent
+already holds a shell (it can run tmux or edit files directly), so first-class
+commands only replace ad-hoc power with a documented, observable interface.
+`can_hire` stays a resource gate on spawn — it is about fan-out control, not
+security. `project up/down/archive` accept the SESSION NAME (resolved to the
+project id via project_list), because the session is what agents and humans
+actually see.
+
+Verified with a real agent: a spawned lead briefed to "create a project at
+/tmp/evolve" ran `tmm project create /tmp/evolve --session evolve`, verified
+with `tmm project list`, and reported done — 21s end to end.
 
 Global flags: `--project <session>`, `--agent <name>`, `--server <ws://…>`,
 `--output json` (every read). Token from `config.toml`, overridable with

@@ -170,9 +170,13 @@ fn build_prompt(def: &RegAgent, name: &str, session: &str, brief: &str) -> Strin
          - `tmm log --limit 30` — read recent chat; `tmm agent list` — who is here and their state\n\
          - `tmm status working|waiting|blocked \"note\"` — declare what you are doing when it changes\n\
          - `tmm done \"summary\"` — REQUIRED when you finish the briefed task\n\
+         You can also manage the workspace itself when the task calls for it:\n\
+         - `tmm spawn <registry-name> --brief \"...\"` — bring in a teammate (see `tmm registry list`)\n\
+         - `tmm project create|up|down|archive` — set up or tear down whole projects\n\
+         - `tmm registry save --name .. --backend .. --system \"..\"` — define NEW kinds of agents, then spawn them\n\
          Rules: report results through `tmm send`/`tmm done`, not just terminal output. \
          If tmm fails (server down), keep working — it is telemetry, never a blocker. \
-         Run `tmm --help` if unsure."
+         Run `tmm --help` for the full command list."
     );
     if !brief.trim().is_empty() {
         s += &format!("\n\nYour task, briefed by {}:\n{}", if brief.is_empty() { "the operator" } else { "your teammate" }, brief.trim());
