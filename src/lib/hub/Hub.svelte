@@ -16,6 +16,7 @@
   // · Agent DEFINITIONS are configured on their own page (AgentsPage), not
   //   in this sidebar. New projects pick their agents at creation time.
   import Terminal from '../terminal/Terminal.svelte';
+  import SideHandle from '../ui/SideHandle.svelte';
   import Icon from '../ui/Icon.svelte';
   import { t } from '../core/i18n.svelte.ts';
   import {
@@ -257,6 +258,7 @@
     {#if !compact}
     <!-- ── Sidebar: projects only ─────────── -->
     <aside class="sidebar">
+      <SideHandle />
       <div class="side-scroll">
         <div class="side-h">{t('hubProjects')}</div>
         {#each rows as row (row.project.id)}
@@ -433,10 +435,10 @@
 
 <style>
   .hub-root { height: 100%; display: flex; flex-direction: column; min-height: 0; background: var(--bg); position: relative; }
-  .cols { flex: 1; display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 0; }
+  .cols { flex: 1; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 0; }
   .hub-root.compact .cols { grid-template-columns: minmax(0, 1fr); }
   /* Drawer open: the conversation yields but stays present. */
-  .hub-root.drawer-open .cols { grid-template-columns: 220px minmax(280px, 0.8fr) minmax(360px, 1.2fr); }
+  .hub-root.drawer-open .cols { grid-template-columns: var(--sidebar-w) minmax(280px, 0.8fr) minmax(360px, 1.2fr); }
 
   .proj-chips {
     display: flex; gap: 6px; padding: 10px 12px 0; overflow-x: auto; flex: none;
@@ -453,9 +455,8 @@
   .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--status-ok); flex: none; }
   .dot.off { background: var(--text3); }
 
-  .sidebar { background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+  .sidebar { position: relative; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
   .side-scroll { flex: 1; overflow-y: auto; padding: 8px; }
-  .side-h { font-family: ui-monospace, Menlo, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 1.4px; color: var(--text3); padding: 10px 10px 5px; }
   .p-row { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: none; border: none; padding: 8px 10px; border-radius: 9px; color: var(--text); cursor: pointer; font-size: 13px; transition: background 160ms; }
   .p-row:hover { background: var(--surface2); }
   .p-row.open { background: var(--accent-bg); }
@@ -468,10 +469,6 @@
   .mid-head h1 { font-family: ui-monospace, Menlo, monospace; font-size: 15px; margin: 0; font-weight: 600; }
   .path { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .spacer { flex: 1; }
-  .chip-btn { display: flex; align-items: center; gap: 5px; background: var(--surface); border: 1px solid var(--border); color: var(--text2); border-radius: 8px; padding: 5px 11px; font-size: 12.5px; cursor: pointer; transition: border-color 160ms, color 160ms; }
-  .chip-btn:hover { border-color: var(--accent); color: var(--accent); }
-  .chip-btn:disabled { opacity: 0.4; cursor: default; }
-  .chip-btn.primary { background: var(--accent-bg); color: var(--accent); border-color: transparent; }
   .term-toggle.on { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
 
   .spawn-form { display: flex; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--border2); }
@@ -488,7 +485,6 @@
   .a-state { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--text2); margin-top: 5px; display: flex; align-items: center; gap: 5px; }
   .st { width: 6px; height: 6px; border-radius: 50%; flex: none; }
   .a-note { font-size: 11px; color: var(--text3); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .ava { width: 16px; height: 16px; border-radius: 5px; flex: none; display: grid; place-items: center; font-family: ui-monospace, Menlo, monospace; font-size: 9px; font-weight: 700; color: var(--bg); }
 
   .feed { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; }
   .msg { max-width: 84%; }
@@ -513,8 +509,6 @@
   .win-pill { display: flex; align-items: center; gap: 5px; flex: none; background: var(--surface); border: 1px solid var(--border); border-radius: 7px; color: var(--text2); padding: 4px 9px; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; cursor: pointer; }
   .win-pill.cur { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
   .direct-tag { font-size: 9px; color: var(--text3); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; margin-left: 3px; }
-  .icon-btn { display: grid; place-items: center; background: none; border: 1px solid var(--border); color: var(--text2); border-radius: 7px; width: 28px; height: 25px; cursor: pointer; transition: border-color 160ms, color 160ms; flex: none; }
-  .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
   .term-body { flex: 1; min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; }
 
   .statusline { display: flex; align-items: center; height: 25px; background: var(--bg3); border-top: 1px solid var(--border); font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--text2); user-select: none; flex: none; }

@@ -84,6 +84,15 @@
   const SPLIT_MIN_WIDTH = 900;
   let wideEnough = $state(typeof window !== 'undefined' && window.innerWidth >= SPLIT_MIN_WIDTH);
   let splitEligible = $derived(!layout.isTouchDevice && (layout.forceDesktop || wideEnough));
+  // Shared sidebar width (ui-unification.md): the shell owns the geometry,
+  // pages consume var(--sidebar-w), SideHandle is the only other writer.
+  $effect(() => {
+    const saved = parseInt(localStorage.getItem('tmux_sidebar_w') || '', 10);
+    if (saved >= 180 && saved <= 420) {
+      document.documentElement.style.setProperty('--sidebar-w', saved + 'px');
+    }
+  });
+
   // Overlay geometry vars for fixed-position panels (Preferences): they must
   // clear whatever shell chrome exists — top bar when disconnected, the left
   // rail on connected desktop, nothing on connected mobile.

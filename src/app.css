@@ -150,3 +150,43 @@ button:disabled {
 .subtle-scroll::-webkit-scrollbar-thumb:hover {
   background-color: var(--scroll-thumb-hover);
 }
+
+/* ─── Shared UI vocabulary (docs/design-docs/features/ui-unification.md) ──
+   Small primitives every desktop page reuses instead of forking copies.
+   Page-specific LAYOUT stays in component styles; the vocabulary lives here. */
+
+:root { --sidebar-w: 240px; }
+
+.chip-btn {
+  display: flex; align-items: center; gap: 5px;
+  background: var(--surface); border: 1px solid var(--border);
+  color: var(--text2); border-radius: 8px; padding: 5px 11px;
+  font-size: 12.5px; cursor: pointer;
+  transition: border-color 160ms, color 160ms;
+  -webkit-tap-highlight-color: transparent;
+}
+.chip-btn:hover { border-color: var(--accent); color: var(--accent); }
+.chip-btn:disabled { opacity: 0.4; cursor: default; }
+.chip-btn.primary { background: var(--accent-bg); color: var(--accent); border-color: transparent; }
+.chip-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
+
+.icon-btn {
+  display: grid; place-items: center; flex: none;
+  background: none; border: 1px solid var(--border); color: var(--text2);
+  border-radius: 7px; width: 28px; height: 25px; cursor: pointer;
+  transition: border-color 160ms, color 160ms;
+}
+.icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.side-h {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 1.4px;
+  color: var(--text3); padding: 10px 10px 5px;
+}
+
+.ava {
+  width: 16px; height: 16px; border-radius: 5px; flex: none;
+  display: grid; place-items: center;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 9px; font-weight: 700; color: var(--bg);
+}

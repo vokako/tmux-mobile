@@ -5,6 +5,7 @@
   // instantiates them into isolated homes). This is the page the registry
   // deserved instead of a list squatting in the Hub sidebar.
   import Icon from '../ui/Icon.svelte';
+  import SideHandle from '../ui/SideHandle.svelte';
   import { t } from '../core/i18n.svelte.ts';
   import { registryList, registrySave, registryDelete } from '../core/ws.ts';
   import { backendColor } from '../hub/hub.ts';
@@ -75,6 +76,7 @@
 
 <div class="agents-root">
   <div class="list">
+    <SideHandle />
     <div class="list-head">
       <h1>{t('agentsTitle')}</h1>
       <button class="chip-btn primary" onclick={() => startEdit(null)}>＋ {t('agentsNew')}</button>
@@ -140,7 +142,7 @@
 </div>
 
 <style>
-  .agents-root { height: 100%; display: grid; grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.1fr); min-height: 0; background: var(--bg); }
+  .agents-root { height: 100%; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 0; background: var(--bg); }
   .agents-root:has(.editor) .list { border-right: 1px solid var(--border); }
   @media (max-width: 760px) {
     .agents-root { grid-template-columns: minmax(0, 1fr); }
@@ -148,14 +150,15 @@
     .agents-root:has(.editor) .list { display: none; }
   }
 
-  .list { overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+  .list { position: relative; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
   .list-head { display: flex; align-items: center; justify-content: space-between; }
   .list-head h1 { font-size: 16px; margin: 0; }
   .hint { color: var(--text3); font-size: 12px; margin: 2px 0 8px; line-height: 1.5; }
   .def { display: flex; align-items: flex-start; gap: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 11px; padding: 10px 12px; cursor: pointer; text-align: left; transition: border-color 160ms; }
   .def:hover { border-color: var(--input-border); }
   .def.sel { border-color: var(--accent); background: var(--accent-bg); }
-  .ava { width: 26px; height: 26px; border-radius: 8px; flex: none; display: grid; place-items: center; font-family: ui-monospace, Menlo, monospace; font-size: 12px; font-weight: 700; color: var(--bg); margin-top: 1px; }
+  /* size override on the shared .ava */
+  .def .ava { width: 26px; height: 26px; border-radius: 8px; font-size: 12px; margin-top: 1px; }
   .d-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .d-name { color: var(--text); font-weight: 600; font-size: 13.5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .d-backend { color: var(--text3); font-weight: 400; font-size: 12px; }
@@ -175,9 +178,4 @@
   textarea { resize: vertical; line-height: 1.5; }
   textarea.mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .chip-btn { display: flex; align-items: center; gap: 5px; background: var(--surface); border: 1px solid var(--border); color: var(--text2); border-radius: 8px; padding: 5px 11px; font-size: 12.5px; cursor: pointer; transition: border-color 160ms, color 160ms; }
-  .chip-btn:hover { border-color: var(--accent); color: var(--accent); }
-  .chip-btn:disabled { opacity: 0.4; cursor: default; }
-  .chip-btn.primary { background: var(--accent-bg); color: var(--accent); border-color: transparent; }
-  .chip-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
 </style>
