@@ -25,7 +25,7 @@ test('statuslineWindows marks the terminal window with tmux notation', () => {
 });
 
 test('every derived state has a dot color and unknown falls back', () => {
-  for (const s of ['working', 'waiting', 'blocked', 'stuck', 'shell', 'idle']) {
+  for (const s of ['working', 'waiting', 'blocked', 'stuck', 'failed', 'shell', 'idle']) {
     assert.ok(stateDotColor(s).startsWith('var(--'), s);
   }
 });

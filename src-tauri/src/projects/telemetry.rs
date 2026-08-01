@@ -5,7 +5,10 @@
 //! wants permission) and tmux window activity. Status is DERIVED from those
 //! facts at read time — an agent never fills in a form, and a backend with
 //! poor hook coverage (codex) degrades to pane-activity granularity instead
-//! of lying. See docs/exec-plans/agents-v2.md §4.1/§4.3.
+//! of lying. A finished turn (Stop) is REST, not distress: "stuck" detection
+//! by stop-without-done was a Team-supervisor-era rule and mislabeled every
+//! long-idle direct agent — the only distress we can honestly observe is a
+//! failed stop. See docs/exec-plans/agents-v2.md §4.1/§4.3.
 //!
 //! The store is a process-global map keyed by (session, window index) — the
 //! same granularity as a project slot and a hook notification. Records are
@@ -18,9 +21,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Tool activity within this window means "working".
 const ACTIVE_SECS: u64 = 30;
-/// A stop/completed notification with no `tmm done` and no activity for this
-/// long means "stuck" (the agent halted without telling anyone it finished).
-const STUCK_SECS: u64 = 180;
 /// An explicit `tmm status` declaration expires after this long so a crashed
 /// agent cannot stay "working" forever on its own last words.
 const EXPLICIT_TTL_SECS: u64 = 30 * 60;
@@ -42,7 +42,7 @@ struct Rec {
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AgentStatus {
-    /// Derived state: working | waiting | idle | stuck.
+    /// Derived state: working | waiting | idle | failed.
     pub state: String,
     /// Human line explaining the state (explicit note, notification kind, or
     /// the last observed tool activity).
@@ -144,20 +144,31 @@ fn derive_from(rec: &Rec, activity_ts: u64, now: u64) -> AgentStatus {
         return AgentStatus { state: "idle".into(), detail: summary, since: done_ts };
     }
 
-    // Hook notification is the freshest fact.
+    // Hook notification is the freshest fact. Newer pane activity resolves
+    // any of them: a prompt that got answered (or an agent that moved on)
+    // shows as working, and self-corrects back if the activity was noise.
     if let Some((kind, ts)) = &rec.notif {
+        if activity_ts > *ts && now.saturating_sub(activity_ts) < ACTIVE_SECS {
+            return AgentStatus { state: "working".into(), detail: String::new(), since: activity_ts };
+        }
         match kind.as_str() {
             "permission_required" | "input_required" => {
                 return AgentStatus { state: "waiting".into(), detail: kind.clone(), since: *ts };
             }
+            "failed" => {
+                // The one genuine distress signal we can observe: the agent's
+                // stop hook reported failure.
+                return AgentStatus { state: "failed".into(), detail: kind.clone(), since: *ts };
+            }
             _ => {
-                // completed/failed without a done: waiting for a human at
-                // first, stuck once it has sat quiet for STUCK_SECS.
-                let quiet = now.saturating_sub((*ts).max(activity_ts));
-                if quiet >= STUCK_SECS {
-                    return AgentStatus { state: "stuck".into(), detail: format!("{kind}, no done"), since: *ts };
-                }
-                return AgentStatus { state: "waiting".into(), detail: kind.clone(), since: *ts };
+                // completed (Stop) = the agent finished a TURN. That is REST,
+                // not distress: direct agents fire Stop after every exchange
+                // and never call `tmm done`, so treating a quiet stop as
+                // "stuck" branded every long-idle window as broken (owner
+                // report, 2026-08-01). "It stopped without done" carries no
+                // alarm on its own — the old rule came from the Team
+                // supervisor world where done was contractual.
+                return AgentStatus { state: "idle".into(), detail: String::new(), since: *ts };
             }
         }
     }
@@ -214,21 +225,38 @@ mod tests {
     }
 
     #[test]
-    fn a_stop_without_done_is_waiting_then_stuck() {
+    fn a_stop_is_rest_not_distress_no_matter_how_old() {
+        // Direct agents fire Stop after every exchange and never call
+        // `tmm done`; a long-idle window must read idle, not stuck.
         let mut r = rec();
         r.notif = Some(("completed".into(), 1000));
-        let early = derive_from(&r, 1000, 1000 + STUCK_SECS - 10);
-        assert_eq!(early.state, "waiting");
-        let late = derive_from(&r, 1000, 1000 + STUCK_SECS + 10);
-        assert_eq!(late.state, "stuck");
+        let hours_later = derive_from(&r, 1000, 1000 + 6 * 3600);
+        assert_eq!(hours_later.state, "idle");
     }
 
     #[test]
-    fn permission_prompt_is_waiting_not_stuck_regardless_of_age() {
+    fn a_failed_stop_is_the_one_distress_signal() {
+        let mut r = rec();
+        r.notif = Some(("failed".into(), 1000));
+        assert_eq!(derive_from(&r, 1000, 5000).state, "failed");
+    }
+
+    #[test]
+    fn permission_prompt_is_waiting_regardless_of_age() {
         let mut r = rec();
         r.notif = Some(("permission_required".into(), 1000));
-        let s = derive_from(&r, 1000, 1000 + STUCK_SECS * 10);
+        let s = derive_from(&r, 1000, 1000 + 36000);
         assert_eq!(s.state, "waiting");
+    }
+
+    #[test]
+    fn fresh_activity_after_a_notification_resolves_it() {
+        // The prompt got answered in the terminal (or the agent moved on):
+        // pane activity newer than the notification wins.
+        let mut r = rec();
+        r.notif = Some(("permission_required".into(), 1000));
+        let s = derive_from(&r, 2000, 2010);
+        assert_eq!(s.state, "working");
     }
 
     #[test]

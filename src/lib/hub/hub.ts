@@ -8,7 +8,8 @@ export function stateDotColor(state: string): string {
     case 'working': return 'var(--status-ok)';
     case 'waiting': return 'var(--status-warn)';
     case 'blocked':
-    case 'stuck': return 'var(--status-danger)';
+    case 'stuck':
+    case 'failed': return 'var(--status-danger)';
     case 'shell': return 'var(--text3)';
     default: return 'var(--status-sleep)'; // idle
   }

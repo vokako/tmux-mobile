@@ -109,8 +109,9 @@ same granularity as a hook notification and a project slot.
 | tool event < 30s ago | hooks (isolated homes, Phase B+) | `working` + activity line |
 | explicit `tmm status` | agent | as declared, expires after 30 min |
 | `tmm done` | agent | `idle`, summary as detail |
-| notification `permission_required` / `input_required` | hooks | `waiting`, never stuck |
-| notification `completed`/`failed`, no done | hooks | `waiting`, → `stuck` after 180s quiet |
+| notification `permission_required` / `input_required` | hooks | `waiting` (fresh pane activity resolves it — an answered prompt self-corrects) |
+| notification `completed` (Stop) | hooks | `idle` — a finished turn is REST, not distress. Direct agents fire Stop after every exchange and never call `tmm done`; the old stop-without-done→stuck rule (Team-supervisor era) branded every long-idle window as broken |
+| notification `failed` (StopFailure) | hooks | `failed` — the one distress signal we can honestly observe |
 | pane activity < 30s | tmux `window_activity` | `working` (hook-poor backends degrade here, not to a lie) |
 | nothing | — | `idle` |
 
