@@ -764,6 +764,22 @@ export interface RegAgent {
 export const registryList = () => call<{ agents: RegAgent[] }>('registry_list');
 export const registrySave = (def: RegAgent) => call('registry_save', { def });
 export const registryDelete = (name: string) => call('registry_delete', { name });
+// Central skills / MCP assets — referenced from agent defs by name.
+export interface RegSkill {
+  name: string;
+  ref: string;
+  description: string;
+}
+export interface RegMcpServer {
+  name: string;
+  def: string;
+}
+export const skillsList = () => call<{ skills: RegSkill[] }>('skills_list');
+export const skillsSave = (def: RegSkill) => call('skills_save', { def });
+export const skillsDelete = (name: string) => call('skills_delete', { name });
+export const mcpList = () => call<{ mcp: RegMcpServer[] }>('mcp_list');
+export const mcpSave = (def: RegMcpServer) => call('mcp_save', { def });
+export const mcpDelete = (name: string) => call('mcp_delete', { name });
 
 export const teamHistory = (room: string, limit = 100) => call('team_history', { room, limit });
 export const teamRoster = (room: string) => call('team_roster', { room });

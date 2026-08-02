@@ -32,8 +32,16 @@ tmm project up|down|archive <session>
 tmm registry list                    centrally-defined agents
 tmm registry save --name <n> --backend <b> [--system <text>] [--skills a,b] [--mcp <json>] [--can-hire]
 tmm registry delete <name>
+tmm skills list|save|delete          central skill assets (name → ref)
+tmm mcp list|save|delete             central MCP server defs
 tmm spawn <agent> [--brief <text>]   spawn a registry agent into this project
 ```
+
+Central assets (state.db v6): agents reference skills and MCP servers by
+NAME — a skills entry matching a reg_skills name resolves to its ref, and a
+STRING entry in the mcp array resolves to its reg_mcp def (inline objects
+keep working). Edit the asset once, every agent that references it follows.
+Managed on the Agents page (sidebar sections AGENTS / SKILLS / MCP).
 
 ## Self-management: the app operates itself through its own CLI
 

@@ -7,23 +7,74 @@
   import Icon from '../ui/Icon.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import { t } from '../core/i18n.svelte.ts';
-  import { registryList, registrySave, registryDelete } from '../core/ws.ts';
+  import { registryList, registrySave, registryDelete, skillsList, skillsSave, skillsDelete, mcpList, mcpSave, mcpDelete } from '../core/ws.ts';
   import { backendColor } from '../hub/hub.ts';
 
   let { visible = false } = $props();
 
   let defs = $state([]);
-  let editing = $state(null);   // working copy or null
+  let skills = $state([]);      // central skill assets
+  let mcps = $state([]);        // central MCP server defs
+  let editing = $state(null);   // agent working copy or null
   let isNew = $state(false);
+  // One editor at a time across the three kinds.
+  let editingSkill = $state(null);
+  let skillIsNew = $state(false);
+  let editingMcp = $state(null);
+  let mcpIsNew = $state(false);
   let error = $state('');
 
   async function reload() {
     try { defs = (await registryList()).agents ?? []; } catch { defs = []; }
+    try { skills = (await skillsList()).skills ?? []; } catch { skills = []; }
+    try { mcps = (await mcpList()).mcp ?? []; } catch { mcps = []; }
   }
   $effect(() => { if (visible) reload(); });
 
-  function startEdit(def) {
+  function closeAll() {
+    editing = null; editingSkill = null; editingMcp = null;
     error = '';
+  }
+
+  function startSkill(sk) {
+    closeAll();
+    skillIsNew = !sk;
+    editingSkill = sk ? { ...sk } : { name: '', ref: '', description: '' };
+  }
+  async function saveSkill() {
+    try {
+      await skillsSave(editingSkill);
+      editingSkill = null;
+      await reload();
+    } catch (e) { error = String(e?.message ?? e); }
+  }
+  async function removeSkill(name) {
+    try { await skillsDelete(name); editingSkill = null; await reload(); }
+    catch (e) { error = String(e?.message ?? e); }
+  }
+
+  function startMcp(m) {
+    closeAll();
+    mcpIsNew = !m;
+    editingMcp = m ? { ...m, defText: pretty(m.def) } : { name: '', defText: '{\n  "command": "",\n  "args": []\n}' };
+  }
+  async function saveMcp() {
+    let def;
+    try { def = JSON.stringify(JSON.parse(editingMcp.defText)); }
+    catch { error = t('agentsMcpInvalid'); return; }
+    try {
+      await mcpSave({ name: editingMcp.name.trim(), def });
+      editingMcp = null;
+      await reload();
+    } catch (e) { error = String(e?.message ?? e); }
+  }
+  async function removeMcp(name) {
+    try { await mcpDelete(name); editingMcp = null; await reload(); }
+    catch (e) { error = String(e?.message ?? e); }
+  }
+
+  function startEdit(def) {
+    closeAll();
     isNew = !def;
     editing = def
       ? { ...def, skillsText: parseRefs(def.skills).join(', '), mcpText: pretty(def.mcp) }
@@ -74,7 +125,7 @@
   }
 </script>
 
-<div class="agents-root" class:editing={!!editing}>
+<div class="agents-root" class:editing={!!editing || !!editingSkill || !!editingMcp}>
   <aside class="sidebar">
     <SideHandle />
     <div class="side-scroll">
@@ -89,11 +140,76 @@
       <button class="side-row add" onclick={() => startEdit(null)}>
         <Icon name="plus" size={13} />{t('agentsNew')}
       </button>
+
+      <div class="side-h">{t('skillsTitle')}</div>
+      {#each skills as sk (sk.name)}
+        <button class="side-row" class:open={editingSkill?.name === sk.name && !skillIsNew} onclick={() => startSkill(sk)}>
+          <Icon name="zap" size={13} />
+          <span class="r-name">{sk.name}</span>
+        </button>
+      {/each}
+      <button class="side-row add" onclick={() => startSkill(null)}>
+        <Icon name="plus" size={13} />{t('skillsNew')}
+      </button>
+
+      <div class="side-h">MCP</div>
+      {#each mcps as m (m.name)}
+        <button class="side-row" class:open={editingMcp?.name === m.name && !mcpIsNew} onclick={() => startMcp(m)}>
+          <Icon name="link" size={13} />
+          <span class="r-name">{m.name}</span>
+        </button>
+      {/each}
+      <button class="side-row add" onclick={() => startMcp(null)}>
+        <Icon name="plus" size={13} />{t('mcpNew')}
+      </button>
     </div>
   </aside>
 
   <main class="mid">
-    {#if editing}
+    {#if editingSkill}
+      <div class="page-head">
+        <h1>{skillIsNew ? t('skillsNew') : editingSkill.name}</h1>
+        <span class="spacer"></span>
+        {#if !skillIsNew}
+          <button class="chip-btn danger" onclick={() => removeSkill(editingSkill.name)}><Icon name="trash" size={13} />{t('delete')}</button>
+        {/if}
+        <button class="chip-btn" onclick={() => editingSkill = null}>{t('cancel')}</button>
+        <button class="chip-btn primary" disabled={!editingSkill.name.trim() || !editingSkill.ref.trim()} onclick={saveSkill}>{t('save')}</button>
+      </div>
+      <div class="editor">
+        {#if error}<div class="err">{error}</div>{/if}
+        <label>{t('agentsName')}
+          <input bind:value={editingSkill.name} disabled={!skillIsNew} placeholder="git-review" />
+        </label>
+        <label>{t('skillsRef')}
+          <input bind:value={editingSkill.ref} placeholder="github.com/org/repo/skills/git-review 或本地目录" />
+        </label>
+        <label>{t('skillsDesc')}
+          <input bind:value={editingSkill.description} />
+        </label>
+        <p class="hint">{t('skillsHint')}</p>
+      </div>
+    {:else if editingMcp}
+      <div class="page-head">
+        <h1>{mcpIsNew ? t('mcpNew') : editingMcp.name}</h1>
+        <span class="spacer"></span>
+        {#if !mcpIsNew}
+          <button class="chip-btn danger" onclick={() => removeMcp(editingMcp.name)}><Icon name="trash" size={13} />{t('delete')}</button>
+        {/if}
+        <button class="chip-btn" onclick={() => editingMcp = null}>{t('cancel')}</button>
+        <button class="chip-btn primary" disabled={!editingMcp.name.trim()} onclick={saveMcp}>{t('save')}</button>
+      </div>
+      <div class="editor">
+        {#if error}<div class="err">{error}</div>{/if}
+        <label>{t('agentsName')}
+          <input bind:value={editingMcp.name} disabled={!mcpIsNew} placeholder="files" />
+        </label>
+        <label>{t('mcpDef')}
+          <textarea class="mono" rows="10" bind:value={editingMcp.defText} spellcheck="false"></textarea>
+        </label>
+        <p class="hint">{t('mcpHint')}</p>
+      </div>
+    {:else if editing}
       <div class="page-head">
         <h1>{isNew ? t('agentsNew') : editing.name}</h1>
         <span class="spacer"></span>

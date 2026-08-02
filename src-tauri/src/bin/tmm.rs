@@ -47,6 +47,10 @@ USAGE (human or agent — self-management):
   tmm registry save --name <n> --backend <kiro|claude|codex> [--system <text>]
                     [--model m] [--skills a,b] [--mcp <json>] [--can-hire]
   tmm registry delete <name>
+  tmm skills list|delete <name>       central skill assets (name → ref)
+  tmm skills save --name <n> --ref <local dir|github url> [--description d]
+  tmm mcp list|delete <name>          central MCP server defs
+  tmm mcp save --name <n> --def '<json>' 
 
 CONTEXT:
   --project <session>   which project (default: $TMM_PROJECT)
@@ -266,6 +270,51 @@ async fn main() {
             let r = rpc(&ctx, "registry_save", json!({ "def": def })).await;
             if ctx.json { println!("{r}"); } else { println!("✓ saved {name}"); }
         }
+        ("skills", rest) if rest.first().map(String::as_str) == Some("list") => {
+            let r = rpc(&ctx, "skills_list", json!({})).await;
+            if ctx.json { println!("{r}"); } else {
+                let empty = Vec::new();
+                for sk in r.get("skills").and_then(|v| v.as_array()).unwrap_or(&empty) {
+                    let s = |k: &str| sk.get(k).and_then(|v| v.as_str()).unwrap_or("");
+                    println!("{} → {} {}", s("name"), s("ref"), s("description"));
+                }
+            }
+        }
+        ("skills", rest) if rest.first().map(String::as_str) == Some("save") => {
+            let (Some(Some(name)), Some(Some(refv))) = (flags.get("name").cloned(), flags.get("ref").cloned()) else {
+                fail(EXIT_USAGE, "skills save needs --name and --ref: tmm skills save --name git-review --ref github.com/org/repo/skills/git-review");
+            };
+            let def = json!({ "name": name, "ref": refv, "description": flags.get("description").cloned().flatten().unwrap_or_default() });
+            let r = rpc(&ctx, "skills_save", json!({ "def": def })).await;
+            if ctx.json { println!("{r}"); } else { println!("✓ saved {name}"); }
+        }
+        ("skills", rest) if rest.first().map(String::as_str) == Some("delete") => {
+            let Some(name) = rest.get(1).cloned() else { fail(EXIT_USAGE, "skills delete <name>"); };
+            let r = rpc(&ctx, "skills_delete", json!({ "name": name })).await;
+            if ctx.json { println!("{r}"); } else { println!("✓ deleted {name}"); }
+        }
+        ("mcp", rest) if rest.first().map(String::as_str) == Some("list") => {
+            let r = rpc(&ctx, "mcp_list", json!({})).await;
+            if ctx.json { println!("{r}"); } else {
+                let empty = Vec::new();
+                for m in r.get("mcp").and_then(|v| v.as_array()).unwrap_or(&empty) {
+                    let s = |k: &str| m.get(k).and_then(|v| v.as_str()).unwrap_or("");
+                    println!("{}: {}", s("name"), s("def"));
+                }
+            }
+        }
+        ("mcp", rest) if rest.first().map(String::as_str) == Some("save") => {
+            let (Some(Some(name)), Some(Some(defv))) = (flags.get("name").cloned(), flags.get("def").cloned()) else {
+                fail(EXIT_USAGE, "mcp save needs --name and --def '<json>': tmm mcp save --name files --def '{\"command\":\"mcp-files\"}'");
+            };
+            let r = rpc(&ctx, "mcp_save", json!({ "def": { "name": name, "def": defv } })).await;
+            if ctx.json { println!("{r}"); } else { println!("✓ saved {name}"); }
+        }
+        ("mcp", rest) if rest.first().map(String::as_str) == Some("delete") => {
+            let Some(name) = rest.get(1).cloned() else { fail(EXIT_USAGE, "mcp delete <name>"); };
+            let r = rpc(&ctx, "mcp_delete", json!({ "name": name })).await;
+            if ctx.json { println!("{r}"); } else { println!("✓ deleted {name}"); }
+        }
         ("registry", rest) if rest.first().map(String::as_str) == Some("delete") => {
             let Some(name) = rest.get(1).cloned() else {
                 fail(EXIT_USAGE, "registry delete needs a name: tmm registry delete <name>");
@@ -313,7 +362,8 @@ fn need_agent(ctx: &Ctx) -> String {
 /// Flags known to take a value consume the next arg; boolean flags don't.
 fn split_flags(args: &[String]) -> (std::collections::HashMap<String, Option<String>>, Vec<String>) {
     const VALUED: &[&str] = &["project", "agent", "server", "output", "since", "limit", "brief",
-                          "name", "session", "with-agent", "backend", "model", "system", "skills", "mcp"];
+                          "name", "session", "with-agent", "backend", "model", "system", "skills", "mcp",
+                          "ref", "description", "def"];
     let mut flags = std::collections::HashMap::new();
     let mut pos = Vec::new();
     let mut i = 0;

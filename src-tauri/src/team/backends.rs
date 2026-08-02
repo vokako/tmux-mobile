@@ -23,6 +23,10 @@ use super::{TeamConfig, TEAM_MCP_TOOL_TIMEOUT_MS};
 /// (`command` [+ `args`/`env`]).
 #[derive(serde::Deserialize, Default, Clone)]
 pub(crate) struct McpDef {
+    /// serde default: central reg_mcp defs store the name as the table KEY,
+    /// not inside the JSON — the spawn resolver injects it after parsing.
+    /// team.yaml entries always carry it inline.
+    #[serde(default)]
     pub(crate) name: String,
     #[serde(default)]
     pub(crate) url: Option<String>,

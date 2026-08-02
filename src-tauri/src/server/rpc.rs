@@ -474,7 +474,9 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
         // client hides the page (same contract as the team_* methods).
         "project_list" | "project_create" | "project_adopt" | "project_up" | "project_down"
         | "project_archive" | "project_autostart"
-        | "registry_list" | "registry_save" | "registry_delete" => {
+        | "registry_list" | "registry_save" | "registry_delete"
+        | "skills_list" | "skills_save" | "skills_delete"
+        | "mcp_list" | "mcp_save" | "mcp_delete" => {
             handle_project_request(req.method.as_str(), id, p)
         }
 
@@ -544,6 +546,20 @@ fn handle_project_request(method: &str, id: Option<u64>, p: &serde_json::Value) 
             None => Err("missing required param: def".into()),
         },
         "registry_delete" => need_id("name").and_then(|n| projects::registry_delete(&n)),
+        // Central skills / MCP assets (owner: "集中化管理") — referenced from
+        // agent defs by name, resolved at spawn.
+        "skills_list" => projects::skills_list(),
+        "skills_save" => match p.get("def") {
+            Some(def) => projects::skill_save(def),
+            None => Err("missing required param: def".into()),
+        },
+        "skills_delete" => need_id("name").and_then(|n| projects::skill_delete(&n)),
+        "mcp_list" => projects::mcp_list(),
+        "mcp_save" => match p.get("def") {
+            Some(def) => projects::mcp_save(def),
+            None => Err("missing required param: def".into()),
+        },
+        "mcp_delete" => need_id("name").and_then(|n| projects::mcp_delete(&n)),
         other => Err(format!("unknown project method: {other}")),
     };
 

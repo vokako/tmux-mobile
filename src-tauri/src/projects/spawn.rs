@@ -184,13 +184,38 @@ fn build_prompt(def: &RegAgent, name: &str, session: &str, brief: &str) -> Strin
     s
 }
 
+/// Skills: each entry is either a central asset NAME (reg_skills → its ref)
+/// or a raw ref (local dir / github url) — central names win, raw refs keep
+/// working, nothing migrates.
 fn resolve_skill_refs(def: &RegAgent, home: &Path) -> Vec<crate::team::skills::ResolvedSkill> {
-    let refs: Vec<String> = serde_json::from_str(&def.skills).unwrap_or_default();
+    let entries: Vec<String> = serde_json::from_str(&def.skills).unwrap_or_default();
+    let central: std::collections::HashMap<String, String> = super::with_registry_skills();
+    let refs: Vec<String> = entries
+        .into_iter()
+        .map(|e| central.get(&e).cloned().unwrap_or(e))
+        .collect();
     crate::team::skills::resolve_skills(&refs, &home.to_string_lossy())
 }
 
+/// MCP: an array entry that is a STRING names a central server (reg_mcp);
+/// an inline object is used as-is.
 fn mcp_defs(def: &RegAgent) -> Vec<shared::McpDef> {
-    serde_json::from_str(&def.mcp).unwrap_or_default()
+    let entries: Vec<serde_json::Value> = serde_json::from_str(&def.mcp).unwrap_or_default();
+    let central = super::with_registry_mcp();
+    entries
+        .into_iter()
+        .filter_map(|e| match e {
+            serde_json::Value::String(name) => {
+                let def_json = central.get(&name)?;
+                let mut parsed: shared::McpDef = serde_json::from_str(def_json).ok()?;
+                if parsed.name.is_empty() {
+                    parsed.name = name;
+                }
+                Some(parsed)
+            }
+            obj => serde_json::from_value(obj).ok(),
+        })
+        .collect()
 }
 
 fn render_kiro(
@@ -373,6 +398,9 @@ mod tests {
     use super::*;
 
     fn def(backend: &str) -> RegAgent {
+        // Central-asset resolution in mcp_defs/resolve_skill_refs touches the
+        // process-global store — it must NEVER be the user's real state.db.
+        super::super::tests::use_test_store();
         RegAgent {
             name: "tester".into(),
             backend: backend.into(),
@@ -417,6 +445,32 @@ mod tests {
             assert!(r.cmd.contains("files") || dir.join("mcp.json").exists(), "registry MCP present");
             std::fs::remove_dir_all(&dir).ok();
         }
+    }
+
+    #[test]
+    fn central_mcp_and_skill_names_resolve_at_spawn() {
+        super::super::tests::use_test_store();
+        // Define central assets, then reference them by NAME from an agent.
+        super::super::mcp_save(&serde_json::json!({
+            "name": "central-files",
+            "def": "{\"command\":\"mcp-files\",\"args\":[\"--root\",\"/tmp\"]}"
+        })).unwrap();
+        super::super::skill_save(&serde_json::json!({
+            "name": "central-skill",
+            "ref": "github.com/org/repo/skills/x"
+        })).unwrap();
+        let mut d = def("kiro");
+        d.mcp = r#"["central-files", {"name":"inline","command":"inline-cmd"}]"#.into();
+        let resolved = mcp_defs(&d);
+        let names: Vec<&str> = resolved.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(resolved.len(), 2, "name entry + inline entry both resolve; got {names:?}");
+        assert!(resolved.iter().any(|m| m.name == "central-files" && m.command.as_deref() == Some("mcp-files")),
+            "string entry resolves through reg_mcp");
+        assert!(resolved.iter().any(|m| m.name == "inline" && m.command.as_deref() == Some("inline-cmd")),
+            "inline object keeps working");
+        // Unknown names drop silently rather than breaking the spawn.
+        d.mcp = r#"["no-such-server"]"#.into();
+        assert!(mcp_defs(&d).is_empty());
     }
 
     #[test]

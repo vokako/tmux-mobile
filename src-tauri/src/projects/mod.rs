@@ -393,6 +393,60 @@ pub fn registry_delete(name: &str) -> Result<Value, String> {
     })
 }
 
+// ---- central skills / MCP assets ----------------------------------------
+
+pub fn skills_list() -> Result<Value, String> {
+    with_store(|store| Ok(json!({ "skills": store.skills_list()? })))
+}
+
+pub fn skill_save(def: &Value) -> Result<Value, String> {
+    let sk: store::RegSkill = serde_json::from_value(def.clone()).map_err(|e| format!("invalid skill: {e}"))?;
+    if sk.name.trim().is_empty() || sk.r#ref.trim().is_empty() {
+        return Err("skill needs a name and a ref".into());
+    }
+    with_store(|store| {
+        store.skill_save(&sk, now())?;
+        Ok(json!({ "ok": true, "name": sk.name }))
+    })
+}
+
+pub fn skill_delete(name: &str) -> Result<Value, String> {
+    with_store(|store| Ok(json!({ "ok": store.skill_delete(name)? })))
+}
+
+pub fn mcp_list() -> Result<Value, String> {
+    with_store(|store| Ok(json!({ "mcp": store.mcp_list()? })))
+}
+
+pub fn mcp_save(def: &Value) -> Result<Value, String> {
+    let m: store::RegMcp = serde_json::from_value(def.clone()).map_err(|e| format!("invalid mcp: {e}"))?;
+    if m.name.trim().is_empty() {
+        return Err("mcp server needs a name".into());
+    }
+    serde_json::from_str::<Value>(&m.def).map_err(|e| format!("def must be JSON: {e}"))?;
+    with_store(|store| {
+        store.mcp_save(&m, now())?;
+        Ok(json!({ "ok": true, "name": m.name }))
+    })
+}
+
+pub fn mcp_delete(name: &str) -> Result<Value, String> {
+    with_store(|store| Ok(json!({ "ok": store.mcp_delete(name)? })))
+}
+
+/// Central skills as name→ref (spawn-time resolution; empty on store errors —
+/// a raw ref in the agent def still works).
+pub(crate) fn with_registry_skills() -> std::collections::HashMap<String, String> {
+    with_store(|store| Ok(store.skills_list()?.into_iter().map(|s| (s.name, s.r#ref)).collect()))
+        .unwrap_or_default()
+}
+
+/// Central MCP defs as name→def-json.
+pub(crate) fn with_registry_mcp() -> std::collections::HashMap<String, String> {
+    with_store(|store| Ok(store.mcp_list()?.into_iter().map(|m| (m.name, m.def)).collect()))
+        .unwrap_or_default()
+}
+
 /// Project row for a session (used by spawn to find the workspace).
 pub fn project_for_session(session: &str) -> Result<Option<store::Project>, String> {
     with_store(|store| store.project_by_session(session))
@@ -531,7 +585,10 @@ mod tests {
     /// Point the process-wide store at a throwaway database, wiped once per
     /// test process. `STORE` is a `OnceLock`, so every test that touches it must
     /// go through here — the first opener decides the path for the whole run.
-    fn use_test_store() {
+    /// pub(crate): spawn's tests reach the store through mcp_defs/
+    /// resolve_skill_refs (central-asset resolution), and skipping this once
+    /// pointed the WHOLE test process at the user's real state.db.
+    pub(crate) fn use_test_store() {
         static TEST_DB: OnceLock<()> = OnceLock::new();
         TEST_DB.get_or_init(|| {
             let dir = std::env::temp_dir().join("tmm-projects-test");

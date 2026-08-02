@@ -14,7 +14,7 @@ use std::path::Path;
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
@@ -258,6 +258,29 @@ impl Store {
                      );",
                 )
                 .map_err(|e| format!("migrate to 5: {e}"))?;
+        }
+        if version < 6 {
+            // Skills and MCP servers become first-class central assets
+            // (owner: "集中化管理"): define once, reference from any agent by
+            // NAME. A skill entry maps a name to a resolvable ref (local dir
+            // or github url); an mcp entry holds the server def JSON. Agent
+            // defs keep their existing columns — string entries in them now
+            // resolve through these tables at spawn, inline values still work.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE reg_skills (
+                       name        TEXT PRIMARY KEY,
+                       ref_        TEXT NOT NULL,
+                       description TEXT NOT NULL DEFAULT '',
+                       updated_at  INTEGER NOT NULL
+                     );
+                     CREATE TABLE reg_mcp (
+                       name       TEXT PRIMARY KEY,
+                       def        TEXT NOT NULL,
+                       updated_at INTEGER NOT NULL
+                     );",
+                )
+                .map_err(|e| format!("migrate to 6: {e}"))?;
         }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)
@@ -563,6 +586,89 @@ impl Store {
         Ok(())
     }
 
+
+    // ---- central skills / MCP assets (agents-v2, state.db v6) ----------
+
+    pub fn skills_list(&self) -> Result<Vec<RegSkill>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT name, ref_, description FROM reg_skills ORDER BY name")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(RegSkill { name: r.get(0)?, r#ref: r.get(1)?, description: r.get(2)? })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(rows)
+    }
+
+    pub fn skill_save(&self, sk: &RegSkill, now: u64) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO reg_skills (name, ref_, description, updated_at) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(name) DO UPDATE SET ref_=?2, description=?3, updated_at=?4",
+                rusqlite::params![sk.name, sk.r#ref, sk.description, now as i64],
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn skill_delete(&self, name: &str) -> Result<bool, String> {
+        self.conn
+            .execute("DELETE FROM reg_skills WHERE name = ?1", [name])
+            .map(|n| n > 0)
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn mcp_list(&self) -> Result<Vec<RegMcp>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT name, def FROM reg_mcp ORDER BY name")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| Ok(RegMcp { name: r.get(0)?, def: r.get(1)? }))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(rows)
+    }
+
+    pub fn mcp_save(&self, m: &RegMcp, now: u64) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO reg_mcp (name, def, updated_at) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(name) DO UPDATE SET def=?2, updated_at=?3",
+                rusqlite::params![m.name, m.def, now as i64],
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn mcp_delete(&self, name: &str) -> Result<bool, String> {
+        self.conn
+            .execute("DELETE FROM reg_mcp WHERE name = ?1", [name])
+            .map(|n| n > 0)
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// A central skill asset: name → resolvable ref (local dir name or github url).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RegSkill {
+    pub name: String,
+    #[serde(rename = "ref")]
+    pub r#ref: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+/// A central MCP server def: name → def JSON ({command,args,env} or {url,headers}).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RegMcp {
+    pub name: String,
+    pub def: String,
 }
 
 /// A registry agent definition. `skills` and `mcp` are stored as JSON text
@@ -791,7 +897,7 @@ mod tests {
     }
 
     #[test]
-    fn v4_to_v5_migration_adds_the_registry() {
+    fn v4_to_v6_migration_adds_registry_and_assets() {
         // An existing v4 db (projects+slots only) must gain reg_agents.
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
@@ -812,6 +918,9 @@ mod tests {
         store.reg_seed(1).unwrap();
         assert_eq!(store.reg_list().unwrap().len(), 3);
         let v: i64 = store.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(v, 5);
+        assert_eq!(v, SCHEMA_VERSION);
+        // v6 assets exist and are usable on a migrated db.
+        store.skill_save(&RegSkill { name: "s".into(), r#ref: "github.com/x/y".into(), description: String::new() }, 1).unwrap();
+        assert_eq!(store.skills_list().unwrap().len(), 1);
     }
 }
