@@ -190,3 +190,31 @@ button:disabled {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 9px; font-weight: 700; color: var(--bg);
 }
+
+/* Page skeleton (ui-unification.md "Page skeleton"): the Hub page is the
+   reference format — one header dialect, one sidebar-row dialect. */
+
+.page-head {
+  display: flex; align-items: center; gap: 10px;
+  min-height: 42px; padding: 6px 16px; box-sizing: border-box;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.page-head h1 {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 15px; margin: 0; font-weight: 600;
+}
+
+.side-row {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; text-align: left;
+  background: none; border: none;
+  padding: 8px 10px; border-radius: 9px;
+  color: var(--text); cursor: pointer; font-size: 13px;
+  transition: background 160ms;
+  -webkit-tap-highlight-color: transparent;
+}
+.side-row:hover { background: var(--surface2); }
+.side-row.open { background: var(--accent-bg); }
+.side-row.add { color: var(--text3); font-size: 12.5px; }
+.side-row.add:hover { color: var(--accent); }

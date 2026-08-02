@@ -1,9 +1,9 @@
 <script>
-  // AgentsPage — the agent configuration page. Definitions (backend, model,
-  // persona, skills, MCP servers, hire permission) are edited HERE and only
-  // here; the Hub consumes them (project creation picks agents, spawn
-  // instantiates them into isolated homes). This is the page the registry
-  // deserved instead of a list squatting in the Hub sidebar.
+  // AgentsPage — the agent configuration page, in the Hub page format
+  // (ui-unification.md "Page skeleton"): a real sidebar (bg2, .side-h,
+  // .side-row entries) + a main column with a .page-head. Definitions
+  // (backend, model, persona, skills, MCP servers, hire permission) are
+  // edited HERE and only here; the Hub consumes them.
   import Icon from '../ui/Icon.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import { t } from '../core/i18n.svelte.ts';
@@ -74,31 +74,28 @@
   }
 </script>
 
-<div class="agents-root">
-  <div class="list">
+<div class="agents-root" class:editing={!!editing}>
+  <aside class="sidebar">
     <SideHandle />
-    <div class="list-head">
-      <h1>{t('agentsTitle')}</h1>
-      <button class="chip-btn primary" onclick={() => startEdit(null)}>＋ {t('agentsNew')}</button>
-    </div>
-    <p class="hint">{t('agentsHint')}</p>
-    {#each defs as d (d.name)}
-      <button class="def" class:sel={editing?.name === d.name && !isNew} onclick={() => startEdit(d)}>
-        <span class="ava" style:background={backendColor(d.backend)}>{d.name.slice(0, 1).toUpperCase()}</span>
-        <span class="d-main">
-          <span class="d-name">{d.name}<span class="d-backend">· {d.backend}{d.model ? ` · ${d.model}` : ''}</span>
-            {#if d.can_hire}<span class="hire-tag">{t('agentsCanHire')}</span>{/if}
-          </span>
-          <span class="d-sys">{d.system}</span>
-        </span>
+    <div class="side-scroll">
+      <div class="side-h">{t('agentsTitle')}</div>
+      {#each defs as d (d.name)}
+        <button class="side-row" class:open={editing?.name === d.name && !isNew} onclick={() => startEdit(d)}>
+          <span class="ava" style:background={backendColor(d.backend)}>{d.name.slice(0, 1).toUpperCase()}</span>
+          <span class="r-name">{d.name}</span>
+          <span class="r-backend">{d.backend}{d.can_hire ? ' ⚡' : ''}</span>
+        </button>
+      {/each}
+      <button class="side-row add" onclick={() => startEdit(null)}>
+        <Icon name="plus" size={13} />{t('agentsNew')}
       </button>
-    {/each}
-  </div>
+    </div>
+  </aside>
 
-  {#if editing}
-    <div class="editor">
-      <div class="ed-head">
-        <h2>{isNew ? t('agentsNew') : editing.name}</h2>
+  <main class="mid">
+    {#if editing}
+      <div class="page-head">
+        <h1>{isNew ? t('agentsNew') : editing.name}</h1>
         <span class="spacer"></span>
         {#if !isNew}
           <button class="chip-btn danger" onclick={() => remove(editing.name)}><Icon name="trash" size={13} />{t('delete')}</button>
@@ -106,69 +103,68 @@
         <button class="chip-btn" onclick={() => editing = null}>{t('cancel')}</button>
         <button class="chip-btn primary" disabled={!editing.name.trim()} onclick={save}>{t('save')}</button>
       </div>
-      {#if error}<div class="err">{error}</div>{/if}
+      <div class="editor">
+        {#if error}<div class="err">{error}</div>{/if}
 
-      <label>{t('agentsName')}
-        <input bind:value={editing.name} disabled={!isNew} placeholder="reviewer" />
-      </label>
-      <div class="row2">
-        <label>{t('agentsBackend')}
-          <select bind:value={editing.backend}>
-            <option value="kiro">kiro</option>
-            <option value="claude">claude</option>
-            <option value="codex">codex</option>
-          </select>
+        <label>{t('agentsName')}
+          <input bind:value={editing.name} disabled={!isNew} placeholder="reviewer" />
         </label>
-        <label>{t('agentsModel')}
-          <input bind:value={editing.model} placeholder={t('agentsModelDefault')} />
+        <div class="row2">
+          <label>{t('agentsBackend')}
+            <select bind:value={editing.backend}>
+              <option value="kiro">kiro</option>
+              <option value="claude">claude</option>
+              <option value="codex">codex</option>
+            </select>
+          </label>
+          <label>{t('agentsModel')}
+            <input bind:value={editing.model} placeholder={t('agentsModelDefault')} />
+          </label>
+        </div>
+        <label class="check">
+          <input type="checkbox" bind:checked={editing.can_hire} />
+          {t('agentsCanHireLabel')}
         </label>
+        <label>{t('agentsSystem')}
+          <textarea rows="6" bind:value={editing.system} placeholder={t('agentsSystemPh')}></textarea>
+        </label>
+        <label>{t('agentsSkills')}
+          <input bind:value={editing.skillsText} placeholder="git-review, github.com/org/repo/skills/docs" />
+        </label>
+        <label>{t('agentsMcp')}
+          <textarea class="mono" rows="6" bind:value={editing.mcpText} spellcheck="false"></textarea>
+        </label>
+        <p class="hint">{t('agentsMcpHint')}</p>
       </div>
-      <label class="check">
-        <input type="checkbox" bind:checked={editing.can_hire} />
-        {t('agentsCanHireLabel')}
-      </label>
-      <label>{t('agentsSystem')}
-        <textarea rows="6" bind:value={editing.system} placeholder={t('agentsSystemPh')}></textarea>
-      </label>
-      <label>{t('agentsSkills')}
-        <input bind:value={editing.skillsText} placeholder="git-review, github.com/org/repo/skills/docs" />
-      </label>
-      <label>{t('agentsMcp')}
-        <textarea class="mono" rows="6" bind:value={editing.mcpText} spellcheck="false"></textarea>
-      </label>
-      <p class="hint">{t('agentsMcpHint')}</p>
-    </div>
-  {/if}
+    {:else}
+      <div class="page-head"><h1>{t('agentsTitle')}</h1></div>
+      <div class="placeholder">
+        <p class="hint">{t('agentsHint')}</p>
+      </div>
+    {/if}
+  </main>
 </div>
 
 <style>
   .agents-root { height: 100%; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 0; background: var(--bg); }
-  .agents-root:has(.editor) .list { border-right: 1px solid var(--border); }
   @media (max-width: 760px) {
     .agents-root { grid-template-columns: minmax(0, 1fr); }
-    /* Editing takes the screen on a phone. */
-    .agents-root:has(.editor) .list { display: none; }
+    /* Compact: the list is the page; editing takes the screen. */
+    .agents-root.editing .sidebar { display: none; }
+    .agents-root:not(.editing) .mid { display: none; }
   }
 
-  .list { position: relative; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
-  .list-head { display: flex; align-items: center; justify-content: space-between; }
-  .list-head h1 { font-size: 16px; margin: 0; }
-  .hint { color: var(--text3); font-size: 12px; margin: 2px 0 8px; line-height: 1.5; }
-  .def { display: flex; align-items: flex-start; gap: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 11px; padding: 10px 12px; cursor: pointer; text-align: left; transition: border-color 160ms; }
-  .def:hover { border-color: var(--input-border); }
-  .def.sel { border-color: var(--accent); background: var(--accent-bg); }
-  /* size override on the shared .ava */
-  .def .ava { width: 26px; height: 26px; border-radius: 8px; font-size: 12px; margin-top: 1px; }
-  .d-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-  .d-name { color: var(--text); font-weight: 600; font-size: 13.5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .d-backend { color: var(--text3); font-weight: 400; font-size: 12px; }
-  .hire-tag { font-size: 10px; color: var(--accent); border: 1px solid var(--accent); border-radius: 5px; padding: 0 5px; }
-  .d-sys { color: var(--text3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; }
+  .sidebar { position: relative; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+  .side-scroll { flex: 1; overflow-y: auto; padding: 8px; }
+  .r-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; }
+  .r-backend { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text3); flex: none; }
 
-  .editor { overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
-  .ed-head { display: flex; align-items: center; gap: 8px; }
-  .ed-head h2 { font-size: 15px; margin: 0; font-family: ui-monospace, Menlo, monospace; }
+  .mid { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   .spacer { flex: 1; }
+  .placeholder { flex: 1; display: grid; place-items: center; }
+  .hint { color: var(--text3); font-size: 12.5px; margin: 0; line-height: 1.6; max-width: 420px; }
+
+  .editor { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
   .err { color: var(--danger); font-size: 12.5px; background: var(--danger-bg); border-radius: 8px; padding: 8px 12px; }
   label { display: flex; flex-direction: column; gap: 5px; color: var(--text2); font-size: 12px; }
   label.check { flex-direction: row; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }

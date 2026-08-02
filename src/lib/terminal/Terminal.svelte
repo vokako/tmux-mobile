@@ -2133,11 +2133,13 @@
     display: flex;
     align-items: center;
     gap: var(--ui-gap);
-    min-height: var(--ui-bar-height);
-    padding: var(--ui-bar-padding);
+    /* Page-skeleton alignment (ui-unification.md): the win-bar is the
+       Terminal page's header — same geometry/border as every page head. */
+    min-height: 42px;
+    padding: 6px 10px;
     box-sizing: border-box;
-    border-bottom: 1px solid var(--border2);
-    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    background: transparent;
     flex-shrink: 0;
     position: relative; /* anchor for the PanePicker popover */
   }

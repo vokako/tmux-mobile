@@ -262,12 +262,12 @@
       <div class="side-scroll">
         <div class="side-h">{t('hubProjects')}</div>
         {#each rows as row (row.project.id)}
-          <button class="p-row" class:open={row.project.session === selected} onclick={() => selectProject(row.project.session)}>
+          <button class="side-row" class:open={row.project.session === selected} onclick={() => selectProject(row.project.session)}>
             <span class="dot" class:off={!row.live}></span>
             <span class="p-name">{row.project.name}</span>
           </button>
         {/each}
-        <button class="p-row add" onclick={() => { createOpen = true; }}>
+        <button class="side-row add" onclick={() => { createOpen = true; }}>
           <Icon name="plus" size={13} />{t('projectNew')}
         </button>
       </div>
@@ -287,7 +287,7 @@
         </div>
       {/if}
 
-      <div class="mid-head">
+      <div class="page-head">
         <h1>{selectedRow?.project.name ?? ''}</h1>
         {#if !compact}<span class="path">{shortPath(selectedRow?.project.path ?? '')}</span>{/if}
         <span class="spacer"></span>
@@ -457,16 +457,9 @@
 
   .sidebar { position: relative; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
   .side-scroll { flex: 1; overflow-y: auto; padding: 8px; }
-  .p-row { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: none; border: none; padding: 8px 10px; border-radius: 9px; color: var(--text); cursor: pointer; font-size: 13px; transition: background 160ms; }
-  .p-row:hover { background: var(--surface2); }
-  .p-row.open { background: var(--accent-bg); }
-  .p-row.add { color: var(--text3); font-size: 12.5px; }
-  .p-row.add:hover { color: var(--accent); }
   .p-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; }
 
   .mid { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-  .mid-head { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
-  .mid-head h1 { font-family: ui-monospace, Menlo, monospace; font-size: 15px; margin: 0; font-weight: 600; }
   .path { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .spacer { flex: 1; }
   .term-toggle.on { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }

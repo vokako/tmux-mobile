@@ -88,6 +88,32 @@ retrofitting every page in one commit is churn without user value.
 5. Verify: drag in Hub → switch to Agents → same width; reload → persists;
    compact/mobile unaffected.
 
+## Page skeleton (added 2026-08-02, owner: "reuse the project page's format")
+
+Bar dialects found in the wild: Hub's header (`padding 10px 16px`, ~41px,
+`border` color, mono h1) vs the compact `--ui-bar-*` dialect shared by the
+Files toolbar and the Terminal win-bar (31px, `surface` bg, `border2`) vs
+Agents (no header bar at all, 16px sans h1). Three dialects, one app.
+
+**The Hub page is the reference format.** Two more shared classes:
+
+| class | role |
+|---|---|
+| `.page-head` | THE page header bar: flex, `min-height 42px`, `padding 6px 16px`, `border-bottom: 1px solid var(--border)`, transparent bg; `h1` inside is mono 15px/600 |
+| `.side-row` | sidebar list row (the Hub `.p-row` pattern): flex, `8px 10px`, radius 9px, hover `surface2`, `.open` = `accent-bg`, `.add` = dim |
+
+Adoption:
+
+- **Hub** — donates the pattern; its local `.mid-head`/`.p-row` become the
+  shared classes.
+- **Agents** — full adopt: left column becomes a real sidebar (bg2,
+  `.side-h`, `.side-row` entries), the editor gets a `.page-head` (name +
+  actions). Compact keeps list-or-editor.
+- **Files toolbar / Terminal win-bar** — adopt `.page-head` geometry and
+  border/background (their dense controls stay; only the bar itself is
+  standardized). The 31px `--ui-bar-*` tokens remain for the Preferences
+  modal tabs, which are a modal, not a page.
+
 ## Out of scope (recorded, not forgotten)
 
 - Sessions/Files as sidebar+detail pages (a deeper IA change; Sessions may

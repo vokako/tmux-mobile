@@ -1494,9 +1494,11 @@
 
   /* Toolbar — same vertical rhythm as the Terminal window-switcher bar
      and the Sessions top-row (24 px buttons + 3 px padding = ~31 px total). */
+  /* Page-skeleton alignment (ui-unification.md): same bar geometry and
+     border as the Hub page header; the dense controls inside stay. */
   .toolbar {
-    display: flex; align-items: center; gap: var(--ui-gap); min-height: var(--ui-bar-height); padding: var(--ui-bar-padding); box-sizing: border-box;
-    border-bottom: 1px solid var(--border2); background: var(--surface); flex-shrink: 0;
+    display: flex; align-items: center; gap: var(--ui-gap); min-height: 42px; padding: 6px 10px; box-sizing: border-box;
+    border-bottom: 1px solid var(--border); background: transparent; flex-shrink: 0;
   }
   .tool-btn {
     width: var(--ui-control-height); height: var(--ui-control-height);
