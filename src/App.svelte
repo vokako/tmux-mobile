@@ -169,10 +169,25 @@
     localStorage.setItem('tmux_fontsize', v);
   }
   async function setUiZoom(value) {
-    if (!isTauriDesktop) return;
     const next = normalizeUiZoom(value);
     uiZoom = next;
     localStorage.setItem('tmux_ui_zoom', String(next));
+    if (!isTauriDesktop) {
+      // Web / Android: CSS zoom on the root scales the whole interface.
+      // Two compensations keep the geometry honest:
+      // - --ui-zoom lets the full-height containers divide their pixel
+      //   --app-height back down (the writers keep writing raw innerHeight);
+      // - the terminal host counter-zooms to 1.0 so xterm's cell metrics
+      //   stay in physical pixels — terminal text size is its OWN setting,
+      //   and mixing scaled cell rects with unscaled clientHeight would
+      //   mis-fit cols×rows.
+      document.documentElement.style.zoom = String(next);
+      document.documentElement.style.setProperty('--ui-zoom', String(next));
+      requestAnimationFrame(() => {
+        window.dispatchEvent(new CustomEvent('app-zoom-change', { detail: { scale: next } }));
+      });
+      return;
+    }
     const version = ++zoomApplyVersion;
     zoomApplyQueue = zoomApplyQueue.then(async () => {
       try {
@@ -194,7 +209,7 @@
     await zoomApplyQueue;
   }
 
-  if (isTauriDesktop) setUiZoom(initialUiZoom);
+  if (isTauriDesktop || initialUiZoom !== 1) setUiZoom(initialUiZoom);
 
   // Settings is a PAGE (ui-unification.md "Settings as a page"), not a modal.
   // The gear toggles into it and back to where you were.
@@ -980,7 +995,7 @@
       {optimizing} {linkCopied}
       onClose={togglePrefs}
       onTheme={setTheme}
-      {uiZoom} showUiZoom={isTauriDesktop} showShortcuts={isTauriDesktop} onUiZoom={setUiZoom}
+      {uiZoom} showUiZoom={true} showShortcuts={isTauriDesktop} onUiZoom={setUiZoom}
       onFontSize={setFontSize}
       onDebug={(value) => { debugMode = value; localStorage.setItem('tmux_debug', value ? '1' : ''); }}
       onOptimize={optimizeConnection}
@@ -1166,7 +1181,7 @@
   main {
     display: flex;
     flex-direction: column;
-    height: var(--app-height, 100dvh);
+    height: calc(var(--app-height, 100dvh) / var(--ui-zoom, 1));
     max-width: 100vw;
     overflow: hidden;
     background: linear-gradient(180deg, var(--bg) 0%, var(--bg2) 50%, var(--bg3) 100%);

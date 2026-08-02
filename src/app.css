@@ -77,7 +77,7 @@ body {
   background: var(--bg);
   color: var(--text);
   overflow: hidden;
-  height: var(--app-height, 100dvh);
+  height: calc(var(--app-height, 100dvh) / var(--ui-zoom, 1));
   -webkit-font-smoothing: antialiased;
   position: fixed;
   width: 100%;

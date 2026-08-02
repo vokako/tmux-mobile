@@ -2193,6 +2193,11 @@
     min-height: 0;
     overflow: hidden;
     position: relative;
+    /* Global UI zoom (web/Android CSS zoom) scales the chrome, NOT the
+       terminal: counter-zoom back to 1.0 so xterm's cell metrics stay in
+       physical pixels (terminal text size is its own setting). Tauri
+       desktop zooms the webview instead — --ui-zoom stays 1 there. */
+    zoom: calc(1 / var(--ui-zoom, 1));
   }
 
   .toast {
