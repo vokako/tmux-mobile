@@ -14,7 +14,7 @@ use std::path::Path;
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
@@ -281,6 +281,31 @@ impl Store {
                      );",
                 )
                 .map_err(|e| format!("migrate to 6: {e}"))?;
+        }
+        if version < 7 {
+            // Skills become APP-OWNED (owner: "存到你管理的目录里"): the files
+            // live in <state dir>/skills/<name>/, and the row records the
+            // SOURCE they were imported from (local path or git url) plus
+            // when it was last synced — the source is sync metadata, not the
+            // thing agents load. ref_ carried the same string; rename + add
+            // the timestamp via rebuild.
+            self.conn
+                .execute_batch(
+                    "PRAGMA foreign_keys=OFF;
+                     CREATE TABLE reg_skills_v7 (
+                       name        TEXT PRIMARY KEY,
+                       source      TEXT NOT NULL,
+                       description TEXT NOT NULL DEFAULT '',
+                       synced_at   INTEGER,
+                       updated_at  INTEGER NOT NULL
+                     );
+                     INSERT INTO reg_skills_v7 (name, source, description, synced_at, updated_at)
+                       SELECT name, ref_, description, NULL, updated_at FROM reg_skills;
+                     DROP TABLE reg_skills;
+                     ALTER TABLE reg_skills_v7 RENAME TO reg_skills;
+                     PRAGMA foreign_keys=ON;",
+                )
+                .map_err(|e| format!("migrate to 7: {e}"))?;
         }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)
@@ -592,11 +617,16 @@ impl Store {
     pub fn skills_list(&self) -> Result<Vec<RegSkill>, String> {
         let mut stmt = self
             .conn
-            .prepare("SELECT name, ref_, description FROM reg_skills ORDER BY name")
+            .prepare("SELECT name, source, description, synced_at FROM reg_skills ORDER BY name")
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |r| {
-                Ok(RegSkill { name: r.get(0)?, r#ref: r.get(1)?, description: r.get(2)? })
+                Ok(RegSkill {
+                    name: r.get(0)?,
+                    source: r.get(1)?,
+                    description: r.get(2)?,
+                    synced_at: r.get::<_, Option<i64>>(3)?.map(|v| v as u64),
+                })
             })
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
@@ -604,12 +634,16 @@ impl Store {
         Ok(rows)
     }
 
+    pub fn skill_get(&self, name: &str) -> Result<Option<RegSkill>, String> {
+        Ok(self.skills_list()?.into_iter().find(|s| s.name == name))
+    }
+
     pub fn skill_save(&self, sk: &RegSkill, now: u64) -> Result<(), String> {
         self.conn
             .execute(
-                "INSERT INTO reg_skills (name, ref_, description, updated_at) VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(name) DO UPDATE SET ref_=?2, description=?3, updated_at=?4",
-                rusqlite::params![sk.name, sk.r#ref, sk.description, now as i64],
+                "INSERT INTO reg_skills (name, source, description, synced_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(name) DO UPDATE SET source=?2, description=?3, synced_at=?4, updated_at=?5",
+                rusqlite::params![sk.name, sk.source, sk.description, sk.synced_at.map(|v| v as i64), now as i64],
             )
             .map(|_| ())
             .map_err(|e| e.to_string())
@@ -654,14 +688,17 @@ impl Store {
     }
 }
 
-/// A central skill asset: name → resolvable ref (local dir name or github url).
+/// A central skill asset. The FILES live in the app-managed skills dir; the
+/// `source` (local path or git url) is where they were imported from and what
+/// a refresh re-syncs against.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RegSkill {
     pub name: String,
-    #[serde(rename = "ref")]
-    pub r#ref: String,
+    pub source: String,
     #[serde(default)]
     pub description: String,
+    #[serde(default)]
+    pub synced_at: Option<u64>,
 }
 
 /// A central MCP server def: name → def JSON ({command,args,env} or {url,headers}).
@@ -920,7 +957,7 @@ mod tests {
         let v: i64 = store.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
         assert_eq!(v, SCHEMA_VERSION);
         // v6 assets exist and are usable on a migrated db.
-        store.skill_save(&RegSkill { name: "s".into(), r#ref: "github.com/x/y".into(), description: String::new() }, 1).unwrap();
+        store.skill_save(&RegSkill { name: "s".into(), source: "github.com/x/y".into(), description: String::new(), synced_at: None }, 1).unwrap();
         assert_eq!(store.skills_list().unwrap().len(), 1);
     }
 }

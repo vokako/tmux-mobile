@@ -399,19 +399,97 @@ pub fn skills_list() -> Result<Value, String> {
     with_store(|store| Ok(json!({ "skills": store.skills_list()? })))
 }
 
-pub fn skill_save(def: &Value) -> Result<Value, String> {
-    let sk: store::RegSkill = serde_json::from_value(def.clone()).map_err(|e| format!("invalid skill: {e}"))?;
-    if sk.name.trim().is_empty() || sk.r#ref.trim().is_empty() {
-        return Err("skill needs a name and a ref".into());
+/// The app-OWNED skills storage: `<state dir>/skills/<name>/`. Lives beside
+/// state.db so the TMM_STATE_DB test override isolates it too. Agents load
+/// from HERE; the recorded source is sync metadata.
+pub fn managed_skills_dir() -> std::path::PathBuf {
+    db_path().parent().map(|p| p.join("skills")).unwrap_or_else(|| "skills".into())
+}
+
+/// Copy the resolved source directory into the managed store (atomic: build
+/// a temp sibling, then swap).
+fn sync_skill_files(name: &str, source: &str) -> Result<(), String> {
+    let source = source.trim();
+    if source.starts_with("http://") || source.starts_with("https://") {
+        // A refresh must see the remote's CURRENT state, not the clone cache.
+        crate::team::skills::invalidate_git_cache(source);
+    } else if !std::path::Path::new(source).is_absolute() {
+        return Err("local source must be an absolute path".into());
     }
+    let resolved = crate::team::skills::resolve_skills(&[source.to_string()], "");
+    let src_dir = resolved
+        .first()
+        .map(|r| r.dir.clone())
+        .ok_or_else(|| format!("source did not resolve to a skill directory: {source}"))?;
+    if !src_dir.join("SKILL.md").is_file() {
+        return Err(format!("no SKILL.md in {}", src_dir.display()));
+    }
+    let root = managed_skills_dir();
+    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    let tmp = root.join(format!(".tmp-{name}"));
+    let dest = root.join(name);
+    let _ = std::fs::remove_dir_all(&tmp);
+    copy_dir(&src_dir, &tmp)?;
+    let _ = std::fs::remove_dir_all(&dest);
+    std::fs::rename(&tmp, &dest).map_err(|e| format!("swap into place: {e}"))
+}
+
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) -> Result<(), String> {
+    std::fs::create_dir_all(to).map_err(|e| e.to_string())?;
+    for entry in std::fs::read_dir(from).map_err(|e| e.to_string())?.flatten() {
+        let ty = entry.file_type().map_err(|e| e.to_string())?;
+        let dest = to.join(entry.file_name());
+        if ty.is_dir() {
+            // .git in a copied local repo would be dead weight in the store.
+            if entry.file_name() == ".git" {
+                continue;
+            }
+            copy_dir(&entry.path(), &dest)?;
+        } else if ty.is_file() {
+            std::fs::copy(entry.path(), &dest).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Import (or re-import) a skill: pull the files from `source` into the
+/// managed store, then record the row. Name doubles as the directory name.
+pub fn skill_save(def: &Value) -> Result<Value, String> {
+    let mut sk: store::RegSkill = serde_json::from_value(def.clone()).map_err(|e| format!("invalid skill: {e}"))?;
+    sk.name = sk.name.trim().to_string();
+    if sk.name.is_empty() || sk.source.trim().is_empty() {
+        return Err("skill needs a name and a source".into());
+    }
+    if !sk.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err("skill name must be [a-zA-Z0-9_-] (it names a directory)".into());
+    }
+    sync_skill_files(&sk.name, &sk.source)?;
+    sk.synced_at = Some(now());
     with_store(|store| {
         store.skill_save(&sk, now())?;
-        Ok(json!({ "ok": true, "name": sk.name }))
+        Ok(json!({ "ok": true, "name": sk.name, "synced_at": sk.synced_at }))
+    })
+}
+
+/// Re-sync a skill's files from its recorded source.
+pub fn skill_refresh(name: &str) -> Result<Value, String> {
+    let sk = with_store(|store| store.skill_get(name))?
+        .ok_or_else(|| format!("no skill named '{name}'"))?;
+    sync_skill_files(&sk.name, &sk.source)?;
+    let mut updated = sk;
+    updated.synced_at = Some(now());
+    with_store(|store| {
+        store.skill_save(&updated, now())?;
+        Ok(json!({ "ok": true, "name": updated.name, "synced_at": updated.synced_at }))
     })
 }
 
 pub fn skill_delete(name: &str) -> Result<Value, String> {
-    with_store(|store| Ok(json!({ "ok": store.skill_delete(name)? })))
+    let deleted = with_store(|store| store.skill_delete(name))?;
+    if deleted {
+        let _ = std::fs::remove_dir_all(managed_skills_dir().join(name));
+    }
+    Ok(json!({ "ok": deleted }))
 }
 
 pub fn mcp_list() -> Result<Value, String> {
@@ -437,8 +515,25 @@ pub fn mcp_delete(name: &str) -> Result<Value, String> {
 /// Central skills as name→ref (spawn-time resolution; empty on store errors —
 /// a raw ref in the agent def still works).
 pub(crate) fn with_registry_skills() -> std::collections::HashMap<String, String> {
-    with_store(|store| Ok(store.skills_list()?.into_iter().map(|s| (s.name, s.r#ref)).collect()))
-        .unwrap_or_default()
+    let root = managed_skills_dir();
+    with_store(|store| {
+        Ok(store
+            .skills_list()?
+            .into_iter()
+            .map(|s| {
+                let managed = root.join(&s.name);
+                let target = if managed.is_dir() {
+                    managed.to_string_lossy().to_string()
+                } else {
+                    // Files missing (deleted by hand?) — fall back to the
+                    // source so the spawn still works, degraded not broken.
+                    s.source
+                };
+                (s.name, target)
+            })
+            .collect())
+    })
+    .unwrap_or_default()
 }
 
 /// Central MCP defs as name→def-json.
@@ -596,6 +691,58 @@ mod tests {
             std::fs::create_dir_all(&dir).unwrap();
             std::env::set_var("TMM_STATE_DB", dir.join("state.db"));
         });
+    }
+
+    #[test]
+    fn skill_import_owns_the_files_and_refresh_resyncs() {
+        use_test_store();
+        // A local source directory with a SKILL.md.
+        let src = std::env::temp_dir().join(format!("tmm-skill-src-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("SKILL.md"), "---\nname: demo\n---\nv1").unwrap();
+        std::fs::write(src.join("helper.py"), "print(1)").unwrap();
+
+        // Import copies the files into the app-managed store.
+        skill_save(&serde_json::json!({
+            "name": "demo-skill",
+            "source": src.to_string_lossy(),
+            "description": "d"
+        }))
+        .unwrap();
+        let managed = managed_skills_dir().join("demo-skill");
+        assert!(managed.join("SKILL.md").is_file(), "files live in the managed dir");
+        assert!(managed.join("helper.py").is_file());
+        assert!(std::fs::read_to_string(managed.join("SKILL.md")).unwrap().ends_with("v1"));
+        let listed = with_store(|st| st.skills_list()).unwrap();
+        assert!(listed[0].synced_at.is_some(), "import records the sync time");
+
+        // Agents resolve to the MANAGED copy, not the source.
+        let map = with_registry_skills();
+        assert_eq!(map.get("demo-skill").unwrap(), &managed.to_string_lossy().to_string());
+
+        // Source changes → refresh re-syncs the managed copy.
+        std::fs::write(src.join("SKILL.md"), "---\nname: demo\n---\nv2").unwrap();
+        skill_refresh("demo-skill").unwrap();
+        assert!(std::fs::read_to_string(managed.join("SKILL.md")).unwrap().ends_with("v2"));
+
+        // Delete removes row AND files.
+        skill_delete("demo-skill").unwrap();
+        assert!(!managed.exists());
+        std::fs::remove_dir_all(&src).ok();
+    }
+
+    #[test]
+    fn skill_import_rejects_bad_names_and_sources() {
+        use_test_store();
+        let err = skill_save(&serde_json::json!({ "name": "../evil", "source": "/tmp" })).unwrap_err();
+        assert!(err.contains("a-zA-Z0-9"), "directory-unsafe names refused: {err}");
+        let err = skill_save(&serde_json::json!({ "name": "ok", "source": "relative/path" })).unwrap_err();
+        assert!(err.contains("absolute"), "{err}");
+        let empty = std::env::temp_dir().join(format!("tmm-noskill-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&empty).unwrap();
+        let err = skill_save(&serde_json::json!({ "name": "ok", "source": empty.to_string_lossy() })).unwrap_err();
+        assert!(err.contains("SKILL.md"), "{err}");
+        std::fs::remove_dir_all(&empty).ok();
     }
 
     #[test]

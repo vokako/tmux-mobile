@@ -455,10 +455,16 @@ mod tests {
             "name": "central-files",
             "def": "{\"command\":\"mcp-files\",\"args\":[\"--root\",\"/tmp\"]}"
         })).unwrap();
+        // Skills are imported (files copied into the managed store) — build
+        // a real local source so the import path runs for real.
+        let src = std::env::temp_dir().join(format!("tmm-central-skill-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("SKILL.md"), "---\nname: central-skill\n---\nbody").unwrap();
         super::super::skill_save(&serde_json::json!({
             "name": "central-skill",
-            "ref": "github.com/org/repo/skills/x"
+            "source": src.to_string_lossy()
         })).unwrap();
+        std::fs::remove_dir_all(&src).ok();
         let mut d = def("kiro");
         d.mcp = r#"["central-files", {"name":"inline","command":"inline-cmd"}]"#.into();
         let resolved = mcp_defs(&d);

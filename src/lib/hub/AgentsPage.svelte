@@ -7,7 +7,7 @@
   import Icon from '../ui/Icon.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import { t } from '../core/i18n.svelte.ts';
-  import { registryList, registrySave, registryDelete, skillsList, skillsSave, skillsDelete, mcpList, mcpSave, mcpDelete } from '../core/ws.ts';
+  import { registryList, registrySave, registryDelete, skillsList, skillsSave, skillsDelete, skillsRefresh, mcpList, mcpSave, mcpDelete } from '../core/ws.ts';
   import { backendColor } from '../hub/hub.ts';
 
   let { visible = false } = $props();
@@ -39,14 +39,27 @@
   function startSkill(sk) {
     closeAll();
     skillIsNew = !sk;
-    editingSkill = sk ? { ...sk } : { name: '', ref: '', description: '' };
+    editingSkill = sk ? { ...sk } : { name: '', source: '', description: '' };
   }
+  let syncing = $state(false);
   async function saveSkill() {
+    syncing = true;
     try {
       await skillsSave(editingSkill);
       editingSkill = null;
       await reload();
     } catch (e) { error = String(e?.message ?? e); }
+    finally { syncing = false; }
+  }
+  async function refreshSkill() {
+    syncing = true;
+    error = '';
+    try {
+      await skillsRefresh(editingSkill.name);
+      await reload();
+      editingSkill = { ...skills.find((x) => x.name === editingSkill.name) };
+    } catch (e) { error = String(e?.message ?? e); }
+    finally { syncing = false; }
   }
   async function removeSkill(name) {
     try { await skillsDelete(name); editingSkill = null; await reload(); }
@@ -76,9 +89,22 @@
   function startEdit(def) {
     closeAll();
     isNew = !def;
+    // skills / mcp become SELECTIONS over the central assets (closed loop —
+    // no free-text names). Legacy inline objects or unknown names in an old
+    // def are preserved untouched in `extra` so saving does not eat them.
+    const skillSel = def ? parseRefs(def.skills) : [];
+    const mcpEntries = def ? parseRefs(def.mcp) : [];
     editing = def
-      ? { ...def, skillsText: parseRefs(def.skills).join(', '), mcpText: pretty(def.mcp) }
-      : { name: '', backend: 'kiro', model: '', system: '', can_hire: false, skillsText: '', mcpText: '[]' };
+      ? {
+          ...def,
+          skillSel: skillSel.filter((x) => typeof x === 'string'),
+          mcpSel: mcpEntries.filter((x) => typeof x === 'string'),
+          mcpExtra: mcpEntries.filter((x) => typeof x !== 'string'),
+        }
+      : { name: '', backend: 'kiro', model: '', system: '', can_hire: false, skillSel: [], mcpSel: [], mcpExtra: [] };
+  }
+  function toggleSel(list, name) {
+    return list.includes(name) ? list.filter((n) => n !== name) : [...list, name];
   }
 
   function parseRefs(json) {
@@ -91,22 +117,14 @@
   async function save() {
     if (!editing) return;
     error = '';
-    const skills = editing.skillsText.split(',').map((s) => s.trim()).filter(Boolean);
-    let mcp;
-    try {
-      mcp = JSON.stringify(JSON.parse(editing.mcpText.trim() || '[]'));
-    } catch {
-      error = t('agentsMcpInvalid');
-      return;
-    }
     try {
       await registrySave({
         name: editing.name.trim(),
         backend: editing.backend,
         model: editing.model.trim(),
         system: editing.system,
-        skills: JSON.stringify(skills),
-        mcp,
+        skills: JSON.stringify(editing.skillSel),
+        mcp: JSON.stringify([...editing.mcpSel, ...editing.mcpExtra]),
         can_hire: editing.can_hire,
       });
       editing = null;
@@ -173,20 +191,26 @@
         {#if !skillIsNew}
           <button class="chip-btn danger" onclick={() => removeSkill(editingSkill.name)}><Icon name="trash" size={13} />{t('delete')}</button>
         {/if}
+        {#if !skillIsNew}
+          <button class="chip-btn" disabled={syncing} onclick={refreshSkill}><Icon name="refresh" size={13} />{t('skillsRefresh')}</button>
+        {/if}
         <button class="chip-btn" onclick={() => editingSkill = null}>{t('cancel')}</button>
-        <button class="chip-btn primary" disabled={!editingSkill.name.trim() || !editingSkill.ref.trim()} onclick={saveSkill}>{t('save')}</button>
+        <button class="chip-btn primary" disabled={!editingSkill.name.trim() || !editingSkill.source.trim() || syncing} onclick={saveSkill}>{syncing ? '…' : (skillIsNew ? t('skillsImport') : t('save'))}</button>
       </div>
       <div class="editor">
         {#if error}<div class="err">{error}</div>{/if}
         <label>{t('agentsName')}
           <input bind:value={editingSkill.name} disabled={!skillIsNew} placeholder="git-review" />
         </label>
-        <label>{t('skillsRef')}
-          <input bind:value={editingSkill.ref} placeholder="github.com/org/repo/skills/git-review 或本地目录" />
+        <label>{t('skillsSource')}
+          <input bind:value={editingSkill.source} placeholder="https://github.com/org/repo/tree/main/skills/git-review 或 /abs/local/dir" />
         </label>
         <label>{t('skillsDesc')}
           <input bind:value={editingSkill.description} />
         </label>
+        {#if editingSkill.synced_at}
+          <p class="hint">{t('skillsSynced')} {new Date(editingSkill.synced_at * 1000).toLocaleString()}</p>
+        {/if}
         <p class="hint">{t('skillsHint')}</p>
       </div>
     {:else if editingMcp}
@@ -244,13 +268,37 @@
         <label>{t('agentsSystem')}
           <textarea rows="6" bind:value={editing.system} placeholder={t('agentsSystemPh')}></textarea>
         </label>
-        <label>{t('agentsSkills')}
-          <input bind:value={editing.skillsText} placeholder="git-review, github.com/org/repo/skills/docs" />
-        </label>
-        <label>{t('agentsMcp')}
-          <textarea class="mono" rows="6" bind:value={editing.mcpText} spellcheck="false"></textarea>
-        </label>
-        <p class="hint">{t('agentsMcpHint')}</p>
+        <div class="pick-block">
+          <span class="pick-label">{t('agentsSkills')}</span>
+          {#if skills.length}
+            <div class="pick-row">
+              {#each skills as sk (sk.name)}
+                <button class="pick" class:sel={editing.skillSel.includes(sk.name)} onclick={() => editing.skillSel = toggleSel(editing.skillSel, sk.name)}>
+                  <Icon name="zap" size={11} />{sk.name}
+                </button>
+              {/each}
+            </div>
+          {:else}
+            <p class="hint">{t('agentsNoSkills')}</p>
+          {/if}
+        </div>
+        <div class="pick-block">
+          <span class="pick-label">{t('agentsMcp')}</span>
+          {#if mcps.length}
+            <div class="pick-row">
+              {#each mcps as m (m.name)}
+                <button class="pick" class:sel={editing.mcpSel.includes(m.name)} onclick={() => editing.mcpSel = toggleSel(editing.mcpSel, m.name)}>
+                  <Icon name="link" size={11} />{m.name}
+                </button>
+              {/each}
+            </div>
+          {:else}
+            <p class="hint">{t('agentsNoMcp')}</p>
+          {/if}
+          {#if editing.mcpExtra.length}
+            <p class="hint">{t('agentsMcpExtra').replace('{n}', String(editing.mcpExtra.length))}</p>
+          {/if}
+        </div>
       </div>
     {:else}
       <div class="page-head"><h1>{t('agentsTitle')}</h1></div>
@@ -290,4 +338,15 @@
   textarea { resize: vertical; line-height: 1.5; }
   textarea.mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .pick-block { display: flex; flex-direction: column; gap: 6px; }
+  .pick-label { color: var(--text2); font-size: 12px; }
+  .pick-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pick {
+    display: flex; align-items: center; gap: 5px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 999px;
+    color: var(--text2); padding: 5px 12px; font-size: 12.5px; cursor: pointer;
+    transition: border-color 160ms, color 160ms;
+  }
+  .pick:hover { border-color: var(--input-border); }
+  .pick.sel { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
 </style>

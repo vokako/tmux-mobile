@@ -90,6 +90,15 @@ fn read_skill_meta(dir: &std::path::Path) -> (String, String) {
     (name, desc)
 }
 
+/// Drop the clone cache for a GitHub skill URL so the next resolve re-fetches
+/// the remote's current state. Used by the registry's skill refresh — the
+/// cache is keyed owner/repo/ref and otherwise lives forever.
+pub(crate) fn invalidate_git_cache(url: &str) {
+    if let Ok((owner, repo, gitref, _)) = parse_github(url) {
+        let _ = std::fs::remove_dir_all(skills_cache_dir().join(&owner).join(&repo).join(&gitref));
+    }
+}
+
 /// Sparse-clone a GitHub `tree/<ref>/<subpath>` URL (or a bare repo URL) into the
 /// shared skills cache and return the skill directory. Cache key = owner/repo/ref;
 /// repeated refs to the same repo reuse the clone (sparse-checkout adds subpaths).

@@ -47,8 +47,8 @@ USAGE (human or agent — self-management):
   tmm registry save --name <n> --backend <kiro|claude|codex> [--system <text>]
                     [--model m] [--skills a,b] [--mcp <json>] [--can-hire]
   tmm registry delete <name>
-  tmm skills list|delete <name>       central skill assets (name → ref)
-  tmm skills save --name <n> --ref <local dir|github url> [--description d]
+  tmm skills list|delete|refresh <name>   app-managed skill store
+  tmm skills save --name <n> --source <abs dir|github url>  (imports the files)
   tmm mcp list|delete <name>          central MCP server defs
   tmm mcp save --name <n> --def '<json>' 
 
@@ -276,17 +276,23 @@ async fn main() {
                 let empty = Vec::new();
                 for sk in r.get("skills").and_then(|v| v.as_array()).unwrap_or(&empty) {
                     let s = |k: &str| sk.get(k).and_then(|v| v.as_str()).unwrap_or("");
-                    println!("{} → {} {}", s("name"), s("ref"), s("description"));
+                    println!("{} ← {} {}", s("name"), s("source"), s("description"));
                 }
             }
         }
         ("skills", rest) if rest.first().map(String::as_str) == Some("save") => {
-            let (Some(Some(name)), Some(Some(refv))) = (flags.get("name").cloned(), flags.get("ref").cloned()) else {
-                fail(EXIT_USAGE, "skills save needs --name and --ref: tmm skills save --name git-review --ref github.com/org/repo/skills/git-review");
+            let source = flags.get("source").cloned().flatten().or_else(|| flags.get("ref").cloned().flatten());
+            let (Some(Some(name)), Some(source)) = (flags.get("name").cloned(), source) else {
+                fail(EXIT_USAGE, "skills save needs --name and --source: tmm skills save --name git-review --source https://github.com/org/repo/tree/main/skills/git-review");
             };
-            let def = json!({ "name": name, "ref": refv, "description": flags.get("description").cloned().flatten().unwrap_or_default() });
+            let def = json!({ "name": name, "source": source, "description": flags.get("description").cloned().flatten().unwrap_or_default() });
             let r = rpc(&ctx, "skills_save", json!({ "def": def })).await;
-            if ctx.json { println!("{r}"); } else { println!("✓ saved {name}"); }
+            if ctx.json { println!("{r}"); } else { println!("✓ imported {name}"); }
+        }
+        ("skills", rest) if rest.first().map(String::as_str) == Some("refresh") => {
+            let Some(name) = rest.get(1).cloned() else { fail(EXIT_USAGE, "skills refresh <name>"); };
+            let r = rpc(&ctx, "skills_refresh", json!({ "name": name })).await;
+            if ctx.json { println!("{r}"); } else { println!("✓ refreshed {name}"); }
         }
         ("skills", rest) if rest.first().map(String::as_str) == Some("delete") => {
             let Some(name) = rest.get(1).cloned() else { fail(EXIT_USAGE, "skills delete <name>"); };
@@ -363,7 +369,7 @@ fn need_agent(ctx: &Ctx) -> String {
 fn split_flags(args: &[String]) -> (std::collections::HashMap<String, Option<String>>, Vec<String>) {
     const VALUED: &[&str] = &["project", "agent", "server", "output", "since", "limit", "brief",
                           "name", "session", "with-agent", "backend", "model", "system", "skills", "mcp",
-                          "ref", "description", "def"];
+                          "ref", "source", "description", "def"];
     let mut flags = std::collections::HashMap::new();
     let mut pos = Vec::new();
     let mut i = 0;

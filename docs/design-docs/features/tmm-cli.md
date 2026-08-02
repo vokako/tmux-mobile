@@ -37,11 +37,16 @@ tmm mcp list|save|delete             central MCP server defs
 tmm spawn <agent> [--brief <text>]   spawn a registry agent into this project
 ```
 
-Central assets (state.db v6): agents reference skills and MCP servers by
-NAME — a skills entry matching a reg_skills name resolves to its ref, and a
-STRING entry in the mcp array resolves to its reg_mcp def (inline objects
-keep working). Edit the asset once, every agent that references it follows.
-Managed on the Agents page (sidebar sections AGENTS / SKILLS / MCP).
+Central assets: agents reference skills and MCP servers by NAME and pick
+them in the UI (chips over the defined assets — no free-text names; the
+config loop closes inside the app). MCP defs live whole in the db. Skills
+are APP-OWNED (state.db v7): importing COPIES the files into
+`<state dir>/skills/<name>/` — agents load from there, never from the
+source. The source (absolute local dir or github url) is recorded as sync
+metadata with a synced_at stamp; Refresh re-syncs from it (git sources get
+their clone cache invalidated first, so a refresh sees the remote's current
+state). Deleting a skill removes the row AND the managed files. Legacy
+inline mcp objects in old agent defs are preserved and keep working.
 
 ## Self-management: the app operates itself through its own CLI
 
