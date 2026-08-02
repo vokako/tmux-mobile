@@ -939,7 +939,7 @@
     <nav class="rail">
       <img class="rail-brand" src={iconSrc} alt="" width="26" height="26" />
       {#if hubEligible}
-        <button tabindex="-1" class="rail-btn" class:active={page === 'hub'} title={t('hub')} onclick={() => switchTab('hub')}><Icon name="layout" size={17} /></button>
+        <button tabindex="-1" class="rail-btn" class:active={page === 'hub'} title={t('hub')} onclick={() => switchTab('hub')}><Icon name="chat" size={17} /></button>
       {/if}
       <button tabindex="-1" class="rail-btn" class:active={page === 'sessions'} title={t('sessions')} onclick={() => switchTab('sessions')}><Icon name="sessions" size={17} /></button>
       <button tabindex="-1" class="rail-btn" class:active={page === 'terminal'} title={t('terminal')} onclick={() => switchTab('terminal')}><Icon name="terminal" size={17} /></button>
@@ -1100,7 +1100,7 @@
       </button>
       {#if hubEligible}
         <button tabindex="-1" class:active={page === 'hub'} onclick={() => switchTab('hub')}>
-          <Icon name="layout" size={19} /><span>{t('hub')}</span>
+          <Icon name="chat" size={19} /><span>{t('hub')}</span>
         </button>
       {/if}
       <button tabindex="-1" class:active={page === 'terminal'} onclick={() => switchTab('terminal')}>
@@ -1182,7 +1182,7 @@
     display: flex;
     flex-direction: column;
     height: calc(var(--app-height, 100dvh) / var(--ui-zoom, 1));
-    max-width: 100vw;
+    max-width: calc(100vw / var(--ui-zoom, 1));
     overflow: hidden;
     background: linear-gradient(180deg, var(--bg) 0%, var(--bg2) 50%, var(--bg3) 100%);
   }

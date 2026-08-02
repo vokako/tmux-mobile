@@ -14,3 +14,12 @@ test('steps UI zoom without floating point drift', () => {
   assert.equal(stepUiZoom(1.1, -1), 1);
   assert.equal(stepUiZoom(1.8, 1), 1.8);
 });
+
+test('a fresh client (null/empty storage) boots at 100%, never the clamp floor', () => {
+  // Number(null) === 0 → clamped to 0.6 → every first-run web client booted
+  // at 60% (owner report). null/'' /0 must all mean "no preference".
+  assert.equal(normalizeUiZoom(null), UI_ZOOM_DEFAULT);
+  assert.equal(normalizeUiZoom(''), UI_ZOOM_DEFAULT);
+  assert.equal(normalizeUiZoom(0), UI_ZOOM_DEFAULT);
+  assert.equal(normalizeUiZoom('0'), UI_ZOOM_DEFAULT);
+});
