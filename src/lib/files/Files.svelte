@@ -23,6 +23,7 @@
   import 'highlight.js/styles/github-dark.min.css';
   import mermaid from 'mermaid';
   import Icon from '../ui/Icon.svelte';
+  import SideHandle from '../ui/SideHandle.svelte';
   import GitPanel from './GitPanel.svelte';
   import { createPersistedList } from './persisted-list.ts';
   import { t } from '../core/i18n.svelte.ts';
@@ -112,8 +113,6 @@
   const SPLIT_MIN_WIDTH = 900;
   let wideEnough = $state(typeof window !== 'undefined' && window.innerWidth >= SPLIT_MIN_WIDTH);
   let splitEligible = $derived(!layout.isTouchDevice && (layout.forceDesktop || wideEnough));
-  let filesFrac = $state(parseFloat(localStorage.getItem('tmux_files_frac') || '0.38')); // left = folder browser
-  let splitRow = $state(null);
 
   $effect(() => {
     const onResize = () => { wideEnough = window.innerWidth >= SPLIT_MIN_WIDTH; };
@@ -123,22 +122,6 @@
   });
 
   // Drag the splitter to adjust the browser/preview width ratio (desktop only).
-  function startDrag(e) {
-    e.preventDefault();
-    const rect = splitRow?.getBoundingClientRect();
-    if (!rect) return;
-    const onMove = (ev) => {
-      const x = (ev.touches ? ev.touches[0].clientX : ev.clientX) - rect.left;
-      filesFrac = Math.min(0.7, Math.max(0.2, x / rect.width));
-    };
-    const onUp = () => {
-      localStorage.setItem('tmux_files_frac', String(filesFrac));
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  }
 
   // Android local files
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
@@ -1419,11 +1402,14 @@
 <div class="files" bind:this={filesEl} ontouchstart={onTouchStart} ontouchend={onTouchEnd}>
   {#if splitEligible}
     <!-- Desktop: folder browser (left) | draggable splitter | preview (right). -->
-    <div class="files-split" bind:this={splitRow}>
-      <div class="files-left" style="flex: {filesFrac} 1 0;">{@render listPanel()}</div>
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="files-splitter" onmousedown={startDrag} title="Drag to resize"></div>
-      <div class="files-right" style="flex: {1 - filesFrac} 1 0;">
+    <div class="files-split">
+      <!-- The directory browser lives in THE shared sidebar
+           (ui-unification.md): same width var, same handle as Hub/Agents. -->
+      <div class="files-left">
+        <SideHandle />
+        {@render listPanel()}
+      </div>
+      <div class="files-right">
         {#if view === 'preview'}{@render previewPanel()}
         {:else if view === 'edit'}{@render editPanel()}
         {:else if view === 'info'}{@render infoPanel()}
@@ -1481,12 +1467,11 @@
   .files-left, .files-right {
     display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden;
   }
-  .files-right { border-left: 1px solid var(--border); }
-  .files-splitter {
-    flex: 0 0 6px; cursor: col-resize; background: var(--border);
-    transition: background 0.15s ease;
-  }
-  .files-splitter:hover { background: var(--accent); }
+  /* The directory browser is THE shared sidebar: same width var, same bg2,
+     same handle as Hub/Agents (ui-unification.md). The old per-page flex
+     fraction (tmux_files_frac) is gone with its private splitter. */
+  .files-left { position: relative; flex: none; width: var(--sidebar-w); background: var(--bg2); }
+  .files-right { flex: 1; border-left: 1px solid var(--border); }
   .files-placeholder {
     flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 10px; color: var(--text3); font-size: 13px; padding: 24px; text-align: center;

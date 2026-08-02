@@ -113,6 +113,10 @@ Adoption:
   border/background (their dense controls stay; only the bar itself is
   standardized). The 31px `--ui-bar-*` tokens remain for the Preferences
   modal tabs, which are a modal, not a page.
+- **Files directory browser** (added same day) — the desktop left column IS
+  the shared sidebar: `var(--sidebar-w)` + bg2 + `SideHandle`, replacing the
+  page-private flex-fraction splitter (`tmux_files_frac` retired). Mobile
+  single-pane chain unchanged.
 
 ## Out of scope (recorded, not forgotten)
 
