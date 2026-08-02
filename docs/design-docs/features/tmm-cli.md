@@ -159,6 +159,19 @@ message passed as the CLI's positional arg ("Start now… run `tmm done` when
 complete") — is what makes it move. Without it the agent sat at its prompt
 forever (observed live before the fix).
 
+## The activity feed (telemetry in the chat timeline)
+
+The chat shows what agents SAID; between those, the Hub can weave in what we
+OBSERVED — status declarations, lifecycle notifications, individual tool
+calls — as dim mono one-liners. The detail level is a Settings knob
+(Appearance → Chat detail): `chat` (messages only) / `+ status` (default) /
+`+ tools`. Mechanically it is `telemetry::recent_events` — an in-memory ring
+(120/session) fed by the same recorders that drive status derivation,
+exposed as `hub_activity { session, since_ts }` with ms timestamps so the
+client merges it directly into the message timeline. It is deliberately NOT
+chat history: nothing touches the bus db, the ring dies with the server, and
+consecutive duplicate tool lines collapse client-side (pre+post per call).
+
 ## Verified
 
 Against the live server: `project list` (6 projects, ● markers), `send` →

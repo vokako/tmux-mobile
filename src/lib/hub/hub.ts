@@ -1,5 +1,5 @@
 // Pure display logic for the Hub view — testable with node --test, no Svelte.
-import type { HubAgent } from '../core/ws.ts';
+import type { HubAgent, HubActivityEvent } from '../core/ws.ts';
 
 /** Derived-state → dot color (theme token values are resolved in CSS; these
  * are the fallback literals used inline for dynamic dots). */
@@ -67,4 +67,34 @@ export function statuslineWindows(agents: HubAgent[], termTarget: string): Statu
       label: `${a.window}:${a.name}${a.window === cur ? '*' : ''}`,
       current: a.window === cur,
     }));
+}
+
+export type TimelineItem =
+  | { type: 'msg'; ts: number; msg: any }
+  | { type: 'activity'; ts: number; event: HubActivityEvent };
+
+/** Merge chat messages with telemetry activity into one timeline, filtered
+ * by the feed level: 'chat' drops all activity, 'status' keeps status
+ * declarations + lifecycle notifications, 'tools' keeps everything.
+ * Consecutive duplicate tool lines collapse (an agent editing one file
+ * fires pre+post per call — one line carries the information). */
+export function timelineItems(
+  feed: any[],
+  activity: readonly HubActivityEvent[],
+  level: 'chat' | 'status' | 'tools',
+): TimelineItem[] {
+  const items: TimelineItem[] = feed.map((m) => ({ type: 'msg', ts: m.ts ?? 0, msg: m }));
+  if (level !== 'chat') {
+    let lastTool = '';
+    for (const e of activity) {
+      if (e.kind === 'tool') {
+        if (level !== 'tools') continue;
+        if (e.text === lastTool) continue;
+        lastTool = e.text;
+      }
+      items.push({ type: 'activity', ts: e.ts, event: e });
+    }
+  }
+  items.sort((a, b) => a.ts - b.ts);
+  return items;
 }

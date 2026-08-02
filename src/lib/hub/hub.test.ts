@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeMessages, statuslineWindows, stateDotColor } from './hub.ts';
+import { mergeMessages, statuslineWindows, stateDotColor, timelineItems } from './hub.ts';
 
 test('mergeMessages dedupes by id and by content triple, sorts by ts', () => {
   const a = [{ id: '1', ts: 100, from: 'x', body: 'hi' }];
@@ -28,4 +28,21 @@ test('every derived state has a dot color and unknown falls back', () => {
   for (const s of ['working', 'waiting', 'blocked', 'stuck', 'failed', 'shell', 'idle']) {
     assert.ok(stateDotColor(s).startsWith('var(--'), s);
   }
+});
+
+test('timelineItems respects the feed level and collapses duplicate tool lines', () => {
+  const feed = [{ ts: 100, from: 'lead', body: 'hi' }];
+  const activity = [
+    { ts: 50, window: 1, kind: 'status', text: 'waiting' },
+    { ts: 150, window: 1, kind: 'tool', text: 'Edit a.rs' },
+    { ts: 160, window: 1, kind: 'tool', text: 'Edit a.rs' },   // pre+post dup
+    { ts: 170, window: 1, kind: 'tool', text: 'Edit b.rs' },
+    { ts: 200, window: 1, kind: 'notif', text: 'completed' },
+  ] as const satisfies readonly { ts: number; window: number; kind: 'tool' | 'status' | 'notif'; text: string }[];
+  assert.equal(timelineItems(feed, activity, 'chat').length, 1, 'chat = messages only');
+  const status = timelineItems(feed, activity, 'status');
+  assert.deepEqual(status.map((i) => i.type), ['activity', 'msg', 'activity'], 'status + notif, no tools');
+  const tools = timelineItems(feed, activity, 'tools');
+  assert.equal(tools.length, 5, 'dup tool line collapsed');
+  assert.deepEqual(tools.map((i) => i.ts), [50, 100, 150, 170, 200], 'sorted by ts');
 });

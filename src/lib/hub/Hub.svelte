@@ -21,11 +21,12 @@
   import { t } from '../core/i18n.svelte.ts';
   import {
     projectList, projectUp, projectCreate, listSessionsWithPanes,
-    hubPost, hubLog, hubAgents, hubSpawn, registryList,
+    hubPost, hubLog, hubAgents, hubSpawn, hubActivity, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { stateDotColor, mergeMessages, statuslineWindows, backendColor } from './hub.ts';
+  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, timelineItems } from './hub.ts';
+  import { hubPrefs } from './hub-prefs.svelte.ts';
 
   let { visible = false, fontSize = 14, mobile = false, openTerminal = () => {} } = $props();
 
@@ -45,6 +46,8 @@
   let selected = $state('');        // selected project session
   let agents = $state([]);          // HubAgent[] for selected session (all windows)
   let feed = $state([]);            // chat messages, oldest first
+  let activity = $state([]);        // telemetry events (in-memory ring on the server)
+  let lastActivityTs = 0;
   let registry = $state([]);        // RegAgent[]
   let composerText = $state('');
   let dmTarget = $state('');        // managed agent name the composer addresses
@@ -82,11 +85,13 @@
   async function selectProject(session) {
     selected = session;
     feed = [];
+    activity = [];
+    lastActivityTs = 0;
     lastTs = 0;
     agents = [];
     dmTarget = '';
     termOpen = false;
-    await Promise.all([loadFeed(), loadAgents()]);
+    await Promise.all([loadFeed(), loadAgents(), loadActivity()]);
   }
 
   async function loadFeed() {
@@ -96,6 +101,18 @@
       if (messages?.length) {
         feed = mergeMessages(feed, messages);
         lastTs = Math.max(lastTs, ...messages.map((m) => m.ts ?? 0));
+        scrollFeed();
+      }
+    } catch { /* hub not available */ }
+  }
+
+  async function loadActivity() {
+    if (!selected || hubPrefs.feedLevel === 'chat') return;
+    try {
+      const { events } = await hubActivity(selected, lastActivityTs);
+      if (events?.length) {
+        activity = [...activity, ...events].slice(-300);
+        lastActivityTs = Math.max(lastActivityTs, ...events.map((e) => e.ts));
         scrollFeed();
       }
     } catch { /* hub not available */ }
@@ -232,7 +249,7 @@
     if (!visible) return;
     reload();
     registryList().then((r) => { registry = r.agents ?? []; }).catch(() => {});
-    const ai = setInterval(loadAgents, 5000);
+    const ai = setInterval(() => { loadAgents(); loadActivity(); }, 5000);
     const fi = setInterval(loadFeed, 10000);
     const pi = setInterval(reload, 20000);
     return () => { clearInterval(ai); clearInterval(fi); clearInterval(pi); };
@@ -245,6 +262,16 @@
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   });
+
+  const timeline = $derived(timelineItems(feed, activity, hubPrefs.feedLevel));
+  const windowName = (w) => agents.find((a) => a.window === w)?.name ?? `#${w}`;
+  // Notification kinds get a human label; unknown kinds fall back to the raw
+  // text (t() returns the key on a miss, so detect that).
+  function activityLabel(e) {
+    if (e.kind !== 'notif') return e.text;
+    const label = t('hubNotif_' + e.text);
+    return label.startsWith('hubNotif_') ? e.text : label;
+  }
 
   const winsForStatusline = $derived(statuslineWindows(agents, termTarget));
   const fmtTime = (ts) => {
@@ -337,17 +364,28 @@
       {/if}
 
       <div class="feed" bind:this={feedEl}>
-        {#each feed as m (m.id ?? `${m.ts}-${m.from}`)}
-          {#if (m.body ?? '').startsWith('⚡')}
-            <div class="sysline">{m.from}: {m.body}</div>
+        {#each timeline as item, i (item.type === 'msg' ? (item.msg.id ?? `${item.ts}-m${i}`) : `${item.ts}-a${i}`)}
+          {#if item.type === 'msg'}
+            {@const m = item.msg}
+            {#if (m.body ?? '').startsWith('⚡')}
+              <div class="sysline">{m.from}: {m.body}</div>
+            {:else}
+              <div class="msg" class:me={m.from === 'human'}>
+                <div class="m-head"><span class="who">{m.from === 'human' ? t('hubYou') : m.from}</span><span>{fmtTime(m.ts)}</span></div>
+                <div class="bubble">{m.body}</div>
+              </div>
+            {/if}
           {:else}
-            <div class="msg" class:me={m.from === 'human'}>
-              <div class="m-head"><span class="who">{m.from === 'human' ? t('hubYou') : m.from}</span><span>{fmtTime(m.ts)}</span></div>
-              <div class="bubble">{m.body}</div>
+            <!-- Telemetry made visible: dim mono one-liners between the real
+                 messages. kind=tool only at the 'tools' level. -->
+            <div class="activity" class:tool={item.event.kind === 'tool'}>
+              <span class="a-who">{windowName(item.event.window)}</span>
+              <span class="a-text">{activityLabel(item.event)}</span>
+              <span class="a-ts">{fmtTime(item.ts)}</span>
             </div>
           {/if}
         {/each}
-        {#if !feed.length}
+        {#if !timeline.length}
           <div class="empty">{managedAgents.length ? t('hubEmpty') : t('hubEmptyNoAgents')}</div>
         {/if}
       </div>
@@ -487,6 +525,15 @@
   .bubble { background: var(--surface); border: 1px solid var(--border2); border-radius: 12px; padding: 8px 12px; font-size: 13px; color: var(--text); white-space: pre-wrap; word-break: break-word; }
   .msg.me .bubble { background: var(--accent-bg); border-color: transparent; }
   .sysline { align-self: center; font-size: 11px; color: var(--text3); background: var(--surface); border-radius: 999px; padding: 3px 13px; max-width: 92%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .activity {
+    display: flex; align-items: baseline; gap: 8px;
+    font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text3);
+    padding: 0 4px; max-width: 100%;
+  }
+  .activity .a-who { flex: none; font-weight: 600; }
+  .activity .a-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .activity.tool .a-text::before { content: '⚙ '; opacity: 0.7; }
+  .activity .a-ts { flex: none; margin-left: auto; opacity: 0.6; }
   .empty { color: var(--text3); font-size: 12.5px; text-align: center; margin: auto; padding: 0 24px; line-height: 1.6; }
 
   .composer { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }

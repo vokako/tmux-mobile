@@ -750,6 +750,14 @@ export const hubLog = (session: string, sinceTs = 0, limit = 100) =>
   call<{ messages: TeamMessage[] }>('hub_log', { session, since_ts: sinceTs, limit });
 export const hubAgents = (session: string) =>
   call<{ agents: HubAgent[] }>('hub_agents', { session });
+export interface HubActivityEvent {
+  ts: number;      // epoch ms — merges directly with chat message timestamps
+  window: number;
+  kind: 'tool' | 'status' | 'notif';
+  text: string;
+}
+export const hubActivity = (session: string, sinceTs = 0) =>
+  call<{ events: HubActivityEvent[] }>('hub_activity', { session, since_ts: sinceTs });
 export const hubSpawn = (session: string, agent: string, brief = '', by = '') =>
   call('hub_spawn', { session, agent, brief, by });
 export interface RegAgent {

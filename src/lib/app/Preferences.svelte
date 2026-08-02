@@ -5,6 +5,7 @@
   import { layout } from './layout.svelte.ts';
   import { fonts } from './fonts.svelte.ts';
   import { terminalPrefs, LINE_HEIGHT_MIN, LINE_HEIGHT_MAX } from './terminal-prefs.svelte.ts';
+  import { hubPrefs } from '../hub/hub-prefs.svelte.ts';
   import { SHORTCUT_DEFAULTS, shortcutFromEvent, shortcutLabel, type ShortcutAction } from './shortcuts.ts';
   import { shortcuts } from './shortcuts.svelte.ts';
   import { agentHooksInstall, agentHooksRemove, agentHooksStatus } from '../core/ws.ts';
@@ -202,6 +203,14 @@
               <button class:active={layout.mode === 'auto'} onclick={() => layout.set('auto')}>{t('layoutAuto')}</button>
               <button class:active={layout.mode === 'desktop'} onclick={() => layout.set('desktop')}>{t('layoutDesktop')}</button>
               <button class:active={layout.mode === 'mobile'} onclick={() => layout.set('mobile')}>{t('layoutMobile')}</button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div><strong>{t('hubFeedLevel')}</strong><small>{t('hubFeedLevelHint')}</small></div>
+            <div class="segmented">
+              <button class:active={hubPrefs.feedLevel === 'chat'} onclick={() => hubPrefs.setFeedLevel('chat')}>{t('hubFeedChat')}</button>
+              <button class:active={hubPrefs.feedLevel === 'status'} onclick={() => hubPrefs.setFeedLevel('status')}>{t('hubFeedStatus')}</button>
+              <button class:active={hubPrefs.feedLevel === 'tools'} onclick={() => hubPrefs.setFeedLevel('tools')}>{t('hubFeedTools')}</button>
             </div>
           </div>
           {#if showUiZoom}

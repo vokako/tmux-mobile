@@ -55,6 +55,46 @@ fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+/// The activity FEED: recent observed events per session, newest last. This
+/// is telemetry made visible in the chat timeline (owner ask: show tool
+/// calls / status changes between the final replies) — an in-memory ring,
+/// NOT chat history: it never touches the bus db and dies with the server.
+const EVENTS_CAP: usize = 120;
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ActivityEvent {
+    /// Epoch MILLISECONDS to merge directly with bus message timestamps.
+    pub ts: u64,
+    pub window: usize,
+    /// tool | status | notif
+    pub kind: String,
+    pub text: String,
+}
+
+fn events() -> &'static Mutex<HashMap<String, std::collections::VecDeque<ActivityEvent>>> {
+    static EVENTS: OnceLock<Mutex<HashMap<String, std::collections::VecDeque<ActivityEvent>>>> = OnceLock::new();
+    EVENTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn push_event(session: &str, window: usize, kind: &str, text: String) {
+    let mut map = events().lock().unwrap();
+    let q = map.entry(session.to_string()).or_default();
+    q.push_back(ActivityEvent { ts: now() * 1000, window, kind: kind.into(), text });
+    while q.len() > EVENTS_CAP {
+        q.pop_front();
+    }
+}
+
+/// Events newer than `since_ts` (ms, exclusive), oldest first.
+pub fn recent_events(session: &str, since_ts: u64) -> Vec<ActivityEvent> {
+    events()
+        .lock()
+        .unwrap()
+        .get(session)
+        .map(|q| q.iter().filter(|e| e.ts > since_ts).cloned().collect())
+        .unwrap_or_default()
+}
+
 fn store() -> &'static Mutex<HashMap<(String, usize), Rec>> {
     static STORE: OnceLock<Mutex<HashMap<(String, usize), Rec>>> = OnceLock::new();
     STORE.get_or_init(|| Mutex::new(HashMap::new()))
@@ -67,6 +107,8 @@ fn with_rec(session: &str, window: usize, f: impl FnOnce(&mut Rec)) {
 
 /// `tmm status <state> [note]` — explicit declaration by the agent.
 pub fn record_status(session: &str, window: usize, state: &str, note: &str) {
+    let text = if note.is_empty() { state.to_string() } else { format!("{state} — {note}") };
+    push_event(session, window, "status", text);
     let (state, note, ts) = (state.to_string(), note.to_string(), now());
     with_rec(session, window, |r| r.explicit = Some((state, note, ts)));
 }
@@ -83,12 +125,14 @@ pub fn record_done(session: &str, window: usize, summary: &str) {
 /// A hook notification consumed by the AgentNotificationHub (it stopped, it
 /// wants input…). Called from the hub's inbox consumer; must stay cheap.
 pub fn record_notification(session: &str, window: usize, kind: &str, ts: u64) {
+    push_event(session, window, "notif", kind.to_string());
     let kind = kind.to_string();
     with_rec(session, window, |r| r.notif = Some((kind, ts)));
 }
 
 /// A hook tool event (isolated-home agents only, Phase B+): "Edit foo.rs".
 pub fn record_tool(session: &str, window: usize, line: &str) {
+    push_event(session, window, "tool", line.to_string());
     let (line, ts) = (line.to_string(), now());
     with_rec(session, window, |r| r.tool = Some((line, ts)));
 }
@@ -271,6 +315,32 @@ mod tests {
     fn no_facts_and_quiet_pane_is_idle() {
         let s = derive_from(&rec(), 100, 10_000);
         assert_eq!(s.state, "idle");
+    }
+
+    #[test]
+    fn activity_ring_orders_caps_and_filters_by_since() {
+        for i in 0..130u64 {
+            push_event("ring-test", 1, "tool", format!("evt{i}"));
+        }
+        let all = recent_events("ring-test", 0);
+        assert_eq!(all.len(), EVENTS_CAP, "capped");
+        assert_eq!(all.first().unwrap().text, "evt10", "oldest dropped first");
+        assert_eq!(all.last().unwrap().text, "evt129");
+        // since filter is exclusive on ms timestamps
+        let ts = all.last().unwrap().ts;
+        assert!(recent_events("ring-test", ts).is_empty());
+        assert!(recent_events("other-session", 0).is_empty(), "sessions are isolated");
+    }
+
+    #[test]
+    fn recorders_feed_the_activity_ring() {
+        record_status("feed-test", 2, "waiting", "等接口");
+        record_tool("feed-test", 2, "Edit src/lib.rs");
+        record_notification("feed-test", 2, "completed", 123);
+        let kinds: Vec<String> = recent_events("feed-test", 0).iter().map(|e| e.kind.clone()).collect();
+        assert_eq!(kinds, vec!["status", "tool", "notif"]);
+        let texts: Vec<String> = recent_events("feed-test", 0).iter().map(|e| e.text.clone()).collect();
+        assert_eq!(texts[0], "waiting — 等接口");
     }
 
     #[test]

@@ -117,6 +117,15 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>) -
         // detection + status derivation joined at read time.
         "hub_agents" => Response::ok(id, agent_states(session)),
 
+        // The activity feed: recent observed telemetry events (tool calls,
+        // status declarations, notifications) for the chat timeline. An
+        // in-memory ring — telemetry made visible, not chat history.
+        "hub_activity" => {
+            let since_ts = p.get("since_ts").and_then(|v| v.as_u64()).unwrap_or(0);
+            let events = telemetry::recent_events(session, since_ts);
+            Response::ok(id, serde_json::json!({ "events": events }))
+        }
+
         // Spawn a registry agent into this project (tmm spawn / the UI's
         // "+ agent"). can_hire-gated when an agent asks; capped per project.
         "hub_spawn" => {
