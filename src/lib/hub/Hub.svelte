@@ -27,6 +27,7 @@
   import { sortRows, shortPath } from '../projects/projects.ts';
   import { stateDotColor, mergeMessages, statuslineWindows, backendColor, timelineItems } from './hub.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
+  import { renderMarkdown } from '../core/markdown.ts';
 
   let { visible = false, fontSize = 14, mobile = false, openTerminal = () => {} } = $props();
 
@@ -372,7 +373,9 @@
             {:else}
               <div class="msg" class:me={m.from === 'human'}>
                 <div class="m-head"><span class="who">{m.from === 'human' ? t('hubYou') : m.from}</span><span>{fmtTime(m.ts)}</span></div>
-                <div class="bubble">{m.body}</div>
+                <!-- Markdown-rendered (agents write md); renderMarkdown
+                     escapes HTML first, so raw tags stay inert text. -->
+                <div class="bubble md">{@html renderMarkdown(m.body)}</div>
               </div>
             {/if}
           {:else}
@@ -522,7 +525,7 @@
   .msg.me { align-self: flex-end; }
   .m-head { font-size: 11px; color: var(--text3); margin-bottom: 3px; display: flex; gap: 7px; align-items: baseline; }
   .m-head .who { color: var(--text2); font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 11.5px; }
-  .bubble { background: var(--surface); border: 1px solid var(--border2); border-radius: 12px; padding: 8px 12px; font-size: 13px; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+  .bubble { background: var(--surface); border: 1px solid var(--border2); border-radius: 12px; padding: 8px 12px; font-size: 13px; color: var(--text); word-break: break-word; overflow-wrap: anywhere; }
   .msg.me .bubble { background: var(--accent-bg); border-color: transparent; }
   .sysline { align-self: center; font-size: 11px; color: var(--text3); background: var(--surface); border-radius: 999px; padding: 3px 13px; max-width: 92%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .activity {
@@ -562,7 +565,7 @@
   .dlg-backdrop { position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,0.45); }
   .dlg {
     position: fixed; z-index: 31; left: 50%; top: 50%; transform: translate(-50%, -50%);
-    width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto;
+    width: min(440px, calc(100vw / var(--ui-zoom, 1) - 32px)); max-height: calc(100vh / var(--ui-zoom, 1) - 48px); overflow-y: auto;
     background: var(--bg); border: 1px solid var(--border); border-radius: 14px;
     box-shadow: 0 18px 60px rgba(0,0,0,0.5); padding: 18px; display: flex; flex-direction: column; gap: 10px;
   }

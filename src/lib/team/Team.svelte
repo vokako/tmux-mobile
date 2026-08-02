@@ -15,8 +15,7 @@
   import AgentGrid from './AgentGrid.svelte';
   import CollabGraph from './CollabGraph.svelte';
   import DirPicker from './DirPicker.svelte';
-  import { marked } from 'marked';
-  import '../core/markedSafeUrl.ts';
+  import { renderMarkdown } from '../core/markdown.ts';
   import { t } from '../core/i18n.svelte.ts';
   import { layout } from '../app/layout.svelte.ts';
   import { scrollFade } from '../core/scrollFade.ts';
@@ -509,25 +508,7 @@
   function isSystem(m) { return m.kind === 'join' || m.kind === 'leave' || m.kind === 'system'; }
   function isMine(m) { return m.kind === 'msg' && m.from === 'human'; }
 
-  // Render a message body as markdown. Agent output is UNTRUSTED, and marked
-  // (v17) no longer sanitizes, so we escape HTML first — markdown syntax (**,
-  // #, ```fences```, tables, links) still renders, but any raw <script>/<img
-  // onerror> becomes inert literal text. Memoized by body (chat re-renders on
-  // every poll/push). Links open in the system browser via App's global
-  // a[href] handler.
-  const _mdCache = new Map();
-  function renderMarkdown(body) {
-    const src = body || '';
-    const hit = _mdCache.get(src);
-    if (hit !== undefined) return hit;
-    const escaped = src.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    let html;
-    try { html = marked.parse(escaped, { gfm: true, breaks: true }); }
-    catch { html = escaped; }
-    if (_mdCache.size > 500) _mdCache.clear(); // bound the cache
-    _mdCache.set(src, html);
-    return html;
-  }
+
 </script>
 
 {#snippet teamSwitcher()}

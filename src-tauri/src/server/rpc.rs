@@ -475,7 +475,7 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
         "project_list" | "project_create" | "project_adopt" | "project_up" | "project_down"
         | "project_archive" | "project_autostart"
         | "registry_list" | "registry_save" | "registry_delete"
-        | "skills_list" | "skills_save" | "skills_delete" | "skills_refresh"
+        | "skills_list" | "skills_save" | "skills_delete" | "skills_refresh" | "skills_read"
         | "mcp_list" | "mcp_save" | "mcp_delete" => {
             handle_project_request(req.method.as_str(), id, p)
         }
@@ -555,6 +555,7 @@ fn handle_project_request(method: &str, id: Option<u64>, p: &serde_json::Value) 
         },
         "skills_delete" => need_id("name").and_then(|n| projects::skill_delete(&n)),
         "skills_refresh" => need_id("name").and_then(|n| projects::skill_refresh(&n)),
+        "skills_read" => need_id("name").and_then(|n| projects::skill_read(&n)),
         "mcp_list" => projects::mcp_list(),
         "mcp_save" => match p.get("def") {
             Some(def) => projects::mcp_save(def),

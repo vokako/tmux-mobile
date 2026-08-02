@@ -787,6 +787,7 @@ export const skillsList = () => call<{ skills: RegSkill[] }>('skills_list');
 export const skillsSave = (def: RegSkill) => call('skills_save', { def });
 export const skillsDelete = (name: string) => call('skills_delete', { name });
 export const skillsRefresh = (name: string) => call('skills_refresh', { name });
+export const skillsRead = (name: string) => call<{ name: string; content: string }>('skills_read', { name });
 export const mcpList = () => call<{ mcp: RegMcpServer[] }>('mcp_list');
 export const mcpSave = (def: RegMcpServer) => call('mcp_save', { def });
 export const mcpDelete = (name: string) => call('mcp_delete', { name });

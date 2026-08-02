@@ -484,6 +484,16 @@ pub fn skill_refresh(name: &str) -> Result<Value, String> {
     })
 }
 
+/// SKILL.md content from the managed store (for the UI preview).
+pub fn skill_read(name: &str) -> Result<Value, String> {
+    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err("invalid skill name".into());
+    }
+    let path = managed_skills_dir().join(name).join("SKILL.md");
+    let content = std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    Ok(json!({ "name": name, "content": content }))
+}
+
 pub fn skill_delete(name: &str) -> Result<Value, String> {
     let deleted = with_store(|store| store.skill_delete(name))?;
     if deleted {

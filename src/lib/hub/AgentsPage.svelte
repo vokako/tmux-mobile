@@ -7,7 +7,8 @@
   import Icon from '../ui/Icon.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import { t } from '../core/i18n.svelte.ts';
-  import { registryList, registrySave, registryDelete, skillsList, skillsSave, skillsDelete, skillsRefresh, mcpList, mcpSave, mcpDelete } from '../core/ws.ts';
+  import { registryList, registrySave, registryDelete, skillsList, skillsSave, skillsDelete, skillsRefresh, skillsRead, mcpList, mcpSave, mcpDelete } from '../core/ws.ts';
+  import { renderMarkdown } from '../core/markdown.ts';
   import { backendColor } from '../hub/hub.ts';
 
   let { visible = false } = $props();
@@ -36,10 +37,23 @@
     error = '';
   }
 
+  let skillMd = $state('');
+  // The YAML frontmatter duplicates the form fields (name/description) —
+  // the preview shows the skill's BODY.
+  function stripFrontmatter(md) {
+    const m = /^---\n[\s\S]*?\n---\n?/.exec(md);
+    return m ? md.slice(m[0].length) : md;
+  }
   function startSkill(sk) {
     closeAll();
     skillIsNew = !sk;
     editingSkill = sk ? { ...sk } : { name: '', source: '', description: '' };
+    skillMd = '';
+    if (sk) {
+      skillsRead(sk.name)
+        .then((r) => { if (editingSkill?.name === sk.name) skillMd = r.content; })
+        .catch(() => { skillMd = ''; });
+    }
   }
   let syncing = $state(false);
   async function saveSkill() {
@@ -58,6 +72,7 @@
       await skillsRefresh(editingSkill.name);
       await reload();
       editingSkill = { ...skills.find((x) => x.name === editingSkill.name) };
+      skillMd = (await skillsRead(editingSkill.name).catch(() => ({ content: '' }))).content;
     } catch (e) { error = String(e?.message ?? e); }
     finally { syncing = false; }
   }
@@ -212,6 +227,12 @@
           <p class="hint">{t('skillsSynced')} {new Date(editingSkill.synced_at * 1000).toLocaleString()}</p>
         {/if}
         <p class="hint">{t('skillsHint')}</p>
+        {#if skillMd}
+          <div class="md-preview">
+            <div class="side-h">SKILL.md</div>
+            <div class="md md-doc">{@html renderMarkdown(stripFrontmatter(skillMd))}</div>
+          </div>
+        {/if}
       </div>
     {:else if editingMcp}
       <div class="page-head">
@@ -349,4 +370,10 @@
   }
   .pick:hover { border-color: var(--input-border); }
   .pick.sel { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+  .md-preview { border-top: 1px solid var(--border2); margin-top: 6px; }
+  .md-doc {
+    background: var(--surface); border: 1px solid var(--border2); border-radius: 10px;
+    padding: 12px 14px; font-size: 13px; color: var(--text); line-height: 1.55;
+    overflow-wrap: anywhere;
+  }
 </style>
