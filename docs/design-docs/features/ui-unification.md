@@ -118,6 +118,36 @@ Adoption:
   page-private flex-fraction splitter (`tmux_files_frac` retired). Mobile
   single-pane chain unchanged.
 
+## Settings as a page (added 2026-08-02, owner: "not a floating window")
+
+The centered modal lasted one day: settings deserve the same skeleton as
+every other page. `Preferences` becomes the `prefs` page — shared sidebar
+with category rows, main column with a `.page-head` per category. The
+categories are recut by SUBJECT instead of by history:
+
+| category | contents |
+|---|---|
+| Appearance | theme, language, layout mode, UI zoom |
+| Terminal | font family, font size, line spacing (previously mixed into Appearance) |
+| Shortcuts | desktop-Tauri only (unchanged) |
+| Connection | server info, addresses, hooks, share, disconnect, debug toggle |
+
+The gear (rail bottom / mobile tab / disconnected top bar) navigates to the
+page; no backdrop, no X. Compact drills category-list → detail like the
+Agents page.
+
+## Skills & MCP as first-class assets (same day)
+
+The registry stored skills/MCP inline per agent — editing a shared MCP
+server meant editing every agent. Now `reg_skills` (name → ref +
+description) and `reg_mcp` (name → def) are central tables (state.db v6)
+managed on the Agents page (sidebar sections AGENTS / SKILLS / MCP with the
+same editors), exposed over `skills_*`/`mcp_*` RPCs and `tmm skills|mcp
+list/save/delete` (self-management parity). Agent defs may reference both
+by NAME: spawn resolves a skills entry matching a reg_skills name to its
+ref, and an mcp array STRING entry to its reg_mcp def — inline objects keep
+working, so nothing migrates.
+
 ## Out of scope (recorded, not forgotten)
 
 - Sessions/Files as sidebar+detail pages (a deeper IA change; Sessions may

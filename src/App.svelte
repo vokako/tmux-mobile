@@ -196,7 +196,13 @@
 
   if (isTauriDesktop) setUiZoom(initialUiZoom);
 
-  let showSettings = $state(false);
+  // Settings is a PAGE (ui-unification.md "Settings as a page"), not a modal.
+  // The gear toggles into it and back to where you were.
+  let pageBeforePrefs = 'sessions';
+  function togglePrefs() {
+    if (page === 'prefs') { page = pageBeforePrefs; }
+    else { pageBeforePrefs = page; page = 'prefs'; }
+  }
   // Apply the persisted custom terminal font (if any) before first paint of
   // the terminal — rewrites --font-mono inline; a no-op for the default.
   applyMonoVar();
@@ -820,7 +826,7 @@
       if (page === 'files' && filesGoBack && filesGoBack()) return;
       if (page === 'files') { page = 'terminal'; return; }
       if (page === 'terminal') { page = 'sessions'; return; }
-      if (showSettings) { showSettings = false; return; }
+      if (page === 'prefs') { page = pageBeforePrefs; return; }
       // At sessions root, re-push to prevent exit
       navPush();
     };
@@ -843,7 +849,6 @@
 
   function switchTab(target) {
     if (slideAnim) return;
-    showSettings = false;
     const t = tabs();
     const curName = page;
     if (target === curName) return;
@@ -912,7 +917,7 @@
         <span class="brand-text">tmux<span class="brand-accent">mobile</span></span>
       </div>
       <div class="nav-right">
-        <button tabindex="-1" class="gear-btn" class:active={showSettings} onclick={() => showSettings = !showSettings}><Icon name="gear" size={16} /></button>
+        <button tabindex="-1" class="gear-btn" class:active={page === 'prefs'} onclick={togglePrefs}><Icon name="gear" size={16} /></button>
       </div>
     </nav>
   {:else if !layout.isTouchDevice}
@@ -928,32 +933,10 @@
       {/if}
       <button tabindex="-1" class="rail-btn" class:active={page === 'files'} title={t('files')} onclick={() => switchTab('files')}><Icon name="files" size={17} /></button>
       <div class="rail-spacer"></div>
-      <button tabindex="-1" class="rail-btn" class:active={showSettings} title={t('settings')} onclick={() => showSettings = !showSettings}><Icon name="gear" size={17} /></button>
+      <button tabindex="-1" class="rail-btn" class:active={page === 'prefs'} title={t('settings')} onclick={togglePrefs}><Icon name="gear" size={17} /></button>
     </nav>
   {/if}
 
-  {#if showSettings}
-    <Preferences {connected} {theme} {fontSize} {debugMode} {serverInfo} {activeAddress} addresses={prefAddresses}
-      {optimizing} {linkCopied}
-      onClose={() => showSettings = false}
-      onTheme={setTheme}
-      {uiZoom} showUiZoom={isTauriDesktop} showShortcuts={isTauriDesktop} onUiZoom={setUiZoom}
-      onFontSize={setFontSize}
-      onDebug={(value) => { debugMode = value; localStorage.setItem('tmux_debug', value ? '1' : ''); }}
-      onOptimize={optimizeConnection}
-      onShare={shareConnectionLink}
-      onAddress={(address) => {
-        localStorage.setItem('tmux_address', address);
-        activeAddress = address;
-        disconnect();
-        connect(address, localStorage.getItem('tmux_token') || '').then(() => {
-          serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
-          resubscribeAll();
-        }).catch(() => { reconnectMachine.start(); });
-      }}
-      onDisconnect={() => { showSettings = false; doDisconnect(); }}
-      onConnectionSetup={() => { showSettings = false; page = 'settings'; }} />
-  {/if}
 
   {#if reconnecting && page !== 'settings'}
     <div class="reconnect-bar">
@@ -990,6 +973,30 @@
       <div class="page-layer" class:hidden={page !== 'agents'}>
         <AgentsPage visible={page === 'agents'} />
       </div>
+    {/if}
+    {#if page === 'prefs'}
+    <div class="page-layer">
+    <Preferences {connected} {theme} {fontSize} {debugMode} {serverInfo} {activeAddress} addresses={prefAddresses}
+      {optimizing} {linkCopied}
+      onClose={togglePrefs}
+      onTheme={setTheme}
+      {uiZoom} showUiZoom={isTauriDesktop} showShortcuts={isTauriDesktop} onUiZoom={setUiZoom}
+      onFontSize={setFontSize}
+      onDebug={(value) => { debugMode = value; localStorage.setItem('tmux_debug', value ? '1' : ''); }}
+      onOptimize={optimizeConnection}
+      onShare={shareConnectionLink}
+      onAddress={(address) => {
+        localStorage.setItem('tmux_address', address);
+        activeAddress = address;
+        disconnect();
+        connect(address, localStorage.getItem('tmux_token') || '').then(() => {
+          serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
+          resubscribeAll();
+        }).catch(() => { reconnectMachine.start(); });
+      }}
+      onDisconnect={() => { page = 'settings'; doDisconnect(); }}
+      onConnectionSetup={() => { page = 'settings'; }} />
+    </div>
     {/if}
     <div class="page-layer" class:hidden={page !== 'files'}>
       <Files session={filesSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} />
@@ -1092,7 +1099,7 @@
       <button tabindex="-1" class:active={page === 'files'} onclick={() => switchTab('files')}>
         <Icon name="files" size={19} /><span>{t('files')}</span>
       </button>
-      <button tabindex="-1" class:active={showSettings} onclick={() => showSettings = !showSettings}>
+      <button tabindex="-1" class:active={page === 'prefs'} onclick={togglePrefs}>
         <Icon name="gear" size={19} /><span>{t('settings')}</span>
       </button>
     </nav>

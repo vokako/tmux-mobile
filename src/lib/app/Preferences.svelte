@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from '../ui/Icon.svelte';
+  import SideHandle from '../ui/SideHandle.svelte';
   import { t, i18n, setLocale } from '../core/i18n.svelte.ts';
   import { layout } from './layout.svelte.ts';
   import { fonts } from './fonts.svelte.ts';
@@ -64,6 +65,7 @@
   if (storedTab && storedTab !== initialTab) localStorage.setItem(TAB_KEY, initialTab);
   const tabs = $derived([
     { id: 'appearance', label: () => t('settingsAppearance'), icon: 'palette' },
+    { id: 'terminal', label: () => t('settingsTerminal'), icon: 'terminal' },
     ...(showShortcuts ? [{ id: 'shortcuts', label: () => t('settingsShortcuts'), icon: 'command' }] : []),
     { id: 'connection', label: () => t('settingsConnection'), icon: 'link' },
   ]);
@@ -148,24 +150,33 @@
   }
 </script>
 
-<!-- Desktop: a centered modal over a dimmed backdrop — settings are a quick
-     dip, not a destination, so they must not read as a page replacing your
-     work. Mobile keeps the full-screen sheet (small screens have no room for
-     a floating card). Backdrop click and the X both close. -->
-<div class="pref-backdrop" onclick={onClose} role="presentation"></div>
-<section class="preferences" class:sheet={layout.isTouchDevice} aria-label={t('settings')}>
-  <div class="pref-shell">
-    <nav class="pref-tabs" aria-label={t('settings')}>
+<!-- Settings is a PAGE in the unified skeleton (ui-unification.md "Settings
+     as a page"): shared sidebar with category rows, main column with a
+     page-head. No backdrop, no X — the rail/tab bar is the way out. -->
+<section class="preferences" aria-label={t('settings')}>
+  <aside class="sidebar">
+    <SideHandle />
+    <div class="side-scroll">
+      <div class="side-h">{t('settings')}</div>
       {#each tabs as item}
-        <button class:active={tab === item.id} onclick={() => selectTab(item.id)}>
-          <Icon name={item.icon} size={15} /><span>{item.label()}</span>
+        <button class="side-row" class:open={tab === item.id} onclick={() => selectTab(item.id)}>
+          <Icon name={item.icon} size={14} /><span class="r-label">{item.label()}</span>
         </button>
       {/each}
-      <button class="debug-toggle" class:active={debugMode} aria-pressed={debugMode} onclick={() => onDebug(!debugMode)} title={t('debugHint')}>
-        <Icon name="terminal" size={15} /><span>{t('debug')}</span>
-      </button>
-      <button class="close" onclick={onClose} aria-label={t('close')}><Icon name="x" size={16} /></button>
-    </nav>
+    </div>
+  </aside>
+  <div class="pref-shell">
+    <div class="page-head">
+      <h1>{tabs.find((x) => x.id === tab)?.label() ?? t('settings')}</h1>
+    </div>
+    <!-- Compact: the sidebar is hidden, categories become a chip row. -->
+    <div class="cat-chips">
+      {#each tabs as item}
+        <button class="pchip" class:sel={tab === item.id} onclick={() => selectTab(item.id)}>
+          <Icon name={item.icon} size={13} />{item.label()}
+        </button>
+      {/each}
+    </div>
 
     <div class="pref-content">
       {#if tab === 'appearance'}
@@ -201,6 +212,9 @@
               </div>
             </div>
           {/if}
+        </div>
+      {:else if tab === 'terminal'}
+        <div class="setting-card">
           <div class="setting-row">
             <div><strong>{t('fontFamily')}</strong><small>{t('fontFamilyHint')}</small></div>
             <div class="font-control">
@@ -249,6 +263,15 @@
         <button class="shortcut-reset" onclick={() => { shortcuts.reset(); shortcutError = ''; }}>{t('shortcutReset')}</button>
       {:else}
         <div class="setting-card">
+          <div class="setting-row">
+            <div><strong>{t('debug')}</strong><small>{t('debugHint')}</small></div>
+            <div class="segmented">
+              <button class:active={!debugMode} onclick={() => onDebug(false)}>Off</button>
+              <button class:active={debugMode} onclick={() => onDebug(true)}>On</button>
+            </div>
+          </div>
+        </div>
+        <div class="setting-card">
           {#if connected}
             <div class="connection-title">
               <div><strong>{serverInfo.hostname || 'unknown'}</strong><small>{serverInfo.machineId?.slice(0, 8) || '—'}</small></div>
@@ -296,40 +319,32 @@
 </section>
 
 <style>
-  .pref-backdrop {
-    position: fixed; inset: 0; z-index: 18;
-    background: rgba(0,0,0,0.45);
-  }
-  /* Desktop: centered card. Mobile (.sheet): full-bleed below the shell
-     chrome, exactly as before — the shell sets the two vars. */
+  /* Page skeleton (ui-unification.md): shared sidebar + main column. */
   .preferences {
-    position: fixed; z-index: 19; display: flex; flex-direction: column;
+    height: 100%; min-height: 0;
+    display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
     background: var(--bg); color: var(--text);
-    left: 50%; top: 50%; transform: translate(-50%, -50%);
-    width: min(680px, calc(100vw - 32px));
-    height: min(640px, calc(100vh - 48px));
-    border: 1px solid var(--border); border-radius: 14px;
-    box-shadow: 0 18px 60px rgba(0,0,0,0.5);
-    overflow: hidden;
   }
-  .preferences.sheet {
-    /* `inset` expands to top/right/bottom/left — declaring left/top after it
-       would cancel two of its components (that bug shipped for ~a minute:
-       the sheet floated bottom-right). Only neutralize the card properties. */
-    inset: calc(var(--shell-top, 0px) + var(--sat)) 0 0 var(--shell-left, 0px);
-    transform: none;
-    width: auto; height: auto;
-    border: none; border-radius: 0; box-shadow: none;
+  .sidebar { position: relative; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+  .side-scroll { flex: 1; overflow-y: auto; padding: 8px; }
+  .r-label { flex: 1; min-width: 0; }
+  .cat-chips { display: none; }
+  .pchip {
+    display: flex; align-items: center; gap: 6px; flex: none;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 999px;
+    color: var(--text2); padding: 5px 12px; font-size: 12.5px; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
   }
-  .pref-shell { flex:1;min-height:0;display:flex;flex-direction:column; }
-  .pref-tabs { display:flex;align-items:center;gap:var(--ui-gap);min-height:var(--ui-bar-height);padding:var(--ui-bar-padding);box-sizing:border-box;border-bottom:1px solid var(--border2);background:var(--surface);flex-shrink:0;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch; }
-  .pref-tabs::-webkit-scrollbar { display:none; }
-  .pref-tabs button { flex-shrink:0;height:var(--ui-control-height);display:inline-flex;align-items:center;justify-content:center;gap:var(--ui-gap);padding:3px 8px;border:1px solid var(--border2);border-radius:var(--ui-radius-pill);background:transparent;color:var(--text3);font-size:var(--ui-font-control);font-weight:500;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent; }
-  .pref-tabs button.active { border-color:var(--accent);background:var(--accent-bg);color:var(--accent);font-weight:600; }
-  .pref-tabs .debug-toggle.active { background:var(--accent);color:var(--bg); }
-  .pref-tabs button:active { border-color:var(--accent);color:var(--accent); }
-  .pref-tabs .close { width:var(--ui-control-height);padding:0;margin-left:auto;border-color:transparent;background:transparent; }
-  .pref-tabs .close:active { background:var(--surface2); }
+  .pchip.sel { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+  @media (max-width: 760px) {
+    .preferences { grid-template-columns: minmax(0, 1fr); }
+    .sidebar { display: none; }
+    .cat-chips {
+      display: flex; gap: 6px; padding: 10px 12px 0; overflow-x: auto; flex: none;
+      -webkit-overflow-scrolling: touch; scrollbar-width: none;
+    }
+    .cat-chips::-webkit-scrollbar { display: none; }
+  }
   .pref-content { flex:1;min-width:0;overflow:auto;padding:14px clamp(12px,3vw,24px); }
   .setting-card { max-width:720px;margin:0 auto;border:1px solid var(--border2);border-radius:var(--ui-radius-panel);background:var(--surface);overflow:hidden; }
   .setting-row { min-height:52px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:16px; }
