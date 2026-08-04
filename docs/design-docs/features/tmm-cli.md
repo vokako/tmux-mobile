@@ -15,6 +15,10 @@ config materialization and three different schema dialects; `tmm` requires
 one line in a system prompt. The agora MCP daemon still exists for Team
 (legacy) and is not extended.
 
+One subtree breaks the client-of-the-hub shape on purpose: `tmm task` manages
+background tasks with local tmux only and never opens a socket. See
+"Background tasks" below for why that split has to exist.
+
 ## Commands
 
 ```
@@ -35,6 +39,16 @@ tmm registry delete <name>
 tmm skills list|save|delete          central skill assets (name → ref)
 tmm mcp list|save|delete             central MCP server defs
 tmm spawn <agent> [--brief <text>]   spawn a registry agent into this project
+
+# background tasks — LOCAL tmux only, no server, never exits 2
+tmm task start <name> -- <cmd...>    detached in its own tmux window
+                 [--session <s>]     default: the session you are in, else "tmm-tasks"
+                 [--replace]         take over a name a live task holds
+tmm task list                        every task in every session + state + age
+tmm task status <name>               running | exited:<code> | killed:<signal>
+tmm task logs <name> [--limit N] [--grep <text>]   last 50 lines by default
+tmm task stop <name>                 C-c → TERM → KILL; keeps the log
+tmm task rm <name>                   close a finished task's window
 ```
 
 Central assets: agents reference skills and MCP servers by NAME and pick
@@ -80,9 +94,110 @@ timeout, no retries: a dead server is one stderr line and exit 2, measured at
 prompt can treat it as fire-and-forget.
 
 **Tiered exit codes** (multica's convention, adopted after reading its CLI
-docs): `0` ok · `2` server unreachable · `3` auth rejected · `4` not found
-(method missing on this server — mobile or old build) · `5` usage/params.
+docs): `0` ok · `1` local/tmux failure (`tmm task` only) · `2` server
+unreachable · `3` auth rejected · `4` not found (method missing on this
+server — mobile or old build; or no such task) · `5` usage/params.
 Agents and scripts branch on the class without parsing error prose.
+`tmm task *` opens no socket, so it can never return 2 — see below.
+
+## Background tasks (`tmm task`) — local tmux, no server
+
+The rest of `tmm` is a thin WS client: all 21 hub subcommands go through
+`rpc()` and `state.db` is owned by the server process. `tmm task` is the one
+subtree that is purely local (`src-tauri/src/tasks.rs`, over `tmux.rs`), and it
+has to be: **what an agent most often wants to run in the background is the
+server itself.** A task manager that needed the hub to be up could not start
+the hub. So `task` is dispatched in `main()` before `Config::load()` — which is
+not just a read, it seeds a token, a machine id and the team defaults into
+`config.toml`, and a command that only talks to tmux has no business doing
+that.
+
+### Why this belongs to an agent at all
+
+An agent's constraints differ from a human's. Every tool call is a fresh,
+TTY-less, one-shot shell; the only state shared between calls is the
+filesystem and the process table; and the agent's own context gets compacted.
+So:
+
+- **The handle must be discoverable, not remembered.** A PID noted in the
+  conversation is exactly the thing that rots. `tmm task list` is one
+  `tmux list-windows -a` call that enumerates every task in every session, so
+  an agent that lost its context can rediscover what it left running.
+- **Output must be bounded.** Context is the scarce resource; `cat`-ing a
+  500 MB log destroys the caller. `logs` scans the whole scrollback but returns
+  a bounded tail (50 lines by default).
+- **A real TTY matters more than it looks.** Two reasons. When stdout is a pipe
+  or file, libc switches from line to block buffering, so a Python/Node task
+  can write nothing to its log for minutes — an agent polling it concludes the
+  task hung and kills a healthy process. And a TTY is what makes `C-c` reach
+  the whole foreground process group, so `stop` collapses the process tree
+  instead of orphaning its children (a `nohup`-ed `npm → tauri → vite + server`
+  chain cannot be given that signal; `scripts/preflight.mjs` exists because
+  those orphans really happened).
+
+`pm2` was rejected, not just as an extra dependency: **auto-restart lies to an
+agent.** From a log tail you cannot tell "running fine" from "crashed five
+times and retrying", and for a build task the restart loop is pure harm. A
+standalone shell wrapper was rejected because `tmux.rs` already solves socket
+discovery (`-S`), tmux binary location, and `capture-pane -J` wrap
+normalization — bash would duplicate all three, badly.
+
+### The three tmux facts it rests on (verified, tmux 3.7b)
+
+1. **`remain-on-exit on` is what makes a finished task observable.** The pane
+   goes `#{pane_dead}=1` with the code in `#{pane_dead_status}`, and the
+   scrollback stays readable. Status *and* log retention from one native
+   mechanism — no pidfiles, no sentinel files, no log files. A task that
+   auto-vanished would be evidence destroyed: the agent could never find out
+   why it failed.
+2. **It must be set with `-w`.** Session scope would turn it on for every
+   window the user has open, so their shells would stop closing on exit. Not
+   ours to change. Verified: with a task running in the current session, a
+   sibling window still auto-closes and global `remain-on-exit` is still `off`.
+3. **The registry is a window option, not a file.** `@tmm_task` marks the
+   window; `@tmm_cmd` and `@tmm_started` ride along so `list` needs no second
+   lookup. The options are set *before* `respawn-window -k` runs the command,
+   otherwise a command that exits in milliseconds takes its window down first.
+
+Task names are globally unique — the name is the handle — so lookups scan all
+sessions, and `start` refuses a name a live task holds (`--replace` to take it
+over). Refusing rather than clobbering matches preflight's philosophy and keeps
+parallel subagents from silently stealing each other's tasks.
+
+### Two things that read as bugs and are not
+
+**`logs` filters tmux's own `Pane is dead (…)` line.** tmux writes it into the
+pane, on the bottom row, padding the gap above with blank rows. Left in, a
+bounded `--limit 5` returned five blank lines and the real output fell out of
+view. So `logs` returns task output only (and only strips the marker for dead
+tasks), while `status` stays the single place that reports how it ended.
+
+**A signal death is not an exit code.** `State::Killed(String)` is fed from
+`#{pane_dead_signal}` (tmux names it: `kill`, `int`, `term`). The first cut
+reported a SIGKILL as `exited:-1`, which is a lie an agent would then act on;
+JSON now carries `exit_code` and `signal` as separate fields, one of which is
+always null. `Exited(-1)` survives only as the "dead and tmux told us nothing"
+fallback.
+
+### Naming
+
+`task`, not `bg`: the existing management surface is `<noun> <verb>`
+(`project up`, `registry save`), a noun is what `list` can enumerate, and
+shell `bg` actually means "resume a *stopped* job", which is the wrong
+semantics. `spawn` was unavailable — it already spawns agents. `start`, not
+`run`, because `run` implies it blocks and returns output, and an agent holding
+that mental model waits forever. No aliases: they double the surface an agent
+can get wrong to save three characters.
+
+### Known limits
+
+- Output lives in the tmux scrollback, so anything past `history-limit` is
+  gone. Deliberate: writing a log file would bring back the CR/ANSI sludge
+  that makes `capture-pane` output nice to read in the first place.
+- Tasks are tmux windows, so `tmux kill-server` takes them with it.
+- The `tmm-tasks` fallback session keeps one idle shell window (the one tmux
+  creates with the session). Harmless, and it keeps the session alive between
+  tasks.
 
 ## Server side
 
@@ -185,3 +300,17 @@ waiting "note"` → `agent list` shows `waiting — note`, `done` → `idle`,
 `--output json` on all reads. Dead server → exit 2 in 21ms; wrong token →
 exit 3; `team_status` shows `[]` teams (proj rooms filtered). Unit tests:
 derivation table (9 cases), hub dispatch (4 cases), all in `cargo test --lib`.
+
+`tmm task`, end to end against the real binary: a task started in the current
+session reports `running`, then `exited:7` with the code from
+`pane_dead_status`; `logs --limit 3` and `logs --grep error` both return
+bounded, already-rendered text; `stop` on a process trapping INT and TERM
+escalates and reports `killed:kill` with `exit_code: null`; `rm` on a running
+task exits 5, `start` on a taken name exits 5, `status` on an unknown task
+prints `missing` and exits 4. Scope: global `remain-on-exit` still `off`,
+session-level unset, a sibling window still auto-closes. `-- printf %s|%s|%s
+--release --limit -f` reached the command verbatim, proving flags after `--`
+never touch the parser. With `TMUX`/`TMUX_PANE` unset the task lands in
+`tmm-tasks` and stays fully operable from outside tmux. 13 unit tests cover the
+pure helpers (quoting, row parsing incl. signal vs status, bounded tail, grep,
+dead-marker strip, name validation, ages).

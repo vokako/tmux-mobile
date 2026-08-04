@@ -3,6 +3,7 @@ pub mod config;
 pub mod fs;
 pub mod pptx;
 pub mod server;
+pub mod tasks;
 pub mod tmux;
 
 // team multi-agent bus bridge + in-process team supervisor — desktop only

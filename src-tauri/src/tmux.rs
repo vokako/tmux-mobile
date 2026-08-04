@@ -92,7 +92,7 @@ fn find_tmux() -> String {
     "tmux".to_string()
 }
 
-fn run_tmux(args: &[&str]) -> Result<String, String> {
+pub(crate) fn run_tmux(args: &[&str]) -> Result<String, String> {
     let mut cmd = Command::new(find_tmux());
     if let Some(socket) = get_socket() {
         cmd.args(["-S", &socket]);

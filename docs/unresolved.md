@@ -193,3 +193,17 @@ in the same pass):
 
 All are pre-existing smells surfaced (not introduced) by the split;
 everything mechanical from the same clippy run was fixed in-tree.
+
+## `projects::tests::adopt_then_down_then_up_restores_the_workspace` is flaky (2026-08-05)
+
+Seen failing once in the full `cargo test --lib -- --test-threads=1` run with
+`api["cwd"]` empty instead of `"api"` ("cwd is stored relative to the
+project"), then passing on its own and on a full re-run of the identical
+binary — so it is order/state dependent, not a code defect. The suspect is
+shared tmux state: `pick_workspace` chooses the workspace over ALL windows,
+and with the test's two windows (`editor` at the root, `api` one level down)
+there is no majority, so anything another test leaves behind in tmux can tip
+which directory wins and make the stored relative cwd empty. Surfaced while
+adding `tmm task`, which does not touch `projects`; left alone rather than
+fixed blind. A fix means giving the test its own tmux socket (`-S`) so it
+cannot see other sessions.

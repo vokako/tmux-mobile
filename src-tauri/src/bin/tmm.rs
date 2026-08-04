@@ -7,18 +7,23 @@
 //! - FAIL SOFT, NEVER BLOCK: the server is optional. Connection failures are
 //!   one line on stderr and exit code 2 within ~2s. No retries, no hangs — an
 //!   agent calling `tmm send` inside a hook or a prompt must never stall.
-//! - Tiered exit codes (multica convention): 0 ok, 2 network, 3 auth,
-//!   4 not found, 5 invalid params / usage.
+//! - Tiered exit codes (multica convention): 0 ok, 1 local/tmux failure,
+//!   2 network, 3 auth, 4 not found, 5 invalid params / usage.
 //! - `--output json` on every read so agents and scripts consume reliably.
 //! - Context from env: TMM_PROJECT (tmux session = project id), TMM_AGENT
 //!   (window/agent name). Exported by the launcher; overridable by flags.
+//! - `tmm task *` is the one subtree that is purely LOCAL (tmux only). It must
+//!   keep working when no server is running, because what an agent most often
+//!   wants to background is the server itself. It can never exit 2.
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use std::time::Duration;
+use tmux_mobile::tasks;
 use tokio_tungstenite::tungstenite::Message;
 
 const EXIT_OK: i32 = 0;
+const EXIT_ERR: i32 = 1;
 const EXIT_NET: i32 = 2;
 const EXIT_AUTH: i32 = 3;
 const EXIT_NOT_FOUND: i32 = 4;
@@ -35,6 +40,17 @@ USAGE (agent):
   tmm status <working|waiting|blocked> [note]   declare what you are doing
   tmm done [summary]                  declare completion
   tmm spawn <agent> [--brief <text>]  spawn a registry agent into this project
+
+USAGE (background tasks — LOCAL tmux only, no server needed, never exits 2):
+  tmm task start <name> -- <cmd...>   run <cmd> detached in its own tmux window
+                    [--session <s>]   where to put it (default: the session you
+                                      are in, else "tmm-tasks")
+                    [--replace]       take over a name a live task holds
+  tmm task list                       every task, in every session, + state
+  tmm task status <name>              running | exited:<code>  (exit 4 if gone)
+  tmm task logs <name> [--limit N] [--grep <text>]   default 50 lines, from the end
+  tmm task stop <name>                C-c, then TERM, then KILL; keeps the log
+  tmm task rm <name>                  close a finished task's window
 
 USAGE (human or agent — self-management):
   tmm agent list                      agents in this project and their states
@@ -58,7 +74,8 @@ CONTEXT:
   --server <ws://host:port>  (default: $TMM_SERVER, else config.toml)
   --output json         machine-readable output
 
-EXIT CODES: 0 ok · 2 server unreachable · 3 auth · 4 not found · 5 usage
+EXIT CODES: 0 ok · 1 local/tmux failure · 2 server unreachable · 3 auth
+            4 not found · 5 usage
 "#;
 
 struct Ctx {
@@ -77,10 +94,27 @@ fn fail(code: i32, msg: &str) -> ! {
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let (flags, mut pos) = split_flags(&args);
+    // Everything after a bare `--` is a command to be run verbatim, so it must
+    // never reach the flag parser — `-- cargo build --release` would otherwise
+    // lose its `--release` to `flags`.
+    let (head, cmdv) = match args.iter().position(|a| a == "--") {
+        Some(i) => (&args[..i], args[i + 1..].to_vec()),
+        None => (&args[..], Vec::new()),
+    };
+    let (flags, mut pos) = split_flags(head);
     if pos.is_empty() || flags.contains_key("help") {
         print!("{USAGE}");
         std::process::exit(if pos.is_empty() { EXIT_USAGE } else { EXIT_OK });
+    }
+
+    let json = flags.get("output").cloned().flatten().as_deref() == Some("json");
+
+    // Local tmux subtree, dispatched before anything else: `Config::load()`
+    // below seeds a token / machine id / team defaults into config.toml, and a
+    // command that only talks to tmux has no business doing that.
+    if pos[0] == "task" {
+        cmd_task(&pos[1..], &cmdv, &flags, json);
+        return;
     }
 
     let cfg = tmux_mobile::config::Config::load();
@@ -95,7 +129,7 @@ async fn main() {
         token: std::env::var("TMM_TOKEN").ok().unwrap_or(cfg.token),
         project: flags.get("project").cloned().flatten().or_else(|| std::env::var("TMM_PROJECT").ok()).filter(|s| !s.is_empty()),
         agent: flags.get("agent").cloned().flatten().or_else(|| std::env::var("TMM_AGENT").ok()).filter(|s| !s.is_empty()),
-        json: flags.get("output").cloned().flatten().as_deref() == Some("json"),
+        json,
     };
 
     let cmd = pos.remove(0);
@@ -335,6 +369,153 @@ async fn main() {
     }
 }
 
+type Flags = std::collections::HashMap<String, Option<String>>;
+
+/// `tmm task …` — background tasks as tmux windows. The only subtree that
+/// opens no socket and reads no config, so it stays usable when the hub is
+/// down. Errors map onto the tiered codes via `task_fail`; 2 is unreachable.
+fn cmd_task(rest: &[String], cmdv: &[String], flags: &Flags, json: bool) {
+    let verb = rest.first().map(String::as_str).unwrap_or("");
+    let arg = rest.get(1).map(String::as_str);
+    match verb {
+        "start" => {
+            let Some(name) = arg else {
+                fail(EXIT_USAGE, "task start needs a name: tmm task start dev -- npm run dev");
+            };
+            if cmdv.is_empty() {
+                fail(EXIT_USAGE, "task start needs a command after `--`: tmm task start dev -- npm run dev");
+            }
+            let session = flags.get("session").cloned().flatten();
+            let t = tasks::start(name, cmdv, session.as_deref(), flags.contains_key("replace"))
+                .unwrap_or_else(|e| task_fail(e));
+            if json {
+                println!("{}", task_value(&t));
+            } else {
+                println!("✓ started {} in {} (pane {}, pid {})", t.name, t.target(), t.pane, t.pid);
+                println!("  logs: tmm task logs {}", t.name);
+            }
+        }
+        "list" => {
+            let rows = tasks::list();
+            if json {
+                let arr: Vec<Value> = rows.iter().map(task_value).collect();
+                println!("{}", json!({ "tasks": arr }));
+            } else if rows.is_empty() {
+                println!("no tasks");
+            } else {
+                let now = tasks::unix_now();
+                println!("{:<16} {:<11} {:>4}  {:<18} {}", "NAME", "STATE", "AGE", "TARGET", "COMMAND");
+                for t in &rows {
+                    println!(
+                        "{:<16} {:<11} {:>4}  {:<18} {}",
+                        t.name, t.state_str(), tasks::fmt_age(t.age(now)), t.target(), t.cmd
+                    );
+                }
+            }
+        }
+        "status" => {
+            let Some(name) = arg else { fail(EXIT_USAGE, "task status <name>") };
+            match tasks::find(name) {
+                Some(t) => {
+                    if json {
+                        println!("{}", task_value(&t));
+                    } else {
+                        // State first, so `tmm task status x | awk '{print $1}'`
+                        // and a bare `$(...)` comparison both work.
+                        println!(
+                            "{} {} {} pid {}",
+                            t.state_str(),
+                            tasks::fmt_age(t.age(tasks::unix_now())),
+                            t.target(),
+                            t.pid
+                        );
+                    }
+                }
+                None => {
+                    if json {
+                        println!("{}", json!({ "name": name, "state": "missing" }));
+                    } else {
+                        println!("missing");
+                    }
+                    std::process::exit(EXIT_NOT_FOUND);
+                }
+            }
+        }
+        "logs" => {
+            let Some(name) = arg else {
+                fail(EXIT_USAGE, "task logs <name> [--limit N] [--grep <text>]");
+            };
+            let limit = flags
+                .get("limit")
+                .cloned()
+                .flatten()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(50);
+            let grep = flags.get("grep").cloned().flatten();
+            let text = tasks::logs(name, limit, grep.as_deref()).unwrap_or_else(|e| task_fail(e));
+            if json {
+                let lines: Vec<&str> = text.lines().collect();
+                println!("{}", json!({ "name": name, "lines": lines }));
+            } else if !text.is_empty() {
+                println!("{text}");
+            }
+        }
+        "stop" => {
+            let Some(name) = arg else { fail(EXIT_USAGE, "task stop <name>") };
+            let t = tasks::stop(name).unwrap_or_else(|e| task_fail(e));
+            if json {
+                println!("{}", task_value(&t));
+            } else {
+                println!("✓ stopped {} ({})", t.name, t.state_str());
+            }
+        }
+        "rm" => {
+            let Some(name) = arg else { fail(EXIT_USAGE, "task rm <name>") };
+            let t = tasks::remove(name).unwrap_or_else(|e| task_fail(e));
+            if json {
+                println!("{}", json!({ "removed": t.name }));
+            } else {
+                println!("✓ removed {}", t.name);
+            }
+        }
+        _ => {
+            eprint!("{USAGE}");
+            std::process::exit(EXIT_USAGE);
+        }
+    }
+}
+
+/// The module's typed errors are the reason this is not string sniffing.
+fn task_fail(e: tasks::Error) -> ! {
+    let code = match &e {
+        tasks::Error::Invalid(_) => EXIT_USAGE,
+        tasks::Error::NotFound(_) => EXIT_NOT_FOUND,
+        tasks::Error::Tmux(_) => EXIT_ERR,
+    };
+    fail(code, &e.to_string())
+}
+
+fn task_value(t: &tasks::Task) -> Value {
+    json!({
+        "name": t.name,
+        "state": t.state_str(),
+        "exit_code": match &t.state {
+            tasks::State::Exited(code) => Some(*code),
+            _ => None,
+        },
+        "signal": match &t.state {
+            tasks::State::Killed(sig) => Some(sig.as_str()),
+            _ => None,
+        },
+        "session": t.session,
+        "window": t.window,
+        "pane": t.pane,
+        "pid": t.pid,
+        "started": t.started,
+        "cmd": t.cmd,
+    })
+}
+
 /// Accepts a session name or a raw project id; resolves via project_list so
 /// humans and agents can address projects by the name they see in tmux.
 async fn resolve_project_id(ctx: &Ctx, name: &str) -> String {
@@ -369,7 +550,7 @@ fn need_agent(ctx: &Ctx) -> String {
 fn split_flags(args: &[String]) -> (std::collections::HashMap<String, Option<String>>, Vec<String>) {
     const VALUED: &[&str] = &["project", "agent", "server", "output", "since", "limit", "brief",
                           "name", "session", "with-agent", "backend", "model", "system", "skills", "mcp",
-                          "ref", "source", "description", "def"];
+                          "ref", "source", "description", "def", "grep"];
     let mut flags = std::collections::HashMap::new();
     let mut pos = Vec::new();
     let mut i = 0;
