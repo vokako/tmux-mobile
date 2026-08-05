@@ -1183,17 +1183,30 @@
     flex-direction: column;
     height: calc(var(--app-height, 100dvh) / var(--ui-zoom, 1));
     max-width: calc(100vw / var(--ui-zoom, 1));
+    /* The shell reserves the top inset ONCE, for every screen. Android draws
+       edge-to-edge (enforced from targetSdk 35), so without this the topmost
+       header sits under the status bar. It cannot live on the page headers:
+       only the disconnected `.topbar` used to carry it, so every CONNECTED
+       page — which renders its own `.page-head` / win-bar instead — overlapped
+       the notification strip. `box-sizing: border-box` is global, so the
+       padding comes out of the content box and the terminal's fit math still
+       adds up. Mirrors `.tabbar`'s `padding-bottom: var(--sab)` at the bottom.
+       `--sat` is `env(safe-area-inset-top)`, overridden by an inline value that
+       MainActivity pushes in from WindowInsetsCompat — WebView only forwards
+       systemBars() to CSS from M136 (fullscreen) / M144 (always), so on older
+       WebViews the Kotlin path is the only source. Both land on this one var. */
+    padding-top: var(--sat);
     overflow: hidden;
     background: linear-gradient(180deg, var(--bg) 0%, var(--bg2) 50%, var(--bg3) 100%);
   }
 
-  /* Disconnected top bar (brand + gear), both platforms. */
+  /* Disconnected top bar (brand + gear), both platforms. The safe area is
+     `main`'s job now, so this is plain padding. */
   .topbar {
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 8px 12px;
-    padding-top: calc(8px + var(--sat));
     background: var(--nav-bg);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
