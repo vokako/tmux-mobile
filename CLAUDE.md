@@ -44,8 +44,17 @@ per-CGU anonymous symbols get renamed between incremental runs).
 Dev commands run a port preflight (`scripts/preflight.mjs`): if 5173/9899 are
 already held they fail fast and print the owning PIDs instead of half-starting
 (a second vite instance corrupts the dep-optimizer cache → blank page on every
-open client). `build:android` ends with a postflight that heals this machine's
-gradle build-dir symlink if it dangles and prints the real APK path.
+open client). `build:android` ends with a postflight that re-points this
+machine's gradle build-dir symlink at THIS checkout's output and prints the real
+APK path. It computes the target rather than guessing: a global gradle init
+script redirects `build/` to
+`~/.cache/builds/gradle-builds/<dirname>-<md5(gradle root abs path)[:12]>/`, so
+the slug is a pure function of the path. Two failure modes, and the second is
+the dangerous one — dangling (cache pruned) is loud, but a link pointing at a
+**second checkout of the same repo** hashes to a different slug and makes a
+green build silently serve that other tree's older APK. Healing only the
+dangling case, or picking the newest APK across all `android-*` dirs, is how you
+end up shipping the wrong tree.
 
 ## Documentation Map
 
