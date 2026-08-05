@@ -151,7 +151,7 @@
     transform: translateX(-50%);
     bottom: calc(12px + env(safe-area-inset-bottom));
     z-index: 200;
-    width: min(440px, calc(100vw - 24px));
+    width: min(440px, calc(100vw / var(--ui-zoom, 1) - 24px));
     display: flex;
     align-items: center;
     gap: 12px;

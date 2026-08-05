@@ -559,7 +559,7 @@
      query adds no specificity — source order decides between equal selectors). */
   @media (max-width: 620px) {
     .tpl-modal {
-      width: 100vw; height: 100%; height: calc(var(--app-height, 100dvh) / var(--ui-zoom, 1));
+      width: calc(100vw / var(--ui-zoom, 1)); height: 100%; height: calc(var(--app-height, 100dvh) / var(--ui-zoom, 1));
       top: 0; left: 0; transform: none; border-radius: 0; border: none;
       padding-top: var(--sat); padding-bottom: var(--sab);
     }
