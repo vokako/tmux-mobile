@@ -85,6 +85,42 @@ pub trait TeamBridge: Send + Sync {
 pub type OptTeam = Option<Arc<dyn TeamBridge>>;
 pub type NotificationHub = Arc<AgentNotificationHub>;
 
+// ─── RoomPoster implementation ───────────────────────────────────────────────
+// The notification hub needs to post into project rooms from the hook consumer
+// (a background task without a per-request context). This adapter bridges the
+// `RoomPoster` trait to the `TeamBridge` without exposing bus types.
+//
+// INVARIANT: `post_to_room` is called from `consume_file` only for STOP events
+// on managed windows, always with `record_only = true`.
+// The hub_post handler enforces that record_only posts never trigger delivery.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+struct TeamRoomPoster {
+    team: Arc<dyn TeamBridge>,
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+impl crate::agent_notifications::RoomPoster for TeamRoomPoster {
+    fn post_to_room(&self, session: &str, agent: &str, body: &str, record_only: bool) {
+        let room = hub_rpc::project_room(session);
+        let _ = self.team.open_room(&room);
+        // record_only means: store in room, do NOT deliver (type) into panes.
+        // We encode this as requires_reply = false and rely on hub_post's
+        // record_only gate. Since we call bus.post directly (bypassing the RPC
+        // layer), we must not call deliver_mentions — which is exactly what
+        // record_only = true prevents in handle_hub_request. Direct bus call is
+        // safe here because we never deliver; the RPC path's deliver_mentions
+        // is the only thing we're skipping.
+        let _ = self.team.post(&room, agent, body, false);
+        // Delivery suppression: requires_reply=false means the agora bus
+        // records the message but does not alert anyone. The record_only
+        // parameter is not forwarded to the bus itself (it has no such concept);
+        // it is purely a gate in handle_hub_request to prevent deliver_mentions.
+        // Since we bypass handle_hub_request here, `record_only` is honoured
+        // structurally: we never call deliver_mentions.
+        let _ = record_only; // documented above; suppress unused-variable warning
+    }
+}
+
 // Brute-force protection: track failed auth attempts per IP
 pub type AuthTracker = Arc<Mutex<HashMap<IpAddr, (u32, tokio::time::Instant)>>>;
 
@@ -198,6 +234,15 @@ pub async fn start_with_socket(
     {
         crate::projects::set_agent_sessions(notifications.clone());
         tokio::spawn(crate::projects::capture_loop());
+        // Inject the room poster so hook-sourced stop events can auto-post
+        // managed agents' final replies into the project chat room.
+        // Degrades silently to a no-op when team is None (server without the
+        // team bus, e.g. `npm run dev:server` without a team configured).
+        if let Some(ref team_arc) = team {
+            let poster: Arc<dyn crate::agent_notifications::RoomPoster> =
+                Arc::new(TeamRoomPoster { team: team_arc.clone() });
+            notifications.set_room_poster(poster);
+        }
     }
 
     // Load TLS config if cert+key provided

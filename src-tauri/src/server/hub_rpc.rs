@@ -20,7 +20,7 @@ pub(super) fn project_room(session: &str) -> String {
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>) -> Response {
+pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, notifications: Option<&crate::agent_notifications::AgentNotificationHub>) -> Response {
     use crate::projects::telemetry;
 
     let id = req.id;
@@ -43,20 +43,38 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>) -
                 Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
             };
             let from = p.get("from").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or("human");
+            // record_only = true means the message is stored but NEVER typed
+            // into any agent's pane. Required for hook-sourced auto-replies:
+            // if an automatic post addresses a peer, delivery would type into
+            // that peer's pane, triggering their own stop hook, which then
+            // auto-posts back — a ping-pong loop. The caller is responsible
+            // for setting this when the origin is a hook.
+            let record_only = p.get("record_only").and_then(|v| v.as_bool()).unwrap_or(false);
             if let Err(e) = bus.open_room(&room) {
                 return Response::err(id, ERR_INTERNAL, e);
             }
             let requires_reply = p
                 .get("requires_reply")
                 .and_then(|v| v.as_bool())
-                .unwrap_or_else(|| body.contains('@'));
+                .unwrap_or_else(|| !record_only && body.contains('@'));
             match bus.post(&room, from, body, requires_reply) {
                 Ok(msg) => {
                     // DELIVERY: an idle agent sits at its prompt and reads
                     // nothing — @mentions are typed into the mentioned agents'
                     // panes so the chat actually reaches them. (An agent that
                     // is mid-task sees the line queued in its input box.)
-                    deliver_mentions(session, from, body);
+                    // Hook-sourced posts skip delivery entirely to prevent
+                    // reply loops (see record_only comment above).
+                    if !record_only {
+                        deliver_mentions(session, from, body);
+                        // Mark that this agent sent an explicit message this
+                        // turn, so the stop hook won't auto-post a duplicate.
+                        if let Some(hub) = notifications {
+                            if let Some(w) = window_of_agent(session, from) {
+                                hub.mark_sent_this_turn(session, w);
+                            }
+                        }
+                    }
                     Response::ok(id, msg)
                 }
                 Err(e) => Response::err(id, ERR_INTERNAL, e),
@@ -98,6 +116,11 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>) -
                 if bus.open_room(&room).is_ok() {
                     let body = if summary.is_empty() { "✔ done".to_string() } else { format!("✔ done — {summary}") };
                     let _ = bus.post(&room, agent, &body, false);
+                }
+                // Mark this turn as having an explicit message so the stop
+                // hook doesn't auto-post a duplicate reply.
+                if let Some(hub) = notifications {
+                    hub.mark_sent_this_turn(session, window);
                 }
             } else {
                 let state = match require_str(p, "state") {
@@ -161,7 +184,7 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>) -
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
-pub(super) fn handle_hub_request(req: &Request, _team: Option<&dyn TeamBridge>) -> Response {
+pub(super) fn handle_hub_request(req: &Request, _team: Option<&dyn TeamBridge>, _notifications: Option<&crate::agent_notifications::AgentNotificationHub>) -> Response {
     Response::err(req.id, ERR_METHOD_NOT_FOUND, "hub not available on this platform".into())
 }
 
@@ -319,7 +342,7 @@ mod tests {
 
     #[test]
     fn hub_without_bus_is_method_not_found() {
-        let r = handle_hub_request(&req("hub_post", serde_json::json!({ "session": "s", "body": "hi" })), None);
+        let r = handle_hub_request(&req("hub_post", serde_json::json!({ "session": "s", "body": "hi" })), None, None);
         assert_eq!(r.error.as_ref().map(|e| e.code), Some(ERR_METHOD_NOT_FOUND));
     }
 
@@ -329,6 +352,7 @@ mod tests {
         let r = handle_hub_request(
             &req("hub_post", serde_json::json!({ "session": "blog", "from": "lead", "body": "@reviewer 看一下" })),
             Some(&b),
+            None,
         );
         assert!(r.error.is_none(), "{}", r.error.map(|e| e.message).unwrap_or_default());
         let posts = b.posts.lock().unwrap();
@@ -337,11 +361,30 @@ mod tests {
     }
 
     #[test]
+    fn hub_post_record_only_skips_delivery_but_stores_message() {
+        let b = Bridge::new();
+        let r = handle_hub_request(
+            &req("hub_post", serde_json::json!({
+                "session": "blog", "from": "lead",
+                "body": "@reviewer 自动结果", "record_only": true
+            })),
+            Some(&b),
+            None,
+        );
+        assert!(r.error.is_none(), "{}", r.error.map(|e| e.message).unwrap_or_default());
+        // The bus.post was called (message stored) even though delivery was skipped.
+        let posts = b.posts.lock().unwrap();
+        assert_eq!(posts.len(), 1, "record-only posts are stored in the room");
+        assert_eq!(posts[0].2, "@reviewer 自动结果");
+    }
+
+    #[test]
     fn hub_log_since_ts_filters_older_messages() {
         let b = Bridge::new();
         let r = handle_hub_request(
             &req("hub_log", serde_json::json!({ "session": "blog", "since_ts": 100 })),
             Some(&b),
+            None,
         );
         let msgs = r.result.unwrap();
         let msgs = msgs.get("messages").and_then(|m| m.as_array()).unwrap();
@@ -355,6 +398,7 @@ mod tests {
         let bad_state = handle_hub_request(
             &req("hub_status", serde_json::json!({ "session": "no-such-session-xyz", "agent": "a", "state": "napping" })),
             Some(&b),
+            None,
         );
         // The window lookup fails first for a nonexistent session — either
         // error is INVALID_PARAMS, which is the contract that matters.

@@ -9,8 +9,27 @@ use tokio::sync::broadcast;
 
 const MAX_INBOX_BYTES: u64 = 256 * 1024;
 const MAX_SUMMARY_CHARS: usize = 240;
+/// Chat-path budget for hook-sourced auto-replies. Separate from the 240-char
+/// notification summary: a final reply carries full content.
+const MAX_REPLY_CHARS: usize = 6 * 1024;
 const DEDUPE_SECS: u64 = 3;
 const OWNER_MARKER: &str = "tmux-mobile-agent-notify";
+
+// ── Room poster ──────────────────────────────────────────────────────────────
+
+/// Minimal posting interface injected into the hub so hook-sourced replies can
+/// land in the project room without naming the agora bus or the TeamBridge.
+///
+/// **INVARIANT**: implementations MUST set `record_only = true` on every call
+/// that originates from a hook. Hook-sourced text must never trigger delivery
+/// (typed into agent panes), or addressed replies create ping-pong loops.
+/// The flag is enforced at the hub_post call site, not here.
+pub trait RoomPoster: Send + Sync {
+    /// Post `body` into the project room for `session` on behalf of `agent`.
+    /// `record_only`: when true, the message is stored but NOT delivered
+    /// (typed) into any agent's pane, regardless of @-mentions in the body.
+    fn post_to_room(&self, session: &str, agent: &str, body: &str, record_only: bool);
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentNotification {
@@ -57,6 +76,14 @@ struct State {
     /// the capturer stamps with it (`src-tauri/src/projects`), because that is
     /// what has to survive the reboot which loses tmux in the first place.
     sessions: HashMap<String, String>,
+    /// window key → true when the agent issued a `tmm send` or `tmm done`
+    /// during the current turn. Reset at `userPromptSubmit` (turn start).
+    /// Used to suppress the automatic stop-hook post so a turn that already
+    /// reported itself does not produce a second identical message.
+    sent_this_turn: HashMap<String, bool>,
+    /// Injected by the server after the team bus is ready. `None` on mobile.
+    /// Box'd pointer stored here so it shares the Mutex with the rest of state.
+    poster: Option<Arc<dyn RoomPoster>>,
 }
 
 #[derive(Clone)]
@@ -83,9 +110,33 @@ impl AgentNotificationHub {
         let (tx, _) = broadcast::channel(64);
         Self {
             root,
-            state: Arc::new(Mutex::new(State { unread, sessions: HashMap::new() })),
+            state: Arc::new(Mutex::new(State {
+                unread,
+                sessions: HashMap::new(),
+                sent_this_turn: HashMap::new(),
+                poster: None,
+            })),
             tx,
         }
+    }
+
+    /// Inject the room poster. Called once by the server after the team bus is
+    /// ready. Desktop-only; mobile leaves this as `None`.
+    pub fn set_room_poster(&self, poster: Arc<dyn RoomPoster>) {
+        self.state.lock().unwrap().poster = Some(poster);
+    }
+
+    /// Called by `tmm send` / `tmm done` to record that this window's current
+    /// turn already produced an explicit message. The stop hook will skip the
+    /// automatic post for this turn.
+    pub fn mark_sent_this_turn(&self, session: &str, window: usize) {
+        self.state.lock().unwrap().sent_this_turn.insert(window_key(session, window), true);
+    }
+
+    /// Called by the `userPromptSubmit` hook to mark the start of a new turn.
+    /// Clears the "sent this turn" flag so the upcoming stop can auto-post.
+    pub fn reset_sent_this_turn(&self, session: &str, window: usize) {
+        self.state.lock().unwrap().sent_this_turn.remove(&window_key(session, window));
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<String> {
@@ -167,6 +218,14 @@ impl AgentNotificationHub {
             }
             return Ok(());
         }
+        // userPromptSubmit marks the start of a new turn: clear the
+        // "sent this turn" flag so the upcoming stop can auto-post.
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        if is_user_prompt_submit(&envelope) {
+            let (session, window, _) = tmux::resolve_pane_id(&envelope.pane_id)?;
+            self.reset_sent_this_turn(&session, window);
+            return Ok(());
+        }
         let normalized = normalize(&envelope)?;
         let (session, window, pane) = tmux::resolve_pane_id(&envelope.pane_id)?;
         let timestamp = unix_seconds();
@@ -174,6 +233,20 @@ impl AgentNotificationHub {
         // concern; status derivation wants every observed fact.
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         crate::projects::telemetry::record_notification(&session, window, &normalized.kind, timestamp);
+
+        // Stop hook auto-post: post the agent's final reply to the project
+        // room when all conditions are met:
+        //   1. Only managed windows (constraint 3): a .tmm/agents/<name> dir
+        //      must exist, so direct or adopted agents never auto-post.
+        //   2. Skip if the agent already sent an explicit tmm send/done this
+        //      turn (constraint 1 — same-turn dedup).
+        //   3. There must be a reply body worth posting.
+        //   4. The post is record-only (constraint 2): never typed into panes.
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        if normalized.kind == "completed" {
+            self.maybe_auto_post(&session, window, &normalized);
+        }
+
         let item = AgentNotification {
             id: format!("{}-{}-{}", timestamp, std::process::id(), pane),
             agent: normalized.agent,
@@ -188,6 +261,63 @@ impl AgentNotificationHub {
             agent_session_id: normalized.agent_session_id,
         };
         self.record(item)
+    }
+
+    /// Post the agent's final reply to the project room when the window is
+    /// managed, the agent hasn't already sent this turn, and there is a body.
+    ///
+    /// **INVARIANT**: always called with `record_only = true`. This function
+    /// must never pass `false`; delivery of hook-sourced text into agent panes
+    /// creates ping-pong reply loops.
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    fn maybe_auto_post(&self, session: &str, window: usize, normalized: &Normalized) {
+        // Nothing to post — skip.
+        let reply = normalized.full_reply.as_deref().unwrap_or_default();
+        if reply.is_empty() {
+            return;
+        }
+        // Constraint 3: managed-only gate. Look up the window name and check
+        // that a .tmm/agents/<name>/ directory was materialized by `spawn`.
+        let window_name = match tmux::list_panes(session).ok().and_then(|panes| {
+            panes.into_iter().find(|p| p.window == window).map(|p| p.window_name)
+        }) {
+            Some(n) => n,
+            None => return, // session or window vanished between hook and poll
+        };
+        let is_managed = crate::projects::project_for_session(session)
+            .ok()
+            .flatten()
+            .is_some_and(|p| {
+                std::path::Path::new(&p.path)
+                    .join(".tmm")
+                    .join("agents")
+                    .join(&window_name)
+                    .is_dir()
+            });
+        if !is_managed {
+            return;
+        }
+        // Constraint 1: same-turn dedup.
+        let key = window_key(session, window);
+        let already_sent = self
+            .state
+            .lock()
+            .unwrap()
+            .sent_this_turn
+            .get(&key)
+            .copied()
+            .unwrap_or(false);
+        if already_sent {
+            return;
+        }
+        // Constraint 4: truncate at the chat-path budget.
+        let body = truncate(reply, MAX_REPLY_CHARS);
+        // Constraint 2: record_only = true. The poster implementation enforces
+        // this at hub_post: no @-mention delivery, no pane typing.
+        let poster = self.state.lock().unwrap().poster.clone();
+        if let Some(p) = poster {
+            p.post_to_room(session, &window_name, &body, true);
+        }
     }
 
     fn record(&self, item: AgentNotification) -> Result<(), String> {
@@ -377,6 +507,10 @@ struct Normalized {
     kind: String,
     summary: String,
     agent_session_id: Option<String>,
+    /// The full reply text from a stop event, before any truncation. `None`
+    /// for non-stop events. Used by the auto-post path, which applies the
+    /// larger `MAX_REPLY_CHARS` budget instead of the notification summary cap.
+    full_reply: Option<String>,
 }
 
 fn normalize(envelope: &InboxEnvelope) -> Result<Normalized, String> {
@@ -415,7 +549,10 @@ fn normalize(envelope: &InboxEnvelope) -> Result<Normalized, String> {
         }
         _ => return Err("unsupported backend".into()),
     };
-    let summary = string_field(
+    // The raw reply text, shared between the notification summary (truncated
+    // to MAX_SUMMARY_CHARS) and the auto-post path (truncated to MAX_REPLY_CHARS
+    // at the call site).
+    let raw_reply = string_field(
         payload,
         &[
             "message",
@@ -423,15 +560,33 @@ fn normalize(envelope: &InboxEnvelope) -> Result<Normalized, String> {
             "assistant_response",
             "task_subject",
         ],
-    )
-    .map(|s| truncate(&s, MAX_SUMMARY_CHARS))
-    .unwrap_or_default();
+    );
+    let summary = raw_reply
+        .as_deref()
+        .map(|s| truncate(s, MAX_SUMMARY_CHARS))
+        .unwrap_or_default();
+    // Preserve the untruncated text for the auto-post path only when this is
+    // a stop/completion event — other events have no reply body worth posting.
+    let full_reply = if kind == "completed" { raw_reply } else { None };
     Ok(Normalized {
         agent: agent.into(),
         kind: kind.into(),
         summary,
         agent_session_id: string_field(payload, &["session_id"]),
+        full_reply,
     })
+}
+
+/// Returns true when the envelope carries a `userPromptSubmit` event (kiro),
+/// which marks the beginning of a new user turn. Used to reset the
+/// `sent_this_turn` flag so the next stop can auto-post.
+fn is_user_prompt_submit(envelope: &InboxEnvelope) -> bool {
+    envelope.backend == "kiro"
+        && envelope
+            .payload
+            .get("hook_event_name")
+            .and_then(Value::as_str)
+            .is_some_and(|e| e.eq_ignore_ascii_case("userpromptsubmit"))
 }
 
 fn string_field(map: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
@@ -621,12 +776,20 @@ fn install_kiro(path: &Path, helper: &str) -> Result<(), String> {
         path,
         &json!({
             "version": "v1",
-            "hooks": [{
-                "name": OWNER_MARKER,
-                "trigger": "Stop",
-                "action": { "type": "command", "command": format!("{helper} kiro # {OWNER_MARKER}") },
-                "enabled": true
-            }]
+            "hooks": [
+                {
+                    "name": OWNER_MARKER,
+                    "trigger": "Stop",
+                    "action": { "type": "command", "command": format!("{helper} kiro # {OWNER_MARKER}") },
+                    "enabled": true
+                },
+                {
+                    "name": format!("{OWNER_MARKER}-turn"),
+                    "trigger": "UserPromptSubmit",
+                    "action": { "type": "command", "command": format!("{helper} kiro # {OWNER_MARKER}") },
+                    "enabled": true
+                }
+            ]
         }),
     )
 }
@@ -690,6 +853,15 @@ fn install_kiro_default(path: &Path, helper: &str) -> Result<(), String> {
         .ok_or("kiro_default stop hooks must be an array")?;
     stop.retain(|value| !value.to_string().contains(OWNER_MARKER));
     stop.push(json!({ "command": format!("{helper} kiro # {OWNER_MARKER}") }));
+    // userPromptSubmit fires at the start of each user turn. We use it to
+    // reset the "sent this turn" flag so the next stop can auto-post.
+    let user_prompt = hooks
+        .entry("userPromptSubmit")
+        .or_insert_with(|| json!([]))
+        .as_array_mut()
+        .ok_or("kiro_default userPromptSubmit hooks must be an array")?;
+    user_prompt.retain(|value| !value.to_string().contains(OWNER_MARKER));
+    user_prompt.push(json!({ "command": format!("{helper} kiro # {OWNER_MARKER}") }));
     write_json(path, &root)
 }
 
@@ -699,8 +871,10 @@ fn remove_kiro_default_hook(path: &Path) -> Result<(), String> {
     }
     let mut root = read_json_object(path)?;
     if let Some(hooks) = root.get_mut("hooks").and_then(Value::as_object_mut) {
-        if let Some(stop) = hooks.get_mut("stop").and_then(Value::as_array_mut) {
-            stop.retain(|value| !value.to_string().contains(OWNER_MARKER));
+        for key in &["stop", "userPromptSubmit"] {
+            if let Some(arr) = hooks.get_mut(*key).and_then(Value::as_array_mut) {
+                arr.retain(|value| !value.to_string().contains(OWNER_MARKER));
+            }
         }
         hooks.retain(|_, value| value.as_array().is_none_or(|items| !items.is_empty()));
     }
