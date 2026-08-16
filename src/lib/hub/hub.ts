@@ -157,6 +157,20 @@ export function isDirectUrl(src: string): boolean {
   return /^(https?:|data:|blob:)/i.test(src);
 }
 
+/** Agent slots the project DECLARES that have no live window right now — a
+ * stopped agent. They belong in the roster (greyed, with a start action)
+ * because an agent you stopped has not left the project: its isolated home and
+ * its conversation id are still on disk, so starting it again resumes it. */
+export function stoppedAgents(
+  slots: readonly { window_name: string; kind?: string }[] | undefined,
+  live: readonly HubAgent[],
+): string[] {
+  const running = new Set(live.map((a) => a.name));
+  return (slots ?? [])
+    .filter((s) => String(s.kind ?? '').toLowerCase() === 'agent' && !running.has(s.window_name))
+    .map((s) => s.window_name);
+}
+
 export type FeedLevel = 'chat' | 'status' | 'tools';
 
 /** Lifecycle lines the server posts into the room (a spawn, a `tmm done`) are

@@ -775,6 +775,13 @@ export const hubActivity = (session: string, sinceTs = 0) =>
   call<{ events: HubActivityEvent[] }>('hub_activity', { session, since_ts: sinceTs });
 export const hubSpawn = (session: string, agent: string, brief = '', by = '') =>
   call('hub_spawn', { session, agent, brief, by });
+/** Kill one agent's window. The declaration survives, so it can come back. */
+export const hubAgentStop = (session: string, agent: string) =>
+  call<{ stopped: string }>('hub_agent_stop', { session, agent });
+/** Kill and bring back. `resumed` is false when the agent had to start a fresh
+ * conversation because the project declaration did not have it yet. */
+export const hubAgentRestart = (session: string, agent: string) =>
+  call<{ restarted: string; resumed: boolean }>('hub_agent_restart', { session, agent }, 60000);
 export interface RegAgent {
   name: string;
   backend: string;

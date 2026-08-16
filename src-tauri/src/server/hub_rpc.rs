@@ -152,6 +152,66 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
             Response::ok(id, serde_json::json!({ "events": events }))
         }
 
+        // Stop / restart ONE agent. The window is the agent's life: killing it
+        // ends the process and keeps the declaration, so `restart` is kill +
+        // `projects::up`, which recreates only what is missing and prefers the
+        // resume flags — the agent comes back to its own conversation rather
+        // than to a blank prompt. Managed-only: we stop what we started.
+        "hub_agent_stop" | "hub_agent_restart" => {
+            let agent = match require_str(p, "agent") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            if crate::projects::managed_home(session, agent).is_none() {
+                return Response::err(id, ERR_INVALID_PARAMS,
+                    format!("'{agent}' is not an agent this app started"));
+            }
+            let restart = req.method == "hub_agent_restart";
+            let live = window_of_agent(session, agent);
+            // Stop needs something to stop. Restart does not: the isolated home
+            // outlives the window, so `restart` doubles as "start it again"
+            // after a stop — which is what the button does when it reads Start.
+            match (live, restart) {
+                (None, false) => {
+                    return Response::err(id, ERR_INVALID_PARAMS,
+                        format!("no window named '{agent}' in session '{session}'"));
+                }
+                (Some(window), _) => {
+                    if let Err(e) = crate::tmux::kill_window(&format!("{session}:{window}")) {
+                        return Response::err(id, ERR_INTERNAL, e);
+                    }
+                }
+                (None, true) => {}
+            }
+            if !restart {
+                if bus.open_room(&room).is_ok() {
+                    let _ = bus.post(&room, agent, &format!("[tmm] stopped {agent}"), false);
+                }
+                return Response::ok(id, serde_json::json!({ "stopped": agent }));
+            }
+            // Recreate from the declaration. A window younger than the capture
+            // loop's 120 s rule may not be in it yet, so fall back to a fresh
+            // spawn — that starts a new conversation instead of resuming one,
+            // which is still better than an agent that does not come back.
+            let mut resumed = false;
+            if let Ok(Some(project)) = crate::projects::project_for_session(session) {
+                resumed = crate::projects::up(&project.id).is_ok()
+                    && window_of_agent(session, agent).is_some();
+            }
+            if !resumed {
+                let r = crate::projects::spawn::spawn(&crate::projects::spawn::SpawnRequest {
+                    session, agent, brief: "", by: "",
+                });
+                if let Err(e) = r {
+                    return Response::err(id, ERR_INTERNAL, format!("restart failed: {e}"));
+                }
+            }
+            if bus.open_room(&room).is_ok() {
+                let _ = bus.post(&room, agent, &format!("[tmm] restarted {agent}"), false);
+            }
+            Response::ok(id, serde_json::json!({ "restarted": agent, "resumed": resumed }))
+        }
+
         // Spawn a registry agent into this project (tmm spawn / the UI's
         // "+ agent"). can_hire-gated when an agent asks; capped per project.
         "hub_spawn" => {
@@ -394,6 +454,70 @@ mod tests {
         let posts = b.posts.lock().unwrap();
         assert_eq!(posts.len(), 1, "record-only posts are stored in the room");
         assert_eq!(posts[0].2, "@reviewer 自动结果");
+    }
+
+    /// Stop/restart act on a process, so the gate is the same one delivery and
+    /// auto-post use: only agents this app started. A name that has no isolated
+    /// home is refused BEFORE any window is looked up, let alone killed.
+    #[test]
+    fn stopping_something_we_did_not_start_is_refused() {
+        // The gate reads the project store; keep it off the user's real db.
+        crate::projects::tests::use_test_store();
+        let b = Bridge::new();
+        for method in ["hub_agent_stop", "hub_agent_restart"] {
+            let r = handle_hub_request(
+                &req(method, serde_json::json!({ "session": "no-such-session", "agent": "byhand" })),
+                Some(&b),
+                None,
+            );
+            let msg = r.error.map(|e| e.message).unwrap_or_default();
+            assert!(msg.contains("not an agent this app started"), "{method}: got {msg:?}");
+        }
+        assert!(b.posts.lock().unwrap().is_empty(), "nothing announced, nothing killed");
+    }
+
+    /// The kill path, against real tmux: a managed window disappears and the
+    /// room records it. `restart` is not exercised here — it goes through
+    /// `projects::up`, which launches a real agent CLI.
+    #[test]
+    fn stopping_a_managed_agent_kills_its_window_and_says_so() {
+        crate::projects::tests::use_test_store();
+        let session = format!("tmm-stop-{}", std::process::id());
+        let ws = std::env::temp_dir().join(format!("tmm-stop-ws-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(ws.join(".tmm/agents/dev")).unwrap();
+        // Start it IN the workspace: `adopt` derives the project path from the
+        // panes' cwd, so this is what makes managed_home resolve to <ws>/.tmm.
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session, "-n", "dev", "-c",
+                   &ws.to_string_lossy(), "sleep 60"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            return;
+        }
+        // A project must claim the session for managed_home to resolve.
+        let created_project = crate::projects::adopt(&session, Some("stop-test")).is_ok();
+
+        let b = Bridge::new();
+        let r = handle_hub_request(
+            &req("hub_agent_stop", serde_json::json!({ "session": session, "agent": "dev" })),
+            Some(&b),
+            None,
+        );
+        if !created_project {
+            eprintln!("could not adopt a project — skipping the positive half");
+        } else {
+            assert!(r.error.is_none(), "{:?}", r.error.map(|e| e.message));
+            let panes = crate::tmux::list_panes(&session).unwrap_or_default();
+            assert!(!panes.iter().any(|p| p.window_name == "dev"), "the window is gone");
+            let posts = b.posts.lock().unwrap();
+            assert_eq!(posts.len(), 1);
+            assert!(posts[0].2.contains("[tmm] stopped dev"), "the room records it: {:?}", posts[0].2);
+        }
+        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
+        let _ = std::fs::remove_dir_all(&ws);
     }
 
     #[test]

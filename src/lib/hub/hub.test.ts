@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeMessages, statuslineWindows, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, splitImages, isDirectUrl, fmtElapsed, unreadSenders } from './hub.ts';
+import { mergeMessages, statuslineWindows, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -201,6 +201,20 @@ test('unreadSenders marks who replied after the user last looked', () => {
   assert.deepEqual([...unreadSenders(feed, 300)], [], 'caught up');
   assert.deepEqual([...unreadSenders([{ ts: 400, from: 'human' }], 0)], [],
     'your own message is never unread');
+});
+
+test('stoppedAgents lists declared agents with no live window', () => {
+  const slots = [
+    { window_name: 'dev', kind: 'agent' },
+    { window_name: 'qa', kind: 'agent' },
+    { window_name: 'shell', kind: 'shell' },   // a shell is not an agent
+  ];
+  const live = [ag({ name: 'dev' })];
+  assert.deepEqual(stoppedAgents(slots, live), ['qa'], 'declared, not running');
+  assert.deepEqual(stoppedAgents(slots, [ag({ name: 'dev' }), ag({ name: 'qa' })]), []);
+  assert.deepEqual(stoppedAgents(undefined, live), [], 'a project with no declaration');
+  // Case is not the contract: SlotKind serializes lowercase, but be tolerant.
+  assert.deepEqual(stoppedAgents([{ window_name: 'x', kind: 'Agent' }], []), ['x']);
 });
 
 test('systemLine recognizes lifecycle lines and leaves prose alone', () => {

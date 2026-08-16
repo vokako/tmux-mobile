@@ -22,11 +22,11 @@
   import { t } from '../core/i18n.svelte.ts';
   import {
     projectList, projectUp, projectCreate, listSessionsWithPanes,
-    hubPost, hubLog, hubAgents, hubSpawn, hubActivity, registryList,
+    hubPost, hubLog, hubAgents, hubSpawn, hubAgentStop, hubAgentRestart, hubActivity, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, systemLine, pickLead, addressed, fmtElapsed, unreadSenders, splitImages } from './hub.ts';
+  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, systemLine, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents } from './hub.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
 
@@ -86,6 +86,8 @@
   const selectedRow = $derived(rows.find((r) => r.project.session === selected) ?? null);
   const liveSelected = $derived(!!selectedRow?.live);
   const managedAgents = $derived(agents.filter((a) => a.managed));
+  // Declared but not running — a stopped agent still belongs to the room.
+  const stopped = $derived(stoppedAgents(selectedRow?.slots, managedAgents));
   const working = $derived(managedAgents.filter((a) => a.state === 'working').length);
 
   async function reload() {
@@ -302,6 +304,29 @@
     pickerOpen = true;
   }
 
+  // Stopping or restarting an agent kills a process that may be mid-task, and
+  // on a phone the button is a thumb away from the chip you meant to tap — so
+  // it asks first, naming what it will do.
+  let pendingAct = $state(null);   // { kind: 'stop' | 'restart', name }
+  let acting = $state(false);
+  const askAction = (kind, name) => { pendingAct = { kind, name }; };
+
+  async function runAction() {
+    if (!pendingAct || acting) return;
+    const { kind, name } = pendingAct;
+    acting = true;
+    try {
+      if (kind === 'stop') await hubAgentStop(selected, name);
+      else await hubAgentRestart(selected, name);
+      await Promise.all([reload(), loadAgents(), loadFeed()]);
+    } catch (e) {
+      console.warn(`${kind} failed`, e);
+    } finally {
+      acting = false;
+      pendingAct = null;
+    }
+  }
+
   // Live pushes + polling while visible.
   const onPush = (m) => {
     if (!selected || m?.room !== room(selected)) return;
@@ -434,7 +459,7 @@
         </button>
       </div>
 
-      {#if managedAgents.length}
+      {#if managedAgents.length || stopped.length}
         <!-- The roster. Tapping an agent makes it the recipient (and this
              project's lead) — the phone gets chips, the desktop gets cards. -->
         <div class="cards" class:chips={compact}>
@@ -451,6 +476,21 @@
                   onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); openDrawer(a); } }}>
                   <Icon name="terminal" size={12} />
                 </span>
+                <!-- Life controls, on the agent you are talking to: an agent's
+                     window IS its life, and stopping keeps the declaration so it
+                     can come back to the same conversation. -->
+                {#if recipient === a.name}
+                  <span class="a-act" role="button" tabindex="-1" title={t('hubRestart')}
+                    onclick={(e) => { e.stopPropagation(); askAction('restart', a.name); }}
+                    onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); askAction('restart', a.name); } }}>
+                    <Icon name="refresh" size={12} />
+                  </span>
+                  <span class="a-act danger" role="button" tabindex="-1" title={t('hubStop')}
+                    onclick={(e) => { e.stopPropagation(); askAction('stop', a.name); }}
+                    onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); askAction('stop', a.name); } }}>
+                    <Icon name="stop" size={12} />
+                  </span>
+                {/if}
               </div>
               <div class="a-state">
                 <span class="st" class:live={a.state === 'running'} style:background={stateDotColor(a.state)}></span>
@@ -459,6 +499,22 @@
                 {#if a.since}<span class="s-age">{fmtElapsed(a.since, tick)}</span>{/if}
               </div>
               {#if a.detail && !compact}<div class="a-note">{a.detail}</div>{/if}
+            </button>
+          {/each}
+          <!-- Stopped agents: declared by the project, no window right now.
+               Starting one resumes its conversation, so it stays on the roster
+               instead of vanishing from the room it belongs to. -->
+          {#each stopped as name (name)}
+            <button class="acard off" onclick={() => askAction('restart', name)} title={t('hubStartAgain')}>
+              <div class="a-top">
+                <span class="ava dim">{name.slice(0, 1).toUpperCase()}</span>
+                {name}
+              </div>
+              <div class="a-state">
+                <span class="st" style:background={stateDotColor('idle')}></span>
+                <span class="s-word">{t('hubStopped')}</span>
+                <Icon name="refresh" size={11} />
+              </div>
             </button>
           {/each}
           <!-- Ad hoc: add an agent to a conversation already in progress. -->
@@ -664,6 +720,21 @@
     {/if}
   </div>
 
+  {#if pendingAct}
+    <!-- ── Stop / restart one agent ── -->
+    <div class="dlg-backdrop" onclick={() => pendingAct = null} role="presentation"></div>
+    <div class="dlg" class:sheet={compact}>
+      <h2>{(pendingAct.kind === 'stop' ? t('hubStopTitle') : t('hubRestartTitle')).replace('{name}', pendingAct.name)}</h2>
+      <p class="dlg-note">{pendingAct.kind === 'stop' ? t('hubStopNote') : t('hubRestartNote')}</p>
+      <div class="dlg-actions">
+        <button class="chip-btn" onclick={() => pendingAct = null}>{t('cancel')}</button>
+        <button class="chip-btn primary" class:danger={pendingAct.kind === 'stop'} disabled={acting} onclick={runAction}>
+          {acting ? '…' : pendingAct.kind === 'stop' ? t('hubStop') : t('hubRestart')}
+        </button>
+      </div>
+    </div>
+  {/if}
+
   {#if pickerOpen}
     <!-- ── Start a team: several agents at once ── -->
     <div class="dlg-backdrop" onclick={() => pickerOpen = false} role="presentation"></div>
@@ -760,6 +831,10 @@
   .acard:hover { border-color: var(--input-border); }
   .acard.sel { border-color: var(--accent); background: var(--accent-bg); }
   .acard.add { width: auto; display: flex; align-items: center; gap: 6px; color: var(--text3); font-size: 12px; }
+  /* A stopped agent: present, not running. */
+  .acard.off { opacity: 0.6; }
+  .acard.off:hover { opacity: 1; border-color: var(--accent); }
+  .ava.dim { background: var(--surface2) !important; color: var(--text3); }
   .acard.add:hover { color: var(--accent); }
   .lead-tag { font-size: 8.5px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 3px; }
   /* Phone: the roster is a scrollable chip row, not a wall of cards. */
@@ -771,6 +846,12 @@
   .a-top { display: flex; align-items: center; gap: 6px; font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 12.5px; color: var(--text); }
   .a-peek { margin-left: auto; display: grid; place-items: center; width: 22px; height: 20px; border-radius: 6px; color: var(--text3); }
   .a-peek:hover { color: var(--accent); background: var(--surface2); }
+  /* Life controls for the agent you are addressing. */
+  .a-act { display: grid; place-items: center; width: 22px; height: 20px; border-radius: 6px; color: var(--text3); flex: none; }
+  .a-act:hover { color: var(--accent); background: var(--surface2); }
+  .a-act.danger:hover { color: var(--status-danger); }
+  .dlg-note { margin: 0; font-size: 12.5px; color: var(--text2); line-height: 1.55; }
+  .chip-btn.danger { color: var(--status-danger); border-color: var(--status-danger); }
   .a-state { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--text2); margin-top: 5px; display: flex; align-items: center; gap: 5px; }
   .s-word { text-transform: lowercase; }
   .s-age { color: var(--text3); font-variant-numeric: tabular-nums; }

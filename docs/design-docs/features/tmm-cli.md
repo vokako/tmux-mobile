@@ -345,6 +345,26 @@ an empty recipient posts to the room. An empty room offers a preset start
 instead of a composer: tap one agent to begin, or pick several as a team — each
 is the same `hub_spawn`, and the lead of the new roster follows the same rule.
 
+## Stopping and starting one agent
+
+`hub_agent_stop` / `hub_agent_restart` (managed-only, same `managed_home` gate)
+act on the tmux WINDOW, because a window is the agent's life. Stop kills it and
+keeps the declaration; the isolated home and the conversation id stay on disk, so
+the agent has not left the project — the roster shows it greyed with a start
+action (`stoppedAgents`, computed from the slots `project_list` already returns).
+
+Restart is kill + `projects::up`, which is deliberate reuse: `up` matches windows
+BY NAME, creates only what is missing, and prefers `--resume-id` / `--resume` /
+`codex resume <id>`, so the agent comes back to its own conversation instead of a
+blank prompt. A window younger than the capture loop's 120 s rule may not be in
+the declaration yet, so there is a fallback to a fresh `spawn` — a new
+conversation, but better than an agent that does not come back. The reply carries
+`resumed` so the caller can tell which happened.
+
+Restart also works when nothing is running, which is what makes "stop, then
+start again" one button rather than two code paths. Both post a `[tmm] stopped
+<name>` / `[tmm] restarted <name>` line, because the room is the record.
+
 ## Spawn: the starter pistol
 
 An agent CLI boots into an interactive prompt and does nothing until spoken

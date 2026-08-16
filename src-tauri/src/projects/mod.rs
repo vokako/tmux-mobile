@@ -711,7 +711,12 @@ pub async fn capture_loop() {
 }
 
 #[cfg(test)]
-mod tests {
+// pub(crate): `use_test_store` must be reachable from tests in OTHER module
+// trees (server/hub_rpc). STORE is a OnceLock — whichever test opens it first
+// decides the path for the whole process, so a test that reaches the store
+// without pointing it at a throwaway db can send every later test's writes into
+// the user's real state.db.
+pub(crate) mod tests {
     use super::*;
 
     /// Point the process-wide store at a throwaway database, wiped once per
