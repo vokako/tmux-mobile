@@ -8,6 +8,10 @@
 temp/
 # Symlink to the Android gradle build cache (created by the android build)
 /build
+# Convenience symlink to the built APK. Relative, so it stays valid across
+# gradle-cache slug changes — it rides on app/build, which the android
+# postflight re-points at this checkout (scripts/preflight.mjs).
+/tmux-mobile.apk
 
 # Local scratch / not-in-repo assets
 /deploy
