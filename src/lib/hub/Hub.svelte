@@ -304,26 +304,42 @@
     pickerOpen = true;
   }
 
-  // Stopping or restarting an agent kills a process that may be mid-task, and
-  // on a phone the button is a thumb away from the chip you meant to tap — so
-  // it asks first, naming what it will do.
-  let pendingAct = $state(null);   // { kind: 'stop' | 'restart', name }
+  // Stopping an agent kills a process that may be mid-task, and on a phone the
+  // button is a thumb away from the chip you meant to tap — so it asks first.
+  // Starting one that is already stopped destroys nothing, so it just happens.
+  let pendingAct = $state(null);   // { kind: 'stop', name }
   let acting = $state(false);
   const askAction = (kind, name) => { pendingAct = { kind, name }; };
 
   async function runAction() {
     if (!pendingAct || acting) return;
-    const { kind, name } = pendingAct;
+    const { name } = pendingAct;
     acting = true;
     try {
-      if (kind === 'stop') await hubAgentStop(selected, name);
-      else await hubAgentRestart(selected, name);
+      await hubAgentStop(selected, name);
       await Promise.all([reload(), loadAgents(), loadFeed()]);
     } catch (e) {
-      console.warn(`${kind} failed`, e);
+      console.warn('stop failed', e);
     } finally {
       acting = false;
       pendingAct = null;
+    }
+  }
+
+  /** Bring a stopped agent back. Same RPC as a restart — it tolerates there
+   * being no window — so "start again" and "restart" are one code path, and it
+   * resumes the agent's own conversation rather than opening a blank prompt. */
+  async function startAgent(name) {
+    if (!selected || acting) return;
+    acting = true;
+    try {
+      await hubAgentRestart(selected, name);
+      await Promise.all([reload(), loadAgents(), loadFeed()]);
+      setRecipient(name);
+    } catch (e) {
+      console.warn('start failed', e);
+    } finally {
+      acting = false;
     }
   }
 
@@ -476,15 +492,12 @@
                   onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); openDrawer(a); } }}>
                   <Icon name="terminal" size={12} />
                 </span>
-                <!-- Life controls, on the agent you are talking to: an agent's
-                     window IS its life, and stopping keeps the declaration so it
-                     can come back to the same conversation. -->
+                <!-- One life control on a running agent: stop. Stopping keeps
+                     the declaration, so starting it again is the other half —
+                     it lives on the stopped chip, not as a second button here
+                     (owner call: a restart button on a running agent is a
+                     shortcut for two steps nobody asked to combine). -->
                 {#if recipient === a.name}
-                  <span class="a-act" role="button" tabindex="-1" title={t('hubRestart')}
-                    onclick={(e) => { e.stopPropagation(); askAction('restart', a.name); }}
-                    onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); askAction('restart', a.name); } }}>
-                    <Icon name="refresh" size={12} />
-                  </span>
                   <span class="a-act danger" role="button" tabindex="-1" title={t('hubStop')}
                     onclick={(e) => { e.stopPropagation(); askAction('stop', a.name); }}
                     onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); askAction('stop', a.name); } }}>
@@ -505,7 +518,7 @@
                Starting one resumes its conversation, so it stays on the roster
                instead of vanishing from the room it belongs to. -->
           {#each stopped as name (name)}
-            <button class="acard off" onclick={() => askAction('restart', name)} title={t('hubStartAgain')}>
+            <button class="acard off" disabled={acting} onclick={() => startAgent(name)} title={t('hubStartAgain')}>
               <div class="a-top">
                 <span class="ava dim">{name.slice(0, 1).toUpperCase()}</span>
                 {name}
@@ -723,15 +736,15 @@
   </div>
 
   {#if pendingAct}
-    <!-- ── Stop / restart one agent ── -->
+    <!-- ── Stop one agent ── -->
     <div class="dlg-backdrop" onclick={() => pendingAct = null} role="presentation"></div>
     <div class="dlg" class:sheet={compact}>
-      <h2>{(pendingAct.kind === 'stop' ? t('hubStopTitle') : t('hubRestartTitle')).replace('{name}', pendingAct.name)}</h2>
-      <p class="dlg-note">{pendingAct.kind === 'stop' ? t('hubStopNote') : t('hubRestartNote')}</p>
+      <h2>{t('hubStopTitle').replace('{name}', pendingAct.name)}</h2>
+      <p class="dlg-note">{t('hubStopNote')}</p>
       <div class="dlg-actions">
         <button class="chip-btn" onclick={() => pendingAct = null}>{t('cancel')}</button>
-        <button class="chip-btn primary" class:danger={pendingAct.kind === 'stop'} disabled={acting} onclick={runAction}>
-          {acting ? '…' : pendingAct.kind === 'stop' ? t('hubStop') : t('hubRestart')}
+        <button class="chip-btn primary danger" disabled={acting} onclick={runAction}>
+          {acting ? '…' : t('hubStop')}
         </button>
       </div>
     </div>

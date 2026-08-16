@@ -391,9 +391,14 @@ the declaration yet, so there is a fallback to a fresh `spawn` — a new
 conversation, but better than an agent that does not come back. The reply carries
 `resumed` so the caller can tell which happened.
 
-Restart also works when nothing is running, which is what makes "stop, then
-start again" one button rather than two code paths. Both post a `[tmm] stopped
-<name>` / `[tmm] restarted <name>` line, because the room is the record.
+Restart also works when nothing is running, and that is the only way the UI uses
+it: a running agent gets ONE control (stop), and a stopped chip gets "start
+again" (owner call — a restart button on a running agent just combines two steps
+nobody asked to combine). Stopping asks first, because the process may be
+mid-task and on a phone the button is a thumb away from the chip you meant to
+tap; starting something that is not running destroys nothing, so it just
+happens. Both post a `[tmm] stopped <name>` / `[tmm] restarted <name>` line,
+because the room is the record.
 
 ## Spawn: the starter pistol
 
