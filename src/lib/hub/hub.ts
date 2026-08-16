@@ -329,7 +329,13 @@ export function feedBlocks(
     if (e.kind === 'notif' && e.text === 'completed') continue;
     stream.push({ type: 'note', ts: e.ts, window: e.window, event: e });
   }
-  stream.sort((a, b) => a.ts - b.ts);
+  // Chronological, and when two things share a timestamp the OBSERVATION comes
+  // first: a reply is what ends a turn, so the tool calls of that turn happened
+  // before it. Ties are not hypothetical — the server stamps a hook event when
+  // it consumes the file, so a turn's last tool call and its auto-posted reply
+  // can land in the same millisecond.
+  const rank = (i: FeedBlock | ToolItem) => (i.type === 'msg' ? 1 : 0);
+  stream.sort((a, b) => a.ts - b.ts || rank(a) - rank(b));
 
   // Rule 3: fold consecutive same-window tool calls.
   const out: FeedBlock[] = [];

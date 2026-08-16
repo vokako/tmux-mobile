@@ -179,15 +179,7 @@ impl AgentNotificationHub {
     }
 
     fn consume_inbox(&self) {
-        let inbox = self.root.join("inbox");
-        let Ok(entries) = std::fs::read_dir(&inbox) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) != Some("json") {
-                continue;
-            }
+        for path in inbox_files(&self.root.join("inbox")) {
             if let Err(error) = self.consume_file(&path) {
                 eprintln!(
                     "⚠️  agent notification ignored ({}): {}",
@@ -470,6 +462,31 @@ impl crate::projects::capture::AgentSessions for AgentNotificationHub {
     fn agent_session_for(&self, session: &str, window: usize) -> Option<String> {
         AgentNotificationHub::agent_session_for(self, session, window)
     }
+}
+
+/// Inbox files in the order the hooks WROTE them.
+///
+/// `read_dir` yields filesystem order, which is arbitrary. That mattered: every
+/// event is timestamped when it is CONSUMED, so consuming a turn's `stop` before
+/// its tool calls stamped the agent's reply earlier than the work that produced
+/// it, and the chat rendered the tool calls after the answer (owner report,
+/// 2026-08-16). The helper names files `<epoch_secs>-<pid>.json`, so the leading
+/// number is the ordering key, with the whole name as the tie-break.
+fn inbox_files(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("json"))
+        .collect();
+    files.sort_by_key(|p| {
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+        let secs = name.split('-').next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+        (secs, name)
+    });
+    files
 }
 
 /// PreToolUse/PostToolUse across backends → `(tool name, detail)`
@@ -905,6 +922,30 @@ fn json_file_contains(path: &Path, needle: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Consume order IS render order, because an event is stamped when it is
+    /// consumed. Filesystem order is arbitrary, so the listing sorts by the
+    /// epoch prefix the helper writes.
+    #[test]
+    fn inbox_is_consumed_in_the_order_the_hooks_wrote_it() {
+        let dir = std::env::temp_dir().join(format!("tmm-inbox-order-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Written out of order on purpose, including a second-boundary pair.
+        for name in ["1755300010-42.json", "1755300002-7.json", "1755300002-3.json", "notes.txt"] {
+            std::fs::write(dir.join(name), "{}").unwrap();
+        }
+        let got: Vec<String> = inbox_files(&dir)
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(
+            got,
+            vec!["1755300002-3.json", "1755300002-7.json", "1755300010-42.json"],
+            "oldest first, non-json ignored"
+        );
+        assert!(inbox_files(&dir.join("missing")).is_empty(), "no inbox yet is not an error");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn normalizes_backend_events() {

@@ -420,6 +420,18 @@ nothing touches the bus db and the ring dies with the server.
 Five event kinds: `tool`, `status`, `notif`, `prompt` (a prompt the agent
 accepted, `via: app | local`) and `warn` (a line that was never echoed back).
 
+Ordering is the whole point of a transcript, and it took three things to be
+right. An event is stamped when the inbox file is CONSUMED (250 ms poll, so
+close enough to when the hook fired), which makes the CONSUME order the render
+order — so the listing sorts the inbox by the epoch prefix in each filename
+instead of trusting `read_dir`, whose order is arbitrary. Timestamps are real
+milliseconds, not `secs * 1000`, or every event in the same second would tie
+while chat messages carry true millis. And the client breaks a genuine tie by
+putting the observation first: a reply is what ENDS a turn, so the tool calls
+that share its millisecond happened before it. Get any of the three wrong and a
+turn's tool calls render after the answer they produced (owner report,
+2026-08-16).
+
 `prompt` is the input half of the transcript and the reason the hook is worth
 installing twice over: text typed at the agent's own keyboard exists in NO
 other channel — the room only ever held the output side.

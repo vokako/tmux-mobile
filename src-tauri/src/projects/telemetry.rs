@@ -83,6 +83,15 @@ fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+/// Event timestamps are MILLISECONDS, and they have to be real ones. They were
+/// `now() * 1000`, so every event inside the same second carried an identical
+/// timestamp while chat messages carried true millis — the client's sort then
+/// had nothing to order them by and a turn's tool calls could land after the
+/// reply they produced.
+fn now_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
 /// The activity FEED: recent observed events per session, newest last. This
 /// is telemetry made visible in the chat timeline (owner ask: show tool
 /// calls / status changes between the final replies) — an in-memory ring,
@@ -124,7 +133,7 @@ fn push_event_via(session: &str, window: usize, kind: &str, text: String, via: S
 fn push_full(session: &str, window: usize, kind: &str, text: String, tool: String, via: String) {
     let mut map = events().lock().unwrap();
     let q = map.entry(session.to_string()).or_default();
-    q.push_back(ActivityEvent { ts: now() * 1000, window, kind: kind.into(), text, tool, via });
+    q.push_back(ActivityEvent { ts: now_ms(), window, kind: kind.into(), text, tool, via });
     while q.len() > EVENTS_CAP {
         q.pop_front();
     }

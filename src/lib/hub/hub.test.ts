@@ -240,6 +240,29 @@ test('stoppedAgents lists declared agents with no live window', () => {
   assert.deepEqual(stoppedAgents([{ window_name: 'x', kind: 'Agent' }], []), ['x']);
 });
 
+test('a tool call that ties with a reply is ordered before it', () => {
+  // The server stamps a hook event when it CONSUMES the file, so a turn's last
+  // tool call and its auto-posted reply can share a millisecond. A reply is what
+  // ends a turn, so the work sorts first — the symptom of getting this wrong is
+  // tool calls rendered after the answer they produced.
+  const feed = [{ ts: 1000, from: 'dev', body: 'done, see above' }];
+  const activity = [
+    ev({ ts: 1000, kind: 'tool', tool: 'fs_write', text: 'a.rs' }),
+    ev({ ts: 900, kind: 'tool', tool: 'fs_read', text: 'a.rs' }),
+  ];
+  const blocks = feedBlocks(feed, activity, 'tools');
+  assert.deepEqual(blocks.map((b) => b.type), ['steps', 'msg'], 'work, then the reply');
+  const steps = blocks[0];
+  assert.deepEqual(
+    steps?.type === 'steps' ? steps.events.map((e) => e.text) : [],
+    ['a.rs', 'a.rs'],
+    'both calls stayed in one group, oldest first',
+  );
+  // A message that genuinely precedes a tool call still comes first.
+  const after = feedBlocks([{ ts: 500, from: 'human', body: 'go' }], activity, 'tools');
+  assert.deepEqual(after.map((b) => b.type), ['msg', 'steps']);
+});
+
 test('systemLine recognizes lifecycle lines and leaves prose alone', () => {
   assert.equal(systemLine('[tmm] spawned dev — fix the bug'), 'spawned dev — fix the bug');
   assert.equal(systemLine('[tmm] done'), 'done');
