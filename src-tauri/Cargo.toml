@@ -29,6 +29,23 @@ path = "src/bin/server.rs"
 name = "tmm"
 path = "src/bin/tmm.rs"
 
+[features]
+default = ["gui"]
+# `gui` carries the Tauri shell: the window, the webview, and the three plugins
+# the webview calls. ON by default, so `tauri dev`, `tauri build`, `build:mac`
+# and `build:android` behave exactly as before.
+#
+# Off, the crate builds only what the WebSocket server and the `tmm` CLI need,
+# with no webview in the dependency graph at all (`npm run build:server`). That
+# is the supported build on any host without a WebKit webview — a Linux box with
+# no WebKitGTK development package, a CI runner, a container — because on Linux
+# `tauri` reaches gtk3 and webkit2gtk-4.1 through wry, so a `--bin server` build
+# that needs none of it would otherwise fail in `glib-sys`'s build script.
+#
+# `tauri-build` stays a plain build-dependency: it is pure Rust, and build.rs
+# needs it whenever `gui` is on.
+gui = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-fs", "dep:tauri-plugin-opener"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -47,14 +64,14 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yml = "0.0.12"
 uuid = { version = "1", features = ["v4"] }
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = [], optional = true }
 toml = "1.0.3"
 base64 = "0.22"
 dirs = "5"
 gethostname = "0.4"
-tauri-plugin-dialog = "2"
-tauri-plugin-fs = "2"
-tauri-plugin-opener = "2"
+tauri-plugin-dialog = { version = "2", optional = true }
+tauri-plugin-fs = { version = "2", optional = true }
+tauri-plugin-opener = { version = "2", optional = true }
 urlencoding = "2"
 hex = "0.4"
 flate2 = "1"

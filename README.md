@@ -38,7 +38,7 @@ npm install
 npm run tauri:dev
 
 # Option 2: Server + browser
-cd src-tauri && cargo run --bin server   # starts WS server on :9899
+npm run dev:server                        # starts WS server on :9899
 npm run dev                               # starts web UI on :5173
 ```
 
@@ -128,6 +128,9 @@ them work from your phone. Desktop-server only (the agent bus runs in-process).
 | `npm run build` | Production web build |
 | `npm test` | Frontend tests (node --test, no tmux needed) |
 | `npm run check` | Type-check (.ts / .svelte via svelte-check) |
+| `npm run test:rust` | Rust tests, sequential (needs tmux running) |
+| `npm run dev:server` | Standalone WS server — no webview needed |
+| `npm run build:server` | Build `server` + `tmm` (release) — no webview needed |
 | `npm run build:mac` | macOS desktop app (.app + .dmg) |
 | `npm run build:android` | Android APK (aarch64) |
 | `npm run build:all` | Web + macOS + Android |
@@ -179,6 +182,10 @@ JSON-RPC over WebSocket. Full method reference + auth flow:
 
 - macOS or Linux with tmux installed
 - Rust toolchain + Node.js
+- The desktop app needs a WebKit webview: macOS has one, Linux needs the
+  WebKitGTK development package (`webkit2gtk-4.1`). Without it, build the
+  server-only path — `npm run build:server` gives you `server` and `tmm`, which
+  is everything the browser UI and the phone talk to.
 - Recommended: `set-option -g history-limit 50000` in tmux config
 
 ## Tailscale Integration

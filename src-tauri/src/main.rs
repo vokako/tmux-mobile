@@ -1,7 +1,15 @@
-use tmux_mobile::run;
-
+#[cfg(feature = "gui")]
 fn main() {
-    run();
+    tmux_mobile::run();
+}
+
+// A headless build (`gui` off, see src-tauri/Cargo.toml) has no Tauri shell to
+// start. This bin still has to compile so `--bins` works there; the entry point
+// in that build is `server`.
+#[cfg(not(feature = "gui"))]
+fn main() {
+    eprintln!("built without the `gui` feature — run the `server` binary instead");
+    std::process::exit(1);
 }
 
 #[cfg(test)]

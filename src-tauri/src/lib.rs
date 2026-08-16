@@ -19,20 +19,27 @@ pub mod team;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod projects;
 
-#[cfg(desktop)]
+#[cfg(all(desktop, feature = "gui"))]
 use config::Config;
 
+// Everything from here to the end of `run()` is the Tauri shell: the IPC
+// commands the webview calls and the app entry point. Gated on the `gui`
+// feature so a headless build (`npm run build:server`) drops the webview
+// dependency chain entirely — see src-tauri/Cargo.toml.
+#[cfg(feature = "gui")]
 #[derive(serde::Serialize)]
 struct DownloadEntry {
     name: String,
     modified: u64,
 }
 
+#[cfg(feature = "gui")]
 #[tauri::command]
 fn get_local_config() -> serde_json::Value {
     config::get_config_json()
 }
 
+#[cfg(feature = "gui")]
 fn sanitize_filename(name: &str) -> Result<String, String> {
     // Extract just the filename, stripping any directory components
     let fname = std::path::Path::new(name)
@@ -45,6 +52,7 @@ fn sanitize_filename(name: &str) -> Result<String, String> {
     Ok(fname.to_string())
 }
 
+#[cfg(feature = "gui")]
 #[tauri::command]
 fn save_to_downloads(name: String, data: Vec<u8>) -> Result<String, String> {
     // Used to take base64 String — the round trip
@@ -60,6 +68,7 @@ fn save_to_downloads(name: String, data: Vec<u8>) -> Result<String, String> {
     Ok(path.to_string_lossy().to_string())
 }
 
+#[cfg(feature = "gui")]
 #[tauri::command]
 fn list_downloads() -> Result<Vec<DownloadEntry>, String> {
     let dir = std::path::PathBuf::from("/storage/emulated/0/Download/TmuxMobile");
@@ -92,6 +101,7 @@ fn list_downloads() -> Result<Vec<DownloadEntry>, String> {
     Ok(files)
 }
 
+#[cfg(feature = "gui")]
 #[tauri::command]
 fn delete_download(name: String) -> Result<(), String> {
     let safe_name = sanitize_filename(&name)?;
@@ -99,12 +109,14 @@ fn delete_download(name: String) -> Result<(), String> {
     std::fs::remove_file(&path).map_err(|e| format!("delete: {}", e))
 }
 
+#[cfg(feature = "gui")]
 #[tauri::command]
 fn get_download_path(name: String) -> Result<String, String> {
     let safe_name = sanitize_filename(&name)?;
     Ok(format!("/storage/emulated/0/Download/TmuxMobile/{}", safe_name))
 }
 
+#[cfg(feature = "gui")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(desktop)]
