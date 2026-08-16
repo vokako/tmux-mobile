@@ -45,14 +45,19 @@ const MAX_PROMPT_CHARS: usize = 1024;
 struct Rec {
     /// Explicit declaration via `tmm status <state> [note]`: (state, note, ts).
     explicit: Option<(String, String, u64)>,
-    /// `tmm done [summary]`: (summary, ts).
+    /// `tmm done [summary]`: (summary, ts). Also ENDS the turn.
     done: Option<(String, u64)>,
-    /// Last hook notification: (kind, ts). Kinds are the normalized ones from
-    /// agent_notifications (completed / failed / permission_required /
-    /// input_required).
-    notif: Option<(String, u64)>,
-    /// Last hook tool event (pre/postToolUse from an isolated-home agent):
-    /// (activity line, ts).
+    /// Turn START: the `userPromptSubmit` hook. The agent accepted a prompt, so
+    /// a turn is open from here until an end arrives.
+    prompt: Option<u64>,
+    /// Turn END: ("completed" | "failed", ts) from the stop / StopFailure hook.
+    /// Separate from `ask` because they are different questions — "is a turn
+    /// running" vs "is it blocked on me" — and one Option cannot answer both
+    /// once a permission prompt overwrites a stop.
+    end: Option<(String, u64)>,
+    /// The agent is blocked on the human: permission_required | input_required.
+    ask: Option<(String, u64)>,
+    /// Last hook tool event: (activity line, ts). Work observed inside a turn.
     tool: Option<(String, u64)>,
     /// A line this app typed into the pane that has not been echoed back by a
     /// `userPromptSubmit` hook yet: (line, ts). Cleared by the echo (delivery
@@ -62,12 +67,15 @@ struct Rec {
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AgentStatus {
-    /// Derived state: working | waiting | idle | failed.
+    /// Derived state, one of exactly four: `running` (a turn is open — the
+    /// agent accepted a prompt and has not stopped), `waiting` (blocked on the
+    /// human), `idle` (no turn open) or `failed`.
     pub state: String,
-    /// Human line explaining the state (explicit note, notification kind, or
-    /// the last observed tool activity).
+    /// Human line explaining the state (explicit note, what it asked for, the
+    /// last observed tool call, or a `tmm done` summary).
     pub detail: String,
-    /// Timestamp of the fact the state was derived from.
+    /// When the state began — the turn's start for `running`, so a client can
+    /// render "running 2m14s" without keeping its own clock.
     pub since: u64,
 }
 
@@ -89,6 +97,10 @@ pub struct ActivityEvent {
     /// tool | status | notif | prompt | warn
     pub kind: String,
     pub text: String,
+    /// `tool` events only: the tool's NAME, kept apart from its argument so the
+    /// client can render the scannable half differently. `text` is the argument.
+    #[serde(skip_serializing_if = "str::is_empty")]
+    pub tool: String,
     /// Provenance, `prompt` events only: `app` when the text is the line this
     /// app typed into the pane (so the event doubles as the delivery receipt),
     /// `local` when it was typed at the keyboard. Empty for every other kind.
@@ -102,13 +114,17 @@ fn events() -> &'static Mutex<HashMap<String, std::collections::VecDeque<Activit
 }
 
 fn push_event(session: &str, window: usize, kind: &str, text: String) {
-    push_event_via(session, window, kind, text, String::new());
+    push_full(session, window, kind, text, String::new(), String::new());
 }
 
 fn push_event_via(session: &str, window: usize, kind: &str, text: String, via: String) {
+    push_full(session, window, kind, text, String::new(), via);
+}
+
+fn push_full(session: &str, window: usize, kind: &str, text: String, tool: String, via: String) {
     let mut map = events().lock().unwrap();
     let q = map.entry(session.to_string()).or_default();
-    q.push_back(ActivityEvent { ts: now() * 1000, window, kind: kind.into(), text, via });
+    q.push_back(ActivityEvent { ts: now() * 1000, window, kind: kind.into(), text, tool, via });
     while q.len() > EVENTS_CAP {
         q.pop_front();
     }
@@ -142,7 +158,7 @@ pub fn record_status(session: &str, window: usize, state: &str, note: &str) {
     with_rec(session, window, |r| r.explicit = Some((state, note, ts)));
 }
 
-/// `tmm done [summary]` — completion declared by the agent.
+/// `tmm done [summary]` — completion declared by the agent. Ends the turn.
 pub fn record_done(session: &str, window: usize, summary: &str) {
     let (summary, ts) = (summary.to_string(), now());
     with_rec(session, window, |r| {
@@ -151,18 +167,29 @@ pub fn record_done(session: &str, window: usize, summary: &str) {
     });
 }
 
-/// A hook notification consumed by the AgentNotificationHub (it stopped, it
-/// wants input…). Called from the hub's inbox consumer; must stay cheap.
+/// A hook notification consumed by the AgentNotificationHub. Two different
+/// facts arrive here and they are stored apart: a stop ENDS the turn, a
+/// permission/input prompt means the agent is blocked on the human while the
+/// turn stays open.
 pub fn record_notification(session: &str, window: usize, kind: &str, ts: u64) {
     push_event(session, window, "notif", kind.to_string());
     let kind = kind.to_string();
-    with_rec(session, window, |r| r.notif = Some((kind, ts)));
+    with_rec(session, window, |r| match kind.as_str() {
+        "permission_required" | "input_required" => r.ask = Some((kind, ts)),
+        _ => {
+            r.end = Some((kind, ts));
+            r.ask = None; // a finished turn cannot still be asking
+        }
+    });
 }
 
-/// A hook tool event (isolated-home agents only, Phase B+): "Edit foo.rs".
-pub fn record_tool(session: &str, window: usize, line: &str) {
-    push_event(session, window, "tool", line.to_string());
-    let (line, ts) = (line.to_string(), now());
+/// A hook tool event (isolated-home agents only, Phase B+): `("Edit",
+/// "foo.rs")`. The event keeps the two parts apart for rendering; the status
+/// record keeps the joined line, which is what "working — Edit foo.rs" shows.
+pub fn record_tool(session: &str, window: usize, tool: &str, detail: &str) {
+    push_full(session, window, "tool", detail.to_string(), tool.to_string(), String::new());
+    let line = if detail.is_empty() { tool.to_string() } else { format!("{tool} {detail}") };
+    let ts = now();
     with_rec(session, window, |r| r.tool = Some((line, ts)));
 }
 
@@ -184,6 +211,7 @@ pub fn record_delivery(session: &str, window: usize, line: &str) {
 pub fn record_prompt(session: &str, window: usize, prompt: &str) -> bool {
     let text = truncate_chars(prompt, MAX_PROMPT_CHARS);
     let mut acked = false;
+    let ts = now();
     with_rec(session, window, |r| {
         if let Some((line, _)) = r.pending.clone() {
             if prompt.contains(line.as_str()) || line.contains(prompt) {
@@ -191,6 +219,11 @@ pub fn record_prompt(session: &str, window: usize, prompt: &str) -> bool {
                 acked = true;
             }
         }
+        // A turn just opened. This is the ONE honest "it started working"
+        // signal: pane activity cannot be it, because an agent TUI repaints its
+        // prompt (spinner, status line, cursor) long after it finished.
+        r.prompt = Some(ts);
+        r.explicit = None; // a new turn supersedes the last turn's words
     });
     push_event_via(
         session,
@@ -242,9 +275,8 @@ pub fn retain_windows(session: &str, live: &[usize]) {
 }
 
 /// Derive the current status for (session, window). `activity_ts` is tmux's
-/// window_activity for the window; it is the fallback signal for backends
-/// without tool hooks. Pure given the record + clock, so the rules read as a
-/// table (§4.3): latest fact wins, ties broken by specificity.
+/// window_activity for the window — used ONLY when the window has produced no
+/// hook facts at all. Pure given the record + clock.
 pub fn derive(session: &str, window: usize, activity_ts: u64) -> AgentStatus {
     let rec = store()
         .lock()
@@ -255,70 +287,93 @@ pub fn derive(session: &str, window: usize, activity_ts: u64) -> AgentStatus {
     derive_from(&rec, activity_ts, now())
 }
 
+/// The state machine, in one place. A turn is a bracket: `userPromptSubmit`
+/// opens it, `stop` / `tmm done` closes it, tool calls happen inside it, and a
+/// permission prompt suspends it. So the rule is simply *which boundary is the
+/// most recent fact*, and the four states fall out of that:
+///
+/// | newest fact                    | state   | since        |
+/// |--------------------------------|---------|--------------|
+/// | a failed stop                  | failed  | the stop     |
+/// | an explicit `tmm status`       | that    | the claim    |
+/// | a turn end (stop / done)       | idle    | the end      |
+/// | an ask (permission / input)    | waiting | the ask      |
+/// | a turn start (prompt / tool)   | running | the START    |
+///
+/// `since` for `running` is the turn's start, not the newest event, so "running
+/// 2m14s" means the turn has been open that long.
+///
+/// Pane activity is NOT a work signal for a window with hooks. It used to be,
+/// and that was the bug: an agent TUI repaints after replying (spinner, status
+/// line, blinking cursor), so `window_activity` was always newer than the stop
+/// and every finished agent read as "working" forever. Windows with no hook
+/// coverage at all (codex today, anything hand-started) still fall back to it,
+/// because for them the alternative is no signal at all.
 fn derive_from(rec: &Rec, activity_ts: u64, now: u64) -> AgentStatus {
+    let (end_kind, end_ts) = rec.end.clone().unwrap_or_default();
     let done_ts = rec.done.as_ref().map(|(_, t)| *t).unwrap_or(0);
-    let notif_ts = rec.notif.as_ref().map(|(_, t)| *t).unwrap_or(0);
+    let ask_ts = rec.ask.as_ref().map(|(_, t)| *t).unwrap_or(0);
     let tool_ts = rec.tool.as_ref().map(|(_, t)| *t).unwrap_or(0);
+    let prompt_ts = rec.prompt.unwrap_or(0);
 
-    // Fresh tool activity is the strongest working signal — it is an observed
-    // fact, newer facts first.
-    if now.saturating_sub(tool_ts) < ACTIVE_SECS && tool_ts >= notif_ts && tool_ts >= done_ts {
-        let line = rec.tool.as_ref().map(|(l, _)| l.clone()).unwrap_or_default();
-        return AgentStatus { state: "working".into(), detail: line, since: tool_ts };
+    let turn_start = prompt_ts.max(tool_ts);
+    let turn_end = end_ts.max(done_ts);
+    let newest = turn_start.max(turn_end).max(ask_ts);
+
+    // No hook has ever spoken for this window: fall back to pane activity,
+    // which is all a hookless backend gives us.
+    if newest == 0 && rec.explicit.is_none() {
+        let state = if now.saturating_sub(activity_ts) < ACTIVE_SECS { "running" } else { "idle" };
+        return AgentStatus { state: state.into(), detail: String::new(), since: activity_ts };
     }
 
-    // An explicit declaration wins while fresh and not superseded by a newer
-    // stop/done fact.
+    // A failed stop is the one distress signal we can observe. It stands until
+    // a new turn starts.
+    if end_kind == "failed" && end_ts >= turn_start && end_ts >= ask_ts {
+        return AgentStatus { state: "failed".into(), detail: "failed".into(), since: end_ts };
+    }
+
+    // The agent's own words win while fresh and not overtaken by a newer fact.
+    // `working` is the CLI's vocabulary; the UI has one word for it.
     if let Some((state, note, ts)) = &rec.explicit {
-        if now.saturating_sub(*ts) < EXPLICIT_TTL_SECS && *ts >= notif_ts && *ts >= done_ts {
-            return AgentStatus { state: state.clone(), detail: note.clone(), since: *ts };
+        if now.saturating_sub(*ts) < EXPLICIT_TTL_SECS && *ts >= newest {
+            let state = match state.as_str() {
+                "working" => "running",
+                "blocked" => "waiting",
+                other => other,
+            };
+            return AgentStatus { state: state.into(), detail: note.clone(), since: *ts };
         }
     }
 
-    // done → idle, unless something happened after it.
-    if done_ts > 0 && done_ts >= notif_ts {
-        let summary = rec.done.as_ref().map(|(s, _)| s.clone()).unwrap_or_default();
-        // New pane activity after done means the agent picked up new work.
-        if activity_ts > done_ts && now.saturating_sub(activity_ts) < ACTIVE_SECS {
-            return AgentStatus { state: "working".into(), detail: String::new(), since: activity_ts };
-        }
-        return AgentStatus { state: "idle".into(), detail: summary, since: done_ts };
+    // A turn that ended is rest, not distress: direct agents fire stop after
+    // every exchange and never call `tmm done`.
+    if turn_end >= turn_start && turn_end >= ask_ts {
+        let summary = rec
+            .done
+            .as_ref()
+            .filter(|(_, t)| *t == turn_end)
+            .map(|(s, _)| s.clone())
+            .unwrap_or_default();
+        return AgentStatus { state: "idle".into(), detail: summary, since: turn_end };
     }
 
-    // Hook notification is the freshest fact. Newer pane activity resolves
-    // any of them: a prompt that got answered (or an agent that moved on)
-    // shows as working, and self-corrects back if the activity was noise.
-    if let Some((kind, ts)) = &rec.notif {
-        if activity_ts > *ts && now.saturating_sub(activity_ts) < ACTIVE_SECS {
-            return AgentStatus { state: "working".into(), detail: String::new(), since: activity_ts };
-        }
-        match kind.as_str() {
-            "permission_required" | "input_required" => {
-                return AgentStatus { state: "waiting".into(), detail: kind.clone(), since: *ts };
-            }
-            "failed" => {
-                // The one genuine distress signal we can observe: the agent's
-                // stop hook reported failure.
-                return AgentStatus { state: "failed".into(), detail: kind.clone(), since: *ts };
-            }
-            _ => {
-                // completed (Stop) = the agent finished a TURN. That is REST,
-                // not distress: direct agents fire Stop after every exchange
-                // and never call `tmm done`, so treating a quiet stop as
-                // "stuck" branded every long-idle window as broken (owner
-                // report, 2026-08-01). "It stopped without done" carries no
-                // alarm on its own — the old rule came from the Team
-                // supervisor world where done was contractual.
-                return AgentStatus { state: "idle".into(), detail: String::new(), since: *ts };
-            }
-        }
+    // Blocked on the human, and nothing has happened since.
+    if ask_ts > tool_ts && ask_ts >= prompt_ts {
+        let kind = rec.ask.as_ref().map(|(k, _)| k.clone()).unwrap_or_default();
+        return AgentStatus { state: "waiting".into(), detail: kind, since: ask_ts };
     }
 
-    // No facts at all: fall back to pane activity.
-    if now.saturating_sub(activity_ts) < ACTIVE_SECS {
-        return AgentStatus { state: "working".into(), detail: String::new(), since: activity_ts };
-    }
-    AgentStatus { state: "idle".into(), detail: String::new(), since: activity_ts }
+    // A turn is open. `since` is when it opened; the detail is the last thing we
+    // saw it do.
+    let detail = rec
+        .tool
+        .as_ref()
+        .filter(|(_, t)| *t >= prompt_ts)
+        .map(|(l, _)| l.clone())
+        .unwrap_or_default();
+    let since = if prompt_ts > 0 { prompt_ts } else { tool_ts };
+    AgentStatus { state: "running".into(), detail, since }
 }
 
 #[cfg(test)]
@@ -329,115 +384,115 @@ mod tests {
         Rec::default()
     }
 
+    /// The bug this machine replaced: an agent that had just answered kept
+    /// reading "working" forever, because its TUI repaints the prompt after
+    /// every reply and pane activity was treated as work.
     #[test]
-    fn fresh_tool_activity_means_working_with_the_activity_line() {
+    fn a_finished_turn_is_idle_no_matter_how_busy_the_pane_looks() {
         let mut r = rec();
-        r.tool = Some(("Edit src/lib.rs".into(), 1000));
-        let s = derive_from(&r, 0, 1010);
-        assert_eq!(s.state, "working");
-        assert_eq!(s.detail, "Edit src/lib.rs");
+        r.prompt = Some(1000);
+        r.tool = Some(("Edit src/lib.rs".into(), 1010));
+        r.end = Some(("completed".into(), 1020));
+        // Pane activity 500s of it, all newer than the stop — a repainting TUI.
+        let s = derive_from(&r, 1500, 1520);
+        assert_eq!(s.state, "idle", "a repainting prompt is not work");
+        assert_eq!(s.since, 1020, "idle since the turn ended");
     }
 
     #[test]
-    fn explicit_declaration_wins_while_fresh() {
+    fn a_turn_is_running_from_its_prompt_until_it_stops() {
         let mut r = rec();
-        r.explicit = Some(("waiting".into(), "等接口定稿".into(), 1000));
-        let s = derive_from(&r, 0, 1100);
-        assert_eq!(s.state, "waiting");
-        assert_eq!(s.detail, "等接口定稿");
+        r.prompt = Some(1000);
+        let s = derive_from(&r, 0, 1300);
+        assert_eq!(s.state, "running");
+        assert_eq!(s.since, 1000, "since = the turn's start, so elapsed is the TURN's age");
+        // A long think with no tool calls stays running: only an end ends it.
+        assert_eq!(derive_from(&r, 0, 1000 + 3600).state, "running");
+        // Tools inside the turn keep it running and describe it.
+        r.tool = Some(("Edit a.rs".into(), 1200));
+        let s = derive_from(&r, 0, 1300);
+        assert_eq!((s.state.as_str(), s.detail.as_str(), s.since), ("running", "Edit a.rs", 1000));
     }
 
     #[test]
-    fn explicit_declaration_expires() {
+    fn tools_without_a_prompt_still_mean_running() {
+        // Claude/codex may deliver tool events without a turn-start hook.
         let mut r = rec();
-        r.explicit = Some(("working".into(), String::new(), 1000));
-        let s = derive_from(&r, 0, 1000 + EXPLICIT_TTL_SECS + 1);
-        assert_eq!(s.state, "idle", "a crashed agent must not stay working on its own last words");
+        r.tool = Some(("Bash npm test".into(), 1000));
+        let s = derive_from(&r, 0, 1005);
+        assert_eq!((s.state.as_str(), s.since), ("running", 1000));
     }
 
     #[test]
-    fn done_means_idle_and_supersedes_an_earlier_stop() {
+    fn an_ask_suspends_the_turn_and_an_answer_resumes_it() {
         let mut r = rec();
-        r.notif = Some(("completed".into(), 1000));
-        r.done = Some(("PR 已提交".into(), 1005));
+        r.prompt = Some(1000);
+        r.ask = Some(("permission_required".into(), 1100));
+        let s = derive_from(&r, 0, 9000);
+        assert_eq!(s.state, "waiting", "blocked on the human, however long it waits");
+        assert_eq!(s.detail, "permission_required");
+        // A tool call after the ask means it got answered.
+        r.tool = Some(("Bash rm -rf build".into(), 1200));
+        assert_eq!(derive_from(&r, 0, 1250).state, "running");
+        // And a stop after the ask ends the turn, ask or no ask.
+        r.tool = None;
+        r.end = Some(("completed".into(), 1300));
+        assert_eq!(derive_from(&r, 0, 1350).state, "idle");
+    }
+
+    #[test]
+    fn done_is_idle_and_carries_its_summary() {
+        let mut r = rec();
+        r.prompt = Some(1000);
+        r.done = Some(("PR 已提交".into(), 1100));
         let s = derive_from(&r, 0, 2000);
-        assert_eq!(s.state, "idle");
-        assert_eq!(s.detail, "PR 已提交");
-    }
-
-    #[test]
-    fn a_stop_is_rest_not_distress_no_matter_how_old() {
-        // Direct agents fire Stop after every exchange and never call
-        // `tmm done`; a long-idle window must read idle, not stuck.
-        let mut r = rec();
-        r.notif = Some(("completed".into(), 1000));
-        let hours_later = derive_from(&r, 1000, 1000 + 6 * 3600);
-        assert_eq!(hours_later.state, "idle");
+        assert_eq!((s.state.as_str(), s.detail.as_str(), s.since), ("idle", "PR 已提交", 1100));
+        // A NEW turn after done is running again, and does not keep the summary.
+        r.prompt = Some(1200);
+        let s = derive_from(&r, 0, 2000);
+        assert_eq!((s.state.as_str(), s.detail.as_str(), s.since), ("running", "", 1200));
     }
 
     #[test]
     fn a_failed_stop_is_the_one_distress_signal() {
         let mut r = rec();
-        r.notif = Some(("failed".into(), 1000));
-        assert_eq!(derive_from(&r, 1000, 5000).state, "failed");
+        r.prompt = Some(900);
+        r.end = Some(("failed".into(), 1000));
+        assert_eq!(derive_from(&r, 5000, 5000).state, "failed", "and pane noise cannot clear it");
+        // Only a new turn clears it.
+        r.prompt = Some(1100);
+        assert_eq!(derive_from(&r, 0, 1200).state, "running");
     }
 
     #[test]
-    fn permission_prompt_is_waiting_regardless_of_age() {
+    fn an_explicit_claim_wins_while_fresh_in_the_ui_vocabulary() {
         let mut r = rec();
-        r.notif = Some(("permission_required".into(), 1000));
-        let s = derive_from(&r, 1000, 1000 + 36000);
-        assert_eq!(s.state, "waiting");
+        r.prompt = Some(1000);
+        r.explicit = Some(("waiting".into(), "等接口定稿".into(), 1100));
+        let s = derive_from(&r, 0, 1200);
+        assert_eq!((s.state.as_str(), s.detail.as_str()), ("waiting", "等接口定稿"));
+        // The CLI says "working"/"blocked"; the UI has one word for each.
+        r.explicit = Some(("working".into(), String::new(), 1100));
+        assert_eq!(derive_from(&r, 0, 1200).state, "running");
+        r.explicit = Some(("blocked".into(), "no creds".into(), 1100));
+        assert_eq!(derive_from(&r, 0, 1200).state, "waiting");
+        // It expires, so a crashed agent cannot stay running on its last words.
+        r.explicit = Some(("working".into(), String::new(), 1100));
+        assert_eq!(derive_from(&r, 0, 1100 + EXPLICIT_TTL_SECS + 1).state, "running",
+            "the open turn still explains it");
+        r.prompt = None;
+        assert_eq!(derive_from(&r, 0, 1100 + EXPLICIT_TTL_SECS + 1).state, "idle");
+        // And a newer end overtakes it.
+        r.prompt = Some(1000);
+        r.end = Some(("completed".into(), 1150));
+        assert_eq!(derive_from(&r, 0, 1200).state, "idle");
     }
 
     #[test]
-    fn fresh_activity_after_a_notification_resolves_it() {
-        // The prompt got answered in the terminal (or the agent moved on):
-        // pane activity newer than the notification wins.
-        let mut r = rec();
-        r.notif = Some(("permission_required".into(), 1000));
-        let s = derive_from(&r, 2000, 2010);
-        assert_eq!(s.state, "working");
-    }
-
-    #[test]
-    fn pane_activity_after_done_means_new_work() {
-        let mut r = rec();
-        r.done = Some((String::new(), 1000));
-        let s = derive_from(&r, 1100, 1110);
-        assert_eq!(s.state, "working");
-    }
-
-    #[test]
-    fn no_facts_and_quiet_pane_is_idle() {
-        let s = derive_from(&rec(), 100, 10_000);
-        assert_eq!(s.state, "idle");
-    }
-
-    #[test]
-    fn activity_ring_orders_caps_and_filters_by_since() {
-        for i in 0..130u64 {
-            push_event("ring-test", 1, "tool", format!("evt{i}"));
-        }
-        let all = recent_events("ring-test", 0);
-        assert_eq!(all.len(), EVENTS_CAP, "capped");
-        assert_eq!(all.first().unwrap().text, "evt10", "oldest dropped first");
-        assert_eq!(all.last().unwrap().text, "evt129");
-        // since filter is exclusive on ms timestamps
-        let ts = all.last().unwrap().ts;
-        assert!(recent_events("ring-test", ts).is_empty());
-        assert!(recent_events("other-session", 0).is_empty(), "sessions are isolated");
-    }
-
-    #[test]
-    fn recorders_feed_the_activity_ring() {
-        record_status("feed-test", 2, "waiting", "等接口");
-        record_tool("feed-test", 2, "Edit src/lib.rs");
-        record_notification("feed-test", 2, "completed", 123);
-        let kinds: Vec<String> = recent_events("feed-test", 0).iter().map(|e| e.kind.clone()).collect();
-        assert_eq!(kinds, vec!["status", "tool", "notif"]);
-        let texts: Vec<String> = recent_events("feed-test", 0).iter().map(|e| e.text.clone()).collect();
-        assert_eq!(texts[0], "waiting — 等接口");
+    fn a_window_with_no_hooks_at_all_falls_back_to_pane_activity() {
+        let s = derive_from(&rec(), 1000, 1005);
+        assert_eq!(s.state, "running", "a hookless backend has nothing else");
+        assert_eq!(derive_from(&rec(), 1000, 1000 + ACTIVE_SECS + 1).state, "idle");
     }
 
     #[test]
@@ -506,7 +561,7 @@ mod tests {
         let s1 = derive("tsess", 1, 0);
         assert_eq!(s1.state, "idle", "dropped window's record must be gone");
         let s2 = derive("tsess", 2, 0);
-        assert_eq!(s2.state, "working");
+        assert_eq!(s2.state, "running", "an explicit `working` reads as running");
         retain_windows("tsess", &[]);
     }
 }

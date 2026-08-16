@@ -229,26 +229,58 @@ to exit 4). Same degradation contract as `team_*`.
 ## Status derivation (`projects/telemetry.rs`)
 
 Status is **derived from observed facts**, never self-reported state kept on
-faith (§4.3). The store is in-memory, keyed `(session, window_index)` — the
-same granularity as a hook notification and a project slot.
+faith. The store is in-memory, keyed `(session, window_index)` — the same
+granularity as a hook notification and a project slot.
 
-| fact | source | verdict |
+A turn is a bracket, and the hooks now report all four of its edges:
+`userPromptSubmit` opens it, tool calls happen inside it, a permission prompt
+suspends it, `stop` / `tmm done` closes it. So the whole machine is *which
+boundary is the most recent fact*, and there are exactly four states:
+
+| newest fact | state | `since` |
 |---|---|---|
-| tool event < 30s ago | hooks (isolated homes, Phase B+) | `working` + activity line |
-| explicit `tmm status` | agent | as declared, expires after 30 min |
-| `tmm done` | agent | `idle`, summary as detail |
-| notification `permission_required` / `input_required` | hooks | `waiting` (fresh pane activity resolves it — an answered prompt self-corrects) |
-| notification `completed` (Stop) | hooks | `idle` — a finished turn is REST, not distress. Direct agents fire Stop after every exchange and never call `tmm done`; the old stop-without-done→stuck rule (Team-supervisor era) branded every long-idle window as broken |
-| notification `failed` (StopFailure) | hooks | `failed` — the one distress signal we can honestly observe |
-| pane activity < 30s | tmux `window_activity` | `working` (hook-poor backends degrade here, not to a lie) |
-| nothing | — | `idle` |
+| a failed stop (StopFailure) | `failed` | the stop |
+| an explicit `tmm status`, still fresh (30 min TTL) | as declared | the claim |
+| a turn end (`stop` / `tmm done`) | `idle` | the end (detail = done summary) |
+| an ask (`permission_required` / `input_required`) | `waiting` | the ask |
+| a turn start (`userPromptSubmit`, or a tool call) | `running` | **the START** |
+| no hook has ever spoken for this window | pane activity < 30 s | `running` else `idle` |
 
-Precedence is "latest fact wins", with fresh tool activity beating a stale
-declaration and `done` superseding both. The explicit-declaration TTL exists
-so a crashed agent cannot stay `working` on its own last words. Notifications
-feed the store from the hub's inbox consumer *before* dedupe (dedupe is a
-notification-UI concern; telemetry wants every fact). Window records are
-dropped when the window disappears (`retain_windows` on every `hub_agents`).
+`since` for `running` is the turn's start, not the newest event, so a client
+renders "running 2m14s" and means the turn's age.
+
+The CLI's vocabulary is wider than the UI's on purpose: `tmm status working`
+displays as `running` and `blocked` as `waiting` (note preserved). Four words is
+the whole set — a state nobody can point at an observation for is a state nobody
+should trust.
+
+**Pane activity is not a work signal for a window that has hooks**, and that
+correction is the point of this rewrite. It used to be: `window_activity` newer
+than the last stop, within 30 s, meant `working`. But an agent TUI repaints
+after it answers — spinner, status line, cursor — so activity was *always*
+newer than the stop and every finished agent read `working` forever (owner
+report, 2026-08-16). Windows with no hook coverage at all still fall back to it,
+because for them the alternative is no signal.
+
+Records are dropped when the window disappears (`retain_windows` on every
+`hub_agents`), and notifications feed the store *before* dedupe (dedupe is a
+notification-UI concern; telemetry wants every fact).
+
+## Images: a reference, never bytes
+
+`tmm send --image <path|url>` (repeatable) attaches an image by REFERENCE. The
+CLI resolves it for a reader who is somewhere else — a URL passes through, `~`
+expands, a relative path is made absolute against the agent's cwd — and appends
+it to the body as `![](src)`. The room stays a log: no base64 ever enters a
+message.
+
+The client splits those references out of the markdown (`splitImages`) instead
+of letting the renderer emit `<img>`, because a filesystem path is not a URL a
+webview can load. `http(s)` / `data:` / `blob:` go straight into the tag;
+anything else is fetched through the same signed `/dl` endpoint the file browser
+uses, so a screenshot streams rather than arriving base64'd through the RPC
+channel. A reference that cannot be resolved renders as the reference itself —
+"it sent /tmp/x.png" is still information.
 
 ## Managed vs direct windows
 
@@ -290,6 +322,18 @@ type into (`deliver_mentions`). Without the third one, `@all` would inject a
 chat line into a kiro the user started by hand in that directory.
 
 ## Who a message goes to
+
+Three ways a message can land, and they are NOT shades of one thing:
+
+| recipient | what happens | cost |
+|---|---|---|
+| a name (the default: the lead) | typed into that agent's input | one agent starts a turn |
+| `@all` | typed into EVERY managed agent's input | every agent starts a turn at once |
+| nobody | recorded in the room, delivered to no pane | nobody is interrupted; agents see it at their next `tmm log` |
+
+The third one used to be labelled "everyone", which was backwards — it is the
+one that reaches nobody live. The composer now names all three for what they
+cost, and only broadcast wears a warning colour.
 
 A room has ONE default recipient, so talking to your lead agent costs no `@`.
 `pickLead()` (client, pure) resolves it: the remembered choice for this project
@@ -333,6 +377,15 @@ events into rows, and three rules shape what the user sees:
   a second time. This happens at every detail level, because "did what I just
   sent arrive" is not a detail anyone opts into — same for `warn`.
 - **A local prompt is a row.** Nothing else records it.
+- **A tool call is a name plus an argument.** The two travel apart from the hook
+  onward (`ActivityEvent.tool` / `.text`) so the client can render the name as
+  the scannable column and never has to re-split a string on a space that a path
+  or a shell command can contain.
+- **The agent's own `tmm send/status/done/log/spawn` is not a tool row.** Its
+  effect is already a row — the message, the status change, the completion — so
+  showing the call that produced it would print the same event twice
+  (`isSelfReport`). `tmm task`, `project`, `agent`, `skill` have no other trace
+  in the chat and stay visible.
 - **Tool calls collapse, replies do not.** Consecutive `tool` events from the
   same window fold into one collapsible group ("N tool calls", last line as the
   preview); a message, a status declaration or a notification ends the run,

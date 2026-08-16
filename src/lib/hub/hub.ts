@@ -5,7 +5,8 @@ import type { HubAgent, HubActivityEvent } from '../core/ws.ts';
  * are the fallback literals used inline for dynamic dots). */
 export function stateDotColor(state: string): string {
   switch (state) {
-    case 'working': return 'var(--status-ok)';
+    case 'running':
+    case 'working': return 'var(--status-ok)';   // 'working' = pre-2026-08 name
     case 'waiting': return 'var(--status-warn)';
     case 'blocked':
     case 'stuck':
@@ -103,6 +104,59 @@ export function addressed(text: string, to: string): string {
   return to ? `@${to} ${body}` : body;
 }
 
+/** "2m14s" / "1h03m" / "12s" — how long the current state has held. Compact on
+ * purpose: it sits inside an agent chip, and the point is the order of
+ * magnitude, not the precision. `since` is epoch SECONDS (what the server
+ * reports); `now` is epoch ms so the caller can pass a ticking clock. */
+export function fmtElapsed(since: number, now: number): string {
+  if (!since) return '';
+  const s = Math.max(0, Math.floor(now / 1000) - since);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m${String(s % 60).padStart(2, '0')}s`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h${String(m % 60).padStart(2, '0')}m`;
+  return `${Math.floor(h / 24)}d${String(h % 24).padStart(2, '0')}h`;
+}
+
+/** Agents whose newest message the user has not seen yet — the red-dot rule.
+ * Keyed by sender name, so a room where three agents replied marks all three.
+ * `seenTs` is the newest message timestamp the user has looked at (ms). */
+export function unreadSenders(feed: readonly { ts?: number; from?: string }[], seenTs: number): Set<string> {
+  const out = new Set<string>();
+  for (const m of feed) {
+    const from = m.from ?? '';
+    if (!from || from === 'human') continue;
+    if ((m.ts ?? 0) > seenTs) out.add(from);
+  }
+  return out;
+}
+
+/** Markdown image references in a message body, split from the prose.
+ *
+ * `tmm send --image` appends `![](src)` lines, and agents write the same syntax
+ * by hand. They are pulled OUT of the markdown rather than left to the renderer
+ * because a local path is not a URL a webview can load: the src has to go
+ * through the file service first, which means the client needs the list, not an
+ * `<img>` tag it would have to rewrite afterwards. Text keeps its markdown. */
+export function splitImages(body: string | null | undefined): { text: string; images: string[] } {
+  const images: string[] = [];
+  const text = (body ?? '')
+    .replace(/!\[[^\]]*\]\(\s*([^)\s]+)[^)]*\)/g, (_m, src: string) => {
+      images.push(src);
+      return '';
+    })
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return { text, images };
+}
+
+/** True when a reference is already something a webview can load directly; a
+ * filesystem path has to be fetched through the file service instead. */
+export function isDirectUrl(src: string): boolean {
+  return /^(https?:|data:|blob:)/i.test(src);
+}
+
 export type FeedLevel = 'chat' | 'status' | 'tools';
 
 /** Lifecycle lines the server posts into the room (a spawn, a `tmm done`) are
@@ -129,6 +183,24 @@ export type FeedBlock =
 
 /** Internal: a tool call before consecutive ones are folded into a group. */
 type ToolItem = { type: 'tool'; ts: number; window: number; event: HubActivityEvent };
+
+/** `tmm` subcommands whose EFFECT is already a row in this timeline: the
+ * message, the status change, the completion, the spawn notice. Showing the
+ * tool call that produced them would print the same event twice — once as the
+ * thing the agent said, once as the mechanics of saying it. `tmm log` is
+ * filtered for the same reason inverted: polling the room produces nothing to
+ * see. Everything else (`tmm task`, `project`, `agent`, `skill`…) has no other
+ * trace in the chat, so it stays visible. */
+const TMM_SELF_REPORT = new Set(['send', 'status', 'done', 'log', 'spawn']);
+
+/** True when this tool call is the agent reporting through `tmm` — the call
+ * whose own output is already shown as a message or a note. */
+export function isSelfReport(e: HubActivityEvent): boolean {
+  if (e.kind !== 'tool') return false;
+  const parts = e.text.trim().split(/\s+/);
+  const cmd = (parts[0] ?? '').split('/').pop() ?? '';
+  return cmd === 'tmm' && TMM_SELF_REPORT.has(parts[1] ?? '');
+}
 
 /**
  * Build the conversation from chat messages plus observed telemetry.
@@ -194,8 +266,13 @@ export function feedBlocks(
     if (level === 'chat') continue;
     if (e.kind === 'tool') {
       if (level !== 'tools') continue;
-      if (lastTool.get(e.window) === e.text) continue;
-      lastTool.set(e.window, e.text);
+      // The agent's own `tmm send/status/done` is already a row of its own.
+      if (isSelfReport(e)) continue;
+      // Dedup on the whole call, not the argument: two different tools acting
+      // on one file are two facts, and pre+post of one call are one.
+      const sig = `${e.tool ?? ''}\u0000${e.text}`;
+      if (lastTool.get(e.window) === sig) continue;
+      lastTool.set(e.window, sig);
       stream.push({ type: 'tool', ts: e.ts, window: e.window, event: e });
       continue;
     }

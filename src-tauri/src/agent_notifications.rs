@@ -210,11 +210,11 @@ impl AgentNotificationHub {
         // Tool events (pre/postToolUse from isolated-home agents, Phase B+)
         // are TELEMETRY, not notifications: record the live activity line and
         // stop — no unread dot, no dedupe, no persistence.
-        if let Some(tool_line) = tool_event_line(&envelope) {
+        if let Some((tool, detail)) = tool_event_parts(&envelope) {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 let (session, window, _) = tmux::resolve_pane_id(&envelope.pane_id)?;
-                crate::projects::telemetry::record_tool(&session, window, &tool_line);
+                crate::projects::telemetry::record_tool(&session, window, &tool, &detail);
             }
             return Ok(());
         }
@@ -472,9 +472,13 @@ impl crate::projects::capture::AgentSessions for AgentNotificationHub {
     }
 }
 
-/// PreToolUse/PostToolUse across backends → a human activity line
-/// ("Edit src/lib.rs"), or None when this is a lifecycle notification.
-fn tool_event_line(envelope: &InboxEnvelope) -> Option<String> {
+/// PreToolUse/PostToolUse across backends → `(tool name, detail)`
+/// (`("Edit", "src/lib.rs")`), or None when this is a lifecycle notification.
+/// The two parts stay SEPARATE all the way to the client: the tool name is the
+/// scannable part of a step row, so it is rendered differently from its
+/// argument, and joining them here would force the client to re-split a string
+/// on a space that a Windows path or a shell command can contain.
+fn tool_event_parts(envelope: &InboxEnvelope) -> Option<(String, String)> {
     let payload = envelope.payload.as_object()?;
     let event = payload.get("hook_event_name").and_then(Value::as_str)?;
     if !matches!(event, "PreToolUse" | "PostToolUse" | "preToolUse" | "postToolUse") {
@@ -496,11 +500,7 @@ fn tool_event_line(envelope: &InboxEnvelope) -> Option<String> {
                 .and_then(Value::as_str)
         })
         .unwrap_or("");
-    Some(if detail.is_empty() {
-        tool.to_string()
-    } else {
-        format!("{} {}", tool, truncate(detail, 80))
-    })
+    Some((tool.to_string(), truncate(detail, 80)))
 }
 
 struct Normalized {

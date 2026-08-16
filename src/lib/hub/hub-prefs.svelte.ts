@@ -8,14 +8,15 @@
 // about a message the user sent, so feedBlocks() surfaces them at every level.
 const FEED_LEVEL_KEY = 'tmux_hub_feed_level';
 const LEAD_KEY = 'tmux_hub_lead';
+const SEEN_KEY = 'tmux_hub_seen';
 export type FeedLevel = 'chat' | 'status' | 'tools';
 
 const stored = localStorage.getItem(FEED_LEVEL_KEY);
 const valid = (v: string | null): v is FeedLevel => v === 'chat' || v === 'status' || v === 'tools';
 
-const readLeads = (): Record<string, string> => {
+const readMap = <T,>(key: string): Record<string, T> => {
   try {
-    const raw = JSON.parse(localStorage.getItem(LEAD_KEY) ?? '{}');
+    const raw = JSON.parse(localStorage.getItem(key) ?? '{}');
     return raw && typeof raw === 'object' ? raw : {};
   } catch { return {}; }
 };
@@ -26,7 +27,9 @@ const state = $state({
   feedLevel: (valid(stored) ? stored : 'tools') as FeedLevel,
   // Per project (tmux session): who the composer addresses by default. Survives
   // reloads because "who am I talking to" is part of where the user left off.
-  leads: readLeads() as Record<string, string>,
+  leads: readMap<string>(LEAD_KEY),
+  // Per project: the newest message timestamp the user has actually seen.
+  seen: readMap<number>(SEEN_KEY),
 });
 
 export const hubPrefs = {
@@ -46,5 +49,13 @@ export const hubPrefs = {
     if (name) state.leads[session] = name;
     else delete state.leads[session];
     localStorage.setItem(LEAD_KEY, JSON.stringify(state.leads));
+  },
+  /** Newest message timestamp (ms) the user has looked at, per project. Drives
+   * the "an agent replied" dot, so it has to survive a reload like the rest of
+   * "where I left off". */
+  seen(session: string) { return state.seen[session] ?? 0; },
+  setSeen(session: string, ts: number) {
+    state.seen[session] = ts;
+    localStorage.setItem(SEEN_KEY, JSON.stringify(state.seen));
   },
 };

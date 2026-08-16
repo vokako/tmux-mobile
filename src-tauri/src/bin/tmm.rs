@@ -36,6 +36,8 @@ const USAGE: &str = r#"tmm — talk to the tmux-mobile project hub
 
 USAGE (agent):
   tmm send <text>                     post to the project chat (@name to address)
+                    [--image <path|url>]   attach an image by REFERENCE (repeatable);
+                                      a local path is resolved by the client
   tmm log [--since <ts>] [--limit N] [-f]   read chat; --since is exclusive, -f follows
   tmm status <working|waiting|blocked> [note]   declare what you are doing
   tmm done [summary]                  declare completion
@@ -101,7 +103,7 @@ async fn main() {
         Some(i) => (&args[..i], args[i + 1..].to_vec()),
         None => (&args[..], Vec::new()),
     };
-    let (flags, mut pos) = split_flags(head);
+    let (flags, mut pos, repeated) = split_flags(head);
     if pos.is_empty() || flags.contains_key("help") {
         print!("{USAGE}");
         std::process::exit(if pos.is_empty() { EXIT_USAGE } else { EXIT_OK });
@@ -136,12 +138,29 @@ async fn main() {
     match (cmd.as_str(), pos) {
         ("send", rest) => {
             let text = rest.join(" ");
-            if text.is_empty() {
-                fail(EXIT_USAGE, "send needs text: tmm send \"@reviewer 看一下\"");
+            // `--image` may repeat. An image is sent as a REFERENCE (an http(s)
+            // URL, or a path on the machine the server runs on) appended as
+            // markdown; the client resolves a local path through the file
+            // service when it renders. Nothing is ever base64'd into a chat
+            // message — the room is a log, not a blob store.
+            let images: Vec<String> = repeated
+                .iter()
+                .filter(|(k, _)| k == "image")
+                .map(|(_, v)| absolutize_ref(v))
+                .collect();
+            if text.is_empty() && images.is_empty() {
+                fail(EXIT_USAGE, "send needs text: tmm send \"@reviewer 看一下\" [--image shot.png]");
+            }
+            let mut body = text;
+            for src in &images {
+                if !body.is_empty() {
+                    body.push('\n');
+                }
+                body.push_str(&format!("![]({src})"));
             }
             let session = need_project(&ctx);
             let from = ctx.agent.clone().unwrap_or_else(|| "human".into());
-            let r = rpc(&ctx, "hub_post", json!({ "session": session, "from": from, "body": text })).await;
+            let r = rpc(&ctx, "hub_post", json!({ "session": session, "from": from, "body": body })).await;
             if ctx.json {
                 println!("{r}");
             } else {
@@ -547,18 +566,23 @@ fn need_agent(ctx: &Ctx) -> String {
 
 /// `--flag value` / `--flag` / `-f` → map; the rest are positionals.
 /// Flags known to take a value consume the next arg; boolean flags don't.
-fn split_flags(args: &[String]) -> (std::collections::HashMap<String, Option<String>>, Vec<String>) {
+/// The third return is every valued occurrence in order, so a flag that may be
+/// REPEATED (`--image a.png --image b.png`) does not lose all but the last —
+/// the map keeps one value per key by design and that is fine for the rest.
+fn split_flags(args: &[String]) -> (std::collections::HashMap<String, Option<String>>, Vec<String>, Vec<(String, String)>) {
     const VALUED: &[&str] = &["project", "agent", "server", "output", "since", "limit", "brief",
                           "name", "session", "with-agent", "backend", "model", "system", "skills", "mcp",
-                          "ref", "source", "description", "def", "grep"];
+                          "ref", "source", "description", "def", "grep", "image"];
     let mut flags = std::collections::HashMap::new();
     let mut pos = Vec::new();
+    let mut repeats: Vec<(String, String)> = Vec::new();
     let mut i = 0;
     while i < args.len() {
         let a = &args[i];
         if let Some(name) = a.strip_prefix("--") {
             if VALUED.contains(&name) && i + 1 < args.len() {
                 flags.insert(name.to_string(), Some(args[i + 1].clone()));
+                repeats.push((name.to_string(), args[i + 1].clone()));
                 i += 2;
                 continue;
             }
@@ -570,7 +594,26 @@ fn split_flags(args: &[String]) -> (std::collections::HashMap<String, Option<Str
         }
         i += 1;
     }
-    (flags, pos)
+    (flags, pos, repeats)
+}
+
+/// An image reference as the client will have to resolve it. A URL is passed
+/// through untouched; a filesystem path is made absolute against the agent's
+/// cwd, because the reader is a phone in another room and "./shot.png" means
+/// nothing there.
+fn absolutize_ref(src: &str) -> String {
+    let s = src.trim();
+    if s.starts_with("http://") || s.starts_with("https://") || s.starts_with("data:") || s.starts_with('/') {
+        return s.to_string();
+    }
+    if let Some(rest) = s.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return std::path::Path::new(&home).join(rest).to_string_lossy().to_string();
+        }
+    }
+    std::env::current_dir()
+        .map(|d| d.join(s).to_string_lossy().to_string())
+        .unwrap_or_else(|_| s.to_string())
 }
 
 /// One connect → auth → call → close round trip. All failure modes funnel to
@@ -684,5 +727,48 @@ async fn follow_log(ctx: &Ctx, session: &str, mut since: i64, limit: i64) {
             Err((code, msg)) => fail(code, &msg),
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeated_valued_flags_survive_the_map() {
+        // The flag map keeps one value per key; `--image` may appear twice, and
+        // the third return is what stops the first one being silently lost.
+        let args: Vec<String> = ["send", "look", "--image", "a.png", "--image", "b.png"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let (flags, pos, repeated) = split_flags(&args);
+        assert_eq!(pos, vec!["send", "look"], "the text stays positional");
+        assert_eq!(flags.get("image").cloned().flatten().as_deref(), Some("b.png"), "map keeps the last");
+        let images: Vec<&str> = repeated.iter().filter(|(k, _)| k == "image").map(|(_, v)| v.as_str()).collect();
+        assert_eq!(images, vec!["a.png", "b.png"], "both reach the sender");
+    }
+
+    #[test]
+    fn image_references_are_resolved_for_a_reader_somewhere_else() {
+        // URLs pass through untouched.
+        for url in ["https://x/y.png", "http://x/y.png", "data:image/png;base64,AA"] {
+            assert_eq!(absolutize_ref(url), url);
+        }
+        // An absolute path is already meaningful on the server's machine.
+        assert_eq!(absolutize_ref("/tmp/shot.png"), "/tmp/shot.png");
+        // A relative one is not: the reader is a phone, not this shell.
+        let cwd = std::env::current_dir().unwrap();
+        assert_eq!(
+            absolutize_ref("shot.png"),
+            cwd.join("shot.png").to_string_lossy().to_string()
+        );
+        // `~` is the agent's home, expanded here rather than shipped as a tilde.
+        if let Some(home) = std::env::var_os("HOME") {
+            assert_eq!(
+                absolutize_ref("~/shot.png"),
+                std::path::Path::new(&home).join("shot.png").to_string_lossy().to_string()
+            );
+        }
     }
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeMessages, statuslineWindows, stateDotColor, feedBlocks, systemLine, pickLead, addressed } from './hub.ts';
+import { mergeMessages, statuslineWindows, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, splitImages, isDirectUrl, fmtElapsed, unreadSenders } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -132,6 +132,75 @@ test('addressed prefixes the recipient but never rewrites an explicit @', () => 
   assert.equal(addressed('@qa look at this', 'dev'), '@qa look at this', 'the user addressed someone by hand');
   assert.equal(addressed('ship it', ''), 'ship it', 'no recipient = the whole room');
   assert.equal(addressed('   ', 'dev'), '', 'nothing to send');
+});
+
+test('an agent reporting through tmm is not also a tool row', () => {
+  const feed = [{ ts: 150, from: 'dev', body: 'done looking' }];
+  const activity = [
+    ev({ ts: 100, kind: 'tool', tool: 'execute_bash', text: '/home/u/.local/bin/tmm send --agent dev "on it"' }),
+    ev({ ts: 120, kind: 'tool', tool: 'execute_bash', text: 'tmm status working' }),
+    ev({ ts: 130, kind: 'tool', tool: 'execute_bash', text: 'tmm done "shipped"' }),
+    ev({ ts: 140, kind: 'tool', tool: 'execute_bash', text: 'tmm log --limit 5' }),
+  ];
+  assert.deepEqual(feedBlocks(feed, activity, 'tools').map((b) => b.type), ['msg'],
+    'the message IS the report — the call that produced it is not a second event');
+  // Anything with no other trace in the chat stays visible.
+  const kept = [
+    ev({ ts: 100, kind: 'tool', tool: 'execute_bash', text: 'tmm task start dev-server' }),
+    ev({ ts: 110, kind: 'tool', tool: 'execute_bash', text: 'git commit -m "tmm send fix"' }),
+    ev({ ts: 120, kind: 'tool', tool: 'fs_read', text: '/src/lib.rs' }),
+  ];
+  const steps = feedBlocks([], kept, 'tools');
+  assert.equal(steps.length, 1);
+  assert.equal(steps[0]?.type === 'steps' && steps[0].events.length, 3, 'only self-reports are dropped');
+  assert.equal(isSelfReport(ev({ kind: 'status', text: 'tmm send x' })), false, 'only tool events');
+});
+
+test('splitImages pulls image references out of the prose', () => {
+  const one = splitImages('look at this\n![](/tmp/shot.png)');
+  assert.equal(one.text, 'look at this');
+  assert.deepEqual(one.images, ['/tmp/shot.png']);
+  // Several, with alt text and a title, in prose and at the end.
+  const many = splitImages('before ![alt](https://x/y.png "t") after\n![](~/a.jpg)');
+  assert.deepEqual(many.images, ['https://x/y.png', '~/a.jpg']);
+  assert.equal(many.text, 'before  after');
+  // No images: the body is untouched (markdown and all).
+  const none = splitImages('# title\n**bold** and a (paren)');
+  assert.deepEqual(none.images, []);
+  assert.equal(none.text, '# title\n**bold** and a (paren)');
+  assert.deepEqual(splitImages(undefined), { text: '', images: [] });
+});
+
+test('isDirectUrl separates what a webview can load from what needs the file service', () => {
+  for (const ok of ['http://x/y.png', 'https://x/y.png', 'data:image/png;base64,AA', 'blob:abc']) {
+    assert.equal(isDirectUrl(ok), true, ok);
+  }
+  for (const path of ['/tmp/shot.png', '~/shot.png', './rel.png', 'C:\\x.png']) {
+    assert.equal(isDirectUrl(path), false, path);
+  }
+});
+
+test('fmtElapsed is compact at every magnitude', () => {
+  const t = (secsAgo: number) => fmtElapsed(1_000_000, (1_000_000 + secsAgo) * 1000);
+  assert.equal(t(0), '0s');
+  assert.equal(t(45), '45s');
+  assert.equal(t(134), '2m14s');
+  assert.equal(t(3600 + 5 * 60), '1h05m');
+  assert.equal(t(26 * 3600), '1d02h');
+  assert.equal(fmtElapsed(0, Date.now()), '', 'no timestamp, no readout');
+});
+
+test('unreadSenders marks who replied after the user last looked', () => {
+  const feed = [
+    { ts: 100, from: 'human', body: 'go' },
+    { ts: 200, from: 'dev', body: 'done' },
+    { ts: 300, from: 'qa', body: 'looks fine' },
+  ];
+  assert.deepEqual([...unreadSenders(feed, 150)], ['dev', 'qa']);
+  assert.deepEqual([...unreadSenders(feed, 250)], ['qa'], 'only what is newer than seen');
+  assert.deepEqual([...unreadSenders(feed, 300)], [], 'caught up');
+  assert.deepEqual([...unreadSenders([{ ts: 400, from: 'human' }], 0)], [],
+    'your own message is never unread');
 });
 
 test('systemLine recognizes lifecycle lines and leaves prose alone', () => {

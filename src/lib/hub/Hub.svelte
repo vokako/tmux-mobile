@@ -17,6 +17,7 @@
   //   in this sidebar. New projects pick their agents at creation time.
   import Terminal from '../terminal/Terminal.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
+  import ChatImage from './ChatImage.svelte';
   import Icon from '../ui/Icon.svelte';
   import { t } from '../core/i18n.svelte.ts';
   import {
@@ -25,7 +26,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, systemLine, pickLead, addressed } from './hub.ts';
+  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, systemLine, pickLead, addressed, fmtElapsed, unreadSenders, splitImages } from './hub.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
 
@@ -50,10 +51,19 @@
   let activity = $state([]);        // telemetry events (in-memory ring on the server)
   let lastActivityTs = 0;
   let registry = $state([]);        // RegAgent[]
+  // Three ways a message can land, and they are NOT variations of one thing:
+  //   a name    → typed into that agent's input; exactly one agent is
+  //               interrupted and starts a turn. The default (the lead).
+  //   ALL_TARGET→ `@all`: typed into EVERY managed agent's input. Every agent
+  //               starts a turn at once, so this is a deliberate act, not a
+  //               casual default — it is the expensive one.
+  //   ''        → recorded in the room and delivered to NOBODY. Agents read it
+  //               when they next call `tmm log`, which is how you leave context
+  //               without interrupting anyone mid-task.
+  const ALL_TARGET = 'all';
   let composerText = $state('');
-  // Who the composer addresses. '' = the whole room. Defaults to the project's
-  // lead (pickLead), so talking to your lead agent needs no @ ceremony; the
-  // user can retarget or broadcast at any time.
+  // Who the composer addresses. Defaults to the project's lead (pickLead), so
+  // talking to your lead agent needs no @ ceremony.
   let recipient = $state('');
   let recipientOpen = $state(false);
   let feedEl = $state(null);
@@ -133,15 +143,31 @@
       agents = (await hubAgents(selected)).agents ?? [];
       // The recipient follows the room: an agent that left cannot be the
       // recipient, and a room that just gained its first agent gets a lead
-      // without the user choosing one.
-      if (recipient && !agents.some((a) => a.managed && a.name === recipient)) recipient = '';
+      // without the user choosing one. ALL_TARGET is not a window, so it stays.
+      if (recipient && recipient !== ALL_TARGET && !agents.some((a) => a.managed && a.name === recipient)) recipient = '';
       if (!recipient) recipient = pickLead(agents, registry, hubPrefs.lead(selected));
     } catch { agents = []; }
   }
 
   function scrollFeed() {
-    requestAnimationFrame(() => { if (feedEl) feedEl.scrollTop = feedEl.scrollHeight; });
+    requestAnimationFrame(() => {
+      if (!feedEl) return;
+      feedEl.scrollTop = feedEl.scrollHeight;
+      // Scrolled to the newest message means the user has seen it.
+      markSeen();
+    });
   }
+
+  /** The red dot means "an agent replied and you have not looked". So it clears
+   * when the newest message is on screen — the bottom of the feed — and when
+   * you send, since you are plainly looking then. */
+  function markSeen() {
+    if (!selected || !visible) return;
+    const newest = feed.reduce((max, m) => Math.max(max, m.ts ?? 0), 0);
+    if (newest > hubPrefs.seen(selected)) hubPrefs.setSeen(selected, newest);
+  }
+  const atBottom = () => !feedEl || feedEl.scrollHeight - feedEl.scrollTop - feedEl.clientHeight < 40;
+  const unread = $derived(unreadSenders(feed, hubPrefs.seen(selected)));
 
   async function send() {
     let text = composerText.trim();
@@ -237,49 +263,43 @@
   }
 
   // Spawn into the CURRENT project (from the chat header).
-  let spawnOpen = $state(false);
-  let spawnAgent = $state('');
-  let spawnBrief = $state('');
-  // Preset start: pick one agent (tap) or several (a team) for an empty room.
-  let startOpen = $state(false);
+  let sideOpen = $state(false);     // phone: the project list, as a drawer
+  // ONE way to add agents, in two moods: 'start' also makes the first pick the
+  // lead (an empty room), 'add' leaves the current lead alone (a running one).
+  let pickerOpen = $state(false);
+  let pickerMode = $state('start');
   let startPick = $state([]);
   let startBrief = $state('');
   let starting = $state(false);
-  async function doSpawn() {
-    if (!spawnAgent || !selected) return;
-    const brief = spawnBrief.trim();
-    spawnOpen = false;
-    spawnBrief = '';
-    const name = spawnAgent;
-    spawnAgent = '';
-    try {
-      await hubSpawn(selected, name, brief);
-      await Promise.all([reload(), loadAgents(), loadFeed()]);
-      // First agent in an empty room becomes the one you are talking to.
-      if (!recipient) setRecipient(name);
-    } catch (e) { console.warn('spawn failed', e); }
-  }
-
-  /** Start a conversation from a preset: one agent, or several at once (a
-   * team). Each is an existing `hub_spawn`, run in order so the roster appears
-   * in the order it was picked; the lead is the first that can hire, else the
-   * first picked — the same rule pickLead applies to a room already running. */
-  async function startWith(names, brief = '') {
+  /** Add agents to the conversation: one, or several at once. Each is an
+   * existing `hub_spawn`, run in order so the roster appears in the order it was
+   * picked. In 'start' mode the new roster also gets a lead — the first that can
+   * hire, else the first picked, the same rule pickLead applies to a live room.
+   * In 'add' mode whoever you were talking to stays the recipient. */
+  async function addAgents(names, brief = '', mode = pickerMode) {
     if (!selected || !names.length || starting) return;
     starting = true;
-    startOpen = false;
+    pickerOpen = false;
     try {
       for (const name of names) {
         try { await hubSpawn(selected, name, brief); }
         catch (e) { console.warn('spawn failed', name, e); }
       }
       await Promise.all([reload(), loadAgents(), loadFeed()]);
-      const lead = names.find((n) => registry.find((r) => r.name === n)?.can_hire) ?? names[0];
-      setRecipient(lead);
+      if (mode === 'start' || !recipient) {
+        setRecipient(names.find((n) => registry.find((r) => r.name === n)?.can_hire) ?? names[0]);
+      }
     } finally {
       starting = false;
       startPick = [];
+      startBrief = '';
     }
+  }
+
+  function openPicker(mode) {
+    pickerMode = mode;
+    startPick = [];
+    pickerOpen = true;
   }
 
   // Live pushes + polling while visible.
@@ -340,6 +360,23 @@
     return label.startsWith('hubNotif_') ? e.text : label;
   }
 
+  /** Four states, one word each. Anything unexpected shows itself rather than
+   * being silently relabelled. */
+  function stateLabel(state) {
+    const label = t('hubState_' + state);
+    return label.startsWith('hubState_') ? state : label;
+  }
+
+  // A clock for the elapsed readouts. One timer for the whole page, and only
+  // while the tab is on screen — a "running 2m14s" that ticks in a hidden tab
+  // is pure wakeups.
+  let tick = $state(Date.now());
+  $effect(() => {
+    if (!visible) return;
+    const id = setInterval(() => { tick = Date.now(); }, 1000);
+    return () => clearInterval(id);
+  });
+
   const winsForStatusline = $derived(statuslineWindows(agents, termTarget));
   const fmtTime = (ts) => {
     const d = new Date(ts);
@@ -349,19 +386,24 @@
 
 <div class="hub-root" class:compact class:drawer-open={termOpen && !compact}>
   <div class="cols">
-    {#if !compact}
-    <!-- ── Sidebar: projects only ─────────── -->
-    <aside class="sidebar">
-      <SideHandle />
+    <!-- ── Projects. A column on the desktop; on the phone the SAME list slides
+         in from the left, because these are separate conversations you pick
+         between, not tabs you flick through. ─────────── -->
+    {#if !compact || sideOpen}
+    {#if compact}
+      <div class="side-scrim" onclick={() => sideOpen = false} role="presentation"></div>
+    {/if}
+    <aside class="sidebar" class:sheet={compact}>
+      {#if !compact}<SideHandle />{/if}
       <div class="side-scroll">
         <div class="side-h">{t('hubProjects')}</div>
         {#each rows as row (row.project.id)}
-          <button class="side-row" class:open={row.project.session === selected} onclick={() => selectProject(row.project.session)}>
+          <button class="side-row" class:open={row.project.session === selected} onclick={() => { selectProject(row.project.session); sideOpen = false; }}>
             <span class="dot" class:off={!row.live}></span>
             <span class="p-name">{row.project.name}</span>
           </button>
         {/each}
-        <button class="side-row add" onclick={() => { createOpen = true; }}>
+        <button class="side-row add" onclick={() => { createOpen = true; sideOpen = false; }}>
           <Icon name="plus" size={13} />{t('projectNew')}
         </button>
       </div>
@@ -370,48 +412,27 @@
 
     <!-- ── Main: the conversation ─────────── -->
     <main class="mid">
-      {#if compact}
-        <div class="proj-chips">
-          {#each rows as row (row.project.id)}
-            <button class="pchip" class:sel={row.project.session === selected} onclick={() => selectProject(row.project.session)}>
-              <span class="dot" class:off={!row.live}></span>{row.project.name}
-            </button>
-          {/each}
-          <button class="pchip" onclick={() => { createOpen = true; }} title={t('projectNew')}><Icon name="plus" size={12} /></button>
-        </div>
-      {/if}
-
       <div class="page-head">
+        <!-- The phone reaches the project list here, as a drawer. No chip strip:
+             separate conversations are chosen deliberately, not flicked past. -->
+        {#if compact}
+          <button class="icon-btn" title={t('hubProjects')} onclick={() => sideOpen = true}>
+            <Icon name="menu" size={17} />
+          </button>
+        {/if}
         <h1>{selectedRow?.project.name ?? ''}</h1>
         {#if !compact}<span class="path">{shortPath(selectedRow?.project.path ?? '')}</span>{/if}
         <span class="spacer"></span>
         {#if selected && !liveSelected}
           <button class="chip-btn" onclick={bringUp}>{t('projectOpen')}</button>
         {/if}
-        {#if liveSelected}
-          <button class="chip-btn" onclick={() => { spawnOpen = !spawnOpen; }}><Icon name="plus" size={12} /> {t('hubSpawn')}</button>
-        {/if}
-        <!-- Chat detail, reachable where the feed is: cycles chat → status →
-             tools. The full control with labels lives in Settings. -->
-        <button class="chip-btn lvl" title={t('hubFeedLevel')} onclick={() => hubPrefs.cycleFeedLevel()}>
-          {hubPrefs.feedLevel === 'chat' ? t('hubFeedChat') : hubPrefs.feedLevel === 'status' ? t('hubFeedStatus') : t('hubFeedTools')}
-        </button>
-        <!-- THE terminal affordance: a button, not a permanent pane. -->
+        <!-- THE terminal affordance: a button, not a permanent pane. Adding an
+             agent belongs to the roster row, and chat detail belongs to
+             Settings — a header is not a place to keep spare switches. -->
         <button class="chip-btn term-toggle" class:on={termOpen} title={t('hubTerminal')} onclick={() => termOpen && !compact ? termOpen = false : openDrawer()}>
           <Icon name="terminal" size={14} />{#if !compact}<span>{t('hubTerminal')}</span>{/if}
         </button>
       </div>
-
-      {#if spawnOpen}
-        <div class="spawn-form">
-          <select bind:value={spawnAgent}>
-            <option value="" disabled selected>{t('hubPickAgent')}</option>
-            {#each registry as r (r.name)}<option value={r.name}>{r.name} · {r.backend}</option>{/each}
-          </select>
-          <input placeholder={t('hubBrief')} bind:value={spawnBrief} onkeydown={(e) => e.key === 'Enter' && doSpawn()} />
-          <button class="chip-btn" disabled={!spawnAgent} onclick={doSpawn}>{t('hubSpawn')}</button>
-        </div>
-      {/if}
 
       {#if managedAgents.length}
         <!-- The roster. Tapping an agent makes it the recipient (and this
@@ -422,6 +443,8 @@
               <div class="a-top">
                 <span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>
                 {a.name}
+                <!-- It replied and you have not looked yet. -->
+                {#if unread.has(a.name)}<span class="unread" title={t('hubUnread')}></span>{/if}
                 {#if recipient === a.name}<span class="lead-tag">{t('hubLead')}</span>{/if}
                 <span class="a-peek" role="button" tabindex="-1" title={t('hubWatch')}
                   onclick={(e) => { e.stopPropagation(); openDrawer(a); }}
@@ -430,14 +453,17 @@
                 </span>
               </div>
               <div class="a-state">
-                <span class="st" style:background={stateDotColor(a.state)}></span>{a.state}
+                <span class="st" class:live={a.state === 'running'} style:background={stateDotColor(a.state)}></span>
+                <span class="s-word">{stateLabel(a.state)}</span>
+                <!-- How long this state has held: running 2m14s. -->
+                {#if a.since}<span class="s-age">{fmtElapsed(a.since, tick)}</span>{/if}
               </div>
               {#if a.detail && !compact}<div class="a-note">{a.detail}</div>{/if}
             </button>
           {/each}
           <!-- Ad hoc: add an agent to a conversation already in progress. -->
           {#if liveSelected}
-            <button class="acard add" onclick={() => { spawnOpen = true; }} title={t('hubSpawn')}>
+            <button class="acard add" onclick={() => openPicker('add')} title={t('hubSpawn')}>
               <Icon name="plus" size={14} /><span>{t('hubSpawn')}</span>
             </button>
           {/if}
@@ -449,6 +475,7 @@
           {#if b.type === 'msg'}
             {@const m = b.msg}
             {@const sys = systemLine(m.body)}
+            {@const parts = splitImages(m.body)}
             {#if sys !== null}
               <div class="sysline"><span class="sys-who">{m.from}</span>{sys}</div>
             {:else}
@@ -463,8 +490,19 @@
                   {/if}
                 </div>
                 <!-- Markdown-rendered (agents write md); renderMarkdown
-                     escapes HTML first, so raw tags stay inert text. -->
-                <div class="bubble md">{@html renderMarkdown(m.body)}</div>
+                     escapes HTML first, so raw tags stay inert text. Image
+                     references are pulled out and resolved separately — a local
+                     path is not a URL a webview can load. -->
+                {#if parts.text}
+                  <div class="bubble md">{@html renderMarkdown(parts.text)}</div>
+                {/if}
+                {#if parts.images.length}
+                  <div class="shots">
+                    {#each parts.images as src, k (`${k}-${src}`)}
+                      <ChatImage {src} alt={m.from} />
+                    {/each}
+                  </div>
+                {/if}
               </div>
             {/if}
           {:else if b.type === 'prompt'}
@@ -495,12 +533,21 @@
                 {/if}
                 <span class="s-who">{windowName(b.window)}</span>
                 <span class="s-count">{t('hubStepsN').replace('{n}', String(b.events.length))}</span>
-                {#if !open}<span class="s-peek">{b.events[b.events.length - 1]?.text ?? ''}</span>{/if}
+                {#if !open}
+                  {@const last = b.events[b.events.length - 1]}
+                  <span class="s-peek"><span class="tname">{last?.tool ?? ''}</span> {last?.text ?? ''}</span>
+                {/if}
               </button>
               {#if open}
                 <div class="s-body">
                   {#each b.events as e, j (`${e.ts}-${j}`)}
-                    <div class="step"><span class="st-text">{e.text}</span><span class="st-ts">{fmtTime(e.ts)}</span></div>
+                    <div class="step">
+                      <!-- The tool NAME is the scannable half: fixed column,
+                           accent colour. Its argument is secondary. -->
+                      <span class="tname">{e.tool ?? ''}</span>
+                      <span class="st-text">{e.text}</span>
+                      <span class="st-ts">{fmtTime(e.ts)}</span>
+                    </div>
                   {/each}
                 </div>
               {/if}
@@ -515,7 +562,7 @@
               <div class="start-h">{t('hubStartTitle')}</div>
               <div class="start-list">
                 {#each registry as r (r.name)}
-                  <button class="start-row" disabled={starting} onclick={() => startWith([r.name])}>
+                  <button class="start-row" disabled={starting} onclick={() => addAgents([r.name], '', 'start')}>
                     <span class="ava" style:background={backendColor(r.backend)}>{r.name.slice(0, 1).toUpperCase()}</span>
                     <span class="sr-name">{r.name}</span>
                     <span class="sr-backend">{r.backend}</span>
@@ -523,7 +570,7 @@
                   </button>
                 {/each}
               </div>
-              <button class="chip-btn" disabled={starting} onclick={() => { startPick = []; startOpen = true; }}>
+              <button class="chip-btn" disabled={starting} onclick={() => openPicker('start')}>
                 <Icon name="collab" size={13} /> {t('hubStartTeam')}
               </button>
             </div>
@@ -538,9 +585,11 @@
              retarget or to broadcast. No @ typing required. -->
         {#if managedAgents.length}
           <div class="to-wrap">
-            <button class="to-chip" class:all={!recipient} onclick={() => recipientOpen = !recipientOpen}>
+            <button class="to-chip" class:all={recipient === ALL_TARGET} class:note={!recipient}
+              title={recipient === ALL_TARGET ? t('hubToAllHint') : recipient ? '' : t('hubToRoomHint')}
+              onclick={() => recipientOpen = !recipientOpen}>
               <span class="to-label">{t('hubTo')}</span>
-              <span class="to-name">{recipient || t('hubEveryone')}</span>
+              <span class="to-name">{recipient === ALL_TARGET ? t('hubEveryone') : recipient || t('hubRoomNote')}</span>
               <Icon name={recipientOpen ? 'chevron-down' : 'chevron-up'} size={11} />
             </button>
             {#if recipientOpen}
@@ -550,14 +599,22 @@
                     <span class="st" style:background={stateDotColor(a.state)}></span>{a.name}
                   </button>
                 {/each}
+                <div class="to-sep"></div>
+                <!-- Broadcast: every agent is interrupted. Labelled with what
+                     it costs, not just with who it reaches. -->
+                <button class:sel={recipient === ALL_TARGET} onclick={() => setRecipient(ALL_TARGET)}>
+                  <span class="st all-dot"></span>
+                  <span class="to-opt"><span>{t('hubEveryone')}</span><small>{t('hubToAllHint')}</small></span>
+                </button>
                 <button class:sel={!recipient} onclick={() => setRecipient('')}>
-                  <span class="st all-dot"></span>{t('hubEveryone')}
+                  <span class="st note-dot"></span>
+                  <span class="to-opt"><span>{t('hubRoomNote')}</span><small>{t('hubToRoomHint')}</small></span>
                 </button>
               </div>
             {/if}
           </div>
         {/if}
-        <input placeholder={recipient ? t('hubComposerDm').replace('{name}', recipient) : t('hubComposer')}
+        <input placeholder={recipient === ALL_TARGET ? t('hubComposerAll') : recipient ? t('hubComposerDm').replace('{name}', recipient) : t('hubComposerRoom')}
           bind:value={composerText} onkeydown={(e) => e.key === 'Enter' && send()} />
         <button class="send-btn" onclick={send} title={t('hubSend')}>
           {#if compact}<Icon name="send" size={16} />{:else}{t('hubSend')}{/if}
@@ -607,9 +664,9 @@
     {/if}
   </div>
 
-  {#if startOpen}
+  {#if pickerOpen}
     <!-- ── Start a team: several agents at once ── -->
-    <div class="dlg-backdrop" onclick={() => startOpen = false} role="presentation"></div>
+    <div class="dlg-backdrop" onclick={() => pickerOpen = false} role="presentation"></div>
     <div class="dlg" class:sheet={compact}>
       <h2>{t('hubStartTeam')}</h2>
       <div class="dlg-agents">
@@ -624,9 +681,9 @@
       </div>
       <input placeholder={t('hubBrief')} bind:value={startBrief} />
       <div class="dlg-actions">
-        <button class="chip-btn" onclick={() => startOpen = false}>{t('cancel')}</button>
+        <button class="chip-btn" onclick={() => pickerOpen = false}>{t('cancel')}</button>
         <button class="chip-btn primary" disabled={!startPick.length || starting}
-          onclick={() => startWith(startPick, startBrief.trim())}>
+          onclick={() => addAgents(startPick, startBrief.trim())}>
           {starting ? '…' : t('hubStartGo').replace('{n}', String(startPick.length))}
         </button>
       </div>
@@ -674,28 +731,22 @@
   .hub-root.compact .composer input { min-height: 40px; font-size: 14px; }
   .hub-root.compact .send-btn { min-width: 44px; min-height: 40px; padding: 8px 12px; }
   .hub-root.compact .chip-btn { min-height: 34px; }
-  .hub-root.compact .spawn-form { flex-wrap: wrap; padding: 8px 12px; }
-  .hub-root.compact .spawn-form select, .hub-root.compact .spawn-form input { min-height: 40px; flex: 1 1 100%; }
   .hub-root.compact .s-head { min-height: 34px; }
   /* Drawer open: the conversation yields but stays present. */
   .hub-root.drawer-open .cols { grid-template-columns: var(--sidebar-w) minmax(280px, 0.8fr) minmax(360px, 1.2fr); }
-
-  .proj-chips {
-    display: flex; gap: 6px; padding: 10px 12px 0; overflow-x: auto; flex: none;
-    -webkit-overflow-scrolling: touch; scrollbar-width: none;
-  }
-  .proj-chips::-webkit-scrollbar { display: none; }
-  .pchip {
-    display: flex; align-items: center; gap: 6px; flex: none;
-    background: var(--surface); border: 1px solid var(--border); border-radius: 999px;
-    color: var(--text2); padding: 5px 12px; font-size: 12.5px; cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .pchip.sel { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
   .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--status-ok); flex: none; }
   .dot.off { background: var(--text3); }
 
   .sidebar { position: relative; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+  /* Phone: the project list slides over the conversation instead of taking a
+     column from it. */
+  .sidebar.sheet {
+    position: fixed; z-index: 26; inset: 0 auto 0 0; width: min(280px, 82vw);
+    box-shadow: 0 0 44px rgba(0,0,0,0.5);
+    padding-top: env(safe-area-inset-top);
+  }
+  .sidebar.sheet .side-row { min-height: 44px; }
+  .side-scrim { position: fixed; inset: 0; z-index: 25; background: rgba(0,0,0,0.45); }
   .side-scroll { flex: 1; overflow-y: auto; padding: 8px; }
   .p-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; }
 
@@ -703,11 +754,6 @@
   .path { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .spacer { flex: 1; }
   .term-toggle.on { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
-  .lvl { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
-
-  .spawn-form { display: flex; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--border2); }
-  .spawn-form select, .spawn-form input { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 8px; color: var(--text); padding: 6px 10px; font-size: 12.5px; }
-  .spawn-form input { flex: 1; }
 
   .cards { display: flex; gap: 8px; padding: 10px 16px; overflow-x: auto; border-bottom: 1px solid var(--border2); }
   .acard { flex: none; width: 158px; background: var(--surface); border: 1px solid var(--border); border-radius: 11px; padding: 9px 11px; cursor: pointer; text-align: left; transition: border-color 160ms; }
@@ -726,7 +772,13 @@
   .a-peek { margin-left: auto; display: grid; place-items: center; width: 22px; height: 20px; border-radius: 6px; color: var(--text3); }
   .a-peek:hover { color: var(--accent); background: var(--surface2); }
   .a-state { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--text2); margin-top: 5px; display: flex; align-items: center; gap: 5px; }
+  .s-word { text-transform: lowercase; }
+  .s-age { color: var(--text3); font-variant-numeric: tabular-nums; }
   .st { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  /* Running is the only state that moves. */
+  .st.live { animation: s-pulse 1.4s ease-in-out infinite; }
+  /* An agent replied and you have not looked yet. */
+  .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--status-danger); flex: none; }
   .a-note { font-size: 11px; color: var(--text3); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   .feed { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; }
@@ -736,6 +788,8 @@
   .m-head .who { color: var(--text2); font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 11.5px; }
   .bubble { background: var(--surface); border: 1px solid var(--border2); border-radius: 12px; padding: 8px 12px; font-size: 13px; color: var(--text); word-break: break-word; overflow-wrap: anywhere; }
   .msg.me .bubble { background: var(--accent-bg); border-color: transparent; }
+  /* Referenced images, under the text they came with. */
+  .shots { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
   .sysline { align-self: center; display: flex; align-items: baseline; gap: 7px; font-size: 11px; color: var(--text3); background: var(--surface); border-radius: 999px; padding: 3px 13px; max-width: 92%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .sysline .sys-who { font-family: ui-monospace, Menlo, monospace; font-weight: 600; color: var(--text2); }
   /* Delivery receipt: the agent's prompt hook echoed our line back. */
@@ -784,7 +838,11 @@
     margin-left: 11px; padding: 5px 0 3px 11px; border-left: 1px solid var(--border);
   }
   .step { display: flex; align-items: baseline; gap: 8px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text3); }
-  .step .st-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* The tool name: the part the eye scans down a column. */
+  .tname { flex: none; color: var(--accent); font-weight: 650; }
+  .step .tname { min-width: 6.5em; }
+  .s-peek .tname { min-width: 0; }
+  .step .st-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text2); }
   .step .st-ts { flex: none; margin-left: auto; opacity: 0.55; }
   .empty { color: var(--text3); font-size: 12.5px; text-align: center; margin: auto; padding: 0 24px; line-height: 1.6; }
 
@@ -793,9 +851,16 @@
      UPWARD so the on-screen keyboard never covers it. */
   .to-wrap { position: relative; flex: none; }
   .to-chip { display: flex; align-items: center; gap: 5px; min-height: 34px; background: var(--accent-bg); color: var(--accent); border: 1px solid transparent; border-radius: 9px; padding: 6px 9px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: ui-monospace, Menlo, monospace; max-width: 42vw; }
-  .to-chip.all { background: var(--surface); color: var(--text2); border-color: var(--border); }
+  /* Broadcast and room-note are NOT the default state, so they do not wear the
+     accent: one interrupts everyone, the other reaches nobody live. */
+  .to-chip.all { background: var(--surface); color: var(--status-warn); border-color: var(--status-warn); }
+  .to-chip.note { background: var(--surface); color: var(--text2); border-color: var(--border); }
   .to-label { font-weight: 500; opacity: 0.7; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; }
   .to-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .to-sep { height: 1px; background: var(--border2); margin: 4px 6px; }
+  .to-opt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .to-opt small { font-size: 10px; opacity: 0.65; }
+  .note-dot { border: 1px dashed var(--text3); background: none; }
   .to-menu {
     position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 12;
     min-width: 168px; max-height: 46vh; overflow-y: auto;

@@ -762,7 +762,11 @@ export interface HubActivityEvent {
    * prompt = a prompt the agent accepted (userPromptSubmit), warn = a line we
    * typed that the agent never echoed back. */
   kind: 'tool' | 'status' | 'notif' | 'prompt' | 'warn';
+  /** For `tool` events this is the ARGUMENT (a path, a command); the tool's
+   * name is `tool`. For every other kind it is the whole line. */
   text: string;
+  /** `tool` events only: the tool's name ("Edit", "execute_bash"). */
+  tool?: string;
   /** `prompt` events only: 'app' when the text is the line this app typed into
    * the pane (the delivery receipt), 'local' when typed at the keyboard. */
   via?: 'app' | 'local';
