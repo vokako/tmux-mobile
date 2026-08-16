@@ -171,6 +171,34 @@ export function stoppedAgents(
     .map((s) => s.window_name);
 }
 
+/** A colour for a tool NAME, by what the tool does. A wall of grey monospace is
+ * hard to read; the same four buckets in the same colours make a run of steps
+ * scannable without a legend. Names differ per backend (`fs_read`, `Read`,
+ * `execute_bash`, `Bash`, `web_search`…), so match on substrings rather than an
+ * exhaustive table — an unknown tool falls back to neutral rather than to a
+ * misleading colour. */
+export function toolColor(tool: string | null | undefined): string {
+  const t = (tool ?? '').toLowerCase();
+  if (!t) return 'var(--text3)';
+  if (/(write|edit|create|insert|replace|delete|remove|rename|mv|patch|apply)/.test(t)) {
+    return 'var(--status-warn)';       // it changes something
+  }
+  if (/(bash|shell|exec|command|run|terminal|process)/.test(t)) {
+    return 'var(--status-ok)';         // it runs something
+  }
+  if (/(search|grep|find|fetch|web|http|browse|url|query)/.test(t)) {
+    return 'var(--accent)';            // it looks something up
+  }
+  if (/(read|list|stat|cat|view|ls|glob|tree|show)/.test(t)) {
+    return 'var(--tool-read, #7aa2f7)'; // it reads something
+  }
+  return 'var(--text2)';
+}
+
+/** How many steps a group shows before "show all". A run of forty tool calls is
+ * a wall; the last handful is what tells you where the agent is. */
+export const STEPS_PREVIEW = 5;
+
 export type FeedLevel = 'chat' | 'status' | 'tools';
 
 /** Lifecycle lines the server posts into the room (a spawn, a `tmm done`) are
@@ -294,6 +322,11 @@ export function feedBlocks(
       stream.push({ type: 'prompt', ts: e.ts, window: e.window, text: e.text });
       continue;
     }
+    // A finished turn is not news: the agent's reply is right there as a
+    // message, and its chip goes idle. A row saying "finished a turn" after
+    // every answer was just noise in the transcript (owner call, 2026-08-16).
+    // The other lifecycle events all mean something is WAITING on a human.
+    if (e.kind === 'notif' && e.text === 'completed') continue;
     stream.push({ type: 'note', ts: e.ts, window: e.window, event: e });
   }
   stream.sort((a, b) => a.ts - b.ts);

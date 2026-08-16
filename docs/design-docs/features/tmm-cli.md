@@ -441,6 +441,10 @@ events into rows, and three rules shape what the user sees:
   showing the call that produced it would print the same event twice
   (`isSelfReport`). `tmm task`, `project`, `agent`, `skill` have no other trace
   in the chat and stay visible.
+- **A finished turn is not a row.** The `completed` notification used to print
+  "finished a turn" after every answer, next to the answer itself. The reply IS
+  the event; the chip going idle is the state. Lifecycle rows are now only the
+  ones where a human is needed (permission, input, failure).
 - **Tool calls collapse, replies do not.** Consecutive `tool` events from the
   same window fold into one collapsible group ("N tool calls", last line as the
   preview); a message, a status declaration or a notification ends the run,
@@ -450,9 +454,22 @@ events into rows, and three rules shape what the user sees:
   choice lives outside the row (`stepsChoice`, keyed by group) so a re-render
   cannot lose it.
 
+A tool NAME is coloured by what the tool does — changes / runs / looks up /
+reads, four buckets matched on substrings so `fs_write` and `Edit` land in the
+same colour without an exhaustive table (`toolColor`). An expanded group shows
+the last `STEPS_PREVIEW` steps with "show all N", because the tail is what tells
+you where the agent is.
+
 Because a run of tool calls is now one line instead of forty, `+ tools` is the
 default detail level, and the level is reachable from the Hub head (a chip that
 cycles chat → status → tools) as well as Settings → Appearance → Chat detail.
+
+Tapping a message reveals what you can do with it — copy the source, or read it
+raw — rather than parking two buttons on every bubble forever. The roster is one
+line per agent (avatar, name, state dot, elapsed, unread dot) with everything
+secondary behind a dot menu; the menu renders as a BAR under the roster, not a
+popover inside the chip, because the roster scrolls horizontally and a scroll
+container clips absolutely positioned children.
 
 No emoji anywhere in this surface: state is carried by colour, a rotating
 chevron, a pulsing dot and stroked SVG icons. Lifecycle lines the server posts

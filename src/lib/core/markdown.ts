@@ -9,6 +9,35 @@
 import { marked } from 'marked';
 import './markedSafeUrl.ts';
 
+// Strikethrough requires DOUBLE tildes here, unlike GFM, which also accepts
+// `~x~`. A single tilde is a range separator in everyday Chinese text — the
+// weather reply `26~32℃，东风微风 … 26~32℃` opened a <del> at the first tilde
+// and closed it at the next one, striking out several lines of a real answer
+// (owner report, 2026-08-16). Being unable to strike text out is a small loss;
+// striking out text nobody asked to strike is a wrong rendering of the content.
+// Kept to one line as well: a <del> that spans a `breaks: true` newline is how
+// the damage spread.
+//
+// A tilde run that is not a valid `~~…~~` is CONSUMED as plain text, because an
+// overridden tokenizer that returns false falls back to marked's own — so
+// refusing the match is not enough to stop it, the characters have to be taken
+// out of play.
+marked.use({
+  tokenizer: {
+    // The signature is marked's own; the return is a Del token, a text token
+    // that swallows the tildes, or false when this is not our business.
+    del(this: any, src: string): any {
+      if (!src.startsWith('~')) return false;
+      const m = /^~~(?=\S)([^\n]*?\S)~~/.exec(src);
+      if (m) {
+        return { type: 'del', raw: m[0], text: m[1]!, tokens: this.lexer.inlineTokens(m[1]!) };
+      }
+      const run = /^~+/.exec(src)![0];
+      return { type: 'text', raw: run, text: run };
+    },
+  },
+});
+
 const cache = new Map<string, string>();
 
 export function renderMarkdown(body: string | null | undefined): string {

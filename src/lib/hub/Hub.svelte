@@ -26,7 +26,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, systemLine, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents } from './hub.ts';
+  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, systemLine, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_PREVIEW } from './hub.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
 
@@ -108,6 +108,9 @@
     agents = [];
     recipient = '';
     recipientOpen = false;
+    menuFor = '';
+    msgOpen = '';
+    rawOpen = '';
     termOpen = false;
     await Promise.all([loadFeed(), loadAgents(), loadActivity()]);
   }
@@ -380,6 +383,20 @@
   // group follows the agent (open while it works, closed when it is done) and
   // an explicit choice sticks. Keyed by group so re-renders can't lose it.
   let stepsChoice = $state({});
+  let stepsAll = $state({});        // group key → show every step, not the tail
+  let menuFor = $state('');         // agent name whose dot menu is open
+  let msgOpen = $state('');         // message key whose action row is open
+  let rawOpen = $state('');         // message key showing its raw source
+  let copied = $state('');          // body just copied, for the button label
+
+  /** Copy a message as the agent wrote it — markdown, image refs and all. */
+  async function copyMsg(body) {
+    try {
+      await navigator.clipboard.writeText(body ?? '');
+      copied = body;
+      setTimeout(() => { if (copied === body) copied = ''; }, 1500);
+    } catch (e) { console.warn('copy failed', e); }
+  }
   const isRunning = (b) =>
     b.key === newestSteps[b.window] && agents.find((a) => a.window === b.window)?.state === 'working';
   const stepsOpen = (b) => stepsChoice[b.key] ?? isRunning(b);
@@ -480,54 +497,36 @@
              project's lead) — the phone gets chips, the desktop gets cards. -->
         <div class="cards" class:chips={compact}>
           {#each managedAgents as a (a.window)}
-            <button class="acard" class:sel={recipient === a.name} onclick={() => setRecipient(a.name)}>
-              <div class="a-top">
-                <span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>
-                {a.name}
-                <!-- It replied and you have not looked yet. -->
-                {#if unread.has(a.name)}<span class="unread" title={t('hubUnread')}></span>{/if}
-                {#if recipient === a.name}<span class="lead-tag">{t('hubLead')}</span>{/if}
-                <span class="a-peek" role="button" tabindex="-1" title={t('hubWatch')}
-                  onclick={(e) => { e.stopPropagation(); openDrawer(a); }}
-                  onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); openDrawer(a); } }}>
-                  <Icon name="terminal" size={12} />
-                </span>
-                <!-- One life control on a running agent: stop. Stopping keeps
-                     the declaration, so starting it again is the other half —
-                     it lives on the stopped chip, not as a second button here
-                     (owner call: a restart button on a running agent is a
-                     shortcut for two steps nobody asked to combine). -->
-                {#if recipient === a.name}
-                  <span class="a-act danger" role="button" tabindex="-1" title={t('hubStop')}
-                    onclick={(e) => { e.stopPropagation(); askAction('stop', a.name); }}
-                    onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); askAction('stop', a.name); } }}>
-                    <Icon name="stop" size={12} />
-                  </span>
-                {/if}
-              </div>
-              <div class="a-state">
-                <span class="st" class:live={a.state === 'running'} style:background={stateDotColor(a.state)}></span>
-                <span class="s-word">{stateLabel(a.state)}</span>
-                <!-- How long this state has held: running 2m14s. -->
-                {#if a.since}<span class="s-age">{fmtElapsed(a.since, tick)}</span>{/if}
-              </div>
-              {#if a.detail && !compact}<div class="a-note">{a.detail}</div>{/if}
-            </button>
+            <!-- A div, not a button: the dot menu inside contains real buttons,
+                 and a button inside a button is invalid HTML the browser
+                 silently reshuffles. -->
+            <div class="acard" class:sel={recipient === a.name} role="button" tabindex="0"
+              title={`${a.name} · ${stateLabel(a.state)}${a.detail ? ' · ' + a.detail : ''}`}
+              onclick={() => setRecipient(a.name)}
+              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setRecipient(a.name); } }}>
+              <span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>
+              <span class="a-name">{a.name}</span>
+              <span class="st" class:live={a.state === 'running'} style:background={stateDotColor(a.state)}></span>
+              {#if a.since}<span class="s-age">{fmtElapsed(a.since, tick)}</span>{/if}
+              {#if unread.has(a.name)}<span class="unread" title={t('hubUnread')}></span>{/if}
+              <!-- Destructive and secondary actions stay behind a dot menu: a
+                   roster is for seeing who is here, not a row of hazards. -->
+              <span class="a-more" role="button" tabindex="-1" title={t('hubMore')}
+                onclick={(e) => { e.stopPropagation(); menuFor = menuFor === a.name ? '' : a.name; }}
+                onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); menuFor = menuFor === a.name ? '' : a.name; } }}>
+                <Icon name="dots" size={13} />
+              </span>
+            </div>
           {/each}
           <!-- Stopped agents: declared by the project, no window right now.
                Starting one resumes its conversation, so it stays on the roster
                instead of vanishing from the room it belongs to. -->
           {#each stopped as name (name)}
             <button class="acard off" disabled={acting} onclick={() => startAgent(name)} title={t('hubStartAgain')}>
-              <div class="a-top">
-                <span class="ava dim">{name.slice(0, 1).toUpperCase()}</span>
-                {name}
-              </div>
-              <div class="a-state">
-                <span class="st" style:background={stateDotColor('idle')}></span>
-                <span class="s-word">{t('hubStopped')}</span>
-                <Icon name="refresh" size={11} />
-              </div>
+              <span class="ava dim">{name.slice(0, 1).toUpperCase()}</span>
+              <span class="a-name">{name}</span>
+              <span class="s-age">{t('hubStopped')}</span>
+              <Icon name="refresh" size={11} />
             </button>
           {/each}
           <!-- Ad hoc: add an agent to a conversation already in progress. -->
@@ -536,6 +535,23 @@
               <Icon name="plus" size={14} /><span>{t('hubSpawn')}</span>
             </button>
           {/if}
+        </div>
+      {/if}
+
+      {#if menuFor}
+        <!-- Actions for one agent. A bar rather than a popover inside the chip:
+             the roster scrolls horizontally, and a scroll container clips
+             anything absolutely positioned inside it. -->
+        <div class="a-bar">
+          <span class="ab-who">{menuFor}</span>
+          <button onclick={() => { const a = managedAgents.find((x) => x.name === menuFor); menuFor = ''; if (a) openDrawer(a); }}>
+            <Icon name="terminal" size={12} />{t('hubWatch')}
+          </button>
+          <button class="danger" onclick={() => { const n = menuFor; menuFor = ''; askAction('stop', n); }}>
+            <Icon name="stop" size={12} />{t('hubStop')}
+          </button>
+          <span class="spacer"></span>
+          <button class="ab-x" onclick={() => menuFor = ''} title={t('cancel')}><Icon name="x" size={12} /></button>
         </div>
       {/if}
 
@@ -561,9 +577,31 @@
                 <!-- Markdown-rendered (agents write md); renderMarkdown
                      escapes HTML first, so raw tags stay inert text. Image
                      references are pulled out and resolved separately — a local
-                     path is not a URL a webview can load. -->
+                     path is not a URL a webview can load.
+                     Tapping the bubble reveals what you can DO with it: the
+                     actions are not chrome that sits there on every message. -->
                 {#if parts.text}
-                  <div class="bubble md">{@html renderMarkdown(parts.text)}</div>
+                  {@const key = blockKey(b, i)}
+                  <!-- svelte-ignore a11y_no_static_element_interactions -->
+                  <div class="bubble md" role="button" tabindex="0"
+                    onclick={() => { msgOpen = msgOpen === key ? '' : key; }}
+                    onkeydown={(e) => { if (e.key === 'Enter') msgOpen = msgOpen === key ? '' : key; }}>
+                    {#if rawOpen === key}
+                      <pre class="raw">{m.body}</pre>
+                    {:else}
+                      {@html renderMarkdown(parts.text)}
+                    {/if}
+                  </div>
+                  {#if msgOpen === key}
+                    <div class="m-acts">
+                      <button onclick={() => copyMsg(m.body)}>
+                        <Icon name="copy" size={11} />{copied === m.body ? t('hubCopied') : t('hubCopy')}
+                      </button>
+                      <button class:on={rawOpen === key} onclick={() => { rawOpen = rawOpen === key ? '' : key; }}>
+                        <Icon name="command" size={11} />{t('hubRaw')}
+                      </button>
+                    </div>
+                  {/if}
                 {/if}
                 {#if parts.images.length}
                   <div class="shots">
@@ -604,18 +642,23 @@
                 <span class="s-count">{t('hubStepsN').replace('{n}', String(b.events.length))}</span>
                 {#if !open}
                   {@const last = b.events[b.events.length - 1]}
-                  <span class="s-peek">{#if last?.tool}<span class="tname">{last.tool}</span> {/if}{last?.text ?? ''}</span>
+                  <span class="s-peek">{#if last?.tool}<span class="tname" style:color={toolColor(last.tool)}>{last.tool}</span> {/if}{last?.text ?? ''}</span>
                 {/if}
               </button>
               {#if open}
+                {@const shown = stepsAll[b.key] ? b.events : b.events.slice(-STEPS_PREVIEW)}
                 <div class="s-body">
-                  {#each b.events as e, j (`${e.ts}-${j}`)}
+                  {#if shown.length < b.events.length}
+                    <button class="s-all" onclick={() => { stepsAll[b.key] = true; }}>
+                      {t('hubStepsAll').replace('{n}', String(b.events.length))}
+                    </button>
+                  {/if}
+                  {#each shown as e, j (`${e.ts}-${j}`)}
                     <div class="step">
-                      <!-- The tool NAME is the scannable half: fixed column,
-                           accent colour. Only reserve that column when there IS
-                           a name — an event from an older server (or a backend
-                           that does not report one) must not leave a gap. -->
-                      {#if e.tool}<span class="tname">{e.tool}</span>{/if}
+                      <!-- The tool NAME is the scannable half: its own colour by
+                           what the tool does, and a column only when there IS a
+                           name (an older server sends none). -->
+                      {#if e.tool}<span class="tname" style:color={toolColor(e.tool)}>{e.tool}</span>{/if}
                       <span class="st-text">{e.text}</span>
                       <span class="st-ts">{fmtTime(e.ts)}</span>
                     </div>
@@ -841,41 +884,45 @@
   .spacer { flex: 1; }
   .term-toggle.on { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
 
-  .cards { display: flex; gap: 8px; padding: 10px 16px; overflow-x: auto; border-bottom: 1px solid var(--border2); }
-  .acard { flex: none; width: 158px; background: var(--surface); border: 1px solid var(--border); border-radius: 11px; padding: 9px 11px; cursor: pointer; text-align: left; transition: border-color 160ms; }
-  .acard:hover { border-color: var(--input-border); }
-  .acard.sel { border-color: var(--accent); background: var(--accent-bg); }
-  .acard.add { width: auto; display: flex; align-items: center; gap: 6px; color: var(--text3); font-size: 12px; }
-  /* A stopped agent: present, not running. */
-  .acard.off { opacity: 0.6; }
-  .acard.off:hover { opacity: 1; border-color: var(--accent); }
-  .ava.dim { background: var(--surface2) !important; color: var(--text3); }
+  /* The roster: one line per agent, on every screen size. It answers "who is
+     here and are they busy" — anything more was a wall of cards. */
+  .cards { display: flex; gap: 6px; padding: 8px 14px; overflow-x: auto; border-bottom: 1px solid var(--border2); scrollbar-width: none; }
+  .cards::-webkit-scrollbar { display: none; }
+  .acard {
+    position: relative; flex: none; display: flex; align-items: center; gap: 6px;
+    min-height: 34px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 999px; padding: 4px 10px 4px 5px; cursor: pointer; text-align: left;
+    font-size: 12.5px; color: var(--text2); transition: border-color 160ms, color 160ms;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .acard:hover { border-color: var(--input-border); color: var(--text); }
+  .acard.sel { border-color: var(--accent); background: var(--accent-bg); color: var(--text); }
+  .acard.add { color: var(--text3); padding-right: 12px; }
   .acard.add:hover { color: var(--accent); }
-  .lead-tag { font-size: 8.5px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 3px; }
-  /* Phone: the roster is a scrollable chip row, not a wall of cards. */
-  .cards.chips { gap: 6px; padding: 8px 12px; }
-  .cards.chips .acard { width: auto; display: flex; align-items: center; gap: 6px; min-height: 40px; border-radius: 999px; padding: 6px 11px; }
-  .cards.chips .a-top { gap: 5px; }
-  .cards.chips .a-state { margin-top: 0; }
-  .cards.chips .a-state :global(span) { margin: 0; }
-  .a-top { display: flex; align-items: center; gap: 6px; font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 12.5px; color: var(--text); }
-  .a-peek { margin-left: auto; display: grid; place-items: center; width: 22px; height: 20px; border-radius: 6px; color: var(--text3); }
-  .a-peek:hover { color: var(--accent); background: var(--surface2); }
-  /* Life controls for the agent you are addressing. */
-  .a-act { display: grid; place-items: center; width: 22px; height: 20px; border-radius: 6px; color: var(--text3); flex: none; }
-  .a-act:hover { color: var(--accent); background: var(--surface2); }
-  .a-act.danger:hover { color: var(--status-danger); }
-  .dlg-note { margin: 0; font-size: 12.5px; color: var(--text2); line-height: 1.55; }
-  .chip-btn.danger { color: var(--status-danger); border-color: var(--status-danger); }
-  .a-state { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; color: var(--text2); margin-top: 5px; display: flex; align-items: center; gap: 5px; }
-  .s-word { text-transform: lowercase; }
-  .s-age { color: var(--text3); font-variant-numeric: tabular-nums; }
+  .acard.off { opacity: 0.55; }
+  .acard.off:hover { opacity: 1; border-color: var(--accent); }
+  .a-name { font-family: ui-monospace, Menlo, monospace; font-weight: 600; max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .s-age { color: var(--text3); font-size: 10.5px; font-variant-numeric: tabular-nums; font-family: ui-monospace, Menlo, monospace; }
   .st { width: 6px; height: 6px; border-radius: 50%; flex: none; }
-  /* Running is the only state that moves. */
   .st.live { animation: s-pulse 1.4s ease-in-out infinite; }
-  /* An agent replied and you have not looked yet. */
   .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--status-danger); flex: none; }
-  .a-note { font-size: 11px; color: var(--text3); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ava.dim { background: var(--surface2) !important; color: var(--text3); }
+  /* Secondary and destructive actions hide until asked for. */
+  .a-more { display: grid; place-items: center; width: 20px; height: 22px; border-radius: 6px; color: var(--text3); flex: none; }
+  .a-more:hover { color: var(--text); background: var(--surface2); }
+  .a-bar {
+    display: flex; align-items: center; gap: 6px; padding: 6px 14px;
+    border-bottom: 1px solid var(--border2); background: var(--bg2);
+  }
+  .ab-who { font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 12px; color: var(--text2); }
+  .a-bar button {
+    display: inline-flex; align-items: center; gap: 5px; min-height: 32px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text3); padding: 4px 10px; font-size: 12px; cursor: pointer;
+  }
+  .a-bar button:hover { color: var(--text); border-color: var(--input-border); }
+  .a-bar button.danger:hover { color: var(--status-danger); border-color: var(--status-danger); }
+  .a-bar .ab-x { border: none; background: none; padding: 4px 6px; }
 
   .feed { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; }
   .msg { max-width: 84%; }
@@ -884,6 +931,17 @@
   .m-head .who { color: var(--text2); font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 11.5px; }
   .bubble { background: var(--surface); border: 1px solid var(--border2); border-radius: 12px; padding: 8px 12px; font-size: 13px; color: var(--text); word-break: break-word; overflow-wrap: anywhere; }
   .msg.me .bubble { background: var(--accent-bg); border-color: transparent; }
+  .bubble { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .bubble .raw { margin: 0; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text2); }
+  /* What you can DO with a message, revealed by tapping it. */
+  .m-acts { display: flex; gap: 6px; margin-top: 4px; }
+  .msg.me .m-acts { justify-content: flex-end; }
+  .m-acts button {
+    display: inline-flex; align-items: center; gap: 4px; min-height: 28px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text3); padding: 4px 9px; font-size: 11px; cursor: pointer;
+  }
+  .m-acts button:hover, .m-acts button.on { color: var(--accent); border-color: var(--accent); }
   /* Referenced images, under the text they came with. */
   .shots { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
   .sysline { align-self: center; display: flex; align-items: baseline; gap: 7px; font-size: 11px; color: var(--text3); background: var(--surface); border-radius: 999px; padding: 3px 13px; max-width: 92%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -933,6 +991,11 @@
     display: flex; flex-direction: column; gap: 2px;
     margin-left: 11px; padding: 5px 0 3px 11px; border-left: 1px solid var(--border);
   }
+  .s-all {
+    align-self: flex-start; background: none; border: none; color: var(--text3);
+    font-size: 10.5px; padding: 0 0 3px; cursor: pointer; font-family: ui-monospace, Menlo, monospace;
+  }
+  .s-all:hover { color: var(--accent); }
   .step { display: flex; align-items: baseline; gap: 8px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text3); }
   /* The tool name: the part the eye scans down a column. */
   .tname { flex: none; color: var(--accent); font-weight: 650; }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeMessages, statuslineWindows, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents } from './hub.ts';
+import { mergeMessages, statuslineWindows, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -46,7 +46,7 @@ test('feedBlocks respects the feed level and collapses duplicate tool lines', ()
     ev({ ts: 150, kind: 'tool', text: 'Edit a.rs' }),
     ev({ ts: 160, kind: 'tool', text: 'Edit a.rs' }),   // pre+post dup
     ev({ ts: 170, kind: 'tool', text: 'Edit b.rs' }),
-    ev({ ts: 200, kind: 'notif', text: 'completed' }),
+    ev({ ts: 200, kind: 'notif', text: 'input_required' }),
   ];
   assert.equal(feedBlocks(feed, activity, 'chat').length, 1, 'chat = messages only');
   const status = feedBlocks(feed, activity, 'status');
@@ -56,6 +56,29 @@ test('feedBlocks respects the feed level and collapses duplicate tool lines', ()
   const steps = tools.find((i) => i.type === 'steps');
   assert.deepEqual(steps?.events.map((e) => e.text), ['Edit a.rs', 'Edit b.rs'], 'dup dropped, order kept');
   assert.deepEqual(tools.map((i) => i.ts), [50, 100, 150, 200], 'sorted by ts, group carries its first ts');
+});
+
+test('a finished turn is not a row — the reply already is', () => {
+  const feed = [{ ts: 200, from: 'dev', body: 'done' }];
+  const completed = [ev({ ts: 210, kind: 'notif', text: 'completed' })];
+  assert.deepEqual(feedBlocks(feed, completed, 'tools').map((b) => b.type), ['msg'],
+    '"finished a turn" after every answer is noise');
+  // The lifecycle events that mean a human is needed DO show.
+  for (const kind of ['permission_required', 'input_required', 'failed']) {
+    const blocks = feedBlocks([], [ev({ ts: 1, kind: 'notif', text: kind })], 'status');
+    assert.deepEqual(blocks.map((b) => b.type), ['note'], kind);
+  }
+});
+
+test('toolColor buckets tools by what they do, across backend spellings', () => {
+  const bucket = (t: string) => toolColor(t);
+  assert.equal(bucket('fs_write'), bucket('Edit'), 'both change things');
+  assert.equal(bucket('execute_bash'), bucket('Bash'), 'both run things');
+  assert.equal(bucket('web_search'), bucket('grep'), 'both look things up');
+  assert.equal(bucket('fs_read'), bucket('Read'), 'both read things');
+  assert.notEqual(bucket('fs_write'), bucket('fs_read'), 'change and read are not the same');
+  assert.equal(toolColor(''), 'var(--text3)', 'no name, no claim');
+  assert.equal(toolColor('mystery_tool'), 'var(--text2)', 'unknown stays neutral');
 });
 
 test('a reply between tool calls splits the group in two', () => {
