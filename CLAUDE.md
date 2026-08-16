@@ -117,6 +117,7 @@ end up shipping the wrong tree.
 - [Team / multi-agent bus](docs/design-docs/features/team.md)
 - [Projects (declarative workspaces)](docs/design-docs/features/projects.md)
 - [tmm CLI + project hub (agents-v2)](docs/design-docs/features/tmm-cli.md)
+- [Agent lifecycle: spawn → conversation → completion](docs/design-docs/features/agent-lifecycle.md)
 
 ### Other
 - [Testing Conventions](docs/conventions/testing.md)

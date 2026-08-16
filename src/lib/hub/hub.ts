@@ -121,12 +121,15 @@ export function fmtElapsed(since: number, now: number): string {
 
 /** Agents whose newest message the user has not seen yet — the red-dot rule.
  * Keyed by sender name, so a room where three agents replied marks all three.
- * `seenTs` is the newest message timestamp the user has looked at (ms). */
-export function unreadSenders(feed: readonly { ts?: number; from?: string }[], seenTs: number): Set<string> {
+ * `seenTs` is the newest message timestamp the user has looked at (ms).
+ * Lifecycle lines (`[tmm] stopped dev`) are posted under the agent's name but
+ * are not replies, so they never raise the dot. */
+export function unreadSenders(feed: readonly { ts?: number; from?: string; body?: string }[], seenTs: number): Set<string> {
   const out = new Set<string>();
   for (const m of feed) {
     const from = m.from ?? '';
     if (!from || from === 'human') continue;
+    if (systemLine(m.body) !== null) continue;
     if ((m.ts ?? 0) > seenTs) out.add(from);
   }
   return out;

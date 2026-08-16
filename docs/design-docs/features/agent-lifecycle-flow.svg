@@ -1,0 +1,159 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 1190" width="1240" height="1190">
+  <defs>
+    <style>
+      .t  { font-family: -apple-system, "Segoe UI", "Helvetica Neue", "Noto Sans SC", sans-serif; }
+      .ti { font-size: 19px; font-weight: 700; fill: #0f172a; }
+      .sub{ font-size: 12.5px; fill: #64748b; }
+      .ln { font-size: 12.5px; fill: #1e293b; }
+      .sm { font-size: 11px; fill: #64748b; }
+      .hd { font-size: 12.5px; font-weight: 650; fill: #0f172a; }
+      .ph { font-size: 11.5px; font-weight: 700; fill: #ffffff; letter-spacing: 0.7px; }
+      .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+    </style>
+    <marker id="a_blue" markerWidth="9" markerHeight="7" refX="8.5" refY="3.5" orient="auto">
+      <path d="M0,0 L9,3.5 L0,7 z" fill="#2563eb"/>
+    </marker>
+    <marker id="a_orange" markerWidth="9" markerHeight="7" refX="8.5" refY="3.5" orient="auto">
+      <path d="M0,0 L9,3.5 L0,7 z" fill="#ea580c"/>
+    </marker>
+    <marker id="a_green" markerWidth="9" markerHeight="7" refX="8.5" refY="3.5" orient="auto">
+      <path d="M0,0 L9,3.5 L0,7 z" fill="#059669"/>
+    </marker>
+    <marker id="a_purple" markerWidth="9" markerHeight="7" refX="8.5" refY="3.5" orient="auto">
+      <path d="M0,0 L9,3.5 L0,7 z" fill="#7c3aed"/>
+    </marker>
+    <marker id="a_gray" markerWidth="9" markerHeight="7" refX="8.5" refY="3.5" orient="auto">
+      <path d="M0,0 L9,3.5 L0,7 z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <rect width="1240" height="1190" fill="#ffffff"/>
+  <text class="t ti" x="40" y="42">Agent lifecycle: spawn -&gt; conversation -&gt; completion</text>
+  <text class="t sub" x="40" y="64">tmux-mobile · solid = what the app DOES · dashed = what it OBSERVES from hooks · one turn is a bracket</text>
+  <rect x="38" y="96" width="180" height="44" rx="9" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text class="t hd" x="128" y="114" text-anchor="middle">Phone / Browser</text>
+  <text class="t sm mono" x="128" y="130" text-anchor="middle">Hub.svelte</text>
+  <line x1="128" y1="140" x2="128" y2="1146" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <rect x="250" y="96" width="180" height="44" rx="9" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text class="t hd" x="340" y="114" text-anchor="middle">WS server</text>
+  <text class="t sm mono" x="340" y="130" text-anchor="middle">server/hub_rpc.rs</text>
+  <line x1="340" y1="140" x2="340" y2="1146" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <rect x="462" y="96" width="180" height="44" rx="9" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text class="t hd" x="552" y="114" text-anchor="middle">tmux</text>
+  <text class="t sm mono" x="552" y="130" text-anchor="middle">window = identity</text>
+  <line x1="552" y1="140" x2="552" y2="1146" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <rect x="674" y="96" width="180" height="44" rx="9" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text class="t hd" x="764" y="114" text-anchor="middle">Agent CLI</text>
+  <text class="t sm mono" x="764" y="130" text-anchor="middle">isolated KIRO_HOME</text>
+  <line x1="764" y1="140" x2="764" y2="1146" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <rect x="886" y="96" width="180" height="44" rx="9" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text class="t hd" x="976" y="114" text-anchor="middle">Hooks -&gt; inbox</text>
+  <text class="t sm mono" x="976" y="130" text-anchor="middle">agent_notifications.rs</text>
+  <line x1="976" y1="140" x2="976" y2="1146" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <rect x="1086" y="96" width="148" height="44" rx="9" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text class="t hd" x="1160" y="114" text-anchor="middle">Stores</text>
+  <text class="t sm mono" x="1160" y="130" text-anchor="middle">telemetry RAM · bus db</text>
+  <line x1="1160" y1="140" x2="1160" y2="1146" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <rect x="34" y="172" width="1172" height="208" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-dasharray="6,4"/>
+  <rect x="46" y="162" width="85" height="20" rx="10" fill="#334155"/>
+  <text class="t ph" x="88.5" y="176" text-anchor="middle">1 · SPAWN</text>
+  <line x1="128" y1="200" x2="340" y2="200" stroke="#2563eb" stroke-width="2" marker-end="url(#a_blue)"/>
+  <text class="t ln" x="234.0" y="192" text-anchor="middle" fill="#2563eb">hub_spawn { agent, brief }</text>
+  <text class="t sm mono" x="234.0" y="214" text-anchor="middle">tap an agent in the start panel</text>
+  <path d="M 340,220 L 384,220 L 384,240 L 346,240" fill="none" stroke="#ea580c" stroke-width="1.8" marker-end="url(#a_orange)"/>
+  <text class="t ln" x="392" y="225" fill="#ea580c">registry_get · can_hire gate · cap 4</text>
+  <text class="t sm mono" x="392" y="241">projects/spawn.rs</text>
+  <path d="M 340,262 L 384,262 L 384,282 L 346,282" fill="none" stroke="#7c3aed" stroke-width="1.8" marker-end="url(#a_purple)"/>
+  <text class="t ln" x="392" y="267" fill="#7c3aed">materialize the isolated home</text>
+  <text class="t sm mono" x="392" y="283">&lt;ws&gt;/.tmm/agents/&lt;name&gt;/ + hooks</text>
+  <line x1="340" y1="310" x2="552" y2="310" stroke="#2563eb" stroke-width="2" marker-end="url(#a_blue)"/>
+  <text class="t ln" x="446.0" y="302" text-anchor="middle" fill="#2563eb">new_named_window(name)</text>
+  <text class="t sm mono" x="446.0" y="324" text-anchor="middle">the window name IS the agent identity</text>
+  <line x1="552" y1="348" x2="764" y2="348" stroke="#2563eb" stroke-width="2" marker-end="url(#a_blue)"/>
+  <text class="t ln" x="658.0" y="340" text-anchor="middle" fill="#2563eb">. launch.sh</text>
+  <line x1="340" y1="372" x2="1160" y2="372" stroke="#7c3aed" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#a_purple)"/>
+  <text class="t ln" x="750.0" y="364" text-anchor="middle" fill="#7c3aed">record: [tmm] spawned dev</text>
+  <rect x="596" y="200" width="336" height="76" rx="7" fill="#fffbeb" stroke="#fbbf24"/>
+  <text class="t sm" x="606" y="218">KIRO_HOME / CODEX_HOME / --settings point at the</text>
+  <text class="t sm" x="606" y="233">isolated home, so user-space config never leaks in.</text>
+  <text class="t sm" x="606" y="248">TMM_PROJECT + TMM_AGENT give the pane its identity,</text>
+  <text class="t sm" x="606" y="263">which is how tmm and telemetry know who spoke.</text>
+  <rect x="34" y="410" width="1172" height="148" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-dasharray="6,4"/>
+  <rect x="46" y="400" width="120" height="20" rx="10" fill="#334155"/>
+  <text class="t ph" x="106.0" y="414" text-anchor="middle">2 · TURN OPENS</text>
+  <line x1="340" y1="440" x2="764" y2="440" stroke="#ea580c" stroke-width="2" marker-end="url(#a_orange)"/>
+  <text class="t ln" x="552.0" y="432" text-anchor="middle" fill="#ea580c">KICK, as the CLI's positional arg</text>
+  <text class="t sm mono" x="552.0" y="454" text-anchor="middle">an agent does nothing until spoken to</text>
+  <line x1="764" y1="480" x2="976" y2="480" stroke="#059669" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#a_green)"/>
+  <text class="t ln" x="870.0" y="472" text-anchor="middle" fill="#059669">userPromptSubmit { prompt }</text>
+  <line x1="976" y1="506" x2="1160" y2="506" stroke="#7c3aed" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#a_purple)"/>
+  <text class="t ln" x="1068.0" y="498" text-anchor="middle" fill="#7c3aed">record_prompt</text>
+  <text class="t sm mono" x="1068.0" y="520" text-anchor="middle">turn START · via = local | app</text>
+  <line x1="1160" y1="538" x2="128" y2="538" stroke="#64748b" stroke-width="2" stroke-dasharray="4,3" marker-end="url(#a_gray)"/>
+  <text class="t ln" x="644.0" y="530" text-anchor="middle" fill="#64748b">input row · state running 0s</text>
+  <rect x="34" y="588" width="1172" height="186" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-dasharray="6,4"/>
+  <rect x="46" y="578" width="155" height="20" rx="10" fill="#334155"/>
+  <text class="t ph" x="123.5" y="592" text-anchor="middle">3 · A HUMAN MESSAGE</text>
+  <line x1="128" y1="616" x2="340" y2="616" stroke="#2563eb" stroke-width="2" marker-end="url(#a_blue)"/>
+  <text class="t ln" x="234.0" y="608" text-anchor="middle" fill="#2563eb">hub_post { body }</text>
+  <text class="t sm mono" x="234.0" y="630" text-anchor="middle">addressed() prefixes @lead — no @ typing</text>
+  <path d="M 340,636 L 384,636 L 384,656 L 346,656" fill="none" stroke="#7c3aed" stroke-width="1.8" marker-end="url(#a_purple)"/>
+  <text class="t ln" x="392" y="641" fill="#7c3aed">bus.post into room proj:&lt;session&gt;</text>
+  <text class="t sm mono" x="392" y="657">SQLite — this is the durable part</text>
+  <line x1="340" y1="684" x2="552" y2="684" stroke="#2563eb" stroke-width="2" marker-end="url(#a_blue)"/>
+  <text class="t ln" x="446.0" y="676" text-anchor="middle" fill="#2563eb">send_keys [tmm chat] human: …</text>
+  <text class="t sm mono" x="446.0" y="698" text-anchor="middle">managed windows only</text>
+  <line x1="552" y1="712" x2="764" y2="712" stroke="#2563eb" stroke-width="2" marker-end="url(#a_blue)"/>
+  <text class="t ln" x="658.0" y="704" text-anchor="middle" fill="#2563eb">lands in the CLI's input box</text>
+  <line x1="764" y1="740" x2="976" y2="740" stroke="#059669" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#a_green)"/>
+  <text class="t ln" x="870.0" y="732" text-anchor="middle" fill="#059669">userPromptSubmit echoes that line</text>
+  <line x1="976" y1="766" x2="128" y2="766" stroke="#059669" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#a_green)"/>
+  <text class="t ln" x="552.0" y="758" text-anchor="middle" fill="#059669">receipt: delivered</text>
+  <rect x="596" y="616" width="300" height="76" rx="7" fill="#fffbeb" stroke="#fbbf24"/>
+  <text class="t sm" x="606" y="634">send-keys proves the pane existed, nothing</text>
+  <text class="t sm" x="606" y="649">more. The echo is the only proof the CLI</text>
+  <text class="t sm" x="606" y="664">took it AS A PROMPT. Nothing back in 45 s</text>
+  <text class="t sm" x="606" y="679">-&gt; a warning row, shown at every level.</text>
+  <rect x="34" y="804" width="1172" height="136" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-dasharray="6,4"/>
+  <rect x="46" y="794" width="190" height="20" rx="10" fill="#334155"/>
+  <text class="t ph" x="141.0" y="808" text-anchor="middle">4 · WORK INSIDE THE TURN</text>
+  <line x1="764" y1="832" x2="976" y2="832" stroke="#059669" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#a_green)"/>
+  <text class="t ln" x="870.0" y="824" text-anchor="middle" fill="#059669">preToolUse / postToolUse { tool_name, tool_input }</text>
+  <line x1="976" y1="858" x2="1160" y2="858" stroke="#7c3aed" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#a_purple)"/>
+  <text class="t ln" x="1068.0" y="850" text-anchor="middle" fill="#7c3aed">record_tool(name, arg)</text>
+  <text class="t sm mono" x="1068.0" y="872" text-anchor="middle">120-event ring, per session</text>
+  <line x1="1160" y1="890" x2="128" y2="890" stroke="#64748b" stroke-width="2" stroke-dasharray="4,3" marker-end="url(#a_gray)"/>
+  <text class="t ln" x="644.0" y="882" text-anchor="middle" fill="#64748b">one collapsible group per window, tool names coloured by what they do</text>
+  <line x1="764" y1="916" x2="340" y2="916" stroke="#ea580c" stroke-width="2" marker-end="url(#a_orange)"/>
+  <text class="t ln" x="552.0" y="908" text-anchor="middle" fill="#ea580c">tmm send progress   (optional)</text>
+  <text class="t sm mono" x="552.0" y="930" text-anchor="middle">marks sent_this_turn</text>
+  <rect x="34" y="970" width="1172" height="152" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-dasharray="6,4"/>
+  <rect x="46" y="960" width="113" height="20" rx="10" fill="#334155"/>
+  <text class="t ph" x="102.5" y="974" text-anchor="middle">5 · TURN ENDS</text>
+  <line x1="764" y1="998" x2="976" y2="998" stroke="#059669" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#a_green)"/>
+  <text class="t ln" x="870.0" y="990" text-anchor="middle" fill="#059669">stop { assistant_response }</text>
+  <path d="M 976,1016 L 1020,1016 L 1020,1036 L 982,1036" fill="none" stroke="#ea580c" stroke-width="1.8" marker-end="url(#a_orange)"/>
+  <text class="t ln" x="1028" y="1021" fill="#ea580c">managed? · already sent? · cap 6144</text>
+  <text class="t sm mono" x="1028" y="1037">maybe_auto_post</text>
+  <line x1="976" y1="1064" x2="1160" y2="1064" stroke="#7c3aed" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#a_purple)"/>
+  <text class="t ln" x="1068.0" y="1056" text-anchor="middle" fill="#7c3aed">post the final answer, record_only</text>
+  <line x1="1160" y1="1090" x2="128" y2="1090" stroke="#64748b" stroke-width="2" stroke-dasharray="4,3" marker-end="url(#a_gray)"/>
+  <text class="t ln" x="644.0" y="1082" text-anchor="middle" fill="#64748b">the reply appears · chip goes idle</text>
+  <line x1="764" y1="1116" x2="340" y2="1116" stroke="#ea580c" stroke-width="2" marker-end="url(#a_orange)"/>
+  <text class="t ln" x="552.0" y="1108" text-anchor="middle" fill="#ea580c">tmm done summary   (optional)</text>
+  <rect x="560" y="998" width="336" height="76" rx="7" fill="#fef2f2" stroke="#fca5a5"/>
+  <text class="t sm" x="570" y="1016">record_only is the loop breaker: an auto-post that</text>
+  <text class="t sm" x="570" y="1031">@-addressed a peer would be typed into that peer's</text>
+  <text class="t sm" x="570" y="1046">pane, whose stop hook would post back — forever.</text>
+  <text class="t sm" x="570" y="1061">Skipping the sender's own window cannot prevent it.</text>
+  <text class="t sm" x="40" y="1180">legend:</text>
+  <line x1="92" y1="1176" x2="118" y2="1176" stroke="#2563eb" stroke-width="2" marker-end="url(#a_blue)"/>
+  <text class="t sm" x="124" y="1180">we act</text>
+  <line x1="175.6" y1="1176" x2="201.6" y2="1176" stroke="#059669" stroke-width="2" marker-end="url(#a_green)"/>
+  <text class="t sm" x="207.6" y="1180">we observe (hook)</text>
+  <line x1="331.79999999999995" y1="1176" x2="357.79999999999995" y2="1176" stroke="#ea580c" stroke-width="2" marker-end="url(#a_orange)"/>
+  <text class="t sm" x="363.79999999999995" y="1180">control / intent</text>
+  <line x1="481.4" y1="1176" x2="507.4" y2="1176" stroke="#7c3aed" stroke-width="2" marker-end="url(#a_purple)"/>
+  <text class="t sm" x="513.4" y="1180">write to a store</text>
+  <line x1="631.0" y1="1176" x2="657.0" y2="1176" stroke="#64748b" stroke-width="2" marker-end="url(#a_gray)"/>
+  <text class="t sm" x="663.0" y="1180">render</text>
+</svg>

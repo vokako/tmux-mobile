@@ -224,6 +224,9 @@ test('unreadSenders marks who replied after the user last looked', () => {
   assert.deepEqual([...unreadSenders(feed, 300)], [], 'caught up');
   assert.deepEqual([...unreadSenders([{ ts: 400, from: 'human' }], 0)], [],
     'your own message is never unread');
+  // A lifecycle line is posted under the agent's name but is not a reply.
+  assert.deepEqual([...unreadSenders([{ ts: 400, from: 'dev', body: '[tmm] stopped dev' }], 0)], [],
+    'stopping an agent is not the agent answering you');
 });
 
 test('stoppedAgents lists declared agents with no live window', () => {
