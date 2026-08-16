@@ -591,7 +591,7 @@
                 <span class="s-count">{t('hubStepsN').replace('{n}', String(b.events.length))}</span>
                 {#if !open}
                   {@const last = b.events[b.events.length - 1]}
-                  <span class="s-peek"><span class="tname">{last?.tool ?? ''}</span> {last?.text ?? ''}</span>
+                  <span class="s-peek">{#if last?.tool}<span class="tname">{last.tool}</span> {/if}{last?.text ?? ''}</span>
                 {/if}
               </button>
               {#if open}
@@ -599,8 +599,10 @@
                   {#each b.events as e, j (`${e.ts}-${j}`)}
                     <div class="step">
                       <!-- The tool NAME is the scannable half: fixed column,
-                           accent colour. Its argument is secondary. -->
-                      <span class="tname">{e.tool ?? ''}</span>
+                           accent colour. Only reserve that column when there IS
+                           a name — an event from an older server (or a backend
+                           that does not report one) must not leave a gap. -->
+                      {#if e.tool}<span class="tname">{e.tool}</span>{/if}
                       <span class="st-text">{e.text}</span>
                       <span class="st-ts">{fmtTime(e.ts)}</span>
                     </div>
@@ -921,7 +923,8 @@
   .step { display: flex; align-items: baseline; gap: 8px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text3); }
   /* The tool name: the part the eye scans down a column. */
   .tname { flex: none; color: var(--accent); font-weight: 650; }
-  .step .tname { min-width: 6.5em; }
+  .step .tname { min-width: 6.5em; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hub-root.compact .step .tname { min-width: 0; }
   .s-peek .tname { min-width: 0; }
   .step .st-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text2); }
   .step .st-ts { flex: none; margin-left: auto; opacity: 0.55; }
@@ -931,7 +934,7 @@
   /* Recipient control: who this message goes to, with a menu that opens
      UPWARD so the on-screen keyboard never covers it. */
   .to-wrap { position: relative; flex: none; }
-  .to-chip { display: flex; align-items: center; gap: 5px; min-height: 34px; background: var(--accent-bg); color: var(--accent); border: 1px solid transparent; border-radius: 9px; padding: 6px 9px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: ui-monospace, Menlo, monospace; max-width: 42vw; }
+  .to-chip { display: flex; align-items: center; gap: 5px; min-height: 34px; background: var(--accent-bg); color: var(--accent); border: 1px solid transparent; border-radius: 9px; padding: 6px 9px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: ui-monospace, Menlo, monospace; max-width: min(42vw, 260px); }
   /* Broadcast and room-note are NOT the default state, so they do not wear the
      accent: one interrupts everyone, the other reaches nobody live. */
   .to-chip.all { background: var(--surface); color: var(--status-warn); border-color: var(--status-warn); }

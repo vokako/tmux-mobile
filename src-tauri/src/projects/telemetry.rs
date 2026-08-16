@@ -333,16 +333,16 @@ fn derive_from(rec: &Rec, activity_ts: u64, now: u64) -> AgentStatus {
         return AgentStatus { state: "failed".into(), detail: "failed".into(), since: end_ts };
     }
 
-    // The agent's own words win while fresh and not overtaken by a newer fact.
-    // `working` is the CLI's vocabulary; the UI has one word for it.
+    // The agent's own words. What they are good for is the part we CANNOT
+    // observe: "blocked on a credential", "waiting for the API spec". A claim of
+    // `working` adds nothing — the turn bracket already knows a turn is open —
+    // so it contributes its note and nothing else. That keeps one class of lie
+    // out of the system: an agent cannot declare itself busy while its stop hook
+    // says the turn is over.
     if let Some((state, note, ts)) = &rec.explicit {
-        if now.saturating_sub(*ts) < EXPLICIT_TTL_SECS && *ts >= newest {
-            let state = match state.as_str() {
-                "working" => "running",
-                "blocked" => "waiting",
-                other => other,
-            };
-            return AgentStatus { state: state.into(), detail: note.clone(), since: *ts };
+        let claims_block = matches!(state.as_str(), "waiting" | "blocked");
+        if claims_block && now.saturating_sub(*ts) < EXPLICIT_TTL_SECS && *ts >= newest {
+            return AgentStatus { state: "waiting".into(), detail: note.clone(), since: *ts };
         }
     }
 
@@ -364,14 +364,20 @@ fn derive_from(rec: &Rec, activity_ts: u64, now: u64) -> AgentStatus {
         return AgentStatus { state: "waiting".into(), detail: kind, since: ask_ts };
     }
 
-    // A turn is open. `since` is when it opened; the detail is the last thing we
-    // saw it do.
-    let detail = rec
-        .tool
+    // A turn is open. `since` is when it opened; the detail is the agent's own
+    // note if it left one this turn, else the last thing we saw it do.
+    let note = rec
+        .explicit
         .as_ref()
-        .filter(|(_, t)| *t >= prompt_ts)
-        .map(|(l, _)| l.clone())
-        .unwrap_or_default();
+        .filter(|(_, note, ts)| !note.is_empty() && *ts >= prompt_ts)
+        .map(|(_, note, _)| note.clone());
+    let detail = note.unwrap_or_else(|| {
+        rec.tool
+            .as_ref()
+            .filter(|(_, t)| *t >= prompt_ts)
+            .map(|(l, _)| l.clone())
+            .unwrap_or_default()
+    });
     let since = if prompt_ts > 0 { prompt_ts } else { tool_ts };
     AgentStatus { state: "running".into(), detail, since }
 }
@@ -464,28 +470,37 @@ mod tests {
         assert_eq!(derive_from(&r, 0, 1200).state, "running");
     }
 
+    /// What an agent says about itself is only trusted where we cannot observe:
+    /// a block. A claim of `working` contributes its NOTE and no state, because
+    /// the turn bracket already answers "is it running" and a self-declared
+    /// state could contradict the hooks.
     #[test]
-    fn an_explicit_claim_wins_while_fresh_in_the_ui_vocabulary() {
+    fn an_explicit_claim_speaks_only_for_what_we_cannot_observe() {
         let mut r = rec();
         r.prompt = Some(1000);
+        // waiting / blocked: unobservable, so the claim stands (and `blocked`
+        // reads as waiting — the CLI's vocabulary is wider than the UI's).
         r.explicit = Some(("waiting".into(), "等接口定稿".into(), 1100));
         let s = derive_from(&r, 0, 1200);
-        assert_eq!((s.state.as_str(), s.detail.as_str()), ("waiting", "等接口定稿"));
-        // The CLI says "working"/"blocked"; the UI has one word for each.
-        r.explicit = Some(("working".into(), String::new(), 1100));
-        assert_eq!(derive_from(&r, 0, 1200).state, "running");
+        assert_eq!((s.state.as_str(), s.detail.as_str(), s.since), ("waiting", "等接口定稿", 1100));
         r.explicit = Some(("blocked".into(), "no creds".into(), 1100));
         assert_eq!(derive_from(&r, 0, 1200).state, "waiting");
-        // It expires, so a crashed agent cannot stay running on its last words.
-        r.explicit = Some(("working".into(), String::new(), 1100));
+        // A claim of working does NOT set the state; the open turn does, and the
+        // note becomes the line the user reads.
+        r.explicit = Some(("working".into(), "重写状态机".into(), 1100));
+        let s = derive_from(&r, 0, 1200);
+        assert_eq!((s.state.as_str(), s.detail.as_str(), s.since), ("running", "重写状态机", 1000),
+            "state from the bracket, words from the agent, since = the turn start");
+        // And it cannot outlive the turn: a stop is a newer fact.
+        r.end = Some(("completed".into(), 1150));
+        assert_eq!(derive_from(&r, 0, 1200).state, "idle");
+        // A stale block expires, so a crashed agent does not wait forever.
+        r.end = None;
+        r.explicit = Some(("blocked".into(), "no creds".into(), 1100));
         assert_eq!(derive_from(&r, 0, 1100 + EXPLICIT_TTL_SECS + 1).state, "running",
             "the open turn still explains it");
         r.prompt = None;
         assert_eq!(derive_from(&r, 0, 1100 + EXPLICIT_TTL_SECS + 1).state, "idle");
-        // And a newer end overtakes it.
-        r.prompt = Some(1000);
-        r.end = Some(("completed".into(), 1150));
-        assert_eq!(derive_from(&r, 0, 1200).state, "idle");
     }
 
     #[test]
@@ -556,12 +571,12 @@ mod tests {
     #[test]
     fn store_roundtrip_and_window_retention() {
         record_status("tsess", 1, "waiting", "note");
-        record_status("tsess", 2, "working", "");
+        record_status("tsess", 2, "waiting", "");
         retain_windows("tsess", &[2]);
         let s1 = derive("tsess", 1, 0);
         assert_eq!(s1.state, "idle", "dropped window's record must be gone");
         let s2 = derive("tsess", 2, 0);
-        assert_eq!(s2.state, "running", "an explicit `working` reads as running");
+        assert_eq!(s2.state, "waiting", "the surviving record still answers");
         retain_windows("tsess", &[]);
     }
 }

@@ -1172,6 +1172,94 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// The whole auto-post path, end to end: a real tmux window, a real managed
+    /// home, a real inbox file carrying a real kiro `stop` payload — and the
+    /// agent's final answer must land in the room, record-only, with no
+    /// `tmm send` anywhere. This is the behaviour the owner reported missing;
+    /// the cause was a config on disk written before `userPromptSubmit` existed
+    /// (see `spawn::refresh_hooks`), not this path.
+    #[test]
+    fn a_stop_payload_posts_the_agents_final_answer_to_the_room() {
+        crate::projects::tests::use_test_store();
+        let session = format!("tmm-auto-{}", std::process::id());
+        let ws = std::env::temp_dir().join(format!("tmm-auto-ws-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(ws.join(".tmm/agents/dev")).unwrap();
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session, "-n", "dev", "-c",
+                   &ws.to_string_lossy(), "sleep 60"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            return;
+        }
+        let adopted = crate::projects::adopt(&session, Some("auto-test")).is_ok();
+        let pane_id = String::from_utf8(
+            std::process::Command::new("tmux")
+                .args(["display-message", "-p", "-t", &session, "#{pane_id}"])
+                .output().unwrap().stdout,
+        ).unwrap().trim().to_string();
+
+        // A poster that records what it was asked to post.
+        struct Spy(std::sync::Mutex<Vec<(String, String, String, bool)>>);
+        impl RoomPoster for Spy {
+            fn post_to_room(&self, session: &str, agent: &str, body: &str, record_only: bool) {
+                self.0.lock().unwrap().push((session.into(), agent.into(), body.into(), record_only));
+            }
+        }
+        let spy = std::sync::Arc::new(Spy(std::sync::Mutex::new(Vec::new())));
+
+        let root = std::env::temp_dir().join(format!("tmm-auto-hub-{}", uuid::Uuid::new_v4()));
+        let hub = AgentNotificationHub::load_at(root.clone());
+        hub.set_room_poster(spy.clone());
+        std::fs::create_dir_all(root.join("inbox")).unwrap();
+        // Exactly the payload measured from kiro-cli 2.16.2.
+        std::fs::write(
+            root.join("inbox").join("1-stop.json"),
+            serde_json::to_vec(&json!({
+                "backend": "kiro",
+                "pane_id": pane_id,
+                "payload": {
+                    "hook_event_name": "stop",
+                    "cwd": ws.to_string_lossy(),
+                    "session_id": "conv-1",
+                    "assistant_response": "Fixed the flaky test: it assumed a 4 MB read is slow."
+                }
+            })).unwrap(),
+        ).unwrap();
+        hub.consume_inbox();
+
+        if adopted {
+            let posts = spy.0.lock().unwrap();
+            assert_eq!(posts.len(), 1, "the final answer is posted exactly once");
+            let (s, agent, body, record_only) = &posts[0];
+            assert_eq!(s, &session);
+            assert_eq!(agent, "dev", "posted as the agent, by window name");
+            assert!(body.contains("Fixed the flaky test"), "the answer itself: {body:?}");
+            assert!(*record_only, "hook-sourced text must never be delivered into panes");
+        } else {
+            eprintln!("could not adopt a project — skipped the assertions");
+        }
+
+        // Same turn, second stop after an explicit send: no second message.
+        hub.mark_sent_this_turn(&session, 0);
+        std::fs::write(
+            root.join("inbox").join("2-stop.json"),
+            serde_json::to_vec(&json!({
+                "backend": "kiro",
+                "pane_id": pane_id,
+                "payload": { "hook_event_name": "stop", "assistant_response": "again" }
+            })).unwrap(),
+        ).unwrap();
+        hub.consume_inbox();
+        assert_eq!(spy.0.lock().unwrap().len(), if adopted { 1 } else { 0 }, "one turn, one message");
+
+        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
+        let _ = std::fs::remove_dir_all(&ws);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn turn_start_clears_the_sent_flag_so_later_turns_still_auto_post() {
         let root = std::env::temp_dir().join(format!("tmm-agent-turn-{}", uuid::Uuid::new_v4()));

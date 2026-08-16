@@ -240,7 +240,7 @@ boundary is the most recent fact*, and there are exactly four states:
 | newest fact | state | `since` |
 |---|---|---|
 | a failed stop (StopFailure) | `failed` | the stop |
-| an explicit `tmm status`, still fresh (30 min TTL) | as declared | the claim |
+| an explicit `tmm status waiting\|blocked`, still fresh (30 min TTL) | `waiting` | the claim |
 | a turn end (`stop` / `tmm done`) | `idle` | the end (detail = done summary) |
 | an ask (`permission_required` / `input_required`) | `waiting` | the ask |
 | a turn start (`userPromptSubmit`, or a tool call) | `running` | **the START** |
@@ -249,10 +249,40 @@ boundary is the most recent fact*, and there are exactly four states:
 `since` for `running` is the turn's start, not the newest event, so a client
 renders "running 2m14s" and means the turn's age.
 
-The CLI's vocabulary is wider than the UI's on purpose: `tmm status working`
-displays as `running` and `blocked` as `waiting` (note preserved). Four words is
-the whole set — a state nobody can point at an observation for is a state nobody
-should trust.
+**What `tmm status` is still for, now that turns are observed.** Only the part
+we cannot see: being stuck on something outside the agent's control (a
+credential, an answer, another agent). `waiting` and `blocked` both set
+`waiting` and keep the note. A claim of `working` sets NOTHING — the turn
+bracket already answers "is it running" — and contributes only its note as the
+detail line. That removes a whole class of contradiction where an agent declared
+itself busy while its own stop hook said the turn was over, and it is why the
+seeded system prompt now tells agents not to announce that they are working.
+
+Four words is the whole set. A state nobody can point at an observation for is a
+state nobody should trust.
+
+## Config drift: the app owns managed agent configs
+
+Hooks are how we observe an agent at all, so a config on disk must never be
+older than the build reading its events. It was: agents spawned before
+`userPromptSubmit` existed kept a three-hook config, and because that hook is the
+only reset of the same-turn dedup flag, their first `tmm send` silently killed
+the stop-hook auto-post for the rest of the window's life — the owner-visible
+symptom being "the agent's final reply never shows up" (2026-08-16, three live
+agents on the dev machine all had `[postToolUse, preToolUse, stop]`).
+
+`spawn::refresh_hooks(project_path, window_name)` rewrites the `hooks` key in
+place — kiro's `agents/<name>.json`, claude's `settings.json`, codex's
+`codex/hooks.json` — and nothing else, because the prompt carries the brief the
+agent was given once at spawn and that cannot be rebuilt. It is a no-op when
+already current, and it is called on every start: `hub_agent_restart` and
+`reconcile` when a project comes up. The hook sets themselves live in ONE place
+each (`kiro_hooks` / `claude_hooks` / `codex_hooks`), shared by render and
+refresh, so the two cannot disagree.
+
+A CLI reads its config at launch, so patching the file cannot repair a RUNNING
+agent — restart is the only path, which is what the roster's restart button is
+for.
 
 **Pane activity is not a work signal for a window that has hooks**, and that
 correction is the point of this rewrite. It used to be: `window_activity` newer

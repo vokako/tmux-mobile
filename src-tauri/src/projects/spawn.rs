@@ -168,13 +168,14 @@ fn build_prompt(def: &RegAgent, name: &str, session: &str, brief: &str) -> Strin
          Coordinate through the `tmm` CLI:\n\
          - `tmm send \"@name message\"` — talk in the project chat (@name to address someone, use @human for the operator)\n\
          - `tmm log --limit 30` — read recent chat; `tmm agent list` — who is here and their state\n\
-         - `tmm status working|waiting|blocked \"note\"` — declare what you are doing when it changes\n\
+         - `tmm status waiting|blocked \"why\"` — ONLY when you are stuck on something outside your control (a credential, an answer, another agent). Do not announce that you are working: your turn boundaries are observed automatically, so a `working` claim is ignored and only its note is kept\n\
          - `tmm done \"summary\"` — REQUIRED when you finish the briefed task\n\
          You can also manage the workspace itself when the task calls for it:\n\
          - `tmm spawn <registry-name> --brief \"...\"` — bring in a teammate (see `tmm registry list`)\n\
          - `tmm project create|up|down|archive` — set up or tear down whole projects\n\
          - `tmm registry save --name .. --backend .. --system \"..\"` — define NEW kinds of agents, then spawn them\n\
-         Rules: report results through `tmm send`/`tmm done`, not just terminal output. \
+         Rules: your final answer each turn is captured automatically and posted to the room — do not repeat it with `tmm send`. \
+         Use `tmm send` DURING a long turn for progress a human would want before it ends, and `tmm send \"@name ...\"` to hand work to a teammate (it types into their pane and interrupts them). \
          If tmm fails (server down), keep working — it is telemetry, never a blocker. \
          Run `tmm --help` for the full command list."
     );
@@ -218,6 +219,90 @@ fn mcp_defs(def: &RegAgent) -> Vec<shared::McpDef> {
         .collect()
 }
 
+/// The hook set for each backend, in ONE place. `render_*` writes it at spawn
+/// and `refresh_hooks` rewrites it on every start, so a config on disk can
+/// never be older than the app that reads its events. (It was: agents spawned
+/// before `userPromptSubmit` existed kept a three-hook config, and since that
+/// hook is the only reset of the same-turn dedup flag, their first `tmm send`
+/// silently killed the stop-hook auto-post for the rest of the window's life.)
+fn kiro_hooks(notify: &str) -> Value {
+    json!({
+        // The notify helper feeds notifications AND telemetry (tool events are
+        // recognized by hook_event_name and routed to telemetry only).
+        "preToolUse":  [ { "matcher": "*", "command": notify } ],
+        "postToolUse": [ { "matcher": "*", "command": notify } ],
+        // Turn start — the ONLY reset of the same-turn dedup flag, and the
+        // event that carries the submitted prompt.
+        "userPromptSubmit": [ { "command": notify } ],
+        "stop": [ { "command": notify } ]
+    })
+}
+
+fn claude_hooks(notify: &str) -> Value {
+    json!({
+        "PreToolUse":  [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify } ] } ],
+        "PostToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify } ] } ],
+        "Notification": [ { "matcher": "permission_prompt|idle_prompt|agent_needs_input|agent_completed", "hooks": [ { "type": "command", "command": notify } ] } ],
+        "Stop": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
+        "StopFailure": [ { "hooks": [ { "type": "command", "command": notify } ] } ]
+    })
+}
+
+fn codex_hooks(notify: &str) -> Value {
+    json!({
+        "PreToolUse":  [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify } ] } ],
+        "PostToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify } ] } ],
+        "PermissionRequest": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
+        "Stop": [ { "hooks": [ { "type": "command", "command": notify } ] } ]
+    })
+}
+
+/// Bring a managed agent's hooks up to date with this build, in place. Returns
+/// true when a file changed. Only the `hooks` key is touched: the prompt carries
+/// the agent's brief, which was given once at spawn and cannot be rebuilt here.
+///
+/// Called on every start (`hub_agent_restart`, and `reconcile` when a project
+/// comes up), so the app owns these configs rather than trusting whatever an
+/// older version wrote.
+pub fn refresh_hooks(project_path: &str, window_name: &str) -> bool {
+    let home = std::path::Path::new(project_path).join(".tmm").join("agents").join(window_name);
+    if !home.is_dir() {
+        return false; // not a managed agent
+    }
+    let notifications = crate::agent_notifications::AgentNotificationHub::load();
+    if notifications.ensure_helper().is_err() {
+        return false;
+    }
+    let mut changed = false;
+    let kiro = home.join("agents").join(format!("{window_name}.json"));
+    if kiro.is_file() {
+        changed |= patch_hooks(&kiro, kiro_hooks(&notifications.helper_command("kiro")));
+    }
+    let claude = home.join("settings.json");
+    if claude.is_file() {
+        changed |= patch_hooks(&claude, claude_hooks(&notifications.helper_command("claude")));
+    }
+    let codex = home.join("codex").join("hooks.json");
+    if codex.is_file() {
+        changed |= patch_hooks(&codex, codex_hooks(&notifications.helper_command("codex")));
+    }
+    changed
+}
+
+/// Replace the `hooks` key of a JSON config, leaving everything else alone.
+/// A no-op when the value already matches, so starting a project does not
+/// rewrite files for nothing.
+fn patch_hooks(path: &std::path::Path, hooks: Value) -> bool {
+    let Ok(text) = std::fs::read_to_string(path) else { return false };
+    let Ok(mut root) = serde_json::from_str::<Value>(&text) else { return false };
+    let Some(obj) = root.as_object_mut() else { return false };
+    if obj.get("hooks") == Some(&hooks) {
+        return false;
+    }
+    obj.insert("hooks".into(), hooks);
+    std::fs::write(path, serde_json::to_string_pretty(&root).unwrap_or(text)).is_ok()
+}
+
 fn render_kiro(
     def: &RegAgent, name: &str, home: &Path, system_prompt: &str,
     skills: &[crate::team::skills::ResolvedSkill],
@@ -252,19 +337,7 @@ fn render_kiro(
         "allowedTools": ["*"],
         "resources": resources,
         "mcpServers": mcp_servers,
-        "hooks": {
-            // The notify helper feeds notifications AND telemetry (tool events
-            // are recognized by hook_event_name and routed to telemetry only).
-            "preToolUse": [ { "matcher": "*", "command": notify.clone() } ],
-            "postToolUse": [ { "matcher": "*", "command": notify.clone() } ],
-            // Turn start — the ONLY reset of the same-turn dedup flag. Managed
-            // agents are exactly the windows that auto-post, so without this
-            // hook the flag is sticky: one `tmm send` would suppress the stop
-            // auto-post for every LATER turn as well, and the prompt asks the
-            // agent to report progress with `tmm send`.
-            "userPromptSubmit": [ { "command": notify.clone() } ],
-            "stop": [ { "command": notify } ]
-        },
+        "hooks": kiro_hooks(&notify),
     });
     std::fs::write(home.join("agents").join(format!("{name}.json")), serde_json::to_string_pretty(&conf).unwrap())
         .map_err(|e| e.to_string())?;
@@ -304,13 +377,7 @@ fn render_claude(
         &settingsfile,
         serde_json::to_string_pretty(&json!({
             "skipDangerousModePermissionPrompt": true,
-            "hooks": {
-                "PreToolUse":  [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify.clone() } ] } ],
-                "PostToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify.clone() } ] } ],
-                "Notification": [ { "matcher": "permission_prompt|idle_prompt|agent_needs_input|agent_completed", "hooks": [ { "type": "command", "command": notify.clone() } ] } ],
-                "Stop": [ { "hooks": [ { "type": "command", "command": notify.clone() } ] } ],
-                "StopFailure": [ { "hooks": [ { "type": "command", "command": notify } ] } ]
-            }
+            "hooks": claude_hooks(&notify)
         }))
         .unwrap(),
     )
@@ -367,12 +434,7 @@ fn render_codex(
     std::fs::write(
         codex_home.join("hooks.json"),
         serde_json::to_vec_pretty(&json!({
-            "hooks": {
-                "PreToolUse":  [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify.clone() } ] } ],
-                "PostToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify.clone() } ] } ],
-                "PermissionRequest": [ { "hooks": [ { "type": "command", "command": notify.clone() } ] } ],
-                "Stop": [ { "hooks": [ { "type": "command", "command": notify } ] } ]
-            }
+            "hooks": codex_hooks(&notify)
         }))
         .unwrap(),
     )
@@ -442,6 +504,43 @@ mod tests {
         );
         assert!(!r.cmd.contains("@team"), "no team plumbing in registry agents");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A config written by an older build must not stay that way: agents
+    /// spawned before `userPromptSubmit` existed kept a three-hook set, and
+    /// that hook is the only reset of the same-turn dedup flag — so their first
+    /// `tmm send` killed the stop-hook auto-post for good. Every start now
+    /// re-materializes the hooks in place, and nothing else.
+    #[test]
+    fn refresh_hooks_repairs_a_stale_config_without_touching_the_prompt() {
+        let ws = std::env::temp_dir().join(format!("tmm-refresh-{}", uuid::Uuid::new_v4()));
+        let home = ws.join(".tmm/agents/dev/agents");
+        std::fs::create_dir_all(&home).unwrap();
+        let cfg = home.join("dev.json");
+        // What the old renderer wrote: no turn-start hook, and a brief baked
+        // into the prompt that cannot be rebuilt from anywhere.
+        std::fs::write(&cfg, serde_json::to_string_pretty(&json!({
+            "name": "dev",
+            "prompt": "You are dev. Brief: fix the flaky test.",
+            "hooks": { "stop": [ { "command": "old-helper kiro" } ] }
+        })).unwrap()).unwrap();
+
+        assert!(refresh_hooks(&ws.to_string_lossy(), "dev"), "a stale config is rewritten");
+        let after: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
+        let hooks = after.get("hooks").and_then(|h| h.as_object()).unwrap();
+        let mut keys: Vec<&str> = hooks.keys().map(String::as_str).collect();
+        keys.sort();
+        assert_eq!(keys, ["postToolUse", "preToolUse", "stop", "userPromptSubmit"]);
+        assert_eq!(
+            after.get("prompt").and_then(|p| p.as_str()),
+            Some("You are dev. Brief: fix the flaky test."),
+            "the brief survives — only hooks are ours to rewrite"
+        );
+        // Idempotent: a config already current is not rewritten.
+        assert!(!refresh_hooks(&ws.to_string_lossy(), "dev"), "no needless writes");
+        // A window with no isolated home is not ours to touch.
+        assert!(!refresh_hooks(&ws.to_string_lossy(), "byhand"));
+        let _ = std::fs::remove_dir_all(&ws);
     }
 
     #[test]

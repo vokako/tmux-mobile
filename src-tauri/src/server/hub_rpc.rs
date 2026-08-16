@@ -195,6 +195,10 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
             // which is still better than an agent that does not come back.
             let mut resumed = false;
             if let Ok(Some(project)) = crate::projects::project_for_session(session) {
+                // Bring its hooks up to date with this build first: the config
+                // was written by whatever version spawned it, and a stale hook
+                // set is exactly how observation goes quiet.
+                crate::projects::spawn::refresh_hooks(&project.path, agent);
                 resumed = crate::projects::up(&project.id).is_ok()
                     && window_of_agent(session, agent).is_some();
             }

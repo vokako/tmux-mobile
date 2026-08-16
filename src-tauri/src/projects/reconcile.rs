@@ -75,7 +75,13 @@ fn create_or_keep(project: &Project, slot: &Slot) -> SlotResult {
             error: None,
         };
     }
-    let cwd = absolute_cwd(&project.path, &slot.cwd);
+            let cwd = absolute_cwd(&project.path, &slot.cwd);
+    // A managed agent's hooks are re-materialized before it starts: the config
+    // on disk was written by whatever version spawned it, and hooks are how we
+    // observe the agent at all.
+    if slot.kind == SlotKind::Agent {
+        super::spawn::refresh_hooks(&project.path, &slot.window_name);
+    }
     match tmux::new_named_window(&project.session, &slot.window_name, &cwd) {
         Ok(pane) => {
             let mut result = SlotResult {
