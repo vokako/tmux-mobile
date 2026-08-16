@@ -59,6 +59,11 @@ Prompt text cannot enforce any of these.
    would post twice. Mark turn start from the `userPromptSubmit` hook; if a
    `tmm send` or `tmm done` occurred during that turn, skip the automatic post.
    Keep `tmm done` — it is a state transition, not only a message.
+   The turn-start hook must be installed in **every** config that can auto-post,
+   which means `render_kiro` in `projects/spawn.rs` first — managed agents are
+   the only windows constraint 3 lets through, and the global `kiro_default.json`
+   they do not use. Without it the flag is sticky and one `tmm send` disables
+   the auto-post for the rest of that window's life.
 2. **Hook-origin text must not trigger delivery.** `hub_post` types into a
    pane whenever it sees an addressed name. If an automatic post is handled as
    an ordinary post, an agent whose reply addresses a peer will land in that

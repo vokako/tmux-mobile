@@ -257,6 +257,12 @@ fn render_kiro(
             // are recognized by hook_event_name and routed to telemetry only).
             "preToolUse": [ { "matcher": "*", "command": notify.clone() } ],
             "postToolUse": [ { "matcher": "*", "command": notify.clone() } ],
+            // Turn start — the ONLY reset of the same-turn dedup flag. Managed
+            // agents are exactly the windows that auto-post, so without this
+            // hook the flag is sticky: one `tmm send` would suppress the stop
+            // auto-post for every LATER turn as well, and the prompt asks the
+            // agent to report progress with `tmm send`.
+            "userPromptSubmit": [ { "command": notify.clone() } ],
             "stop": [ { "command": notify } ]
         },
     });
@@ -426,6 +432,14 @@ mod tests {
         assert!(conf.get("mcpServers").and_then(|m| m.get("files")).is_some(), "registry MCP def must materialize");
         // Tool hooks feed telemetry.
         assert!(conf.get("hooks").and_then(|h| h.get("preToolUse")).is_some());
+        // Turn start resets the same-turn dedup flag. Without it a managed
+        // agent that calls `tmm send` once never auto-posts again.
+        let turn = conf.get("hooks").and_then(|h| h.get("userPromptSubmit")).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        assert_eq!(turn.len(), 1, "managed kiro must carry the turn-start hook");
+        assert!(
+            turn[0].get("command").and_then(|c| c.as_str()).is_some_and(|c| c.contains("tmux-mobile")),
+            "turn-start hook must run the notify helper, got {turn:?}"
+        );
         assert!(!r.cmd.contains("@team"), "no team plumbing in registry agents");
         std::fs::remove_dir_all(&dir).ok();
     }

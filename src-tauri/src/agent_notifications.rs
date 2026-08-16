@@ -298,16 +298,7 @@ impl AgentNotificationHub {
             return;
         }
         // Constraint 1: same-turn dedup.
-        let key = window_key(session, window);
-        let already_sent = self
-            .state
-            .lock()
-            .unwrap()
-            .sent_this_turn
-            .get(&key)
-            .copied()
-            .unwrap_or(false);
-        if already_sent {
+        if self.already_sent_this_turn(session, window) {
             return;
         }
         // Constraint 4: truncate at the chat-path budget.
@@ -318,6 +309,18 @@ impl AgentNotificationHub {
         if let Some(p) = poster {
             p.post_to_room(session, &window_name, &body, true);
         }
+    }
+
+    /// Constraint 1 (same-turn dedup): skip the automatic post when the agent
+    /// already spoke this turn via `tmm send` / `tmm done`.
+    fn already_sent_this_turn(&self, session: &str, window: usize) -> bool {
+        self.state
+            .lock()
+            .unwrap()
+            .sent_this_turn
+            .get(&window_key(session, window))
+            .copied()
+            .unwrap_or(false)
     }
 
     fn record(&self, item: AgentNotification) -> Result<(), String> {
@@ -1100,6 +1103,30 @@ mod tests {
         hub.record(serde_json::from_value(completion).unwrap())
             .unwrap();
         assert_eq!(hub.snapshot()["unread"][0]["kind"], "permission_required");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn turn_start_clears_the_sent_flag_so_later_turns_still_auto_post() {
+        let root = std::env::temp_dir().join(format!("tmm-agent-turn-{}", uuid::Uuid::new_v4()));
+        let hub = AgentNotificationHub::load_at(root.clone());
+        assert!(!hub.already_sent_this_turn("work", 2));
+        // Turn N: the agent reports progress itself, so its stop must be mute.
+        hub.mark_sent_this_turn("work", 2);
+        assert!(hub.already_sent_this_turn("work", 2), "same turn must not post twice");
+        // Turn N+1 begins. The userPromptSubmit envelope the helper delivers is
+        // the ONLY reset — recognizing it is what keeps the flag from sticking.
+        let turn_start = InboxEnvelope {
+            backend: "kiro".into(),
+            pane_id: "%1".into(),
+            payload: json!({"hook_event_name": "userPromptSubmit"}),
+        };
+        assert!(is_user_prompt_submit(&turn_start), "turn start must be recognized");
+        hub.reset_sent_this_turn("work", 2);
+        assert!(
+            !hub.already_sent_this_turn("work", 2),
+            "a send in one turn must not suppress the auto-post of every later turn"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
