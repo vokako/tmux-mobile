@@ -753,8 +753,14 @@ export const hubAgents = (session: string) =>
 export interface HubActivityEvent {
   ts: number;      // epoch ms — merges directly with chat message timestamps
   window: number;
-  kind: 'tool' | 'status' | 'notif';
+  /** tool = a hook tool call, status = `tmm status`, notif = a lifecycle hook,
+   * prompt = a prompt the agent accepted (userPromptSubmit), warn = a line we
+   * typed that the agent never echoed back. */
+  kind: 'tool' | 'status' | 'notif' | 'prompt' | 'warn';
   text: string;
+  /** `prompt` events only: 'app' when the text is the line this app typed into
+   * the pane (the delivery receipt), 'local' when typed at the keyboard. */
+  via?: 'app' | 'local';
 }
 export const hubActivity = (session: string, sinceTs = 0) =>
   call<{ events: HubActivityEvent[] }>('hub_activity', { session, since_ts: sinceTs });

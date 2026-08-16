@@ -219,11 +219,18 @@ impl AgentNotificationHub {
             return Ok(());
         }
         // userPromptSubmit marks the start of a new turn: clear the
-        // "sent this turn" flag so the upcoming stop can auto-post.
+        // "sent this turn" flag so the upcoming stop can auto-post, and record
+        // the prompt itself — the input half of the transcript, and the receipt
+        // for anything `deliver_mentions` typed into this pane.
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         if is_user_prompt_submit(&envelope) {
             let (session, window, _) = tmux::resolve_pane_id(&envelope.pane_id)?;
             self.reset_sent_this_turn(&session, window);
+            if let Some(prompt) = envelope.payload.get("prompt").and_then(Value::as_str) {
+                if !prompt.trim().is_empty() {
+                    crate::projects::telemetry::record_prompt(&session, window, prompt);
+                }
+            }
             return Ok(());
         }
         let normalized = normalize(&envelope)?;
@@ -1103,6 +1110,74 @@ mod tests {
         hub.record(serde_json::from_value(completion).unwrap())
             .unwrap();
         assert_eq!(hub.snapshot()["unread"][0]["kind"], "permission_required");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// End-to-end over the real inbox and a real tmux pane: a
+    /// `userPromptSubmit` envelope must land in telemetry as the input half of
+    /// the transcript AND acknowledge a line we typed. The payload shape here
+    /// is the one measured from kiro-cli 2.16.2 — `{hook_event_name, cwd,
+    /// prompt}` — so the field name this depends on is pinned by a test rather
+    /// than by a comment.
+    #[test]
+    fn a_prompt_envelope_becomes_input_telemetry_and_a_delivery_receipt() {
+        let session = format!("tmm-prompt-{}", std::process::id());
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session, "sleep 30"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            return;
+        }
+        let panes = crate::tmux::list_panes(&session).unwrap_or_default();
+        let pane = panes.first().expect("the new session has a pane").clone();
+        // resolve_pane_id wants tmux's own `%N` id, which TmuxPane doesn't carry.
+        let pane_id = String::from_utf8(
+            std::process::Command::new("tmux")
+                .args(["display-message", "-p", "-t", &session, "#{pane_id}"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string();
+
+        let root = std::env::temp_dir().join(format!("tmm-prompt-hub-{}", uuid::Uuid::new_v4()));
+        let hub = AgentNotificationHub::load_at(root.clone());
+        // What deliver_mentions types into the pane.
+        let line = "[tmm chat] human: @dev ship it";
+        crate::projects::telemetry::record_delivery(&session, pane.window, line);
+
+        std::fs::create_dir_all(root.join("inbox")).unwrap();
+        let envelope = json!({
+            "backend": "kiro",
+            "pane_id": pane_id,
+            "payload": {
+                "hook_event_name": "userPromptSubmit",
+                "cwd": "/tmp",
+                "prompt": line,
+            }
+        });
+        std::fs::write(
+            root.join("inbox").join("1-prompt.json"),
+            serde_json::to_vec(&envelope).unwrap(),
+        )
+        .unwrap();
+        hub.consume_inbox();
+
+        let events = crate::projects::telemetry::recent_events(&session, 0);
+        let prompt = events.iter().find(|e| e.kind == "prompt").expect("prompt recorded");
+        assert_eq!(prompt.text, line, "the input half of the transcript");
+        assert_eq!(prompt.via, "app", "and the receipt for the line we typed");
+        // A consumed envelope is removed, and no unread notification is created
+        // for a turn start.
+        assert!(!root.join("inbox").join("1-prompt.json").exists(), "envelope consumed");
+        assert_eq!(hub.snapshot()["unread"].as_array().unwrap().len(), 0, "a turn start is not a notification");
+
+        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
         let _ = std::fs::remove_dir_all(root);
     }
 

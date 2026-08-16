@@ -167,7 +167,9 @@
         <button class="side-row" class:open={editing?.name === d.name && !isNew} onclick={() => startEdit(d)}>
           <span class="ava" style:background={backendColor(d.backend)}>{d.name.slice(0, 1).toUpperCase()}</span>
           <span class="r-name">{d.name}</span>
-          <span class="r-backend">{d.backend}{d.can_hire ? ' ⚡' : ''}</span>
+          <span class="r-backend">{d.backend}</span>
+          <!-- can_hire: this agent may spawn teammates. A tag, not a glyph. -->
+          {#if d.can_hire}<span class="r-cap" title={t('agentsCanHireLabel')}>{t('agentsCanHire')}</span>{/if}
         </button>
       {/each}
       <button class="side-row add" onclick={() => startEdit(null)}>
@@ -343,6 +345,7 @@
   .side-scroll { flex: 1; overflow-y: auto; padding: 8px; }
   .r-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; }
   .r-backend { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text3); flex: none; }
+  .r-cap { flex: none; font-size: 9px; letter-spacing: 0.4px; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 3px; opacity: 0.75; }
 
   .mid { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   .spacer { flex: 1; }

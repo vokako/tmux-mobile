@@ -271,6 +271,16 @@ AGENT window in the session gets the line typed into its pane as
 sees it queued in its input. Shells never receive delivery (typing into a
 shell would EXECUTE the message), and the sender's own window is skipped.
 
+`send-keys` succeeding proves only that the pane existed. Whether the CLI
+accepted the text as a *prompt* is a different question, and the
+`userPromptSubmit` hook is the only thing that answers it: the payload carries
+the submitted `prompt`, so a typed line that comes back is delivered. So
+`deliver_mentions` records the line as pending (`telemetry::record_delivery`),
+the echo clears it (`record_prompt`, containment match — the CLI may submit our
+line with the agent's own half-typed text attached), and `sweep_deliveries`
+reports the ones still pending after 45 s as a `warn` event. The sweep runs
+when a client reads `hub_activity`, which is exactly when the answer is wanted.
+
 ## Spawn: the starter pistol
 
 An agent CLI boots into an interactive prompt and does nothing until spoken
@@ -281,16 +291,47 @@ forever (observed live before the fix).
 
 ## The activity feed (telemetry in the chat timeline)
 
-The chat shows what agents SAID; between those, the Hub can weave in what we
-OBSERVED — status declarations, lifecycle notifications, individual tool
-calls — as dim mono one-liners. The detail level is a Settings knob
-(Appearance → Chat detail): `chat` (messages only) / `+ status` (default) /
-`+ tools`. Mechanically it is `telemetry::recent_events` — an in-memory ring
-(120/session) fed by the same recorders that drive status derivation,
-exposed as `hub_activity { session, since_ts }` with ms timestamps so the
-client merges it directly into the message timeline. It is deliberately NOT
-chat history: nothing touches the bus db, the ring dies with the server, and
-consecutive duplicate tool lines collapse client-side (pre+post per call).
+The chat shows what agents SAID; around that, the Hub weaves in what we
+OBSERVED. Mechanically it is `telemetry::recent_events` — an in-memory ring
+(120/session) fed by the same recorders that drive status derivation, exposed
+as `hub_activity { session, since_ts }` with ms timestamps so the client merges
+it directly into the message timeline. It is deliberately NOT chat history:
+nothing touches the bus db and the ring dies with the server.
+
+Five event kinds: `tool`, `status`, `notif`, `prompt` (a prompt the agent
+accepted, `via: app | local`) and `warn` (a line that was never echoed back).
+
+`prompt` is the input half of the transcript and the reason the hook is worth
+installing twice over: text typed at the agent's own keyboard exists in NO
+other channel — the room only ever held the output side.
+
+`feedBlocks()` (`src/lib/hub/hub.ts`, pure and unit-tested) turns messages +
+events into rows, and three rules shape what the user sees:
+
+- **A receipt is not a row.** An `app`-origin prompt is the echo of a line we
+  typed, so it marks that message *delivered* instead of printing the same text
+  a second time. This happens at every detail level, because "did what I just
+  sent arrive" is not a detail anyone opts into — same for `warn`.
+- **A local prompt is a row.** Nothing else records it.
+- **Tool calls collapse, replies do not.** Consecutive `tool` events from the
+  same window fold into one collapsible group ("N tool calls", last line as the
+  preview); a message, a status declaration or a notification ends the run,
+  which is what makes a group mean *between these two replies*. Groups are
+  per-window, so two agents working at once never share one. Open while that
+  window is working, closed when it stops, and an explicit click wins — the
+  choice lives outside the row (`stepsChoice`, keyed by group) so a re-render
+  cannot lose it.
+
+Because a run of tool calls is now one line instead of forty, `+ tools` is the
+default detail level, and the level is reachable from the Hub head (a chip that
+cycles chat → status → tools) as well as Settings → Appearance → Chat detail.
+
+No emoji anywhere in this surface: state is carried by colour, a rotating
+chevron, a pulsing dot and stroked SVG icons. Lifecycle lines the server posts
+into the room (`spawned`, `done`) carry the machine marker `[tmm] ` and the
+client decides how they look; `systemLine()` still recognizes the older `⚡`/`✔`
+spelling because rooms are persisted and old messages must not regress into
+chat bubbles.
 
 ## Verified
 

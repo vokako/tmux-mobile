@@ -114,7 +114,7 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
                 telemetry::record_done(session, window, summary);
                 // A completion is a message too — the room is the record.
                 if bus.open_room(&room).is_ok() {
-                    let body = if summary.is_empty() { "✔ done".to_string() } else { format!("✔ done — {summary}") };
+                    let body = if summary.is_empty() { "[tmm] done".to_string() } else { format!("[tmm] done — {summary}") };
                     let _ = bus.post(&room, agent, &body, false);
                 }
                 // Mark this turn as having an explicit message so the stop
@@ -145,6 +145,9 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
         // in-memory ring — telemetry made visible, not chat history.
         "hub_activity" => {
             let since_ts = p.get("since_ts").and_then(|v| v.as_u64()).unwrap_or(0);
+            // A client asking for the feed is exactly when an undelivered line
+            // matters, so account for the ones that timed out before reading.
+            telemetry::sweep_deliveries(session);
             let events = telemetry::recent_events(session, since_ts);
             Response::ok(id, serde_json::json!({ "events": events }))
         }
@@ -166,10 +169,13 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
                     if bus.open_room(&room).is_ok() {
                         let who = if by.is_empty() { "human" } else { by };
                         let win = result.get("window_name").and_then(|v| v.as_str()).unwrap_or(agent);
+                        // `[tmm] ` marks a lifecycle line: the client renders it
+                        // as a system row rather than a chat bubble. A machine
+                        // marker, not a glyph — how it LOOKS is the UI's call.
                         let line = if brief.is_empty() {
-                            format!("⚡ spawned {win}")
+                            format!("[tmm] spawned {win}")
                         } else {
-                            format!("⚡ spawned {win} — {brief}")
+                            format!("[tmm] spawned {win} — {brief}")
                         };
                         let _ = bus.post(&room, who, &line, false);
                     }
@@ -231,7 +237,13 @@ fn deliver_mentions(session: &str, from: &str, body: &str) {
         }
         let target = format!("{}:{}.{}", session, p.window, p.pane);
         let line = format!("[tmm chat] {from}: {body}");
-        let _ = crate::tmux::send_command(&target, &line);
+        if crate::tmux::send_command(&target, &line).is_ok() {
+            // send_command only proves the pane existed. The delivery is
+            // confirmed when that agent's userPromptSubmit hook echoes the line
+            // back; until then it is pending, and telemetry reports it if the
+            // echo never comes.
+            crate::projects::telemetry::record_delivery(session, p.window, &line);
+        }
     }
 }
 

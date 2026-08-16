@@ -25,7 +25,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, timelineItems } from './hub.ts';
+  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, systemLine } from './hub.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
 
@@ -108,7 +108,10 @@
   }
 
   async function loadActivity() {
-    if (!selected || hubPrefs.feedLevel === 'chat') return;
+    // Polled at EVERY feed level: delivery receipts and undelivered-line
+    // reports ride this channel, and those are about the message the user just
+    // sent, not opt-in telemetry detail. feedBlocks does the level filtering.
+    if (!selected) return;
     try {
       const { events } = await hubActivity(selected, lastActivityTs);
       if (events?.length) {
@@ -264,8 +267,26 @@
     return () => window.removeEventListener('keydown', onKey, true);
   });
 
-  const timeline = $derived(timelineItems(feed, activity, hubPrefs.feedLevel));
+  const blocks = $derived(feedBlocks(feed, activity, hubPrefs.feedLevel));
   const windowName = (w) => agents.find((a) => a.window === w)?.name ?? `#${w}`;
+
+  // Disclosure lives outside the row: `undefined` means "nobody chose", so the
+  // group follows the agent (open while it works, closed when it is done) and
+  // an explicit choice sticks. Keyed by group so re-renders can't lose it.
+  let stepsChoice = $state({});
+  const isRunning = (b) =>
+    b.key === newestSteps[b.window] && agents.find((a) => a.window === b.window)?.state === 'working';
+  const stepsOpen = (b) => stepsChoice[b.key] ?? isRunning(b);
+  const toggleSteps = (b, open) => { stepsChoice[b.key] = open; };
+  /** Per window, the key of its LAST step group: only that one can be running. */
+  const newestSteps = $derived.by(() => {
+    const last = {};
+    for (const b of blocks) if (b.type === 'steps') last[b.window] = b.key;
+    return last;
+  });
+  const blockKey = (b, i) =>
+    b.type === 'msg' ? (b.msg.id ?? `m${b.ts}-${i}`) : b.type === 'steps' ? b.key : `${b.type}${b.ts}-${i}`;
+
   // Notification kinds get a human label; unknown kinds fall back to the raw
   // text (t() returns the key on a miss, so detect that).
   function activityLabel(e) {
@@ -311,7 +332,7 @@
               <span class="dot" class:off={!row.live}></span>{row.project.name}
             </button>
           {/each}
-          <button class="pchip" onclick={() => { createOpen = true; }}>＋</button>
+          <button class="pchip" onclick={() => { createOpen = true; }} title={t('projectNew')}><Icon name="plus" size={12} /></button>
         </div>
       {/if}
 
@@ -323,8 +344,13 @@
           <button class="chip-btn" onclick={bringUp}>{t('projectOpen')}</button>
         {/if}
         {#if liveSelected}
-          <button class="chip-btn" onclick={() => { spawnOpen = !spawnOpen; }}>＋ {t('hubSpawn')}</button>
+          <button class="chip-btn" onclick={() => { spawnOpen = !spawnOpen; }}><Icon name="plus" size={12} /> {t('hubSpawn')}</button>
         {/if}
+        <!-- Chat detail, reachable where the feed is: cycles chat → status →
+             tools. The full control with labels lives in Settings. -->
+        <button class="chip-btn lvl" title={t('hubFeedLevel')} onclick={() => hubPrefs.cycleFeedLevel()}>
+          {hubPrefs.feedLevel === 'chat' ? t('hubFeedChat') : hubPrefs.feedLevel === 'status' ? t('hubFeedStatus') : t('hubFeedTools')}
+        </button>
         <!-- THE terminal affordance: a button, not a permanent pane. -->
         <button class="chip-btn term-toggle" class:on={termOpen} title={t('hubTerminal')} onclick={() => termOpen && !compact ? termOpen = false : openDrawer()}>
           <Icon name="terminal" size={14} />{#if !compact}<span>{t('hubTerminal')}</span>{/if}
@@ -365,30 +391,69 @@
       {/if}
 
       <div class="feed" bind:this={feedEl}>
-        {#each timeline as item, i (item.type === 'msg' ? (item.msg.id ?? `${item.ts}-m${i}`) : `${item.ts}-a${i}`)}
-          {#if item.type === 'msg'}
-            {@const m = item.msg}
-            {#if (m.body ?? '').startsWith('⚡')}
-              <div class="sysline">{m.from}: {m.body}</div>
+        {#each blocks as b, i (blockKey(b, i))}
+          {#if b.type === 'msg'}
+            {@const m = b.msg}
+            {@const sys = systemLine(m.body)}
+            {#if sys !== null}
+              <div class="sysline"><span class="sys-who">{m.from}</span>{sys}</div>
             {:else}
               <div class="msg" class:me={m.from === 'human'}>
-                <div class="m-head"><span class="who">{m.from === 'human' ? t('hubYou') : m.from}</span><span>{fmtTime(m.ts)}</span></div>
+                <div class="m-head">
+                  <span class="who">{m.from === 'human' ? t('hubYou') : m.from}</span>
+                  <span>{fmtTime(m.ts)}</span>
+                  <!-- The agent's own prompt hook echoed this line back, so it
+                       reached the CLI's input — not merely typed at the pane. -->
+                  {#if b.delivered}
+                    <span class="ok-chip" title={t('hubDeliveredHint')}><Icon name="check" size={9} />{t('hubDelivered')}</span>
+                  {/if}
+                </div>
                 <!-- Markdown-rendered (agents write md); renderMarkdown
                      escapes HTML first, so raw tags stay inert text. -->
                 <div class="bubble md">{@html renderMarkdown(m.body)}</div>
               </div>
             {/if}
+          {:else if b.type === 'prompt'}
+            <!-- The input half: what this agent was asked, which only the
+                 userPromptSubmit hook can tell us. -->
+            <div class="prompt">
+              <div class="p-head"><span class="p-who">{windowName(b.window)}</span><span class="p-tag">{t('hubPromptIn')}</span><span>{fmtTime(b.ts)}</span></div>
+              <div class="p-body">{b.text}</div>
+            </div>
+          {:else if b.type === 'note'}
+            <div class="note" class:warn={b.event.kind === 'warn'}>
+              {#if b.event.kind === 'warn'}<Icon name="info" size={11} />{/if}
+              <span class="n-who">{windowName(b.window)}</span>
+              <span class="n-text">{activityLabel(b.event)}</span>
+              <span class="n-ts">{fmtTime(b.ts)}</span>
+            </div>
           {:else}
-            <!-- Telemetry made visible: dim mono one-liners between the real
-                 messages. kind=tool only at the 'tools' level. -->
-            <div class="activity" class:tool={item.event.kind === 'tool'}>
-              <span class="a-who">{windowName(item.event.window)}</span>
-              <span class="a-text">{activityLabel(item.event)}</span>
-              <span class="a-ts">{fmtTime(item.ts)}</span>
+            <!-- Tool calls between two replies: one collapsible run per window.
+                 Open while the agent is working, closed once it is done, unless
+                 the user has said otherwise for this group. -->
+            {@const open = stepsOpen(b)}
+            <div class="steps" class:open>
+              <button class="s-head" aria-expanded={open} onclick={() => toggleSteps(b, !open)}>
+                {#if isRunning(b)}
+                  <span class="s-live" aria-hidden="true"></span>
+                {:else}
+                  <span class="chev" class:open><Icon name="chevron-right" size={12} /></span>
+                {/if}
+                <span class="s-who">{windowName(b.window)}</span>
+                <span class="s-count">{t('hubStepsN').replace('{n}', String(b.events.length))}</span>
+                {#if !open}<span class="s-peek">{b.events[b.events.length - 1]?.text ?? ''}</span>{/if}
+              </button>
+              {#if open}
+                <div class="s-body">
+                  {#each b.events as e, j (`${e.ts}-${j}`)}
+                    <div class="step"><span class="st-text">{e.text}</span><span class="st-ts">{fmtTime(e.ts)}</span></div>
+                  {/each}
+                </div>
+              {/if}
             </div>
           {/if}
         {/each}
-        {#if !timeline.length}
+        {#if !blocks.length}
           <div class="empty">{managedAgents.length ? t('hubEmpty') : t('hubEmptyNoAgents')}</div>
         {/if}
       </div>
@@ -504,6 +569,7 @@
   .path { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .spacer { flex: 1; }
   .term-toggle.on { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+  .lvl { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
 
   .spawn-form { display: flex; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--border2); }
   .spawn-form select, .spawn-form input { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 8px; color: var(--text); padding: 6px 10px; font-size: 12.5px; }
@@ -527,16 +593,56 @@
   .m-head .who { color: var(--text2); font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 11.5px; }
   .bubble { background: var(--surface); border: 1px solid var(--border2); border-radius: 12px; padding: 8px 12px; font-size: 13px; color: var(--text); word-break: break-word; overflow-wrap: anywhere; }
   .msg.me .bubble { background: var(--accent-bg); border-color: transparent; }
-  .sysline { align-self: center; font-size: 11px; color: var(--text3); background: var(--surface); border-radius: 999px; padding: 3px 13px; max-width: 92%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .activity {
+  .sysline { align-self: center; display: flex; align-items: baseline; gap: 7px; font-size: 11px; color: var(--text3); background: var(--surface); border-radius: 999px; padding: 3px 13px; max-width: 92%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sysline .sys-who { font-family: ui-monospace, Menlo, monospace; font-weight: 600; color: var(--text2); }
+  /* Delivery receipt: the agent's prompt hook echoed our line back. */
+  .ok-chip { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; color: var(--status-ok); font-size: 10px; letter-spacing: 0.2px; }
+
+  /* The input half of a turn — what the agent was asked. */
+  .prompt { align-self: flex-start; max-width: 84%; border-left: 2px solid var(--border); padding-left: 9px; }
+  .p-head { display: flex; align-items: baseline; gap: 7px; font-size: 10.5px; color: var(--text3); margin-bottom: 2px; }
+  .p-head .p-who { font-family: ui-monospace, Menlo, monospace; font-weight: 600; color: var(--text2); }
+  .p-tag { text-transform: uppercase; letter-spacing: 0.8px; font-size: 9px; color: var(--text3); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+  .p-body { font-size: 12.5px; color: var(--text2); white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; max-height: 7.5em; overflow: hidden; }
+
+  /* A single observed fact: status declaration, lifecycle hook, warning. */
+  .note {
     display: flex; align-items: baseline; gap: 8px;
     font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text3);
     padding: 0 4px; max-width: 100%;
   }
-  .activity .a-who { flex: none; font-weight: 600; }
-  .activity .a-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .activity.tool .a-text::before { content: '⚙ '; opacity: 0.7; }
-  .activity .a-ts { flex: none; margin-left: auto; opacity: 0.6; }
+  .note .n-who { flex: none; font-weight: 600; }
+  .note .n-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .note .n-ts { flex: none; margin-left: auto; opacity: 0.6; }
+  .note.warn { color: var(--status-warn); }
+  .note.warn :global(svg) { flex: none; align-self: center; }
+
+  /* Collapsible run of tool calls between two replies. */
+  .steps { display: flex; flex-direction: column; }
+  .s-head {
+    display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
+    background: var(--surface); border: 1px solid var(--border2); border-radius: 9px;
+    padding: 5px 10px; cursor: pointer; color: var(--text3);
+    font-family: ui-monospace, Menlo, monospace; font-size: 11px;
+    transition: border-color 160ms, color 160ms;
+  }
+  .s-head:hover { border-color: var(--input-border); color: var(--text2); }
+  .steps.open .s-head { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+  .chev { display: inline-flex; flex: none; transition: transform 150ms; }
+  .chev.open { transform: rotate(90deg); }
+  .s-live { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--status-ok); animation: s-pulse 1.4s ease-in-out infinite; }
+  @keyframes s-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  @media (prefers-reduced-motion: reduce) { .s-live { animation: none; } }
+  .s-who { flex: none; font-weight: 600; color: var(--text2); }
+  .s-count { flex: none; }
+  .s-peek { min-width: 0; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .s-body {
+    display: flex; flex-direction: column; gap: 2px;
+    margin-left: 11px; padding: 5px 0 3px 11px; border-left: 1px solid var(--border);
+  }
+  .step { display: flex; align-items: baseline; gap: 8px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text3); }
+  .step .st-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .step .st-ts { flex: none; margin-left: auto; opacity: 0.55; }
   .empty { color: var(--text3); font-size: 12.5px; text-align: center; margin: auto; padding: 0 24px; line-height: 1.6; }
 
   .composer { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }

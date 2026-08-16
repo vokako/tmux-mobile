@@ -69,32 +69,129 @@ export function statuslineWindows(agents: HubAgent[], termTarget: string): Statu
     }));
 }
 
-export type TimelineItem =
-  | { type: 'msg'; ts: number; msg: any }
-  | { type: 'activity'; ts: number; event: HubActivityEvent };
+export type FeedLevel = 'chat' | 'status' | 'tools';
 
-/** Merge chat messages with telemetry activity into one timeline, filtered
- * by the feed level: 'chat' drops all activity, 'status' keeps status
- * declarations + lifecycle notifications, 'tools' keeps everything.
- * Consecutive duplicate tool lines collapse (an agent editing one file
- * fires pre+post per call — one line carries the information). */
-export function timelineItems(
+/** Lifecycle lines the server posts into the room (a spawn, a `tmm done`) are
+ * events, not prose, and render as a centered system line rather than a chat
+ * bubble. The marker is `[tmm] `; the two glyph prefixes are the pre-2026-08
+ * spelling and stay recognized because the room is persisted — old messages
+ * must not regress into bubbles. Returns the text without its marker, or null
+ * when the body is ordinary prose. */
+export function systemLine(body: string | null | undefined): string | null {
+  for (const marker of ['[tmm] ', '⚡ ', '✔ ']) {
+    if (body?.startsWith(marker)) return body.slice(marker.length);
+  }
+  return null;
+}
+
+/** One row of the conversation. `msg` and `prompt` are things that were said,
+ * `note` is a single observed fact, `steps` is a collapsible run of tool calls
+ * (the "what it did between two replies" pane). */
+export type FeedBlock =
+  | { type: 'msg'; ts: number; msg: any; delivered: boolean }
+  | { type: 'prompt'; ts: number; window: number; text: string }
+  | { type: 'note'; ts: number; window: number; event: HubActivityEvent }
+  | { type: 'steps'; ts: number; window: number; key: string; events: HubActivityEvent[] };
+
+/** Internal: a tool call before consecutive ones are folded into a group. */
+type ToolItem = { type: 'tool'; ts: number; window: number; event: HubActivityEvent };
+
+/**
+ * Build the conversation from chat messages plus observed telemetry.
+ *
+ * Three rules carry the design:
+ *
+ * 1. **A delivery receipt is not telemetry.** `deliver_mentions` types a line
+ *    into an agent's pane; the agent's `userPromptSubmit` hook echoing that line
+ *    back is the only proof it was accepted as a prompt. Such an echo arrives as
+ *    a `prompt` event with `via: 'app'`, and it is consumed here to mark the
+ *    message that caused it as delivered rather than shown as a separate row —
+ *    the text would otherwise appear twice. This runs at EVERY feed level,
+ *    because "did what I just sent arrive" is not a detail the user opted into.
+ * 2. **A local prompt is the input half of the transcript.** Text typed at the
+ *    agent's own keyboard exists in no other channel, so an unmatched `prompt`
+ *    event renders as its own row.
+ * 3. **Tool calls collapse, replies do not.** Consecutive tool events from the
+ *    same window fold into one `steps` group; anything else (a message, a status
+ *    declaration, a lifecycle notification) ends the run, which is what makes a
+ *    group mean "between these two replies". Duplicate consecutive tool lines
+ *    are dropped per window first (pre+post fire for one call).
+ */
+export function feedBlocks(
   feed: any[],
   activity: readonly HubActivityEvent[],
-  level: 'chat' | 'status' | 'tools',
-): TimelineItem[] {
-  const items: TimelineItem[] = feed.map((m) => ({ type: 'msg', ts: m.ts ?? 0, msg: m }));
-  if (level !== 'chat') {
-    let lastTool = '';
-    for (const e of activity) {
-      if (e.kind === 'tool') {
-        if (level !== 'tools') continue;
-        if (e.text === lastTool) continue;
-        lastTool = e.text;
-      }
-      items.push({ type: 'activity', ts: e.ts, event: e });
+  level: FeedLevel,
+): FeedBlock[] {
+  const msgs: Extract<FeedBlock, { type: 'msg' }>[] = feed.map((m) => ({
+    type: 'msg',
+    ts: m.ts ?? 0,
+    msg: m,
+    delivered: false,
+  }));
+
+  // Rule 1: pair echoes with the messages that produced them.
+  const consumed = new Set<HubActivityEvent>();
+  for (const e of activity) {
+    if (e.kind !== 'prompt' || e.via !== 'app') continue;
+    // The newest message at or before the echo whose body it contains. The
+    // typed line is `[tmm chat] <from>: <body>`, and an agent that was
+    // mid-typing submits it with its own leftover text attached.
+    let hit: (typeof msgs)[number] | undefined;
+    for (const m of msgs) {
+      const body = m.msg?.body ?? '';
+      if (body && m.ts <= e.ts && e.text.includes(body)) hit = m;
+    }
+    if (hit) {
+      hit.delivered = true;
+      consumed.add(e);
     }
   }
-  items.sort((a, b) => a.ts - b.ts);
-  return items;
+
+  const stream: (FeedBlock | ToolItem)[] = [...msgs];
+  const lastTool = new Map<number, string>();
+  for (const e of activity) {
+    if (consumed.has(e)) continue;
+    // A line that never came back is about the message, not about telemetry:
+    // it survives even the chat-only level.
+    if (e.kind === 'warn') {
+      stream.push({ type: 'note', ts: e.ts, window: e.window, event: e });
+      continue;
+    }
+    if (level === 'chat') continue;
+    if (e.kind === 'tool') {
+      if (level !== 'tools') continue;
+      if (lastTool.get(e.window) === e.text) continue;
+      lastTool.set(e.window, e.text);
+      stream.push({ type: 'tool', ts: e.ts, window: e.window, event: e });
+      continue;
+    }
+    if (e.kind === 'prompt') {
+      stream.push({ type: 'prompt', ts: e.ts, window: e.window, text: e.text });
+      continue;
+    }
+    stream.push({ type: 'note', ts: e.ts, window: e.window, event: e });
+  }
+  stream.sort((a, b) => a.ts - b.ts);
+
+  // Rule 3: fold consecutive same-window tool calls.
+  const out: FeedBlock[] = [];
+  for (const item of stream) {
+    if (item.type !== 'tool') {
+      out.push(item);
+      continue;
+    }
+    const prev = out[out.length - 1];
+    if (prev?.type === 'steps' && prev.window === item.window) {
+      prev.events.push(item.event);
+      continue;
+    }
+    out.push({
+      type: 'steps',
+      ts: item.ts,
+      window: item.window,
+      key: `w${item.window}-${item.ts}`,
+      events: [item.event],
+    });
+  }
+  return out;
 }

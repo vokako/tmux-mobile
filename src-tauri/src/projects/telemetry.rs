@@ -2,13 +2,19 @@
 //!
 //! What an agent SAYS goes through the `tmm` CLI (hub_post / hub_status /
 //! hub_done). What we OBSERVE arrives here: hook notifications (it stopped, it
-//! wants permission) and tmux window activity. Status is DERIVED from those
-//! facts at read time — an agent never fills in a form, and a backend with
-//! poor hook coverage (codex) degrades to pane-activity granularity instead
-//! of lying. A finished turn (Stop) is REST, not distress: "stuck" detection
-//! by stop-without-done was a Team-supervisor-era rule and mislabeled every
-//! long-idle direct agent — the only distress we can honestly observe is a
-//! failed stop. See docs/exec-plans/agents-v2.md §4.1/§4.3.
+//! wants permission), the prompts it accepted, and tmux window activity. Status
+//! is DERIVED from those facts at read time — an agent never fills in a form,
+//! and a backend with poor hook coverage (codex) degrades to pane-activity
+//! granularity instead of lying. A finished turn (Stop) is REST, not distress:
+//! "stuck" detection by stop-without-done was a Team-supervisor-era rule and
+//! mislabeled every long-idle direct agent — the only distress we can honestly
+//! observe is a failed stop. See docs/exec-plans/agents-v2.md §4.1/§4.3.
+//!
+//! `userPromptSubmit` carries the INPUT half, which nothing else does: a prompt
+//! typed at the keyboard exists nowhere in the room, and a line we typed into a
+//! pane is only *sent*, never *confirmed*. Recording both closes the loop —
+//! `record_delivery` remembers what we typed, the echo acknowledges it, and
+//! `sweep_deliveries` reports the ones that never arrived.
 //!
 //! The store is a process-global map keyed by (session, window index) — the
 //! same granularity as a project slot and a hook notification. Records are
@@ -24,6 +30,16 @@ const ACTIVE_SECS: u64 = 30;
 /// An explicit `tmm status` declaration expires after this long so a crashed
 /// agent cannot stay "working" forever on its own last words.
 const EXPLICIT_TTL_SECS: u64 = 30 * 60;
+/// How long a line we typed into a pane may wait for its `userPromptSubmit`
+/// echo before we call the delivery unconfirmed. Typing is `send-keys`, which
+/// succeeds as long as the pane exists — it says nothing about whether the CLI
+/// accepted the text as a prompt (a busy agent queues it, a shell would have
+/// executed it, a crashed pane swallows it). The hook echo is the only
+/// end-to-end proof, so an unacked line is reported rather than assumed.
+const DELIVERY_ACK_SECS: u64 = 45;
+/// Prompt text kept per event. Long enough for a real instruction, short
+/// enough that 120 of them stay a cheap in-memory ring.
+const MAX_PROMPT_CHARS: usize = 1024;
 
 #[derive(Debug, Clone, Default)]
 struct Rec {
@@ -38,6 +54,10 @@ struct Rec {
     /// Last hook tool event (pre/postToolUse from an isolated-home agent):
     /// (activity line, ts).
     tool: Option<(String, u64)>,
+    /// A line this app typed into the pane that has not been echoed back by a
+    /// `userPromptSubmit` hook yet: (line, ts). Cleared by the echo (delivery
+    /// confirmed) or by the sweep (delivery unconfirmed).
+    pending: Option<(String, u64)>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -66,9 +86,14 @@ pub struct ActivityEvent {
     /// Epoch MILLISECONDS to merge directly with bus message timestamps.
     pub ts: u64,
     pub window: usize,
-    /// tool | status | notif
+    /// tool | status | notif | prompt | warn
     pub kind: String,
     pub text: String,
+    /// Provenance, `prompt` events only: `app` when the text is the line this
+    /// app typed into the pane (so the event doubles as the delivery receipt),
+    /// `local` when it was typed at the keyboard. Empty for every other kind.
+    #[serde(skip_serializing_if = "str::is_empty")]
+    pub via: String,
 }
 
 fn events() -> &'static Mutex<HashMap<String, std::collections::VecDeque<ActivityEvent>>> {
@@ -77,9 +102,13 @@ fn events() -> &'static Mutex<HashMap<String, std::collections::VecDeque<Activit
 }
 
 fn push_event(session: &str, window: usize, kind: &str, text: String) {
+    push_event_via(session, window, kind, text, String::new());
+}
+
+fn push_event_via(session: &str, window: usize, kind: &str, text: String, via: String) {
     let mut map = events().lock().unwrap();
     let q = map.entry(session.to_string()).or_default();
-    q.push_back(ActivityEvent { ts: now() * 1000, window, kind: kind.into(), text });
+    q.push_back(ActivityEvent { ts: now() * 1000, window, kind: kind.into(), text, via });
     while q.len() > EVENTS_CAP {
         q.pop_front();
     }
@@ -135,6 +164,74 @@ pub fn record_tool(session: &str, window: usize, line: &str) {
     push_event(session, window, "tool", line.to_string());
     let (line, ts) = (line.to_string(), now());
     with_rec(session, window, |r| r.tool = Some((line, ts)));
+}
+
+/// A line this app typed into an agent's pane (`deliver_mentions`). Held as a
+/// pending delivery until the agent's `userPromptSubmit` hook echoes it back.
+pub fn record_delivery(session: &str, window: usize, line: &str) {
+    let (line, ts) = (line.to_string(), now());
+    with_rec(session, window, |r| r.pending = Some((line, ts)));
+}
+
+/// The `userPromptSubmit` hook: the agent accepted a prompt. This is BOTH the
+/// input half of the transcript (what the agent was asked, which no other
+/// channel carries) and the delivery receipt for a line we typed.
+///
+/// Returns true when it acknowledged a pending delivery. Matching is
+/// containment, not equality: the CLI may submit the line with its own
+/// decoration, and an agent that is mid-task receives our line appended to
+/// whatever it was already typing.
+pub fn record_prompt(session: &str, window: usize, prompt: &str) -> bool {
+    let text = truncate_chars(prompt, MAX_PROMPT_CHARS);
+    let mut acked = false;
+    with_rec(session, window, |r| {
+        if let Some((line, _)) = r.pending.clone() {
+            if prompt.contains(line.as_str()) || line.contains(prompt) {
+                r.pending = None;
+                acked = true;
+            }
+        }
+    });
+    push_event_via(
+        session,
+        window,
+        "prompt",
+        text,
+        if acked { "app".into() } else { "local".into() },
+    );
+    acked
+}
+
+/// Report deliveries that never came back as a prompt. Called before a client
+/// reads the feed, which is exactly when the answer is wanted; a swept line is
+/// cleared so the warning is emitted once.
+pub fn sweep_deliveries(session: &str) {
+    let now = now();
+    let stale: Vec<(usize, String)> = {
+        let mut map = store().lock().unwrap();
+        map.iter_mut()
+            .filter(|((s, _), _)| s == session)
+            .filter_map(|((_, w), r)| {
+                let (line, ts) = r.pending.clone()?;
+                if now.saturating_sub(ts) < DELIVERY_ACK_SECS {
+                    return None;
+                }
+                r.pending = None;
+                Some((*w, line))
+            })
+            .collect()
+    };
+    for (window, line) in stale {
+        push_event(session, window, "warn", format!("unconfirmed: {}", truncate_chars(&line, 160)));
+    }
+}
+
+fn truncate_chars(input: &str, max: usize) -> String {
+    let mut out: String = input.chars().take(max).collect();
+    if input.chars().count() > max {
+        out.push('…');
+    }
+    out
 }
 
 /// Drop records for windows that no longer exist (called opportunistically
@@ -341,6 +438,64 @@ mod tests {
         assert_eq!(kinds, vec!["status", "tool", "notif"]);
         let texts: Vec<String> = recent_events("feed-test", 0).iter().map(|e| e.text.clone()).collect();
         assert_eq!(texts[0], "waiting — 等接口");
+    }
+
+    #[test]
+    fn a_typed_line_is_acknowledged_by_the_prompt_hook_that_echoes_it() {
+        let line = "[tmm chat] human: @dev ship it";
+        record_delivery("ack-test", 3, line);
+        // The CLI submits our line (possibly with the agent's own leading text
+        // when it was mid-typing) — containment, not equality.
+        assert!(
+            record_prompt("ack-test", 3, &format!("{line}\n")),
+            "the echo must acknowledge the pending delivery"
+        );
+        let evs = recent_events("ack-test", 0);
+        assert_eq!(evs.last().unwrap().kind, "prompt");
+        assert_eq!(evs.last().unwrap().via, "app", "an acked prompt came from this app");
+        // Nothing pending any more, so the sweep stays silent.
+        sweep_deliveries("ack-test");
+        assert_eq!(recent_events("ack-test", 0).len(), 1, "no warning for a delivered line");
+    }
+
+    #[test]
+    fn a_prompt_typed_at_the_keyboard_is_recorded_as_local_input() {
+        assert!(!record_prompt("local-test", 1, "fix the flaky test"), "nothing was pending");
+        let e = recent_events("local-test", 1).into_iter().next().unwrap();
+        assert_eq!((e.kind.as_str(), e.via.as_str()), ("prompt", "local"));
+        assert_eq!(e.text, "fix the flaky test", "the input half of the transcript");
+    }
+
+    #[test]
+    fn an_unacknowledged_delivery_is_reported_once() {
+        // Backdate the pending line past the ack window.
+        record_delivery("sweep-test", 2, "[tmm chat] human: @dev hello");
+        with_rec("sweep-test", 2, |r| {
+            let (line, ts) = r.pending.clone().unwrap();
+            r.pending = Some((line, ts - DELIVERY_ACK_SECS - 1));
+        });
+        sweep_deliveries("sweep-test");
+        let warns: Vec<String> = recent_events("sweep-test", 0)
+            .iter()
+            .filter(|e| e.kind == "warn")
+            .map(|e| e.text.clone())
+            .collect();
+        assert_eq!(warns.len(), 1, "one report per unacked line");
+        assert!(warns[0].contains("hello"), "the report names the line, got {:?}", warns[0]);
+        sweep_deliveries("sweep-test");
+        assert_eq!(
+            recent_events("sweep-test", 0).iter().filter(|e| e.kind == "warn").count(),
+            1,
+            "sweeping again must not re-report"
+        );
+    }
+
+    #[test]
+    fn prompt_text_is_capped() {
+        let long = "x".repeat(MAX_PROMPT_CHARS + 50);
+        record_prompt("cap-test", 1, &long);
+        let e = recent_events("cap-test", 0).into_iter().next().unwrap();
+        assert_eq!(e.text.chars().count(), MAX_PROMPT_CHARS + 1, "capped plus the ellipsis");
     }
 
     #[test]
