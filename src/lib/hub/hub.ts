@@ -69,6 +69,40 @@ export function statuslineWindows(agents: HubAgent[], termTarget: string): Statu
     }));
 }
 
+/** Who the composer talks to when the user has not chosen anyone.
+ *
+ * A conversation has ONE default recipient — the lead. Typing `@name` to reach
+ * the only agent in the room is ceremony, so the room picks a lead and the
+ * composer addresses it silently. Order of preference:
+ *   1. the stored choice for this project, while that agent is still present;
+ *   2. the only managed agent, when there is exactly one;
+ *   3. an agent whose registry definition can hire (that IS the lead role);
+ *   4. the lowest window index, so the answer is stable rather than arbitrary.
+ * Returns '' when the project has no managed agent to talk to. */
+export function pickLead(
+  agents: readonly HubAgent[],
+  registry: readonly { name: string; can_hire?: boolean }[],
+  stored?: string | null,
+): string {
+  const managed = agents.filter((a) => a.managed);
+  if (!managed.length) return '';
+  if (stored && managed.some((a) => a.name === stored)) return stored;
+  if (managed.length === 1) return managed[0]!.name;
+  const canHire = new Set(registry.filter((r) => r.can_hire).map((r) => r.name));
+  const lead = managed.find((a) => canHire.has(a.name));
+  if (lead) return lead.name;
+  return managed.slice().sort((a, b) => a.window - b.window)[0]!.name;
+}
+
+/** The body to post for `text` addressed at `to`. `''` means everyone (the
+ * room's broadcast), and an explicit `@` anywhere means the user is addressing
+ * people by hand — never rewrite that. */
+export function addressed(text: string, to: string): string {
+  const body = text.trim();
+  if (!body || body.includes('@')) return body;
+  return to ? `@${to} ${body}` : body;
+}
+
 export type FeedLevel = 'chat' | 'status' | 'tools';
 
 /** Lifecycle lines the server posts into the room (a spawn, a `tmm done`) are

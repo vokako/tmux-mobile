@@ -205,8 +205,9 @@ fn window_of_agent(session: &str, agent: &str) -> Option<usize> {
 
 /// Type an @mentioned chat line into each mentioned agent's pane. This is the
 /// delivery half of the hub: the bus stores the record, but an interactive
-/// CLI only reacts to what lands in its input. Only windows that ARE agents
-/// receive delivery (typing into a shell would execute the message).
+/// CLI only reacts to what lands in its input. Delivery goes to MANAGED agent
+/// windows only — a shell would execute the message, and a window the user
+/// started by hand belongs to the user, not to this app.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn deliver_mentions(session: &str, from: &str, body: &str) {
     use crate::projects::agents;
@@ -221,6 +222,7 @@ fn deliver_mentions(session: &str, from: &str, body: &str) {
     if mentions.is_empty() {
         return;
     }
+    let ws = crate::projects::project_for_session(session).ok().flatten().map(|p| p.path);
     let Ok(panes) = crate::tmux::list_panes(session) else { return };
     let mut seen = std::collections::HashSet::new();
     for p in &panes {
@@ -229,6 +231,13 @@ fn deliver_mentions(session: &str, from: &str, body: &str) {
         }
         let is_agent = agents::detect(&format!("{} {} {}", p.current_command, p.pane_title, p.window_name)).is_some();
         if !is_agent || p.window_name == from {
+            continue;
+        }
+        // MANAGED windows only. `@all` would otherwise type into a kiro the user
+        // started by hand in this directory — the app does not own that session,
+        // and injecting a chat line into it is not ours to do. Same gate as
+        // hub_agents' participant list and the stop-hook auto-post.
+        if !crate::projects::is_managed_in(ws.as_deref(), &p.window_name) {
             continue;
         }
         let matched = mentions.iter().any(|m| *m == p.window_name || *m == "all");
@@ -286,10 +295,7 @@ fn agent_states(session: &str) -> serde_json::Value {
         .map(|p| {
             let agent = agents::detect(&format!("{} {} {}", p.current_command, p.pane_title, p.window_name));
             let st = telemetry::derive(session, p.window, activity.get(&p.window).copied().unwrap_or(0));
-            let managed = agent.is_some()
-                && ws.as_deref().is_some_and(|w| {
-                    std::path::Path::new(w).join(".tmm").join("agents").join(&p.window_name).is_dir()
-                });
+            let managed = agent.is_some() && crate::projects::is_managed_in(ws.as_deref(), &p.window_name);
             serde_json::json!({
                 "window": p.window,
                 "name": p.window_name,

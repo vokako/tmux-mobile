@@ -283,25 +283,16 @@ impl AgentNotificationHub {
         if reply.is_empty() {
             return;
         }
-        // Constraint 3: managed-only gate. Look up the window name and check
-        // that a .tmm/agents/<name>/ directory was materialized by `spawn`.
+        // Constraint 3: managed-only gate. `projects::managed_home` is the ONE
+        // definition of "an agent this app created" — shared with hub_agents'
+        // participant list and with delivery, so the three cannot drift apart.
         let window_name = match tmux::list_panes(session).ok().and_then(|panes| {
             panes.into_iter().find(|p| p.window == window).map(|p| p.window_name)
         }) {
             Some(n) => n,
             None => return, // session or window vanished between hook and poll
         };
-        let is_managed = crate::projects::project_for_session(session)
-            .ok()
-            .flatten()
-            .is_some_and(|p| {
-                std::path::Path::new(&p.path)
-                    .join(".tmm")
-                    .join("agents")
-                    .join(&window_name)
-                    .is_dir()
-            });
-        if !is_managed {
+        if crate::projects::managed_home(session, &window_name).is_none() {
             return;
         }
         // Constraint 1: same-turn dedup.

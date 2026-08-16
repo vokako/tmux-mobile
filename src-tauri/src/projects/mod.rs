@@ -557,6 +557,33 @@ pub fn project_for_session(session: &str) -> Result<Option<store::Project>, Stri
     with_store(|store| store.project_by_session(session))
 }
 
+/// The isolated home of a MANAGED agent, or `None` when this window is not one.
+///
+/// This is THE definition of "an agent this app created", and it has to be one
+/// function because three unrelated places gate on it and they must not drift:
+/// `hub_agents` (who is a chat participant), `maybe_auto_post` (whose replies
+/// get posted to the room) and `deliver_mentions` (whose pane we are allowed to
+/// type into). The marker is the directory `spawn` materialized — a window the
+/// user started by hand can share a name with a registry agent, but it has no
+/// isolated home, and typing into it or publishing its replies would reach into
+/// a session this app does not own.
+pub fn managed_home(session: &str, window_name: &str) -> Option<std::path::PathBuf> {
+    let project = project_for_session(session).ok().flatten()?;
+    let dir = std::path::Path::new(&project.path)
+        .join(".tmm")
+        .join("agents")
+        .join(window_name);
+    dir.is_dir().then_some(dir)
+}
+
+/// Same question, when the caller already knows the workspace path (it is
+/// listing every window of one session and must not hit the store per row).
+pub fn is_managed_in(workspace: Option<&str>, window_name: &str) -> bool {
+    workspace.is_some_and(|ws| {
+        std::path::Path::new(ws).join(".tmm").join("agents").join(window_name).is_dir()
+    })
+}
+
 pub fn registry_get(name: &str) -> Result<Option<store::RegAgent>, String> {
     with_store(|store| {
         store.reg_seed(now())?;
@@ -701,6 +728,24 @@ mod tests {
             std::fs::create_dir_all(&dir).unwrap();
             std::env::set_var("TMM_STATE_DB", dir.join("state.db"));
         });
+    }
+
+    /// The one definition of "an agent this app created". Three gates share it
+    /// (chat participants, stop-hook auto-post, pane delivery), so it is worth
+    /// a test of its own: the marker is the isolated home `spawn` materialized,
+    /// NOT the window name — a hand-started window may share the name.
+    #[test]
+    fn managed_is_the_isolated_home_not_the_name() {
+        let ws = std::env::temp_dir().join(format!("tmm-managed-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(ws.join(".tmm/agents/dev")).unwrap();
+        let path = ws.to_string_lossy().to_string();
+        assert!(is_managed_in(Some(&path), "dev"), "spawn materialized this one");
+        assert!(!is_managed_in(Some(&path), "byhand"), "same session, no isolated home");
+        assert!(!is_managed_in(None, "dev"), "a session with no project owns nothing");
+        // A file where the directory should be is not a home either.
+        std::fs::write(ws.join(".tmm/agents/file"), "x").unwrap();
+        assert!(!is_managed_in(Some(&path), "file"));
+        let _ = std::fs::remove_dir_all(&ws);
     }
 
     #[test]

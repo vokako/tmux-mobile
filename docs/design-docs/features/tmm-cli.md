@@ -281,6 +281,26 @@ line with the agent's own half-typed text attached), and `sweep_deliveries`
 reports the ones still pending after 45 s as a `warn` event. The sweep runs
 when a client reads `hub_activity`, which is exactly when the answer is wanted.
 
+Delivery reaches MANAGED windows only. `projects::managed_home` /
+`is_managed_in` is the one definition of "an agent this app created" — the
+isolated home `spawn` materialized, never the window name — and three gates
+share it so they cannot drift: who counts as a chat participant (`hub_agents`),
+whose stop-hook reply gets posted (`maybe_auto_post`), and whose pane we may
+type into (`deliver_mentions`). Without the third one, `@all` would inject a
+chat line into a kiro the user started by hand in that directory.
+
+## Who a message goes to
+
+A room has ONE default recipient, so talking to your lead agent costs no `@`.
+`pickLead()` (client, pure) resolves it: the remembered choice for this project
+while that agent is still present → the only managed agent → one whose registry
+definition `can_hire` (that IS the lead role) → lowest window index. Choosing a
+recipient IS choosing the project's lead, so it persists per session.
+`addressed()` prefixes `@name` on send and leaves any hand-written `@` alone;
+an empty recipient posts to the room. An empty room offers a preset start
+instead of a composer: tap one agent to begin, or pick several as a team — each
+is the same `hub_spawn`, and the lead of the new roster follows the same rule.
+
 ## Spawn: the starter pistol
 
 An agent CLI boots into an interactive prompt and does nothing until spoken

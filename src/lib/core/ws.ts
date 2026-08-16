@@ -740,6 +740,11 @@ export interface HubAgent {
   name: string;
   command: string;
   agent: string | null;
+  /** True when the window is a MANAGED agent — spawned from the registry into
+   * an isolated home under `<workspace>/.tmm/agents/<name>/`. Only these are
+   * chat participants; direct windows (shells, agents the user started by
+   * hand) exist in the terminal drawer only. */
+  managed: boolean;
   state: string;
   detail: string;
   since: number;

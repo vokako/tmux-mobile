@@ -25,7 +25,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, systemLine } from './hub.ts';
+  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, systemLine, pickLead, addressed } from './hub.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
 
@@ -51,7 +51,11 @@
   let lastActivityTs = 0;
   let registry = $state([]);        // RegAgent[]
   let composerText = $state('');
-  let dmTarget = $state('');        // managed agent name the composer addresses
+  // Who the composer addresses. '' = the whole room. Defaults to the project's
+  // lead (pickLead), so talking to your lead agent needs no @ ceremony; the
+  // user can retarget or broadcast at any time.
+  let recipient = $state('');
+  let recipientOpen = $state(false);
   let feedEl = $state(null);
 
   // Terminal drawer (closed by default — the whole point).
@@ -90,7 +94,8 @@
     lastActivityTs = 0;
     lastTs = 0;
     agents = [];
-    dmTarget = '';
+    recipient = '';
+    recipientOpen = false;
     termOpen = false;
     await Promise.all([loadFeed(), loadAgents(), loadActivity()]);
   }
@@ -126,7 +131,11 @@
     if (!selected) return;
     try {
       agents = (await hubAgents(selected)).agents ?? [];
-      if (dmTarget && !agents.some((a) => a.managed && a.name === dmTarget)) dmTarget = '';
+      // The recipient follows the room: an agent that left cannot be the
+      // recipient, and a room that just gained its first agent gets a lead
+      // without the user choosing one.
+      if (recipient && !agents.some((a) => a.managed && a.name === recipient)) recipient = '';
+      if (!recipient) recipient = pickLead(agents, registry, hubPrefs.lead(selected));
     } catch { agents = []; }
   }
 
@@ -137,9 +146,10 @@
   async function send() {
     let text = composerText.trim();
     if (!text || !selected) return;
-    // The DM target makes "talk to THIS agent" one tap: auto-address unless
-    // the user already @-addressed someone explicitly.
-    if (dmTarget && !text.includes('@')) text = `@${dmTarget} ${text}`;
+    // The recipient makes "talk to THIS agent" the default rather than a
+    // gesture: addressed() prefixes @name unless the user @-addressed someone
+    // by hand, and an empty recipient posts to the room.
+    text = addressed(text, recipient);
     composerText = '';
     try {
       await hubPost(selected, text);
@@ -147,8 +157,12 @@
     } catch (e) { console.warn('hub post failed', e); }
   }
 
-  function toggleDm(a) {
-    dmTarget = dmTarget === a.name ? '' : a.name;
+  /** Choosing a recipient is also choosing this project's lead: it is the same
+   * decision ("who am I working with here"), so it persists. */
+  function setRecipient(name) {
+    recipient = name;
+    recipientOpen = false;
+    if (selected) hubPrefs.setLead(selected, name);
   }
 
   // Terminal drawer: pick a window (any window — this is where direct
@@ -226,15 +240,46 @@
   let spawnOpen = $state(false);
   let spawnAgent = $state('');
   let spawnBrief = $state('');
+  // Preset start: pick one agent (tap) or several (a team) for an empty room.
+  let startOpen = $state(false);
+  let startPick = $state([]);
+  let startBrief = $state('');
+  let starting = $state(false);
   async function doSpawn() {
     if (!spawnAgent || !selected) return;
     const brief = spawnBrief.trim();
     spawnOpen = false;
     spawnBrief = '';
+    const name = spawnAgent;
+    spawnAgent = '';
     try {
-      await hubSpawn(selected, spawnAgent, brief);
+      await hubSpawn(selected, name, brief);
       await Promise.all([reload(), loadAgents(), loadFeed()]);
+      // First agent in an empty room becomes the one you are talking to.
+      if (!recipient) setRecipient(name);
     } catch (e) { console.warn('spawn failed', e); }
+  }
+
+  /** Start a conversation from a preset: one agent, or several at once (a
+   * team). Each is an existing `hub_spawn`, run in order so the roster appears
+   * in the order it was picked; the lead is the first that can hire, else the
+   * first picked — the same rule pickLead applies to a room already running. */
+  async function startWith(names, brief = '') {
+    if (!selected || !names.length || starting) return;
+    starting = true;
+    startOpen = false;
+    try {
+      for (const name of names) {
+        try { await hubSpawn(selected, name, brief); }
+        catch (e) { console.warn('spawn failed', name, e); }
+      }
+      await Promise.all([reload(), loadAgents(), loadFeed()]);
+      const lead = names.find((n) => registry.find((r) => r.name === n)?.can_hire) ?? names[0];
+      setRecipient(lead);
+    } finally {
+      starting = false;
+      startPick = [];
+    }
   }
 
   // Live pushes + polling while visible.
@@ -369,12 +414,15 @@
       {/if}
 
       {#if managedAgents.length}
-        <div class="cards">
+        <!-- The roster. Tapping an agent makes it the recipient (and this
+             project's lead) — the phone gets chips, the desktop gets cards. -->
+        <div class="cards" class:chips={compact}>
           {#each managedAgents as a (a.window)}
-            <button class="acard" class:sel={dmTarget === a.name} onclick={() => toggleDm(a)}>
+            <button class="acard" class:sel={recipient === a.name} onclick={() => setRecipient(a.name)}>
               <div class="a-top">
                 <span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>
                 {a.name}
+                {#if recipient === a.name}<span class="lead-tag">{t('hubLead')}</span>{/if}
                 <span class="a-peek" role="button" tabindex="-1" title={t('hubWatch')}
                   onclick={(e) => { e.stopPropagation(); openDrawer(a); }}
                   onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); openDrawer(a); } }}>
@@ -384,9 +432,15 @@
               <div class="a-state">
                 <span class="st" style:background={stateDotColor(a.state)}></span>{a.state}
               </div>
-              {#if a.detail}<div class="a-note">{a.detail}</div>{/if}
+              {#if a.detail && !compact}<div class="a-note">{a.detail}</div>{/if}
             </button>
           {/each}
+          <!-- Ad hoc: add an agent to a conversation already in progress. -->
+          {#if liveSelected}
+            <button class="acard add" onclick={() => { spawnOpen = true; }} title={t('hubSpawn')}>
+              <Icon name="plus" size={14} /><span>{t('hubSpawn')}</span>
+            </button>
+          {/if}
         </div>
       {/if}
 
@@ -454,19 +508,60 @@
           {/if}
         {/each}
         {#if !blocks.length}
-          <div class="empty">{managedAgents.length ? t('hubEmpty') : t('hubEmptyNoAgents')}</div>
+          {#if liveSelected && !managedAgents.length && registry.length}
+            <!-- Nothing to talk to yet: start from a preset. One tap = that
+                 agent becomes the lead; "several" starts a team in one go. -->
+            <div class="start">
+              <div class="start-h">{t('hubStartTitle')}</div>
+              <div class="start-list">
+                {#each registry as r (r.name)}
+                  <button class="start-row" disabled={starting} onclick={() => startWith([r.name])}>
+                    <span class="ava" style:background={backendColor(r.backend)}>{r.name.slice(0, 1).toUpperCase()}</span>
+                    <span class="sr-name">{r.name}</span>
+                    <span class="sr-backend">{r.backend}</span>
+                    {#if r.can_hire}<span class="sr-cap">{t('agentsCanHire')}</span>{/if}
+                  </button>
+                {/each}
+              </div>
+              <button class="chip-btn" disabled={starting} onclick={() => { startPick = []; startOpen = true; }}>
+                <Icon name="collab" size={13} /> {t('hubStartTeam')}
+              </button>
+            </div>
+          {:else}
+            <div class="empty">{managedAgents.length ? t('hubEmpty') : t('hubEmptyNoAgents')}</div>
+          {/if}
         {/if}
       </div>
 
       <div class="composer">
-        {#if dmTarget}
-          <button class="dm-chip" onclick={() => dmTarget = ''} title={t('hubDmClear')}>
-            @{dmTarget} <Icon name="x" size={11} />
-          </button>
+        <!-- WHO this goes to, always visible: the lead by default, one tap to
+             retarget or to broadcast. No @ typing required. -->
+        {#if managedAgents.length}
+          <div class="to-wrap">
+            <button class="to-chip" class:all={!recipient} onclick={() => recipientOpen = !recipientOpen}>
+              <span class="to-label">{t('hubTo')}</span>
+              <span class="to-name">{recipient || t('hubEveryone')}</span>
+              <Icon name={recipientOpen ? 'chevron-down' : 'chevron-up'} size={11} />
+            </button>
+            {#if recipientOpen}
+              <div class="to-menu">
+                {#each managedAgents as a (a.window)}
+                  <button class:sel={recipient === a.name} onclick={() => setRecipient(a.name)}>
+                    <span class="st" style:background={stateDotColor(a.state)}></span>{a.name}
+                  </button>
+                {/each}
+                <button class:sel={!recipient} onclick={() => setRecipient('')}>
+                  <span class="st all-dot"></span>{t('hubEveryone')}
+                </button>
+              </div>
+            {/if}
+          </div>
         {/if}
-        <input placeholder={dmTarget ? t('hubComposerDm').replace('{name}', dmTarget) : t('hubComposer')}
+        <input placeholder={recipient ? t('hubComposerDm').replace('{name}', recipient) : t('hubComposer')}
           bind:value={composerText} onkeydown={(e) => e.key === 'Enter' && send()} />
-        <button class="send-btn" onclick={send}>{t('hubSend')}</button>
+        <button class="send-btn" onclick={send} title={t('hubSend')}>
+          {#if compact}<Icon name="send" size={16} />{:else}{t('hubSend')}{/if}
+        </button>
       </div>
     </main>
 
@@ -512,10 +607,36 @@
     {/if}
   </div>
 
+  {#if startOpen}
+    <!-- ── Start a team: several agents at once ── -->
+    <div class="dlg-backdrop" onclick={() => startOpen = false} role="presentation"></div>
+    <div class="dlg" class:sheet={compact}>
+      <h2>{t('hubStartTeam')}</h2>
+      <div class="dlg-agents">
+        {#each registry as r (r.name)}
+          <button class="agent-pick" class:sel={startPick.includes(r.name)}
+            onclick={() => { startPick = startPick.includes(r.name) ? startPick.filter((n) => n !== r.name) : [...startPick, r.name]; }}>
+            <span class="ava" style:background={backendColor(r.backend)}>{r.name.slice(0, 1).toUpperCase()}</span>
+            {r.name} · {r.backend}
+            {#if startPick.includes(r.name)}<Icon name="check" size={13} />{/if}
+          </button>
+        {/each}
+      </div>
+      <input placeholder={t('hubBrief')} bind:value={startBrief} />
+      <div class="dlg-actions">
+        <button class="chip-btn" onclick={() => startOpen = false}>{t('cancel')}</button>
+        <button class="chip-btn primary" disabled={!startPick.length || starting}
+          onclick={() => startWith(startPick, startBrief.trim())}>
+          {starting ? '…' : t('hubStartGo').replace('{n}', String(startPick.length))}
+        </button>
+      </div>
+    </div>
+  {/if}
+
   {#if createOpen}
     <!-- ── New project: path + name + WHICH AGENTS ── -->
     <div class="dlg-backdrop" onclick={() => createOpen = false} role="presentation"></div>
-    <div class="dlg">
+    <div class="dlg" class:sheet={compact}>
       <h2>{t('projectNew')}</h2>
       <input placeholder={t('hubCreatePath')} bind:value={createPath} />
       <input placeholder={t('hubCreateName')} bind:value={createName} />
@@ -543,6 +664,19 @@
   .hub-root { height: 100%; display: flex; flex-direction: column; min-height: 0; background: var(--bg); position: relative; }
   .cols { flex: 1; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 0; }
   .hub-root.compact .cols { grid-template-columns: minmax(0, 1fr); }
+  /* Phone shape: tighter gutters, thumb-sized controls, no horizontal
+     overflow. The page head wraps instead of pushing the chips off-screen. */
+  .hub-root.compact .page-head { flex-wrap: wrap; row-gap: 6px; padding: 8px 12px; }
+  .hub-root.compact .page-head h1 { font-size: 15px; }
+  .hub-root.compact .feed { padding: 12px 12px; gap: 10px; }
+  .hub-root.compact .msg, .hub-root.compact .prompt { max-width: 92%; }
+  .hub-root.compact .composer { padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); gap: 6px; }
+  .hub-root.compact .composer input { min-height: 40px; font-size: 14px; }
+  .hub-root.compact .send-btn { min-width: 44px; min-height: 40px; padding: 8px 12px; }
+  .hub-root.compact .chip-btn { min-height: 34px; }
+  .hub-root.compact .spawn-form { flex-wrap: wrap; padding: 8px 12px; }
+  .hub-root.compact .spawn-form select, .hub-root.compact .spawn-form input { min-height: 40px; flex: 1 1 100%; }
+  .hub-root.compact .s-head { min-height: 34px; }
   /* Drawer open: the conversation yields but stays present. */
   .hub-root.drawer-open .cols { grid-template-columns: var(--sidebar-w) minmax(280px, 0.8fr) minmax(360px, 1.2fr); }
 
@@ -579,6 +713,15 @@
   .acard { flex: none; width: 158px; background: var(--surface); border: 1px solid var(--border); border-radius: 11px; padding: 9px 11px; cursor: pointer; text-align: left; transition: border-color 160ms; }
   .acard:hover { border-color: var(--input-border); }
   .acard.sel { border-color: var(--accent); background: var(--accent-bg); }
+  .acard.add { width: auto; display: flex; align-items: center; gap: 6px; color: var(--text3); font-size: 12px; }
+  .acard.add:hover { color: var(--accent); }
+  .lead-tag { font-size: 8.5px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 3px; }
+  /* Phone: the roster is a scrollable chip row, not a wall of cards. */
+  .cards.chips { gap: 6px; padding: 8px 12px; }
+  .cards.chips .acard { width: auto; display: flex; align-items: center; gap: 6px; min-height: 40px; border-radius: 999px; padding: 6px 11px; }
+  .cards.chips .a-top { gap: 5px; }
+  .cards.chips .a-state { margin-top: 0; }
+  .cards.chips .a-state :global(span) { margin: 0; }
   .a-top { display: flex; align-items: center; gap: 6px; font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 12.5px; color: var(--text); }
   .a-peek { margin-left: auto; display: grid; place-items: center; width: 22px; height: 20px; border-radius: 6px; color: var(--text3); }
   .a-peek:hover { color: var(--accent); background: var(--surface2); }
@@ -646,10 +789,45 @@
   .empty { color: var(--text3); font-size: 12.5px; text-align: center; margin: auto; padding: 0 24px; line-height: 1.6; }
 
   .composer { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
-  .dm-chip { display: flex; align-items: center; gap: 4px; flex: none; background: var(--accent-bg); color: var(--accent); border: none; border-radius: 8px; padding: 6px 10px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: ui-monospace, Menlo, monospace; }
+  /* Recipient control: who this message goes to, with a menu that opens
+     UPWARD so the on-screen keyboard never covers it. */
+  .to-wrap { position: relative; flex: none; }
+  .to-chip { display: flex; align-items: center; gap: 5px; min-height: 34px; background: var(--accent-bg); color: var(--accent); border: 1px solid transparent; border-radius: 9px; padding: 6px 9px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: ui-monospace, Menlo, monospace; max-width: 42vw; }
+  .to-chip.all { background: var(--surface); color: var(--text2); border-color: var(--border); }
+  .to-label { font-weight: 500; opacity: 0.7; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .to-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .to-menu {
+    position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 12;
+    min-width: 168px; max-height: 46vh; overflow-y: auto;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 11px;
+    box-shadow: 0 12px 34px rgba(0,0,0,0.45); padding: 5px; display: flex; flex-direction: column; gap: 2px;
+  }
+  .to-menu button {
+    display: flex; align-items: center; gap: 7px; min-height: 38px; width: 100%; text-align: left;
+    background: none; border: none; border-radius: 8px; color: var(--text2);
+    padding: 7px 10px; font-size: 13px; cursor: pointer; font-family: ui-monospace, Menlo, monospace;
+  }
+  .to-menu button:hover { background: var(--surface2); color: var(--text); }
+  .to-menu button.sel { color: var(--accent); background: var(--accent-bg); }
+  .all-dot { border: 1px solid var(--text3); background: none; }
   .composer input { flex: 1; min-width: 0; background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 10px; color: var(--text); padding: 8px 12px; font-size: 13px; outline: none; transition: border-color 160ms; }
   .composer input:focus { border-color: var(--accent); }
-  .send-btn { background: var(--accent-bg); color: var(--accent); border: none; border-radius: 10px; padding: 8px 16px; cursor: pointer; font-weight: 600; font-size: 13px; }
+  .send-btn { background: var(--accent-bg); color: var(--accent); border: none; border-radius: 10px; padding: 8px 16px; cursor: pointer; font-weight: 600; font-size: 13px; display: grid; place-items: center; }
+
+  /* Empty room: start from a preset — one agent, or a team. */
+  .start { margin: auto; display: flex; flex-direction: column; gap: 8px; width: min(420px, 100%); }
+  .start-h { font-size: 12.5px; color: var(--text2); text-align: center; margin-bottom: 2px; }
+  .start-list { display: flex; flex-direction: column; gap: 5px; }
+  .start-row {
+    display: flex; align-items: center; gap: 8px; min-height: 44px; width: 100%; text-align: left;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 11px;
+    color: var(--text); padding: 8px 11px; font-size: 13px; cursor: pointer;
+  }
+  .start-row:hover { border-color: var(--accent); background: var(--accent-bg); }
+  .start-row:disabled { opacity: 0.5; }
+  .sr-name { font-family: ui-monospace, Menlo, monospace; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sr-backend { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text3); margin-left: auto; }
+  .sr-cap { font-size: 9px; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 3px; opacity: 0.75; }
 
   .drawer { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #000; border-left: 1px solid var(--border); }
   .drawer-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--bg2); border-bottom: 1px solid var(--border); }
@@ -675,7 +853,16 @@
     background: var(--bg); border: 1px solid var(--border); border-radius: 14px;
     box-shadow: 0 18px 60px rgba(0,0,0,0.5); padding: 18px; display: flex; flex-direction: column; gap: 10px;
   }
-  .dlg h2 { margin: 0 0 4px; font-size: 15px; }
+  .dlg h2 { margin: 0 0 4px; font-size: 15px; }  /* Phone: dialogs become bottom sheets — reachable with a thumb, and they
+     never fight the on-screen keyboard for the middle of the screen. */
+  .dlg.sheet {
+    left: 0; top: auto; bottom: 0; transform: none;
+    width: 100%; max-width: none; max-height: 82vh;
+    border-radius: 16px 16px 0 0; border-left: none; border-right: none; border-bottom: none;
+    padding: 16px 14px calc(16px + env(safe-area-inset-bottom));
+  }
+  .dlg.sheet .dlg-agents { max-height: 46vh; overflow-y: auto; }
+  .dlg.sheet .agent-pick, .dlg.sheet input, .dlg.sheet .dlg-actions button { min-height: 44px; }
   .dlg input { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 9px; color: var(--text); padding: 8px 12px; font-size: 13px; outline: none; }
   .dlg input:focus { border-color: var(--accent); }
   .dlg-h { font-family: ui-monospace, Menlo, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 1.4px; color: var(--text3); margin-top: 4px; }
