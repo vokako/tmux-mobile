@@ -44,7 +44,13 @@ export function renderMarkdown(body: string | null | undefined): string {
   const src = body || '';
   const hit = cache.get(src);
   if (hit !== undefined) return hit;
-  const escaped = src.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // Escape `&` and `<` — and deliberately NOT `>`. Those two are all that raw
+  // HTML needs to be inert: a tag cannot start without `<`, so `&lt;script>`
+  // renders as text either way. Escaping `>` as well (which this did) also ate
+  // every markdown construct that uses it: `> quote` arrived at the parser as
+  // `&gt; quote`, so blockquotes NEVER rendered — reported as "the content is not
+  // rendered as markdown", and it was right for that whole class of message.
+  const escaped = src.replace(/&/g, '&amp;').replace(/</g, '&lt;');
   let html: string;
   try { html = marked.parse(escaped, { gfm: true, breaks: true }) as string; }
   catch { html = escaped; }

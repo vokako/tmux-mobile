@@ -20,8 +20,22 @@ test('double tildes still strike text out, on one line only', () => {
   assert.ok(!renderMarkdown('~~open\nclose~~').includes('<del>'));
 });
 
+test('blockquotes render — escaping `>` up front used to kill them', () => {
+  const html = renderMarkdown('> 引用一句\n> 第二行');
+  assert.match(html, /<blockquote>/, `got: ${html}`);
+  assert.ok(!html.includes('&gt; 引用'), 'the marker was consumed, not printed');
+  // Nested markdown inside a quote still works.
+  assert.match(renderMarkdown('> **重点**'), /<blockquote>[\s\S]*<strong>重点<\/strong>/);
+});
+
 test('html in agent output stays inert, markdown still renders', () => {
   const html = renderMarkdown('<img src=x onerror=alert(1)> **bold**');
   assert.ok(!html.includes('<img'), 'raw html is escaped');
   assert.match(html, /<strong>bold<\/strong>/);
+  // `<` is the only character a tag can start with, so leaving `>` alone is safe.
+  const script = renderMarkdown('<script>alert(1)</script>');
+  assert.ok(!script.includes('<script'), `got: ${script}`);
+  assert.match(script, /&lt;script&gt;|&lt;script>/, 'shown as text');
+  // A closing angle bracket in prose is just text.
+  assert.match(renderMarkdown('a > b'), /a &gt; b|a > b/);
 });
