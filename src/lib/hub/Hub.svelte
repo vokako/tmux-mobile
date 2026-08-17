@@ -26,7 +26,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, systemLine, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_PREVIEW, lastAskIndex } from './hub.ts';
+  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, systemLine, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_PREVIEW } from './hub.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
 
@@ -191,32 +191,49 @@
   const lastAskKey = $derived(lastAskBlock?.key ?? '');
   let following = $state(true);   // the feed is parked at the tail
   let newBelow = $state(false);   // something arrived while it was not
-  let askStuck = $state(false);   // the pinned question is caught at the top
+  let askTop = $state('');        // your message caught at the top edge
+  let askBottom = $state('');     // your next message, caught at the bottom
 
   function onFeedScroll() {
     following = atBottom();
-    syncAskStuck();
+    syncAsks();
     if (following) {
       newBelow = false;
       markSeen();
     }
   }
 
-  /** Is the pinned question currently caught at the top edge? CSS has no way to
-   * ask, so compare the element's top with the container's: within a pixel means
-   * sticky has taken over, and only then is it clipped to one line. */
-  function syncAskStuck() {
-    const el = feedEl?.querySelector('[data-ask]');
-    if (!el || !feedEl) { askStuck = false; return; }
-    // `scrollTop > 1` matters: the FIRST message also sits at the container top
-    // in an unscrolled feed, and clipping it there would be wrong — nothing has
-    // scrolled out yet.
-    askStuck = feedEl.scrollTop > 1
-      && el.getBoundingClientRect().top - feedEl.getBoundingClientRect().top <= 1;
+  /** Which of your own messages act as anchors right now: the last one you have
+   * scrolled PAST (caught at the top edge) and the next one you have not reached
+   * yet (caught at the bottom). So wherever you are in a long reply, one of your
+   * questions is visible and you know where you stand — and it is always the
+   * nearest one, second or third or twentieth, not a fixed message.
+   *
+   * Measured with `offsetTop`, not `getBoundingClientRect`: sticky changes where
+   * an element PAINTS but not where it sits in layout, so the rect of an already
+   * caught message would report the edge it is holding and the answer would latch.
+   * CSS cannot express "am I stuck", which is why this runs in the scroll handler
+   * at all. */
+  function syncAsks() {
+    if (!feedEl) { askTop = ''; askBottom = ''; return; }
+    const top = feedEl.scrollTop;
+    const bottom = top + feedEl.clientHeight;
+    let above = '', below = '';
+    for (const el of feedEl.querySelectorAll('[data-ask]')) {
+      const y = el.offsetTop;
+      if (y + el.offsetHeight <= top + 1) {
+        above = el.dataset.ask ?? '';        // fully scrolled past: hold the top
+      } else if (y >= bottom - 1) {
+        below = el.dataset.ask ?? '';        // not reached yet: hold the bottom
+        break;                               // the NEAREST one wins
+      }
+    }
+    askTop = above;
+    askBottom = below;
   }
   $effect(() => {
-    void blocks;   // a new message can change who is pinned, and the geometry
-    requestAnimationFrame(syncAskStuck);
+    void blocks;   // a new message changes both the set and the geometry
+    requestAnimationFrame(syncAsks);
   });
 
   // The keyboard shrinks the visible viewport (App sets --app-height and fires
@@ -623,12 +640,15 @@
             {#if sys !== null}
               <div class="sysline"><span class="sys-who">{m.from}</span>{sys}</div>
             {:else}
-              <!-- Your last question sticks to the top as it scrolls out of view:
-                   the SAME bubble, caught at the edge, clipped to one line while
-                   it is stuck. Not a second element that swaps in. -->
-              {@const isAsk = blockKey(b, i) === lastAskKey}
-              <div class="msg" class:me={m.from === 'human'} class:ask={isAsk}
-                class:stuck={isAsk && askStuck} data-ask={isAsk ? '1' : undefined}>
+              <!-- Your own messages are the anchors: the SAME bubble catches at
+                   the top edge once you scroll past it, and the next one catches
+                   at the bottom before you reach it. Not a copy that swaps in. -->
+              {@const key = blockKey(b, i)}
+              {@const isAsk = m.from === 'human' && sys === null}
+              <div class="msg" class:me={m.from === 'human'}
+                class:ask-top={isAsk && askTop === key}
+                class:ask-bottom={isAsk && askBottom === key}
+                data-ask={isAsk ? key : undefined}>
                 <div class="m-head">
                   <span class="who">{m.from === 'human' ? t('hubYou') : m.from}</span>
                   <span>{fmtTime(m.ts)}</span>
@@ -645,7 +665,6 @@
                      Tapping the bubble reveals what you can DO with it: the
                      actions are not chrome that sits there on every message. -->
                 {#if parts.text}
-                  {@const key = blockKey(b, i)}
                   <!-- svelte-ignore a11y_no_static_element_interactions -->
                   <div class="bubble md" role="button" tabindex="0"
                     onclick={() => { msgOpen = msgOpen === key ? '' : key; }}
@@ -1001,19 +1020,31 @@
   /* The feed plus the things that float over it. */
   .feed-wrap { flex: 1; position: relative; display: flex; min-height: 0; }
   .feed { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; }
-  /* Your last question catches at the top edge as it scrolls out. It is the same
-     bubble, so it keeps every bit of its own style; `sticky` does the catching
-     and `.stuck` is what CSS cannot ask for — set from the scroll handler — so a
-     tall question collapses to one line once it is holding the edge instead of
-     eating the screen. The opaque backdrop is not decoration: the bubble tint is
-     translucent (rgba), so without it the reply sliding underneath shows through. */
-  .msg.ask { position: sticky; top: 0; z-index: 6; }
-  .msg.ask.stuck {
-    background: var(--bg); border-radius: 12px;
-    box-shadow: 0 6px 12px -8px rgba(0,0,0,0.55);
+  /* An anchor is the message itself, made sticky — so it keeps every bit of its
+     own style and the motion is "it caught at the edge", not "something replaced
+     it". `top` for the one you scrolled past, `bottom` for the one ahead. */
+  .msg.ask-top { position: sticky; top: 0; z-index: 6; }
+  .msg.ask-bottom { position: sticky; bottom: 0; z-index: 6; }
+  /* Anything holding an edge is clipped to one line: a tall question would
+     otherwise eat the screen it is supposed to orient you in. */
+  .msg.ask-top .bubble, .msg.ask-bottom .bubble {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    /* A bubble tint is rgba, so on its own the reply sliding underneath reads
+       straight through it. Compositing the SAME tint over the page colour makes
+       the bubble opaque without changing what it looks like. */
+    background: linear-gradient(var(--accent-bg), var(--accent-bg)), var(--bg);
   }
-  .msg.ask.stuck .bubble { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .msg.ask.stuck .m-head { opacity: 0.65; }
+  .msg.ask-top:not(.me) .bubble, .msg.ask-bottom:not(.me) .bubble {
+    background: linear-gradient(var(--surface), var(--surface)), var(--bg);
+  }
+  .msg.ask-top, .msg.ask-bottom {
+    border-radius: 12px;
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+  }
+  .msg.ask-top { box-shadow: 0 8px 16px -12px rgba(0,0,0,0.7); }
+  .msg.ask-bottom { box-shadow: 0 -8px 16px -12px rgba(0,0,0,0.7); }
+  .msg.ask-top .m-head, .msg.ask-bottom .m-head { opacity: 0.6; }
 
   /* Back to the tail. */
   .to-bottom {

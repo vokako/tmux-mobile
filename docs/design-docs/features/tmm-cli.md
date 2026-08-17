@@ -491,15 +491,22 @@ yanking someone back down while they read history is worse than a missed
 autoscroll — and sending forces it, because you plainly want to see what you just
 sent. Parked away from the tail, a round button offers the way back and carries a
 dot when a MESSAGE arrived meanwhile (telemetry rows extend the tail but are not
-news). Your own last message catches at the top edge as it scrolls out: the SAME bubble
-made `position: sticky`, not a second element that swaps in — a copy reads as two
-components even when it is styled identically. CSS cannot ask "am I stuck", so the
-scroll handler compares the element's top with the container's (and requires
-`scrollTop > 1`, since the first message also sits at the top of an unscrolled
-feed) and sets a class that clips it to one line while it holds the edge; a tall
-question would otherwise eat the screen. The opaque backdrop underneath is not
-decoration: bubble tints are translucent, so the reply sliding under it would
-show through.
+news). Your own messages are the anchors, and they anchor BOTH edges: the last one you
+scrolled past catches at the top, the next one you have not reached catches at the
+bottom. So wherever you are inside a long reply, one of your questions is on
+screen and it is always the nearest one — second, third, twentieth. It is the SAME
+bubble made `position: sticky`, never a copy that swaps in: a copy reads as two
+components however carefully it is styled.
+
+Two measurement details. CSS cannot express "am I stuck", so the scroll handler
+decides, and it reads `offsetTop`, not `getBoundingClientRect` — sticky changes
+where an element PAINTS but not where it sits in layout, so a rect would report
+the edge an already-caught message is holding and the answer would latch. And
+anything holding an edge is clipped to one line, because a tall question would eat
+the screen it is meant to orient you in. The bubble also has to be made opaque
+while it floats: tints are rgba, so the reply sliding underneath reads straight
+through. Compositing the same tint over the page colour keeps the bubble looking
+exactly like a bubble.
 And when the keyboard opens, the feed re-parks at the tail: `--app-height` shrinks
 the box while the scroll position stays, which otherwise leaves the newest line
 below the fold — App already broadcasts `keyboard-shift`, so the Hub listens

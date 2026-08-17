@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeMessages, statuslineWindows, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, lastAskIndex } from './hub.ts';
+import { mergeMessages, statuslineWindows, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -264,24 +264,6 @@ test('a tool call that ties with a reply is ordered before it', () => {
   // A message that genuinely precedes a tool call still comes first.
   const after = feedBlocks([{ ts: 500, from: 'human', body: 'go' }], activity, 'tools');
   assert.deepEqual(after.map((b) => b.type), ['msg', 'steps']);
-});
-
-test('lastAskIndex finds what the USER last said, ignoring lifecycle lines', () => {
-  const blocks = feedBlocks([
-    { ts: 100, from: 'human', body: 'first question' },
-    { ts: 200, from: 'dev', body: 'an answer' },
-    { ts: 300, from: 'human', body: 'second question' },
-    { ts: 400, from: 'dev', body: 'a long answer' },
-  ], [], 'chat');
-  assert.equal(lastAskIndex(blocks), 2, 'the newest human message');
-  // A lifecycle line is posted under a name but is not something anyone said.
-  const withSys = feedBlocks([
-    { ts: 100, from: 'human', body: 'do it' },
-    { ts: 200, from: 'human', body: '[tmm] spawned dev' },
-  ], [], 'chat');
-  assert.equal(lastAskIndex(withSys), 0, 'a spawn notice is not a question');
-  assert.equal(lastAskIndex(feedBlocks([{ ts: 1, from: 'dev', body: 'hi' }], [], 'chat')), -1);
-  assert.equal(lastAskIndex([]), -1);
 });
 
 test('systemLine recognizes lifecycle lines and leaves prose alone', () => {

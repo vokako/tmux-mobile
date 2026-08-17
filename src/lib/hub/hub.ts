@@ -202,23 +202,6 @@ export function toolColor(tool: string | null | undefined): string {
  * a wall; the last handful is what tells you where the agent is. */
 export const STEPS_PREVIEW = 5;
 
-/** Index of the user's own last real message in the rendered feed, or -1.
- *
- * "Real" excludes lifecycle lines: `[tmm] spawned dev` is posted under the
- * human's name but is not something the user said, and pinning it as "what you
- * asked" would be a lie. This is the pin's source, so it walks the same blocks
- * the feed renders rather than the raw message list. */
-export function lastAskIndex(blocks: readonly FeedBlock[]): number {
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    const b = blocks[i];
-    if (b?.type !== 'msg') continue;
-    if (b.msg?.from !== 'human') continue;
-    if (systemLine(b.msg?.body) !== null) continue;
-    return i;
-  }
-  return -1;
-}
-
 export type FeedLevel = 'chat' | 'status' | 'tools';
 
 /** Lifecycle lines the server posts into the room (a spawn, a `tmm done`) are
