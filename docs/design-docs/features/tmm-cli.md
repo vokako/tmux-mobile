@@ -485,6 +485,20 @@ Because a run of tool calls is now one line instead of forty, `+ tools` is the
 default detail level, and the level is reachable from the Hub head (a chip that
 cycles chat → status → tools) as well as Settings → Appearance → Chat detail.
 
+Scrolling follows four rules, all of them about not losing your place. New
+content scrolls the feed only while it is parked AT the tail (`following`) —
+yanking someone back down while they read history is worse than a missed
+autoscroll — and sending forces it, because you plainly want to see what you just
+sent. Parked away from the tail, a round button offers the way back and carries a
+dot when a MESSAGE arrived meanwhile (telemetry rows extend the tail but are not
+news). Your own last message stays reachable as a sticky pin while a long reply
+scrolls past it, driven by an IntersectionObserver on that message rather than by
+arithmetic, because a bubble's height depends on rendered markdown and images.
+And when the keyboard opens, the feed re-parks at the tail: `--app-height` shrinks
+the box while the scroll position stays, which otherwise leaves the newest line
+below the fold — App already broadcasts `keyboard-shift`, so the Hub listens
+instead of measuring anything itself.
+
 Tapping a message reveals what you can do with it — copy the source, or read it
 raw — rather than parking two buttons on every bubble forever. The roster is one
 line per agent (avatar, name, state dot, elapsed, unread dot) with everything

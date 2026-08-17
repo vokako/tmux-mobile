@@ -26,7 +26,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, systemLine, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_PREVIEW } from './hub.ts';
+  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, systemLine, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_PREVIEW, lastAskIndex } from './hub.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
 
@@ -122,7 +122,7 @@
       if (messages?.length) {
         feed = mergeMessages(feed, messages);
         lastTs = Math.max(lastTs, ...messages.map((m) => m.ts ?? 0));
-        scrollFeed();
+        if (following) scrollFeed(); else newBelow = true;
       }
     } catch { /* hub not available */ }
   }
@@ -137,7 +137,9 @@
       if (events?.length) {
         activity = [...activity, ...events].slice(-300);
         lastActivityTs = Math.max(lastActivityTs, ...events.map((e) => e.ts));
-        scrollFeed();
+        // Telemetry rows are not "news": they extend the tail, so follow if we
+        // were following, but they must not raise the new-messages dot.
+        if (following) scrollFeed();
       }
     } catch { /* hub not available */ }
   }
@@ -154,11 +156,17 @@
     } catch { agents = []; }
   }
 
-  function scrollFeed() {
+  /** Follow the tail — but only while the user is AT the tail. Yanking someone
+   * back down while they read history is worse than a missed autoscroll, so new
+   * content only scrolls when `following`; sending forces it, because you plainly
+   * want to see what you just sent. */
+  function scrollFeed(force = false) {
+    if (!force && !following) return;
     requestAnimationFrame(() => {
       if (!feedEl) return;
       feedEl.scrollTop = feedEl.scrollHeight;
-      // Scrolled to the newest message means the user has seen it.
+      following = true;
+      newBelow = false;
       markSeen();
     });
   }
@@ -174,6 +182,59 @@
   const atBottom = () => !feedEl || feedEl.scrollHeight - feedEl.scrollTop - feedEl.clientHeight < 40;
   const unread = $derived(unreadSenders(feed, hubPrefs.seen(selected)));
 
+  /** The user's own last message: its key (to mark the element) and a one-line
+   * preview (for the pin). Derived from the blocks so it follows the feed. */
+  const lastAskBlock = $derived.by(() => {
+    const i = lastAskIndex(blocks);
+    if (i < 0) return null;
+    const b = blocks[i];
+    return { key: blockKey(b, i), text: splitImages(b.msg.body).text.replace(/\s+/g, ' ').trim() };
+  });
+  const lastAskKey = $derived(lastAskBlock?.key ?? '');
+  const lastAsk = $derived(lastAskBlock?.text ?? '');
+  const jumpToAsk = () => {
+    feedEl?.querySelector('[data-ask]')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  };
+
+  let following = $state(true);   // the feed is parked at the tail
+  let newBelow = $state(false);   // something arrived while it was not
+  let askVisible = $state(true);  // is the user's last message on screen?
+
+  function onFeedScroll() {
+    following = atBottom();
+    if (following) {
+      newBelow = false;
+      markSeen();
+    }
+  }
+
+  /** Keep the user's own last message reachable while a long reply scrolls past:
+   * observe it, and when it leaves the feed's viewport a sticky bar takes its
+   * place. An observer rather than arithmetic because a message's height depends
+   * on rendered markdown and images. */
+  $effect(() => {
+    void blocks; // re-observe when the feed changes
+    if (!feedEl) return;
+    const el = feedEl.querySelector('[data-ask]');
+    if (!el) { askVisible = true; return; }
+    const io = new IntersectionObserver(
+      (entries) => { askVisible = entries[entries.length - 1]?.isIntersecting ?? true; },
+      { root: feedEl, threshold: 0 },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  });
+
+  // The keyboard shrinks the visible viewport (App sets --app-height and fires
+  // this), which otherwise leaves the tail below the fold: the feed keeps its
+  // scrollTop while its box gets shorter. Re-park at the tail instead.
+  $effect(() => {
+    if (!visible) return;
+    const onKb = () => { if (following) scrollFeed(true); };
+    window.addEventListener('keyboard-shift', onKb);
+    return () => window.removeEventListener('keyboard-shift', onKb);
+  });
+
   async function send() {
     let text = composerText.trim();
     if (!text || !selected) return;
@@ -182,9 +243,12 @@
     // by hand, and an empty recipient posts to the room.
     text = addressed(text, recipient);
     composerText = '';
+    following = true;
+    scrollFeed(true);
     try {
       await hubPost(selected, text);
       await loadFeed();
+      scrollFeed(true);
     } catch (e) { console.warn('hub post failed', e); }
   }
 
@@ -351,7 +415,7 @@
     if (!selected || m?.room !== room(selected)) return;
     feed = mergeMessages(feed, [m]);
     lastTs = Math.max(lastTs, m.ts ?? 0);
-    scrollFeed();
+    if (following) scrollFeed(); else newBelow = true;
     loadAgents();
   };
   $effect(() => {
@@ -555,7 +619,17 @@
         </div>
       {/if}
 
-      <div class="feed" bind:this={feedEl}>
+      <div class="feed-wrap">
+      <div class="feed" bind:this={feedEl} onscroll={onFeedScroll}>
+        {#if !askVisible && lastAsk}
+          <!-- What you asked, kept in reach while a long reply scrolls past.
+               Right-aligned like your own messages, and tapping it goes back. -->
+          <button class="ask-pin" onclick={() => jumpToAsk()}>
+            <span class="ap-tag">{t('hubYou')}</span>
+            <span class="ap-text">{lastAsk}</span>
+            <Icon name="arrow-up" size={11} />
+          </button>
+        {/if}
         {#each blocks as b, i (blockKey(b, i))}
           {#if b.type === 'msg'}
             {@const m = b.msg}
@@ -564,7 +638,7 @@
             {#if sys !== null}
               <div class="sysline"><span class="sys-who">{m.from}</span>{sys}</div>
             {:else}
-              <div class="msg" class:me={m.from === 'human'}>
+              <div class="msg" class:me={m.from === 'human'} data-ask={blockKey(b, i) === lastAskKey ? '1' : undefined}>
                 <div class="m-head">
                   <span class="who">{m.from === 'human' ? t('hubYou') : m.from}</span>
                   <span>{fmtTime(m.ts)}</span>
@@ -693,6 +767,14 @@
           {/if}
         {/if}
       </div>
+      <!-- Parked away from the tail: one tap back, with a dot when something
+           arrived while you were reading. -->
+      {#if !following}
+        <button class="to-bottom" class:news={newBelow} title={t('hubToBottom')} onclick={() => scrollFeed(true)}>
+          <Icon name="arrow-down" size={15} />
+        </button>
+      {/if}
+      </div>
 
       <div class="composer">
         <!-- WHO this goes to, always visible: the lead by default, one tap to
@@ -729,7 +811,9 @@
           </div>
         {/if}
         <input placeholder={recipient === ALL_TARGET ? t('hubComposerAll') : recipient ? t('hubComposerDm').replace('{name}', recipient) : t('hubComposerRoom')}
-          bind:value={composerText} onkeydown={(e) => e.key === 'Enter' && send()} />
+          bind:value={composerText}
+          onkeydown={(e) => e.key === 'Enter' && send()}
+          onfocus={() => { following = true; scrollFeed(true); setTimeout(() => scrollFeed(true), 300); }} />
         <button class="send-btn" onclick={send} title={t('hubSend')}>
           {#if compact}<Icon name="send" size={16} />{:else}{t('hubSend')}{/if}
         </button>
@@ -924,7 +1008,31 @@
   .a-bar button.danger:hover { color: var(--status-danger); border-color: var(--status-danger); }
   .a-bar .ab-x { border: none; background: none; padding: 4px 6px; }
 
+  /* The feed plus the things that float over it. */
+  .feed-wrap { flex: 1; position: relative; display: flex; min-height: 0; }
   .feed { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; }
+  /* What you asked, pinned while a long reply scrolls past. */
+  .ask-pin {
+    position: sticky; top: 0; z-index: 6; align-self: flex-end; max-width: 88%;
+    display: flex; align-items: center; gap: 7px; min-height: 32px;
+    background: var(--accent-bg); border: 1px solid var(--accent); border-radius: 999px;
+    color: var(--text); padding: 5px 12px; font-size: 12px; cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.28); backdrop-filter: blur(3px);
+  }
+  .ap-tag { flex: none; font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--accent); }
+  .ap-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Back to the tail. */
+  .to-bottom {
+    position: absolute; right: 14px; bottom: 12px; z-index: 7;
+    width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--surface); border: 1px solid var(--border); color: var(--text2);
+    cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+  }
+  .to-bottom:hover { color: var(--accent); border-color: var(--accent); }
+  .to-bottom.news::after {
+    content: ''; position: absolute; top: 1px; right: 1px; width: 9px; height: 9px;
+    border-radius: 50%; background: var(--status-danger); border: 2px solid var(--bg);
+  }
   .msg { max-width: 84%; }
   .msg.me { align-self: flex-end; }
   .m-head { font-size: 11px; color: var(--text3); margin-bottom: 3px; display: flex; gap: 7px; align-items: baseline; }
