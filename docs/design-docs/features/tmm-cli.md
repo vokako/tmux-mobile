@@ -512,6 +512,15 @@ the box while the scroll position stays, which otherwise leaves the newest line
 below the fold — App already broadcasts `keyboard-shift`, so the Hub listens
 instead of measuring anything itself.
 
+The composer is a textarea, not an input: a message you are still writing has to
+be readable, so it wraps, grows to fit (height measured from `scrollHeight` —
+wrapping depends on font, width and text, so it cannot be guessed) and starts
+scrolling at a `max-height` ceiling. Growing it shrinks the feed, which is the
+keyboard problem again, so it re-parks the tail as it grows. Enter sends where
+there are modifiers to distinguish with, and inserts a newline on a touch device —
+there the return key is the only way to get one and the send button is right
+there; Shift+Enter is always a newline.
+
 Tapping a message reveals what you can do with it — copy the source, or read it
 raw — rather than parking two buttons on every bubble forever. The roster is one
 line per agent (avatar, name, state dot, elapsed, unread dot) with everything

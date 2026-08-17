@@ -67,6 +67,7 @@
   let recipient = $state('');
   let recipientOpen = $state(false);
   let feedEl = $state(null);
+  let composerEl = $state(null);
 
   // Terminal drawer (closed by default — the whole point).
   let termOpen = $state(false);
@@ -261,6 +262,33 @@
       await loadFeed();
       scrollFeed(true);
     } catch (e) { console.warn('hub post failed', e); }
+  }
+
+  /** Grow to fit what is being typed, up to the CSS ceiling, then let it scroll.
+   * Height has to be measured, not guessed: wrapping depends on the font, the
+   * width and the text. Reset to `auto` first or the box can only ever grow. */
+  function growComposer() {
+    const el = composerEl;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+    // The composer taking space is the feed losing it — the same way the keyboard
+    // does — so keep the tail parked while it grows.
+    if (following) scrollFeed(true);
+  }
+  $effect(() => {
+    void composerText;   // includes the reset to '' after sending
+    growComposer();
+  });
+
+  /** Enter sends where there is a keyboard with modifiers, and inserts a newline
+   * on a touch device — where the return key is the ONLY way to get one and the
+   * send button is right there. Shift+Enter is always a newline. */
+  function onComposerKey(e) {
+    if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+    if (compact) return;      // let the newline through; tap send
+    e.preventDefault();
+    send();
   }
 
   /** Choosing a recipient is also choosing this project's lead: it is the same
@@ -819,10 +847,14 @@
             {/if}
           </div>
         {/if}
-        <input placeholder={recipient === ALL_TARGET ? t('hubComposerAll') : recipient ? t('hubComposerDm').replace('{name}', recipient) : t('hubComposerRoom')}
-          bind:value={composerText}
-          onkeydown={(e) => e.key === 'Enter' && send()}
-          onfocus={() => { following = true; scrollFeed(true); setTimeout(() => scrollFeed(true), 300); }} />
+        <!-- A textarea, not an input: a message you are still writing has to be
+             readable. It grows with the text and then scrolls, so a long one is
+             never a one-line peephole. -->
+        <textarea class="c-input" rows="1" bind:this={composerEl} bind:value={composerText}
+          placeholder={recipient === ALL_TARGET ? t('hubComposerAll') : recipient ? t('hubComposerDm').replace('{name}', recipient) : t('hubComposerRoom')}
+          onkeydown={onComposerKey}
+          onfocus={() => { following = true; scrollFeed(true); setTimeout(() => scrollFeed(true), 300); }}
+        ></textarea>
         <button class="send-btn" onclick={send} title={t('hubSend')}>
           {#if compact}<Icon name="send" size={16} />{:else}{t('hubSend')}{/if}
         </button>
@@ -950,7 +982,7 @@
   .hub-root.compact .feed { padding: 12px 12px; gap: 10px; }
   .hub-root.compact .msg, .hub-root.compact .prompt { max-width: 92%; }
   .hub-root.compact .composer { padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); gap: 6px; }
-  .hub-root.compact .composer input { min-height: 40px; font-size: 14px; }
+  .hub-root.compact .c-input { min-height: 40px; font-size: 14px; max-height: 40vh; }
   .hub-root.compact .send-btn { min-width: 44px; min-height: 40px; padding: 8px 12px; }
   .hub-root.compact .chip-btn { min-height: 34px; }
   .hub-root.compact .s-head { min-height: 34px; }
@@ -1139,7 +1171,7 @@
   .step .st-ts { flex: none; margin-left: auto; opacity: 0.55; }
   .empty { color: var(--text3); font-size: 12.5px; text-align: center; margin: auto; padding: 0 24px; line-height: 1.6; }
 
-  .composer { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
+  .composer { display: flex; align-items: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
   /* Recipient control: who this message goes to, with a menu that opens
      UPWARD so the on-screen keyboard never covers it. */
   .to-wrap { position: relative; flex: none; }
@@ -1168,8 +1200,16 @@
   .to-menu button:hover { background: var(--surface2); color: var(--text); }
   .to-menu button.sel { color: var(--accent); background: var(--accent-bg); }
   .all-dot { border: 1px solid var(--text3); background: none; }
-  .composer input { flex: 1; min-width: 0; background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 10px; color: var(--text); padding: 8px 12px; font-size: 13px; outline: none; transition: border-color 160ms; }
-  .composer input:focus { border-color: var(--accent); }
+  .c-input {
+    flex: 1; min-width: 0; background: var(--input-bg); border: 1px solid var(--input-border);
+    border-radius: 10px; color: var(--text); padding: 8px 12px; font-size: 13px; outline: none;
+    transition: border-color 160ms;
+    /* Wrap, grow, then scroll. The height is set from JS to the content height;
+       max-height is what turns growth into scrolling. */
+    font-family: inherit; line-height: 1.45; resize: none; overflow-y: auto;
+    max-height: 34vh; min-height: 36px;
+  }
+  .c-input:focus { border-color: var(--accent); }
   .send-btn { background: var(--accent-bg); color: var(--accent); border: none; border-radius: 10px; padding: 8px 16px; cursor: pointer; font-weight: 600; font-size: 13px; display: grid; place-items: center; }
 
   /* Empty room: start from a preset — one agent, or a team. */
