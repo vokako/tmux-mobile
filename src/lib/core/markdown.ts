@@ -40,6 +40,35 @@ marked.use({
 
 const cache = new Map<string, string>();
 
+/** In the chat, rendered/raw is a view switch. Agents often wrap an entire
+ * answer (or a quoted .md file inside an answer) in ```markdown even though the
+ * user asked to SEE the formatted result. In rendered view that language fence
+ * is therefore transparent: remove only its wrapper and let its contents go
+ * through the normal Markdown parser. Raw view still reads `m.body` untouched.
+ *
+ * Fence length matters: a four-backtick markdown wrapper may legitimately
+ * contain triple-backtick code blocks, so only an equally long (or longer)
+ * closing run ends it. Other language fences remain ordinary code blocks. */
+function unwrapMarkdownFences(src: string): string {
+  const lines = src.split('\n');
+  const out: string[] = [];
+  let fence: { char: '`' | '~'; len: number } | null = null;
+  for (const line of lines) {
+    if (!fence) {
+      const open = /^\s*(`{3,}|~{3,})\s*(?:markdown|md)\s*$/i.exec(line);
+      if (!open) { out.push(line); continue; }
+      fence = { char: open[1]![0] as '`' | '~', len: open[1]!.length };
+      continue;
+    }
+    const close = new RegExp(`^\\s*\\${fence.char}{${fence.len},}\\s*$`);
+    if (close.test(line)) { fence = null; continue; }
+    out.push(line);
+  }
+  // An unclosed language fence is malformed source. Do not silently reinterpret
+  // the rest of the message; marked's normal code-fence behavior is safer.
+  return fence ? src : out.join('\n');
+}
+
 export function renderMarkdown(body: string | null | undefined): string {
   const src = body || '';
   const hit = cache.get(src);
@@ -50,7 +79,8 @@ export function renderMarkdown(body: string | null | undefined): string {
   // every markdown construct that uses it: `> quote` arrived at the parser as
   // `&gt; quote`, so blockquotes NEVER rendered — reported as "the content is not
   // rendered as markdown", and it was right for that whole class of message.
-  const escaped = src.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const rendered = unwrapMarkdownFences(src);
+  const escaped = rendered.replace(/&/g, '&amp;').replace(/</g, '&lt;');
   let html: string;
   try { html = marked.parse(escaped, { gfm: true, breaks: true }) as string; }
   catch { html = escaped; }

@@ -491,22 +491,38 @@ yanking someone back down while they read history is worse than a missed
 autoscroll — and sending forces it, because you plainly want to see what you just
 sent. Parked away from the tail, a round button offers the way back and carries a
 dot when a MESSAGE arrived meanwhile (telemetry rows extend the tail but are not
-news). Your own messages are the anchors, and they anchor BOTH edges: the last one you
-scrolled past catches at the top, the next one you have not reached catches at the
-bottom. So wherever you are inside a long reply, one of your questions is on
-screen and it is always the nearest one — second, third, twentieth. It is the SAME
-bubble made `position: sticky`, never a copy that swaps in: a copy reads as two
-components however carefully it is styled.
+news). There is exactly **one** user-message anchor in the whole viewport, and
+it is never a second pin component. The real message bubble must enter and move
+with the feed first; only when that SAME DOM element is about to leave does
+`position: sticky` catch it. Scrolling down selects the newest naturally visible
+user message and prepares its top edge; scrolling up selects the oldest naturally
+visible one and prepares its bottom edge. Through a long reply with no user
+message naturally visible, that active bubble remains the same — it MUST NOT swap
+to the next/previous message at an invisible midpoint. When the next real bubble
+enters, it takes over in its natural location. This is what makes second, third and
+later questions work without ever stacking two anchors.
 
-Two measurement details. CSS cannot express "am I stuck", so the scroll handler
-decides, and it reads `offsetTop`, not `getBoundingClientRect` — sticky changes
-where an element PAINTS but not where it sits in layout, so a rect would report
-the edge an already-caught message is holding and the answer would latch. And
-anything holding an edge is clipped to one line, because a tall question would eat
-the screen it is meant to orient you in. The bubble also has to be made opaque
-while it floats: tints are rgba, so the reply sliding underneath reads straight
-through. Compositing the same tint over the page colour keeps the bubble looking
-exactly like a bubble.
+The difference between “active” and “held” is deliberate. `ask-top` /
+`ask-bottom` puts the same bubble into the sticky flow while it travels, but the
+one-line clip, opaque composited background, 10px backdrop blur and edge shadow
+start only under `.held`, after it has actually touched the edge. Styling it while
+it was still travelling made one DOM element LOOK like two components. A tall
+question is clipped only while held, because otherwise it would eat the screen it
+is meant to orient.
+
+One browser fact is part of the contract: Chromium reports `offsetTop` for a
+sticky element at its HELD position, not its original flow position. Before the
+scroll handler measures candidates, it synchronously overrides the current
+anchor to `position: static`, reads all natural positions, then removes the inline
+override before paint. Without that neutral measurement, the old anchor looks
+naturally visible forever and transition state becomes stale. Programmatic jumps
+to the tail call the same synchronization explicitly; setting `scrollTop` to the
+same value does not emit a scroll event.
+
+The held bubble is made opaque rather than replaced: bubble tints are rgba, so
+reply text otherwise reads through them. Compositing the same tint over the page
+colour preserves its ordinary appearance while the backdrop blur softens what
+moves under it.
 And when the keyboard opens, the feed re-parks at the tail: `--app-height` shrinks
 the box while the scroll position stays, which otherwise leaves the newest line
 below the fold — App already broadcasts `keyboard-shift`, so the Hub listens
@@ -521,8 +537,18 @@ there are modifiers to distinguish with, and inserts a newline on a touch device
 there the return key is the only way to get one and the send button is right
 there; Shift+Enter is always a newline.
 
-Tapping a message reveals what you can do with it — copy the source, or read it
-raw — rather than parking two buttons on every bubble forever. The roster is one
+Tapping a message reveals what you can do with it — copy the source, or switch
+between rendered Markdown and raw source — rather than parking two buttons on
+every bubble forever. Raw is always the exact `m.body`. Rendered view applies
+Markdown, including one deliberate chat convention: a complete ` ```markdown `
+or ` ```md ` fence is a transparent wrapper and its contents are rendered again.
+Agents commonly wrap a requested `.md` document that way; showing it as `<pre>`
+made “rendered” indistinguishable from raw (the real `proj:test` seq=52 failure).
+Other language fences and unclosed Markdown fences remain code. Fence length is
+respected, so a four-backtick Markdown wrapper may contain ordinary triple-
+backtick code blocks.
+
+The roster is one
 line per agent (avatar, name, state dot, elapsed, unread dot) with everything
 secondary behind a dot menu; the menu renders as a BAR under the roster, not a
 popover inside the chip, because the roster scrolls horizontally and a scroll

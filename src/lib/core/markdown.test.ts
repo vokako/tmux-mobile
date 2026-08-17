@@ -39,3 +39,23 @@ test('html in agent output stays inert, markdown still renders', () => {
   // A closing angle bracket in prose is just text.
   assert.match(renderMarkdown('a > b'), /a &gt; b|a > b/);
 });
+
+test('markdown/md fences are rendered in rendered view, not shown as source', () => {
+  // This is the exact shape used by proj:test seq=52: prose, a quoted tasks.md
+  // file, then prose. Raw view bypasses this function and still shows the fence.
+  const body = '@human tasks.md：\n\n```markdown\n# Plan\n\n- [x] done\n- [ ] next\n```\n\n完成。';
+  const html = renderMarkdown(body);
+  assert.match(html, /<h1>Plan<\/h1>/, `heading should render, got: ${html}`);
+  assert.match(html, /<input[^>]*checked/, 'task item should render as checked');
+  assert.ok(!html.includes('language-markdown'), 'markdown wrapper is transparent in rendered view');
+  assert.ok(!html.includes('<pre>'), 'the quoted md is not presented as source');
+});
+
+test('only complete markdown fences unwrap; code and malformed fences stay code', () => {
+  assert.match(renderMarkdown('```rust\n# not a heading\n```'), /<pre><code class="language-rust">/);
+  assert.match(renderMarkdown('```markdown\n# unclosed'), /<pre><code class="language-markdown">/);
+  // Four ticks can wrap a document that itself contains a normal code fence.
+  const nested = renderMarkdown('````md\n# Doc\n```js\nconst x = 1\n```\n````');
+  assert.match(nested, /<h1>Doc<\/h1>/);
+  assert.match(nested, /<code class="language-js">/);
+});

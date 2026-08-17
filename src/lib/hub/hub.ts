@@ -202,28 +202,42 @@ export function toolColor(tool: string | null | undefined): string {
  * a wall; the last handful is what tells you where the agent is. */
 export const STEPS_PREVIEW = 5;
 
-/** Which of the user's own messages should hold an edge: the NEAREST one that has
- * scrolled out above, and the NEAREST one not reached yet below. At most one per
- * edge — two anchors, never a stack.
+/** Advance the ONE user-message anchor without inventing a second component.
  *
- * Pure so it can be tested: the DOM half is only reading `offsetTop`/`offsetHeight`
- * (layout positions, which sticky does not move). Anchors are dropped entirely
- * when nothing can scroll out — a feed shorter than its box has no "past" or
- * "ahead". */
-export function pickAnchors(
+ * The active message is selected while its real bubble is naturally visible:
+ * scrolling down chooses the newest visible message and gives that SAME element
+ * a top sticky edge; scrolling up chooses the oldest visible one and gives it a
+ * bottom edge. It therefore moves with the feed first and only catches when it
+ * is about to leave. While a long reply contains no user message, keep the same
+ * active element — never switch at an invisible midpoint.
+ *
+ * `current` is also the seed across direction reversals in an empty gap. If the
+ * page opens/jumps directly into a gap, select only the message already passed
+ * in that direction. */
+export function pickAnchor(
   items: readonly { key: string; top: number; height: number }[],
   scrollTop: number,
   clientHeight: number,
-  scrollHeight = Infinity,
-): { above: string; below: string } {
-  if (scrollHeight <= clientHeight + 1) return { above: '', below: '' };
+  scrollHeight: number,
+  direction: 'up' | 'down',
+  current: { key: string; edge: 'top' | 'bottom' | '' } = { key: '', edge: '' },
+): { key: string; edge: 'top' | 'bottom' | '' } {
+  const none = { key: '', edge: '' } as const;
+  if (scrollHeight <= clientHeight + 1 || !items.length) return none;
   const viewBottom = scrollTop + clientHeight;
-  let above = '', below = '';
-  for (const it of items) {
-    if (it.top + it.height <= scrollTop + 1) above = it.key;          // fully past
-    else if (it.top >= viewBottom - 1) { below = it.key; break; }     // not reached
+  const visible = items.filter((it) => it.top < viewBottom - 1 && it.top + it.height > scrollTop + 1);
+  if (visible.length) {
+    const picked = direction === 'down' ? visible[visible.length - 1]! : visible[0]!;
+    return { key: picked.key, edge: direction === 'down' ? 'top' : 'bottom' };
   }
-  return { above, below };
+  // No new bubble entered naturally: the current one keeps holding its edge.
+  if (current.key && items.some((it) => it.key === current.key)) return current;
+  if (direction === 'down') {
+    const passed = items.filter((it) => it.top + it.height <= scrollTop + 1).at(-1);
+    return passed ? { key: passed.key, edge: 'top' } : none;
+  }
+  const ahead = items.find((it) => it.top >= viewBottom - 1);
+  return ahead ? { key: ahead.key, edge: 'bottom' } : none;
 }
 
 export type FeedLevel = 'chat' | 'status' | 'tools';

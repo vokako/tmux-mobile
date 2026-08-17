@@ -26,7 +26,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, systemLine, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_PREVIEW, pickAnchors } from './hub.ts';
+  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, systemLine, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_PREVIEW, pickAnchor } from './hub.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
 
@@ -166,6 +166,11 @@
     requestAnimationFrame(() => {
       if (!feedEl) return;
       feedEl.scrollTop = feedEl.scrollHeight;
+      // Programmatic jumps have no continuous path to preserve. Seed from the
+      // destination (latest passed message), and do not depend on a scroll event
+      // — assigning the same scrollTop emits none.
+      askScrollTop = feedEl.scrollTop;
+      syncAsk('down', true);
       following = true;
       newBelow = false;
       markSeen();
@@ -183,52 +188,63 @@
   const atBottom = () => !feedEl || feedEl.scrollHeight - feedEl.scrollTop - feedEl.clientHeight < 40;
   const unread = $derived(unreadSenders(feed, hubPrefs.seen(selected)));
 
-  /** The user's own last message: its key (to mark the element) and a one-line
-   * preview (for the pin). Derived from the blocks so it follows the feed. */
-  const lastAskBlock = $derived.by(() => {
-    const i = lastAskIndex(blocks);
-    return i < 0 ? null : { key: blockKey(blocks[i], i) };
-  });
-  const lastAskKey = $derived(lastAskBlock?.key ?? '');
   let following = $state(true);   // the feed is parked at the tail
   let newBelow = $state(false);   // something arrived while it was not
-  let askTop = $state('');        // your message caught at the top edge
-  let askBottom = $state('');     // your next message, caught at the bottom
+  let askKey = $state('');        // the ONE user-message anchor on screen
+  let askEdge = $state('');       // which edge that same bubble catches
+  let askHeld = $state(false);    // true only after it has actually hit the edge
+  let askScrollTop = 0;           // direction decides which bubble naturally enters
 
   function onFeedScroll() {
     following = atBottom();
-    syncAsks();
+    const top = feedEl?.scrollTop ?? 0;
+    const direction = top < askScrollTop - 0.5 ? 'up'
+      : top > askScrollTop + 0.5 ? 'down'
+      : askEdge === 'bottom' ? 'up' : 'down';
+    askScrollTop = top;
+    syncAsk(direction);
     if (following) {
       newBelow = false;
       markSeen();
     }
   }
 
-  /** Which of your own messages act as anchors right now: the last one you have
-   * scrolled PAST (caught at the top edge) and the next one you have not reached
-   * yet (caught at the bottom). So wherever you are in a long reply, one of your
-   * questions is visible and you know where you stand — and it is always the
-   * nearest one, second or third or twentieth, not a fixed message.
-   *
-   * Measured with `offsetTop`, not `getBoundingClientRect`: sticky changes where
-   * an element PAINTS but not where it sits in layout, so the rect of an already
-   * caught message would report the edge it is holding and the answer would latch.
-   * CSS cannot express "am I stuck", which is why this runs in the scroll handler
-   * at all. */
-  function syncAsks() {
-    if (!feedEl) { askTop = ''; askBottom = ''; return; }
+  /** One bubble, one continuous motion: select it while it is naturally inside
+   * the viewport, then let CSS sticky catch that SAME element as it leaves in
+   * the current scroll direction. In an empty stretch of a long reply, retain
+   * it; never swap to another invisible message at an arbitrary midpoint. */
+  function syncAsk(direction = askEdge === 'bottom' ? 'up' : 'down', reset = false) {
+    if (!feedEl) { askKey = ''; askEdge = ''; askHeld = false; return; }
+    // Chromium's offsetTop for a sticky element is its HELD position. Read that
+    // and the old anchor appears naturally visible, so the next anchor is never
+    // selected. Neutralize the one current sticky element for this synchronous
+    // layout read; the inline override is removed before the browser can paint.
+    const held = [...feedEl.querySelectorAll('.ask-top, .ask-bottom')];
+    for (const el of held) el.style.position = 'static';
     const items = [...feedEl.querySelectorAll('[data-ask]')].map((el) => ({
       key: el.dataset.ask ?? '',
       top: el.offsetTop,
       height: el.offsetHeight,
     }));
-    const { above, below } = pickAnchors(items, feedEl.scrollTop, feedEl.clientHeight, feedEl.scrollHeight);
-    askTop = above;
-    askBottom = below;
+    for (const el of held) el.style.removeProperty('position');
+    const picked = pickAnchor(
+      items,
+      feedEl.scrollTop,
+      feedEl.clientHeight,
+      feedEl.scrollHeight,
+      direction,
+      reset ? undefined : { key: askKey, edge: askEdge },
+    );
+    askKey = picked.key;
+    askEdge = picked.edge;
+    const chosen = items.find((it) => it.key === picked.key);
+    askHeld = !!chosen && (picked.edge === 'top'
+      ? chosen.top <= feedEl.scrollTop + 1
+      : picked.edge === 'bottom' && chosen.top + chosen.height >= feedEl.scrollTop + feedEl.clientHeight - 1);
   }
   $effect(() => {
     void blocks;   // a new message changes both the set and the geometry
-    requestAnimationFrame(syncAsks);
+    requestAnimationFrame(syncAsk);
   });
 
   // The keyboard shrinks the visible viewport (App sets --app-height and fires
@@ -662,14 +678,16 @@
             {#if sys !== null}
               <div class="sysline"><span class="sys-who">{m.from}</span>{sys}</div>
             {:else}
-              <!-- Your own messages are the anchors: the SAME bubble catches at
-                   the top edge once you scroll past it, and the next one catches
-                   at the bottom before you reach it. Not a copy that swaps in. -->
+              <!-- Every user message can become the landmark, but exactly ONE
+                   does. The real bubble enters with the feed, then that SAME
+                   element catches the edge as it is about to leave; there is no
+                   duplicate and no invisible midpoint swap. -->
               {@const key = blockKey(b, i)}
               {@const isAsk = m.from === 'human' && sys === null}
               <div class="msg" class:me={m.from === 'human'}
-                class:ask-top={isAsk && askTop === key}
-                class:ask-bottom={isAsk && askBottom === key}
+                class:ask-top={isAsk && askKey === key && askEdge === 'top'}
+                class:ask-bottom={isAsk && askKey === key && askEdge === 'bottom'}
+                class:held={isAsk && askKey === key && askHeld}
                 data-ask={isAsk ? key : undefined}>
                 <div class="m-head">
                   <span class="who">{m.from === 'human' ? t('hubYou') : m.from}</span>
@@ -1046,31 +1064,31 @@
   /* The feed plus the things that float over it. */
   .feed-wrap { flex: 1; position: relative; display: flex; min-height: 0; }
   .feed { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; }
-  /* An anchor is the message itself, made sticky — so it keeps every bit of its
-     own style and the motion is "it caught at the edge", not "something replaced
-     it". `top` for the one you scrolled past, `bottom` for the one ahead. */
+  /* The active anchor is the message itself. It enters and moves with the feed;
+     only when that SAME element reaches an edge does sticky hold it there. */
   .msg.ask-top { position: sticky; top: 0; z-index: 6; }
   .msg.ask-bottom { position: sticky; bottom: 0; z-index: 6; }
-  /* Anything holding an edge is clipped to one line: a tall question would
-     otherwise eat the screen it is supposed to orient you in. */
-  .msg.ask-top .bubble, .msg.ask-bottom .bubble {
+  /* Floating treatment begins only after the bubble is actually held. Applying
+     it while the message was still travelling made the same DOM element LOOK
+     like a second component appearing early. */
+  .msg.held .bubble {
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     /* A bubble tint is rgba, so on its own the reply sliding underneath reads
        straight through it. Compositing the SAME tint over the page colour makes
-       the bubble opaque without changing what it looks like. */
+       the held bubble opaque without replacing it. */
     background: linear-gradient(var(--accent-bg), var(--accent-bg)), var(--bg);
   }
-  .msg.ask-top:not(.me) .bubble, .msg.ask-bottom:not(.me) .bubble {
+  .msg.held:not(.me) .bubble {
     background: linear-gradient(var(--surface), var(--surface)), var(--bg);
   }
-  .msg.ask-top, .msg.ask-bottom {
+  .msg.held {
     border-radius: 12px;
     -webkit-backdrop-filter: blur(10px);
     backdrop-filter: blur(10px);
   }
-  .msg.ask-top { box-shadow: 0 8px 16px -12px rgba(0,0,0,0.7); }
-  .msg.ask-bottom { box-shadow: 0 -8px 16px -12px rgba(0,0,0,0.7); }
-  .msg.ask-top .m-head, .msg.ask-bottom .m-head { opacity: 0.6; }
+  .msg.ask-top.held { box-shadow: 0 8px 16px -12px rgba(0,0,0,0.7); }
+  .msg.ask-bottom.held { box-shadow: 0 -8px 16px -12px rgba(0,0,0,0.7); }
+  .msg.held .m-head { opacity: 0.6; }
 
   /* Back to the tail. */
   .to-bottom {

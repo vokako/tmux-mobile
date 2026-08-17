@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeMessages, statuslineWindows, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchors } from './hub.ts';
+import { mergeMessages, statuslineWindows, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -266,26 +266,37 @@ test('a tool call that ties with a reply is ordered before it', () => {
   assert.deepEqual(after.map((b) => b.type), ['msg', 'steps']);
 });
 
-test('pickAnchors holds ONE edge each with the nearest message, never a stack', () => {
-  // Four of the user's own messages down a tall feed, viewport 100 tall.
+test('pickAnchor keeps ONE real bubble until another naturally enters', () => {
   const items = [
     { key: 'a', top: 0, height: 40 },
     { key: 'b', top: 100, height: 40 },
     { key: 'c', top: 300, height: 40 },
     { key: 'd', top: 500, height: 40 },
   ];
-  const at = (scrollTop: number) => pickAnchors(items, scrollTop, 100, 600);
-  // Scrolled to 200: a and b are past (b is nearest), c and d ahead (c nearest).
-  assert.deepEqual(at(200), { above: 'b', below: 'c' }, 'nearest on each side only');
-  // Further down: c becomes the one above, d the one ahead.
-  assert.deepEqual(at(400), { above: 'c', below: 'd' });
-  // At the very top nothing has scrolled out; b is already the next one ahead.
-  assert.deepEqual(at(0), { above: '', below: 'b' });
-  // A message straddling the top edge anchors nothing — it is simply visible.
-  assert.deepEqual(at(120), { above: 'a', below: 'c' });
-  // A feed that cannot scroll has no anchors at all.
-  assert.deepEqual(pickAnchors(items, 0, 600, 600), { above: '', below: '' });
-  assert.deepEqual(pickAnchors([], 200, 100, 600), { above: '', below: '' });
+  const pick = (
+    scrollTop: number,
+    direction: 'up' | 'down',
+    current = { key: '', edge: '' as 'top' | 'bottom' | '' },
+  ) => pickAnchor(items, scrollTop, 100, 600, direction, current);
+
+  // Scrolling down: the real bubble enters at the bottom, travels, then holds
+  // the top. In the empty gap it remains b — it does NOT swap invisibly to c.
+  assert.deepEqual(pick(0, 'down'), { key: 'a', edge: 'top' });
+  assert.deepEqual(pick(50, 'down', { key: 'a', edge: 'top' }), { key: 'b', edge: 'top' });
+  assert.deepEqual(pick(200, 'down', { key: 'b', edge: 'top' }), { key: 'b', edge: 'top' });
+  assert.deepEqual(pick(220, 'down', { key: 'b', edge: 'top' }), { key: 'c', edge: 'top' });
+
+  // Scrolling up is symmetric: c keeps holding the bottom through the gap,
+  // then b becomes active only when its real bubble enters from the top.
+  assert.deepEqual(pick(220, 'up', { key: 'c', edge: 'top' }), { key: 'c', edge: 'bottom' });
+  assert.deepEqual(pick(170, 'up', { key: 'c', edge: 'bottom' }), { key: 'c', edge: 'bottom' });
+  assert.deepEqual(pick(120, 'up', { key: 'c', edge: 'bottom' }), { key: 'b', edge: 'bottom' });
+
+  // A direct page jump has no motion to preserve, so seed from the destination.
+  assert.deepEqual(pick(200, 'down'), { key: 'b', edge: 'top' });
+  assert.deepEqual(pick(200, 'up'), { key: 'c', edge: 'bottom' });
+  assert.deepEqual(pickAnchor(items, 0, 600, 600, 'down'), { key: '', edge: '' });
+  assert.deepEqual(pickAnchor([], 200, 100, 600, 'down'), { key: '', edge: '' });
 });
 
 test('systemLine recognizes lifecycle lines and leaves prose alone', () => {
