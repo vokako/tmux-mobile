@@ -267,6 +267,13 @@ fn window_of_agent(session: &str, agent: &str) -> Option<usize> {
     panes.iter().find(|p| p.window_name == agent).map(|p| p.window)
 }
 
+/// Local wall-clock stamp for a line an agent will read: `2026-08-17 16:31`.
+/// Minute precision on purpose — this is context, not a log timestamp.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub(super) fn stamp_now() -> String {
+    chrono::Local::now().format("%Y-%m-%d %H:%M").to_string()
+}
+
 /// Type an @mentioned chat line into each mentioned agent's pane. This is the
 /// delivery half of the hub: the bus stores the record, but an interactive
 /// CLI only reacts to what lands in its input. Delivery goes to MANAGED agent
@@ -309,7 +316,12 @@ fn deliver_mentions(session: &str, from: &str, body: &str) {
             continue;
         }
         let target = format!("{}:{}.{}", session, p.window, p.pane);
-        let line = format!("[tmm chat] {from}: {body}");
+        // The stamp is for the agent, not for us: a CLI reads this line inside a
+        // conversation that may have been idle for hours, and "when was this
+        // said" is context it otherwise has no way to recover — its own clock
+        // only tells it `now`. Local wall time, minute precision; seconds would
+        // be noise in a chat line.
+        let line = format!("[tmm chat {}] {from}: {body}", stamp_now());
         if crate::tmux::send_command(&target, &line).is_ok() {
             // send_command only proves the pane existed. The delivery is
             // confirmed when that agent's userPromptSubmit hook echoes the line
@@ -463,6 +475,27 @@ mod tests {
     /// Stop/restart act on a process, so the gate is the same one delivery and
     /// auto-post use: only agents this app started. A name that has no isolated
     /// home is refused BEFORE any window is looked up, let alone killed.
+    /// The line an agent reads carries local wall time, because a CLI resuming a
+    /// conversation has no other way to know when something was said. The stamp
+    /// must not break the delivery receipt, which matches by containment.
+    #[test]
+    fn a_delivered_line_carries_a_readable_local_stamp() {
+        let stamp = stamp_now();
+        assert_eq!(stamp.len(), 16, "YYYY-MM-DD HH:MM, got {stamp:?}");
+        let (date, time) = stamp.split_once(' ').expect("date and time");
+        assert_eq!(date.split('-').count(), 3, "{date:?}");
+        assert_eq!(time.split(':').count(), 2, "minute precision, got {time:?}");
+
+        // The shape deliver_mentions types, and the echo the hook returns.
+        let body = "@dev ship it";
+        let line = format!("[tmm chat {stamp}] human: {body}");
+        crate::projects::telemetry::record_delivery("stamp-test", 9, &line);
+        assert!(
+            crate::projects::telemetry::record_prompt("stamp-test", 9, &line),
+            "the stamped line still acknowledges its own echo"
+        );
+    }
+
     #[test]
     fn stopping_something_we_did_not_start_is_refused() {
         // The gate reads the project store; keep it off the user's real db.

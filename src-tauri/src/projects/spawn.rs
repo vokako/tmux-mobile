@@ -136,6 +136,15 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
 /// context, this line is the starter pistol (same trick as team_kick).
 const KICK: &str = "Start now: read your instructions and task brief, then begin working. When the task is complete, run `tmm done \"summary\"`.";
 
+/// The kick, stamped with local wall time. An agent's first prompt is the only
+/// place it learns what "now" is: its system prompt cannot carry a date (that
+/// prompt is reused every time the window is restored, so a baked-in date would
+/// be a lie a few days later), and the CLI does not volunteer one. Every LATER
+/// message carries its own stamp from `deliver_mentions`.
+fn kick_now() -> String {
+    format!("[{}] {KICK}", chrono::Local::now().format("%Y-%m-%d %H:%M"))
+}
+
 struct Rendered {
     env: Vec<(String, String)>,
     cmd: String,
@@ -349,7 +358,7 @@ fn render_kiro(
             "command kiro-cli chat --agent {} --model {} --trust-all-tools {}",
             shared::shell_quote(name),
             shared::shell_quote(model),
-            shared::shell_quote(KICK),
+            shared::shell_quote(&kick_now()),
         ),
         confirmation: None,
     })
@@ -398,7 +407,7 @@ fn render_claude(
             shared::shell_quote(&settingsfile.to_string_lossy()),
             shared::shell_quote(model),
             shared::shell_quote(&full_prompt),
-            shared::shell_quote(KICK),
+            shared::shell_quote(&kick_now()),
         ),
         confirmation: Some(shared::StartupConfirmation {
             markers: shared::CLAUDE_FOLDER_TRUST_MARKERS.to_vec(),
@@ -445,7 +454,7 @@ fn render_codex(
     }
     config_args.push("--dangerously-bypass-approvals-and-sandbox".into());
     config_args.push("--dangerously-bypass-hook-trust".into());
-    config_args.push(shared::shell_quote(KICK));
+    config_args.push(shared::shell_quote(&kick_now()));
     Ok(Rendered {
         env: vec![("CODEX_HOME".into(), codex_home.to_string_lossy().to_string())],
         cmd: format!("command codex {}", config_args.join(" ")),
@@ -491,6 +500,11 @@ mod tests {
         let prompt = conf.get("prompt").and_then(|p| p.as_str()).unwrap();
         assert!(prompt.contains("tmm send"), "the tmm paragraph IS the integration");
         assert!(prompt.contains("fix the bug"), "brief must reach the prompt");
+        // The prompt must NOT carry a date: it is replayed every time the window
+        // is restored, so a baked-in "today" becomes a lie. The KICK carries it.
+        let year = chrono::Local::now().format("%Y").to_string();
+        assert!(!prompt.contains(&year), "no wall-clock date in a replayed prompt");
+        assert!(kick_now().starts_with(&format!("[{year}-")), "the kick tells the agent what now is");
         assert!(conf.get("mcpServers").and_then(|m| m.get("files")).is_some(), "registry MCP def must materialize");
         // Tool hooks feed telemetry.
         assert!(conf.get("hooks").and_then(|h| h.get("preToolUse")).is_some());

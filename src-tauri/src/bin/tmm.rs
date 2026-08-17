@@ -696,8 +696,18 @@ fn print_log(ctx: &Ctx, r: &Value) {
         let from = m.get("from").and_then(|v| v.as_str()).unwrap_or("?");
         let body = m.get("body").and_then(|v| v.as_str()).unwrap_or("");
         let ts = m.get("ts").and_then(|v| v.as_i64()).unwrap_or(0);
-        println!("[{ts}] {from}: {body}");
+        println!("[{}] {from}: {body}", local_stamp(ts));
     }
+}
+
+/// Epoch MILLISECONDS -> local `2026-08-17 16:31`, for a reader that wants to
+/// know when something was said. The raw epoch was printed here before, which
+/// told an agent nothing it could reason about. Falls back to the raw number if
+/// the value is not a sane timestamp.
+fn local_stamp(ts_ms: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(ts_ms)
+        .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|| ts_ms.to_string())
 }
 
 /// `-f`: poll with the since cursor. Polling (not push) keeps the CLI a plain
@@ -720,7 +730,7 @@ async fn follow_log(ctx: &Ctx, session: &str, mut since: i64, limit: i64) {
                     } else {
                         let from = m.get("from").and_then(|x| x.as_str()).unwrap_or("?");
                         let body = m.get("body").and_then(|x| x.as_str()).unwrap_or("");
-                        println!("[{ts}] {from}: {body}");
+                        println!("[{}] {from}: {body}", local_stamp(ts));
                     }
                 }
             }
@@ -750,8 +760,28 @@ mod tests {
     }
 
     #[test]
-    fn image_references_are_resolved_for_a_reader_somewhere_else() {
-        // URLs pass through untouched.
+    fn log_timestamps_are_readable_local_time() {
+        // The rendered value is LOCAL, so assert the
+        // shape and that it round-trips through the same conversion rather than
+        // hard-coding a zone the CI box may not share.
+        let ms = 1_755_419_460_000_i64;   // 2025-08-17 08:31:00 UTC
+        let got = local_stamp(ms);
+        assert_eq!(got.len(), 16, "YYYY-MM-DD HH:MM, got {got:?}");
+        assert!(got.starts_with("2025-08-1"), "the right day, got {got:?}");
+        assert_eq!(
+            got,
+            chrono::DateTime::from_timestamp_millis(ms)
+                .unwrap()
+                .with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
+        );
+        // A nonsense value degrades to the raw number instead of panicking.
+        assert_eq!(local_stamp(i64::MAX), i64::MAX.to_string());
+    }
+
+    #[test]
+    fn image_references_are_resolved_for_a_reader_somewhere_else() {        // URLs pass through untouched.
         for url in ["https://x/y.png", "http://x/y.png", "data:image/png;base64,AA"] {
             assert_eq!(absolutize_ref(url), url);
         }

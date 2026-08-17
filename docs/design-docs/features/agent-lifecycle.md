@@ -64,6 +64,12 @@ Three recipients, three different costs — a name interrupts one agent, `@all`
 interrupts everyone, and no recipient interrupts nobody (the room keeps it for
 their next `tmm log`).
 
+The typed line carries local wall time (`[tmm chat 2026-08-17 16:31] human: …`)
+for the reader's sake: a CLI resuming a conversation cannot recover *when*
+something was said — its clock only tells it `now`. The spawn KICK is stamped for
+the same reason, and the system prompt deliberately is NOT: it is replayed on
+every restore, so a baked-in date becomes a lie.
+
 Then the half that makes delivery honest: `send-keys` succeeding proves the pane
 existed. The proof that the CLI accepted the text *as a prompt* is that the
 agent's own `userPromptSubmit` echoes the line back — `record_delivery` holds it

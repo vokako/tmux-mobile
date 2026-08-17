@@ -54,6 +54,13 @@ inbox 写一个信封 → `consume_file`（`agent_notifications.rs`）转成
 三种收件人，三种代价——一个名字打断一个 agent，`@all` 打断所有人，没有收件人
 谁都不打断（房间替他们留着，等他们下次 `tmm log`）。
 
+打进去的那行带**本地日期和时间**：`[tmm chat 2026-08-17 16:31] human: …`。这是给
+读的那一方用的：CLI 读到这行时，这段对话可能已经空了几个小时，而"这句话是什么时候
+说的"是它无法自己恢复的上下文——它自己的时钟只能告诉它"现在"。spawn 的 KICK 同理
+也带了时间戳；而 system prompt **不带**，因为那段 prompt 每次窗口恢复都会重放，
+写死一个日期几天后就是在说谎。`tmm log` 也改成渲染成同样的本地时间，而不是打印原始
+的 epoch 毫秒——那个数字对 agent 来说什么都推不出来。
+
 然后是让"投递"这件事变诚实的那一半：`send-keys` 成功只证明 pane 存在。证明 CLI
 **把它当成了 prompt** 的唯一证据，是这个 agent 自己的 `userPromptSubmit` 把那行
 回传回来 —— `record_delivery` 把它记成待确认，`record_prompt` 匹配上就清掉

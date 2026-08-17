@@ -333,6 +333,15 @@ AGENT window in the session gets the line typed into its pane as
 sees it queued in its input. Shells never receive delivery (typing into a
 shell would EXECUTE the message), and the sender's own window is skipped.
 
+The line carries local wall time — `[tmm chat 2026-08-17 16:31] human: …` — for
+the reader, not for us. A CLI reads that line inside a conversation that may have
+been idle for hours, and "when was this said" is context it cannot recover: its
+own clock only tells it *now*. Same reason the spawn KICK is stamped
+(`kick_now()`), and the same reason the SYSTEM PROMPT is not: a prompt is
+replayed every time the window is restored, so a date baked into it becomes a lie
+a few days later. `tmm log` renders stored timestamps the same way instead of
+printing raw epoch millis, which told an agent nothing it could reason about.
+
 `send-keys` succeeding proves only that the pane existed. Whether the CLI
 accepted the text as a *prompt* is a different question, and the
 `userPromptSubmit` hook is the only thing that answers it: the payload carries

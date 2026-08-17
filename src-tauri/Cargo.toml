@@ -86,6 +86,10 @@ socket2 = "0.5"
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 agora = { path = "crates/agora" }
 rusqlite = { version = "0.32", features = ["bundled"] }
+# Local wall-clock formatting for the lines we type into an agent's pane and for
+# `tmm log`. Already in this graph (agora -> rmcp -> chrono), so declaring it
+# directly adds no compilation; desktop-gated because those two paths are.
+chrono = { version = "0.4.44", default-features = false, features = ["clock", "std"] }
 
 # `npm run tauri:dev:release` and `tauri build` use this profile.
 #
