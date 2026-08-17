@@ -26,7 +26,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, systemLine, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_PREVIEW } from './hub.ts';
+  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, systemLine, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_PREVIEW, pickAnchors } from './hub.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
 
@@ -217,18 +217,12 @@
    * at all. */
   function syncAsks() {
     if (!feedEl) { askTop = ''; askBottom = ''; return; }
-    const top = feedEl.scrollTop;
-    const bottom = top + feedEl.clientHeight;
-    let above = '', below = '';
-    for (const el of feedEl.querySelectorAll('[data-ask]')) {
-      const y = el.offsetTop;
-      if (y + el.offsetHeight <= top + 1) {
-        above = el.dataset.ask ?? '';        // fully scrolled past: hold the top
-      } else if (y >= bottom - 1) {
-        below = el.dataset.ask ?? '';        // not reached yet: hold the bottom
-        break;                               // the NEAREST one wins
-      }
-    }
+    const items = [...feedEl.querySelectorAll('[data-ask]')].map((el) => ({
+      key: el.dataset.ask ?? '',
+      top: el.offsetTop,
+      height: el.offsetHeight,
+    }));
+    const { above, below } = pickAnchors(items, feedEl.scrollTop, feedEl.clientHeight, feedEl.scrollHeight);
     askTop = above;
     askBottom = below;
   }

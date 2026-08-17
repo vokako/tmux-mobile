@@ -229,8 +229,17 @@ button:disabled {
 .md ul, .md ol { padding-left: 1.4em; }
 .md li { margin: 0.15em 0; }
 .md code { background: var(--code-bg); border-radius: 4px; padding: 0.1em 0.35em; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em; }
-.md pre { background: var(--code-bg); border-radius: 8px; padding: 8px 10px; overflow-x: auto; }
-.md pre code { background: none; padding: 0; font-size: 0.85em; }
+/* A fenced block has to LOOK like one. --code-bg is a 5% wash, which inside a
+   tinted chat bubble is invisible — a quoted file then reads as unrendered
+   markdown, which is exactly how it was reported. The border is what carries the
+   frame; the fill only tints it. */
+.md pre {
+  background: var(--code-bg); border: 1px solid var(--border2); border-radius: 8px;
+  padding: 9px 11px; overflow-x: auto;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; line-height: 1.5;
+}
+/* The inner <code> must not tint again on top of the block. */
+.md pre code { background: none; padding: 0; border-radius: 0; font-size: inherit; }
 .md blockquote { border-left: 3px solid var(--border); padding-left: 10px; color: var(--text2); }
 .md a { color: var(--accent); }
 .md table { border-collapse: collapse; font-size: 0.9em; }

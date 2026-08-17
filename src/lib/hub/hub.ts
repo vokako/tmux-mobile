@@ -202,6 +202,30 @@ export function toolColor(tool: string | null | undefined): string {
  * a wall; the last handful is what tells you where the agent is. */
 export const STEPS_PREVIEW = 5;
 
+/** Which of the user's own messages should hold an edge: the NEAREST one that has
+ * scrolled out above, and the NEAREST one not reached yet below. At most one per
+ * edge — two anchors, never a stack.
+ *
+ * Pure so it can be tested: the DOM half is only reading `offsetTop`/`offsetHeight`
+ * (layout positions, which sticky does not move). Anchors are dropped entirely
+ * when nothing can scroll out — a feed shorter than its box has no "past" or
+ * "ahead". */
+export function pickAnchors(
+  items: readonly { key: string; top: number; height: number }[],
+  scrollTop: number,
+  clientHeight: number,
+  scrollHeight = Infinity,
+): { above: string; below: string } {
+  if (scrollHeight <= clientHeight + 1) return { above: '', below: '' };
+  const viewBottom = scrollTop + clientHeight;
+  let above = '', below = '';
+  for (const it of items) {
+    if (it.top + it.height <= scrollTop + 1) above = it.key;          // fully past
+    else if (it.top >= viewBottom - 1) { below = it.key; break; }     // not reached
+  }
+  return { above, below };
+}
+
 export type FeedLevel = 'chat' | 'status' | 'tools';
 
 /** Lifecycle lines the server posts into the room (a spawn, a `tmm done`) are
