@@ -491,9 +491,15 @@ yanking someone back down while they read history is worse than a missed
 autoscroll — and sending forces it, because you plainly want to see what you just
 sent. Parked away from the tail, a round button offers the way back and carries a
 dot when a MESSAGE arrived meanwhile (telemetry rows extend the tail but are not
-news). Your own last message stays reachable as a sticky pin while a long reply
-scrolls past it, driven by an IntersectionObserver on that message rather than by
-arithmetic, because a bubble's height depends on rendered markdown and images.
+news). Your own last message catches at the top edge as it scrolls out: the SAME bubble
+made `position: sticky`, not a second element that swaps in — a copy reads as two
+components even when it is styled identically. CSS cannot ask "am I stuck", so the
+scroll handler compares the element's top with the container's (and requires
+`scrollTop > 1`, since the first message also sits at the top of an unscrolled
+feed) and sets a class that clips it to one line while it holds the edge; a tall
+question would otherwise eat the screen. The opaque backdrop underneath is not
+decoration: bubble tints are translucent, so the reply sliding under it would
+show through.
 And when the keyboard opens, the feed re-parks at the tail: `--app-height` shrinks
 the box while the scroll position stays, which otherwise leaves the newest line
 below the fold — App already broadcasts `keyboard-shift`, so the Hub listens

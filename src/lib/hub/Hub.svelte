@@ -186,43 +186,37 @@
    * preview (for the pin). Derived from the blocks so it follows the feed. */
   const lastAskBlock = $derived.by(() => {
     const i = lastAskIndex(blocks);
-    if (i < 0) return null;
-    const b = blocks[i];
-    return { key: blockKey(b, i), text: splitImages(b.msg.body).text.replace(/\s+/g, ' ').trim() };
+    return i < 0 ? null : { key: blockKey(blocks[i], i) };
   });
   const lastAskKey = $derived(lastAskBlock?.key ?? '');
-  const lastAsk = $derived(lastAskBlock?.text ?? '');
-  const jumpToAsk = () => {
-    feedEl?.querySelector('[data-ask]')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  };
-
   let following = $state(true);   // the feed is parked at the tail
   let newBelow = $state(false);   // something arrived while it was not
-  let askVisible = $state(true);  // is the user's last message on screen?
+  let askStuck = $state(false);   // the pinned question is caught at the top
 
   function onFeedScroll() {
     following = atBottom();
+    syncAskStuck();
     if (following) {
       newBelow = false;
       markSeen();
     }
   }
 
-  /** Keep the user's own last message reachable while a long reply scrolls past:
-   * observe it, and when it leaves the feed's viewport a sticky bar takes its
-   * place. An observer rather than arithmetic because a message's height depends
-   * on rendered markdown and images. */
+  /** Is the pinned question currently caught at the top edge? CSS has no way to
+   * ask, so compare the element's top with the container's: within a pixel means
+   * sticky has taken over, and only then is it clipped to one line. */
+  function syncAskStuck() {
+    const el = feedEl?.querySelector('[data-ask]');
+    if (!el || !feedEl) { askStuck = false; return; }
+    // `scrollTop > 1` matters: the FIRST message also sits at the container top
+    // in an unscrolled feed, and clipping it there would be wrong — nothing has
+    // scrolled out yet.
+    askStuck = feedEl.scrollTop > 1
+      && el.getBoundingClientRect().top - feedEl.getBoundingClientRect().top <= 1;
+  }
   $effect(() => {
-    void blocks; // re-observe when the feed changes
-    if (!feedEl) return;
-    const el = feedEl.querySelector('[data-ask]');
-    if (!el) { askVisible = true; return; }
-    const io = new IntersectionObserver(
-      (entries) => { askVisible = entries[entries.length - 1]?.isIntersecting ?? true; },
-      { root: feedEl, threshold: 0 },
-    );
-    io.observe(el);
-    return () => io.disconnect();
+    void blocks;   // a new message can change who is pinned, and the geometry
+    requestAnimationFrame(syncAskStuck);
   });
 
   // The keyboard shrinks the visible viewport (App sets --app-height and fires
@@ -621,13 +615,6 @@
 
       <div class="feed-wrap">
       <div class="feed" bind:this={feedEl} onscroll={onFeedScroll}>
-        {#if !askVisible && lastAsk}
-          <!-- What you asked, kept in reach while a long reply scrolls past.
-               Right-aligned like your own messages, and tapping it goes back. -->
-          <button class="ask-pin msg me" title={t('hubToBottom')} onclick={() => jumpToAsk()}>
-            <span class="bubble">{lastAsk}</span>
-          </button>
-        {/if}
         {#each blocks as b, i (blockKey(b, i))}
           {#if b.type === 'msg'}
             {@const m = b.msg}
@@ -636,7 +623,12 @@
             {#if sys !== null}
               <div class="sysline"><span class="sys-who">{m.from}</span>{sys}</div>
             {:else}
-              <div class="msg" class:me={m.from === 'human'} data-ask={blockKey(b, i) === lastAskKey ? '1' : undefined}>
+              <!-- Your last question sticks to the top as it scrolls out of view:
+                   the SAME bubble, caught at the edge, clipped to one line while
+                   it is stuck. Not a second element that swaps in. -->
+              {@const isAsk = blockKey(b, i) === lastAskKey}
+              <div class="msg" class:me={m.from === 'human'} class:ask={isAsk}
+                class:stuck={isAsk && askStuck} data-ask={isAsk ? '1' : undefined}>
                 <div class="m-head">
                   <span class="who">{m.from === 'human' ? t('hubYou') : m.from}</span>
                   <span>{fmtTime(m.ts)}</span>
@@ -1009,17 +1001,19 @@
   /* The feed plus the things that float over it. */
   .feed-wrap { flex: 1; position: relative; display: flex; min-height: 0; }
   .feed { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; }
-  /* What you asked, pinned while a long reply scrolls past. It IS a message
-     bubble — same class, same style — just stuck to the top and clipped to one
-     line. The only addition is an opaque backdrop in the page colour: the bubble
-     tint is translucent, so without it the content scrolling underneath would
-     show through and the pin would read as a rendering fault. */
-  .ask-pin {
-    position: sticky; top: 0; z-index: 6; align-self: flex-end; max-width: 84%;
-    border: none; padding: 0; cursor: pointer;
+  /* Your last question catches at the top edge as it scrolls out. It is the same
+     bubble, so it keeps every bit of its own style; `sticky` does the catching
+     and `.stuck` is what CSS cannot ask for — set from the scroll handler — so a
+     tall question collapses to one line once it is holding the edge instead of
+     eating the screen. The opaque backdrop is not decoration: the bubble tint is
+     translucent (rgba), so without it the reply sliding underneath shows through. */
+  .msg.ask { position: sticky; top: 0; z-index: 6; }
+  .msg.ask.stuck {
     background: var(--bg); border-radius: 12px;
+    box-shadow: 0 6px 12px -8px rgba(0,0,0,0.55);
   }
-  .ask-pin .bubble { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .msg.ask.stuck .bubble { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .msg.ask.stuck .m-head { opacity: 0.65; }
 
   /* Back to the tail. */
   .to-bottom {
