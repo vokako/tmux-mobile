@@ -624,10 +624,8 @@
         {#if !askVisible && lastAsk}
           <!-- What you asked, kept in reach while a long reply scrolls past.
                Right-aligned like your own messages, and tapping it goes back. -->
-          <button class="ask-pin" onclick={() => jumpToAsk()}>
-            <span class="ap-tag">{t('hubYou')}</span>
-            <span class="ap-text">{lastAsk}</span>
-            <Icon name="arrow-up" size={11} />
+          <button class="ask-pin msg me" title={t('hubToBottom')} onclick={() => jumpToAsk()}>
+            <span class="bubble">{lastAsk}</span>
           </button>
         {/if}
         {#each blocks as b, i (blockKey(b, i))}
@@ -1011,16 +1009,18 @@
   /* The feed plus the things that float over it. */
   .feed-wrap { flex: 1; position: relative; display: flex; min-height: 0; }
   .feed { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; }
-  /* What you asked, pinned while a long reply scrolls past. */
+  /* What you asked, pinned while a long reply scrolls past. It IS a message
+     bubble — same class, same style — just stuck to the top and clipped to one
+     line. The only addition is an opaque backdrop in the page colour: the bubble
+     tint is translucent, so without it the content scrolling underneath would
+     show through and the pin would read as a rendering fault. */
   .ask-pin {
-    position: sticky; top: 0; z-index: 6; align-self: flex-end; max-width: 88%;
-    display: flex; align-items: center; gap: 7px; min-height: 32px;
-    background: var(--accent-bg); border: 1px solid var(--accent); border-radius: 999px;
-    color: var(--text); padding: 5px 12px; font-size: 12px; cursor: pointer;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.28); backdrop-filter: blur(3px);
+    position: sticky; top: 0; z-index: 6; align-self: flex-end; max-width: 84%;
+    border: none; padding: 0; cursor: pointer;
+    background: var(--bg); border-radius: 12px;
   }
-  .ap-tag { flex: none; font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--accent); }
-  .ap-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ask-pin .bubble { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
   /* Back to the tail. */
   .to-bottom {
     position: absolute; right: 14px; bottom: 12px; z-index: 7;
