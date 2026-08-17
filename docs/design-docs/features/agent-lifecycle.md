@@ -4,6 +4,8 @@ One agent, end to end: how it gets started, how a message reaches it, how its
 work becomes visible, and how a turn ends. Written by reading the code, so every
 claim below points at a function you can open.
 
+中文版：[`agent-lifecycle.zh.md`](agent-lifecycle.zh.md).
+
 Two companions, and neither repeats the other:
 [`tmm-cli.md`](tmm-cli.md) is the reference for each piece (commands, RPCs, the
 CLI contract); this document is the *sequence*, and the place where the

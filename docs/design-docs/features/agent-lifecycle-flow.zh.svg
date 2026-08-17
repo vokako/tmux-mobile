@@ -1,0 +1,158 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 1180" width="1320" height="1180">
+  <defs>
+    <style>
+      .t  { font-family: "Noto Sans SC","Microsoft YaHei","PingFang SC",sans-serif; }
+      .ti { font-size: 20px; font-weight: 700; fill: #0f172a; }
+      .sub{ font-size: 13px; fill: #64748b; }
+      .ln { font-size: 13px; fill: #1e293b; }
+      .sm { font-size: 11.5px; fill: #64748b; }
+      .hd { font-size: 13px; font-weight: 700; fill: #0f172a; }
+      .ph { font-size: 12px; font-weight: 700; fill: #ffffff; letter-spacing: 0.5px; }
+    </style>
+    <marker id="a_blue" markerWidth="9" markerHeight="7" refX="8.5" refY="3.5" orient="auto">
+      <path d="M0,0 L9,3.5 L0,7 z" fill="#2563eb"/>
+    </marker>
+    <marker id="a_orange" markerWidth="9" markerHeight="7" refX="8.5" refY="3.5" orient="auto">
+      <path d="M0,0 L9,3.5 L0,7 z" fill="#ea580c"/>
+    </marker>
+    <marker id="a_green" markerWidth="9" markerHeight="7" refX="8.5" refY="3.5" orient="auto">
+      <path d="M0,0 L9,3.5 L0,7 z" fill="#059669"/>
+    </marker>
+    <marker id="a_purple" markerWidth="9" markerHeight="7" refX="8.5" refY="3.5" orient="auto">
+      <path d="M0,0 L9,3.5 L0,7 z" fill="#7c3aed"/>
+    </marker>
+    <marker id="a_gray" markerWidth="9" markerHeight="7" refX="8.5" refY="3.5" orient="auto">
+      <path d="M0,0 L9,3.5 L0,7 z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <rect width="1320" height="1180" fill="#ffffff"/>
+  <text class="t ti" x="40" y="42">Agent 生命周期：启动 → 对话 → 完成</text>
+  <text class="t sub" x="40" y="66">tmux-mobile · 实线 = 应用主动做的事 · 虚线 = 从 hook 观测到的事 · 一轮 = 一个括号</text>
+  <rect x="34" y="98" width="196" height="46" rx="9" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text class="t hd" x="132" y="117" text-anchor="middle">手机 / 浏览器</text>
+  <text class="t sm" x="132" y="134" text-anchor="middle">Hub.svelte</text>
+  <line x1="132" y1="144" x2="132" y2="1140" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <rect x="262" y="98" width="196" height="46" rx="9" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text class="t hd" x="360" y="117" text-anchor="middle">WS 服务端</text>
+  <text class="t sm" x="360" y="134" text-anchor="middle">server/hub_rpc.rs</text>
+  <line x1="360" y1="144" x2="360" y2="1140" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <rect x="490" y="98" width="196" height="46" rx="9" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text class="t hd" x="588" y="117" text-anchor="middle">tmux</text>
+  <text class="t sm" x="588" y="134" text-anchor="middle">窗口名 = 身份</text>
+  <line x1="588" y1="144" x2="588" y2="1140" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <rect x="718" y="98" width="196" height="46" rx="9" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text class="t hd" x="816" y="117" text-anchor="middle">Agent CLI</text>
+  <text class="t sm" x="816" y="134" text-anchor="middle">隔离的 KIRO_HOME</text>
+  <line x1="816" y1="144" x2="816" y2="1140" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <rect x="942" y="98" width="196" height="46" rx="9" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text class="t hd" x="1040" y="117" text-anchor="middle">Hooks → inbox</text>
+  <text class="t sm" x="1040" y="134" text-anchor="middle">agent_notifications.rs</text>
+  <line x1="1040" y1="144" x2="1040" y2="1140" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <rect x="1138" y="98" width="172" height="46" rx="9" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text class="t hd" x="1224" y="117" text-anchor="middle">存储</text>
+  <text class="t sm" x="1224" y="134" text-anchor="middle">telemetry 内存 · bus 库</text>
+  <line x1="1224" y1="144" x2="1224" y2="1140" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,4"/>
+  <rect x="34" y="176" width="1252" height="216" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-dasharray="6,4"/>
+  <rect x="46" y="165" width="182" height="22" rx="11" fill="#334155"/>
+  <text class="t ph" x="137.0" y="181" text-anchor="middle">1 · 启动 SPAWN</text>
+  <line x1="132" y1="204" x2="360" y2="204" stroke="#2563eb" stroke-width="2" marker-end="url(#a_blue)"/>
+  <text class="t ln" x="246.0" y="195" text-anchor="middle" fill="#2563eb">hub_spawn { agent, brief }</text>
+  <text class="t sm" x="246.0" y="219" text-anchor="middle">在开场面板里点一个 agent</text>
+  <path d="M 360,226 L 404,226 L 404,246 L 366,246" fill="none" stroke="#ea580c" stroke-width="1.8" marker-end="url(#a_orange)"/>
+  <text class="t ln" x="412" y="231" fill="#ea580c" text-anchor="start">registry_get · can_hire · 上限 4</text>
+  <text class="t sm" x="412" y="248" text-anchor="start">projects/spawn.rs</text>
+  <path d="M 360,272 L 404,272 L 404,292 L 366,292" fill="none" stroke="#7c3aed" stroke-width="1.8" marker-end="url(#a_purple)"/>
+  <text class="t ln" x="412" y="277" fill="#7c3aed" text-anchor="start">物化隔离 home + hooks</text>
+  <text class="t sm" x="412" y="294" text-anchor="start">&lt;ws&gt;/.tmm/agents/&lt;名字&gt;/</text>
+  <line x1="360" y1="320" x2="588" y2="320" stroke="#2563eb" stroke-width="2" marker-end="url(#a_blue)"/>
+  <text class="t ln" x="474.0" y="311" text-anchor="middle" fill="#2563eb">new_named_window(名字)</text>
+  <text class="t sm" x="474.0" y="335" text-anchor="middle">窗口名就是这个 agent 的身份</text>
+  <line x1="588" y1="358" x2="816" y2="358" stroke="#2563eb" stroke-width="2" marker-end="url(#a_blue)"/>
+  <text class="t ln" x="702.0" y="349" text-anchor="middle" fill="#2563eb">. launch.sh</text>
+  <line x1="360" y1="382" x2="1224" y2="382" stroke="#7c3aed" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#a_purple)"/>
+  <text class="t ln" x="792.0" y="373" text-anchor="middle" fill="#7c3aed">记一条：[tmm] spawned dev</text>
+  <rect x="700" y="200" width="384" height="82" rx="7" fill="#fffbeb" stroke="#fbbf24"/>
+  <text class="t sm" x="710" y="220">KIRO_HOME / CODEX_HOME / --settings 都指向这个隔离 home，</text>
+  <text class="t sm" x="710" y="236">所以用户自己的配置绝不会漏进来。</text>
+  <text class="t sm" x="710" y="252">TMM_PROJECT + TMM_AGENT 给这个 pane 身份，</text>
+  <text class="t sm" x="710" y="268">tmm 和遥测就是靠它知道“谁在说话”。</text>
+  <rect x="34" y="422" width="1252" height="152" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-dasharray="6,4"/>
+  <rect x="46" y="411" width="130" height="22" rx="11" fill="#334155"/>
+  <text class="t ph" x="111.0" y="427" text-anchor="middle">2 · 一轮开始</text>
+  <line x1="360" y1="452" x2="816" y2="452" stroke="#ea580c" stroke-width="2" marker-end="url(#a_orange)"/>
+  <text class="t ln" x="588.0" y="443" text-anchor="middle" fill="#ea580c">KICK：作为 CLI 的位置参数传进去</text>
+  <text class="t sm" x="588.0" y="467" text-anchor="middle">agent 不被搭话就什么都不做</text>
+  <line x1="816" y1="494" x2="1040" y2="494" stroke="#059669" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#a_green)"/>
+  <text class="t ln" x="928.0" y="485" text-anchor="middle" fill="#059669">userPromptSubmit { prompt }</text>
+  <line x1="1040" y1="520" x2="1224" y2="520" stroke="#7c3aed" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#a_purple)"/>
+  <text class="t ln" x="1132.0" y="511" text-anchor="middle" fill="#7c3aed">record_prompt</text>
+  <text class="t sm" x="1132.0" y="535" text-anchor="middle">回合开始 · via = local | app</text>
+  <line x1="1224" y1="552" x2="132" y2="552" stroke="#64748b" stroke-width="2" stroke-dasharray="4,3" marker-end="url(#a_gray)"/>
+  <text class="t ln" x="678.0" y="543" text-anchor="middle" fill="#64748b">时间线出现“输入”行 · 状态 running 0s</text>
+  <rect x="34" y="604" width="1252" height="196" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-dasharray="6,4"/>
+  <rect x="46" y="593" width="156" height="22" rx="11" fill="#334155"/>
+  <text class="t ph" x="124.0" y="609" text-anchor="middle">3 · 人发一条消息</text>
+  <line x1="132" y1="632" x2="360" y2="632" stroke="#2563eb" stroke-width="2" marker-end="url(#a_blue)"/>
+  <text class="t ln" x="246.0" y="623" text-anchor="middle" fill="#2563eb">hub_post { body }</text>
+  <text class="t sm" x="246.0" y="647" text-anchor="middle">addressed() 自动补 @lead，不用你打 @</text>
+  <path d="M 360,654 L 404,654 L 404,674 L 366,674" fill="none" stroke="#7c3aed" stroke-width="1.8" marker-end="url(#a_purple)"/>
+  <text class="t ln" x="412" y="659" fill="#7c3aed" text-anchor="start">bus.post 写入房间 proj:&lt;session&gt;</text>
+  <text class="t sm" x="412" y="676" text-anchor="start">SQLite —— 唯一持久的部分</text>
+  <line x1="360" y1="706" x2="588" y2="706" stroke="#2563eb" stroke-width="2" marker-end="url(#a_blue)"/>
+  <text class="t ln" x="474.0" y="697" text-anchor="middle" fill="#2563eb">send_keys「[tmm chat] human: …」</text>
+  <text class="t sm" x="474.0" y="721" text-anchor="middle">只发给托管窗口</text>
+  <line x1="588" y1="738" x2="816" y2="738" stroke="#2563eb" stroke-width="2" marker-end="url(#a_blue)"/>
+  <text class="t ln" x="702.0" y="729" text-anchor="middle" fill="#2563eb">落进 CLI 的输入框</text>
+  <line x1="816" y1="766" x2="1040" y2="766" stroke="#059669" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#a_green)"/>
+  <text class="t ln" x="928.0" y="757" text-anchor="middle" fill="#059669">userPromptSubmit 把这行回传</text>
+  <line x1="1040" y1="792" x2="132" y2="792" stroke="#059669" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#a_green)"/>
+  <text class="t ln" x="586.0" y="783" text-anchor="middle" fill="#059669">回执：已送达</text>
+  <rect x="700" y="630" width="384" height="82" rx="7" fill="#fffbeb" stroke="#fbbf24"/>
+  <text class="t sm" x="710" y="650">send-keys 成功只证明 pane 存在，别的都不证明。</text>
+  <text class="t sm" x="710" y="666">唯一能证明 CLI 把它当 prompt 收下的，是这条回传。</text>
+  <text class="t sm" x="710" y="682">45 秒没回来 → 时间线上出现一条警告，</text>
+  <text class="t sm" x="710" y="698">而且在任何详细级别下都显示。</text>
+  <rect x="34" y="830" width="1252" height="140" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-dasharray="6,4"/>
+  <rect x="46" y="819" width="169" height="22" rx="11" fill="#334155"/>
+  <text class="t ph" x="130.5" y="835" text-anchor="middle">4 · 一轮之内的工作</text>
+  <line x1="816" y1="858" x2="1040" y2="858" stroke="#059669" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#a_green)"/>
+  <text class="t ln" x="928.0" y="849" text-anchor="middle" fill="#059669">preToolUse / postToolUse { tool_name, tool_input }</text>
+  <line x1="1040" y1="884" x2="1224" y2="884" stroke="#7c3aed" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#a_purple)"/>
+  <text class="t ln" x="1132.0" y="875" text-anchor="middle" fill="#7c3aed">record_tool(工具名, 参数)</text>
+  <text class="t sm" x="1132.0" y="899" text-anchor="middle">每 session 一个 120 条的环</text>
+  <line x1="1224" y1="918" x2="132" y2="918" stroke="#64748b" stroke-width="2" stroke-dasharray="4,3" marker-end="url(#a_gray)"/>
+  <text class="t ln" x="678.0" y="909" text-anchor="middle" fill="#64748b">按窗口折叠成一组 · 工具名按“它干什么”着色</text>
+  <line x1="816" y1="944" x2="360" y2="944" stroke="#ea580c" stroke-width="2" marker-end="url(#a_orange)"/>
+  <text class="t ln" x="588.0" y="935" text-anchor="middle" fill="#ea580c">tmm send 汇报进度（可选）</text>
+  <text class="t sm" x="588.0" y="959" text-anchor="middle">会置上 sent_this_turn</text>
+  <rect x="34" y="1000" width="1252" height="148" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-dasharray="6,4"/>
+  <rect x="46" y="989" width="130" height="22" rx="11" fill="#334155"/>
+  <text class="t ph" x="111.0" y="1005" text-anchor="middle">5 · 一轮结束</text>
+  <line x1="816" y1="1028" x2="1040" y2="1028" stroke="#059669" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#a_green)"/>
+  <text class="t ln" x="928.0" y="1019" text-anchor="middle" fill="#059669">stop { assistant_response }</text>
+  <path d="M 1040,1046 L 1084,1046 L 1084,1066 L 1046,1066" fill="none" stroke="#ea580c" stroke-width="1.8" marker-end="url(#a_orange)"/>
+  <text class="t ln" x="1092" y="1051" fill="#ea580c" text-anchor="start">三道门禁 · 截断 6144</text>
+  <text class="t sm" x="1092" y="1068" text-anchor="start">maybe_auto_post</text>
+  <line x1="1040" y1="1092" x2="1224" y2="1092" stroke="#7c3aed" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#a_purple)"/>
+  <text class="t ln" x="1132.0" y="1083" text-anchor="middle" fill="#7c3aed">最终回答进房间（record_only）</text>
+  <line x1="1224" y1="1108" x2="132" y2="1108" stroke="#64748b" stroke-width="2" stroke-dasharray="4,3" marker-end="url(#a_gray)"/>
+  <text class="t ln" x="960" y="1099" text-anchor="middle" fill="#64748b">回复出现 · chip 变 idle</text>
+  <line x1="816" y1="1134" x2="360" y2="1134" stroke="#ea580c" stroke-width="2" marker-end="url(#a_orange)"/>
+  <text class="t ln" x="588.0" y="1125" text-anchor="middle" fill="#ea580c">tmm done 摘要（可选）</text>
+  <rect x="374" y="1024" width="380" height="82" rx="7" fill="#fef2f2" stroke="#fca5a5"/>
+  <text class="t sm" x="384" y="1044">三道门禁：① 只有托管 agent ② 这一轮没自己说过话</text>
+  <text class="t sm" x="384" y="1060">③ record_only（不投递）。第三条是断环的那一刀：</text>
+  <text class="t sm" x="384" y="1076">自动回帖里若 @了别人，会被打进对方 pane，对方的</text>
+  <text class="t sm" x="384" y="1092">stop hook 又自动回帖 —— 无穷循环。</text>
+  <text class="t sm" x="40" y="1170">图例：</text>
+  <line x1="106" y1="1166" x2="132" y2="1166" stroke="#2563eb" stroke-width="2" marker-end="url(#a_blue)"/>
+  <text class="t sm" x="138" y="1170">我们做的</text>
+  <line x1="202" y1="1166" x2="228" y2="1166" stroke="#059669" stroke-width="2" marker-end="url(#a_green)"/>
+  <text class="t sm" x="234" y="1170">我们观测到的</text>
+  <line x1="322" y1="1166" x2="348" y2="1166" stroke="#ea580c" stroke-width="2" marker-end="url(#a_orange)"/>
+  <text class="t sm" x="354" y="1170">控制 / 意图</text>
+  <line x1="454" y1="1166" x2="480" y2="1166" stroke="#7c3aed" stroke-width="2" marker-end="url(#a_purple)"/>
+  <text class="t sm" x="486" y="1170">写入存储</text>
+  <line x1="550" y1="1166" x2="576" y2="1166" stroke="#64748b" stroke-width="2" marker-end="url(#a_gray)"/>
+  <text class="t sm" x="582" y="1170">渲染</text>
+</svg>
