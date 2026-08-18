@@ -619,11 +619,16 @@ them, so the "glowing block" class of bug is fixed in ONE place. Disabled recede
 accent. The button reserves NO column (owner: text may run directly above
 it): the textarea is full width, and growComposer measures the value in a
 hidden mirror div to find the LAST line's right edge — only when that edge
-would collide with the button zone does the box gain one line of bottom
-padding. Same "share the last line, else drop below" semantics as the
-bubble's meta trailer; a textarea cannot flow around a float, so the mirror
-is the only honest way to know where the last line ends (the mirror must
-mirror font metrics, width, wrapping AND the chip text-indent). The indent is a re-measure dependency of the
+would collide with the button zone does the box gain bottom padding, and the
+pad clears the button's FULL height (34px): a one-line pad still left the
+button's top strip over the glyph descenders (owner report). When the box is
+at max height and SCROLLING, every line passes under the button's corner, so
+the avoidance flips axis: a 40px right padding shortens all lines clear of
+the button for as long as the scroll state lasts, and releases with it. Same
+"share the last line, else drop below" semantics as the bubble's meta
+trailer; a textarea cannot flow around a float, so the mirror is the only
+honest way to know where the last line ends (the mirror must mirror font
+metrics, width, wrapping AND the chip text-indent). The indent is a re-measure dependency of the
 auto-grow, since it changes where text wraps. On a phone the chip drops its
 redundant “TO” prefix and caps its width; safe-area padding remains on the outer
 composer.

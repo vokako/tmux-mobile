@@ -342,8 +342,23 @@
   function growComposer() {
     const el = composerEl;
     if (!el) return;
-    const lh = parseFloat(getComputedStyle(el).lineHeight) || 20;
-    el.style.paddingBottom = lastLineCollides(el) ? `${4 + lh}px` : '';
+    // Measure the natural height first, with no avoidance applied.
+    el.style.paddingBottom = '';
+    el.style.paddingRight = '';
+    el.style.height = 'auto';
+    const maxH = parseFloat(getComputedStyle(el).maxHeight) || Infinity;
+    if (el.scrollHeight > maxH + 1) {
+      // Scrolled state: the box is at max height and the button permanently
+      // overlays its bottom-right corner — EVERY line scrolls past it, so
+      // all lines shorten clear of the button zone while scrolling lasts.
+      el.style.paddingRight = '40px';
+    } else if (lastLineCollides(el)) {
+      // Tail collision: clear the button's full height (top edge sits
+      // ~30px above the textarea's bottom; 34px keeps descenders clear),
+      // not just one line box — a 24px pad still left the button's top
+      // strip over the glyphs (owner report).
+      el.style.paddingBottom = '34px';
+    }
     el.style.height = 'auto';
     el.style.height = `${el.scrollHeight}px`;
     // The composer taking space is the feed losing it — the same way the keyboard
