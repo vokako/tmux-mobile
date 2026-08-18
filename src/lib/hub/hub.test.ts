@@ -337,6 +337,29 @@ test('systemLine recognizes lifecycle lines and leaves prose alone', () => {
   assert.equal(systemLine(undefined), null);
 });
 
+test('lifecycle lines fold into one sys row and vanish at chat level', () => {
+  const feed = [
+    { id: 'a', ts: 100, from: 'human', body: 'hello' },
+    { id: 'b', ts: 200, from: 'lead', body: '[tmm] stopped lead' },
+    { id: 'c', ts: 210, from: 'lead', body: '[tmm] restarted lead' },
+    { id: 'd', ts: 300, from: 'lead', body: 'back to work' },
+  ];
+  // A stop followed by a restart is one fact: one row, both items.
+  const blocks = feedBlocks(feed, [], 'tools');
+  assert.deepEqual(blocks.map((b) => b.type), ['msg', 'sys', 'msg']);
+  const sys = blocks[1];
+  assert.deepEqual(sys?.type === 'sys' && sys.items, ['stopped lead', 'restarted lead']);
+  // The chat-only level is the conversation, not the app's record.
+  assert.deepEqual(feedBlocks(feed, [], 'chat').map((b) => b.type), ['msg', 'msg']);
+  // A real message between two lifecycle lines keeps them apart.
+  const split = feedBlocks([
+    { id: 'a', ts: 100, from: 'x', body: '[tmm] spawned dev' },
+    { id: 'b', ts: 200, from: 'x', body: 'hi' },
+    { id: 'c', ts: 300, from: 'x', body: '[tmm] done' },
+  ], [], 'status');
+  assert.deepEqual(split.map((b) => b.type), ['sys', 'msg', 'sys']);
+});
+
 test('an unconfirmed delivery is visible even at the chat-only level', () => {
   const activity = [ev({ ts: 100, kind: 'warn', text: 'unconfirmed: [tmm chat] human: @dev hi' })];
   const blocks = feedBlocks([{ ts: 50, from: 'human', body: '@dev hi' }], activity, 'chat');

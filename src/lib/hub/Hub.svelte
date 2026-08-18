@@ -26,7 +26,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, systemLine, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_PREVIEW, pickAnchor, toolEventParts } from './hub.ts';
+  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_PREVIEW, pickAnchor, toolEventParts } from './hub.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
 
@@ -560,7 +560,7 @@
     return last;
   });
   const blockKey = (b, i) =>
-    b.type === 'msg' ? (b.msg.id ?? `m${b.ts}-${i}`) : b.type === 'steps' ? b.key : `${b.type}${b.ts}-${i}`;
+    b.type === 'msg' ? (b.msg.id ?? `m${b.ts}-${i}`) : b.type === 'steps' || b.type === 'sys' ? b.key : `${b.type}${b.ts}-${i}`;
 
   // Notification kinds get a human label; unknown kinds fall back to the raw
   // text (t() returns the key on a miss, so detect that).
@@ -710,19 +710,20 @@
       <div class="feed-wrap">
       <div class="feed subtle-scroll" bind:this={feedEl} onscroll={onFeedScroll}>
         {#each blocks as b, i (blockKey(b, i))}
-          {#if b.type === 'msg'}
+          {#if b.type === 'sys'}
+            <!-- The app's own record (spawn/stop/restart), folded: consecutive
+                 lifecycle lines are one fact each, not one row each. Hidden
+                 entirely at the chat-only level (feedBlocks drops them). -->
+            <div class="sysline">{b.items.join(' · ')}</div>
+          {:else if b.type === 'msg'}
             {@const m = b.msg}
-            {@const sys = systemLine(m.body)}
             {@const parts = splitImages(m.body)}
-            {#if sys !== null}
-              <div class="sysline"><span class="sys-who">{m.from}</span>{sys}</div>
-            {:else}
               <!-- Every user message can become the landmark, but exactly ONE
                    does. The real bubble enters with the feed, then that SAME
                    element catches the edge as it is about to leave; there is no
                    duplicate and no invisible midpoint swap. -->
               {@const key = blockKey(b, i)}
-              {@const isAsk = m.from === 'human' && sys === null}
+              {@const isAsk = m.from === 'human'}
               <div class="msg" class:me={m.from === 'human'}
                 class:ask-top={isAsk && askKey === key && askEdge === 'top'}
                 class:ask-bottom={isAsk && askKey === key && askEdge === 'bottom'}
@@ -772,7 +773,6 @@
                   </div>
                 {/if}
               </div>
-            {/if}
           {:else if b.type === 'prompt'}
             <!-- The input half: what this agent was asked, which only the
                  userPromptSubmit hook can tell us. -->
@@ -1253,7 +1253,6 @@
     font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
   }
-  .sysline .sys-who { font-weight: 650; color: var(--text2); }
   /* Delivery receipt: the agent's prompt hook echoed our line back. */
   .ok-chip { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; color: var(--status-ok); font-size: 9.5px; letter-spacing: 0.1px; }
 

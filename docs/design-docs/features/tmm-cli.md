@@ -527,7 +527,10 @@ look like a cloned card even when there is only one DOM node. Prose bubbles are
 bounded to `min(76%, 760px)` on a wide screen and 91% on a phone, while tool runs,
 observed prompts and status facts use the same width ceiling but stay visually
 subordinate. The feed reuses `.subtle-scroll`; system events are centered frosted
-pills. The tap-revealed copy/raw actions are an absolutely-positioned OVERLAY on
+pills — CONSECUTIVE lifecycle lines fold into one pill ("stopped lead ·
+restarted lead": a stop followed by a restart is one fact, not two rows), and
+at the chat-only level they disappear entirely, because they are the app's
+record, not the conversation. The tap-revealed copy/raw actions are an absolutely-positioned OVERLAY on
 the bubble's bottom-right corner, not a row in the flow: opening them must not
 push the conversation around or change the scroll height the anchor math
 depends on. The bubble itself carries a text cursor, not a pointer — it is

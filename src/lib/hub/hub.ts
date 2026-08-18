@@ -260,6 +260,7 @@ export function systemLine(body: string | null | undefined): string | null {
  * (the "what it did between two replies" pane). */
 export type FeedBlock =
   | { type: 'msg'; ts: number; msg: any; delivered: boolean }
+  | { type: 'sys'; ts: number; key: string; items: string[] }
   | { type: 'prompt'; ts: number; window: number; text: string }
   | { type: 'note'; ts: number; window: number; event: HubActivityEvent }
   | { type: 'steps'; ts: number; window: number; key: string; events: HubActivityEvent[] };
@@ -336,12 +337,18 @@ export function feedBlocks(
   activity: readonly HubActivityEvent[],
   level: FeedLevel,
 ): FeedBlock[] {
-  const msgs: Extract<FeedBlock, { type: 'msg' }>[] = feed.map((m) => ({
-    type: 'msg',
-    ts: m.ts ?? 0,
-    msg: m,
-    delivered: false,
-  }));
+  // Lifecycle lines ("[tmm] spawned dev") are the app's record, not the
+  // conversation: at the chat-only level they disappear, and elsewhere they
+  // become 'sys' rows so CONSECUTIVE ones fold into one line — a stop
+  // followed by a restart is one fact, not two rows (owner report).
+  const msgs: Extract<FeedBlock, { type: 'msg' | 'sys' }>[] = feed.flatMap((m): Extract<FeedBlock, { type: 'msg' | 'sys' }>[] => {
+    const sys = systemLine(m.body);
+    if (sys === null) {
+      return [{ type: 'msg' as const, ts: m.ts ?? 0, msg: m, delivered: false }];
+    }
+    if (level === 'chat') return [];
+    return [{ type: 'sys' as const, ts: m.ts ?? 0, key: `sys${m.id ?? m.ts}`, items: [sys] }];
+  });
 
   // Rule 1: pair echoes with the messages that produced them.
   const consumed = new Set<HubActivityEvent>();
@@ -350,8 +357,9 @@ export function feedBlocks(
     // The newest message at or before the echo whose body it contains. The
     // typed line is `[tmm chat] <from>: <body>`, and an agent that was
     // mid-typing submits it with its own leftover text attached.
-    let hit: (typeof msgs)[number] | undefined;
+    let hit: Extract<FeedBlock, { type: 'msg' }> | undefined;
     for (const m of msgs) {
+      if (m.type !== 'msg') continue;
       const body = m.msg?.body ?? '';
       if (body && m.ts <= e.ts && e.text.includes(body)) hit = m;
     }
@@ -406,6 +414,15 @@ export function feedBlocks(
   // Rule 3: fold consecutive same-window tool calls.
   const out: FeedBlock[] = [];
   for (const item of stream) {
+    if (item.type === 'sys') {
+      const prev = out[out.length - 1];
+      if (prev?.type === 'sys') {
+        prev.items.push(...item.items);
+        continue;
+      }
+      out.push(item);
+      continue;
+    }
     if (item.type !== 'tool') {
       out.push(item);
       continue;
