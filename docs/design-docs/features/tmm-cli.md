@@ -412,27 +412,37 @@ because the room is the record.
 ## Spawn: the starter pistol
 
 An agent CLI boots into an interactive prompt and does nothing until spoken
-to. The brief in the system prompt is context; the KICK — passed as the CLI's
-positional arg, so it becomes the first user prompt — is what makes it move.
-Without it the agent sat at its prompt forever (observed live).
+to. For a while we exploited that with a synthetic KICK passed as the CLI's
+positional arg — first an instruction ("Start now: read your instructions…"),
+then a bare `(session start)` marker. Both are gone, and the rule now is:
 
-The kick is a MARKER, not an instruction: `[2026-08-18 16:41] (session
-start)`. It used to be a sentence ("Start now: read your instructions…run
-`tmm done` when complete"), and that was wrong for one reason that outranks
-brevity — that channel is the OPERATOR's. The prompt echo is rendered in the
-chat, so the app appeared to have typed instructions at the agent in the
-user's name (owner report 2026-08-18), and standing instructions do not
-belong in a per-launch message anyway: they are stated once, in the agent's
-definition. `build_prompt` therefore explains what the marker MEANS (read the
-brief, begin, `tmm done` when complete) and states that nothing in that line
-is an operator request. The marker keeps the timestamp, which is the only
-place an agent learns the wall time (a system prompt is replayed on every
-restart, so a baked-in date would age into a lie).
+**Nothing is sent unless there is something to consume.** A spawn with no
+brief passes NO positional arg at all: the agent opens and waits, costing
+nothing, until a real message arrives. Two reasons, and the second is the one
+that killed the marker: that channel is where the OPERATOR's words land (the
+prompt echo renders in the chat, so an invented line reads as something the
+user typed), and an agent handed a contentless prompt starts reasoning about
+nothing — "多此一举" (owner, 2026-08-18).
 
-Client side, `isSessionStart()` drops the echo from the transcript entirely —
-it also matches the pre-change instruction kick, because rooms are persisted.
-Measured after the change: a spawned kiro agent received the bare marker,
-read its brief, answered, and called `tmm done` on its own.
+A brief IS something to consume: `tmm spawn <agent> --brief "…"` delivers it
+as the first prompt, stamped `[YYYY-MM-DD HH:MM]` like every later message
+(`first_prompt()`). The stamp is also how an agent learns the wall time —
+`build_prompt` says so, because a system prompt cannot carry a date (it is
+replayed on every restart, so a baked-in "today" ages into a lie). The system
+prompt also tells a brief-less agent explicitly to WAIT.
+
+A side effect worth keeping: `write_launch_recipe` no longer has to strip a
+trailing quoted argument to keep the kick out of the restart line — the
+command it is handed never contains a first prompt, so it stores it verbatim
+(the old strip was a guess that would have eaten a legitimate quoted flag).
+Client side, `isSessionStart()` still filters the OLD kicks out of persisted
+rooms.
+
+Measured after the change: a brief-less kiro agent's launch line ends at
+`--trust-all-tools` and its pane sits idle with no turn at all; the same agent
+answered immediately when a real `tmm send` arrived; a briefed agent received
+`[2026-08-18 17:10] 回一句：收到 brief` as its first prompt, answered, and
+called `tmm done` itself.
 
 ## The activity feed (telemetry in the chat timeline)
 

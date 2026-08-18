@@ -119,7 +119,13 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
         .map(|(k, v)| format!("{}={}", k, shared::shell_quote(v)))
         .collect::<Vec<_>>()
         .join(" ");
-    let full = format!("{} {}", prefix, prepared.cmd);
+    // The launch line ends with the first prompt ONLY when a brief gave us
+    // something for the agent to act on; otherwise the CLI opens and waits.
+    let launch_cmd = match first_prompt(req.brief) {
+        Some(p) => format!("{} {}", prepared.cmd, shared::shell_quote(&p)),
+        None => prepared.cmd.clone(),
+    };
+    let full = format!("{} {}", prefix, launch_cmd);
     // NEVER send the full line via send-keys — see team/launch.rs: tty shims
     // swallow bursts ≳2KB. Source a script instead.
     let script = shared::write_launch_script(&home, &window_name, &full)?;
@@ -142,18 +148,14 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
 /// The kick is NOT part of the recipe: it belongs to the first launch only;
 /// a restart resumes a conversation instead.
 fn write_launch_recipe(home: &Path, backend: &str, env: &[(String, String)], cmd: &str) {
-    // The kick is always the final argument and always shell-quoted (it
-    // contains spaces); strip that whole quoted argument, not the last word.
-    let t = cmd.trim_end();
-    let cmd_sans_kick = if t.ends_with('\'') {
-        t[..t.len() - 1].rfind(" '").map(|i| &t[..i]).unwrap_or(t)
-    } else {
-        t.rsplit_once(' ').map(|(head, _)| head).unwrap_or(t)
-    };
+    // `cmd` is the identity command with NO first prompt appended (spawn adds
+    // that separately), so the recipe stores it verbatim. It used to strip a
+    // trailing quoted argument to remove the kick — a guess that would have
+    // eaten a legitimate quoted flag the day a backend ended with one.
     let recipe = json!({
         "backend": backend,
         "env": env.iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>(),
-        "cmd": cmd_sans_kick,
+        "cmd": cmd.trim_end(),
     });
     let _ = std::fs::write(
         home.join("launch.json"),
@@ -194,22 +196,26 @@ pub fn relaunch_line(project_path: &str, window_name: &str, session_id: Option<&
     Some(line)
 }
 
-/// The initial prompt: an agent CLI boots into an interactive prompt and does
-/// nothing until spoken to, so SOMETHING has to arrive — but it must not be an
-/// instruction. That channel is the operator's (it is echoed into the chat as a
-/// prompt, and the owner reads it as "the human said this"), and standing
-/// instructions belong in the agent's own definition where they are stated once
-/// and never re-typed. So the kick is a MARKER, not a sentence: the system
-/// prompt (`build_prompt`) tells the agent what a session-start marker means.
-const KICK: &str = "(session start)";
+/// The first prompt, if there is one AT ALL. A spawned agent used to receive a
+/// synthetic starter (an instruction, then a `(session start)` marker) purely
+/// because an interactive CLI sits idle until spoken to. Both were wrong for
+/// the same reason: that channel is where the OPERATOR's words arrive, so
+/// anything we invent there is a message the user never wrote — and an agent
+/// handed a contentless prompt starts reasoning about nothing ("多此一举",
+/// owner 2026-08-18). So: no brief, no prompt. The agent waits at its prompt,
+/// costing nothing, until a real message arrives via `deliver_mentions` (which
+/// stamps its own time — the only reason the marker carried one).
+///
+/// A brief IS something to consume: `tmm spawn <agent> --brief "…"` is a task
+/// assignment from the operator or a teammate, so it is delivered as the first
+/// message, stamped like every later one.
 
-/// The kick, stamped with local wall time. An agent's first prompt is the only
-/// place it learns what "now" is: its system prompt cannot carry a date (that
-/// prompt is reused every time the window is restored, so a baked-in date would
-/// be a lie a few days later), and the CLI does not volunteer one. Every LATER
-/// message carries its own stamp from `deliver_mentions`.
-fn kick_now() -> String {
-    format!("[{}] {KICK}", chrono::Local::now().format("%Y-%m-%d %H:%M"))
+fn first_prompt(brief: &str) -> Option<String> {
+    let brief = brief.trim();
+    if brief.is_empty() {
+        return None;
+    }
+    Some(format!("[{}] {brief}", chrono::Local::now().format("%Y-%m-%d %H:%M")))
 }
 
 #[cfg(test)]
@@ -225,13 +231,21 @@ mod relaunch_tests {
             &home,
             "kiro",
             &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())],
-            "command kiro-cli chat --agent lead --model m --trust-all-tools kick",
+            "command kiro-cli chat --agent lead --model m --trust-all-tools",
         );
         let line = relaunch_line(ws.to_str().unwrap(), "lead", Some("id-1")).unwrap();
         assert!(line.starts_with("KIRO_HOME="), "isolated home first: {line}");
         assert!(line.contains("--agent lead"), "identity: {line}");
         assert!(line.ends_with("--resume-id id-1"), "conversation resumes: {line}");
-        assert!(!line.contains("kick"), "write_launch_recipe strips the kick: {line}");
+        // The recipe stores the identity command VERBATIM: a first prompt is
+        // never part of it (spawn appends that separately, only for a brief),
+        // so nothing has to be guessed off the end of the line.
+        let stored: Value =
+            serde_json::from_str(&std::fs::read_to_string(home.join("launch.json")).unwrap()).unwrap();
+        assert_eq!(
+            stored.get("cmd").and_then(|c| c.as_str()).unwrap(),
+            "command kiro-cli chat --agent lead --model m --trust-all-tools",
+        );
         // No recorded conversation → plain identity relaunch, no resume flag.
         let fresh = relaunch_line(ws.to_str().unwrap(), "lead", None).unwrap();
         assert!(!fresh.contains("--resume"), "{fresh}");
@@ -280,10 +294,10 @@ fn build_prompt(def: &RegAgent, name: &str, session: &str, brief: &str) -> Strin
          - `tmm spawn <registry-name> --brief \"...\"` — bring in a teammate (see `tmm registry list`)\n\
          - `tmm project create|up|down|archive` — set up or tear down whole projects\n\
          - `tmm registry save --name .. --backend .. --system \"..\"` — define NEW kinds of agents, then spawn them\n\
-         Your first prompt of a session is a MARKER, not a request: `[<local time>] (session start)`. \
-         It is how you learn the current time (a system prompt cannot carry a date — it is replayed every restart), and it means: \
-         read the brief above, begin working, and run `tmm done \"summary\"` when the briefed task is complete. \
-         Nothing else in that line is an instruction from the operator; every real request arrives as its own message.\n\
+         When you start with no message waiting, just WAIT at your prompt — nothing is expected of you until someone writes. \
+         Every real request arrives as a prompt stamped `[YYYY-MM-DD HH:MM]`, which is also how you learn the current time \
+         (this system prompt cannot carry a date: it is replayed on every restart). \
+         If a task was briefed to you it appears below — do it when you are asked to start, and run `tmm done \"summary\"` when it is complete.\n\
          Rules: your final answer each turn is captured automatically and posted to the room — do not repeat it with `tmm send`. \
          Use `tmm send` DURING a long turn for progress a human would want before it ends, and `tmm send \"@name ...\"` to hand work to a teammate (it types into their pane and interrupts them). \
          If tmm fails (server down), keep working — it is telemetry, never a blocker. \
@@ -471,10 +485,9 @@ fn render_kiro(
     Ok(Rendered {
         env: vec![("KIRO_HOME".into(), home.to_string_lossy().to_string())],
         cmd: format!(
-            "command kiro-cli chat --agent {} --model {} --trust-all-tools {}",
+            "command kiro-cli chat --agent {} --model {} --trust-all-tools",
             shared::shell_quote(name),
             shared::shell_quote(model),
-            shared::shell_quote(&kick_now()),
         ),
         confirmation: None,
     })
@@ -518,12 +531,11 @@ fn render_claude(
     Ok(Rendered {
         env: Vec::new(),
         cmd: format!(
-            "command claude --mcp-config {} --strict-mcp-config --settings {} --model {} --dangerously-skip-permissions --append-system-prompt {} {}",
+            "command claude --mcp-config {} --strict-mcp-config --settings {} --model {} --dangerously-skip-permissions --append-system-prompt {}",
             shared::shell_quote(&mcpfile.to_string_lossy()),
             shared::shell_quote(&settingsfile.to_string_lossy()),
             shared::shell_quote(model),
             shared::shell_quote(&full_prompt),
-            shared::shell_quote(&kick_now()),
         ),
         confirmation: Some(shared::StartupConfirmation {
             markers: shared::CLAUDE_FOLDER_TRUST_MARKERS.to_vec(),
@@ -570,7 +582,6 @@ fn render_codex(
     }
     config_args.push("--dangerously-bypass-approvals-and-sandbox".into());
     config_args.push("--dangerously-bypass-hook-trust".into());
-    config_args.push(shared::shell_quote(&kick_now()));
     Ok(Rendered {
         env: vec![("CODEX_HOME".into(), codex_home.to_string_lossy().to_string())],
         cmd: format!("command codex {}", config_args.join(" ")),
@@ -620,15 +631,16 @@ mod tests {
         // is restored, so a baked-in "today" becomes a lie. The KICK carries it.
         let year = chrono::Local::now().format("%Y").to_string();
         assert!(!prompt.contains(&year), "no wall-clock date in a replayed prompt");
-        assert!(kick_now().starts_with(&format!("[{year}-")), "the kick tells the agent what now is");
-        // The kick is a MARKER, not an instruction: that channel is echoed
-        // into the chat as something the operator said, so standing
-        // instructions live in the system prompt instead.
-        let kick = kick_now();
-        for word in ["Start now", "read your", "begin working", "REQUIRED"] {
-            assert!(!kick.contains(word), "kick must not instruct ({word}): {kick}");
-        }
-        assert!(kick.ends_with("(session start)"), "kick is a marker: {kick}");
+        // NOTHING is sent to an agent that was spawned without a brief: an
+        // invented first prompt is a message the user never wrote, and it made
+        // agents reason about nothing (owner, 2026-08-18).
+        assert!(first_prompt("").is_none(), "no brief, no prompt");
+        assert!(first_prompt("   ").is_none(), "whitespace is not a brief");
+        // A brief IS something to consume: delivered as the first message,
+        // stamped like every later one.
+        let p = first_prompt("fix the flaky test").unwrap();
+        assert!(p.starts_with(&format!("[{year}-")), "a delivered brief is stamped: {p}");
+        assert!(p.ends_with("fix the flaky test"), "the brief is the message: {p}");
         assert!(conf.get("mcpServers").and_then(|m| m.get("files")).is_some(), "registry MCP def must materialize");
         // Tool hooks feed telemetry.
         assert!(conf.get("hooks").and_then(|h| h.get("preToolUse")).is_some());
@@ -647,7 +659,7 @@ mod tests {
         assert_eq!(recipe["backend"], "kiro");
         let cmd = recipe["cmd"].as_str().unwrap();
         assert!(cmd.contains("--agent tester"), "identity survives: {cmd}");
-        assert!(!cmd.contains("session start"), "the kick is not replayed: {cmd}");
+        assert!(!cmd.contains("session start"), "no synthetic kick anywhere: {cmd}");
         let _ = line; // shape of the ws path differs in this fixture; covered below
         // Turn start resets the same-turn dedup flag. Without it a managed
         // agent that calls `tmm send` once never auto-posts again.
@@ -755,8 +767,8 @@ mod tests {
         assert!(p.contains("agent \"rev-2\" in project \"blog\""));
         assert!(p.contains("tmm done"));
         // The standing instructions the kick used to carry now live HERE.
-        assert!(p.contains("(session start)"), "prompt explains the marker: {p}");
-        assert!(p.contains("begin working"), "prompt carries the start instruction: {p}");
+        assert!(p.contains("just WAIT at your prompt"), "prompt tells it to idle: {p}");
+        assert!(p.contains("[YYYY-MM-DD HH:MM]"), "prompt explains message stamps: {p}");
         assert!(p.contains("review the branch"));
     }
 }
