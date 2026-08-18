@@ -502,9 +502,15 @@ cycles chat → status → tools) as well as Settings → Appearance → Chat de
 #### Design tokens (the contract — do not reintroduce ad-hoc values)
 
 An audit (2026-08-18, ui-ux-pro-max guidelines) found ELEVEN font sizes and
-FIVE transition durations accumulated in the Hub. These are now tokens on
-`.hub-root`, and every new rule must reference them; a raw `font-size: 12px`
-or `transition: … 160ms` in a Hub style is a regression:
+FIVE transition durations accumulated in the Hub, and the settings/connect
+surfaces had grown their own (raw 10–15px sizes, `transition: all`). The
+tokens now live on `:root` in app.css — APP-WIDE, not Hub-scoped — and every
+component rule must reference them; a raw `font-size: 12px` or
+`transition: … 160ms` anywhere is a regression. The shared UI vocabulary
+(.chip-btn, .side-h, --ui-font-control) consumes the same tokens. Two
+deliberate exceptions: the connect card's hero title, and its INPUTS at 16px
+— below 16px iOS auto-zooms the page when an input focuses, which on the
+phone-first connect card is worse than a size off the scale:
 
 - Type scale (6 steps, nothing in between):
   `--fs-micro: 9px` (uppercase letterspaced tags only: `.p-tag`, `.sr-cap`,

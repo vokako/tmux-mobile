@@ -249,7 +249,7 @@
 
   .subtitle {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--fs-ui);
     color: var(--text3);
   }
 
@@ -279,7 +279,7 @@
   .hist-row:last-child { border-bottom: none; }
   .hist-item {
     flex: 1; min-width: 0; padding: 9px 14px; border: none; background: none;
-    color: var(--text); font-size: 14px; text-align: left; cursor: pointer;
+    color: var(--text); font-size: var(--fs-body); text-align: left; cursor: pointer;
     font-family: var(--font-mono);
     -webkit-tap-highlight-color: transparent;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -298,7 +298,7 @@
   }
 
   .label-text {
-    font-size: 12px;
+    font-size: var(--fs-sub);
     font-weight: 500;
     color: var(--text3);
     text-transform: uppercase;
@@ -312,9 +312,11 @@
     border-radius: 10px;
     background: var(--input-bg);
     color: var(--text);
-    font-size: 15px;
+    /* 16px is the iOS threshold below which focusing an input auto-zooms
+       the page — on the phone-first connect card that zoom is pure jank. */
+    font-size: 16px;
     outline: none;
-    transition: all 0.2s ease;
+    transition: border-color var(--t-fast) ease, background var(--t-fast) ease, box-shadow var(--t-fast) ease;
     -webkit-appearance: none;
     appearance: none;
   }
@@ -351,10 +353,10 @@
     border-radius: 10px;
     background: var(--accent-fill);
     color: var(--accent-fill-ink);
-    font-size: 15px;
+    font-size: var(--fs-title);
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: transform var(--t-fast) ease, filter var(--t-fast) ease, opacity var(--t-fast) ease;
     -webkit-tap-highlight-color: transparent;
     display: flex;
     align-items: center;
@@ -375,7 +377,7 @@
   .share-btn {
     width: 100%; margin-top: 8px; padding: 10px;
     border: 1px solid var(--border); border-radius: 10px;
-    background: none; color: var(--text2); font-size: 13px; font-weight: 600;
+    background: none; color: var(--text2); font-size: var(--fs-ui); font-weight: 600;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
     display: flex; align-items: center; justify-content: center; gap: 6px;
   }
@@ -383,13 +385,13 @@
   .share-btn:disabled { opacity: 0.4; cursor: default; }
   .about-link {
     display: block; text-align: center; margin-top: 18px;
-    color: var(--text3); font-size: 12px; text-decoration: none;
+    color: var(--text3); font-size: var(--fs-ui); text-decoration: none;
     -webkit-tap-highlight-color: transparent;
   }
   .about-link:active { color: var(--accent); }
   .cancel-btn {
     padding: 13px 20px; border: 1px solid var(--border); border-radius: 10px;
-    background: none; color: var(--text2); font-size: 14px; font-weight: 600;
+    background: none; color: var(--text2); font-size: var(--fs-body); font-weight: 600;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
 
@@ -404,10 +406,10 @@
 
   .error {
     color: var(--danger);
-    font-size: 13px;
+    font-size: var(--fs-ui);
     padding: 10px 14px;
     background: var(--danger-bg);
-    border: 1px solid rgba(255, 80, 80, 0.15);
+    border: 1px solid color-mix(in srgb, var(--danger) 15%, transparent);
     border-radius: 10px;
   }
 </style>

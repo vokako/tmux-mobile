@@ -1075,12 +1075,8 @@
     --bubble-out: color-mix(in srgb, var(--bg) 84%, var(--accent) 16%);
     --bubble-line: color-mix(in srgb, var(--border) 72%, var(--text3) 28%);
   
-    /* Design tokens — the contract in tmm-cli.md "Design tokens". New rules
-       must reference these; a raw font-size/duration here is a regression. */
-    --fs-micro: 9px; --fs-meta: 10.5px; --fs-sub: 11.5px;
-    --fs-ui: 12.5px; --fs-body: 13.5px; --fs-title: 15px;
-    --meta-ink: color-mix(in srgb, var(--text2) 55%, var(--text3));
-    --t-fast: 120ms; --t-move: 200ms;
+    /* Design tokens (--fs-*, --meta-ink, --t-*) come from :root in app.css —
+       promoted app-wide 2026-08-18. Contract: tmm-cli.md "Design tokens". */
   }
   .cols { flex: 1; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 0; }
   .hub-root.compact .cols { grid-template-columns: minmax(0, 1fr); }
