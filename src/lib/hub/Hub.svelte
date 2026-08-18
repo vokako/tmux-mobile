@@ -1271,7 +1271,7 @@
   /* Agent name heads the bubble (your own carries none — the right-aligned
      accent bubble already says "yours"). */
   .m-head {
-    color: var(--accent); font-weight: 650; font-size: var(--fs-sub);
+    color: var(--accent); font-weight: 650; font-size: var(--fs-ui);
     letter-spacing: 0.1px; line-height: 1.2; margin: 0 0 2px; user-select: none;
   }
   /* The Telegram inline trailer: time (+ delivery ring on your own messages,
