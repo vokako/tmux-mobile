@@ -1128,6 +1128,13 @@
     flex: 1; overflow-y: auto; padding: 18px clamp(18px, 4vw, 64px) 24px;
     display: flex; flex-direction: column; gap: 10px;
   }
+  /* Feed rows must NEVER flex-shrink. The feed always overflows, and a column
+     flex container compresses shrinkable children before scrolling; children
+     with `overflow: visible` are saved by their min-content height, but any
+     row with `overflow: hidden` has a spec minimum of ZERO — the sysline was
+     crushed to its padding (10px of 23px) and read as an empty little bar
+     (owner report, measured live). One rule retires the whole bug class. */
+  .feed > * { flex: none; }
   /* The active anchor is the message itself. It enters and moves with the feed;
      only when that SAME element reaches an edge does sticky hold it there. */
   .msg.ask-top { position: sticky; top: 0; z-index: 6; }
