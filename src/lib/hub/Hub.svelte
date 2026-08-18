@@ -736,15 +736,9 @@
                 <div class="bubble md" role="button" tabindex="0"
                   onclick={() => { msgOpen = msgOpen === key ? '' : key; }}
                   onkeydown={(e) => { if (e.key === 'Enter') msgOpen = msgOpen === key ? '' : key; }}>
-                  <div class="m-head">
-                    {#if m.from !== 'human'}<span class="who">{m.from}</span>{/if}
-                    <span class="m-time">{fmtTime(m.ts)}</span>
-                    <!-- The agent's own prompt hook echoed this line back, so it
-                         reached the CLI's input — not merely typed at the pane. -->
-                    {#if b.delivered}
-                      <span class="ok-chip" title={t('hubDeliveredHint')}><Icon name="check" size={9} />{t('hubDelivered')}</span>
-                    {/if}
-                  </div>
+                  {#if m.from !== 'human'}
+                    <div class="m-head"><span class="who">{m.from}</span></div>
+                  {/if}
                   {#if parts.text}
                     <div class="m-body">
                       {#if rawOpen === key}
@@ -754,6 +748,20 @@
                       {/if}
                     </div>
                   {/if}
+                  <!-- The foot never moves: time bottom-right, and on your own
+                       messages a status ring that is ALWAYS there — empty until
+                       the agent's prompt hook echoes the line back (the only
+                       proof it reached the CLI's input), a check once it does.
+                       The old chip appeared on delivery with margin-left:auto,
+                       which shoved the time from right to left (owner report). -->
+                  <div class="m-foot">
+                    <span class="m-time">{fmtTime(m.ts)}</span>
+                    {#if m.from === 'human'}
+                      <span class="m-state" class:ok={b.delivered} title={t('hubDeliveredHint')}>
+                        <Icon name={b.delivered ? 'circle-check' : 'circle'} size={11} />
+                      </span>
+                    {/if}
+                  </div>
                 </div>
                 {#if msgOpen === key}
                   <div class="m-acts">
@@ -1151,11 +1159,13 @@
      so holding the edge can never move the scroll position. A short bubble
      yields a negative inset, which simply does not clip. */
   .msg.held { -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
-  /* Both edges show the SAME preview — head (with its time) + first line —
-     inside a 53px window. Geometry (measured): head bottom 25px, first line
-     box 29..49px, the NEXT line's glyphs start ≈51px. Everything here is
-     paint-only: clip-path clips, transform moves painting, neither touches
-     layout (the scroll-anchoring feedback loop is documented above).
+  /* Both edges show the SAME preview — the question's first line — inside a
+     33px window. Asks are the user's own messages, and those carry no head
+     row since the time moved to the foot; geometry (measured): first line box
+     9..29px, the NEXT line's glyphs start ≈31px; bar 29..32, stroke 32..33.
+     Everything here is paint-only: clip-path clips, transform moves painting,
+     neither touches layout (the scroll-anchoring feedback loop is documented
+     above).
 
      · Top edge: clip the message to its top 53px.
      · Bottom edge: same clip ON THE BUBBLE plus translateY(100% − 53px), so
@@ -1165,11 +1175,11 @@
      · The bare cut had no bottom edge ("少了一个小边边"): ::after paints a
        fake floor — 3px of the bubble's own colour capped by its 1px border
        line — which also covers the next line's 2px glyph sliver. */
-  .msg.ask-top.held { clip-path: inset(0 0 calc(100% - 53px) 0 round 12px); }
-  .msg.ask-bottom.held { clip-path: inset(calc(100% - 53px) 0 0 0 round 12px); }
+  .msg.ask-top.held { clip-path: inset(0 0 calc(100% - 33px) 0 round 12px); }
+  .msg.ask-bottom.held { clip-path: inset(calc(100% - 33px) 0 0 0 round 12px); }
   .msg.ask-bottom.held .bubble {
-    clip-path: inset(0 0 calc(100% - 53px) 0 round 12px);
-    transform: translateY(calc(100% - 53px));
+    clip-path: inset(0 0 calc(100% - 33px) 0 round 12px);
+    transform: translateY(calc(100% - 33px));
   }
   /* The frame of the held mini-bubble is DRAWN, not inherited. The real
      bubble border cannot survive the clip: its bottom edge lies below the
@@ -1183,7 +1193,7 @@
      ::after remains an opaque bar that hides the next line's glyph sliver. */
   .msg.held .bubble, .msg.held.me .bubble { border-color: transparent; }
   .msg.held .bubble::before {
-    content: ''; position: absolute; left: -1px; right: -1px; top: -1px; height: 53px;
+    content: ''; position: absolute; left: -1px; right: -1px; top: -1px; height: 33px;
     border: 1px solid var(--bubble-line); border-radius: 12px;
     pointer-events: none;
   }
@@ -1191,7 +1201,7 @@
     border-color: color-mix(in srgb, var(--accent) 18%, transparent);
   }
   .msg.held .bubble::after {
-    content: ''; position: absolute; left: 0; right: 0; top: 48px; height: 3px;
+    content: ''; position: absolute; left: 0; right: 0; top: 28px; height: 3px;
     background: var(--bubble-in); pointer-events: none;
   }
   .msg.held.me .bubble::after { background: var(--bubble-out); }
@@ -1231,8 +1241,14 @@
     margin: 0 0 4px; color: var(--text3); font-size: 10.5px; line-height: 1;
   }
   .m-head .who { color: var(--accent); font-weight: 650; font-size: 11.5px; letter-spacing: 0.1px; }
-  .msg.me .m-head { justify-content: flex-end; }
-  .msg.me .m-head .who { color: color-mix(in srgb, var(--accent) 82%, var(--text)); }
+  /* Time (and, on your own messages, the delivery ring) live UNDER the text,
+     bottom-right, in the same place for every message forever. */
+  .m-foot {
+    display: flex; justify-content: flex-end; align-items: center; gap: 4px;
+    margin-top: 3px; color: var(--text3); font-size: 10px; line-height: 1;
+  }
+  .m-state { display: inline-flex; opacity: 0.55; }
+  .m-state.ok { color: var(--status-ok); opacity: 1; }
   .m-time { font-variant-numeric: tabular-nums; opacity: 0.78; }
   .m-body { min-width: 0; }
   .bubble .raw { margin: 0; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text2); }
@@ -1260,8 +1276,6 @@
     font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
   }
-  /* Delivery receipt: the agent's prompt hook echoed our line back. */
-  .ok-chip { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; color: var(--status-ok); font-size: 9.5px; letter-spacing: 0.1px; }
 
   /* The input half of a turn — what the agent was asked. */
   .prompt { align-self: flex-start; max-width: min(76%, 760px); border-left: 2px solid var(--border); padding-left: 9px; margin: 1px 6px; }

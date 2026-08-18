@@ -512,8 +512,14 @@ the component variables are `color-mix()` derivatives of `--bg`, `--bg2`,
 `--accent`, `--border` and `--text3`.
 
 One label rule: an agent's bubble carries its name (several agents speak in one
-room), while your own carries only the timestamp — the right-aligned accent
-bubble already says "yours", so a "you" label was noise and is gone.
+room); your own carries none — the right-aligned accent bubble already says
+"yours". Time lives in a FOOT under the text, bottom-right, in the same place
+for every message forever: the first design put it in the head next to a
+delivery chip whose `margin-left: auto` shoved the time from right to left the
+moment the receipt arrived (owner report). Your own messages also carry a
+status ring in that foot, ALWAYS: an empty circle until the agent's prompt
+hook echoes the line back, a green check once it does — the receipt is a state
+change, not an appearing element.
 
 Corner radii are one small scale, tuned down on owner feedback (大圆角 read as
 toy-like): bubbles 12px with a 4px directional corner, the composer capsule
@@ -590,7 +596,10 @@ Both edges show the SAME preview — head (with its time) + first line — in a
 clip ON THE BUBBLE plus `translateY(calc(100% − 53px))` — transform moves
 painting, not layout, so the bubble's head slides down into the bottom window;
 without it the window showed the bubble's TAIL and the timestamp was cut off
-(owner report). The frame of the held mini-bubble is DRAWN, not inherited: the
+(owner report). Both edges show the question's FIRST LINE: asks are the user's
+own messages, which carry no head row (time lives in the foot), so the window
+is 33px — first line box 9..29, next line's glyphs from ≈31, bar 29..32,
+stroke 32..33. The frame of the held mini-bubble is DRAWN, not inherited: the
 real border cannot survive the clip — its bottom edge lies below the window and
 its side strokes are eaten by the window's corner rounding, and a first attempt
 that only drew a floor line put that line at border-y 53..54, which the 53px
@@ -602,9 +611,9 @@ stroke safely inside the clip; `::after` is an opaque bar covering the next
 line's ≈2px glyph sliver. The bubble's 140ms border-color transition makes the
 swap a soft cross-fade — and also means a computed-style read right after the
 class flips reports a MID-TRANSITION colour, which cost half an hour of chasing
-a cascade bug that did not exist. Geometry (measured): head bottom 25px, first
-line box 29..49px, next line's glyphs from ≈51px; bar at 48..51px, window 53px.
-Re-derive if bubble padding, head height or line-height change.
+a cascade bug that did not exist. Geometry is re-derived
+whenever bubble padding, head presence or line-height change — current numbers
+live beside the CSS.
 
 Direction has hysteresis too: trackpads and touch momentum land 1–3px reversals
 at rest, and at the held boundary a direction flip re-picks the anchor. A

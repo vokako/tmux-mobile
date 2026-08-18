@@ -113,6 +113,10 @@
     <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
   {:else if name === 'star-filled'}
     <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="currentColor"/>
+  {:else if name === 'circle'}
+    <circle cx="12" cy="12" r="9"/>
+  {:else if name === 'circle-check'}
+    <circle cx="12" cy="12" r="9"/><polyline points="8.5 12.5 11 15 15.5 9.5"/>
   {:else if name === 'check'}
     <polyline points="20 6 9 17 4 12"/>
   {:else if name === 'check-filled'}

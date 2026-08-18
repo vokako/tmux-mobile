@@ -41,7 +41,6 @@ const msgs: Record<string, Record<string, string>> = {
     hubFeedStatus: '+ Status',
     hubFeedTools: '+ Tools',
     // The prompt hook echoed our line back, so the CLI accepted it as input.
-    hubDelivered: 'delivered',
     hubDeliveredHint: 'The agent’s prompt hook echoed this line back — it reached the CLI’s input, not just the pane.',
     hubPromptIn: 'input',
     hubStepsN: '{n} tool calls',
@@ -347,7 +346,6 @@ const msgs: Record<string, Record<string, string>> = {
     hubFeedChat: '会话',
     hubFeedStatus: '+ 状态',
     hubFeedTools: '+ 工具',
-    hubDelivered: '已送达',
     hubDeliveredHint: 'agent 的 hook 把这行回传了，说明它真的进了 CLI 的输入。',
     hubPromptIn: '输入',
     hubStepsN: '{n} 次工具调用',
