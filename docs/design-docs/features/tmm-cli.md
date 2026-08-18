@@ -501,8 +501,9 @@ cycles chat → status → tools) as well as Settings → Appearance → Chat de
 
 The Hub uses one adaptive chat surface rather than separate desktop/mobile
 markup. Its visual hierarchy follows the useful parts of Telegram without
-copying a second application: a quiet canvas derived from the existing theme
-tokens; opaque incoming and outgoing bubbles; asymmetric lower corners that make
+copying a second application: a quiet FLAT canvas derived from the existing
+theme tokens (an earlier accent radial glow read as a faint blue shadow and was
+removed on owner feedback); opaque incoming and outgoing bubbles; asymmetric lower corners that make
 direction legible without labels; and a restrained border plus one-pixel shadow
 instead of nested panels. Incoming bubbles use `--bubble-in`, outgoing human
 messages use the accent-derived `--bubble-out`; both are opaque so content moving

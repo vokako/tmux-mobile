@@ -1120,15 +1120,13 @@
   .a-bar button.danger:hover { color: var(--status-danger); border-color: var(--status-danger); }
   .a-bar .ab-x { border: none; background: none; padding: 4px 6px; }
 
-  /* Chat canvas: restrained depth rather than a flat admin-panel grey. The two
-     broad glows work in both themes and never compete with message text. */
+  /* Chat canvas: one quiet tone derived from the theme. It had two radial
+     glows for "depth"; the accent one read as a faint blue shadow over the
+     conversation and the owner asked for it gone — flat is calmer. */
   .feed-wrap { flex: 1; position: relative; display: flex; min-height: 0; background: var(--chat-canvas); }
   .feed {
     flex: 1; overflow-y: auto; padding: 18px clamp(18px, 4vw, 64px) 24px;
     display: flex; flex-direction: column; gap: 10px;
-    background:
-      radial-gradient(ellipse at 12% 0%, var(--accent-glow), transparent 38%),
-      radial-gradient(ellipse at 88% 100%, var(--surface2), transparent 42%);
   }
   /* The active anchor is the message itself. It enters and moves with the feed;
      only when that SAME element reaches an edge does sticky hold it there. */
