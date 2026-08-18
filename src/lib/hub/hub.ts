@@ -276,13 +276,38 @@ type ToolItem = { type: 'tool'; ts: number; window: number; event: HubActivityEv
  * trace in the chat, so it stays visible. */
 const TMM_SELF_REPORT = new Set(['send', 'status', 'done', 'log', 'spawn']);
 
+/** Normalize a tool event across server generations. An older server had no
+ * `tool` field and spelled the event as one string, `"shell tmm send …"` — the
+ * tool name glued onto the front of the text. Measured live (2026-08-18): that
+ * shape is what made every tool name grey (the coloured column only renders
+ * when `tool` is set) AND what defeated the self-report filter (the first
+ * token was `shell`, not `tmm`). Split the known lead-in words back out;
+ * events that already carry `tool` pass through untouched. */
+const LEGACY_TOOL_PREFIX = /^(shell|bash|exec)\s+(\S[\s\S]*)$/;
+export function toolEventParts(e: HubActivityEvent): { tool: string; text: string } {
+  if (e.tool) return { tool: e.tool, text: e.text };
+  const m = LEGACY_TOOL_PREFIX.exec(e.text.trim());
+  return m ? { tool: m[1]!, text: m[2]! } : { tool: '', text: e.text };
+}
+
 /** True when this tool call is the agent reporting through `tmm` — the call
- * whose own output is already shown as a message or a note. */
+ * whose own output is already shown as a message or a note. Agents chain the
+ * report onto one shell line (`tmm send "…" 2>&1; tmm status working "…"`), so
+ * the whole command is a self-report only if EVERY chained segment is one —
+ * `tmm send "done" && make deploy` still has something to show. */
 export function isSelfReport(e: HubActivityEvent): boolean {
   if (e.kind !== 'tool') return false;
-  const parts = e.text.trim().split(/\s+/);
-  const cmd = (parts[0] ?? '').split('/').pop() ?? '';
-  return cmd === 'tmm' && TMM_SELF_REPORT.has(parts[1] ?? '');
+  const { text } = toolEventParts(e);
+  const segments = text.split(/(?:&&|\|\||;)+/);
+  let sawTmm = false;
+  for (const seg of segments) {
+    const parts = seg.trim().split(/\s+/);
+    if (!parts[0]) continue;                        // empty tail after a ';'
+    const cmd = parts[0].split('/').pop() ?? '';
+    if (cmd !== 'tmm' || !TMM_SELF_REPORT.has(parts[1] ?? '')) return false;
+    sawTmm = true;
+  }
+  return sawTmm;
 }
 
 /**

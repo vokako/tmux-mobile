@@ -477,9 +477,21 @@ events into rows, and three rules shape what the user sees:
 
 A tool NAME is coloured by what the tool does — changes / runs / looks up /
 reads, four buckets matched on substrings so `fs_write` and `Edit` land in the
-same colour without an exhaustive table (`toolColor`). An expanded group shows
+same colour without an exhaustive table (`toolColor`). The name has to be split
+off first: an older server shipped tool events with no `tool` field and the name
+glued onto the text (`"shell tmm send …"`), which is why every name rendered
+grey — the coloured column only exists when there IS a name. `toolEventParts`
+normalizes both generations, and everything downstream (the colour column, the
+collapsed peek, the self-report filter) reads through it. An expanded group shows
 the last `STEPS_PREVIEW` steps with "show all N", because the tail is what tells
 you where the agent is.
+
+Self-report filtering is segment-wise: agents chain the report onto one shell
+line (`tmm send "…" 2>&1; tmm status working "…"`), so a command is invisible
+only when EVERY `;`/`&&`/`||` segment is a `tmm` self-report — the `tmm send`
+the room already shows as a message never prints again as a tool row, while
+`tmm send "done" && make deploy` keeps its row because the deploy has no other
+trace. A `;` inside a quoted message body fails open (the row stays).
 
 Because a run of tool calls is now one line instead of forty, `+ tools` is the
 default detail level, and the level is reachable from the Hub head (a chip that
@@ -556,7 +568,12 @@ the reported "一闪一闪". The fix is `clip-path: inset(… round r)`: it clip
 painting and hit-testing but the element keeps its full flow height, so holding
 an edge can never move the scroll position. A bubble shorter than the clip
 window computes a negative inset and simply does not clip. Do not reintroduce
-any held style that affects layout (height, padding, font-size, display).
+any held style that affects layout (height, padding, font-size, display). The
+window must land BETWEEN text lines or the cut runs through glyphs: with the
+current bubble grid (8px padding-top + 16px head + 4px margin + ~20px line) the
+first line ends 48px in and the next line's glyphs start ≈2px lower, so the top
+window is 50px (head + first line intact) and the bottom one 30px (last line +
+padding). Re-derive these if bubble padding, head height or line-height change.
 
 Direction has hysteresis too: trackpads and touch momentum land 1–3px reversals
 at rest, and at the held boundary a direction flip re-picks the anchor. A

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeMessages, statuslineWindows, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor } from './hub.ts';
+import { mergeMessages, statuslineWindows, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -157,6 +157,21 @@ test('addressed prefixes the recipient but never rewrites an explicit @', () => 
   assert.equal(addressed('   ', 'dev'), '', 'nothing to send');
 });
 
+test('toolEventParts splits the name off legacy glued-together events', () => {
+  // Old server: no tool field, text = "shell tmm send …". Measured live — this
+  // shape is why names stayed grey and self-report filtering missed.
+  assert.deepEqual(toolEventParts(ev({ kind: 'tool', text: 'shell tmm send "@human hi" 2>&1' })),
+    { tool: 'shell', text: 'tmm send "@human hi" 2>&1' });
+  assert.deepEqual(toolEventParts(ev({ kind: 'tool', text: 'bash ls -la' })),
+    { tool: 'bash', text: 'ls -la' });
+  // A modern event with its own tool field passes through untouched.
+  assert.deepEqual(toolEventParts(ev({ kind: 'tool', tool: 'fs_read', text: '/src/lib.rs' })),
+    { tool: 'fs_read', text: '/src/lib.rs' });
+  // No known lead-in: nothing is invented.
+  assert.deepEqual(toolEventParts(ev({ kind: 'tool', text: 'Read /src/lib.rs' })),
+    { tool: '', text: 'Read /src/lib.rs' });
+});
+
 test('an agent reporting through tmm is not also a tool row', () => {
   const feed = [{ ts: 150, from: 'dev', body: 'done looking' }];
   const activity = [
@@ -167,6 +182,18 @@ test('an agent reporting through tmm is not also a tool row', () => {
   ];
   assert.deepEqual(feedBlocks(feed, activity, 'tools').map((b) => b.type), ['msg'],
     'the message IS the report — the call that produced it is not a second event');
+  // Agents chain the report onto one line, and old events glue the tool name on:
+  // both are still nothing but self-report, so both are dropped.
+  const chained = [
+    ev({ ts: 100, kind: 'tool', tool: 'execute_bash', text: 'tmm send "@human ok" 2>&1; tmm status working "x"' }),
+    ev({ ts: 110, kind: 'tool', text: 'shell tmm send "@human 好的，转告给 crew。" 2>&1' }),
+  ];
+  assert.deepEqual(feedBlocks(feed, chained, 'tools').map((b) => b.type), ['msg'],
+    'chained and legacy-glued self-reports are equally invisible');
+  // But a chain that also does real work keeps its row.
+  const mixed = [ev({ ts: 100, kind: 'tool', tool: 'execute_bash', text: 'tmm send "done" && make deploy' })];
+  assert.deepEqual(feedBlocks([], mixed, 'tools').map((b) => b.type), ['steps'],
+    'a self-report chained to real work still has something to show');
   // Anything with no other trace in the chat stays visible.
   const kept = [
     ev({ ts: 100, kind: 'tool', tool: 'execute_bash', text: 'tmm task start dev-server' }),

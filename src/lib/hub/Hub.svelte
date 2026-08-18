@@ -26,7 +26,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, systemLine, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_PREVIEW, pickAnchor } from './hub.ts';
+  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, systemLine, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_PREVIEW, pickAnchor, toolEventParts } from './hub.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
 
@@ -803,7 +803,8 @@
                 <span class="s-count">{t('hubStepsN').replace('{n}', String(b.events.length))}</span>
                 {#if !open}
                   {@const last = b.events[b.events.length - 1]}
-                  <span class="s-peek">{#if last?.tool}<span class="tname" style:color={toolColor(last.tool)}>{last.tool}</span> {/if}{last?.text ?? ''}</span>
+                  {@const lp = last ? toolEventParts(last) : { tool: '', text: '' }}
+                  <span class="s-peek">{#if lp.tool}<span class="tname" style:color={toolColor(lp.tool)}>{lp.tool}</span> {/if}{lp.text}</span>
                 {/if}
               </button>
               {#if open}
@@ -815,12 +816,14 @@
                     </button>
                   {/if}
                   {#each shown as e, j (`${e.ts}-${j}`)}
+                    {@const ep = toolEventParts(e)}
                     <div class="step">
                       <!-- The tool NAME is the scannable half: its own colour by
-                           what the tool does, and a column only when there IS a
-                           name (an older server sends none). -->
-                      {#if e.tool}<span class="tname" style:color={toolColor(e.tool)}>{e.tool}</span>{/if}
-                      <span class="st-text">{e.text}</span>
+                           what the tool does. toolEventParts splits the name off
+                           legacy events that glued it onto the text — those were
+                           the "still grey" rows. -->
+                      {#if ep.tool}<span class="tname" style:color={toolColor(ep.tool)}>{ep.tool}</span>{/if}
+                      <span class="st-text">{ep.text}</span>
                       <span class="st-ts">{fmtTime(e.ts)}</span>
                     </div>
                   {/each}
@@ -1143,8 +1146,14 @@
      so holding the edge can never move the scroll position. A short bubble
      yields a negative inset, which simply does not clip. */
   .msg.held { -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
-  .msg.ask-top.held { clip-path: inset(0 0 calc(100% - 46px) 0 round 17px); }
-  .msg.ask-bottom.held { clip-path: inset(calc(100% - 46px) 0 0 0 round 17px); }
+  /* The clip window must land BETWEEN text lines, or the cut runs through
+     glyphs (the reported "内容出框"). Bubble geometry: 8px padding-top +
+     16px head + 4px head margin + 20px line (13.5px × 1.48) = the first line
+     ends 48px in, and the next line's glyphs start ≈2px lower. 50px shows
+     head + first line intact and clips in the blank seam. Bottom edge shows
+     the LAST line: 9px padding-bottom + 20px + 1px seam = 30px. */
+  .msg.ask-top.held { clip-path: inset(0 0 calc(100% - 50px) 0 round 17px); }
+  .msg.ask-bottom.held { clip-path: inset(calc(100% - 30px) 0 0 0 round 17px); }
   .msg.held .m-head { opacity: 0.72; }
 
   /* Back to the tail. */
@@ -1266,7 +1275,7 @@
   .tname { flex: none; color: var(--accent); font-weight: 650; }
   .step .tname { min-width: 6.5em; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hub-root.compact .step .tname { min-width: 0; }
-  .s-peek .tname { min-width: 0; }
+  .s-peek .tname { min-width: 0; margin-right: 5px; }
   .step .st-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text2); }
   .step .st-ts { flex: none; margin-left: auto; opacity: 0.55; }
   .empty { color: var(--text3); font-size: 12.5px; text-align: center; margin: auto; padding: 0 24px; line-height: 1.6; }
