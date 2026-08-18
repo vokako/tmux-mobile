@@ -68,6 +68,7 @@
   let recipientOpen = $state(false);
   let feedEl = $state(null);
   let composerEl = $state(null);
+  let toChipW = $state(0);        // measured recipient-chip width → first-line indent
 
   // Terminal drawer (closed by default — the whole point).
   let termOpen = $state(false);
@@ -170,6 +171,8 @@
       // destination (latest passed message), and do not depend on a scroll event
       // — assigning the same scrollTop emits none.
       askScrollTop = feedEl.scrollTop;
+      askDir = 'down';
+      askDirTravel = 0;
       syncAsk('down', true);
       following = true;
       newBelow = false;
@@ -193,16 +196,30 @@
   let askKey = $state('');        // the ONE user-message anchor on screen
   let askEdge = $state('');       // which edge that same bubble catches
   let askHeld = $state(false);    // true only after it has actually hit the edge
-  let askScrollTop = 0;           // direction decides which bubble naturally enters
+  let askScrollTop = 0;           // last observed position
+  let askDir = 'down';            // committed direction — flips only after real travel
+  let askDirTravel = 0;           // accumulated movement AGAINST the committed direction
 
   function onFeedScroll() {
     following = atBottom();
     const top = feedEl?.scrollTop ?? 0;
-    const direction = top < askScrollTop - 0.5 ? 'up'
-      : top > askScrollTop + 0.5 ? 'down'
-      : askEdge === 'bottom' ? 'up' : 'down';
+    const delta = top - askScrollTop;
     askScrollTop = top;
-    syncAsk(direction);
+    // Direction hysteresis: trackpad and touch momentum land 1–3px reversals at
+    // rest, and at the held boundary a direction flip re-picks the anchor — the
+    // reported flicker. A reversal only counts once it has travelled 16px.
+    if (delta !== 0) {
+      if ((delta > 0) === (askDir === 'down')) {
+        askDirTravel = 0;
+      } else {
+        askDirTravel += Math.abs(delta);
+        if (askDirTravel >= 16) {
+          askDir = delta > 0 ? 'down' : 'up';
+          askDirTravel = 0;
+        }
+      }
+    }
+    syncAsk(askDir);
     if (following) {
       newBelow = false;
       markSeen();
@@ -213,20 +230,20 @@
    * the viewport, then let CSS sticky catch that SAME element as it leaves in
    * the current scroll direction. In an empty stretch of a long reply, retain
    * it; never swap to another invisible message at an arbitrary midpoint. */
-  function syncAsk(direction = askEdge === 'bottom' ? 'up' : 'down', reset = false) {
+  function syncAsk(direction = askDir, reset = false) {
     if (!feedEl) { askKey = ''; askEdge = ''; askHeld = false; return; }
     // Chromium's offsetTop for a sticky element is its HELD position. Read that
     // and the old anchor appears naturally visible, so the next anchor is never
     // selected. Neutralize the one current sticky element for this synchronous
     // layout read; the inline override is removed before the browser can paint.
-    const held = [...feedEl.querySelectorAll('.ask-top, .ask-bottom')];
-    for (const el of held) el.style.position = 'static';
+    const stickies = [...feedEl.querySelectorAll('.ask-top, .ask-bottom')];
+    for (const el of stickies) el.style.position = 'static';
     const items = [...feedEl.querySelectorAll('[data-ask]')].map((el) => ({
       key: el.dataset.ask ?? '',
       top: el.offsetTop,
       height: el.offsetHeight,
     }));
-    for (const el of held) el.style.removeProperty('position');
+    for (const el of stickies) el.style.removeProperty('position');
     const picked = pickAnchor(
       items,
       feedEl.scrollTop,
@@ -235,12 +252,33 @@
       direction,
       reset ? undefined : { key: askKey, edge: askEdge },
     );
-    askKey = picked.key;
-    askEdge = picked.edge;
+    // Hysteresis on the HELD state, and it overrides direction re-edging: at
+    // the edge the bubble is simultaneously "naturally visible" (within 1px)
+    // and "touching the edge", so a micro scroll reversal (trackpad, touch
+    // momentum) flips the prepared edge top<->bottom and held with it — the
+    // one-line collapse blinking on and off was the reported flicker. While
+    // the SAME bubble is within 8px of the edge it already holds, it keeps
+    // holding that edge regardless of instantaneous direction.
     const chosen = items.find((it) => it.key === picked.key);
-    askHeld = !!chosen && (picked.edge === 'top'
-      ? chosen.top <= feedEl.scrollTop + 1
-      : picked.edge === 'bottom' && chosen.top + chosen.height >= feedEl.scrollTop + feedEl.clientHeight - 1);
+    let edge = picked.edge;
+    let held = false;
+    if (chosen) {
+      const top = feedEl.scrollTop;
+      const bottom = top + feedEl.clientHeight;
+      if (askHeld && askKey === picked.key && askEdge === 'top' && chosen.top <= top + 8) {
+        edge = 'top'; held = true;
+      } else if (askHeld && askKey === picked.key && askEdge === 'bottom'
+        && chosen.top + chosen.height >= bottom - 8) {
+        edge = 'bottom'; held = true;
+      } else {
+        held = edge === 'top' ? chosen.top <= top + 1
+          : edge === 'bottom' ? chosen.top + chosen.height >= bottom - 1
+          : false;
+      }
+    }
+    askKey = picked.key;
+    askEdge = edge;
+    askHeld = held;
   }
   $effect(() => {
     void blocks;   // a new message changes both the set and the geometry
@@ -288,6 +326,7 @@
   }
   $effect(() => {
     void composerText;   // includes the reset to '' after sending
+    void toChipW;        // the indent changes wrapping, so height must re-measure
     growComposer();
   });
 
@@ -669,7 +708,7 @@
       {/if}
 
       <div class="feed-wrap">
-      <div class="feed" bind:this={feedEl} onscroll={onFeedScroll}>
+      <div class="feed subtle-scroll" bind:this={feedEl} onscroll={onFeedScroll}>
         {#each blocks as b, i (blockKey(b, i))}
           {#if b.type === 'msg'}
             {@const m = b.msg}
@@ -689,42 +728,41 @@
                 class:ask-bottom={isAsk && askKey === key && askEdge === 'bottom'}
                 class:held={isAsk && askKey === key && askHeld}
                 data-ask={isAsk ? key : undefined}>
-                <div class="m-head">
-                  <span class="who">{m.from === 'human' ? t('hubYou') : m.from}</span>
-                  <span>{fmtTime(m.ts)}</span>
-                  <!-- The agent's own prompt hook echoed this line back, so it
-                       reached the CLI's input — not merely typed at the pane. -->
-                  {#if b.delivered}
-                    <span class="ok-chip" title={t('hubDeliveredHint')}><Icon name="check" size={9} />{t('hubDelivered')}</span>
-                  {/if}
-                </div>
-                <!-- Markdown-rendered (agents write md); renderMarkdown
-                     escapes HTML first, so raw tags stay inert text. Image
-                     references are pulled out and resolved separately — a local
-                     path is not a URL a webview can load.
-                     Tapping the bubble reveals what you can DO with it: the
-                     actions are not chrome that sits there on every message. -->
-                {#if parts.text}
-                  <!-- svelte-ignore a11y_no_static_element_interactions -->
-                  <div class="bubble md" role="button" tabindex="0"
-                    onclick={() => { msgOpen = msgOpen === key ? '' : key; }}
-                    onkeydown={(e) => { if (e.key === 'Enter') msgOpen = msgOpen === key ? '' : key; }}>
-                    {#if rawOpen === key}
-                      <pre class="raw">{m.body}</pre>
-                    {:else}
-                      {@html renderMarkdown(parts.text)}
+                <!-- Sender, timestamp and content are one visual object. This is
+                     also the exact element that sticky moves — no detached label
+                     that could make the anchor look duplicated. -->
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <div class="bubble md" role="button" tabindex="0"
+                  onclick={() => { msgOpen = msgOpen === key ? '' : key; }}
+                  onkeydown={(e) => { if (e.key === 'Enter') msgOpen = msgOpen === key ? '' : key; }}>
+                  <div class="m-head">
+                    {#if m.from !== 'human'}<span class="who">{m.from}</span>{/if}
+                    <span class="m-time">{fmtTime(m.ts)}</span>
+                    <!-- The agent's own prompt hook echoed this line back, so it
+                         reached the CLI's input — not merely typed at the pane. -->
+                    {#if b.delivered}
+                      <span class="ok-chip" title={t('hubDeliveredHint')}><Icon name="check" size={9} />{t('hubDelivered')}</span>
                     {/if}
                   </div>
-                  {#if msgOpen === key}
-                    <div class="m-acts">
-                      <button onclick={() => copyMsg(m.body)}>
-                        <Icon name="copy" size={11} />{copied === m.body ? t('hubCopied') : t('hubCopy')}
-                      </button>
-                      <button class:on={rawOpen === key} onclick={() => { rawOpen = rawOpen === key ? '' : key; }}>
-                        <Icon name="command" size={11} />{t('hubRaw')}
-                      </button>
+                  {#if parts.text}
+                    <div class="m-body">
+                      {#if rawOpen === key}
+                        <pre class="raw">{m.body}</pre>
+                      {:else}
+                        {@html renderMarkdown(parts.text)}
+                      {/if}
                     </div>
                   {/if}
+                </div>
+                {#if msgOpen === key}
+                  <div class="m-acts">
+                    <button onclick={() => copyMsg(m.body)}>
+                      <Icon name="copy" size={11} />{copied === m.body ? t('hubCopied') : t('hubCopy')}
+                    </button>
+                    <button class:on={rawOpen === key} onclick={() => { rawOpen = rawOpen === key ? '' : key; }}>
+                      <Icon name="command" size={11} />{t('hubRaw')}
+                    </button>
+                  </div>
                 {/if}
                 {#if parts.images.length}
                   <div class="shots">
@@ -826,10 +864,13 @@
       </div>
 
       <div class="composer">
+        <div class="compose-shell">
         <!-- WHO this goes to, always visible: the lead by default, one tap to
-             retarget or to broadcast. No @ typing required. -->
+             retarget or to broadcast. No @ typing required. Pinned to the shell's
+             top-left; the textarea's FIRST line starts beside it (measured
+             text-indent) and wrapped lines run full width beneath it. -->
         {#if managedAgents.length}
-          <div class="to-wrap">
+          <div class="to-wrap" bind:clientWidth={toChipW}>
             <button class="to-chip" class:all={recipient === ALL_TARGET} class:note={!recipient}
               title={recipient === ALL_TARGET ? t('hubToAllHint') : recipient ? '' : t('hubToRoomHint')}
               onclick={() => recipientOpen = !recipientOpen}>
@@ -863,13 +904,18 @@
              readable. It grows with the text and then scrolls, so a long one is
              never a one-line peephole. -->
         <textarea class="c-input" rows="1" bind:this={composerEl} bind:value={composerText}
+          style:text-indent={managedAgents.length ? `${toChipW + 8}px` : '0'}
           placeholder={recipient === ALL_TARGET ? t('hubComposerAll') : recipient ? t('hubComposerDm').replace('{name}', recipient) : t('hubComposerRoom')}
           onkeydown={onComposerKey}
           onfocus={() => { following = true; scrollFeed(true); setTimeout(() => scrollFeed(true), 300); }}
         ></textarea>
-        <button class="send-btn" onclick={send} title={t('hubSend')}>
-          {#if compact}<Icon name="send" size={16} />{:else}{t('hubSend')}{/if}
+        <!-- Send lives INSIDE the capsule, bottom-right, out of the flow: it
+             stopped costing the composer a whole column. -->
+        <button class="send-btn" onclick={send} title={t('hubSend')} aria-label={t('hubSend')}
+          disabled={!composerText.trim() || !selected}>
+          <Icon name="send" size={16} />
         </button>
+        </div>
       </div>
     </main>
 
@@ -984,18 +1030,28 @@
 </div>
 
 <style>
-  .hub-root { height: 100%; display: flex; flex-direction: column; min-height: 0; background: var(--bg); position: relative; }
+  .hub-root {
+    height: 100%; display: flex; flex-direction: column; min-height: 0;
+    background: var(--bg); position: relative;
+    --chat-canvas: color-mix(in srgb, var(--bg) 62%, var(--bg2));
+    --bubble-in: color-mix(in srgb, var(--bg) 92%, white 8%);
+    --bubble-out: color-mix(in srgb, var(--bg) 84%, var(--accent) 16%);
+    --bubble-line: color-mix(in srgb, var(--border) 72%, var(--text3) 28%);
+  }
   .cols { flex: 1; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 0; }
   .hub-root.compact .cols { grid-template-columns: minmax(0, 1fr); }
   /* Phone shape: tighter gutters, thumb-sized controls, no horizontal
      overflow. The page head wraps instead of pushing the chips off-screen. */
   .hub-root.compact .page-head { flex-wrap: wrap; row-gap: 6px; padding: 8px 12px; }
   .hub-root.compact .page-head h1 { font-size: 15px; }
-  .hub-root.compact .feed { padding: 12px 12px; gap: 10px; }
-  .hub-root.compact .msg, .hub-root.compact .prompt { max-width: 92%; }
-  .hub-root.compact .composer { padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); gap: 6px; }
-  .hub-root.compact .c-input { min-height: 40px; font-size: 14px; max-height: 40vh; }
-  .hub-root.compact .send-btn { min-width: 44px; min-height: 40px; padding: 8px 12px; }
+  .hub-root.compact .feed { padding: 14px 10px 18px; gap: 9px; }
+  .hub-root.compact .msg, .hub-root.compact .prompt { max-width: 91%; }
+  .hub-root.compact .composer { padding: 8px 9px calc(8px + env(safe-area-inset-bottom)); }
+  .hub-root.compact .compose-shell { padding: 6px 48px 6px 9px; border-radius: 21px; }
+  .hub-root.compact .to-chip { max-width: 110px; height: 28px; }
+  .hub-root.compact .to-label { display: none; }
+  .hub-root.compact .c-input { min-height: 30px; font-size: 14px; max-height: 40vh; }
+  .hub-root.compact .send-btn { width: 38px; height: 38px; right: 5px; bottom: 4px; }
   .hub-root.compact .chip-btn { min-height: 34px; }
   .hub-root.compact .s-head { min-height: 34px; }
   /* Drawer open: the conversation yields but stays present. */
@@ -1061,34 +1117,35 @@
   .a-bar button.danger:hover { color: var(--status-danger); border-color: var(--status-danger); }
   .a-bar .ab-x { border: none; background: none; padding: 4px 6px; }
 
-  /* The feed plus the things that float over it. */
-  .feed-wrap { flex: 1; position: relative; display: flex; min-height: 0; }
-  .feed { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; }
+  /* Chat canvas: restrained depth rather than a flat admin-panel grey. The two
+     broad glows work in both themes and never compete with message text. */
+  .feed-wrap { flex: 1; position: relative; display: flex; min-height: 0; background: var(--chat-canvas); }
+  .feed {
+    flex: 1; overflow-y: auto; padding: 18px clamp(18px, 4vw, 64px) 24px;
+    display: flex; flex-direction: column; gap: 10px;
+    background:
+      radial-gradient(ellipse at 12% 0%, var(--accent-glow), transparent 38%),
+      radial-gradient(ellipse at 88% 100%, var(--surface2), transparent 42%);
+  }
   /* The active anchor is the message itself. It enters and moves with the feed;
      only when that SAME element reaches an edge does sticky hold it there. */
   .msg.ask-top { position: sticky; top: 0; z-index: 6; }
   .msg.ask-bottom { position: sticky; bottom: 0; z-index: 6; }
-  /* Floating treatment begins only after the bubble is actually held. Applying
-     it while the message was still travelling made the same DOM element LOOK
-     like a second component appearing early. */
-  .msg.held .bubble {
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    /* A bubble tint is rgba, so on its own the reply sliding underneath reads
-       straight through it. Compositing the SAME tint over the page colour makes
-       the held bubble opaque without replacing it. */
-    background: linear-gradient(var(--accent-bg), var(--accent-bg)), var(--bg);
-  }
-  .msg.held:not(.me) .bubble {
-    background: linear-gradient(var(--surface), var(--surface)), var(--bg);
-  }
-  .msg.held {
-    border-radius: 12px;
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
-  }
-  .msg.ask-top.held { box-shadow: 0 8px 16px -12px rgba(0,0,0,0.7); }
-  .msg.ask-bottom.held { box-shadow: 0 -8px 16px -12px rgba(0,0,0,0.7); }
-  .msg.held .m-head { opacity: 0.6; }
+  /* Floating treatment begins only after the bubble is actually held. Normal
+     and held use the SAME opaque surface, so catching the edge changes depth,
+     never identity or colour. */
+  /* The held collapse is PAINT-ONLY, never layout. The first version shrank
+     the bubble to one line with max-height, which changed its flow height;
+     the browser's scroll anchoring compensated scrollTop, which flipped the
+     boundary condition back, and the anchor blinked in an infinite layout
+     feedback loop (measured: setting scrollTop=2261 landed on 2221↔2298).
+     clip-path clips rendering and hit-testing but occupies identical space,
+     so holding the edge can never move the scroll position. A short bubble
+     yields a negative inset, which simply does not clip. */
+  .msg.held { -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+  .msg.ask-top.held { clip-path: inset(0 0 calc(100% - 46px) 0 round 17px); }
+  .msg.ask-bottom.held { clip-path: inset(calc(100% - 46px) 0 0 0 round 17px); }
+  .msg.held .m-head { opacity: 0.72; }
 
   /* Back to the tail. */
   .to-bottom {
@@ -1102,32 +1159,63 @@
     content: ''; position: absolute; top: 1px; right: 1px; width: 9px; height: 9px;
     border-radius: 50%; background: var(--status-danger); border: 2px solid var(--bg);
   }
-  .msg { max-width: 84%; }
+  .msg { position: relative; display: flex; flex-direction: column; max-width: min(76%, 760px); }
   .msg.me { align-self: flex-end; }
-  .m-head { font-size: 11px; color: var(--text3); margin-bottom: 3px; display: flex; gap: 7px; align-items: baseline; }
-  .m-head .who { color: var(--text2); font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 11.5px; }
-  .bubble { background: var(--surface); border: 1px solid var(--border2); border-radius: 12px; padding: 8px 12px; font-size: 13px; color: var(--text); word-break: break-word; overflow-wrap: anywhere; }
-  .msg.me .bubble { background: var(--accent-bg); border-color: transparent; }
-  .bubble { cursor: pointer; -webkit-tap-highlight-color: transparent; }
-  .bubble .raw { margin: 0; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text2); }
-  /* What you can DO with a message, revealed by tapping it. */
-  .m-acts { display: flex; gap: 6px; margin-top: 4px; }
-  .msg.me .m-acts { justify-content: flex-end; }
-  .m-acts button {
-    display: inline-flex; align-items: center; gap: 4px; min-height: 28px;
-    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
-    color: var(--text3); padding: 4px 9px; font-size: 11px; cursor: pointer;
+  .bubble {
+    background: var(--bubble-in); border: 1px solid var(--bubble-line);
+    border-radius: 17px 17px 17px 6px; padding: 8px 12px 9px;
+    color: var(--text); font-size: 13.5px; line-height: 1.48;
+    word-break: break-word; overflow-wrap: anywhere; cursor: pointer;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.10);
+    transition: border-color 140ms ease, box-shadow 140ms ease;
+    -webkit-tap-highlight-color: transparent;
   }
-  .m-acts button:hover, .m-acts button.on { color: var(--accent); border-color: var(--accent); }
+  .bubble:hover { border-color: var(--input-border); }
+  .msg.me .bubble {
+    background: var(--bubble-out); border-color: color-mix(in srgb, var(--accent) 18%, transparent);
+    border-radius: 17px 17px 6px 17px;
+  }
+  .m-head {
+    display: flex; align-items: center; gap: 7px; min-height: 16px;
+    margin: 0 0 4px; color: var(--text3); font-size: 10.5px; line-height: 1;
+  }
+  .m-head .who { color: var(--accent); font-weight: 650; font-size: 11.5px; letter-spacing: 0.1px; }
+  .msg.me .m-head { justify-content: flex-end; }
+  .msg.me .m-head .who { color: color-mix(in srgb, var(--accent) 82%, var(--text)); }
+  .m-time { font-variant-numeric: tabular-nums; opacity: 0.78; }
+  .m-body { min-width: 0; }
+  .bubble .raw { margin: 0; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text2); }
+  /* What you can DO with a message, revealed by tapping it. An OVERLAY on the
+     bubble's top edge, out of the flow: opening it must not push the feed
+     around or change the scroll height the anchor math depends on. */
+  .m-acts {
+    position: absolute; z-index: 8; top: -13px; right: 10px;
+    display: flex; gap: 5px; margin: 0;
+  }
+  .msg:not(.me) .m-acts { right: auto; left: 10px; }
+  .m-acts button {
+    display: inline-flex; align-items: center; gap: 4px; min-height: 26px;
+    background: var(--bubble-in); border: 1px solid var(--border); border-radius: 999px;
+    color: var(--text2); padding: 3px 10px; font-size: 10.5px; cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+  }
+  .m-acts button:hover, .m-acts button.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
   /* Referenced images, under the text they came with. */
-  .shots { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
-  .sysline { align-self: center; display: flex; align-items: baseline; gap: 7px; font-size: 11px; color: var(--text3); background: var(--surface); border-radius: 999px; padding: 3px 13px; max-width: 92%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .sysline .sys-who { font-family: ui-monospace, Menlo, monospace; font-weight: 600; color: var(--text2); }
+  .shots { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; border-radius: 16px; overflow: hidden; }
+  .sysline {
+    align-self: center; display: flex; align-items: baseline; gap: 7px;
+    max-width: min(92%, 620px); padding: 4px 13px; border-radius: 999px;
+    color: var(--text3); background: color-mix(in srgb, var(--bubble-in) 88%, transparent);
+    border: 1px solid var(--border2); box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+    font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  }
+  .sysline .sys-who { font-weight: 650; color: var(--text2); }
   /* Delivery receipt: the agent's prompt hook echoed our line back. */
-  .ok-chip { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; color: var(--status-ok); font-size: 10px; letter-spacing: 0.2px; }
+  .ok-chip { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; color: var(--status-ok); font-size: 9.5px; letter-spacing: 0.1px; }
 
   /* The input half of a turn — what the agent was asked. */
-  .prompt { align-self: flex-start; max-width: 84%; border-left: 2px solid var(--border); padding-left: 9px; }
+  .prompt { align-self: flex-start; max-width: min(76%, 760px); border-left: 2px solid var(--border); padding-left: 9px; margin: 1px 6px; }
   .p-head { display: flex; align-items: baseline; gap: 7px; font-size: 10.5px; color: var(--text3); margin-bottom: 2px; }
   .p-head .p-who { font-family: ui-monospace, Menlo, monospace; font-weight: 600; color: var(--text2); }
   .p-tag { text-transform: uppercase; letter-spacing: 0.8px; font-size: 9px; color: var(--text3); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
@@ -1135,9 +1223,9 @@
 
   /* A single observed fact: status declaration, lifecycle hook, warning. */
   .note {
-    display: flex; align-items: baseline; gap: 8px;
-    font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text3);
-    padding: 0 4px; max-width: 100%;
+    display: flex; align-items: baseline; gap: 8px; width: min(76%, 760px);
+    font-family: var(--font-mono); font-size: 10.5px; color: var(--text3);
+    padding: 1px 8px; max-width: 100%;
   }
   .note .n-who { flex: none; font-weight: 600; }
   .note .n-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1146,7 +1234,7 @@
   .note.warn :global(svg) { flex: none; align-self: center; }
 
   /* Collapsible run of tool calls between two replies. */
-  .steps { display: flex; flex-direction: column; }
+  .steps { display: flex; flex-direction: column; width: min(76%, 760px); max-width: 100%; }
   .s-head {
     display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
     background: var(--surface); border: 1px solid var(--border2); border-radius: 9px;
@@ -1183,11 +1271,30 @@
   .step .st-ts { flex: none; margin-left: auto; opacity: 0.55; }
   .empty { color: var(--text3); font-size: 12.5px; text-align: center; margin: auto; padding: 0 24px; line-height: 1.6; }
 
-  .composer { display: flex; align-items: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); }
+  .composer {
+    display: flex; align-items: flex-end; gap: 9px; padding: 10px clamp(12px, 3vw, 28px);
+    border-top: 1px solid var(--border2); background: color-mix(in srgb, var(--bg) 92%, transparent);
+    box-shadow: 0 -8px 28px rgba(0,0,0,0.05);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  }
+  .compose-shell {
+    flex: 1; min-width: 0; position: relative;
+    padding: 6px 52px 6px 10px; border: 1px solid var(--input-border); border-radius: 23px;
+    background: var(--bubble-in); box-shadow: 0 1px 3px rgba(0,0,0,0.10);
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+  }
+  .compose-shell:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
   /* Recipient control: who this message goes to, with a menu that opens
      UPWARD so the on-screen keyboard never covers it. */
-  .to-wrap { position: relative; flex: none; }
-  .to-chip { display: flex; align-items: center; gap: 5px; min-height: 34px; background: var(--accent-bg); color: var(--accent); border: 1px solid transparent; border-radius: 9px; padding: 6px 9px; font-size: 12px; font-weight: 600; cursor: pointer; font-family: ui-monospace, Menlo, monospace; max-width: min(42vw, 260px); }
+  /* Pinned to the capsule's top-left; the textarea's first line is indented
+     past it and later lines reclaim the full width beneath. */
+  .to-wrap { position: absolute; top: 7px; left: 8px; z-index: 2; width: max-content; }
+  .to-chip {
+    display: flex; align-items: center; gap: 4px; height: 26px;
+    background: var(--accent-bg); color: var(--accent); border: 1px solid transparent;
+    border-radius: 999px; padding: 0 9px; font-size: 11px; font-weight: 650;
+    cursor: pointer; max-width: min(34vw, 220px);
+  }
   /* Broadcast and room-note are NOT the default state, so they do not wear the
      accent: one interrupts everyone, the other reaches nobody live. */
   .to-chip.all { background: var(--surface); color: var(--status-warn); border-color: var(--status-warn); }
@@ -1213,16 +1320,23 @@
   .to-menu button.sel { color: var(--accent); background: var(--accent-bg); }
   .all-dot { border: 1px solid var(--text3); background: none; }
   .c-input {
-    flex: 1; min-width: 0; background: var(--input-bg); border: 1px solid var(--input-border);
-    border-radius: 10px; color: var(--text); padding: 8px 12px; font-size: 13px; outline: none;
-    transition: border-color 160ms;
-    /* Wrap, grow, then scroll. The height is set from JS to the content height;
-       max-height is what turns growth into scrolling. */
-    font-family: inherit; line-height: 1.45; resize: none; overflow-y: auto;
-    max-height: 34vh; min-height: 36px;
+    display: block; width: 100%; min-height: 28px; max-height: 34vh;
+    padding: 5px 0 4px; background: transparent; border: none; outline: none;
+    color: var(--text); font-size: 13.5px; line-height: 1.5;
+    resize: none; overflow-y: auto;
   }
-  .c-input:focus { border-color: var(--accent); }
-  .send-btn { background: var(--accent-bg); color: var(--accent); border: none; border-radius: 10px; padding: 8px 16px; cursor: pointer; font-weight: 600; font-size: 13px; display: grid; place-items: center; }
+  .c-input::placeholder { color: var(--text3); opacity: 0.82; }
+  .send-btn {
+    position: absolute; right: 6px; bottom: 5px;
+    width: 36px; height: 36px; display: grid; place-items: center;
+    padding: 0; border: none; border-radius: 50%; cursor: pointer;
+    background: var(--accent); color: white;
+    box-shadow: 0 3px 10px color-mix(in srgb, var(--accent) 30%, transparent);
+    transition: transform 130ms ease, box-shadow 130ms ease, opacity 130ms ease;
+  }
+  .send-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 38%, transparent); }
+  .send-btn:active:not(:disabled) { transform: scale(0.96); }
+  .send-btn:disabled { opacity: 0.35; cursor: default; box-shadow: none; }
 
   /* Empty room: start from a preset — one agent, or a team. */
   .start { margin: auto; display: flex; flex-direction: column; gap: 8px; width: min(420px, 100%); }

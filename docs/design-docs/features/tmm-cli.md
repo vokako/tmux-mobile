@@ -485,6 +485,45 @@ Because a run of tool calls is now one line instead of forty, `+ tools` is the
 default detail level, and the level is reachable from the Hub head (a chip that
 cycles chat → status → tools) as well as Settings → Appearance → Chat detail.
 
+### Conversation visual language
+
+The Hub uses one adaptive chat surface rather than separate desktop/mobile
+markup. Its visual hierarchy follows the useful parts of Telegram without
+copying a second application: a quiet canvas derived from the existing theme
+tokens; opaque incoming and outgoing bubbles; asymmetric lower corners that make
+direction legible without labels; and a restrained border plus one-pixel shadow
+instead of nested panels. Incoming bubbles use `--bubble-in`, outgoing human
+messages use the accent-derived `--bubble-out`; both are opaque so content moving
+under a sticky bubble never reads through it. No light/dark colour is hard-coded:
+the component variables are `color-mix()` derivatives of `--bg`, `--bg2`,
+`--accent`, `--border` and `--text3`.
+
+One label rule: an agent's bubble carries its name (several agents speak in one
+room), while your own carries only the timestamp — the right-aligned accent
+bubble already says "yours", so a "you" label was noise and is gone.
+
+Sender, timestamp, delivery receipt and body belong inside the same `.bubble`.
+That is not cosmetic: separating the header from the bubble makes a sticky message
+look like a cloned card even when there is only one DOM node. Prose bubbles are
+bounded to `min(76%, 760px)` on a wide screen and 91% on a phone, while tool runs,
+observed prompts and status facts use the same width ceiling but stay visually
+subordinate. The feed reuses `.subtle-scroll`; system events are centered frosted
+pills. The tap-revealed copy/raw actions are an absolutely-positioned OVERLAY on
+the bubble's top edge, not a row in the flow: opening them must not push the
+conversation around or change the scroll height the anchor math depends on.
+
+The composer is one rounded capsule at every width, and everything lives inside
+it. The recipient chip is pinned to the capsule's top-left; the textarea's FIRST
+line starts beside it via a measured `text-indent` (the chip width is bound with
+`bind:clientWidth`, so a long agent name still works) and wrapped lines reclaim
+the full capsule width beneath the chip. The circular accent send button —
+stroked paper-plane, disabled when empty — sits inside the capsule's bottom-right
+corner, absolutely positioned so it stops costing the composer a whole column and
+stays put as the textarea grows. The indent is a re-measure dependency of the
+auto-grow, since it changes where text wraps. On a phone the chip drops its
+redundant “TO” prefix and caps its width; safe-area padding remains on the outer
+composer.
+
 Scrolling follows four rules, all of them about not losing your place. New
 content scrolls the feed only while it is parked AT the tail (`following`) —
 yanking someone back down while they read history is worse than a missed
@@ -503,18 +542,32 @@ enters, it takes over in its natural location. This is what makes second, third 
 later questions work without ever stacking two anchors.
 
 The difference between “active” and “held” is deliberate. `ask-top` /
-`ask-bottom` puts the same bubble into the sticky flow while it travels, but the
-one-line clip, opaque composited background, 10px backdrop blur and edge shadow
-start only under `.held`, after it has actually touched the edge. Styling it while
-it was still travelling made one DOM element LOOK like two components. A tall
-question is clipped only while held, because otherwise it would eat the screen it
-is meant to orient.
+`ask-bottom` puts the same bubble into the sticky flow while it travels; the
+collapsed look starts only under `.held`, after it has actually touched the edge.
+Styling it while it was still travelling made one DOM element LOOK like two
+components.
+
+**The held collapse is paint-only, never layout.** The first implementation
+shrank the bubble to one line with `max-height`, and that closed a feedback loop:
+collapsing changed the bubble's flow height, the browser's scroll anchoring
+compensated `scrollTop` (measured: assigning 2261 landed on 2221↔2298), the
+compensation flipped the boundary test, and the anchor blinked indefinitely —
+the reported "一闪一闪". The fix is `clip-path: inset(… round r)`: it clips
+painting and hit-testing but the element keeps its full flow height, so holding
+an edge can never move the scroll position. A bubble shorter than the clip
+window computes a negative inset and simply does not clip. Do not reintroduce
+any held style that affects layout (height, padding, font-size, display).
+
+Direction has hysteresis too: trackpads and touch momentum land 1–3px reversals
+at rest, and at the held boundary a direction flip re-picks the anchor. A
+reversal only commits after 16px of travel against the current direction.
 
 One browser fact is part of the contract: Chromium reports `offsetTop` for a
 sticky element at its HELD position, not its original flow position. Before the
 scroll handler measures candidates, it synchronously overrides the current
-anchor to `position: static`, reads all natural positions, then removes the inline
-override before paint. Without that neutral measurement, the old anchor looks
+anchor to `position: static`, reads all natural positions, then removes the
+inline override before paint (`.held` no longer needs neutralizing — clip-path
+does not change layout). Without that neutral measurement, the old anchor looks
 naturally visible forever and transition state becomes stale. Programmatic jumps
 to the tail call the same synchronization explicitly; setting `scrollTop` to the
 same value does not emit a scroll event.
@@ -528,10 +581,10 @@ the box while the scroll position stays, which otherwise leaves the newest line
 below the fold — App already broadcasts `keyboard-shift`, so the Hub listens
 instead of measuring anything itself.
 
-The composer is a textarea, not an input: a message you are still writing has to
-be readable, so it wraps, grows to fit (height measured from `scrollHeight` —
-wrapping depends on font, width and text, so it cannot be guessed) and starts
-scrolling at a `max-height` ceiling. Growing it shrinks the feed, which is the
+Inside that shell the composer remains a textarea, not an input: a message you
+are still writing has to be readable, so it wraps, grows to fit (height measured
+from `scrollHeight` — wrapping depends on font, width and text, so it cannot be
+guessed) and starts scrolling at a `max-height` ceiling. Growing it shrinks the feed, which is the
 keyboard problem again, so it re-parks the tail as it grows. Enter sends where
 there are modifiers to distinguish with, and inserts a newline on a touch device —
 there the return key is the only way to get one and the send button is right

@@ -26,7 +26,7 @@
   {:else if name === 'key'}
     <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
   {:else if name === 'send'}
-    <polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/>
+    <path d="M22 2 11 13"/><path d="m22 2-7 20-4-9-9-4Z"/>
   {:else if name === 'stop'}
     <rect x="6" y="6" width="12" height="12" rx="1" fill="currentColor" stroke="none"/>
   {:else if name === 'arrow-down'}
