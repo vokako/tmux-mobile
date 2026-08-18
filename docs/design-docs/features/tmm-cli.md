@@ -551,10 +551,13 @@ line starts beside it via a measured `text-indent` (the chip width is bound with
 the full capsule width beneath the chip. The send button is a small rounded
 SQUARE in the capsule's bottom-right corner — same design language as the
 capsule, flat, no shadow physics of its own (the floating accent circle read as
-a foreign element). Its ink is `var(--bg)`: dark ink on the dark theme's bright
-cyan, light ink on the light theme's deep blue. Disabled recedes into the
-surface instead of ghosting the accent; it is absolutely positioned so it costs
-no column and stays put as the textarea grows. The indent is a re-measure dependency of the
+a foreign element). Its glyph is a BOLD UP-ARROW (the iMessage/ChatGPT shape):
+symmetric, so it optically centres where a diagonal paper plane always sat
+crooked in a small square — the plane was the owner's "太丑了". Ink is crisp,
+not washed: near-white over the light theme's deep blue, near-black (#062830)
+over the dark theme's bright cyan. Disabled recedes into the surface instead
+of ghosting the accent; it is absolutely positioned so it costs no column and
+stays put as the textarea grows. The indent is a re-measure dependency of the
 auto-grow, since it changes where text wraps. On a phone the chip drops its
 redundant “TO” prefix and caps its width; safe-area padding remains on the outer
 composer.

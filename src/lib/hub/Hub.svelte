@@ -922,7 +922,7 @@
              stopped costing the composer a whole column. -->
         <button class="send-btn" onclick={send} title={t('hubSend')} aria-label={t('hubSend')}
           disabled={!composerText.trim() || !selected}>
-          <Icon name="send" size={16} />
+          <Icon name="send-up" size={17} />
         </button>
         </div>
       </div>
@@ -1060,7 +1060,7 @@
   .hub-root.compact .to-chip { max-width: 110px; height: 28px; }
   .hub-root.compact .to-label { display: none; }
   .hub-root.compact .c-input { min-height: 30px; font-size: 14px; max-height: 40vh; }
-  .hub-root.compact .send-btn { width: 38px; height: 38px; right: 5px; bottom: 5px; border-radius: 9px; }
+  .hub-root.compact .send-btn { width: 38px; height: 38px; right: 5px; bottom: 5px; border-radius: 11px; }
   .hub-root.compact .chip-btn { min-height: 34px; }
   .hub-root.compact .s-head { min-height: 34px; }
   /* Drawer open: the conversation yields but stays present. */
@@ -1382,20 +1382,23 @@
     resize: none; overflow-y: auto;
   }
   .c-input::placeholder { color: var(--text3); opacity: 0.82; }
-  /* The send action shares the capsule's design language: a small rounded
-     square, flat, aligned with the input line — not a floating circle with
-     its own shadow physics. Ink is var(--bg): dark ink on the bright cyan of
-     the dark theme, light ink on the deep blue of the light theme. Disabled
-     recedes into the surface instead of ghosting the accent. */
+  /* The send action: a bold up-arrow (the iMessage/ChatGPT shape — symmetric,
+     so it optically centres where a diagonal plane always sat crooked) on a
+     flat accent square that matches the capsule's radius. Ink is pure white
+     over the light theme's deep blue and near-black over the dark theme's
+     bright cyan — crisp, not the washed var(--bg) gray. Disabled recedes into
+     the surface instead of ghosting the accent. */
   .send-btn {
     position: absolute; right: 6px; bottom: 6px;
     width: 34px; height: 34px; display: grid; place-items: center;
-    padding: 0; border: none; border-radius: 8px; cursor: pointer;
-    background: var(--accent); color: var(--bg);
+    padding: 0; border: none; border-radius: 10px; cursor: pointer;
+    background: var(--accent);
+    color: color-mix(in srgb, var(--bg) 30%, white);
     transition: filter 120ms ease, background 120ms ease, color 120ms ease, transform 100ms ease;
   }
-  .send-btn:hover:not(:disabled) { filter: brightness(1.08); }
-  .send-btn:active:not(:disabled) { transform: scale(0.94); }
+  :global(html[data-theme="dark"]) .send-btn:not(:disabled) { color: #062830; }
+  .send-btn:hover:not(:disabled) { filter: brightness(1.07); }
+  .send-btn:active:not(:disabled) { transform: scale(0.93); }
   .send-btn:disabled { background: var(--surface2); color: var(--text3); cursor: default; }
 
   /* Empty room: start from a preset — one agent, or a team. */
