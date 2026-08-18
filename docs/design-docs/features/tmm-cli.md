@@ -602,10 +602,18 @@ capsule, flat, no shadow physics of its own (the floating accent circle read as
 a foreign element). Its glyph is a BOLD UP-ARROW (the iMessage/ChatGPT shape):
 symmetric, so it optically centres where a diagonal paper plane always sat
 crooked in a small square — the plane was the owner's "太丑了". Ink is crisp,
-not washed: near-white over the light theme's deep blue, near-black (#062830)
-over the dark theme's bright cyan. Disabled recedes into the surface instead
-of ghosting the accent; it is absolutely positioned so it costs no column and
-stays put as the textarea grows. The indent is a re-measure dependency of the
+not washed: near-white over the light theme's deep blue; in the dark theme the
+accent is ELECTRIC CYAN and a full-strength block of it read as a light source
+(owner report), so the fill tones to a 60% accent/background mix with
+near-white ink. Disabled recedes into the surface instead of ghosting the
+accent. The button reserves NO column (owner: text may run directly above
+it): the textarea is full width, and growComposer measures the value in a
+hidden mirror div to find the LAST line's right edge — only when that edge
+would collide with the button zone does the box gain one line of bottom
+padding. Same "share the last line, else drop below" semantics as the
+bubble's meta trailer; a textarea cannot flow around a float, so the mirror
+is the only honest way to know where the last line ends (the mirror must
+mirror font metrics, width, wrapping AND the chip text-indent). The indent is a re-measure dependency of the
 auto-grow, since it changes where text wraps. On a phone the chip drops its
 redundant “TO” prefix and caps its width; safe-area padding remains on the outer
 composer.

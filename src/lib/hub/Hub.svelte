@@ -315,9 +315,35 @@
   /** Grow to fit what is being typed, up to the CSS ceiling, then let it scroll.
    * Height has to be measured, not guessed: wrapping depends on the font, the
    * width and the text. Reset to `auto` first or the box can only ever grow. */
+  /* The send button does NOT reserve a column (owner: text may run directly
+     above it). The textarea is full width; a hidden mirror re-lays-out the
+     value to find the LAST line's right edge, and only when that edge would
+     collide with the button zone does the box gain one line of bottom
+     padding — the same "share the last line, else drop below" semantics as
+     the bubble's meta trailer. A textarea cannot flow around a float, so
+     the mirror is the only honest way to know where the last line ends. */
+  let mirrorEl = null;
+  const SEND_ZONE = 38; // button 30px + gaps, measured from the textarea's right edge
+  function lastLineCollides(el) {
+    if (!el.value) return false;
+    if (!mirrorEl) {
+      mirrorEl = document.createElement('div');
+      mirrorEl.className = 'c-mirror';
+      el.parentElement?.appendChild(mirrorEl);
+    }
+    mirrorEl.style.width = `${el.clientWidth}px`;
+    mirrorEl.style.textIndent = el.style.textIndent || '0';
+    mirrorEl.textContent = el.value;
+    const marker = document.createElement('span');
+    marker.textContent = '\u200b';
+    mirrorEl.appendChild(marker);
+    return marker.offsetLeft > el.clientWidth - SEND_ZONE;
+  }
   function growComposer() {
     const el = composerEl;
     if (!el) return;
+    const lh = parseFloat(getComputedStyle(el).lineHeight) || 20;
+    el.style.paddingBottom = lastLineCollides(el) ? `${4 + lh}px` : '';
     el.style.height = 'auto';
     el.style.height = `${el.scrollHeight}px`;
     // The composer taking space is the feed losing it — the same way the keyboard
@@ -1065,7 +1091,7 @@
   .hub-root.compact .feed { padding: 14px 10px 18px; gap: 9px; }
   .hub-root.compact .msg, .hub-root.compact .prompt { max-width: 91%; }
   .hub-root.compact .composer { padding: 8px 9px calc(8px + env(safe-area-inset-bottom)); }
-  .hub-root.compact .compose-shell { padding: 6px 48px 6px 9px; border-radius: 10px; }
+  .hub-root.compact .compose-shell { padding: 6px 9px; border-radius: 10px; }
   .hub-root.compact .to-chip { max-width: 110px; height: 28px; }
   .hub-root.compact .to-label { display: none; }
   .hub-root.compact .c-input { min-height: 30px; font-size: var(--fs-body); max-height: 40vh; }
@@ -1367,7 +1393,7 @@
   }
   .compose-shell {
     flex: 1; min-width: 0; position: relative;
-    padding: 6px 52px 6px 10px; border: 1px solid var(--input-border); border-radius: 10px;
+    padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 10px;
     background: var(--bubble-in); box-shadow: 0 1px 3px rgba(0,0,0,0.10);
     transition: border-color var(--t-fast) ease, box-shadow var(--t-fast) ease;
   }
@@ -1412,6 +1438,13 @@
     padding: 5px 0 4px; background: transparent; border: none; outline: none;
     color: var(--text); font-size: var(--fs-body); line-height: 1.5;
     resize: none; overflow-y: auto;
+  }
+  /* growComposer's layout mirror: same metrics as .c-input, invisible.
+     Created by JS, so it has no scope class — hence :global under the shell. */
+  .compose-shell :global(.c-mirror) {
+    position: absolute; left: 10px; top: 0; visibility: hidden; pointer-events: none;
+    font-size: var(--fs-body); line-height: 1.5; white-space: pre-wrap;
+    overflow-wrap: break-word; padding: 0; border: 0;
   }
   .c-input::placeholder { color: var(--text3); opacity: 0.82; }
   /* The send action: a bold up-arrow (the iMessage/ChatGPT shape — symmetric,
