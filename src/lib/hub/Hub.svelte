@@ -729,22 +729,34 @@
                 class:ask-bottom={isAsk && askKey === key && askEdge === 'bottom'}
                 class:held={isAsk && askKey === key && askHeld}
                 data-ask={isAsk ? key : undefined}>
-                <!-- The bubble carries ONLY the content; metadata sits in the
-                     foot row below. While held, the foot is visibility-hidden
-                     (paint-only) so the pinned preview is just the bubble. -->
+                <!-- Telegram-style bubble: agent name heads the bubble; the
+                     time — and on your own messages the delivery ring, right
+                     of it — is an inline trailer FLOATED at the end of the
+                     text, sharing the last line when it fits and dropping to
+                     its own right-aligned line when it doesn't. Never a
+                     separate row or column outside the bubble. -->
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <div class="bubble md" role="button" tabindex="0"
                   onclick={() => { msgOpen = msgOpen === key ? '' : key; }}
                   onkeydown={(e) => { if (e.key === 'Enter') msgOpen = msgOpen === key ? '' : key; }}>
-                  {#if parts.text}
-                    <div class="m-body">
+                  {#if m.from !== 'human'}<div class="m-head">{m.from}</div>{/if}
+                  <div class="m-body">
+                    {#if parts.text}
                       {#if rawOpen === key}
                         <pre class="raw">{m.body}</pre>
                       {:else}
                         {@html renderMarkdown(parts.text)}
                       {/if}
-                    </div>
-                  {/if}
+                    {/if}
+                    <span class="m-meta">
+                      <span class="m-time">{fmtTime(m.ts)}</span>
+                      {#if m.from === 'human'}
+                        <span class="m-state" class:ok={b.delivered} title={t('hubDeliveredHint')}>
+                          <Icon name={b.delivered ? 'circle-check' : 'circle'} size={11} />
+                        </span>
+                      {/if}
+                    </span>
+                  </div>
                 </div>
                 {#if msgOpen === key}
                   <div class="m-acts">
@@ -763,21 +775,6 @@
                     {/each}
                   </div>
                 {/if}
-                <!-- Metadata lives OUTSIDE the bubble (it made the bubble read
-                     bigger than its words): agent name on the left, time — and
-                     on your own messages the delivery ring, empty until the
-                     agent's prompt hook echoes the line back — on the right.
-                     Fixed 16px row (13px + 3px gap): the held bottom-window
-                     math depends on that constant. -->
-                <div class="m-foot">
-                  {#if m.from !== 'human'}<span class="who">{m.from}</span>{/if}
-                  <span class="m-time">{fmtTime(m.ts)}</span>
-                  {#if m.from === 'human'}
-                    <span class="m-state" class:ok={b.delivered} title={t('hubDeliveredHint')}>
-                      <Icon name={b.delivered ? 'circle-check' : 'circle'} size={11} />
-                    </span>
-                  {/if}
-                </div>
               </div>
           {:else if b.type === 'prompt'}
             <!-- The input half: what this agent was asked, which only the
@@ -1159,7 +1156,7 @@
   .msg.held { -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
   /* Both edges show the SAME preview — the question's first line — inside a
      33px window. Asks are the user's own messages, and those carry no head
-     row since the time moved to the foot; geometry (measured): first line box
+     row (only agent bubbles are named); geometry (measured): first line box
      9..29px, the NEXT line's glyphs start ≈31px; bar 29..32, stroke 32..33.
      Everything here is paint-only: clip-path clips, transform moves painting,
      neither touches layout (the scroll-anchoring feedback loop is documented
@@ -1177,10 +1174,7 @@
   .msg.ask-bottom.held { clip-path: inset(calc(100% - 33px) 0 0 0 round 12px); }
   .msg.ask-bottom.held .bubble {
     clip-path: inset(0 0 calc(100% - 33px) 0 round 12px);
-    /* 100% is the BUBBLE's height, but the sticky element is the msg, which
-       is 16px taller (the foot row): −33px + 16px = −17px lands the bubble's
-       first line exactly in the msg's bottom 33px window. */
-    transform: translateY(calc(100% - 17px));
+    transform: translateY(calc(100% - 33px));
   }
   /* The frame of the held mini-bubble is DRAWN, not inherited. The real
      bubble border cannot survive the clip: its bottom edge lies below the
@@ -1220,6 +1214,10 @@
     border-radius: 50%; background: var(--status-danger); border: 2px solid var(--bg);
   }
   .msg { position: relative; display: flex; flex-direction: column; max-width: min(76%, 760px); }
+  /* Both sides hug their content (default column-flex STRETCH made every
+     agent bubble 76% wide, leaving a short line's inline time stranded at
+     the far right). */
+  .msg { align-self: flex-start; }
   .msg.me { align-self: flex-end; }
   .bubble {
     position: relative;
@@ -1236,24 +1234,30 @@
     background: var(--bubble-out); border-color: color-mix(in srgb, var(--accent) 18%, transparent);
     border-radius: 12px 12px 4px 12px;
   }
-  /* One fixed metadata row UNDER the bubble — outside it, so the bubble is
-     exactly as big as its words: agent name (left), time, and on your own
-     messages the delivery ring (right). Height is a CONSTANT 13px + 3px gap:
-     the held bottom-window translate depends on it. */
-  .m-foot {
-    display: flex; justify-content: flex-end; align-items: center; gap: 4px;
-    height: 13px; margin-top: 3px; padding: 0 6px;
-    color: var(--text3); font-size: 10px; line-height: 1;
+  /* Agent name heads the bubble (your own carries none — the right-aligned
+     accent bubble already says "yours"). */
+  .m-head {
+    color: var(--accent); font-weight: 650; font-size: 11px;
+    letter-spacing: 0.1px; line-height: 1.2; margin: 0 0 2px; user-select: none;
   }
-  /* Agent metadata spreads: name hard left, time hard right — one glance
-     answers both "who" and "when" without reading a cluster. */
-  .msg:not(.me) .m-foot { justify-content: space-between; }
-  .msg.held .m-foot { visibility: hidden; }
-  .m-foot .who { color: var(--accent); font-weight: 650; font-size: 10.5px; letter-spacing: 0.1px; margin-right: 2px; }
+  /* The Telegram inline trailer: time (+ delivery ring on your own messages,
+     to its right) FLOATS at the end of the content. On the last line when it
+     fits, its own right-aligned line when it doesn't — never a separate
+     row/column. Two pieces make it work with rendered markdown: the last
+     content element (when it is a <p>) turns inline so the float can share
+     its line box, and .m-body is flow-root so the bubble's height contains
+     the float. The 7px top margin bottoms the 10px trailer within the
+     ~20px line box. */
+  .m-body { min-width: 0; display: flow-root; }
+  .m-body > :global(p:nth-last-child(2)) { display: inline; }
+  .m-meta {
+    float: right; display: inline-flex; align-items: center; gap: 3px;
+    margin: 7px 0 0 8px; color: var(--text3); font-size: 10px; line-height: 1;
+    user-select: none;
+  }
   .m-state { display: inline-flex; opacity: 0.55; }
   .m-state.ok { color: var(--status-ok); opacity: 1; }
   .m-time { font-variant-numeric: tabular-nums; opacity: 0.78; }
-  .m-body { min-width: 0; }
   .bubble .raw { margin: 0; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text2); }
   /* What you can DO with a message, revealed by tapping it. An OVERLAY on the
      bubble's bottom-right corner, out of the flow: opening it must not push

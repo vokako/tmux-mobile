@@ -511,17 +511,21 @@ under a sticky bubble never reads through it. No light/dark colour is hard-coded
 the component variables are `color-mix()` derivatives of `--bg`, `--bg2`,
 `--accent`, `--border` and `--text3`.
 
-One label rule: an agent's message carries its name (several agents speak in
-one room); your own carries none — the right-aligned accent bubble already says
-"yours". The bubble holds ONLY the content; all metadata lives in one fixed
-13px row UNDER the bubble, outside it (inside, it made the bubble read bigger
-than its words): agent name sits left, time — and on your own messages the
-delivery ring — sits right. The row's 13px + 3px gap is a load-bearing
-constant: the held bottom-window translate is `100% − 33px + 16px`, because
-`100%` is the bubble's height while the sticky element (the msg) is 16px
-taller. While held the foot is `visibility: hidden` (paint-only), so the
-pinned preview is just the bubble. Name-on-top split the metadata across two
-rows for no reason once the head had nothing else: the first design put it in the head next to a
+One label rule: an agent's bubble is headed by its name (several agents speak
+in one room); your own carries none — the right-aligned accent bubble already
+says "yours". Time — and on your own messages the delivery ring, to the
+time's right — is a Telegram-style INLINE TRAILER floated at the end of the
+content: it shares the last text line when it fits and drops to its own
+right-aligned line when it doesn't; never a separate row or column outside
+the bubble (a fixed foot row under the bubble read as detached furniture, and
+in-bubble fixed rows made bubbles read bigger than their words). Two CSS
+pieces carry it: the last content element (when it is a `<p>`) turns
+`display: inline` so the float can share its line box — safe because `.md`
+paragraph margins are symmetric, so the PREVIOUS block's bottom margin still
+separates them — and `.m-body` is `flow-root` so the bubble's height contains
+the float. Both sides hug their content (`align-self: flex-start/flex-end`);
+column-flex default STRETCH made every agent bubble 76% wide with a short
+line's time stranded at the far right: the first design put it in the head next to a
 delivery chip whose `margin-left: auto` shoved the time from right to left the
 moment the receipt arrived (owner report). Your own messages also carry a
 status ring in that foot, ALWAYS: an empty circle until the agent's prompt
@@ -534,10 +538,9 @@ toy-like): bubbles 12px with a 4px directional corner, the composer capsule
 7px. The held mini-bubble's clip `round` and drawn frame follow the bubble
 radius — change one, change all three.
 
-The sticky anchor element is the whole `.msg` (bubble + foot), and while held
-only the bubble paints (foot hidden, clip windows sized to the bubble) — so
-the pinned preview reads as one object even though metadata sits outside the
-bubble in flow. Prose bubbles are
+With metadata inline, the sticky anchor `.msg` and the bubble are the same
+box again, so the held windows are plain `100% − 33px` with no foot
+compensation. Prose bubbles are
 bounded to `min(76%, 760px)` on a wide screen and 91% on a phone, while tool runs,
 observed prompts and status facts use the same width ceiling but stay visually
 subordinate. The feed reuses `.subtle-scroll`; system events are centered frosted
