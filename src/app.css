@@ -220,9 +220,19 @@ button:disabled {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
+/* The title NEVER becomes a squeezed vertical strip: it keeps one line and
+   ellipsizes (a 4-character name wrapped to four 36px-wide lines between
+   five action buttons — owner report, skill editor on a phone). */
 .page-head h1 {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 15px; margin: 0; font-weight: 600;
+  font-size: var(--fs-title); margin: 0; font-weight: 600;
+  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Phone: too many head actions for one row — let them wrap under the title
+   instead of crushing it. The title row (back button + h1) stays first. */
+@media (max-width: 760px) {
+  .page-head { flex-wrap: wrap; row-gap: 6px; padding: 8px 12px; }
+  .page-head h1 { flex: 1 1 auto; }
 }
 
 .side-row {

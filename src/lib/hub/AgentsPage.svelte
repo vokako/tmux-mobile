@@ -205,6 +205,7 @@
       <div class="page-head">
         <h1>{skillIsNew ? t('skillsNew') : editingSkill.name}</h1>
         <span class="spacer"></span>
+        <div class="head-acts">
         {#if !skillIsNew}
           <button class="chip-btn danger" onclick={() => removeSkill(editingSkill.name)}><Icon name="trash" size={13} />{t('delete')}</button>
         {/if}
@@ -213,6 +214,7 @@
         {/if}
         <button class="chip-btn" onclick={() => editingSkill = null}>{t('cancel')}</button>
         <button class="chip-btn primary" disabled={!editingSkill.name.trim() || !editingSkill.source.trim() || syncing} onclick={saveSkill}>{syncing ? '…' : (skillIsNew ? t('skillsImport') : t('save'))}</button>
+        </div>
       </div>
       <div class="editor">
         {#if error}<div class="err">{error}</div>{/if}
@@ -240,11 +242,13 @@
       <div class="page-head">
         <h1>{mcpIsNew ? t('mcpNew') : editingMcp.name}</h1>
         <span class="spacer"></span>
+        <div class="head-acts">
         {#if !mcpIsNew}
           <button class="chip-btn danger" onclick={() => removeMcp(editingMcp.name)}><Icon name="trash" size={13} />{t('delete')}</button>
         {/if}
         <button class="chip-btn" onclick={() => editingMcp = null}>{t('cancel')}</button>
         <button class="chip-btn primary" disabled={!editingMcp.name.trim()} onclick={saveMcp}>{t('save')}</button>
+        </div>
       </div>
       <div class="editor">
         {#if error}<div class="err">{error}</div>{/if}
@@ -260,11 +264,13 @@
       <div class="page-head">
         <h1>{isNew ? t('agentsNew') : editing.name}</h1>
         <span class="spacer"></span>
+        <div class="head-acts">
         {#if !isNew}
           <button class="chip-btn danger" onclick={() => remove(editing.name)}><Icon name="trash" size={13} />{t('delete')}</button>
         {/if}
         <button class="chip-btn" onclick={() => editing = null}>{t('cancel')}</button>
         <button class="chip-btn primary" disabled={!editing.name.trim()} onclick={save}>{t('save')}</button>
+        </div>
       </div>
       <div class="editor">
         {#if error}<div class="err">{error}</div>{/if}
@@ -349,6 +355,9 @@
 
   .mid { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   .spacer { flex: 1; }
+  /* The head actions move as ONE block: on a phone they wrap under the
+     title together instead of scattering one button per row. */
+  .head-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
   .placeholder { flex: 1; display: grid; place-items: center; }
   .hint { color: var(--text3); font-size: 12.5px; margin: 0; line-height: 1.6; max-width: 420px; }
 
