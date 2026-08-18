@@ -568,12 +568,19 @@ the reported "一闪一闪". The fix is `clip-path: inset(… round r)`: it clip
 painting and hit-testing but the element keeps its full flow height, so holding
 an edge can never move the scroll position. A bubble shorter than the clip
 window computes a negative inset and simply does not clip. Do not reintroduce
-any held style that affects layout (height, padding, font-size, display). The
-window must land BETWEEN text lines or the cut runs through glyphs: with the
-current bubble grid (8px padding-top + 16px head + 4px margin + ~20px line) the
-first line ends 48px in and the next line's glyphs start ≈2px lower, so the top
-window is 50px (head + first line intact) and the bottom one 30px (last line +
-padding). Re-derive these if bubble padding, head height or line-height change.
+any held style that affects layout (height, padding, font-size, display).
+
+Both edges show the SAME preview — head (with its time) + first line — in a
+53px window. Top edge: clip the message to its top 53px. Bottom edge: the same
+clip ON THE BUBBLE plus `translateY(calc(100% − 53px))` — transform moves
+painting, not layout, so the bubble's head slides down into the bottom window;
+without it the window showed the bubble's TAIL and the timestamp was cut off
+(owner report). The bare cut also had no bottom edge, so a `::after` paints a
+fake floor — 3px of the bubble's own colour capped by its 1px border line —
+which doubles as cover for the next line's ≈2px glyph sliver. Geometry
+(measured): head bottom 25px, first line box 29..49px, next line's glyphs from
+≈51px; seam at 49px, window 53px. Re-derive if bubble padding, head height or
+line-height change.
 
 Direction has hysteresis too: trackpads and touch momentum land 1–3px reversals
 at rest, and at the held boundary a direction flip re-picks the anchor. A

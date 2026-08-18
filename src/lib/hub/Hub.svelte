@@ -1146,14 +1146,35 @@
      so holding the edge can never move the scroll position. A short bubble
      yields a negative inset, which simply does not clip. */
   .msg.held { -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
-  /* The clip window must land BETWEEN text lines, or the cut runs through
-     glyphs (the reported "内容出框"). Bubble geometry: 8px padding-top +
-     16px head + 4px head margin + 20px line (13.5px × 1.48) = the first line
-     ends 48px in, and the next line's glyphs start ≈2px lower. 50px shows
-     head + first line intact and clips in the blank seam. Bottom edge shows
-     the LAST line: 9px padding-bottom + 20px + 1px seam = 30px. */
-  .msg.ask-top.held { clip-path: inset(0 0 calc(100% - 50px) 0 round 17px); }
-  .msg.ask-bottom.held { clip-path: inset(calc(100% - 30px) 0 0 0 round 17px); }
+  /* Both edges show the SAME preview — head (with its time) + first line —
+     inside a 53px window. Geometry (measured): head bottom 25px, first line
+     box 29..49px, the NEXT line's glyphs start ≈51px. Everything here is
+     paint-only: clip-path clips, transform moves painting, neither touches
+     layout (the scroll-anchoring feedback loop is documented above).
+
+     · Top edge: clip the message to its top 53px.
+     · Bottom edge: same clip ON THE BUBBLE plus translateY(100% − 53px), so
+       the bubble's HEAD slides down into the bottom window — without it the
+       window showed the bubble's tail and the time was cut off (owner
+       report). The outer .msg clip bounds anything else (image refs).
+     · The bare cut had no bottom edge ("少了一个小边边"): ::after paints a
+       fake floor — 3px of the bubble's own colour capped by its 1px border
+       line — which also covers the next line's 2px glyph sliver. */
+  .msg.ask-top.held { clip-path: inset(0 0 calc(100% - 53px) 0 round 17px); }
+  .msg.ask-bottom.held { clip-path: inset(calc(100% - 53px) 0 0 0 round 17px); }
+  .msg.ask-bottom.held .bubble {
+    clip-path: inset(0 0 calc(100% - 53px) 0 round 17px);
+    transform: translateY(calc(100% - 53px));
+  }
+  .msg.held .bubble::after {
+    content: ''; position: absolute; left: 0; right: 0; top: 49px; height: 4px;
+    background: var(--bubble-in);
+    border-bottom: 1px solid var(--bubble-line);
+  }
+  .msg.held.me .bubble::after {
+    background: var(--bubble-out);
+    border-bottom-color: color-mix(in srgb, var(--accent) 18%, transparent);
+  }
   .msg.held .m-head { opacity: 0.72; }
 
   /* Back to the tail. */
@@ -1171,6 +1192,7 @@
   .msg { position: relative; display: flex; flex-direction: column; max-width: min(76%, 760px); }
   .msg.me { align-self: flex-end; }
   .bubble {
+    position: relative;
     background: var(--bubble-in); border: 1px solid var(--bubble-line);
     border-radius: 17px 17px 17px 6px; padding: 8px 12px 9px;
     color: var(--text); font-size: 13.5px; line-height: 1.48;
