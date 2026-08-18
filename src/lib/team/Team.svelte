@@ -962,7 +962,7 @@
     font-size: 12px; font-weight: 600; cursor: pointer; flex-shrink: 0;
     -webkit-tap-highlight-color: transparent;
   }
-  .team-start:active { background: var(--accent); color: var(--bg); }
+  .team-start:active { background: var(--accent-fill); color: var(--accent-fill-ink); }
   .team-start:disabled { opacity: 0.5; cursor: default; }
   .reconnect-spinner-sm {
     width: 12px; height: 12px; border: 2px solid var(--border);
@@ -1145,5 +1145,5 @@
     transition: opacity 0.15s ease;
   }
   .compose-send:disabled { opacity: 0.4; cursor: default; }
-  .compose-send:not(:disabled):active { background: var(--accent); color: var(--bg); }
+  .compose-send:not(:disabled):active { background: var(--accent-fill); color: var(--accent-fill-ink); }
 </style>

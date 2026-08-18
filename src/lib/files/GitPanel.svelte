@@ -288,7 +288,7 @@
   .git-commit-row textarea:focus { border-color: var(--accent); }
   .git-commit-btn {
     padding: 6px 14px; border: none; border-radius: 6px;
-    background: var(--accent); color: var(--bg); font-size: 12px; font-weight: 600;
+    background: var(--accent-fill); color: var(--accent-fill-ink); font-size: 12px; font-weight: 600;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
   .git-commit-btn:disabled { opacity: 0.4; }

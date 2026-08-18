@@ -349,8 +349,8 @@
     padding: 13px;
     border: none;
     border-radius: 10px;
-    background: var(--accent);
-    color: var(--bg);
+    background: var(--accent-fill);
+    color: var(--accent-fill-ink);
     font-size: 15px;
     font-weight: 600;
     cursor: pointer;

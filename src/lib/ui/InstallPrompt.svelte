@@ -199,8 +199,8 @@
     padding: 7px 14px;
     border: none;
     border-radius: 999px;
-    background: var(--accent);
-    color: var(--bg);
+    background: var(--accent-fill);
+    color: var(--accent-fill-ink);
     font-size: 12px;
     font-weight: 600;
     cursor: pointer;

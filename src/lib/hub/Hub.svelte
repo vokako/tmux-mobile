@@ -1133,7 +1133,7 @@
     -webkit-tap-highlight-color: transparent;
   }
   .acard:hover { border-color: var(--input-border); color: var(--text); }
-  .acard.sel { border-color: var(--accent); background: var(--accent-bg); color: var(--text); }
+  .acard.sel { border-color: var(--accent-line); background: var(--accent-bg); color: var(--text); }
   .acard.add { color: var(--text3); padding-right: 12px; }
   .acard.add:hover { color: var(--accent); }
   .acard.off { opacity: 0.55; }
@@ -1464,13 +1464,9 @@
     position: absolute; right: 7px; bottom: 5.5px;
     width: 30px; height: 30px; display: grid; place-items: center;
     padding: 0; border: none; border-radius: 9px; cursor: pointer;
-    background: var(--accent);
-    color: color-mix(in srgb, var(--bg) 30%, white);
+    background: var(--accent-fill);
+    color: var(--accent-fill-ink);
     transition: filter var(--t-fast) ease, background var(--t-fast) ease, color var(--t-fast) ease, transform var(--t-fast) ease;
-  }
-  :global(html[data-theme="dark"]) .send-btn:not(:disabled) {
-    background: color-mix(in srgb, var(--accent) 60%, var(--bg));
-    color: color-mix(in srgb, white 90%, var(--accent));
   }
   .send-btn:hover:not(:disabled) { filter: brightness(1.07); }
   .send-btn:active:not(:disabled) { transform: scale(0.93); }
@@ -1506,7 +1502,7 @@
   .term-body { flex: 1; min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; }
 
   .statusline { display: flex; align-items: center; height: 25px; background: var(--bg3); border-top: 1px solid var(--border); font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text2); user-select: none; flex: none; }
-  .statusline .sess { background: var(--accent); color: #06232b; font-weight: 700; padding: 0 10px; height: 100%; display: flex; align-items: center; }
+  .statusline .sess { background: var(--accent-fill); color: var(--accent-fill-ink); font-weight: 700; padding: 0 10px; height: 100%; display: flex; align-items: center; }
   .wlist { display: flex; height: 100%; overflow-x: auto; scrollbar-width: none; }
   .statusline .w { display: flex; align-items: center; padding: 0 9px; color: var(--text3); background: none; border: none; cursor: pointer; font: inherit; transition: color var(--t-fast); }
   .statusline .w:hover { color: var(--text); }

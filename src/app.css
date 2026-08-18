@@ -46,6 +46,13 @@ html[data-theme="dark"] {
   --border: rgba(255,255,255,0.06); --border2: rgba(255,255,255,0.04);
   --surface: rgba(255,255,255,0.03); --surface2: rgba(255,255,255,0.06);
   --accent: #00d4ff; --accent-bg: rgba(0,212,255,0.12); --accent-glow: rgba(0,212,255,0.1);
+  /* Solid accent CTAs: the electric cyan at full strength reads as a light
+     source on the dark canvas (owner report, send button 2026-08-18), so
+     every solid fill tones to a 60% mix and strong selection lines to 70%.
+     Light theme keeps full accent — its deep blue never glowed. */
+  --accent-fill: color-mix(in srgb, var(--accent) 60%, var(--bg));
+  --accent-fill-ink: color-mix(in srgb, white 90%, var(--accent));
+  --accent-line: color-mix(in srgb, var(--accent) 70%, var(--bg));
   --danger: #ff5050; --danger-bg: rgba(255,80,80,0.08);
   --status-ok: #4ade80; --status-warn: #fbbf24; --status-danger: #ff5050; --status-hot: #fb923c; --status-sleep: #818cf8;
   --nav-bg: rgba(12,12,20,0.95); --pill-bg: rgba(255,255,255,0.04);
@@ -61,6 +68,9 @@ html[data-theme="light"] {
   --border: rgba(0,0,0,0.08); --border2: rgba(0,0,0,0.05);
   --surface: rgba(0,0,0,0.02); --surface2: rgba(0,0,0,0.04);
   --accent: #0088cc; --accent-bg: rgba(0,136,204,0.08); --accent-glow: rgba(0,136,204,0.06);
+  --accent-fill: var(--accent);
+  --accent-fill-ink: color-mix(in srgb, var(--bg) 30%, white);
+  --accent-line: var(--accent);
   --danger: #e53e3e; --danger-bg: rgba(229,62,62,0.06);
   --status-ok: #16a34a; --status-warn: #ca8a04; --status-danger: #e53e3e; --status-hot: #ea580c; --status-sleep: #6366f1;
   --nav-bg: rgba(245,245,247,0.95); --pill-bg: rgba(0,0,0,0.03);

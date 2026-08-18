@@ -605,7 +605,11 @@ crooked in a small square — the plane was the owner's "太丑了". Ink is cris
 not washed: near-white over the light theme's deep blue; in the dark theme the
 accent is ELECTRIC CYAN and a full-strength block of it read as a light source
 (owner report), so the fill tones to a 60% accent/background mix with
-near-white ink. Disabled recedes into the surface instead of ghosting the
+near-white ink — promoted to app-wide tokens `--accent-fill` /
+`--accent-fill-ink` / `--accent-line` in app.css (2026-08-18): every solid
+accent CTA (send, statusline session block, connect, PWA install, git
+commit, Team send/start actives) and strong selection border draws from
+them, so the "glowing block" class of bug is fixed in ONE place. Disabled recedes into the surface instead of ghosting the
 accent. The button reserves NO column (owner: text may run directly above
 it): the textarea is full width, and growComposer measures the value in a
 hidden mirror div to find the LAST line's right edge — only when that edge
