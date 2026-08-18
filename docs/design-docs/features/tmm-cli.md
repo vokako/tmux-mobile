@@ -511,12 +511,17 @@ under a sticky bubble never reads through it. No light/dark colour is hard-coded
 the component variables are `color-mix()` derivatives of `--bg`, `--bg2`,
 `--accent`, `--border` and `--text3`.
 
-One label rule: an agent's bubble carries its name (several agents speak in one
-room); your own carries none — the right-aligned accent bubble already says
-"yours". Everything secondary lives in ONE fixed foot under the text,
-bottom-right, identical for every message forever — agent name, time, and on
-your own messages the delivery ring. Name-on-top split the metadata across two
-rows (name above, time below) for no reason once the head had nothing else: the first design put it in the head next to a
+One label rule: an agent's message carries its name (several agents speak in
+one room); your own carries none — the right-aligned accent bubble already says
+"yours". The bubble holds ONLY the content; all metadata lives in one fixed
+13px row UNDER the bubble, outside it (inside, it made the bubble read bigger
+than its words): agent name sits left, time — and on your own messages the
+delivery ring — sits right. The row's 13px + 3px gap is a load-bearing
+constant: the held bottom-window translate is `100% − 33px + 16px`, because
+`100%` is the bubble's height while the sticky element (the msg) is 16px
+taller. While held the foot is `visibility: hidden` (paint-only), so the
+pinned preview is just the bubble. Name-on-top split the metadata across two
+rows for no reason once the head had nothing else: the first design put it in the head next to a
 delivery chip whose `margin-left: auto` shoved the time from right to left the
 moment the receipt arrived (owner report). Your own messages also carry a
 status ring in that foot, ALWAYS: an empty circle until the agent's prompt
@@ -529,9 +534,10 @@ toy-like): bubbles 12px with a 4px directional corner, the composer capsule
 7px. The held mini-bubble's clip `round` and drawn frame follow the bubble
 radius — change one, change all three.
 
-Sender, timestamp, delivery receipt and body belong inside the same `.bubble`.
-That is not cosmetic: separating the header from the bubble makes a sticky message
-look like a cloned card even when there is only one DOM node. Prose bubbles are
+The sticky anchor element is the whole `.msg` (bubble + foot), and while held
+only the bubble paints (foot hidden, clip windows sized to the bubble) — so
+the pinned preview reads as one object even though metadata sits outside the
+bubble in flow. Prose bubbles are
 bounded to `min(76%, 760px)` on a wide screen and 91% on a phone, while tool runs,
 observed prompts and status facts use the same width ceiling but stay visually
 subordinate. The feed reuses `.subtle-scroll`; system events are centered frosted

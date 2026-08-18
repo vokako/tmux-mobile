@@ -729,9 +729,9 @@
                 class:ask-bottom={isAsk && askKey === key && askEdge === 'bottom'}
                 class:held={isAsk && askKey === key && askHeld}
                 data-ask={isAsk ? key : undefined}>
-                <!-- Content first, then one fixed FOOT (agent name · time ·
-                     delivery ring) bottom-right — all inside the same bubble
-                     that sticky moves, so the anchor never looks duplicated. -->
+                <!-- The bubble carries ONLY the content; metadata sits in the
+                     foot row below. While held, the foot is visibility-hidden
+                     (paint-only) so the pinned preview is just the bubble. -->
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <div class="bubble md" role="button" tabindex="0"
                   onclick={() => { msgOpen = msgOpen === key ? '' : key; }}
@@ -745,21 +745,6 @@
                       {/if}
                     </div>
                   {/if}
-                  <!-- The foot never moves: time bottom-right, and on your own
-                       messages a status ring that is ALWAYS there — empty until
-                       the agent's prompt hook echoes the line back (the only
-                       proof it reached the CLI's input), a check once it does.
-                       The old chip appeared on delivery with margin-left:auto,
-                       which shoved the time from right to left (owner report). -->
-                  <div class="m-foot">
-                    {#if m.from !== 'human'}<span class="who">{m.from}</span>{/if}
-                    <span class="m-time">{fmtTime(m.ts)}</span>
-                    {#if m.from === 'human'}
-                      <span class="m-state" class:ok={b.delivered} title={t('hubDeliveredHint')}>
-                        <Icon name={b.delivered ? 'circle-check' : 'circle'} size={11} />
-                      </span>
-                    {/if}
-                  </div>
                 </div>
                 {#if msgOpen === key}
                   <div class="m-acts">
@@ -778,6 +763,21 @@
                     {/each}
                   </div>
                 {/if}
+                <!-- Metadata lives OUTSIDE the bubble (it made the bubble read
+                     bigger than its words): agent name on the left, time — and
+                     on your own messages the delivery ring, empty until the
+                     agent's prompt hook echoes the line back — on the right.
+                     Fixed 16px row (13px + 3px gap): the held bottom-window
+                     math depends on that constant. -->
+                <div class="m-foot">
+                  {#if m.from !== 'human'}<span class="who">{m.from}</span>{/if}
+                  <span class="m-time">{fmtTime(m.ts)}</span>
+                  {#if m.from === 'human'}
+                    <span class="m-state" class:ok={b.delivered} title={t('hubDeliveredHint')}>
+                      <Icon name={b.delivered ? 'circle-check' : 'circle'} size={11} />
+                    </span>
+                  {/if}
+                </div>
               </div>
           {:else if b.type === 'prompt'}
             <!-- The input half: what this agent was asked, which only the
@@ -1177,7 +1177,10 @@
   .msg.ask-bottom.held { clip-path: inset(calc(100% - 33px) 0 0 0 round 12px); }
   .msg.ask-bottom.held .bubble {
     clip-path: inset(0 0 calc(100% - 33px) 0 round 12px);
-    transform: translateY(calc(100% - 33px));
+    /* 100% is the BUBBLE's height, but the sticky element is the msg, which
+       is 16px taller (the foot row): −33px + 16px = −17px lands the bubble's
+       first line exactly in the msg's bottom 33px window. */
+    transform: translateY(calc(100% - 17px));
   }
   /* The frame of the held mini-bubble is DRAWN, not inherited. The real
      bubble border cannot survive the clip: its bottom edge lies below the
@@ -1233,12 +1236,17 @@
     background: var(--bubble-out); border-color: color-mix(in srgb, var(--accent) 18%, transparent);
     border-radius: 12px 12px 4px 12px;
   }
-  /* One fixed FOOT under the text, bottom-right, identical place for every
-     message forever: agent name, time, and (on your own) the delivery ring. */
+  /* One fixed metadata row UNDER the bubble — outside it, so the bubble is
+     exactly as big as its words: agent name (left), time, and on your own
+     messages the delivery ring (right). Height is a CONSTANT 13px + 3px gap:
+     the held bottom-window translate depends on it. */
   .m-foot {
     display: flex; justify-content: flex-end; align-items: center; gap: 4px;
-    margin-top: 3px; color: var(--text3); font-size: 10px; line-height: 1;
+    height: 13px; margin-top: 3px; padding: 0 6px;
+    color: var(--text3); font-size: 10px; line-height: 1;
   }
+  .msg:not(.me) .m-foot { justify-content: flex-start; }
+  .msg.held .m-foot { visibility: hidden; }
   .m-foot .who { color: var(--accent); font-weight: 650; font-size: 10.5px; letter-spacing: 0.1px; margin-right: 2px; }
   .m-state { display: inline-flex; opacity: 0.55; }
   .m-state.ok { color: var(--status-ok); opacity: 1; }
