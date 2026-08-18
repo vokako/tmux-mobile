@@ -729,16 +729,13 @@
                 class:ask-bottom={isAsk && askKey === key && askEdge === 'bottom'}
                 class:held={isAsk && askKey === key && askHeld}
                 data-ask={isAsk ? key : undefined}>
-                <!-- Sender, timestamp and content are one visual object. This is
-                     also the exact element that sticky moves — no detached label
-                     that could make the anchor look duplicated. -->
+                <!-- Content first, then one fixed FOOT (agent name · time ·
+                     delivery ring) bottom-right — all inside the same bubble
+                     that sticky moves, so the anchor never looks duplicated. -->
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <div class="bubble md" role="button" tabindex="0"
                   onclick={() => { msgOpen = msgOpen === key ? '' : key; }}
                   onkeydown={(e) => { if (e.key === 'Enter') msgOpen = msgOpen === key ? '' : key; }}>
-                  {#if m.from !== 'human'}
-                    <div class="m-head"><span class="who">{m.from}</span></div>
-                  {/if}
                   {#if parts.text}
                     <div class="m-body">
                       {#if rawOpen === key}
@@ -755,6 +752,7 @@
                        The old chip appeared on delivery with margin-left:auto,
                        which shoved the time from right to left (owner report). -->
                   <div class="m-foot">
+                    {#if m.from !== 'human'}<span class="who">{m.from}</span>{/if}
                     <span class="m-time">{fmtTime(m.ts)}</span>
                     {#if m.from === 'human'}
                       <span class="m-state" class:ok={b.delivered} title={t('hubDeliveredHint')}>
@@ -1205,7 +1203,6 @@
     background: var(--bubble-in); pointer-events: none;
   }
   .msg.held.me .bubble::after { background: var(--bubble-out); }
-  .msg.held .m-head { opacity: 0.72; }
 
   /* Back to the tail. */
   .to-bottom {
@@ -1236,17 +1233,13 @@
     background: var(--bubble-out); border-color: color-mix(in srgb, var(--accent) 18%, transparent);
     border-radius: 12px 12px 4px 12px;
   }
-  .m-head {
-    display: flex; align-items: center; gap: 7px; min-height: 16px;
-    margin: 0 0 4px; color: var(--text3); font-size: 10.5px; line-height: 1;
-  }
-  .m-head .who { color: var(--accent); font-weight: 650; font-size: 11.5px; letter-spacing: 0.1px; }
-  /* Time (and, on your own messages, the delivery ring) live UNDER the text,
-     bottom-right, in the same place for every message forever. */
+  /* One fixed FOOT under the text, bottom-right, identical place for every
+     message forever: agent name, time, and (on your own) the delivery ring. */
   .m-foot {
     display: flex; justify-content: flex-end; align-items: center; gap: 4px;
     margin-top: 3px; color: var(--text3); font-size: 10px; line-height: 1;
   }
+  .m-foot .who { color: var(--accent); font-weight: 650; font-size: 10.5px; letter-spacing: 0.1px; margin-right: 2px; }
   .m-state { display: inline-flex; opacity: 0.55; }
   .m-state.ok { color: var(--status-ok); opacity: 1; }
   .m-time { font-variant-numeric: tabular-nums; opacity: 0.78; }

@@ -513,8 +513,10 @@ the component variables are `color-mix()` derivatives of `--bg`, `--bg2`,
 
 One label rule: an agent's bubble carries its name (several agents speak in one
 room); your own carries none — the right-aligned accent bubble already says
-"yours". Time lives in a FOOT under the text, bottom-right, in the same place
-for every message forever: the first design put it in the head next to a
+"yours". Everything secondary lives in ONE fixed foot under the text,
+bottom-right, identical for every message forever — agent name, time, and on
+your own messages the delivery ring. Name-on-top split the metadata across two
+rows (name above, time below) for no reason once the head had nothing else: the first design put it in the head next to a
 delivery chip whose `margin-left: auto` shoved the time from right to left the
 moment the receipt arrived (owner report). Your own messages also carry a
 status ring in that foot, ALWAYS: an empty circle until the agent's prompt
