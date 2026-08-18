@@ -126,21 +126,39 @@ fn start_in_existing(project: &Project, slot: &Slot, target: &str) -> SlotResult
 /// time (decision 5 in the exec plan). An agent goes back into the conversation
 /// it was in, not to a blank prompt — see `agents::launch_line`.
 pub(super) fn slot_command(slot: &Slot) -> Option<String> {
+    slot_command_in(slot, None)
+}
+
+/// `project_path` enables the managed-agent path: a spawned agent restarts
+/// with its FULL identity (isolated home env + --agent + resume) via the
+/// launch recipe `spawn` persisted. Without it the generic backend launch
+/// line runs the user-space config, whose kiro hooks never fire (measured) —
+/// the restarted agent kept answering but went observably deaf: no tool rows,
+/// no delivery receipts, every message "unconfirmed" (owner report 2026-08-18).
+pub(super) fn slot_command_in(slot: &Slot, project_path: Option<&str>) -> Option<String> {
     if !slot.auto_run {
         return None;
     }
     let command = match slot.kind {
-        SlotKind::Agent => slot
-            .command
-            .as_deref()
-            .and_then(|backend| agents::launch_line(backend, slot.agent_session_id.as_deref()))?,
+        SlotKind::Agent => {
+            let recipe = project_path.and_then(|p| {
+                super::spawn::relaunch_line(p, &slot.window_name, slot.agent_session_id.as_deref())
+            });
+            match recipe {
+                Some(line) => line,
+                None => slot
+                    .command
+                    .as_deref()
+                    .and_then(|backend| agents::launch_line(backend, slot.agent_session_id.as_deref()))?,
+            }
+        }
         SlotKind::Shell => slot.command.clone()?,
     };
     (!command.trim().is_empty()).then_some(command)
 }
 
 fn run_slot_command(project: &Project, slot: &Slot, target: &str) -> Result<(), String> {
-    match slot_command(slot) {
+    match slot_command_in(slot, Some(&project.path)) {
         // Agents get their tmm identity: the project is the session, the agent
         // name is the window. Resumed agents keep the user's own config (no
         // isolated home — that is spawn's job), but tmm works in their window

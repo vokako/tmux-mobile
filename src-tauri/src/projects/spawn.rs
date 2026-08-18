@@ -128,7 +128,70 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
         shared::confirm_startup_prompt(pane.clone(), confirmation);
     }
 
+    write_launch_recipe(&home, &def.backend, &env, &prepared.cmd);
+
     Ok(json!({ "window_name": window_name, "pane": pane, "backend": def.backend }))
+}
+
+/// Persist how this agent is STARTED, so a restart can replay the full
+/// identity. Without it, the resume path fell back to the plain backend
+/// launch line ("kiro-cli chat --resume-id …" — no KIRO_HOME, no --agent),
+/// which runs the USER-SPACE config whose hooks never fire (measured,
+/// kiro-cli 2.16.2): the restarted agent went observably deaf — no tool rows,
+/// no auto-post, every delivery "unconfirmed" (owner report, 2026-08-18).
+/// The kick is NOT part of the recipe: it belongs to the first launch only;
+/// a restart resumes a conversation instead.
+fn write_launch_recipe(home: &Path, backend: &str, env: &[(String, String)], cmd: &str) {
+    // The kick is always the final argument and always shell-quoted (it
+    // contains spaces); strip that whole quoted argument, not the last word.
+    let t = cmd.trim_end();
+    let cmd_sans_kick = if t.ends_with('\'') {
+        t[..t.len() - 1].rfind(" '").map(|i| &t[..i]).unwrap_or(t)
+    } else {
+        t.rsplit_once(' ').map(|(head, _)| head).unwrap_or(t)
+    };
+    let recipe = json!({
+        "backend": backend,
+        "env": env.iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>(),
+        "cmd": cmd_sans_kick,
+    });
+    let _ = std::fs::write(
+        home.join("launch.json"),
+        serde_json::to_string_pretty(&recipe).unwrap(),
+    );
+}
+
+/// The full relaunch line for a managed agent: recipe env + identity command +
+/// the backend's resume flag for the recorded conversation. `None` when this
+/// window has no recipe (a hand-started window, or a pre-recipe spawn).
+pub fn relaunch_line(project_path: &str, window_name: &str, session_id: Option<&str>) -> Option<String> {
+    let home = agent_home(project_path, window_name);
+    let recipe: Value = serde_json::from_str(&std::fs::read_to_string(home.join("launch.json")).ok()?).ok()?;
+    let cmd = recipe.get("cmd")?.as_str()?.to_string();
+    let backend = recipe.get("backend").and_then(|b| b.as_str()).unwrap_or("");
+    let resume = session_id.filter(|s| !s.is_empty()).and_then(|id| match backend {
+        "kiro" => Some(format!("--resume-id {}", shared::shell_quote(id))),
+        "claude" => Some(format!("--resume {}", shared::shell_quote(id))),
+        _ => None,
+    });
+    let env = recipe.get("env").and_then(|e| e.as_array()).map(|arr| {
+        arr.iter()
+            .filter_map(|kv| Some((kv.get(0)?.as_str()?, kv.get(1)?.as_str()?)))
+            .map(|(k, v)| format!("{}={}", k, shared::shell_quote(v)))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }).unwrap_or_default();
+    let mut line = String::new();
+    if !env.is_empty() {
+        line.push_str(&env);
+        line.push(' ');
+    }
+    line.push_str(&cmd);
+    if let Some(r) = resume {
+        line.push(' ');
+        line.push_str(&r);
+    }
+    Some(line)
 }
 
 /// The initial user message: an agent CLI boots into an interactive prompt
@@ -143,6 +206,36 @@ const KICK: &str = "Start now: read your instructions and task brief, then begin
 /// message carries its own stamp from `deliver_mentions`.
 fn kick_now() -> String {
     format!("[{}] {KICK}", chrono::Local::now().format("%Y-%m-%d %H:%M"))
+}
+
+#[cfg(test)]
+mod relaunch_tests {
+    use super::*;
+
+    #[test]
+    fn relaunch_line_replays_env_identity_and_resume() {
+        let ws = std::env::temp_dir().join(format!("tmm-relaunch-{}", uuid::Uuid::new_v4()));
+        let home = agent_home(ws.to_str().unwrap(), "lead");
+        std::fs::create_dir_all(&home).unwrap();
+        write_launch_recipe(
+            &home,
+            "kiro",
+            &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())],
+            "command kiro-cli chat --agent lead --model m --trust-all-tools kick",
+        );
+        let line = relaunch_line(ws.to_str().unwrap(), "lead", Some("id-1")).unwrap();
+        assert!(line.starts_with("KIRO_HOME="), "isolated home first: {line}");
+        assert!(line.contains("--agent lead"), "identity: {line}");
+        assert!(line.ends_with("--resume-id id-1"), "conversation resumes: {line}");
+        assert!(!line.contains("kick"), "write_launch_recipe strips the kick: {line}");
+        // No recorded conversation → plain identity relaunch, no resume flag.
+        let fresh = relaunch_line(ws.to_str().unwrap(), "lead", None).unwrap();
+        assert!(!fresh.contains("--resume"), "{fresh}");
+        // A window with no recipe (hand-started) stays None — the caller falls
+        // back to the generic backend line.
+        assert!(relaunch_line(ws.to_str().unwrap(), "byhand", None).is_none());
+        std::fs::remove_dir_all(&ws).ok();
+    }
 }
 
 struct Rendered {
@@ -294,6 +387,21 @@ pub fn refresh_hooks(project_path: &str, window_name: &str) -> bool {
     let codex = home.join("codex").join("hooks.json");
     if codex.is_file() {
         changed |= patch_hooks(&codex, codex_hooks(&notifications.helper_command("codex")));
+    }
+    // Agents spawned before launch recipes existed can still be restarted with
+    // full identity: for kiro the recipe is reconstructible from the isolated
+    // home itself (env = KIRO_HOME, cmd = --agent <name>).
+    if kiro.is_file() && !home.join("launch.json").exists() {
+        write_launch_recipe(
+            &home,
+            "kiro",
+            &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())],
+            &format!(
+                "command kiro-cli chat --agent {} --trust-all-tools kick",
+                shared::shell_quote(window_name),
+            ),
+        );
+        changed = true;
     }
     changed
 }
@@ -508,6 +616,23 @@ mod tests {
         assert!(conf.get("mcpServers").and_then(|m| m.get("files")).is_some(), "registry MCP def must materialize");
         // Tool hooks feed telemetry.
         assert!(conf.get("hooks").and_then(|h| h.get("preToolUse")).is_some());
+        // A restart must replay the FULL identity, not the bare backend line:
+        // the user-space config's hooks never fire (measured), so losing
+        // KIRO_HOME/--agent makes a restarted agent observably deaf.
+        write_launch_recipe(&dir, "kiro", &r.env, &r.cmd);
+        let line = relaunch_line(
+            dir.parent().unwrap().parent().unwrap().to_str().unwrap(),
+            "tester", Some("abc-123"),
+        );
+        // agent_home(workspace, name) = <ws>/.tmm/agents/<name>; our temp dir is
+        // not that shape, so call the parts directly instead:
+        let recipe: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("launch.json")).unwrap()).unwrap();
+        assert_eq!(recipe["backend"], "kiro");
+        let cmd = recipe["cmd"].as_str().unwrap();
+        assert!(cmd.contains("--agent tester"), "identity survives: {cmd}");
+        assert!(!cmd.contains("Start now"), "the kick is not replayed: {cmd}");
+        let _ = line; // shape of the ws path differs in this fixture; covered below
         // Turn start resets the same-turn dedup flag. Without it a managed
         // agent that calls `tmm send` once never auto-posts again.
         let turn = conf.get("hooks").and_then(|h| h.get("userPromptSubmit")).and_then(|v| v.as_array()).cloned().unwrap_or_default();
