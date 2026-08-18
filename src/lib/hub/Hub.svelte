@@ -1211,7 +1211,7 @@
     background: var(--bubble-in); border: 1px solid var(--bubble-line);
     border-radius: 12px 12px 12px 4px; padding: 8px 12px 9px;
     color: var(--text); font-size: 13.5px; line-height: 1.48;
-    word-break: break-word; overflow-wrap: anywhere; cursor: pointer;
+    word-break: break-word; overflow-wrap: anywhere; cursor: text;
     box-shadow: 0 1px 2px rgba(0,0,0,0.10);
     transition: border-color 140ms ease, box-shadow 140ms ease;
     -webkit-tap-highlight-color: transparent;
@@ -1232,13 +1232,12 @@
   .m-body { min-width: 0; }
   .bubble .raw { margin: 0; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text2); }
   /* What you can DO with a message, revealed by tapping it. An OVERLAY on the
-     bubble's top edge, out of the flow: opening it must not push the feed
-     around or change the scroll height the anchor math depends on. */
+     bubble's bottom-right corner, out of the flow: opening it must not push
+     the feed around or change the scroll height the anchor math depends on. */
   .m-acts {
-    position: absolute; z-index: 8; top: -13px; right: 10px;
+    position: absolute; z-index: 8; bottom: -13px; right: 10px;
     display: flex; gap: 5px; margin: 0;
   }
-  .msg:not(.me) .m-acts { right: auto; left: 10px; }
   .m-acts button {
     display: inline-flex; align-items: center; gap: 4px; min-height: 26px;
     background: var(--bubble-in); border: 1px solid var(--border); border-radius: 7px;

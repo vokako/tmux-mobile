@@ -527,8 +527,10 @@ bounded to `min(76%, 760px)` on a wide screen and 91% on a phone, while tool run
 observed prompts and status facts use the same width ceiling but stay visually
 subordinate. The feed reuses `.subtle-scroll`; system events are centered frosted
 pills. The tap-revealed copy/raw actions are an absolutely-positioned OVERLAY on
-the bubble's top edge, not a row in the flow: opening them must not push the
-conversation around or change the scroll height the anchor math depends on.
+the bubble's bottom-right corner, not a row in the flow: opening them must not
+push the conversation around or change the scroll height the anchor math
+depends on. The bubble itself carries a text cursor, not a pointer — it is
+selectable prose first; the tap affordance needs no hand.
 
 The composer is one rounded capsule at every width, and everything lives inside
 it. The recipient chip is pinned to the capsule's top-left; the textarea's FIRST
