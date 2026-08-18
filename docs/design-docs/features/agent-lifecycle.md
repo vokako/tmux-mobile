@@ -30,6 +30,7 @@ never gets to assert anything about the agent.
 | window name | `dev`, `dev-2`, … | **the window name IS the agent identity** — telemetry, `tmm`, delivery and the managed gate all key on it |
 | `agent_home()` | `<ws>/.tmm/agents/<name>/` | the isolated home. `KIRO_HOME` / `CODEX_HOME` / `--settings` point here, so user-space config never leaks in — and this directory is also the *definition* of "an agent this app created" (`projects::managed_home`) |
 | `render_kiro/claude/codex` | config + hooks + MCP + skills | hooks are written here; `refresh_hooks` rewrites them on every later start |
+| `write_launch_recipe` | `launch.json` in the home: env + identity command, kick stripped | **a restart replays the FULL identity.** Without it the restart ran the bare backend line (`kiro-cli chat --resume-id …` — no `KIRO_HOME`, no `--agent`), i.e. the user-space config whose hooks never fire: the agent kept answering but went observably deaf — no tool rows, no auto-post, every delivery "unconfirmed" (owner report 2026-08-18). `relaunch_line` = recipe env + identity cmd + resume flag; `refresh_hooks` backfills the recipe for pre-recipe kiro agents |
 | `new_named_window` + `. launch.sh` | starts the CLI | the command is sourced from a script, never `send-keys`'d: a tty shim swallows bursts ≳2 KB |
 | `bus.post` | `[tmm] spawned dev — brief` | the room is the record |
 
@@ -142,6 +143,13 @@ state and contributes only its note.
 The asymmetry in the last three rows is the honest summary of this design: **the
 conversation is durable, the observation is not.**
 
+One more thing does NOT survive that the table cannot show: a **running CLI's
+config**. The CLI reads it once at launch, so `refresh_hooks` patching the disk
+repairs the *next* start, never the current process — an agent started before a
+hook existed keeps missing it until restarted (this is exactly how the
+2026-08-18 "unconfirmed" report began: a lead running since before the
+`userPromptSubmit` hook was added).
+
 ## Open issues found while writing this
 
 Ordered by how much they can mislead a user.
@@ -151,7 +159,10 @@ Ordered by how much they can mislead a user.
    else — but the system prompt carries the brief, which cannot be rebuilt, so an
    agent spawned last week still carries last week's instructions (including the
    old "announce that you are working" line). Fix needs the brief stored on the
-   slot so the prompt can be re-rendered.
+   slot so the prompt can be re-rendered. *(Related but fixed 2026-08-18: a
+   restart now replays the full launch identity via the persisted recipe —
+   hooks-current config, isolated home, resume id. The brief staleness above is
+   what remains.)*
 2. **Telemetry dies with the server** (table above). After a restart the messages
    are there and the work around them is gone, which reads as "the agent answered
    out of nowhere". A persisted ring in `state.db` would fix it; the 120-event cap

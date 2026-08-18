@@ -25,6 +25,7 @@
 | 窗口名 | `dev`、`dev-2`… | **窗口名就是 agent 的身份** —— 遥测、`tmm`、消息投递、托管门禁全都以它为键 |
 | `agent_home()` | `<ws>/.tmm/agents/<名字>/` | 隔离 home。`KIRO_HOME` / `CODEX_HOME` / `--settings` 都指向这里，用户自己的配置漏不进来；这个目录同时也是"**这个 agent 是我们创建的**"的定义（`projects::managed_home`） |
 | `render_kiro/claude/codex` | 配置 + hooks + MCP + skills | hooks 在这里写下；以后每次启动 `refresh_hooks` 都会重写它 |
+| `write_launch_recipe` | 隔离 home 里的 `launch.json`：环境 + 身份命令（剥掉 kick） | **重启必须重放完整身份。**没有配方时，重启跑的是裸后端命令（`kiro-cli chat --resume-id …`——没有 `KIRO_HOME`、没有 `--agent`），即用户空间配置，而它的 hooks 永远不触发：agent 还能回答，但观测上全聋——没有工具行、没有自动转发、条条消息 "unconfirmed"（2026-08-18 使用者报告）。`relaunch_line` = 配方环境 + 身份命令 + resume 参数；`refresh_hooks` 为旧 agent 回填配方 |
 | `new_named_window` + `. launch.sh` | 真正把 CLI 起来 | 启动命令是 source 一个脚本，绝不用 `send-keys` —— tty shim 会吞掉 ≳2 KB 的突发输入 |
 | `bus.post` | `[tmm] spawned dev — brief` | 房间就是记录 |
 
@@ -124,6 +125,12 @@ agent 身上）；声称 `working` 不设置任何状态，只贡献它那句备
 
 最后三行的不对称就是这套设计最诚实的总结：**对话是持久的，观测不是。**
 
+还有一样东西表格里放不下，但同样不会"存活"：**运行中 CLI 的配置**。CLI 只在
+启动时读一次配置，所以 `refresh_hooks` 修补磁盘只能救*下一次*启动，救不了当前
+进程——一个在某 hook 存在之前就启动的 agent，会一直缺这个 hook，直到重启为止
+（2026-08-18 的 "unconfirmed" 报告正是这样开始的：lead 早于 `userPromptSubmit`
+hook 的提交三小时启动，此后一直没重启过）。
+
 ## 梳理中发现的问题
 
 按"能误导用户的程度"排序。
@@ -132,6 +139,8 @@ agent 身上）；声称 `working` 不设置任何状态，只贡献它那句备
    并且刻意不碰别的——但 system prompt 里带着那一次给的 brief，重建不出来。所以
    上周 spawn 的 agent 现在还揣着上周的指令（包括已经被删掉的"要宣布自己在工作"
    那句）。要修，得先把 brief 存到 slot 上。
+   *（相关但已于 2026-08-18 修复：重启现在通过持久化的配方重放完整启动身份——
+   hooks 最新的配置、隔离 home、resume id。上面说的 brief 过期是仍然遗留的部分。）*
 2. **遥测随 server 一起死**（见上表）。重启之后消息在、产生它的工作没了，读起来
    像"agent 凭空答了一句"。落到 `state.db` 就能解决；那时 120 条上限就从内存约束
    变成保留策略。
