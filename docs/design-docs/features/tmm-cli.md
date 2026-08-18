@@ -575,12 +575,21 @@ Both edges show the SAME preview — head (with its time) + first line — in a
 clip ON THE BUBBLE plus `translateY(calc(100% − 53px))` — transform moves
 painting, not layout, so the bubble's head slides down into the bottom window;
 without it the window showed the bubble's TAIL and the timestamp was cut off
-(owner report). The bare cut also had no bottom edge, so a `::after` paints a
-fake floor — 3px of the bubble's own colour capped by its 1px border line —
-which doubles as cover for the next line's ≈2px glyph sliver. Geometry
-(measured): head bottom 25px, first line box 29..49px, next line's glyphs from
-≈51px; seam at 49px, window 53px. Re-derive if bubble padding, head height or
-line-height change.
+(owner report). The frame of the held mini-bubble is DRAWN, not inherited: the
+real border cannot survive the clip — its bottom edge lies below the window and
+its side strokes are eaten by the window's corner rounding, and a first attempt
+that only drew a floor line put that line at border-y 53..54, which the 53px
+clip removed exactly (a pseudo-element's `top` is padding-box relative, 1px
+lower than the border box the clip measures). While held, the real border-color
+goes transparent (paint-only) and `::before` draws the complete frame — outer
+edge exactly on the 53px window (`top:-1px; height:53px` in padding coords),
+stroke safely inside the clip; `::after` is an opaque bar covering the next
+line's ≈2px glyph sliver. The bubble's 140ms border-color transition makes the
+swap a soft cross-fade — and also means a computed-style read right after the
+class flips reports a MID-TRANSITION colour, which cost half an hour of chasing
+a cascade bug that did not exist. Geometry (measured): head bottom 25px, first
+line box 29..49px, next line's glyphs from ≈51px; bar at 48..51px, window 53px.
+Re-derive if bubble padding, head height or line-height change.
 
 Direction has hysteresis too: trackpads and touch momentum land 1–3px reversals
 at rest, and at the held boundary a direction flip re-picks the anchor. A

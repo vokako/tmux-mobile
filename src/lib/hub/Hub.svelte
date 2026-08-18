@@ -1166,15 +1166,30 @@
     clip-path: inset(0 0 calc(100% - 53px) 0 round 17px);
     transform: translateY(calc(100% - 53px));
   }
+  /* The frame of the held mini-bubble is DRAWN, not inherited. The real
+     bubble border cannot survive the clip: its bottom edge lies below the
+     window, and its side strokes are eaten by the window's corner rounding —
+     the first fake floor put its 1px line at border-y 53..54 and the 53px
+     clip removed exactly that line (pseudo-element `top` is padding-box
+     relative, 1px lower than the border box the clip measures — the owner
+     saw the missing stroke). So while held: hide the real border
+     (border-color is paint-only) and let ::before draw the complete frame,
+     outer edge exactly on the 53px window, stroke safely INSIDE the clip.
+     ::after remains an opaque bar that hides the next line's glyph sliver. */
+  .msg.held .bubble, .msg.held.me .bubble { border-color: transparent; }
+  .msg.held .bubble::before {
+    content: ''; position: absolute; left: -1px; right: -1px; top: -1px; height: 53px;
+    border: 1px solid var(--bubble-line); border-radius: 17px;
+    pointer-events: none;
+  }
+  .msg.held.me .bubble::before {
+    border-color: color-mix(in srgb, var(--accent) 18%, transparent);
+  }
   .msg.held .bubble::after {
-    content: ''; position: absolute; left: 0; right: 0; top: 49px; height: 4px;
-    background: var(--bubble-in);
-    border-bottom: 1px solid var(--bubble-line);
+    content: ''; position: absolute; left: 0; right: 0; top: 48px; height: 3px;
+    background: var(--bubble-in); pointer-events: none;
   }
-  .msg.held.me .bubble::after {
-    background: var(--bubble-out);
-    border-bottom-color: color-mix(in srgb, var(--accent) 18%, transparent);
-  }
+  .msg.held.me .bubble::after { background: var(--bubble-out); }
   .msg.held .m-head { opacity: 0.72; }
 
   /* Back to the tail. */
