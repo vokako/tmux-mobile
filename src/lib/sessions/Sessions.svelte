@@ -14,11 +14,18 @@
   import { isTeamSession, teamLabel } from '../core/team.svelte.ts';
   import { agentNotifications, notificationForWindow, sessionHasNotification } from '../core/agent-notifications.svelte.ts';
 
-  let { openTerminal, activeTarget = '', visible = false }: {
+  // `onPick` lets the host close its slide-over after a choice — this list is
+  // Terminal's sidebar now, not a page that navigates away by itself.
+  let { openTerminal: openTerminalRaw, activeTarget = '', visible = false, onPick = null }: {
     openTerminal: (session: string, target: string, command?: string) => void;
     activeTarget?: string;
     visible?: boolean;
+    onPick?: (() => void) | null;
   } = $props();
+  const openTerminal = (session: string, target: string, command = '') => {
+    openTerminalRaw(session, target, command);
+    onPick?.();
+  };
 
   const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 

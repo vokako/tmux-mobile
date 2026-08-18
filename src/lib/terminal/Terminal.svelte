@@ -50,7 +50,7 @@
   // `chromeless` = embedded with NO window-switcher bar (used by the desktop
   // agent grid, where each cell is pinned to one agent's pane — there is
   // nothing to switch to, so the bar would only steal vertical space).
-  let { target, session, command: initialCommand = '', fontSize = 14, embedded = false, active = true, chromeless = false, onSwitchPane = null, onPaneExit = () => {}, onClose = null, splitEligible = false, splitActive = false, splitLayout = 1, onSetLayout = null } = $props();
+  let { target, session, command: initialCommand = '', fontSize = 14, embedded = false, active = true, chromeless = false, onSwitchPane = null, onPaneExit = () => {}, onClose = null, onOpenSessions = null, splitEligible = false, splitActive = false, splitLayout = 1, onSetLayout = null } = $props();
   let splitMenuOpen = $state(false);
 
   // svelte-ignore state_referenced_locally — intentional: seeded from the
@@ -1914,7 +1914,16 @@
           label={session}
           variant="active"
           title={session}
-          onclick={(e) => { e.stopPropagation(); showPanePicker = !showPanePicker; }}
+          onclick={(e) => {
+            e.stopPropagation();
+            // On a phone the session list IS the sidebar (a slide-over sheet
+            // owned by the page), so the chip opens that instead of a second,
+            // smaller picker over the terminal. On a desktop the sidebar is
+            // already on screen beside us, and the popover stays available
+            // for a fast jump without moving the eyes to the far column.
+            if (onOpenSessions) onOpenSessions();
+            else showPanePicker = !showPanePicker;
+          }}
         />
         {#if showPanePicker}
           <PanePicker

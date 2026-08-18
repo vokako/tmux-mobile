@@ -66,8 +66,11 @@
   // beats kicking the user off the tab they were on.
   $effect(() => {
     if (page === 'team') page = 'hub'; // Team tab retired — the Hub replaced it
+    // Sessions tab retired 2026-08-18: the list is Terminal's sidebar now, so
+    // a persisted/deep-linked 'sessions' lands on the terminal it belonged to.
+    if (page === 'sessions') page = 'terminal';
     // Same for the Hub: it needs the bus. Only redirect once the probe answered.
-    if ((page === 'hub' || page === 'agents') && teamState.probed && !teamState.available) page = 'sessions';
+    if ((page === 'hub' || page === 'agents') && teamState.probed && !teamState.available) page = 'terminal';
   });
 
   // ─── Split-screen (desktop + wide only) ────────────────────────────────
@@ -213,7 +216,7 @@
 
   // Settings is a PAGE (ui-unification.md "Settings as a page"), not a modal.
   // The gear toggles into it and back to where you were.
-  let pageBeforePrefs = 'sessions';
+  let pageBeforePrefs = 'terminal';
   function togglePrefs() {
     if (page === 'prefs') { page = pageBeforePrefs; }
     else { pageBeforePrefs = page; page = 'prefs'; }
@@ -582,7 +585,7 @@
     reconnectMachine.cancel();
     connected = true;
     serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
-    page = 'sessions';
+    page = 'terminal';
     localStorage.removeItem('tmux_disconnected');
     // A manual connect from Settings reaches a server with EMPTY subscription
     // state, while Terminals stay mounted across the disconnect and keep their
@@ -637,7 +640,9 @@
       }
     } catch {} // list_panes fails when the whole session died with the pane
     terminalTarget = '';
-    if (page === 'terminal') page = 'sessions';
+    // Nothing left to show: the empty state offers the session list (which
+    // used to BE the fallback page).
+    if (page === 'terminal' && layout.isTouchDevice) sessListOpen = true;
   }
 
   // Jump to the Team tab and select a specific room (from a team session row in
@@ -817,9 +822,9 @@
             activeCellId = s.splitCells[0]?.id ?? null;
           }
         } else {
-          page = layout.isTouchDevice ? 'sessions' : 'hub';
+          page = layout.isTouchDevice ? 'terminal' : 'hub';
         }
-      } catch { page = layout.isTouchDevice ? 'sessions' : 'hub'; }
+      } catch { page = layout.isTouchDevice ? 'terminal' : 'hub'; }
     }).catch(() => {
       clearTimeout(timeout);
       page = 'settings';
@@ -840,7 +845,9 @@
       }
       if (page === 'files' && filesGoBack && filesGoBack()) return;
       if (page === 'files') { page = 'terminal'; return; }
-      if (page === 'terminal') { page = 'sessions'; return; }
+      // Terminal is the root on a phone: back closes the session sheet if it
+      // is open, otherwise there is nowhere below it (re-push prevents exit).
+      if (page === 'terminal' && sessListOpen) { sessListOpen = false; navPush(); return; }
       if (page === 'prefs') { page = pageBeforePrefs; return; }
       // At sessions root, re-push to prevent exit
       navPush();
@@ -852,7 +859,7 @@
   });
   // Swipe left/right to switch tabs with slide animation
   const tabs = $derived(() => {
-    const t = ['sessions'];
+    const t = [];
     if (hubEligible) t.push('hub');
     t.push('terminal');
     if (hubEligible) t.push('agents');
@@ -860,6 +867,11 @@
     return t;
   });
 
+  // The session list is Terminal's sidebar, not a page of its own (owner,
+  // 2026-08-18: "sessions 页面差不多相当于 terminal 的侧边栏"). On a wide
+  // screen it is a column; on a phone it slides over the terminal, because
+  // the terminal wants the whole screen there.
+  let sessListOpen = $state(false);
   let slideAnim = $state('');
 
   function switchTab(target) {
@@ -941,7 +953,7 @@
       {#if hubEligible}
         <button tabindex="-1" class="rail-btn" class:active={page === 'hub'} title={t('hub')} onclick={() => switchTab('hub')}><Icon name="chat" size={17} /></button>
       {/if}
-      <button tabindex="-1" class="rail-btn" class:active={page === 'sessions'} title={t('sessions')} onclick={() => switchTab('sessions')}><Icon name="sessions" size={17} /></button>
+
       <button tabindex="-1" class="rail-btn" class:active={page === 'terminal'} title={t('terminal')} onclick={() => switchTab('terminal')}><Icon name="terminal" size={17} /></button>
       {#if hubEligible}
         <button tabindex="-1" class="rail-btn" class:active={page === 'agents'} title={t('agentsTitle')} onclick={() => switchTab('agents')}><Icon name="bot" size={17} /></button>
@@ -964,8 +976,6 @@
   <div class="page {slideAnim}" class:page-terminal={page === 'terminal'}>
     {#if page === 'settings'}
       <Settings {onConnected} />
-    {:else if page === 'sessions'}
-      <Sessions {openTerminal} activeTarget={terminalTarget} visible={page === 'sessions'} />
     {/if}
     <!-- Team is kept mounted (like Files/Terminal below) and merely hidden when
          inactive, so switching tabs preserves its state — the selected team
@@ -1016,7 +1026,20 @@
     <div class="page-layer" class:hidden={page !== 'files'}>
       <Files session={filesSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} />
     </div>
-    <div class="page-layer" class:hidden={page !== 'terminal'}>
+    <div class="page-layer term-page" class:hidden={page !== 'terminal'}>
+      <!-- The session/window list: a column beside the terminal on a wide
+           screen, a slide-over sheet on a phone (opened from the switcher's
+           session tag). Kept MOUNTED so its polling and expansion state
+           survive; `visible` pauses the poll while the page is hidden. -->
+      <aside class="term-side" class:sheet={layout.isTouchDevice} class:open={sessListOpen}>
+        <Sessions {openTerminal} activeTarget={terminalTarget}
+          visible={page === 'terminal' && (!layout.isTouchDevice || sessListOpen)}
+          onPick={() => sessListOpen = false} />
+      </aside>
+      {#if layout.isTouchDevice && sessListOpen}
+        <button class="term-scrim" aria-label={t('close')} onclick={() => sessListOpen = false}></button>
+      {/if}
+      <div class="term-main">
       {#if terminalTarget}
         <div class="terminal-body" class:split-capable={splitEligible}>
           {#if splitActive}
@@ -1046,6 +1069,7 @@
           {:else}
             <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {fontSize}
               splitEligible={splitEligible} {splitActive} {splitLayout} onSetLayout={setLayout}
+              onOpenSessions={layout.isTouchDevice ? () => sessListOpen = true : null}
               onSwitchPane={(t, cmd) => { terminalTarget = t; terminalSession = t.split(':')[0]; terminalCommand = cmd || ''; readTarget(t); }} onPaneExit={paneExitFallback} />
           {/if}
         </div>
@@ -1053,8 +1077,12 @@
         <div class="terminal-empty">
           <Icon name="terminal" size={22} />
           <span>{t('noTerminalSelected')}</span>
+          <button class="chip-btn" onclick={() => sessListOpen = true}>
+            <Icon name="sessions" size={14} />{t('sessions')}
+          </button>
         </div>
       {/if}
+      </div>
     </div>
   </div>
 
@@ -1095,9 +1123,7 @@
   <InstallPrompt />
   {#if connected && layout.isTouchDevice}
     <nav class="tabbar">
-      <button tabindex="-1" class:active={page === 'sessions'} onclick={() => switchTab('sessions')}>
-        <Icon name="sessions" size={19} /><span>{t('sessions')}</span>
-      </button>
+
       {#if hubEligible}
         <button tabindex="-1" class:active={page === 'hub'} onclick={() => switchTab('hub')}>
           <Icon name="chat" size={19} /><span>{t('hub')}</span>
@@ -1329,6 +1355,27 @@
     position: relative;
   }
   .page-terminal { background: var(--bg); }
+  /* Terminal = session list + terminal, one page (the Sessions tab was
+     retired into this). Wide: two columns. Phone: the list slides over,
+     because the terminal needs the whole screen there. */
+  /* Specificity note: .page-layer sets display:flex later in this sheet, so
+     the merged layout must qualify with BOTH classes to win. */
+  /* 280px, not the 240px rail sidebar width: this column carries project
+     cards with actions and pane chips (it used to be a whole page), and at
+     240 the chips wrapped one per line. */
+  .page-layer.term-page { display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: 0; }
+  .term-side { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--border); background: var(--bg2); }
+  .term-main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  @media (max-width: 760px) {
+    .page-layer.term-page { grid-template-columns: minmax(0, 1fr); }
+    .term-side.sheet {
+      position: fixed; z-index: 26; inset: calc(var(--sat)) auto 0 0; width: min(300px, 86vw);
+      transform: translateX(-100%); transition: transform var(--t-move) ease;
+      box-shadow: 0 0 44px rgba(0,0,0,0.5);
+    }
+    .term-side.sheet.open { transform: none; }
+    .term-scrim { position: fixed; inset: 0; z-index: 25; background: rgba(0,0,0,0.45); border: none; }
+  }
 
   /* Swipe transition animations */
   .page { will-change: transform; }

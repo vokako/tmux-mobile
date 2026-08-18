@@ -21,17 +21,33 @@ test('every authenticated connection path refreshes agent notifications', () => 
 });
 
 test('Terminal navigation and page layer exist without an active target', () => {
-  // The tab list starts with sessions and always contains terminal; hub is
-  // desktop-eligible-only and sits between them when present.
-  assert.match(source, /const t = \['sessions'\]/u);
+  // The Sessions tab was retired into Terminal (2026-08-18): the list is
+  // Terminal's sidebar, so no tab starts the list and terminal is always there.
+  assert.doesNotMatch(source, /const t = \['sessions'\]/u);
   assert.match(source, /t\.push\('terminal'\)/u);
+  assert.doesNotMatch(source, /switchTab\('sessions'\)/u);
   assert.match(
     source,
     /<button tabindex="-1" class:active=\{page === 'terminal'[\s\S]*?\{t\('terminal'\)\}[\s\S]*?<\/button>/u,
   );
   assert.match(
     source,
-    /<div class="page-layer" class:hidden=\{page !== 'terminal'\}>\s*\{#if terminalTarget\}/u,
+    /<div class="page-layer term-page" class:hidden=\{page !== 'terminal'\}>/u,
   );
   assert.match(source, /\{:else\}\s*<div class="terminal-empty">/u);
+});
+
+test('the session list lives inside the Terminal page, sheeted on a phone', () => {
+  // One Sessions instance, mounted as the terminal page's sidebar; on a phone
+  // it slides over and a pick closes it.
+  const mounts = source.match(/<Sessions\b/gu) ?? [];
+  assert.equal(mounts.length, 1, 'exactly one Sessions mount');
+  const aside = source.match(/<aside class="term-side"[\s\S]*?<\/aside>/u)?.[0] ?? '';
+  assert.match(aside, /class:sheet=\{layout\.isTouchDevice\}/u);
+  assert.match(aside, /class:open=\{sessListOpen\}/u);
+  assert.match(aside, /onPick=\{\(\) => sessListOpen = false\}/u);
+  // The terminal's session chip opens that same sheet on a phone.
+  assert.match(source, /onOpenSessions=\{layout\.isTouchDevice \? \(\) => sessListOpen = true : null\}/u);
+  // A phone back gesture closes the sheet instead of leaving the app.
+  assert.match(source, /page === 'terminal' && sessListOpen.*sessListOpen = false/u);
 });

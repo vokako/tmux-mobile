@@ -1,4 +1,13 @@
-# Sessions Page
+# Sessions List (Terminal's sidebar)
+
+> **Merged into Terminal, 2026-08-18.** There is no Sessions TAB any more: the
+> list was, in the owner's words, "差不多相当于 terminal 的侧边栏" and it also
+> duplicated the switcher's quick-jump. It is now part of the Terminal page —
+> a 280px column beside the terminal on a wide screen, a slide-over sheet on a
+> phone (opened by the switcher's session chip, closed by picking a pane or by
+> the back gesture). Everything below still describes the list's own
+> requirements; only its host changed. A persisted or deep-linked `sessions`
+> page redirects to `terminal`.
 
 ## Purpose
 Fast, scannable entry point for selecting which pane to view. Optimized for

@@ -5,6 +5,16 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
 
 ## Components
 
+- **The session list is part of this page** (the Sessions tab was retired into
+  it, 2026-08-18): `.term-page` is a two-column grid — a 280px session/window
+  list (`src/lib/sessions/Sessions.svelte`, 240px was too narrow for its
+  project cards) plus the terminal. On a touch layout the column becomes a
+  slide-over sheet: the switcher's session chip opens it (instead of the
+  smaller pane popover, which stays for desktop where the column is already
+  visible), picking a pane closes it via `onPick`, and the back gesture closes
+  it before it can leave the app. Terminal is therefore the ROOT page on a
+  phone and the connect/fallback landing everywhere.
+
 - The Terminal tab and its always-mounted page layer are available immediately
   after connecting, even before a pane has been selected. With no active target,
   the page renders a stable empty state; opening a pane from Sessions or Team
