@@ -922,7 +922,7 @@
              stopped costing the composer a whole column. -->
         <button class="send-btn" onclick={send} title={t('hubSend')} aria-label={t('hubSend')}
           disabled={!composerText.trim() || !selected}>
-          <Icon name="send-up" size={17} />
+          <Icon name="send-up" size={15} />
         </button>
         </div>
       </div>
@@ -1060,7 +1060,7 @@
   .hub-root.compact .to-chip { max-width: 110px; height: 28px; }
   .hub-root.compact .to-label { display: none; }
   .hub-root.compact .c-input { min-height: 30px; font-size: 14px; max-height: 40vh; }
-  .hub-root.compact .send-btn { width: 38px; height: 38px; right: 5px; bottom: 5px; border-radius: 11px; }
+  .hub-root.compact .send-btn { width: 32px; height: 32px; right: 6px; bottom: 4.5px; border-radius: 10px; }
   .hub-root.compact .chip-btn { min-height: 34px; }
   .hub-root.compact .s-head { min-height: 34px; }
   /* Drawer open: the conversation yields but stays present. */
@@ -1245,7 +1245,9 @@
     height: 13px; margin-top: 3px; padding: 0 6px;
     color: var(--text3); font-size: 10px; line-height: 1;
   }
-  .msg:not(.me) .m-foot { justify-content: flex-start; }
+  /* Agent metadata spreads: name hard left, time hard right — one glance
+     answers both "who" and "when" without reading a cluster. */
+  .msg:not(.me) .m-foot { justify-content: space-between; }
   .msg.held .m-foot { visibility: hidden; }
   .m-foot .who { color: var(--accent); font-weight: 650; font-size: 10.5px; letter-spacing: 0.1px; margin-right: 2px; }
   .m-state { display: inline-flex; opacity: 0.55; }
@@ -1396,10 +1398,14 @@
      over the light theme's deep blue and near-black over the dark theme's
      bright cyan — crisp, not the washed var(--bg) gray. Disabled recedes into
      the surface instead of ghosting the accent. */
+  /* Sized so the empty capsule centres it exactly (measured shell 43px, so
+     the absolute `bottom` is measured from the PADDING box, 1px inside the
+     border, so 5.5px yields symmetric 6.5px gaps). Bottom-anchored, so it
+     stays put as the box grows into multiple lines. */
   .send-btn {
-    position: absolute; right: 6px; bottom: 6px;
-    width: 34px; height: 34px; display: grid; place-items: center;
-    padding: 0; border: none; border-radius: 10px; cursor: pointer;
+    position: absolute; right: 7px; bottom: 5.5px;
+    width: 30px; height: 30px; display: grid; place-items: center;
+    padding: 0; border: none; border-radius: 9px; cursor: pointer;
     background: var(--accent);
     color: color-mix(in srgb, var(--bg) 30%, white);
     transition: filter 120ms ease, background 120ms ease, color 120ms ease, transform 100ms ease;
