@@ -1416,10 +1416,13 @@
   .c-input::placeholder { color: var(--text3); opacity: 0.82; }
   /* The send action: a bold up-arrow (the iMessage/ChatGPT shape — symmetric,
      so it optically centres where a diagonal plane always sat crooked) on a
-     flat accent square that matches the capsule's radius. Ink is pure white
-     over the light theme's deep blue and near-black over the dark theme's
-     bright cyan — crisp, not the washed var(--bg) gray. Disabled recedes into
-     the surface instead of ghosting the accent. */
+     flat accent square that matches the capsule's radius. Light theme: full
+     accent (a deep blue) + near-white ink. Dark theme: the accent is ELECTRIC
+     CYAN (#00d4ff) — at full strength it read as a glowing block on the dark
+     canvas (owner report), so the fill is toned to a 60% mix with the
+     background and the ink flips to near-white, which also matches the
+     recipient chip's quiet accent language. Disabled recedes into the
+     surface instead of ghosting the accent. */
   /* Sized so the empty capsule centres it exactly (measured shell 43px, so
      the absolute `bottom` is measured from the PADDING box, 1px inside the
      border, so 5.5px yields symmetric 6.5px gaps). Bottom-anchored, so it
@@ -1432,7 +1435,10 @@
     color: color-mix(in srgb, var(--bg) 30%, white);
     transition: filter var(--t-fast) ease, background var(--t-fast) ease, color var(--t-fast) ease, transform var(--t-fast) ease;
   }
-  :global(html[data-theme="dark"]) .send-btn:not(:disabled) { color: #062830; }
+  :global(html[data-theme="dark"]) .send-btn:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 60%, var(--bg));
+    color: color-mix(in srgb, white 90%, var(--accent));
+  }
   .send-btn:hover:not(:disabled) { filter: brightness(1.07); }
   .send-btn:active:not(:disabled) { transform: scale(0.93); }
   .send-btn:disabled { background: var(--surface2); color: var(--text3); cursor: default; }
