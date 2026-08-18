@@ -499,6 +499,18 @@ cycles chat → status → tools) as well as Settings → Appearance → Chat de
 
 ### Conversation visual language
 
+#### User-facing vocabulary (the contract)
+
+One noun per concept, everywhere the USER reads: the tab is **Chat**
+(中文 "对话") — it was "Hub", a name that described the architecture, not
+the page; a **Project** (项目) is the container entity in the left column,
+and each project has one chat; the things that speak are **agents**.
+"Room" is the bus's term (`proj:<session>`) and NEVER appears in UI copy —
+the no-recipient send is "leave a note in the chat" (中文 already said
+"只记录/不打断任何人"). Internal identifiers (`hub_*` RPCs, component
+names, i18n keys) intentionally keep their names: they are API contracts,
+and renaming them buys migration risk, not clarity.
+
 #### Design tokens (the contract — do not reintroduce ad-hoc values)
 
 An audit (2026-08-18, ui-ux-pro-max guidelines) found ELEVEN font sizes and
