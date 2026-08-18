@@ -22,13 +22,14 @@
   import { t } from '../core/i18n.svelte.ts';
   import {
     projectList, projectUp, projectCreate, listSessionsWithPanes,
-    hubPost, hubLog, hubAgents, hubSpawn, hubAgentStop, hubAgentRestart, hubActivity, registryList,
+    hubPost, hubLog, hubAgents, hubSpawn, hubAgentStop, hubAgentRestart, hubActivity, sendKeys, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
   import { markLeadingMention, stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_PREVIEW, pickAnchor, toolEventParts } from './hub.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
+  import DirPicker from '../files/DirPicker.svelte';
 
   let { visible = false, fontSize = 14, mobile = false, openTerminal = () => {} } = $props();
 
@@ -78,6 +79,7 @@
   // New-project dialog.
   let createOpen = $state(false);
   let createPath = $state('');
+  let dirPickerOpen = $state(false);   // the reused fs_list directory chooser
   let createName = $state('');
   let createAgents = $state([]);    // selected registry names
   let creating = $state(false);
@@ -391,6 +393,26 @@
 
   // Terminal drawer: pick a window (any window — this is where direct
   // windows and shells live) and show it.
+  /* Interrupt: type Escape into the agent's own pane. An agent CLI reacts to
+     what lands in its input (the same truth `deliver_mentions` rests on), and
+     Escape is how every supported TUI cancels the turn it is in — a `tmm`
+     message could not, because a busy agent reads chat only between turns.
+     Escape must be the NAMED key: with extended-keys on, tmux drops raw C0
+     bytes sent to a pane in extended mode (see CLAUDE.md). Stop/restart stay
+     separate and heavier: this cancels output, it does not kill the agent. */
+  async function interrupt(name) {
+    const a = agents.find((x) => x.name === name);
+    if (!a) return;
+    const p = panes.find((p) => p.session === selected && p.window === a.window && p.active)
+      ?? panes.find((p) => p.session === selected && p.window === a.window);
+    if (!p) return;
+    try {
+      await sendKeys(`${p.session}:${p.window}.${p.pane}`, 'Escape', false);
+    } catch (e) {
+      console.warn('interrupt failed', name, e);
+    }
+  }
+
   function openDrawer(a = null) {
     const pick = a ?? agents.find((x) => x.managed) ?? agents[0];
     if (pick) {
@@ -432,10 +454,16 @@
   // orchestration on purpose: each step is an existing, observable RPC.
   async function createProject() {
     const path = createPath.trim();
-    if (!path || creating) return;
+    const name = createName.trim();
+    // The NAME names the project — and its tmux session. Without it the
+    // server fell back to the directory's basename, so a project created
+    // in .../myapp/src-tauri was called "src-tauri" (owner report). It is
+    // required in the dialog rather than defaulted, because a good default
+    // does not exist: the folder name is what was wrong.
+    if (!path || !name || creating) return;
     creating = true;
     try {
-      const r = await projectCreate(path, createName.trim() ? { name: createName.trim() } : {});
+      const r = await projectCreate(path, { name, session: name });
       const proj = r.project ?? r;
       await projectUp(proj.id);
       for (const name of createAgents) {
@@ -739,6 +767,9 @@
           <span class="ab-who">{menuFor}</span>
           <button onclick={() => { const a = managedAgents.find((x) => x.name === menuFor); menuFor = ''; if (a) openDrawer(a); }}>
             <Icon name="terminal" size={12} />{t('hubWatch')}
+          </button>
+          <button title={t('hubInterruptHint')} onclick={() => { const n = menuFor; menuFor = ''; interrupt(n); }}>
+            <Icon name="x" size={12} />{t('hubInterrupt')}
           </button>
           <button class="danger" onclick={() => { const n = menuFor; menuFor = ''; askAction('stop', n); }}>
             <Icon name="stop" size={12} />{t('hubStop')}
@@ -1059,8 +1090,20 @@
     <div class="dlg-backdrop" onclick={() => createOpen = false} role="presentation"></div>
     <div class="dlg" class:sheet={compact}>
       <h2>{t('projectNew')}</h2>
-      <input placeholder={t('hubCreatePath')} bind:value={createPath} />
-      <input placeholder={t('hubCreateName')} bind:value={createName} />
+      {#if dirPickerOpen}
+        <DirPicker start={createPath.trim() || '~'}
+          onpick={(p) => { createPath = p; dirPickerOpen = false; }}
+          oncancel={() => dirPickerOpen = false} />
+      {:else}
+        <input placeholder={t('hubCreateName')} bind:value={createName} />
+        <div class="path-row">
+          <input placeholder={t('hubCreatePath')} bind:value={createPath} />
+          <button class="chip-btn" onclick={() => dirPickerOpen = true}>
+            <Icon name="folder" size={13} />{t('dirPickerOpen')}
+          </button>
+        </div>
+      {/if}
+      {#if !dirPickerOpen}
       <div class="dlg-h">{t('hubCreateAgents')}</div>
       <div class="dlg-agents">
         {#each registry as r (r.name)}
@@ -1073,10 +1116,11 @@
       </div>
       <div class="dlg-actions">
         <button class="chip-btn" onclick={() => createOpen = false}>{t('cancel')}</button>
-        <button class="chip-btn primary" disabled={!createPath.trim() || creating} onclick={createProject}>
+        <button class="chip-btn primary" disabled={!createPath.trim() || !createName.trim() || creating} onclick={createProject}>
           {creating ? '…' : t('hubCreateGo')}
         </button>
       </div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -1541,6 +1585,10 @@
   .dlg input:focus { border-color: var(--accent); }
   .dlg-h { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-meta); text-transform: uppercase; letter-spacing: 1.4px; color: var(--text3); margin-top: 4px; }
   .dlg-agents { display: flex; flex-direction: column; gap: 5px; }
+  /* Path field + Browse, one row: the field still accepts a typed path. */
+  .path-row { display: flex; gap: 6px; align-items: stretch; }
+  .path-row input { flex: 1; min-width: 0; }
+  .path-row .chip-btn { flex: none; }
   .agent-pick { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; color: var(--text2); padding: 8px 11px; font-size: var(--fs-ui); cursor: pointer; text-align: left; }
   .agent-pick.sel { border-color: var(--accent); color: var(--text); background: var(--accent-bg); }
   .agent-pick :global(svg) { margin-left: auto; color: var(--accent); }

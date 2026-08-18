@@ -499,6 +499,27 @@ cycles chat → status → tools) as well as Settings → Appearance → Chat de
 
 ### Conversation visual language
 
+#### Starting a project, and interrupting an agent
+
+Creating a project asks for a NAME and a PATH, in that order, and the name
+is REQUIRED: it names the project and seeds its tmux session name. Left
+empty, the server falls back to the directory's basename, which produced
+projects called "src-tauri" (owner report) — and no better default exists,
+because the folder name is exactly what was wrong. The path field still
+accepts a typed path, but `Browse…` opens `DirPicker` — the same `fs_list`
+RPC the file browser uses, directories only, read-only. It is a chooser,
+not a second file manager: no preview, edit or upload, 40px rows for a
+thumb, and the path label keeps its TAIL visible (`direction: rtl`).
+
+Interrupting is a THIRD verb, between "say something" and "stop the
+agent": it types `Escape` into the agent's own pane. That is the only
+channel that reaches a BUSY agent — a `tmm` message is read between turns,
+so it cannot cancel the turn in progress — and Escape is how the supported
+TUIs cancel. It must be the NAMED key, never a raw `\x1b`: with
+`extended-keys on` tmux drops raw C0 bytes sent to a pane in extended mode.
+Interrupt cancels output and leaves the agent alive; stop/restart remain
+the heavier, separately-confirmed actions.
+
 #### User-facing vocabulary (the contract)
 
 One noun per concept, everywhere the USER reads: the tab is **Chat**
