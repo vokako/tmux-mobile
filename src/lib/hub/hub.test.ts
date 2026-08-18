@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeMessages, statuslineWindows, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor } from './hub.ts';
+import { markLeadingMention, mergeMessages, statuslineWindows, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -364,4 +364,26 @@ test('an unconfirmed delivery is visible even at the chat-only level', () => {
   const activity = [ev({ ts: 100, kind: 'warn', text: 'unconfirmed: [tmm chat] human: @dev hi' })];
   const blocks = feedBlocks([{ ts: 50, from: 'human', body: '@dev hi' }], activity, 'chat');
   assert.deepEqual(blocks.map((b) => b.type), ['msg', 'note'], 'a failed delivery is not opt-in detail');
+});
+
+test('markLeadingMention wraps only a leading address', () => {
+  assert.equal(
+    markLeadingMention('<p>@lead 查一下状态</p>'),
+    '<p><span class="m-to">@lead</span> 查一下状态</p>',
+  );
+  assert.equal(
+    markLeadingMention('<p>@all everyone</p>'),
+    '<p><span class="m-to">@all</span> everyone</p>',
+  );
+  // a bare address with nothing after it
+  assert.equal(markLeadingMention('<p>@human</p>'), '<p><span class="m-to">@human</span></p>');
+});
+
+test('markLeadingMention leaves non-address mentions alone', () => {
+  // mid-text mention is content, not an address
+  assert.equal(markLeadingMention('<p>ping @lead later</p>'), '<p>ping @lead later</p>');
+  // a message that does not start with a paragraph (list, code) is untouched
+  assert.equal(markLeadingMention('<ul><li>@lead x</li></ul>'), '<ul><li>@lead x</li></ul>');
+  // an email is not a mention
+  assert.equal(markLeadingMention('<p>a@b.com hi</p>'), '<p>a@b.com hi</p>');
 });

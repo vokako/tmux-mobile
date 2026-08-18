@@ -26,7 +26,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_PREVIEW, pickAnchor, toolEventParts } from './hub.ts';
+  import { markLeadingMention, stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_PREVIEW, pickAnchor, toolEventParts } from './hub.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
 
@@ -745,7 +745,7 @@
                       {#if rawOpen === key}
                         <pre class="raw">{m.body}</pre>
                       {:else}
-                        {@html renderMarkdown(parts.text)}
+                        {@html markLeadingMention(renderMarkdown(parts.text))}
                       {/if}
                     {/if}
                     <span class="m-meta">
@@ -1250,6 +1250,9 @@
      ~20px line box. */
   .m-body { min-width: 0; display: flow-root; }
   .m-body > :global(p:nth-last-child(2)) { display: inline; }
+  /* The leading @recipient — the address — reads apart from the words
+     without shouting: weight and a quiet accent lean, no chip, no box. */
+  .m-body :global(.m-to) { font-weight: 600; color: color-mix(in srgb, var(--accent) 62%, var(--text)); }
   .m-meta {
     float: right; display: inline-flex; align-items: center; gap: 3px;
     margin: 7px 0 0 8px; color: var(--text3); font-size: 10px; line-height: 1;

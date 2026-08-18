@@ -248,6 +248,15 @@ export type FeedLevel = 'chat' | 'status' | 'tools';
  * spelling and stay recognized because the room is persisted — old messages
  * must not regress into bubbles. Returns the text without its marker, or null
  * when the body is ordinary prose. */
+/// Wrap a message's leading @recipient — the address, the composer's own
+/// prefix — in a span the bubble can set apart. Only the FIRST mention and
+/// only at the very start of the first paragraph: a mention mid-text is
+/// content, not an address. Works on rendered markdown HTML so the span
+/// stays inline in the first line box.
+export function markLeadingMention(html: string): string {
+  return html.replace(/^(\s*<p>)(@[\w][\w.-]*)(?=[\s<,，:：、!！?？]|$)/, '$1<span class="m-to">$2</span>');
+}
+
 export function systemLine(body: string | null | undefined): string | null {
   for (const marker of ['[tmm] ', '⚡ ', '✔ ']) {
     if (body?.startsWith(marker)) return body.slice(marker.length);
