@@ -188,8 +188,13 @@ pub fn create(
             }
             return Ok(json!(existing));
         }
+        // The session follows the NAME when one was given: a project called
+        // "closetest" living in /tmp must not become the session "tmp" (owner
+        // report — the same folder-name-wins bug the Hub dialog hit). An
+        // explicit `session` still overrides; basename is the last resort.
         let wanted = session
             .filter(|s| !s.trim().is_empty())
+            .or(name.filter(|s| !s.trim().is_empty()))
             .map(slug)
             .unwrap_or_else(|| slug(basename(&path)));
         let id = format!("{}-{}", slug(&label), digest(&path));
@@ -733,6 +738,31 @@ pub(crate) mod tests {
             std::fs::create_dir_all(&dir).unwrap();
             std::env::set_var("TMM_STATE_DB", dir.join("state.db"));
         });
+    }
+
+    #[test]
+    fn the_session_follows_the_project_name_not_the_folder() {
+        use_test_store();
+        let dir = std::env::temp_dir().join(format!("tmm-name-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.to_string_lossy().to_string();
+
+        // A name given, no session: BOTH follow the name. The folder name is a
+        // fallback, never a winner — it produced projects called "src-tauri"
+        // and sessions called "tmp" (owner reports).
+        let made = create(&path, Some("Close Test"), None, None).unwrap();
+        assert_eq!(made.get("name").and_then(|v| v.as_str()), Some("Close Test"));
+        // slug() lowercases and hyphenates — a tmux session name, not a label.
+        assert_eq!(made.get("session").and_then(|v| v.as_str()), Some("close-test"));
+
+        // An explicit session still wins over the name.
+        let other = std::env::temp_dir().join(format!("tmm-name-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&other).unwrap();
+        let made2 = create(&other.to_string_lossy(), Some("Label"), Some("chosen"), None).unwrap();
+        assert_eq!(made2.get("session").and_then(|v| v.as_str()), Some("chosen"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&other);
     }
 
     /// The one definition of "an agent this app created". Three gates share it

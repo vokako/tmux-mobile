@@ -21,7 +21,7 @@
   import Icon from '../ui/Icon.svelte';
   import { t } from '../core/i18n.svelte.ts';
   import {
-    projectList, projectUp, projectCreate, listSessionsWithPanes,
+    projectList, projectUp, projectDown, projectCreate, listSessionsWithPanes,
     hubPost, hubLog, hubAgents, hubSpawn, hubAgentStop, hubAgentRestart, hubActivity, sendKeys, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
@@ -531,19 +531,29 @@
   // Stopping an agent kills a process that may be mid-task, and on a phone the
   // button is a thumb away from the chip you meant to tap — so it asks first.
   // Starting one that is already stopped destroys nothing, so it just happens.
-  let pendingAct = $state(null);   // { kind: 'stop', name }
+  // One confirmation dialog for the consequential actions: stopping ONE agent
+  // and closing the WHOLE project (which kills every pane in its session).
+  // Both are recoverable — the declaration survives, `Open` brings it back
+  // and an agent resumes its conversation — but neither should happen from a
+  // mis-tap.
+  let pendingAct = $state(null);   // { kind: 'stop' | 'down', name }
   let acting = $state(false);
   const askAction = (kind, name) => { pendingAct = { kind, name }; };
 
   async function runAction() {
     if (!pendingAct || acting) return;
-    const { name } = pendingAct;
+    const { kind, name } = pendingAct;
     acting = true;
     try {
-      await hubAgentStop(selected, name);
+      if (kind === 'down') {
+        const row = rows.find((r) => r.project.session === selected);
+        if (row) await projectDown(row.project.id);
+      } else {
+        await hubAgentStop(selected, name);
+      }
       await Promise.all([reload(), loadAgents(), loadFeed()]);
     } catch (e) {
-      console.warn('stop failed', e);
+      console.warn(kind === 'down' ? 'close project failed' : 'stop failed', e);
     } finally {
       acting = false;
       pendingAct = null;
@@ -704,6 +714,14 @@
         <span class="spacer"></span>
         {#if selected && !liveSelected}
           <button class="chip-btn" onclick={bringUp}>{t('projectOpen')}</button>
+        {:else if selected}
+          <!-- Closing is the counterpart of Open, in the same slot: it kills
+               the tmux session and keeps the project, so the header shows
+               exactly one of the two depending on what is true now. -->
+          <button class="chip-btn danger" title={t('projectDownHint')}
+            onclick={() => askAction('down', selectedRow?.project.name ?? '')}>
+            {t('projectDown')}
+          </button>
         {/if}
         <!-- THE terminal affordance: a button, not a permanent pane. Adding an
              agent belongs to the roster row, and chat detail belongs to
@@ -1045,15 +1063,15 @@
   </div>
 
   {#if pendingAct}
-    <!-- ── Stop one agent ── -->
+    <!-- ── Confirm: stop one agent, or close the whole project ── -->
     <div class="dlg-backdrop" onclick={() => pendingAct = null} role="presentation"></div>
     <div class="dlg" class:sheet={compact}>
-      <h2>{t('hubStopTitle').replace('{name}', pendingAct.name)}</h2>
-      <p class="dlg-note">{t('hubStopNote')}</p>
+      <h2>{(pendingAct.kind === 'down' ? t('projectDownTitle') : t('hubStopTitle')).replace('{name}', pendingAct.name)}</h2>
+      <p class="dlg-note">{pendingAct.kind === 'down' ? t('projectDownNote') : t('hubStopNote')}</p>
       <div class="dlg-actions">
         <button class="chip-btn" onclick={() => pendingAct = null}>{t('cancel')}</button>
         <button class="chip-btn primary danger" disabled={acting} onclick={runAction}>
-          {acting ? '…' : t('hubStop')}
+          {acting ? '…' : (pendingAct.kind === 'down' ? t('projectDown') : t('hubStop'))}
         </button>
       </div>
     </div>

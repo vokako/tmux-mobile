@@ -526,6 +526,22 @@ cycles chat → status → tools) as well as Settings → Appearance → Chat de
 
 ### Conversation visual language
 
+#### Opening and closing a project
+
+The chat header carries exactly ONE of two buttons, whichever is true right
+now: **Open** (`project_up`) when the project has no live tmux session, and
+**Close** (`project_down`) when it does — the owner could not find a way to
+close a project from the chat, because only Open existed. Close goes through
+the same confirmation dialog as stopping an agent (it kills every pane in the
+session), and the copy says what survives: the project stays in the list, Open
+brings it back, and each agent resumes its own conversation.
+
+`project_create` also had to change: the session name follows the NAME when
+one is given (`session ?? name ?? basename(path)`). It previously fell
+straight through to the folder, so `tmm project create /tmp --name closetest`
+made a session called `tmp` — the same folder-name-wins bug the Hub dialog hit
+from the other side. An explicit `--session` still overrides.
+
 #### Starting a project, and interrupting an agent
 
 Creating a project asks for a NAME and a PATH, in that order, and the name
