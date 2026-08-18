@@ -514,6 +514,12 @@ One label rule: an agent's bubble carries its name (several agents speak in one
 room), while your own carries only the timestamp — the right-aligned accent
 bubble already says "yours", so a "you" label was noise and is gone.
 
+Corner radii are one small scale, tuned down on owner feedback (大圆角 read as
+toy-like): bubbles 12px with a 4px directional corner, the composer capsule
+10px, roster chips 9px, system pills 8px, recipient chip and message actions
+7px. The held mini-bubble's clip `round` and drawn frame follow the bubble
+radius — change one, change all three.
+
 Sender, timestamp, delivery receipt and body belong inside the same `.bubble`.
 That is not cosmetic: separating the header from the bubble makes a sticky message
 look like a cloned card even when there is only one DOM node. Prose bubbles are
@@ -528,10 +534,13 @@ The composer is one rounded capsule at every width, and everything lives inside
 it. The recipient chip is pinned to the capsule's top-left; the textarea's FIRST
 line starts beside it via a measured `text-indent` (the chip width is bound with
 `bind:clientWidth`, so a long agent name still works) and wrapped lines reclaim
-the full capsule width beneath the chip. The circular accent send button —
-stroked paper-plane, disabled when empty — sits inside the capsule's bottom-right
-corner, absolutely positioned so it stops costing the composer a whole column and
-stays put as the textarea grows. The indent is a re-measure dependency of the
+the full capsule width beneath the chip. The send button is a small rounded
+SQUARE in the capsule's bottom-right corner — same design language as the
+capsule, flat, no shadow physics of its own (the floating accent circle read as
+a foreign element). Its ink is `var(--bg)`: dark ink on the dark theme's bright
+cyan, light ink on the light theme's deep blue. Disabled recedes into the
+surface instead of ghosting the accent; it is absolutely positioned so it costs
+no column and stays put as the textarea grows. The indent is a re-measure dependency of the
 auto-grow, since it changes where text wraps. On a phone the chip drops its
 redundant “TO” prefix and caps its width; safe-area padding remains on the outer
 composer.

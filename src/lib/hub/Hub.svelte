@@ -1050,11 +1050,11 @@
   .hub-root.compact .feed { padding: 14px 10px 18px; gap: 9px; }
   .hub-root.compact .msg, .hub-root.compact .prompt { max-width: 91%; }
   .hub-root.compact .composer { padding: 8px 9px calc(8px + env(safe-area-inset-bottom)); }
-  .hub-root.compact .compose-shell { padding: 6px 48px 6px 9px; border-radius: 21px; }
+  .hub-root.compact .compose-shell { padding: 6px 48px 6px 9px; border-radius: 10px; }
   .hub-root.compact .to-chip { max-width: 110px; height: 28px; }
   .hub-root.compact .to-label { display: none; }
   .hub-root.compact .c-input { min-height: 30px; font-size: 14px; max-height: 40vh; }
-  .hub-root.compact .send-btn { width: 38px; height: 38px; right: 5px; bottom: 4px; }
+  .hub-root.compact .send-btn { width: 38px; height: 38px; right: 5px; bottom: 5px; border-radius: 9px; }
   .hub-root.compact .chip-btn { min-height: 34px; }
   .hub-root.compact .s-head { min-height: 34px; }
   /* Drawer open: the conversation yields but stays present. */
@@ -1087,7 +1087,7 @@
   .acard {
     position: relative; flex: none; display: flex; align-items: center; gap: 6px;
     min-height: 34px; background: var(--surface); border: 1px solid var(--border);
-    border-radius: 999px; padding: 4px 10px 4px 5px; cursor: pointer; text-align: left;
+    border-radius: 9px; padding: 4px 10px 4px 5px; cursor: pointer; text-align: left;
     font-size: 12.5px; color: var(--text2); transition: border-color 160ms, color 160ms;
     -webkit-tap-highlight-color: transparent;
   }
@@ -1160,10 +1160,10 @@
      · The bare cut had no bottom edge ("少了一个小边边"): ::after paints a
        fake floor — 3px of the bubble's own colour capped by its 1px border
        line — which also covers the next line's 2px glyph sliver. */
-  .msg.ask-top.held { clip-path: inset(0 0 calc(100% - 53px) 0 round 17px); }
-  .msg.ask-bottom.held { clip-path: inset(calc(100% - 53px) 0 0 0 round 17px); }
+  .msg.ask-top.held { clip-path: inset(0 0 calc(100% - 53px) 0 round 12px); }
+  .msg.ask-bottom.held { clip-path: inset(calc(100% - 53px) 0 0 0 round 12px); }
   .msg.ask-bottom.held .bubble {
-    clip-path: inset(0 0 calc(100% - 53px) 0 round 17px);
+    clip-path: inset(0 0 calc(100% - 53px) 0 round 12px);
     transform: translateY(calc(100% - 53px));
   }
   /* The frame of the held mini-bubble is DRAWN, not inherited. The real
@@ -1179,7 +1179,7 @@
   .msg.held .bubble, .msg.held.me .bubble { border-color: transparent; }
   .msg.held .bubble::before {
     content: ''; position: absolute; left: -1px; right: -1px; top: -1px; height: 53px;
-    border: 1px solid var(--bubble-line); border-radius: 17px;
+    border: 1px solid var(--bubble-line); border-radius: 12px;
     pointer-events: none;
   }
   .msg.held.me .bubble::before {
@@ -1209,7 +1209,7 @@
   .bubble {
     position: relative;
     background: var(--bubble-in); border: 1px solid var(--bubble-line);
-    border-radius: 17px 17px 17px 6px; padding: 8px 12px 9px;
+    border-radius: 12px 12px 12px 4px; padding: 8px 12px 9px;
     color: var(--text); font-size: 13.5px; line-height: 1.48;
     word-break: break-word; overflow-wrap: anywhere; cursor: pointer;
     box-shadow: 0 1px 2px rgba(0,0,0,0.10);
@@ -1219,7 +1219,7 @@
   .bubble:hover { border-color: var(--input-border); }
   .msg.me .bubble {
     background: var(--bubble-out); border-color: color-mix(in srgb, var(--accent) 18%, transparent);
-    border-radius: 17px 17px 6px 17px;
+    border-radius: 12px 12px 4px 12px;
   }
   .m-head {
     display: flex; align-items: center; gap: 7px; min-height: 16px;
@@ -1241,7 +1241,7 @@
   .msg:not(.me) .m-acts { right: auto; left: 10px; }
   .m-acts button {
     display: inline-flex; align-items: center; gap: 4px; min-height: 26px;
-    background: var(--bubble-in); border: 1px solid var(--border); border-radius: 999px;
+    background: var(--bubble-in); border: 1px solid var(--border); border-radius: 7px;
     color: var(--text2); padding: 3px 10px; font-size: 10.5px; cursor: pointer;
     box-shadow: 0 2px 8px rgba(0,0,0,0.18);
   }
@@ -1250,7 +1250,7 @@
   .shots { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; border-radius: 16px; overflow: hidden; }
   .sysline {
     align-self: center; display: flex; align-items: baseline; gap: 7px;
-    max-width: min(92%, 620px); padding: 4px 13px; border-radius: 999px;
+    max-width: min(92%, 620px); padding: 4px 13px; border-radius: 8px;
     color: var(--text3); background: color-mix(in srgb, var(--bubble-in) 88%, transparent);
     border: 1px solid var(--border2); box-shadow: 0 1px 2px rgba(0,0,0,0.06);
     font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -1325,7 +1325,7 @@
   }
   .compose-shell {
     flex: 1; min-width: 0; position: relative;
-    padding: 6px 52px 6px 10px; border: 1px solid var(--input-border); border-radius: 23px;
+    padding: 6px 52px 6px 10px; border: 1px solid var(--input-border); border-radius: 10px;
     background: var(--bubble-in); box-shadow: 0 1px 3px rgba(0,0,0,0.10);
     transition: border-color 150ms ease, box-shadow 150ms ease;
   }
@@ -1338,7 +1338,7 @@
   .to-chip {
     display: flex; align-items: center; gap: 4px; height: 26px;
     background: var(--accent-bg); color: var(--accent); border: 1px solid transparent;
-    border-radius: 999px; padding: 0 9px; font-size: 11px; font-weight: 650;
+    border-radius: 7px; padding: 0 9px; font-size: 11px; font-weight: 650;
     cursor: pointer; max-width: min(34vw, 220px);
   }
   /* Broadcast and room-note are NOT the default state, so they do not wear the
@@ -1372,17 +1372,21 @@
     resize: none; overflow-y: auto;
   }
   .c-input::placeholder { color: var(--text3); opacity: 0.82; }
+  /* The send action shares the capsule's design language: a small rounded
+     square, flat, aligned with the input line — not a floating circle with
+     its own shadow physics. Ink is var(--bg): dark ink on the bright cyan of
+     the dark theme, light ink on the deep blue of the light theme. Disabled
+     recedes into the surface instead of ghosting the accent. */
   .send-btn {
-    position: absolute; right: 6px; bottom: 5px;
-    width: 36px; height: 36px; display: grid; place-items: center;
-    padding: 0; border: none; border-radius: 50%; cursor: pointer;
-    background: var(--accent); color: white;
-    box-shadow: 0 3px 10px color-mix(in srgb, var(--accent) 30%, transparent);
-    transition: transform 130ms ease, box-shadow 130ms ease, opacity 130ms ease;
+    position: absolute; right: 6px; bottom: 6px;
+    width: 34px; height: 34px; display: grid; place-items: center;
+    padding: 0; border: none; border-radius: 8px; cursor: pointer;
+    background: var(--accent); color: var(--bg);
+    transition: filter 120ms ease, background 120ms ease, color 120ms ease, transform 100ms ease;
   }
-  .send-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 38%, transparent); }
-  .send-btn:active:not(:disabled) { transform: scale(0.96); }
-  .send-btn:disabled { opacity: 0.35; cursor: default; box-shadow: none; }
+  .send-btn:hover:not(:disabled) { filter: brightness(1.08); }
+  .send-btn:active:not(:disabled) { transform: scale(0.94); }
+  .send-btn:disabled { background: var(--surface2); color: var(--text3); cursor: default; }
 
   /* Empty room: start from a preset — one agent, or a team. */
   .start { margin: auto; display: flex; flex-direction: column; gap: 8px; width: min(420px, 100%); }
