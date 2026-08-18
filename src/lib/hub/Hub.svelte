@@ -735,10 +735,14 @@
                      text, sharing the last line when it fits and dropping to
                      its own right-aligned line when it doesn't. Never a
                      separate row or column outside the bubble. -->
-                <!-- svelte-ignore a11y_no_static_element_interactions -->
-                <div class="bubble md" role="button" tabindex="0"
-                  onclick={() => { msgOpen = msgOpen === key ? '' : key; }}
-                  onkeydown={(e) => { if (e.key === 'Enter') msgOpen = msgOpen === key ? '' : key; }}>
+                <!-- The bubble is TEXT to assistive tech (role="button" made
+                     every message announce as one giant button and Tab walk
+                     the whole transcript); its click is a pointer convenience.
+                     The accessible path to copy/raw is the meta-trailer
+                     button below. -->
+                <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+                <div class="bubble md"
+                  onclick={() => { msgOpen = msgOpen === key ? '' : key; }}>
                   {#if m.from !== 'human'}<div class="m-head">{m.from}</div>{/if}
                   <div class="m-body">
                     {#if parts.text}
@@ -748,14 +752,15 @@
                         {@html markLeadingMention(renderMarkdown(parts.text))}
                       {/if}
                     {/if}
-                    <span class="m-meta">
+                    <button class="m-meta" aria-label={t('hubMsgActions')}
+                      onclick={(e) => { e.stopPropagation(); msgOpen = msgOpen === key ? '' : key; }}>
                       <span class="m-time">{fmtTime(m.ts)}</span>
                       {#if m.from === 'human'}
                         <span class="m-state" class:ok={b.delivered} title={t('hubDeliveredHint')}>
                           <Icon name={b.delivered ? 'circle-check' : 'circle'} size={11} />
                         </span>
                       {/if}
-                    </span>
+                    </button>
                   </div>
                 </div>
                 {#if msgOpen === key}
@@ -1043,20 +1048,27 @@
     --bubble-in: color-mix(in srgb, var(--bg) 92%, white 8%);
     --bubble-out: color-mix(in srgb, var(--bg) 84%, var(--accent) 16%);
     --bubble-line: color-mix(in srgb, var(--border) 72%, var(--text3) 28%);
+  
+    /* Design tokens — the contract in tmm-cli.md "Design tokens". New rules
+       must reference these; a raw font-size/duration here is a regression. */
+    --fs-micro: 9px; --fs-meta: 10.5px; --fs-sub: 11.5px;
+    --fs-ui: 12.5px; --fs-body: 13.5px; --fs-title: 15px;
+    --meta-ink: color-mix(in srgb, var(--text2) 55%, var(--text3));
+    --t-fast: 120ms; --t-move: 200ms;
   }
   .cols { flex: 1; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 0; }
   .hub-root.compact .cols { grid-template-columns: minmax(0, 1fr); }
   /* Phone shape: tighter gutters, thumb-sized controls, no horizontal
      overflow. The page head wraps instead of pushing the chips off-screen. */
   .hub-root.compact .page-head { flex-wrap: wrap; row-gap: 6px; padding: 8px 12px; }
-  .hub-root.compact .page-head h1 { font-size: 15px; }
+  .hub-root.compact .page-head h1 { font-size: var(--fs-title); }
   .hub-root.compact .feed { padding: 14px 10px 18px; gap: 9px; }
   .hub-root.compact .msg, .hub-root.compact .prompt { max-width: 91%; }
   .hub-root.compact .composer { padding: 8px 9px calc(8px + env(safe-area-inset-bottom)); }
   .hub-root.compact .compose-shell { padding: 6px 48px 6px 9px; border-radius: 10px; }
   .hub-root.compact .to-chip { max-width: 110px; height: 28px; }
   .hub-root.compact .to-label { display: none; }
-  .hub-root.compact .c-input { min-height: 30px; font-size: 14px; max-height: 40vh; }
+  .hub-root.compact .c-input { min-height: 30px; font-size: var(--fs-body); max-height: 40vh; }
   .hub-root.compact .send-btn { width: 32px; height: 32px; right: 6px; bottom: 4.5px; border-radius: 10px; }
   .hub-root.compact .chip-btn { min-height: 34px; }
   .hub-root.compact .s-head { min-height: 34px; }
@@ -1079,7 +1091,7 @@
   .p-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; }
 
   .mid { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-  .path { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .path { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .spacer { flex: 1; }
   .term-toggle.on { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
 
@@ -1091,7 +1103,7 @@
     position: relative; flex: none; display: flex; align-items: center; gap: 6px;
     min-height: 34px; background: var(--surface); border: 1px solid var(--border);
     border-radius: 9px; padding: 4px 10px 4px 5px; cursor: pointer; text-align: left;
-    font-size: 12.5px; color: var(--text2); transition: border-color 160ms, color 160ms;
+    font-size: var(--fs-ui); color: var(--text2); transition: border-color var(--t-fast), color var(--t-fast);
     -webkit-tap-highlight-color: transparent;
   }
   .acard:hover { border-color: var(--input-border); color: var(--text); }
@@ -1101,7 +1113,7 @@
   .acard.off { opacity: 0.55; }
   .acard.off:hover { opacity: 1; border-color: var(--accent); }
   .a-name { font-family: ui-monospace, Menlo, monospace; font-weight: 600; max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .s-age { color: var(--text3); font-size: 10.5px; font-variant-numeric: tabular-nums; font-family: ui-monospace, Menlo, monospace; }
+  .s-age { color: var(--text3); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; font-family: ui-monospace, Menlo, monospace; }
   .st { width: 6px; height: 6px; border-radius: 50%; flex: none; }
   .st.live { animation: s-pulse 1.4s ease-in-out infinite; }
   .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--status-danger); flex: none; }
@@ -1113,11 +1125,11 @@
     display: flex; align-items: center; gap: 6px; padding: 6px 14px;
     border-bottom: 1px solid var(--border2); background: var(--bg2);
   }
-  .ab-who { font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: 12px; color: var(--text2); }
+  .ab-who { font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: var(--fs-sub); color: var(--text2); }
   .a-bar button {
     display: inline-flex; align-items: center; gap: 5px; min-height: 32px;
     background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
-    color: var(--text3); padding: 4px 10px; font-size: 12px; cursor: pointer;
+    color: var(--text3); padding: 4px 10px; font-size: var(--fs-sub); cursor: pointer;
   }
   .a-bar button:hover { color: var(--text); border-color: var(--input-border); }
   .a-bar button.danger:hover { color: var(--status-danger); border-color: var(--status-danger); }
@@ -1223,10 +1235,10 @@
     position: relative;
     background: var(--bubble-in); border: 1px solid var(--bubble-line);
     border-radius: 12px 12px 12px 4px; padding: 8px 12px 9px;
-    color: var(--text); font-size: 13.5px; line-height: 1.48;
+    color: var(--text); font-size: var(--fs-body); line-height: 1.48;
     word-break: break-word; overflow-wrap: anywhere; cursor: text;
     box-shadow: 0 1px 2px rgba(0,0,0,0.10);
-    transition: border-color 140ms ease, box-shadow 140ms ease;
+    transition: border-color var(--t-fast) ease, box-shadow var(--t-fast) ease;
     -webkit-tap-highlight-color: transparent;
   }
   .bubble:hover { border-color: var(--input-border); }
@@ -1237,7 +1249,7 @@
   /* Agent name heads the bubble (your own carries none — the right-aligned
      accent bubble already says "yours"). */
   .m-head {
-    color: var(--accent); font-weight: 650; font-size: 11px;
+    color: var(--accent); font-weight: 650; font-size: var(--fs-sub);
     letter-spacing: 0.1px; line-height: 1.2; margin: 0 0 2px; user-select: none;
   }
   /* The Telegram inline trailer: time (+ delivery ring on your own messages,
@@ -1253,15 +1265,18 @@
   /* The leading @recipient — the address — reads apart from the words
      without shouting: weight and a quiet accent lean, no chip, no box. */
   .m-body :global(.m-to) { font-weight: 600; color: color-mix(in srgb, var(--accent) 62%, var(--text)); }
+  /* A real <button>: the accessible route to copy/raw (the bubble itself is
+     text). Styled to stay a quiet trailer. */
   .m-meta {
     float: right; display: inline-flex; align-items: center; gap: 3px;
-    margin: 7px 0 0 8px; color: var(--text3); font-size: 10px; line-height: 1;
-    user-select: none;
+    margin: 7px 0 0 8px; color: var(--meta-ink); font-size: var(--fs-meta); line-height: 1;
+    user-select: none; background: none; border: none; padding: 0;
+    font-family: inherit; cursor: pointer;
   }
   .m-state { display: inline-flex; opacity: 0.55; }
   .m-state.ok { color: var(--status-ok); opacity: 1; }
-  .m-time { font-variant-numeric: tabular-nums; opacity: 0.78; }
-  .bubble .raw { margin: 0; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text2); }
+  .m-time { font-variant-numeric: tabular-nums; }
+  .bubble .raw { margin: 0; font-family: var(--font-mono); font-size: var(--fs-sub); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text2); }
   /* What you can DO with a message, revealed by tapping it. An OVERLAY on the
      bubble's bottom-right corner, out of the flow: opening it must not push
      the feed around or change the scroll height the anchor math depends on. */
@@ -1272,7 +1287,7 @@
   .m-acts button {
     display: inline-flex; align-items: center; gap: 4px; min-height: 26px;
     background: var(--bubble-in); border: 1px solid var(--border); border-radius: 7px;
-    color: var(--text2); padding: 3px 10px; font-size: 10.5px; cursor: pointer;
+    color: var(--text2); padding: 3px 10px; font-size: var(--fs-meta); cursor: pointer;
     box-shadow: 0 2px 8px rgba(0,0,0,0.18);
   }
   .m-acts button:hover, .m-acts button.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
@@ -1283,21 +1298,21 @@
     max-width: min(92%, 620px); padding: 4px 13px; border-radius: 8px;
     color: var(--text3); background: color-mix(in srgb, var(--bubble-in) 88%, transparent);
     border: 1px solid var(--border2); box-shadow: 0 1px 2px rgba(0,0,0,0.06);
-    font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-size: var(--fs-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
   }
 
   /* The input half of a turn — what the agent was asked. */
   .prompt { align-self: flex-start; max-width: min(76%, 760px); border-left: 2px solid var(--border); padding-left: 9px; margin: 1px 6px; }
-  .p-head { display: flex; align-items: baseline; gap: 7px; font-size: 10.5px; color: var(--text3); margin-bottom: 2px; }
+  .p-head { display: flex; align-items: baseline; gap: 7px; font-size: var(--fs-meta); color: var(--text3); margin-bottom: 2px; }
   .p-head .p-who { font-family: ui-monospace, Menlo, monospace; font-weight: 600; color: var(--text2); }
-  .p-tag { text-transform: uppercase; letter-spacing: 0.8px; font-size: 9px; color: var(--text3); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
-  .p-body { font-size: 12.5px; color: var(--text2); white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; max-height: 7.5em; overflow: hidden; }
+  .p-tag { text-transform: uppercase; letter-spacing: 0.8px; font-size: var(--fs-micro); color: var(--text3); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+  .p-body { font-size: var(--fs-ui); color: var(--text2); white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; max-height: 7.5em; overflow: hidden; }
 
   /* A single observed fact: status declaration, lifecycle hook, warning. */
   .note {
     display: flex; align-items: baseline; gap: 8px; width: min(76%, 760px);
-    font-family: var(--font-mono); font-size: 10.5px; color: var(--text3);
+    font-family: var(--font-mono); font-size: var(--fs-meta); color: var(--text3);
     padding: 1px 8px; max-width: 100%;
   }
   .note .n-who { flex: none; font-weight: 600; }
@@ -1312,12 +1327,12 @@
     display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
     background: var(--surface); border: 1px solid var(--border2); border-radius: 9px;
     padding: 5px 10px; cursor: pointer; color: var(--text3);
-    font-family: ui-monospace, Menlo, monospace; font-size: 11px;
-    transition: border-color 160ms, color 160ms;
+    font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub);
+    transition: border-color var(--t-fast), color var(--t-fast);
   }
   .s-head:hover { border-color: var(--input-border); color: var(--text2); }
   .steps.open .s-head { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
-  .chev { display: inline-flex; flex: none; transition: transform 150ms; }
+  .chev { display: inline-flex; flex: none; transition: transform var(--t-move); }
   .chev.open { transform: rotate(90deg); }
   .s-live { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--status-ok); animation: s-pulse 1.4s ease-in-out infinite; }
   @keyframes s-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
@@ -1331,10 +1346,10 @@
   }
   .s-all {
     align-self: flex-start; background: none; border: none; color: var(--text3);
-    font-size: 10.5px; padding: 0 0 3px; cursor: pointer; font-family: ui-monospace, Menlo, monospace;
+    font-size: var(--fs-meta); padding: 0 0 3px; cursor: pointer; font-family: ui-monospace, Menlo, monospace;
   }
   .s-all:hover { color: var(--accent); }
-  .step { display: flex; align-items: baseline; gap: 8px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text3); }
+  .step { display: flex; align-items: baseline; gap: 8px; font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text3); }
   /* The tool name: the part the eye scans down a column. */
   .tname { flex: none; color: var(--accent); font-weight: 650; }
   .step .tname { min-width: 6.5em; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1342,7 +1357,7 @@
   .s-peek .tname { min-width: 0; margin-right: 5px; }
   .step .st-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text2); }
   .step .st-ts { flex: none; margin-left: auto; opacity: 0.55; }
-  .empty { color: var(--text3); font-size: 12.5px; text-align: center; margin: auto; padding: 0 24px; line-height: 1.6; }
+  .empty { color: var(--text3); font-size: var(--fs-ui); text-align: center; margin: auto; padding: 0 24px; line-height: 1.6; }
 
   .composer {
     display: flex; align-items: flex-end; gap: 9px; padding: 10px clamp(12px, 3vw, 28px);
@@ -1354,7 +1369,7 @@
     flex: 1; min-width: 0; position: relative;
     padding: 6px 52px 6px 10px; border: 1px solid var(--input-border); border-radius: 10px;
     background: var(--bubble-in); box-shadow: 0 1px 3px rgba(0,0,0,0.10);
-    transition: border-color 150ms ease, box-shadow 150ms ease;
+    transition: border-color var(--t-fast) ease, box-shadow var(--t-fast) ease;
   }
   .compose-shell:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
   /* Recipient control: who this message goes to, with a menu that opens
@@ -1365,18 +1380,18 @@
   .to-chip {
     display: flex; align-items: center; gap: 4px; height: 26px;
     background: var(--accent-bg); color: var(--accent); border: 1px solid transparent;
-    border-radius: 7px; padding: 0 9px; font-size: 11px; font-weight: 650;
+    border-radius: 7px; padding: 0 9px; font-size: var(--fs-sub); font-weight: 650;
     cursor: pointer; max-width: min(34vw, 220px);
   }
   /* Broadcast and room-note are NOT the default state, so they do not wear the
      accent: one interrupts everyone, the other reaches nobody live. */
   .to-chip.all { background: var(--surface); color: var(--status-warn); border-color: var(--status-warn); }
   .to-chip.note { background: var(--surface); color: var(--text2); border-color: var(--border); }
-  .to-label { font-weight: 500; opacity: 0.7; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .to-label { font-weight: 500; opacity: 0.7; font-size: var(--fs-meta); text-transform: uppercase; letter-spacing: 0.5px; }
   .to-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .to-sep { height: 1px; background: var(--border2); margin: 4px 6px; }
   .to-opt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-  .to-opt small { font-size: 10px; opacity: 0.65; }
+  .to-opt small { font-size: var(--fs-meta); opacity: 0.65; }
   .note-dot { border: 1px dashed var(--text3); background: none; }
   .to-menu {
     position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 12;
@@ -1387,7 +1402,7 @@
   .to-menu button {
     display: flex; align-items: center; gap: 7px; min-height: 38px; width: 100%; text-align: left;
     background: none; border: none; border-radius: 8px; color: var(--text2);
-    padding: 7px 10px; font-size: 13px; cursor: pointer; font-family: ui-monospace, Menlo, monospace;
+    padding: 7px 10px; font-size: var(--fs-ui); cursor: pointer; font-family: ui-monospace, Menlo, monospace;
   }
   .to-menu button:hover { background: var(--surface2); color: var(--text); }
   .to-menu button.sel { color: var(--accent); background: var(--accent-bg); }
@@ -1395,7 +1410,7 @@
   .c-input {
     display: block; width: 100%; min-height: 28px; max-height: 34vh;
     padding: 5px 0 4px; background: transparent; border: none; outline: none;
-    color: var(--text); font-size: 13.5px; line-height: 1.5;
+    color: var(--text); font-size: var(--fs-body); line-height: 1.5;
     resize: none; overflow-y: auto;
   }
   .c-input::placeholder { color: var(--text3); opacity: 0.82; }
@@ -1415,41 +1430,46 @@
     padding: 0; border: none; border-radius: 9px; cursor: pointer;
     background: var(--accent);
     color: color-mix(in srgb, var(--bg) 30%, white);
-    transition: filter 120ms ease, background 120ms ease, color 120ms ease, transform 100ms ease;
+    transition: filter var(--t-fast) ease, background var(--t-fast) ease, color var(--t-fast) ease, transform var(--t-fast) ease;
   }
   :global(html[data-theme="dark"]) .send-btn:not(:disabled) { color: #062830; }
   .send-btn:hover:not(:disabled) { filter: brightness(1.07); }
   .send-btn:active:not(:disabled) { transform: scale(0.93); }
   .send-btn:disabled { background: var(--surface2); color: var(--text3); cursor: default; }
+  /* Phone-first hit areas (contract: primary actions ≥44px): the visual box
+     stays small, the tap target grows via an invisible overlay. .to-bottom
+     uses ::before — its ::after is the new-output dot. */
+  .send-btn::after { content: ''; position: absolute; inset: -7px; }
+  .to-bottom::before { content: ''; position: absolute; inset: -3px; }
 
   /* Empty room: start from a preset — one agent, or a team. */
   .start { margin: auto; display: flex; flex-direction: column; gap: 8px; width: min(420px, 100%); }
-  .start-h { font-size: 12.5px; color: var(--text2); text-align: center; margin-bottom: 2px; }
+  .start-h { font-size: var(--fs-ui); color: var(--text2); text-align: center; margin-bottom: 2px; }
   .start-list { display: flex; flex-direction: column; gap: 5px; }
   .start-row {
     display: flex; align-items: center; gap: 8px; min-height: 44px; width: 100%; text-align: left;
     background: var(--surface); border: 1px solid var(--border); border-radius: 11px;
-    color: var(--text); padding: 8px 11px; font-size: 13px; cursor: pointer;
+    color: var(--text); padding: 8px 11px; font-size: var(--fs-ui); cursor: pointer;
   }
   .start-row:hover { border-color: var(--accent); background: var(--accent-bg); }
   .start-row:disabled { opacity: 0.5; }
   .sr-name { font-family: ui-monospace, Menlo, monospace; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sr-backend { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text3); margin-left: auto; }
-  .sr-cap { font-size: 9px; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 3px; opacity: 0.75; }
+  .sr-backend { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text3); margin-left: auto; }
+  .sr-cap { font-size: var(--fs-micro); color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 3px; opacity: 0.75; }
 
   .drawer { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #000; border-left: 1px solid var(--border); }
   .drawer-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--bg2); border-bottom: 1px solid var(--border); }
   .win-list { display: flex; gap: 5px; overflow-x: auto; scrollbar-width: none; }
   .win-list::-webkit-scrollbar { display: none; }
-  .win-pill { display: flex; align-items: center; gap: 5px; flex: none; background: var(--surface); border: 1px solid var(--border); border-radius: 7px; color: var(--text2); padding: 4px 9px; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; cursor: pointer; }
+  .win-pill { display: flex; align-items: center; gap: 5px; flex: none; background: var(--surface); border: 1px solid var(--border); border-radius: 7px; color: var(--text2); padding: 4px 9px; font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); cursor: pointer; }
   .win-pill.cur { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
-  .direct-tag { font-size: 9px; color: var(--text3); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; margin-left: 3px; }
+  .direct-tag { font-size: var(--fs-micro); color: var(--text3); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; margin-left: 3px; }
   .term-body { flex: 1; min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; }
 
-  .statusline { display: flex; align-items: center; height: 25px; background: var(--bg3); border-top: 1px solid var(--border); font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; color: var(--text2); user-select: none; flex: none; }
+  .statusline { display: flex; align-items: center; height: 25px; background: var(--bg3); border-top: 1px solid var(--border); font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text2); user-select: none; flex: none; }
   .statusline .sess { background: var(--accent); color: #06232b; font-weight: 700; padding: 0 10px; height: 100%; display: flex; align-items: center; }
   .wlist { display: flex; height: 100%; overflow-x: auto; scrollbar-width: none; }
-  .statusline .w { display: flex; align-items: center; padding: 0 9px; color: var(--text3); background: none; border: none; cursor: pointer; font: inherit; transition: color 160ms; }
+  .statusline .w { display: flex; align-items: center; padding: 0 9px; color: var(--text3); background: none; border: none; cursor: pointer; font: inherit; transition: color var(--t-fast); }
   .statusline .w:hover { color: var(--text); }
   .statusline .w.cur { background: var(--surface2); color: var(--accent); }
   .statusline .right { margin-left: auto; padding: 0 12px; color: var(--text3); white-space: nowrap; }
@@ -1461,7 +1481,7 @@
     background: var(--bg); border: 1px solid var(--border); border-radius: 14px;
     box-shadow: 0 18px 60px rgba(0,0,0,0.5); padding: 18px; display: flex; flex-direction: column; gap: 10px;
   }
-  .dlg h2 { margin: 0 0 4px; font-size: 15px; }  /* Phone: dialogs become bottom sheets — reachable with a thumb, and they
+  .dlg h2 { margin: 0 0 4px; font-size: var(--fs-title); }  /* Phone: dialogs become bottom sheets — reachable with a thumb, and they
      never fight the on-screen keyboard for the middle of the screen. */
   .dlg.sheet {
     left: 0; top: auto; bottom: 0; transform: none;
@@ -1471,11 +1491,11 @@
   }
   .dlg.sheet .dlg-agents { max-height: 46vh; overflow-y: auto; }
   .dlg.sheet .agent-pick, .dlg.sheet input, .dlg.sheet .dlg-actions button { min-height: 44px; }
-  .dlg input { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 9px; color: var(--text); padding: 8px 12px; font-size: 13px; outline: none; }
+  .dlg input { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 9px; color: var(--text); padding: 8px 12px; font-size: var(--fs-ui); outline: none; }
   .dlg input:focus { border-color: var(--accent); }
-  .dlg-h { font-family: ui-monospace, Menlo, monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 1.4px; color: var(--text3); margin-top: 4px; }
+  .dlg-h { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-meta); text-transform: uppercase; letter-spacing: 1.4px; color: var(--text3); margin-top: 4px; }
   .dlg-agents { display: flex; flex-direction: column; gap: 5px; }
-  .agent-pick { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; color: var(--text2); padding: 8px 11px; font-size: 12.5px; cursor: pointer; text-align: left; }
+  .agent-pick { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; color: var(--text2); padding: 8px 11px; font-size: var(--fs-ui); cursor: pointer; text-align: left; }
   .agent-pick.sel { border-color: var(--accent); color: var(--text); background: var(--accent-bg); }
   .agent-pick :global(svg) { margin-left: auto; color: var(--accent); }
   .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }

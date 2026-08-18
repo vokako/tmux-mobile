@@ -499,6 +499,45 @@ cycles chat → status → tools) as well as Settings → Appearance → Chat de
 
 ### Conversation visual language
 
+#### Design tokens (the contract — do not reintroduce ad-hoc values)
+
+An audit (2026-08-18, ui-ux-pro-max guidelines) found ELEVEN font sizes and
+FIVE transition durations accumulated in the Hub. These are now tokens on
+`.hub-root`, and every new rule must reference them; a raw `font-size: 12px`
+or `transition: … 160ms` in a Hub style is a regression:
+
+- Type scale (6 steps, nothing in between):
+  `--fs-micro: 9px` (uppercase letterspaced tags only: `.p-tag`, `.sr-cap`,
+  `.direct-tag`) · `--fs-meta: 10.5px` (times, hints, overlays, labels) ·
+  `--fs-sub: 11.5px` (names, monospace paths/steps, raw view, chips) ·
+  `--fs-ui: 12.5px` (menus, dialogs, empty states, previews) ·
+  `--fs-body: 13.5px` (message text, composer) · `--fs-title: 15px`
+  (page/dialog headings).
+- Metadata ink: `--meta-ink` (a text2/text3 mix). The old stack — text3 AND
+  10px AND 0.78 opacity — triple-attenuated timestamps into decoration;
+  opacity is no longer used to dim metadata TEXT (state icons may still use
+  it for their empty/filled distinction).
+- Motion: `--t-fast: 120ms` for surface feedback (color, border, shadow,
+  filter, opacity), `--t-move: 200ms` for anything that moves or resizes
+  (transform, height). One duration per PURPOSE, not per author.
+- Colour semantics: green (`--status-ok`) means RUNNING/CONFIRMED state and
+  nothing else; accent means selection and interaction. The roster capsule
+  already complies (accent border = selected, dot colour = state); keep it
+  that way.
+- Touch targets: PRIMARY actions get a ≥44px hit area on phone — visual size
+  stays in the small-radius design language, the extension is an invisible
+  `::after` overlay (send button, jump-to-tail). Dense secondary rows
+  (statusline windows, roster, message actions) accept the WCAG-web 24px
+  minimum with ≥8px gaps instead: inflating them to 44px would destroy the
+  density that page exists for. The recipient chip cannot expand upward or
+  rightward — it would steal taps from the textarea's first line.
+- Screen readers: a message bubble is TEXT, not a control. The copy/raw
+  toggle rides the meta trailer (a real `<button>` with an i18n aria-label);
+  the bubble's own click handler is a pointer convenience, not the accessible
+  path — do not put `role="button"` back on the bubble (it made every message
+  announce as one giant button and Tab walk through the whole transcript).
+
+
 The Hub uses one adaptive chat surface rather than separate desktop/mobile
 markup. Its visual hierarchy follows the useful parts of Telegram without
 copying a second application: a quiet FLAT canvas derived from the existing
