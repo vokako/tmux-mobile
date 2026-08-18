@@ -412,10 +412,27 @@ because the room is the record.
 ## Spawn: the starter pistol
 
 An agent CLI boots into an interactive prompt and does nothing until spoken
-to. The brief in the system prompt is context; the KICK — a fixed first user
-message passed as the CLI's positional arg ("Start now… run `tmm done` when
-complete") — is what makes it move. Without it the agent sat at its prompt
-forever (observed live before the fix).
+to. The brief in the system prompt is context; the KICK — passed as the CLI's
+positional arg, so it becomes the first user prompt — is what makes it move.
+Without it the agent sat at its prompt forever (observed live).
+
+The kick is a MARKER, not an instruction: `[2026-08-18 16:41] (session
+start)`. It used to be a sentence ("Start now: read your instructions…run
+`tmm done` when complete"), and that was wrong for one reason that outranks
+brevity — that channel is the OPERATOR's. The prompt echo is rendered in the
+chat, so the app appeared to have typed instructions at the agent in the
+user's name (owner report 2026-08-18), and standing instructions do not
+belong in a per-launch message anyway: they are stated once, in the agent's
+definition. `build_prompt` therefore explains what the marker MEANS (read the
+brief, begin, `tmm done` when complete) and states that nothing in that line
+is an operator request. The marker keeps the timestamp, which is the only
+place an agent learns the wall time (a system prompt is replayed on every
+restart, so a baked-in date would age into a lie).
+
+Client side, `isSessionStart()` drops the echo from the transcript entirely —
+it also matches the pre-change instruction kick, because rooms are persisted.
+Measured after the change: a spawned kiro agent received the bare marker,
+read its brief, answered, and called `tmm done` on its own.
 
 ## The activity feed (telemetry in the chat timeline)
 

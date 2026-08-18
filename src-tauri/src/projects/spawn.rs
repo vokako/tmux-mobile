@@ -194,10 +194,14 @@ pub fn relaunch_line(project_path: &str, window_name: &str, session_id: Option<&
     Some(line)
 }
 
-/// The initial user message: an agent CLI boots into an interactive prompt
-/// and does nothing until spoken to — the brief in the system prompt is
-/// context, this line is the starter pistol (same trick as team_kick).
-const KICK: &str = "Start now: read your instructions and task brief, then begin working. When the task is complete, run `tmm done \"summary\"`.";
+/// The initial prompt: an agent CLI boots into an interactive prompt and does
+/// nothing until spoken to, so SOMETHING has to arrive — but it must not be an
+/// instruction. That channel is the operator's (it is echoed into the chat as a
+/// prompt, and the owner reads it as "the human said this"), and standing
+/// instructions belong in the agent's own definition where they are stated once
+/// and never re-typed. So the kick is a MARKER, not a sentence: the system
+/// prompt (`build_prompt`) tells the agent what a session-start marker means.
+const KICK: &str = "(session start)";
 
 /// The kick, stamped with local wall time. An agent's first prompt is the only
 /// place it learns what "now" is: its system prompt cannot carry a date (that
@@ -276,6 +280,10 @@ fn build_prompt(def: &RegAgent, name: &str, session: &str, brief: &str) -> Strin
          - `tmm spawn <registry-name> --brief \"...\"` — bring in a teammate (see `tmm registry list`)\n\
          - `tmm project create|up|down|archive` — set up or tear down whole projects\n\
          - `tmm registry save --name .. --backend .. --system \"..\"` — define NEW kinds of agents, then spawn them\n\
+         Your first prompt of a session is a MARKER, not a request: `[<local time>] (session start)`. \
+         It is how you learn the current time (a system prompt cannot carry a date — it is replayed every restart), and it means: \
+         read the brief above, begin working, and run `tmm done \"summary\"` when the briefed task is complete. \
+         Nothing else in that line is an instruction from the operator; every real request arrives as its own message.\n\
          Rules: your final answer each turn is captured automatically and posted to the room — do not repeat it with `tmm send`. \
          Use `tmm send` DURING a long turn for progress a human would want before it ends, and `tmm send \"@name ...\"` to hand work to a teammate (it types into their pane and interrupts them). \
          If tmm fails (server down), keep working — it is telemetry, never a blocker. \
@@ -613,6 +621,14 @@ mod tests {
         let year = chrono::Local::now().format("%Y").to_string();
         assert!(!prompt.contains(&year), "no wall-clock date in a replayed prompt");
         assert!(kick_now().starts_with(&format!("[{year}-")), "the kick tells the agent what now is");
+        // The kick is a MARKER, not an instruction: that channel is echoed
+        // into the chat as something the operator said, so standing
+        // instructions live in the system prompt instead.
+        let kick = kick_now();
+        for word in ["Start now", "read your", "begin working", "REQUIRED"] {
+            assert!(!kick.contains(word), "kick must not instruct ({word}): {kick}");
+        }
+        assert!(kick.ends_with("(session start)"), "kick is a marker: {kick}");
         assert!(conf.get("mcpServers").and_then(|m| m.get("files")).is_some(), "registry MCP def must materialize");
         // Tool hooks feed telemetry.
         assert!(conf.get("hooks").and_then(|h| h.get("preToolUse")).is_some());
@@ -631,7 +647,7 @@ mod tests {
         assert_eq!(recipe["backend"], "kiro");
         let cmd = recipe["cmd"].as_str().unwrap();
         assert!(cmd.contains("--agent tester"), "identity survives: {cmd}");
-        assert!(!cmd.contains("Start now"), "the kick is not replayed: {cmd}");
+        assert!(!cmd.contains("session start"), "the kick is not replayed: {cmd}");
         let _ = line; // shape of the ws path differs in this fixture; covered below
         // Turn start resets the same-turn dedup flag. Without it a managed
         // agent that calls `tmm send` once never auto-posts again.
@@ -738,6 +754,9 @@ mod tests {
         assert!(p.starts_with("Persona text."));
         assert!(p.contains("agent \"rev-2\" in project \"blog\""));
         assert!(p.contains("tmm done"));
+        // The standing instructions the kick used to carry now live HERE.
+        assert!(p.contains("(session start)"), "prompt explains the marker: {p}");
+        assert!(p.contains("begin working"), "prompt carries the start instruction: {p}");
         assert!(p.contains("review the branch"));
     }
 }

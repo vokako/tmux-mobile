@@ -257,6 +257,13 @@ export function markLeadingMention(html: string): string {
   return html.replace(/^(\s*<p>)(@[\w][\w.-]*)(?=[\s<,，:：、!！?？]|$)/, '$1<span class="m-to">$2</span>');
 }
 
+/** The spawn kick's echo: `[YYYY-MM-DD HH:MM] (session start)`. Also matches
+ * the pre-2026-08-18 instruction kick, because rooms are persisted. */
+export function isSessionStart(text: string | null | undefined): boolean {
+  const t = (text ?? '').trim();
+  return /^\[[^\]]+\]\s*\(session start\)$/.test(t) || /^\[[^\]]+\]\s*Start now:/.test(t);
+}
+
 export function systemLine(body: string | null | undefined): string | null {
   for (const marker of ['[tmm] ', '⚡ ', '✔ ']) {
     if (body?.startsWith(marker)) return body.slice(marker.length);
@@ -402,6 +409,11 @@ export function feedBlocks(
       continue;
     }
     if (e.kind === 'prompt') {
+      // The spawn kick is machinery, not conversation: it is a marker
+      // (`[time] (session start)`) that only exists because a CLI does
+      // nothing until spoken to. Showing it made the app look like it had
+      // typed instructions at the agent in the operator's name.
+      if (isSessionStart(e.text)) continue;
       stream.push({ type: 'prompt', ts: e.ts, window: e.window, text: e.text });
       continue;
     }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { markLeadingMention, mergeMessages, statuslineWindows, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor } from './hub.ts';
+import { isSessionStart, markLeadingMention, mergeMessages, statuslineWindows, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -386,4 +386,14 @@ test('markLeadingMention leaves non-address mentions alone', () => {
   assert.equal(markLeadingMention('<ul><li>@lead x</li></ul>'), '<ul><li>@lead x</li></ul>');
   // an email is not a mention
   assert.equal(markLeadingMention('<p>a@b.com hi</p>'), '<p>a@b.com hi</p>');
+});
+
+test('the spawn kick never appears in the transcript', () => {
+  assert.equal(isSessionStart('[2026-08-18 16:29] (session start)'), true);
+  // rooms are persisted: the old instruction kick must stay filtered too
+  assert.equal(isSessionStart('[2026-08-18 16:29] Start now: read your instructions and task brief.'), true);
+  // a real prompt that merely mentions it is NOT the marker
+  assert.equal(isSessionStart('[2026-08-18 16:30] what does (session start) mean?'), false);
+  assert.equal(isSessionStart('run the tests'), false);
+  assert.equal(isSessionStart(null), false);
 });
