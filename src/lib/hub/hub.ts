@@ -482,7 +482,8 @@ export function systemLine(body: string | null | undefined): string | null {
 }
 
 /**
- * A status note posted by an agent: `[tmm status working] compiling the server`.
+ * A note posted by an agent about its own work: `[tmm status working] compiling
+ * the server`, or `[tmm done] shipped the palette`.
  *
  * `tmm status` used to be a telemetry event, which meant it vanished on restart
  * while the messages around it survived. It is now a MESSAGE from the agent
@@ -491,15 +492,19 @@ export function systemLine(body: string | null | undefined): string | null {
  * the marker comes off, the declared state comes out, and the note is rendered as
  * an ordinary bubble that happens to be dimmer.
  *
- * The marker is NOT `[tmm] ` on purpose: that prefix means "the app is narrating"
- * and folds into a grey sys row, which is the treatment this note was moved OUT
- * of.
+ * The marker is NOT `[tmm] ` on purpose: that prefix means "the app is narrating",
+ * folds into a grey sys row, and is dropped entirely at the chat-only level — so
+ * the text disappeared exactly where a reader looks. That is the treatment both of
+ * these were moved OUT of (owner, 2026-08-19, twice: "status要用agent发送消息的形
+ * 式显示" and "返回的状态信息要用消息的形式展示在对话里").
+ *
+ * A `done` with no summary never becomes a message: there is nothing to read.
  */
 export function statusNote(body: string | null | undefined): { state: string; text: string } | null {
-  const m = /^\[tmm status ([a-z]+)\]\s*([\s\S]*)$/u.exec(body ?? '');
+  const m = /^\[tmm (?:status ([a-z]+)|(done))\]\s*([\s\S]*)$/u.exec(body ?? '');
   if (!m) return null;
-  const text = m[2]!.trim();
-  return text ? { state: m[1]!, text } : null;
+  const text = m[3]!.trim();
+  return text ? { state: m[1] ?? m[2]!, text } : null;
 }
 
 /** A draft is a convenience, not a document: capped so a pasted file cannot fill

@@ -1140,10 +1140,11 @@
             <div class="sysline">{b.items.join(' · ')}</div>
           {:else if b.type === 'msg'}
             {@const m = b.msg}
-            <!-- A `tmm status` note: a message from the agent (it is persisted
-                 like one and it reads like one), rendered dimmer and with its
-                 marker off. `waiting`/`blocked` take the attention colour —
-                 those are the states that want a person. -->
+            <!-- An agent's note about its own work — a `tmm status` note or a
+                 `tmm done` summary. A message from the agent (it is persisted like
+                 one and it reads like one), rendered with its marker off.
+                 `waiting`/`blocked` take the attention colour: those are the two
+                 that want a person. -->
             {@const note = statusNote(m.body)}
             {@const parts = splitImages(note ? note.text : m.body)}
               <!-- Every user message can become the landmark, but exactly ONE
@@ -1159,7 +1160,7 @@
               {@const folded = isAsk && askKey === key && askHeld && heldExpanded !== key
                 && heldBody(parts.text) !== parts.text}
               <div class="msg" class:me={m.from === 'human'} class:note={!!note}
-                class:attn={note ? note.state !== 'working' : false}
+                class:attn={note ? note.state === 'waiting' || note.state === 'blocked' : false}
                 class:ask-top={isAsk && askKey === key && askEdge === 'top'}
                 class:ask-bottom={isAsk && askKey === key && askEdge === 'bottom'}
                 class:held={isAsk && askKey === key && askHeld}
@@ -1845,7 +1846,6 @@
      because "what I am doing right now" is not the same as an answer. It keeps
      the bubble's shape so the feed stays one visual language. */
   .msg.note .bubble { background: var(--surface); color: var(--text2); }
-  .msg.note .m-body { font-size: var(--fs-sub); }
   /* Waiting on a person is not the same colour as making progress. */
   .msg.note.attn .bubble { border-color: var(--status-warn); }
   /* A progress note: what the agent SAYS it is doing. Between a bubble and a

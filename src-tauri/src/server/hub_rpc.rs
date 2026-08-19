@@ -194,9 +194,19 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
             if req.method == "hub_done" {
                 let summary = p.get("summary").and_then(|v| v.as_str()).unwrap_or("");
                 telemetry::record_done(session, window, summary);
-                // A completion is a message too — the room is the record.
+                // A completion is a message too — the room is the record. With a
+                // summary it is the AGENT speaking (what it finished is its own
+                // report, and the marker keeps it out of the app-narration
+                // treatment: `[tmm] ` folds into a grey sys row and the chat-only
+                // level drops it entirely, so the text vanished exactly where a
+                // reader looks). Bare `done` has nothing to say and stays a
+                // lifecycle line.
                 if bus.open_room(&room).is_ok() {
-                    let body = if summary.is_empty() { "[tmm] done".to_string() } else { format!("[tmm] done — {summary}") };
+                    let body = if summary.trim().is_empty() {
+                        "[tmm] done".to_string()
+                    } else {
+                        format!("[tmm done] {summary}")
+                    };
                     let _ = bus.post(&room, agent, &body, false);
                 }
                 // Mark this turn as having an explicit message so the stop
@@ -704,6 +714,53 @@ mod tests {
         );
         assert!(r2.error.is_none());
         assert_eq!(b.posts.lock().unwrap().len(), 1, "still just the one");
+        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
+    }
+
+    /// A `tmm done` SUMMARY is the agent's own report, so it is a message. A
+    /// summary-less done has nothing to read and stays a lifecycle line.
+    #[test]
+    fn a_done_summary_is_a_message_and_a_bare_done_is_not() {
+        crate::projects::tests::use_test_store();
+        let session = format!("tmm-done-{}", std::process::id());
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session, "-n", "dev", "sleep 60"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            return;
+        }
+        let b = Bridge::new();
+        let with = handle_hub_request(
+            &req("hub_done", serde_json::json!({
+                "session": session, "agent": "dev", "summary": "shipped the palette",
+            })),
+            Some(&b),
+            None,
+        );
+        assert!(with.error.is_none(), "{:?}", with.error.map(|e| e.message));
+        {
+            let posts = b.posts.lock().unwrap();
+            assert_eq!(posts.len(), 1);
+            assert_eq!(posts[0].1, "dev", "the agent is the sender");
+            assert_eq!(
+                posts[0].2, "[tmm done] shipped the palette",
+                "not `[tmm] `: that marker folds into a grey sys row and the chat level drops it"
+            );
+        }
+        let bare = handle_hub_request(
+            &req("hub_done", serde_json::json!({ "session": session, "agent": "dev" })),
+            Some(&b),
+            None,
+        );
+        assert!(bare.error.is_none());
+        {
+            let posts = b.posts.lock().unwrap();
+            assert_eq!(posts.len(), 2);
+            assert_eq!(posts[1].2, "[tmm] done", "nothing was said, so the app narrates");
+        }
         let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
     }
 

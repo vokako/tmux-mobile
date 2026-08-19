@@ -619,14 +619,24 @@ test('statusNote reads an agent status message, and only that', () => {
     { state: 'blocked', text: 'waiting for the API spec' });
   // A multi-line note keeps its body.
   assert.equal(statusNote('[tmm status working] one\ntwo')?.text, 'one\ntwo');
-  // Not a status note: an ordinary message, a lifecycle line, an empty note.
-  for (const b of ['hello', '[tmm] stopped dev', '[tmm status working]', '[tmm status working]   ',
+  // A `tmm done` summary is the same kind of thing: the agent reporting on its
+  // own work, and it must not be app narration — `[tmm] ` folds into a grey sys
+  // row and the chat-only level drops it, so the text vanished where a reader
+  // looks (owner, 2026-08-19: "返回的状态信息要用消息的形式展示在对话里").
+  assert.deepEqual(statusNote('[tmm done] shipped the palette'),
+    { state: 'done', text: 'shipped the palette' });
+  // Not a note: an ordinary message, a lifecycle line, an empty one.
+  for (const b of ['hello', '[tmm] stopped dev', '[tmm] done', '[tmm status working]',
+                   '[tmm status working]   ', '[tmm done]', '[tmm done]  ',
                    '[tmm status] no state', 'prefix [tmm status working] x', '', null, undefined]) {
     assert.equal(statusNote(b), null, JSON.stringify(b));
   }
   // The two markers must not overlap: `[tmm] ` folds into a grey sys row, which
   // is exactly the treatment a status note was moved out of.
   assert.equal(systemLine('[tmm status working] compiling'), null);
+  assert.equal(systemLine('[tmm done] shipped it'), null);
+  // A summary-less done stays a lifecycle line: there is nothing to read.
+  assert.equal(systemLine('[tmm] done'), 'done');
 });
 
 test('a draft belongs to its project, and an empty one leaves no trace', () => {

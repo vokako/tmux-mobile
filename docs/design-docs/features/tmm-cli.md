@@ -745,11 +745,19 @@ bare state word would be an empty message. And the marker is deliberately not
 `[tmm] `: that prefix means "the app is narrating" and folds into a grey `sys` row,
 which is the treatment this note was moved out of.
 
-Client side, `statusNote()` (pure, tested) takes the marker off and the bubble
-renders one notch quieter — same shape, so the feed stays one visual language —
-with the attention border for `waiting`/`blocked`, because those ask for a human.
-`record_status` still keeps the explicit claim in the status record: that is the
-part only it can answer, and `derive_from` needs it for `waiting`.
+**A `tmm done` SUMMARY is the same kind of thing**, and it was the worse case:
+`[tmm] done — <summary>` folded into a grey `sys` row and the chat-only level drops
+those entirely, so the agent's own account of what it finished vanished exactly
+where a reader looks (owner, 2026-08-19: "返回的状态信息要用消息的形式展示在对话
+里"). It is now `[tmm done] <summary>` from the agent. A done with NO summary stays
+a lifecycle line, because nothing was said.
+
+Client side, `statusNote()` (pure, tested) reads both markers, takes them off, and
+the bubble renders one notch quieter — same shape, so the feed stays one visual
+language — with the attention border for `waiting`/`blocked` only, because those
+are the two that ask for a human. `record_status` still keeps the explicit claim in
+the status record: that is the part only it can answer, and `derive_from` needs it
+for `waiting`.
 
 The other half is the prompt, since a channel nobody is told to use stays empty.
 `build_prompt` now leads with `tmm status working "<what you are doing right
