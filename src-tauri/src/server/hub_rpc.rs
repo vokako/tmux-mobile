@@ -599,6 +599,7 @@ fn agent_states(session: &str) -> serde_json::Value {
     }
     let live: Vec<usize> = windows.keys().copied().collect();
     telemetry::retain_windows(session, &live);
+    crate::projects::vitals::retain_windows(session, &live);
 
     let rows: Vec<serde_json::Value> = windows
         .values()
@@ -612,9 +613,15 @@ fn agent_states(session: &str) -> serde_json::Value {
             // know their status line's shape), every field optional, and the
             // object omitted entirely when nothing could be read. One
             // capture-pane per agent, capped at 4 per project.
+            // A miss is normal — the pane may be mid-repaint, a tool's output may
+            // have pushed the status line up — so the reading REMEMBERS: gaps are
+            // filled field by field from the last good one (5 min TTL). Treating
+            // every miss as "no information" is what made the card blink empty.
             let vitals = if managed {
                 crate::tmux::capture_pane_plain(&format!("{session}:{}", p.window), Some(0))
-                    .map(|text| crate::projects::vitals::sniff_kiro(&text, &p.window_name))
+                    .map(|text| {
+                        crate::projects::vitals::sniff_remembered(session, p.window, &text, &p.window_name)
+                    })
                     .unwrap_or_default()
             } else {
                 Default::default()

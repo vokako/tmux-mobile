@@ -47,6 +47,84 @@ impl Vitals {
     }
 }
 
+/// How long a remembered reading may stand in for a fresh one. A model or a branch
+/// does not change between polls, and a context percentage that is a minute old is
+/// far better than a card that blinks empty. Past this the agent has probably been
+/// doing something else entirely, so the reading is dropped rather than aged.
+const VITALS_TTL_SECS: u64 = 300;
+
+/// Last good reading per (session, window). Sniffing reads somebody else's screen
+/// at an arbitrary instant, so a miss is normal: the pane may be mid-repaint, a
+/// tool's output may have pushed the status line up, a panel may be open. Treating
+/// each miss as "no information" is what made the card flicker (owner, 2026-08-19:
+/// "context window 和模型状态信息，有时候会闪没了 … 可以多维持缓存一会儿").
+fn cache() -> &'static std::sync::Mutex<
+    std::collections::HashMap<(String, usize), (Vitals, u64)>,
+> {
+    static C: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<(String, usize), (Vitals, u64)>>,
+    > = std::sync::OnceLock::new();
+    C.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+impl Vitals {
+    /// Fill the fields this reading did not get from a previous one. FIELD BY
+    /// FIELD, not all-or-nothing: a pane commonly shows the wrapped branch line
+    /// while the status line itself has scrolled off, and half a reading is still
+    /// half a reading.
+    pub fn backfill(&mut self, prev: &Vitals) {
+        if self.model.is_none() {
+            self.model = prev.model.clone();
+        }
+        if self.context_pct.is_none() {
+            self.context_pct = prev.context_pct;
+        }
+        if self.effort.is_none() {
+            self.effort = prev.effort.clone();
+        }
+        if self.branch.is_none() {
+            self.branch = prev.branch.clone();
+        }
+    }
+}
+
+/// Sniff a pane and remember what was read, filling gaps from the last reading.
+///
+/// This is what `hub_agents` calls. `sniff_kiro` stays pure (and tested) — the
+/// memory lives here, keyed by session and window, expiring after
+/// `VITALS_TTL_SECS` so a long-dead reading cannot follow an agent around.
+pub fn sniff_remembered(session: &str, window: usize, pane: &str, agent: &str) -> Vitals {
+    let mut v = sniff_kiro(pane, agent);
+    let now = now_secs();
+    let key = (session.to_string(), window);
+    let mut map = cache().lock().unwrap();
+    if let Some((prev, at)) = map.get(&key) {
+        if now.saturating_sub(*at) <= VITALS_TTL_SECS {
+            v.backfill(prev);
+        }
+    }
+    if v.is_empty() {
+        // Nothing known at all: do not store an empty reading over a good one.
+        map.remove(&key);
+        return v;
+    }
+    map.insert(key, (v.clone(), now));
+    v
+}
+
+/// Forget readings for windows that no longer exist — the same housekeeping
+/// telemetry does, called from the same place.
+pub fn retain_windows(session: &str, live: &[usize]) {
+    cache().lock().unwrap().retain(|(s, w), _| s != session || live.contains(w));
+}
+
 /// The effort words kiro accepts. A segment matching one of these IS the effort
 /// segment, wherever it sits — matching by position alone would mistake a model
 /// id for it whenever the effort segment is absent (it usually is).
@@ -268,5 +346,74 @@ mod tests {
         assert_eq!(context_pct("◔ 100%"), Some(100));
         assert_eq!(context_pct("◔ 0%"), Some(0));
         assert_eq!(context_pct("◔ abc%"), None);
+    }
+
+    #[test]
+    fn a_reading_fills_its_gaps_from_the_last_one() {
+        // The flicker: this capture caught the pane between paints, so only the
+        // wrapped branch line was there.
+        let mut half = sniff_kiro("(feat/x)\n", "bot");
+        assert_eq!(half.model, None);
+        assert_eq!(half.context_pct, None);
+
+        let good = sniff_kiro("bot · claude-opus-5 · high · ◔ 12%\n(feat/x)\n", "bot");
+        assert_eq!(good.model.as_deref(), Some("claude-opus-5"));
+
+        half.backfill(&good);
+        assert_eq!(half.model.as_deref(), Some("claude-opus-5"), "gap filled");
+        assert_eq!(half.context_pct, Some(12));
+        assert_eq!(half.effort.as_deref(), Some("high"));
+        assert_eq!(half.branch.as_deref(), Some("feat/x"), "its own value, unchanged");
+    }
+
+    #[test]
+    fn a_fresh_value_always_wins_over_a_remembered_one() {
+        // Backfill must never overwrite: a `/model` swap has to show up at once.
+        let mut fresh = sniff_kiro("bot · gpt-5.1 · ● 90%\n", "bot");
+        let old = sniff_kiro("bot · claude-opus-5 · ○ 3%\n(main)\n", "bot");
+        fresh.backfill(&old);
+        assert_eq!(fresh.model.as_deref(), Some("gpt-5.1"));
+        assert_eq!(fresh.context_pct, Some(90));
+        // The field it never had is the only one that comes from memory.
+        assert_eq!(fresh.branch.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn backfilling_from_nothing_changes_nothing() {
+        let mut v = sniff_kiro("bot · gpt-5.1 · ● 90%\n", "bot");
+        let before = v.clone();
+        v.backfill(&Vitals::default());
+        assert_eq!(v, before);
+    }
+
+    /// The flicker itself, end to end: a good capture, then one that caught the
+    /// pane between paints. The second must still report what we know.
+    #[test]
+    fn a_missed_capture_keeps_the_last_reading() {
+        let session = format!("vitals-test-{}", std::process::id());
+        let good = "bot · claude-opus-5 · ◔ 12%\n/w/x ·\n(main)\n";
+        let first = sniff_remembered(&session, 7, good, "bot");
+        assert_eq!(first.model.as_deref(), Some("claude-opus-5"));
+        assert_eq!(first.context_pct, Some(12));
+
+        // A capture with nothing in it — a repaint, a tool's output, a panel.
+        let blind = sniff_remembered(&session, 7, "\n\n$ ls\n", "bot");
+        assert_eq!(blind.model.as_deref(), Some("claude-opus-5"), "remembered, not blank");
+        assert_eq!(blind.context_pct, Some(12));
+        assert_eq!(blind.branch.as_deref(), Some("main"));
+
+        // A fresh number replaces the remembered one immediately.
+        let moved = sniff_remembered(&session, 7, "bot · claude-opus-5 · ◑ 44%\n", "bot");
+        assert_eq!(moved.context_pct, Some(44));
+
+        // Another window's reading is its own.
+        let other = sniff_remembered(&session, 9, "\n", "bot");
+        assert!(other.is_empty(), "window 9 was never read");
+
+        // A window that goes away is forgotten, so a new agent in the same index
+        // cannot inherit its numbers.
+        retain_windows(&session, &[9]);
+        let after = sniff_remembered(&session, 7, "\n", "bot");
+        assert!(after.is_empty());
     }
 }

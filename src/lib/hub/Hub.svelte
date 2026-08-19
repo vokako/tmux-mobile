@@ -176,7 +176,15 @@
       // without the user choosing one. ALL_TARGET is not a window, so it stays.
       if (recipient && recipient !== ALL_TARGET && !agents.some((a) => a.managed && a.name === recipient)) recipient = '';
       if (!recipient) recipient = pickLead(agents, registry, hubPrefs.lead(selected));
-    } catch { agents = []; }
+    } catch (e) {
+      // "I could not ask" is not "there is nobody". Emptying the roster on a
+      // failed poll is what made the cards — and with them the model and context
+      // readings — blink away whenever the socket hiccuped or an RPC timed out
+      // (owner, 2026-08-19: "有时候会闪没了，是不是中间心跳失败了"). The roster is
+      // a last-known state; `selectProject` is the one place that clears it,
+      // because that is the one time it is genuinely unknown.
+      console.warn('hub agents poll failed, keeping the last roster', e);
+    }
   }
 
   /** Follow the tail — but only while the user is AT the tail. Yanking someone

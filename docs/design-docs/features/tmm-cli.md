@@ -574,6 +574,26 @@ rules follow from reading a screen rather than an API:
 Managed agents only (their status line's shape is one we materialized), one
 `capture-pane` per agent, capped at four per project.
 
+**A miss is normal, so the reading REMEMBERS.** Sniffing looks at somebody else's
+screen at an arbitrary instant: the pane may be mid-repaint, a tool's output may
+have pushed the status line up, a panel may be open. Treating each miss as "no
+information" made the card blink empty (owner, 2026-08-19: "context window 和模型状
+态信息，有时候会闪没了，是不是中间心跳失败了？我觉得对于心跳的状态可以多维持缓存一会
+儿"). `sniff_remembered` keeps the last good reading per (session, window) and fills
+gaps FIELD BY FIELD — a pane often shows the wrapped branch line while the status
+line itself has scrolled off, and half a reading is still half a reading. A fresh
+value always wins, so a `/model` swap shows up at once; the memory expires after
+`VITALS_TTL_SECS` (5 min) and `retain_windows` drops it with the window, so a new
+agent cannot inherit the last one's numbers. `sniff_kiro` stays pure and tested; the
+memory is a thin layer over it.
+
+The owner's other half was right too, and it was a client bug: `loadAgents` did
+`catch { agents = [] }`, so a dropped socket or one timed-out RPC emptied the whole
+roster — cards, readings and all — until the next successful poll. "I could not ask"
+is not "there is nobody": the roster is a last-known state now, and `selectProject`
+is the one place that clears it, because that is the one time it is genuinely
+unknown.
+
 **On the card, permanently, and the percentage is a line rather than a number**
 ("这个直接常驻显示吧 可以字号小一点 百分比用一个细长会变颜色的进度条示意 一个细横线
 就行", 2026-08-19). Each roster card carries the model and effort on a second line
