@@ -45,6 +45,20 @@ can never disagree.
 
 ### 2. One resize affordance
 
+## One "New Project" surface
+
+`CreateProjectDialog.svelte` (src/lib/projects/) is THE way a project is
+born, wherever the button lives. The Chat sidebar and the Terminal sidebar
+used to grow their own — the dialog vs an inline form with a SECOND directory
+picker and raw kiro/claude/codex presets — which read as two different apps
+(owner, 2026-08-19). The dialog survived because it carries the rules: the
+required NAME that names project and session both, `DirPicker` over the same
+`fs_list` the file browser uses, and registry agents (which seed real slots)
+instead of bare backend names. It is self-contained — loads the registry,
+runs create → up → spawn, and hands the created project back; the caller only
+navigates (Chat selects the conversation, Terminal jumps into the first
+pane). Sessions.svelte lost ~120 lines of duplicate form/picker with it.
+
 ## Every sidebar speaks the same language
 
 The Chat sidebar set the house style and the others follow it (owner,

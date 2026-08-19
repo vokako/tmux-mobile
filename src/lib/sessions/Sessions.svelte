@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { listSessions, listPanes, listSessionsWithPanes, killSession, newWindow, killWindow, fsList, projectCreate, projectUp } from '../core/ws.ts';
+  import { listSessions, listPanes, listSessionsWithPanes, killSession, newWindow, killWindow } from '../core/ws.ts';
   import type { TmuxSession, TmuxPane } from '../core/ws.ts';
   import Icon from '../ui/Icon.svelte';
   import AgentChip from '../ui/AgentChip.svelte';
   import Projects from '../projects/Projects.svelte';
+  import CreateProjectDialog from '../projects/CreateProjectDialog.svelte';
   import { t } from '../core/i18n.svelte.ts';
   import { sessionHasAgent, paneAgent, AGENTS } from '../core/agents.ts';
   // Team-mode sessions (`tmm-team-<room>`) are grouped apart from regular
@@ -47,16 +48,8 @@
 
   // New session form
   let showNew = $state(false);
-  let newName = $state('');
-  let newPath = $state('');
-  let newAgent = $state('');   // which agent the new project starts with
 
   // Folder picker (inside new form)
-  type DirEntry = { name: string; type: string; path: string };
-  let showPicker = $state(false);
-  let pickerPath = $state('');
-  let pickerEntries = $state<DirEntry[]>([]);
-  let pickerPathEl = $state<HTMLElement | null>(null);
 
   // Confirm-to-kill gates
   let confirmKill = $state<string | null>(null);       // session name
@@ -232,52 +225,8 @@
   // point in a second, weaker way to make one. The agent preset becomes the
   // project's first window, which means it also relaunches (and resumes) on
   // every later `up`.
-  async function createSession() {
-    if (!newName.trim() && !newPath.trim()) return;
-    try {
-      const created = await projectCreate(newPath.trim() || '~', {
-        name: newName.trim() || undefined,
-        session: newName.trim() || undefined,
-        agent: newAgent || undefined,
-      }) as { id: string; session: string };
-      newName = ''; newPath = ''; newAgent = ''; showNew = false;
-      await projectUp(created.id);
-      await reloadProjects?.();
-      const ps = await listPanes(created.session);
-      if (ps.length) {
-        const p = ps[0]!;
-        openTerminal(created.session, `${p.session}:${p.window}.${p.pane}`, p.current_command);
-      }
-      await refresh();
-    } catch (e) { error = (e as Error).message; }
-  }
 
-  // ─── Folder picker ────────────────────────────────────
-  async function openPicker() {
-    showPicker = true;
-    await loadPicker(newPath || '~');
-  }
-  async function loadPicker(path: string) {
-    try {
-      const r = await fsList(path, false);
-      pickerPath = path;
-      pickerEntries = r.entries.filter((e: DirEntry) => e.type === 'dir').sort((a: DirEntry, b: DirEntry) => a.name.localeCompare(b.name));
-    } catch {}
-  }
-  function pickerUp() {
-    const parent = pickerPath.replace(/\/[^/]+\/?$/, '') || '/';
-    loadPicker(parent);
-  }
-  function pickerSelect() { newPath = pickerPath; showPicker = false; }
-  let pickerBreadcrumbs = $derived.by(() => {
-    if (!pickerPath) return [];
-    const parts = pickerPath.split('/').filter(Boolean);
-    return parts.map((name, i) => ({ name, path: '/' + parts.slice(0, i + 1).join('/') }));
-  });
-  $effect(() => {
-    pickerPath;
-    setTimeout(() => { if (pickerPathEl) pickerPathEl.scrollLeft = pickerPathEl.scrollWidth; }, 0);
-  });
+
 
   // ─── Derived: filtered + MRU chips ────────────────────
   // MRU chips: up to N AI sessions (Kiro/Claude/…) by last_opened,
@@ -612,49 +561,24 @@
   </div>
 
   {#if showNew}
-    <div class="new-form" use:scrollIntoView>
-      <input type="text" bind:value={newName} placeholder={t('sessionName')} onkeydown={(e) => e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && createSession()} autocapitalize="off" />
-      <div class="cmd-row-new">
-        <input type="text" bind:value={newPath} placeholder={t('workingDir')} autocapitalize="off" />
-        <button class="preset-btn" onclick={openPicker}><Icon name="folder" size={14} /></button>
-      </div>
-      {#if showPicker}
-        <div class="picker">
-          <div class="picker-header">
-            <button class="picker-btn" onclick={pickerUp}><Icon name="folder-up" size={13} /></button>
-            <div class="picker-path" bind:this={pickerPathEl}>
-              <button class="picker-seg" onclick={() => loadPicker('/')}>/</button>
-              {#each pickerBreadcrumbs as bc}
-                <button class="picker-seg" onclick={() => loadPicker(bc.path)}>{bc.name}</button>
-                <span class="picker-sep">/</span>
-              {/each}
-            </div>
-            <button class="picker-btn pick-ok" onclick={pickerSelect}><Icon name="check" size={13} /></button>
-          </div>
-          <div class="picker-list">
-            {#each pickerEntries as e}
-              <button class="picker-item" onclick={() => loadPicker(e.path)}>
-                <Icon name="folder" size={13} /> {e.name}
-              </button>
-            {/each}
-            {#if !pickerEntries.length}
-              <div class="picker-empty">{t('noSubdirs')}</div>
-            {/if}
-          </div>
-        </div>
-      {/if}
-      <!-- The presets pick an AGENT, not a raw command line: the project stores
-           which agent lives in that window, so `up` relaunches it and resumes
-           its conversation. A free-form command would be observed-only and never
-           replayed (see docs/design-docs/features/projects.md). -->
-      <div class="cmd-row-new">
-        <span class="agent-label">{t('projectAgentOpt')}</span>
-        <button class="preset-btn" class:active={newAgent === 'kiro'} onclick={() => newAgent = newAgent === 'kiro' ? '' : 'kiro'}><img src="/assets/kiro.svg" alt="Kiro" width="16" height="16" /></button>
-        <button class="preset-btn" class:active={newAgent === 'claude'} onclick={() => newAgent = newAgent === 'claude' ? '' : 'claude'}><img src="/assets/claude.svg" alt="Claude" width="18" height="18" /></button>
-        <button class="preset-btn" class:active={newAgent === 'codex'} onclick={() => newAgent = newAgent === 'codex' ? '' : 'codex'}><img src="/assets/codex.svg" alt="Codex" width="16" height="16" /></button>
-      </div>
-      <button class="create-btn" onclick={createSession} disabled={!newName.trim() && !newPath.trim()}>{t('create')}</button>
-    </div>
+    <!-- The SAME New Project dialog the Chat sidebar opens (owner: the two
+         used to look designed by different people — an inline form with its
+         own second directory picker and raw backend presets vs the dialog).
+         After creation, jump straight into the new session's first pane. -->
+    <CreateProjectDialog compact={isMobile}
+      oncreated={async (proj: { id: string; session: string }) => {
+        showNew = false;
+        await reloadProjects?.();
+        try {
+          const ps = await listPanes(proj.session);
+          const p = ps[0];
+          if (p) {
+            openTerminal(proj.session, `${p.session}:${p.window}.${p.pane}`, p.current_command);
+          }
+        } catch {}
+        await refresh();
+      }}
+      oncancel={() => showNew = false} />
   {/if}
 
   <div class="bottom-bar">
@@ -1152,131 +1076,5 @@
   @keyframes spin { to { transform: rotate(360deg); } }
 
   /* ─── New session form ────────────────────────────── */
-  .new-form {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 12px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-  }
-  .new-form input {
-    padding: 10px 12px;
-    border: 1px solid var(--border2);
-    border-radius: 10px;
-    background: var(--input-bg);
-    color: var(--text);
-    font-size: 14px;
-    outline: none;
-    -webkit-appearance: none;
-    appearance: none;
-  }
-  .new-form input:focus { border-color: var(--accent); }
-  .new-form input::placeholder { color: var(--text3); }
-  .cmd-row-new { display: flex; gap: 8px; }
-  .cmd-row-new input { flex: 1; min-width: 0; }
-  .preset-btn {
-    padding: 0 12px;
-    border: 1px solid var(--border2);
-    border-radius: 10px;
-    background: var(--input-bg);
-    color: var(--text2);
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    white-space: nowrap;
-    display: flex;
-    align-items: center;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .preset-btn.active {
-    background: var(--accent-bg);
-    color: var(--accent);
-    border-color: var(--accent);
-  }
 
-  .picker {
-    border: 1px solid var(--border2);
-    border-radius: 10px;
-    overflow: hidden;
-    background: var(--input-bg);
-  }
-  .picker-header {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 8px;
-    border-bottom: 1px solid var(--border2);
-  }
-  .picker-path {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    gap: 1px;
-    overflow-x: auto;
-    scrollbar-width: none;
-    font-family: var(--font-mono);
-    font-size: 12px;
-    -webkit-overflow-scrolling: touch;
-  }
-  .picker-path::-webkit-scrollbar { display: none; }
-  .picker-seg {
-    padding: 2px 3px;
-    border: none;
-    background: none;
-    color: var(--text2);
-    cursor: pointer;
-    white-space: nowrap;
-    font-size: 12px;
-    font-family: inherit;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .picker-seg:last-of-type { color: var(--accent); }
-  .picker-seg:active { color: var(--accent); }
-  .picker-sep { color: var(--text3); font-size: 11px; }
-  .picker-btn {
-    padding: 5px;
-    border: none;
-    border-radius: 6px;
-    background: var(--surface2);
-    color: var(--text2);
-    cursor: pointer;
-    display: flex;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .picker-btn:active { color: var(--accent); }
-  .pick-ok { background: var(--accent-bg); color: var(--accent); }
-  .picker-list { max-height: 180px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-  .picker-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 10px 12px;
-    border: none;
-    border-bottom: 1px solid var(--border2);
-    background: none;
-    color: var(--accent);
-    font-size: 13px;
-    cursor: pointer;
-    text-align: left;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .picker-item:active { background: var(--accent-bg); }
-  .picker-item:last-child { border-bottom: none; }
-  .picker-empty { padding: 12px; text-align: center; color: var(--text3); font-size: 12px; }
-  .create-btn {
-    padding: 10px;
-    border: none;
-    border-radius: 10px;
-    background: var(--accent-bg);
-    color: var(--accent);
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .create-btn:active:not(:disabled) { opacity: 0.8; }
-  .create-btn:disabled { opacity: 0.3; cursor: default; }
 </style>

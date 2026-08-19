@@ -29,7 +29,7 @@
   import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_PREVIEW, pickAnchor, toolEventParts } from './hub.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
-  import DirPicker from '../files/DirPicker.svelte';
+  import CreateProjectDialog from '../projects/CreateProjectDialog.svelte';
 
   let { visible = false, fontSize = 14, mobile = false, openTerminal = () => {} } = $props();
 
@@ -78,11 +78,7 @@
 
   // New-project dialog.
   let createOpen = $state(false);
-  let createPath = $state('');
-  let dirPickerOpen = $state(false);   // the reused fs_list directory chooser
-  let createName = $state('');
-  let createAgents = $state([]);    // selected registry names
-  let creating = $state(false);
+
 
   const room = (session) => `proj:${session}`;
   let lastTs = 0;
@@ -448,43 +444,9 @@
     } catch (e) { console.warn('up failed', e); }
   }
 
-  // New project: create → up → spawn each chosen agent. Client-side
-  // orchestration on purpose: each step is an existing, observable RPC.
-  async function createProject() {
-    const path = createPath.trim();
-    const name = createName.trim();
-    // The NAME names the project — and its tmux session. Without it the
-    // server fell back to the directory's basename, so a project created
-    // in .../myapp/src-tauri was called "src-tauri" (owner report). It is
-    // required in the dialog rather than defaulted, because a good default
-    // does not exist: the folder name is what was wrong.
-    if (!path || !name || creating) return;
-    creating = true;
-    try {
-      const r = await projectCreate(path, { name, session: name });
-      const proj = r.project ?? r;
-      await projectUp(proj.id);
-      for (const name of createAgents) {
-        try { await hubSpawn(proj.session, name); } catch (e) { console.warn('spawn failed', name, e); }
-      }
-      createOpen = false;
-      createPath = '';
-      createName = '';
-      createAgents = [];
-      await reload();
-      await selectProject(proj.session);
-    } catch (e) {
-      console.warn('create failed', e);
-    } finally {
-      creating = false;
-    }
-  }
 
-  function toggleCreateAgent(name) {
-    createAgents = createAgents.includes(name)
-      ? createAgents.filter((n) => n !== name)
-      : [...createAgents, name];
-  }
+
+
 
   // Spawn into the CURRENT project (from the chat header).
   let sideOpen = $state(false);     // phone: the project list, as a drawer
@@ -1136,42 +1098,15 @@
   {/if}
 
   {#if createOpen}
-    <!-- ── New project: path + name + WHICH AGENTS ── -->
-    <div class="dlg-backdrop" onclick={() => createOpen = false} role="presentation"></div>
-    <div class="dlg" class:sheet={compact}>
-      <h2>{t('projectNew')}</h2>
-      {#if dirPickerOpen}
-        <DirPicker start={createPath.trim() || '~'}
-          onpick={(p) => { createPath = p; dirPickerOpen = false; }}
-          oncancel={() => dirPickerOpen = false} />
-      {:else}
-        <input placeholder={t('hubCreateName')} bind:value={createName} />
-        <div class="path-row">
-          <input placeholder={t('hubCreatePath')} bind:value={createPath} />
-          <button class="chip-btn" onclick={() => dirPickerOpen = true}>
-            <Icon name="folder" size={13} />{t('dirPickerOpen')}
-          </button>
-        </div>
-      {/if}
-      {#if !dirPickerOpen}
-      <div class="dlg-h">{t('hubCreateAgents')}</div>
-      <div class="dlg-agents">
-        {#each registry as r (r.name)}
-          <button class="agent-pick" class:sel={createAgents.includes(r.name)} onclick={() => toggleCreateAgent(r.name)}>
-            <span class="ava" style:background={backendColor(r.backend)}>{r.name.slice(0, 1).toUpperCase()}</span>
-            {r.name} · {r.backend}
-            {#if createAgents.includes(r.name)}<Icon name="check" size={13} />{/if}
-          </button>
-        {/each}
-      </div>
-      <div class="dlg-actions">
-        <button class="chip-btn" onclick={() => createOpen = false}>{t('cancel')}</button>
-        <button class="chip-btn primary" disabled={!createPath.trim() || !createName.trim() || creating} onclick={createProject}>
-          {creating ? '…' : t('hubCreateGo')}
-        </button>
-      </div>
-      {/if}
-    </div>
+    <!-- ONE New Project surface app-wide (CreateProjectDialog): the Terminal
+         sidebar opens the same component, so they cannot drift apart. -->
+    <CreateProjectDialog {compact}
+      oncreated={async (proj) => {
+        createOpen = false;
+        await reload();
+        await selectProject(proj.session);
+      }}
+      oncancel={() => createOpen = false} />
   {/if}
 </div>
 
@@ -1649,12 +1584,7 @@
   .dlg.sheet .agent-pick, .dlg.sheet input, .dlg.sheet .dlg-actions button { min-height: 44px; }
   .dlg input { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 9px; color: var(--text); padding: 8px 12px; font-size: var(--fs-ui); outline: none; }
   .dlg input:focus { border-color: var(--accent); }
-  .dlg-h { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-meta); text-transform: uppercase; letter-spacing: 1.4px; color: var(--text3); margin-top: 4px; }
   .dlg-agents { display: flex; flex-direction: column; gap: 5px; }
-  /* Path field + Browse, one row: the field still accepts a typed path. */
-  .path-row { display: flex; gap: 6px; align-items: stretch; }
-  .path-row input { flex: 1; min-width: 0; }
-  .path-row .chip-btn { flex: none; }
   .agent-pick { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; color: var(--text2); padding: 8px 11px; font-size: var(--fs-ui); cursor: pointer; text-align: left; }
   .agent-pick.sel { border-color: var(--accent); color: var(--text); background: var(--accent-bg); }
   .agent-pick :global(svg) { margin-left: auto; color: var(--accent); }
