@@ -26,7 +26,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts } from './hub.ts';
+  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, menuPlacement } from './hub.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
   import CreateProjectDialog from '../projects/CreateProjectDialog.svelte';
@@ -611,6 +611,67 @@
     return () => window.removeEventListener('keydown', onKey, true);
   });
 
+  // ── The agent action menu is a CONTEXT MENU next to its chip, not a row.
+  // It used to open as a bar under the roster because the roster scrolls
+  // horizontally and a popover positioned inside a scroll container gets
+  // clipped by it. A fixed layer escapes that container entirely, so the menu
+  // can sit where the click was (owner, 2026-08-19).
+  let cardsEl = $state(null);
+  let menuAnchor = $state(null);   // trigger rect, in CSS px
+  let menuW = $state(0);
+  let menuH = $state(0);
+
+  /** The root's CSS `zoom` (web/Android interface scaling). Under zoom,
+   * getBoundingClientRect reports VISUAL pixels while a fixed child's `left`
+   * is in its own zoomed pixels, so the rect has to be divided back down or
+   * the menu lands at scale× the intended offset. 1 on the Tauri desktop path,
+   * where the webview zooms instead. */
+  const uiZoom = () =>
+    parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-zoom')) || 1;
+
+  function toggleAgentMenu(name, trigger) {
+    if (menuFor === name) { menuFor = ''; return; }
+    const r = trigger.getBoundingClientRect();
+    const z = uiZoom();
+    menuAnchor = { left: r.left / z, right: r.right / z, top: r.top / z, bottom: r.bottom / z };
+    menuW = 0; menuH = 0;          // re-measure for this opening
+    menuFor = name;
+  }
+
+  /** Under the trigger, right-aligned to it, flipped above when the bottom of
+   * the viewport is closer than the menu is tall, and always clamped into
+   * view. Measured size arrives one frame after mount, which is why the menu
+   * stays invisible until it has one. The math is `menuPlacement` in hub.ts,
+   * unit-tested there. */
+  const menuPos = $derived.by(() => {
+    if (!menuAnchor) return { x: 0, y: 0 };
+    const z = uiZoom();
+    return menuPlacement(
+      menuAnchor,
+      { w: menuW, h: menuH },
+      { w: window.innerWidth / z, h: window.innerHeight / z },
+    );
+  });
+
+  // Any click elsewhere, Escape, a scroll of the roster or a resize dismisses
+  // it — a menu you have to close by hand is a menu you forget to close.
+  $effect(() => {
+    if (!menuFor) return;
+    const close = () => { menuFor = ''; };
+    const onDown = (e) => { if (!e.target?.closest?.('.a-menu, .a-more')) close(); };
+    const onKey = (e) => { if (e.key === 'Escape') { close(); e.stopPropagation(); } };
+    window.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('resize', close);
+    cardsEl?.addEventListener('scroll', close, { passive: true });
+    return () => {
+      window.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('resize', close);
+      cardsEl?.removeEventListener('scroll', close);
+    };
+  });
+
   // `windowOf` is what lets a reply close the lane it belongs to, so two agents
   // working at once keep ONE growing group each instead of interleaving.
   const blocks = $derived(
@@ -804,7 +865,7 @@
       {#if managedAgents.length || stopped.length}
         <!-- The roster. Tapping an agent makes it the recipient (and this
              project's lead) — the phone gets chips, the desktop gets cards. -->
-        <div class="cards" class:chips={compact}>
+        <div class="cards" class:chips={compact} bind:this={cardsEl}>
           {#each managedAgents as a (a.window)}
             <!-- A div, not a button: the dot menu inside contains real buttons,
                  and a button inside a button is invalid HTML the browser
@@ -821,8 +882,8 @@
               <!-- Destructive and secondary actions stay behind a dot menu: a
                    roster is for seeing who is here, not a row of hazards. -->
               <span class="a-more" role="button" tabindex="-1" title={t('hubMore')}
-                onclick={(e) => { e.stopPropagation(); menuFor = menuFor === a.name ? '' : a.name; }}
-                onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); menuFor = menuFor === a.name ? '' : a.name; } }}>
+                onclick={(e) => { e.stopPropagation(); toggleAgentMenu(a.name, e.currentTarget); }}
+                onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); toggleAgentMenu(a.name, e.currentTarget); } }}>
                 <Icon name="dots" size={13} />
               </span>
             </div>
@@ -844,8 +905,8 @@
               <span class="s-age">{t('hubStopped')}</span>
               <Icon name="refresh" size={11} />
               <span class="a-more" role="button" tabindex="-1" title={t('hubMore')}
-                onclick={(e) => { e.stopPropagation(); menuFor = menuFor === name ? '' : name; }}
-                onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); menuFor = menuFor === name ? '' : name; } }}>
+                onclick={(e) => { e.stopPropagation(); toggleAgentMenu(name, e.currentTarget); }}
+                onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); toggleAgentMenu(name, e.currentTarget); } }}>
                 <Icon name="dots" size={13} />
               </span>
             </div>
@@ -860,34 +921,36 @@
       {/if}
 
       {#if menuFor}
-        <!-- Actions for one agent. A bar rather than a popover inside the chip:
-             the roster scrolls horizontally, and a scroll container clips
-             anything absolutely positioned inside it.
+        <!-- Actions for one agent, as a context menu beside its chip. It is a
+             FIXED layer: the roster scrolls horizontally, and a popover inside
+             that scroll container would be clipped by it (which is why this was
+             a full-width bar under the roster until 2026-08-19). Same popover
+             dialect as the recipient menu — one menu language in this file.
 
              A stopped agent gets the two verbs that mean anything to it: start
              it again, or eject it. Watch/Interrupt/Stop all need a live pane. -->
-        <div class="a-bar">
-          <span class="ab-who">{menuFor}</span>
+        <div class="a-menu" class:ready={menuH > 0} role="menu" tabindex="-1"
+          style:left="{menuPos.x}px" style:top="{menuPos.y}px"
+          bind:clientWidth={menuW} bind:clientHeight={menuH}>
+          <div class="am-who">{menuFor}</div>
           {#if stopped.includes(menuFor)}
-            <button disabled={acting} onclick={() => { const n = menuFor; menuFor = ''; startAgent(n); }}>
+            <button role="menuitem" disabled={acting} onclick={() => { const n = menuFor; menuFor = ''; startAgent(n); }}>
               <Icon name="refresh" size={12} />{t('hubStartAgain')}
             </button>
           {:else}
-            <button onclick={() => { const a = managedAgents.find((x) => x.name === menuFor); menuFor = ''; if (a) openDrawer(a); }}>
+            <button role="menuitem" onclick={() => { const a = managedAgents.find((x) => x.name === menuFor); menuFor = ''; if (a) openDrawer(a); }}>
               <Icon name="terminal" size={12} />{t('hubWatch')}
             </button>
-            <button title={t('hubInterruptHint')} onclick={() => { const n = menuFor; menuFor = ''; interrupt(n); }}>
+            <button role="menuitem" title={t('hubInterruptHint')} onclick={() => { const n = menuFor; menuFor = ''; interrupt(n); }}>
               <Icon name="x" size={12} />{t('hubInterrupt')}
             </button>
-            <button class="danger" onclick={() => { const n = menuFor; menuFor = ''; askAction('stop', n); }}>
+            <button role="menuitem" class="danger" onclick={() => { const n = menuFor; menuFor = ''; askAction('stop', n); }}>
               <Icon name="stop" size={12} />{t('hubStop')}
             </button>
           {/if}
-          <button class="danger" title={t('hubRemoveHint')} onclick={() => { const n = menuFor; menuFor = ''; askAction('remove', n); }}>
+          <button role="menuitem" class="danger" title={t('hubRemoveHint')} onclick={() => { const n = menuFor; menuFor = ''; askAction('remove', n); }}>
             <Icon name="trash" size={12} />{t('hubRemove')}
           </button>
-          <span class="spacer"></span>
-          <button class="ab-x" onclick={() => menuFor = ''} title={t('cancel')}><Icon name="x" size={12} /></button>
         </div>
       {/if}
 
@@ -1336,19 +1399,34 @@
   /* Secondary and destructive actions hide until asked for. */
   .a-more { display: grid; place-items: center; width: 20px; height: 22px; border-radius: 6px; color: var(--text3); flex: none; }
   .a-more:hover { color: var(--text); background: var(--surface2); }
-  .a-bar {
-    display: flex; align-items: center; gap: 6px; padding: 6px 14px;
-    border-bottom: 1px solid var(--border2); background: var(--bg2);
+  /* The agent action menu: a fixed popover, positioned in JS from the trigger's
+     rect (see toggleAgentMenu). It speaks the same dialect as .to-menu — same
+     surface, radius, shadow and row metrics — because this file should have ONE
+     popover language, not one per feature. Invisible until measured so the
+     clamp/flip cannot be seen happening. */
+  .a-menu {
+    position: fixed; z-index: 24; min-width: 176px; max-width: min(76vw, 280px);
+    background: var(--bg); border: 1px solid var(--border); border-radius: 11px;
+    box-shadow: 0 12px 34px rgba(0,0,0,0.45); padding: 5px;
+    display: flex; flex-direction: column; gap: 2px;
+    opacity: 0; transition: opacity var(--t-fast) ease;
   }
-  .ab-who { font-family: ui-monospace, Menlo, monospace; font-weight: 600; font-size: var(--fs-sub); color: var(--text2); }
-  .a-bar button {
-    display: inline-flex; align-items: center; gap: 5px; min-height: 32px;
-    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
-    color: var(--text3); padding: 4px 10px; font-size: var(--fs-sub); cursor: pointer;
+  .a-menu.ready { opacity: 1; }
+  .am-who {
+    font-family: ui-monospace, Menlo, monospace; font-weight: 600;
+    font-size: var(--fs-meta); color: var(--text3);
+    padding: 4px 10px 5px; border-bottom: 1px solid var(--border2); margin-bottom: 3px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .a-bar button:hover { color: var(--text); border-color: var(--input-border); }
-  .a-bar button.danger:hover { color: var(--status-danger); border-color: var(--status-danger); }
-  .a-bar .ab-x { border: none; background: none; padding: 4px 6px; }
+  .a-menu button {
+    display: flex; align-items: center; gap: 8px; min-height: 38px; width: 100%; text-align: left;
+    background: none; border: none; border-radius: 8px; color: var(--text2);
+    padding: 7px 10px; font-size: var(--fs-ui); cursor: pointer; font-family: ui-monospace, Menlo, monospace;
+  }
+  .a-menu button:hover { background: var(--surface2); color: var(--text); }
+  .a-menu button.danger:hover { background: color-mix(in srgb, var(--status-danger) 14%, transparent); color: var(--status-danger); }
+  .a-menu button:disabled { opacity: 0.45; cursor: default; background: none; }
+  .a-menu button :global(svg) { flex: none; }
 
   /* Chat canvas: one quiet tone derived from the theme. It had two radial
      glows for "depth"; the accent one read as a faint blue shadow over the

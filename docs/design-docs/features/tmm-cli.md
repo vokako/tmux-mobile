@@ -694,7 +694,7 @@ reachable from both the chat UI and `tmm` — the CLI is not a subset (owner:
 "所有的 Agent 也可以通过 TMM 命令直接交互所有的操作"), because an agent that
 can only be managed by a human cannot manage a teammate:
 
-| Agent | `tmm agent interrupt\|stop\|restart\|remove <name>` | roster action bar: Watch / Interrupt / Stop / Remove |
+| Agent | `tmm agent interrupt\|stop\|restart\|remove <name>` | roster dot menu (context menu): Watch / Interrupt / Stop / Remove |
 | Project | `tmm project up\|down\|archive\|delete <session>` | header: Open / Close / Delete (archive is the list's own action) |
 
 `remove` is the eject button next to stop's pause button: it kills the window,
@@ -978,9 +978,22 @@ backtick code blocks.
 
 The roster is one
 line per agent (avatar, name, state dot, elapsed, unread dot) with everything
-secondary behind a dot menu; the menu renders as a BAR under the roster, not a
-popover inside the chip, because the roster scrolls horizontally and a scroll
-container clips absolutely positioned children.
+secondary behind a dot menu. That menu is a CONTEXT MENU next to the chip, in a
+`position: fixed` layer placed from the trigger's client rect — fixed because the
+roster scrolls horizontally and a popover positioned inside that scroll container
+is clipped by it, which is why the first version was a full-width bar under the
+roster instead ("是不是应该类似右键菜单一样，在旁边会比较好", 2026-08-19). The
+placement is a pure function (`menuPlacement`): right-aligned to the trigger and
+below it, flipped above when the room underneath is smaller than the menu,
+clamped to the viewport on both axes, and skipping the flip while the height is
+still unmeasured — the menu stays invisible for that one frame rather than
+jumping. Under CSS `zoom` the trigger's rect is divided by `--ui-zoom` first: a
+client rect is in visual pixels while a fixed child's `left` is in its own zoomed
+pixels. It dismisses itself on an outside pointerdown, Escape, a roster scroll or
+a resize, and every action closes it as its first act — a menu you have to close
+by hand is a menu you forget to close. A stopped agent's menu carries the only
+two verbs that apply to it (Start again / Remove); Watch, Interrupt and Stop all
+need a live pane.
 
 No emoji anywhere in this surface: state is carried by colour, a rotating
 chevron, a pulsing dot and stroked SVG icons. Lifecycle lines the server posts
