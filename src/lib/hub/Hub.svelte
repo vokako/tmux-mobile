@@ -253,8 +253,8 @@
     // Hysteresis on the HELD state, and it overrides direction re-edging: at
     // the edge the bubble is simultaneously "naturally visible" (within 1px)
     // and "touching the edge", so a micro scroll reversal (trackpad, touch
-    // momentum) flips the prepared edge top<->bottom and held with it — the
-    // one-line collapse blinking on and off was the reported flicker. While
+    // momentum) flips the prepared edge top<->bottom and held with it, which
+    // made the held treatment blink on and off (the reported flicker). While
     // the SAME bubble is within 8px of the edge it already holds, it keeps
     // holding that edge regardless of instantaneous direction.
     const chosen = items.find((it) => it.key === picked.key);
@@ -1371,62 +1371,28 @@
   .msg.ask-bottom { position: sticky; bottom: 0; z-index: 6; }
   /* Floating treatment begins only after the bubble is actually held. Normal
      and held use the SAME opaque surface, so catching the edge changes depth,
-     never identity or colour. */
-  /* The held collapse is PAINT-ONLY, never layout. The first version shrank
-     the bubble to one line with max-height, which changed its flow height;
-     the browser's scroll anchoring compensated scrollTop, which flipped the
-     boundary condition back, and the anchor blinked in an infinite layout
-     feedback loop (measured: setting scrollTop=2261 landed on 2221↔2298).
-     clip-path clips rendering and hit-testing but occupies identical space,
-     so holding the edge can never move the scroll position. A short bubble
-     yields a negative inset, which simply does not clip. */
-  .msg.held { -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
-  /* Both edges show the SAME preview — the question's first line — inside a
-     33px window. Asks are the user's own messages, and those carry no head
-     row (only agent bubbles are named); geometry (measured): first line box
-     9..29px, the NEXT line's glyphs start ≈31px; bar 29..32, stroke 32..33.
-     Everything here is paint-only: clip-path clips, transform moves painting,
-     neither touches layout (the scroll-anchoring feedback loop is documented
-     above).
+     never identity or colour.
 
-     · Top edge: clip the message to its top 53px.
-     · Bottom edge: same clip ON THE BUBBLE plus translateY(100% − 53px), so
-       the bubble's HEAD slides down into the bottom window — without it the
-       window showed the bubble's tail and the time was cut off (owner
-       report). The outer .msg clip bounds anything else (image refs).
-     · The bare cut had no bottom edge ("少了一个小边边"): ::after paints a
-       fake floor — 3px of the bubble's own colour capped by its 1px border
-       line — which also covers the next line's 2px glyph sliver. */
-  .msg.ask-top.held { clip-path: inset(0 0 calc(100% - 33px) 0 round 12px); }
-  .msg.ask-bottom.held { clip-path: inset(calc(100% - 33px) 0 0 0 round 12px); }
-  .msg.ask-bottom.held .bubble {
-    clip-path: inset(0 0 calc(100% - 33px) 0 round 12px);
-    transform: translateY(calc(100% - 33px));
-  }
-  /* The frame of the held mini-bubble is DRAWN, not inherited. The real
-     bubble border cannot survive the clip: its bottom edge lies below the
-     window, and its side strokes are eaten by the window's corner rounding —
-     the first fake floor put its 1px line at border-y 53..54 and the 53px
-     clip removed exactly that line (pseudo-element `top` is padding-box
-     relative, 1px lower than the border box the clip measures — the owner
-     saw the missing stroke). So while held: hide the real border
-     (border-color is paint-only) and let ::before draw the complete frame,
-     outer edge exactly on the 53px window, stroke safely INSIDE the clip.
-     ::after remains an opaque bar that hides the next line's glyph sliver. */
-  .msg.held .bubble, .msg.held.me .bubble { border-color: transparent; }
-  .msg.held .bubble::before {
-    content: ''; position: absolute; left: -1px; right: -1px; top: -1px; height: 33px;
-    border: 1px solid var(--bubble-line); border-radius: 12px;
-    pointer-events: none;
-  }
-  .msg.held.me .bubble::before {
-    border-color: color-mix(in srgb, var(--accent) 18%, transparent);
-  }
-  .msg.held .bubble::after {
-    content: ''; position: absolute; left: 0; right: 0; top: 28px; height: 3px;
-    background: var(--bubble-in); pointer-events: none;
-  }
-  .msg.held.me .bubble::after { background: var(--bubble-out); }
+     A held bubble shows ALL of itself. It used to be clipped to a 33px window
+     — one line — which turned every multi-line question into a single truncated
+     line at the edge (owner, 2026-08-19: "保留原始样式完整显示就好，不用截断").
+     What replaced it is nothing at all: no clip, no transform, no drawn frame.
+     That is also the safest possible change here, because the ONE hazard in
+     this feature is layout, not paint. The first version collapsed the bubble
+     with max-height, which changed its flow height; the browser's scroll
+     anchoring compensated scrollTop, that flipped the boundary condition back,
+     and the anchor blinked in an infinite feedback loop (measured: setting
+     scrollTop=2261 landed on 2221↔2298). So a cap is not available even as a
+     safety net: any max-height on `.held` brings the loop back, and a generous
+     clip window would be truncation again. The bubble is as tall as the message
+     — a deliberately long question held at an edge covers more of the feed, and
+     that is the trade the owner asked for.
+
+     Depth is the only thing `.held` adds: the backdrop blur plus a lifted
+     shadow, both paint-only, so a bubble overlapping the scrolling content
+     below it reads as floating rather than as a rendering glitch. */
+  .msg.held { -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+  .msg.held .bubble { box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28); }
 
   /* Back to the tail. */
   .to-bottom {

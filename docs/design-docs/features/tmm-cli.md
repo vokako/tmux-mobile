@@ -841,12 +841,10 @@ change, not an appearing element.
 Corner radii are one small scale, tuned down on owner feedback (大圆角 read as
 toy-like): bubbles 12px with a 4px directional corner, the composer capsule
 10px, roster chips 9px, system pills 8px, recipient chip and message actions
-7px. The held mini-bubble's clip `round` and drawn frame follow the bubble
-radius — change one, change all three.
+7px.
 
 With metadata inline, the sticky anchor `.msg` and the bubble are the same
-box again, so the held windows are plain `100% − 33px` with no foot
-compensation. Prose bubbles are
+box again, and a held bubble is simply that box at full height. Prose bubbles are
 bounded to `min(76%, 760px)` on a wide screen and 91% on a phone, while tool runs,
 observed prompts and status facts use the same width ceiling but stay visually
 subordinate. The feed reuses `.subtle-scroll`; system events are centered frosted
@@ -912,44 +910,33 @@ later questions work without ever stacking two anchors.
 
 The difference between “active” and “held” is deliberate. `ask-top` /
 `ask-bottom` puts the same bubble into the sticky flow while it travels; the
-collapsed look starts only under `.held`, after it has actually touched the edge.
-Styling it while it was still travelling made one DOM element LOOK like two
+floating treatment starts only under `.held`, after it has actually touched the
+edge. Styling it while it was still travelling made one DOM element LOOK like two
 components.
 
-**The held collapse is paint-only, never layout.** The first implementation
-shrank the bubble to one line with `max-height`, and that closed a feedback loop:
-collapsing changed the bubble's flow height, the browser's scroll anchoring
-compensated `scrollTop` (measured: assigning 2261 landed on 2221↔2298), the
-compensation flipped the boundary test, and the anchor blinked indefinitely —
-the reported "一闪一闪". The fix is `clip-path: inset(… round r)`: it clips
-painting and hit-testing but the element keeps its full flow height, so holding
-an edge can never move the scroll position. A bubble shorter than the clip
-window computes a negative inset and simply does not clip. Do not reintroduce
-any held style that affects layout (height, padding, font-size, display).
+**A held bubble shows all of itself.** It was clipped to a 33px window — one
+line — which read as a truncated one-liner for every multi-line question (owner,
+2026-08-19: "保留原始样式完整显示就好，不用截断"). So the clip, the bottom
+edge's `translateY`, and the drawn mini-frame that only existed to make that
+window look finished are all gone; `.held` now adds depth and nothing else (a
+backdrop blur plus a lifted shadow, both paint-only). A long question held at an
+edge covers more of the feed, and that is the accepted trade.
 
-Both edges show the SAME preview — head (with its time) + first line — in a
-53px window. Top edge: clip the message to its top 53px. Bottom edge: the same
-clip ON THE BUBBLE plus `translateY(calc(100% − 53px))` — transform moves
-painting, not layout, so the bubble's head slides down into the bottom window;
-without it the window showed the bubble's TAIL and the timestamp was cut off
-(owner report). Both edges show the question's FIRST LINE: asks are the user's
-own messages, which carry no head row (time lives in the foot), so the window
-is 33px — first line box 9..29, next line's glyphs from ≈31, bar 29..32,
-stroke 32..33. The frame of the held mini-bubble is DRAWN, not inherited: the
-real border cannot survive the clip — its bottom edge lies below the window and
-its side strokes are eaten by the window's corner rounding, and a first attempt
-that only drew a floor line put that line at border-y 53..54, which the 53px
-clip removed exactly (a pseudo-element's `top` is padding-box relative, 1px
-lower than the border box the clip measures). While held, the real border-color
-goes transparent (paint-only) and `::before` draws the complete frame — outer
-edge exactly on the 53px window (`top:-1px; height:53px` in padding coords),
-stroke safely inside the clip; `::after` is an opaque bar covering the next
-line's ≈2px glyph sliver. The bubble's 140ms border-color transition makes the
-swap a soft cross-fade — and also means a computed-style read right after the
-class flips reports a MID-TRANSITION colour, which cost half an hour of chasing
-a cascade bug that did not exist. Geometry is re-derived
-whenever bubble padding, head presence or line-height change — current numbers
-live beside the CSS.
+**Nothing about `.held` may touch layout, and that is not negotiable.** The
+first implementation shrank the bubble to one line with `max-height`, and that
+closed a feedback loop: collapsing changed the bubble's flow height, the
+browser's scroll anchoring compensated `scrollTop` (measured: assigning 2261
+landed on 2221↔2298), the compensation flipped the boundary test, and the anchor
+blinked indefinitely — the reported "一闪一闪". This is also why a height CAP is
+not available as a safety net for a very long held bubble: `max-height` brings
+the loop straight back, and a generous `clip-path` window would be truncation
+again. Do not reintroduce any held style that affects layout (height, padding,
+font-size, display).
+
+The bubble is made opaque rather than replaced: bubble tints are rgba, so reply
+text otherwise reads through them. Compositing the same tint over the page colour
+preserves its ordinary appearance while the backdrop blur softens what moves
+under it.
 
 Direction has hysteresis too: trackpads and touch momentum land 1–3px reversals
 at rest, and at the held boundary a direction flip re-picks the anchor. A
@@ -959,16 +946,11 @@ One browser fact is part of the contract: Chromium reports `offsetTop` for a
 sticky element at its HELD position, not its original flow position. Before the
 scroll handler measures candidates, it synchronously overrides the current
 anchor to `position: static`, reads all natural positions, then removes the
-inline override before paint (`.held` no longer needs neutralizing — clip-path
-does not change layout). Without that neutral measurement, the old anchor looks
-naturally visible forever and transition state becomes stale. Programmatic jumps
-to the tail call the same synchronization explicitly; setting `scrollTop` to the
-same value does not emit a scroll event.
-
-The held bubble is made opaque rather than replaced: bubble tints are rgba, so
-reply text otherwise reads through them. Compositing the same tint over the page
-colour preserves its ordinary appearance while the backdrop blur softens what
-moves under it.
+inline override before paint (`.held` needs no neutralizing — it is paint-only).
+Without that neutral measurement, the old anchor looks naturally visible forever
+and transition state becomes stale. Programmatic jumps to the tail call the same
+synchronization explicitly; setting `scrollTop` to the same value does not emit a
+scroll event.
 And when the keyboard opens, the feed re-parks at the tail: `--app-height` shrinks
 the box while the scroll position stays, which otherwise leaves the newest line
 below the fold — App already broadcasts `keyboard-shift`, so the Hub listens
