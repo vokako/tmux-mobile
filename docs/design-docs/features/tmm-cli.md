@@ -936,47 +936,51 @@ floating treatment starts only under `.held`, after it has actually touched the
 edge. Styling it while it was still travelling made one DOM element LOOK like two
 components.
 
-**A held bubble is capped at a FIFTH of the feed, and elided from the MIDDLE.**
-Three positions in three days, and each one was right about the previous one's
-failure. It began clipped to a 33px window — one line — which read as a truncated
-one-liner for every multi-line question. Then it showed all of itself, which is
-correct for a two-line ask and swallows the conversation for a twenty-line one.
-Now: at most `20%` of the feed's height, with the text cut from the middle so
-BOTH ends survive ("如果太长把文字中间内容可以跳过比较多用 ……省略 但是少数几行可以
-完整展示 具体多少行取决于当前屏幕大小 总高度不超过屏幕百分之二十", 2026-08-19).
+**The TEXT folds; the bubble is never cut.** Four positions in three days, and
+the fourth is the one that separates the two ideas that kept getting confused. It
+began clipped to a 33px window — one line, which read as a truncated one-liner.
+Then it showed all of itself, which is right for a two-line ask and swallows the
+conversation for a twenty-line one. Then it was capped with `max-height` +
+`overflow: hidden`, which is the same mistake as the clip wearing different
+clothes: "我希望是消息内容自己内部折叠 不是框截断 … 气泡什么的都要完整的不要任何裁
+切" (2026-08-19).
 
-Why the middle and not the tail: a long ask puts the subject at the top and the
-actual request at the bottom, so a line clamp throws away the half that says what
-to do. `elideMiddle` (`hub.ts`, pure and unit-tested) handles the two shapes
-separately — many lines are cut by WHOLE lines (which keeps the markdown
-parseable, and rebalances a fence the cut would have orphaned), while one long
-paragraph is cut by characters on a word boundary, because line counting cannot
-help there. More is kept from the head than the tail, the marker is the full-width
-`……`, and text that already fits is returned by identity so the common case
-re-renders nothing.
+So: no clip, no cap, no `overflow: hidden` anywhere near `.held`. The bubble keeps
+its whole box — border, radius, padding, meta trailer — and is exactly as tall as
+the text it is showing. What shrinks is the CONTENT: while an ask is the held
+anchor, `elideMiddle` folds its body before it is rendered, and a `Show the whole
+message` control inside the bubble unfolds it (one at a time, reset when the anchor
+moves on — an unfolded ask is a moment of attention, not a setting).
 
-The ceiling is measured, not declared: `measureHeld` takes 20% of the FEED's
-height (not `20vh` — a head, a roster and a composer sit around it) and divides it
-by the bubble's computed line box, which is how "how many lines" follows the
-screen: ~2 head lines + `……` + 1 tail line on a phone, ~4 + `……` + 2 on a
-desktop. Three lines is the floor at which an elision still says anything. A CSS
-`max-height` backs it up for what an estimate cannot cover — an unbroken URL, a
-wide glyph run, an image ref. Raw view and every non-held message always render in
-full.
+The fold keeps BOTH ends. A long ask puts its subject at the top and the actual
+request at the bottom, so a line clamp discards the half that says what to do.
+`elideMiddle` (`hub.ts`, pure and unit-tested) handles the two shapes separately —
+many lines are cut by WHOLE lines, which keeps the markdown parseable and
+rebalances a fence the cut would have orphaned, while one long paragraph is cut by
+characters on a word boundary, because counting lines cannot help there. More is
+kept from the head than the tail, the marker is the full-width `……`, and text that
+already fits comes back by identity so the common case re-renders nothing.
 
-**Layout is now allowed to change, and exactly two things make that safe.** The
-first version collapsed the bubble with `max-height` and closed a feedback loop:
-collapsing changed the flow height, Chromium's scroll anchoring compensated
-`scrollTop` (measured: assigning 2261 landed on 2221↔2298), the compensation
-flipped the boundary test, and the anchor blinked indefinitely — the reported
-"一闪一闪". So (1) the feed sets `overflow-anchor: none`, which is the actual root
-cause switched off; it followed its tail explicitly (`scrollFeed`) anyway, so
-nothing depended on the compensation. And (2) `syncAsk` neutralizes `max-height`
-alongside `position` for its synchronous measurement, so the boundary test always
-reads the NATURAL box — measuring the clamped height would answer "is it still
-touching the bottom edge" with a different number than the one that decided to
-clamp it, which is the same blink by another route. Break either and the loop
-comes back.
+How much to keep is an ESTIMATE from the screen, not a constant: `measureHeld`
+takes 20% of the FEED's height (not `20vh` — a head, a roster and a composer sit
+around it) and divides it by the bubble's computed line box. A phone shows ~2 head
+lines + `……` + 1 tail line, a desktop ~4 + `……` + 2; three lines is the floor at
+which a fold still says anything. Being an estimate is fine precisely because
+nothing is clipped — if it is a line off, the bubble is a line taller, not cut.
+
+**Folding changes the box's height, and two things keep that from blinking.** The
+original `max-height` collapse closed a feedback loop: the flow height changed,
+Chromium's scroll anchoring compensated `scrollTop` (measured: assigning 2261
+landed on 2221↔2298), the compensation flipped the boundary test, and the anchor
+blinked indefinitely — the reported "一闪一闪". Folding the text shrinks the box
+just as a cap did, so both guards stay: (1) the feed sets `overflow-anchor: none`,
+the root cause switched off — it follows its tail explicitly (`scrollFeed`), so
+nothing depended on the compensation; and (2) a folded bubble reports its UNFOLDED
+height to the boundary test (`naturalH`, cached on every tick it is not folded,
+cleared on resize), so the decision that folded it and the decision that keeps it
+folded use the same number. Answer that question with the folded height and it
+unholds, the text returns, and it holds again — the same blink sourced from the
+text instead of from a clip.
 
 The bubble is made opaque rather than replaced: bubble tints are rgba, so reply
 text otherwise reads through them. Compositing the same tint over the page colour

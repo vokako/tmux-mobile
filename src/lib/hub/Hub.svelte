@@ -238,11 +238,11 @@
    * the viewport, then let CSS sticky catch that SAME element as it leaves in
    * the current scroll direction. In an empty stretch of a long reply, retain
    * it; never swap to another invisible message at an arbitrary midpoint. */
-  /** A held bubble may cover at most a FIFTH of the conversation — the owner's
-   * number ("总高度不超过屏幕百分之二十"). Measured in px off the feed rather than
-   * `20vh` because the feed is not the viewport (a head, a roster and a composer
-   * sit around it), and because the same number has to tell us how many LINES
-   * that is. */
+  /** The height a held ask should not exceed — a fifth of the conversation, the
+   * owner's number. It is an ESTIMATE that feeds the line budget below, never a
+   * cap on the box: the bubble is never clipped, the text is folded to fit. Taken
+   * from the FEED rather than `20vh` because a head, a roster and a composer sit
+   * around it. */
   let heldMax = $state(0);
   let heldLine = $state(20);        // measured line box of a bubble, px
   function measureHeld() {
@@ -255,7 +255,7 @@
   $effect(() => {
     void blocks; void visible;
     measureHeld();
-    const onResize = () => measureHeld();
+    const onResize = () => { naturalH.clear(); measureHeld(); };
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   });
@@ -266,6 +266,18 @@
   /** The body a held bubble shows. Identity when it already fits, so the common
    * case re-renders nothing. */
   const heldBody = (text) => elideMiddle(text, heldLines);
+  /** The message the reader unfolded by hand. One at a time, and it resets when
+   * the anchor moves on — an unfolded ask is a moment of attention, not a
+   * setting. */
+  let heldExpanded = $state('');
+  $effect(() => { if (askKey !== heldExpanded) heldExpanded = ''; });
+  /** Natural heights, by message key. A folded bubble is SHORTER than the
+   * message it stands for, so the boundary test has to keep using the height it
+   * had unfolded — otherwise folding shrinks the box, that unholds it, the text
+   * comes back, and it holds again: the same blink, sourced from the text
+   * instead of from a clip. The cache refreshes on every tick a bubble is NOT
+   * folded, which includes the tick before it first folds. */
+  const naturalH = new Map();
 
   function syncAsk(direction = askDir, reset = false) {
     if (!feedEl) { askKey = ''; askEdge = ''; askHeld = false; return; }
@@ -274,23 +286,20 @@
     // selected. Neutralize the one current sticky element for this synchronous
     // layout read; the inline override is removed before the browser can paint.
     const stickies = [...feedEl.querySelectorAll('.ask-top, .ask-bottom')];
-    for (const el of stickies) {
-      el.style.position = 'static';
-      // …and its natural HEIGHT: `.held` caps it, so measuring the clamped box
-      // would answer "is it still touching the bottom edge" with a different
-      // number than the one that decided to clamp it — held would flip off, the
-      // bubble would grow, and it would flip straight back on.
-      el.style.maxHeight = 'none';
-    }
-    const items = [...feedEl.querySelectorAll('[data-ask]')].map((el) => ({
-      key: el.dataset.ask ?? '',
-      top: el.offsetTop,
-      height: el.offsetHeight,
-    }));
-    for (const el of stickies) {
-      el.style.removeProperty('position');
-      el.style.removeProperty('max-height');
-    }
+    for (const el of stickies) el.style.position = 'static';
+    const items = [...feedEl.querySelectorAll('[data-ask]')].map((el) => {
+      const key = el.dataset.ask ?? '';
+      const height = el.offsetHeight;
+      if (el.dataset.folded === '1') {
+        // Folded: this box is smaller than the message. Answer with the height
+        // it has when unfolded (see naturalH) so the decision that folded it and
+        // the decision that keeps it folded use the same number.
+        return { key, top: el.offsetTop, height: naturalH.get(key) ?? height };
+      }
+      naturalH.set(key, height);
+      return { key, top: el.offsetTop, height };
+    });
+    for (const el of stickies) el.style.removeProperty('position');
     const picked = pickAnchor(
       items,
       feedEl.scrollTop,
@@ -990,8 +999,7 @@
       {/if}
 
       <div class="feed-wrap">
-      <div class="feed subtle-scroll" bind:this={feedEl} onscroll={onFeedScroll}
-        style:--held-max={heldMax ? `${heldMax}px` : null}>
+      <div class="feed subtle-scroll" bind:this={feedEl} onscroll={onFeedScroll}>
         {#each blocks as b, i (blockKey(b, i))}
           {#if b.type === 'sys'}
             <!-- The app's own record (spawn/stop/restart), folded: consecutive
@@ -1007,11 +1015,18 @@
                    duplicate and no invisible midpoint swap. -->
               {@const key = blockKey(b, i)}
               {@const isAsk = m.from === 'human'}
+              <!-- Folding is a property of the TEXT: while this ask is the held
+                   anchor and the reader has not unfolded it, the bubble renders a
+                   middle-elided body. `data-folded` tells syncAsk that this box
+                   is smaller than its message (see naturalH). -->
+              {@const folded = isAsk && askKey === key && askHeld && heldExpanded !== key
+                && heldBody(parts.text) !== parts.text}
               <div class="msg" class:me={m.from === 'human'}
                 class:ask-top={isAsk && askKey === key && askEdge === 'top'}
                 class:ask-bottom={isAsk && askKey === key && askEdge === 'bottom'}
                 class:held={isAsk && askKey === key && askHeld}
-                data-ask={isAsk ? key : undefined}>
+                data-ask={isAsk ? key : undefined}
+                data-folded={folded ? '1' : undefined}>
                 <!-- Telegram-style bubble: agent name heads the bubble; the
                      time — and on your own messages the delivery ring, right
                      of it — is an inline trailer FLOATED at the end of the
@@ -1032,12 +1047,18 @@
                       {#if rawOpen === key}
                         <pre class="raw">{m.body}</pre>
                       {:else}
-                        <!-- While HELD, a long ask is elided from the MIDDLE so
-                             both ends stay readable inside the ceiling; raw view
-                             and every other message render in full. -->
-                        {@html markLeadingMention(renderMarkdown(
-                          isAsk && askKey === key && askHeld ? heldBody(parts.text) : parts.text,
-                        ))}
+                        <!-- Folded: both ends of the ask, with the middle
+                             replaced by ……. Raw view and every other message
+                             render in full. -->
+                        {@html markLeadingMention(renderMarkdown(folded ? heldBody(parts.text) : parts.text))}
+                      {/if}
+                      {#if folded}
+                        <!-- The way back to the whole message. A button, because
+                             this is the one thing you might want from a folded
+                             ask; the bubble's own click still opens copy/raw. -->
+                        <button class="m-unfold" onclick={(e) => { e.stopPropagation(); heldExpanded = key; }}>
+                          <Icon name="chevron-down" size={11} />{t('hubUnfold')}
+                        </button>
                       {/if}
                     {/if}
                     <button class="m-meta" aria-label={t('hubMsgActions')}
@@ -1518,14 +1539,13 @@
      Depth is the only thing `.held` adds: the backdrop blur plus a lifted
      shadow, both paint-only, so a bubble overlapping the scrolling content
      below it reads as floating rather than as a rendering glitch. */
-  .msg.held {
-    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
-    /* The ceiling. The elision already fits the TEXT to it, so this is the guard
-       for what an estimate cannot cover: a long unbroken URL, a wide glyph run,
-       an image ref. Layout is only safe here because the feed opts out of scroll
-       anchoring and syncAsk measures the natural box — see both comments. */
-    max-height: var(--held-max, none); overflow: hidden;
-  }
+  /* NOTHING is clipped or capped here. The bubble keeps its whole box — border,
+     radius, padding, meta trailer — and stays as tall as the text it is showing;
+     what shrinks is the TEXT, folded by elideMiddle before it is rendered (owner,
+     2026-08-19: "我希望是消息内容自己内部折叠 不是框截断 … 气泡什么的都要完整的不要
+     任何裁切"). A cap or a clip would cut the bubble itself, which is exactly the
+     thing that read as broken in the two earlier attempts. */
+  .msg.held { -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
   .msg.held .bubble { box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28); }
 
   /* Back to the tail. */
@@ -1588,6 +1608,15 @@
     user-select: none; background: none; border: none; padding: 0;
     font-family: inherit; cursor: pointer;
   }
+  /* "Show the rest": a quiet inline control inside the bubble, not a chip on
+     top of it — the bubble is complete, this is part of its content. */
+  .m-unfold {
+    display: inline-flex; align-items: center; gap: 4px; margin-top: 4px;
+    background: none; border: none; padding: 2px 0; cursor: pointer;
+    color: var(--accent); font-family: inherit; font-size: var(--fs-sub);
+  }
+  .m-unfold:hover { text-decoration: underline; text-underline-offset: 2px; }
+  .m-unfold :global(svg) { flex: none; }
   .m-state { display: inline-flex; opacity: 0.55; }
   .m-state.ok { color: var(--status-ok); opacity: 1; }
   .m-time { font-variant-numeric: tabular-nums; }
