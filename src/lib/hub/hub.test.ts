@@ -78,8 +78,50 @@ test('a reply between tool calls splits the group in two', () => {
     ev({ ts: 100, kind: 'tool', text: 'Read a.rs' }),
     ev({ ts: 200, kind: 'tool', text: 'Edit a.rs' }),
   ];
-  const blocks = feedBlocks(feed, activity, 'tools');
-  assert.deepEqual(blocks.map((b) => b.type), ['steps', 'msg', 'steps'], 'a group means "between two replies"');
+  // With no window map a reply cannot be attributed, so it ends every run.
+  assert.deepEqual(
+    feedBlocks(feed, activity, 'tools').map((b) => b.type),
+    ['steps', 'msg', 'steps'],
+    'a group means "between two replies"',
+  );
+  // With one, it ends the lane it came from — the same split, now for a reason.
+  assert.deepEqual(
+    feedBlocks(feed, activity, 'tools', (from) => (from === 'dev' ? 1 : undefined)).map((b) => b.type),
+    ['steps', 'msg', 'steps'],
+  );
+});
+
+test('two agents working at once keep one lane each', () => {
+  // The churn this replaces: folding only CONSECUTIVE events turned an
+  // interleaved run into one group per call (owner report, 2026-08-19).
+  const activity = [
+    ev({ ts: 100, window: 1, kind: 'tool', text: 'Read a.rs' }),
+    ev({ ts: 110, window: 2, kind: 'tool', text: 'Read b.rs' }),
+    ev({ ts: 120, window: 1, kind: 'tool', text: 'Edit a.rs' }),
+    ev({ ts: 130, window: 2, kind: 'tool', text: 'Edit b.rs' }),
+    ev({ ts: 140, window: 1, kind: 'tool', text: 'Bash cargo test' }),
+  ];
+  const blocks = feedBlocks([], activity, 'tools');
+  assert.deepEqual(blocks.map((b) => b.type === 'steps' && b.window), [1, 2], 'two lanes, not five rows');
+  const w1 = blocks.find((b) => b.type === 'steps' && b.window === 1);
+  const w2 = blocks.find((b) => b.type === 'steps' && b.window === 2);
+  assert.deepEqual(
+    w1?.type === 'steps' ? w1.events.map((e) => e.text) : [],
+    ['Read a.rs', 'Edit a.rs', 'Bash cargo test'],
+    'every call of that agent, in order',
+  );
+  assert.equal(w2?.type === 'steps' && w2.events.length, 2);
+  // A lane is closed only by ITS OWN rows: another agent's reply is a different
+  // conversation, not a boundary.
+  const withReply = feedBlocks(
+    [{ ts: 115, from: 'other', body: 'done over here' }],
+    activity,
+    'tools',
+    (from) => (from === 'other' ? 2 : undefined),
+  );
+  const lanes = withReply.filter((b) => b.type === 'steps');
+  assert.equal(lanes.length, 3, 'window 2 was split by its own reply, window 1 was not');
+  assert.equal(lanes[0]?.type === 'steps' && lanes[0].events.length, 3, 'window 1 stayed whole');
 });
 
 test('concurrent windows never share a tool group', () => {
@@ -89,7 +131,7 @@ test('concurrent windows never share a tool group', () => {
     ev({ ts: 120, window: 1, kind: 'tool', text: 'Edit a.rs' }),
   ];
   const blocks = feedBlocks([], activity, 'tools');
-  assert.deepEqual(blocks.map((b) => b.type === 'steps' && b.window), [1, 2, 1], 'per-window runs');
+  assert.deepEqual(blocks.map((b) => b.type === 'steps' && b.window), [1, 2], 'one lane per window');
   // Per-window dedup: window 2 repeating window 1's line is not a duplicate.
   const same = feedBlocks([], [
     ev({ ts: 100, window: 1, kind: 'tool', text: 'Read a.rs' }),

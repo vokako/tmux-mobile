@@ -176,9 +176,12 @@ export function toolColor(tool: string | null | undefined): string {
   return 'var(--text2)';
 }
 
-/** How many steps a group shows before "show all". A run of forty tool calls is
- * a wall; the last handful is what tells you where the agent is. */
-export const STEPS_PREVIEW = 5;
+/** How many tool rows a group shows before its body starts scrolling. A run of
+ * forty calls is a wall; ten rows is enough to see what the agent is doing now
+ * and where it has been, and the group's OUTER height stops growing there —
+ * which is what keeps a live run from shoving the conversation around. "Expand
+ * all" lifts the cap for one group. */
+export const STEPS_ROWS = 10;
 
 /** Advance the ONE user-message anchor without inventing a second component.
  *
@@ -262,6 +265,12 @@ export type FeedBlock =
 /** Internal: a tool call before consecutive ones are folded into a group. */
 type ToolItem = { type: 'tool'; ts: number; window: number; event: HubActivityEvent };
 
+/** Internal: a turn boundary that produces NO row — a delivery echo. The echo
+ * is consumed as a receipt (rule 1) so it never renders, but it is still the
+ * moment `userPromptSubmit` opened a new turn, and a new turn must not pour its
+ * tool calls into the previous turn's group. */
+type TurnMark = { type: 'turn'; ts: number; window: number };
+
 /** `tmm` subcommands whose EFFECT is already a row in this timeline: the
  * message, the status change, the completion, the spawn notice. Showing the
  * tool call that produced them would print the same event twice — once as the
@@ -320,16 +329,25 @@ export function isSelfReport(e: HubActivityEvent): boolean {
  * 2. **A local prompt is the input half of the transcript.** Text typed at the
  *    agent's own keyboard exists in no other channel, so an unmatched `prompt`
  *    event renders as its own row.
- * 3. **Tool calls collapse, replies do not.** Consecutive tool events from the
- *    same window fold into one `steps` group; anything else (a message, a status
- *    declaration, a lifecycle notification) ends the run, which is what makes a
- *    group mean "between these two replies". Duplicate consecutive tool lines
- *    are dropped per window first (pre+post fire for one call).
+ * 3. **Tool calls collapse per AGENT, replies do not.** A window's tool events
+ *    fold into one `steps` group that stays open for that window's whole turn.
+ *    Only that SAME window ends its own run — its reply, its local prompt, the
+ *    echo of a line delivered to it, a note about it. Another agent's rows are a
+ *    different lane and must not break it: with two agents working, a rule that
+ *    folded only CONSECUTIVE events produced one group per call
+ *    (w1, w2, w1, w2 …) and the feed read as churn (owner report, 2026-08-19).
+ *    Duplicate consecutive tool lines are dropped per window first (pre+post
+ *    fire for one call).
+ *
+ * `windowOf` maps a message's sender to its window, which is how a reply is
+ * attributed to the lane it ends. Without it a reply cannot be attributed, so
+ * it conservatively ends every open run — the pre-aggregation behavior.
  */
 export function feedBlocks(
   feed: any[],
   activity: readonly HubActivityEvent[],
   level: FeedLevel,
+  windowOf?: (from: string) => number | undefined,
 ): FeedBlock[] {
   // Lifecycle lines ("[tmm] spawned dev") are the app's record, not the
   // conversation: at the chat-only level they disappear, and elsewhere they
@@ -346,6 +364,7 @@ export function feedBlocks(
 
   // Rule 1: pair echoes with the messages that produced them.
   const consumed = new Set<HubActivityEvent>();
+  const turns: TurnMark[] = [];
   for (const e of activity) {
     if (e.kind !== 'prompt' || e.via !== 'app') continue;
     // The newest message at or before the echo whose body it contains. The
@@ -360,10 +379,12 @@ export function feedBlocks(
     if (hit) {
       hit.delivered = true;
       consumed.add(e);
+      // Invisible, but still a turn boundary (rule 3).
+      turns.push({ type: 'turn', ts: e.ts, window: e.window });
     }
   }
 
-  const stream: (FeedBlock | ToolItem)[] = [...msgs];
+  const stream: (FeedBlock | ToolItem | TurnMark)[] = [...msgs, ...turns];
   const lastTool = new Map<number, string>();
   for (const e of activity) {
     if (consumed.has(e)) continue;
@@ -406,38 +427,61 @@ export function feedBlocks(
   // first: a reply is what ends a turn, so the tool calls of that turn happened
   // before it. Ties are not hypothetical — the server stamps a hook event when
   // it consumes the file, so a turn's last tool call and its auto-posted reply
-  // can land in the same millisecond.
-  const rank = (i: FeedBlock | ToolItem) => (i.type === 'msg' ? 1 : 0);
+  // can land in the same millisecond. A turn boundary sorts ahead of everything
+  // at its timestamp, because it OPENS what follows.
+  const rank = (i: FeedBlock | ToolItem | TurnMark) => (i.type === 'turn' ? -1 : i.type === 'msg' ? 1 : 0);
   stream.sort((a, b) => a.ts - b.ts || rank(a) - rank(b));
 
-  // Rule 3: fold consecutive same-window tool calls.
+  // Rule 3: one group per window per turn — see the doc comment. `open` holds
+  // the group each window is still adding to; a row from that window closes it,
+  // a row from any other window is a different lane and is ignored.
   const out: FeedBlock[] = [];
+  const open = new Map<number, Extract<FeedBlock, { type: 'steps' }>>();
   for (const item of stream) {
-    if (item.type === 'sys') {
-      const prev = out[out.length - 1];
-      if (prev?.type === 'sys') {
-        prev.items.push(...item.items);
+    if (item.type === 'tool') {
+      const group = open.get(item.window);
+      if (group) {
+        group.events.push(item.event);
         continue;
       }
+      const created: Extract<FeedBlock, { type: 'steps' }> = {
+        type: 'steps',
+        ts: item.ts,
+        window: item.window,
+        key: `w${item.window}-${item.ts}`,
+        events: [item.event],
+      };
+      open.set(item.window, created);
+      out.push(created);
+      continue;
+    }
+    if (item.type === 'turn') {
+      open.delete(item.window);
+      continue;                      // a receipt renders as a mark on its message
+    }
+    if (item.type === 'msg') {
+      // Which lane does this reply end? Its sender's, when we can tell; every
+      // lane when we cannot (no map = no attribution, so stay conservative).
+      const from = item.msg?.from ?? '';
+      const w = from ? windowOf?.(from) : undefined;
+      if (!windowOf) open.clear();
+      else if (w !== undefined) open.delete(w);
       out.push(item);
       continue;
     }
-    if (item.type !== 'tool') {
+    if (item.type === 'prompt' || item.type === 'note') {
+      open.delete(item.window);
       out.push(item);
       continue;
     }
+    // Lifecycle lines are the app's record, not a turn boundary: consecutive
+    // ones fold into ONE row.
     const prev = out[out.length - 1];
-    if (prev?.type === 'steps' && prev.window === item.window) {
-      prev.events.push(item.event);
+    if (item.type === 'sys' && prev?.type === 'sys') {
+      prev.items.push(...item.items);
       continue;
     }
-    out.push({
-      type: 'steps',
-      ts: item.ts,
-      window: item.window,
-      key: `w${item.window}-${item.ts}`,
-      events: [item.event],
-    });
+    out.push(item);
   }
   return out;
 }

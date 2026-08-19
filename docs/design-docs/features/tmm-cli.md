@@ -583,14 +583,27 @@ events into rows, and three rules shape what the user sees:
   "finished a turn" after every answer, next to the answer itself. The reply IS
   the event; the chip going idle is the state. Lifecycle rows are now only the
   ones where a human is needed (permission, input, failure).
-- **Tool calls collapse, replies do not.** Consecutive `tool` events from the
-  same window fold into one collapsible group ("N tool calls", last line as the
-  preview); a message, a status declaration or a notification ends the run,
-  which is what makes a group mean *between these two replies*. Groups are
-  per-window, so two agents working at once never share one. Open while that
-  window is working, closed when it stops, and an explicit click wins — the
-  choice lives outside the row (`stepsChoice`, keyed by group) so a re-render
-  cannot lose it.
+- **Tool calls collapse per AGENT, replies do not.** A window's `tool` events
+  fold into ONE group ("N tool calls") that stays open for that window's whole
+  turn. What ends the run is that window's OWN rows — its reply, its local
+  prompt, the (invisible) echo of a line delivered to it, a note about it — so a
+  group still means *between these two replies*. Another agent's rows are a
+  different lane and never break it: folding only CONSECUTIVE events turned two
+  agents working at once into one group per call (w1, w2, w1, w2 …) and the feed
+  read as churn (owner report, 2026-08-19). A reply is attributed to its lane by
+  the `windowOf` map the Hub passes in; with no map (the pure-function default)
+  a reply conservatively ends every run. Because a delivery echo is consumed as
+  a receipt it renders nothing, but it is still a turn boundary — otherwise a
+  new turn's calls poured into the previous turn's group.
+- **A group is open by default, and ten rows tall.** The default used to be
+  "open only while the agent is working", so a finished run needed a click to
+  read (owner, 2026-08-19). Now every group is open unless the user closed it,
+  the body scrolls past `STEPS_ROWS` (10) rows, and "show all N" lifts the cap
+  for one group. Every call is in the DOM — the cap is a viewport on it, which is
+  what keeps a live run from growing the conversation past ten rows while the
+  inner tail sticks to the newest call (`stickBottom`, released as soon as the
+  user scrolls up inside it). The open/closed choice lives outside the row
+  (`stepsChoice`, keyed by group) so a re-render cannot lose it.
 
 A tool NAME is coloured by what the tool does — changes / runs / looks up /
 reads, four buckets matched on substrings so `fs_write` and `Edit` land in the
@@ -599,9 +612,7 @@ off first: an older server shipped tool events with no `tool` field and the name
 glued onto the text (`"shell tmm send …"`), which is why every name rendered
 grey — the coloured column only exists when there IS a name. `toolEventParts`
 normalizes both generations, and everything downstream (the colour column, the
-collapsed peek, the self-report filter) reads through it. An expanded group shows
-the last `STEPS_PREVIEW` steps with "show all N", because the tail is what tells
-you where the agent is.
+collapsed peek, the self-report filter) reads through it.
 
 Self-report filtering is segment-wise: agents chain the report onto one shell
 line (`tmm send "…" 2>&1; tmm status working "…"`), so a command is invisible
@@ -610,9 +621,10 @@ the room already shows as a message never prints again as a tool row, while
 `tmm send "done" && make deploy` keeps its row because the deploy has no other
 trace. A `;` inside a quoted message body fails open (the row stays).
 
-Because a run of tool calls is now one line instead of forty, `+ tools` is the
-default detail level, and the level is reachable from the Hub head (a chip that
-cycles chat → status → tools) as well as Settings → Appearance → Chat detail.
+Because a run of tool calls is now one group instead of forty rows, `+ tools` is
+the default detail level, and the level is reachable from the Hub head (a chip
+that cycles chat → status → tools) as well as Settings → Appearance → Chat
+detail.
 
 ### Conversation visual language
 

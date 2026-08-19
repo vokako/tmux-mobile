@@ -26,7 +26,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_PREVIEW, pickAnchor, toolEventParts } from './hub.ts';
+  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts } from './hub.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
   import CreateProjectDialog from '../projects/CreateProjectDialog.svelte';
@@ -611,14 +611,20 @@
     return () => window.removeEventListener('keydown', onKey, true);
   });
 
-  const blocks = $derived(feedBlocks(feed, activity, hubPrefs.feedLevel));
+  // `windowOf` is what lets a reply close the lane it belongs to, so two agents
+  // working at once keep ONE growing group each instead of interleaving.
+  const blocks = $derived(
+    feedBlocks(feed, activity, hubPrefs.feedLevel, (from) => agents.find((a) => a.name === from)?.window),
+  );
   const windowName = (w) => agents.find((a) => a.window === w)?.name ?? `#${w}`;
 
-  // Disclosure lives outside the row: `undefined` means "nobody chose", so the
-  // group follows the agent (open while it works, closed when it is done) and
-  // an explicit choice sticks. Keyed by group so re-renders can't lose it.
+  // Disclosure lives outside the row: `undefined` means "nobody chose", and the
+  // default is OPEN — what an agent is doing is the thing you came to watch
+  // (owner, 2026-08-19; it used to open only while the agent was working, so a
+  // finished run needed a click to read). An explicit choice sticks. Keyed by
+  // group so re-renders can't lose it.
   let stepsChoice = $state({});
-  let stepsAll = $state({});        // group key → show every step, not the tail
+  let stepsAll = $state({});        // group key → lift the 10-row cap
   let menuFor = $state('');         // agent name whose dot menu is open
   let msgOpen = $state('');         // message key whose action row is open
   let rawOpen = $state('');         // message key showing its raw source
@@ -633,9 +639,23 @@
     } catch (e) { console.warn('copy failed', e); }
   }
   const isRunning = (b) =>
-    b.key === newestSteps[b.window] && agents.find((a) => a.window === b.window)?.state === 'working';
-  const stepsOpen = (b) => stepsChoice[b.key] ?? isRunning(b);
+    b.key === newestSteps[b.window] &&
+    ['running', 'working'].includes(agents.find((a) => a.window === b.window)?.state);
+  const stepsOpen = (b) => stepsChoice[b.key] ?? true;
   const toggleSteps = (b, open) => { stepsChoice[b.key] = open; };
+
+  /** Keep a capped step list showing its NEWEST row, the way a log tail does —
+   * unless the user has scrolled up inside it, which is a deliberate look at
+   * history and must not be yanked back. `use:stickBottom={events.length}`
+   * re-runs on every appended call. */
+  function stickBottom(node) {
+    let stick = true;
+    const onScroll = () => { stick = node.scrollHeight - node.scrollTop - node.clientHeight < 24; };
+    node.addEventListener('scroll', onScroll, { passive: true });
+    const toBottom = () => { if (stick) requestAnimationFrame(() => { node.scrollTop = node.scrollHeight; }); };
+    toBottom();
+    return { update: toBottom, destroy: () => node.removeEventListener('scroll', onScroll) };
+  }
   /** Per window, the key of its LAST step group: only that one can be running. */
   const newestSteps = $derived.by(() => {
     const last = {};
@@ -959,14 +979,13 @@
                 {/if}
               </button>
               {#if open}
-                {@const shown = stepsAll[b.key] ? b.events : b.events.slice(-STEPS_PREVIEW)}
-                <div class="s-body">
-                  {#if shown.length < b.events.length}
-                    <button class="s-all" onclick={() => { stepsAll[b.key] = true; }}>
-                      {t('hubStepsAll').replace('{n}', String(b.events.length))}
-                    </button>
-                  {/if}
-                  {#each shown as e, j (`${e.ts}-${j}`)}
+                {@const capped = !stepsAll[b.key] && b.events.length > STEPS_ROWS}
+                <!-- Every call is in the DOM; the CAP is a viewport on it, so a
+                     live run stops growing the conversation after ten rows and
+                     the tail stays where the eye already is. -->
+                <div class="s-body" class:capped style:--steps-rows={STEPS_ROWS}
+                  use:stickBottom={capped ? b.events.length : 0}>
+                  {#each b.events as e, j (`${e.ts}-${j}`)}
                     {@const ep = toolEventParts(e)}
                     <div class="step">
                       <!-- The tool NAME is the scannable half: its own colour by
@@ -979,6 +998,13 @@
                     </div>
                   {/each}
                 </div>
+                {#if b.events.length > STEPS_ROWS}
+                  <!-- Outside the scroller on purpose: a control that scrolls
+                       away is a control you cannot find. -->
+                  <button class="s-all" onclick={() => { stepsAll[b.key] = !stepsAll[b.key]; }}>
+                    {capped ? t('hubStepsAll').replace('{n}', String(b.events.length)) : t('hubStepsCap')}
+                  </button>
+                {/if}
               {/if}
             </div>
           {/if}
@@ -1506,13 +1532,26 @@
     /* 30px = the head's padding (10) + chevron (12) + gap (7): the rows line up
        under the head's TEXT, which is the column the eye follows. */
     padding: 5px 10px 6px 30px; border-top: 1px solid var(--border2);
+    /* One em == one step row's font size, so the cap below is expressed in ROWS
+       and follows the type scale instead of a magic pixel height. */
+    font-size: var(--fs-sub);
+  }
+  /* Ten rows, then scroll. Each step is one line by construction (.st-text
+     ellipsizes), so rows and lines are the same thing here. */
+  .s-body.capped {
+    max-height: calc(var(--steps-rows) * (1.5em + 2px) + 11px);
+    overflow-y: auto; overscroll-behavior: contain;
+    scrollbar-width: thin;
   }
   .s-all {
     align-self: flex-start; background: none; border: none; color: var(--text3);
-    font-size: var(--fs-meta); padding: 0 0 3px; cursor: pointer; font-family: ui-monospace, Menlo, monospace;
+    font-size: var(--fs-meta); padding: 2px 10px 5px 30px; cursor: pointer; font-family: ui-monospace, Menlo, monospace;
   }
   .s-all:hover { color: var(--accent); }
-  .step { display: flex; align-items: baseline; gap: 8px; font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text3); }
+  .step {
+    display: flex; align-items: baseline; gap: 8px; line-height: 1.5;
+    font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text3);
+  }
   /* The tool name: the part the eye scans down a column. */
   .tname { flex: none; color: var(--accent); font-weight: 650; }
   .step .tname { min-width: 6.5em; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
