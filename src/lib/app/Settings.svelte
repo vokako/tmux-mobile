@@ -229,7 +229,7 @@
   }
 
   .icon {
-    font-size: 36px;
+    font-size: var(--fs-hero);
     color: var(--accent);
     filter: drop-shadow(0 0 12px var(--accent-glow));
     margin-bottom: 4px;
@@ -240,7 +240,7 @@
 
   h2 {
     margin: 0;
-    font-size: 22px;
+    font-size: var(--fs-display);
     font-weight: 700;
     color: var(--text);
     letter-spacing: -0.5px;
@@ -312,9 +312,8 @@
     border-radius: 10px;
     background: var(--input-bg);
     color: var(--text);
-    /* 16px is the iOS threshold below which focusing an input auto-zooms
-       the page — on the phone-first connect card that zoom is pure jank. */
-    font-size: 16px;
+    /* The iOS no-auto-zoom threshold; see --fs-input-touch in app.css. */
+    font-size: var(--fs-input-touch);
     outline: none;
     transition: border-color var(--t-fast) ease, background var(--t-fast) ease, box-shadow var(--t-fast) ease;
     -webkit-appearance: none;
@@ -335,7 +334,7 @@
     left: 12px;
     top: 50%;
     transform: translateY(-50%);
-    font-size: 13px;
+    font-size: var(--fs-body);
     pointer-events: none;
   }
   .token-wrap input { padding-left: 36px; padding-right: 36px; }

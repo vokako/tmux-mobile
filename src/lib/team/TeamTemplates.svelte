@@ -373,7 +373,7 @@
     display: flex; align-items: center; justify-content: space-between;
     padding: 12px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
   }
-  .tpl-title { font-size: 14px; font-weight: 600; color: var(--text); }
+  .tpl-title { font-size: var(--fs-body); font-weight: 600; color: var(--text); }
   .tpl-x { border: none; background: none; color: var(--text3); cursor: pointer; display: flex; }
   .tpl-x:active { color: var(--accent); }
 
@@ -389,20 +389,20 @@
   }
   .sys-toggle:active { color: var(--accent); }
   .sys-label {
-    font-size: 10px; font-weight: 600; color: var(--text3);
+    font-size: var(--fs-meta); font-weight: 600; color: var(--text3);
     text-transform: uppercase; letter-spacing: 0.5px;
   }
   .sys-save {
     display: inline-flex; align-items: center; gap: 5px;
     padding: 4px 10px; border: 1px solid var(--accent); border-radius: 7px;
-    background: var(--accent-bg); color: var(--accent); font-size: 11px; font-weight: 600;
+    background: var(--accent-bg); color: var(--accent); font-size: var(--fs-sub); font-weight: 600;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
   .sys-save:disabled { opacity: 0.45; cursor: default; }
   .sys-input {
     width: 100%; box-sizing: border-box; max-height: 120px;
     padding: 8px 10px; border: 1px solid var(--input-border); border-radius: 8px;
-    background: var(--input-bg); color: var(--text); font-size: 12px;
+    background: var(--input-bg); color: var(--text); font-size: var(--fs-ui);
     font-family: inherit; resize: vertical; line-height: 1.4; outline: none;
   }
   .sys-input:focus { border-color: var(--accent); }
@@ -415,15 +415,15 @@
   .tpl-item {
     display: flex; align-items: center; justify-content: space-between; gap: 6px;
     padding: 7px 9px; border: 1px solid var(--border2); border-radius: 8px;
-    background: var(--input-bg); color: var(--text2); font-size: 12px; cursor: pointer;
+    background: var(--input-bg); color: var(--text2); font-size: var(--fs-ui); cursor: pointer;
     text-align: left; -webkit-tap-highlight-color: transparent;
     font-family: var(--font-ui);
   }
   .tpl-item.active { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
-  .tpl-count { color: var(--text3); font-size: 11px; }
+  .tpl-count { color: var(--text3); font-size: var(--fs-sub); }
   .tpl-add {
     padding: 7px 9px; border: 1px dashed var(--border2); border-radius: 8px;
-    background: transparent; color: var(--text3); font-size: 12px; cursor: pointer;
+    background: transparent; color: var(--text3); font-size: var(--fs-ui); cursor: pointer;
     display: flex; align-items: center; gap: 5px; -webkit-tap-highlight-color: transparent;
   }
   .tpl-add:active { color: var(--accent); border-color: var(--accent); }
@@ -433,11 +433,11 @@
   .tpl-picker-btn {
     display: flex; align-items: center; gap: 8px; width: 100%;
     padding: 10px 12px; border: 1px solid var(--border2); border-radius: 9px;
-    background: var(--input-bg); color: var(--text); font-size: 15px; font-weight: 600;
+    background: var(--input-bg); color: var(--text); font-size: var(--fs-title); font-weight: 600;
     cursor: pointer; -webkit-tap-highlight-color: transparent; font-family: var(--font-ui);
   }
   .tpl-picker-name { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tpl-picker-label { display: block; margin-bottom: 5px; font-size: 10px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.4px; }
+  .tpl-picker-label { display: block; margin-bottom: 5px; font-size: var(--fs-meta); font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.4px; }
   .tpl-picker-backdrop { position: fixed; inset: 0; z-index: 50; border: none; background: none; }
   .tpl-picker-menu {
     position: absolute; left: 14px; right: 14px; top: 100%; z-index: 51; margin-top: 2px;
@@ -448,7 +448,7 @@
   .tpl-picker-item {
     display: flex; align-items: center; gap: 8px; width: 100%;
     padding: 11px 12px; border: none; border-radius: 7px;
-    background: none; color: var(--text2); font-size: 15px; cursor: pointer;
+    background: none; color: var(--text2); font-size: var(--fs-title); cursor: pointer;
     text-align: left; -webkit-tap-highlight-color: transparent; font-family: var(--font-ui);
   }
   .tpl-picker-item.active { color: var(--accent); background: var(--accent-bg); }
@@ -457,11 +457,11 @@
   .tpl-edit { flex: 1; min-width: 0; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
   .tpl-name-input {
     width: 100%; padding: 8px 10px; border: 1px solid var(--input-border); border-radius: 8px;
-    background: var(--input-bg); color: var(--text); font-size: 14px; font-weight: 600; outline: none;
+    background: var(--input-bg); color: var(--text); font-size: var(--fs-body); font-weight: 600; outline: none;
     font-family: var(--font-ui);
   }
   .tpl-name-row { display: flex; align-items: center; gap: 8px; }
-  .tpl-name-tag { flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.4px; }
+  .tpl-name-tag { flex-shrink: 0; font-size: var(--fs-sub); font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.4px; }
   .tpl-name-input:focus { border-color: var(--accent); }
   .tpl-name-input:disabled { opacity: 0.6; }
 
@@ -471,23 +471,23 @@
   }
   .agent-card-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .ag-card-title {
-    flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--text);
+    flex: 1; min-width: 0; font-size: var(--fs-body); font-weight: 600; color: var(--text);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .ag-flabel {
-    font-size: 10px; color: var(--text3); font-weight: 600;
+    font-size: var(--fs-meta); color: var(--text3); font-weight: 600;
     text-transform: uppercase; letter-spacing: 0.4px; margin-top: 2px;
   }
   .ag-row { display: flex; align-items: flex-end; gap: 12px; }
   .ag-col { display: flex; flex-direction: column; gap: 4px; }
   .ag-field {
     padding: 6px 9px; border: 1px solid var(--input-border); border-radius: 7px;
-    background: var(--input-bg); color: var(--text); font-size: 12px; font-family: inherit;
+    background: var(--input-bg); color: var(--text); font-size: var(--fs-ui); font-family: inherit;
     outline: none; width: 100%; box-sizing: border-box;
   }
   .ag-field:focus { border-color: var(--accent); }
   .ag-backend { flex-shrink: 0; width: auto; }
-  .ag-manage { display: flex; align-items: center; gap: 3px; font-size: 11px; color: var(--text3); white-space: nowrap; }
+  .ag-manage { display: flex; align-items: center; gap: 3px; font-size: var(--fs-sub); color: var(--text3); white-space: nowrap; }
   .ag-del { border: none; background: none; color: var(--text3); cursor: pointer; display: flex; flex-shrink: 0; padding: 4px; }
   .ag-del:active { color: var(--danger); }
   .ag-del.confirm { color: var(--danger); }
@@ -496,23 +496,23 @@
   .ag-adv-toggle {
     display: flex; align-items: center; gap: 5px; align-self: flex-start;
     padding: 3px 6px; border: none; background: none; cursor: pointer;
-    color: var(--text3); font-size: 11px; font-weight: 600;
+    color: var(--text3); font-size: var(--fs-sub); font-weight: 600;
     -webkit-tap-highlight-color: transparent; font-family: var(--font-ui);
   }
   .ag-adv-toggle:active { color: var(--accent); }
   .ag-adv-badge {
     min-width: 15px; padding: 0 4px; border-radius: 7px; background: var(--accent-bg);
-    color: var(--accent); font-size: 10px; text-align: center;
+    color: var(--accent); font-size: var(--fs-meta); text-align: center;
   }
   .ag-adv { display: flex; flex-direction: column; gap: 5px; padding-left: 4px; border-left: 2px solid var(--border2); }
-  .ag-adv-label { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.4px; }
+  .ag-adv-label { font-size: var(--fs-meta); color: var(--text3); text-transform: uppercase; letter-spacing: 0.4px; }
   .ag-adv-err { color: var(--danger); text-transform: none; letter-spacing: 0; margin-left: 6px; }
-  .ag-mono { font-family: var(--font-mono, monospace); font-size: 11px; }
+  .ag-mono { font-family: var(--font-mono, monospace); font-size: var(--fs-sub); }
 
   .tw-toggle {
     display: flex; align-items: center; gap: 5px; align-self: flex-start;
     padding: 5px 8px; border: 1px dashed var(--border2); border-radius: 8px;
-    background: transparent; color: var(--text2); font-size: 12px; font-weight: 600;
+    background: transparent; color: var(--text2); font-size: var(--fs-ui); font-weight: 600;
     cursor: pointer; -webkit-tap-highlight-color: transparent; font-family: var(--font-ui);
   }
   .tw-toggle:active { color: var(--accent); border-color: var(--accent); }
@@ -520,7 +520,7 @@
 
   .agent-add {
     padding: 9px; border: 1px dashed var(--border2); border-radius: 10px;
-    background: transparent; color: var(--text3); font-size: 13px; cursor: pointer;
+    background: transparent; color: var(--text3); font-size: var(--fs-body); cursor: pointer;
     display: flex; align-items: center; justify-content: center; gap: 6px;
     -webkit-tap-highlight-color: transparent;
   }
@@ -533,19 +533,19 @@
   .tpl-foot-right { display: flex; gap: 8px; margin-left: auto; }
   .tpl-delete {
     padding: 7px 12px; border: 1px solid var(--danger); border-radius: 8px;
-    background: none; color: var(--danger); font-size: 12px; cursor: pointer;
+    background: none; color: var(--danger); font-size: var(--fs-ui); cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
   .tpl-delete.confirm { background: var(--danger); color: #fff; }
   .tpl-cancel {
     padding: 7px 12px; border: 1px solid var(--border2); border-radius: 8px;
-    background: none; color: var(--text2); font-size: 12px; cursor: pointer;
+    background: none; color: var(--text2); font-size: var(--fs-ui); cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
   .tpl-save {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 7px 14px; border: 1px solid var(--accent); border-radius: 8px;
-    background: var(--accent-bg); color: var(--accent); font-size: 12px; font-weight: 600;
+    background: var(--accent-bg); color: var(--accent); font-size: var(--fs-ui); font-weight: 600;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
   .tpl-save:disabled { opacity: 0.5; cursor: default; }
@@ -568,8 +568,10 @@
     .tpl-list { display: none; }
     .tpl-picker { display: block; position: relative; flex-shrink: 0; padding: 8px 14px; border-bottom: 1px solid var(--border); }
 
-    /* iOS zooms the page when focusing an input whose font-size < 16px. */
-    .ag-field, .sys-input, .tpl-name-input, .ag-backend { font-size: 16px; }
+    /* iOS zooms the page when focusing an input below the threshold. */
+    .ag-field, .sys-input, .tpl-name-input, .ag-backend { font-size: var(--fs-input-touch); }
+    /* Deliberately below it: mono glyphs are wider, and this textarea was
+       tuned by eye. Left raw so the exception stays visible. */
     .ag-mono { font-size: 15px; }
 
     /* Agent header: name on its own row; backend + mgr + delete below. */
@@ -578,9 +580,9 @@
     .ag-del { margin-left: auto; padding: 8px; }
 
     /* Roomier touch targets. */
-    .ag-adv-toggle, .tw-toggle { padding: 8px; font-size: 13px; }
-    .ag-manage { font-size: 13px; }
+    .ag-adv-toggle, .tw-toggle { padding: 8px; font-size: var(--fs-body); }
+    .ag-manage { font-size: var(--fs-body); }
     .ag-manage input { width: 16px; height: 16px; }
-    .tpl-foot button { padding: 10px 14px; font-size: 14px; }
+    .tpl-foot button { padding: 10px 14px; font-size: var(--fs-body); }
   }
 </style>

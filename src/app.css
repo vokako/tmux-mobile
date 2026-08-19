@@ -170,9 +170,21 @@ button:disabled {
   /* Type scale + motion + metadata ink — APP-WIDE (born Hub-scoped, promoted
      2026-08-18: the settings/connect surfaces had re-grown ad-hoc values).
      The contract lives in tmm-cli.md "Design tokens"; a raw font-size or
-     duration in any component style is a regression. */
+     duration in any component style is a regression.
+
+     SIX steps carry every piece of UI chrome, and the whole app rounds onto
+     them — the audit on 2026-08-19 found 185 raw values, almost all of them a
+     half-pixel away from a step (12px→ui, 13px→body, 11px→sub, 10px→meta). */
   --fs-micro: 9px; --fs-meta: 10.5px; --fs-sub: 11.5px;
   --fs-ui: 12.5px; --fs-body: 13.5px; --fs-title: 15px;
+  /* Two DISPLAY steps above the chrome scale, for the one surface that is a
+     poster rather than an interface: the connect card's brand icon and its
+     headline. Not for reuse inside a page. */
+  --fs-hero: 36px; --fs-display: 22px;
+  /* A behaviour constant, not a type step: iOS auto-zooms the page when a
+     FOCUSED input's computed font-size is below 16px, and that zoom is pure
+     jank on a phone-first form. Any touch-size input rule uses this. */
+  --fs-input-touch: 16px;
   --meta-ink: color-mix(in srgb, var(--text2) 55%, var(--text3));
   --t-fast: 120ms; --t-move: 200ms;
 }
@@ -208,7 +220,7 @@ button:disabled {
   width: 16px; height: 16px; border-radius: 5px; flex: none;
   display: grid; place-items: center;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 9px; font-weight: 700; color: var(--bg);
+  font-size: var(--fs-micro); font-weight: 700; color: var(--bg);
 }
 
 /* Page skeleton (ui-unification.md "Page skeleton"): the Hub page is the
@@ -240,13 +252,13 @@ button:disabled {
   width: 100%; text-align: left;
   background: none; border: none;
   padding: 8px 10px; border-radius: 9px;
-  color: var(--text); cursor: pointer; font-size: 13px;
+  color: var(--text); cursor: pointer; font-size: var(--fs-body);
   transition: background 160ms;
   -webkit-tap-highlight-color: transparent;
 }
 .side-row:hover { background: var(--surface2); }
 .side-row.open { background: var(--accent-bg); }
-.side-row.add { color: var(--text3); font-size: 12.5px; }
+.side-row.add { color: var(--text3); font-size: var(--fs-ui); }
 .side-row.add:hover { color: var(--accent); }
 
 /* Rendered-markdown bodies (chat bubbles, skill previews). Compact rhythm —

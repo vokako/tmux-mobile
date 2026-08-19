@@ -746,7 +746,7 @@
     outline: none;
     background: transparent;
     padding: 0;
-    font-size: 13px;
+    font-size: var(--fs-body);
     color: var(--text);
     -webkit-appearance: none;
     appearance: none;
@@ -812,7 +812,7 @@
   .sessions:not(.sidebar-mode) .group-label {
     padding: 8px 8px 2px;
     color: var(--accent);
-    font-size: 11px;
+    font-size: var(--fs-sub);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.6px;
@@ -825,7 +825,7 @@
     background: var(--accent-bg);
     border-radius: 999px;
     padding: 0 6px;
-    font-size: 10px;
+    font-size: var(--fs-meta);
     letter-spacing: 0;
     font-variant-numeric: tabular-nums;
   }
@@ -873,7 +873,7 @@
 
   .name {
     font-weight: 600;
-    font-size: 14px;
+    font-size: var(--fs-body);
     color: var(--text);
     white-space: nowrap;
     flex-shrink: 0;
@@ -892,7 +892,7 @@
     align-items: center;
     gap: 6px;
     color: var(--text3);
-    font-size: 12px;
+    font-size: var(--fs-ui);
     white-space: nowrap;
     overflow: hidden;
   }
@@ -918,14 +918,14 @@
     display: inline-flex;
     align-items: center;
     color: var(--text3);
-    font-size: 8px;
+    font-size: var(--fs-micro);
     font-weight: 600;
     line-height: 1;
     font-variant-numeric: tabular-nums;
   }
   .meta .cmd {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--fs-sub);
     color: var(--text2);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -939,12 +939,12 @@
     flex-shrink: 0;
   }
   .ago {
-    font-size: 10px;
+    font-size: var(--fs-meta);
     color: var(--text3);
     font-variant-numeric: tabular-nums;
   }
   .w-badge {
-    font-size: 10px;
+    font-size: var(--fs-meta);
     font-weight: 600;
     color: var(--text2);
     background: var(--surface2);
@@ -966,7 +966,7 @@
     -webkit-tap-highlight-color: transparent;
   }
   .kill:active, .kill.confirm { color: var(--danger); }
-  .kill-text { font-size: 10px; font-weight: 600; white-space: nowrap; }
+  .kill-text { font-size: var(--fs-meta); font-weight: 600; white-space: nowrap; }
 
   /* ─── Pane list (expanded) ──────────────────────────── */
   .pane-list {
@@ -996,7 +996,7 @@
     color: var(--text);
     cursor: pointer;
     text-align: left;
-    font-size: 13px;
+    font-size: var(--fs-body);
     min-width: 0;
     -webkit-tap-highlight-color: transparent;
   }
@@ -1005,20 +1005,20 @@
     font-family: var(--font-mono);
     color: var(--accent);
     font-weight: 500;
-    font-size: 11px;
+    font-size: var(--fs-sub);
     min-width: 22px;
     flex-shrink: 0;
   }
   .pane-cmd {
     font-family: var(--font-mono);
     color: var(--text2);
-    font-size: 12px;
+    font-size: var(--fs-ui);
     flex-shrink: 0;
   }
   .pane-cwd {
     display: block;
     color: var(--text3);
-    font-size: 11px;
+    font-size: var(--fs-sub);
     font-family: var(--font-mono);
     flex: 1;
     min-width: 0;
@@ -1067,7 +1067,7 @@
     border-radius: 7px;
     background: none;
     color: var(--text3);
-    font-size: 11px;
+    font-size: var(--fs-sub);
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
     transition: all 0.15s ease;
@@ -1083,7 +1083,7 @@
     padding: 32px 12px;
     text-align: center;
     color: var(--text3);
-    font-size: 13px;
+    font-size: var(--fs-body);
   }
   .empty-q {
     color: var(--text);
@@ -1091,7 +1091,7 @@
   }
   .error {
     color: var(--danger);
-    font-size: 13px;
+    font-size: var(--fs-body);
     padding: 10px 14px;
     background: var(--danger-bg);
     border: 1px solid var(--danger);
@@ -1112,7 +1112,7 @@
     border-radius: 9px;
     background: none;
     color: var(--text2);
-    font-size: 13px;
+    font-size: var(--fs-body);
     font-weight: 500;
     cursor: pointer;
     display: flex;

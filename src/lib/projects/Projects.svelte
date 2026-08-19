@@ -242,7 +242,7 @@
      sidebar is supposed to inherit — measured as 11px/0.66px tracking against
      Chat's 10.5px/1.4px (2026-08-19). */
   .projects:not(.dense) .group-label {
-    font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+    font-size: var(--fs-sub); letter-spacing: 0.06em; text-transform: uppercase;
     color: var(--text3);
   }
   .group-label {
@@ -256,7 +256,7 @@
   }
   .group-count {
     background: var(--surface2); color: var(--text2);
-    border-radius: 8px; padding: 0 5px; font-size: 10px; letter-spacing: 0;
+    border-radius: 8px; padding: 0 5px; font-size: var(--fs-meta); letter-spacing: 0;
   }
 
   /* ── Sidebar (dense) mode ───────────────────────────────────────────────
@@ -319,9 +319,9 @@
   .dot.on { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
   .body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .line { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
-  .name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .age { margin-left: auto; font-size: 10px; color: var(--text3); }
-  .sub { font-family: var(--font-mono); font-size: 11px; color: var(--text2); }
+  .name { font-size: var(--fs-body); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .age { margin-left: auto; font-size: var(--fs-meta); color: var(--text3); }
+  .sub { font-family: var(--font-mono); font-size: var(--fs-sub); color: var(--text2); }
   .path { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* Window row: one tappable button per window, inside the project card and
@@ -336,12 +336,12 @@
     background: var(--surface2); color: var(--text2);
     border: 1px solid var(--border); border-radius: 5px;
     padding: 2px 7px; cursor: pointer;
-    font-family: var(--font-mono); font-size: 10.5px;
+    font-family: var(--font-mono); font-size: var(--fs-meta);
     transition: color var(--ui-motion-fast, 0.12s) ease, border-color var(--ui-motion-fast, 0.12s) ease;
   }
   .win:hover { color: var(--text); border-color: var(--border2); }
   .win-name { max-width: 13ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .win-empty { font-family: var(--font-mono); font-size: 10.5px; color: var(--text3); }
+  .win-empty { font-family: var(--font-mono); font-size: var(--fs-meta); color: var(--text3); }
   .attention-dot {
     width: 6px; height: 6px; border-radius: 50%;
     background: var(--accent); box-shadow: 0 0 5px var(--accent-glow);
@@ -352,7 +352,7 @@
     height: var(--ui-control-height, 28px); padding: 0 9px;
     background: var(--surface2); color: var(--text2);
     border: 1px solid var(--border); border-radius: 6px;
-    font-family: var(--font-ui); font-size: 11px; cursor: pointer;
+    font-family: var(--font-ui); font-size: var(--fs-sub); cursor: pointer;
     transition: background var(--ui-motion-fast, 0.12s) ease;
   }
   .act:hover:not(:disabled) { color: var(--text); }
@@ -364,10 +364,10 @@
     color: var(--danger); border-color: var(--danger);
     padding: 0 8px;
   }
-  .confirm-text { font-family: var(--font-ui); font-size: 10.5px; white-space: nowrap; }
+  .confirm-text { font-family: var(--font-ui); font-size: var(--fs-meta); white-space: nowrap; }
 
   .err {
     color: var(--danger); background: var(--danger-bg);
-    border-radius: 6px; padding: 5px 8px; font-size: 11px;
+    border-radius: 6px; padding: 5px 8px; font-size: var(--fs-sub);
   }
 </style>

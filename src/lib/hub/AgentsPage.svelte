@@ -373,8 +373,8 @@
   .sidebar { position: relative; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
   .side-scroll { flex: 1; overflow-y: auto; padding: 8px; }
   .r-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; }
-  .r-backend { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text3); flex: none; }
-  .r-cap { flex: none; font-size: 9px; letter-spacing: 0.4px; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 3px; opacity: 0.75; }
+  .r-backend { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text3); flex: none; }
+  .r-cap { flex: none; font-size: var(--fs-micro); letter-spacing: 0.4px; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 3px; opacity: 0.75; }
 
   .mid { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   .spacer { flex: 1; }
@@ -382,25 +382,25 @@
      title together instead of scattering one button per row. */
   .head-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
   .placeholder { flex: 1; display: grid; place-items: center; }
-  .hint { color: var(--text3); font-size: 12.5px; margin: 0; line-height: 1.6; max-width: 420px; }
+  .hint { color: var(--text3); font-size: var(--fs-ui); margin: 0; line-height: 1.6; max-width: 420px; }
 
   .editor { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
-  .err { color: var(--danger); font-size: 12.5px; background: var(--danger-bg); border-radius: 8px; padding: 8px 12px; }
-  label { display: flex; flex-direction: column; gap: 5px; color: var(--text2); font-size: 12px; }
-  label.check { flex-direction: row; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
-  input, select, textarea { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 9px; color: var(--text); padding: 8px 12px; font-size: 13px; outline: none; font-family: inherit; }
+  .err { color: var(--danger); font-size: var(--fs-ui); background: var(--danger-bg); border-radius: 8px; padding: 8px 12px; }
+  label { display: flex; flex-direction: column; gap: 5px; color: var(--text2); font-size: var(--fs-ui); }
+  label.check { flex-direction: row; align-items: center; gap: 8px; font-size: var(--fs-body); color: var(--text); }
+  input, select, textarea { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 9px; color: var(--text); padding: 8px 12px; font-size: var(--fs-body); outline: none; font-family: inherit; }
   input:focus, select:focus, textarea:focus { border-color: var(--accent); }
   input:disabled { opacity: 0.5; }
   textarea { resize: vertical; line-height: 1.5; }
-  textarea.mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  textarea.mono { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-ui); }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .pick-block { display: flex; flex-direction: column; gap: 6px; }
-  .pick-label { color: var(--text2); font-size: 12px; }
+  .pick-label { color: var(--text2); font-size: var(--fs-ui); }
   .pick-row { display: flex; flex-wrap: wrap; gap: 6px; }
   .pick {
     display: flex; align-items: center; gap: 5px;
     background: var(--surface); border: 1px solid var(--border); border-radius: 999px;
-    color: var(--text2); padding: 5px 12px; font-size: 12.5px; cursor: pointer;
+    color: var(--text2); padding: 5px 12px; font-size: var(--fs-ui); cursor: pointer;
     transition: border-color 160ms, color 160ms;
   }
   .pick:hover { border-color: var(--input-border); }
@@ -408,7 +408,7 @@
   .md-preview { border-top: 1px solid var(--border2); margin-top: 6px; }
   .md-doc {
     background: var(--surface); border: 1px solid var(--border2); border-radius: 10px;
-    padding: 12px 14px; font-size: 13px; color: var(--text); line-height: 1.55;
+    padding: 12px 14px; font-size: var(--fs-body); color: var(--text); line-height: 1.55;
     overflow-wrap: anywhere;
   }
 </style>

@@ -1160,7 +1160,7 @@
           <div class="bm-row">
             <span class="bm-icon"><Icon name="clock" size={13} /></span>
             <button class="bm-path" onclick={() => { showRecent = false; openEntry({ type: 'file', path: rf.path, name: rf.name }); }} use:scrollEnd>
-              <span style="color:var(--text3);font-size:10px">{rf.path.replace(/\/[^/]+$/, '')}/</span>{rf.name}
+              <span style="color:var(--text3);font-size:var(--fs-meta)">{rf.path.replace(/\/[^/]+$/, '')}/</span>{rf.name}
             </button>
             <button class="bm-del" onclick={() => { recentFiles = recentFiles.filter(f => f.path !== rf.path); setPref('recentFiles', recentFiles).catch(() => {}); }}><Icon name="x" size={12} /></button>
           </div>
@@ -1474,7 +1474,7 @@
   .files-right { flex: 1; border-left: 1px solid var(--border); }
   .files-placeholder {
     flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 10px; color: var(--text3); font-size: 13px; padding: 24px; text-align: center;
+    gap: 10px; color: var(--text3); font-size: var(--fs-body); padding: 24px; text-align: center;
   }
 
   /* Toolbar — same vertical rhythm as the Terminal window-switcher bar
@@ -1500,16 +1500,16 @@
   /* Path row */
   .bc-path-row {
     display: flex; align-items: center; gap: 1px; padding: 4px 10px;
-    overflow-x: auto; font-size: 12px; font-family: var(--font-mono);
+    overflow-x: auto; font-size: var(--fs-ui); font-family: var(--font-mono);
     scrollbar-width: none; border-bottom: 1px solid var(--border2); flex-shrink: 0;
   }
   .bc-path-row::-webkit-scrollbar { display: none; }
   .bc-seg {
     padding: 2px 4px; border: none; background: none; color: var(--text2);
-    cursor: pointer; white-space: nowrap; font-size: 12px; font-family: inherit;
+    cursor: pointer; white-space: nowrap; font-size: var(--fs-ui); font-family: inherit;
   }
   .bc-seg:last-of-type { color: var(--accent); }
-  .bc-sep { color: var(--text3); font-size: 11px; }
+  .bc-sep { color: var(--text3); font-size: var(--fs-sub); }
 
   /* Bookmarks / Recent panel */
   .bookmarks-panel {
@@ -1525,7 +1525,7 @@
   .bm-path {
     flex: 1; display: block;
     padding: 8px 0; border: none; background: none; color: var(--text);
-    font-size: 12px; font-family: var(--font-mono);
+    font-size: var(--fs-ui); font-family: var(--font-mono);
     cursor: pointer; text-align: left; overflow-x: auto;
     white-space: nowrap; scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
@@ -1545,7 +1545,7 @@
   }
   .new-item input {
     flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 6px;
-    background: var(--input-bg); color: var(--text); font-size: 13px;
+    background: var(--input-bg); color: var(--text); font-size: var(--fs-body);
     font-family: var(--font-mono);
   }
   .new-item button {
@@ -1556,7 +1556,7 @@
 
   .error {
     padding: 8px 12px; background: var(--bg2); color: var(--danger);
-    font-size: 12px; border-bottom: 1px solid var(--danger);
+    font-size: var(--fs-ui); border-bottom: 1px solid var(--danger);
   }
 
   /* File list */
@@ -1570,7 +1570,7 @@
   .file-main {
     flex: 1; display: flex; align-items: center; gap: 10px; padding: 14px 12px;
     border: none; background: none; color: var(--text); cursor: pointer; text-align: left;
-    font-size: 14px; min-width: 0; -webkit-tap-highlight-color: transparent;
+    font-size: var(--fs-body); min-width: 0; -webkit-tap-highlight-color: transparent;
   }
   .file-main:active { background: var(--input-bg); }
   /* Symlink badge — small ↗ arrow overlaid on the bottom-right of the
@@ -1589,7 +1589,7 @@
     position: absolute;
     right: -4px;
     bottom: -4px;
-    font-size: 10px;
+    font-size: var(--fs-meta);
     line-height: 1;
     color: var(--accent);
     background: var(--bg);
@@ -1609,7 +1609,7 @@
   }
   .file-name::-webkit-scrollbar { display: none; }
   .dir-name { color: var(--accent); }
-  .file-size { color: var(--text3); font-size: 11px; font-family: var(--font-mono); white-space: nowrap; }
+  .file-size { color: var(--text3); font-size: var(--fs-sub); font-family: var(--font-mono); white-space: nowrap; }
   .file-actions { display: flex; gap: 2px; padding-right: 8px; }
   .act-btn {
     padding: 6px; border: none; border-radius: 6px; background: none;
@@ -1618,11 +1618,11 @@
   .act-btn:active { color: var(--accent); }
   .act-btn.on { color: var(--accent); }
   .act-btn.del:active, .act-btn.del.confirm { color: var(--danger); }
-  .del-text { font-size: 10px; font-weight: 600; }
+  .del-text { font-size: var(--fs-meta); font-weight: 600; }
   .act-btn.save { color: var(--accent); }
   .act-btn.save:disabled { color: var(--text3); opacity: 0.5; }
   .act-btn:disabled { color: var(--text3); opacity: 0.5; }
-  .empty, .loading { padding: 40px; text-align: center; color: var(--text3); font-size: 14px; }
+  .empty, .loading { padding: 40px; text-align: center; color: var(--text3); font-size: var(--fs-body); }
 
   /* Preview header */
   .preview-header {
@@ -1634,7 +1634,7 @@
     color: var(--text2); cursor: pointer; display: flex; -webkit-tap-highlight-color: transparent;
   }
   .preview-name {
-    flex: 1; font-size: 14px; font-weight: 500; overflow: hidden;
+    flex: 1; font-size: var(--fs-body); font-weight: 500; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap;
   }
   .preview-actions { display: flex; gap: 4px; }
@@ -1674,14 +1674,14 @@
   }
   .image-preview img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; }
   .md-render { font-size: var(--file-font-size, 14px); line-height: 1.6; color: var(--text); overflow-wrap: break-word; }
-  .md-render :global(h1) { font-size: 22px; margin: 16px 0 8px; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 6px; }
-  .md-render :global(h2) { font-size: 18px; margin: 14px 0 6px; color: var(--accent); }
-  .md-render :global(h3) { font-size: 16px; margin: 10px 0 4px; color: var(--accent); }
-  .md-render :global(h4), .md-render :global(h5), .md-render :global(h6) { font-size: 14px; margin: 8px 0 4px; color: var(--accent); }
+  .md-render :global(h1) { font-size: 1.55em; margin: 16px 0 8px; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  .md-render :global(h2) { font-size: 1.28em; margin: 14px 0 6px; color: var(--accent); }
+  .md-render :global(h3) { font-size: 1.15em; margin: 10px 0 4px; color: var(--accent); }
+  .md-render :global(h4), .md-render :global(h5), .md-render :global(h6) { font-size: 1em; margin: 8px 0 4px; color: var(--accent); }
   .md-render :global(p) { margin: 8px 0; }
-  .md-render :global(code) { background: var(--surface2); padding: 2px 5px; border-radius: 3px; font-size: 12px; font-family: var(--font-mono); }
+  .md-render :global(code) { background: var(--surface2); padding: 2px 5px; border-radius: 3px; font-size: 0.86em; font-family: var(--font-mono); }
   .md-render :global(pre) { background: var(--code-bg); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 8px 0; }
-  .md-render :global(pre code) { background: none; padding: 0; font-size: 12px; line-height: 1.5; }
+  .md-render :global(pre code) { background: none; padding: 0; font-size: var(--fs-ui); line-height: 1.5; }
   .md-render :global(strong) { color: var(--text); }
   .md-render :global(em) { color: var(--text2); }
   .md-render :global(a) { color: var(--accent); text-decoration: none; }
@@ -1691,7 +1691,7 @@
   .md-render :global(blockquote) { border-left: 3px solid var(--accent); margin: 8px 0; padding: 4px 12px; color: var(--text2); }
   .md-render :global(hr) { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
   .md-render :global(img) { max-width: 100%; border-radius: 6px; }
-  .md-render :global(table) { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 13px; }
+  .md-render :global(table) { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: var(--fs-body); }
   .md-render :global(th), .md-render :global(td) { padding: 8px 12px; border: 1px solid var(--input-border); text-align: left; }
   .md-render :global(th) { background: var(--surface2); color: var(--accent); font-weight: 600; }
   .md-render :global(input[type="checkbox"]) { margin-right: 6px; }
@@ -1699,7 +1699,7 @@
   .md-render :global(.mermaid-block) { background: var(--surface); border-radius: 8px; padding: 12px; margin: 8px 0; overflow-x: auto; }
   .md-render :global(.mermaid-block svg) { max-width: 100%; }
   .csv-render { overflow: auto; }
-  .csv-render :global(table) { border-collapse: collapse; font-size: 12px; width: 100%; }
+  .csv-render :global(table) { border-collapse: collapse; font-size: var(--fs-ui); width: 100%; }
   .csv-render :global(th), .csv-render :global(td) {
     padding: 6px 10px; border: 1px solid var(--input-border); text-align: left;
   }
@@ -1753,11 +1753,11 @@
   .info-row {
     display: flex; padding: 10px 0; border-bottom: 1px solid var(--border2);
   }
-  .info-label { width: 100px; flex-shrink: 0; color: var(--text3); font-size: 12px; }
-  .info-val { flex: 1; font-size: 13px; word-break: break-all; }
+  .info-label { width: 100px; flex-shrink: 0; color: var(--text3); font-size: var(--fs-ui); }
+  .info-val { flex: 1; font-size: var(--fs-body); word-break: break-all; }
   .info-val.mono { font-family: var(--font-mono); }
   .info-path {
-    flex: 1; font-size: 13px; word-break: break-all; text-align: left;
+    flex: 1; font-size: var(--fs-body); word-break: break-all; text-align: left;
     background: none; border: none; color: var(--text); cursor: pointer; padding: 0;
     display: flex; align-items: center; gap: 4px; -webkit-tap-highlight-color: transparent;
   }
@@ -1767,18 +1767,18 @@
   .copy-toast {
     position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%);
     background: var(--bg); border: 1px solid var(--border); color: var(--accent); padding: 8px 20px;
-    border-radius: 8px; font-size: 13px; font-weight: 500;
+    border-radius: 8px; font-size: var(--fs-body); font-weight: 500;
     box-shadow: 0 4px 16px rgba(0,0,0,0.3); pointer-events: none;
     animation: toast-fade 1.2s ease forwards;
   }
   .download-toast {
     pointer-events: auto; display: flex; align-items: center; gap: 8px;
-    animation: none; max-width: 90%; font-size: 12px;
+    animation: none; max-width: 90%; font-size: var(--fs-ui);
   }
   .dl-path {
     flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     direction: rtl; text-align: left; min-width: 0;
-    font-family: var(--font-mono); font-size: 11px; color: var(--text2);
+    font-family: var(--font-mono); font-size: var(--fs-sub); color: var(--text2);
   }
   .dl-ring { flex-shrink: 0; }
   /* No transition on the progress arc — it must track the displayed integer
@@ -1788,7 +1788,7 @@
      (LAN) downloads: the number would read 94% while the arc was still easing
      through ~1/3. The two are now always in sync. */
   .dl-pct {
-    font-family: var(--font-mono); font-size: 11px;
+    font-family: var(--font-mono); font-size: var(--fs-sub);
     font-weight: 600; color: var(--accent); min-width: 30px;
   }
   .dl-name {
@@ -1796,7 +1796,7 @@
   }
   .toast-open {
     padding: 4px 12px; border: 1px solid var(--accent); border-radius: 6px;
-    background: var(--accent-bg); color: var(--accent); font-size: 12px;
+    background: var(--accent-bg); color: var(--accent); font-size: var(--fs-ui);
     font-weight: 600; cursor: pointer; -webkit-tap-highlight-color: transparent;
     flex-shrink: 0;
   }

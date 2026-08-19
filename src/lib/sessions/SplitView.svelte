@@ -133,7 +133,7 @@
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 8px;
     border: none; background: transparent;
-    color: var(--text3); font-size: 13px;
+    color: var(--text3); font-size: var(--fs-body);
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }

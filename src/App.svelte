@@ -1179,7 +1179,7 @@
     background: rgba(0, 0, 0, 0.85);
     color: #0f0;
     font-family: var(--font-mono);
-    font-size: 9px;
+    font-size: var(--fs-micro);
     line-height: 1.3;
     border-radius: 6px;
     z-index: 9999;
@@ -1193,7 +1193,7 @@
     justify-content: space-between;
     padding: 4px 8px;
     font-weight: bold;
-    font-size: 10px;
+    font-size: var(--fs-meta);
     color: #0f0;
     cursor: grab;
     -webkit-app-region: no-drag;
@@ -1207,7 +1207,7 @@
     background: none;
     border: 1px solid rgba(0, 255, 0, 0.3);
     color: #0f0;
-    font-size: 9px;
+    font-size: var(--fs-micro);
     padding: 1px 6px;
     border-radius: 3px;
     cursor: pointer;
@@ -1307,7 +1307,7 @@
     padding: 7px 0 5px;
     border: none; background: none;
     color: var(--text3); cursor: pointer;
-    font-size: 10px;
+    font-size: var(--fs-meta);
     -webkit-tap-highlight-color: transparent;
   }
   .tabbar button.active { color: var(--accent); }
@@ -1344,7 +1344,7 @@
   }
   .brand-text {
     font-weight: 600;
-    font-size: 15px;
+    font-size: var(--fs-title);
     color: var(--text2);
     letter-spacing: -0.3px;
   }
@@ -1353,7 +1353,7 @@
   .reconnect-bar {
     display: flex; align-items: center; justify-content: center; gap: 8px;
     padding: 6px; background: var(--bg2); border-bottom: 1px solid var(--accent); color: var(--accent);
-    font-size: 12px; font-weight: 500; flex-shrink: 0;
+    font-size: var(--fs-ui); font-weight: 500; flex-shrink: 0;
   }
   .reconnect-spinner {
     width: 12px; height: 12px; border: 2px solid var(--border);
@@ -1363,7 +1363,7 @@
   @keyframes reconnect-spin { to { transform: rotate(360deg); } }
   .reconnect-cancel {
     margin-left: auto; padding: 2px 10px; border: 1px solid var(--accent);
-    border-radius: 6px; background: none; color: var(--accent); font-size: 11px;
+    border-radius: 6px; background: none; color: var(--accent); font-size: var(--fs-sub);
     font-weight: 600; cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
 
@@ -1422,7 +1422,7 @@
   .terminal-empty {
     flex: 1; min-height: 0;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 9px; color: var(--text3); font-size: 13px;
+    gap: 9px; color: var(--text3); font-size: var(--fs-body);
   }
   .terminal-empty :global(svg) { opacity: 0.65; }
 
@@ -1448,7 +1448,7 @@
   .split-opt {
     min-width: 28px; height: 28px;
     border: none; border-radius: 6px; background: transparent;
-    color: var(--text3); font-size: 13px; font-weight: 600; cursor: pointer;
+    color: var(--text3); font-size: var(--fs-body); font-weight: 600; cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
   .split-opt:hover { background: var(--surface2); color: var(--text2); }

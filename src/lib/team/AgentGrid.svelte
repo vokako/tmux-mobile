@@ -228,7 +228,7 @@
     padding: 4px 8px; flex-shrink: 0;
     border-bottom: 1px solid var(--border2);
     background: var(--surface);
-    font-size: 11px; font-weight: 600; color: var(--text2);
+    font-size: var(--fs-sub); font-weight: 600; color: var(--text2);
   }
   .ag-cell.active .ag-head { color: var(--accent); }
   .ag-head-actions { margin-left: auto; display: flex; gap: 2px; }

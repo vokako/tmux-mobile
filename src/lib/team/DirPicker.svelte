@@ -122,17 +122,17 @@
     flex: 1; display: flex; align-items: center; gap: 1px;
     overflow-x: auto; scrollbar-width: none;
     font-family: var(--font-mono);
-    font-size: 12px; -webkit-overflow-scrolling: touch;
+    font-size: var(--fs-ui); -webkit-overflow-scrolling: touch;
   }
   .picker-path::-webkit-scrollbar { display: none; }
   .picker-seg {
     padding: 2px 3px; border: none; background: none; color: var(--text2);
-    cursor: pointer; white-space: nowrap; font-size: 12px; font-family: inherit;
+    cursor: pointer; white-space: nowrap; font-size: var(--fs-ui); font-family: inherit;
     -webkit-tap-highlight-color: transparent;
   }
   .picker-seg:last-of-type { color: var(--accent); }
   .picker-seg:active { color: var(--accent); }
-  .picker-sep { color: var(--text3); font-size: 11px; }
+  .picker-sep { color: var(--text3); font-size: var(--fs-sub); }
   .picker-btn {
     padding: 5px; border: none; border-radius: 6px;
     background: var(--surface2); color: var(--text2);
@@ -149,19 +149,19 @@
   .picker-new-input {
     flex: 1; min-width: 0; padding: 5px 8px;
     border: 1px solid var(--input-border); border-radius: 6px;
-    background: var(--bg); color: var(--text); font-size: 12px;
+    background: var(--bg); color: var(--text); font-size: var(--fs-ui);
     font-family: var(--font-mono); outline: none;
   }
   .picker-new-input:focus { border-color: var(--accent); }
-  .picker-err { padding: 4px 10px; color: var(--danger); font-size: 11px; border-bottom: 1px solid var(--border2); }
+  .picker-err { padding: 4px 10px; color: var(--danger); font-size: var(--fs-sub); border-bottom: 1px solid var(--border2); }
   .picker-list { max-height: 180px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   .picker-item {
     display: flex; align-items: center; gap: 8px; width: 100%;
     padding: 10px 12px; border: none; border-bottom: 1px solid var(--border2);
-    background: none; color: var(--accent); font-size: 13px; cursor: pointer;
+    background: none; color: var(--accent); font-size: var(--fs-body); cursor: pointer;
     text-align: left; -webkit-tap-highlight-color: transparent;
   }
   .picker-item:active { background: var(--accent-bg); }
   .picker-item:last-child { border-bottom: none; }
-  .picker-empty { padding: 12px; text-align: center; color: var(--text3); font-size: 12px; }
+  .picker-empty { padding: 12px; text-align: center; color: var(--text3); font-size: var(--fs-ui); }
 </style>

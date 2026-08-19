@@ -629,7 +629,7 @@
       {/if}
     </div>
     {#if startError}
-      <div class="start-error" style="margin-top:8px;color:#e5484d;font-size:13px;line-height:1.4;word-break:break-word;">{startError}</div>
+      <div class="start-error" style="margin-top:8px;color:#e5484d;font-size:var(--fs-body);line-height:1.4;word-break:break-word;">{startError}</div>
     {/if}
   </div>
 {/snippet}
@@ -817,7 +817,7 @@
      manager, so the view was redirected to a valid team instead. */
   .team-notice {
     padding: 6px 10px; flex-shrink: 0;
-    font-size: 12px; color: var(--danger);
+    font-size: var(--fs-ui); color: var(--danger);
     background: var(--danger-bg); border-bottom: 1px solid var(--border);
     word-break: break-all;
   }
@@ -845,7 +845,7 @@
   .team-pick-item, .team-pick-new {
     display: flex; align-items: center; gap: 8px; width: 100%;
     padding: 7px 9px; border: none; border-radius: 7px; background: transparent;
-    color: var(--text2); font-size: 12px; cursor: pointer; text-align: left;
+    color: var(--text2); font-size: var(--fs-ui); cursor: pointer; text-align: left;
     -webkit-tap-highlight-color: transparent;
   }
   .team-pick-item:active, .team-pick-new:active { background: var(--surface2); }
@@ -853,8 +853,8 @@
   .tp-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text3); flex-shrink: 0; }
   .tp-dot.on { background: var(--status-ok); }
   .tp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-ui); }
-  .tp-count { color: var(--text3); font-size: 11px; }
-  .team-pick-empty { padding: 8px 9px; color: var(--text3); font-size: 12px; }
+  .tp-count { color: var(--text3); font-size: var(--fs-sub); }
+  .team-pick-empty { padding: 8px 9px; color: var(--text3); font-size: var(--fs-ui); }
   .team-pick-new { color: var(--accent); border-top: 1px solid var(--border2); border-radius: 0 0 7px 7px; margin-top: 2px; }
   .team-close, .team-swap, .team-hbtn {
     flex-shrink: 0; width: var(--ui-control-height); height: var(--ui-control-height); padding: 0;
@@ -866,12 +866,12 @@
   .team-close:active { color: var(--danger); border-color: var(--danger); }
   .team-close { margin-left: auto; }
   .team-close.confirm { width: auto; padding: 0 8px; color: var(--danger); border-color: var(--danger); }
-  .team-close-text { font-size: 10px; font-weight: 600; white-space: nowrap; }
+  .team-close-text { font-size: var(--fs-meta); font-weight: 600; white-space: nowrap; }
   .team-swap:active, .team-swap.on,
   .team-hbtn:active, .team-hbtn.on { color: var(--accent); border-color: var(--accent); }
   .team-start-cancel {
     padding: 6px 12px; border: 1px solid var(--border2); border-radius: 8px;
-    background: transparent; color: var(--text3); font-size: 12px; cursor: pointer;
+    background: transparent; color: var(--text3); font-size: var(--fs-ui); cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
   .team-empty {
@@ -882,7 +882,7 @@
     justify-content: center;
     gap: 10px;
     color: var(--text3);
-    font-size: 13px;
+    font-size: var(--fs-body);
     padding: 24px;
     text-align: center;
   }
@@ -899,15 +899,15 @@
     scrollbar-width: none;
   }
   .team-roster::-webkit-scrollbar { display: none; }
-  .team-roster-empty { color: var(--text3); font-size: 12px; padding: 4px 2px; }
+  .team-roster-empty { color: var(--text3); font-size: var(--fs-ui); padding: 4px 2px; }
   .team-start-panel {
     display: flex; flex-direction: column; gap: 8px;
     padding: 10px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
   }
-  .start-hint { color: var(--text3); font-size: 12px; }
+  .start-hint { color: var(--text3); font-size: var(--fs-ui); }
   .start-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .start-ws-label {
-    font-size: 10px; font-weight: 600; color: var(--text3);
+    font-size: var(--fs-meta); font-weight: 600; color: var(--text3);
     text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;
   }
   .start-ws-input {
@@ -915,7 +915,7 @@
     padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 8px;
     background: var(--input-bg); color: var(--text);
     font-family: var(--font-mono);
-    font-size: 12px; outline: none;
+    font-size: var(--fs-ui); outline: none;
   }
   .start-ws-input:focus { border-color: var(--accent); }
   .start-browse {
@@ -930,7 +930,7 @@
   .start-tpl {
     width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 6px;
     padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 8px;
-    background: var(--input-bg); color: var(--text); font-size: 12px; cursor: pointer;
+    background: var(--input-bg); color: var(--text); font-size: var(--fs-ui); cursor: pointer;
     font-family: var(--font-ui);
     -webkit-tap-highlight-color: transparent;
   }
@@ -946,20 +946,20 @@
   .start-tpl-item {
     display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;
     padding: 7px 9px; border: none; border-radius: 7px; background: transparent;
-    color: var(--text2); font-size: 12px; cursor: pointer; text-align: left;
+    color: var(--text2); font-size: var(--fs-ui); cursor: pointer; text-align: left;
     font-family: var(--font-ui);
     -webkit-tap-highlight-color: transparent;
   }
   .start-tpl-item:active { background: var(--surface2); }
   .start-tpl-item.active { background: var(--accent-bg); color: var(--accent); }
-  .stt-count { color: var(--text3); font-size: 11px; }
+  .stt-count { color: var(--text3); font-size: var(--fs-sub); }
   .start-actions { display: flex; align-items: center; gap: 8px; }
   .team-start {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 5px 12px; height: 28px;
     border: 1px solid var(--accent); border-radius: 999px;
     background: var(--accent-bg); color: var(--accent);
-    font-size: 12px; font-weight: 600; cursor: pointer; flex-shrink: 0;
+    font-size: var(--fs-ui); font-weight: 600; cursor: pointer; flex-shrink: 0;
     -webkit-tap-highlight-color: transparent;
   }
   .team-start:active { background: var(--accent-fill); color: var(--accent-fill-ink); }
@@ -1021,7 +1021,7 @@
   .msg-system {
     align-self: center;
     color: var(--text3);
-    font-size: 11px;
+    font-size: var(--fs-sub);
     padding: 2px 10px;
     background: var(--surface);
     border-radius: 999px;
@@ -1046,11 +1046,11 @@
   }
   .msg-from {
     display: inline-flex; align-items: center; gap: 5px;
-    font-size: 11px; font-weight: 600; color: var(--accent);
+    font-size: var(--fs-sub); font-weight: 600; color: var(--accent);
     margin-bottom: 2px;
   }
   .msg-body {
-    font-size: 13px; line-height: 1.45; color: var(--text);
+    font-size: var(--fs-body); line-height: 1.45; color: var(--text);
     word-break: break-word; overflow-wrap: anywhere;
     user-select: text; -webkit-user-select: text;
   }
@@ -1064,27 +1064,27 @@
   .msg-body.md :global(h1),
   .msg-body.md :global(h2),
   .msg-body.md :global(h3),
-  .msg-body.md :global(h4) { font-size: 13px; font-weight: 700; margin: 6px 0 3px; }
+  .msg-body.md :global(h4) { font-size: var(--fs-body); font-weight: 700; margin: 6px 0 3px; }
   .msg-body.md :global(code) {
     font-family: var(--font-mono);
-    font-size: 12px; background: var(--code-bg); padding: 1px 4px; border-radius: 4px;
+    font-size: var(--fs-ui); background: var(--code-bg); padding: 1px 4px; border-radius: 4px;
   }
   .msg-body.md :global(pre) {
     background: var(--code-bg); border: 1px solid var(--border2); border-radius: 8px;
     padding: 8px 10px; margin: 6px 0; overflow-x: auto; -webkit-overflow-scrolling: touch;
   }
-  .msg-body.md :global(pre code) { background: none; padding: 0; font-size: 12px; line-height: 1.4; }
+  .msg-body.md :global(pre code) { background: none; padding: 0; font-size: var(--fs-ui); line-height: 1.4; }
   .msg-body.md :global(a) { color: var(--accent); text-decoration: underline; }
   .msg-body.md :global(blockquote) {
     margin: 4px 0; padding-left: 10px; border-left: 3px solid var(--border);
     color: var(--text2);
   }
-  .msg-body.md :global(table) { border-collapse: collapse; margin: 6px 0; font-size: 12px; }
+  .msg-body.md :global(table) { border-collapse: collapse; margin: 6px 0; font-size: var(--fs-ui); }
   .msg-body.md :global(th),
   .msg-body.md :global(td) { border: 1px solid var(--border2); padding: 3px 7px; text-align: left; }
   .msg-body.md :global(hr) { border: none; border-top: 1px solid var(--border2); margin: 8px 0; }
   .msg-body.md :global(img) { max-width: 100%; border-radius: 6px; }
-  .msg-time { font-size: 9px; color: var(--text3); margin-top: 3px; text-align: right; }
+  .msg-time { font-size: var(--fs-micro); color: var(--text3); margin-top: 3px; text-align: right; }
 
   /* Compose */
   .team-compose {
@@ -1120,7 +1120,7 @@
   .mention-chip {
     flex-shrink: 0;
     padding: 3px 9px; border: 1px solid var(--border2); border-radius: 999px;
-    background: transparent; color: var(--text2); font-size: 11px; font-weight: 500;
+    background: transparent; color: var(--text2); font-size: var(--fs-sub); font-weight: 500;
     cursor: pointer; -webkit-tap-highlight-color: transparent; white-space: nowrap;
   }
   .mention-chip:active { color: var(--accent); border-color: var(--accent); }
@@ -1129,7 +1129,7 @@
     flex: 1 1 0; width: 100%; min-width: 0;
     min-height: 40px; max-height: 160px;
     padding: 8px 12px; border: 1px solid var(--input-border); border-radius: 8px;
-    background: var(--input-bg); color: var(--text); font-size: 14px;
+    background: var(--input-bg); color: var(--text); font-size: var(--fs-body);
     font-family: inherit; resize: none; line-height: 1.4;
     overflow-x: hidden; overflow-y: hidden;
     outline: none;

@@ -243,7 +243,7 @@
     color: var(--text2); cursor: pointer; display: flex; -webkit-tap-highlight-color: transparent;
   }
   .preview-name {
-    flex: 1; font-size: 14px; font-weight: 500; overflow: hidden;
+    flex: 1; font-size: var(--fs-body); font-weight: 500; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap;
   }
   .preview-actions { display: flex; gap: 4px; }
@@ -252,7 +252,7 @@
     color: var(--text3); cursor: pointer; display: flex; -webkit-tap-highlight-color: transparent;
   }
   .act-btn:active { color: var(--accent); }
-  .empty { padding: 40px; text-align: center; color: var(--text3); font-size: 14px; }
+  .empty { padding: 40px; text-align: center; color: var(--text3); font-size: var(--fs-body); }
 
   .git-tabs {
     display: flex; gap: 2px; padding: 6px 10px; border-bottom: 1px solid var(--border);
@@ -260,19 +260,19 @@
   }
   .git-tabs button {
     padding: 6px 16px; border: none; border-radius: 6px; background: transparent;
-    color: var(--text3); font-size: 12px; font-weight: 600; cursor: pointer;
+    color: var(--text3); font-size: var(--fs-ui); font-weight: 600; cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
   .git-tabs button.active { background: var(--accent-bg); color: var(--accent); }
-  .git-error { padding: 10px; color: var(--danger); font-size: 12px; background: var(--danger-bg); }
-  .git-push-result { padding: 8px 12px; font-size: 12px; color: var(--status-ok); background: var(--accent-bg); flex-shrink: 0; }
+  .git-error { padding: 10px; color: var(--danger); font-size: var(--fs-ui); background: var(--danger-bg); }
+  .git-push-result { padding: 8px 12px; font-size: var(--fs-ui); color: var(--status-ok); background: var(--accent-bg); flex-shrink: 0; }
   .git-push-result.git-error { color: var(--danger); background: var(--danger-bg); }
   .git-actions {
     display: flex; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0;
   }
   .git-act-btn {
     padding: 5px 12px; border: 1px solid var(--border); border-radius: 6px;
-    background: var(--surface2); color: var(--text2); font-size: 12px; font-weight: 500;
+    background: var(--surface2); color: var(--text2); font-size: var(--fs-ui); font-weight: 500;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
   .git-act-btn:active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
@@ -282,13 +282,13 @@
   }
   .git-commit-row textarea {
     flex: 1; padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 6px;
-    background: var(--input-bg); color: var(--text); font-size: 13px; outline: none;
+    background: var(--input-bg); color: var(--text); font-size: var(--fs-body); outline: none;
     font-family: inherit; resize: none; line-height: 1.4;
   }
   .git-commit-row textarea:focus { border-color: var(--accent); }
   .git-commit-btn {
     padding: 6px 14px; border: none; border-radius: 6px;
-    background: var(--accent-fill); color: var(--accent-fill-ink); font-size: 12px; font-weight: 600;
+    background: var(--accent-fill); color: var(--accent-fill-ink); font-size: var(--fs-ui); font-weight: 600;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
   .git-commit-btn:disabled { opacity: 0.4; }
@@ -296,23 +296,25 @@
   .git-file-row .git-file { flex: 1; border-bottom: none; }
   .git-stage-btn {
     width: 32px; height: 32px; border: none; border-radius: 6px;
-    background: none; color: var(--accent); font-size: 18px; font-weight: 600;
+    /* The label is a +/− GLYPH acting as an icon, so it takes the largest
+       chrome step rather than an off-scale size of its own. */
+    background: none; color: var(--accent); font-size: var(--fs-title); font-weight: 600;
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     flex-shrink: 0; -webkit-tap-highlight-color: transparent;
   }
   .git-stage-btn:active { background: var(--accent-bg); }
-  .git-loading { padding: 20px; text-align: center; color: var(--text3); font-size: 13px; }
+  .git-loading { padding: 20px; text-align: center; color: var(--text3); font-size: var(--fs-body); }
   .git-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   .git-file {
     display: flex; align-items: center; gap: 8px; width: 100%;
     padding: 10px 12px; border: none; background: none;
     border-bottom: 1px solid var(--border2); cursor: pointer;
-    text-align: left; color: var(--text); font-size: 13px;
+    text-align: left; color: var(--text); font-size: var(--fs-body);
     -webkit-tap-highlight-color: transparent;
   }
   .git-file:active { background: var(--accent-bg); }
   .git-st {
-    font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+    font-family: var(--font-mono); font-size: var(--fs-ui); font-weight: 600;
     min-width: 24px; color: var(--text3);
   }
   .git-st.git-add { color: var(--status-ok); }
@@ -320,16 +322,16 @@
   .git-st.git-del { color: var(--danger); }
   .git-fname {
     flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-family: var(--font-mono); font-size: 12px;
+    font-family: var(--font-mono); font-size: var(--fs-ui);
   }
   .git-hash {
-    font-family: var(--font-mono); font-size: 11px;
+    font-family: var(--font-mono); font-size: var(--fs-sub);
     color: var(--accent); min-width: 56px;
   }
-  .git-date { font-size: 11px; color: var(--text3); white-space: nowrap; }
+  .git-date { font-size: var(--fs-sub); color: var(--text3); white-space: nowrap; }
   .git-diff-header {
     display: flex; align-items: center; gap: 8px;
-    padding: 8px 12px; font-family: var(--font-mono); font-size: 12px;
+    padding: 8px 12px; font-family: var(--font-mono); font-size: var(--fs-ui);
     color: var(--accent); background: var(--accent-bg); border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }

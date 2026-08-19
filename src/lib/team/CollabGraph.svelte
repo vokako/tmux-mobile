@@ -133,7 +133,7 @@
 
 <style>
   .collab { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 6px 14px 22px; box-sizing: border-box; }
-  .collab-empty { color: var(--text3); font-size: 12px; }
+  .collab-empty { color: var(--text3); font-size: var(--fs-ui); }
   .collab-svg { width: 100%; height: 100%; overflow: visible; }
 
   .ring { fill: none; stroke: var(--border2); stroke-width: 0.75; opacity: 0.6; }
@@ -176,6 +176,8 @@
   .dot.status-hardworking { animation: breathe 2.8s ease-in-out infinite; }
   .dot.status-sleeping    { animation: breathe-soft 5s ease-in-out infinite; opacity: 0.5; }
 
+  /* SVG user units inside the viewBox, NOT CSS px: the graph scales with
+     its viewport, so a --fs-* token here would fight the transform. */
   .lbl { fill: var(--text2); font-size: 8px; font-weight: 600; }
 
   /* Connection decay is count-based: ARC_PASSES trips of the glowing dot, each
@@ -214,7 +216,7 @@
   .legend {
     position: absolute; left: 10px; bottom: 4px;
     display: flex; flex-wrap: wrap; gap: 4px 10px;
-    font-size: 10px; color: var(--text3);
+    font-size: var(--fs-meta); color: var(--text3);
   }
   .leg-item { display: inline-flex; align-items: center; gap: 4px; }
   .leg-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }

@@ -2236,7 +2236,7 @@
     width: 26px; height: 26px; padding: 0;
     border: 1px solid var(--border2); border-radius: 6px;
     background: var(--input-bg); color: var(--text2);
-    font-size: 12px; font-weight: 600; cursor: pointer;
+    font-size: var(--fs-ui); font-weight: 600; cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
   .win-split-opt.active { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
@@ -2264,7 +2264,7 @@
     color: #fff;
     padding: 8px 20px;
     border-radius: 8px;
-    font-size: 13px;
+    font-size: var(--fs-body);
     z-index: 20;
     pointer-events: none;
   }
@@ -2394,7 +2394,7 @@
     background: transparent;
     border: none;
     color: var(--accent, #00d4ff);
-    font-size: 13px;
+    font-size: var(--fs-body);
     font-weight: 500;
     padding: 6px 14px;
     border-radius: 6px;

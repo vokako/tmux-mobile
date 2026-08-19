@@ -165,13 +165,13 @@
      are muted. All session names (team + regular) use the same style. */
   .picker-group {
     padding: 6px 6px 2px;
-    font-size: 10px; font-weight: 600; color: var(--accent);
+    font-size: var(--fs-meta); font-weight: 600; color: var(--accent);
     text-transform: uppercase; letter-spacing: 0.5px;
   }
   .picker-group:first-child { padding-top: 2px; }
   .picker-session {
     display: flex; align-items: center; gap: 6px;
-    font-size: 10px; font-weight: 600; color: var(--text3);
+    font-size: var(--fs-meta); font-weight: 600; color: var(--text3);
     text-transform: uppercase; letter-spacing: 0.5px;
     padding: 6px 6px 2px;
   }
@@ -195,5 +195,5 @@
   .picker-add:active { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
   .picker-add:disabled { opacity: 0.4; cursor: default; }
   .picker-panes { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 0 4px 6px; }
-  .picker-empty { padding: 16px; text-align: center; color: var(--text3); font-size: 13px; }
+  .picker-empty { padding: 16px; text-align: center; color: var(--text3); font-size: var(--fs-body); }
 </style>

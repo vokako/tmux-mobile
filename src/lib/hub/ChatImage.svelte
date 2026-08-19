@@ -48,7 +48,7 @@
     border-radius: 9px; border: 1px solid var(--border2); background: var(--surface2);
   }
   .ci-ref {
-    display: inline-block; font-family: ui-monospace, Menlo, monospace; font-size: 11px;
+    display: inline-block; font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub);
     color: var(--text3); border: 1px dashed var(--border); border-radius: 7px; padding: 4px 8px;
     max-width: 100%; overflow-wrap: anywhere;
   }

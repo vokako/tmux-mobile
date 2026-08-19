@@ -1418,11 +1418,17 @@
     padding: 4px 10px 5px; border-bottom: 1px solid var(--border2); margin-bottom: 3px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  /* Menu rows are CONTROLS: --ui-font-control (= --fs-sub) is the app's size
+     for those, and it is what the action bar used before this became a menu.
+     --fs-ui read as oversized for a menu (owner, 2026-08-19). */
   .a-menu button {
-    display: flex; align-items: center; gap: 8px; min-height: 38px; width: 100%; text-align: left;
+    display: flex; align-items: center; gap: 8px; min-height: 36px; width: 100%; text-align: left;
     background: none; border: none; border-radius: 8px; color: var(--text2);
-    padding: 7px 10px; font-size: var(--fs-ui); cursor: pointer; font-family: ui-monospace, Menlo, monospace;
+    padding: 6px 10px; font-size: var(--ui-font-control); cursor: pointer; font-family: ui-monospace, Menlo, monospace;
   }
+  /* Touch contract: a menu row is a tap target, so the phone keeps 44px rows
+     even though the type got smaller. */
+  .hub-root.compact .a-menu button, .hub-root.compact .to-menu button { min-height: 44px; }
   .a-menu button:hover { background: var(--surface2); color: var(--text); }
   .a-menu button.danger:hover { background: color-mix(in srgb, var(--status-danger) 14%, transparent); color: var(--status-danger); }
   .a-menu button:disabled { opacity: 0.45; cursor: default; background: none; }
@@ -1708,9 +1714,9 @@
     box-shadow: 0 12px 34px rgba(0,0,0,0.45); padding: 5px; display: flex; flex-direction: column; gap: 2px;
   }
   .to-menu button {
-    display: flex; align-items: center; gap: 7px; min-height: 38px; width: 100%; text-align: left;
+    display: flex; align-items: center; gap: 7px; min-height: 36px; width: 100%; text-align: left;
     background: none; border: none; border-radius: 8px; color: var(--text2);
-    padding: 7px 10px; font-size: var(--fs-ui); cursor: pointer; font-family: ui-monospace, Menlo, monospace;
+    padding: 6px 10px; font-size: var(--ui-font-control); cursor: pointer; font-family: ui-monospace, Menlo, monospace;
   }
   .to-menu button:hover { background: var(--surface2); color: var(--text); }
   .to-menu button.sel { color: var(--accent); background: var(--accent-bg); }

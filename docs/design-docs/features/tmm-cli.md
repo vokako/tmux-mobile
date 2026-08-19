@@ -768,18 +768,40 @@ surfaces had grown their own (raw 10–15px sizes, `transition: all`). The
 tokens now live on `:root` in app.css — APP-WIDE, not Hub-scoped — and every
 component rule must reference them; a raw `font-size: 12px` or
 `transition: … 160ms` anywhere is a regression. The shared UI vocabulary
-(.chip-btn, .side-h, --ui-font-control) consumes the same tokens. Two
-deliberate exceptions: the connect card's hero title, and its INPUTS at 16px
-— below 16px iOS auto-zooms the page when an input focuses, which on the
-phone-first connect card is worse than a size off the scale:
+(.chip-btn, .side-h, --ui-font-control) consumes the same tokens.
+
+A second audit (2026-08-19, owner: "对我们全部的 ui 里的字号系统做一个梳理，不要
+出现太多 hardcode") found the rule had only ever been enforced in the Hub: **185
+raw px font sizes** remained across 18 other components, almost all a half pixel
+from a step (53×12px, 36×13px, 33×11px, 20×10px). 168 were rounded onto the
+scale mechanically; the rest were judgement calls, listed below. The guard
+against a third audit is `src/lib/ui/tokens.source.test.ts`, which scans every
+`.svelte`/`.css` file under `src/` for a raw px font size and fails with
+file:line — with an allowlist that forces each exception to be argued for in one
+place instead of hiding in a stylesheet:
 
 - Type scale (6 steps, nothing in between):
   `--fs-micro: 9px` (uppercase letterspaced tags only: `.p-tag`, `.sr-cap`,
   `.direct-tag`) · `--fs-meta: 10.5px` (times, hints, overlays, labels) ·
-  `--fs-sub: 11.5px` (names, monospace paths/steps, raw view, chips) ·
-  `--fs-ui: 12.5px` (menus, dialogs, empty states, previews) ·
-  `--fs-body: 13.5px` (message text, composer) · `--fs-title: 15px`
+  `--fs-sub: 11.5px` (names, monospace paths/steps, raw view, chips, MENU ROWS
+  via `--ui-font-control`) · `--fs-ui: 12.5px` (dialogs, empty states,
+  previews) · `--fs-body: 13.5px` (message text, composer) · `--fs-title: 15px`
   (page/dialog headings).
+- Two DISPLAY steps above the chrome scale, for the one surface that is a poster
+  rather than an interface: `--fs-hero: 36px` (the connect card's brand icon)
+  and `--fs-display: 22px` (its headline). Not for reuse inside a page.
+- One BEHAVIOUR constant: `--fs-input-touch: 16px`, the threshold below which
+  iOS auto-zooms the page when an input takes focus. It is not a type step, and
+  the phone-first connect card and template editor both need it.
+- A rendered DOCUMENT scales with its own base, not with the chrome scale: the
+  markdown preview's headings are `em` multiples of `--file-font-size` (the
+  file browser's own setting). They were absolute px, so the reader's font size
+  moved the body text and left every heading behind.
+- Two raw values survive, both non-typographic and both allowlisted in the test:
+  `CollabGraph .lbl` (SVG user units inside a viewBox — a CSS px token there
+  would be measured against the viewport, not the graph) and TeamTemplates
+  `.ag-mono` (deliberately below the iOS threshold because mono glyphs are
+  wider; changing it is a behaviour change, not a cleanup).
 - Metadata ink: `--meta-ink` (a text2/text3 mix). The old stack — text3 AND
   10px AND 0.78 opacity — triple-attenuated timestamps into decoration;
   opacity is no longer used to dim metadata TEXT (state icons may still use

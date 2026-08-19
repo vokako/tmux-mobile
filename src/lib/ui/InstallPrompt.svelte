@@ -179,12 +179,12 @@
     min-width: 0;
   }
   .install-title {
-    font-size: 13px;
+    font-size: var(--fs-body);
     font-weight: 600;
     color: var(--text);
   }
   .install-desc {
-    font-size: 11px;
+    font-size: var(--fs-sub);
     color: var(--text2);
     margin-top: 2px;
     line-height: 1.35;
@@ -201,7 +201,7 @@
     border-radius: 999px;
     background: var(--accent-fill);
     color: var(--accent-fill-ink);
-    font-size: 12px;
+    font-size: var(--fs-ui);
     font-weight: 600;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
@@ -214,7 +214,7 @@
     border-radius: 999px;
     background: transparent;
     color: var(--text3);
-    font-size: 12px;
+    font-size: var(--fs-ui);
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
     font-family: inherit;
