@@ -1034,7 +1034,8 @@
       <aside class="term-side" class:sheet={layout.isTouchDevice} class:open={sessListOpen}>
         <Sessions {openTerminal} activeTarget={terminalTarget}
           visible={page === 'terminal' && (!layout.isTouchDevice || sessListOpen)}
-          onPick={() => sessListOpen = false} />
+          onPick={() => sessListOpen = false}
+          chips={false} />
       </aside>
       {#if layout.isTouchDevice && sessListOpen}
         <button class="term-scrim" aria-label={t('close')} onclick={() => sessListOpen = false}></button>

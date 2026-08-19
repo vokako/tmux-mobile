@@ -1942,13 +1942,19 @@
           {#each windows as w}
             {@const wAgent = paneAgent(w)}
             {@const notice = terminalNotificationForWindow(w.session, w.window)}
+            <!-- An agent window used to render as a bare icon, which told you
+                 a kiro was there but not WHICH agent — unreadable in a project
+                 with three of them (owner). Now every chip reads
+                 `<index>:<name>`, the same coordinate the project drawer's
+                 pills use; the icon stays as the backend's mark. A shell keeps
+                 its command as the name, which is what identifies it. -->
             <AgentChip
               attention={!!notice}
               urgent={notice && notice.kind !== 'completed'}
               agent={wAgent}
-              label={wAgent ? '' : (w.current_command || w.window_name)}
+              label={`${w.window}:${wAgent ? w.window_name : (w.current_command || w.window_name)}`}
               variant={String(w.window) === currentWindow ? 'active' : 'default'}
-              title={w.current_command || w.window_name}
+              title={`${w.window}: ${w.window_name}${w.current_command ? ` · ${w.current_command}` : ''}`}
               onclick={(e) => {
                 e.stopPropagation();
                 if (String(w.window) !== currentWindow && onSwitchPane) {

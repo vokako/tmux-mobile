@@ -16,11 +16,17 @@
 
   // `onPick` lets the host close its slide-over after a choice — this list is
   // Terminal's sidebar now, not a page that navigates away by itself.
-  let { openTerminal: openTerminalRaw, activeTarget = '', visible = false, onPick = null }: {
+  // `chips`: the MRU quick-switch strip at the top. It earns its place when
+  // this list is the whole page, and it is pure duplication when the list is
+  // Terminal's sidebar — the terminal already has a window bar, and the rows
+  // are right below (owner: "左侧侧边栏不要显示" that bar). Search moves to
+  // the bottom bar in that mode rather than being lost with the row.
+  let { openTerminal: openTerminalRaw, activeTarget = '', visible = false, onPick = null, chips = true }: {
     openTerminal: (session: string, target: string, command?: string) => void;
     activeTarget?: string;
     visible?: boolean;
     onPick?: (() => void) | null;
+    chips?: boolean;
   } = $props();
   const openTerminal = (session: string, target: string, command = '') => {
     openTerminalRaw(session, target, command);
@@ -379,6 +385,7 @@
     restores chips. The chip strip itself already hides while searching,
     so there's no fight for horizontal space.
   -->
+  {#if chips || searchOpen}
   <div class="top-row">
     {#if searchOpen}
       <div class="search-bar">
@@ -431,6 +438,7 @@
       </button>
     {/if}
   </div>
+  {/if}
 
   <div class="content">
     {#if error}
@@ -652,6 +660,11 @@
     <button class="new-btn" onclick={() => showNew = !showNew}>
       <Icon name="plus" size={16} /> {t('projectNew')}
     </button>
+    {#if !chips}
+      <button class="refresh-icon" onclick={() => (searchOpen = true)} aria-label={t('searchSessions')}>
+        <Icon name="search" size={16} />
+      </button>
+    {/if}
     <button class="refresh-icon" class:spinning={refreshing} onclick={doRefresh} aria-label="Refresh">
       <Icon name="refresh" size={16} />
     </button>

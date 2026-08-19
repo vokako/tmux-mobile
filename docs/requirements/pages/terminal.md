@@ -5,6 +5,15 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
 
 ## Components
 
+- **ONE bar, and it belongs to the terminal.** The sidebar renders with
+  `chips={false}`: its MRU quick-switch strip is justified when the list is a
+  whole page, but beside a terminal that already has a window bar it was a
+  second switcher stacked on the first (owner report). Search survives the row
+  — it moves to the sidebar's bottom bar. The terminal's own bar is the
+  coordinate strip: every window chip reads `<index>:<name>` (an agent window
+  keeps its backend icon AND shows the agent's name — a bare icon said "a kiro
+  is here" but not WHICH agent, useless in a project running three), the
+  session chip sits at the far left, and `+` adds a window.
 - **The session list is part of this page** (the Sessions tab was retired into
   it, 2026-08-18): `.term-page` is a two-column grid — a 280px session/window
   list (`src/lib/sessions/Sessions.svelte`, 240px was too narrow for its
