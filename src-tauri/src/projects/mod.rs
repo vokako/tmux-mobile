@@ -161,8 +161,13 @@ pub fn list(include_archived: bool) -> Result<Value, String> {
     Ok(json!({ "projects": projects }))
 }
 
-/// Create a project for a directory. Idempotent: an existing project for the
-/// same canonical path is returned (and un-archived) instead of duplicated.
+/// Create a project for a directory. Idempotent by SESSION, not by path:
+/// identity is the tmux session (several projects parked in the same
+/// directory — typically `$HOME` — are separate workspaces), so only the
+/// literal same request (same wanted session AND same canonical path) returns
+/// the existing project (un-archived). A new project at a path some other
+/// project already uses is a NEW project — merging on path silently swallowed
+/// it (owner report, 2026-08-19).
 ///
 /// `session` is the tmux session name the user asked for (falling back to the
 /// directory basename); `agent` seeds the workspace with one agent window, which
@@ -182,12 +187,6 @@ pub fn create(
         .to_string();
     let ts = now();
     with_store(|store| {
-        if let Some(existing) = store.project_by_path(&path)? {
-            if existing.archived {
-                store.set_archived(&existing.id, false, ts)?;
-            }
-            return Ok(json!(existing));
-        }
         // The session follows the NAME when one was given: a project called
         // "closetest" living in /tmp must not become the session "tmp" (owner
         // report — the same folder-name-wins bug the Hub dialog hit). An
@@ -197,7 +196,25 @@ pub fn create(
             .or(name.filter(|s| !s.trim().is_empty()))
             .map(slug)
             .unwrap_or_else(|| slug(basename(&path)));
-        let id = format!("{}-{}", slug(&label), digest(&path));
+        // Same session + same directory IS the same request: return the row
+        // instead of a duplicate. A session-name clash with a DIFFERENT
+        // directory falls through — free_session_name suffixes the new one.
+        if let Some(existing) = store.project_by_session(&wanted)? {
+            if existing.path == path {
+                if existing.archived {
+                    store.set_archived(&existing.id, false, ts)?;
+                }
+                return Ok(json!(existing));
+            }
+        }
+        // Two projects may now legitimately share label + path, so the id
+        // must be salted past a collision rather than assumed unique.
+        let mut id = format!("{}-{}", slug(&label), digest(&path));
+        let mut salt: u32 = 1;
+        while store.project(&id)?.is_some() {
+            salt += 1;
+            id = format!("{}-{}", slug(&label), digest(&format!("{path}#{salt}")));
+        }
         let session = free_session_name(store, &wanted, &id)?;
         let project = Project {
             id: id.clone(),
@@ -817,6 +834,51 @@ pub(crate) mod tests {
         std::fs::create_dir_all(&other).unwrap();
         let made2 = create(&other.to_string_lossy(), Some("Label"), Some("chosen"), None).unwrap();
         assert_eq!(made2.get("session").and_then(|v| v.as_str()), Some("chosen"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&other);
+    }
+
+    #[test]
+    fn two_projects_can_share_one_directory() {
+        use_test_store();
+        let dir = std::env::temp_dir().join(format!("tmm-share-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.to_string_lossy().to_string();
+
+        // Identity is the SESSION, not the path: a second create at the same
+        // directory with a different name is a NEW project, not a merge into
+        // the first (owner report, 2026-08-19).
+        let a = create(&path, Some("alpha-proj"), None, None).unwrap();
+        let b = create(&path, Some("beta-proj"), None, None).unwrap();
+        assert_ne!(
+            a.get("id").and_then(|v| v.as_str()),
+            b.get("id").and_then(|v| v.as_str()),
+            "same path, different name → two projects"
+        );
+        assert_eq!(b.get("name").and_then(|v| v.as_str()), Some("beta-proj"));
+        assert_eq!(b.get("session").and_then(|v| v.as_str()), Some("beta-proj"));
+
+        // The literal same request IS idempotent: same wanted session + same
+        // path returns the existing row instead of a duplicate.
+        let a2 = create(&path, Some("alpha-proj"), None, None).unwrap();
+        assert_eq!(
+            a.get("id").and_then(|v| v.as_str()),
+            a2.get("id").and_then(|v| v.as_str()),
+            "same session + same path → the same project"
+        );
+
+        // Same name + same path a THIRD way: even when the id seed collides,
+        // the salt keeps ids unique — session name gets suffixed, not merged.
+        let other = std::env::temp_dir().join(format!("tmm-share-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&other).unwrap();
+        let c = create(&path, Some("alpha-proj"), Some("alpha-two"), None).unwrap();
+        assert_ne!(
+            a.get("id").and_then(|v| v.as_str()),
+            c.get("id").and_then(|v| v.as_str()),
+            "explicit different session at the same path → a third project"
+        );
+        assert_eq!(c.get("session").and_then(|v| v.as_str()), Some("alpha-two"));
 
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&other);

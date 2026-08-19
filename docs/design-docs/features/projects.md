@@ -87,6 +87,19 @@ toward the shortest path (the one closest to a project root when windows sit in
 sibling subdirs). A window that does sit outside the project keeps an absolute
 cwd, so it is restored where it was.
 
+`project_create` had to learn the same lesson a second time (owner report,
+2026-08-19): the schema had moved uniqueness to `session`, but `create` still
+opened with "is there a project at this canonical path? → return it", so
+creating a NEW project inside a directory some existing project already used
+silently merged into that project — the dialog said created, the store said
+nothing happened. Dedup now follows identity: only the literal same request
+(same wanted session name AND same canonical path) is idempotent and returns
+the existing row (un-archiving it); a session-name clash at a different path
+falls through to `free_session_name`'s suffixing, and the id is salted past a
+collision so even same-name-same-path coexistence works when an explicit
+session distinguishes them. `project_by_path` was deleted outright so
+path-identity cannot creep back in.
+
 Migrations run with `PRAGMA foreign_keys=OFF` and this is not optional:
 libsqlite3-sys builds its bundled SQLite with `SQLITE_DEFAULT_FOREIGN_KEYS=1`,
 so enforcement is ON by default, and a schema rebuild's `DROP TABLE projects`

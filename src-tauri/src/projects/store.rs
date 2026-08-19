@@ -367,19 +367,6 @@ impl Store {
             .map_err(|e| format!("get project: {e}"))
     }
 
-    pub fn project_by_path(&self, path: &str) -> Result<Option<Project>, String> {
-        self.conn
-            .query_row(
-                "SELECT id, name, path, icon, session, adopted, autostart, created_at,
-                        last_up_at, last_seen_at, archived_at
-                   FROM projects WHERE path = ?1 ORDER BY created_at LIMIT 1",
-                params![path],
-                row_to_project,
-            )
-            .optional()
-            .map_err(|e| format!("get project by path: {e}"))
-    }
-
     /// A project's identity is the tmux session it projects onto.
     pub fn project_by_session(&self, session: &str) -> Result<Option<Project>, String> {
         self.conn
