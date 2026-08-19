@@ -58,11 +58,14 @@ The outlier was the Terminal sidebar, because it renders `Sessions` →
 now take a mode flag instead of being duplicated: `Sessions chips={false}`
 (also drops the MRU strip, see terminal.md) sets `.sidebar-mode`, which
 tightens the content gutter and passes `dense` to `Projects`. In dense mode a
-project card loses its border and surface, the group label becomes the
-`.side-h` idiom, and the row's actions (Close / archive) fade in on
-hover/focus-within — at rest a row is a name, a dot and a path, exactly like a
-Chat row. Windows stay inside the row (they are what the project is made of)
-as a quiet indented line.
+project card loses its border and surface, the group label becomes a plain
+`.side-h`-style LABEL (no chevron: a sidebar section header is not a control,
+and Chat's projects never collapsed), the row collapses to ONE line — dot,
+name, age, with the path moved into the row's `title` — and its actions
+(Close / archive) fade in on hover/focus-within. Windows stay under the row,
+because picking one is why this sidebar exists, but as borderless text rather
+than a tray of pills; that tray was the last thing still reading as a "card"
+(owner had to point at it twice).
 
 Measured after the change, Chat / Terminal / Agents sidebars all report the
 same surface `rgb(238,238,240)` (light), 1px right border, 10.5px headers in

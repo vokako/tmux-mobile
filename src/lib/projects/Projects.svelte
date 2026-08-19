@@ -135,11 +135,19 @@
 {#if supported && sorted.length > 0}
   <section class="projects" class:dense>
     <div class="group-label">
-      <button class="group-toggle" onclick={() => collapsed = !collapsed} aria-expanded={!collapsed}>
-        <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
-        {t('projects')}
-        <span class="group-count">{sorted.length}</span>
-      </button>
+      {#if dense}
+        <!-- A sidebar section header is a LABEL, not a control: the Chat
+             sidebar has no chevron to collapse its projects, and a list this
+             short never needed one (owner: "projects 上边还是折叠的，这个和
+             chat 里不太一样"). -->
+        <span class="side-h-inline">{t('projects')}<span class="group-count">{sorted.length}</span></span>
+      {:else}
+        <button class="group-toggle" onclick={() => collapsed = !collapsed} aria-expanded={!collapsed}>
+          <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
+          {t('projects')}
+          <span class="group-count">{sorted.length}</span>
+        </button>
+      {/if}
     </div>
 
     {#if !collapsed}
@@ -154,9 +162,15 @@
                   <span class="name">{row.project.name}</span>
                   <span class="age">{ageLabel(row.project.last_seen_at ?? row.project.last_up_at)}</span>
                 </span>
-                <span class="line sub">
-                  <span class="path">{shortPath(row.project.path)}</span>
-                </span>
+                {#if !dense}
+                  <!-- The path is what tells two same-named folders apart, so a
+                       full-page card shows it. A sidebar row is one line like
+                       every other sidebar row; the path lives in the row's
+                       title instead. -->
+                  <span class="line sub">
+                    <span class="path">{shortPath(row.project.path)}</span>
+                  </span>
+                {/if}
               </span>
             </button>
             <div class="acts">
@@ -259,9 +273,20 @@
   .projects.dense .acts { opacity: 0; transition: opacity var(--t-fast) ease; }
   .projects.dense .proj:hover .acts,
   .projects.dense .proj:focus-within .acts { opacity: 1; }
-  /* Windows stay — they are what the project is made of — but as a quiet
-     single line, not a bordered tray. */
-  .projects.dense .wins { padding: 0 4px 2px 16px; gap: 3px; }
+  .projects.dense .side-h-inline {
+    display: inline-flex; align-items: baseline; gap: 6px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  /* Windows stay — they are what the project is made of, and picking one is
+     why this sidebar exists — but as quiet text under the row, not a tray of
+     bordered pills (that tray is what still read as a "card"). */
+  .projects.dense .wins { padding: 0 4px 3px 18px; gap: 2px 10px; }
+  .projects.dense .win {
+    background: none; border: none; border-radius: 6px; padding: 2px 5px;
+    color: var(--text3); font-size: var(--fs-meta);
+  }
+  .projects.dense .win:hover { background: var(--surface2); color: var(--text); }
+  .projects.dense .win-name { max-width: 16ch; }
 
   .proj {
     display: flex; flex-direction: column; gap: 6px;
