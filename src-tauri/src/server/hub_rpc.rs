@@ -38,10 +38,23 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
     let Some(bus) = team else {
         return Response::err(id, ERR_METHOD_NOT_FOUND, "hub not available on this server".into());
     };
-    let session = match require_str(p, "session") {
+    let asked = match require_str(p, "session") {
         Ok(s) => s,
         Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
     };
+    // Resolve the caller's session name to the project's CURRENT one, ONCE, here.
+    // Renaming a project renames its tmux session, but a running agent carries
+    // `TMM_PROJECT` from the moment it started — and half of these methods reach
+    // straight into tmux (`window_of_agent`, `list_panes`), where a stale name
+    // finds nothing. Measured the hard way: right after a rename, `tmm status`
+    // answered "no window named 'builder-2' in session 'tmm-tasks'" — the deaf
+    // agent again, one layer below the project lookup that already handled it.
+    let current = crate::projects::project_for_session(asked)
+        .ok()
+        .flatten()
+        .map(|proj| proj.session)
+        .unwrap_or_else(|| asked.to_string());
+    let session: &str = &current;
     let room = project_room(session);
 
     match req.method.as_str() {

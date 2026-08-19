@@ -387,28 +387,48 @@ pub fn rename(id: &str, name: &str) -> Result<Value, String> {
         let Some(project) = store.project(id)? else {
             return Err(format!("no project with id '{id}'"));
         };
-        if !store.set_name(id, name)? {
-            return Err(format!("no project with id '{id}'"));
-        }
         // The tmux SESSION follows the name, because it is the name the Terminal
         // and `tmux ls` show — leaving it behind made one project wear two names
         // (owner, 2026-08-19: "没有改tmux session的名字 所以在terminal显示不对").
         //
-        // This used to skip ADOPTED projects, on the theory that their session
-        // name is their owner's and not ours to change. That was wrong HERE:
-        // `auto_adopt_once` adopts every untracked session automatically — it is
-        // the migration path and the "every session is a project" rule — so
-        // `adopted` mostly means "the app found it before it was declared", not
-        // "a human chose this name". On the owner's own machine 2 of 4 projects
-        // were adopted, including the one they were renaming, so the exception
-        // silently disabled the feature exactly where it was wanted ("tmux不能改
-        // 名字吗", 2026-08-19). A rename typed into our UI IS the instruction.
+        // No exception for ADOPTED projects: `auto_adopt_once` adopts every
+        // untracked session automatically, so `adopted` mostly means "the app
+        // found it before it was declared", not "a human chose this name". The
+        // first cut skipped them and thereby disabled the feature on 2 of the
+        // owner's 4 projects, including the one they were renaming.
+        let wanted = slug(name);
+        // Everything that can REFUSE happens before anything is written: a rename
+        // that moved the label and then failed on the session left the project
+        // wearing two names again — the exact bug this feature exists to fix.
+        if wanted != project.session {
+            if tmux::session_exists(&wanted) {
+                return Err(format!("a tmux session named '{wanted}' already exists"));
+            }
+            if store.session_taken_by_other(&wanted, id)? {
+                let owner = store.project_by_session(&wanted)?;
+                let label = owner.as_ref().map(|p| p.name.clone()).unwrap_or_default();
+                let archived = owner.as_ref().is_some_and(|p| p.archived);
+                // A rename REFUSES a taken name; it does not decorate one.
+                // `create` suffixes with a digest because there the alternative is
+                // failing to make the project at all, but here the user typed a
+                // name and `closetest-e110d2` is not an answer to that — measured
+                // on the owner's own data, where an ARCHIVED (invisible) project
+                // was holding the name.
+                return Err(format!(
+                    "session '{wanted}' belongs to {}project '{label}' — rename or delete that one first",
+                    if archived { "the archived " } else { "" },
+                ));
+            }
+        }
+
+        if !store.set_name(id, name)? {
+            return Err(format!("no project with id '{id}'"));
+        }
         let mut session = project.session.clone();
         let mut renamed_session = false;
-        let wanted = free_session_name(store, &slug(name), id)?;
         if wanted != project.session {
-            // tmux first: if it refuses (the name is taken by a session no
-            // project claims), the declaration must not drift away from it.
+            // tmux first: if it refuses anyway (a session created between the
+            // check and here), the declaration must not drift away from it.
             let live = tmux::session_exists(&project.session);
             if !live || tmux::rename_session(&project.session, &wanted).is_ok() {
                 store.set_session(id, &wanted, &project.session)?;
@@ -964,6 +984,20 @@ pub(crate) mod tests {
         // The conversation stays where it is. This is the whole reason the room
         // is a column instead of `proj:<session>`.
         assert_eq!(after.room, room, "the chat must not move with the name");
+
+        // A name another project holds is REFUSED, not decorated — including when
+        // that project is archived and therefore invisible in the list.
+        let other = std::env::temp_dir().join(format!("tmm-rename-other-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&other).unwrap();
+        let taken = create(&other.to_string_lossy(), Some("Taken Name"), None, None).unwrap();
+        set_archived(taken["id"].as_str().unwrap(), true).unwrap();
+        let err = rename(&id, "Taken Name").expect_err("a taken session must not be decorated");
+        assert!(err.contains("archived"), "the message must explain WHY: {err}");
+        assert!(err.contains("taken-name"), "and name the session: {err}");
+        let untouched = with_store(|s| s.project(&id)).unwrap().unwrap();
+        assert_eq!(untouched.session, "new-name", "a refused rename changes nothing");
+        assert_eq!(untouched.name, "New Name", "…including the label: no half-applied rename");
+        let _ = std::fs::remove_dir_all(&other);
 
         // The old name still resolves, so an agent started before the rename can
         // keep using the TMM_PROJECT it was launched with.

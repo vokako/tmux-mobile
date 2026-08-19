@@ -12,7 +12,7 @@
   import Preferences from './lib/app/Preferences.svelte';
   import { copyText } from './lib/core/clipboard.ts';
   import { teamStatus } from './lib/core/ws.ts';
-  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable, listPanes } from './lib/core/ws.ts';
+  import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable, listPanes, listSessions } from './lib/core/ws.ts';
   import { t } from './lib/core/i18n.svelte.ts';
   import { layout } from './lib/app/layout.svelte.ts';
   import { teamState } from './lib/core/team.svelte.ts';
@@ -833,6 +833,24 @@
       syncAgentNotifications();
       try {
         const s = JSON.parse(localStorage.getItem('tmux_state') || '{}');
+        // A saved target names a session that may not exist any more — killed
+        // while we were away, or RENAMED (a project rename renames its session).
+        // Restoring it anyway lands the user on a pane that cannot be captured,
+        // so check first and come back to the tab without a target instead.
+        if (s.terminalTarget && s.terminalSession) {
+          listSessions()
+            .then((sessions) => {
+              // list_sessions answers with a bare array (list_sessions_with_panes
+              // is the one that wraps).
+              if (!(sessions ?? []).some((x) => x.name === s.terminalSession)) {
+                terminalTarget = '';
+                terminalSession = '';
+                terminalCommand = '';
+                splitCells = splitCells.filter((c) => c.session !== s.terminalSession);
+              }
+            })
+            .catch(() => {});
+        }
         if (s.terminalTarget) {
           terminalTarget = s.terminalTarget;
           terminalSession = s.terminalSession || '';
