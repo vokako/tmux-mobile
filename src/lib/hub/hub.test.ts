@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand } from './hub.ts';
+import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -527,5 +527,47 @@ test('slashCommand tells a CLI command from a message (and from a path)', () => 
   // Ordinary prose, and the shapes that only look like commands.
   for (const msg of ['hello', '', '   ', '/', '//', '/1234', 'a /model', '@dev hello']) {
     assert.equal(slashCommand(msg), null, JSON.stringify(msg));
+  }
+});
+
+test('commandPalette completes a command, then its argument', () => {
+  const models = ['auto', 'claude-opus-5', 'claude-sonnet-4.5'];
+
+  // Stage one: a bare slash offers everything, and a prefix narrows it.
+  const all = commandPalette('/', models);
+  assert.equal(all?.stage, 'command');
+  assert.equal(all?.items.length, KIRO_COMMANDS.length, 'every command is offered');
+  assert.equal(all?.from, 0);
+  assert.ok(all?.more, 'accepting a command may open its argument list');
+  assert.deepEqual(
+    commandPalette('/co', models)?.items.map((i) => i.value),
+    ['/compact', '/context', '/code'],
+    'prefix match, in table order',
+  );
+  // Every offered item carries the CLI's own description, not an invented one.
+  assert.ok(all?.items.every((i) => i.hint.length > 3));
+
+  // Stage two: the argument. `/model` takes a model id, which is fetched.
+  const arg = commandPalette('/model ', models);
+  assert.equal(arg?.stage, 'arg');
+  assert.deepEqual(arg?.items.map((i) => i.value), [...models, 'set-current-as-default']);
+  assert.equal(arg?.from, '/model '.length, 'replace only the (empty) argument');
+  assert.equal(arg?.more, false, 'nothing follows a single argument');
+  assert.deepEqual(commandPalette('/model cla', models)?.items.map((i) => i.value),
+    ['claude-opus-5', 'claude-sonnet-4.5']);
+  // Fixed argument lists come from the table.
+  assert.deepEqual(commandPalette('/effort ', models)?.items.map((i) => i.value),
+    ['low', 'medium', 'high', 'xhigh', 'max', 'set-current-as-default']);
+
+  // A filled argument ends the palette: what follows is a path or free text.
+  assert.equal(commandPalette('/model claude-opus-5 ', models), null);
+  assert.equal(commandPalette('/context add ', models), null);
+  // A command with no arguments offers nothing once it is typed.
+  assert.equal(commandPalette('/compact ', models), null);
+  // An address is allowed before it, and shifts the replace offset.
+  assert.equal(commandPalette('@builder-2 /comp', models)?.from, '@builder-2 '.length);
+  // Not a command line at all.
+  for (const s of ['hello', '/tmp/x', '', ' ', '/nope ']) {
+    assert.equal(commandPalette(s, models), null, JSON.stringify(s));
   }
 });

@@ -479,6 +479,30 @@ windows it reached. Four rules:
   and disappears at the chat-only level. Recording it as a message would also feed
   it back to the mention scanner.
 
+### Completion: two stages, one palette
+
+Typing `/` in the composer offers the agent CLI's commands; choosing one that
+takes an argument offers ITS values next ("比如我打/ 就会出现compact之类的让我选，
+还有model 如果支持两个参数的，可以多次选择", 2026-08-19). `commandPalette()`
+(`hub.ts`, pure and tested) is the whole decision: which stage, which items, and
+which slice of the input a chosen item replaces.
+
+`KIRO_COMMANDS` is TRANSCRIBED from kiro-cli's own TUI table — the same names,
+the same descriptions, the same sub-commands — not invented. A made-up command is
+worse than no completion at all: it looks authoritative in the list and then does
+nothing in the pane. Cloud-only and hidden entries are left out, and `/quit` sits
+last because it ends the agent. `/model`'s values are the exception that cannot be
+transcribed: they are fetched through `models_list`, the same server call the agent
+editor uses (cached ten minutes, asked at most once per Hub visit).
+
+Only the LAST token is completed, and only the FIRST argument: these commands take
+one, and what follows it — a path, a prompt, a free-text name — is not ours to
+guess, so a filled argument closes the palette instead of re-offering the same
+list. The palette owns ArrowUp/Down, Tab and Enter while it is open (a menu that
+ignores the keyboard is a menu you have to reach for the mouse to use), Escape
+dismisses it until the text changes, and hover shares ONE highlight with the
+keyboard cursor because two would read as two selections.
+
 ## Who a message goes to
 
 Three ways a message can land, and they are NOT shades of one thing:

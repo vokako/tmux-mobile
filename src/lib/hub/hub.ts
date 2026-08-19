@@ -313,6 +313,107 @@ export function slashCommand(text: string): { to: string; command: string } | nu
   return { to, command: rest };
 }
 
+/** One slash command of an agent's CLI, for the composer's completion palette.
+ *
+ * The table is TRANSCRIBED from kiro-cli's own TUI (its command palette carries
+ * the same names, descriptions and subcommands), not invented here: a made-up
+ * command is worse than no completion, because it looks authoritative in the
+ * list and then does nothing in the pane. Cloud-only and hidden entries are
+ * left out; `/quit` is last because it ends the agent.
+ */
+export interface SlashCmd {
+  name: string;
+  desc: string;
+  /** Fixed sub-commands, when the CLI defines them. */
+  args?: string[];
+  /** Values that have to be fetched — the model ids come from `models_list`. */
+  dynamic?: 'models';
+}
+
+export const KIRO_COMMANDS: readonly SlashCmd[] = [
+  { name: 'model', desc: 'List or switch models', args: ['set-current-as-default'], dynamic: 'models' },
+  { name: 'compact', desc: 'Compact conversation history to reduce context usage' },
+  { name: 'clear', desc: 'Clear the conversation and start a fresh session' },
+  { name: 'context', desc: 'Show or manage context files', args: ['add', 'remove', 'clear'] },
+  { name: 'effort', desc: 'List or set the reasoning effort level', args: ['low', 'medium', 'high', 'xhigh', 'max', 'set-current-as-default'] },
+  { name: 'agent', desc: 'List or switch agents', args: ['create', 'edit', 'swap'] },
+  { name: 'tools', desc: 'List available tools' },
+  { name: 'mcp', desc: 'Show MCP server status' },
+  { name: 'hooks', desc: 'View configured hooks' },
+  { name: 'usage', desc: 'Show plan usage and billing information' },
+  { name: 'code', desc: 'Code intelligence status, init, codebase overview', args: ['status', 'init', 'overview'] },
+  { name: 'knowledge', desc: 'Manage knowledge bases' },
+  { name: 'memories', desc: 'Manage repo-scoped memories from previous sessions' },
+  { name: 'plan', desc: 'Switch to plan mode to break ideas into a plan' },
+  { name: 'spec', desc: 'List specs, switch to spec mode, or run spec tasks', args: ['new', 'run', 'view', 'analyze_requirements'] },
+  { name: 'tangent', desc: 'Go back, switch to, or create a conversation tangent', args: ['ls', 'root'] },
+  { name: 'chat', desc: 'Load a previous session, save, or start a new one', args: ['new', 'save', 'load'] },
+  { name: 'prompts', desc: 'Select or list available prompts' },
+  { name: 'rewind', desc: 'Fork the session at an earlier turn' },
+  { name: 'reply', desc: 'Reply to the last assistant message in $EDITOR' },
+  { name: 'paste', desc: 'Paste image from clipboard' },
+  { name: 'goal', desc: 'Work toward a goal in a loop until done' },
+  { name: 'workflow', desc: 'Browse and manage workflows or run a recipe', args: ['run', 'list', 'new', 'retry'] },
+  { name: 'upgrade-agent', desc: 'Upgrade V2 agent configs to universal form' },
+  { name: 'help', desc: 'Show available commands' },
+  { name: 'feedback', desc: 'Submit feedback, request features, or report issues' },
+  { name: 'quit', desc: 'Exit the agent CLI' },
+];
+
+export interface PaletteItem { value: string; hint: string }
+export interface Palette {
+  /** 'command' completes `/mo` → `/model`; 'arg' completes what follows it. */
+  stage: 'command' | 'arg';
+  items: PaletteItem[];
+  /** Replace `text.slice(from)` with the chosen value. */
+  from: number;
+  /** True when accepting an item should keep the palette open for its argument. */
+  more: boolean;
+}
+
+/**
+ * What to offer for the composer's current text — the two-stage completion the
+ * owner asked for: "比如我打/ 就会出现compact之类的让我选，还有model 如果支持两个
+ * 参数的，可以多次选择".
+ *
+ * Only a line that IS a slash command gets a palette (an optional leading
+ * `@name ` is allowed, since that is how you aim one), and only its LAST token is
+ * completed. Returns null when there is nothing to offer, which is also how the
+ * caller knows to stay out of the way.
+ */
+export function commandPalette(text: string, models: readonly string[] = []): Palette | null {
+  const at = /^(\s*@[\w][\w.-]*\s+)?/u.exec(text ?? '')?.[0]?.length ?? 0;
+  const line = (text ?? '').slice(at);
+  if (!line.startsWith('/')) return null;
+  const parts = line.split(/(\s+)/u);          // keeps the separators
+  const head = parts[0]!.slice(1);              // the command, without the slash
+  // Still typing the command itself: `/`, `/mo`, `/model` with no space yet.
+  if (parts.length === 1) {
+    const items = KIRO_COMMANDS.filter((c) => c.name.startsWith(head.toLowerCase())).map((c) => ({
+      value: `/${c.name}`,
+      hint: c.desc,
+    }));
+    return items.length ? { stage: 'command', items, from: at, more: true } : null;
+  }
+  const cmd = KIRO_COMMANDS.find((c) => c.name === head.toLowerCase());
+  if (!cmd) return null;
+  const values = [...(cmd.dynamic === 'models' ? models : []), ...(cmd.args ?? [])];
+  if (!values.length) return null;
+  // Completing the argument: everything after the last whitespace run.
+  const lastGap = line.search(/\s+\S*$/u);
+  const typed = lastGap >= 0 ? line.slice(lastGap).trimStart() : '';
+  const from = at + line.length - typed.length;
+  // Only the FIRST argument is completable — these commands take one, and what
+  // follows it (a path, a prompt, a free-text name) is not ours to guess. So a
+  // filled argument ends the palette instead of re-offering the same list.
+  const tokens = line.split(/\s+/u).filter(Boolean);
+  if (tokens.length > 2 || (tokens.length === 2 && typed === '')) return null;
+  const items = values
+    .filter((v) => v.toLowerCase().startsWith(typed.toLowerCase()))
+    .map((v) => ({ value: v, hint: cmd.dynamic === 'models' && !cmd.args?.includes(v) ? 'model' : 'option' }));
+  return items.length ? { stage: 'arg', items, from, more: false } : null;
+}
+
 export type FeedLevel = 'chat' | 'status' | 'tools';
 
 /** Lifecycle lines the server posts into the room (a spawn, a `tmm done`) are

@@ -22,11 +22,11 @@
   import { t } from '../core/i18n.svelte.ts';
   import {
     projectList, projectUp, projectDown, projectDelete, projectCreate, projectRename, listSessionsWithPanes,
-    hubPost, hubCommand, hubLog, hubAgents, hubSpawn, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
+    hubPost, hubCommand, modelsList, hubLog, hubAgents, hubSpawn, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, elideMiddle, slashCommand } from './hub.ts';
+  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette } from './hub.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
@@ -448,7 +448,53 @@
   /** Enter sends where there is a keyboard with modifiers, and inserts a newline
    * on a touch device — where the return key is the ONLY way to get one and the
    * send button is right there. Shift+Enter is always a newline. */
+  // ── Slash-command completion. Typing `/` offers the agent CLI's commands;
+  // choosing one that takes an argument offers ITS values next (the model ids
+  // come from the server, which asks the CLI). Two stages, one palette.
+  let cmdModels = $state([]);
+  let paletteIdx = $state(0);
+  let paletteOff = $state(false);      // Escape closes it until the text changes
+  const palette = $derived(paletteOff ? null : commandPalette(composerText, cmdModels));
+  $effect(() => { void composerText; paletteOff = false; });
+  $effect(() => { void palette; paletteIdx = 0; });
+  // The model list is only needed once a command wants it, and the server caches
+  // it for ten minutes — so this asks at most once per Hub visit.
+  $effect(() => {
+    if (!palette || cmdModels.length) return;
+    modelsList('kiro').then((r) => { cmdModels = r.models ?? []; }).catch(() => {});
+  });
+
+  /** Put the chosen completion in the box. `more` keeps the palette alive for the
+   * argument, which is what makes a two-part command one flow. */
+  function acceptCompletion(item) {
+    if (!palette) return;
+    const head = composerText.slice(0, palette.from);
+    composerText = `${head}${item.value}${palette.more ? ' ' : ''}`;
+    paletteIdx = 0;
+    composerEl?.focus();
+    // Put the caret at the end; assigning `value` in Svelte leaves it wherever
+    // it was, which on a re-render means before the text we just inserted.
+    requestAnimationFrame(() => composerEl?.setSelectionRange(composerText.length, composerText.length));
+  }
+
   function onComposerKey(e) {
+    // The palette owns the arrows, Tab and Enter while it is open — it is a
+    // menu, and a menu that ignores the keyboard is a menu you have to reach for
+    // the mouse to use.
+    if (palette?.items.length) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const step = e.key === 'ArrowDown' ? 1 : -1;
+        paletteIdx = (paletteIdx + step + palette.items.length) % palette.items.length;
+        return;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && !e.isComposing)) {
+        e.preventDefault();
+        acceptCompletion(palette.items[paletteIdx] ?? palette.items[0]);
+        return;
+      }
+      if (e.key === 'Escape') { e.preventDefault(); paletteOff = true; return; }
+    }
     if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
     if (compact) return;      // let the newline through; tap send
     e.preventDefault();
@@ -1274,6 +1320,22 @@
             {/if}
           </div>
         {/if}
+        {#if palette?.items.length}
+          <!-- Completion for a `/command`, opening UPWARD so the on-screen
+               keyboard never covers it — the same rule as the recipient menu, and
+               the same popover dialect. -->
+          <div class="cmd-menu" role="listbox" tabindex="-1">
+            {#each palette.items as it, i (it.value)}
+              <button class="cmd-opt" class:cur={i === paletteIdx} role="option"
+                aria-selected={i === paletteIdx}
+                onpointerenter={() => (paletteIdx = i)}
+                onclick={() => acceptCompletion(it)}>
+                <span class="cmd-name">{it.value}</span>
+                <span class="cmd-hint">{it.hint}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
         <!-- A textarea, not an input: a message you are still writing has to be
              readable. It grows with the text and then scrolls, so a long one is
              never a one-line peephole. -->
@@ -1832,6 +1894,30 @@
     padding: 6px 10px; font-size: var(--ui-font-control); cursor: pointer; font-family: ui-monospace, Menlo, monospace;
   }
   .to-menu button:hover { background: var(--surface2); color: var(--text); }
+  /* The slash-command palette: the recipient menu's surface, full capsule width
+     because a command list is read as rows of name + description. */
+  .cmd-menu {
+    position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; z-index: 14;
+    max-height: 44vh; overflow-y: auto; scrollbar-width: thin;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 11px;
+    box-shadow: 0 12px 34px rgba(0,0,0,0.45); padding: 5px;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .cmd-opt {
+    display: flex; align-items: baseline; gap: 10px; width: 100%; text-align: left;
+    background: none; border: none; border-radius: 8px; color: var(--text2);
+    padding: 6px 10px; font-size: var(--ui-font-control); cursor: pointer;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  /* Hover and the keyboard cursor are the SAME highlight — two would read as two
+     selections. */
+  .cmd-opt:hover, .cmd-opt.cur { background: var(--surface2); color: var(--text); }
+  .cmd-name { flex: none; font-weight: 650; color: var(--accent); }
+  .cmd-hint {
+    min-width: 0; color: var(--text3); font-family: inherit; font-size: var(--fs-meta);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .hub-root.compact .cmd-opt { min-height: 44px; align-items: center; }
   .to-menu button.sel { color: var(--accent); background: var(--accent-bg); }
   .all-dot { border: 1px solid var(--text3); background: none; }
   .c-input {
