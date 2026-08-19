@@ -960,11 +960,16 @@
       {/if}
 
       <button tabindex="-1" class="rail-btn" class:active={page === 'terminal'} title={t('terminal')} onclick={() => switchTab('terminal')}><Icon name="terminal" size={17} /></button>
+      <button tabindex="-1" class="rail-btn" class:active={page === 'files'} title={t('files')} onclick={() => switchTab('files')}><Icon name="files" size={17} /></button>
+      <div class="rail-spacer"></div>
+      <!-- Agent definitions sit with Settings, not with the workspaces: the top
+           group is where you WORK (a conversation, a terminal, files), while
+           these two are where you CONFIGURE what you work with (owner,
+           2026-08-19). Agents stays above the gear because it is the narrower
+           of the two. -->
       {#if hubEligible}
         <button tabindex="-1" class="rail-btn" class:active={page === 'agents'} title={t('agentsTitle')} onclick={() => switchTab('agents')}><Icon name="bot" size={17} /></button>
       {/if}
-      <button tabindex="-1" class="rail-btn" class:active={page === 'files'} title={t('files')} onclick={() => switchTab('files')}><Icon name="files" size={17} /></button>
-      <div class="rail-spacer"></div>
       <button tabindex="-1" class="rail-btn" class:active={page === 'prefs'} title={t('settings')} onclick={togglePrefs}><Icon name="gear" size={17} /></button>
     </nav>
   {/if}

@@ -52,6 +52,15 @@ legacy tmm-team-* sessions appear as plain sessions in the list.
 - Tab order for swipe navigation is unchanged (`tabs()`), and the gear is a
   toggle, not a page — it never participates in swipes.
 
+## The rail has two groups: where you work, and what you configure
+
+Top: Chat, Terminal, Files — the places work happens. Bottom, after the
+spacer: Agents (agent/skill/MCP definitions) and Settings. Agents moved down
+there on 2026-08-19 (owner ask): it is a configuration surface, visited when
+setting something up rather than while working, and pairing it with the gear
+says that without a label. Order within the pair puts Agents above the gear,
+which stays the last item in the rail as the app-wide convention.
+
 ## The tab slide belongs to the swipe, not to the app
 
 `switchTab` plays a one-shot `slide-in-left/right` on the page layer — but only
