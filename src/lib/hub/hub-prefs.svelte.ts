@@ -6,6 +6,8 @@
 //   tools  — + individual tool calls ("Edit src/lib.rs")
 // Delivery receipts and undelivered-line reports are NOT levelled: they are
 // about a message the user sent, so feedBlocks() surfaces them at every level.
+import { draftUpdate } from './hub.ts';
+
 const FEED_LEVEL_KEY = 'tmux_hub_feed_level';
 const LEAD_KEY = 'tmux_hub_lead';
 const SEEN_KEY = 'tmux_hub_seen';
@@ -13,6 +15,11 @@ const SEEN_KEY = 'tmux_hub_seen';
 // just a tab: reopening the app on somebody else's chat is the same jolt as
 // landing on the wrong tab (owner, 2026-08-19).
 const PROJECT_KEY = 'tmux_hub_project';
+// An unsent message belongs to the project it was being written to. Switching
+// projects with a half-typed line in the box used to carry that line into
+// somebody else's conversation, and a reload threw it away (owner, 2026-08-19:
+// "前端消息框的消息应该和项目绑定 … 正在输入的内容刷新也还在").
+const DRAFT_KEY = 'tmux_hub_drafts';
 export type FeedLevel = 'chat' | 'status' | 'tools';
 
 const stored = localStorage.getItem(FEED_LEVEL_KEY);
@@ -36,6 +43,8 @@ const state = $state({
   seen: readMap<number>(SEEN_KEY),
   // The project whose conversation was open, restored if it still exists.
   project: localStorage.getItem(PROJECT_KEY) ?? '',
+  // Per project: the message being written but not yet sent.
+  drafts: readMap<string>(DRAFT_KEY),
 });
 
 export const hubPrefs = {
@@ -62,7 +71,7 @@ export const hubPrefs = {
    * lead and its read marker. */
   renameSession(from: string, to: string) {
     if (!from || !to || from === to) return;
-    for (const map of [state.leads, state.seen] as Record<string, unknown>[]) {
+    for (const map of [state.leads, state.seen, state.drafts] as Record<string, unknown>[]) {
       if (from in map) {
         map[to] = map[from];
         delete map[from];
@@ -70,6 +79,7 @@ export const hubPrefs = {
     }
     localStorage.setItem(LEAD_KEY, JSON.stringify(state.leads));
     localStorage.setItem(SEEN_KEY, JSON.stringify(state.seen));
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(state.drafts));
     if (state.project === from) this.setProject(to);
   },
   /** The remembered default recipient for a project, '' when none. */
@@ -86,5 +96,16 @@ export const hubPrefs = {
   setSeen(session: string, ts: number) {
     state.seen[session] = ts;
     localStorage.setItem(SEEN_KEY, JSON.stringify(state.seen));
+  },
+  /** The unsent message for a project, '' when there is none. */
+  draft(session: string) { return state.drafts[session] ?? ''; },
+  /** Remember (or forget) what is in the composer. Called as the user types, so
+   * it stays a single JSON write and an empty draft REMOVES its key rather than
+   * storing '' — otherwise every project ever visited would leave a row. */
+  setDraft(session: string, text: string) {
+    const next = draftUpdate(state.drafts, session, text);
+    if (next === state.drafts) return;   // nothing changed, nothing to write
+    state.drafts = next;
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(next));
   },
 };

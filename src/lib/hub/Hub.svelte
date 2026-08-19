@@ -109,7 +109,12 @@
   }
 
   async function selectProject(session) {
+    // An unsent line belongs to the conversation it was written for. Park it on
+    // the project we are leaving and pick up whatever was waiting in the new one
+    // — carrying the text across would put it in front of the wrong agents.
+    if (selected) hubPrefs.setDraft(selected, composerText);
     selected = session;
+    composerText = hubPrefs.draft(session);
     hubPrefs.setProject(session);
     feed = [];
     activity = [];
@@ -458,6 +463,10 @@
   // The open menu's agent, as its status line reads right now.
   const vitalsFor = $derived(vitalsLine(managedAgents.find((a) => a.name === menuFor)?.vitals));
   $effect(() => { void composerText; paletteOff = false; });
+  // The draft survives a reload because a half-written message is work. Written
+  // on every keystroke: one small JSON string, and the alternative (a debounce)
+  // loses the last few characters exactly when the tab goes away.
+  $effect(() => { hubPrefs.setDraft(selected, composerText); });
   $effect(() => { void palette; paletteIdx = 0; });
   // The model list is only needed once a command wants it, and the server caches
   // it for ten minutes — so this asks at most once per Hub visit.

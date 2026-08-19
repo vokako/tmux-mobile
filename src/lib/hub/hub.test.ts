@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote } from './hub.ts';
+import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, draftUpdate, DRAFT_MAX } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -627,4 +627,30 @@ test('statusNote reads an agent status message, and only that', () => {
   // The two markers must not overlap: `[tmm] ` folds into a grey sys row, which
   // is exactly the treatment a status note was moved out of.
   assert.equal(systemLine('[tmm status working] compiling'), null);
+});
+
+test('a draft belongs to its project, and an empty one leaves no trace', () => {
+  // Typing in one project cannot touch another's draft.
+  const one = draftUpdate({}, 'proj-a', 'half a sen');
+  assert.deepEqual(one, { 'proj-a': 'half a sen' });
+  const two = draftUpdate(one, 'proj-b', '@dev hi');
+  assert.deepEqual(two, { 'proj-a': 'half a sen', 'proj-b': '@dev hi' });
+
+  // Clearing the box REMOVES the key: otherwise every project ever visited
+  // leaves a row behind for good.
+  assert.deepEqual(draftUpdate(two, 'proj-b', ''), { 'proj-a': 'half a sen' });
+  assert.deepEqual(draftUpdate({ x: '' }, 'x', ''), {});
+
+  // No change means the SAME object, which is how the caller skips a write on a
+  // keystroke that changed nothing (arrow keys, a re-render).
+  assert.equal(draftUpdate(one, 'proj-a', 'half a sen'), one);
+  assert.equal(draftUpdate(one, '', 'anything'), one, 'no project, no draft');
+
+  // A pasted file is capped rather than allowed to fill localStorage.
+  const huge = draftUpdate({}, 'p', 'x'.repeat(DRAFT_MAX + 500));
+  assert.equal(huge['p']?.length, DRAFT_MAX);
+  // The input is never mutated — the map is state somebody else owns.
+  const before = { p: 'a' };
+  draftUpdate(before, 'p', 'b');
+  assert.deepEqual(before, { p: 'a' });
 });

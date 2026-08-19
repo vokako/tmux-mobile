@@ -502,6 +502,42 @@ export function statusNote(body: string | null | undefined): { state: string; te
   return text ? { state: m[1]!, text } : null;
 }
 
+/** A draft is a convenience, not a document: capped so a pasted file cannot fill
+ * localStorage and take the rest of the Hub's prefs down with it. */
+export const DRAFT_MAX = 8000;
+
+/**
+ * The next draft map after typing in a project's composer. Pure so the two rules
+ * that would regress silently are testable: an EMPTY draft removes its key (else
+ * every project ever visited leaves a row behind), and the text is capped.
+ *
+ * Returns the SAME object when nothing changes, which is the caller's signal to
+ * skip the write — this runs on every keystroke.
+ */
+export function draftUpdate(
+  map: Record<string, string>,
+  session: string,
+  text: string,
+): Record<string, string> {
+  if (!session) return map;
+  const keep = (text ?? '').slice(0, DRAFT_MAX);
+  if (keep === (map[session] ?? '')) {
+    // A stored empty string is junk — we never write one — so clean it up if an
+    // older build or a hand-edited value left one behind. Everything else is a
+    // genuine no-op, which is the common case on a keystroke.
+    if (map[session] === '') {
+      const cleaned = { ...map };
+      delete cleaned[session];
+      return cleaned;
+    }
+    return map;
+  }
+  const next = { ...map };
+  if (keep) next[session] = keep;
+  else delete next[session];
+  return next;
+}
+
 /** One row of the conversation. `msg` and `prompt` are things that were said,
  * `note` is a single observed fact, `steps` is a collapsible run of tool calls
  * (the "what it did between two replies" pane). */

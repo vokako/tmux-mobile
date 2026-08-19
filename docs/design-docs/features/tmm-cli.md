@@ -592,6 +592,25 @@ are kiro's own — green until 20%, amber by 60% (its warning threshold) — and
 that it continues into `hot` and `danger`, because a context above 85% is about to
 force a compact, which is a thing to see coming rather than discover.
 
+### The composer's draft is part of the project
+
+An unsent line belongs to the conversation it was being written for. It used to be
+one box shared by every project, so switching projects carried a half-typed line in
+front of the wrong agents, and a reload threw it away ("前端消息框的消息应该和项目
+绑定，比如我切换项目了，但是消息框没有切换，这里内容最好是浏览器有缓存的，正在输入
+的内容刷新也还在", 2026-08-19).
+
+`hubPrefs.draft/setDraft` keys the text by tmux session next to the lead and the
+read marker (so `renameSession` moves it too, or a rename would silently eat what
+you were typing). `selectProject` parks the outgoing draft and loads the incoming
+one; the write happens on every keystroke, because one small JSON string is cheap
+and a debounce loses the last characters exactly when the tab goes away.
+`draftUpdate()` (pure, tested) holds the two rules that would regress in silence:
+an empty draft REMOVES its key — otherwise every project ever visited leaves a row
+behind for good — and the text is capped at `DRAFT_MAX`, because a draft is a
+convenience, not a document, and a pasted file would fill localStorage and take the
+rest of the Hub's preferences down with it.
+
 ## Who a message goes to
 
 Three ways a message can land, and they are NOT shades of one thing:
