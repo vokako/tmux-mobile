@@ -9,6 +9,10 @@
 const FEED_LEVEL_KEY = 'tmux_hub_feed_level';
 const LEAD_KEY = 'tmux_hub_lead';
 const SEEN_KEY = 'tmux_hub_seen';
+// Which project's conversation was open. "Where I left off" is a project, not
+// just a tab: reopening the app on somebody else's chat is the same jolt as
+// landing on the wrong tab (owner, 2026-08-19).
+const PROJECT_KEY = 'tmux_hub_project';
 export type FeedLevel = 'chat' | 'status' | 'tools';
 
 const stored = localStorage.getItem(FEED_LEVEL_KEY);
@@ -30,6 +34,8 @@ const state = $state({
   leads: readMap<string>(LEAD_KEY),
   // Per project: the newest message timestamp the user has actually seen.
   seen: readMap<number>(SEEN_KEY),
+  // The project whose conversation was open, restored if it still exists.
+  project: localStorage.getItem(PROJECT_KEY) ?? '',
 });
 
 export const hubPrefs = {
@@ -42,6 +48,14 @@ export const hubPrefs = {
   cycleFeedLevel() {
     const order: FeedLevel[] = ['chat', 'status', 'tools'];
     this.setFeedLevel(order[(order.indexOf(state.feedLevel) + 1) % order.length]!);
+  },
+  /** The conversation that was open, '' when none was ever chosen. The caller
+   * verifies it still exists — a project can be deleted between two visits. */
+  get project() { return state.project; },
+  setProject(session: string) {
+    state.project = session;
+    if (session) localStorage.setItem(PROJECT_KEY, session);
+    else localStorage.removeItem(PROJECT_KEY);
   },
   /** The remembered default recipient for a project, '' when none. */
   lead(session: string) { return state.leads[session] ?? ''; },

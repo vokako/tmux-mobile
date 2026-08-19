@@ -1,0 +1,28 @@
+// Which tab a reload lands on. Framework-free so the rule is testable: it is a
+// two-line decision that used to be wrong in a way nobody notices until they
+// reload on the tab they were reading (owner, 2026-08-19: "每次切换或者刷新都会变").
+
+/** The tabs a saved state may name. A stale key from an older build — or a
+ * retired tab, like the Team one the Hub replaced — must not strand the app on
+ * a page that no longer renders. */
+export const PAGES = ['terminal', 'hub', 'files', 'sessions', 'agents', 'team', 'prefs', 'settings'] as const;
+export type Page = (typeof PAGES)[number];
+
+/** The default when there is nothing to restore: a phone opens on the terminal
+ * (it is the reason the app exists on a phone), a desktop on the Hub. */
+export function defaultPage(isTouchDevice: boolean): Page {
+  return isTouchDevice ? 'terminal' : 'hub';
+}
+
+/**
+ * The tab to restore. `saved` is whatever was in localStorage, so it is
+ * untrusted: anything that is not a known page falls back to the default.
+ *
+ * `settings` is deliberately restorable — it is a real page (the connect card
+ * lives there), and a user who left it open is not lost.
+ */
+export function restorePage(saved: unknown, isTouchDevice: boolean): Page {
+  return typeof saved === 'string' && (PAGES as readonly string[]).includes(saved)
+    ? (saved as Page)
+    : defaultPage(isTouchDevice);
+}

@@ -18,6 +18,7 @@
   import { teamState } from './lib/core/team.svelte.ts';
   import { applyMonoVar } from './lib/app/fonts.svelte.ts';
   import { normalizeUiZoom, stepUiZoom, UI_ZOOM_DEFAULT } from './lib/app/ui-zoom.ts';
+  import { defaultPage, restorePage } from './lib/app/nav-state.ts';
   import { createReconnectMachine } from './lib/app/reconnect.ts';
   import { cycleItem, shortcutFromEvent } from './lib/app/shortcuts.ts';
   import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.ts';
@@ -521,16 +522,19 @@
     return () => mq.removeEventListener('change', handler);
   });
 
-  // Persist nav state for restore on reload. splitLayout/splitCells are only
-  // meaningful on desktop; a desktop-saved state degrades to single-pane on a
-  // phone because restore re-gates on splitEligible.
+  // Persist nav state for restore on reload. It used to save ONLY when a
+  // terminal target existed, so reading the chat and refreshing dropped you back
+  // on the device's default tab — the state was there, just never written
+  // (owner, 2026-08-19: "每次切换或者刷新都会变"). The tab is worth remembering on
+  // its own; the terminal fields ride along when there are any.
+  // splitLayout/splitCells are only meaningful on desktop; a desktop-saved state
+  // degrades to single-pane on a phone because restore re-gates on splitEligible.
   $effect(() => {
-    if (connected && terminalTarget) {
-      localStorage.setItem('tmux_state', JSON.stringify({
-        page, terminalTarget, terminalSession, terminalCommand,
-        splitLayout, splitCells
-      }));
-    }
+    if (!connected) return;
+    localStorage.setItem('tmux_state', JSON.stringify({
+      page, terminalTarget, terminalSession, terminalCommand,
+      splitLayout, splitCells,
+    }));
   });
 
   // Reconnect UI state, mirrored from the reconnect machine
@@ -813,7 +817,6 @@
           terminalTarget = s.terminalTarget;
           terminalSession = s.terminalSession || '';
           terminalCommand = s.terminalCommand || '';
-          page = s.page || 'terminal';
           // Restore split layout only on eligible (desktop + wide) clients;
           // a desktop-saved state silently stays single-pane on a phone.
           if (splitEligible && s.splitLayout > 1 && Array.isArray(s.splitCells) && s.splitCells.length) {
@@ -822,10 +825,11 @@
             nextCellId = Math.max(0, ...s.splitCells.map(c => c.id ?? 0)) + 1;
             activeCellId = s.splitCells[0]?.id ?? null;
           }
-        } else {
-          page = layout.isTouchDevice ? 'terminal' : 'hub';
         }
-      } catch { page = layout.isTouchDevice ? 'terminal' : 'hub'; }
+        // The tab is restored whether or not a terminal came with it; only an
+        // unknown name falls back to the device default.
+        page = restorePage(s.page, layout.isTouchDevice);
+      } catch { page = defaultPage(layout.isTouchDevice); }
     }).catch(() => {
       clearTimeout(timeout);
       page = 'settings';

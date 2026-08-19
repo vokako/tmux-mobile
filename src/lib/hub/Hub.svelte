@@ -97,12 +97,20 @@
       const [{ projects }, sp] = await Promise.all([projectList(), listSessionsWithPanes()]);
       rows = sortRows(projects);
       panes = sp.panes ?? [];
-      if (!selected && rows.length) selectProject(rows[0].project.session);
+      // First load: go back to the conversation that was open, and only fall
+      // back to the top row when that project is gone.
+      if (!selected && rows.length) {
+        const remembered = rows.some((r) => r.project.session === hubPrefs.project)
+          ? hubPrefs.project
+          : rows[0].project.session;
+        selectProject(remembered);
+      }
     } catch { /* server without projects — the Hub tab is hidden anyway */ }
   }
 
   async function selectProject(session) {
     selected = session;
+    hubPrefs.setProject(session);
     feed = [];
     activity = [];
     lastActivityTs = 0;
