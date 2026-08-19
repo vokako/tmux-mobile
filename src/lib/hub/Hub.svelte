@@ -22,7 +22,7 @@
   import { t } from '../core/i18n.svelte.ts';
   import {
     projectList, projectUp, projectDown, projectDelete, projectCreate, projectRename, listSessionsWithPanes,
-    hubPost, hubCommand, modelsList, hubLog, hubMsgArchive, hubMsgRestore, hubMsgPurge, hubArchive, hubAgents, hubSpawn, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
+    hubPost, hubCommand, modelsList, hubLog, hubMsgArchive, hubMsgRestore, hubMsgPurge, hubArchive, hubRooms, hubAgents, hubSpawn, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
@@ -94,8 +94,14 @@
 
   async function reload() {
     try {
-      const [{ projects }, sp] = await Promise.all([projectList(), listSessionsWithPanes()]);
-      rows = sortRows(projects);
+      // The sidebar is ordered by CONVERSATION, so the list needs one more fact:
+      // when each room last had a message. One grouped query server-side.
+      const [{ projects }, sp, talk] = await Promise.all([
+        projectList(),
+        listSessionsWithPanes(),
+        hubRooms().then((r) => r.rooms ?? {}).catch(() => ({})),
+      ]);
+      rows = sortRows(projects, talk);
       panes = sp.panes ?? [];
       // First load: go back to the conversation that was open, and only fall
       // back to the top row when that project is gone.

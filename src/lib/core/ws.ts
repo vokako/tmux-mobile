@@ -781,6 +781,10 @@ export const hubMsgRestore = (session: string, ids: string[]) =>
   call<{ restored: number }>('hub_msg_restore', { session, ids });
 export const hubMsgPurge = (session: string, ids: string[]) =>
   call<{ deleted: number }>('hub_msg_purge', { session, ids });
+/** Newest message timestamp (ms) per room: `{ "<room>": ts }`. One call for every
+ * room, so the sidebar can order projects by conversation without asking per
+ * project. */
+export const hubRooms = () => call<{ rooms: Record<string, number> }>('hub_rooms', {});
 /** What is hidden in this room, newest first. Each row carries the message itself,
  * so the archive view needs no second lookup. */
 export const hubArchive = (session: string) =>

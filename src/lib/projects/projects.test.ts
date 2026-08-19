@@ -106,6 +106,42 @@ test('a project with no recorded activity falls back to its creation time', () =
   assert.deepEqual(rows.map((r) => r.project.id), ['fresh', 'old']);
 });
 
+test('the conversation orders the sidebar, not whichever session tmux touched last', () => {
+  // The symptom this fixes: `last_seen_at` is rewritten by the capturer on every
+  // tick, so for a live project it always means "just now" — every live project
+  // floats up and their order is arbitrary.
+  const a = row('a', true, 1_000_000);   // live, captured a moment ago
+  const b = row('b', true, 1_000_001);   // live, captured a moment later
+  const c = row('c', false, 500);        // stopped ages ago
+  a.project.room = 'proj:a';
+  b.project.room = 'proj:b';
+  c.project.room = 'proj:c';
+  // We talked in C most recently, then A. Never in B.
+  const talk = { 'proj:c': 9_000_000_000, 'proj:a': 8_000_000_000 };
+  assert.deepEqual(sortRows([a, b, c], talk).map((r) => r.project.id), ['c', 'a', 'b'],
+    'newest conversation first; the one nobody talked in goes last');
+
+  // Without the map, nothing changes: the Projects page keeps its own ordering.
+  assert.deepEqual(sortRows([a, b, c]).map((r) => r.project.id), ['b', 'a', 'c']);
+
+  // A project with no `room` recorded falls back to the derived id, because the
+  // column was backfilled as `proj:<session>` and an older row may predate it.
+  const d = row('d', false, 100);
+  delete d.project.room;
+  assert.deepEqual(sortRows([c, d], { 'proj:d': 9_999_999_999, 'proj:c': 1 })
+    .map((r) => r.project.id), ['d', 'c']);
+
+  // Seconds vs milliseconds: the projects table is in seconds and the bus is in
+  // ms, so a conversation must never lose to a raw `last_seen_at`.
+  const talked = row('talked', false, 1);
+  talked.project.room = 'proj:talked';
+  const busy = row('busy', false, 1_800_000_000);   // seconds: ~2027
+  assert.deepEqual(
+    sortRows([busy, talked], { 'proj:talked': 1_700_000_000_000 }).map((r) => r.project.id),
+    ['talked', 'busy'],
+  );
+});
+
 test('long paths collapse to the last two segments', () => {
   assert.equal(shortPath('/Users/me/work/app'), '/Users/me/work/app');
   assert.equal(

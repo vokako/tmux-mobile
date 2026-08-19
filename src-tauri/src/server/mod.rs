@@ -36,6 +36,10 @@ pub trait TeamBridge: Send + Sync {
     fn roster(&self, room: &str) -> serde_json::Value;
     /// Post as a participant in `room`. Returns the stored message JSON.
     fn post(&self, room: &str, from: &str, body: &str, requires_reply: bool) -> Result<serde_json::Value, String>;
+    /// Newest message timestamp (ms) per room: `{ "<room>": ts }`. Used to order
+    /// projects by their conversation, so it must include rooms with no running
+    /// team.
+    fn room_latest(&self) -> serde_json::Value;
     /// Forget messages by id, for good. The archive is the reversible half of
     /// deleting; this is the half that is not.
     fn delete_messages(&self, room: &str, ids: &[String]) -> Result<usize, String>;

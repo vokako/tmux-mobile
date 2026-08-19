@@ -428,6 +428,15 @@ pub fn clear_runtime_state(conn: &Connection, room: &str) -> Result<()> {
     Ok(())
 }
 
+/// The newest message timestamp per room, as `(room, ts_ms)`. One grouped query
+/// for the whole database: a caller that wants to order rooms by "when did we last
+/// talk here" must not have to ask room by room.
+pub fn room_latest(conn: &Connection) -> Result<Vec<(String, i64)>> {
+    let mut stmt = conn.prepare("SELECT room, MAX(ts) FROM messages GROUP BY room")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+    Ok(rows.filter_map(std::result::Result::ok).collect())
+}
+
 /// Forget specific messages. The one message-level primitive this store needs
 /// for a UI that can delete: `clear_room` is all-or-nothing, and a transcript you
 /// cannot correct is a transcript that fills up with test debris.

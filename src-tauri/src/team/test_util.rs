@@ -17,6 +17,9 @@ impl TeamBridge for RecordingBridge {
     fn delete_messages(&self, _room: &str, ids: &[String]) -> Result<usize, String> {
         Ok(ids.len())
     }
+    fn room_latest(&self) -> serde_json::Value {
+        serde_json::Value::Object(Default::default())
+    }
 
     fn history(&self, _room: &str, _l: i64) -> Value { serde_json::json!({}) }
     fn roster(&self, _room: &str) -> Value { serde_json::json!({ "roster": [] }) }

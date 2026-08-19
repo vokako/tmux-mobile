@@ -29,6 +29,9 @@ export interface Project {
   last_up_at?: number;
   last_seen_at?: number;
   archived: boolean;
+  /** The bus room this project's conversation lives in. Recorded on the project
+   * (schema v8) rather than derived, so a rename cannot orphan the chat. */
+  room?: string;
 }
 
 export interface ProjectRow {
@@ -116,16 +119,34 @@ export function declaredWindowChips(slots: Slot[]): WindowChip[] {
 }
 
 /**
- * Live projects first (they are what you are working in), then by recency.
- * `last_seen_at` is written by the capturer, so it means "when tmux last had
- * this session", which is a better recency signal than creation time.
+ * Order projects by the CONVERSATION, newest first — "把我们最近的对话默认排在最上
+ * 面" (owner, 2026-08-19). `talk` maps room id → newest message timestamp (ms),
+ * from `hub_rooms`.
+ *
+ * Why the conversation and not `last_seen_at`: the capturer writes `last_seen_at`
+ * on every tick, so for a LIVE project it always means "just now" — every live
+ * project floats to the top and their order is whichever one tmux was captured
+ * last, which is no signal at all. A message timestamp only moves when somebody
+ * actually says something.
+ *
+ * Projects nobody has talked in keep the old rule underneath (live first, then
+ * when tmux last had the session, then creation): there is no conversation to
+ * order them by, and they should not outrank one that exists.
+ *
+ * The `talk` argument is optional so the Projects page — which is about tmux and
+ * declarations, not conversations — keeps its own ordering.
  */
-export function sortRows(rows: ProjectRow[]): ProjectRow[] {
-  const recency = (r: ProjectRow) =>
-    r.project.last_seen_at ?? r.project.last_up_at ?? r.project.created_at;
+export function sortRows(rows: ProjectRow[], talk: Record<string, number> = {}): ProjectRow[] {
+  // seconds in the projects table, milliseconds on the bus: normalise before any
+  // comparison, or a creation time looks like 1970 next to a message.
+  const seen = (r: ProjectRow) =>
+    (r.project.last_seen_at ?? r.project.last_up_at ?? r.project.created_at ?? 0) * 1000;
+  const said = (r: ProjectRow) => talk[r.project.room ?? `proj:${r.project.session}`] ?? 0;
   return rows.slice().sort((a, b) => {
+    const [sa, sb] = [said(a), said(b)];
+    if (sa !== sb) return sb - sa;          // both talked, or one did: newest wins
     if (a.live !== b.live) return a.live ? -1 : 1;
-    return recency(b) - recency(a);
+    return seen(b) - seen(a);
   });
 }
 

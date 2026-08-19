@@ -203,6 +203,9 @@ mod tests {
         fn delete_messages(&self, _room: &str, ids: &[String]) -> Result<usize, String> {
             Ok(ids.len())
         }
+        fn room_latest(&self) -> serde_json::Value {
+            serde_json::Value::Object(Default::default())
+        }
 
         fn history(&self, _room: &str, limit: i64) -> serde_json::Value {
             serde_json::json!({ "messages": [], "echo_limit": limit })

@@ -38,6 +38,12 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
     let Some(bus) = team else {
         return Response::err(id, ERR_METHOD_NOT_FOUND, "hub not available on this server".into());
     };
+    // The one method that is about EVERY room: when did we last talk in each?
+    // It answers before the session gate below, because it has no session to
+    // resolve — the sidebar asks it once to order the whole project list.
+    if req.method == "hub_rooms" {
+        return Response::ok(id, serde_json::json!({ "rooms": bus.room_latest() }));
+    }
     let asked = match require_str(p, "session") {
         Ok(s) => s,
         Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
@@ -647,6 +653,9 @@ mod tests {
     impl TeamBridge for Bridge {
         fn delete_messages(&self, _room: &str, ids: &[String]) -> Result<usize, String> {
             Ok(ids.len())
+        }
+        fn room_latest(&self) -> serde_json::Value {
+            serde_json::json!({ "proj:blog": 200 })
         }
 
         fn history(&self, room: &str, _limit: i64) -> serde_json::Value {

@@ -343,6 +343,19 @@ impl TeamBridge for TeamManager {
             .map_err(|e| e.to_string())
     }
 
+    fn room_latest(&self) -> serde_json::Value {
+        // Deliberately not via `room_bus`: ordering projects by their conversation
+        // has to work for rooms whose Team is not running, which is nearly all of
+        // them. The manager owns the connection, so it can just ask.
+        let conn = self.conn.lock().unwrap();
+        let map: serde_json::Map<String, serde_json::Value> = agora::store::room_latest(&conn)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(room, ts)| (room, serde_json::json!(ts)))
+            .collect();
+        serde_json::Value::Object(map)
+    }
+
     fn delete_messages(&self, room: &str, ids: &[String]) -> Result<usize, String> {
         let bus = self.room_bus(room).ok_or_else(|| format!("unknown team '{room}'"))?;
         bus.delete_messages(ids).map_err(|e| e.to_string())
