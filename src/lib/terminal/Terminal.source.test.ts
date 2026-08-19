@@ -92,3 +92,37 @@ test('unlockKeyboard settles the touch-scroll pin instead of cancelling it', () 
   assert.doesNotMatch(body, /clearTimeout\(endTouchScrollTimer\)/u);
   assert.match(body, /resumeLiveTailRef\?\.\(\)/u);
 });
+
+test('the win-bar IS the page head, and carries a title on the desktop', () => {
+  // ui-unification.md "Page skeleton": one header dialect app-wide. The bar
+  // had the geometry copied into its own rule and no <h1> at all, so Terminal
+  // was the one page with a headerless head (owner, 2026-08-19).
+  assert.match(source, /<div class="win-bar page-head">/u);
+  // Geometry/border/h1 come from the shared class — not re-declared here.
+  const rule = /\n  \.win-bar \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
+  assert.doesNotMatch(rule, /min-height/u);
+  assert.doesNotMatch(rule, /border-bottom/u);
+  // The strip must not wrap: the phone page-head rule wraps head actions.
+  assert.match(rule, /flex-wrap: nowrap/u);
+
+  // Three roles, one branch: a split cell keeps a chip (its own pane picker),
+  // a phone keeps a chip (it opens the session sheet), the desktop shows the
+  // page title because the sidebar is already on screen beside it.
+  const branch = /\{#if embedded\}([\s\S]*?)\{:else\}([\s\S]*?)\{\/if\}/u.exec(source);
+  assert.ok(branch, 'the identity branch must exist');
+  assert.match(branch[0], /\{:else if onOpenSessions\}/u);
+  assert.match(branch[0], /<h1 class="win-title"/u);
+  // A cell's chip opens the picker; it must not fall through to a null call.
+  assert.match(branch[1] ?? '', /showPanePicker = !showPanePicker/u);
+});
+
+test('collapsing the switcher hides the chips, not the desktop page head', () => {
+  // The collapsed state is the DEFAULT (tmux_winswitcher unset), so dropping
+  // the bar entirely made a fresh desktop install the only page in the app
+  // with no header (measured 2026-08-19: no .win-bar, xterm at top 0).
+  assert.match(source, /\{#if isMobile\}\s*<div class="win-collapsed-anchor">/u);
+  const desktopCollapsed = /\{:else\}\s*<div class="win-bar page-head">[\s\S]*?<\/div>/u.exec(source)?.[0] ?? '';
+  assert.match(desktopCollapsed, /<h1 class="win-title"/u);
+  assert.match(desktopCollapsed, /chevron="left"/u, 'the chip stays the expand control');
+  assert.match(desktopCollapsed, /tmux_winswitcher', '1'/u);
+});

@@ -7,6 +7,7 @@
   import Hub from './lib/hub/Hub.svelte';
   import AgentsPage from './lib/hub/AgentsPage.svelte';
   import Icon from './lib/ui/Icon.svelte';
+  import SideHandle from './lib/ui/SideHandle.svelte';
   import InstallPrompt from './lib/ui/InstallPrompt.svelte';
   import Preferences from './lib/app/Preferences.svelte';
   import { copyText } from './lib/core/clipboard.ts';
@@ -1042,6 +1043,7 @@
            session tag). Kept MOUNTED so its polling and expansion state
            survive; `visible` pauses the poll while the page is hidden. -->
       <aside class="term-side" class:sheet={layout.isTouchDevice} class:open={sessListOpen}>
+        {#if !layout.isTouchDevice}<SideHandle />{/if}
         <Sessions {openTerminal} activeTarget={terminalTarget}
           visible={page === 'terminal' && (!layout.isTouchDevice || sessListOpen)}
           onPick={() => sessListOpen = false}
@@ -1085,6 +1087,13 @@
           {/if}
         </div>
       {:else}
+        <!-- No pane selected. The HEADER still renders: every other page keeps
+             its `.page-head` when its detail pane is empty (Chat, Agents,
+             Settings), and dropping it here made the Terminal tab look like a
+             different app the moment nothing was open (owner, 2026-08-19). -->
+        <div class="page-head">
+          <h1>{t('terminal')}</h1>
+        </div>
         <div class="terminal-empty">
           <Icon name="terminal" size={22} />
           <span>{t('noTerminalSelected')}</span>
@@ -1371,11 +1380,14 @@
      because the terminal needs the whole screen there. */
   /* Specificity note: .page-layer sets display:flex later in this sheet, so
      the merged layout must qualify with BOTH classes to win. */
-  /* 280px, not the 240px rail sidebar width: this column carries project
-     cards with actions and pane chips (it used to be a whole page), and at
-     240 the chips wrapped one per line. */
-  .page-layer.term-page { display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: 0; }
-  .term-side { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--border); background: var(--bg2); }
+  /* The left column is THE shared sidebar (ui-unification.md §1): same
+     `var(--sidebar-w)` geometry and the same SideHandle as Chat / Agents /
+     Files, so switching rail tabs no longer makes the left region jump. It
+     was pinned at 280px because this column used to render project CARDS
+     with a tray of pane pills that wrapped one-per-line at 240 — dense mode
+     retired both, so the exception expired with them (owner, 2026-08-19). */
+  .page-layer.term-page { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 0; }
+  .term-side { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--border); background: var(--bg2); }
   .term-main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   @media (max-width: 760px) {
     .page-layer.term-page { grid-template-columns: minmax(0, 1fr); }

@@ -166,6 +166,53 @@ Adoption:
   the shared sidebar: `var(--sidebar-w)` + bg2 + `SideHandle`, replacing the
   page-private flex-fraction splitter (`tmux_files_frac` retired). Mobile
   single-pane chain unchanged.
+- **Terminal** (2026-08-19, owner: "terminal 和 project 还是不统一") — the last
+  holdout, and it differed in four measurable ways at once:
+  - *No title.* The win-bar had copied the head's geometry but carried no
+    `<h1>`, and worse, the bar only existed when the window switcher was
+    EXPANDED — which is not the default (`tmux_winswitcher` unset), so a fresh
+    desktop install showed a terminal with no header at all (measured: no
+    `.win-bar` in the DOM, xterm at `top: 0`). Now the bar wears
+    `class="win-bar page-head"` (geometry, border and the mono 15px h1 come
+    from the shared class, not a copy), and collapsing hides the window CHIPS
+    while the head stays — the current-window chip compresses to the bar's
+    right end, which is what "collapsed" always claimed to mean. The identity
+    slot is a three-way branch, because the bar plays three roles: a split
+    CELL keeps its chip (it opens the cross-session pane picker), a PHONE keeps
+    its chip (it opens the session sheet, that layout's sidebar), and the
+    DESKTOP shows the title — there the sidebar is already on screen, so a chip
+    would be the second door the owner cut. `flex-wrap: nowrap` is required:
+    the phone `.page-head` rule wraps head actions, and this head is a scroll
+    strip.
+  - *A different New Project button.* A full-width bordered `.new-btn` in a
+    bottom bar, next to Chat's and Agents' `.side-row.add` rows — the same
+    dialog behind two unrelated-looking controls. The sidebar now renders the
+    shared row (measured identical to Chat's: 223×35, 12.5px, radius 9, padding
+    8px 10px, same ink), the bottom bar keeps only the two list utilities
+    (search + refresh, right-aligned), and the `.new-btn` survives solely in
+    the page dialect. The row sits in `Sessions`, not in `Projects`, because
+    that section hides itself when there is nothing to list — an empty project
+    list is exactly when the create row matters most.
+  - *A different column width.* A hardcoded 280px with no resize handle. Now
+    `var(--sidebar-w)` + `SideHandle`, so switching rail tabs no longer makes
+    the left region jump. The 280px exception was justified by project CARDS
+    with a wrapping tray of pane pills; dense mode retired both, so the
+    exception expired with them.
+  - *Two header dialects in ONE column.* The dense PROJECTS label imitated
+    `.side-h` while TEAMS/SESSIONS stayed accent-bold — and the imitation had
+    already drifted (1.05px tracking vs Chat's 1.4px). Both now WEAR the
+    `.side-h` class; the page dialect is qualified (`.projects:not(.dense)`,
+    `.sessions:not(.sidebar-mode)`) because a scoped `.group-label` rule
+    outranks a shared class (0,2,0 vs 0,1,0) and silently overrode it. A flat
+    session list also gained its own header, so no group of rows is unlabelled.
+
+  Measured after the change, Chat / Terminal / Agents / Settings report the
+  same head (`min-height 42px`, `padding 6px 16px`, one border colour), the
+  same h1 (15px, `ui-monospace`, 600), the same sidebar surface
+  (`rgb(238,238,240)`, 1px right border, 240px) and the same section headers
+  (10.5px mono, uppercase, 1.4px tracking, `--text3`). Restating a shared
+  property in a page's own stylesheet is how each of these drifted; wearing
+  the class is the fix.
 
 ## Settings as a page (added 2026-08-02, owner: "not a floating window")
 

@@ -286,6 +286,10 @@
   // removed from the list on purpose.
   let trackedSessions = $state<string[]>([]);
   let reloadProjects = $state<(() => Promise<void>) | null>(null);
+  /** Does the Projects section above have anything to show? Its rows are the
+   *  reason "no sessions" must stay quiet: with them listed, the column is
+   *  not empty and the message contradicts what is on screen. */
+  let hasProjects = $derived(trackedSessions.length > 0);
 
   let filtered = $derived(
     sessions.filter(s => sessionMatches(s, query) && !trackedSessions.includes(s.name)),
@@ -524,8 +528,22 @@
       dense={!chips}
       onTracked={(names) => trackedSessions = names}
       onReady={(reload) => reloadProjects = reload} />
+    <!-- Creating a project is the same ROW in every sidebar (Chat's projects,
+         Agents' definitions/skills/MCP): `.side-row.add`, quiet until hovered.
+         It used to be a full-width bordered button in a bottom bar here, which
+         is why the two sidebars read as different apps even though they open
+         the identical dialog (owner, 2026-08-19). Outside the sidebar (the
+         page dialect, `chips`) the bottom bar keeps its button.
+         It lives HERE rather than inside `Projects` because that section hides
+         itself when there is nothing to list — and an empty project list is
+         exactly when the create row matters most. -->
+    {#if !chips}
+      <button class="side-row add" onclick={() => showNew = true}>
+        <Icon name="plus" size={13} />{t('projectNew')}
+      </button>
+    {/if}
     {#if grouped}
-      <div class="group-label">
+      <div class="group-label" class:side-h={!chips}>
         <Icon name="bot" size={12} />
         {t('groupTeams')}
         <span class="group-count">{teamGroup.length}</span>
@@ -534,7 +552,7 @@
         {@render sessionItem(s)}
       {/each}
       {#if regularGroup.length > 0}
-        <div class="group-label">
+        <div class="group-label" class:side-h={!chips}>
           <Icon name="terminal" size={12} />
           {t('groupSessions')}
           <span class="group-count">{regularGroup.length}</span>
@@ -544,12 +562,28 @@
         {/each}
       {/if}
     {:else}
+      <!-- One header per group is the sidebar rule (ui-unification: "every
+           sidebar speaks the same language"). The grouped branch above always
+           had them; the flat list showed bare rows under the PROJECTS header,
+           so the sessions looked like more projects. Page mode keeps the flat
+           list headerless — there the page title already says what it is. -->
+      {#if !chips && filtered.length > 0}
+        <div class="group-label" class:side-h={!chips}>
+          <Icon name="terminal" size={12} />
+          {t('groupSessions')}
+          <span class="group-count">{filtered.length}</span>
+        </div>
+      {/if}
       {#each filtered as s (s.name)}
         {@render sessionItem(s)}
       {/each}
     {/if}
 
-    {#if filtered.length === 0}
+    <!-- "No sessions" is about the UNTRACKED list only. With projects above it
+         (every session is a project now) the column is not empty at all, and
+         saying so next to four listed rows read as a bug. Searching still
+         reports a miss, because then the user asked a question. -->
+    {#if filtered.length === 0 && (isSearching || !hasProjects)}
       <div class="empty">
         {#if isSearching}
           {t('noMatches')} "<span class="empty-q">{query}</span>"
@@ -582,9 +616,14 @@
   {/if}
 
   <div class="bottom-bar">
-    <button class="new-btn" onclick={() => showNew = !showNew}>
-      <Icon name="plus" size={16} /> {t('projectNew')}
-    </button>
+    <!-- Page dialect only: in sidebar mode the create affordance is the
+         `.side-row.add` row up in the list, where every other sidebar puts
+         it. What stays down here is the pair of list UTILITIES. -->
+    {#if chips}
+      <button class="new-btn" onclick={() => showNew = !showNew}>
+        <Icon name="plus" size={16} /> {t('projectNew')}
+      </button>
+    {/if}
     {#if !chips}
       <button class="refresh-icon" onclick={() => (searchOpen = true)} aria-label={t('searchSessions')}>
         <Icon name="search" size={16} />
@@ -613,6 +652,27 @@
      sidebar's 8px gutter, so rows line up with the Chat sidebar's. */
   .sessions.sidebar-mode .content { padding: 4px 8px 10px; gap: 4px; }
   .sessions.sidebar-mode .bottom-bar { background: none; }
+  /* Section headers in the sidebar speak `.side-h` — the class is on the
+     element (see the markup), so mono/10.5px/uppercase/1.4px/--text3 come
+     from app.css and cannot drift. Leaving TEAMS/SESSIONS in the page's
+     accent-bold dialect put two header styles in ONE column, which is the
+     drift the shared vocabulary exists to prevent (owner, 2026-08-19). Only
+     the sidebar's tighter gutter stays local; page mode keeps the accent
+     headers. */
+  .sessions.sidebar-mode .group-label { padding: 8px 6px 4px; }
+  .sessions.sidebar-mode .group-count {
+    background: none; color: var(--text3); padding: 0; font-weight: 600;
+  }
+  /* The footer is two utilities, not a call to action: right-aligned so the
+     create ROW above stays the only full-width affordance. */
+  .sessions.sidebar-mode .bottom-bar { justify-content: flex-end; padding: 6px 2px 0; }
+  .sessions.sidebar-mode .refresh-icon { width: 30px; height: 30px; border-radius: 8px; }
+  /* A session row is a `.side-row`, not a card: 9px radius, no border, and an
+     active row carries only the accent BACKGROUND (the accent outline was the
+     last card tell left in this column — Chat's open row has none). */
+  .sessions.sidebar-mode .session { border-radius: 9px; }
+  .sessions.sidebar-mode .session.active { border-color: transparent; }
+  .sessions.sidebar-mode .session-row { padding: 8px 10px; border-radius: 9px; }
   .content {
     display: flex;
     flex-direction: column;
@@ -740,11 +800,16 @@
   /* ─── Group headers (team vs regular sessions) ─────── */
   /* Both headers share this one style. Accent-highlighted text + icon (the
      Icon inherits the colour via currentColor) so the two section dividers
-     read identically and stand out from the rows. */
+     read identically and stand out from the rows.
+     Qualified to PAGE mode: a scoped `.group-label` rule outranks the shared
+     `.side-h` class (0,2,0 vs 0,1,0), so an unqualified one would quietly
+     override the sidebar vocabulary these headers are supposed to inherit. */
   .group-label {
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+  .sessions:not(.sidebar-mode) .group-label {
     padding: 8px 8px 2px;
     color: var(--accent);
     font-size: 11px;

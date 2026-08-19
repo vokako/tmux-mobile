@@ -34,7 +34,21 @@ test('Terminal navigation and page layer exist without an active target', () => 
     source,
     /<div class="page-layer term-page" class:hidden=\{page !== 'terminal'\}>/u,
   );
-  assert.match(source, /\{:else\}\s*<div class="terminal-empty">/u);
+  // The empty state keeps the page HEADER (ui-unification: every page's head
+  // survives an empty detail pane — Chat, Agents, Settings all do), so the
+  // else-branch opens with `.page-head` and the empty block follows it.
+  assert.match(source, /\{:else\}[\s\S]{0,400}?<div class="page-head">\s*<h1>\{t\('terminal'\)\}<\/h1>/u);
+  assert.match(source, /<div class="terminal-empty">/u);
+});
+
+test('the Terminal page uses the shared sidebar geometry', () => {
+  // ui-unification.md §1: wherever a sidebar exists it is THE sidebar — one
+  // width variable, one resize affordance. Terminal was the last holdout
+  // (a hardcoded 280px column with no handle).
+  assert.match(source, /\.page-layer\.term-page \{[^}]*grid-template-columns: var\(--sidebar-w\)/u);
+  const aside = source.match(/<aside class="term-side"[\s\S]*?<\/aside>/u)?.[0] ?? '';
+  assert.match(aside, /<SideHandle \/>/u, 'the sidebar carries the shared handle');
+  assert.doesNotMatch(source, /grid-template-columns: 280px/u);
 });
 
 test('the session list lives inside the Terminal page, sheeted on a phone', () => {

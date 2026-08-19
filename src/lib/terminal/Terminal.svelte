@@ -1905,32 +1905,38 @@
         Expanded switcher: a top-of-page horizontal tab bar for the current
         session's windows. The session chip opens the all-session picker.
       -->
-      <div class="win-bar">
-        <!-- Session name as a fixed tag at the far left of the switcher row,
-             so it's always visible without stealing a whole row. The window
-             chips scroll independently to its right. -->
-        <!-- The session chip is a QUICK JUMP to any pane in any session. It
-             earns its place only where no list is on screen: on a phone it
-             opens the session sheet. On a desktop the sidebar list is already
-             there, so the chip is a second door to the same room and the owner
-             asked for it to go (2026-08-19). -->
-        {#if onOpenSessions}
-        <AgentChip
-          attention={otherTerminalSessionHasNotification(session)}
-          label={session}
-          variant="active"
-          title={session}
-          onclick={(e) => {
-            e.stopPropagation();
-            // On a phone the session list IS the sidebar (a slide-over sheet
-            // owned by the page), so the chip opens that instead of a second,
-            // smaller picker over the terminal. On a desktop the sidebar is
-            // already on screen beside us, and the popover stays available
-            // for a fast jump without moving the eyes to the far column.
-            if (onOpenSessions) onOpenSessions();
-            else showPanePicker = !showPanePicker;
-          }}
-        />
+      <div class="win-bar page-head">
+        <!-- Who this bar belongs to, in one of three forms — because the bar
+             plays three roles and only one of them is a page header:
+             · a split CELL has no sidebar of its own, so its badge stays a
+               chip and opens the cross-session pane picker (what the cell
+               header always promised);
+             · on a PHONE the chip opens the session sheet, which is that
+               layout's sidebar;
+             · on the DESKTOP the sidebar is already on screen, so a chip
+               would be a second door to the same room (owner, 2026-08-19)
+               and what belongs here instead is the page TITLE — the same h1
+               dialect Chat / Agents / Settings carry. The win-bar IS the
+               Terminal page's header and it was the only head in the app
+               with no title (owner, 2026-08-19: visual consistency). -->
+        {#if embedded}
+          <AgentChip
+            attention={otherTerminalSessionHasNotification(session)}
+            label={session}
+            variant="active"
+            title={session}
+            onclick={(e) => { e.stopPropagation(); showPanePicker = !showPanePicker; }}
+          />
+        {:else if onOpenSessions}
+          <AgentChip
+            attention={otherTerminalSessionHasNotification(session)}
+            label={session}
+            variant="active"
+            title={session}
+            onclick={(e) => { e.stopPropagation(); onOpenSessions(); }}
+          />
+        {:else}
+          <h1 class="win-title" title={session}>{session}</h1>
         {/if}
         {#if showPanePicker}
           <PanePicker
@@ -2026,21 +2032,44 @@
       {@const cur = windows.find(w => String(w.window) === currentWindow)}
       {@const curAgent = currentWinAgent}
       <!--
-        Collapsed state: a single chip in the top-right corner using the
-        exact chip visual language from the expanded bar. Conceptually the
-        switcher hasn't become "something else" — it has been compressed
-        to the right end of the bar.
+        Collapsed state: a single chip using the exact chip visual language
+        from the expanded bar. Conceptually the switcher hasn't become
+        "something else" — it has been compressed to the right end of the bar.
+
+        On a DESKTOP the bar itself stays, because it is this page's
+        `.page-head`: collapsing hides the window CHIPS, not the page's title
+        and border. Dropping the whole bar left the Terminal tab as the only
+        page in the app with no header — and since the collapsed state is the
+        DEFAULT (`tmux_winswitcher` unset), that was what a fresh install
+        looked like (measured 2026-08-19: no `.win-bar` in the DOM, xterm at
+        top: 0). A phone still gets the floating chip alone: there the
+        terminal needs every pixel of height.
       -->
-      <div class="win-collapsed-anchor">
-        <AgentChip
-          attention={!!terminalNotificationForWindow(cur?.session, cur?.window)}
-          urgent={terminalNotificationForWindow(cur?.session, cur?.window)?.kind !== 'completed'}
-          agent={curAgent}
-          label={curAgent ? '' : (cur?.current_command || cur?.window_name || '?')}
-          chevron="left"
-          onclick={() => { showWindowCmd = true; localStorage.setItem('tmux_winswitcher', '1'); }}
-        />
-      </div>
+      {#if isMobile}
+        <div class="win-collapsed-anchor">
+          <AgentChip
+            attention={!!terminalNotificationForWindow(cur?.session, cur?.window)}
+            urgent={terminalNotificationForWindow(cur?.session, cur?.window)?.kind !== 'completed'}
+            agent={curAgent}
+            label={curAgent ? '' : (cur?.current_command || cur?.window_name || '?')}
+            chevron="left"
+            onclick={() => { showWindowCmd = true; localStorage.setItem('tmux_winswitcher', '1'); }}
+          />
+        </div>
+      {:else}
+        <div class="win-bar page-head">
+          <h1 class="win-title" title={session}>{session}</h1>
+          <span class="win-bar-spacer"></span>
+          <AgentChip
+            attention={!!terminalNotificationForWindow(cur?.session, cur?.window)}
+            urgent={terminalNotificationForWindow(cur?.session, cur?.window)?.kind !== 'completed'}
+            agent={curAgent}
+            label={curAgent ? '' : (cur?.current_command || cur?.window_name || '?')}
+            chevron="left"
+            onclick={() => { showWindowCmd = true; localStorage.setItem('tmux_winswitcher', '1'); }}
+          />
+        </div>
+      {/if}
     {/if}
   {/if}
 
@@ -2150,21 +2179,25 @@
   }
 
   /* Expanded: horizontal tab bar pinned to the top of the Terminal view.
-     Holds current-session windows; chip visuals live in AgentChip. */
+     Holds current-session windows; chip visuals live in AgentChip.
+     Geometry, border and the h1 dialect come from the shared .page-head
+     (ui-unification.md "Page skeleton") — this block only keeps what is
+     win-bar-specific. The gap stays denser than the head's 10px because
+     the bar is a chip strip, not a title-and-actions row. */
   .win-bar {
-    display: flex;
-    align-items: center;
     gap: var(--ui-gap);
-    /* Page-skeleton alignment (ui-unification.md): the win-bar is the
-       Terminal page's header — same geometry/border as every page head. */
-    min-height: 42px;
-    padding: 6px 10px;
-    box-sizing: border-box;
-    border-bottom: 1px solid var(--border);
-    background: transparent;
-    flex-shrink: 0;
     position: relative; /* anchor for the PanePicker popover */
+    /* The phone `.page-head` rule wraps head actions under the title; this
+       head is a horizontal SCROLL strip, so it must stay one line — the
+       chips scroll instead of stacking. */
+    flex-wrap: nowrap;
   }
+  /* The title is identity, the chips are navigation: cap the title so a long
+     session name never squeezes the window chips off the bar. */
+  .win-title { max-width: 22ch; }
+  /* Collapsed head (desktop): the chip sits at the RIGHT end of the bar,
+     which is what "compressed to the right end of the bar" always meant. */
+  .win-bar-spacer { flex: 1; min-width: 0; }
   .win-bar-scroll {
     flex: 1;
     min-width: 0;

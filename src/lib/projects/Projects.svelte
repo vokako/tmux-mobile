@@ -134,7 +134,7 @@
 
 {#if supported && sorted.length > 0}
   <section class="projects" class:dense>
-    <div class="group-label">
+    <div class="group-label" class:side-h={dense}>
       {#if dense}
         <!-- A sidebar section header is a LABEL, not a control: the Chat
              sidebar has no chevron to collapse its projects, and a list this
@@ -236,10 +236,18 @@
 
 <style>
   .projects { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+  /* The PAGE dialect for the header. Scoped away from dense mode on purpose:
+     a scoped `.group-label` rule outranks the shared `.side-h` class (0,2,0
+     vs 0,1,0), so leaving it unqualified silently overrode the vocabulary the
+     sidebar is supposed to inherit — measured as 11px/0.66px tracking against
+     Chat's 10.5px/1.4px (2026-08-19). */
+  .projects:not(.dense) .group-label {
+    font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--text3);
+  }
   .group-label {
     display: flex; align-items: center; gap: 6px;
-    font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
-    color: var(--text3); padding: 2px 2px 2px 4px;
+    padding: 2px 2px 2px 4px;
   }
   .group-toggle {
     display: flex; align-items: center; gap: 6px;
@@ -259,7 +267,12 @@
      Card chrome off, section header in the shared .side-h idiom, actions
      revealed on hover so the row is a name and a state at rest. */
   .projects.dense { gap: 1px; margin-bottom: 6px; }
-  .projects.dense .group-label { font-size: var(--fs-meta); letter-spacing: 0.1em; padding: 8px 6px 4px; }
+  /* The header IS `.side-h` now (the class is on the element), so the type
+     dialect — mono, 10.5px, uppercase, 1.4px tracking, --text3 — comes from
+     app.css and cannot drift. Re-declaring it here is what put 1.05px
+     tracking next to Chat's 1.4px (measured 2026-08-19). Only the sidebar's
+     tighter gutter stays local. */
+  .projects.dense .group-label { padding: 8px 6px 4px; }
   .projects.dense .group-count { background: none; color: var(--text3); padding: 0; }
   .projects.dense .proj {
     background: none; border: none; border-radius: 9px; padding: 2px 4px; gap: 2px;
