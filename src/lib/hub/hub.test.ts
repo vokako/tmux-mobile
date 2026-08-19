@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isSessionStart, markLeadingMention, mergeMessages, statuslineWindows, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor } from './hub.ts';
+import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -23,15 +23,6 @@ const ag = (a: Partial<HubAgent>): HubAgent => ({
   window: 1, name: 'a', command: '', agent: 'kiro', managed: true, state: 'idle', detail: '', since: 0, ...a,
 });
 
-test('statuslineWindows marks the terminal window with tmux notation', () => {
-  const agents = [
-    ag({ window: 2, name: 'reviewer', agent: 'claude', state: 'working' }),
-    ag({ window: 1, name: 'lead', agent: 'kiro' }),
-  ];
-  const wins = statuslineWindows(agents, 'blog:2.1');
-  assert.deepEqual(wins.map((w) => w.label), ['1:lead', '2:reviewer*'], 'index order, * on current');
-  assert.equal(wins[1]?.current, true);
-});
 
 test('every derived state has a dot color and unknown falls back', () => {
   for (const s of ['working', 'waiting', 'blocked', 'stuck', 'failed', 'shell', 'idle']) {

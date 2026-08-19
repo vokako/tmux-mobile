@@ -26,7 +26,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, mergeMessages, statuslineWindows, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_PREVIEW, pickAnchor, toolEventParts } from './hub.ts';
+  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_PREVIEW, pickAnchor, toolEventParts } from './hub.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
   import DirPicker from '../files/DirPicker.svelte';
@@ -679,7 +679,6 @@
     return () => clearInterval(id);
   });
 
-  const winsForStatusline = $derived(statuslineWindows(agents, termTarget));
   const fmtTime = (ts) => {
     const d = new Date(ts);
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -1058,6 +1057,9 @@
           {/each}
         </div>
         <span class="spacer"></span>
+        <!-- The roster count the retired statusline carried. Everything else it
+             showed was a second copy of this bar. -->
+        <span class="d-count">{managedAgents.length} · {working} {t('hubState_running')}</span>
         <button class="icon-btn" title={t('hubOpenFull')} onclick={() => { const m = /^(.+):(\d+)\.(\d+)$/.exec(termTarget); if (m) openTerminal(selected, termTarget, termCommand); }}>
           <Icon name="maximize" size={14} />
         </button>
@@ -1074,15 +1076,6 @@
           <div class="empty">{t('hubNoPane')}</div>
         {/if}
       </div>
-      <footer class="statusline">
-        <span class="sess">{selected || '—'}</span>
-        <div class="wlist">
-          {#each winsForStatusline as w (w.window)}
-            <button class="w" class:cur={w.current} onclick={() => pickWindow(w)}>{w.label}</button>
-          {/each}
-        </div>
-        <div class="right"><span>{managedAgents.length} agents · {working} working</span></div>
-      </footer>
     </section>
     {/if}
   </div>
@@ -1599,13 +1592,13 @@
   .direct-tag { font-size: var(--fs-micro); color: var(--text3); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; margin-left: 3px; }
   .term-body { flex: 1; min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; }
 
-  .statusline { display: flex; align-items: center; height: 25px; background: var(--bg3); border-top: 1px solid var(--border); font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text2); user-select: none; flex: none; }
-  .statusline .sess { background: var(--accent-fill); color: var(--accent-fill-ink); font-weight: 700; padding: 0 10px; height: 100%; display: flex; align-items: center; }
-  .wlist { display: flex; height: 100%; overflow-x: auto; scrollbar-width: none; }
-  .statusline .w { display: flex; align-items: center; padding: 0 9px; color: var(--text3); background: none; border: none; cursor: pointer; font: inherit; transition: color var(--t-fast); }
-  .statusline .w:hover { color: var(--text); }
-  .statusline .w.cur { background: var(--surface2); color: var(--accent); }
-  .statusline .right { margin-left: auto; padding: 0 12px; color: var(--text3); white-space: nowrap; }
+  /* ONE switcher for the drawer. It used to have two: these pills on top and
+     a tmux-style statusline underneath, both listing the same windows and both
+     calling pickWindow (owner: "上面和下面有两个 bar…可以把它们合并一下").
+     The pills won — they carry the state dot, the direct-window tag and the
+     actions — and the statusline's only unique content, the roster count,
+     moved up here. */
+  .d-count { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-meta); color: var(--text3); white-space: nowrap; margin-right: 2px; }
 
   .dlg-backdrop { position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,0.45); }
   .dlg {

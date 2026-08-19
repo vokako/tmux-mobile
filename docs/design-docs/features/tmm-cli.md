@@ -526,6 +526,20 @@ cycles chat → status → tools) as well as Settings → Appearance → Chat de
 
 ### Conversation visual language
 
+#### The terminal drawer has ONE switcher
+
+Opening a terminal inside the chat gives a drawer with a single bar: window
+pills (state dot, name, `direct` tag for a window the app did not start) plus
+the roster count and the open-full / close actions. It used to carry TWO — the
+pills on top and a tmux-style statusline underneath — which listed the same
+windows and called the same `pickWindow` (owner: "上面和下面有两个 bar…可以把
+它们合并一下"). The pills survived because they carry the state and the
+actions; the statusline's only unique content was the roster count, which
+moved into the bar. The embedded `Terminal` stays `chromeless`, so its own
+window-switcher never appears here either — one bar, one place to switch.
+`statuslineWindows()` and its test went with the footer rather than lingering
+as dead code.
+
 #### Deleting, and CLI/UI parity
 
 Four verbs act on one agent and four on a project, and EVERY one of them is
@@ -633,7 +647,7 @@ phone-first connect card is worse than a size off the scale:
 - Touch targets: PRIMARY actions get a ≥44px hit area on phone — visual size
   stays in the small-radius design language, the extension is an invisible
   `::after` overlay (send button, jump-to-tail). Dense secondary rows
-  (statusline windows, roster, message actions) accept the WCAG-web 24px
+  (the drawer's window pills, roster, message actions) accept the WCAG-web 24px
   minimum with ≥8px gaps instead: inflating them to 44px would destroy the
   density that page exists for. The recipient chip cannot expand upward or
   rightward — it would steal taps from the textarea's first line.
@@ -713,8 +727,7 @@ accent is ELECTRIC CYAN and a full-strength block of it read as a light source
 (owner report), so the fill tones to a 60% accent/background mix with
 near-white ink — promoted to app-wide tokens `--accent-fill` /
 `--accent-fill-ink` / `--accent-line` in app.css (2026-08-18): every solid
-accent CTA (send, statusline session block, connect, PWA install, git
-commit, Team send/start actives) and strong selection border draws from
+accent CTA (send, connect, PWA install, git commit, Team send/start actives) and strong selection border draws from
 them, so the "glowing block" class of bug is fixed in ONE place. Disabled recedes into the surface instead of ghosting the
 accent. The button reserves NO column (owner: text may run directly above
 it): the textarea is full width, and growComposer measures the value in a

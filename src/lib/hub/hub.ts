@@ -48,28 +48,6 @@ export function backendColor(backend: string | null | undefined): string {
   }
 }
 
-export interface StatuslineWindow {
-  window: number;
-  label: string;
-  current: boolean;
-}
-
-/** tmux's own notation: `2:reviewer*` marks the current window. Windows are
- * listed in index order; the `*` suffix goes to the window the terminal
- * column is showing. */
-export function statuslineWindows(agents: HubAgent[], termTarget: string): StatuslineWindow[] {
-  const m = /^.+:(\d+)\.\d+$/.exec(termTarget || '');
-  const cur = m ? Number(m[1]) : -1;
-  return agents
-    .slice()
-    .sort((a, b) => a.window - b.window)
-    .map((a) => ({
-      window: a.window,
-      label: `${a.window}:${a.name}${a.window === cur ? '*' : ''}`,
-      current: a.window === cur,
-    }));
-}
-
 /** Who the composer talks to when the user has not chosen anyone.
  *
  * A conversation has ONE default recipient — the lead. Typing `@name` to reach
