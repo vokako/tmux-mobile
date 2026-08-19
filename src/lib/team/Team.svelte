@@ -12,6 +12,7 @@
   // disabled) makes the team_* RPCs reject with method-not-found; we surface
   // that as an "unavailable" state and the App hides the tab.
   import Icon from '../ui/Icon.svelte';
+  import Select from '../ui/Select.svelte';
   import AgentGrid from './AgentGrid.svelte';
   import CollabGraph from './CollabGraph.svelte';
   import DirPicker from './DirPicker.svelte';
@@ -136,9 +137,10 @@
   let templates = $state([]);
   let selectedTemplate = $state('default');
   let showTemplates = $state(false);
-  let tplOpen = $state(false);   // template dropdown open
   let systemPrompt = $state(''); // global system prompt, shared across all teams
-  let selectedTplAgents = $derived(templates.find(x => x.name === selectedTemplate)?.agents?.length ?? null);
+  // Each roster offers its agent COUNT as the option hint — the number is
+  // what distinguishes "software-dev" from "mixed-engineering" at a glance.
+  let tplOptions = $derived(templates.map((x) => ({ value: x.name, hint: String(x.agents?.length ?? 0) })));
 
   let activeTeam = $derived(teams.find(x => x.room === activeRoom) || null);
   // team session for the active team (window_name → agent for pane preview).
@@ -592,28 +594,14 @@
         onPick={(p) => { workspace = p; showPicker = false; }}
         onClose={() => showPicker = false} />
     {/if}
-    <!-- Roster template picker: which named roster (A/B/…) this team uses. A
-         custom dropdown (not a native <select>, which pops a separate OS menu
-         on desktop WKWebView) to match the rest of the in-app UI. -->
+    <!-- Roster template picker: which named roster (A/B/…) this team uses. The
+         shared Select — this was the first hand-rolled dropdown in the app (a
+         native <select> pops a separate OS menu on desktop WKWebView), and it
+         is now one implementation instead of two. -->
     <div class="start-row">
       <span class="start-ws-label">{t('teamTemplate')}</span>
       <div class="start-tpl-pick">
-        <button class="start-tpl" onclick={() => tplOpen = !tplOpen}>
-          <span class="start-tpl-name">{selectedTemplate}{#if selectedTplAgents != null} ({selectedTplAgents}){/if}</span>
-          <Icon name="chevron-down" size={10} />
-        </button>
-        {#if tplOpen}
-          <button class="start-tpl-backdrop" aria-label="close" onclick={() => tplOpen = false}></button>
-          <div class="start-tpl-menu">
-            {#each templates as tpl}
-              <button class="start-tpl-item" class:active={tpl.name === selectedTemplate}
-                onclick={() => { selectedTemplate = tpl.name; tplOpen = false; }}>
-                <span class="stt-name">{tpl.name}</span>
-                <span class="stt-count">{tpl.agents?.length ?? 0}</span>
-              </button>
-            {/each}
-          </div>
-        {/if}
+        <Select bind:value={selectedTemplate} options={tplOptions} ariaLabel={t('teamTemplate')} />
       </div>
       <button class="start-browse" onclick={() => showTemplates = true} aria-label={t('teamEditTemplates')} title={t('teamEditTemplates')}>
         <Icon name="edit" size={14} />
@@ -927,32 +915,6 @@
   }
   .start-browse:active, .start-browse.on { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
   .start-tpl-pick { position: relative; flex: 1; min-width: 0; }
-  .start-tpl {
-    width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 6px;
-    padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 8px;
-    background: var(--input-bg); color: var(--text); font-size: var(--fs-ui); cursor: pointer;
-    font-family: var(--font-ui);
-    -webkit-tap-highlight-color: transparent;
-  }
-  .start-tpl:active { border-color: var(--accent); }
-  .start-tpl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .start-tpl-backdrop { position: fixed; inset: 0; z-index: 30; background: transparent; border: none; }
-  .start-tpl-menu {
-    position: absolute; top: 36px; left: 0; right: 0; z-index: 31;
-    max-height: 40vh; overflow-y: auto;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
-    box-shadow: 0 12px 40px rgba(0,0,0,0.4); padding: 4px;
-  }
-  .start-tpl-item {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;
-    padding: 7px 9px; border: none; border-radius: 7px; background: transparent;
-    color: var(--text2); font-size: var(--fs-ui); cursor: pointer; text-align: left;
-    font-family: var(--font-ui);
-    -webkit-tap-highlight-color: transparent;
-  }
-  .start-tpl-item:active { background: var(--surface2); }
-  .start-tpl-item.active { background: var(--accent-bg); color: var(--accent); }
-  .stt-count { color: var(--text3); font-size: var(--fs-sub); }
   .start-actions { display: flex; align-items: center; gap: 8px; }
   .team-start {
     display: inline-flex; align-items: center; gap: 6px;

@@ -10,6 +10,11 @@
   import { registryList, registrySave, registryDelete, modelsList, skillsList, skillsSave, skillsDelete, skillsRefresh, skillsRead, mcpList, mcpSave, mcpDelete } from '../core/ws.ts';
   import { renderMarkdown } from '../core/markdown.ts';
   import { backendColor } from '../hub/hub.ts';
+  import Select from '../ui/Select.svelte';
+
+  /** The backends a registry agent can run on — the same list the server
+   * validates against in `registry_save`. */
+  const BACKENDS = ['kiro', 'claude', 'codex'];
 
   let { visible = false } = $props();
 
@@ -297,11 +302,7 @@
         </label>
         <div class="row2">
           <label>{t('agentsBackend')}
-            <select bind:value={editing.backend}>
-              <option value="kiro">kiro</option>
-              <option value="claude">claude</option>
-              <option value="codex">codex</option>
-            </select>
+            <Select bind:value={editing.backend} options={BACKENDS} ariaLabel={t('agentsBackend')} />
           </label>
           <label>{t('agentsModel')}
             <input bind:value={editing.model} placeholder={t('agentsModelDefault')}
@@ -388,8 +389,8 @@
   .err { color: var(--danger); font-size: var(--fs-ui); background: var(--danger-bg); border-radius: 8px; padding: 8px 12px; }
   label { display: flex; flex-direction: column; gap: 5px; color: var(--text2); font-size: var(--fs-ui); }
   label.check { flex-direction: row; align-items: center; gap: 8px; font-size: var(--fs-body); color: var(--text); }
-  input, select, textarea { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 9px; color: var(--text); padding: 8px 12px; font-size: var(--fs-body); outline: none; font-family: inherit; }
-  input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+  input, textarea { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 9px; color: var(--text); padding: 8px 12px; font-size: var(--fs-body); outline: none; font-family: inherit; }
+  input:focus, textarea:focus { border-color: var(--accent); }
   input:disabled { opacity: 0.5; }
   textarea { resize: vertical; line-height: 1.5; }
   textarea.mono { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-ui); }

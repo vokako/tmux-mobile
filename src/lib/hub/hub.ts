@@ -223,32 +223,6 @@ export function pickAnchor(
 
 export type FeedLevel = 'chat' | 'status' | 'tools';
 
-/** Where a context menu sits next to the control that opened it.
- *
- * Right-aligned to the trigger and below it, because the trigger is a dot menu
- * at a chip's right edge; flipped above when the menu is taller than the room
- * left underneath; clamped to the viewport on both axes so it is never partly
- * off screen. A zero height means "not measured yet", and then the flip is
- * skipped rather than guessed — the caller keeps the menu invisible for that
- * one frame.
- *
- * Everything is in CSS pixels of the fixed layer's coordinate space; a caller
- * under CSS `zoom` must divide the trigger's client rect first (a client rect
- * is in visual pixels, a fixed child's `left` is in its own zoomed pixels).
- */
-export function menuPlacement(
-  anchor: { left: number; right: number; top: number; bottom: number },
-  size: { w: number; h: number },
-  view: { w: number; h: number },
-  gap = 6,
-  edge = 8,
-): { x: number; y: number } {
-  const x = Math.max(edge, Math.min(anchor.right - size.w, view.w - size.w - edge));
-  let y = anchor.bottom + gap;
-  if (size.h && y + size.h > view.h - edge) y = Math.max(edge, anchor.top - size.h - gap);
-  return { x, y };
-}
-
 /** Lifecycle lines the server posts into the room (a spawn, a `tmm done`) are
  * events, not prose, and render as a centered system line rather than a chat
  * bubble. The marker is `[tmm] `; the two glyph prefixes are the pre-2026-08

@@ -5,6 +5,7 @@
   // Persists via onSave(name, agents) / onDelete(name) which call the team_*
   // template RPCs and re-fetch.
   import Icon from '../ui/Icon.svelte';
+  import Select from '../ui/Select.svelte';
   import { t } from '../core/i18n.svelte.ts';
 
   export interface TplAgent {
@@ -300,9 +301,8 @@
             <div class="ag-row">
               <div class="ag-col">
                 <span class="ag-flabel">{t('teamBackend')}</span>
-                <select class="ag-field ag-backend" bind:value={ag.backend} onchange={markDirty}>
-                  {#each BACKENDS as b}<option value={b}>{b}</option>{/each}
-                </select>
+                <Select bind:value={ag.backend} options={BACKENDS}
+                  ariaLabel={t('teamBackend')} onchange={markDirty} />
               </div>
               <label class="ag-manage" title={t('teamManagerHint')}>
                 <input type="checkbox" bind:checked={ag.manage} onchange={markDirty} /> {t('teamManager')}
@@ -486,7 +486,6 @@
     outline: none; width: 100%; box-sizing: border-box;
   }
   .ag-field:focus { border-color: var(--accent); }
-  .ag-backend { flex-shrink: 0; width: auto; }
   .ag-manage { display: flex; align-items: center; gap: 3px; font-size: var(--fs-sub); color: var(--text3); white-space: nowrap; }
   .ag-del { border: none; background: none; color: var(--text3); cursor: pointer; display: flex; flex-shrink: 0; padding: 4px; }
   .ag-del:active { color: var(--danger); }
@@ -569,14 +568,13 @@
     .tpl-picker { display: block; position: relative; flex-shrink: 0; padding: 8px 14px; border-bottom: 1px solid var(--border); }
 
     /* iOS zooms the page when focusing an input below the threshold. */
-    .ag-field, .sys-input, .tpl-name-input, .ag-backend { font-size: var(--fs-input-touch); }
+    .ag-field, .sys-input, .tpl-name-input { font-size: var(--fs-input-touch); }
     /* Deliberately below it: mono glyphs are wider, and this textarea was
        tuned by eye. Left raw so the exception stays visible. */
     .ag-mono { font-size: 15px; }
 
     /* Agent header: name on its own row; backend + mgr + delete below. */
     .agent-card-head { gap: 8px; }
-    .ag-backend { min-width: 96px; }
     .ag-del { margin-left: auto; padding: 8px; }
 
     /* Roomier touch targets. */

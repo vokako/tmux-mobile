@@ -26,7 +26,8 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, menuPlacement } from './hub.ts';
+  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts } from './hub.ts';
+  import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
   import CreateProjectDialog from '../projects/CreateProjectDialog.svelte';
@@ -621,19 +622,11 @@
   let menuW = $state(0);
   let menuH = $state(0);
 
-  /** The root's CSS `zoom` (web/Android interface scaling). Under zoom,
-   * getBoundingClientRect reports VISUAL pixels while a fixed child's `left`
-   * is in its own zoomed pixels, so the rect has to be divided back down or
-   * the menu lands at scale× the intended offset. 1 on the Tauri desktop path,
-   * where the webview zooms instead. */
-  const uiZoom = () =>
-    parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-zoom')) || 1;
-
   function toggleAgentMenu(name, trigger) {
     if (menuFor === name) { menuFor = ''; return; }
-    const r = trigger.getBoundingClientRect();
-    const z = uiZoom();
-    menuAnchor = { left: r.left / z, right: r.right / z, top: r.top / z, bottom: r.bottom / z };
+    // anchorOf divides the client rect by --ui-zoom: a rect is in visual px
+    // while a fixed child's `left` is in its own zoomed px.
+    menuAnchor = anchorOf(trigger);
     menuW = 0; menuH = 0;          // re-measure for this opening
     menuFor = name;
   }
@@ -643,15 +636,9 @@
    * view. Measured size arrives one frame after mount, which is why the menu
    * stays invisible until it has one. The math is `menuPlacement` in hub.ts,
    * unit-tested there. */
-  const menuPos = $derived.by(() => {
-    if (!menuAnchor) return { x: 0, y: 0 };
-    const z = uiZoom();
-    return menuPlacement(
-      menuAnchor,
-      { w: menuW, h: menuH },
-      { w: window.innerWidth / z, h: window.innerHeight / z },
-    );
-  });
+  const menuPos = $derived.by(() =>
+    menuAnchor ? menuPlacement(menuAnchor, { w: menuW, h: menuH }, viewBox()) : { x: 0, y: 0 },
+  );
 
   // Any click elsewhere, Escape, a scroll of the roster or a resize dismisses
   // it — a menu you have to close by hand is a menu you forget to close.
