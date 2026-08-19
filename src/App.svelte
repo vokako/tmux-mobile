@@ -884,8 +884,13 @@
     // Apply page change immediately
     page = target;
     navPush();
-    // Single slide-in animation from the correct direction
-    if (fromIdx >= 0 && toIdx >= 0) {
+    // Single slide-in animation from the correct direction — TOUCH LAYOUTS
+    // ONLY. It is the visual half of the swipe gesture: content follows the
+    // finger, so the direction means something. On a desktop the tabs are a
+    // rail of buttons with no horizontal motion behind them, and pages slid
+    // sideways for no reason (owner report) — worse on the wide three-column
+    // pages, where a whole workspace lurches.
+    if (layout.isTouchDevice && fromIdx >= 0 && toIdx >= 0) {
       slideAnim = toIdx > fromIdx ? 'slide-in-right' : 'slide-in-left';
       requestAnimationFrame(() => {
         setTimeout(() => { slideAnim = ''; }, SLIDE_ANIMATION_MS);

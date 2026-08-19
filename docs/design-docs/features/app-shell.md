@@ -52,6 +52,17 @@ legacy tmm-team-* sessions appear as plain sessions in the list.
 - Tab order for swipe navigation is unchanged (`tabs()`), and the gear is a
   toggle, not a page — it never participates in swipes.
 
+## The tab slide belongs to the swipe, not to the app
+
+`switchTab` plays a one-shot `slide-in-left/right` on the page layer — but only
+on a TOUCH layout (`layout.isTouchDevice`, 2026-08-19). It is the visual half
+of the swipe gesture: content follows the finger, so the direction carries
+meaning. A desktop switches tabs by clicking a rail button, where nothing moved
+horizontally and the slide just made the page lurch (owner report) — most
+visibly on the wide three-column pages, where a whole workspace slid. The
+animation is not deleted, because on a phone removing it would leave a swipe
+whose content does not follow the thumb.
+
 ## Verified
 
 Desktop 1440x900: rail with Hub/Sessions/Terminal/Team/Files/Settings, no
