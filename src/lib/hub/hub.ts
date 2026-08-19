@@ -287,6 +287,32 @@ export function pickAnchor(
   return ahead ? { key: ahead.key, edge: 'bottom' } : none;
 }
 
+/**
+ * A composer line that is a SLASH COMMAND for the agent's CLI rather than a
+ * message for its model — `/model`, `/clear`, `/compact`, `/tools`.
+ *
+ * Those are interpreted by the TUI and only when they are the whole line, so
+ * they cannot go through the normal delivery, which prefixes
+ * `[tmm chat <time>] human:` — the model would just read them as prose (owner,
+ * 2026-08-19). Returns the target (an explicit leading `@name`, else '' for
+ * "whoever the composer is addressing") and the command text, or null when this
+ * is an ordinary message.
+ *
+ * A PATH is not a command: the first token must be `/word` with no second
+ * slash, so `/tmp/foo` and `/usr/bin/env x` stay messages while `/model
+ * claude-opus-5` does not.
+ */
+export function slashCommand(text: string): { to: string; command: string } | null {
+  const body = (text ?? '').trim();
+  const addressed = /^@([\w][\w.-]*)\s+([\s\S]+)$/u.exec(body);
+  const to = addressed ? addressed[1]! : '';
+  const rest = (addressed ? addressed[2]! : body).trim();
+  if (!/^\/[A-Za-z][\w-]*(\s|$)/u.test(rest)) return null;
+  const first = rest.split(/\s/u)[0] ?? '';
+  if (first.slice(1).includes('/')) return null;    // a path, not a command
+  return { to, command: rest };
+}
+
 export type FeedLevel = 'chat' | 'status' | 'tools';
 
 /** Lifecycle lines the server posts into the room (a spawn, a `tmm done`) are

@@ -22,11 +22,11 @@
   import { t } from '../core/i18n.svelte.ts';
   import {
     projectList, projectUp, projectDown, projectDelete, projectCreate, projectRename, listSessionsWithPanes,
-    hubPost, hubLog, hubAgents, hubSpawn, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
+    hubPost, hubCommand, hubLog, hubAgents, hubSpawn, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, elideMiddle } from './hub.ts';
+  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, elideMiddle, slashCommand } from './hub.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
@@ -352,12 +352,30 @@
   });
 
   async function send() {
-    let text = composerText.trim();
-    if (!text || !selected) return;
+    const raw = composerText.trim();
+    if (!raw || !selected) return;
+    // A SLASH COMMAND goes to the agent's CLI, not to its model, so it is typed
+    // verbatim — no `[tmm chat …] human:` stamp, no @address, nothing the TUI
+    // would read as prose. It needs a target: an explicit `@name`, else the
+    // composer's recipient. With neither (a room note) there is nobody to run
+    // it, so it stays an ordinary message rather than vanishing.
+    const cmd = slashCommand(raw);
+    const cmdTarget = cmd && (cmd.to || (recipient === ALL_TARGET ? 'all' : recipient));
+    if (cmd && cmdTarget) {
+      composerText = '';
+      following = true;
+      scrollFeed(true);
+      try {
+        await hubCommand(selected, cmdTarget, cmd.command);
+        await loadFeed();
+        scrollFeed(true);
+      } catch (e) { console.warn('hub command failed', e); composerText = raw; }
+      return;
+    }
     // The recipient makes "talk to THIS agent" the default rather than a
     // gesture: addressed() prefixes @name unless the user @-addressed someone
     // by hand, and an empty recipient posts to the room.
-    text = addressed(text, recipient);
+    const text = addressed(raw, recipient);
     composerText = '';
     following = true;
     scrollFeed(true);

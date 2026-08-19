@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE } from './hub.ts';
+import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -509,4 +509,23 @@ test('the spawn kick never appears in the transcript', () => {
   assert.equal(isSessionStart('[2026-08-18 16:30] what does (session start) mean?'), false);
   assert.equal(isSessionStart('run the tests'), false);
   assert.equal(isSessionStart(null), false);
+});
+
+test('slashCommand tells a CLI command from a message (and from a path)', () => {
+  // The whole point: these are for the TUI, so they cannot carry the
+  // `[tmm chat …] human:` prefix the normal delivery adds.
+  assert.deepEqual(slashCommand('/model'), { to: '', command: '/model' });
+  assert.deepEqual(slashCommand('  /model claude-opus-5  '), { to: '', command: '/model claude-opus-5' });
+  assert.deepEqual(slashCommand('/clear'), { to: '', command: '/clear' });
+  // An explicit address picks the target and is stripped from what is typed.
+  assert.deepEqual(slashCommand('@builder-2 /compact'), { to: 'builder-2', command: '/compact' });
+  assert.deepEqual(slashCommand('@all /clear'), { to: 'all', command: '/clear' });
+  // A PATH is a message. This is the discriminator that keeps `/tmp/foo` out.
+  assert.equal(slashCommand('/tmp/foo'), null);
+  assert.equal(slashCommand('/usr/bin/env node'), null);
+  assert.equal(slashCommand('look at /etc/hosts'), null);
+  // Ordinary prose, and the shapes that only look like commands.
+  for (const msg of ['hello', '', '   ', '/', '//', '/1234', 'a /model', '@dev hello']) {
+    assert.equal(slashCommand(msg), null, JSON.stringify(msg));
+  }
 });

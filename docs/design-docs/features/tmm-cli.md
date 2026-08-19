@@ -450,6 +450,35 @@ whose stop-hook reply gets posted (`maybe_auto_post`), and whose pane we may
 type into (`deliver_mentions`). Without the third one, `@all` would inject a
 chat line into a kiro the user started by hand in that directory.
 
+## A slash command is for the CLI, not for the model
+
+`/model`, `/clear`, `/compact`, `/tools` are interpreted by the agent's own TUI,
+and only when they are the whole line. Sent the normal way they are not commands
+at all: `deliver_mentions` types `[tmm chat 16:38] human: @builder-2 /model` into
+the pane, the CLI sees prose, and the model answers a question about slash
+commands instead of the CLI running one (owner, 2026-08-19: "支持 /命令 这个直接
+发送 不加消息时间戳之类的").
+
+So the composer routes them through `hub_command { session, agent, text }`, which
+types the text VERBATIM — no stamp, no sender, no @address — and answers with the
+windows it reached. Four rules:
+
+- **A path is not a command.** `slashCommand()` (`hub.ts`, pure and tested)
+  requires the first token to be `/word` with no second slash, so `/model
+  claude-opus-5` is a command while `/tmp/foo` and `/usr/bin/env node` stay
+  messages. Without that discriminator a one-line path would be typed into an
+  agent's pane as a command.
+- **It needs a target**, an explicit leading `@name` or the composer's recipient
+  (`@all` → every managed agent). With neither — a room note, which reaches nobody
+  live — it stays an ordinary message rather than vanishing.
+- **Managed windows only**, the same gate as delivery and auto-post. Typing into a
+  window the user started by hand is not ours to do, and `/clear` typed into a
+  SHELL would run `/clear` as a path.
+- **The room records it as a lifecycle line** (`[tmm] /help → builder-2`), not as a
+  message: it is an instruction to a program, so it renders as a folded `sys` row
+  and disappears at the chat-only level. Recording it as a message would also feed
+  it back to the mention scanner.
+
 ## Who a message goes to
 
 Three ways a message can land, and they are NOT shades of one thing:

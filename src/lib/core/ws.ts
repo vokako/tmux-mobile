@@ -763,6 +763,13 @@ export interface HubAgent {
 }
 export const hubPost = (session: string, body: string, from = 'human') =>
   call('hub_post', { session, body, from });
+/** Type a slash command into an agent's pane VERBATIM — no stamp, no sender, no
+ * @address. `/model`, `/clear`, `/compact` are interpreted by the agent's CLI and
+ * only when they are the whole line, so they cannot go through hub_post's
+ * delivery. `agent` is a window name or 'all'; the room records it as a lifecycle
+ * line, not a message. */
+export const hubCommand = (session: string, agent: string, text: string) =>
+  call<{ sent: string[]; command: string }>('hub_command', { session, agent, text });
 export const hubLog = (session: string, sinceTs = 0, limit = 100) =>
   call<{ messages: TeamMessage[] }>('hub_log', { session, since_ts: sinceTs, limit });
 export const hubAgents = (session: string) =>

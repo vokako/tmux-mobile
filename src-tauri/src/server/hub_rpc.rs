@@ -60,6 +60,65 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
     match req.method.as_str() {
         // Post to the project chat. `from` is the agent name (tmm exports
         // TMM_AGENT) or "human" for the operator.
+        // A SLASH COMMAND is for the CLI, not for the model. `/model`, `/clear`,
+        // `/compact`, `/tools` are things the agent's TUI interprets, and only
+        // when they are the whole line — delivered the normal way, prefixed with
+        // `[tmm chat …] human:`, they arrive as ordinary prose and the model
+        // answers them instead of the CLI running them (owner, 2026-08-19: "支持
+        // /命令 这个直接发送 不加消息时间戳之类的").
+        //
+        // So this path types the text VERBATIM into the agent's pane: no stamp,
+        // no sender, no @address. It is recorded in the room as a lifecycle line
+        // (`[tmm] `) rather than a message, because it is an instruction to a
+        // program, not something said to a person — and record-only, so the
+        // mention scanner never sees it.
+        "hub_command" => {
+            let agent = match require_str(p, "agent") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            let text = match require_str(p, "text") {
+                Ok(s) => s.trim(),
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            if !text.starts_with('/') {
+                return Response::err(id, ERR_INVALID_PARAMS, "a command must start with '/'".into());
+            }
+            let ws = crate::projects::project_for_session(session).ok().flatten().map(|pr| pr.path);
+            let panes = crate::tmux::list_panes(session).unwrap_or_default();
+            let mut sent: Vec<String> = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            for pane in &panes {
+                if !seen.insert(pane.window) || !pane.active {
+                    continue;
+                }
+                if agent != "all" && pane.window_name != agent {
+                    continue;
+                }
+                // Same managed-only gate as delivery: typing into a window the
+                // user started by hand is not ours to do, and typing a slash
+                // command into a SHELL would execute a stray path.
+                if !crate::projects::is_managed_in(ws.as_deref(), &pane.window_name) {
+                    continue;
+                }
+                let target = format!("{}:{}.{}", session, pane.window, pane.pane);
+                if crate::tmux::send_command(&target, text).is_ok() {
+                    sent.push(pane.window_name.clone());
+                }
+            }
+            if sent.is_empty() {
+                return Response::err(
+                    id,
+                    ERR_INVALID_PARAMS,
+                    format!("no managed agent named '{agent}' in session '{session}'"),
+                );
+            }
+            if bus.open_room(&room).is_ok() {
+                let _ = bus.post(&room, "human", &format!("[tmm] {} → {}", text, sent.join(", ")), false);
+            }
+            Response::ok(id, serde_json::json!({ "sent": sent, "command": text }))
+        }
+
         "hub_post" => {
             let body = match require_str(p, "body") {
                 Ok(s) => s,
