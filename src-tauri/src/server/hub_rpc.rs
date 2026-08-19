@@ -12,11 +12,21 @@
 use super::rpc::{require_str, Request, Response, ERR_INTERNAL, ERR_INVALID_PARAMS, ERR_METHOD_NOT_FOUND};
 use super::TeamBridge;
 
-/// Bus room for a project's hub chat. The session name IS the project
-/// identity (UNIQUE(session) in state.db), so it is also the room key.
+/// Bus room for a project's hub chat.
+///
+/// Recorded ON THE PROJECT (schema v8) rather than derived from the session
+/// name, because the session name can now change: renaming a project renames its
+/// tmux session, and a room id derived from it would have left the conversation
+/// behind. `proj:<session>` stays the FALLBACK — it is what every room created
+/// before v8 is called, and what an untracked session gets.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(super) fn project_room(session: &str) -> String {
-    format!("proj:{session}")
+    crate::projects::project_for_session(session)
+        .ok()
+        .flatten()
+        .map(|p| p.room)
+        .filter(|r| !r.is_empty())
+        .unwrap_or_else(|| format!("proj:{session}"))
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

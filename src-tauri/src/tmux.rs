@@ -764,6 +764,12 @@ pub fn session_exists(session: &str) -> bool {
     run_tmux(&["has-session", "-t", session]).is_ok()
 }
 
+/// Rename a live session. `-t` is the exact current name; tmux refuses when the
+/// new name is already taken, which is why the caller picks a free one first.
+pub fn rename_session(from: &str, to: &str) -> Result<(), String> {
+    run_tmux(&["rename-session", "-t", from, to]).map(|_| ())
+}
+
 /// All tmux session names beginning with `prefix` (e.g. "tmm-team-"). Used on
 /// startup to recover teams that survived a server restart.
 pub fn list_team_sessions(prefix: &str) -> Vec<String> {

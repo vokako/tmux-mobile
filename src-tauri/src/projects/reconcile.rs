@@ -240,6 +240,7 @@ mod tests {
             last_up_at: None,
             last_seen_at: None,
             archived: false,
+            room: String::new(),
         }
     }
 

@@ -728,11 +728,15 @@ export const projectCreate = (path: string, opts: { name?: string; session?: str
 export const projectAdopt = (session: string, name?: string) => call('project_adopt', { session, name });
 export const projectUp = (id: string) => call('project_up', { id });
 export const projectDown = (id: string) => call('project_down', { id });
-/** Rename a project's LABEL. Its tmux session — its identity, and the key of
- * its chat room — deliberately stays as it is, so the conversation follows the
- * rename instead of being orphaned by it. */
+/** Rename a project. The tmux SESSION follows the name (it is what the Terminal
+ * and `tmux ls` show), except on an adopted project whose session name is its
+ * owner's. `session` is the name it ended up with. The chat room does NOT move —
+ * it is recorded on the project — and the previous session name keeps resolving,
+ * so agents already running with `TMM_PROJECT` set are unaffected. */
 export const projectRename = (id: string, name: string) =>
-  call<{ id: string; name: string }>('project_rename', { id, name });
+  call<{ id: string; name: string; session: string; session_renamed: boolean }>(
+    'project_rename', { id, name },
+  );
 export const projectArchive = (id: string, archived = true) => call('project_archive', { id, archived });
 /** Forget a project: kills its session and deletes its agents' isolated homes.
  * `projectArchive` is the reversible "hide it" verb; this one is not. */

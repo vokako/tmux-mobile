@@ -57,6 +57,21 @@ export const hubPrefs = {
     if (session) localStorage.setItem(PROJECT_KEY, session);
     else localStorage.removeItem(PROJECT_KEY);
   },
+  /** Follow a project onto its new tmux session name: the per-project prefs are
+   * keyed by that name, so a rename would otherwise silently drop the room's
+   * lead and its read marker. */
+  renameSession(from: string, to: string) {
+    if (!from || !to || from === to) return;
+    for (const map of [state.leads, state.seen] as Record<string, unknown>[]) {
+      if (from in map) {
+        map[to] = map[from];
+        delete map[from];
+      }
+    }
+    localStorage.setItem(LEAD_KEY, JSON.stringify(state.leads));
+    localStorage.setItem(SEEN_KEY, JSON.stringify(state.seen));
+    if (state.project === from) this.setProject(to);
+  },
   /** The remembered default recipient for a project, '' when none. */
   lead(session: string) { return state.leads[session] ?? ''; },
   setLead(session: string, name: string) {

@@ -229,6 +229,7 @@ pub fn create(
             last_up_at: None,
             last_seen_at: None,
             archived: false,
+            room: String::new(),   // insert_project freezes it as proj:<session>
         };
         store.insert_project(&project)?;
         // A seeded agent slot is settled straight away: the user asked for that
@@ -295,6 +296,7 @@ fn adopt_in(
         last_up_at: Some(ts),
         last_seen_at: Some(ts),
         archived: false,
+        room: String::new(),   // insert_project freezes it as proj:<session>
     };
     store.insert_project(&project)?;
     let observed = capture::observe(session, &path, agent_sessions())?;
@@ -380,11 +382,41 @@ pub fn rename(id: &str, name: &str) -> Result<Value, String> {
     if name.is_empty() {
         return Err("project name must not be empty".into());
     }
+    let ts = now();
     with_store(|store| {
+        let Some(project) = store.project(id)? else {
+            return Err(format!("no project with id '{id}'"));
+        };
         if !store.set_name(id, name)? {
             return Err(format!("no project with id '{id}'"));
         }
-        Ok(json!({ "id": id, "name": name }))
+        // The tmux SESSION follows the name, because it is the name the Terminal
+        // and `tmux ls` show — leaving it behind made one project wear two names
+        // (owner, 2026-08-19: "没有改tmux session的名字 所以在terminal显示不对").
+        // An ADOPTED session keeps the name its owner gave it: we did not choose
+        // it and renaming someone else's session is not ours to do.
+        let mut session = project.session.clone();
+        let mut renamed_session = false;
+        if !project.adopted {
+            let wanted = free_session_name(store, &slug(name), id)?;
+            if wanted != project.session {
+                // tmux first: if it refuses (the name is taken by a session no
+                // project claims), the declaration must not drift away from it.
+                let live = tmux::session_exists(&project.session);
+                if !live || tmux::rename_session(&project.session, &wanted).is_ok() {
+                    store.set_session(id, &wanted, &project.session)?;
+                    session = wanted;
+                    renamed_session = true;
+                }
+            }
+        }
+        store.mark_seen(id, ts)?;
+        Ok(json!({
+            "id": id,
+            "name": name,
+            "session": session,
+            "session_renamed": renamed_session,
+        }))
     })
 }
 
@@ -682,8 +714,17 @@ pub(crate) fn with_registry_mcp() -> std::collections::HashMap<String, String> {
 }
 
 /// Project row for a session (used by spawn to find the workspace).
+/// The project a session name refers to. Falls back to the name the session
+/// used to have, because a running agent carries `TMM_PROJECT` from the moment
+/// it started: after a rename its `tmm send/status/done` would otherwise fail
+/// until someone restarted it, which is not a thing a rename should cost.
 pub fn project_for_session(session: &str) -> Result<Option<store::Project>, String> {
-    with_store(|store| store.project_by_session(session))
+    with_store(|store| {
+        if let Some(p) = store.project_by_session(session)? {
+            return Ok(Some(p));
+        }
+        store.project_by_prev_session(session)
+    })
 }
 
 /// The isolated home of a MANAGED agent, or `None` when this window is not one.
@@ -889,31 +930,80 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&other);
     }
 
-    /// Renaming moves the LABEL and nothing else. The session is the identity
-    /// (`UNIQUE`, the tmux session, and the chat room key `proj:<session>`), so
-    /// a rename that touched it would orphan the conversation and leave a live
-    /// session no project claims.
+    /// Renaming moves the label AND the tmux session, because the session name
+    /// is what the Terminal and `tmux ls` show — leaving it behind made one
+    /// project wear two names (owner, 2026-08-19). Two things must NOT move with
+    /// it: the chat room (the conversation would be orphaned) and the old
+    /// session's resolvability (a running agent carries `TMM_PROJECT` from the
+    /// moment it started).
     #[test]
-    fn renaming_a_project_moves_the_label_and_leaves_its_session_alone() {
+    fn renaming_a_project_moves_its_session_but_never_its_room() {
         use_test_store();
         let dir = std::env::temp_dir().join(format!("tmm-rename-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let made = create(&dir.to_string_lossy(), Some("Old Name"), None, None).unwrap();
         let id = made["id"].as_str().unwrap().to_string();
-        let session = made["session"].as_str().unwrap().to_string();
+        let born_session = made["session"].as_str().unwrap().to_string();
+        assert_eq!(born_session, "old-name");
+        let room = with_store(|s| s.project(&id)).unwrap().unwrap().room;
+        assert_eq!(room, format!("proj:{born_session}"), "the room is frozen at birth");
 
         let out = rename(&id, "  New Name  ").unwrap();
         assert_eq!(out["name"].as_str(), Some("New Name"), "trimmed");
+        assert_eq!(out["session"].as_str(), Some("new-name"), "the session follows the name");
         let after = with_store(|store| store.project(&id)).unwrap().unwrap();
         assert_eq!(after.name, "New Name");
-        assert_eq!(after.session, session, "identity must not move");
+        assert_eq!(after.session, "new-name");
+        assert_eq!(after.path, made["path"].as_str().unwrap());
+        // The conversation stays where it is. This is the whole reason the room
+        // is a column instead of `proj:<session>`.
+        assert_eq!(after.room, room, "the chat must not move with the name");
+
+        // The old name still resolves, so an agent started before the rename can
+        // keep using the TMM_PROJECT it was launched with.
+        let via_old = project_for_session(&born_session).unwrap();
+        assert_eq!(via_old.map(|p| p.id), Some(id.clone()), "previous session name resolves");
+        assert_eq!(project_for_session("new-name").unwrap().map(|p| p.id), Some(id.clone()));
 
         // An empty name is a mistake, not a way to clear the label.
         assert!(rename(&id, "   ").is_err());
         assert_eq!(with_store(|store| store.project(&id)).unwrap().unwrap().name, "New Name");
-        // Renaming something that does not exist is the caller's error, not a
-        // silent no-op.
         assert!(rename("no-such-project", "x").is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An ADOPTED project runs on a session its owner named. We did not choose
+    /// that name, so a rename relabels the project and leaves tmux alone.
+    #[test]
+    fn renaming_an_adopted_project_leaves_its_session_alone() {
+        use_test_store();
+        let dir = std::env::temp_dir().join(format!("tmm-rename-adopted-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ts = now();
+        let project = Project {
+            id: "adopted-1".into(),
+            name: "mine".into(),
+            path: dir.to_string_lossy().to_string(),
+            icon: None,
+            session: "hand-made".into(),
+            adopted: true,
+            autostart: false,
+            created_at: ts,
+            last_up_at: None,
+            last_seen_at: None,
+            archived: false,
+            room: String::new(),
+        };
+        with_store(|store| store.insert_project(&project)).unwrap();
+
+        let out = rename("adopted-1", "A Better Label").unwrap();
+        assert_eq!(out["name"].as_str(), Some("A Better Label"));
+        assert_eq!(out["session"].as_str(), Some("hand-made"), "not ours to rename");
+        assert_eq!(out["session_renamed"].as_bool(), Some(false));
+        let after = with_store(|store| store.project("adopted-1")).unwrap().unwrap();
+        assert_eq!(after.session, "hand-made");
+        assert_eq!(after.name, "A Better Label");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

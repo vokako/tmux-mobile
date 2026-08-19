@@ -14,7 +14,7 @@ use std::path::Path;
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
@@ -36,6 +36,11 @@ pub struct Project {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_seen_at: Option<u64>,
     pub archived: bool,
+    /// The bus room this project's chat lives in, recorded once so a rename of
+    /// the session cannot orphan the conversation. `proj:<first session>` for
+    /// everything that existed before schema v8.
+    #[serde(default)]
+    pub room: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -307,6 +312,28 @@ impl Store {
                 )
                 .map_err(|e| format!("migrate to 7: {e}"))?;
         }
+        if version < 8 {
+            // Renaming a project renames its tmux SESSION too — the session name
+            // is what the Terminal and `tmux ls` show, so leaving it behind made
+            // one thing wear two names (owner, 2026-08-19). Two additive columns
+            // make that safe, and additive is the point: an ALTER cannot cascade
+            // children away the way a table rebuild can.
+            //
+            //  · `room` decouples the chat from the name. The bus room used to be
+            //    derived as `proj:<session>`, so a rename would have orphaned the
+            //    conversation; now the room id is recorded once and never moves.
+            //  · `prev_session` keeps the OLD name resolvable. A running agent has
+            //    `TMM_PROJECT=<session>` baked into its environment, so without
+            //    this every `tmm send/status/done` from an already-started agent
+            //    would fail until it was restarted.
+            self.conn
+                .execute_batch(
+                    "ALTER TABLE projects ADD COLUMN room TEXT NOT NULL DEFAULT '';
+                     ALTER TABLE projects ADD COLUMN prev_session TEXT;
+                     UPDATE projects SET room = 'proj:' || session WHERE room = '';",
+                )
+                .map_err(|e| format!("migrate to 8: {e}"))?;
+        }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| format!("set user_version: {e}"))
@@ -318,8 +345,8 @@ impl Store {
         self.conn
             .execute(
                 "INSERT INTO projects
-                   (id, name, path, icon, session, adopted, autostart, created_at, archived_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL)",
+                   (id, name, path, icon, session, adopted, autostart, created_at, archived_at, room)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9)",
                 params![
                     p.id,
                     p.name,
@@ -329,6 +356,7 @@ impl Store {
                     p.adopted as i64,
                     p.autostart as i64,
                     p.created_at as i64,
+                    if p.room.is_empty() { format!("proj:{}", p.session) } else { p.room.clone() },
                 ],
             )
             .map(|_| ())
@@ -338,11 +366,11 @@ impl Store {
     pub fn list_projects(&self, include_archived: bool) -> Result<Vec<Project>, String> {
         let sql = if include_archived {
             "SELECT id, name, path, icon, session, adopted, autostart, created_at,
-                    last_up_at, last_seen_at, archived_at
+                    last_up_at, last_seen_at, archived_at, room
                FROM projects ORDER BY COALESCE(last_seen_at, created_at) DESC"
         } else {
             "SELECT id, name, path, icon, session, adopted, autostart, created_at,
-                    last_up_at, last_seen_at, archived_at
+                    last_up_at, last_seen_at, archived_at, room
                FROM projects WHERE archived_at IS NULL
               ORDER BY COALESCE(last_seen_at, created_at) DESC"
         };
@@ -358,7 +386,7 @@ impl Store {
         self.conn
             .query_row(
                 "SELECT id, name, path, icon, session, adopted, autostart, created_at,
-                        last_up_at, last_seen_at, archived_at
+                        last_up_at, last_seen_at, archived_at, room
                    FROM projects WHERE id = ?1",
                 params![id],
                 row_to_project,
@@ -372,7 +400,7 @@ impl Store {
         self.conn
             .query_row(
                 "SELECT id, name, path, icon, session, adopted, autostart, created_at,
-                        last_up_at, last_seen_at, archived_at
+                        last_up_at, last_seen_at, archived_at, room
                    FROM projects WHERE session = ?1",
                 params![session],
                 row_to_project,
@@ -401,6 +429,37 @@ impl Store {
             .execute("UPDATE projects SET name = ?2 WHERE id = ?1", params![id, name])
             .map(|n| n > 0)
             .map_err(|e| format!("rename project: {e}"))
+    }
+
+    /// Move a project onto a different tmux session name, remembering the old
+    /// one. `prev_session` is what keeps an ALREADY RUNNING agent working: its
+    /// `TMM_PROJECT` env var holds the name the session had when it started, and
+    /// a process cannot be told otherwise.
+    pub fn set_session(&self, id: &str, session: &str, prev: &str) -> Result<bool, String> {
+        self.conn
+            .execute(
+                "UPDATE projects SET session = ?2, prev_session = ?3 WHERE id = ?1",
+                params![id, session, prev],
+            )
+            .map(|n| n > 0)
+            .map_err(|e| format!("rename session: {e}"))
+    }
+
+    /// A project by the session name it used to have. Only the most recent
+    /// previous name is kept: two renames in a row leave the oldest one
+    /// unresolvable, which costs a restarted agent nothing and keeps this to one
+    /// column instead of a table.
+    pub fn project_by_prev_session(&self, session: &str) -> Result<Option<Project>, String> {
+        self.conn
+            .query_row(
+                "SELECT id, name, path, icon, session, adopted, autostart, created_at,
+                        last_up_at, last_seen_at, archived_at, room
+                   FROM projects WHERE prev_session = ?1",
+                params![session],
+                row_to_project,
+            )
+            .optional()
+            .map_err(|e| format!("get project by previous session: {e}"))
     }
 
     pub fn set_archived(&self, id: &str, archived: bool, now: u64) -> Result<(), String> {
@@ -779,6 +838,7 @@ fn row_to_project(r: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
         last_up_at: r.get::<_, Option<i64>>(8)?.map(|v| v as u64),
         last_seen_at: r.get::<_, Option<i64>>(9)?.map(|v| v as u64),
         archived: r.get::<_, Option<i64>>(10)?.is_some(),
+        room: r.get::<_, Option<String>>(11)?.unwrap_or_default(),
     })
 }
 
@@ -799,6 +859,7 @@ mod tests {
             last_up_at: None,
             last_seen_at: None,
             archived: false,
+            room: String::new(),
         }
     }
 

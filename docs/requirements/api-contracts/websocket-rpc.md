@@ -109,7 +109,7 @@ Projects section hides itself when these return -32601. See
 | `project_up` | `id` | `{session, created_session, slots: [{window_name, status, error?}]}` |
 | `project_down` | `id` | `{session, live: false}` — kills the session, keeps the declaration |
 | `project_archive` | `id`, `archived?` | Hides/unhides without deleting |
-| `project_rename` | `id`, `name` | `{id, name}` — the LABEL only; the session (and so the chat room `proj:<session>`) is unchanged |
+| `project_rename` | `id`, `name` | `{id, name, session, session_renamed}` — renames the tmux session to `slug(name)` too (not on an adopted project). The chat room is recorded on the project so it does NOT move, and the previous session name keeps resolving for agents already running with `TMM_PROJECT` |
 | `project_autostart` | `id`, `autostart?` | Flag only; no boot integration yet |
 | `models_list` | `backend?` (default `kiro`) | `{backend, models}` — model ids the backend accepts, asked of its own CLI (cached). `models` is `null` when it cannot be enumerated (claude/codex), and the agent editor keeps free text |
 

@@ -110,21 +110,46 @@ caught exactly that.
 The reverse direction, `capture.rs`, is why nobody hand-writes a project: a
 20-second loop folds live tmux back into the declaration.
 
-### Renaming touches the label and nothing else
+### Renaming moves the session too, and never the room
 
-`project_rename` (RPC, `projects::rename`, `tmm project rename <session>
---name`) updates `projects.name`. The Hub's chat header IS the control: the
-title is a button that becomes an input in place, Enter/blur commits, Escape
-cancels — a project's name is the one thing in that header you might want to
-change, so a separate pencil button would just duplicate the thing it edits.
+`project_rename` (RPC, `projects::rename`, `tmm project rename <session> --name`)
+updates `projects.name` AND renames the tmux session to `slug(name)`. The Hub's
+chat header is the control: the title is a button that becomes an input in place,
+Enter/blur commits, Escape cancels.
 
-The session is deliberately not part of it. Three things hang off that string —
-the `UNIQUE` column, the tmux session the declaration projects onto, and the
-chat room id `proj:<session>` — so renaming it would orphan the conversation and
-leave a live tmux session no project claims. Names are for reading; the session
-is the identity (see above).
+The session has to follow, because it is the name the Terminal's header and
+`tmux ls` show — renaming only the label left one project wearing two names
+(owner, 2026-08-19: "没有改tmux session的名字 所以在terminal显示不对"). Three
+things make that safe, and all three are the reason the first version did not do
+it:
 
-## The capture rule
+- **The chat room is recorded on the project, not derived from the session**
+  (`projects.room`, schema v8, backfilled as `proj:<session>`). The room id was
+  `proj:<session>`, so a rename would have orphaned the conversation. Now the id
+  is frozen at birth and `project_room()` reads it, falling back to the derived
+  form for anything older.
+- **The previous session name keeps resolving** (`projects.prev_session`;
+  `project_for_session` checks it after the current name). A running agent has
+  `TMM_PROJECT=<session>` baked into its environment and a process cannot be told
+  otherwise, so without this every `tmm send/status/done` from an agent that was
+  already up would fail until someone restarted it. Only the most recent previous
+  name is kept — two renames in a row leave the oldest unresolvable, which costs a
+  restarted agent nothing and keeps this to one column instead of a table.
+- **tmux goes first.** If `rename-session` fails (the name is taken by a session
+  no project claims), the declaration is left alone rather than drifting away from
+  the session it projects onto. `free_session_name` picks a free name first, so
+  this is the belt to that braces.
+
+An **adopted** project is the exception: its session name is the one its owner
+gave it, we did not choose it, and renaming someone else's session is not ours to
+do — the label moves, tmux does not, and `session_renamed` comes back false.
+
+Client-side, everything keyed by the session name follows: the Hub re-selects the
+project under its new name and `hubPrefs.renameSession` moves the remembered lead
+and the read marker, which are keyed by session and would otherwise be silently
+dropped.
+
+## The capture rule## The capture rule
 
 **A window must survive `SETTLE_SECS` (120 s) before it becomes restorable.**
 The window you opened to grep one file and closed again must not reappear on

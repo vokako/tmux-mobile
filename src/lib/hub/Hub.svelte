@@ -523,10 +523,20 @@
     if (!renaming || !selectedRow) return;
     const name = renameDraft.trim();
     const id = selectedRow.project.id;
+    const was = selectedRow.project.session;
     renaming = false;
     if (!name || name === selectedRow.project.name) return;
     try {
-      await projectRename(id, name);
+      const res = await projectRename(id, name);
+      // The session may have followed the name. Everything keyed by it — the
+      // remembered lead, the read marker, which project is open — follows too,
+      // and the feed reloads under the new key.
+      if (res?.session && res.session !== was) {
+        hubPrefs.renameSession(was, res.session);
+        await reload();
+        await selectProject(res.session);
+        return;
+      }
       await reload();
     } catch (e) { console.warn('rename failed', e); }
   }
