@@ -41,6 +41,22 @@ npm run build:server     # server + tmm, release
 npm run dev:server       # run the server (pair with `npm run dev` for the web UI)
 npm run test:rust        # the Rust tests
 ```
+
+**On this dev host the server is already supervised — do not tell the owner to
+restart it.** `scripts/dev-server-watch.sh` runs under `tmm task` (window
+`tmm-tasks:server`, started with
+`tmm task start server --replace -- scripts/dev-server-watch.sh`) and is what
+`tauri dev` would have given us for the server half, which cannot build here (no
+webkit2gtk-4.1, no DISPLAY): it restarts the server when it EXITS (2 s backoff),
+polls Rust source mtimes every 3 s (no inotify — NFS-safe, ~4 ms per scan),
+rebuilds release after the tree has been quiet for one interval, and restarts
+ONLY when the rebuilt binary's BYTES differ — cargo fingerprints by mtime, so a
+`touch`, a checkout, or a comment-only edit relinks an identical binary and
+dropping every client for that would be noise. A failed rebuild keeps the last
+good binary running and retries on the next change. So an edit is live within
+seconds (`[watch] binary changed — restarting server` in that window's log), and
+the frontend needs no restart either — vite serves from disk, so a browser
+reload is enough. `tmm task list` shows both. Owner correction, 2026-08-19.
 These pass `--no-default-features`, which turns off the `gui` Cargo feature —
 `tauri` plus its three plugins. What remains is what the WebSocket server and
 `tmm` actually use, and the webview leaves the dependency graph entirely. Use
