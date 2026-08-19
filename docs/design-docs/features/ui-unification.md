@@ -45,12 +45,21 @@ can never disagree.
 
 ### 2. One resize affordance
 
-`SideHandle.svelte` — a 5px grab strip on the sidebar's right edge:
+`SideHandle.svelte` — a 6px grab strip on a panel's edge, and the ONE resize
+affordance in the app:
 
-- drag → live-updates `--sidebar-w`, persists on release
-- double-click → reset to the 240px default
+- drag → live-updates a CSS variable on `:root`, persists on release
+- double-click → reset to the default
 - keyboard: arrow keys nudge ±16px when focused (a11y floor)
-- hidden in compact/mobile layouts (they have no sidebar)
+- hidden in compact/mobile layouts (they have no resizable columns)
+
+It is PARAMETRIC, not sidebar-specific (2026-08-19): `varName`, `storeKey`,
+`min`/`max`/`def`, `edge` (`right` default, `left` inverts the drag delta so a
+panel grows when its left edge is dragged left) and `label`. Defaults describe
+the shared sidebar (`--sidebar-w`, 180–420, 240), and the Hub's chat/terminal
+divider passes `--hub-drawer-w`, 320–900, 520 — a second consumer instead of a
+second implementation. The page that owns the variable restores it from
+localStorage on mount; SideHandle is the only other writer.
 
 The handle is the only writer of `--sidebar-w` besides the App init read.
 

@@ -1,25 +1,39 @@
 <script>
-  // SideHandle — the one resize affordance for the shared sidebar
-  // (docs/design-docs/features/ui-unification.md). Drag live-updates
-  // --sidebar-w on :root, release persists, double-click resets, arrow keys
-  // nudge. This component and App's init read are the ONLY writers.
-  const MIN = 180;
-  const MAX = 420;
-  const DEFAULT = 240;
+  // SideHandle — the ONE resize affordance for every draggable divider
+  // (docs/design-docs/features/ui-unification.md). Drag live-updates a CSS
+  // custom property on :root, release persists it, double-click resets, arrow
+  // keys nudge. Defaults describe the shared sidebar; the Hub's chat/terminal
+  // divider passes its own variable, bounds and `left` edge instead of forking
+  // a second implementation.
+  let {
+    varName = '--sidebar-w',
+    storeKey = 'tmux_sidebar_w',
+    min = 180,
+    max = 420,
+    def = 240,
+    // Which edge of the parent the handle sits on. A `left` handle grows the
+    // panel when dragged LEFT, so the delta is inverted.
+    edge = 'right',
+    label = 'Resize sidebar',
+  } = $props();
+  const MIN = $derived(min);
+  const MAX = $derived(max);
+  const DEFAULT = $derived(def);
+  const sign = $derived(edge === 'left' ? -1 : 1);
 
   let dragging = $state(false);
 
   function current() {
-    const v = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w'), 10);
+    const v = parseInt(getComputedStyle(document.documentElement).getPropertyValue(varName), 10);
     return Number.isFinite(v) ? v : DEFAULT;
   }
   function apply(w) {
     const clamped = Math.min(MAX, Math.max(MIN, Math.round(w)));
-    document.documentElement.style.setProperty('--sidebar-w', clamped + 'px');
+    document.documentElement.style.setProperty(varName, clamped + 'px');
     return clamped;
   }
   function persist(w) {
-    localStorage.setItem('tmux_sidebar_w', String(w));
+    localStorage.setItem(storeKey, String(w));
   }
 
   function onPointerDown(e) {
@@ -27,10 +41,10 @@
     const startX = e.clientX;
     const startW = current();
     dragging = true;
-    const move = (ev) => apply(startW + (ev.clientX - startX));
+    const move = (ev) => apply(startW + sign * (ev.clientX - startX));
     const up = (ev) => {
       dragging = false;
-      persist(apply(startW + (ev.clientX - startX)));
+      persist(apply(startW + sign * (ev.clientX - startX)));
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };
@@ -45,7 +59,7 @@
   function onKeyDown(e) {
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       e.preventDefault();
-      persist(apply(current() + (e.key === 'ArrowRight' ? 16 : -16)));
+      persist(apply(current() + sign * (e.key === 'ArrowRight' ? 16 : -16)));
     }
   }
 </script>
@@ -56,9 +70,10 @@
 <div
   class="side-handle"
   class:dragging
+  class:on-left={edge === 'left'}
   role="separator"
   aria-orientation="vertical"
-  aria-label="Resize sidebar"
+  aria-label={label}
   tabindex="0"
   onpointerdown={onPointerDown}
   ondblclick={onDblClick}
@@ -78,6 +93,7 @@
     background: linear-gradient(90deg, transparent 40%, var(--accent) 40%, var(--accent) 60%, transparent 60%);
     opacity: 0.6;
   }
+  .side-handle.on-left { right: auto; left: -3px; }
   .side-handle:focus-visible { outline: none; background: var(--accent-bg); }
   /* Narrow layouts have no sidebar to resize (single-column pages keep their
      list full-width) — the handle disappears with the geometry it controls. */

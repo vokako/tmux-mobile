@@ -526,6 +526,28 @@ cycles chat → status → tools) as well as Settings → Appearance → Chat de
 
 ### Conversation visual language
 
+#### The chat/terminal divider is draggable, and a tool group is one card
+
+The divider between the conversation and the terminal drawer is a real
+splitter: the drawer column is `var(--hub-drawer-w)` (320–900, default 520,
+persisted as `tmux_hub_drawer_w`) and the chat column takes the rest with a
+280px floor. It reuses `SideHandle`, which is now parametric (variable name,
+storage key, bounds, and which edge it rides — a `left` handle inverts the
+drag delta) rather than forked: ui-unification says there is ONE resize
+affordance, and that has to survive a second consumer. It was a fixed
+`0.8fr / 1.2fr` grid before, so the divider looked draggable and was not
+(owner report).
+
+A folded tool-call group is ONE card, full feed width. Two things were wrong:
+the head owned its own border while the body was indented with
+`margin-left + border-left`, so opening the group jogged the left edge (the
+body box started at 11px, the head's text at 30px — measured); and the group
+was capped at bubble width (76%), which truncated exactly the paths one opens
+it to read. Now `.steps` carries the border and radius, `.s-head` is
+borderless inside it, and `.s-body` is separated by a top line with
+`padding-left: 30px` = the head's padding (10) + chevron (12) + gap (7), so
+every row lines up under the head's TEXT rather than under its chevron.
+
 #### The terminal drawer has ONE switcher
 
 Opening a terminal inside the chat gives a drawer with a single bar: window

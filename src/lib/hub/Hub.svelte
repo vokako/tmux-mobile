@@ -672,6 +672,16 @@
   // A clock for the elapsed readouts. One timer for the whole page, and only
   // while the tab is on screen — a "running 2m14s" that ticks in a hidden tab
   // is pure wakeups.
+  // The chat/terminal divider is draggable like the sidebar's, so --hub-drawer-w
+  // has to be restored the same way App restores --sidebar-w: SideHandle is the
+  // only other writer.
+  $effect(() => {
+    const saved = parseInt(localStorage.getItem('tmux_hub_drawer_w') || '', 10);
+    if (saved >= 320 && saved <= 900) {
+      document.documentElement.style.setProperty('--hub-drawer-w', saved + 'px');
+    }
+  });
+
   let tick = $state(Date.now());
   $effect(() => {
     if (!visible) return;
@@ -1047,6 +1057,10 @@
     {#if termOpen && !compact}
     <!-- ── Terminal drawer: where terminal things live ── -->
     <section class="drawer">
+      {#if !compact}
+        <SideHandle varName="--hub-drawer-w" storeKey="tmux_hub_drawer_w"
+          min={320} max={900} def={520} edge="left" label={t('hubTerminal')} />
+      {/if}
       <div class="drawer-head">
         <div class="win-list">
           {#each agents as a (a.window)}
@@ -1190,7 +1204,10 @@
   .hub-root.compact .chip-btn { min-height: 34px; }
   .hub-root.compact .s-head { min-height: 34px; }
   /* Drawer open: the conversation yields but stays present. */
-  .hub-root.drawer-open .cols { grid-template-columns: var(--sidebar-w) minmax(280px, 0.8fr) minmax(360px, 1.2fr); }
+  /* The terminal column is a DRAGGED width (SideHandle on its left edge), not a
+     fraction: the owner reached for that divider and nothing moved. The chat
+     column takes the rest and keeps a floor so it can never be squeezed away. */
+  .hub-root.drawer-open .cols { grid-template-columns: var(--sidebar-w) minmax(280px, 1fr) var(--hub-drawer-w, 520px); }
   .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--status-ok); flex: none; }
   .dot.off { background: var(--text3); }
 
@@ -1439,16 +1456,26 @@
   .note.warn :global(svg) { flex: none; align-self: center; }
 
   /* Collapsible run of tool calls between two replies. */
-  .steps { display: flex; flex-direction: column; width: min(76%, 760px); max-width: 100%; }
+  /* Telemetry, not a bubble: the group spans the feed's full width so paths
+     stop being truncated at 76% (owner: "整个宽度非常窄"), and it is ONE card —
+     the head owns no border of its own, the body is separated by a line rather
+     than indented with a margin+border guide. That guide is what made the left
+     edge jog when the group opened: the body box started at 11px while the
+     head's text started at 30px. */
+  .steps {
+    display: flex; flex-direction: column; width: 100%;
+    background: var(--surface); border: 1px solid var(--border2); border-radius: 9px;
+    overflow: hidden;
+  }
   .s-head {
     display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
-    background: var(--surface); border: 1px solid var(--border2); border-radius: 9px;
+    background: none; border: none; border-radius: 0;
     padding: 5px 10px; cursor: pointer; color: var(--text3);
     font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub);
-    transition: border-color var(--t-fast), color var(--t-fast);
+    transition: color var(--t-fast);
   }
-  .s-head:hover { border-color: var(--input-border); color: var(--text2); }
-  .steps.open .s-head { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+  .steps:hover { border-color: var(--input-border); }
+  .s-head:hover { color: var(--text2); }
   .chev { display: inline-flex; flex: none; transition: transform var(--t-move); }
   .chev.open { transform: rotate(90deg); }
   .s-live { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--status-ok); animation: s-pulse 1.4s ease-in-out infinite; }
@@ -1459,7 +1486,9 @@
   .s-peek { min-width: 0; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .s-body {
     display: flex; flex-direction: column; gap: 2px;
-    margin-left: 11px; padding: 5px 0 3px 11px; border-left: 1px solid var(--border);
+    /* 30px = the head's padding (10) + chevron (12) + gap (7): the rows line up
+       under the head's TEXT, which is the column the eye follows. */
+    padding: 5px 10px 6px 30px; border-top: 1px solid var(--border2);
   }
   .s-all {
     align-self: flex-start; background: none; border: none; color: var(--text3);
@@ -1583,6 +1612,7 @@
   .sr-backend { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text3); margin-left: auto; }
   .sr-cap { font-size: var(--fs-micro); color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 3px; opacity: 0.75; }
 
+  .drawer { position: relative; }
   .drawer { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #000; border-left: 1px solid var(--border); }
   .drawer-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--bg2); border-bottom: 1px solid var(--border); }
   .win-list { display: flex; gap: 5px; overflow-x: auto; scrollbar-width: none; }
