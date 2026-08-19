@@ -752,12 +752,15 @@ where a reader looks (owner, 2026-08-19: "返回的状态信息要用消息的�
 里"). It is now `[tmm done] <summary>` from the agent. A done with NO summary stays
 a lifecycle line, because nothing was said.
 
-Client side, `statusNote()` (pure, tested) reads both markers, takes them off, and
-the bubble renders one notch quieter — same shape, so the feed stays one visual
-language — with the attention border for `waiting`/`blocked` only, because those
-are the two that ask for a human. `record_status` still keeps the explicit claim in
-the status record: that is the part only it can answer, and `derive_from` needs it
-for `waiting`.
+Client side the ONLY thing that happens is the marker coming off: `statusNote()`
+(pure, tested) reads both markers and the bubble is exactly the bubble any other
+message gets ("status 消息的样式要和普通消息一样就行", 2026-08-19). A first cut
+rendered it a notch quieter with an attention border for `waiting`/`blocked`, which
+was the same mistake in a new costume — a second visual species for the same thing
+is what made these read as telemetry to begin with. The raw view still shows the
+stored body, marker included, because raw means exact. `record_status` keeps the
+explicit claim in the status record: that is the part only it can answer, and
+`derive_from` needs it for `waiting`.
 
 The other half is the prompt, since a channel nobody is told to use stays empty.
 `build_prompt` now leads with `tmm status working "<what you are doing right

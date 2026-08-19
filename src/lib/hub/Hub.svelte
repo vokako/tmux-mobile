@@ -1141,10 +1141,11 @@
           {:else if b.type === 'msg'}
             {@const m = b.msg}
             <!-- An agent's note about its own work — a `tmm status` note or a
-                 `tmm done` summary. A message from the agent (it is persisted like
-                 one and it reads like one), rendered with its marker off.
-                 `waiting`/`blocked` take the attention colour: those are the two
-                 that want a person. -->
+                 `tmm done` summary. Only the MARKER is client-side: it is a message
+                 from the agent, so it wears exactly the same bubble as any other
+                 ("status 消息的样式要和普通消息一样就行", owner 2026-08-19). A
+                 second visual species for the same thing is what made it read as
+                 telemetry in the first place. -->
             {@const note = statusNote(m.body)}
             {@const parts = splitImages(note ? note.text : m.body)}
               <!-- Every user message can become the landmark, but exactly ONE
@@ -1159,8 +1160,7 @@
                    is smaller than its message (see naturalH). -->
               {@const folded = isAsk && askKey === key && askHeld && heldExpanded !== key
                 && heldBody(parts.text) !== parts.text}
-              <div class="msg" class:me={m.from === 'human'} class:note={!!note}
-                class:attn={note ? note.state === 'waiting' || note.state === 'blocked' : false}
+              <div class="msg" class:me={m.from === 'human'}
                 class:ask-top={isAsk && askKey === key && askEdge === 'top'}
                 class:ask-bottom={isAsk && askKey === key && askEdge === 'bottom'}
                 class:held={isAsk && askKey === key && askHeld}
@@ -1842,12 +1842,6 @@
   .note.warn { color: var(--status-warn); }
   .note.warn :global(svg) { flex: none; align-self: center; }
 
-  /* A status note is a message, so it is the same bubble — one notch quieter,
-     because "what I am doing right now" is not the same as an answer. It keeps
-     the bubble's shape so the feed stays one visual language. */
-  .msg.note .bubble { background: var(--surface); color: var(--text2); }
-  /* Waiting on a person is not the same colour as making progress. */
-  .msg.note.attn .bubble { border-color: var(--status-warn); }
   /* A progress note: what the agent SAYS it is doing. Between a bubble and a
      telemetry row on purpose — it is prose the agent chose to write, so it gets
      the reading font and full-strength ink, but it is about work rather than
