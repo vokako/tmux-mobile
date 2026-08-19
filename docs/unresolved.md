@@ -1,5 +1,19 @@
 # Unresolved Issues
 
+## `slow_rpc_does_not_block_fast_rpc` is load-flaky
+- **Priority**: Low
+- **Area**: Rust tests (`src-tauri/tests/concurrent_rpc.rs`)
+- **Details**: The test asserts that a fast RPC's response arrives BEFORE a slow
+  one's by comparing arrival order, which makes it a timing assertion on a
+  shared machine. On the dev host with the watcher rebuilding, vite running and
+  two agents working it fails and passes at roughly 2:1 (measured 2026-08-19,
+  four consecutive runs: FAIL, FAIL, ok / FAIL, ok) with no code change in
+  between, and nothing in the concurrency path was touched. It costs a reader
+  real time deciding whether their change broke it. Fix: assert on measured
+  DURATIONS with a generous margin (the fast call must finish well before the
+  slow one's sleep elapses) rather than on delivery order, or gate the ordering
+  assertion behind a load check.
+
 ## A registry def change does not reach the agents already spawned from it
 - **Priority**: Medium
 - **Area**: Projects / agents-v2 (`projects/spawn.rs`)

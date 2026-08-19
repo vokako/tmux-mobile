@@ -778,6 +778,9 @@ export interface HubActivityEvent {
   /** `prompt` events only: 'app' when the text is the line this app typed into
    * the pane (the delivery receipt), 'local' when typed at the keyboard. */
   via?: 'app' | 'local';
+  /** `status` events only: the state the agent declared. The `text` is its note
+   * — what it says it is doing — which is the half a human reads. */
+  state?: 'working' | 'waiting' | 'blocked';
 }
 export const hubActivity = (session: string, sinceTs = 0) =>
   call<{ events: HubActivityEvent[] }>('hub_activity', { session, since_ts: sinceTs });

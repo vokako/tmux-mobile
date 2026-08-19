@@ -39,7 +39,8 @@ USAGE (agent):
                     [--image <path|url>]   attach an image by REFERENCE (repeatable);
                                       a local path is resolved by the client
   tmm log [--since <ts>] [--limit N] [-f]   read chat; --since is exclusive, -f follows
-  tmm status <working|waiting|blocked> [note]   declare what you are doing
+  tmm status <working|waiting|blocked> "<note>"   say what you are doing NOW
+                                      (the note is the point — it shows in the chat)
   tmm done [summary]                  declare completion
   tmm spawn <agent> [--brief <text>]  spawn a registry agent into this project
 

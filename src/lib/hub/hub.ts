@@ -259,8 +259,18 @@ export type FeedBlock =
   | { type: 'msg'; ts: number; msg: any; delivered: boolean }
   | { type: 'sys'; ts: number; key: string; items: string[] }
   | { type: 'prompt'; ts: number; window: number; text: string }
+  | { type: 'progress'; ts: number; window: number; state: string; text: string }
   | { type: 'note'; ts: number; window: number; event: HubActivityEvent }
   | { type: 'steps'; ts: number; window: number; key: string; events: HubActivityEvent[] };
+
+/** The two halves of a `tmm status` event: what the agent DECLARED and the note
+ * it wrote. Older servers glued them into one string (`"working — 重写状态机"`)
+ * and sent no `state`; rooms and rings outlive a build, so both shapes parse. */
+export function statusParts(e: HubActivityEvent): { state: string; text: string } {
+  if (e.state) return { state: e.state, text: e.text === e.state ? '' : e.text };
+  const m = /^(working|waiting|blocked)(?:\s+—\s+([\s\S]*))?$/.exec(e.text.trim());
+  return m ? { state: m[1]!, text: m[2] ?? '' } : { state: '', text: e.text };
+}
 
 /** Internal: a tool call before consecutive ones are folded into a group. */
 type ToolItem = { type: 'tool'; ts: number; window: number; event: HubActivityEvent };
@@ -329,6 +339,10 @@ export function isSelfReport(e: HubActivityEvent): boolean {
  * 2. **A local prompt is the input half of the transcript.** Text typed at the
  *    agent's own keyboard exists in no other channel, so an unmatched `prompt`
  *    event renders as its own row.
+ * 2b. **A `tmm status` note is a spoken line.** Hooks see that a turn is open,
+ *    never what it is about; the note is the only account of the work in
+ *    progress, so it renders at every level and never breaks a tool lane (the
+ *    agent wrote it in the middle of the run it describes).
  * 3. **Tool calls collapse per AGENT, replies do not.** A window's tool events
  *    fold into one `steps` group that stays open for that window's whole turn.
  *    Only that SAME window ends its own run — its reply, its local prompt, the
@@ -392,6 +406,16 @@ export function feedBlocks(
     // it survives even the chat-only level.
     if (e.kind === 'warn') {
       stream.push({ type: 'note', ts: e.ts, window: e.window, event: e });
+      continue;
+    }
+    // A `tmm status` NOTE is the agent saying what it is doing — the one thing
+    // hooks cannot observe. It is deliberate, it is prose, and it is the answer
+    // to "what is happening right now", so it renders as a spoken line at every
+    // detail level. A note-less claim is dropped: the derived state already says
+    // running/idle better than a word the agent typed.
+    if (e.kind === 'status') {
+      const { state, text } = statusParts(e);
+      if (text.trim()) stream.push({ type: 'progress', ts: e.ts, window: e.window, state, text: text.trim() });
       continue;
     }
     if (level === 'chat') continue;
@@ -471,6 +495,13 @@ export function feedBlocks(
     }
     if (item.type === 'prompt' || item.type === 'note') {
       open.delete(item.window);
+      out.push(item);
+      continue;
+    }
+    // A progress note is NOT a boundary, on purpose: the agent wrote it in the
+    // middle of the work it describes, so closing its lane there would chop one
+    // run into a group per report — the churn this whole rule exists to avoid.
+    if (item.type === 'progress') {
       out.push(item);
       continue;
     }

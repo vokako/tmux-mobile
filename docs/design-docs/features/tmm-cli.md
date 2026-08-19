@@ -543,8 +543,31 @@ as `hub_activity { session, since_ts }` with ms timestamps so the client merges
 it directly into the message timeline. It is deliberately NOT chat history:
 nothing touches the bus db and the ring dies with the server.
 
-Five event kinds: `tool`, `status`, `notif`, `prompt` (a prompt the agent
-accepted, `via: app | local`) and `warn` (a line that was never echoed back).
+Five event kinds: `tool`, `status` (a `tmm status` note, with the declared
+`state` alongside it), `notif`, `prompt` (a prompt the agent accepted,
+`via: app | local`) and `warn` (a line that was never echoed back).
+
+**A `tmm status` note is the only account of work in progress, so it is a row.**
+The hooks bracket a turn but say nothing about what it is FOR, and the owner's
+symptom was exactly that: "经常一直在做但是没有同步状态" (2026-08-19). So the
+note — not the state word — is the payload: `record_status` puts it in the
+event's `text` with the state in a `state` field, and the client renders it as a
+line the agent spoke (`progress` block, the agent's name plus its sentence),
+visible at EVERY detail level and never a tool-lane boundary (the agent wrote it
+in the middle of the run it describes, so closing the lane there would fragment
+it). A note-less claim is dropped instead: `running`/`idle` is derived from
+observation and is more trustworthy than a word the agent typed. `waiting` and
+`blocked` notes get the attention colour, because those ask for a human.
+
+The other half is the prompt, since a channel nobody is told to use stays empty.
+`build_prompt` now leads with `tmm status working "<what you are doing right
+now>"` and says when to send one (at the start, when the work moves to a
+different part, when a step runs long), while `tmm send` is described as the
+INTERRUPTING channel reserved for something that needs a person. That ordering
+is the convention: progress is ambient, messages are addressed. NOTE: an agent
+already spawned keeps the prompt it was given — see the def-drift entry in
+`docs/unresolved.md` — so the new convention reaches existing windows only when
+they are re-spawned.
 
 Ordering is the whole point of a transcript, and it took three things to be
 right. An event is stamped when the inbox file is CONSUMED (250 ms poll, so

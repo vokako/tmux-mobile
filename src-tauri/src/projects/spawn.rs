@@ -292,9 +292,10 @@ fn build_prompt(def: &RegAgent, name: &str, session: &str, brief: &str) -> Strin
     s += &format!(
         "You are agent \"{name}\" in project \"{session}\" (a tmux session managed by tmux-mobile).\n\
          Coordinate through the `tmm` CLI:\n\
-         - `tmm send \"@name message\"` — talk in the project chat (@name to address someone, use @human for the operator)\n\
+         - `tmm status working \"<what you are doing right now>\"` — KEEP THIS CURRENT. Your turn boundaries are observed automatically, but nobody can see WHAT you are working on unless you say it. Send one when you start the task, again whenever you move to a different part of it, and again if a single step runs long. One short line, no ceremony — it appears in the chat as your current activity, and it is how the operator follows a long task without interrupting you\n\
+         - `tmm status waiting|blocked \"why\"` — when you are stuck on something outside your control (a credential, an answer, another agent). This one asks for attention, so keep it for the real thing\n\
+         - `tmm send \"@name message\"` — talk in the project chat (@name to address someone, use @human for the operator). This INTERRUPTS the reader, so use it for something that needs a person: a question, a decision, a result. Plain progress belongs in `tmm status`\n\
          - `tmm log --limit 30` — read recent chat; `tmm agent list` — who is here and their state\n\
-         - `tmm status waiting|blocked \"why\"` — ONLY when you are stuck on something outside your control (a credential, an answer, another agent). Do not announce that you are working: your turn boundaries are observed automatically, so a `working` claim is ignored and only its note is kept\n\
          - `tmm done \"summary\"` — REQUIRED when you finish the briefed task\n\
          You can also manage the workspace itself when the task calls for it:\n\
          - `tmm spawn <registry-name> --brief \"...\"` — bring in a teammate (see `tmm registry list`)\n\
@@ -305,7 +306,7 @@ fn build_prompt(def: &RegAgent, name: &str, session: &str, brief: &str) -> Strin
          (this system prompt cannot carry a date: it is replayed on every restart). \
          If a task was briefed to you it appears below — do it when you are asked to start, and run `tmm done \"summary\"` when it is complete.\n\
          Rules: your final answer each turn is captured automatically and posted to the room — do not repeat it with `tmm send`. \
-         Use `tmm send` DURING a long turn for progress a human would want before it ends, and `tmm send \"@name ...\"` to hand work to a teammate (it types into their pane and interrupts them). \
+         Keep `tmm status` flowing DURING a long turn so the work is visible before it ends, and use `tmm send \"@name ...\"` to hand work to a teammate (it types into their pane and interrupts them). \
          If tmm fails (server down), keep working — it is telemetry, never a blocker. \
          Run `tmm --help` for the full command list."
     );

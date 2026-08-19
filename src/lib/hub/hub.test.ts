@@ -41,12 +41,14 @@ test('feedBlocks respects the feed level and collapses duplicate tool lines', ()
   ];
   assert.equal(feedBlocks(feed, activity, 'chat').length, 1, 'chat = messages only');
   const status = feedBlocks(feed, activity, 'status');
-  assert.deepEqual(status.map((i) => i.type), ['note', 'msg', 'note'], 'status + notif, no tools');
+  // The bare `waiting` claim carries no note, so it is not a row — the derived
+  // state already says that better than a word the agent typed.
+  assert.deepEqual(status.map((i) => i.type), ['msg', 'note'], 'notif, no tools, no contentless claim');
   const tools = feedBlocks(feed, activity, 'tools');
-  assert.deepEqual(tools.map((i) => i.type), ['note', 'msg', 'steps', 'note'], 'the two tool calls became one group');
+  assert.deepEqual(tools.map((i) => i.type), ['msg', 'steps', 'note'], 'the two tool calls became one group');
   const steps = tools.find((i) => i.type === 'steps');
   assert.deepEqual(steps?.events.map((e) => e.text), ['Edit a.rs', 'Edit b.rs'], 'dup dropped, order kept');
-  assert.deepEqual(tools.map((i) => i.ts), [50, 100, 150, 200], 'sorted by ts, group carries its first ts');
+  assert.deepEqual(tools.map((i) => i.ts), [100, 150, 200], 'sorted by ts, group carries its first ts');
 });
 
 test('a finished turn is not a row — the reply already is', () => {
@@ -138,6 +140,45 @@ test('concurrent windows never share a tool group', () => {
     ev({ ts: 110, window: 2, kind: 'tool', text: 'Read a.rs' }),
   ], 'tools');
   assert.equal(same.length, 2, 'two windows doing the same thing are two facts');
+});
+
+test('a status note is a spoken line at every level, and never breaks a lane', () => {
+  // What the owner could not see: hooks report that a turn is open, never what
+  // it is about (2026-08-19). The note is the only account of the work.
+  const activity = [
+    ev({ ts: 100, window: 1, kind: 'tool', text: 'Read a.rs' }),
+    { ts: 110, window: 1, kind: 'status', text: '重写状态机', state: 'working' } as HubActivityEvent,
+    ev({ ts: 120, window: 1, kind: 'tool', text: 'Edit a.rs' }),
+  ];
+  for (const level of ['chat', 'status', 'tools'] as const) {
+    const kinds = feedBlocks([], activity, level).map((b) => b.type);
+    assert.ok(kinds.includes('progress'), `visible at the ${level} level: ${kinds}`);
+  }
+  const blocks = feedBlocks([], activity, 'tools');
+  // One lane, not two: the note was written in the middle of the run.
+  const lanes = blocks.filter((b) => b.type === 'steps');
+  assert.equal(lanes.length, 1, 'a progress note is not a boundary');
+  assert.equal(lanes[0]?.type === 'steps' && lanes[0].events.length, 2);
+  const prog = blocks.find((b) => b.type === 'progress');
+  assert.equal(prog?.type === 'progress' && prog.text, '重写状态机');
+  assert.equal(prog?.type === 'progress' && prog.state, 'working');
+
+  // A claim with no note says nothing the derived state does not already say —
+  // the server sends an empty text for it, and an older one echoed the state
+  // word into the text.
+  for (const bareEv of [
+    { ts: 100, window: 1, kind: 'status', text: '', state: 'working' } as HubActivityEvent,
+    { ts: 100, window: 1, kind: 'status', text: 'working', state: 'working' } as HubActivityEvent,
+    ev({ ts: 100, kind: 'status', text: 'waiting' }),
+  ]) {
+    assert.deepEqual(feedBlocks([], [bareEv], 'tools'), [], `no content, no row: ${JSON.stringify(bareEv)}`);
+  }
+
+  // Rooms and rings outlive a build: the old glued shape still parses.
+  const legacy = feedBlocks([], [ev({ ts: 100, kind: 'status', text: 'blocked — no creds' })], 'chat');
+  assert.equal(legacy.length, 1);
+  assert.equal(legacy[0]?.type === 'progress' && legacy[0].state, 'blocked');
+  assert.equal(legacy[0]?.type === 'progress' && legacy[0].text, 'no creds');
 });
 
 test('an echoed prompt marks its message delivered instead of repeating it', () => {

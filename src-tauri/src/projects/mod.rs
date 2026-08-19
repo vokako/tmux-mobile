@@ -430,20 +430,44 @@ pub fn delete(id: &str) -> Result<Value, String> {
 /// slot so `up` never recreates it, and delete its isolated home so it stops
 /// counting as "an agent this app created". Stop is the pause button; this is
 /// the eject button (owner: "stop 以外，也可以删除 Agent").
+///
+/// It removes whatever of those three the agent still has, and only refuses when
+/// there is NOTHING of it left in this project. The narrower rule — a managed
+/// home must exist — made two ordinary cases unremovable (owner report,
+/// 2026-08-19: "停止的 agent，没办法 remove"):
+///
+/// * a STOPPED agent still holds a slot, and the roster offers it exactly
+///   because starting it resumes its conversation; refusing to remove it left
+///   the declaration as the only way to get rid of it;
+/// * an agent whose home was deleted by hand (or that was never ours — a window
+///   the user started, which the capturer adopts into a slot all the same) could
+///   never be dropped, so `up` kept recreating a window nobody wanted.
+///
+/// The slot is what makes it a member of the project, so the slot is what
+/// authorizes the removal. `home_removed` reports whether there was a home.
 pub fn agent_remove(session: &str, agent: &str) -> Result<Value, String> {
     let project = project_for_session(session)?
         .ok_or_else(|| format!("no project for session '{session}'"))?;
-    let home = managed_home(session, agent)
-        .ok_or_else(|| format!("'{agent}' is not an agent this app started"))?;
+    let home = managed_home(session, agent);
+    let declared = with_store(|store| store.slots(&project.id))?
+        .iter()
+        .any(|s| s.window_name == agent);
     // Kill the window first, or the capture loop would re-add the slot we are
     // about to delete from a window that is still alive.
+    let mut window_killed = false;
     if let Ok(panes) = crate::tmux::list_panes(session) {
         if let Some(p) = panes.iter().find(|p| p.window_name == agent) {
-            let _ = crate::tmux::kill_window(&format!("{session}:{}", p.window));
+            if home.is_some() || declared {
+                let _ = crate::tmux::kill_window(&format!("{session}:{}", p.window));
+                window_killed = true;
+            }
         }
     }
+    if home.is_none() && !declared && !window_killed {
+        return Err(format!("'{agent}' is not an agent of project '{}'", project.name));
+    }
     let slot_removed = with_store(|store| store.delete_slot(&project.id, agent))?;
-    let home_removed = std::fs::remove_dir_all(&home).is_ok();
+    let home_removed = home.is_some_and(|h| std::fs::remove_dir_all(h).is_ok());
     Ok(json!({
         "session": session,
         "agent": agent,
@@ -1008,6 +1032,38 @@ pub(crate) mod tests {
         assert!(!slots.iter().any(|s| s.window_name == "dev"), "slot is gone");
         // A name that was never ours is rejected rather than half-handled.
         assert!(agent_remove(&session, "nope").is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A STOPPED agent is the ordinary case: no window, no reason its home has
+    /// to be intact, but a slot that keeps `up` recreating it. Requiring a
+    /// managed home made those unremovable (owner, 2026-08-19).
+    #[test]
+    fn a_stopped_agent_can_be_removed_by_its_declaration_alone() {
+        use_test_store();
+        let dir = std::env::temp_dir().join(format!("tmm-rmstop-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let made = create(&dir.to_string_lossy(), Some("rmstop"), None, None).unwrap();
+        let id = made["id"].as_str().unwrap().to_string();
+        let session = made["session"].as_str().unwrap().to_string();
+        let slot = |name: &str| store::Slot {
+            id: None, ord: 0, window_name: name.into(), cwd: String::new(),
+            kind: store::SlotKind::Agent, command: Some("kiro".into()),
+            auto_run: true, agent_session_id: None,
+            first_seen_at: now(), settled_at: Some(now()),
+        };
+        // Declared, never started (or started and stopped): no home on disk.
+        with_store(|store| store.replace_slots(&id, &[slot("ghost")])).unwrap();
+        assert!(managed_home(&session, "ghost").is_none(), "no home — that is the point");
+
+        let r = agent_remove(&session, "ghost").unwrap();
+        assert_eq!(r["slot_removed"].as_bool(), Some(true), "the declaration is what we can remove");
+        assert_eq!(r["home_removed"].as_bool(), Some(false), "there was nothing to delete");
+        let slots = with_store(|store| store.slots(&id)).unwrap();
+        assert!(slots.is_empty(), "`up` cannot bring it back");
+        // Nothing left of it anywhere: now it IS an unknown name.
+        assert!(agent_remove(&session, "ghost").is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

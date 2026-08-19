@@ -115,6 +115,11 @@ pub struct ActivityEvent {
     /// `local` when it was typed at the keyboard. Empty for every other kind.
     #[serde(skip_serializing_if = "str::is_empty")]
     pub via: String,
+    /// `status` events only: the state the agent DECLARED. Kept apart from the
+    /// note for the same reason a tool's name is — the client renders the two
+    /// halves differently, and a note is the half a human reads.
+    #[serde(skip_serializing_if = "str::is_empty")]
+    pub state: String,
 }
 
 fn events() -> &'static Mutex<HashMap<String, std::collections::VecDeque<ActivityEvent>>> {
@@ -131,9 +136,17 @@ fn push_event_via(session: &str, window: usize, kind: &str, text: String, via: S
 }
 
 fn push_full(session: &str, window: usize, kind: &str, text: String, tool: String, via: String) {
+    push(
+        session,
+        ActivityEvent { ts: now_ms(), window, kind: kind.into(), text, tool, via, state: String::new() },
+    );
+}
+
+/// The one place the ring is appended to and trimmed.
+fn push(session: &str, ev: ActivityEvent) {
     let mut map = events().lock().unwrap();
     let q = map.entry(session.to_string()).or_default();
-    q.push_back(ActivityEvent { ts: now_ms(), window, kind: kind.into(), text, tool, via });
+    q.push_back(ev);
     while q.len() > EVENTS_CAP {
         q.pop_front();
     }
@@ -160,9 +173,29 @@ fn with_rec(session: &str, window: usize, f: impl FnOnce(&mut Rec)) {
 }
 
 /// `tmm status <state> [note]` — explicit declaration by the agent.
+///
+/// The NOTE is the point of this call. Turn boundaries are observed for free
+/// (hooks), so a state word tells us nothing we did not know; what the hooks
+/// cannot see is what the agent is actually doing, and that only exists if the
+/// agent says it. So the note goes into the ring as the event's TEXT, with the
+/// declared state alongside it, and the client renders it as a line the agent
+/// spoke rather than as a grey telemetry row (owner, 2026-08-19: "经常一直在做
+/// 但是没有同步状态").
 pub fn record_status(session: &str, window: usize, state: &str, note: &str) {
-    let text = if note.is_empty() { state.to_string() } else { format!("{state} — {note}") };
-    push_event(session, window, "status", text);
+    push(
+        session,
+        ActivityEvent {
+            ts: now_ms(),
+            window,
+            kind: "status".into(),
+            // Empty when there is no note, so a client can tell a REPORT from a
+            // bare claim without comparing the text to the state word.
+            text: note.to_string(),
+            tool: String::new(),
+            via: String::new(),
+            state: state.into(),
+        },
+    );
     let (state, note, ts) = (state.to_string(), note.to_string(), now());
     with_rec(session, window, |r| r.explicit = Some((state, note, ts)));
 }

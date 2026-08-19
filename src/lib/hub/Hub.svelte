@@ -831,12 +831,24 @@
                Starting one resumes its conversation, so it stays on the roster
                instead of vanishing from the room it belongs to. -->
           {#each stopped as name (name)}
-            <button class="acard off" disabled={acting} onclick={() => startAgent(name)} title={t('hubStartAgain')}>
+            <!-- A div for the same reason as the live card: the dot menu inside
+                 holds real buttons. Clicking the card starts it; removing it
+                 lives in the menu, because a stopped agent you are done with
+                 has to be ejectable — the slot is what keeps `up` recreating
+                 it (owner, 2026-08-19). -->
+            <div class="acard off" class:busy={acting} role="button" tabindex="0" title={t('hubStartAgain')}
+              onclick={() => !acting && startAgent(name)}
+              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (!acting) startAgent(name); } }}>
               <span class="ava dim">{name.slice(0, 1).toUpperCase()}</span>
               <span class="a-name">{name}</span>
               <span class="s-age">{t('hubStopped')}</span>
               <Icon name="refresh" size={11} />
-            </button>
+              <span class="a-more" role="button" tabindex="-1" title={t('hubMore')}
+                onclick={(e) => { e.stopPropagation(); menuFor = menuFor === name ? '' : name; }}
+                onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); menuFor = menuFor === name ? '' : name; } }}>
+                <Icon name="dots" size={13} />
+              </span>
+            </div>
           {/each}
           <!-- Ad hoc: add an agent to a conversation already in progress. -->
           {#if liveSelected}
@@ -850,18 +862,27 @@
       {#if menuFor}
         <!-- Actions for one agent. A bar rather than a popover inside the chip:
              the roster scrolls horizontally, and a scroll container clips
-             anything absolutely positioned inside it. -->
+             anything absolutely positioned inside it.
+
+             A stopped agent gets the two verbs that mean anything to it: start
+             it again, or eject it. Watch/Interrupt/Stop all need a live pane. -->
         <div class="a-bar">
           <span class="ab-who">{menuFor}</span>
-          <button onclick={() => { const a = managedAgents.find((x) => x.name === menuFor); menuFor = ''; if (a) openDrawer(a); }}>
-            <Icon name="terminal" size={12} />{t('hubWatch')}
-          </button>
-          <button title={t('hubInterruptHint')} onclick={() => { const n = menuFor; menuFor = ''; interrupt(n); }}>
-            <Icon name="x" size={12} />{t('hubInterrupt')}
-          </button>
-          <button class="danger" onclick={() => { const n = menuFor; menuFor = ''; askAction('stop', n); }}>
-            <Icon name="stop" size={12} />{t('hubStop')}
-          </button>
+          {#if stopped.includes(menuFor)}
+            <button disabled={acting} onclick={() => { const n = menuFor; menuFor = ''; startAgent(n); }}>
+              <Icon name="refresh" size={12} />{t('hubStartAgain')}
+            </button>
+          {:else}
+            <button onclick={() => { const a = managedAgents.find((x) => x.name === menuFor); menuFor = ''; if (a) openDrawer(a); }}>
+              <Icon name="terminal" size={12} />{t('hubWatch')}
+            </button>
+            <button title={t('hubInterruptHint')} onclick={() => { const n = menuFor; menuFor = ''; interrupt(n); }}>
+              <Icon name="x" size={12} />{t('hubInterrupt')}
+            </button>
+            <button class="danger" onclick={() => { const n = menuFor; menuFor = ''; askAction('stop', n); }}>
+              <Icon name="stop" size={12} />{t('hubStop')}
+            </button>
+          {/if}
           <button class="danger" title={t('hubRemoveHint')} onclick={() => { const n = menuFor; menuFor = ''; askAction('remove', n); }}>
             <Icon name="trash" size={12} />{t('hubRemove')}
           </button>
@@ -950,6 +971,20 @@
             <div class="prompt">
               <div class="p-head"><span class="p-who">{windowName(b.window)}</span><span class="p-tag">{t('hubPromptIn')}</span><span>{fmtTime(b.ts)}</span></div>
               <div class="p-body">{b.text}</div>
+            </div>
+          {:else if b.type === 'progress'}
+            <!-- What the agent says it is doing (`tmm status <state> "note"`).
+                 Hooks can see that a turn is open, never what it is about, so
+                 this is the only account of work in progress — it reads as a
+                 line the agent spoke, not as a telemetry row, and a blocked or
+                 waiting note carries the colour of something that needs a
+                 human. -->
+            <div class="prog" class:blocked={b.state === 'blocked' || b.state === 'waiting'}>
+              <span class="pg-bar" aria-hidden="true"></span>
+              <span class="pg-who">{windowName(b.window)}</span>
+              {#if b.state && b.state !== 'working'}<span class="pg-tag">{stateLabel(b.state)}</span>{/if}
+              <span class="pg-text">{b.text}</span>
+              <span class="pg-ts">{fmtTime(b.ts)}</span>
             </div>
           {:else if b.type === 'note'}
             <div class="note" class:warn={b.event.kind === 'warn'}>
@@ -1289,6 +1324,9 @@
   .acard.add:hover { color: var(--accent); }
   .acard.off { opacity: 0.55; }
   .acard.off:hover { opacity: 1; border-color: var(--accent); }
+  /* An action is in flight: the card stops taking clicks (the handler guards
+     too — this is the visible half of that). */
+  .acard.busy { opacity: 0.35; pointer-events: none; }
   .a-name { font-family: ui-monospace, Menlo, monospace; font-weight: 600; max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .s-age { color: var(--text3); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; font-family: ui-monospace, Menlo, monospace; }
   .st { width: 6px; height: 6px; border-radius: 50%; flex: none; }
@@ -1497,6 +1535,30 @@
   .note .n-ts { flex: none; margin-left: auto; opacity: 0.6; }
   .note.warn { color: var(--status-warn); }
   .note.warn :global(svg) { flex: none; align-self: center; }
+
+  /* A progress note: what the agent SAYS it is doing. Between a bubble and a
+     telemetry row on purpose — it is prose the agent chose to write, so it gets
+     the reading font and full-strength ink, but it is about work rather than
+     addressed to anyone, so it wears a lane bar instead of a bubble. */
+  .prog {
+    display: flex; align-items: baseline; gap: 8px; width: 100%; max-width: 100%;
+    font-size: var(--fs-sub); color: var(--text2);
+    padding: 3px 10px 3px 0; position: relative;
+  }
+  .pg-bar {
+    flex: none; align-self: stretch; width: 2px; min-height: 1em;
+    background: var(--accent); opacity: 0.55; border-radius: 2px; margin-right: 2px;
+  }
+  .pg-who { flex: none; font-family: ui-monospace, Menlo, monospace; font-weight: 650; color: var(--text3); }
+  .pg-tag {
+    flex: none; font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.6px;
+    color: var(--status-warn); border: 1px solid var(--status-warn); border-radius: 4px; padding: 0 3px;
+  }
+  .pg-text { min-width: 0; overflow-wrap: break-word; }
+  .pg-ts { flex: none; margin-left: auto; font-size: var(--fs-meta); color: var(--meta-ink); font-variant-numeric: tabular-nums; }
+  /* Waiting on a human is not the same colour as making progress. */
+  .prog.blocked .pg-bar { background: var(--status-warn); opacity: 0.9; }
+  .prog.blocked .pg-text { color: var(--text); }
 
   /* Collapsible run of tool calls between two replies. */
   /* Telemetry, not a bubble: the group spans the feed's full width so paths
