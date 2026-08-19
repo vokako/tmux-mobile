@@ -473,8 +473,8 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
         // Android/iOS, where these methods report method-not-found and the
         // client hides the page (same contract as the team_* methods).
         "project_list" | "project_create" | "project_adopt" | "project_up" | "project_down"
-        | "project_archive" | "project_delete" | "project_autostart"
-        | "registry_list" | "registry_save" | "registry_delete"
+        | "project_archive" | "project_delete" | "project_autostart" | "project_rename"
+        | "registry_list" | "registry_save" | "registry_delete" | "models_list"
         | "skills_list" | "skills_save" | "skills_delete" | "skills_refresh" | "skills_read"
         | "mcp_list" | "mcp_save" | "mcp_delete" => {
             handle_project_request(req.method.as_str(), id, p)
@@ -532,6 +532,10 @@ fn handle_project_request(method: &str, id: Option<u64>, p: &serde_json::Value) 
         }),
         "project_up" => need_id("id").and_then(|id| projects::up(&id)),
         "project_down" => need_id("id").and_then(|id| projects::down(&id)),
+        // The name is a label, so this touches nothing else: the session stays
+        // the project's identity and the chat room keeps its key.
+        "project_rename" => need_id("id")
+            .and_then(|id| need_id("name").and_then(|name| projects::rename(&id, &name))),
         // Archive hides and is reversible; delete forgets the project and wipes
         // the isolated homes of the agents it owned.
         "project_delete" => need_id("id").and_then(|id| projects::delete(&id)),
@@ -549,6 +553,17 @@ fn handle_project_request(method: &str, id: Option<u64>, p: &serde_json::Value) 
             None => Err("missing required param: def".into()),
         },
         "registry_delete" => need_id("name").and_then(|n| projects::registry_delete(&n)),
+        // The model ids a backend accepts, so the agent editor can offer them
+        // instead of letting a one-character typo through. `null` means the
+        // backend cannot enumerate them (claude/codex) — the field stays free
+        // text there.
+        "models_list" => {
+            let backend = p.get("backend").and_then(|v| v.as_str()).unwrap_or("kiro");
+            Ok(serde_json::json!({
+                "backend": backend,
+                "models": projects::models::list(backend),
+            }))
+        }
         // Central skills / MCP assets (owner: "集中化管理") — referenced from
         // agent defs by name, resolved at spawn.
         "skills_list" => projects::skills_list(),

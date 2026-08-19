@@ -393,6 +393,16 @@ impl Store {
             .map_err(|e| format!("check session: {e}"))
     }
 
+    /// Rename a project. `false` when no such row — a rename of nothing is a
+    /// caller error, not a silent no-op. Only the LABEL moves: `session` is the
+    /// project's identity (and the chat room's key), so it stays put.
+    pub fn set_name(&self, id: &str, name: &str) -> Result<bool, String> {
+        self.conn
+            .execute("UPDATE projects SET name = ?2 WHERE id = ?1", params![id, name])
+            .map(|n| n > 0)
+            .map_err(|e| format!("rename project: {e}"))
+    }
+
     pub fn set_archived(&self, id: &str, archived: bool, now: u64) -> Result<(), String> {
         let at = if archived { Some(now as i64) } else { None };
         self.conn

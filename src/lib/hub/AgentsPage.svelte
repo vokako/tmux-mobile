@@ -7,7 +7,7 @@
   import Icon from '../ui/Icon.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import { t } from '../core/i18n.svelte.ts';
-  import { registryList, registrySave, registryDelete, skillsList, skillsSave, skillsDelete, skillsRefresh, skillsRead, mcpList, mcpSave, mcpDelete } from '../core/ws.ts';
+  import { registryList, registrySave, registryDelete, modelsList, skillsList, skillsSave, skillsDelete, skillsRefresh, skillsRead, mcpList, mcpSave, mcpDelete } from '../core/ws.ts';
   import { renderMarkdown } from '../core/markdown.ts';
   import { backendColor } from '../hub/hub.ts';
 
@@ -24,6 +24,23 @@
   let editingMcp = $state(null);
   let mcpIsNew = $state(false);
   let error = $state('');
+
+  // The model ids the selected backend accepts, asked of the backend's own CLI
+  // (per backend, cached server-side). This is a suggestion list, not a
+  // restriction: an id we cannot enumerate is still typeable, and `registry_save`
+  // is the authority that rejects one the backend would silently ignore — a
+  // dashed `claude-sonnet-4-5` ran happily on the DEFAULT model instead
+  // (owner report, 2026-08-19).
+  let models = $state([]);
+  $effect(() => {
+    const backend = editing?.backend;
+    if (!backend) { models = []; return; }
+    let live = true;
+    modelsList(backend)
+      .then((r) => { if (live) models = r.models ?? []; })
+      .catch(() => { if (live) models = []; });
+    return () => { live = false; };
+  });
 
   async function reload() {
     try { defs = (await registryList()).agents ?? []; } catch { defs = []; }
@@ -287,7 +304,13 @@
             </select>
           </label>
           <label>{t('agentsModel')}
-            <input bind:value={editing.model} placeholder={t('agentsModelDefault')} />
+            <input bind:value={editing.model} placeholder={t('agentsModelDefault')}
+              list={models.length ? 'agent-model-ids' : undefined} />
+            {#if models.length}
+              <datalist id="agent-model-ids">
+                {#each models as m (m)}<option value={m}></option>{/each}
+              </datalist>
+            {/if}
           </label>
         </div>
         <label class="check">

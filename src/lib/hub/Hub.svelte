@@ -21,7 +21,7 @@
   import Icon from '../ui/Icon.svelte';
   import { t } from '../core/i18n.svelte.ts';
   import {
-    projectList, projectUp, projectDown, projectDelete, projectCreate, listSessionsWithPanes,
+    projectList, projectUp, projectDown, projectDelete, projectCreate, projectRename, listSessionsWithPanes,
     hubPost, hubLog, hubAgents, hubSpawn, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
@@ -444,6 +444,35 @@
     } catch (e) { console.warn('up failed', e); }
   }
 
+  // ── Renaming a project happens where you read its name: the chat header.
+  // A project is named by its NAME and identified by its SESSION, so this
+  // edits the label only — the room (`proj:<session>`) and the tmux session
+  // stay put, which is why the conversation survives a rename.
+  let renaming = $state(false);
+  let renameDraft = $state('');
+  let renameEl = $state(null);
+
+  function startRename() {
+    if (!selectedRow) return;
+    renameDraft = selectedRow.project.name;
+    renaming = true;
+  }
+  // Focus + select once the input exists, so typing replaces the old name.
+  $effect(() => {
+    if (renaming && renameEl) { renameEl.focus(); renameEl.select(); }
+  });
+  async function commitRename() {
+    if (!renaming || !selectedRow) return;
+    const name = renameDraft.trim();
+    const id = selectedRow.project.id;
+    renaming = false;
+    if (!name || name === selectedRow.project.name) return;
+    try {
+      await projectRename(id, name);
+      await reload();
+    } catch (e) { console.warn('rename failed', e); }
+  }
+
 
 
 
@@ -693,7 +722,28 @@
             <Icon name="menu" size={17} />
           </button>
         {/if}
-        <h1>{selectedRow?.project.name ?? ''}</h1>
+        <!-- The title IS the rename control: a project's name is the one thing
+             in this header you might want to change, and a second pencil button
+             would be a duplicate of the thing it edits. -->
+        {#if renaming}
+          <input class="h1-edit" bind:this={renameEl} bind:value={renameDraft}
+            aria-label={t('projectRename')} maxlength="80"
+            onkeydown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
+              else if (e.key === 'Escape') { e.preventDefault(); renaming = false; }
+            }}
+            onblur={commitRename} />
+        {:else}
+          <h1>
+            <!-- A real button, not a role on the heading: the heading stays a
+                 heading for assistive tech and Enter/Space come for free. -->
+            {#if selected}
+              <button class="h1-btn" title={t('projectRenameHint')} onclick={startRename}>
+                {selectedRow?.project.name ?? ''}
+              </button>
+            {:else}{selectedRow?.project.name ?? ''}{/if}
+          </h1>
+        {/if}
         {#if !compact}<span class="path">{shortPath(selectedRow?.project.path ?? '')}</span>{/if}
         <span class="spacer"></span>
         {#if selected}
@@ -1128,6 +1178,7 @@
      overflow. The page head wraps instead of pushing the chips off-screen. */
   .hub-root.compact .page-head { flex-wrap: wrap; row-gap: 6px; padding: 8px 12px; }
   .hub-root.compact .page-head h1 { font-size: var(--fs-title); }
+  .hub-root.compact .h1-edit { font-size: var(--fs-title); }
   .hub-root.compact .feed { padding: 14px 10px 18px; gap: 9px; }
   .hub-root.compact .msg, .hub-root.compact .prompt { max-width: 91%; }
   .hub-root.compact .composer { padding: 8px 9px calc(8px + env(safe-area-inset-bottom)); }
@@ -1143,6 +1194,25 @@
      fraction: the owner reached for that divider and nothing moved. The chat
      column takes the rest and keeps a floor so it can never be squeezed away. */
   .hub-root.drawer-open .cols { grid-template-columns: var(--sidebar-w) minmax(280px, 1fr) var(--hub-drawer-w, 520px); }
+  /* The project title, in its two states. The idle one only HINTS that it is
+     editable (cursor + a hover underline): a permanent box would make the
+     header look like a form. The edit one keeps the title's exact metrics so
+     nothing in the row shifts when it appears. */
+  .h1-btn {
+    font: inherit; color: inherit; background: none; border: 0; padding: 0;
+    max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    cursor: text; border-radius: 7px;
+  }
+  .h1-btn:hover { text-decoration: underline dotted var(--text3); text-underline-offset: 3px; }
+  .h1-btn:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+  .h1-edit {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: var(--fs-title); font-weight: 600; color: var(--text);
+    min-width: 0; flex: 0 1 auto; width: 22ch; max-width: 100%;
+    background: var(--bg2); border: 1px solid var(--accent-line); border-radius: 7px;
+    padding: 2px 6px; box-sizing: border-box;
+  }
+  .h1-edit:focus { outline: none; }
   .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--status-ok); flex: none; }
   .dot.off { background: var(--text3); }
 

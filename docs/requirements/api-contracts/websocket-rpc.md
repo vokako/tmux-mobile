@@ -109,7 +109,9 @@ Projects section hides itself when these return -32601. See
 | `project_up` | `id` | `{session, created_session, slots: [{window_name, status, error?}]}` |
 | `project_down` | `id` | `{session, live: false}` — kills the session, keeps the declaration |
 | `project_archive` | `id`, `archived?` | Hides/unhides without deleting |
+| `project_rename` | `id`, `name` | `{id, name}` — the LABEL only; the session (and so the chat room `proj:<session>`) is unchanged |
 | `project_autostart` | `id`, `autostart?` | Flag only; no boot integration yet |
+| `models_list` | `backend?` (default `kiro`) | `{backend, models}` — model ids the backend accepts, asked of its own CLI (cached). `models` is `null` when it cannot be enumerated (claude/codex), and the agent editor keeps free text |
 
 ### Project Hub (desktop-only — the `tmm` CLI's surface)
 One chat room per project on the bus (`proj:<session>`), agent status

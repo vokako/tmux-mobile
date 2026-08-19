@@ -62,6 +62,7 @@ USAGE (human or agent — self-management):
   tmm project list                    all projects
   tmm project create <path> [--name n] [--session s] [--with-agent kiro|claude|codex]
   tmm project up <session>            bring a project's tmux session up
+  tmm project rename <session> --name "New name"   rename the label (session unchanged)
   tmm project delete <session>        forget the project and delete its agents' homes
   tmm project down <session>          kill the session, keep the declaration
   tmm project archive <session>       remove from projects (session survives)
@@ -307,6 +308,19 @@ async fn main() {
                     proj.get("session").and_then(|v| v.as_str()).unwrap_or("?"),
                     proj.get("id").and_then(|v| v.as_str()).unwrap_or("?"));
             }
+        }
+        ("project", rest) if rest.first().map(String::as_str) == Some("rename") => {
+            // Renames the LABEL. The session is the project's identity (and the
+            // chat room's key), so it is deliberately untouched.
+            let Some(name) = rest.get(1).cloned() else {
+                fail(EXIT_USAGE, "project rename needs a session and a new name: tmm project rename <session> --name \"New name\"");
+            };
+            let Some(Some(new_name)) = flags.get("name").cloned() else {
+                fail(EXIT_USAGE, "project rename needs --name: tmm project rename <session> --name \"New name\"");
+            };
+            let id = resolve_project_id(&ctx, &name).await;
+            let r = rpc(&ctx, "project_rename", json!({ "id": id, "name": new_name })).await;
+            if ctx.json { println!("{r}"); } else { println!("✓ renamed {name} → {new_name}"); }
         }
         ("project", rest) if matches!(rest.first().map(String::as_str), Some("up" | "down" | "archive" | "delete")) => {
             let action = rest[0].clone();

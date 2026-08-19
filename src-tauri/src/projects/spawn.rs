@@ -46,6 +46,12 @@ pub struct SpawnRequest<'a> {
 pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
     let def = super::registry_get(req.agent)?
         .ok_or_else(|| format!("no agent named '{}' in the registry", req.agent))?;
+    // A model the backend does not know is not a runtime hiccup: kiro answers
+    // the first turn with "not available, use /model" and the agent is alive but
+    // mute — no reply, no auto-post, nothing for the app to notice. Registry
+    // defs saved before validation existed can still carry one, so refuse here
+    // too rather than open a window that cannot work.
+    super::models::validate(&def.backend, &def.model)?;
 
     // can_hire gate: when an AGENT asks, its own registry def must allow
     // hiring. A human caller (empty `by`) is always allowed.
@@ -381,9 +387,11 @@ fn codex_hooks(notify: &str) -> Value {
     })
 }
 
-/// Bring a managed agent's hooks up to date with this build, in place. Returns
-/// true when a file changed. Only the `hooks` key is touched: the prompt carries
-/// the agent's brief, which was given once at spawn and cannot be rebuilt here.
+/// Bring a managed agent's config up to date with this build, in place. Returns
+/// true when a file changed. Two things are ours to rewrite — the `hooks` key
+/// and a `--model` an older build left on the launch line; the prompt is not,
+/// because it carries the agent's brief, which was given once at spawn and
+/// cannot be rebuilt here.
 ///
 /// Called on every start (`hub_agent_restart`, and `reconcile` when a project
 /// comes up), so the app owns these configs rather than trusting whatever an
@@ -401,6 +409,7 @@ pub fn refresh_hooks(project_path: &str, window_name: &str) -> bool {
     let kiro = home.join("agents").join(format!("{window_name}.json"));
     if kiro.is_file() {
         changed |= patch_hooks(&kiro, kiro_hooks(&notifications.helper_command("kiro")));
+        changed |= migrate_launch_model(&home, &kiro);
     }
     let claude = home.join("settings.json");
     if claude.is_file() {
@@ -426,6 +435,64 @@ pub fn refresh_hooks(project_path: &str, window_name: &str) -> bool {
         changed = true;
     }
     changed
+}
+
+/// Move a `--model <id>` an older build put on the launch line into the agent
+/// config, where kiro actually honours it, and drop it from the recipe so the
+/// two cannot disagree. Exact information, so nothing is guessed: the id is
+/// read off the line that was really used.
+///
+/// Why it matters beyond tidiness: `refresh_hooks` also BACKFILLS recipes for
+/// pre-recipe agents, and that backfilled line has no `--model` at all — so an
+/// agent restarted through that path silently lost its model. Once the id is in
+/// the config it survives every start (`up`, restart, resume) because they all
+/// pass `--agent`.
+fn migrate_launch_model(home: &Path, config: &Path) -> bool {
+    let recipe_path = home.join("launch.json");
+    let Ok(text) = std::fs::read_to_string(&recipe_path) else { return false };
+    let Ok(mut recipe) = serde_json::from_str::<Value>(&text) else { return false };
+    let Some(cmd) = recipe.get("cmd").and_then(Value::as_str).map(str::to_string) else {
+        return false;
+    };
+    // Model ids never contain whitespace, so token splitting is exact here.
+    let mut tokens: Vec<&str> = cmd.split_whitespace().collect();
+    let Some(at) = tokens.iter().position(|t| *t == "--model") else { return false };
+    let model = tokens
+        .get(at + 1)
+        .map(|m| m.trim_matches('\'').trim_matches('"').to_string())
+        .filter(|m| !m.is_empty() && !m.starts_with('-'));
+    tokens.drain(at..(at + 2).min(tokens.len()));
+    recipe["cmd"] = json!(tokens.join(" "));
+    let recipe_written = std::fs::write(
+        &recipe_path,
+        serde_json::to_string_pretty(&recipe).unwrap_or(text),
+    )
+    .is_ok();
+    // Only fill a config that has no model of its own: a value already there
+    // came from a newer spawn (or the user) and outranks the old launch line.
+    let Some(model) = model else { return recipe_written };
+    // And only if the backend actually accepts it. An id it rejects was never
+    // the agent's model — kiro fell back to its default and said so above the
+    // splash — so carrying the typo into the config would turn a working agent
+    // into a mute one on its next restart. Dropping it preserves what was
+    // really running.
+    if let Err(e) = crate::projects::models::validate("kiro", &model) {
+        eprintln!("projects: dropping the launch line's model for a managed agent — {e}");
+        return recipe_written;
+    }
+    let config_written = std::fs::read_to_string(config)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|mut root| {
+            let obj = root.as_object_mut()?;
+            if obj.contains_key("model") {
+                return None;
+            }
+            obj.insert("model".into(), json!(model));
+            Some(std::fs::write(config, serde_json::to_string_pretty(&root).unwrap()).is_ok())
+        })
+        .unwrap_or(false);
+    recipe_written || config_written
 }
 
 /// Replace the `hooks` key of a JSON config, leaving everything else alone.
@@ -468,7 +535,7 @@ fn render_kiro(
             mcp_servers.as_object_mut().unwrap().insert(m.name.clone(), shared::kiro_mcp_value(m));
         }
     }
-    let conf = json!({
+    let mut conf = json!({
         "name": name,
         "description": format!("{} (registry agent)", def.name),
         "prompt": system_prompt,
@@ -478,16 +545,31 @@ fn render_kiro(
         "mcpServers": mcp_servers,
         "hooks": kiro_hooks(&notify),
     });
+    // The model belongs to the agent's IDENTITY, not to one launch of it. It
+    // used to ride on `--model`, which had two costs: it was invisible in the
+    // config the owner reads (`.tmm/agents/<name>/agents/<name>.json`), and
+    // kiro-cli's TUI answers an unknown id with a warning above the splash and
+    // then runs its DEFAULT model — so a typo'd id was a silent downgrade. In
+    // the config, kiro reports it as a real error on the first turn instead,
+    // and every later start (resume, restart, `up`) reads the same field.
+    // `registry_save` rejects unknown ids up front.
+    //
+    // An empty model means what the editor's placeholder says — the BACKEND's
+    // default — so the key is omitted rather than set to a hardcoded id (the
+    // old launch line pinned `claude-sonnet-4.6`, which silently contradicted
+    // the UI and would have outlived that model).
+    let model = def.model.trim();
+    if !model.is_empty() {
+        conf["model"] = json!(model);
+    }
     std::fs::write(home.join("agents").join(format!("{name}.json")), serde_json::to_string_pretty(&conf).unwrap())
         .map_err(|e| e.to_string())?;
 
-    let model = if def.model.is_empty() { "claude-sonnet-4.6" } else { &def.model };
     Ok(Rendered {
         env: vec![("KIRO_HOME".into(), home.to_string_lossy().to_string())],
         cmd: format!(
-            "command kiro-cli chat --agent {} --model {} --trust-all-tools",
+            "command kiro-cli chat --agent {} --trust-all-tools",
             shared::shell_quote(name),
-            shared::shell_quote(model),
         ),
         confirmation: None,
     })
@@ -619,11 +701,17 @@ mod tests {
     #[test]
     fn kiro_home_is_isolated_and_wired_to_tmm() {
         let dir = std::env::temp_dir().join(format!("tmm-spawn-kiro-{}", uuid::Uuid::new_v4()));
-        let d = def("kiro");
+        let mut d = def("kiro");
+        d.model = "claude-haiku-4.5".into();
         let r = render_kiro(&d, "tester", &dir, &build_prompt(&d, "tester", "proj", "fix the bug"), &[]).unwrap();
         assert!(r.env.iter().any(|(k, v)| k == "KIRO_HOME" && v.contains("tmm-spawn-kiro")), "home must be the isolated dir");
         let conf: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("agents/tester.json")).unwrap()).unwrap();
+        // The model lives in the CONFIG, not on the launch line: kiro's TUI
+        // treats an unknown `--model` as a warning and runs its default, so a
+        // flag made a wrong id invisible (owner report, 2026-08-19).
+        assert_eq!(conf.get("model").and_then(|m| m.as_str()), Some("claude-haiku-4.5"));
+        assert!(!r.cmd.contains("--model"), "no model on the launch line: {}", r.cmd);
         let prompt = conf.get("prompt").and_then(|p| p.as_str()).unwrap();
         assert!(prompt.contains("tmm send"), "the tmm paragraph IS the integration");
         assert!(prompt.contains("fix the bug"), "brief must reach the prompt");
@@ -708,6 +796,88 @@ mod tests {
         // A window with no isolated home is not ours to touch.
         assert!(!refresh_hooks(&ws.to_string_lossy(), "byhand"));
         let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    /// An empty model means the BACKEND's default — which is what the agent
+    /// editor's placeholder promises. The key is omitted rather than pinned to
+    /// a hardcoded id (the launch line used to force `claude-sonnet-4.6`).
+    #[test]
+    fn no_model_configured_leaves_the_backend_default_alone() {
+        let dir = std::env::temp_dir().join(format!("tmm-spawn-nomodel-{}", uuid::Uuid::new_v4()));
+        let mut d = def("kiro");
+        d.model = "   ".into();
+        let r = render_kiro(&d, "tester", &dir, "p", &[]).unwrap();
+        let conf: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("agents/tester.json")).unwrap()).unwrap();
+        assert!(conf.get("model").is_none(), "no key at all, not \"\" (kiro rejects that): {conf}");
+        assert!(!r.cmd.contains("--model"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Agents spawned by an older build carry their model on the launch line,
+    /// where kiro downgrades a wrong id silently — and where the recipe backfill
+    /// drops it entirely on restart. Every start moves it into the config once.
+    #[test]
+    fn a_launch_line_model_migrates_into_the_config() {
+        let ws = std::env::temp_dir().join(format!("tmm-modelmig-{}", uuid::Uuid::new_v4()));
+        let home = ws.join(".tmm/agents/dev");
+        std::fs::create_dir_all(home.join("agents")).unwrap();
+        let cfg = home.join("agents").join("dev.json");
+        std::fs::write(&cfg, serde_json::to_string_pretty(&json!({
+            "name": "dev",
+            "prompt": "You are dev.",
+            "hooks": {}
+        })).unwrap()).unwrap();
+        write_launch_recipe(
+            &home,
+            "kiro",
+            &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())],
+            "command kiro-cli chat --agent dev --model claude-haiku-4.5 --trust-all-tools",
+        );
+
+        assert!(refresh_hooks(&ws.to_string_lossy(), "dev"), "a stale config is rewritten");
+        let after: Value = serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(after.get("model").and_then(|m| m.as_str()), Some("claude-haiku-4.5"));
+        let recipe: Value =
+            serde_json::from_str(&std::fs::read_to_string(home.join("launch.json")).unwrap()).unwrap();
+        let cmd = recipe["cmd"].as_str().unwrap();
+        assert!(!cmd.contains("--model"), "the line must not keep a second opinion: {cmd}");
+        assert!(cmd.contains("--agent dev") && cmd.contains("--trust-all-tools"), "{cmd}");
+        // Idempotent, and a model already in the config outranks the line.
+        assert!(!refresh_hooks(&ws.to_string_lossy(), "dev"), "no needless writes");
+        std::fs::remove_dir_all(&ws).ok();
+    }
+
+    /// The migration must preserve what was really RUNNING, and an id the
+    /// backend rejects was never that: kiro fell back to its default. Carrying
+    /// such a typo into the config would turn a working agent into a mute one
+    /// on its next restart, so it is dropped — the line is still cleaned up.
+    #[test]
+    fn a_launch_line_model_the_backend_rejects_is_dropped_not_migrated() {
+        if super::super::models::list("kiro").is_none() {
+            eprintln!("kiro-cli unavailable — nothing can be rejected, skipping");
+            return;
+        }
+        let ws = std::env::temp_dir().join(format!("tmm-modelbad-{}", uuid::Uuid::new_v4()));
+        let home = ws.join(".tmm/agents/dev");
+        std::fs::create_dir_all(home.join("agents")).unwrap();
+        let cfg = home.join("agents").join("dev.json");
+        std::fs::write(&cfg, serde_json::to_string_pretty(&json!({ "name": "dev", "hooks": {} })).unwrap()).unwrap();
+        write_launch_recipe(
+            &home,
+            "kiro",
+            &[],
+            // The owner's real value: one character off `claude-sonnet-4.5`.
+            "command kiro-cli chat --agent dev --model claude-sonnet-4-5 --trust-all-tools",
+        );
+
+        refresh_hooks(&ws.to_string_lossy(), "dev");
+        let after: Value = serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
+        assert!(after.get("model").is_none(), "a rejected id must not reach the config: {after}");
+        let recipe: Value =
+            serde_json::from_str(&std::fs::read_to_string(home.join("launch.json")).unwrap()).unwrap();
+        assert!(!recipe["cmd"].as_str().unwrap().contains("--model"), "the line is cleaned up either way");
+        std::fs::remove_dir_all(&ws).ok();
     }
 
     #[test]

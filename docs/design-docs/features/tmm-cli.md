@@ -33,6 +33,7 @@ tmm agent list                       windows + agent detection + derived state
 tmm project list                     ● live / ○ down, session + path
 tmm project create <path> [--name n] [--session s] [--with-agent kiro|claude|codex]
 tmm project up|down|archive <session>
+tmm project rename <session> --name "New name"   the LABEL only (session unchanged)
 tmm registry list                    centrally-defined agents
 tmm registry save --name <n> --backend <b> [--system <text>] [--skills a,b] [--mcp <json>] [--can-hire]
 tmm registry delete <name>
@@ -260,6 +261,95 @@ seeded system prompt now tells agents not to announce that they are working.
 
 Four words is the whole set. A state nobody can point at an observation for is a
 state nobody should trust.
+
+## What lives in `<workspace>/.tmm` — three generations, one directory
+
+`.tmm/` is per-workspace runtime state, self-gitignored (`.tmm/.gitignore` is
+`*`, written by `ensure_gitignore` on the first spawn). It looks messy on an old
+checkout because three features have written into it, and only two of them are
+current:
+
+| Path | Owner | Status |
+| --- | --- | --- |
+| `.tmm/agents/<window_name>/` | **Projects / agents-v2** (`projects::spawn`) | current |
+| `.tmm/teams/<team-id>/{kiro,claude,codex}/` | **Team** (`team::workspace`) | current |
+| `.tmm/kiro-home/`, `.tmm/heartbeat.sh`, `.tmm/keepalive.sh` | Team, pre-multi-team layout | legacy, read-only |
+
+An **agent home** (`.tmm/agents/<window_name>/`) is the whole identity of one
+managed agent, and its shape is dictated by the backend it wraps:
+
+```
+.tmm/agents/builder-2/
+  agents/builder-2.json     # kiro agent config: prompt, model, tools, mcpServers, hooks
+  settings/cli.json         # kiro CLI settings (trust-all confirmation off)
+  sessions/cli/*.jsonl      # kiro's own conversation store, inside OUR home
+  launch-builder-2.sh       # the launch line, sourced by the pane (never send-keys'd — >2KB gets eaten)
+  launch.json              # the recipe a restart replays: env + identity command
+```
+
+The directory name is the **tmux window name**, not the registry def name:
+spawning `builder` twice gives windows `builder` and `builder-2`, hence two
+homes. That name is the agent's identity everywhere — telemetry, `tmm status`,
+`@mentions` — and `projects::managed_home` / `is_managed_in` is the ONE function
+that turns it back into this path (see "Managed vs direct windows").
+
+For claude the same directory holds `mcp.json` + `settings.json` (passed with
+`--mcp-config` / `--settings`); for codex it is `codex/` as `CODEX_HOME` plus
+`codex/hooks.json`.
+
+Nothing here is hand-written and nothing needs backing up: `spawn` materializes
+it from the registry def, `refresh_hooks` repairs it on every start,
+`agent_remove` deletes one home, and `project_delete` deletes all of them. The
+legacy row in the table is the only part that is neither written nor migrated
+any more — `team::workspace` still *reads* `.tmm/kiro-home` so an old team keeps
+working, and new teams go to `.tmm/teams/<team-id>/`. Deleting the legacy paths
+on a workspace whose teams have been re-created costs nothing.
+
+## The model belongs in the agent config, not on the launch line
+
+A registry def's `model` used to be pasted onto kiro's launch line as
+`--model <id>`, with an empty def falling back to a hardcoded
+`claude-sonnet-4.6`. Two failures came out of that, both silent:
+
+* **A wrong id downgraded instead of failing.** kiro-cli's TUI prints
+  `Model 'x' does not exist` above the splash screen and then starts on its
+  DEFAULT model, so `claude-sonnet-4-5` — one character off the real
+  `claude-sonnet-4.5` — produced an agent that answered normally on the wrong
+  model. (In `--no-interactive` mode the same flag is a hard error, which is why
+  this was never seen in a script.) Owner report, 2026-08-19: "kiro 里配置的模型
+  好像没有生效".
+* **The model was invisible where the owner looked for it.** It was in
+  `launch.json` and in the pane's scrollback, not in
+  `.tmm/agents/<name>/agents/<name>.json` — the file that otherwise IS the
+  agent.
+
+So `render_kiro` writes `"model": "<id>"` into the agent config (a first-class
+field of kiro's agent schema — verified: a bogus value there is reported as a
+real error on the first turn, not swallowed) and the launch line carries only
+`--agent`. Three things follow:
+
+* Every start reads the same field, because they all pass `--agent`: first
+  launch, `up`, `hub_agent_restart`, `--resume-id`. The pre-recipe backfill in
+  `refresh_hooks` used to drop the model entirely on restart; there is nothing
+  left to drop.
+* `refresh_hooks` migrates one `--model` off an old recipe into the config and
+  strips it from the line, so the two can never hold different opinions. The id
+  is read off the line that really ran — nothing is guessed — and an id the
+  backend REJECTS is dropped rather than migrated: it was never the agent's
+  model (kiro was running its default), so carrying the typo forward would turn
+  a working agent into a mute one on its next restart.
+* An empty `model` means what the editor's placeholder says, the BACKEND's
+  default, and the key is omitted. The old hardcoded `claude-sonnet-4.6`
+  contradicted that placeholder and would have outlived the model.
+
+Validation is where the app can still say something useful: `projects::models`
+asks `kiro-cli chat --list-models -f json` (cached 10 min) and both
+`registry_save` and `spawn` reject an id the backend does not know, listing the
+ones it does. The list is never hardcoded — model ids change weekly — and
+everything degrades soft: no CLI, no login, or unparsable output all mean
+"cannot know", and an unknown id is accepted rather than blocking a save.
+`models_list` exposes the same list to the agent editor as a datalist. claude
+and codex take aliases nobody can enumerate, so their field stays free text.
 
 ## Config drift: the app owns managed agent configs
 

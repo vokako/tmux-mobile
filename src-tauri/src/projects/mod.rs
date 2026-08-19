@@ -10,6 +10,7 @@
 
 pub mod agents;
 pub mod capture;
+pub mod models;
 pub mod reconcile;
 pub mod spawn;
 pub mod store;
@@ -366,6 +367,27 @@ pub fn down(id: &str) -> Result<Value, String> {
     Ok(json!({ "session": project.session, "live": false }))
 }
 
+/// Rename a project — the LABEL only.
+///
+/// A project is named by its name and identified by its session (see
+/// `create`), and three things are keyed on that session: the row's UNIQUE
+/// column, the tmux session the declaration projects onto, and the chat room
+/// `proj:<session>`. So renaming the session would silently orphan the
+/// conversation and leave a live session no project claims; the name is the
+/// part a user actually reads, and it is the part that moves.
+pub fn rename(id: &str, name: &str) -> Result<Value, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("project name must not be empty".into());
+    }
+    with_store(|store| {
+        if !store.set_name(id, name)? {
+            return Err(format!("no project with id '{id}'"));
+        }
+        Ok(json!({ "id": id, "name": name }))
+    })
+}
+
 pub fn set_archived(id: &str, archived: bool) -> Result<Value, String> {
     with_store(|store| {
         store.set_archived(id, archived, now())?;
@@ -459,6 +481,10 @@ pub fn registry_save(def: &Value) -> Result<Value, String> {
     // Validate the JSON columns now, not at spawn time.
     serde_json::from_str::<Vec<String>>(&agent.skills).map_err(|e| format!("skills must be a JSON array of refs: {e}"))?;
     serde_json::from_str::<Vec<Value>>(&agent.mcp).map_err(|e| format!("mcp must be a JSON array of defs: {e}"))?;
+    // Same rule for the model, and for a sharper reason: a backend that does
+    // not know the id does not fail, it falls back to its default and says so
+    // in a line nobody reads. See `models`.
+    models::validate(&agent.backend, &agent.model)?;
     with_store(|store| {
         store.reg_save(&agent, now())?;
         Ok(json!({ "ok": true, "name": agent.name }))
@@ -837,6 +863,35 @@ pub(crate) mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&other);
+    }
+
+    /// Renaming moves the LABEL and nothing else. The session is the identity
+    /// (`UNIQUE`, the tmux session, and the chat room key `proj:<session>`), so
+    /// a rename that touched it would orphan the conversation and leave a live
+    /// session no project claims.
+    #[test]
+    fn renaming_a_project_moves_the_label_and_leaves_its_session_alone() {
+        use_test_store();
+        let dir = std::env::temp_dir().join(format!("tmm-rename-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let made = create(&dir.to_string_lossy(), Some("Old Name"), None, None).unwrap();
+        let id = made["id"].as_str().unwrap().to_string();
+        let session = made["session"].as_str().unwrap().to_string();
+
+        let out = rename(&id, "  New Name  ").unwrap();
+        assert_eq!(out["name"].as_str(), Some("New Name"), "trimmed");
+        let after = with_store(|store| store.project(&id)).unwrap().unwrap();
+        assert_eq!(after.name, "New Name");
+        assert_eq!(after.session, session, "identity must not move");
+
+        // An empty name is a mistake, not a way to clear the label.
+        assert!(rename(&id, "   ").is_err());
+        assert_eq!(with_store(|store| store.project(&id)).unwrap().unwrap().name, "New Name");
+        // Renaming something that does not exist is the caller's error, not a
+        // silent no-op.
+        assert!(rename("no-such-project", "x").is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

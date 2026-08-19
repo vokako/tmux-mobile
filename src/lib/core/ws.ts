@@ -728,6 +728,11 @@ export const projectCreate = (path: string, opts: { name?: string; session?: str
 export const projectAdopt = (session: string, name?: string) => call('project_adopt', { session, name });
 export const projectUp = (id: string) => call('project_up', { id });
 export const projectDown = (id: string) => call('project_down', { id });
+/** Rename a project's LABEL. Its tmux session — its identity, and the key of
+ * its chat room — deliberately stays as it is, so the conversation follows the
+ * rename instead of being orphaned by it. */
+export const projectRename = (id: string, name: string) =>
+  call<{ id: string; name: string }>('project_rename', { id, name });
 export const projectArchive = (id: string, archived = true) => call('project_archive', { id, archived });
 /** Forget a project: kills its session and deletes its agents' isolated homes.
  * `projectArchive` is the reversible "hide it" verb; this one is not. */
@@ -804,6 +809,11 @@ export interface RegAgent {
 export const registryList = () => call<{ agents: RegAgent[] }>('registry_list');
 export const registrySave = (def: RegAgent) => call('registry_save', { def });
 export const registryDelete = (name: string) => call('registry_delete', { name });
+/** The model ids a backend accepts. `models` is null where the backend cannot
+ * enumerate them (claude/codex take aliases), and the editor keeps the field as
+ * free text in that case. */
+export const modelsList = (backend: string) =>
+  call<{ backend: string; models: string[] | null }>('models_list', { backend });
 // Central skills / MCP assets — referenced from agent defs by name.
 export interface RegSkill {
   name: string;

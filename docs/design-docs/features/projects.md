@@ -110,6 +110,20 @@ caught exactly that.
 The reverse direction, `capture.rs`, is why nobody hand-writes a project: a
 20-second loop folds live tmux back into the declaration.
 
+### Renaming touches the label and nothing else
+
+`project_rename` (RPC, `projects::rename`, `tmm project rename <session>
+--name`) updates `projects.name`. The Hub's chat header IS the control: the
+title is a button that becomes an input in place, Enter/blur commits, Escape
+cancels — a project's name is the one thing in that header you might want to
+change, so a separate pencil button would just duplicate the thing it edits.
+
+The session is deliberately not part of it. Three things hang off that string —
+the `UNIQUE` column, the tmux session the declaration projects onto, and the
+chat room id `proj:<session>` — so renaming it would orphan the conversation and
+leave a live tmux session no project claims. Names are for reading; the session
+is the identity (see above).
+
 ## The capture rule
 
 **A window must survive `SETTLE_SECS` (120 s) before it becomes restorable.**
