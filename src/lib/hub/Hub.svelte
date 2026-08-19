@@ -26,7 +26,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette } from './hub.ts';
+  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette, ctxColor } from './hub.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
@@ -516,10 +516,13 @@
     if (v.branch) parts.push(v.branch);
     return parts.join(' · ');
   }
-  /** kiro's own warning threshold for context usage — the point where its status
-   * line turns the number amber. Borrowing it keeps one meaning of "getting
-   * full" across the two surfaces. */
-  const CTX_WARN = 60;
+  /** The card's share of the reading: what makes THIS agent different from its
+   * neighbours. The branch and cwd are project-wide, so they stay in the tooltip
+   * and the menu — repeating them on every card would be chrome, not data. */
+  function cardVitals(v) {
+    if (!v) return '';
+    return [v.model, v.effort].filter(Boolean).join(' · ');
+  }
 
   /** Choosing a recipient is also choosing this project's lead: it is the same
    * decision ("who am I working with here"), so it persists. */
@@ -1018,26 +1021,35 @@
               title={[`${a.name} · ${stateLabel(a.state)}`, a.detail, vitalsLine(a.vitals)].filter(Boolean).join(' · ')}
               onclick={() => setRecipient(a.name)}
               onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setRecipient(a.name); } }}>
-              <span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>
-              <span class="a-name">{a.name}</span>
-              <span class="st" class:live={a.state === 'running'} style:background={stateDotColor(a.state)}></span>
-              {#if a.since}<span class="s-age">{fmtElapsed(a.since, tick)}</span>{/if}
-              <!-- Context used, from the agent's own status line. It is here and
-                   not in the menu because it is the one number you want BEFORE
-                   you go looking: a context about to auto-compact changes what
-                   you should ask for. Amber at kiro's own threshold. -->
-              {#if !compact && a.vitals?.context_pct != null}
-                <span class="ctx" class:warn={a.vitals.context_pct >= CTX_WARN}
-                  title={t('hubCtxUsed')}>{a.vitals.context_pct}%</span>
+              <div class="ac-top">
+                <span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>
+                <span class="a-name">{a.name}</span>
+                <span class="st" class:live={a.state === 'running'} style:background={stateDotColor(a.state)}></span>
+                {#if a.since}<span class="s-age">{fmtElapsed(a.since, tick)}</span>{/if}
+                {#if unread.has(a.name)}<span class="unread" title={t('hubUnread')}></span>{/if}
+                <!-- Destructive and secondary actions stay behind a dot menu: a
+                     roster is for seeing who is here, not a row of hazards. -->
+                <span class="a-more" role="button" tabindex="-1" title={t('hubMore')}
+                  onclick={(e) => { e.stopPropagation(); toggleAgentMenu(a.name, e.currentTarget); }}
+                  onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); toggleAgentMenu(a.name, e.currentTarget); } }}>
+                  <Icon name="dots" size={13} />
+                </span>
+              </div>
+              <!-- What the agent's own status line says, kept ON the card rather
+                   than behind the menu ("这个直接常驻显示吧 可以字号小一点"). Model
+                   and effort only: the branch is the same for every agent in a
+                   project, so on a card it is noise. -->
+              {#if cardVitals(a.vitals)}<div class="ac-vitals">{cardVitals(a.vitals)}</div>{/if}
+              <!-- Context used as a thin colour-changing line at the card's own
+                   bottom edge ("百分比用一个细长会变颜色的进度条示意 一个细横线就
+                   行"): a percentage you read at a glance, costing no row and no
+                   vertical space. The exact number stays in the tooltip and the
+                   menu header, where a number is what you came for. -->
+              {#if a.vitals?.context_pct != null}
+                <div class="ac-bar" title={`${a.vitals.context_pct}% · ${t('hubCtxUsed')}`}>
+                  <i style:width="{a.vitals.context_pct}%" style:background={ctxColor(a.vitals.context_pct)}></i>
+                </div>
               {/if}
-              {#if unread.has(a.name)}<span class="unread" title={t('hubUnread')}></span>{/if}
-              <!-- Destructive and secondary actions stay behind a dot menu: a
-                   roster is for seeing who is here, not a row of hazards. -->
-              <span class="a-more" role="button" tabindex="-1" title={t('hubMore')}
-                onclick={(e) => { e.stopPropagation(); toggleAgentMenu(a.name, e.currentTarget); }}
-                onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); toggleAgentMenu(a.name, e.currentTarget); } }}>
-                <Icon name="dots" size={13} />
-              </span>
             </div>
           {/each}
           <!-- Stopped agents: declared by the project, no window right now.
@@ -1052,15 +1064,17 @@
             <div class="acard off" class:busy={acting} role="button" tabindex="0" title={t('hubStartAgain')}
               onclick={() => !acting && startAgent(name)}
               onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (!acting) startAgent(name); } }}>
-              <span class="ava dim">{name.slice(0, 1).toUpperCase()}</span>
-              <span class="a-name">{name}</span>
-              <span class="s-age">{t('hubStopped')}</span>
-              <Icon name="refresh" size={11} />
-              <span class="a-more" role="button" tabindex="-1" title={t('hubMore')}
-                onclick={(e) => { e.stopPropagation(); toggleAgentMenu(name, e.currentTarget); }}
-                onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); toggleAgentMenu(name, e.currentTarget); } }}>
-                <Icon name="dots" size={13} />
-              </span>
+              <div class="ac-top">
+                <span class="ava dim">{name.slice(0, 1).toUpperCase()}</span>
+                <span class="a-name">{name}</span>
+                <span class="s-age">{t('hubStopped')}</span>
+                <Icon name="refresh" size={11} />
+                <span class="a-more" role="button" tabindex="-1" title={t('hubMore')}
+                  onclick={(e) => { e.stopPropagation(); toggleAgentMenu(name, e.currentTarget); }}
+                  onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); toggleAgentMenu(name, e.currentTarget); } }}>
+                  <Icon name="dots" size={13} />
+                </span>
+              </div>
             </div>
           {/each}
           <!-- Ad hoc: add an agent to a conversation already in progress. -->
@@ -1560,15 +1574,33 @@
   .cards { display: flex; gap: 6px; padding: 8px 14px; overflow-x: auto; border-bottom: 1px solid var(--border2); scrollbar-width: none; }
   .cards::-webkit-scrollbar { display: none; }
   .acard {
-    position: relative; flex: none; display: flex; align-items: center; gap: 6px;
+    position: relative; flex: none; display: flex; flex-direction: column;
+    align-items: stretch; justify-content: center; gap: 1px; overflow: hidden;
     min-height: 34px; background: var(--surface); border: 1px solid var(--border);
     border-radius: 9px; padding: 4px 10px 4px 5px; cursor: pointer; text-align: left;
     font-size: var(--fs-ui); color: var(--text2); transition: border-color var(--t-fast), color var(--t-fast);
     -webkit-tap-highlight-color: transparent;
   }
+  /* The identity row — what the card used to be in its entirety. */
+  .ac-top { display: flex; align-items: center; gap: 6px; }
+  /* The sniffed reading: the smallest step on the scale, in monospace so a model
+     id and a percentage do not reflow as they change. */
+  .ac-vitals {
+    font-size: var(--fs-micro); color: var(--meta-ink); line-height: 1.35;
+    font-family: ui-monospace, Menlo, monospace; padding: 0 1px 1px 5px;
+    max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* One thin horizontal line at the card's bottom edge. Absolute, so it costs no
+     height and cannot push the roster taller as it appears. */
+  .ac-bar {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+    background: var(--pill-bg); border-radius: 0 0 8px 8px; overflow: hidden;
+  }
+  .ac-bar > i { display: block; height: 100%; transition: width var(--t-move), background var(--t-move); }
   .acard:hover { border-color: var(--input-border); color: var(--text); }
   .acard.sel { border-color: var(--accent-line); background: var(--accent-bg); color: var(--text); }
-  .acard.add { color: var(--text3); padding-right: 12px; }
+  /* The `+` card holds one row of two items — it never grew a second line. */
+  .acard.add { flex-direction: row; align-items: center; gap: 6px; color: var(--text3); padding-right: 12px; }
   .acard.add:hover { color: var(--accent); }
   .acard.off { opacity: 0.55; }
   .acard.off:hover { opacity: 1; border-color: var(--accent); }
@@ -1927,13 +1959,6 @@
     padding: 6px 10px; font-size: var(--ui-font-control); cursor: pointer; font-family: ui-monospace, Menlo, monospace;
   }
   .to-menu button:hover { background: var(--surface2); color: var(--text); }
-  /* Sniffed vitals are subordinate telemetry: monospace so a percentage does not
-     jitter as it changes, and the meta ink so they never compete with the name. */
-  .ctx {
-    flex: none; font-size: var(--fs-meta); color: var(--meta-ink);
-    font-family: ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums;
-  }
-  .ctx.warn { color: var(--warn, #d98d2b); }
   .am-vitals {
     padding: 0 9px 6px; margin-top: -3px; font-size: var(--fs-meta); color: var(--text3);
     font-family: ui-monospace, Menlo, monospace; max-width: 240px;

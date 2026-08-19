@@ -572,10 +572,25 @@ rules follow from reading a screen rather than an API:
   earlier status line in its scrollback.
 
 Managed agents only (their status line's shape is one we materialized), one
-`capture-pane` per agent, capped at four per project. The client shows the context
-percentage on the roster card — amber at kiro's own 60% threshold, because a
-context about to auto-compact changes what you should ask for — and the whole
-reading in the agent's menu header and the card's tooltip.
+`capture-pane` per agent, capped at four per project.
+
+**On the card, permanently, and the percentage is a line rather than a number**
+("这个直接常驻显示吧 可以字号小一点 百分比用一个细长会变颜色的进度条示意 一个细横线
+就行", 2026-08-19). Each roster card carries the model and effort on a second line
+at the smallest step of the type scale (`--fs-micro`, monospace so an id or a
+percentage does not reflow as it changes), and the context usage is a 2px line at
+the card's own bottom edge — absolute, so it costs no height and cannot make the
+roster taller as agents appear. The branch and cwd stay in the tooltip and the menu
+header: they are the same for every agent in a project, so on a card they would be
+chrome rather than data, and the exact number belongs where a number is what you
+came for.
+
+`ctxColor()` (pure, tested) returns a THEME EXPRESSION, not a colour: every stop is
+one of the app's four status tokens and the ramp is a `color-mix` between them, so
+it is correct in both themes and follows the palette if it changes. The two anchors
+are kiro's own — green until 20%, amber by 60% (its warning threshold) — and past
+that it continues into `hot` and `danger`, because a context above 85% is about to
+force a compact, which is a thing to see coming rather than discover.
 
 ## Who a message goes to
 

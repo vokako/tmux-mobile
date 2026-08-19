@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS } from './hub.ts';
+import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -588,4 +588,26 @@ test('an interactive view is not offered — it would park the agent in a panel'
   assert.ok(commandPalette('/model ', ['auto'])?.items.some((i) => i.value === 'auto'));
   // `/agent` offers only `swap`: create/edit open $EDITOR in the pane.
   assert.deepEqual(commandPalette('/agent ', [])?.items.map((i) => i.value), ['swap']);
+});
+
+test('ctxColor ramps through the theme tokens, never a raw colour', () => {
+  // Every value must be expressed in the app's status tokens: a raw hex here
+  // would be right in one theme and wrong in the other.
+  for (const pct of [0, 1, 20, 21, 42, 60, 61, 85, 86, 100, -5, 999, NaN]) {
+    const c = ctxColor(pct);
+    assert.ok(c.includes('var(--status-'), `${pct} → ${c}`);
+    assert.ok(!/#[0-9a-f]{3}/i.test(c), `${pct} → ${c} must not carry a literal colour`);
+  }
+  // kiro's own anchors: green up to 20%, amber by 60%.
+  assert.equal(ctxColor(0), 'var(--status-ok)');
+  assert.equal(ctxColor(20), 'var(--status-ok)');
+  assert.equal(ctxColor(60), 'color-mix(in srgb, var(--status-warn) 100%, var(--status-ok))');
+  // Past the warning threshold it keeps going: hot, then danger.
+  assert.ok(ctxColor(70).includes('--status-hot'));
+  assert.ok(ctxColor(95).includes('--status-danger'));
+  assert.equal(ctxColor(100), 'color-mix(in srgb, var(--status-danger) 100%, var(--status-hot))');
+  // Out-of-range and garbage clamp instead of producing a broken expression.
+  assert.equal(ctxColor(-5), 'var(--status-ok)');
+  assert.equal(ctxColor(NaN), 'var(--status-ok)');
+  assert.equal(ctxColor(999), ctxColor(100));
 });
