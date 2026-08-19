@@ -1174,7 +1174,11 @@
                       onclick={(e) => { e.stopPropagation(); msgOpen = msgOpen === key ? '' : key; }}>
                       <span class="m-time">{fmtTime(m.ts)}</span>
                       {#if m.from === 'human'}
-                        <span class="m-state" class:ok={b.delivered} title={t('hubDeliveredHint')}>
+                        <!-- Hollow does not mean failed: a busy agent QUEUES the
+                             line and accepts it when its turn ends, so the two
+                             states need two different explanations. -->
+                        <span class="m-state" class:ok={b.delivered}
+                          title={b.delivered ? t('hubDeliveredHint') : t('hubPendingHint')}>
                           <Icon name={b.delivered ? 'circle-check' : 'circle'} size={11} />
                         </span>
                       {/if}

@@ -33,9 +33,11 @@ const EXPLICIT_TTL_SECS: u64 = 30 * 60;
 /// How long a line we typed into a pane may wait for its `userPromptSubmit`
 /// echo before we call the delivery unconfirmed. Typing is `send-keys`, which
 /// succeeds as long as the pane exists — it says nothing about whether the CLI
-/// accepted the text as a prompt (a busy agent queues it, a shell would have
-/// executed it, a crashed pane swallows it). The hook echo is the only
-/// end-to-end proof, so an unacked line is reported rather than assumed.
+/// accepted the text as a prompt (a shell would have executed it, a crashed pane
+/// swallows it). The hook echo is the only end-to-end proof, so an unacked line
+/// is reported rather than assumed. The clock does NOT run while a turn is open:
+/// a busy agent QUEUES what we typed by design, so it is measured from the turn's
+/// end (see `delivery_overdue`).
 const DELIVERY_ACK_SECS: u64 = 45;
 /// Prompt text kept per event. Long enough for a real instruction, short
 /// enough that 120 of them stay a cheap in-memory ring.
@@ -277,6 +279,39 @@ pub fn record_prompt(session: &str, window: usize, prompt: &str) -> bool {
     acked
 }
 
+/// Is a typed line overdue for its echo? Pure, so the rule is testable.
+///
+/// A QUEUED line is not a lost line. An agent that is mid-turn holds what we
+/// typed in its input queue — kiro says so on screen ("Type to queue") — and
+/// submits it when the turn ends, which for a long turn is many minutes later.
+/// Warning about that was warning about the system working: the owner saw
+/// perfectly good messages marked unconfirmed ("有一些queue的指令，没办法马上
+/// confirm，这个不用立刻就unconfirm", 2026-08-19).
+///
+/// So the ack clock does not run while a turn is OPEN — `running` (working) or
+/// `waiting` (blocked on a permission answer) both mean the queue is holding it.
+/// It starts at the turn's END, giving the CLI the same 45 s from the moment it
+/// could actually submit the line. A line typed into an idle agent is unchanged:
+/// its clock starts when we typed it.
+fn delivery_overdue(rec: &Rec, now: u64) -> bool {
+    let Some((_, typed_ts)) = rec.pending.as_ref().map(|(l, t)| (l.clone(), *t)) else {
+        return false;
+    };
+    // activity_ts 0 on purpose: pane repaints must not keep a line pending
+    // forever, and a window with no hook facts can never ack one anyway.
+    if matches!(derive_from(rec, 0, now).state.as_str(), "running" | "waiting") {
+        return false;
+    }
+    let turn_end = rec
+        .end
+        .as_ref()
+        .map(|(_, t)| *t)
+        .unwrap_or(0)
+        .max(rec.done.as_ref().map(|(_, t)| *t).unwrap_or(0));
+    let reference = typed_ts.max(turn_end.min(now));
+    now.saturating_sub(reference) >= DELIVERY_ACK_SECS
+}
+
 /// Report deliveries that never came back as a prompt. Called before a client
 /// reads the feed, which is exactly when the answer is wanted; a swept line is
 /// cleared so the warning is emitted once.
@@ -287,11 +322,10 @@ pub fn sweep_deliveries(session: &str) {
         map.iter_mut()
             .filter(|((s, _), _)| s == session)
             .filter_map(|((_, w), r)| {
-                let (line, ts) = r.pending.clone()?;
-                if now.saturating_sub(ts) < DELIVERY_ACK_SECS {
+                if !delivery_overdue(r, now) {
                     return None;
                 }
-                r.pending = None;
+                let (line, _) = r.pending.take()?;
                 Some((*w, line))
             })
             .collect()
@@ -430,6 +464,64 @@ mod tests {
 
     fn rec() -> Rec {
         Rec::default()
+    }
+
+    // ── Delivery acknowledgement: when is a typed line actually overdue?
+
+    /// The owner's report: a line typed at a BUSY agent is queued by its CLI and
+    /// submitted when the turn ends, so warning after 45 s was warning about the
+    /// system working as designed.
+    #[test]
+    fn a_queued_line_is_not_an_unconfirmed_line() {
+        let mut r = rec();
+        r.prompt = Some(1000); // a turn is open — the agent is working
+        r.pending = Some(("@builder-2 do the thing".into(), 1010));
+        // Ten minutes later the turn is STILL running. Nothing is overdue: the
+        // line is sitting in the agent's input queue where we put it.
+        assert!(!delivery_overdue(&r, 1010 + 600));
+        // Blocked on a permission answer is the same situation: the queue holds
+        // the line until the human answers.
+        let mut asking = r.clone();
+        asking.ask = Some(("permission_required".into(), 1100));
+        assert!(!delivery_overdue(&asking, 1100 + 600));
+    }
+
+    #[test]
+    fn the_clock_starts_when_the_turn_ends() {
+        let mut r = rec();
+        r.prompt = Some(1000);
+        r.pending = Some(("@builder-2 do the thing".into(), 1010));
+        r.end = Some(("completed".into(), 2000)); // the turn ended much later
+        // The CLI gets the full window from the moment it could submit, not from
+        // the moment we typed — 990 s after typing is still not overdue.
+        assert!(!delivery_overdue(&r, 2000 + DELIVERY_ACK_SECS - 1));
+        assert!(delivery_overdue(&r, 2000 + DELIVERY_ACK_SECS));
+    }
+
+    #[test]
+    fn a_line_typed_at_an_idle_agent_keeps_its_own_clock() {
+        let mut r = rec();
+        r.prompt = Some(500);
+        r.end = Some(("completed".into(), 600)); // idle since 600
+        r.pending = Some(("@builder-2 hello".into(), 1000)); // typed later
+        assert!(!delivery_overdue(&r, 1000 + DELIVERY_ACK_SECS - 1));
+        assert!(delivery_overdue(&r, 1000 + DELIVERY_ACK_SECS), "an idle agent had its chance");
+    }
+
+    #[test]
+    fn a_hookless_window_is_still_swept() {
+        // No hook facts at all (a hand-started codex, a backend without hooks):
+        // it can never ack, and pane repaints must not keep the line pending
+        // forever — the warning is the only signal the owner would get.
+        let mut r = rec();
+        r.pending = Some(("@codex hello".into(), 1000));
+        assert!(!delivery_overdue(&r, 1000 + 10));
+        assert!(delivery_overdue(&r, 1000 + DELIVERY_ACK_SECS));
+    }
+
+    #[test]
+    fn nothing_pending_is_never_overdue() {
+        assert!(!delivery_overdue(&rec(), 9999));
     }
 
     /// The bug this machine replaced: an agent that had just answered kept

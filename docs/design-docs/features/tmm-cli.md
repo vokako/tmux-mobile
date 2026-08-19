@@ -442,6 +442,23 @@ line with the agent's own half-typed text attached), and `sweep_deliveries`
 reports the ones still pending after 45 s as a `warn` event. The sweep runs
 when a client reads `hub_activity`, which is exactly when the answer is wanted.
 
+**The ack clock does not run while a turn is open.** A queued line is not a lost
+line: an agent that is mid-turn holds what we typed in its input queue — kiro says
+so on screen ("Type to queue") — and submits it when the turn ends, which for a
+long turn is many minutes later. Sweeping on typing-time alone therefore warned
+about the system working as designed, and the owner watched perfectly good
+messages turn unconfirmed ("有一些queue的指令，没办法马上confirm，这个不用立刻就
+unconfirm", 2026-08-19). `delivery_overdue` (pure, tested) skips a window whose
+derived state is `running` or `waiting` — both mean the queue is holding the line,
+the second because a permission prompt suspends the turn — and otherwise measures
+from the LATER of the typing time and the turn's end, so the CLI gets the full
+window from the moment it could actually submit. Two cases must keep their old
+behaviour, and both are tests: a line typed at an IDLE agent keeps its own clock
+(it had its chance), and a window with no hook facts at all is still swept (it can
+never ack, and pane repaints must not keep a line pending forever). Client side the
+hollow ring now says what it means — "a busy agent queues it and accepts it when
+its turn ends" — because hollow never meant failed.
+
 Delivery reaches MANAGED windows only. `projects::managed_home` /
 `is_managed_in` is the one definition of "an agent this app created" — the
 isolated home `spawn` materialized, never the window name — and three gates
