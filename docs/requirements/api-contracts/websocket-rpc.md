@@ -122,9 +122,14 @@ humans) and the desktop hub UI. See
 | Method | Params | Response |
 |--------|--------|----------|
 | `hub_post` | `session`, `body`, `from?` (default `human`), `requires_reply?` | The stored message |
-| `hub_log` | `session`, `since_ts?` (exclusive, epoch ms), `limit?` | `{messages: […]}` |
+| `hub_log` | `session`, `since_ts?` (exclusive, epoch ms), `limit?` | `{messages: […]}` — archived messages are filtered out |
+| `hub_rooms` | — (the one hub method with no `session`) | `{rooms: {"<room>": ts_ms}}` — newest message per room, one grouped query; orders the project sidebar by conversation |
+| `hub_msg_archive` | `session`, `ids[]` | `{archived: n}` — HIDES messages (they stay in team.db, so `hub_log` filters them out on the way). Reversible, so no confirmation |
+| `hub_msg_restore` | `session`, `ids[]` | `{restored: n}` — take them back out of the archive |
+| `hub_msg_purge` | `session`, `ids[]` | `{deleted: n}` — forgets them for good: deletes from team.db first, then drops the archive rows |
+| `hub_archive` | `session` | `{messages: [{id, ts, from, body, archived_at}]}` — what is hidden, newest first; each row carries its own copy of the message |
 | `hub_status` | `session`, `agent` (window name), `state` (`working\|waiting\|blocked`), `note?` | `{ok, window}` |
-| `hub_done` | `session`, `agent`, `summary?` | `{ok, window}` — also posts `✔ done` to the room |
+| `hub_done` | `session`, `agent`, `summary?` | `{ok, window}` — a summary is posted as `[tmm done] <summary>` FROM THE AGENT (a message, not app narration); a summary-less done posts the `[tmm] done` lifecycle line |
 | `hub_command` | `session`, `agent` (window name or `all`), `text` (must start with `/`) | `{sent: [names], command}` — types the text VERBATIM into the managed agent's pane (no stamp, no sender): slash commands are read by the CLI, not the model. Recorded in the room as a `[tmm] ` lifecycle line |
 | `hub_agents` | `session` | `{agents: [{window, name, command, agent, managed, state, detail, since, vitals}]}` — `vitals` is `{model, context_pct, effort, branch}` SNIFFED from the last lines of a managed agent's pane (a CLI's live state has no API): every field may be null, and `vitals` itself is null when nothing could be read |
 
