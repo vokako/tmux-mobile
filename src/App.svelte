@@ -18,7 +18,7 @@
   import { teamState } from './lib/core/team.svelte.ts';
   import { applyMonoVar } from './lib/app/fonts.svelte.ts';
   import { normalizeUiZoom, stepUiZoom, UI_ZOOM_DEFAULT } from './lib/app/ui-zoom.ts';
-  import { defaultPage, restorePage } from './lib/app/nav-state.ts';
+  import { defaultPage, restorePage, retarget } from './lib/app/nav-state.ts';
   import { createReconnectMachine } from './lib/app/reconnect.ts';
   import { cycleItem, shortcutFromEvent } from './lib/app/shortcuts.ts';
   import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.ts';
@@ -520,6 +520,26 @@
     const handler = () => { if (theme === 'system') applyTheme(); };
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
+  });
+
+  // A project rename renames its tmux session, so every target that names the
+  // old session stops resolving — including the one on screen. Remap them in
+  // place instead of dropping the user on a dead pane.
+  $effect(() => {
+    const onRenamed = (e) => {
+      const { from, to } = e.detail ?? {};
+      if (!from || !to || from === to) return;
+      const move = (target) => retarget(target ?? '', from, to);
+      if (terminalSession === from) terminalSession = to;
+      terminalTarget = move(terminalTarget);
+      splitCells = splitCells.map((c) => ({
+        ...c,
+        session: c.session === from ? to : c.session,
+        target: move(c.target),
+      }));
+    };
+    window.addEventListener('project-renamed', onRenamed);
+    return () => window.removeEventListener('project-renamed', onRenamed);
   });
 
   // Persist nav state for restore on reload. It used to save ONLY when a

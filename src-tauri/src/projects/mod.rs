@@ -393,21 +393,27 @@ pub fn rename(id: &str, name: &str) -> Result<Value, String> {
         // The tmux SESSION follows the name, because it is the name the Terminal
         // and `tmux ls` show — leaving it behind made one project wear two names
         // (owner, 2026-08-19: "没有改tmux session的名字 所以在terminal显示不对").
-        // An ADOPTED session keeps the name its owner gave it: we did not choose
-        // it and renaming someone else's session is not ours to do.
+        //
+        // This used to skip ADOPTED projects, on the theory that their session
+        // name is their owner's and not ours to change. That was wrong HERE:
+        // `auto_adopt_once` adopts every untracked session automatically — it is
+        // the migration path and the "every session is a project" rule — so
+        // `adopted` mostly means "the app found it before it was declared", not
+        // "a human chose this name". On the owner's own machine 2 of 4 projects
+        // were adopted, including the one they were renaming, so the exception
+        // silently disabled the feature exactly where it was wanted ("tmux不能改
+        // 名字吗", 2026-08-19). A rename typed into our UI IS the instruction.
         let mut session = project.session.clone();
         let mut renamed_session = false;
-        if !project.adopted {
-            let wanted = free_session_name(store, &slug(name), id)?;
-            if wanted != project.session {
-                // tmux first: if it refuses (the name is taken by a session no
-                // project claims), the declaration must not drift away from it.
-                let live = tmux::session_exists(&project.session);
-                if !live || tmux::rename_session(&project.session, &wanted).is_ok() {
-                    store.set_session(id, &wanted, &project.session)?;
-                    session = wanted;
-                    renamed_session = true;
-                }
+        let wanted = free_session_name(store, &slug(name), id)?;
+        if wanted != project.session {
+            // tmux first: if it refuses (the name is taken by a session no
+            // project claims), the declaration must not drift away from it.
+            let live = tmux::session_exists(&project.session);
+            if !live || tmux::rename_session(&project.session, &wanted).is_ok() {
+                store.set_session(id, &wanted, &project.session)?;
+                session = wanted;
+                renamed_session = true;
             }
         }
         store.mark_seen(id, ts)?;
@@ -973,10 +979,11 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// An ADOPTED project runs on a session its owner named. We did not choose
-    /// that name, so a rename relabels the project and leaves tmux alone.
+    /// An ADOPTED project is renamed like any other. `adopted` is set by
+    /// `auto_adopt_once` for every session the app finds untracked, so treating
+    /// it as "a human named this" made the rename a no-op on most real projects.
     #[test]
-    fn renaming_an_adopted_project_leaves_its_session_alone() {
+    fn an_adopted_project_is_renamed_like_any_other() {
         use_test_store();
         let dir = std::env::temp_dir().join(format!("tmm-rename-adopted-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -999,11 +1006,17 @@ pub(crate) mod tests {
 
         let out = rename("adopted-1", "A Better Label").unwrap();
         assert_eq!(out["name"].as_str(), Some("A Better Label"));
-        assert_eq!(out["session"].as_str(), Some("hand-made"), "not ours to rename");
-        assert_eq!(out["session_renamed"].as_bool(), Some(false));
+        assert_eq!(out["session"].as_str(), Some("a-better-label"), "adopted renames too");
+        assert_eq!(out["session_renamed"].as_bool(), Some(true));
         let after = with_store(|store| store.project("adopted-1")).unwrap().unwrap();
-        assert_eq!(after.session, "hand-made");
+        assert_eq!(after.session, "a-better-label");
         assert_eq!(after.name, "A Better Label");
+        // The old name still resolves, and the room never moved.
+        assert_eq!(
+            project_for_session("hand-made").unwrap().map(|p| p.id).as_deref(),
+            Some("adopted-1"),
+        );
+        assert_eq!(after.room, "proj:hand-made");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

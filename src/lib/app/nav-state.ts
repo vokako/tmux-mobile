@@ -26,3 +26,16 @@ export function restorePage(saved: unknown, isTouchDevice: boolean): Page {
     ? (saved as Page)
     : defaultPage(isTouchDevice);
 }
+
+/**
+ * Retarget a `session:window.pane` reference after its session was renamed.
+ *
+ * A project rename renames the tmux session, so every saved target that names the
+ * old one stops resolving — including the pane currently on screen. Only an exact
+ * session-name prefix is rewritten: `old:1.0` moves, `older:1.0` does not, and a
+ * target for some other session is returned untouched.
+ */
+export function retarget(target: string, from: string, to: string): string {
+  if (!target || !from || !to || from === to) return target;
+  return target.startsWith(`${from}:`) ? `${to}:${target.slice(from.length + 1)}` : target;
+}

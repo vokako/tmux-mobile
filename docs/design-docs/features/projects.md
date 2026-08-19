@@ -140,14 +140,24 @@ it:
   the session it projects onto. `free_session_name` picks a free name first, so
   this is the belt to that braces.
 
-An **adopted** project is the exception: its session name is the one its owner
-gave it, we did not choose it, and renaming someone else's session is not ours to
-do — the label moves, tmux does not, and `session_renamed` comes back false.
+There is no exception for **adopted** projects, and the first version's was a
+mistake worth remembering: it skipped them on the theory that their session name
+is their owner's. But `auto_adopt_once` adopts every untracked session
+automatically — that is the migration path and the "every session is a project"
+rule — so `adopted` mostly means "the app found it before it was declared", not "a
+human chose this name". On the owner's own machine 2 of 4 projects were adopted,
+including the one being renamed, so the exception silently disabled the feature
+exactly where it was asked for ("tmux不能改名字吗", 2026-08-19). A rename typed
+into our UI is the instruction; nothing else needs consulting.
 
-Client-side, everything keyed by the session name follows: the Hub re-selects the
+Client-side, everything keyed by the session name follows. The Hub re-selects the
 project under its new name and `hubPrefs.renameSession` moves the remembered lead
-and the read marker, which are keyed by session and would otherwise be silently
-dropped.
+and the read marker (both keyed by session). The Terminal is the case that cannot
+be reached from there: it may be showing `<old session>:<window>.<pane>`, which
+stops resolving the instant tmux renames the session, so the Hub dispatches a
+`project-renamed` event and App remaps the live target and every split cell
+through `retarget` (pure, tested — only an exact session-name prefix moves, so
+`older:1.0` is left alone).
 
 ## The capture rule## The capture rule
 

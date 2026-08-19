@@ -533,6 +533,12 @@
       // and the feed reloads under the new key.
       if (res?.session && res.session !== was) {
         hubPrefs.renameSession(was, res.session);
+        // The Terminal may be pointing at `<old session>:<win>.<pane>`, which
+        // stops resolving the moment tmux renames the session. Nothing here can
+        // reach that state, so say it out loud and let App remap.
+        window.dispatchEvent(new CustomEvent('project-renamed', {
+          detail: { from: was, to: res.session },
+        }));
         await reload();
         await selectProject(res.session);
         return;

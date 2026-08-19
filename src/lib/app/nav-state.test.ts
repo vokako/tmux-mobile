@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PAGES, defaultPage, restorePage } from './nav-state.ts';
+import { PAGES, defaultPage, restorePage, retarget } from './nav-state.ts';
 
 test('a saved tab is restored, and only a known one', () => {
   for (const p of PAGES) {
@@ -20,4 +20,17 @@ test('anything else falls back to the device default', () => {
   }
   assert.equal(defaultPage(true), 'terminal');
   assert.equal(defaultPage(false), 'hub');
+});
+
+test('retarget follows a renamed session, and only that session', () => {
+  assert.equal(retarget('old:1.0', 'old', 'new'), 'new:1.0');
+  assert.equal(retarget('old:12.3', 'old', 'renamed-probe'), 'renamed-probe:12.3');
+  // A name that merely STARTS with the old one is a different session.
+  assert.equal(retarget('older:1.0', 'old', 'new'), 'older:1.0');
+  assert.equal(retarget('other:1.0', 'old', 'new'), 'other:1.0');
+  // Nothing to do, nothing broken.
+  const noops: [string, string, string][] = [
+    ['', 'old', 'new'], ['old:1.0', '', 'new'], ['old:1.0', 'old', ''], ['old:1.0', 'x', 'x'],
+  ];
+  for (const [target, from, to] of noops) assert.equal(retarget(target, from, to), target);
 });
