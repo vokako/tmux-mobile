@@ -18,6 +18,10 @@
     value = $bindable(''),
     options = [] as (string | Option)[],
     disabled = false,
+    /** Match the denser field dialect (Team's template editor) instead of the
+     * default one (the agent editor's inputs). A dropdown that lines up with
+     * neither is what "左右和上方没有对齐" looked like. */
+    dense = false,
     placeholder = '',
     ariaLabel = '',
     onchange = (_v: string) => {},
@@ -37,7 +41,7 @@
   /** Keyboard cursor while open; -1 until the user arrows. */
   let cursor = $state(-1);
 
-  const pos = $derived(anchor ? menuPlacement(anchor, { w: menuW, h: menuH }, viewBox()) : { x: 0, y: 0 });
+  const pos = $derived(anchor ? menuPlacement(anchor, { w: menuW, h: menuH }, viewBox(), 4) : { x: 0, y: 0 });
 
   function show() {
     if (disabled || !triggerEl) return;
@@ -54,9 +58,11 @@
     onchange(v);
   }
 
-  // The menu is at least as wide as the field, so opening it does not make the
-  // choice look like it belongs to something else.
-  const minW = $derived(anchor ? Math.round(anchor.right - anchor.left) : 0);
+  // EXACTLY as wide as the field: with the menu right-aligned to the trigger,
+  // equal widths make both edges line up, which is what a field-shaped picker
+  // has to do. A max-width clamp would break that on the wide side, so the only
+  // clamp is menuPlacement's viewport one.
+  const fieldW = $derived(anchor ? Math.round(anchor.right - anchor.left) : 0);
 
   // Dismissal, on everything that means "I moved on": a click elsewhere,
   // Escape, a scroll under the anchor, a resize.
@@ -91,7 +97,7 @@
   });
 </script>
 
-<button class="sel-trigger" class:open bind:this={triggerEl} type="button"
+<button class="sel-trigger" class:open class:dense bind:this={triggerEl} type="button"
   {disabled} aria-haspopup="listbox" aria-expanded={open} aria-label={ariaLabel || undefined}
   onclick={() => (open ? hide() : show())}>
   <span class="sel-value" class:ph={!label}>{label || placeholder}</span>
@@ -100,7 +106,7 @@
 
 {#if open}
   <div class="sel-menu" class:ready={menuH > 0} role="listbox" tabindex="-1"
-    style:left="{pos.x}px" style:top="{pos.y}px" style:min-width="{minW}px"
+    style:left="{pos.x}px" style:top="{pos.y}px" style:width="{fieldW}px"
     bind:clientWidth={menuW} bind:clientHeight={menuH}>
     {#each norm as o, i (o.value)}
       <button class="sel-opt" class:sel={o.value === value} class:cur={i === cursor}
@@ -117,14 +123,25 @@
 <style>
   /* The trigger wears the app's INPUT dialect, so a dropdown sits in a form
      next to text fields without announcing itself as a different species. */
+  /* Metrically IDENTICAL to the app's text inputs — same padding, radius, type
+     step and line box — so a dropdown in a form row lines up with the field
+     beside it on every edge. */
   .sel-trigger {
     display: flex; align-items: center; gap: 6px; width: 100%;
     background: var(--input-bg); border: 1px solid var(--input-border);
-    border-radius: 9px; padding: 8px 10px; color: var(--text);
-    font-size: var(--fs-ui); font-family: inherit; cursor: pointer; text-align: left;
+    border-radius: 9px; padding: 8px 12px; color: var(--text);
+    font-size: var(--fs-body); font-family: inherit;
+    /* `normal`, not a ratio: an <input> computes its line box from `normal`,
+       so matching the keyword is what makes the two boxes the same height.
+       Inheriting the page's 1.5 made the trigger ~4px taller than the field
+       next to it, which is the misalignment the owner saw. */
+    line-height: normal;
+    cursor: pointer; text-align: left;
     transition: border-color var(--t-fast) ease;
     -webkit-tap-highlight-color: transparent;
   }
+  /* The other field dialect in the app (Team's template editor). */
+  .sel-trigger.dense { padding: 6px 9px; border-radius: 7px; font-size: var(--fs-ui); }
   .sel-trigger:hover:not(:disabled), .sel-trigger.open { border-color: var(--accent); }
   .sel-trigger:disabled { opacity: 0.5; cursor: default; }
   .sel-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -133,7 +150,7 @@
 
   /* Same popover dialect as the Hub's menus: one menu language app-wide. */
   .sel-menu {
-    position: fixed; z-index: 40; max-width: min(86vw, 320px); max-height: 46vh; overflow-y: auto;
+    position: fixed; z-index: 40; max-height: 46vh; overflow-y: auto;
     background: var(--bg); border: 1px solid var(--border); border-radius: 11px;
     box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45); padding: 5px;
     display: flex; flex-direction: column; gap: 2px;

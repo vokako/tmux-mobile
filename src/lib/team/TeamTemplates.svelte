@@ -301,7 +301,7 @@
             <div class="ag-row">
               <div class="ag-col">
                 <span class="ag-flabel">{t('teamBackend')}</span>
-                <Select bind:value={ag.backend} options={BACKENDS}
+                <Select bind:value={ag.backend} options={BACKENDS} dense
                   ariaLabel={t('teamBackend')} onchange={markDirty} />
               </div>
               <label class="ag-manage" title={t('teamManagerHint')}>
