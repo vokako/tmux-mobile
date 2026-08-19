@@ -14,7 +14,7 @@ use std::path::Path;
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 8;
+const SCHEMA_VERSION: i64 = 9;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
@@ -334,9 +334,105 @@ impl Store {
                 )
                 .map_err(|e| format!("migrate to 8: {e}"))?;
         }
+        if version < 9 {
+            // v9: the activity log becomes durable. Tool calls, prompts, receipts
+            // and status notes lived in a 120-entry in-memory ring, so a server
+            // restart erased every tool lane in the conversation while the
+            // messages around them survived — a feed with holes in it (owner,
+            // 2026-08-19: "后台的工具调用 status之类的是不是没有持久化，好像重启就
+            // 没了"). One flat table, written fail-soft: telemetry may never
+            // block the thing it observes.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE activity (
+                       id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                       session TEXT NOT NULL,
+                       window  INTEGER NOT NULL,
+                       ts      INTEGER NOT NULL,
+                       kind    TEXT NOT NULL,
+                       text    TEXT NOT NULL DEFAULT '',
+                       tool    TEXT NOT NULL DEFAULT '',
+                       via     TEXT NOT NULL DEFAULT '',
+                       state   TEXT NOT NULL DEFAULT ''
+                     );
+                     CREATE INDEX activity_session_ts ON activity(session, ts);",
+                )
+                .map_err(|e| format!("migrate to 9: {e}"))?;
+        }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| format!("set user_version: {e}"))
+    }
+
+    // ---- activity log ---------------------------------------------------
+
+    /// Append one observed event. Called on every hook, so it stays a single
+    /// INSERT and its failure is the caller's to ignore.
+    pub fn insert_activity(
+        &self,
+        session: &str,
+        window: usize,
+        ts: u64,
+        kind: &str,
+        text: &str,
+        tool: &str,
+        via: &str,
+        state: &str,
+    ) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO activity (session, window, ts, kind, text, tool, via, state)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                rusqlite::params![session, window as i64, ts as i64, kind, text, tool, via, state],
+            )
+            .map(|_| ())
+            .map_err(|e| format!("insert activity: {e}"))
+    }
+
+    /// Events newer than `since_ts` (ms, exclusive), oldest first. `limit` caps
+    /// the NEWEST end: a first load wants the tail of a long history, not its
+    /// head, so the rows are selected descending and then reversed.
+    pub fn activity_since(
+        &self,
+        session: &str,
+        since_ts: u64,
+        limit: usize,
+    ) -> Result<Vec<(usize, u64, String, String, String, String, String)>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT window, ts, kind, text, tool, via, state FROM activity
+                 WHERE session = ?1 AND ts > ?2 ORDER BY ts DESC, id DESC LIMIT ?3",
+            )
+            .map_err(|e| format!("prepare activity: {e}"))?;
+        let rows = stmt
+            .query_map(rusqlite::params![session, since_ts as i64, limit as i64], |r| {
+                Ok((
+                    r.get::<_, i64>(0)? as usize,
+                    r.get::<_, i64>(1)? as u64,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, String>(5)?,
+                    r.get::<_, String>(6)?,
+                ))
+            })
+            .map_err(|e| format!("query activity: {e}"))?;
+        let mut out: Vec<_> = rows.filter_map(Result::ok).collect();
+        out.reverse();
+        Ok(out)
+    }
+
+    /// Keep the newest `keep` events of a session and forget the rest. A log
+    /// nobody prunes is a log that eventually costs more than it is worth.
+    pub fn prune_activity(&self, session: &str, keep: usize) -> Result<usize, String> {
+        self.conn
+            .execute(
+                "DELETE FROM activity WHERE session = ?1 AND id NOT IN
+                   (SELECT id FROM activity WHERE session = ?1 ORDER BY id DESC LIMIT ?2)",
+                rusqlite::params![session, keep as i64],
+            )
+            .map_err(|e| format!("prune activity: {e}"))
     }
 
     // ---- projects -------------------------------------------------------
@@ -1042,5 +1138,44 @@ mod tests {
         // v6 assets exist and are usable on a migrated db.
         store.skill_save(&RegSkill { name: "s".into(), source: "github.com/x/y".into(), description: String::new(), synced_at: None }, 1).unwrap();
         assert_eq!(store.skills_list().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn the_activity_log_survives_and_stays_bounded() {
+        let store = Store::open_memory().unwrap();
+        for n in 0..5u64 {
+            store
+                .insert_activity("s1", 3, 1000 + n, "tool", &format!("file{n}.rs"), "Edit", "", "")
+                .unwrap();
+        }
+        // Another session's rows never leak into this one's feed.
+        store.insert_activity("s2", 1, 1002, "tool", "other.rs", "Read", "", "").unwrap();
+
+        let all = store.activity_since("s1", 0, 100).unwrap();
+        assert_eq!(all.len(), 5);
+        assert_eq!(all.first().unwrap().1, 1000, "oldest first");
+        assert_eq!(all.last().unwrap().1, 1004);
+        assert_eq!(all[0].2, "tool");
+        assert_eq!(all[0].4, "Edit", "the tool name is kept apart from its detail");
+
+        // `since_ts` is exclusive — the client's cursor must not replay a row.
+        let tail = store.activity_since("s1", 1002, 100).unwrap();
+        assert_eq!(tail.len(), 2);
+        assert_eq!(tail[0].1, 1003);
+
+        // A limit takes the NEWEST rows: a first load wants the tail of a long
+        // history, not its beginning.
+        let capped = store.activity_since("s1", 0, 2).unwrap();
+        assert_eq!(capped.len(), 2);
+        assert_eq!(capped[0].1, 1003);
+        assert_eq!(capped[1].1, 1004);
+
+        // Pruning keeps the newest and only touches this session.
+        let dropped = store.prune_activity("s1", 2).unwrap();
+        assert_eq!(dropped, 3);
+        let left = store.activity_since("s1", 0, 100).unwrap();
+        assert_eq!(left.len(), 2);
+        assert_eq!(left[0].1, 1003);
+        assert_eq!(store.activity_since("s2", 0, 100).unwrap().len(), 1);
     }
 }

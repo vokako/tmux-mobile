@@ -679,27 +679,58 @@ called `tmm done` itself.
 ## The activity feed (telemetry in the chat timeline)
 
 The chat shows what agents SAID; around that, the Hub weaves in what we
-OBSERVED. Mechanically it is `telemetry::recent_events` — an in-memory ring
-(120/session) fed by the same recorders that drive status derivation, exposed
-as `hub_activity { session, since_ts }` with ms timestamps so the client merges
-it directly into the message timeline. It is deliberately NOT chat history:
-nothing touches the bus db and the ring dies with the server.
+OBSERVED. Mechanically it is `telemetry::recent_events`, fed by the same
+recorders that drive status derivation and exposed as
+`hub_activity { session, since_ts }` with ms timestamps so the client merges it
+directly into the message timeline.
 
-Five event kinds: `tool`, `status` (a `tmm status` note, with the declared
-`state` alongside it), `notif`, `prompt` (a prompt the agent accepted,
-`via: app | local`) and `warn` (a line that was never echoed back).
+**It is DURABLE.** It used to be an in-memory ring (120/session) that died with
+the server, which meant a restart erased every tool lane in the conversation while
+the messages around them survived — a feed with holes in it (owner, 2026-08-19:
+"后台的工具调用 status之类的是不是没有持久化，好像重启就没了"). The `activity`
+table (state.db v9) is now the record, and the ring is what is left when there is
+no database. Three rules keep an observer from becoming a burden:
 
-**A `tmm status` note is the only account of work in progress, so it is a row.**
-The hooks bracket a turn but say nothing about what it is FOR, and the owner's
-symptom was exactly that: "经常一直在做但是没有同步状态" (2026-08-19). So the
-note — not the state word — is the payload: `record_status` puts it in the
-event's `text` with the state in a `state` field, and the client renders it as a
-line the agent spoke (`progress` block, the agent's name plus its sentence),
-visible at EVERY detail level and never a tool-lane boundary (the agent wrote it
-in the middle of the run it describes, so closing the lane there would fragment
-it). A note-less claim is dropped instead: `running`/`idle` is derived from
-observation and is more trustworthy than a word the agent typed. `waiting` and
-`blocked` notes get the attention colour, because those ask for a human.
+- **Writing is FAIL-SOFT.** `push` inserts and ignores the result. Telemetry may
+  never block or break the thing it observes, so a locked or read-only database
+  costs you the history, not the tool call.
+- **Reading takes the TAIL.** A first load (`since_ts` 0) returns the newest
+  `LOAD_EVENTS` rows, oldest-first, because what the user is looking at is the end
+  of the conversation. A cursor read returns everything after it.
+- **It prunes itself.** Every `PRUNE_EVERY` inserts, a session is trimmed to
+  `KEEP_EVENTS`. A log nobody prunes eventually costs more than it is worth.
+
+Both halves are OFF under `cfg(test)`: unit tests exercise the ring and the derive
+rules, and the SQL is tested directly in `store.rs`, so `cargo test` cannot write
+rows for invented sessions into the developer's real state.db.
+
+Four event kinds: `tool`, `notif`, `prompt` (a prompt the agent accepted,
+`via: app | local`) and `warn` (a line that was never echoed back). A `tmm status`
+note is NOT among them — see below.
+
+**A `tmm status` note is a MESSAGE from the agent.** The hooks bracket a turn but
+say nothing about what it is FOR, and the owner's symptom was exactly that: "经常
+一直在做但是没有同步状态" (2026-08-19). So the note — not the state word — is the
+payload, and the form it takes is the agent speaking: `hub_status` posts
+`[tmm status <state>] <note>` to the room from the AGENT ("status要用agent发送消息
+的形式显示", 2026-08-19). That is not only what it looks like, it is what makes it
+last: the room is the record, so a note outlives a restart the way a reply does,
+and there is exactly ONE copy of it (it is no longer also an event, which would
+have shown the same sentence twice).
+
+Three things make the form safe. The post is **record-only**, so `deliver_mentions`
+never runs on it — an `@name` inside a note must not type into a peer's pane, which
+is invariant 2 of the hook-sourced posts. A **note-less claim posts nothing**:
+`running`/`idle` is derived from observation and beats a word the agent typed, so a
+bare state word would be an empty message. And the marker is deliberately not
+`[tmm] `: that prefix means "the app is narrating" and folds into a grey `sys` row,
+which is the treatment this note was moved out of.
+
+Client side, `statusNote()` (pure, tested) takes the marker off and the bubble
+renders one notch quieter — same shape, so the feed stays one visual language —
+with the attention border for `waiting`/`blocked`, because those ask for a human.
+`record_status` still keeps the explicit claim in the status record: that is the
+part only it can answer, and `derive_from` needs it for `waiting`.
 
 The other half is the prompt, since a channel nobody is told to use stays empty.
 `build_prompt` now leads with `tmm status working "<what you are doing right

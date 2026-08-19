@@ -99,6 +99,17 @@ fn now_ms() -> u64 {
 /// calls / status changes between the final replies) — an in-memory ring,
 /// NOT chat history: it never touches the bus db and dies with the server.
 const EVENTS_CAP: usize = 120;
+/// How many events one session keeps in the durable log. A busy turn is tens of
+/// rows, so this is days of history at a few hundred KB.
+const KEEP_EVENTS: usize = 2000;
+/// Inserts between prunes. Pruning is a scan, and the cap is about boundedness,
+/// not an exact length.
+const PRUNE_EVERY: u64 = 256;
+/// The most a single read returns — the tail of the history, which is what a
+/// client renders. Above this the feed's own caps take over anyway.
+const LOAD_EVENTS: usize = 600;
+/// Inserts so far this process, for the prune schedule.
+static INSERTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ActivityEvent {
@@ -144,8 +155,11 @@ fn push_full(session: &str, window: usize, kind: &str, text: String, tool: Strin
     );
 }
 
-/// The one place the ring is appended to and trimmed.
+/// The one place the ring is appended to and trimmed. The event also goes to
+/// state.db, because a restart used to erase the whole feed while the messages
+/// around it survived: a conversation with holes in it.
 fn push(session: &str, ev: ActivityEvent) {
+    persist(session, &ev);
     let mut map = events().lock().unwrap();
     let q = map.entry(session.to_string()).or_default();
     q.push_back(ev);
@@ -154,8 +168,59 @@ fn push(session: &str, ev: ActivityEvent) {
     }
 }
 
+/// Unit tests exercise the ring and the derive rules; the durable log is tested
+/// directly in `store.rs`. Keeping the two apart is what stops `cargo test` from
+/// writing rows for invented sessions into the developer's real state.db.
+#[cfg(test)]
+fn persist(_session: &str, _ev: &ActivityEvent) {}
+
+/// Write one event to the durable log. FAIL-SOFT, always: telemetry may never
+/// block or break the thing it observes, and the ring is still there for this
+/// process's lifetime if the database is unavailable (a mobile build, a
+/// read-only disk).
+#[cfg(not(test))]
+fn persist(session: &str, ev: &ActivityEvent) {
+    let written = super::with_store(|s| {
+        s.insert_activity(session, ev.window, ev.ts, &ev.kind, &ev.text, &ev.tool, &ev.via, &ev.state)
+    });
+    if written.is_err() {
+        return;
+    }
+    // Prune occasionally rather than on every insert: the cap is about the log
+    // not growing without bound, not about an exact length.
+    let n = INSERTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    if n % PRUNE_EVERY == 0 {
+        let _ = super::with_store(|s| s.prune_activity(session, KEEP_EVENTS));
+    }
+}
+
 /// Events newer than `since_ts` (ms, exclusive), oldest first.
+///
+/// The durable log is the record; the ring is the fallback for when there is no
+/// database (and for the first moments of a fresh one). A first load — `since_ts`
+/// 0 — gets the TAIL of the history, not its beginning: what the user is looking
+/// at is the end of the conversation.
 pub fn recent_events(session: &str, since_ts: u64) -> Vec<ActivityEvent> {
+    if let Ok(rows) = (if cfg!(test) {
+        Err(String::new())
+    } else {
+        super::with_store(|s| s.activity_since(session, since_ts, LOAD_EVENTS))
+    }) {
+        if !rows.is_empty() {
+            return rows
+                .into_iter()
+                .map(|(window, ts, kind, text, tool, via, state)| ActivityEvent {
+                    ts,
+                    window,
+                    kind,
+                    text,
+                    tool,
+                    via,
+                    state,
+                })
+                .collect();
+        }
+    }
     events()
         .lock()
         .unwrap()
@@ -179,25 +244,15 @@ fn with_rec(session: &str, window: usize, f: impl FnOnce(&mut Rec)) {
 /// The NOTE is the point of this call. Turn boundaries are observed for free
 /// (hooks), so a state word tells us nothing we did not know; what the hooks
 /// cannot see is what the agent is actually doing, and that only exists if the
-/// agent says it. So the note goes into the ring as the event's TEXT, with the
-/// declared state alongside it, and the client renders it as a line the agent
-/// spoke rather than as a grey telemetry row (owner, 2026-08-19: "经常一直在做
-/// 但是没有同步状态").
+/// agent says it (owner, 2026-08-19: "经常一直在做但是没有同步状态").
+///
+/// The note is no longer an event: `hub_status` POSTS it to the room as a message
+/// from the agent, which is what the owner asked for ("status要用agent发送消息的
+/// 形式显示") and also what makes it durable — the room is the record, and an
+/// event was a thing that vanished on restart. What stays here is the part only
+/// this record can answer: the explicit claim, which `derive_from` uses for
+/// `waiting`/`blocked`.
 pub fn record_status(session: &str, window: usize, state: &str, note: &str) {
-    push(
-        session,
-        ActivityEvent {
-            ts: now_ms(),
-            window,
-            kind: "status".into(),
-            // Empty when there is no note, so a client can tell a REPORT from a
-            // bare claim without comparing the text to the state word.
-            text: note.to_string(),
-            tool: String::new(),
-            via: String::new(),
-            state: state.into(),
-        },
-    );
     let (state, note, ts) = (state.to_string(), note.to_string(), now());
     with_rec(session, window, |r| r.explicit = Some((state, note, ts)));
 }

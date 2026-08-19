@@ -214,6 +214,17 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
                 }
                 let note = p.get("note").and_then(|v| v.as_str()).unwrap_or("");
                 telemetry::record_status(session, window, state, note);
+                // A status note is a MESSAGE from the agent, not a telemetry row
+                // ("status要用agent发送消息的形式显示"): the room is the record, so
+                // it survives a restart, and it reads as the agent speaking
+                // because that is what it is. Record-only — an @name inside a note
+                // must never type into a peer's pane (that loop is invariant 2 of
+                // the hook-sourced posts). A note-less claim posts nothing: the
+                // derived state already knows a turn is open, so a bare word would
+                // be an empty message.
+                if !note.trim().is_empty() && bus.open_room(&room).is_ok() {
+                    let _ = bus.post(&room, agent, &format!("[tmm status {state}] {note}"), false);
+                }
             }
             Response::ok(id, serde_json::json!({ "ok": true, "window": window }))
         }
@@ -649,6 +660,51 @@ mod tests {
             assert!(msg.contains("not an agent this app started"), "{method}: got {msg:?}");
         }
         assert!(b.posts.lock().unwrap().is_empty(), "nothing announced, nothing killed");
+    }
+
+    /// A status NOTE is a message from the agent — the owner's requirement, and
+    /// what makes it durable (the room is the record; an event was not).
+    #[test]
+    fn a_status_note_is_posted_as_the_agents_own_message() {
+        crate::projects::tests::use_test_store();
+        let session = format!("tmm-note-{}", std::process::id());
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session, "-n", "dev", "sleep 60"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            return;
+        }
+        let b = Bridge::new();
+        let r = handle_hub_request(
+            &req("hub_status", serde_json::json!({
+                "session": session, "agent": "dev", "state": "blocked",
+                "note": "waiting for the API spec",
+            })),
+            Some(&b),
+            None,
+        );
+        assert!(r.error.is_none(), "{:?}", r.error.map(|e| e.message));
+        {
+            let posts = b.posts.lock().unwrap();
+            assert_eq!(posts.len(), 1, "one message, from the agent");
+            assert_eq!(posts[0].1, "dev", "the agent is the sender, not the app");
+            assert_eq!(posts[0].2, "[tmm status blocked] waiting for the API spec");
+        }
+        // A note-less claim posts NOTHING: the derived state already knows a turn
+        // is open, so a bare state word would be an empty message.
+        let r2 = handle_hub_request(
+            &req("hub_status", serde_json::json!({
+                "session": session, "agent": "dev", "state": "working", "note": "   ",
+            })),
+            Some(&b),
+            None,
+        );
+        assert!(r2.error.is_none());
+        assert_eq!(b.posts.lock().unwrap().len(), 1, "still just the one");
+        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
     }
 
     /// The kill path, against real tmux: a managed window disappears and the

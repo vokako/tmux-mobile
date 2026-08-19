@@ -481,6 +481,27 @@ export function systemLine(body: string | null | undefined): string | null {
   return null;
 }
 
+/**
+ * A status note posted by an agent: `[tmm status working] compiling the server`.
+ *
+ * `tmm status` used to be a telemetry event, which meant it vanished on restart
+ * while the messages around it survived. It is now a MESSAGE from the agent
+ * ("status要用agent发送消息的形式显示", 2026-08-19), so it is persisted like any
+ * other and it reads as the agent speaking — because it is. This is the reader:
+ * the marker comes off, the declared state comes out, and the note is rendered as
+ * an ordinary bubble that happens to be dimmer.
+ *
+ * The marker is NOT `[tmm] ` on purpose: that prefix means "the app is narrating"
+ * and folds into a grey sys row, which is the treatment this note was moved OUT
+ * of.
+ */
+export function statusNote(body: string | null | undefined): { state: string; text: string } | null {
+  const m = /^\[tmm status ([a-z]+)\]\s*([\s\S]*)$/u.exec(body ?? '');
+  if (!m) return null;
+  const text = m[2]!.trim();
+  return text ? { state: m[1]!, text } : null;
+}
+
 /** One row of the conversation. `msg` and `prompt` are things that were said,
  * `note` is a single observed fact, `steps` is a collapsible run of tool calls
  * (the "what it did between two replies" pane). */

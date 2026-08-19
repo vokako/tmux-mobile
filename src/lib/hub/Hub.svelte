@@ -26,7 +26,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette, ctxColor } from './hub.ts';
+  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette, ctxColor, statusNote } from './hub.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
@@ -1131,7 +1131,12 @@
             <div class="sysline">{b.items.join(' · ')}</div>
           {:else if b.type === 'msg'}
             {@const m = b.msg}
-            {@const parts = splitImages(m.body)}
+            <!-- A `tmm status` note: a message from the agent (it is persisted
+                 like one and it reads like one), rendered dimmer and with its
+                 marker off. `waiting`/`blocked` take the attention colour —
+                 those are the states that want a person. -->
+            {@const note = statusNote(m.body)}
+            {@const parts = splitImages(note ? note.text : m.body)}
               <!-- Every user message can become the landmark, but exactly ONE
                    does. The real bubble enters with the feed, then that SAME
                    element catches the edge as it is about to leave; there is no
@@ -1144,7 +1149,8 @@
                    is smaller than its message (see naturalH). -->
               {@const folded = isAsk && askKey === key && askHeld && heldExpanded !== key
                 && heldBody(parts.text) !== parts.text}
-              <div class="msg" class:me={m.from === 'human'}
+              <div class="msg" class:me={m.from === 'human'} class:note={!!note}
+                class:attn={note ? note.state !== 'working' : false}
                 class:ask-top={isAsk && askKey === key && askEdge === 'top'}
                 class:ask-bottom={isAsk && askKey === key && askEdge === 'bottom'}
                 class:held={isAsk && askKey === key && askHeld}
@@ -1826,6 +1832,13 @@
   .note.warn { color: var(--status-warn); }
   .note.warn :global(svg) { flex: none; align-self: center; }
 
+  /* A status note is a message, so it is the same bubble — one notch quieter,
+     because "what I am doing right now" is not the same as an answer. It keeps
+     the bubble's shape so the feed stays one visual language. */
+  .msg.note .bubble { background: var(--surface); color: var(--text2); }
+  .msg.note .m-body { font-size: var(--fs-sub); }
+  /* Waiting on a person is not the same colour as making progress. */
+  .msg.note.attn .bubble { border-color: var(--status-warn); }
   /* A progress note: what the agent SAYS it is doing. Between a bubble and a
      telemetry row on purpose — it is prose the agent chose to write, so it gets
      the reading font and full-strength ink, but it is about work rather than

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor } from './hub.ts';
+import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -610,4 +610,21 @@ test('ctxColor ramps through the theme tokens, never a raw colour', () => {
   assert.equal(ctxColor(-5), 'var(--status-ok)');
   assert.equal(ctxColor(NaN), 'var(--status-ok)');
   assert.equal(ctxColor(999), ctxColor(100));
+});
+
+test('statusNote reads an agent status message, and only that', () => {
+  assert.deepEqual(statusNote('[tmm status working] compiling the server'),
+    { state: 'working', text: 'compiling the server' });
+  assert.deepEqual(statusNote('[tmm status blocked] waiting for the API spec'),
+    { state: 'blocked', text: 'waiting for the API spec' });
+  // A multi-line note keeps its body.
+  assert.equal(statusNote('[tmm status working] one\ntwo')?.text, 'one\ntwo');
+  // Not a status note: an ordinary message, a lifecycle line, an empty note.
+  for (const b of ['hello', '[tmm] stopped dev', '[tmm status working]', '[tmm status working]   ',
+                   '[tmm status] no state', 'prefix [tmm status working] x', '', null, undefined]) {
+    assert.equal(statusNote(b), null, JSON.stringify(b));
+  }
+  // The two markers must not overlap: `[tmm] ` folds into a grey sys row, which
+  // is exactly the treatment a status note was moved out of.
+  assert.equal(systemLine('[tmm status working] compiling'), null);
 });
