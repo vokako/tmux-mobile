@@ -725,6 +725,12 @@
         <!-- The title IS the rename control: a project's name is the one thing
              in this header you might want to change, and a second pencil button
              would be a duplicate of the thing it edits. -->
+        <!-- The title IS the rename control. It carries a visible pencil,
+             because the first version relied on a hover underline and the owner
+             could not find the feature at all (2026-08-19) — and hover does not
+             exist on a phone, where this page mostly lives. The icon sits INSIDE
+             the title button, so it is a hint on the thing it edits rather than
+             a second control next to it. -->
         {#if renaming}
           <input class="h1-edit" bind:this={renameEl} bind:value={renameDraft}
             aria-label={t('projectRename')} maxlength="80"
@@ -739,7 +745,8 @@
                  heading for assistive tech and Enter/Space come for free. -->
             {#if selected}
               <button class="h1-btn" title={t('projectRenameHint')} onclick={startRename}>
-                {selectedRow?.project.name ?? ''}
+                <span class="h1-text">{selectedRow?.project.name ?? ''}</span>
+                <Icon name="edit" size={13} />
               </button>
             {:else}{selectedRow?.project.name ?? ''}{/if}
           </h1>
@@ -1194,16 +1201,21 @@
      fraction: the owner reached for that divider and nothing moved. The chat
      column takes the rest and keeps a floor so it can never be squeezed away. */
   .hub-root.drawer-open .cols { grid-template-columns: var(--sidebar-w) minmax(280px, 1fr) var(--hub-drawer-w, 520px); }
-  /* The project title, in its two states. The idle one only HINTS that it is
-     editable (cursor + a hover underline): a permanent box would make the
-     header look like a form. The edit one keeps the title's exact metrics so
-     nothing in the row shifts when it appears. */
+  /* The project title, in its two states. The idle one carries a visible pencil
+     and only underlines on hover — a permanent box would make the header look
+     like a form, but relying on hover ALONE hid the feature (no hover on a
+     phone). The edit state keeps the title's metrics so nothing in the row
+     shifts when it appears. */
   .h1-btn {
     font: inherit; color: inherit; background: none; border: 0; padding: 0;
-    max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    cursor: text; border-radius: 7px;
+    max-width: 100%; min-width: 0; cursor: text; border-radius: 7px;
+    display: inline-flex; align-items: center; gap: 6px;
   }
-  .h1-btn:hover { text-decoration: underline dotted var(--text3); text-underline-offset: 3px; }
+  /* The NAME ellipsizes; the pencil never shrinks away with it. */
+  .h1-btn .h1-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .h1-btn :global(svg) { flex: none; color: var(--meta-ink); transition: color var(--t-fast); }
+  .h1-btn:hover .h1-text { text-decoration: underline dotted var(--text3); text-underline-offset: 3px; }
+  .h1-btn:hover :global(svg) { color: var(--text); }
   .h1-btn:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
   .h1-edit {
     font-family: ui-monospace, "SF Mono", Menlo, monospace;

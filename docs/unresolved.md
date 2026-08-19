@@ -1,5 +1,39 @@
 # Unresolved Issues
 
+## A registry def change does not reach the agents already spawned from it
+- **Priority**: Medium
+- **Area**: Projects / agents-v2 (`projects/spawn.rs`)
+- **Details**: An agent's isolated home is rendered ONCE, at spawn. Editing its
+  registry def afterwards (model, persona, skills, MCP) therefore only affects
+  the NEXT spawn: `refresh_hooks` re-materializes the `hooks` key and migrates a
+  `--model` off an old launch recipe, and deliberately nothing else, because the
+  prompt carries the brief that was given once and cannot be rebuilt. So
+  "change builder to claude-opus-5" (owner, 2026-08-19) needed the def saved AND
+  `.tmm/agents/builder-2/agents/builder-2.json` edited by hand for the running
+  window. Blocker for doing it properly: a home is keyed by WINDOW name
+  (`builder-2`) and there is no recorded link back to the def (`builder`) — the
+  config's `description` happens to read `"builder (registry agent)"`, but
+  parsing a description is not a link. Fix would be a `slots.agent_def` column
+  written at spawn, after which `refresh_hooks` could re-sync the fields that
+  are ours (model, mcpServers, resources) and leave the prompt alone.
+
+## `is_managed_in` can be re-armed by the CLI after an agent is removed
+- **Priority**: Medium
+- **Area**: Projects / agents-v2 (`projects::managed_home`)
+- **Details**: "An agent this app created" is defined as
+  `<ws>/.tmm/agents/<window>/` EXISTING. But `agent_remove` deletes that
+  directory while the kiro process in the window keeps running with its config
+  in memory — and kiro then re-creates its own `KIRO_HOME` subtree
+  (`settings/cli.json`, `sessions/`) on the next write. Observed on the dev host
+  2026-08-19: `.tmm/agents/builder/` was back, with `settings/` and `sessions/`
+  but no `agents/builder.json` and no `launch.json`, for a window the app had
+  ejected. The gate then says "managed" again, so stop-hook auto-post and `@all`
+  delivery resume for a window the user removed (and whose `--agent` no longer
+  resolves, i.e. no persona, no hooks). Fix: gate on `launch.json` — `spawn`
+  writes it for every backend and no CLI re-creates it — but check the
+  pre-recipe backfill path first, or an old managed agent would stop being
+  recognised.
+
 ## Emoji width mismatch: tmux (2 cells) vs xterm UnicodeV6 (1 cell)
 - **Priority**: Low
 - **Area**: Terminal rendering
