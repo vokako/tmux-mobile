@@ -526,6 +526,30 @@ cycles chat → status → tools) as well as Settings → Appearance → Chat de
 
 ### Conversation visual language
 
+#### Deleting, and CLI/UI parity
+
+Four verbs act on one agent and four on a project, and EVERY one of them is
+reachable from both the chat UI and `tmm` — the CLI is not a subset (owner:
+"所有的 Agent 也可以通过 TMM 命令直接交互所有的操作"), because an agent that
+can only be managed by a human cannot manage a teammate:
+
+| Agent | `tmm agent interrupt\|stop\|restart\|remove <name>` | roster action bar: Watch / Interrupt / Stop / Remove |
+| Project | `tmm project up\|down\|archive\|delete <session>` | header: Open / Close / Delete (archive is the list's own action) |
+
+`remove` is the eject button next to stop's pause button: it kills the window,
+DROPS THE SLOT (so `up` never recreates it) and deletes the isolated home (so
+`is_managed_in` stops recognising it). `delete` is archive's irreversible
+sibling: it closes the session, removes every `<path>/.tmm/agents/<name>/` the
+app created, and forgets the row (slots cascade). Two things both verbs leave
+alone on purpose: **your files** — we only ever delete inside `.tmm/agents/` —
+and **the chat history**, because the room is the record of what happened and
+rooms are keyed by session name.
+
+Interrupt moved server-side (`hub_agent_interrupt`) when the CLI gained it:
+one implementation types the named `Escape` key, so the button and the command
+cannot drift and the managed-agent gate is enforced in the same place as
+stop/restart.
+
 #### Opening and closing a project
 
 The chat header carries exactly ONE of two buttons, whichever is true right

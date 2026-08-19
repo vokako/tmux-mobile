@@ -478,6 +478,31 @@ impl Store {
     /// Replace a project's whole slot list in one transaction. The declaration
     /// is always written as a set, never patched row by row, so a capture can
     /// never leave a half-applied topology behind.
+    /// Forget a project entirely: the row plus its slots (FK cascade). Archive
+    /// hides a project and is reversible; this is the "I am done with it" verb,
+    /// so the caller is responsible for tearing the session down first.
+    pub fn delete_project(&self, id: &str) -> Result<bool, String> {
+        let n = self
+            .conn
+            .execute("DELETE FROM projects WHERE id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
+        Ok(n > 0)
+    }
+
+    /// Drop ONE slot by window name — "this agent is no longer part of the
+    /// project", as opposed to `replace_slots`, which is the capture loop
+    /// rewriting the whole declaration.
+    pub fn delete_slot(&self, project_id: &str, window_name: &str) -> Result<bool, String> {
+        let n = self
+            .conn
+            .execute(
+                "DELETE FROM slots WHERE project_id = ?1 AND window_name = ?2",
+                params![project_id, window_name],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(n > 0)
+    }
+
     pub fn replace_slots(&mut self, project_id: &str, slots: &[Slot]) -> Result<(), String> {
         let tx = self.conn.transaction().map_err(|e| e.to_string())?;
         tx.execute("DELETE FROM slots WHERE project_id = ?1", params![project_id])

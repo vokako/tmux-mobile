@@ -21,8 +21,8 @@
   import Icon from '../ui/Icon.svelte';
   import { t } from '../core/i18n.svelte.ts';
   import {
-    projectList, projectUp, projectDown, projectCreate, listSessionsWithPanes,
-    hubPost, hubLog, hubAgents, hubSpawn, hubAgentStop, hubAgentRestart, hubActivity, sendKeys, registryList,
+    projectList, projectUp, projectDown, projectDelete, projectCreate, listSessionsWithPanes,
+    hubPost, hubLog, hubAgents, hubSpawn, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
@@ -401,13 +401,11 @@
      bytes sent to a pane in extended mode (see CLAUDE.md). Stop/restart stay
      separate and heavier: this cancels output, it does not kill the agent. */
   async function interrupt(name) {
-    const a = agents.find((x) => x.name === name);
-    if (!a) return;
-    const p = panes.find((p) => p.session === selected && p.window === a.window && p.active)
-      ?? panes.find((p) => p.session === selected && p.window === a.window);
-    if (!p) return;
+    // One implementation, server-side (`hub_agent_interrupt`), so the CLI's
+    // `tmm agent interrupt` and this button cannot drift apart — and so the
+    // managed-agent gate is enforced in the same place as stop/restart.
     try {
-      await sendKeys(`${p.session}:${p.window}.${p.pane}`, 'Escape', false);
+      await hubAgentInterrupt(selected, name);
     } catch (e) {
       console.warn('interrupt failed', name, e);
     }
@@ -536,7 +534,15 @@
   // Both are recoverable — the declaration survives, `Open` brings it back
   // and an agent resumes its conversation — but neither should happen from a
   // mis-tap.
-  let pendingAct = $state(null);   // { kind: 'stop' | 'down', name }
+  // Copy for the one confirmation dialog, keyed by action. Four consequential
+  // verbs share it: stop/remove an agent, close/delete a project.
+  const ACT_COPY = {
+    stop:   { title: 'hubStopTitle',       note: 'hubStopNote',       go: 'hubStop' },
+    remove: { title: 'hubRemoveTitle',     note: 'hubRemoveNote',     go: 'hubRemove' },
+    down:   { title: 'projectDownTitle',   note: 'projectDownNote',   go: 'projectDown' },
+    delete: { title: 'projectDeleteTitle', note: 'projectDeleteNote', go: 'projectDelete' },
+  };
+  let pendingAct = $state(null);   // { kind: keyof ACT_COPY, name }
   let acting = $state(false);
   const askAction = (kind, name) => { pendingAct = { kind, name }; };
 
@@ -545,9 +551,16 @@
     const { kind, name } = pendingAct;
     acting = true;
     try {
-      if (kind === 'down') {
+      if (kind === 'down' || kind === 'delete') {
         const row = rows.find((r) => r.project.session === selected);
-        if (row) await projectDown(row.project.id);
+        if (row) await (kind === 'delete' ? projectDelete(row.project.id) : projectDown(row.project.id));
+        if (kind === 'delete') {
+          // The project is gone: land on whatever is left rather than an
+          // empty conversation pointing at nothing.
+          selected = '';
+        }
+      } else if (kind === 'remove') {
+        await hubAgentRemove(selected, name);
       } else {
         await hubAgentStop(selected, name);
       }
@@ -712,6 +725,15 @@
         <h1>{selectedRow?.project.name ?? ''}</h1>
         {#if !compact}<span class="path">{shortPath(selectedRow?.project.path ?? '')}</span>{/if}
         <span class="spacer"></span>
+        {#if selected}
+          <!-- Delete is offered whether or not the session is live: it is the
+               "this project should stop existing" verb, so it does the closing
+               itself. Confirmed like every consequential action. -->
+          <button class="chip-btn danger" title={t('projectDeleteHint')}
+            onclick={() => askAction('delete', selectedRow?.project.name ?? '')}>
+            <Icon name="trash" size={13} />{#if !compact}{t('projectDelete')}{/if}
+          </button>
+        {/if}
         {#if selected && !liveSelected}
           <button class="chip-btn" onclick={bringUp}>{t('projectOpen')}</button>
         {:else if selected}
@@ -791,6 +813,9 @@
           </button>
           <button class="danger" onclick={() => { const n = menuFor; menuFor = ''; askAction('stop', n); }}>
             <Icon name="stop" size={12} />{t('hubStop')}
+          </button>
+          <button class="danger" title={t('hubRemoveHint')} onclick={() => { const n = menuFor; menuFor = ''; askAction('remove', n); }}>
+            <Icon name="trash" size={12} />{t('hubRemove')}
           </button>
           <span class="spacer"></span>
           <button class="ab-x" onclick={() => menuFor = ''} title={t('cancel')}><Icon name="x" size={12} /></button>
@@ -1066,12 +1091,12 @@
     <!-- ── Confirm: stop one agent, or close the whole project ── -->
     <div class="dlg-backdrop" onclick={() => pendingAct = null} role="presentation"></div>
     <div class="dlg" class:sheet={compact}>
-      <h2>{(pendingAct.kind === 'down' ? t('projectDownTitle') : t('hubStopTitle')).replace('{name}', pendingAct.name)}</h2>
-      <p class="dlg-note">{pendingAct.kind === 'down' ? t('projectDownNote') : t('hubStopNote')}</p>
+      <h2>{t(ACT_COPY[pendingAct.kind].title).replace('{name}', pendingAct.name)}</h2>
+      <p class="dlg-note">{t(ACT_COPY[pendingAct.kind].note)}</p>
       <div class="dlg-actions">
         <button class="chip-btn" onclick={() => pendingAct = null}>{t('cancel')}</button>
         <button class="chip-btn primary danger" disabled={acting} onclick={runAction}>
-          {acting ? '…' : (pendingAct.kind === 'down' ? t('projectDown') : t('hubStop'))}
+          {acting ? '…' : t(ACT_COPY[pendingAct.kind].go)}
         </button>
       </div>
     </div>

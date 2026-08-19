@@ -157,6 +157,48 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
         // `projects::up`, which recreates only what is missing and prefers the
         // resume flags — the agent comes back to its own conversation rather
         // than to a blank prompt. Managed-only: we stop what we started.
+        // Interrupt: type Escape into the agent's own pane — the only channel
+        // that reaches a BUSY agent, since a chat message is read between
+        // turns. Named key, never a raw \x1b: with extended-keys on, tmux
+        // drops raw C0 bytes sent to a pane in extended mode. Server-side so
+        // the CLI and the UI share ONE implementation.
+        "hub_agent_interrupt" => {
+            let agent = match require_str(p, "agent") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            if crate::projects::managed_home(session, agent).is_none() {
+                return Response::err(id, ERR_INVALID_PARAMS,
+                    format!("'{agent}' is not an agent this app started"));
+            }
+            let Some(window) = window_of_agent(session, agent) else {
+                return Response::err(id, ERR_INVALID_PARAMS,
+                    format!("no window named '{agent}' in session '{session}'"));
+            };
+            match crate::tmux::send_keys(&format!("{session}:{window}"), "Escape", false) {
+                Ok(()) => Response::ok(id, serde_json::json!({ "interrupted": agent })),
+                Err(e) => Response::err(id, ERR_INTERNAL, e),
+            }
+        }
+
+        // Eject an agent from the project: stop it, drop its slot, remove its
+        // isolated home. Stop is the pause button, this is the delete button.
+        "hub_agent_remove" => {
+            let agent = match require_str(p, "agent") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            match crate::projects::agent_remove(session, agent) {
+                Ok(v) => {
+                    if bus.open_room(&room).is_ok() {
+                        let _ = bus.post(&room, agent, &format!("[tmm] removed {agent}"), false);
+                    }
+                    Response::ok(id, v)
+                }
+                Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
+            }
+        }
+
         "hub_agent_stop" | "hub_agent_restart" => {
             let agent = match require_str(p, "agent") {
                 Ok(s) => s,

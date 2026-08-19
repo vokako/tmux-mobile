@@ -473,7 +473,7 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
         // Android/iOS, where these methods report method-not-found and the
         // client hides the page (same contract as the team_* methods).
         "project_list" | "project_create" | "project_adopt" | "project_up" | "project_down"
-        | "project_archive" | "project_autostart"
+        | "project_archive" | "project_delete" | "project_autostart"
         | "registry_list" | "registry_save" | "registry_delete"
         | "skills_list" | "skills_save" | "skills_delete" | "skills_refresh" | "skills_read"
         | "mcp_list" | "mcp_save" | "mcp_delete" => {
@@ -532,6 +532,9 @@ fn handle_project_request(method: &str, id: Option<u64>, p: &serde_json::Value) 
         }),
         "project_up" => need_id("id").and_then(|id| projects::up(&id)),
         "project_down" => need_id("id").and_then(|id| projects::down(&id)),
+        // Archive hides and is reversible; delete forgets the project and wipes
+        // the isolated homes of the agents it owned.
+        "project_delete" => need_id("id").and_then(|id| projects::delete(&id)),
         "project_archive" => {
             need_id("id").and_then(|id| projects::set_archived(&id, flag("archived", true)))
         }

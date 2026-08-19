@@ -56,9 +56,13 @@ USAGE (background tasks — LOCAL tmux only, no server needed, never exits 2):
 
 USAGE (human or agent — self-management):
   tmm agent list                      agents in this project and their states
+  tmm agent interrupt <name>          cancel the turn it is running (Escape into its pane)
+  tmm agent stop|restart <name>       stop it, or bring it back resuming its conversation
+  tmm agent remove <name>             eject it: stop + forget its slot + delete its home
   tmm project list                    all projects
   tmm project create <path> [--name n] [--session s] [--with-agent kiro|claude|codex]
   tmm project up <session>            bring a project's tmux session up
+  tmm project delete <session>        forget the project and delete its agents' homes
   tmm project down <session>          kill the session, keep the declaration
   tmm project archive <session>       remove from projects (session survives)
   tmm registry list                   centrally-defined agents
@@ -244,6 +248,26 @@ async fn main() {
                 }
             }
         }
+        // Everything the chat UI can do to ONE agent, so an agent can do it too
+        // (owner: parity between the buttons and the CLI). `remove` is the
+        // eject button — stop + forget the slot + delete the isolated home.
+        ("agent", rest)
+            if matches!(rest.first().map(String::as_str), Some("stop" | "restart" | "remove" | "interrupt")) =>
+        {
+            let action = rest[0].clone();
+            let session = need_project(&ctx);
+            let Some(name) = rest.get(1).cloned() else {
+                fail(EXIT_USAGE, &format!("agent {action} needs a name: tmm agent {action} <name>"));
+            };
+            let method = match action.as_str() {
+                "stop" => "hub_agent_stop",
+                "restart" => "hub_agent_restart",
+                "remove" => "hub_agent_remove",
+                _ => "hub_agent_interrupt",
+            };
+            let r = rpc(&ctx, method, json!({ "session": session, "agent": name })).await;
+            if ctx.json { println!("{r}"); } else { println!("✓ {action} {name}"); }
+        }
         ("project", rest) if rest.first().map(String::as_str) == Some("list") => {
             let r = rpc(&ctx, "project_list", json!({})).await;
             if ctx.json {
@@ -284,7 +308,7 @@ async fn main() {
                     proj.get("id").and_then(|v| v.as_str()).unwrap_or("?"));
             }
         }
-        ("project", rest) if matches!(rest.first().map(String::as_str), Some("up" | "down" | "archive")) => {
+        ("project", rest) if matches!(rest.first().map(String::as_str), Some("up" | "down" | "archive" | "delete")) => {
             let action = rest[0].clone();
             let Some(name) = rest.get(1).cloned() else {
                 fail(EXIT_USAGE, &format!("project {action} needs a session name: tmm project {action} <session>"));
@@ -293,6 +317,7 @@ async fn main() {
             let method = match action.as_str() {
                 "up" => "project_up",
                 "down" => "project_down",
+                "delete" => "project_delete",
                 _ => "project_archive",
             };
             let r = rpc(&ctx, method, json!({ "id": id })).await;

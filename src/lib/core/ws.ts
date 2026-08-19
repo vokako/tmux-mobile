@@ -729,6 +729,9 @@ export const projectAdopt = (session: string, name?: string) => call('project_ad
 export const projectUp = (id: string) => call('project_up', { id });
 export const projectDown = (id: string) => call('project_down', { id });
 export const projectArchive = (id: string, archived = true) => call('project_archive', { id, archived });
+/** Forget a project: kills its session and deletes its agents' isolated homes.
+ * `projectArchive` is the reversible "hide it" verb; this one is not. */
+export const projectDelete = (id: string) => call('project_delete', { id });
 export const projectAutostart = (id: string, autostart: boolean) => call('project_autostart', { id, autostart });
 
 // Project hub (agents-v2): per-project chat + derived agent states + spawn.
@@ -778,6 +781,13 @@ export const hubSpawn = (session: string, agent: string, brief = '', by = '') =>
 /** Kill one agent's window. The declaration survives, so it can come back. */
 export const hubAgentStop = (session: string, agent: string) =>
   call<{ stopped: string }>('hub_agent_stop', { session, agent });
+/** Eject an agent: stop it, drop its slot, delete its isolated home. */
+export const hubAgentRemove = (session: string, agent: string) =>
+  call<{ agent: string; slot_removed: boolean; home_removed: boolean }>('hub_agent_remove', { session, agent });
+/** Cancel the turn an agent is running (Escape into its pane, server-side, so
+ * the CLI and the UI share one implementation). */
+export const hubAgentInterrupt = (session: string, agent: string) =>
+  call<{ interrupted: string }>('hub_agent_interrupt', { session, agent });
 /** Kill and bring back. `resumed` is false when the agent had to start a fresh
  * conversation because the project declaration did not have it yet. */
 export const hubAgentRestart = (session: string, agent: string) =>

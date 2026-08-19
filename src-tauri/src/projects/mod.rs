@@ -356,6 +356,63 @@ pub fn set_archived(id: &str, archived: bool) -> Result<Value, String> {
     })
 }
 
+/// Delete a project for good: kill its session, remove every managed agent's
+/// isolated home, then forget the row (slots cascade). Archive is the
+/// reversible verb — "hide this from the list, I might come back"; this one is
+/// for a project that should stop existing (owner: "除了关闭之外，还要可以删除").
+///
+/// What it does NOT touch: the workspace directory and anything in it that is
+/// not ours. We delete `<path>/.tmm/agents/<name>/` — configs and launch
+/// recipes this app wrote — and never the user's files. The chat room is kept
+/// too: it is the record of what happened, and rooms are addressed by session
+/// name, so a later project with the same name inherits its history rather
+/// than losing it.
+pub fn delete(id: &str) -> Result<Value, String> {
+    let project = with_store(|store| store.project(id))?
+        .ok_or_else(|| format!("no project with id '{id}'"))?;
+    // Down first: killing the session while its declaration still exists is
+    // what `down` is for, and it keeps the reconciler from re-creating windows
+    // for a project that is about to vanish.
+    let _ = down(id);
+    let mut homes_removed = 0usize;
+    let agents_root = std::path::Path::new(&project.path).join(".tmm").join("agents");
+    if let Ok(entries) = std::fs::read_dir(&agents_root) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() && std::fs::remove_dir_all(entry.path()).is_ok() {
+                homes_removed += 1;
+            }
+        }
+    }
+    let deleted = with_store(|store| store.delete_project(id))?;
+    Ok(json!({ "id": id, "deleted": deleted, "agent_homes_removed": homes_removed }))
+}
+
+/// Remove ONE agent from a project: kill its window if it is running, drop its
+/// slot so `up` never recreates it, and delete its isolated home so it stops
+/// counting as "an agent this app created". Stop is the pause button; this is
+/// the eject button (owner: "stop 以外，也可以删除 Agent").
+pub fn agent_remove(session: &str, agent: &str) -> Result<Value, String> {
+    let project = project_for_session(session)?
+        .ok_or_else(|| format!("no project for session '{session}'"))?;
+    let home = managed_home(session, agent)
+        .ok_or_else(|| format!("'{agent}' is not an agent this app started"))?;
+    // Kill the window first, or the capture loop would re-add the slot we are
+    // about to delete from a window that is still alive.
+    if let Ok(panes) = crate::tmux::list_panes(session) {
+        if let Some(p) = panes.iter().find(|p| p.window_name == agent) {
+            let _ = crate::tmux::kill_window(&format!("{session}:{}", p.window));
+        }
+    }
+    let slot_removed = with_store(|store| store.delete_slot(&project.id, agent))?;
+    let home_removed = std::fs::remove_dir_all(&home).is_ok();
+    Ok(json!({
+        "session": session,
+        "agent": agent,
+        "slot_removed": slot_removed,
+        "home_removed": home_removed,
+    }))
+}
+
 pub fn set_autostart(id: &str, autostart: bool) -> Result<Value, String> {
     with_store(|store| {
         store.set_autostart(id, autostart)?;
@@ -763,6 +820,79 @@ pub(crate) mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&other);
+    }
+
+    #[test]
+    fn delete_forgets_the_project_and_its_agent_homes_but_not_your_files() {
+        use_test_store();
+        let dir = std::env::temp_dir().join(format!("tmm-del-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // A file of the user's, and an agent home of ours.
+        std::fs::write(dir.join("keep-me.txt"), "mine").unwrap();
+        let home = dir.join(".tmm").join("agents").join("lead");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("launch.json"), "{}").unwrap();
+
+        let path = dir.to_string_lossy().to_string();
+        let made = create(&path, Some("deltest"), None, None).unwrap();
+        let id = made.get("id").and_then(|v| v.as_str()).unwrap().to_string();
+
+        let r = delete(&id).unwrap();
+        assert_eq!(r.get("deleted").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(r.get("agent_homes_removed").and_then(|v| v.as_u64()), Some(1));
+        assert!(!home.exists(), "the agent's isolated home is gone");
+        assert!(dir.join("keep-me.txt").is_file(), "the user's files are untouched");
+        // Gone from the store even with archived rows included: delete is not
+        // archive.
+        let listed = list(true).unwrap();
+        let ids: Vec<String> = listed
+            .get("projects").and_then(|v| v.as_array()).unwrap()
+            .iter()
+            .filter_map(|p| p.get("id").and_then(|v| v.as_str()).map(str::to_string))
+            .collect();
+        assert!(!ids.contains(&id), "delete removes the row: {ids:?}");
+        // Deleting twice is an error, not a silent success — the caller asked
+        // about a project that no longer exists.
+        assert!(delete(&id).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn removing_an_agent_drops_its_slot_and_home() {
+        use_test_store();
+        let dir = std::env::temp_dir().join(format!("tmm-rm-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.to_string_lossy().to_string();
+        let made = create(&path, Some("rmtest"), None, None).unwrap();
+        let id = made.get("id").and_then(|v| v.as_str()).unwrap().to_string();
+        let session = made.get("session").and_then(|v| v.as_str()).unwrap().to_string();
+
+        // A managed agent: a slot in the declaration plus the isolated home
+        // that makes it "ours".
+        let home = dir.join(".tmm").join("agents").join("dev");
+        std::fs::create_dir_all(&home).unwrap();
+        with_store(|store| {
+            store.replace_slots(&id, &[store::Slot {
+                id: None, ord: 0, window_name: "dev".into(), cwd: String::new(),
+                kind: store::SlotKind::Agent, command: Some("kiro".into()),
+                auto_run: true, agent_session_id: None,
+                first_seen_at: now(), settled_at: Some(now()),
+            }])
+        })
+        .unwrap();
+
+        let r = agent_remove(&session, "dev").unwrap();
+        assert_eq!(r.get("slot_removed").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(r.get("home_removed").and_then(|v| v.as_bool()), Some(true));
+        assert!(!home.exists());
+        // `up` must not bring it back: the slot is gone from the declaration.
+        let slots = with_store(|store| store.slots(&id)).unwrap();
+        assert!(!slots.iter().any(|s| s.window_name == "dev"), "slot is gone");
+        // A name that was never ours is rejected rather than half-handled.
+        assert!(agent_remove(&session, "nope").is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The one definition of "an agent this app created". Three gates share it
