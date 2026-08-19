@@ -11,6 +11,7 @@
   import { renderMarkdown } from '../core/markdown.ts';
   import { backendColor } from '../hub/hub.ts';
   import Select from '../ui/Select.svelte';
+  import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
   /** The backends a registry agent can run on — the same list the server
    * validates against in `registry_save`. */
@@ -29,6 +30,30 @@
   let editingMcp = $state(null);
   let mcpIsNew = $state(false);
   let error = $state('');
+
+  /** The pending destructive action: `{ kind, name }`. Deleting an agent
+   * definition, a skill or an MCP server used to be immediate — one stray tap
+   * on a phone and a definition was gone (owner asked for the audit,
+   * 2026-08-19). The words per kind live here so the dialog stays generic. */
+  let pending = $state(null);
+  let removing = $state(false);
+  const COPY = {
+    agent: { title: 'confirmDeleteAgentDefTitle', note: 'confirmDeleteAgentDefNote' },
+    skill: { title: 'confirmDeleteSkillTitle',    note: 'confirmDeleteSkillNote' },
+    mcp:   { title: 'confirmDeleteMcpTitle',      note: 'confirmDeleteMcpNote' },
+  };
+  const ask = (kind, name) => { pending = { kind, name }; };
+  async function runPending() {
+    if (!pending || removing) return;
+    const { kind, name } = pending;
+    removing = true;
+    try {
+      if (kind === 'agent') await remove(name);
+      else if (kind === 'skill') await removeSkill(name);
+      else await removeMcp(name);
+      pending = null;
+    } finally { removing = false; }
+  }
 
   // The model ids the selected backend accepts, asked of the backend's own CLI
   // (per backend, cached server-side). This is a suggestion list, not a
@@ -229,7 +254,7 @@
         <span class="spacer"></span>
         <div class="head-acts">
         {#if !skillIsNew}
-          <button class="chip-btn danger" onclick={() => removeSkill(editingSkill.name)}><Icon name="trash" size={13} />{t('delete')}</button>
+          <button class="chip-btn danger" onclick={() => ask('skill', editingSkill.name)}><Icon name="trash" size={13} />{t('delete')}</button>
         {/if}
         {#if !skillIsNew}
           <button class="chip-btn" disabled={syncing} onclick={refreshSkill}><Icon name="refresh" size={13} />{t('skillsRefresh')}</button>
@@ -266,7 +291,7 @@
         <span class="spacer"></span>
         <div class="head-acts">
         {#if !mcpIsNew}
-          <button class="chip-btn danger" onclick={() => removeMcp(editingMcp.name)}><Icon name="trash" size={13} />{t('delete')}</button>
+          <button class="chip-btn danger" onclick={() => ask('mcp', editingMcp.name)}><Icon name="trash" size={13} />{t('delete')}</button>
         {/if}
         <button class="chip-btn" onclick={() => editingMcp = null}>{t('cancel')}</button>
         <button class="chip-btn primary" disabled={!editingMcp.name.trim()} onclick={saveMcp}>{t('save')}</button>
@@ -288,7 +313,7 @@
         <span class="spacer"></span>
         <div class="head-acts">
         {#if !isNew}
-          <button class="chip-btn danger" onclick={() => remove(editing.name)}><Icon name="trash" size={13} />{t('delete')}</button>
+          <button class="chip-btn danger" onclick={() => ask('agent', editing.name)}><Icon name="trash" size={13} />{t('delete')}</button>
         {/if}
         <button class="chip-btn" onclick={() => editing = null}>{t('cancel')}</button>
         <button class="chip-btn primary" disabled={!editing.name.trim()} onclick={save}>{t('save')}</button>
@@ -361,6 +386,12 @@
     {/if}
   </main>
 </div>
+
+<ConfirmDialog open={!!pending} busy={removing}
+  title={pending ? t(COPY[pending.kind].title).replace('{name}', pending.name) : ''}
+  note={pending ? t(COPY[pending.kind].note) : ''}
+  confirmLabel={t('delete')}
+  onconfirm={runPending} oncancel={() => (pending = null)} />
 
 <style>
   .agents-root { height: 100%; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 0; background: var(--bg); }

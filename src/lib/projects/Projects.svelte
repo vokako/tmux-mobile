@@ -19,6 +19,7 @@
   import { ageLabel, declaredWindowChips, liveWindowChips, shortPath, sortRows } from './projects.ts';
   import { notificationForWindow } from '../core/agent-notifications.svelte.ts';
   import Icon from '../ui/Icon.svelte';
+  import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import { t } from '../core/i18n.svelte.ts';
 
   let { visible = false, openTerminal, panes = {}, onTracked = () => {}, onReady = () => {}, dense = false }: {
@@ -40,7 +41,10 @@
   let supported = $state(true);
   let error = $state('');
   let busy = $state<Record<string, boolean>>({});
-  let confirmRemove = $state<string | null>(null);
+  /** The project awaiting archive confirmation. Two taps used to arm and fire;
+   * the app's confirmation says what actually happens instead (the session is
+   * left alone — this forgets the declaration). */
+  let pendingArchive = $state<{ id: string; name: string } | null>(null);
   let collapsed = $state(false);
 
   const sorted = $derived(sortRows(rows));
@@ -179,26 +183,17 @@
               {:else}
                 <button class="act primary" disabled={busy[row.project.id]} onclick={() => run(row.project.id, () => projectUp(row.project.id))}>{t('projectUp')}</button>
               {/if}
-              <!-- Two taps, because there is no un-remove in the UI and the
+              <!-- Confirmed, because there is no un-remove in the UI and the
                    server never auto-tracks a removed session again. The session
                    itself is left alone — this forgets the declaration, it does
                    not kill anything. -->
               <button
                 class="act icon"
-                class:confirm={confirmRemove === row.project.id}
                 disabled={busy[row.project.id]}
                 aria-label={t('projectArchive')}
                 title={t('projectArchive')}
-                onclick={() => {
-                  if (confirmRemove !== row.project.id) { confirmRemove = row.project.id; return; }
-                  confirmRemove = null;
-                  void run(row.project.id, () => projectArchive(row.project.id, true));
-                }}>
-                {#if confirmRemove === row.project.id}
-                  <span class="confirm-text">{t('projectArchiveConfirm')}</span>
-                {:else}
-                  <Icon name="x" size={13} />
-                {/if}
+                onclick={() => (pendingArchive = { id: row.project.id, name: row.project.name })}>
+                <Icon name="x" size={13} />
               </button>
             </div>
           </div>
@@ -233,6 +228,16 @@
     {/if}
   </section>
 {/if}
+
+<ConfirmDialog open={!!pendingArchive}
+  title={pendingArchive ? t('projectArchiveConfirmTitle').replace('{name}', pendingArchive.name) : ''}
+  note={t('projectArchiveConfirmNote')} confirmLabel={t('projectArchive')}
+  onconfirm={() => {
+    const a = pendingArchive;
+    pendingArchive = null;
+    if (a) void run(a.id, () => projectArchive(a.id, true));
+  }}
+  oncancel={() => (pendingArchive = null)} />
 
 <style>
   .projects { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
@@ -360,11 +365,6 @@
   .act.primary { color: var(--accent); border-color: var(--accent-bg); }
   .act.icon { padding: 0 7px; display: flex; align-items: center; }
 
-  .act.icon.confirm {
-    color: var(--danger); border-color: var(--danger);
-    padding: 0 8px;
-  }
-  .confirm-text { font-family: var(--font-ui); font-size: var(--fs-meta); white-space: nowrap; }
 
   .err {
     color: var(--danger); background: var(--danger-bg);

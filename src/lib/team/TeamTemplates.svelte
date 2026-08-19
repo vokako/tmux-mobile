@@ -6,6 +6,7 @@
   // template RPCs and re-fetch.
   import Icon from '../ui/Icon.svelte';
   import Select from '../ui/Select.svelte';
+  import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import { t } from '../core/i18n.svelte.ts';
 
   export interface TplAgent {
@@ -84,18 +85,14 @@
   }
   function removeAgent(i: number) {
     if (!sel) return;
-    // Tap-to-confirm (like killing a session): first tap arms, second removes.
-    if (confirmRmAgent !== i) {
-      confirmRmAgent = i;
-      setTimeout(() => { if (confirmRmAgent === i) confirmRmAgent = null; }, 3000);
-      return;
-    }
-    confirmRmAgent = null;
     sel.agents = sel.agents.filter((_, idx) => idx !== i);
     markDirty();
   }
-  let confirmRmAgent = $state<number | null>(null); // agent index armed for deletion
-  let confirmDelTpl = $state(false); // template delete armed
+  /** Awaiting confirmation: which roster row to drop, and whether the whole
+   * template goes. Both were tap-to-confirm — a 3s window in which the same
+   * button meant something else (owner audit, 2026-08-19). */
+  let pendingRm = $state<{ i: number; name: string } | null>(null);
+  let pendingDelTpl = $state(false);
   let teamWideOpen = $state(false);  // team-wide config section expanded
   let pickerOpen = $state(false);    // mobile template dropdown open
 
@@ -107,7 +104,7 @@
     s.has(i) ? s.delete(i) : s.add(i);
     advSet = s;
   }
-  $effect(() => { selIdx; advSet = new Set(); confirmRmAgent = null; confirmDelTpl = false; teamWideOpen = false; pickerOpen = false; });
+  $effect(() => { selIdx; advSet = new Set(); pendingRm = null; pendingDelTpl = false; teamWideOpen = false; pickerOpen = false; });
 
   // env (object) ⇄ KEY=VALUE lines; skills (array) ⇄ one-per-line.
   const envToLines = (o: Record<string, string> | undefined) => (o && typeof o === 'object')
@@ -173,13 +170,6 @@
     if (!sel) return;
     const name = sel.name;
     if (name === 'default') return; // protected
-    // Tap-to-confirm: first click arms the button, second click deletes.
-    if (!confirmDelTpl) {
-      confirmDelTpl = true;
-      setTimeout(() => { confirmDelTpl = false; }, 3000);
-      return;
-    }
-    confirmDelTpl = false;
     try {
       await onDelete(name);
       drafts = drafts.filter(d => d.name !== name);
@@ -292,8 +282,8 @@
           <div class="agent-card">
             <div class="agent-card-head">
               <span class="ag-card-title">{ag.name?.trim() || t('teamAgentName')}</span>
-              <button class="ag-del" class:confirm={confirmRmAgent === i} onclick={() => removeAgent(i)}
-                title={confirmRmAgent === i ? t('teamConfirmDelete') : t('teamRemoveAgent')}
+              <button class="ag-del" onclick={() => (pendingRm = { i, name: ag.name || `#${i + 1}` })}
+                title={t('teamRemoveAgent')}
                 aria-label={t('teamRemoveAgent')}><Icon name="trash" size={13} /></button>
             </div>
             <span class="ag-flabel">{t('teamAgentName')}</span>
@@ -345,8 +335,8 @@
 
   <div class="tpl-foot">
     {#if sel && sel.name !== 'default'}
-      <button class="tpl-delete" class:confirm={confirmDelTpl} onclick={deleteCurrent}>
-        {confirmDelTpl ? t('teamConfirmDelete') : t('teamDeleteTemplate')}
+      <button class="tpl-delete" onclick={() => (pendingDelTpl = true)}>
+        {t('teamDeleteTemplate')}
       </button>
     {/if}
     <div class="tpl-foot-right">
@@ -357,6 +347,18 @@
     </div>
   </div>
 </div>
+
+<ConfirmDialog open={!!pendingRm}
+  title={pendingRm ? t('confirmRemoveTeamAgentTitle').replace('{name}', pendingRm.name) : ''}
+  note={t('confirmRemoveTeamAgentNote')} confirmLabel={t('teamRemoveAgent')}
+  onconfirm={() => { if (pendingRm) { removeAgent(pendingRm.i); pendingRm = null; } }}
+  oncancel={() => (pendingRm = null)} />
+
+<ConfirmDialog open={pendingDelTpl}
+  title={t('confirmDeleteTemplateTitle').replace('{name}', sel?.name ?? '')}
+  note={t('confirmDeleteTemplateNote')} confirmLabel={t('teamDeleteTemplate')}
+  onconfirm={() => { pendingDelTpl = false; deleteCurrent(); }}
+  oncancel={() => (pendingDelTpl = false)} />
 
 <style>
   .tpl-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 40; border: none; }
@@ -489,7 +491,6 @@
   .ag-manage { display: flex; align-items: center; gap: 3px; font-size: var(--fs-sub); color: var(--text3); white-space: nowrap; }
   .ag-del { border: none; background: none; color: var(--text3); cursor: pointer; display: flex; flex-shrink: 0; padding: 4px; }
   .ag-del:active { color: var(--danger); }
-  .ag-del.confirm { color: var(--danger); }
   .ag-area { resize: vertical; line-height: 1.4; }
 
   .ag-adv-toggle {
@@ -535,7 +536,6 @@
     background: none; color: var(--danger); font-size: var(--fs-ui); cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
-  .tpl-delete.confirm { background: var(--danger); color: #fff; }
   .tpl-cancel {
     padding: 7px 12px; border: 1px solid var(--border2); border-radius: 8px;
     background: none; color: var(--text2); font-size: var(--fs-ui); cursor: pointer;

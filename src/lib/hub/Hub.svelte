@@ -31,6 +31,7 @@
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
   import CreateProjectDialog from '../projects/CreateProjectDialog.svelte';
+  import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
   let { visible = false, fontSize = 14, mobile = false, openTerminal = () => {} } = $props();
 
@@ -1224,20 +1225,14 @@
     {/if}
   </div>
 
-  {#if pendingAct}
-    <!-- ── Confirm: stop one agent, or close the whole project ── -->
-    <div class="dlg-backdrop" onclick={() => pendingAct = null} role="presentation"></div>
-    <div class="dlg" class:sheet={compact}>
-      <h2>{t(ACT_COPY[pendingAct.kind].title).replace('{name}', pendingAct.name)}</h2>
-      <p class="dlg-note">{t(ACT_COPY[pendingAct.kind].note)}</p>
-      <div class="dlg-actions">
-        <button class="chip-btn" onclick={() => pendingAct = null}>{t('cancel')}</button>
-        <button class="chip-btn primary danger" disabled={acting} onclick={runAction}>
-          {acting ? '…' : t(ACT_COPY[pendingAct.kind].go)}
-        </button>
-      </div>
-    </div>
-  {/if}
+  <!-- Confirm: stop one agent, close or delete the whole project. The dialog is
+       the shared one (src/lib/ui/ConfirmDialog.svelte) — this page had the only
+       good version of it, so it was lifted out rather than copied. -->
+  <ConfirmDialog open={!!pendingAct} busy={acting} compact={compact}
+    title={pendingAct ? t(ACT_COPY[pendingAct.kind].title).replace('{name}', pendingAct.name) : ''}
+    note={pendingAct ? t(ACT_COPY[pendingAct.kind].note) : ''}
+    confirmLabel={pendingAct ? t(ACT_COPY[pendingAct.kind].go) : ''}
+    onconfirm={runAction} oncancel={() => (pendingAct = null)} />
 
   {#if pickerOpen}
     <!-- ── Start a team: several agents at once ── -->

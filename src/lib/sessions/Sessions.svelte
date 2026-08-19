@@ -6,6 +6,7 @@
   import Projects from '../projects/Projects.svelte';
   import CreateProjectDialog from '../projects/CreateProjectDialog.svelte';
   import { t } from '../core/i18n.svelte.ts';
+  import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import { sessionHasAgent, paneAgent, AGENTS } from '../core/agents.ts';
   // Team-mode sessions (`tmm-team-<room>`) are grouped apart from regular
   // sessions and their clicks route to the Team chat instead of a raw terminal.
@@ -52,8 +53,10 @@
   // Folder picker (inside new form)
 
   // Confirm-to-kill gates
-  let confirmKill = $state<string | null>(null);       // session name
-  let confirmKillWindow = $state<string | null>(null); // "session:window"
+  /** The destructive action awaiting confirmation. `target` is a session name
+   * for 'session' and "session:window" for 'window'. */
+  let pendingKill = $state<{ kind: 'session' | 'window'; target: string; session?: string } | null>(null);
+  let killing = $state(false);
 
   let refreshing = $state(false);
 
@@ -187,15 +190,14 @@
     openTerminal(s.name, `${p.session}:${p.window}.${p.pane}`, p.current_command);
   }
 
-  // ─── Kill with tap-to-confirm ─────────────────────────
+  // ─── Kill, behind the app's confirmation ─────────────
+  // It used to be tap-to-confirm: the button re-labelled itself for 3 seconds
+  // and a second tap did the deed. That is a different interaction from every
+  // other destructive verb in the app, it says nothing about what is lost, and
+  // on a phone the 3s window is easy to hit by accident (owner audit,
+  // 2026-08-19).
   async function removeSession(name: string, e?: Event) {
     e?.stopPropagation();
-    if (confirmKill !== name) {
-      confirmKill = name;
-      setTimeout(() => { if (confirmKill === name) confirmKill = null; }, 3000);
-      return;
-    }
-    confirmKill = null;
     try {
       await killSession(name);
       await refresh();
@@ -205,12 +207,6 @@
   }
   async function removeWindow(target: string, session: string, e?: Event) {
     e?.stopPropagation();
-    if (confirmKillWindow !== target) {
-      confirmKillWindow = target;
-      setTimeout(() => { if (confirmKillWindow === target) confirmKillWindow = null; }, 3000);
-      return;
-    }
-    confirmKillWindow = null;
     try {
       await killWindow(target);
       panes[session] = await listPanes(session);
@@ -454,15 +450,10 @@
             {/if}
             <button
               class="kill"
-              class:confirm={confirmKill === s.name}
-              onclick={(e) => removeSession(s.name, e)}
+              onclick={(e) => { e.stopPropagation(); pendingKill = { kind: 'session', target: s.name }; }}
               aria-label="Kill session"
             >
-              {#if confirmKill === s.name}
-                <span class="kill-text">{t('tapToKill')}</span>
-              {:else}
-                <Icon name="trash" size={12} />
-              {/if}
+              <Icon name="trash" size={12} />
             </button>
           {/if}
         </span>
@@ -488,14 +479,9 @@
               </button>
               <button
                 class="pane-kill"
-                class:confirm={confirmKillWindow === `${s.name}:${p.window}`}
-                onclick={(e) => removeWindow(`${s.name}:${p.window}`, s.name, e)}
+                onclick={(e) => { e.stopPropagation(); pendingKill = { kind: 'window', target: `${s.name}:${p.window}`, session: s.name }; }}
               >
-                {#if confirmKillWindow === `${s.name}:${p.window}`}
-                  <span class="kill-text">{t('del')}</span>
-                {:else}
-                  <Icon name="trash" size={11} />
-                {/if}
+                <Icon name="trash" size={11} />
               </button>
             </div>
           {/each}
@@ -635,6 +621,25 @@
   </div>
   </div>
 </div>
+
+<ConfirmDialog open={!!pendingKill} busy={killing} compact={isMobile}
+  title={pendingKill
+    ? t(pendingKill.kind === 'session' ? 'confirmKillSessionTitle' : 'confirmKillWindowTitle')
+        .replace('{name}', pendingKill.target)
+    : ''}
+  note={pendingKill ? t(pendingKill.kind === 'session' ? 'confirmKillSessionNote' : 'confirmKillWindowNote') : ''}
+  confirmLabel={t('del')}
+  onconfirm={async () => {
+    if (!pendingKill || killing) return;
+    killing = true;
+    const act = pendingKill;
+    try {
+      if (act.kind === 'session') await removeSession(act.target);
+      else await removeWindow(act.target, act.session ?? '');
+      pendingKill = null;
+    } finally { killing = false; }
+  }}
+  oncancel={() => (pendingKill = null)} />
 
 <style>
   .sessions {
@@ -965,8 +970,6 @@
     transition: color 0.15s ease;
     -webkit-tap-highlight-color: transparent;
   }
-  .kill:active, .kill.confirm { color: var(--danger); }
-  .kill-text { font-size: var(--fs-meta); font-weight: 600; white-space: nowrap; }
 
   /* ─── Pane list (expanded) ──────────────────────────── */
   .pane-list {
@@ -1054,7 +1057,6 @@
     transition: color 0.15s ease;
     -webkit-tap-highlight-color: transparent;
   }
-  .pane-kill:active, .pane-kill.confirm { color: var(--danger); }
   .pane-add {
     display: flex;
     align-items: center;

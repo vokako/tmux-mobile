@@ -23,6 +23,7 @@
   import 'highlight.js/styles/github-dark.min.css';
   import mermaid from 'mermaid';
   import Icon from '../ui/Icon.svelte';
+  import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import GitPanel from './GitPanel.svelte';
   import { createPersistedList } from './persisted-list.ts';
@@ -75,6 +76,16 @@
 
   let { session = '', onGoBack = null, visible = false, fontSize = 14 } = $props();
 
+  /* The confirmation becomes a bottom sheet on a phone-sized viewport, the same
+     rule the Hub's dialogs use. */
+  let narrowViewport = $state(typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches);
+  $effect(() => {
+    const mq = window.matchMedia('(max-width: 760px)');
+    const onChange = () => { narrowViewport = mq.matches; };
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  });
+
   function navPush() { history.pushState({ app: true }, ''); }
 
   // Register goBack for Android back gesture
@@ -84,7 +95,10 @@
         if (gitPanelRef?.goBack()) return true;
         view = 'list'; return true;
       }
-      if (view === 'edit') { if (isEdited && !confirm(t('discardChanges'))) return true; view = 'preview'; return true; }
+      if (view === 'edit') {
+        if (isEdited) { pendingAct = { kind: 'leave', to: 'preview' }; return true; }
+        view = 'preview'; return true;
+      }
       if (view === 'info') { view = fromGit ? (fromGit = false, 'git') : currentFile?.content != null ? 'preview' : 'list'; return true; }
       if (view === 'preview') { if (fromGit) { fromGit = false; view = 'git'; } else { view = 'list'; } currentFile = null; return true; }
       if (view === 'local') { view = 'list'; return true; }
@@ -212,8 +226,32 @@
   function defaultWrapForMime(mime) {
     return mime === 'text/markdown' || mime === 'text/plain';
   }
-  let confirmDelete = $state(null);
-  let deleteTimer;
+  /** The destructive action awaiting confirmation:
+   *   { kind: 'file', path }     — delete on the server, no trash, no undo
+   *   { kind: 'local', name }    — delete a downloaded copy (had NO confirm)
+   *   { kind: 'leave', to }      — abandon unsaved edits (was a native confirm(),
+   *                                i.e. an OS dialog in the middle of our UI)
+   * Tap-to-confirm is gone: it re-labelled the button for 3s, said nothing about
+   * what is lost, and differed from every other destructive verb in the app. */
+  let pendingAct = $state(null);
+  let acting = $state(false);
+  const ACT_COPY = {
+    file:  { title: 'confirmDeleteFileTitle',  note: 'confirmDeleteFileNote',  go: 'delete' },
+    local: { title: 'confirmDeleteFileTitle',  note: 'confirmDeleteFileNote',  go: 'delete' },
+    leave: { title: 'confirmDiscardTitle',     note: 'confirmDiscardNote',     go: 'confirmDiscard' },
+  };
+  const actName = (a) => (a?.kind === 'file' ? (a.path.split('/').pop() ?? a.path) : a?.name ?? '');
+  async function runPendingAct() {
+    if (!pendingAct || acting) return;
+    const act = pendingAct;
+    acting = true;
+    try {
+      if (act.kind === 'file') await handleDelete(act.path);
+      else if (act.kind === 'local') await deleteLocalFile(act.name);
+      else view = act.to;
+      pendingAct = null;
+    } finally { acting = false; }
+  }
   let newName = $state('');
   let newType = $state(''); // 'file' or 'dir'
   let renaming = $state(null); // path being renamed
@@ -592,24 +630,16 @@
   }
 
   function backToPreview() {
-    if (isEdited && !confirm('Discard unsaved changes?')) return;
+    if (isEdited) { pendingAct = { kind: 'leave', to: 'preview' }; return; }
     view = 'preview';
   }
 
   async function handleDelete(path) {
-    if (confirmDelete === path) {
-      clearTimeout(deleteTimer);
-      try {
-        await fsDelete(path);
-        confirmDelete = null;
-        if (view !== 'list') backToList();
-        loadDir(cwd);
-      } catch (e) { error = e.message; }
-    } else {
-      confirmDelete = path;
-      clearTimeout(deleteTimer);
-      deleteTimer = setTimeout(() => confirmDelete = null, 3000);
-    }
+    try {
+      await fsDelete(path);
+      if (view !== 'list') backToList();
+      loadDir(cwd);
+    } catch (e) { error = e.message; }
   }
 
   async function handleNewItem() {
@@ -1232,12 +1262,8 @@
                 <button class="act-btn" onclick={() => handleDownload(entry.path)} title="Download"><Icon name="download" size={12} /></button>
               {/if}
               <button class="act-btn" onclick={() => { renaming = entry.path; renameValue = entry.name; }} title="Rename"><Icon name="edit" size={12} /></button>
-              <button class="act-btn del" class:confirm={confirmDelete === entry.path} onclick={() => handleDelete(entry.path)} title="Delete">
-                {#if confirmDelete === entry.path}
-                  <span class="del-text">{t('del')}</span>
-                {:else}
-                  <Icon name="trash" size={12} />
-                {/if}
+              <button class="act-btn del" onclick={() => (pendingAct = { kind: 'file', path: entry.path })} title="Delete">
+                <Icon name="trash" size={12} />
               </button>
             </div>
           </div>
@@ -1360,7 +1386,7 @@
             <Icon name="file" size={16} />
             <span class="file-name">{f.name}</span>
           </button>
-          <button class="act-btn del" onclick={() => deleteLocalFile(f.name)}><Icon name="trash" size={12} /></button>
+          <button class="act-btn del" onclick={() => (pendingAct = { kind: 'local', name: f.name })}><Icon name="trash" size={12} /></button>
         </div>
       {/each}
       {#if !localFiles.length}
@@ -1455,6 +1481,12 @@
     </div>
   {/if}
 </div>
+
+<ConfirmDialog open={!!pendingAct} busy={acting} compact={narrowViewport}
+  title={pendingAct ? t(ACT_COPY[pendingAct.kind].title).replace('{name}', actName(pendingAct)) : ''}
+  note={pendingAct ? t(ACT_COPY[pendingAct.kind].note) : ''}
+  confirmLabel={pendingAct ? t(ACT_COPY[pendingAct.kind].go) : ''}
+  onconfirm={runPendingAct} oncancel={() => (pendingAct = null)} />
 
 <style>
   .files { display: flex; flex-direction: column; flex: 1; min-height: 0; background: var(--bg); }
@@ -1617,8 +1649,6 @@
   }
   .act-btn:active { color: var(--accent); }
   .act-btn.on { color: var(--accent); }
-  .act-btn.del:active, .act-btn.del.confirm { color: var(--danger); }
-  .del-text { font-size: var(--fs-meta); font-weight: 600; }
   .act-btn.save { color: var(--accent); }
   .act-btn.save:disabled { color: var(--text3); opacity: 0.5; }
   .act-btn:disabled { color: var(--text3); opacity: 0.5; }

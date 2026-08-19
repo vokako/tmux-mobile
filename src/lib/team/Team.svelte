@@ -13,6 +13,7 @@
   // that as an "unavailable" state and the App hides the tab.
   import Icon from '../ui/Icon.svelte';
   import Select from '../ui/Select.svelte';
+  import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import AgentGrid from './AgentGrid.svelte';
   import CollabGraph from './CollabGraph.svelte';
   import DirPicker from './DirPicker.svelte';
@@ -57,7 +58,21 @@
   let gridFrac = $state(parseFloat(localStorage.getItem('tmux_team_gridfrac') || '0.6'));
   // Latest live message drives the collaboration graph.
   let lastEvent = $state(null);
-  let confirmClose = $state(false); // tap-to-confirm gate for closing a team
+  /** Closing a team kills every agent pane in it, so it goes through the app's
+   * confirmation like every other destructive verb. It used to be
+   * tap-to-confirm — a 3s window in which the same button meant something
+   * different, and no word about what is lost (owner audit, 2026-08-19). */
+  /* Phone-sized viewport: the confirmation becomes a bottom sheet. */
+  let narrowViewport = $state(typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches);
+  $effect(() => {
+    const mq = window.matchMedia('(max-width: 760px)');
+    const onChange = () => { narrowViewport = mq.matches; };
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  });
+
+  let confirmClose = $state(false);
+  let closing = $state(false);
   // Swap the desktop split's left/right regions (some prefer the chat on the left).
   let swapSides = $state(localStorage.getItem('tmux_team_swap') === '1');
   function toggleSwap() {
@@ -316,13 +331,6 @@
   // Close the active team (kill its agents); chat log persists server-side.
   async function closeActiveTeam() {
     if (!activeRoom) return;
-    // Tap-to-confirm (same as killing a session): first tap arms, second closes.
-    if (!confirmClose) {
-      confirmClose = true;
-      setTimeout(() => { confirmClose = false; }, 3000);
-      return;
-    }
-    confirmClose = false;
     switcherOpen = false;
     const room = activeRoom;
     try { await teamCloseTeam(room); } catch {}
@@ -568,8 +576,8 @@
       </div>
     {/if}
     {#if activeTeam}
-      <button class="team-close" class:confirm={confirmClose} onclick={closeActiveTeam} title={t('teamClose')} aria-label={t('teamClose')}>
-        {#if confirmClose}<span class="team-close-text">{t('tapToKill')}</span>{:else}<Icon name="x" size={13} />{/if}
+      <button class="team-close" onclick={() => (confirmClose = true)} title={t('teamClose')} aria-label={t('teamClose')}>
+        <Icon name="x" size={13} />
       </button>
     {/if}
   </div>
@@ -760,6 +768,15 @@
   {/if}
 </div>
 
+<ConfirmDialog open={confirmClose} busy={closing} compact={narrowViewport}
+  title={t('confirmCloseTeamTitle')} note={t('confirmCloseTeamNote')} confirmLabel={t('teamClose')}
+  onconfirm={async () => {
+    if (closing) return;
+    closing = true;
+    try { await closeActiveTeam(); confirmClose = false; } finally { closing = false; }
+  }}
+  oncancel={() => (confirmClose = false)} />
+
 <style>
   /* Desktop split: grid pane | splitter | chat pane. */
   .team-split { display: flex; height: 100%; min-height: 0; width: 100%; }
@@ -853,8 +870,6 @@
   }
   .team-close:active { color: var(--danger); border-color: var(--danger); }
   .team-close { margin-left: auto; }
-  .team-close.confirm { width: auto; padding: 0 8px; color: var(--danger); border-color: var(--danger); }
-  .team-close-text { font-size: var(--fs-meta); font-weight: 600; white-space: nowrap; }
   .team-swap:active, .team-swap.on,
   .team-hbtn:active, .team-hbtn.on { color: var(--accent); border-color: var(--accent); }
   .team-start-cancel {
