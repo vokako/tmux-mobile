@@ -378,7 +378,7 @@
   }
 </script>
 
-<div class="sessions" bind:this={sessionsEl}>
+<div class="sessions" class:sidebar-mode={!chips} bind:this={sessionsEl}>
   <!--
     Top row: chip strip on the left, search button on the right.
     Tapping search swaps this row into full-width input mode; closing it
@@ -572,6 +572,7 @@
       {visible}
       {openTerminal}
       {panes}
+      dense={!chips}
       onTracked={(names) => trackedSessions = names}
       onReady={(reload) => reloadProjects = reload} />
     {#if grouped}
@@ -684,6 +685,10 @@
   /* Scrollable content below the top bar. Padding/gap moved here so the
      top bar can span edge-to-edge at the page top (matching Terminal /
      Files top strips). */
+  /* Sidebar mode (chips off) trades the page's generous padding for the
+     sidebar's 8px gutter, so rows line up with the Chat sidebar's. */
+  .sessions.sidebar-mode .content { padding: 4px 8px 10px; gap: 4px; }
+  .sessions.sidebar-mode .bottom-bar { background: none; }
   .content {
     display: flex;
     flex-direction: column;

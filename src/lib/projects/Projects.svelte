@@ -21,7 +21,7 @@
   import Icon from '../ui/Icon.svelte';
   import { t } from '../core/i18n.svelte.ts';
 
-  let { visible = false, openTerminal, panes = {}, onTracked = () => {}, onReady = () => {} }: {
+  let { visible = false, openTerminal, panes = {}, onTracked = () => {}, onReady = () => {}, dense = false }: {
     visible?: boolean;
     openTerminal: (session: string, target: string, command?: string) => void;
     /** Live panes per session, already loaded by the Sessions page. */
@@ -30,6 +30,10 @@
     onTracked?: (sessions: string[]) => void;
     /** Hands the reload function out, so creating a project refreshes us. */
     onReady?: (reload: () => Promise<void>) => void;
+    /** Sidebar mode: rows in the shared side-row language instead of cards
+     * (ui-unification "Page skeleton"). The Chat sidebar set that style; the
+     * Terminal sidebar has to match it (owner, 2026-08-19). */
+    dense?: boolean;
   } = $props();
 
   let rows = $state<ProjectRow[]>([]);
@@ -129,7 +133,7 @@
 </script>
 
 {#if supported && sorted.length > 0}
-  <section class="projects">
+  <section class="projects" class:dense>
     <div class="group-label">
       <button class="group-toggle" onclick={() => collapsed = !collapsed} aria-expanded={!collapsed}>
         <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
@@ -232,6 +236,32 @@
     background: var(--surface2); color: var(--text2);
     border-radius: 8px; padding: 0 5px; font-size: 10px; letter-spacing: 0;
   }
+
+  /* ── Sidebar (dense) mode ───────────────────────────────────────────────
+     The Chat sidebar defined the house style — bg2 surface, one uppercase
+     mono section header, borderless rows that only highlight when active —
+     and the Terminal sidebar now shows the SAME component, so the cards
+     become rows here instead of a second visual language living next door.
+     Card chrome off, section header in the shared .side-h idiom, actions
+     revealed on hover so the row is a name and a state at rest. */
+  .projects.dense { gap: 1px; margin-bottom: 6px; }
+  .projects.dense .group-label { font-size: var(--fs-meta); letter-spacing: 0.1em; padding: 8px 6px 4px; }
+  .projects.dense .group-count { background: none; color: var(--text3); padding: 0; }
+  .projects.dense .proj {
+    background: none; border: none; border-radius: 9px; padding: 2px 4px; gap: 2px;
+  }
+  .projects.dense .proj:hover { background: var(--surface); }
+  .projects.dense .proj.live { border: none; }
+  .projects.dense .proj-main { padding: 4px 4px; }
+  .projects.dense .age, .projects.dense .path { color: var(--text3); }
+  /* At rest a row shows what it IS; what you can DO to it appears on hover
+     (or focus, for keyboards) — the same restraint the Chat rows have. */
+  .projects.dense .acts { opacity: 0; transition: opacity var(--t-fast) ease; }
+  .projects.dense .proj:hover .acts,
+  .projects.dense .proj:focus-within .acts { opacity: 1; }
+  /* Windows stay — they are what the project is made of — but as a quiet
+     single line, not a bordered tray. */
+  .projects.dense .wins { padding: 0 4px 2px 16px; gap: 3px; }
 
   .proj {
     display: flex; flex-direction: column; gap: 6px;

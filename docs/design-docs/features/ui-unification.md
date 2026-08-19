@@ -45,6 +45,29 @@ can never disagree.
 
 ### 2. One resize affordance
 
+## Every sidebar speaks the same language
+
+The Chat sidebar set the house style and the others follow it (owner,
+2026-08-19: "所有的侧边栏风格尽量保持一致"): `--bg2` surface with a right
+border, ONE uppercase mono section header per group (`.side-h`, `--fs-meta`,
+`--text3`), borderless rows at 9px radius that only take a background when
+they are active or hovered, and 8px gutters.
+
+The outlier was the Terminal sidebar, because it renders `Sessions` →
+`Projects`, which was designed as a PAGE of bordered cards. Those components
+now take a mode flag instead of being duplicated: `Sessions chips={false}`
+(also drops the MRU strip, see terminal.md) sets `.sidebar-mode`, which
+tightens the content gutter and passes `dense` to `Projects`. In dense mode a
+project card loses its border and surface, the group label becomes the
+`.side-h` idiom, and the row's actions (Close / archive) fade in on
+hover/focus-within — at rest a row is a name, a dot and a path, exactly like a
+Chat row. Windows stay inside the row (they are what the project is made of)
+as a quiet indented line.
+
+Measured after the change, Chat / Terminal / Agents sidebars all report the
+same surface `rgb(238,238,240)` (light), 1px right border, 10.5px headers in
+`--text3`, and 9px borderless rows.
+
 `SideHandle.svelte` — a 6px grab strip on a panel's edge, and the ONE resize
 affordance in the app:
 

@@ -1909,6 +1909,12 @@
         <!-- Session name as a fixed tag at the far left of the switcher row,
              so it's always visible without stealing a whole row. The window
              chips scroll independently to its right. -->
+        <!-- The session chip is a QUICK JUMP to any pane in any session. It
+             earns its place only where no list is on screen: on a phone it
+             opens the session sheet. On a desktop the sidebar list is already
+             there, so the chip is a second door to the same room and the owner
+             asked for it to go (2026-08-19). -->
+        {#if onOpenSessions}
         <AgentChip
           attention={otherTerminalSessionHasNotification(session)}
           label={session}
@@ -1925,6 +1931,7 @@
             else showPanePicker = !showPanePicker;
           }}
         />
+        {/if}
         {#if showPanePicker}
           <PanePicker
             currentTarget={target}
