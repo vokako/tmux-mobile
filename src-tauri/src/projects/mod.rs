@@ -15,6 +15,7 @@ pub mod reconcile;
 pub mod spawn;
 pub mod store;
 pub mod telemetry;
+pub mod vitals;
 
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};

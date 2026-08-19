@@ -517,6 +517,49 @@ ignores the keyboard is a menu you have to reach for the mouse to use), Escape
 dismisses it until the text changes, and hover shares ONE highlight with the
 keyboard cursor because two would read as two selections.
 
+## Vitals: reading the agent's own status line
+
+An agent CLI already publishes its live state at the bottom of its pane — the
+model, the share of context used, the reasoning effort, the cwd and branch. We
+were showing none of it and asking the owner to go read the terminal ("从输出的最后
+几行原始文本内容 加一下当前状态的嗅探，比如模型名 上下文长度 effort 之类的",
+2026-08-19). There is no API for it: a CLI's live state lives in its own process.
+
+So `projects::vitals::sniff_kiro` reads the last lines of the pane, and
+`hub_agents` attaches a `vitals` object per agent. It is a SNIFFER, with a
+sniffer's contract: every field is optional, an unreadable pane yields the empty
+reading and never an error, the object is omitted entirely when nothing could be
+read, and nothing downstream may assume a value is present. It sits on top of the
+hook-derived state, never in place of it — hooks are facts, this is a reading of
+somebody else's screen.
+
+What makes it more than guesswork is that kiro's layout is documented by kiro's
+own source: the status line is a fixed order of segments joined by `·` — `agent ·
+autonomous · model · effort · context · tangent · codeIntel · goal` on the left,
+`location · branch` on the right — and the context segment is defined there as
+"Share of the context used" (a pie glyph plus `N%`, or `N% ctx` in lite mode). Four
+rules follow from reading a screen rather than an API:
+
+- **The agent's own name is the anchor.** The model is positional (it follows the
+  name, and the optional `Autonomous` flag), so a line that does not start with
+  this window's name contributes no model. Without that anchor a cwd, a tangent
+  name or a neighbour's status line becomes "the model this agent is running".
+- **Fields that can identify themselves do.** Context, effort and branch are found
+  by shape wherever they sit, because a narrow pane wraps the right-hand segments
+  onto their own lines. Effort in particular cannot be positional: it is absent
+  unless the backend reports one, and by position its slot holds the model.
+- **A bare `69%` is never the context.** Only a percentage carrying the pie glyph
+  or the `ctx` suffix counts. A terminal is full of percentages, and a confident
+  wrong number on the card is worse than a missing one.
+- **The newest paint wins**, so the tail is read bottom-up: a pane keeps every
+  earlier status line in its scrollback.
+
+Managed agents only (their status line's shape is one we materialized), one
+`capture-pane` per agent, capped at four per project. The client shows the context
+percentage on the roster card — amber at kiro's own 60% threshold, because a
+context about to auto-compact changes what you should ask for — and the whole
+reading in the agent's menu header and the card's tooltip.
+
 ## Who a message goes to
 
 Three ways a message can land, and they are NOT shades of one thing:

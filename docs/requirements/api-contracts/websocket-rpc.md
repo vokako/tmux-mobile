@@ -126,7 +126,7 @@ humans) and the desktop hub UI. See
 | `hub_status` | `session`, `agent` (window name), `state` (`working\|waiting\|blocked`), `note?` | `{ok, window}` |
 | `hub_done` | `session`, `agent`, `summary?` | `{ok, window}` — also posts `✔ done` to the room |
 | `hub_command` | `session`, `agent` (window name or `all`), `text` (must start with `/`) | `{sent: [names], command}` — types the text VERBATIM into the managed agent's pane (no stamp, no sender): slash commands are read by the CLI, not the model. Recorded in the room as a `[tmm] ` lifecycle line |
-| `hub_agents` | `session` | `{agents: [{window, name, command, agent, state, detail, since}]}` |
+| `hub_agents` | `session` | `{agents: [{window, name, command, agent, managed, state, detail, since, vitals}]}` — `vitals` is `{model, context_pct, effort, branch}` SNIFFED from the last lines of a managed agent's pane (a CLI's live state has no API): every field may be null, and `vitals` itself is null when nothing could be read |
 
 ### Team (desktop-only — method-not-found on servers without the bus)
 All chat operations are scoped to a team `room`; `team_status` / `team_teams`

@@ -455,6 +455,8 @@
   let paletteIdx = $state(0);
   let paletteOff = $state(false);      // Escape closes it until the text changes
   const palette = $derived(paletteOff ? null : commandPalette(composerText, cmdModels));
+  // The open menu's agent, as its status line reads right now.
+  const vitalsFor = $derived(vitalsLine(managedAgents.find((a) => a.name === menuFor)?.vitals));
   $effect(() => { void composerText; paletteOff = false; });
   $effect(() => { void palette; paletteIdx = 0; });
   // The model list is only needed once a command wants it, and the server caches
@@ -500,6 +502,24 @@
     e.preventDefault();
     send();
   }
+
+  /** What the agent's own status line says, as one line. Sniffed server-side
+   * from the last lines of its pane (there is no API for a CLI's live state), so
+   * every field is a maybe and a missing one is simply absent — never a zero, a
+   * dash, or a guess. */
+  function vitalsLine(v) {
+    if (!v) return '';
+    const parts = [];
+    if (v.model) parts.push(v.model);
+    if (v.context_pct != null) parts.push(`${v.context_pct}% ctx`);
+    if (v.effort) parts.push(v.effort);
+    if (v.branch) parts.push(v.branch);
+    return parts.join(' · ');
+  }
+  /** kiro's own warning threshold for context usage — the point where its status
+   * line turns the number amber. Borrowing it keeps one meaning of "getting
+   * full" across the two surfaces. */
+  const CTX_WARN = 60;
 
   /** Choosing a recipient is also choosing this project's lead: it is the same
    * decision ("who am I working with here"), so it persists. */
@@ -995,13 +1015,21 @@
                  and a button inside a button is invalid HTML the browser
                  silently reshuffles. -->
             <div class="acard" class:sel={recipient === a.name} role="button" tabindex="0"
-              title={`${a.name} · ${stateLabel(a.state)}${a.detail ? ' · ' + a.detail : ''}`}
+              title={[`${a.name} · ${stateLabel(a.state)}`, a.detail, vitalsLine(a.vitals)].filter(Boolean).join(' · ')}
               onclick={() => setRecipient(a.name)}
               onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setRecipient(a.name); } }}>
               <span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>
               <span class="a-name">{a.name}</span>
               <span class="st" class:live={a.state === 'running'} style:background={stateDotColor(a.state)}></span>
               {#if a.since}<span class="s-age">{fmtElapsed(a.since, tick)}</span>{/if}
+              <!-- Context used, from the agent's own status line. It is here and
+                   not in the menu because it is the one number you want BEFORE
+                   you go looking: a context about to auto-compact changes what
+                   you should ask for. Amber at kiro's own threshold. -->
+              {#if !compact && a.vitals?.context_pct != null}
+                <span class="ctx" class:warn={a.vitals.context_pct >= CTX_WARN}
+                  title={t('hubCtxUsed')}>{a.vitals.context_pct}%</span>
+              {/if}
               {#if unread.has(a.name)}<span class="unread" title={t('hubUnread')}></span>{/if}
               <!-- Destructive and secondary actions stay behind a dot menu: a
                    roster is for seeing who is here, not a row of hazards. -->
@@ -1057,6 +1085,7 @@
           style:left="{menuPos.x}px" style:top="{menuPos.y}px"
           bind:clientWidth={menuW} bind:clientHeight={menuH}>
           <div class="am-who">{menuFor}</div>
+          {#if vitalsFor}<div class="am-vitals">{vitalsFor}</div>{/if}
           {#if stopped.includes(menuFor)}
             <button role="menuitem" disabled={acting} onclick={() => { const n = menuFor; menuFor = ''; startAgent(n); }}>
               <Icon name="refresh" size={12} />{t('hubStartAgain')}
@@ -1894,6 +1923,18 @@
     padding: 6px 10px; font-size: var(--ui-font-control); cursor: pointer; font-family: ui-monospace, Menlo, monospace;
   }
   .to-menu button:hover { background: var(--surface2); color: var(--text); }
+  /* Sniffed vitals are subordinate telemetry: monospace so a percentage does not
+     jitter as it changes, and the meta ink so they never compete with the name. */
+  .ctx {
+    flex: none; font-size: var(--fs-meta); color: var(--meta-ink);
+    font-family: ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums;
+  }
+  .ctx.warn { color: var(--warn, #d98d2b); }
+  .am-vitals {
+    padding: 0 9px 6px; margin-top: -3px; font-size: var(--fs-meta); color: var(--text3);
+    font-family: ui-monospace, Menlo, monospace; max-width: 240px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   /* The slash-command palette: the recipient menu's surface, full capsule width
      because a command list is read as rows of name + description. */
   .cmd-menu {

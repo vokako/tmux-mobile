@@ -496,6 +496,19 @@ fn agent_states(session: &str) -> serde_json::Value {
             let agent = agents::detect(&format!("{} {} {}", p.current_command, p.pane_title, p.window_name));
             let st = telemetry::derive(session, p.window, activity.get(&p.window).copied().unwrap_or(0));
             let managed = agent.is_some() && crate::projects::is_managed_in(ws.as_deref(), &p.window_name);
+            // What the agent's own status line says: model, context used, effort,
+            // branch. There is no API for a CLI's live state, so it is SNIFFED
+            // from the last lines of the pane — hence managed agents only (we
+            // know their status line's shape), every field optional, and the
+            // object omitted entirely when nothing could be read. One
+            // capture-pane per agent, capped at 4 per project.
+            let vitals = if managed {
+                crate::tmux::capture_pane_plain(&format!("{session}:{}", p.window), Some(0))
+                    .map(|text| crate::projects::vitals::sniff_kiro(&text, &p.window_name))
+                    .unwrap_or_default()
+            } else {
+                Default::default()
+            };
             serde_json::json!({
                 "window": p.window,
                 "name": p.window_name,
@@ -505,6 +518,7 @@ fn agent_states(session: &str) -> serde_json::Value {
                 "state": if agent.is_some() { st.state.as_str() } else { "shell" },
                 "detail": st.detail,
                 "since": st.since,
+                "vitals": if vitals.is_empty() { serde_json::Value::Null } else { serde_json::to_value(&vitals).unwrap_or(serde_json::Value::Null) },
             })
         })
         .collect();
