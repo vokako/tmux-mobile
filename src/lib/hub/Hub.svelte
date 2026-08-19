@@ -26,7 +26,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts } from './hub.ts';
+  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, elideMiddle } from './hub.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
@@ -238,6 +238,35 @@
    * the viewport, then let CSS sticky catch that SAME element as it leaves in
    * the current scroll direction. In an empty stretch of a long reply, retain
    * it; never swap to another invisible message at an arbitrary midpoint. */
+  /** A held bubble may cover at most a FIFTH of the conversation — the owner's
+   * number ("总高度不超过屏幕百分之二十"). Measured in px off the feed rather than
+   * `20vh` because the feed is not the viewport (a head, a roster and a composer
+   * sit around it), and because the same number has to tell us how many LINES
+   * that is. */
+  let heldMax = $state(0);
+  let heldLine = $state(20);        // measured line box of a bubble, px
+  function measureHeld() {
+    if (!feedEl) return;
+    heldMax = Math.max(96, Math.round(feedEl.clientHeight * 0.2));
+    const bubble = feedEl.querySelector('.bubble');
+    const lh = bubble ? parseFloat(getComputedStyle(bubble).lineHeight) : NaN;
+    if (Number.isFinite(lh) && lh > 6) heldLine = lh;
+  }
+  $effect(() => {
+    void blocks; void visible;
+    measureHeld();
+    const onResize = () => measureHeld();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  });
+  /** How many whole lines fit in that ceiling, minus the bubble's own padding
+   * and the meta trailer's line. Never below three: head + marker + tail is the
+   * floor at which an elision still says anything. */
+  const heldLines = $derived(Math.max(3, Math.floor((heldMax - 26) / heldLine)));
+  /** The body a held bubble shows. Identity when it already fits, so the common
+   * case re-renders nothing. */
+  const heldBody = (text) => elideMiddle(text, heldLines);
+
   function syncAsk(direction = askDir, reset = false) {
     if (!feedEl) { askKey = ''; askEdge = ''; askHeld = false; return; }
     // Chromium's offsetTop for a sticky element is its HELD position. Read that
@@ -245,13 +274,23 @@
     // selected. Neutralize the one current sticky element for this synchronous
     // layout read; the inline override is removed before the browser can paint.
     const stickies = [...feedEl.querySelectorAll('.ask-top, .ask-bottom')];
-    for (const el of stickies) el.style.position = 'static';
+    for (const el of stickies) {
+      el.style.position = 'static';
+      // …and its natural HEIGHT: `.held` caps it, so measuring the clamped box
+      // would answer "is it still touching the bottom edge" with a different
+      // number than the one that decided to clamp it — held would flip off, the
+      // bubble would grow, and it would flip straight back on.
+      el.style.maxHeight = 'none';
+    }
     const items = [...feedEl.querySelectorAll('[data-ask]')].map((el) => ({
       key: el.dataset.ask ?? '',
       top: el.offsetTop,
       height: el.offsetHeight,
     }));
-    for (const el of stickies) el.style.removeProperty('position');
+    for (const el of stickies) {
+      el.style.removeProperty('position');
+      el.style.removeProperty('max-height');
+    }
     const picked = pickAnchor(
       items,
       feedEl.scrollTop,
@@ -951,7 +990,8 @@
       {/if}
 
       <div class="feed-wrap">
-      <div class="feed subtle-scroll" bind:this={feedEl} onscroll={onFeedScroll}>
+      <div class="feed subtle-scroll" bind:this={feedEl} onscroll={onFeedScroll}
+        style:--held-max={heldMax ? `${heldMax}px` : null}>
         {#each blocks as b, i (blockKey(b, i))}
           {#if b.type === 'sys'}
             <!-- The app's own record (spawn/stop/restart), folded: consecutive
@@ -992,7 +1032,12 @@
                       {#if rawOpen === key}
                         <pre class="raw">{m.body}</pre>
                       {:else}
-                        {@html markLeadingMention(renderMarkdown(parts.text))}
+                        <!-- While HELD, a long ask is elided from the MIDDLE so
+                             both ends stay readable inside the ceiling; raw view
+                             and every other message render in full. -->
+                        {@html markLeadingMention(renderMarkdown(
+                          isAsk && askKey === key && askHeld ? heldBody(parts.text) : parts.text,
+                        ))}
                       {/if}
                     {/if}
                     <button class="m-meta" aria-label={t('hubMsgActions')}
@@ -1431,6 +1476,14 @@
   .feed {
     flex: 1; overflow-y: auto; padding: 18px clamp(18px, 4vw, 64px) 24px;
     display: flex; flex-direction: column; gap: 10px;
+    /* THE reason a held bubble may change its own height. Chromium's scroll
+       anchoring compensated `scrollTop` whenever the held bubble grew or shrank;
+       that compensation moved the geometry the boundary test reads, which
+       unheld it, which restored the height — the "一闪一闪" infinite blink
+       (measured: assigning scrollTop 2261 landed on 2221↔2298). With anchoring
+       off, a height change is just a height change. The feed follows its tail
+       explicitly anyway (scrollFeed), so nothing here depended on it. */
+    overflow-anchor: none;
   }
   /* Feed rows must NEVER flex-shrink. The feed always overflows, and a column
      flex container compresses shrinkable children before scrolling; children
@@ -1465,7 +1518,14 @@
      Depth is the only thing `.held` adds: the backdrop blur plus a lifted
      shadow, both paint-only, so a bubble overlapping the scrolling content
      below it reads as floating rather than as a rendering glitch. */
-  .msg.held { -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+  .msg.held {
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    /* The ceiling. The elision already fits the TEXT to it, so this is the guard
+       for what an estimate cannot cover: a long unbroken URL, a wide glyph run,
+       an image ref. Layout is only safe here because the feed opts out of scroll
+       anchoring and syncAsk measures the natural box — see both comments. */
+    max-height: var(--held-max, none); overflow: hidden;
+  }
   .msg.held .bubble { box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28); }
 
   /* Back to the tail. */

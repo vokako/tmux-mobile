@@ -183,6 +183,72 @@ export function toolColor(tool: string | null | undefined): string {
  * all" lifts the cap for one group. */
 export const STEPS_ROWS = 10;
 
+/** The marker that stands in for what a held bubble is not showing. Full-width
+ * ellipsis: this is a Chinese-first UI and `...` reads as three periods. */
+export const ELIDE = '……';
+
+/**
+ * Shorten `text` from the MIDDLE, keeping the beginning and the end.
+ *
+ * A held user message is a reminder of what you asked, and the ask is usually
+ * split between the two ends: the subject at the top, the actual request at the
+ * bottom. Cutting the tail (what a line clamp does) throws away the half that
+ * says what to do — hence "把文字中间内容可以跳过比较多用 ……省略, 但是少数几行可以
+ * 完整展示" (owner, 2026-08-19).
+ *
+ * Two shapes need eliding and they need different cuts:
+ *  · MANY LINES → keep whole lines, more from the head than the tail (the first
+ *    lines carry the framing), with the marker on a line of its own. Whole lines
+ *    keep the markdown parseable, which is why this is not a character cut.
+ *  · ONE LONG PARAGRAPH → line counting cannot help, so cut characters, and cut
+ *    on a word/CJK boundary rather than mid-word.
+ *
+ * `maxLines` is derived by the caller from the height it may occupy and the
+ * measured line height, so a big screen shows more lines than a small one.
+ * Returns the text unchanged when it already fits — the common case, and the
+ * caller relies on identity to skip re-rendering.
+ */
+export function elideMiddle(text: string, maxLines: number, perLine = 80): string {
+  const lines = (text ?? '').split('\n');
+  const budget = Math.max(2, Math.floor(maxLines));
+  if (lines.length > budget) {
+    // One line of the budget goes to the marker itself.
+    const keep = budget - 1;
+    const head = Math.max(1, Math.ceil(keep * 0.6));
+    const tail = Math.max(1, keep - head);
+    const out = [...lines.slice(0, head), ELIDE, ...lines.slice(-tail)].join('\n');
+    return closeFences(out);
+  }
+  // Short enough in lines, but a single paragraph can still be pages long once
+  // it wraps.
+  const cap = budget * perLine;
+  if (text.length <= cap) return text;
+  const head = Math.floor(cap * 0.6);
+  const tail = Math.max(20, cap - head);
+  return closeFences(`${cutAt(text, head, 'end')}\n${ELIDE}\n${cutAt(text, tail, 'start')}`);
+}
+
+/** Cut `n` characters off the start/end of `s`, backing up to the nearest space
+ * so a word is not sliced in half. CJK has no spaces, so a run without one is
+ * cut where asked. */
+function cutAt(s: string, n: number, from: 'start' | 'end'): string {
+  if (from === 'end') {
+    const slice = s.slice(0, n);
+    const at = slice.lastIndexOf(' ');
+    return (at > n * 0.7 ? slice.slice(0, at) : slice).trimEnd();
+  }
+  const slice = s.slice(-n);
+  const at = slice.indexOf(' ');
+  return (at >= 0 && at < n * 0.3 ? slice.slice(at + 1) : slice).trimStart();
+}
+
+/** An elision can drop the closing half of a fenced block, which would swallow
+ * the rest of the bubble in a code block. Balance it. */
+function closeFences(s: string): string {
+  const fences = (s.match(/^```/gmu) ?? []).length;
+  return fences % 2 === 0 ? s : `${s}\n\`\`\``;
+}
+
 /** Advance the ONE user-message anchor without inventing a second component.
  *
  * The active message is selected while its real bubble is naturally visible:
