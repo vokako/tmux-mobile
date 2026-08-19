@@ -328,37 +328,53 @@ export interface SlashCmd {
   args?: string[];
   /** Values that have to be fetched — the model ids come from `models_list`. */
   dynamic?: 'models';
+  /** The command opens an interactive VIEW in the agent's TUI rather than doing
+   * something: kiro marks these `inputType: "panel"` (a list/table that takes
+   * over the pane and needs a key to dismiss) or opens $EDITOR / a recorder.
+   * Sending one from the chat parks the agent inside a panel nobody here can
+   * see, so they are kept in this table — with the reason — and filtered OUT of
+   * the palette until there is a way to show them ("有一些命令输入后是交互式查看
+   * 的 这种就先去掉吧 以后再想办法支持", owner 2026-08-19). Re-enabling one is
+   * deleting a flag. */
+  view?: true;
 }
 
 export const KIRO_COMMANDS: readonly SlashCmd[] = [
+  // ── Act immediately, or act once an argument is chosen.
   { name: 'model', desc: 'List or switch models', args: ['set-current-as-default'], dynamic: 'models' },
   { name: 'compact', desc: 'Compact conversation history to reduce context usage' },
   { name: 'clear', desc: 'Clear the conversation and start a fresh session' },
-  { name: 'context', desc: 'Show or manage context files', args: ['add', 'remove', 'clear'] },
-  { name: 'effort', desc: 'List or set the reasoning effort level', args: ['low', 'medium', 'high', 'xhigh', 'max', 'set-current-as-default'] },
-  { name: 'agent', desc: 'List or switch agents', args: ['create', 'edit', 'swap'] },
-  { name: 'tools', desc: 'List available tools' },
-  { name: 'mcp', desc: 'Show MCP server status' },
-  { name: 'hooks', desc: 'View configured hooks' },
-  { name: 'usage', desc: 'Show plan usage and billing information' },
-  { name: 'code', desc: 'Code intelligence status, init, codebase overview', args: ['status', 'init', 'overview'] },
-  { name: 'knowledge', desc: 'Manage knowledge bases' },
-  { name: 'memories', desc: 'Manage repo-scoped memories from previous sessions' },
-  { name: 'plan', desc: 'Switch to plan mode to break ideas into a plan' },
+  { name: 'effort', desc: 'Set the reasoning effort level', args: ['low', 'medium', 'high', 'xhigh', 'max', 'set-current-as-default'] },
+  // `create`/`edit` open $EDITOR in the pane, so only `swap` is offered.
+  { name: 'agent', desc: 'Switch to a different agent', args: ['swap'] },
+  { name: 'chat', desc: 'Save the conversation, load one, or start fresh', args: ['new', 'save', 'load'] },
   { name: 'spec', desc: 'List specs, switch to spec mode, or run spec tasks', args: ['new', 'run', 'view', 'analyze_requirements'] },
-  { name: 'tangent', desc: 'Go back, switch to, or create a conversation tangent', args: ['ls', 'root'] },
-  { name: 'chat', desc: 'Load a previous session, save, or start a new one', args: ['new', 'save', 'load'] },
-  { name: 'prompts', desc: 'Select or list available prompts' },
-  { name: 'rewind', desc: 'Fork the session at an earlier turn' },
-  { name: 'reply', desc: 'Reply to the last assistant message in $EDITOR' },
+  { name: 'plan', desc: 'Switch to plan mode to break ideas into a plan' },
   { name: 'paste', desc: 'Paste image from clipboard' },
-  { name: 'goal', desc: 'Work toward a goal in a loop until done' },
-  { name: 'workflow', desc: 'Browse and manage workflows or run a recipe', args: ['run', 'list', 'new', 'retry'] },
-  { name: 'upgrade-agent', desc: 'Upgrade V2 agent configs to universal form' },
-  { name: 'help', desc: 'Show available commands' },
-  { name: 'feedback', desc: 'Submit feedback, request features, or report issues' },
   { name: 'quit', desc: 'Exit the agent CLI' },
+  // ── Interactive views: kept for the record, filtered out of the palette.
+  { name: 'tools', desc: 'List available tools', view: true },
+  { name: 'help', desc: 'Show available commands', view: true },
+  { name: 'usage', desc: 'Show plan usage and billing information', view: true },
+  { name: 'context', desc: 'Show or manage context files', args: ['add', 'remove', 'clear'], view: true },
+  { name: 'mcp', desc: 'Show MCP server status', view: true },
+  { name: 'hooks', desc: 'View configured hooks', view: true },
+  { name: 'code', desc: 'Code intelligence status, init, codebase overview', args: ['status', 'init', 'overview'], view: true },
+  { name: 'knowledge', desc: 'Manage knowledge bases', view: true },
+  { name: 'memories', desc: 'Manage repo-scoped memories from previous sessions', view: true },
+  { name: 'tangent', desc: 'Go back, switch to, or create a conversation tangent', args: ['ls', 'root'], view: true },
+  { name: 'rewind', desc: 'Fork the session at an earlier turn', view: true },
+  { name: 'goal', desc: 'Work toward a goal in a loop until done', view: true },
+  { name: 'workflow', desc: 'Browse and manage workflows or run a recipe', args: ['run', 'list', 'new', 'retry'], view: true },
+  { name: 'prompts', desc: 'Select or list available prompts', view: true },
+  { name: 'feedback', desc: 'Submit feedback, request features, or report issues', view: true },
+  { name: 'upgrade-agent', desc: 'Upgrade V2 agent configs to universal form', view: true },
+  { name: 'reply', desc: 'Reply to the last assistant message in $EDITOR', view: true },
+  { name: 'voice', desc: 'Record voice input', view: true },
 ];
+
+/** The commands the palette offers: everything that is not an interactive view. */
+export const OFFERED_COMMANDS: readonly SlashCmd[] = KIRO_COMMANDS.filter((c) => !c.view);
 
 export interface PaletteItem { value: string; hint: string }
 export interface Palette {
@@ -389,13 +405,13 @@ export function commandPalette(text: string, models: readonly string[] = []): Pa
   const head = parts[0]!.slice(1);              // the command, without the slash
   // Still typing the command itself: `/`, `/mo`, `/model` with no space yet.
   if (parts.length === 1) {
-    const items = KIRO_COMMANDS.filter((c) => c.name.startsWith(head.toLowerCase())).map((c) => ({
+    const items = OFFERED_COMMANDS.filter((c) => c.name.startsWith(head.toLowerCase())).map((c) => ({
       value: `/${c.name}`,
       hint: c.desc,
     }));
     return items.length ? { stage: 'command', items, from: at, more: true } : null;
   }
-  const cmd = KIRO_COMMANDS.find((c) => c.name === head.toLowerCase());
+  const cmd = OFFERED_COMMANDS.find((c) => c.name === head.toLowerCase());
   if (!cmd) return null;
   const values = [...(cmd.dynamic === 'models' ? models : []), ...(cmd.args ?? [])];
   if (!values.length) return null;

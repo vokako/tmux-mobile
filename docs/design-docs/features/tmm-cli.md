@@ -495,6 +495,20 @@ last because it ends the agent. `/model`'s values are the exception that cannot 
 transcribed: they are fetched through `models_list`, the same server call the agent
 editor uses (cached ten minutes, asked at most once per Hub visit).
 
+**Only commands that DO something are offered.** kiro marks the rest
+`inputType: "panel"` — a list or table that takes over the pane and needs a key to
+dismiss — and a few others open `$EDITOR` or a recorder. Sending one from the chat
+parks the agent inside something nobody here can see, so `/tools`, `/help`,
+`/mcp`, `/context`, `/code`, `/hooks`, `/knowledge`, `/memories`, `/tangent`,
+`/rewind`, `/goal`, `/workflow`, `/prompts`, `/feedback`, `/upgrade-agent`,
+`/usage`, `/reply` and `/voice` carry `view: true`: they stay in the table, with
+the reason, and `OFFERED_COMMANDS` filters them out (owner, 2026-08-19: "有一些命令
+输入后是交互式查看的 这种就先去掉吧 以后再想办法支持"). Re-enabling one is deleting
+a flag, once there is a way to show a panel — the terminal drawer is the obvious
+candidate. Ten remain: `/model`, `/compact`, `/clear`, `/effort`, `/agent swap`,
+`/chat`, `/spec`, `/plan`, `/paste`, `/quit`. `/agent` offers only `swap` for the
+same reason: `create` and `edit` open an editor in the pane.
+
 Only the LAST token is completed, and only the FIRST argument: these commands take
 one, and what follows it — a path, a prompt, a free-text name — is not ours to
 guess, so a filled argument closes the palette instead of re-offering the same

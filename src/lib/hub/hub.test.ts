@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS } from './hub.ts';
+import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -536,13 +536,13 @@ test('commandPalette completes a command, then its argument', () => {
   // Stage one: a bare slash offers everything, and a prefix narrows it.
   const all = commandPalette('/', models);
   assert.equal(all?.stage, 'command');
-  assert.equal(all?.items.length, KIRO_COMMANDS.length, 'every command is offered');
+  assert.equal(all?.items.length, OFFERED_COMMANDS.length, 'every OFFERED command is offered');
   assert.equal(all?.from, 0);
   assert.ok(all?.more, 'accepting a command may open its argument list');
   assert.deepEqual(
     commandPalette('/co', models)?.items.map((i) => i.value),
-    ['/compact', '/context', '/code'],
-    'prefix match, in table order',
+    ['/compact'],
+    'prefix match, in table order — /context and /code are interactive views',
   );
   // Every offered item carries the CLI's own description, not an invented one.
   assert.ok(all?.items.every((i) => i.hint.length > 3));
@@ -570,4 +570,22 @@ test('commandPalette completes a command, then its argument', () => {
   for (const s of ['hello', '/tmp/x', '', ' ', '/nope ']) {
     assert.equal(commandPalette(s, models), null, JSON.stringify(s));
   }
+});
+
+test('an interactive view is not offered — it would park the agent in a panel', () => {
+  // kiro marks these `inputType: "panel"` (or they open $EDITOR / a recorder):
+  // sending one from the chat leaves the agent inside something nobody here can
+  // see or dismiss, so they are filtered out until there is a way to show them
+  // (owner, 2026-08-19: "比如/tools 就先去掉吧").
+  assert.ok(KIRO_COMMANDS.some((c) => c.name === 'tools' && c.view), 'kept in the table, with the reason');
+  assert.ok(OFFERED_COMMANDS.every((c) => !c.view));
+  for (const typed of ['/tools', '/too', '/help', '/mcp', '/context', '/context ', '/rewind', '/voice']) {
+    assert.equal(commandPalette(typed, ['auto']), null, `${typed} must not be offered`);
+  }
+  // The actors are still there, and `/model` still completes its values.
+  const offered = commandPalette('/', [])?.items.map((i) => i.value) ?? [];
+  assert.deepEqual(offered, ['/model', '/compact', '/clear', '/effort', '/agent', '/chat', '/spec', '/plan', '/paste', '/quit']);
+  assert.ok(commandPalette('/model ', ['auto'])?.items.some((i) => i.value === 'auto'));
+  // `/agent` offers only `swap`: create/edit open $EDITOR in the pane.
+  assert.deepEqual(commandPalette('/agent ', [])?.items.map((i) => i.value), ['swap']);
 });
