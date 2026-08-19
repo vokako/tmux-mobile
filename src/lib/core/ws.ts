@@ -772,6 +772,19 @@ export const hubCommand = (session: string, agent: string, text: string) =>
   call<{ sent: string[]; command: string }>('hub_command', { session, agent, text });
 export const hubLog = (session: string, sinceTs = 0, limit = 100) =>
   call<{ messages: TeamMessage[] }>('hub_log', { session, since_ts: sinceTs, limit });
+/** Deleting a message is two steps. `hubMsgArchive` HIDES it — the message stays in
+ * the room's store, so a restore costs nothing — and `hubMsgPurge` is the step that
+ * forgets it for good. Only the second one destroys anything. */
+export const hubMsgArchive = (session: string, ids: string[]) =>
+  call<{ archived: number }>('hub_msg_archive', { session, ids });
+export const hubMsgRestore = (session: string, ids: string[]) =>
+  call<{ restored: number }>('hub_msg_restore', { session, ids });
+export const hubMsgPurge = (session: string, ids: string[]) =>
+  call<{ deleted: number }>('hub_msg_purge', { session, ids });
+/** What is hidden in this room, newest first. Each row carries the message itself,
+ * so the archive view needs no second lookup. */
+export const hubArchive = (session: string) =>
+  call<{ messages: TeamMessage[] }>('hub_archive', { session });
 export const hubAgents = (session: string) =>
   call<{ agents: HubAgent[] }>('hub_agents', { session });
 export interface HubActivityEvent {

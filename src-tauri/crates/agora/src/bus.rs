@@ -351,6 +351,12 @@ impl Bus {
         store::set_status(&conn, &self.room, agent, status)
     }
 
+    /// Delete messages by id. Returns how many rows went away.
+    pub fn delete_messages(&self, ids: &[String]) -> Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        store::delete_messages(&conn, &self.room, ids)
+    }
+
     pub fn history(&self, limit: i64) -> Result<Vec<Message>> {
         let conn = self.lock();
         store::history(&conn, &self.room, limit)

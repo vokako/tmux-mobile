@@ -14,7 +14,7 @@ use std::path::Path;
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 9;
+const SCHEMA_VERSION: i64 = 10;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
@@ -359,9 +359,113 @@ impl Store {
                 )
                 .map_err(|e| format!("migrate to 9: {e}"))?;
         }
+        if version < 10 {
+            // v10: archived chat messages. Deleting a message is two steps —
+            // archive hides it, and deleting it IN the archive forgets it for good
+            // (owner, 2026-08-19) — so the middle state needs somewhere to live.
+            // It lives HERE, in our own database, because `agora` (team.db) is a
+            // faithful copy of an upstream crate and this is our feature, not its.
+            //
+            // The row carries a SNAPSHOT of the message: the archive view is then
+            // self-contained (no join across two databases, no dependence on how
+            // far back the room history was fetched), and a restore is just
+            // dropping the row — the message itself never left team.db.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE msg_archive (
+                       room        TEXT NOT NULL,
+                       msg_id      TEXT NOT NULL,
+                       ts          INTEGER NOT NULL,
+                       sender      TEXT NOT NULL,
+                       body        TEXT NOT NULL,
+                       archived_at INTEGER NOT NULL,
+                       PRIMARY KEY (room, msg_id)
+                     );",
+                )
+                .map_err(|e| format!("migrate to 10: {e}"))?;
+        }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| format!("set user_version: {e}"))
+    }
+
+    // ---- archived messages ----------------------------------------------
+
+    /// Hide a message: it stays in the room's own store, we stop showing it.
+    /// Idempotent, so archiving twice is not an error the UI has to handle.
+    pub fn archive_msg(
+        &self,
+        room: &str,
+        msg_id: &str,
+        ts: u64,
+        sender: &str,
+        body: &str,
+        now: u64,
+    ) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO msg_archive (room, msg_id, ts, sender, body, archived_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(room, msg_id) DO UPDATE SET archived_at = ?6",
+                rusqlite::params![room, msg_id, ts as i64, sender, body, now as i64],
+            )
+            .map(|_| ())
+            .map_err(|e| format!("archive message: {e}"))
+    }
+
+    /// The ids hidden in a room — what `hub_log` filters the history against.
+    pub fn archived_ids(&self, room: &str) -> Result<Vec<String>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT msg_id FROM msg_archive WHERE room = ?1")
+            .map_err(|e| format!("prepare archived ids: {e}"))?;
+        let rows = stmt
+            .query_map(rusqlite::params![room], |r| r.get::<_, String>(0))
+            .map_err(|e| format!("query archived ids: {e}"))?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    /// The archive itself, newest first — a list you review before forgetting.
+    pub fn archived_msgs(
+        &self,
+        room: &str,
+    ) -> Result<Vec<(String, u64, String, String, u64)>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT msg_id, ts, sender, body, archived_at FROM msg_archive
+                 WHERE room = ?1 ORDER BY archived_at DESC, ts DESC",
+            )
+            .map_err(|e| format!("prepare archive: {e}"))?;
+        let rows = stmt
+            .query_map(rusqlite::params![room], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)? as u64,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, i64>(4)? as u64,
+                ))
+            })
+            .map_err(|e| format!("query archive: {e}"))?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    /// Take messages back out of the archive (restore), or forget the archive rows
+    /// after the messages themselves have been deleted (purge). Returns how many
+    /// rows went away.
+    pub fn unarchive_msgs(&self, room: &str, ids: &[String]) -> Result<usize, String> {
+        let mut n = 0;
+        for id in ids {
+            n += self
+                .conn
+                .execute(
+                    "DELETE FROM msg_archive WHERE room = ?1 AND msg_id = ?2",
+                    rusqlite::params![room, id],
+                )
+                .map_err(|e| format!("unarchive message: {e}"))?;
+        }
+        Ok(n)
     }
 
     // ---- activity log ---------------------------------------------------
@@ -1177,5 +1281,38 @@ mod tests {
         assert_eq!(left.len(), 2);
         assert_eq!(left[0].1, 1003);
         assert_eq!(store.activity_since("s2", 0, 100).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn archiving_hides_a_message_and_restoring_gives_it_back() {
+        let store = Store::open_memory().unwrap();
+        store.archive_msg("proj:a", "m1", 100, "human", "a test probe", 900).unwrap();
+        store.archive_msg("proj:a", "m2", 200, "dev", "another", 901).unwrap();
+        store.archive_msg("proj:b", "m3", 300, "human", "other room", 902).unwrap();
+
+        // The filter list is per room: another room's archive cannot hide a
+        // message here.
+        let mut ids = store.archived_ids("proj:a").unwrap();
+        ids.sort();
+        assert_eq!(ids, vec!["m1", "m2"]);
+        assert_eq!(store.archived_ids("proj:b").unwrap(), vec!["m3"]);
+
+        // The archive view is self-contained: it carries the message itself, so it
+        // needs no join across two databases and no history window.
+        let rows = store.archived_msgs("proj:a").unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0, "m2", "newest archived first");
+        assert_eq!(rows[0].2, "dev");
+        assert_eq!(rows[1].3, "a test probe");
+
+        // Archiving twice is not an error — the UI must not have to care.
+        store.archive_msg("proj:a", "m1", 100, "human", "a test probe", 950).unwrap();
+        assert_eq!(store.archived_msgs("proj:a").unwrap().len(), 2);
+
+        // Restoring is dropping the row; the message never left the room's store.
+        assert_eq!(store.unarchive_msgs("proj:a", &["m1".to_string()]).unwrap(), 1);
+        assert_eq!(store.archived_ids("proj:a").unwrap(), vec!["m2"]);
+        // Unknown ids are simply not there.
+        assert_eq!(store.unarchive_msgs("proj:a", &["nope".to_string()]).unwrap(), 0);
     }
 }

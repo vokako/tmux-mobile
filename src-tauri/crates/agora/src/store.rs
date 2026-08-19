@@ -428,6 +428,17 @@ pub fn clear_runtime_state(conn: &Connection, room: &str) -> Result<()> {
     Ok(())
 }
 
+/// Forget specific messages. The one message-level primitive this store needs
+/// for a UI that can delete: `clear_room` is all-or-nothing, and a transcript you
+/// cannot correct is a transcript that fills up with test debris.
+pub fn delete_messages(conn: &Connection, room: &str, ids: &[String]) -> Result<usize> {
+    let mut n = 0;
+    for id in ids {
+        n += conn.execute("DELETE FROM messages WHERE room=?1 AND id=?2", params![room, id])?;
+    }
+    Ok(n)
+}
+
 /// Forget everything persisted about a room, including its transcript.
 /// Kept as an explicit administrative/test primitive; normal Team lifecycle
 /// operations use [`clear_runtime_state`] instead.

@@ -611,6 +611,37 @@ behind for good — and the text is capped at `DRAFT_MAX`, because a draft is a
 convenience, not a document, and a pasted file would fill localStorage and take the
 rest of the Hub's preferences down with it.
 
+## Deleting a message is two steps
+
+A transcript is a record, so a misclick on one should be recoverable — and a
+transcript you cannot correct fills up with test debris (owner, 2026-08-19: "这些
+都遗留在了我们的对话消息历史里，请帮我把它们删掉吧 … 我点击一下删除，只是把它
+archive 掉，在 archive 里面删除，才会彻底删掉"). So:
+
+- **Archive hides it** (`hub_msg_archive`). The message never leaves the room's own
+  store, which is what makes a restore free: `hub_log` filters the history against
+  `projects::archived_ids` on the way out. No confirmation — the whole point of the
+  first step is that it is the safe one.
+- **Deleting it IN the archive forgets it** (`hub_msg_purge`). This is the only
+  irreversible verb of the three, so it is the only one that asks, and the copy
+  names what is lost and what survives.
+- `hub_msg_restore` puts it back, and `hub_archive` lists what is hidden.
+
+The archive state lives in OUR database (`msg_archive`, state.db v10), not in the
+bus: `agora` is a faithful copy of an upstream crate and hiding a message is this
+app's idea. The row carries a SNAPSHOT of the message (sender, ts, body), so the
+archive view is self-contained — no join across two databases, no dependence on how
+far back the room history was fetched — and a restore is just dropping the row.
+Purge is the one place that reaches into team.db, through the JSON-only
+`TeamBridge::delete_messages` (the `server/` module must never name an agora type);
+it deletes the messages FIRST and drops the archive rows after, so a failure leaves
+the message still listed and retryable rather than orphaned.
+
+Client side the archive is a VIEW of the feed area, not a page: a bar appears above
+the conversation only when something is in there (an empty archive is not a place to
+visit), and each row shows the body as pre-wrapped, line-clamped evidence rather
+than rendered markdown — what you are about to forget should be what you see.
+
 ## Who a message goes to
 
 Three ways a message can land, and they are NOT shades of one thing:

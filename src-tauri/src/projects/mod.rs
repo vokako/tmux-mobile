@@ -781,6 +781,36 @@ pub fn is_managed_in(workspace: Option<&str>, window_name: &str) -> bool {
     })
 }
 
+// ---- archived messages ---------------------------------------------------
+//
+// The archive is OUR state (state.db), not the bus's: `agora` is a faithful copy
+// of an upstream crate, and hiding a message is this app's idea. These are the
+// four verbs the hub RPCs need, each fail-soft in the direction that keeps the UI
+// honest — a read that fails hides nothing, a write that fails is reported.
+
+/// Ids hidden in a room. A failure here must not blank the conversation, so it
+/// degrades to "nothing is hidden".
+pub fn archived_ids(room: &str) -> Vec<String> {
+    with_store(|s| s.archived_ids(room)).unwrap_or_default()
+}
+
+/// The archive itself, newest first, each row carrying its own copy of the
+/// message.
+pub fn archived_msgs(room: &str) -> Vec<(String, u64, String, String, u64)> {
+    with_store(|s| s.archived_msgs(room)).unwrap_or_default()
+}
+
+/// Hide one message.
+pub fn archive_msg(room: &str, msg_id: &str, ts: u64, sender: &str, body: &str) -> Result<(), String> {
+    with_store(|s| s.archive_msg(room, msg_id, ts, sender, body, now()))
+}
+
+/// Take messages out of the archive — a restore, or the bookkeeping half of a
+/// purge once the messages themselves are gone.
+pub fn unarchive_msgs(room: &str, ids: &[String]) -> Result<usize, String> {
+    with_store(|s| s.unarchive_msgs(room, ids))
+}
+
 pub fn registry_get(name: &str) -> Result<Option<store::RegAgent>, String> {
     with_store(|store| {
         store.reg_seed(now())?;

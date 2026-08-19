@@ -22,7 +22,7 @@
   import { t } from '../core/i18n.svelte.ts';
   import {
     projectList, projectUp, projectDown, projectDelete, projectCreate, projectRename, listSessionsWithPanes,
-    hubPost, hubCommand, modelsList, hubLog, hubAgents, hubSpawn, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
+    hubPost, hubCommand, modelsList, hubLog, hubMsgArchive, hubMsgRestore, hubMsgPurge, hubArchive, hubAgents, hubSpawn, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
@@ -127,7 +127,9 @@
     msgOpen = '';
     rawOpen = '';
     termOpen = false;
-    await Promise.all([loadFeed(), loadAgents(), loadActivity()]);
+    archiveOpen = false;
+    archived = [];
+    await Promise.all([loadFeed(), loadAgents(), loadActivity(), loadArchive()]);
   }
 
   async function loadFeed() {
@@ -525,6 +527,52 @@
     if (v.branch) parts.push(v.branch);
     return parts.join(' · ');
   }
+  // ── Deleting a message is two steps. Archive HIDES it (the message stays in
+  // the room's store, so a restore costs nothing); deleting it in the archive is
+  // what forgets it (owner, 2026-08-19). The archive is a VIEW of the same feed
+  // area, not a page: it is a short list you visit to change your mind.
+  let archiveOpen = $state(false);
+  let archived = $state([]);
+  let purgeAsk = $state(null);      // the message awaiting "yes, forget it"
+
+  async function loadArchive() {
+    if (!selected) return;
+    try {
+      const r = await hubArchive(selected);
+      archived = r.messages ?? [];
+    } catch (e) { console.warn('hub archive failed', e); }
+  }
+
+  /** Hide a message from the conversation. Reversible, so no confirmation: the
+   * whole point of the first step is that it is the safe one. */
+  async function archiveMsg(id) {
+    if (!selected || !id) return;
+    msgOpen = '';
+    try {
+      await hubMsgArchive(selected, [id]);
+      feed = feed.filter((m) => m.id !== id);
+      await loadArchive();
+    } catch (e) { console.warn('archive failed', e); }
+  }
+
+  async function restoreMsg(id) {
+    try {
+      await hubMsgRestore(selected, [id]);
+      archived = archived.filter((m) => m.id !== id);
+      await loadFeed();
+    } catch (e) { console.warn('restore failed', e); }
+  }
+
+  /** The irreversible half. Confirmed, and the copy says what is lost and what
+   * survives — the app's rule for every destructive verb. */
+  async function purgeMsg(id) {
+    purgeAsk = null;
+    try {
+      await hubMsgPurge(selected, [id]);
+      archived = archived.filter((m) => m.id !== id);
+    } catch (e) { console.warn('purge failed', e); }
+  }
+
   /** The card's share of the reading: what makes THIS agent different from its
    * neighbours. The branch and cwd are project-wide, so they stay in the tooltip
    * and the menu — repeating them on every card would be chrome, not data. */
@@ -1131,7 +1179,38 @@
       {/if}
 
       <div class="feed-wrap">
-      <div class="feed subtle-scroll" bind:this={feedEl} onscroll={onFeedScroll}>
+      {#if archived.length}
+        <!-- The way in and out of the archive. It only exists when something is
+             in there: an empty archive is not a place to visit. -->
+        <button class="arch-bar" class:on={archiveOpen} onclick={() => { archiveOpen = !archiveOpen; if (archiveOpen) loadArchive(); }}>
+          <Icon name={archiveOpen ? 'chevron-down' : 'trash'} size={11} />
+          {archiveOpen ? t('hubArchiveClose') : t('hubArchiveOpen').replace('{n}', String(archived.length))}
+        </button>
+      {/if}
+      {#if archiveOpen}
+        <div class="arch subtle-scroll">
+          {#each archived as a (a.id)}
+            <div class="arow">
+              <div class="ar-head">
+                <span class="ar-who">{a.from}</span>
+                <span class="ar-ts">{fmtTime(a.ts)}</span>
+              </div>
+              <div class="ar-body">{a.body}</div>
+              <div class="ar-acts">
+                <button onclick={() => restoreMsg(a.id)}>
+                  <Icon name="refresh" size={11} />{t('hubRestore')}
+                </button>
+                <!-- The only irreversible step in the whole flow, so it is the
+                     only one that asks. -->
+                <button class="danger" onclick={() => (purgeAsk = a)}>
+                  <Icon name="trash" size={11} />{t('hubPurge')}
+                </button>
+              </div>
+            </div>
+          {/each}
+        </div>
+      {/if}
+      <div class="feed subtle-scroll" class:hidden={archiveOpen} bind:this={feedEl} onscroll={onFeedScroll}>
         {#each blocks as b, i (blockKey(b, i))}
           {#if b.type === 'sys'}
             <!-- The app's own record (spawn/stop/restart), folded: consecutive
@@ -1222,6 +1301,12 @@
                     </button>
                     <button class:on={rawOpen === key} onclick={() => { rawOpen = rawOpen === key ? '' : key; }}>
                       <Icon name="command" size={11} />{t('hubRaw')}
+                    </button>
+                    <!-- One click hides it; forgetting it takes a second decision
+                         in the archive. So this is not a `danger` action — it is
+                         the reversible one. -->
+                    <button onclick={() => archiveMsg(m.id)} title={t('hubArchiveHint')}>
+                      <Icon name="trash" size={11} />{t('hubArchive')}
                     </button>
                   </div>
                 {/if}
@@ -1467,6 +1552,14 @@
     confirmLabel={pendingAct ? t(ACT_COPY[pendingAct.kind].go) : ''}
     onconfirm={runAction} oncancel={() => (pendingAct = null)} />
 
+  <!-- Forgetting a message for good. The copy names what is lost AND what
+       survives, which is the rule for every destructive verb in this app. -->
+  <ConfirmDialog open={!!purgeAsk} compact={compact}
+    title={t('hubPurgeTitle')}
+    note={purgeAsk ? t('hubPurgeNote').replace('{who}', purgeAsk.from) : ''}
+    confirmLabel={t('hubPurgeGo')}
+    onconfirm={() => purgeMsg(purgeAsk?.id)} oncancel={() => (purgeAsk = null)} />
+
   {#if pickerOpen}
     <!-- ── Start a team: several agents at once ── -->
     <div class="dlg-backdrop" onclick={() => pickerOpen = false} role="presentation"></div>
@@ -1587,6 +1680,34 @@
 
   /* The roster: one line per agent, on every screen size. It answers "who is
      here and are they busy" — anything more was a wall of cards. */
+  /* The archive: a short review list, not a second conversation — so it borrows
+     the feed's surface and none of its bubble language. */
+  .arch-bar {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    background: var(--surface); border: none; border-bottom: 1px solid var(--border2);
+    color: var(--text3); font-size: var(--fs-meta); padding: 6px 14px; cursor: pointer;
+  }
+  .arch-bar:hover, .arch-bar.on { color: var(--text); }
+  .arch { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .arow { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: var(--surface); }
+  .ar-head { display: flex; gap: 8px; align-items: baseline; font-size: var(--fs-meta); color: var(--text3); }
+  .ar-who { font-family: ui-monospace, Menlo, monospace; color: var(--text2); }
+  /* An archived body is EVIDENCE, not prose: it keeps its newlines and is clamped
+     rather than rendered, so what you are about to forget is what you see. */
+  .ar-body {
+    font-size: var(--fs-sub); color: var(--text2); margin: 4px 0 6px;
+    white-space: pre-wrap; overflow: hidden; display: -webkit-box;
+    -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4;
+  }
+  .ar-acts { display: flex; gap: 6px; }
+  .ar-acts button {
+    display: flex; align-items: center; gap: 4px; background: none; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 7px; color: var(--text3);
+    font-size: var(--fs-meta); padding: 3px 8px;
+  }
+  .ar-acts button:hover { color: var(--text); border-color: var(--input-border); }
+  .ar-acts button.danger:hover { color: var(--danger); border-color: var(--danger); }
+  .feed.hidden { display: none; }
   .cards { display: flex; gap: 6px; padding: 8px 14px; overflow-x: auto; border-bottom: 1px solid var(--border2); scrollbar-width: none; }
   .cards::-webkit-scrollbar { display: none; }
   .acard {

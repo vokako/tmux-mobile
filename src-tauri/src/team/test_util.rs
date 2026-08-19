@@ -14,6 +14,10 @@ pub(super) struct RecordingBridge {
     pub(super) existing: Vec<(String, Value, String)>,
 }
 impl TeamBridge for RecordingBridge {
+    fn delete_messages(&self, _room: &str, ids: &[String]) -> Result<usize, String> {
+        Ok(ids.len())
+    }
+
     fn history(&self, _room: &str, _l: i64) -> Value { serde_json::json!({}) }
     fn roster(&self, _room: &str) -> Value { serde_json::json!({ "roster": [] }) }
     fn post(&self, _room: &str, _f: &str, _b: &str, _r: bool) -> Result<Value, String> { Ok(Value::Null) }

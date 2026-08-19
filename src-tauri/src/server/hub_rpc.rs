@@ -172,12 +172,95 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
             }
             let since_ts = p.get("since_ts").and_then(|v| v.as_i64()).unwrap_or(0);
             let mut history = bus.history(&room, limit);
-            if since_ts > 0 {
-                if let Some(msgs) = history.get_mut("messages").and_then(|m| m.as_array_mut()) {
+            // An archived message is hidden, not gone: the room's own store still
+            // has it (that is what makes a restore free), so the hiding happens
+            // here, on the way out.
+            let hidden = crate::projects::archived_ids(&room);
+            if let Some(msgs) = history.get_mut("messages").and_then(|m| m.as_array_mut()) {
+                if since_ts > 0 {
                     msgs.retain(|m| m.get("ts").and_then(|t| t.as_i64()).unwrap_or(0) > since_ts);
+                }
+                if !hidden.is_empty() {
+                    msgs.retain(|m| {
+                        !m.get("id").and_then(|v| v.as_str()).is_some_and(|i| hidden.iter().any(|h| h == i))
+                    });
                 }
             }
             Response::ok(id, history)
+        }
+
+        // Deleting a message is TWO steps, because a transcript is a record and a
+        // misclick on a record should be recoverable (owner, 2026-08-19): archive
+        // hides it — reversibly, the message never leaves the room's store — and
+        // deleting it IN the archive is what forgets it. `hub_msg_purge` is the
+        // only one of the three that destroys anything.
+        "hub_msg_archive" | "hub_msg_restore" | "hub_msg_purge" => {
+            let ids: Vec<String> = p
+                .get("ids")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            if ids.is_empty() {
+                return Response::err(id, ERR_INVALID_PARAMS, "ids must be a non-empty array".into());
+            }
+            match req.method.as_str() {
+                "hub_msg_archive" => {
+                    // The archive row carries a copy of the message, so the archive
+                    // view needs no second lookup and no history window. The bodies
+                    // come from the room, not from the client: what gets stored is
+                    // what was actually said.
+                    if let Err(e) = bus.open_room(&room) {
+                        return Response::err(id, ERR_INTERNAL, e);
+                    }
+                    let history = bus.history(&room, 1000);
+                    let msgs = history.get("messages").and_then(|m| m.as_array()).cloned().unwrap_or_default();
+                    let mut done = 0usize;
+                    for m in &msgs {
+                        let mid = m.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                        if mid.is_empty() || !ids.iter().any(|i| i == mid) {
+                            continue;
+                        }
+                        let ok = crate::projects::archive_msg(
+                            &room,
+                            mid,
+                            m.get("ts").and_then(|v| v.as_i64()).unwrap_or(0) as u64,
+                            m.get("from").or_else(|| m.get("sender")).and_then(|v| v.as_str()).unwrap_or(""),
+                            m.get("body").and_then(|v| v.as_str()).unwrap_or(""),
+                        );
+                        if ok.is_ok() {
+                            done += 1;
+                        }
+                    }
+                    Response::ok(id, serde_json::json!({ "archived": done }))
+                }
+                "hub_msg_restore" => match crate::projects::unarchive_msgs(&room, &ids) {
+                    Ok(n) => Response::ok(id, serde_json::json!({ "restored": n })),
+                    Err(e) => Response::err(id, ERR_INTERNAL, e),
+                },
+                _ => {
+                    // Forget the message itself first: if that fails the archive row
+                    // stays, so the message is still listed and can be tried again.
+                    match bus.delete_messages(&room, &ids) {
+                        Ok(n) => {
+                            let _ = crate::projects::unarchive_msgs(&room, &ids);
+                            Response::ok(id, serde_json::json!({ "deleted": n }))
+                        }
+                        Err(e) => Response::err(id, ERR_INTERNAL, e),
+                    }
+                }
+            }
+        }
+
+        // What is hidden in this room, newest first. Self-contained rows: the
+        // archive is a list you review before forgetting anything.
+        "hub_archive" => {
+            let rows: Vec<serde_json::Value> = crate::projects::archived_msgs(&room)
+                .into_iter()
+                .map(|(id, ts, sender, body, at)| {
+                    serde_json::json!({ "id": id, "ts": ts, "from": sender, "body": body, "archived_at": at })
+                })
+                .collect();
+            Response::ok(id, serde_json::json!({ "messages": rows }))
         }
 
         // Explicit status declaration: `tmm status waiting "等接口定稿"`.
@@ -562,6 +645,10 @@ mod tests {
         }
     }
     impl TeamBridge for Bridge {
+        fn delete_messages(&self, _room: &str, ids: &[String]) -> Result<usize, String> {
+            Ok(ids.len())
+        }
+
         fn history(&self, room: &str, _limit: i64) -> serde_json::Value {
             serde_json::json!({ "messages": [
                 { "room": room, "ts": 100, "from": "a", "body": "old" },

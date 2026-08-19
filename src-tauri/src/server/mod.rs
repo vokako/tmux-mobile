@@ -36,6 +36,9 @@ pub trait TeamBridge: Send + Sync {
     fn roster(&self, room: &str) -> serde_json::Value;
     /// Post as a participant in `room`. Returns the stored message JSON.
     fn post(&self, room: &str, from: &str, body: &str, requires_reply: bool) -> Result<serde_json::Value, String>;
+    /// Forget messages by id, for good. The archive is the reversible half of
+    /// deleting; this is the half that is not.
+    fn delete_messages(&self, room: &str, ids: &[String]) -> Result<usize, String>;
     /// Force an agent's stored status in `room` (supervisor idle-sleep:
     /// `"sleeping"` to park, `"idle"` to wake). No-op if the agent is unknown.
     fn set_agent_status(&self, room: &str, agent: &str, status: &str) -> Result<(), String>;

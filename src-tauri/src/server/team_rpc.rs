@@ -200,6 +200,10 @@ mod tests {
     // handle_team_request without pulling in the real (desktop-only) bus.
     struct MockAgora;
     impl TeamBridge for MockAgora {
+        fn delete_messages(&self, _room: &str, ids: &[String]) -> Result<usize, String> {
+            Ok(ids.len())
+        }
+
         fn history(&self, _room: &str, limit: i64) -> serde_json::Value {
             serde_json::json!({ "messages": [], "echo_limit": limit })
         }
