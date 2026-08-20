@@ -45,6 +45,10 @@ const MAX_PROMPT_CHARS: usize = 1024;
 /// Most outstanding typed lines kept per window. A busy agent's queue is short in
 /// practice; this only stops an unbounded queue if nothing ever acks.
 const MAX_PENDING: usize = 16;
+/// How close two identical tool events have to be to count as the same call.
+/// `preToolUse` and `postToolUse` arrive milliseconds apart; an agent genuinely
+/// running the same command twice takes longer than this.
+const TOOL_DEDUPE_SECS: u64 = 5;
 
 #[derive(Debug, Clone, Default)]
 struct Rec {
@@ -295,10 +299,26 @@ pub fn record_notification(session: &str, window: usize, kind: &str, ts: u64) {
 /// "foo.rs")`. The event keeps the two parts apart for rendering; the status
 /// record keeps the joined line, which is what "working — Edit foo.rs" shows.
 pub fn record_tool(session: &str, window: usize, tool: &str, detail: &str) {
-    push_full(session, window, "tool", detail.to_string(), tool.to_string(), String::new());
     let line = if detail.is_empty() { tool.to_string() } else { format!("{tool} {detail}") };
     let ts = now();
-    with_rec(session, window, |r| r.tool = Some((line, ts)));
+    // ONE row per call. We subscribe to both `preToolUse` and `postToolUse` (a
+    // backend may only send one of them), and they carry the same tool and the
+    // same argument — so a lane showed every call twice, milliseconds apart. The
+    // pair is collapsed here rather than in the hook config, because an
+    // already-spawned agent keeps the config it was started with: fixing it at
+    // the source would only help agents spawned later.
+    let mut dup = false;
+    with_rec(session, window, |r| {
+        dup = r
+            .tool
+            .as_ref()
+            .is_some_and(|(prev, at)| prev == &line && ts.saturating_sub(*at) <= TOOL_DEDUPE_SECS);
+        r.tool = Some((line.clone(), ts));
+    });
+    if dup {
+        return;
+    }
+    push_full(session, window, "tool", detail.to_string(), tool.to_string(), String::new());
 }
 
 /// A line this app typed into an agent's pane (`deliver_mentions`). Held as a
@@ -580,6 +600,30 @@ mod tests {
     /// queued line, nothing matched it — so it was reported as a prompt the user
     /// had typed locally (rendered as an "input" row) and the message it belonged
     /// to never got its delivered mark.
+    /// Pre + Post for one call are one ROW. Both hooks are subscribed (a backend
+    /// may only send one), they carry the same tool and argument, and they arrive
+    /// milliseconds apart — so the lane used to show every call twice.
+    #[test]
+    fn a_pre_and_post_pair_is_one_row() {
+        let session = format!("tool-dedupe-{}", std::process::id());
+        let rows = |s: &str| {
+            recent_events(s, 0).into_iter().filter(|e| e.kind == "tool").count()
+        };
+        record_tool(&session, 4, "Read", "/w/src/lib.rs");
+        record_tool(&session, 4, "Read", "/w/src/lib.rs");   // the Post half
+        assert_eq!(rows(&session), 1, "one call, one row");
+
+        // A different argument is a different call.
+        record_tool(&session, 4, "Read", "/w/src/main.rs");
+        assert_eq!(rows(&session), 2);
+        // The same argument in ANOTHER window is that window's own call.
+        record_tool(&session, 9, "Read", "/w/src/main.rs");
+        assert_eq!(rows(&session), 3);
+        // And the status record still carries the newest line either way.
+        let st = derive(&session, 4, 0);
+        assert!(st.detail.contains("main.rs"), "got {:?}", st.detail);
+    }
+
     #[test]
     fn two_lines_queued_at_a_busy_agent_are_both_still_outstanding() {
         let session = format!("queue-test-{}", std::process::id());

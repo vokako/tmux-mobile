@@ -818,6 +818,21 @@ Both halves are OFF under `cfg(test)`: unit tests exercise the ring and the deri
 rules, and the SQL is tested directly in `store.rs`, so `cargo test` cannot write
 rows for invented sessions into the developer's real state.db.
 
+A tool row keeps up to `MAX_TOOL_DETAIL_CHARS` (2 KB) of its argument. It kept 80,
+which is shorter than the paths this app's own agents work with: every row ended in
+`…` after a third of a line with the rest of a wide screen blank beside it, and the
+argument is the half of a tool call worth reading (owner, 2026-08-20: "工具调用的参数
+没有显示全，后边被压缩成 ... 了，屏幕的宽度没有有效利用"). Length costs no layout —
+the lane pans — and no unbounded storage, because the log is capped by row count.
+
+**One row per call.** Both `preToolUse` and `postToolUse` are subscribed, because a
+backend may only send one of them, and they carry the same tool and the same
+argument — so the lane showed every call twice, milliseconds apart. `record_tool`
+collapses the pair (same window, same line, within `TOOL_DEDUPE_SECS`) rather than
+the hook config dropping one, because an already-spawned agent keeps the config it
+was started with: fixing it at the source would only have helped agents spawned
+later.
+
 Four event kinds: `tool`, `notif`, `prompt` (a prompt the agent accepted,
 `via: app | local`) and `warn` (a line that was never echoed back). A `tmm status`
 note is NOT among them — see below.

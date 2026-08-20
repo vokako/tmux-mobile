@@ -12,6 +12,15 @@ const MAX_SUMMARY_CHARS: usize = 240;
 /// Chat-path budget for hook-sourced auto-replies. Separate from the 240-char
 /// notification summary: a final reply carries full content.
 const MAX_REPLY_CHARS: usize = 6 * 1024;
+/// How much of a tool's argument is kept. It was 80 characters, which is shorter
+/// than the paths this app's own agents work with: every row in the lane ended in
+/// `…` after a third of a line, with the rest of a wide screen blank next to it —
+/// and the argument is the half of a tool call worth reading (owner, 2026-08-20:
+/// "工具调用的参数没有显示全，后边被压缩成 ... 了，屏幕的宽度没有有效利用"). 2 KB
+/// covers every real path and command; beyond that it is a script, and its first
+/// two thousand characters identify it. The lane pans, so length costs no layout,
+/// and the durable log is capped by ROW COUNT, so it costs no unbounded storage.
+const MAX_TOOL_DETAIL_CHARS: usize = 2048;
 const DEDUPE_SECS: u64 = 3;
 const OWNER_MARKER: &str = "tmux-mobile-agent-notify";
 
@@ -517,7 +526,7 @@ fn tool_event_parts(envelope: &InboxEnvelope) -> Option<(String, String)> {
                 .and_then(Value::as_str)
         })
         .unwrap_or("");
-    Some((tool.to_string(), truncate(detail, 80)))
+    Some((tool.to_string(), truncate(detail, MAX_TOOL_DETAIL_CHARS)))
 }
 
 struct Normalized {
