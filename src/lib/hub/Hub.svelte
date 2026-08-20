@@ -1476,7 +1476,15 @@
                            legacy events that glued it onto the text — those were
                            the "still grey" rows. -->
                       {#if ep.tool}<span class="tname" style:color={toolColor(ep.tool)}>{ep.tool}</span>{/if}
-                      <span class="st-text">{ep.text}</span>
+                      <!-- The argument is the ONLY scrolling cell: the name and
+                           the time are ordinary flex children BESIDE it, so the
+                           panning text is clipped by this box and structurally
+                           cannot show through them or slide past the lane's edge.
+                           The sticky-column build could not guarantee that — a
+                           sticky column covers its own box but not the lane
+                           padding beside it, which is where the text bled through
+                           (owner, 2026-08-20: "参数穿模到工具名左侧了"). -->
+                      <span class="st-scroll" tabindex="-1"><span class="st-text">{ep.text}</span></span>
                       <span class="st-ts">{fmtTime(e.ts)}</span>
                     </div>
                   {/each}
@@ -2102,10 +2110,10 @@
      head's text started at 30px. */
   .steps {
     display: flex; flex-direction: column; width: 100%;
-    /* `--surface` is a 3% white wash, so anything that needs to COVER what slides
-       under it (the two pinned columns) cannot use it alone. `--lane-bg` is the
-       lane's painted colour as one value: the feed canvas underneath, the same wash
-       on top. Sticky columns paint this and are opaque. */
+    /* The lane's painted colour as one value: the feed canvas underneath, the
+       same 3% wash on top. Nothing needs to COVER anything since the middle cell
+       became the only scroller, but the token stays — it is the lane's colour,
+       and the next thing that must match it should have one name to reach for. */
     --lane-bg: linear-gradient(var(--surface), var(--surface)), var(--chat-canvas);
     /* 30px = the head's padding (10) + chevron (12) + gap (7): every row, the
        pinned name column and the "show all" button line up under the head's TEXT,
@@ -2143,9 +2151,9 @@
        wider than the lane — a path, a command, a heredoc. It used to be cut with
        an ellipsis, so the one thing you opened the lane to read was the one thing
        you could not (owner, 2026-08-20: "这些参数应该左右可以滑动，查看完整的参
-       数"). The LANE pans instead: ONE scroller for the whole block, so every row
-       moves together and the tool-name column stays a column. */
-    overflow-x: auto; scrollbar-width: thin;
+       数"). Each row's MIDDLE CELL pans instead — see .st-scroll: the lane itself
+       never scrolls horizontally, which is what makes bleed-through impossible. */
+    overflow-x: hidden;
   }
   /* Ten rows, then scroll. Each step is exactly one line (rows never wrap), so
      rows and lines are the same thing here. */
@@ -2161,46 +2169,30 @@
   }
   .s-all:hover { color: var(--accent); }
   .step {
-    /* NO gap: the separation between the columns lives INSIDE the two pinned ones,
-       as padding they paint. A flex gap would be an 8px transparent strip that the
-       panning argument shows through, right beside a column that is supposed to be
-       covering it. */
-    display: flex; align-items: baseline; gap: 0; line-height: 1.5;
+    display: flex; align-items: baseline; gap: 8px; line-height: 1.5;
     font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text3);
-    /* As wide as its content so the lane has something to pan, but never
-       narrower than the lane — otherwise a short row's time would sit in the
-       middle of the row instead of at the right edge, and the column would go
-       ragged. */
-    width: max-content; min-width: 100%;
   }
-  /* The tool name: the part the eye scans down a column — so it IS a column, held
-     at the left edge while the argument pans under it (owner, 2026-08-20: "工具明固
-     定保持在最左侧 … 相当于三列，中间参数是可以左右滑动查看的"). Pinned at the
-     lane's own indent rather than at 0, so it does not jump 30px sideways the
-     moment you start scrolling; it needs the lane's background and a little
-     padding, or the argument would slide out from under it. */
+  /* The tool name: the part the eye scans down a column. A plain flex child —
+     it sits OUTSIDE the scroller, so the argument cannot be panned under it. */
   .tname { flex: none; color: var(--accent); font-weight: 650; }
-  .step .tname {
-    min-width: 6.5em; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    position: sticky; left: var(--lane-indent); z-index: 1;
-    background: var(--lane-bg); padding-right: 9px;
-  }
+  .step .tname { min-width: 6.5em; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hub-root.compact .step .tname { min-width: 0; }
   .s-peek .tname { min-width: 0; margin-right: 5px; }
-  /* No ellipsis and no shrinking: the row grows, the lane scrolls. Still
-     `nowrap`, NOT `pre`: a tool detail routinely contains real newlines (a
-     heredoc, a multi-line command), and `pre` would turn one of them into a
-     three-line row — which would break both the one-row-per-call reading and the
-     10-row cap, whose height is calculated in single lines. */
-  .step .st-text { flex: none; white-space: nowrap; color: var(--text2); }
-  /* The third column: pinned at the lane's own right padding, for the same reason
-     the name is pinned at its left indent — panning a long argument must never
-     scroll the time out of view. */
-  .step .st-ts {
-    flex: none; margin-left: auto; opacity: 0.55;
-    position: sticky; right: var(--lane-pad-r); z-index: 1;
-    padding-left: 9px; background: var(--lane-bg);
-  }
+  /* The middle column, and the ONLY scroller. It takes the leftover width, clips
+     its own overflow, and pans on wheel/touch — so the full argument is reachable
+     ("中间参数是可以左右滑动查看的") while the name and the time never move. Its
+     scrollbar is hidden: ten rows each drawing one is a ruler collection, and the
+     cut-off text itself is the affordance. */
+  .step .st-scroll { flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .step .st-scroll::-webkit-scrollbar { display: none; }
+  /* No ellipsis: what does not fit is scrolled to, not cut. Still `nowrap`, NOT
+     `pre`: a tool detail routinely contains real newlines (a heredoc, a multi-line
+     command), and `pre` would turn one call into a three-line row — breaking both
+     one-row-per-call and the 10-row cap, whose height is single-line math. */
+  .step .st-text { display: inline-block; white-space: nowrap; color: var(--text2); }
+  /* The right column: a plain flex child after the scroller, always at the lane's
+     right edge no matter how far the argument is panned. */
+  .step .st-ts { flex: none; opacity: 0.55; }
   .empty { color: var(--text3); font-size: var(--fs-ui); text-align: center; margin: auto; padding: 0 24px; line-height: 1.6; }
 
   .composer {
