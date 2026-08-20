@@ -466,7 +466,19 @@
   $effect(() => {
     void composerText;   // includes the reset to '' after sending
     void toChipW;        // the indent changes wrapping, so height must re-measure
+    void composerIsCmd;  // the mono flip changes metrics, so height re-measures too
     growComposer();
+  });
+
+  // Is what is typed going to be RUN rather than SAID? Mirrors send()'s own
+  // branch exactly — slashCommand() recognises the shape, and a target must
+  // exist (explicit @name, else the recipient; a room note has nobody to run
+  // it and stays a message) — so the composer's look never promises a command
+  // that send() would deliver as prose (owner, 2026-08-20: "如果是指令的话在输
+  // 入框里样式改变一下").
+  const composerIsCmd = $derived.by(() => {
+    const c = slashCommand(composerText.trim());
+    return !!(c && (c.to || recipient));
   });
 
   /** Enter sends where there is a keyboard with modifiers, and inserts a newline
@@ -1592,7 +1604,7 @@
       </div>
 
       <div class="composer">
-        <div class="compose-shell">
+        <div class="compose-shell" class:cmd={composerIsCmd}>
         <!-- WHO this goes to, always visible: the lead by default, one tap to
              retarget or to broadcast. No @ typing required. Pinned to the shell's
              top-left; the textarea's FIRST line starts beside it (measured
@@ -2280,6 +2292,14 @@
     transition: border-color var(--t-fast) ease, box-shadow var(--t-fast) ease;
   }
   .compose-shell:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+  /* A line that will be RUN, not said: machine text wears the machine face —
+     the same monospace the tool lane uses — plus an accent tint on the capsule,
+     so "this goes to the CLI" is visible before send decides anything. The
+     mirror MUST flip with it: it re-lays-out the text to find the last line,
+     and measuring mono text with a proportional font misplaces the send
+     button's collision zone. */
+  .compose-shell.cmd { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 6%, var(--bubble-in)); }
+  .compose-shell.cmd .c-input, .compose-shell.cmd :global(.c-mirror) { font-family: ui-monospace, Menlo, monospace; }
   /* Recipient control: who this message goes to, with a menu that opens
      UPWARD so the on-screen keyboard never covers it. */
   /* Pinned to the capsule's top-left; the textarea's first line is indented

@@ -117,3 +117,19 @@ test('the drawer opens and closes through the reading anchor, everywhere', () =>
   assert.match(source, /!el\.classList\.contains\('ask-top'\)/u);
   assert.match(source, /!el\.classList\.contains\('ask-bottom'\)/u);
 });
+
+test('a command-shaped draft styles the composer, with the mirror in step', () => {
+  // The look mirrors send()'s own branch (slashCommand + a target), so the
+  // capsule never promises a command that send() would deliver as prose.
+  assert.match(source, /class:cmd=\{composerIsCmd\}/u);
+  assert.match(source, /const composerIsCmd = \$derived/u);
+  // The metrics trap: growComposer's mirror re-lays-out the text to find the
+  // last line. If the input flips to monospace and the mirror does not, the
+  // send button's collision zone is measured in the wrong font.
+  assert.match(
+    source,
+    /\.compose-shell\.cmd \.c-input, \.compose-shell\.cmd :global\(\.c-mirror\) \{ font-family: ui-monospace/u,
+  );
+  // And the height re-measures when the font flips, not just when text changes.
+  assert.match(source, /void composerIsCmd;/u);
+});
