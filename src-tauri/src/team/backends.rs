@@ -378,7 +378,13 @@ pub(super) fn prepare_kiro(
     std::fs::create_dir_all(home.join("settings")).map_err(|e| e.to_string())?;
     std::fs::write(
         home.join("settings").join("cli.json"),
-        serde_json::to_string_pretty(&serde_json::json!({ "chat.disableTrustAllConfirmation": true })).unwrap(),
+        // Mirrors projects/spawn.rs `kiro_cli_settings`: queue mode is an owner
+        // decision (2026-08-20) — a line typed at a busy agent waits for the
+        // turn to end instead of steering it mid-flight.
+        serde_json::to_string_pretty(&serde_json::json!({
+            "chat.disableTrustAllConfirmation": true,
+            "chat.defaultInterruptBehavior": "queue",
+        })).unwrap(),
     )
     .map_err(|e| e.to_string())?;
 

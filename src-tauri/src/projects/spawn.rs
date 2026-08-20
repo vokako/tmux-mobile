@@ -411,6 +411,10 @@ pub fn refresh_hooks(project_path: &str, window_name: &str) -> bool {
     if kiro.is_file() {
         changed |= patch_hooks(&kiro, kiro_hooks(&notifications.helper_command("kiro")));
         changed |= migrate_launch_model(&home, &kiro);
+        // Settings drift is config drift: agents spawned before queue-mode
+        // (or before settings existed at all) get the canonical file on their
+        // next start, same as hooks.
+        changed |= ensure_kiro_settings(&home);
     }
     let claude = home.join("settings.json");
     if claude.is_file() {
@@ -510,15 +514,63 @@ fn patch_hooks(path: &std::path::Path, hooks: Value) -> bool {
     std::fs::write(path, serde_json::to_string_pretty(&root).unwrap_or(text)).is_ok()
 }
 
+/// The CLI settings every managed kiro agent runs with (`<home>/settings/
+/// cli.json`, read because the pane launches with `KIRO_HOME=<home>`).
+///
+/// `chat.defaultInterruptBehavior = "queue"` is an owner decision, 2026-08-20
+/// ("所有 Agent 在 kiro 里边发送指令的模式 默认给我设计成 Queue 队列模式吧 不要
+/// steer 模式"): a line typed at a BUSY agent waits for the turn to end instead
+/// of steering the turn mid-flight — the agent reads it whole, as its own
+/// prompt. That is also the contract the delivery pipeline already assumes:
+/// `delivery_overdue` pauses the ack clock while a turn is open precisely
+/// because kiro "Type to queue"s what we send.
+fn kiro_cli_settings() -> Vec<(&'static str, Value)> {
+    vec![
+        ("chat.disableTrustAllConfirmation", json!(true)),
+        ("chat.defaultInterruptBehavior", json!("queue")),
+    ]
+}
+
+/// Force the canonical CLI settings into a managed kiro home, leaving any
+/// other keys alone. Creates the file when it is missing (pre-settings homes),
+/// no-op write when everything already matches — the same contract as
+/// `patch_hooks`, because the app owns these configs. Returns true on change.
+fn ensure_kiro_settings(home: &Path) -> bool {
+    let dir = home.join("settings");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return false;
+    }
+    let path = dir.join("cli.json");
+    let mut root = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    let obj = root.as_object_mut().expect("filtered to object above");
+    let mut changed = !path.is_file();
+    for (key, value) in kiro_cli_settings() {
+        if obj.get(key) != Some(&value) {
+            obj.insert(key.to_string(), value);
+            changed = true;
+        }
+    }
+    changed && std::fs::write(&path, serde_json::to_string_pretty(&root).unwrap()).is_ok()
+}
+
 fn render_kiro(
     def: &RegAgent, name: &str, home: &Path, system_prompt: &str,
     skills: &[crate::team::skills::ResolvedSkill],
 ) -> Result<Rendered, String> {
     std::fs::create_dir_all(home.join("agents")).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(home.join("settings")).map_err(|e| e.to_string())?;
+    // Fail-loud at spawn (a home without settings/cli.json would re-enable the
+    // trust-all confirmation, which nobody is there to answer); refresh_hooks
+    // reuses the same canonical list fail-soft via ensure_kiro_settings.
+    let settings: serde_json::Map<String, Value> =
+        kiro_cli_settings().into_iter().map(|(k, v)| (k.to_string(), v)).collect();
     std::fs::write(
         home.join("settings").join("cli.json"),
-        serde_json::to_string_pretty(&json!({ "chat.disableTrustAllConfirmation": true })).unwrap(),
+        serde_json::to_string_pretty(&Value::Object(settings)).unwrap(),
     )
     .map_err(|e| e.to_string())?;
 
@@ -733,6 +785,14 @@ mod tests {
         assert!(conf.get("mcpServers").and_then(|m| m.get("files")).is_some(), "registry MCP def must materialize");
         // Tool hooks feed telemetry.
         assert!(conf.get("hooks").and_then(|h| h.get("preToolUse")).is_some());
+        // The CLI settings ship with the home: queue mode is the DEFAULT for
+        // every managed kiro agent (owner, 2026-08-20 — a line typed at a busy
+        // agent waits for the turn to end instead of steering it mid-flight),
+        // and the trust-all confirmation stays off.
+        let cli: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("settings/cli.json")).unwrap()).unwrap();
+        assert_eq!(cli.get("chat.defaultInterruptBehavior").and_then(|v| v.as_str()), Some("queue"));
+        assert_eq!(cli.get("chat.disableTrustAllConfirmation").and_then(|v| v.as_bool()), Some(true));
         // A restart must replay the FULL identity, not the bare backend line:
         // the user-space config's hooks never fire (measured), so losing
         // KIRO_HOME/--agent makes a restarted agent observably deaf.
@@ -796,6 +856,46 @@ mod tests {
         assert!(!refresh_hooks(&ws.to_string_lossy(), "dev"), "no needless writes");
         // A window with no isolated home is not ours to touch.
         assert!(!refresh_hooks(&ws.to_string_lossy(), "byhand"));
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    /// Agents spawned before queue mode (or before settings existed at all)
+    /// pick it up on their next start: `refresh_hooks` treats settings drift
+    /// as config drift. Owner decision, 2026-08-20: every managed kiro agent
+    /// runs with `chat.defaultInterruptBehavior = "queue"` — a message typed
+    /// at a busy agent is read whole when the turn ends, never steered into
+    /// the middle of it.
+    #[test]
+    fn refresh_hooks_backfills_queue_mode_settings() {
+        let ws = std::env::temp_dir().join(format!("tmm-qmode-{}", uuid::Uuid::new_v4()));
+        let home = ws.join(".tmm/agents/dev");
+        std::fs::create_dir_all(home.join("agents")).unwrap();
+        std::fs::write(home.join("agents/dev.json"), serde_json::to_string_pretty(&json!({
+            "name": "dev", "prompt": "You are dev.", "hooks": {}
+        })).unwrap()).unwrap();
+        let cli = home.join("settings/cli.json");
+
+        // Case 1: a pre-settings home has NO cli.json — it is created whole.
+        assert!(refresh_hooks(&ws.to_string_lossy(), "dev"));
+        let read = || -> serde_json::Value {
+            serde_json::from_str(&std::fs::read_to_string(&cli).unwrap()).unwrap()
+        };
+        assert_eq!(read().get("chat.defaultInterruptBehavior").and_then(|v| v.as_str()), Some("queue"));
+
+        // Case 2: an older file missing the key gains it, and a key the app
+        // does not own survives untouched.
+        std::fs::write(&cli, serde_json::to_string_pretty(&json!({
+            "chat.disableTrustAllConfirmation": true,
+            "chat.editMode": "vi"
+        })).unwrap()).unwrap();
+        assert!(ensure_kiro_settings(&home), "missing key is backfilled");
+        let after = read();
+        assert_eq!(after.get("chat.defaultInterruptBehavior").and_then(|v| v.as_str()), Some("queue"));
+        assert_eq!(after.get("chat.editMode").and_then(|v| v.as_str()), Some("vi"), "foreign keys are not ours to drop");
+
+        // Case 3: already canonical — no write, so starting a project does not
+        // churn mtimes.
+        assert!(!ensure_kiro_settings(&home), "no needless writes");
         let _ = std::fs::remove_dir_all(&ws);
     }
 

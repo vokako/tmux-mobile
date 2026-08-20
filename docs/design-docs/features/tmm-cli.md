@@ -370,6 +370,23 @@ already current, and it is called on every start: `hub_agent_restart` and
 each (`kiro_hooks` / `claude_hooks` / `codex_hooks`), shared by render and
 refresh, so the two cannot disagree.
 
+**Settings drift is config drift too.** A managed kiro home carries
+`settings/cli.json` (read because the pane launches with `KIRO_HOME=<home>`),
+and its canonical content lives in ONE function (`kiro_cli_settings`), written
+fail-loud at spawn and backfilled fail-soft by `refresh_hooks` on every start —
+a file that predates a key gains it, a key the app does not own (say, the
+user's `chat.editMode`) survives untouched, and an already-canonical file is
+not rewritten. Two keys today: `chat.disableTrustAllConfirmation = true` (an
+agent has nobody at its keyboard to answer a confirmation), and
+`chat.defaultInterruptBehavior = "queue"` — an owner decision, 2026-08-20
+("所有 Agent 在 kiro 里边发送指令的模式 默认给我设计成 Queue 队列模式吧 不要
+steer 模式"): a line typed at a BUSY agent waits and arrives whole as the next
+prompt instead of steering the running turn, which is also the contract the
+delivery pipeline already assumes (`delivery_overdue` pauses the ack clock
+while a turn is open precisely because a busy kiro queues what we type).
+Team's kiro renderer (`team/backends.rs`) mirrors the same two keys, as it
+mirrors the rest of the rendering.
+
 A CLI reads its config at launch, so patching the file cannot repair a RUNNING
 agent — restart is the only path, which is what the roster's restart button is
 for.
