@@ -811,3 +811,110 @@ export function feedBlocks(
   }
   return out;
 }
+
+/** One readline edit against the composer's text, as pure data.
+ *
+ * The composer talks to terminal people: their fingers already know Ctrl-A/E/
+ * U/K/W/Y from every shell they have ever typed into, and on macOS the system
+ * text views honour half of that set natively — so its ABSENCE here is what
+ * reads as broken, and the half macOS lacks (U, W, Y) is the half a Linux
+ * browser lacks entirely (owner, 2026-08-20: "支持 ctrl a/e/u/y 等等快捷键，
+ * 其中有一些 mac 系统好像就已经支持了 … 适用性更好一些"). Implementing the set
+ * OURSELVES, everywhere, is what makes it uniform: the mac keeps the bindings
+ * it had, every other platform gains them, and none of them drift apart.
+ *
+ * Pure — the component owns the textarea and the kill buffer; this owns the
+ * arithmetic. Returns null for any key the table does not know, so the caller
+ * falls through to the browser (Ctrl-C/V/X/Z are deliberately NOT here).
+ *
+ * Kill semantics are readline's: U/K/W save what they delete into ONE buffer,
+ * consecutive kills accumulate (backward kills PREPEND, forward kills APPEND —
+ * so Ctrl-W Ctrl-W Ctrl-Y restores the words in their original order), and any
+ * other edit breaks the chain. Ctrl-D deletes without saving, as in readline.
+ * A/E move within the LINE, not the whole text — the composer is a textarea
+ * and a multi-line draft has lines.
+ */
+export interface ReadlineReq {
+  key: string;      // e.key, lowercased; caller has checked ctrl && !meta && !alt
+  text: string;
+  start: number;    // selectionStart
+  end: number;      // selectionEnd
+  kill: string;     // the kill buffer as of this keystroke
+  killing: boolean; // the PREVIOUS edit was a kill (accumulation chain)
+}
+export interface ReadlineEdit {
+  text: string;
+  caret: number;    // collapsed selection
+  kill: string;
+  killing: boolean;
+}
+export function readlineEdit(r: ReadlineReq): ReadlineEdit | null {
+  const { text, start, end } = r;
+  const lineStart = (i: number) => text.lastIndexOf('\n', i - 1) + 1;
+  const lineEnd = (i: number) => { const n = text.indexOf('\n', i); return n === -1 ? text.length : n; };
+  const keep = (caret: number): ReadlineEdit => ({ text, caret, kill: r.kill, killing: false });
+  const cut = (from: number, to: number, prepend: boolean): ReadlineEdit => {
+    const del = text.slice(from, to);
+    return {
+      text: text.slice(0, from) + text.slice(to),
+      caret: from,
+      kill: del ? (r.killing ? (prepend ? del + r.kill : r.kill + del) : del) : r.kill,
+      killing: true,
+    };
+  };
+  switch (r.key) {
+    case 'a': return keep(lineStart(start));
+    case 'e': return keep(lineEnd(end));
+    case 'b': return keep(start !== end ? start : Math.max(start - 1, 0));
+    case 'f': return keep(start !== end ? end : Math.min(end + 1, text.length));
+    case 'u': return cut(lineStart(start), start, true);
+    case 'k': {
+      // At the end of a line, Ctrl-K eats the newline — that is how readline
+      // joins lines, and without it the key dies exactly where you reach for it.
+      const from = end;
+      const to = lineEnd(end) === from && from < text.length ? from + 1 : lineEnd(end);
+      return cut(from, to, false);
+    }
+    case 'w': {
+      let p = start;
+      while (p > 0 && /\s/u.test(text[p - 1]!)) p--;
+      while (p > 0 && !/\s/u.test(text[p - 1]!)) p--;
+      return cut(p, start, true);
+    }
+    case 'y': {
+      // Empty buffer still returns handled: the browser's own Ctrl-Y is redo
+      // (Chromium), and half-yanking half-redoing would be worse than a no-op.
+      if (!r.kill) return keep(start);
+      return {
+        text: text.slice(0, start) + r.kill + text.slice(end),
+        caret: start + r.kill.length,
+        kill: r.kill,
+        killing: false,
+      };
+    }
+    case 'd': {
+      if (start !== end) return { text: text.slice(0, start) + text.slice(end), caret: start, kill: r.kill, killing: false };
+      if (start >= text.length) return keep(start);
+      return { text: text.slice(0, start) + text.slice(start + 1), caret: start, kill: r.kill, killing: false };
+    }
+    case 'h': {
+      if (start !== end) return { text: text.slice(0, start) + text.slice(end), caret: start, kill: r.kill, killing: false };
+      if (start === 0) return keep(0);
+      return { text: text.slice(0, start - 1) + text.slice(start), caret: start - 1, kill: r.kill, killing: false };
+    }
+    case 't': {
+      // Drag the char before point over the char at point; at the end of a
+      // line, transpose the last two. Readline's caret lands after the pair.
+      const atEol = start >= text.length || text[start] === '\n';
+      const i = atEol ? start - 2 : start - 1;
+      if (i < 0 || text[i] === '\n' || text[i + 1] === '\n' || i + 1 >= text.length) return keep(start);
+      return {
+        text: text.slice(0, i) + text[i + 1] + text[i] + text.slice(i + 2),
+        caret: i + 2,
+        kill: r.kill,
+        killing: false,
+      };
+    }
+    default: return null;
+  }
+}

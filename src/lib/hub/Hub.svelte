@@ -27,7 +27,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows, shortPath } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette, ctxColor, statusNote } from './hub.ts';
+  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette, ctxColor, statusNote, readlineEdit } from './hub.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
   import { longpress } from '../ui/longpress.ts';
@@ -519,7 +519,34 @@
     requestAnimationFrame(() => composerEl?.setSelectionRange(composerText.length, composerText.length));
   }
 
+  // The composer's readline set (Ctrl-A/E/U/K/W/Y/D/H/T/F/B): the kill buffer
+  // and the accumulation chain live here; the arithmetic is readlineEdit()
+  // (pure, in hub.ts). Ours everywhere — macOS keeps the half it had natively,
+  // every other platform gains the whole set, and none of them drift apart.
+  let killBuf = '';
+  let killChain = false;
+
   function onComposerKey(e) {
+    if (e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing && composerEl) {
+      const r = readlineEdit({
+        key: e.key.toLowerCase(), text: composerEl.value,
+        start: composerEl.selectionStart, end: composerEl.selectionEnd,
+        kill: killBuf, killing: killChain,
+      });
+      if (r) {
+        e.preventDefault();
+        killBuf = r.kill;
+        killChain = r.killing;
+        composerText = r.text;
+        // The caret AFTER Svelte writes the value back — setting it before
+        // would let the value update reset it to the text's end.
+        settled().then(() => composerEl?.setSelectionRange(r.caret, r.caret));
+        return;
+      }
+    }
+    // Any other keystroke breaks the kill chain: Ctrl-K Ctrl-K accumulates,
+    // Ctrl-K <type> Ctrl-K replaces — readline's own rule.
+    killChain = false;
     // The palette owns the arrows, Tab and Enter while it is open — it is a
     // menu, and a menu that ignores the keyboard is a menu you have to reach for
     // the mouse to use.

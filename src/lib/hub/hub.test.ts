@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, draftUpdate, DRAFT_MAX } from './hub.ts';
+import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, draftUpdate, DRAFT_MAX, readlineEdit } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -684,4 +684,79 @@ test('a draft belongs to its project, and an empty one leaves no trace', () => {
   const before = { p: 'a' };
   draftUpdate(before, 'p', 'b');
   assert.deepEqual(before, { p: 'a' });
+});
+
+// ── readlineEdit: the composer's readline set ──
+const rl = (key: string, text: string, start: number, end = start, kill = '', killing = false) =>
+  readlineEdit({ key, text, start, end, kill, killing });
+
+test('readline A/E move within the LINE of a multi-line draft', () => {
+  const text = 'first line\nsecond line';
+  assert.equal(rl('a', text, 17)?.caret, 11);          // start of "second"
+  assert.equal(rl('e', text, 3)?.caret, 10);           // end of "first line"
+  assert.equal(rl('a', text, 0)?.caret, 0);
+  assert.equal(rl('e', text, text.length)?.caret, text.length);
+});
+
+test('readline U kills to line start, K to line end, and both feed the buffer', () => {
+  const u = rl('u', 'hello world', 5)!;
+  assert.deepEqual([u.text, u.caret, u.kill, u.killing], [' world', 0, 'hello', true]);
+  const k = rl('k', 'hello world', 5)!;
+  assert.deepEqual([k.text, k.caret, k.kill], ['hello', 5, ' world']);
+  // U at line start and K at text end are handled no-ops, not crashes.
+  assert.equal(rl('u', 'ab\ncd', 3)?.text, 'ab\ncd');
+  assert.equal(rl('k', 'ab', 2)?.text, 'ab');
+});
+
+test('readline K at end of line eats the newline (join), like readline', () => {
+  const k = rl('k', 'ab\ncd', 2)!;
+  assert.equal(k.text, 'abcd');
+  assert.equal(k.kill, '\n');
+});
+
+test('readline W kills the previous word, whitespace included', () => {
+  const w = rl('w', 'one two  ', 9)!;
+  assert.deepEqual([w.text, w.caret, w.kill], ['one ', 4, 'two  ']);
+});
+
+test('consecutive kills accumulate — backward prepends, forward appends', () => {
+  // Ctrl-W Ctrl-W then Ctrl-Y restores the words in original order.
+  const w1 = rl('w', 'one two three', 13)!;
+  const w2 = readlineEdit({ key: 'w', text: w1.text, start: w1.caret, end: w1.caret, kill: w1.kill, killing: w1.killing })!;
+  assert.equal(w2.kill, 'two three');
+  const y = readlineEdit({ key: 'y', text: w2.text, start: w2.caret, end: w2.caret, kill: w2.kill, killing: false })!;
+  assert.equal(y.text, 'one two three');
+  // A broken chain replaces instead of accumulating.
+  const k = rl('k', 'abc', 0, 0, 'old', false)!;
+  assert.equal(k.kill, 'abc');
+});
+
+test('readline Y yanks at the caret and replaces a selection; empty buffer is a handled no-op', () => {
+  const y = rl('y', 'ab', 1, 1, 'XY')!;
+  assert.deepEqual([y.text, y.caret], ['aXYb', 3]);
+  const sel = rl('y', 'abcd', 1, 3, 'Z')!;
+  assert.equal(sel.text, 'aZd');
+  assert.notEqual(rl('y', 'ab', 1), null); // handled — Ctrl-Y must not fall through to redo
+});
+
+test('readline D and H delete without touching the kill buffer', () => {
+  const d = rl('d', 'abc', 1, 1, 'keep')!;
+  assert.deepEqual([d.text, d.caret, d.kill], ['ac', 1, 'keep']);
+  const h = rl('h', 'abc', 2)!;
+  assert.deepEqual([h.text, h.caret], ['ac', 1]);
+  assert.deepEqual(rl('d', 'abcd', 1, 3)?.text, 'ad'); // selection: delete it
+});
+
+test('readline T transposes, F/B move, unknown keys fall through', () => {
+  const t1 = rl('t', 'abc', 1)!;               // drag a over b
+  assert.deepEqual([t1.text, t1.caret], ['bac', 2]);
+  const t2 = rl('t', 'abc', 3)!;               // at end: last two
+  assert.deepEqual([t2.text, t2.caret], ['acb', 3]);
+  assert.equal(rl('t', 'a\nb', 2)?.text, 'a\nb'); // never across the newline
+  assert.equal(rl('f', 'ab', 0)?.caret, 1);
+  assert.equal(rl('b', 'ab', 1)?.caret, 0);
+  assert.equal(rl('b', 'abc', 1, 3)?.caret, 1); // selection collapses, no move
+  assert.equal(rl('c', 'ab', 0), null);         // copy is the browser's
+  assert.equal(rl('v', 'ab', 0), null);
+  assert.equal(rl('z', 'ab', 0), null);
 });

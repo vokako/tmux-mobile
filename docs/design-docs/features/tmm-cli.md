@@ -548,6 +548,23 @@ ignores the keyboard is a menu you have to reach for the mouse to use), Escape
 dismisses it until the text changes, and hover shares ONE highlight with the
 keyboard cursor because two would read as two selections.
 
+**The composer speaks readline.** Ctrl-A/E (line start/end), Ctrl-U/K/W (kill to
+line start / to line end / previous word), Ctrl-Y (yank), Ctrl-D/H
+(delete/backspace), Ctrl-T (transpose), Ctrl-F/B (move) — the fingers that live in
+this app already know these from every shell, macOS text views honour half the set
+natively, and the half macOS lacks (U, W, Y) is the half a Linux browser lacks
+entirely ("其中有一些 mac 系统好像就已经支持了 … 适用性更好一些", owner
+2026-08-20). Implemented OURSELVES on every platform so none of them drift:
+`readlineEdit()` (pure + tested, `hub.ts`) owns the arithmetic — kill semantics are
+readline's (one buffer; consecutive kills accumulate, backward kills prepend so
+`Ctrl-W Ctrl-W Ctrl-Y` restores word order; any other key breaks the chain;
+Ctrl-D deletes without saving), A/E move within the LINE of a multi-line draft,
+Ctrl-K at a line's end eats the newline (join), and an empty-buffer Ctrl-Y is a
+handled no-op because Chromium's default Ctrl-Y is REDO. Ctrl-C/V/X/Z return null
+and stay the browser's. The component keeps only the buffer and the chain flag;
+the caret is set after Svelte writes the value back, or the update would reset it
+to the text's end.
+
 **The composer shows what will be RUN.** While the draft parses as a command with
 a target — the same `slashCommand` + recipient branch `send()` takes, so the look
 can never promise a command that sends as prose — the capsule takes an accent tint
