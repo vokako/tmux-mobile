@@ -16,7 +16,7 @@ a no-op service worker satisfy installability, and a small Svelte banner
 ## Pieces
 | File | Role |
 |------|------|
-| `public/manifest.webmanifest` | App metadata + icons (192/512 `any`, 512 `maskable`). `display: standalone`, theme/background `#0a0a0f` (dark bg). |
+| `public/manifest.webmanifest` | App metadata + icons (192/512 `any`, 512 `maskable`). `display: standalone`, theme/background `#0b0b0d` (dark bg). |
 | `public/sw.js` | Service worker registered **only** to make the page installable. Network-passthrough `fetch` handler (no `respondWith`) — present purely because some Chromium versions gate installability on a fetch handler. `skipWaiting` + `clients.claim` so updates take over immediately. |
 | `public/pwa-192.png`, `pwa-512.png`, `pwa-maskable-512.png` | Generated from `src-tauri/icons/icon.png` (1024²) via `sips`. The maskable one scales the glyph to ~72% over an opaque black field so it survives Android's circular mask (the source icon has transparent rounded corners — unusable as maskable directly). |
 | `index.html` | `<link rel="manifest">` + `theme-color` + `apple-*` tags (iOS "Add to Home Screen" reads these; there's no JS install API on iOS). |

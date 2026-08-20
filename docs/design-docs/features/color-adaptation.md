@@ -3,7 +3,7 @@
 ## Context
 AI CLIs (Kiro, Claude Code, etc.) ship ANSI truecolor / 256-color codes tuned for a *typical* dark terminal around bg ≈ `#1e1e1e`. tmux-mobile's themes are harsher at both ends:
 
-- Dark: `#0a0a0f` (near-black)
+- Dark: `#0b0b0d` (near-black)
 - Light: `#f5f5f7` (near-white)
 
 Unchanged, a Kiro "Tasks" panel with BG `rgb(238,238,238)` reads as a **blinding near-white block** on our dark background, and in light mode the previous behavior (flat `255 - c` RGB inversion) produced **pure-black blocks and wrong hues**.
