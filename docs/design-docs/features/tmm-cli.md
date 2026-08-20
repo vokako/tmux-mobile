@@ -1305,13 +1305,17 @@ change, not an appearing element.
 Corner radii are one small scale, tuned down on owner feedback (大圆角 read as
 toy-like): bubbles 12px with a 4px directional corner, the composer capsule
 10px, roster chips 9px, system pills 8px, recipient chip and message actions
-7px. On engines that know `corner-shape` (Chromium 139+), the conversation's
-boxes draw those same radii as CONTINUOUS iOS-style corners — `corner-shape:
-squircle`, one `.hub-root`-scoped rule in app.css ("类似于 iOS 那种圆角", owner
-2026-08-20; it lives there because svelte-check's CSS service does not know the
-property yet). Everywhere else the plain circular arc stays — same radius, no
-polyfill — and full-round 999px capsules are excluded on purpose, since a
-superellipse flattens a stadium's caps.
+7px. On engines that know `corner-shape` (Chromium 139+), every rounded
+RECTANGLE in the app draws those same radii as CONTINUOUS iOS-style corners —
+`corner-shape: squircle`, ONE policy block in app.css listing the surfaces by
+component ("有质感一些，类似于 iPad、iOS 或 Mac 上的应用。尤其是标签的圆角过渡",
+owner 2026-08-20; it lives there because svelte-check's CSS service does not
+know the property yet, and global selectors reach scoped components because
+Svelte keeps the original class names). Everywhere else the plain circular arc
+stays — same radius, no polyfill. Full-round shapes (999px capsules, toggles,
+50% dots) are excluded on purpose, since a superellipse flattens a stadium's
+caps and squares off a circle; a listed class that grows a pill variant gets an
+explicit `corner-shape: round` reset next to the policy block.
 
 With metadata inline, the sticky anchor `.msg` and the bubble are the same
 box again, and a held bubble is simply that box at full height. Prose bubbles are

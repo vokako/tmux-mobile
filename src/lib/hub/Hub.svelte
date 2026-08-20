@@ -2159,8 +2159,8 @@
      the far right). */
   .msg { align-self: flex-start; }
   .msg.me { align-self: flex-end; }
-  /* iOS-style CONTINUOUS corners on the conversation's boxes live in app.css
-     (`.hub-root …` + corner-shape: squircle): svelte-check's CSS service does
+  /* iOS-style CONTINUOUS corners live in app.css (the app-wide
+     `corner-shape: squircle` policy block): svelte-check's CSS service does
      not know the property yet and the house bar is zero warnings. */
   .bubble {
     position: relative;

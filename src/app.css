@@ -261,21 +261,67 @@ button:disabled {
 .side-row.add { color: var(--text3); font-size: var(--fs-ui); }
 .side-row.add:hover { color: var(--accent); }
 
-/* iOS-style CONTINUOUS corners on the conversation's boxes ("类似于 iOS 那种
-   圆角", owner 2026-08-20): `corner-shape: squircle` blends each corner into
-   its sides as a superellipse instead of a circular arc, inside the SAME
-   border-radius each rule already declares. Progressive by design — Chromium
-   139+ (the Android WebView, desktop Chrome/Edge) draws the smooth curve;
-   WKWebView and older engines keep the plain round corner, nothing to hide or
-   polyfill. Full-round pills (999px capsules, dots) are left alone: a
-   superellipse flattens a stadium's caps. The rule lives HERE rather than in
-   Hub.svelte because svelte-check's CSS service does not know the property yet
-   and the house bar is zero warnings; `.hub-root` scopes it to the chat, where
-   the class names are Hub's own. */
-.hub-root :is(.bubble, .compose-shell, .send-btn, .m-acts button, .sysline,
-  .shots, .steps, .arow, .a-menu, .to-menu, .start-row) {
+/* ── iOS/macOS-style CONTINUOUS corners, app-wide ─────────────────────────
+   ("把它设计得有质感一些，类似于 iPad、iOS 或 Mac 上的应用。尤其是标签的圆角
+   过渡，要自然一点", owner 2026-08-20.)
+
+   `corner-shape: squircle` blends each corner into its sides as a
+   superellipse instead of a circular arc, inside the SAME border-radius each
+   rule already declares — the radii scale stays untouched. Progressive by
+   design: Chromium 139+ (the Android WebView, desktop Chrome/Edge) draws the
+   smooth curve; WKWebView and older engines keep the plain round corner,
+   nothing to hide or polyfill.
+
+   POLICY — one list, one place:
+   - Every rounded RECTANGLE (bubbles, cards, rows, inputs, buttons, tags,
+     menus, dialogs, toasts) is listed here, grouped by component. The rules
+     live in app.css and NOT in component <style> because svelte-check's CSS
+     service does not know the property yet and the house bar is zero
+     warnings; global selectors reach scoped components because Svelte keeps
+     the original class names.
+   - FULL-ROUND shapes are deliberately absent: a superellipse flattens a
+     stadium's caps (999px / --ui-radius-pill chips, toggles, .day-pill) and
+     squares off a circle (50% dots, fabs). When a listed class gains a pill
+     variant somewhere, reset it below like `.sessions .icon-btn`.
+   - A name collision across components is harmless BY POLICY: the treatment
+     is app-wide, so the worst case is a rounded box getting exactly what
+     everything else has. Only a pill/circle variant must be reset. */
+:is(
+  /* shared vocabulary (this file) */
+  .chip-btn, .icon-btn, .side-row, .ava,
+  /* rendered markdown (chat bubbles, file preview, skill docs) */
+  .md pre, .md code, .md-render pre, .md-render img, .md-render .mermaid-block,
+  /* Hub — conversation */
+  .bubble, .compose-shell, .send-btn, .m-acts button, .sysline, .shots,
+  .steps, .s-head, .arow, .ar-acts button, .a-menu, .a-menu button, .to-menu,
+  .to-menu button, .start-row, .to-chip, .acard, .ac-bar, .a-more, .arch-bar,
+  .s-all, .h1-edit, .h1-pen, .cmd-menu, .cmd-opt, .win-pill, .agent-pick,
+  .pg-tag, .p-tag, .m-note-state, .sr-cap, .direct-tag, .r-cap,
+  /* Sessions / Projects */
+  .session, .session-row, .pane-row, .pane-add, .pane-kill, .kill, .new-btn,
+  .sessions.sidebar-mode .refresh-icon, .w-badge,
+  .proj, .win, .act, .err, .error,
+  /* Terminal + app shell */
+  .input-bar, .scroll-btn, .sel-toolbar, .sel-toolbar-btn, .toast,
+  .win-split-menu, .win-split-opt, .rail-btn, .rail-brand, .gear-btn,
+  .split-menu, .split-opt, .split-toggle, .reconnect-cancel, .debug-overlay,
+  /* Files / Git */
+  .act-btn, .back-btn, .bm-del, .copy-toast, .toast-open, .new-item button,
+  .new-item input, .git-tabs button, .git-stage-btn, .git-commit-btn,
+  .git-act-btn, .git-commit-row textarea, .html-preview, .image-preview img,
+  /* Settings / Preferences / Agents editor */
+  .card, .connect-btn, .cancel-btn, .share-btn, .hist-list, .setting-card,
+  .text-input, .address-list button, .disconnect, .empty-connection button,
+  .agents-root input, .agents-root textarea, .md-doc,
+  /* shared ui components */
+  .sel-trigger, .sel-menu, .sel-opt, .ctx, .ctx button, .dlg, .dlg input,
+  .picker, .picker-add, .pk-list, .install-banner, .install-icon
+) {
   corner-shape: squircle;
 }
+/* Pill variants of listed classes go back to the circular arc: a superellipse
+   flattens a stadium's caps. */
+.sessions .icon-btn { corner-shape: round; }
 
 /* Rendered-markdown bodies (chat bubbles, skill previews). Compact rhythm —
    these live inside small containers, not documents. */
