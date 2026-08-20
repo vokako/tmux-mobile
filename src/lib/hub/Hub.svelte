@@ -1040,14 +1040,19 @@
             onblur={commitRename} />
         {:else}
           <h1>
-            <!-- A real button, not a role on the heading: the heading stays a
-                 heading for assistive tech and Enter/Space come for free. -->
+            <!-- The NAME is text, not a control. Making the whole title clickable
+                 meant every attempt to select it, or a stray tap on the way to
+                 something else, opened an editor ("不应该点击名字都是改名，只有点击
+                 右边小图标才是改名", owner 2026-08-20). The pencil beside it is the
+                 rename affordance, and it is a real button so assistive tech and
+                 Enter/Space come for free. -->
+            <span class="h1-text">{selectedRow?.project.name ?? ''}</span>
             {#if selected}
-              <button class="h1-btn" title={t('projectRenameHint')} onclick={startRename}>
-                <span class="h1-text">{selectedRow?.project.name ?? ''}</span>
+              <button class="h1-pen" title={t('projectRenameHint')}
+                aria-label={t('projectRename')} onclick={startRename}>
                 <Icon name="edit" size={13} />
               </button>
-            {:else}{selectedRow?.project.name ?? ''}{/if}
+            {/if}
           </h1>
         {/if}
         {#if !compact}<span class="path">{shortPath(selectedRow?.project.path ?? '')}</span>{/if}
@@ -1652,17 +1657,24 @@
      like a form, but relying on hover ALONE hid the feature (no hover on a
      phone). The edit state keeps the title's metrics so nothing in the row
      shifts when it appears. */
-  .h1-btn {
-    font: inherit; color: inherit; background: none; border: 0; padding: 0;
-    max-width: 100%; min-width: 0; cursor: text; border-radius: 7px;
-    display: inline-flex; align-items: center; gap: 6px;
+  /* The global `.page-head h1` rule ellipsizes its own text; with a second child
+     it has to be a flex row, or the pencil is pushed out and clipped by the
+     heading's own `overflow: hidden` as soon as the name is long. */
+  h1 { display: flex; align-items: center; min-width: 0; }
+  /* The name is selectable text that ellipsizes; the pencil never shrinks with
+     it, and it is the only thing that renames. */
+  .h1-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .h1-pen {
+    flex: none; display: inline-grid; place-items: center; background: none;
+    border: 0; padding: 2px; margin-left: 5px; border-radius: 6px; cursor: pointer;
+    color: var(--meta-ink); transition: color var(--t-fast), background var(--t-fast);
+    /* A 13px glyph is not a touch target: the hit area is padded out to 44px
+       without moving the layout, the same trick the primary actions use. */
+    position: relative;
   }
-  /* The NAME ellipsizes; the pencil never shrinks away with it. */
-  .h1-btn .h1-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .h1-btn :global(svg) { flex: none; color: var(--meta-ink); transition: color var(--t-fast); }
-  .h1-btn:hover .h1-text { text-decoration: underline dotted var(--text3); text-underline-offset: 3px; }
-  .h1-btn:hover :global(svg) { color: var(--text); }
-  .h1-btn:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+  .h1-pen::after { content: ''; position: absolute; inset: -14px; }
+  .h1-pen:hover { color: var(--text); background: var(--surface2); }
+  .h1-pen:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
   .h1-edit {
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     font-size: var(--fs-title); font-weight: 600; color: var(--text);
