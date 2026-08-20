@@ -2179,7 +2179,12 @@
   }
   /* Agent name heads the bubble (your own carries none — the right-aligned
      accent bubble already says "yours"). */
+  /* Agent name heads the bubble (your own carries none — the right-aligned
+     accent bubble already says "yours"). A flex row so the status badge can
+     sit at the bubble's TOP-RIGHT ("放到这个消息的右侧 往右上角放", owner
+     2026-08-20) while the name keeps the left edge. */
   .m-head {
+    display: flex; align-items: center; gap: 8px;
     color: var(--accent); font-weight: 650; font-size: var(--fs-ui);
     letter-spacing: 0.1px; line-height: 1.2; margin: 0 0 2px; user-select: none;
   }
@@ -2187,10 +2192,10 @@
      uppercase, bordered) plus a leading dot, coloured by noteStateColor via
      inline `color` — border and dot follow through currentColor. A pill with
      a dot reads as a state the agent ENTERED; the first cut's arrow read as
-     an addressee (owner, 2026-08-20). */
+     an addressee (owner, 2026-08-20). Pushed to the row's right edge. */
   .m-head .m-note-state {
-    display: inline-flex; align-items: center; gap: 4px; vertical-align: 1px;
-    margin-left: 7px; padding: 0 5px; border-radius: 4px;
+    display: inline-flex; align-items: center; gap: 4px;
+    margin-left: auto; padding: 0 5px; border-radius: 4px;
     border: 1px solid color-mix(in srgb, currentColor 55%, transparent);
     font-size: var(--fs-micro); font-weight: 650;
     text-transform: uppercase; letter-spacing: 0.6px; line-height: 1.6;

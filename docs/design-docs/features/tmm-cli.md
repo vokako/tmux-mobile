@@ -966,8 +966,10 @@ exactly the bubble any other message gets ("status 消息的样式要和普通�
 for `waiting`/`blocked`, which was the same mistake in a new costume — a second
 visual species for the same thing is what made these read as telemetry to begin
 with. The one adornment lives in the HEADER, where a name already goes: the bubble
-head reads the name plus a state BADGE — a dot + the state word in the app's
-state-pill dialect, coloured by `noteStateColor()` (pure + tested) in the ONE
+head reads the name plus a state BADGE at the row's RIGHT edge — the bubble's
+top-right corner ("放到这个消息的右侧 往右上角放", owner 2026-08-20) — a dot +
+the state word in the app's state-pill dialect, coloured by `noteStateColor()`
+(pure + tested) in the ONE
 progressive status language the owner asked for ("不同的颜色应该是渐进式的",
 2026-08-20), defined once above `stateDotColor` in hub.ts and spoken by both:
 **accent = in motion** (running/working — a spinner is never green; this is
