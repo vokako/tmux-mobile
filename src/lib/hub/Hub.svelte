@@ -2130,9 +2130,16 @@
     /* One em == one step row's font size, so the cap below is expressed in ROWS
        and follows the type scale instead of a magic pixel height. */
     font-size: var(--fs-sub);
+    /* The ARGUMENT is the interesting half of a tool call and it is routinely
+       wider than the lane — a path, a command, a heredoc. It used to be cut with
+       an ellipsis, so the one thing you opened the lane to read was the one thing
+       you could not (owner, 2026-08-20: "这些参数应该左右可以滑动，查看完整的参
+       数"). The LANE pans instead: ONE scroller for the whole block, so every row
+       moves together and the tool-name column stays a column. */
+    overflow-x: auto; scrollbar-width: thin;
   }
-  /* Ten rows, then scroll. Each step is one line by construction (.st-text
-     ellipsizes), so rows and lines are the same thing here. */
+  /* Ten rows, then scroll. Each step is exactly one line (rows never wrap), so
+     rows and lines are the same thing here. */
   .s-body.capped {
     max-height: calc(var(--steps-rows) * (1.5em + 2px) + 11px);
     overflow-y: auto; overscroll-behavior: contain;
@@ -2146,14 +2153,30 @@
   .step {
     display: flex; align-items: baseline; gap: 8px; line-height: 1.5;
     font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text3);
+    /* As wide as its content so the lane has something to pan, but never
+       narrower than the lane — otherwise a short row's time would sit in the
+       middle of the row instead of at the right edge, and the column would go
+       ragged. */
+    width: max-content; min-width: 100%;
   }
   /* The tool name: the part the eye scans down a column. */
   .tname { flex: none; color: var(--accent); font-weight: 650; }
   .step .tname { min-width: 6.5em; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hub-root.compact .step .tname { min-width: 0; }
   .s-peek .tname { min-width: 0; margin-right: 5px; }
-  .step .st-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text2); }
-  .step .st-ts { flex: none; margin-left: auto; opacity: 0.55; }
+  /* No ellipsis and no shrinking: the row grows, the lane scrolls. Still
+     `nowrap`, NOT `pre`: a tool detail routinely contains real newlines (a
+     heredoc, a multi-line command), and `pre` would turn one of them into a
+     three-line row — which would break both the one-row-per-call reading and the
+     10-row cap, whose height is calculated in single lines. */
+  .step .st-text { flex: none; white-space: nowrap; color: var(--text2); }
+  /* Pinned to the right edge of the scrollport, so panning a long argument never
+     scrolls the time out of view. It needs the lane's own background, or the
+     argument would slide under it. */
+  .step .st-ts {
+    flex: none; margin-left: auto; opacity: 0.55;
+    position: sticky; right: 0; padding-left: 8px; background: var(--surface);
+  }
   .empty { color: var(--text3); font-size: var(--fs-ui); text-align: center; margin: auto; padding: 0 24px; line-height: 1.6; }
 
   .composer {

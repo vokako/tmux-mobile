@@ -59,4 +59,5 @@ These tests `readFile` the component source and assert with regexes.
 | `team/Team.source.test.ts` | roster chip wrap/overflow CSS contract |
 | `ui/tokens.source.test.ts` | one type scale: no raw px font-size outside the listed exceptions |
 | `ui/confirm.source.test.ts` | every destructive verb goes through the shared confirmation |
+| `hub/Hub.source.test.ts` | a tool-lane row is one line (`nowrap`, never `pre`), the argument is never truncated (the lane pans instead), and the row cap stays expressed in rows |
 | `ui/sidebar.source.test.ts` | one sidebar box: a section header takes its padding and type from `.side-h`, and `.side-h`/`.side-row` keep the same 10px inset |
