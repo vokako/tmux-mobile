@@ -672,17 +672,21 @@ export function feedBlocks(
   const turns: TurnMark[] = [];
   for (const e of activity) {
     if (e.kind !== 'prompt' || e.via !== 'app') continue;
-    // The newest message at or before the echo whose body it contains. The
-    // typed line is `[tmm chat] <from>: <body>`, and an agent that was
-    // mid-typing submits it with its own leftover text attached.
-    let hit: Extract<FeedBlock, { type: 'msg' }> | undefined;
+    // EVERY message at or before the echo whose body it contains. The typed line
+    // is `[tmm chat] <from>: <body>`, an agent that was mid-typing submits it with
+    // its own leftover text attached — and a busy agent can submit SEVERAL queued
+    // lines in one prompt, in which case each of them was delivered. Marking only
+    // the newest left the earlier ones hollow for ever.
+    let hit = false;
     for (const m of msgs) {
-      if (m.type !== 'msg') continue;
+      if (m.type !== 'msg' || m.delivered) continue;
       const body = m.msg?.body ?? '';
-      if (body && m.ts <= e.ts && e.text.includes(body)) hit = m;
+      if (body && m.ts <= e.ts && e.text.includes(body)) {
+        m.delivered = true;
+        hit = true;
+      }
     }
     if (hit) {
-      hit.delivered = true;
       consumed.add(e);
       // Invisible, but still a turn boundary (rule 3).
       turns.push({ type: 'turn', ts: e.ts, window: e.window });

@@ -237,6 +237,27 @@ test('an echoed prompt marks its message delivered instead of repeating it', () 
   }
 });
 
+test('one prompt carrying several queued lines confirms all of them', () => {
+  // A busy agent queues what we type and can submit more than one line when the
+  // turn ends. Marking only the newest left the earlier message hollow for ever —
+  // and, before the server kept a QUEUE of typed lines, made it come back as an
+  // "input" row instead of a receipt (owner, 2026-08-20).
+  const feed = [
+    { ts: 100, from: 'human', body: '@dev first thing' },
+    { ts: 200, from: 'human', body: '@dev second thing' },
+    { ts: 300, from: 'human', body: '@dev not in that prompt' },
+  ];
+  const activity = [
+    ev({ ts: 900, kind: 'prompt', via: 'app', text: '[tmm chat] human: @dev first thing\n[tmm chat] human: @dev second thing' }),
+  ];
+  const blocks = feedBlocks(feed, activity, 'tools');
+  assert.deepEqual(blocks.map((b) => b.type), ['msg', 'msg', 'msg'], 'still a receipt, not a row');
+  const [a, b, c] = blocks;
+  assert.equal(a?.type === 'msg' && a.delivered, true);
+  assert.equal(b?.type === 'msg' && b.delivered, true);
+  assert.equal(c?.type === 'msg' && c.delivered, false, 'it was not in that prompt');
+});
+
 test('a prompt typed at the agent keyboard becomes its own input row', () => {
   const activity = [ev({ ts: 100, kind: 'prompt', via: 'local', text: 'fix the flaky test' })];
   assert.deepEqual(feedBlocks([], activity, 'status').map((b) => b.type), ['prompt']);

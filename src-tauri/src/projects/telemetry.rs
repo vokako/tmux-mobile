@@ -42,6 +42,9 @@ const DELIVERY_ACK_SECS: u64 = 45;
 /// Prompt text kept per event. Long enough for a real instruction, short
 /// enough that 120 of them stay a cheap in-memory ring.
 const MAX_PROMPT_CHARS: usize = 1024;
+/// Most outstanding typed lines kept per window. A busy agent's queue is short in
+/// practice; this only stops an unbounded queue if nothing ever acks.
+const MAX_PENDING: usize = 16;
 
 #[derive(Debug, Clone, Default)]
 struct Rec {
@@ -61,10 +64,16 @@ struct Rec {
     ask: Option<(String, u64)>,
     /// Last hook tool event: (activity line, ts). Work observed inside a turn.
     tool: Option<(String, u64)>,
-    /// A line this app typed into the pane that has not been echoed back by a
-    /// `userPromptSubmit` hook yet: (line, ts). Cleared by the echo (delivery
-    /// confirmed) or by the sweep (delivery unconfirmed).
-    pending: Option<(String, u64)>,
+    /// Lines this app typed into the pane that no `userPromptSubmit` hook has
+    /// echoed back yet: (line, ts), oldest first. A QUEUE, not a slot: a busy
+    /// agent holds everything we type and submits it later, so two messages sent
+    /// during one turn are both outstanding at once. With a single slot the second
+    /// erased the first's record, and when the agent finally submitted the first
+    /// line nothing matched it — so it was reported as a prompt the user had typed
+    /// locally, and the message it belonged to never got its delivered mark (owner,
+    /// 2026-08-20: "在对列里后续隔很久才响应的消息 … 显示到 input 上了，但是没有当成
+    /// 已读的消息，给跳过了"). Entries leave on their echo or on the sweep.
+    pending: Vec<(String, u64)>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -296,7 +305,17 @@ pub fn record_tool(session: &str, window: usize, tool: &str, detail: &str) {
 /// pending delivery until the agent's `userPromptSubmit` hook echoes it back.
 pub fn record_delivery(session: &str, window: usize, line: &str) {
     let (line, ts) = (line.to_string(), now());
-    with_rec(session, window, |r| r.pending = Some((line, ts)));
+    with_rec(session, window, |r| {
+        // Re-typing the same line replaces its entry rather than queueing a
+        // duplicate that could never be acked twice.
+        r.pending.retain(|(l, _)| l != &line);
+        r.pending.push((line, ts));
+        // A queue that only grows is a leak; nobody types this many lines at one
+        // agent without the sweep having something to say about it.
+        while r.pending.len() > MAX_PENDING {
+            r.pending.remove(0);
+        }
+    });
 }
 
 /// The `userPromptSubmit` hook: the agent accepted a prompt. This is BOTH the
@@ -312,12 +331,13 @@ pub fn record_prompt(session: &str, window: usize, prompt: &str) -> bool {
     let mut acked = false;
     let ts = now();
     with_rec(session, window, |r| {
-        if let Some((line, _)) = r.pending.clone() {
-            if prompt.contains(line.as_str()) || line.contains(prompt) {
-                r.pending = None;
-                acked = true;
-            }
-        }
+        // Any outstanding line may be the one this prompt carries — a queue is
+        // submitted in order, but an agent can also be steered, so match on
+        // CONTENT and remove exactly what was found. One submitted prompt can
+        // carry several queued lines at once, so this keeps going.
+        let before = r.pending.len();
+        r.pending.retain(|(line, _)| !(prompt.contains(line.as_str()) || line.contains(prompt)));
+        acked = r.pending.len() < before;
         // A turn just opened. This is the ONE honest "it started working"
         // signal: pane activity cannot be it, because an agent TUI repaints its
         // prompt (spinner, status line, cursor) long after it finished.
@@ -348,14 +368,16 @@ pub fn record_prompt(session: &str, window: usize, prompt: &str) -> bool {
 /// It starts at the turn's END, giving the CLI the same 45 s from the moment it
 /// could actually submit the line. A line typed into an idle agent is unchanged:
 /// its clock starts when we typed it.
-fn delivery_overdue(rec: &Rec, now: u64) -> bool {
-    let Some((_, typed_ts)) = rec.pending.as_ref().map(|(l, t)| (l.clone(), *t)) else {
-        return false;
-    };
+/// Which outstanding lines are overdue, oldest first. Per LINE, because the queue
+/// holds several and they were typed at different times.
+fn overdue_lines(rec: &Rec, now: u64) -> Vec<String> {
+    if rec.pending.is_empty() {
+        return Vec::new();
+    }
     // activity_ts 0 on purpose: pane repaints must not keep a line pending
     // forever, and a window with no hook facts can never ack one anyway.
     if matches!(derive_from(rec, 0, now).state.as_str(), "running" | "waiting") {
-        return false;
+        return Vec::new();
     }
     let turn_end = rec
         .end
@@ -363,8 +385,20 @@ fn delivery_overdue(rec: &Rec, now: u64) -> bool {
         .map(|(_, t)| *t)
         .unwrap_or(0)
         .max(rec.done.as_ref().map(|(_, t)| *t).unwrap_or(0));
-    let reference = typed_ts.max(turn_end.min(now));
-    now.saturating_sub(reference) >= DELIVERY_ACK_SECS
+    rec.pending
+        .iter()
+        .filter(|(_, typed_ts)| {
+            let reference = (*typed_ts).max(turn_end.min(now));
+            now.saturating_sub(reference) >= DELIVERY_ACK_SECS
+        })
+        .map(|(line, _)| line.clone())
+        .collect()
+}
+
+/// Is anything overdue? Kept as its own predicate because the rule — not the list
+/// — is what the tests are about.
+fn delivery_overdue(rec: &Rec, now: u64) -> bool {
+    !overdue_lines(rec, now).is_empty()
 }
 
 /// Report deliveries that never came back as a prompt. Called before a client
@@ -376,12 +410,12 @@ pub fn sweep_deliveries(session: &str) {
         let mut map = store().lock().unwrap();
         map.iter_mut()
             .filter(|((s, _), _)| s == session)
-            .filter_map(|((_, w), r)| {
-                if !delivery_overdue(r, now) {
-                    return None;
-                }
-                let (line, _) = r.pending.take()?;
-                Some((*w, line))
+            .flat_map(|((_, w), r)| {
+                let due = overdue_lines(r, now);
+                // Each line is reported once, so it leaves the queue with its
+                // warning. The ones still in time stay outstanding.
+                r.pending.retain(|(line, _)| !due.contains(line));
+                due.into_iter().map(move |line| (*w, line)).collect::<Vec<_>>()
             })
             .collect()
     };
@@ -530,7 +564,7 @@ mod tests {
     fn a_queued_line_is_not_an_unconfirmed_line() {
         let mut r = rec();
         r.prompt = Some(1000); // a turn is open — the agent is working
-        r.pending = Some(("@builder-2 do the thing".into(), 1010));
+        r.pending = vec![("@builder-2 do the thing".into(), 1010)];
         // Ten minutes later the turn is STILL running. Nothing is overdue: the
         // line is sitting in the agent's input queue where we put it.
         assert!(!delivery_overdue(&r, 1010 + 600));
@@ -541,11 +575,70 @@ mod tests {
         assert!(!delivery_overdue(&asking, 1100 + 600));
     }
 
+    /// The bug: `pending` was ONE slot, so a second message typed at a busy agent
+    /// erased the first one's record. When the agent finally submitted the first
+    /// queued line, nothing matched it — so it was reported as a prompt the user
+    /// had typed locally (rendered as an "input" row) and the message it belonged
+    /// to never got its delivered mark.
+    #[test]
+    fn two_lines_queued_at_a_busy_agent_are_both_still_outstanding() {
+        let session = format!("queue-test-{}", std::process::id());
+        record_prompt(&session, 1, "start working");      // a turn is open
+        record_delivery(&session, 1, "[tmm chat 00:05] human: first thing");
+        record_delivery(&session, 1, "[tmm chat 00:06] human: second thing");
+
+        // Both are held, oldest first — the second no longer erases the first.
+        let held = |s: &str| {
+            store().lock().unwrap().get(&(s.to_string(), 1)).map(|r| r.pending.clone()).unwrap_or_default()
+        };
+        assert_eq!(held(&session).len(), 2);
+        assert!(held(&session)[0].0.contains("first thing"));
+
+        // The agent works through the queue in order. Each echo acknowledges its
+        // OWN line and leaves the other outstanding.
+        assert!(record_prompt(&session, 1, "[tmm chat 00:05] human: first thing"),
+            "the first queued line is acknowledged, however late it arrives");
+        assert_eq!(held(&session).len(), 1);
+        assert!(held(&session)[0].0.contains("second thing"));
+        assert!(record_prompt(&session, 1, "[tmm chat 00:06] human: second thing"));
+        assert!(held(&session).is_empty());
+
+        // A prompt nobody typed for us is still local input.
+        assert!(!record_prompt(&session, 1, "something the user typed at the keyboard"));
+    }
+
+    #[test]
+    fn one_submitted_prompt_can_carry_the_whole_queue() {
+        // kiro submits queued lines together; the hook then reports ONE prompt
+        // containing several of ours. Each must be acknowledged, or the earlier
+        // messages keep their hollow ring for ever.
+        let session = format!("queue-batch-{}", std::process::id());
+        record_prompt(&session, 2, "open the turn");
+        record_delivery(&session, 2, "line one");
+        record_delivery(&session, 2, "line two");
+        assert!(record_prompt(&session, 2, "line one\nline two\n"));
+        let left = store().lock().unwrap().get(&(session, 2)).map(|r| r.pending.clone()).unwrap_or_default();
+        assert!(left.is_empty(), "both lines were in that prompt");
+    }
+
+    #[test]
+    fn every_overdue_line_is_reported_not_just_the_first() {
+        let mut r = rec();
+        r.end = Some(("completed".into(), 1000));         // idle since 1000
+        r.pending = vec![("older".into(), 900), ("newer".into(), 1000)];
+        // Both past the window.
+        let due = overdue_lines(&r, 1000 + DELIVERY_ACK_SECS);
+        assert_eq!(due, vec!["older".to_string(), "newer".to_string()]);
+        // Only the older one is past it: the fresh line keeps its own clock.
+        let one = overdue_lines(&r, 900 + DELIVERY_ACK_SECS);
+        assert_eq!(one, Vec::<String>::new(), "the clock runs from the turn end (1000)");
+    }
+
     #[test]
     fn the_clock_starts_when_the_turn_ends() {
         let mut r = rec();
         r.prompt = Some(1000);
-        r.pending = Some(("@builder-2 do the thing".into(), 1010));
+        r.pending = vec![("@builder-2 do the thing".into(), 1010)];
         r.end = Some(("completed".into(), 2000)); // the turn ended much later
         // The CLI gets the full window from the moment it could submit, not from
         // the moment we typed — 990 s after typing is still not overdue.
@@ -558,7 +651,7 @@ mod tests {
         let mut r = rec();
         r.prompt = Some(500);
         r.end = Some(("completed".into(), 600)); // idle since 600
-        r.pending = Some(("@builder-2 hello".into(), 1000)); // typed later
+        r.pending = vec![("@builder-2 hello".into(), 1000)]; // typed later
         assert!(!delivery_overdue(&r, 1000 + DELIVERY_ACK_SECS - 1));
         assert!(delivery_overdue(&r, 1000 + DELIVERY_ACK_SECS), "an idle agent had its chance");
     }
@@ -569,7 +662,7 @@ mod tests {
         // it can never ack, and pane repaints must not keep the line pending
         // forever — the warning is the only signal the owner would get.
         let mut r = rec();
-        r.pending = Some(("@codex hello".into(), 1000));
+        r.pending = vec![("@codex hello".into(), 1000)];
         assert!(!delivery_overdue(&r, 1000 + 10));
         assert!(delivery_overdue(&r, 1000 + DELIVERY_ACK_SECS));
     }
@@ -730,8 +823,8 @@ mod tests {
         // Backdate the pending line past the ack window.
         record_delivery("sweep-test", 2, "[tmm chat] human: @dev hello");
         with_rec("sweep-test", 2, |r| {
-            let (line, ts) = r.pending.clone().unwrap();
-            r.pending = Some((line, ts - DELIVERY_ACK_SECS - 1));
+            let (line, ts) = r.pending[0].clone();
+            r.pending = vec![(line, ts - DELIVERY_ACK_SECS - 1)];
         });
         sweep_deliveries("sweep-test");
         let warns: Vec<String> = recent_events("sweep-test", 0)

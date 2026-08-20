@@ -442,6 +442,20 @@ line with the agent's own half-typed text attached), and `sweep_deliveries`
 reports the ones still pending after 45 s as a `warn` event. The sweep runs
 when a client reads `hub_activity`, which is exactly when the answer is wanted.
 
+**A typed line joins a QUEUE, it does not replace one.** `Rec.pending` was a
+single slot, so a second message typed at a busy agent erased the first one's
+record — and when the agent finally submitted that first queued line, nothing
+matched it, so it came back as a prompt the user had typed *locally*: rendered as
+an "input" row, while the message it belonged to kept its hollow ring for ever
+(owner, 2026-08-20: "在对列里后续隔很久才响应的消息 … 显示到 input 上了，但是没有当
+成已读的消息，给跳过了"). It is a `Vec` now: `record_prompt` matches on CONTENT and
+removes exactly what it found (so a queue may be worked through in any order, and
+ONE submitted prompt carrying several of our lines acknowledges all of them),
+`overdue_lines` reports per line rather than per window, and re-typing the same line
+replaces its entry instead of queueing a duplicate that could never be acked twice.
+The client side of the same bug: `feedBlocks` marked only the NEWEST message an echo
+contained, so a batch submission left the earlier ones hollow.
+
 **The ack clock does not run while a turn is open.** A queued line is not a lost
 line: an agent that is mid-turn holds what we typed in its input queue — kiro says
 so on screen ("Type to queue") — and submits it when the turn ends, which for a
