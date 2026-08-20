@@ -949,16 +949,20 @@ exactly the bubble any other message gets ("status 消息的样式要和普通�
 for `waiting`/`blocked`, which was the same mistake in a new costume — a second
 visual species for the same thing is what made these read as telemetry to begin
 with. The one adornment lives in the HEADER, where a name already goes: the bubble
-head reads `name → state`, the arrow quiet chrome and the state word in its own
-status colour (`noteStateColor()`, pure + tested — working/running `--status-ok`,
-waiting/blocked `--status-warn` because they ask for a person rather than report a
-failure, failed `--status-danger`, done the accent, anything unknown `--text3`).
-That is the owner's ask verbatim ("在消息框的 agent name 后面加一个箭头 指向具体
-的状态 … 为不同状态定义不同的色彩", 2026-08-20): what the note is ABOUT belongs
-to the header, and the words stay an ordinary message. The raw view still shows
-the stored body, marker included, because raw means exact. `record_status` keeps
-the explicit claim in the status record: that is the part only it can answer, and
-`derive_from` needs it for `waiting`.
+head reads the name plus a state BADGE — a dot + the state word in the app's
+state-pill dialect, coloured by `noteStateColor()` (pure + tested —
+working/running `--status-ok`, waiting/blocked `--status-warn` because they ask
+for a person rather than report a failure, failed `--status-danger`, done the
+accent, anything unknown `--text3`). The badge answers the owner's two asks in
+order: point at the state and colour it ("在消息框的 agent name 后面加一个箭头
+指向具体的状态 … 为不同状态定义不同的色彩", 2026-08-20), then say it
+UNAMBIGUOUSLY — the first cut was a literal `name → state` arrow, which read as
+an addressee ("像是这个 Agent 给另外一个 working 的人发的", same day), and a
+dotted pill reads as "entered this state" instead. What the note is ABOUT
+belongs to the header, and the words stay an ordinary message. The raw view
+still shows the stored body, marker included, because raw means exact.
+`record_status` keeps the explicit claim in the status record: that is the part
+only it can answer, and `derive_from` needs it for `waiting`.
 
 The other half is the prompt, since a channel nobody is told to use stays empty.
 `build_prompt` now leads with `tmm status working "<what you are doing right

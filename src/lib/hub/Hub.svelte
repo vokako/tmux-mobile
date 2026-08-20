@@ -1498,11 +1498,14 @@
                   onclick={() => { msgOpen = msgOpen === key ? '' : key; }}>
                   {#if m.from !== 'human'}
                     <!-- A status note keeps the ordinary bubble, but its header
-                         says what the words are ABOUT: `name → state`, the state
-                         in its own status colour ("在消息框的 agent name 后面加
-                         一个箭头 指向具体的状态 … 为不同状态定义不同的色彩",
-                         owner 2026-08-20). The name stays the name. -->
-                    <div class="m-head">{m.from}{#if note}<span class="m-arrow" aria-hidden="true">→</span><span class="m-note-state" style:color={noteStateColor(note.state)}>{stateLabel(note.state)}</span>{/if}</div>
+                         says what the words are ABOUT. The first cut was
+                         `name → state`, and the arrow read as an ADDRESSEE —
+                         "像是这个 Agent 给另外一个 working 的人发的" (owner,
+                         2026-08-20) — so the state is now a BADGE in the app's
+                         existing state-pill dialect (.pg-tag): a dot + the
+                         state word in its own status colour, which reads as
+                         "entered this state", not "sent to working". -->
+                    <div class="m-head">{m.from}{#if note}<span class="m-note-state" style:color={noteStateColor(note.state)}><span class="mns-dot" aria-hidden="true"></span>{stateLabel(note.state)}</span>{/if}</div>
                   {/if}
                   <div class="m-body" class:held-scroll={heldScroll}>
                     {#if parts.text}
@@ -2177,10 +2180,22 @@
     color: var(--accent); font-weight: 650; font-size: var(--fs-ui);
     letter-spacing: 0.1px; line-height: 1.2; margin: 0 0 2px; user-select: none;
   }
-  /* The status-note header's `name → state`: the arrow is quiet chrome, the
-     state wears its own status colour (set inline from noteStateColor). */
-  .m-head .m-arrow { color: var(--text3); font-weight: 400; margin: 0 5px; }
-  .m-head .m-note-state { font-weight: 650; }
+  /* The status-note header's state BADGE: the .pg-tag pill dialect (micro,
+     uppercase, bordered) plus a leading dot, coloured by noteStateColor via
+     inline `color` — border and dot follow through currentColor. A pill with
+     a dot reads as a state the agent ENTERED; the first cut's arrow read as
+     an addressee (owner, 2026-08-20). */
+  .m-head .m-note-state {
+    display: inline-flex; align-items: center; gap: 4px; vertical-align: 1px;
+    margin-left: 7px; padding: 0 5px; border-radius: 4px;
+    border: 1px solid color-mix(in srgb, currentColor 55%, transparent);
+    font-size: var(--fs-micro); font-weight: 650;
+    text-transform: uppercase; letter-spacing: 0.6px; line-height: 1.6;
+  }
+  .m-head .mns-dot {
+    width: 5px; height: 5px; border-radius: 50%; flex: none;
+    background: currentColor;
+  }
   /* The Telegram inline trailer: time (+ delivery ring on your own messages,
      to its right) FLOATS at the end of the content. On the last line when it
      fits, its own right-aligned line when it doesn't — never a separate
