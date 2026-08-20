@@ -548,6 +548,17 @@ ignores the keyboard is a menu you have to reach for the mouse to use), Escape
 dismisses it until the text changes, and hover shares ONE highlight with the
 keyboard cursor because two would read as two selections.
 
+**The composer shows what will be RUN.** While the draft parses as a command with
+a target — the same `slashCommand` + recipient branch `send()` takes, so the look
+can never promise a command that sends as prose — the capsule takes an accent tint
+and the text flips to the tool lane's monospace ("如果是指令的话在输入框里样式改变
+一下", owner 2026-08-20): `/tmp/foo` stays proportional, `/model` with an empty
+recipient stays proportional, `@builder-2 /compact` turns mono. The measuring
+mirror flips WITH the input (one CSS rule covers both) — `growComposer` re-lays-out
+the text to find the last line, and measuring mono text in a proportional font
+misplaces the send button's collision zone — and the height re-measures on the
+flip itself, since a font change rewraps.
+
 ## Vitals: reading the agent's own status line
 
 An agent CLI already publishes its live state at the bottom of its pane — the
