@@ -249,10 +249,15 @@
   .projects:not(.dense) .group-label {
     font-size: var(--fs-sub); letter-spacing: 0.06em; text-transform: uppercase;
     color: var(--text3);
+    padding: 2px 2px 2px 4px;
   }
+  /* NO padding (or type) on the unqualified rule: this element carries `.side-h`
+     in dense mode, and a scoped rule outranks that shared class (0,2,0 vs
+     0,1,0). Declaring padding here is what put the Terminal sidebar's
+     "PROJECTS" 6px left of Chat's — the third recurrence of the same drift
+     (owner, 2026-08-20). The page dialect above owns its own box instead. */
   .group-label {
     display: flex; align-items: center; gap: 6px;
-    padding: 2px 2px 2px 4px;
   }
   .group-toggle {
     display: flex; align-items: center; gap: 6px;
@@ -284,9 +289,17 @@
        name lines up with the header above it and with the session rows below. */
     background: none; border: none; border-radius: 9px; padding: 2px 6px; gap: 2px;
   }
-  .projects.dense .proj:hover { background: var(--surface); }
+  .projects.dense .proj:hover { background: var(--surface2); }
   .projects.dense .proj.live { border: none; }
-  .projects.dense .proj-main { padding: 4px 4px; }
+  /* 2 + 6 = the 8px vertical rhythm of `.side-row`; rows are one line here,
+     so the dot centers instead of hanging off the first text line. */
+  .projects.dense .proj-main { padding: 6px 4px; align-items: center; }
+  /* Chat's dot language, verbatim: 6px, --status-ok when live, --text3 when
+     down, no glow (the 7px accent-glow dot is the card dialect). The name
+     takes `.p-name`'s 550, not the card's 600. */
+  .projects.dense .dot { width: 6px; height: 6px; margin-top: 0; background: var(--text3); }
+  .projects.dense .dot.on { background: var(--status-ok); box-shadow: none; }
+  .projects.dense .name { font-weight: 550; }
   .projects.dense .age, .projects.dense .path { color: var(--text3); }
   /* At rest a row shows what it IS; what you can DO to it appears on hover
      (or focus, for keyboards) — the same restraint the Chat rows have. */

@@ -655,8 +655,14 @@
      Files top strips). */
   /* Sidebar mode (chips off) trades the page's generous padding for the
      sidebar's 8px gutter, so rows line up with the Chat sidebar's. */
-  .sessions.sidebar-mode .content { padding: 4px 8px 10px; gap: 4px; }
+  .sessions.sidebar-mode .content { padding: 8px 8px 10px; gap: 4px; }
   .sessions.sidebar-mode .bottom-bar { background: none; }
+  /* Rows speak Chat's dialect all the way down: 6px status dot (green when
+     on, --text3 otherwise, no glow) and the 550 name weight of `.p-name` —
+     the 7px accent-glow dot and 600 weight are the PAGE dialect. */
+  .sessions.sidebar-mode .dot { width: 6px; height: 6px; }
+  .sessions.sidebar-mode .dot.attached { background: var(--status-ok); box-shadow: none; }
+  .sessions.sidebar-mode .name { font-weight: 550; }
   /* Section headers in the sidebar speak `.side-h` — the class is on the
      element (see the markup), so mono/10.5px/uppercase/1.4px/--text3 come
      from app.css and cannot drift. Leaving TEAMS/SESSIONS in the page's
@@ -826,8 +832,10 @@
     text-transform: uppercase;
     letter-spacing: 0.6px;
   }
-  /* Tighten the very first header against the top of the list. */
-  .group-label:first-child { padding-top: 2px; }
+  /* Tighten the very first header against the top of the list — page mode
+     only: in the sidebar `.side-h` owns the box (same 0,2,0-vs-0,1,0 trap as
+     above). */
+  .sessions:not(.sidebar-mode) .group-label:first-child { padding-top: 2px; }
   .group-count {
     font-weight: 600;
     color: var(--accent);
