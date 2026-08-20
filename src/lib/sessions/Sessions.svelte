@@ -664,7 +664,11 @@
      drift the shared vocabulary exists to prevent (owner, 2026-08-19). Only
      the sidebar's tighter gutter stays local; page mode keeps the accent
      headers. */
-  .sessions.sidebar-mode .group-label { padding: 8px 6px 4px; }
+  /* No padding here: `.side-h` (app.css) owns the sidebar header's box as well
+     as its type, and a scoped rule outranks it (0,2,0 vs 0,1,0). Overriding just
+     the padding put this header 4px left of the rows it labels — and 4px left of
+     Chat's identical header (owner, 2026-08-20: "chat 页面和 terminal 页面这里的
+     projects 文字的位置不一样，样式好像不统一"). */
   .sessions.sidebar-mode .group-count {
     background: none; color: var(--text3); padding: 0; font-weight: 600;
   }

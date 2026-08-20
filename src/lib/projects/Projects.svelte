@@ -277,10 +277,12 @@
      app.css and cannot drift. Re-declaring it here is what put 1.05px
      tracking next to Chat's 1.4px (measured 2026-08-19). Only the sidebar's
      tighter gutter stays local. */
-  .projects.dense .group-label { padding: 8px 6px 4px; }
+  /* Padding comes from `.side-h` too — see the note in Sessions.svelte. */
   .projects.dense .group-count { background: none; color: var(--text3); padding: 0; }
   .projects.dense .proj {
-    background: none; border: none; border-radius: 9px; padding: 2px 4px; gap: 2px;
+    /* 6 + `.proj-main`'s 4 = the 10px inset the whole sidebar shares, so the
+       name lines up with the header above it and with the session rows below. */
+    background: none; border: none; border-radius: 9px; padding: 2px 6px; gap: 2px;
   }
   .projects.dense .proj:hover { background: var(--surface); }
   .projects.dense .proj.live { border: none; }

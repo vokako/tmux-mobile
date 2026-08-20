@@ -57,3 +57,6 @@ These tests `readFile` the component source and assert with regexes.
 | `sessions/PanePicker.source.test.ts` | Team-dot suppression in the picker |
 | `terminal/Terminal.source.test.ts` | Terminal chrome uses only Team-filtered queries |
 | `team/Team.source.test.ts` | roster chip wrap/overflow CSS contract |
+| `ui/tokens.source.test.ts` | one type scale: no raw px font-size outside the listed exceptions |
+| `ui/confirm.source.test.ts` | every destructive verb goes through the shared confirmation |
+| `ui/sidebar.source.test.ts` | one sidebar box: a section header takes its padding and type from `.side-h`, and `.side-h`/`.side-row` keep the same 10px inset |
