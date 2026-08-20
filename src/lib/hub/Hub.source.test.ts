@@ -101,3 +101,19 @@ test('a held ask caps only its EXPANDED body, never the bubble', () => {
   assert.match(source, /class:held-scroll=\{heldScroll\}/u);
   assert.match(source, /heldExpanded === key/u);
 });
+
+test('the drawer opens and closes through the reading anchor, everywhere', () => {
+  // The drawer regrids the columns and every message rewraps; without the anchor
+  // the reader's message drifts (owner, 2026-08-20). One open path and one close
+  // path, both wrapped — a bare `termOpen = true/false` outside selectProject is
+  // a trigger someone forgot to route.
+  const bare = [...source.matchAll(/termOpen = (?:true|false)/g)].length;
+  assert.equal(bare, 3, 'selectProject reset + the two wrapped mutations, nothing else');
+  assert.match(source, /withReadingAnchor\(\(\) => \{ termOpen = true; \}\)/u);
+  assert.match(source, /withReadingAnchor\(\(\) => \{ termOpen = false; \}\)/u);
+  // The reference skips every sticky variant: a pinned rect does not move with
+  // the flow, so anchoring to it restores nothing.
+  assert.match(source, /!el\.classList\.contains\('held'\)/u);
+  assert.match(source, /!el\.classList\.contains\('ask-top'\)/u);
+  assert.match(source, /!el\.classList\.contains\('ask-bottom'\)/u);
+});

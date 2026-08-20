@@ -833,6 +833,23 @@ the hook config dropping one, because an already-spawned agent keeps the config 
 was started with: fixing it at the source would only have helped agents spawned
 later.
 
+### Opening the drawer keeps the reader's place
+
+The terminal drawer regrids the columns: the feed narrows, every message rewraps to
+a new height, and the same `scrollTop` now points at different content — the
+message being read drifts away ("点击右侧 terminal 按钮后，当前消息变窄，导致当前消
+息位置漂移", owner 2026-08-20). The browser's own fix, scroll anchoring, is off on
+purpose (`overflow-anchor: none` is what ended the held-ask blink), so
+`withReadingAnchor` does it by hand: remember the topmost visible block and its
+offset from the feed's top edge, mutate, and after the DOM settles put the SAME
+element back at the SAME offset. Identity is the DOM node itself (Svelte's keyed
+each preserves it); sticky variants (`held`/`ask-top`/`ask-bottom`) are skipped as
+references because a pinned rect does not move with the flow, so anchoring to one
+restores nothing. At the tail it just stays at the tail — that is what "where I
+was" means there. Both drawer paths (open, and the one `closeDrawer` behind the
+toggle, the Esc key and the ✕) go through it; the source test counts the bare
+`termOpen =` writes so a new trigger cannot bypass the anchor unnoticed.
+
 ### The lane is three columns, and the middle one is the only scroller
 
 The tool name is fixed left, the time is fixed right, and the argument between them

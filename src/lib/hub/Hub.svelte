@@ -19,6 +19,7 @@
   import SideHandle from '../ui/SideHandle.svelte';
   import ChatImage from './ChatImage.svelte';
   import Icon from '../ui/Icon.svelte';
+  import { tick as settled } from 'svelte';
   import { t } from '../core/i18n.svelte.ts';
   import {
     projectList, projectUp, projectDown, projectDelete, projectCreate, projectRename, listSessionsWithPanes,
@@ -625,6 +626,45 @@
     }
   }
 
+  /** Run a layout-changing mutation without losing the reader's place.
+   *
+   * Opening or closing the terminal drawer regrids the columns: the feed
+   * narrows, every message rewraps to a new height, and the same scrollTop now
+   * points at different content — the reader's message drifts away (owner,
+   * 2026-08-20: "点击右侧 terminal 按钮后，当前消息变窄，导致当前消息位置漂移").
+   * `overflow-anchor` cannot help — it is off on purpose (the held-ask blink) —
+   * so this does the anchoring by hand: remember the topmost visible block and
+   * its offset from the feed's top edge, mutate, then put the SAME element back
+   * at the SAME offset. Svelte's keyed each preserves the DOM node, so identity
+   * is the element itself; a pinned (sticky) ask is skipped as the reference
+   * because its rect does not move with the flow. At the tail, just stay at the
+   * tail — that is what "where I was" means there. */
+  async function withReadingAnchor(mutate) {
+    if (!feedEl) { mutate(); return; }
+    if (following) {
+      mutate();
+      await settled();
+      scrollFeed(true);
+      return;
+    }
+    const feedTop = feedEl.getBoundingClientRect().top;
+    const ref = [...feedEl.children].find((el) =>
+      // Any sticky variant is a bad reference: its rect is its PINNED position,
+      // which does not move with the flow the way the content does.
+      !el.classList.contains('held') && !el.classList.contains('ask-top')
+      && !el.classList.contains('ask-bottom')
+      && el.getBoundingClientRect().bottom > feedTop + 1);
+    const delta = ref ? ref.getBoundingClientRect().top - feedTop : 0;
+    mutate();
+    await settled();
+    if (ref?.isConnected) {
+      const now = ref.getBoundingClientRect().top - feedEl.getBoundingClientRect().top;
+      feedEl.scrollTop += now - delta;
+    }
+    // The anchor machinery reads geometry; it must re-decide for the new widths.
+    syncAsk();
+  }
+
   function openDrawer(a = null) {
     const pick = a ?? agents.find((x) => x.managed) ?? agents[0];
     if (pick) {
@@ -641,7 +681,12 @@
       if (m) openTerminal(selected, termTarget, termCommand);
       return;
     }
-    termOpen = true;
+    withReadingAnchor(() => { termOpen = true; });
+  }
+
+  /** The one close path, so every trigger keeps the reader's place. */
+  function closeDrawer() {
+    withReadingAnchor(() => { termOpen = false; });
   }
 
   function pickWindow(a) {
@@ -840,7 +885,7 @@
   // Esc closes the drawer (capture so it wins over xterm).
   $effect(() => {
     if (!termOpen) return;
-    const onKey = (e) => { if (e.key === 'Escape') { termOpen = false; e.stopPropagation(); } };
+    const onKey = (e) => { if (e.key === 'Escape') { closeDrawer(); e.stopPropagation(); } };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   });
@@ -1151,7 +1196,7 @@
         <!-- THE terminal affordance: a button, not a permanent pane. Adding an
              agent belongs to the roster row, and chat detail belongs to
              Settings — a header is not a place to keep spare switches. -->
-        <button class="chip-btn term-toggle" class:on={termOpen} title={t('hubTerminal')} onclick={() => termOpen && !compact ? termOpen = false : openDrawer()}>
+        <button class="chip-btn term-toggle" class:on={termOpen} title={t('hubTerminal')} onclick={() => termOpen && !compact ? closeDrawer() : openDrawer()}>
           <Icon name="terminal" size={14} />{#if !compact}<span>{t('hubTerminal')}</span>{/if}
         </button>
       </div>
@@ -1641,7 +1686,7 @@
         <button class="icon-btn" title={t('hubOpenFull')} onclick={() => { const m = /^(.+):(\d+)\.(\d+)$/.exec(termTarget); if (m) openTerminal(selected, termTarget, termCommand); }}>
           <Icon name="maximize" size={14} />
         </button>
-        <button class="icon-btn" title="Esc" onclick={() => termOpen = false}>
+        <button class="icon-btn" title="Esc" onclick={closeDrawer}>
           <Icon name="x" size={14} />
         </button>
       </div>
