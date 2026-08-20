@@ -2102,7 +2102,12 @@
      head's text started at 30px. */
   .steps {
     display: flex; flex-direction: column; width: 100%;
-    background: var(--surface); border: 1px solid var(--border2); border-radius: 9px;
+    /* `--surface` is a 3% white wash, so anything that needs to COVER what slides
+       under it (the two pinned columns) cannot use it alone. `--lane-bg` is the
+       lane's painted colour as one value: the feed canvas underneath, the same wash
+       on top. Sticky columns paint this and are opaque. */
+    --lane-bg: linear-gradient(var(--surface), var(--surface)), var(--chat-canvas);
+    background: var(--lane-bg); border: 1px solid var(--border2); border-radius: 9px;
     overflow: hidden;
   }
   .s-head {
@@ -2178,7 +2183,7 @@
   .step .tname {
     min-width: 6.5em; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     position: sticky; left: var(--lane-indent); z-index: 1;
-    background: var(--surface); padding-right: 9px;
+    background: var(--lane-bg); padding-right: 9px;
   }
   .hub-root.compact .step .tname { min-width: 0; }
   .s-peek .tname { min-width: 0; margin-right: 5px; }
@@ -2194,7 +2199,7 @@
   .step .st-ts {
     flex: none; margin-left: auto; opacity: 0.55;
     position: sticky; right: var(--lane-pad-r); z-index: 1;
-    padding-left: 9px; background: var(--surface);
+    padding-left: 9px; background: var(--lane-bg);
   }
   .empty { color: var(--text3); font-size: var(--fs-ui); text-align: center; margin: auto; padding: 0 24px; line-height: 1.6; }
 

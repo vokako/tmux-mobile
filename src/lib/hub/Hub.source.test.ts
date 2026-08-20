@@ -46,12 +46,18 @@ test('a tool-lane row stays one line, and the lane pans instead of truncating', 
   const name = rule('.step .tname');
   assert.match(name, /position:\s*sticky/u);
   assert.match(name, /left:\s*var\(--lane-indent\)/u);
-  assert.match(name, /background:\s*var\(--surface\)/u);
+  // The background has to be OPAQUE or the argument shows straight through it:
+  // `--surface` is a 3% wash, so `--lane-bg` (canvas + the same wash) is the value
+  // both pinned columns must paint. This is the bug the owner saw as "文字都叠加在
+  // 一块了".
+  assert.match(name, /background:\s*var\(--lane-bg\)/u);
+  assert.doesNotMatch(name, /background:\s*var\(--surface\)/u);
 
   const ts = rule('.step .st-ts');
   assert.match(ts, /position:\s*sticky/u);
   assert.match(ts, /right:\s*var\(--lane-pad-r\)/u);
-  assert.match(ts, /background:\s*var\(--surface\)/u);
+  assert.match(ts, /background:\s*var\(--lane-bg\)/u);
+  assert.doesNotMatch(ts, /background:\s*var\(--surface\)/u);
 
   // A flex gap would be a transparent strip the panning argument shows through,
   // right next to a column whose job is to cover it — so the separation lives
@@ -63,6 +69,7 @@ test('a tool-lane row stays one line, and the lane pans instead of truncating', 
   // The offsets the two columns pin at ARE the lane's padding: one number, or the
   // columns and the rows disagree about where the row starts.
   const body = rule('.s-body');
+  assert.match(rule('.steps'), /--lane-bg:\s*linear-gradient\(var\(--surface\), var\(--surface\)\), var\(--chat-canvas\)/u);
   assert.match(body, /--lane-indent:\s*30px/u);
   assert.match(body, /--lane-pad-r:\s*10px/u);
   assert.match(body, /padding:\s*5px var\(--lane-pad-r\) 6px var\(--lane-indent\)/u);
