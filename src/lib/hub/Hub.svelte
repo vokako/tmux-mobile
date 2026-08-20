@@ -2125,8 +2125,13 @@
   .s-body {
     display: flex; flex-direction: column; gap: 2px;
     /* 30px = the head's padding (10) + chevron (12) + gap (7): the rows line up
-       under the head's TEXT, which is the column the eye follows. */
-    padding: 5px 10px 6px 30px; border-top: 1px solid var(--border2);
+       under the head's TEXT, which is the column the eye follows. Named, because
+       the sticky tool-name column pins itself at exactly this offset — the two
+       numbers have to be the same one or the column jumps when you start
+       panning. */
+    --lane-indent: 30px; --lane-pad-r: 10px;
+    padding: 5px var(--lane-pad-r) 6px var(--lane-indent);
+    border-top: 1px solid var(--border2);
     /* One em == one step row's font size, so the cap below is expressed in ROWS
        and follows the type scale instead of a magic pixel height. */
     font-size: var(--fs-sub);
@@ -2151,7 +2156,11 @@
   }
   .s-all:hover { color: var(--accent); }
   .step {
-    display: flex; align-items: baseline; gap: 8px; line-height: 1.5;
+    /* NO gap: the separation between the columns lives INSIDE the two pinned ones,
+       as padding they paint. A flex gap would be an 8px transparent strip that the
+       panning argument shows through, right beside a column that is supposed to be
+       covering it. */
+    display: flex; align-items: baseline; gap: 0; line-height: 1.5;
     font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text3);
     /* As wide as its content so the lane has something to pan, but never
        narrower than the lane — otherwise a short row's time would sit in the
@@ -2159,9 +2168,18 @@
        ragged. */
     width: max-content; min-width: 100%;
   }
-  /* The tool name: the part the eye scans down a column. */
+  /* The tool name: the part the eye scans down a column — so it IS a column, held
+     at the left edge while the argument pans under it (owner, 2026-08-20: "工具明固
+     定保持在最左侧 … 相当于三列，中间参数是可以左右滑动查看的"). Pinned at the
+     lane's own indent rather than at 0, so it does not jump 30px sideways the
+     moment you start scrolling; it needs the lane's background and a little
+     padding, or the argument would slide out from under it. */
   .tname { flex: none; color: var(--accent); font-weight: 650; }
-  .step .tname { min-width: 6.5em; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .step .tname {
+    min-width: 6.5em; max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    position: sticky; left: var(--lane-indent); z-index: 1;
+    background: var(--surface); padding-right: 9px;
+  }
   .hub-root.compact .step .tname { min-width: 0; }
   .s-peek .tname { min-width: 0; margin-right: 5px; }
   /* No ellipsis and no shrinking: the row grows, the lane scrolls. Still
@@ -2170,12 +2188,13 @@
      three-line row — which would break both the one-row-per-call reading and the
      10-row cap, whose height is calculated in single lines. */
   .step .st-text { flex: none; white-space: nowrap; color: var(--text2); }
-  /* Pinned to the right edge of the scrollport, so panning a long argument never
-     scrolls the time out of view. It needs the lane's own background, or the
-     argument would slide under it. */
+  /* The third column: pinned at the lane's own right padding, for the same reason
+     the name is pinned at its left indent — panning a long argument must never
+     scroll the time out of view. */
   .step .st-ts {
     flex: none; margin-left: auto; opacity: 0.55;
-    position: sticky; right: 0; padding-left: 8px; background: var(--surface);
+    position: sticky; right: var(--lane-pad-r); z-index: 1;
+    padding-left: 9px; background: var(--surface);
   }
   .empty { color: var(--text3); font-size: var(--fs-ui); text-align: center; margin: auto; padding: 0 24px; line-height: 1.6; }
 

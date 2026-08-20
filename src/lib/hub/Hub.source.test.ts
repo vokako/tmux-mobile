@@ -38,12 +38,34 @@ test('a tool-lane row stays one line, and the lane pans instead of truncating', 
   // One scroller for the whole block, so every row pans together.
   assert.match(rule('.s-body'), /overflow-x:\s*auto/u);
 
-  // The time stays pinned while the argument slides under it, and it needs the
-  // lane's own background or the text would show through.
+  // THREE columns: the tool name pinned left, the time pinned right, and only the
+  // argument between them moves. Both pinned columns stick at the lane's OWN
+  // padding — not at 0 — or they jump sideways the moment you start panning, and
+  // both need the lane's background or the argument would slide out from under
+  // them (owner, 2026-08-20: "工具明固定保持在最左侧 … 相当于三列").
+  const name = rule('.step .tname');
+  assert.match(name, /position:\s*sticky/u);
+  assert.match(name, /left:\s*var\(--lane-indent\)/u);
+  assert.match(name, /background:\s*var\(--surface\)/u);
+
   const ts = rule('.step .st-ts');
   assert.match(ts, /position:\s*sticky/u);
-  assert.match(ts, /right:\s*0/u);
+  assert.match(ts, /right:\s*var\(--lane-pad-r\)/u);
   assert.match(ts, /background:\s*var\(--surface\)/u);
+
+  // A flex gap would be a transparent strip the panning argument shows through,
+  // right next to a column whose job is to cover it — so the separation lives
+  // inside the pinned columns, as padding they paint.
+  assert.match(rule('.step'), /gap:\s*0/u);
+  assert.match(name, /padding-right:/u);
+  assert.match(ts, /padding-left:/u);
+
+  // The offsets the two columns pin at ARE the lane's padding: one number, or the
+  // columns and the rows disagree about where the row starts.
+  const body = rule('.s-body');
+  assert.match(body, /--lane-indent:\s*30px/u);
+  assert.match(body, /--lane-pad-r:\s*10px/u);
+  assert.match(body, /padding:\s*5px var\(--lane-pad-r\) 6px var\(--lane-indent\)/u);
 });
 
 test('the row cap is still expressed in rows, not pixels', () => {
