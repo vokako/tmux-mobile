@@ -1,18 +1,25 @@
 # Unresolved Issues
 
-## `slow_rpc_does_not_block_fast_rpc` is load-flaky
-- **Priority**: Low
+## `slow_rpc_does_not_block_fast_rpc` can prove concurrency but not its absence
+- **Priority**: Low — RESOLVED as far as the flake goes (2026-08-20)
 - **Area**: Rust tests (`src-tauri/tests/concurrent_rpc.rs`)
-- **Details**: The test asserts that a fast RPC's response arrives BEFORE a slow
-  one's by comparing arrival order, which makes it a timing assertion on a
-  shared machine. On the dev host with the watcher rebuilding, vite running and
-  two agents working it fails and passes at roughly 2:1 (measured 2026-08-19,
-  four consecutive runs: FAIL, FAIL, ok / FAIL, ok) with no code change in
-  between, and nothing in the concurrency path was touched. It costs a reader
-  real time deciding whether their change broke it. Fix: assert on measured
-  DURATIONS with a generous margin (the fast call must finish well before the
-  slow one's sleep elapses) rather than on delivery order, or gate the ordering
-  assertion behind a load check.
+- **Details**: The test used to assert that a ping's response ARRIVES before a
+  4 MB `fs_download`'s, and failed about two runs in three on a loaded host with
+  nothing in the concurrency path touched. The reason turned out not to be load
+  but the measurement itself. Instrumented arrivals (2026-08-20):
+  download 507.6 ms, first ping 508.6 ms, the other three at 557 ms. The download
+  response is ~5.3 MB of base64 and the client reads frames sequentially, so the
+  only thing observable is the order the server WROTE them — and the 1 ms gap says
+  the pings were already in the socket buffer behind that one huge frame. A
+  concurrent server that finished the cached 4 MB read before it parsed the pings
+  looks identical to a serial one from the client's side.
+- **Now**: the test PROVES concurrency when a ping's frame precedes the download's,
+  and prints `inconclusive` with the arrival table otherwise. A one-directional
+  prover that never cries wolf beats a coin-flip assertion people learn to ignore.
+- **Residual gap**: a regression to the serial loop is caught only on a machine
+  quiet enough for the pings to win. Closing it properly needs an RPC whose SERVER
+  work is slow while its response stays small — every current one couples the two,
+  because the slow part *is* the payload.
 
 ## A registry def change does not reach the agents already spawned from it
 - **Priority**: Medium

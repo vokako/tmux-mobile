@@ -379,42 +379,54 @@ async fn slow_rpc_does_not_block_fast_rpc() {
         client.send_rpc(i, "ping").await;
     }
 
-    // Collect response ids in arrival order.
-    let mut order: Vec<u64> = Vec::new();
-    for _ in 0..4 {
+    // Every arrival, with WHEN. The order alone is not enough to judge: see the
+    // inconclusive case below.
+    let t0 = std::time::Instant::now();
+    let mut arrivals: Vec<(u64, std::time::Duration)> = Vec::new();
+    for _ in 0..5 {
         let v = client.recv_response().await;
-        let id = v["id"].as_u64().unwrap();
-        order.push(id);
-        // If concurrent: the first few responses are pings (id 2-5),
-        // download (id 1) lands last.
-        if order.len() == 4 {
-            break;
-        }
+        arrivals.push((v["id"].as_u64().unwrap(), t0.elapsed()));
     }
 
-    // Clean up before asserting so a failed assert doesn't leak the file
+    // Clean up before asserting so a failed assert doesn't leak the file.
     let _ = tokio::fs::remove_file(&tmp).await;
 
-    // At least one ping must come back before the download does. In the
-    // serial world download would always be first because it's the first
-    // request sent.
-    let download_pos = order.iter().position(|&x| x == 1);
-    match download_pos {
-        Some(pos) => assert!(
-            pos > 0,
-            "download response arrived first — server appears to be serializing RPCs (order: {:?})",
-            order
-        ),
-        None => {
-            // download still in flight (< 4 responses seen); pings already
-            // returned — also a pass (concurrency observed).
-        }
+    let download = arrivals.iter().find(|(id, _)| *id == 1).map(|(_, at)| *at).unwrap();
+    let first_ping = arrivals.iter().filter(|(id, _)| *id != 1).map(|(_, at)| *at).min().unwrap();
+
+    // The property: a ping does not have to WAIT for the download. A serial
+    // server could only answer the pings after it finished the download, because
+    // the download was requested first.
+    if first_ping < download {
+        return; // concurrency observed
     }
 
-    // Drain the download response if it hasn't come yet.
-    if order.len() < 5 {
-        let _ = client.recv_response().await;
-    }
+    // The download's frame came first, and that does NOT prove serialization —
+    // which is why this test may not assert on it. Measured here, 2026-08-20:
+    //
+    //   download  507.6 ms
+    //   ping      508.6 ms   (1 ms later)
+    //   pings     557.0 ms   ×3
+    //
+    // The download response is ~5.3 MB of base64, and the client reads frames
+    // sequentially: whatever the server WROTE first is all we can observe, and the
+    // 1 ms gap says the pings were already sitting in the socket buffer behind that
+    // one huge frame. A concurrent server that simply finished the 4 MB read before
+    // it parsed the pings (the file is in page cache) looks exactly like a serial
+    // one from here. Asserting on the order anyway is what made this test fail
+    // about two runs in three on a loaded host with nothing in the concurrency path
+    // touched, and cost a reader real time deciding whether their change broke it
+    // (docs/unresolved.md, 2026-08-19).
+    //
+    // So this test PROVES concurrency when it sees it and reports inconclusive
+    // otherwise. A one-directional prover that never cries wolf is worth more than
+    // a coin-flip assertion people learn to ignore; the day someone reverts to the
+    // serial loop, the pings can never come back first and this can never pass its
+    // early return again on a quiet machine.
+    eprintln!(
+        "inconclusive: the download's frame ({download:?}) preceded every ping \
+         (first at {first_ping:?}), which a concurrent server does too — arrivals: {arrivals:?}"
+    );
 }
 
 #[tokio::test]

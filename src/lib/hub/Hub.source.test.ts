@@ -68,11 +68,16 @@ test('a tool-lane row stays one line, and the lane pans instead of truncating', 
 
   // The offsets the two columns pin at ARE the lane's padding: one number, or the
   // columns and the rows disagree about where the row starts.
-  const body = rule('.s-body');
-  assert.match(rule('.steps'), /--lane-bg:\s*linear-gradient\(var\(--surface\), var\(--surface\)\), var\(--chat-canvas\)/u);
-  assert.match(body, /--lane-indent:\s*30px/u);
-  assert.match(body, /--lane-pad-r:\s*10px/u);
-  assert.match(body, /padding:\s*5px var\(--lane-pad-r\) 6px var\(--lane-indent\)/u);
+  // The lane's colour and its two offsets live on `.steps`, the element every
+  // part of the lane inherits from: the body, both pinned columns and the "show
+  // all" button all measure from the same numbers. A second copy anywhere is how
+  // the column and the rows drift apart.
+  const steps = rule('.steps');
+  assert.match(steps, /--lane-bg:\s*linear-gradient\(var\(--surface\), var\(--surface\)\), var\(--chat-canvas\)/u);
+  assert.match(steps, /--lane-indent:\s*30px/u);
+  assert.match(steps, /--lane-pad-r:\s*10px/u);
+  assert.match(rule('.s-body'), /padding:\s*5px var\(--lane-pad-r\) 6px var\(--lane-indent\)/u);
+  assert.match(rule('.s-all'), /padding:\s*2px var\(--lane-pad-r\) 5px var\(--lane-indent\)/u);
 });
 
 test('the row cap is still expressed in rows, not pixels', () => {

@@ -833,6 +833,39 @@ the hook config dropping one, because an already-spawned agent keeps the config 
 was started with: fixing it at the source would only have helped agents spawned
 later.
 
+### The lane is three columns
+
+The tool name is pinned left, the time is pinned right, and the argument between
+them is the only thing that moves ("时间的信息应该固定保持在最右侧，工具明固定保持在最
+左侧，相当于三列，中间参数是可以左右滑动查看的", owner 2026-08-20). One scroller for
+the whole block, so the rows pan together and the name stays a column the eye can
+follow down. Four things this needs, three of which were bugs on the way here and are
+now pinned by `hub/Hub.source.test.ts`:
+
+- **The row is `width: max-content; min-width: 100%`.** Max-content gives the lane
+  something to pan; never narrower than the lane, or a short row's time would sit in
+  the middle of the row and the time column would go ragged.
+- **The pinned columns stick at the lane's OWN offsets** (`--lane-indent`,
+  `--lane-pad-r`), not at 0. A sticky offset is measured from the scrollport's
+  padding box, so `left: 0` pins to the border edge — the column would jump 30px
+  sideways the moment you start panning. Pinned at its resting offset it never moves
+  at all. Both offsets live on `.steps`, which the body, the columns and the "show
+  all" button all inherit from: one number, or they drift apart.
+- **They paint `--lane-bg`, not `--surface`.** `--surface` is a 3% wash
+  (`rgba(255,255,255,0.03)`), so a column painting it covers 3% of what slides
+  under it — the argument read straight through the name and the time ("文字都叠加在一
+  块了"). `--lane-bg` is the lane's painted colour as one value: the chat canvas
+  underneath, the same wash on top. Anything that has to COVER something cannot use
+  `--surface`.
+- **The row has no flex `gap`.** The separation lives inside the two pinned columns
+  as padding they paint; a gap would be a transparent strip the argument shows
+  through, immediately beside a column whose whole job is to cover it.
+
+`.st-text` stays `nowrap` and must never become `pre`: a tool detail routinely
+contains real newlines, and `pre` would turn one call into a three-line row, breaking
+both "one row per call" and the 10-row cap, whose height is calculated in single
+lines.
+
 Four event kinds: `tool`, `notif`, `prompt` (a prompt the agent accepted,
 `via: app | local`) and `warn` (a line that was never echoed back). A `tmm status`
 note is NOT among them — see below.

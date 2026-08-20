@@ -2107,6 +2107,11 @@
        lane's painted colour as one value: the feed canvas underneath, the same wash
        on top. Sticky columns paint this and are opaque. */
     --lane-bg: linear-gradient(var(--surface), var(--surface)), var(--chat-canvas);
+    /* 30px = the head's padding (10) + chevron (12) + gap (7): every row, the
+       pinned name column and the "show all" button line up under the head's TEXT,
+       which is the column the eye follows. ONE number, on the element they all
+       inherit from — a second copy is how the column and the rows drift apart. */
+    --lane-indent: 30px; --lane-pad-r: 10px;
     background: var(--lane-bg); border: 1px solid var(--border2); border-radius: 9px;
     overflow: hidden;
   }
@@ -2129,12 +2134,6 @@
   .s-peek { min-width: 0; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .s-body {
     display: flex; flex-direction: column; gap: 2px;
-    /* 30px = the head's padding (10) + chevron (12) + gap (7): the rows line up
-       under the head's TEXT, which is the column the eye follows. Named, because
-       the sticky tool-name column pins itself at exactly this offset — the two
-       numbers have to be the same one or the column jumps when you start
-       panning. */
-    --lane-indent: 30px; --lane-pad-r: 10px;
     padding: 5px var(--lane-pad-r) 6px var(--lane-indent);
     border-top: 1px solid var(--border2);
     /* One em == one step row's font size, so the cap below is expressed in ROWS
@@ -2157,7 +2156,8 @@
   }
   .s-all {
     align-self: flex-start; background: none; border: none; color: var(--text3);
-    font-size: var(--fs-meta); padding: 2px 10px 5px 30px; cursor: pointer; font-family: ui-monospace, Menlo, monospace;
+    font-size: var(--fs-meta); cursor: pointer; font-family: ui-monospace, Menlo, monospace;
+    padding: 2px var(--lane-pad-r) 5px var(--lane-indent);
   }
   .s-all:hover { color: var(--accent); }
   .step {
