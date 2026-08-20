@@ -2357,7 +2357,10 @@
   .s-head:hover { color: var(--text2); }
   .chev { display: inline-flex; flex: none; transition: transform var(--t-move); }
   .chev.open { transform: rotate(90deg); }
-  .s-live { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--status-ok); animation: s-pulse 1.4s ease-in-out infinite; }
+  /* A run in motion pulses in the MOTION colour (the accent — see the status
+     colour language in hub.ts): green would say "ended well" about something
+     still going. */
+  .s-live { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: s-pulse 1.4s ease-in-out infinite; }
   @keyframes s-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
   @media (prefers-reduced-motion: reduce) { .s-live { animation: none; } }
   .s-who { flex: none; font-weight: 600; color: var(--text2); }

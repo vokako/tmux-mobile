@@ -660,19 +660,23 @@ test('statusNote reads an agent status message, and only that', () => {
   assert.equal(systemLine('[tmm] done'), 'done');
 });
 
-test('noteStateColor speaks in status tokens, one per family', () => {
-  // The bubble header's `name → state` tag ("为不同状态定义不同的色彩",
-  // owner 2026-08-20). working/running are progress; waiting/blocked ask for a
-  // person (attention, NOT danger — same reading as the .prog row); failure is
-  // danger; done is the accent (an outcome, not a state on the ramp).
-  assert.equal(noteStateColor('working'), 'var(--status-ok)');
-  assert.equal(noteStateColor('running'), 'var(--status-ok)');
+test('noteStateColor speaks the ONE progressive colour language', () => {
+  // Owner, 2026-08-20: colours must match intuition, as a progression —
+  // accent means IN MOTION (a spinner is never green), green means it ENDED
+  // WELL, amber means paused on a person, red is the only distress signal.
+  assert.equal(noteStateColor('working'), 'var(--accent)');
+  assert.equal(noteStateColor('running'), 'var(--accent)');
+  assert.equal(noteStateColor('done'), 'var(--status-ok)');
   assert.equal(noteStateColor('waiting'), 'var(--status-warn)');
   assert.equal(noteStateColor('blocked'), 'var(--status-warn)');
   assert.equal(noteStateColor('failed'), 'var(--status-danger)');
-  assert.equal(noteStateColor('done'), 'var(--accent)');
   // A word we do not know renders quiet, never wrong.
   assert.equal(noteStateColor('pondering'), 'var(--text3)');
+  // The roster dots MUST agree with the badges — two dialects of the same
+  // vocabulary is how colours stop meaning anything.
+  for (const s of ['working', 'running', 'waiting', 'blocked', 'failed']) {
+    assert.equal(stateDotColor(s), noteStateColor(s), s);
+  }
 });
 
 test('sameDay is a LOCAL calendar-day rule', () => {

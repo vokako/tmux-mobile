@@ -967,10 +967,18 @@ for `waiting`/`blocked`, which was the same mistake in a new costume — a secon
 visual species for the same thing is what made these read as telemetry to begin
 with. The one adornment lives in the HEADER, where a name already goes: the bubble
 head reads the name plus a state BADGE — a dot + the state word in the app's
-state-pill dialect, coloured by `noteStateColor()` (pure + tested —
-working/running `--status-ok`, waiting/blocked `--status-warn` because they ask
-for a person rather than report a failure, failed `--status-danger`, done the
-accent, anything unknown `--text3`). The badge answers the owner's two asks in
+state-pill dialect, coloured by `noteStateColor()` (pure + tested) in the ONE
+progressive status language the owner asked for ("不同的颜色应该是渐进式的",
+2026-08-20), defined once above `stateDotColor` in hub.ts and spoken by both:
+**accent = in motion** (running/working — a spinner is never green; this is
+also the colour the progress row's lane bar and the tool lane's pulse use),
+**green = ended well** (done), **amber = paused on a person**
+(waiting/blocked), **red = failed** (the only distress signal), **grey = at
+rest / a word we do not know**. `working` used to be green, which made every
+busy agent look already finished; a test now pins the badge and the roster
+dots to the same table so the two readers cannot fork. The live/off dots in
+the sidebars are a DIFFERENT domain on purpose — green there is the power
+convention ("on"), not a turn state. The badge answers the owner's two asks in
 order: point at the state and colour it ("在消息框的 agent name 后面加一个箭头
 指向具体的状态 … 为不同状态定义不同的色彩", 2026-08-20), then say it
 UNAMBIGUOUSLY — the first cut was a literal `name → state` arrow, which read as

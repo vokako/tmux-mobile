@@ -1,17 +1,36 @@
 // Pure display logic for the Hub view — testable with node --test, no Svelte.
 import type { HubAgent, HubActivityEvent } from '../core/ws.ts';
 
-/** Derived-state → dot color (theme token values are resolved in CSS; these
- * are the fallback literals used inline for dynamic dots). */
+/**
+ * THE status colour language — one progression, read at a glance (owner,
+ * 2026-08-20: "不同的颜色应该是渐进式的 … 设计好颜色所表达的含义"):
+ *
+ *   accent (cyan)  = MOTION      — a turn is open, work is happening now
+ *                                  (running/working; the same colour the
+ *                                  progress row's lane bar and the tool
+ *                                  lane's pulse already use)
+ *   ok (green)     = SUCCESS     — finished well (done)
+ *   warn (amber)   = NEEDS YOU   — paused on a person (waiting/blocked)
+ *   danger (red)   = FAILED      — the only distress signal
+ *   sleep (grey)   = AT REST     — nothing happening, nothing wrong (idle)
+ *
+ * The progression start → running → done reads accent → green, which matches
+ * the CI intuition (a spinner is never green; green means it ENDED well).
+ * `working` used to be green, which made every busy agent look already
+ * finished. Both readers below speak this one language; do not fork it.
+ *
+ * Derived-state → dot color (theme token values are resolved in CSS; these
+ * are the fallback literals used inline for dynamic dots).
+ */
 export function stateDotColor(state: string): string {
   switch (state) {
     case 'running':
-    case 'working': return 'var(--status-ok)';   // 'working' = pre-2026-08 name
-    case 'waiting': return 'var(--status-warn)';
-    case 'blocked':
+    case 'working': return 'var(--accent)';       // 'working' = pre-2026-08 name
+    case 'waiting':
+    case 'blocked': return 'var(--status-warn)';  // paused on a person
     case 'stuck':
     case 'failed': return 'var(--status-danger)';
-    case 'shell': return 'var(--text3)';
+    case 'shell': return 'var(--text3)';          // outside the vocabulary
     default: return 'var(--status-sleep)'; // idle
   }
 }
@@ -508,23 +527,22 @@ export function statusNote(body: string | null | undefined): { state: string; te
 }
 
 /**
- * The colour of a status-note's declared state, worn by the `name → state`
- * tag in the bubble header ("可以在消息框的 agent name 后面加一个箭头 指向具体的
- * 状态 … 为不同状态定义不同的色彩", owner 2026-08-20). Theme tokens only, like
- * every other status colour in the app. `waiting`/`blocked` take the attention
- * colour rather than danger — they ask for a person, they are not failures —
- * matching the `.prog` row's treatment of the same words. `done` is the accent:
- * an outcome, not a state on the ok/warn/danger ramp.
+ * The colour of a status-note's declared state, worn by the badge in the
+ * bubble header. SAME language as `stateDotColor` (see the table there):
+ * accent = in motion, green = done well, amber = needs a person, red =
+ * failed, grey = a word we do not know (quiet, never wrong). The only case
+ * this reader adds is `done`, which is a note-only state — a roster dot never
+ * shows it because a finished agent goes back to idle.
  */
 export function noteStateColor(state: string): string {
   switch (state) {
     case 'working':
-    case 'running': return 'var(--status-ok)';
+    case 'running': return 'var(--accent)';
     case 'waiting':
     case 'blocked': return 'var(--status-warn)';
     case 'failed':
     case 'stuck': return 'var(--status-danger)';
-    case 'done': return 'var(--accent)';
+    case 'done': return 'var(--status-ok)';
     default: return 'var(--text3)';
   }
 }
