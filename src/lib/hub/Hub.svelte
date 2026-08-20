@@ -1333,6 +1333,14 @@
                    is smaller than its message (see naturalH). -->
               {@const folded = isAsk && askKey === key && askHeld && heldExpanded !== key
                 && heldBody(parts.text) !== parts.text}
+              <!-- Unfolded while STILL HELD: the whole message is now inside a
+                   bubble that is pinned to an edge, so a message taller than the
+                   screen would have an unreachable bottom half — sticky ignores
+                   the feed's scrolling ("我展开看的时候，应该可以上下滑动，而不是死
+                   死钉住", owner 2026-08-20). The BODY becomes its own scroller
+                   for exactly this state; back in the normal flow the cap is off
+                   and the message reads full-length again. -->
+              {@const heldScroll = isAsk && askKey === key && askHeld && heldExpanded === key}
               <div class="msg" class:me={m.from === 'human'}
                 class:ask-top={isAsk && askKey === key && askEdge === 'top'}
                 class:ask-bottom={isAsk && askKey === key && askEdge === 'bottom'}
@@ -1355,7 +1363,7 @@
                   oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), m.from, msgItems(m)); }}
                   onclick={() => { msgOpen = msgOpen === key ? '' : key; }}>
                   {#if m.from !== 'human'}<div class="m-head">{m.from}</div>{/if}
-                  <div class="m-body">
+                  <div class="m-body" class:held-scroll={heldScroll}>
                     {#if parts.text}
                       {#if rawOpen === key}
                         <pre class="raw">{m.body}</pre>
@@ -1371,6 +1379,10 @@
                              ask; the bubble's own click still opens copy/raw. -->
                         <button class="m-unfold" onclick={(e) => { e.stopPropagation(); heldExpanded = key; }}>
                           <Icon name="chevron-down" size={11} />{t('hubUnfold')}
+                        </button>
+                      {:else if heldScroll}
+                        <button class="m-unfold" onclick={(e) => { e.stopPropagation(); heldExpanded = ''; }}>
+                          <Icon name="chevron-up" size={11} />{t('hubRefold')}
                         </button>
                       {/if}
                     {/if}
@@ -1959,6 +1971,21 @@
      thing that read as broken in the two earlier attempts. */
   .msg.held { -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
   .msg.held .bubble { box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28); }
+  /* EXPANDED while held: the one state where the body scrolls itself. A pinned
+     bubble ignores the feed's scrolling, so a message taller than the screen had
+     an unreachable bottom half. The cap is on the BODY — border, radius and meta
+     trailer stay whole — and only in this state: folded bubbles keep the
+     no-clipping rule, and back in the normal flow the message reads full-length.
+     The blink hazard that banned max-height on `.held` was flow-height feedback
+     through scroll anchoring; the feed has `overflow-anchor: none` now, and this
+     cap is entered only by an explicit click, not by the boundary test. */
+  .msg.held .m-body.held-scroll {
+    max-height: min(62vh, 560px);
+    overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
+    /* Room for the scrollbar: the trailer floats at the text's right edge, and a
+       bar drawn over it reads as clutter. */
+    padding-right: 6px;
+  }
 
   /* Back to the tail. */
   .to-bottom {

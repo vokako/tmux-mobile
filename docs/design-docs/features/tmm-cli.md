@@ -1301,6 +1301,21 @@ anchor, `elideMiddle` folds its body before it is rendered, and a `Show the whol
 message` control inside the bubble unfolds it (one at a time, reset when the anchor
 moves on — an unfolded ask is a moment of attention, not a setting).
 
+**Except one state: unfolded while still held.** The whole message is now inside a
+bubble pinned to an edge, and a sticky element ignores the feed's scrolling — so a
+message taller than the screen had an unreachable bottom half ("我展开看的时候，应该
+可以上下滑动，而不是死死钉住，下半部分消息内容我怎么都没办法看到了", owner
+2026-08-20). In exactly this state the BODY becomes its own scroller
+(`.m-body.held-scroll`, `max-height: min(62vh, 560px)`, `overscroll-behavior:
+contain` so its wheel does not fling the feed), with a `Fold it away again` control
+as the way back down. The bubble's box still is not clipped — border, radius and
+trailer stay whole — and the cap is entered only by the user's explicit click,
+never by the boundary test, which together with the feed's `overflow-anchor: none`
+is what keeps the old max-height blink loop from coming back. Back in the normal
+flow the cap is off and the message reads full-length. `Hub.source.test.ts` pins
+all of it: no `max-height` on `.msg.held` or its bubble, the cap only on
+`.held-scroll`, and the class hanging off `heldExpanded === key`.
+
 The fold keeps BOTH ends. A long ask puts its subject at the top and the actual
 request at the bottom, so a line clamp discards the half that says what to do.
 `elideMiddle` (`hub.ts`, pure and unit-tested) handles the two shapes separately —
