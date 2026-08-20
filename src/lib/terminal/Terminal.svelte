@@ -153,14 +153,14 @@
   });
 
   const darkTheme = {
-    background: '#0a0a0f', foreground: '#c9d1d9', cursor: '#00d4ff',
+    background: '#0b0b0d', foreground: '#c9d1d9', cursor: '#00d4ff',
     selectionBackground: 'rgba(0, 212, 255, 0.18)',
     // Overlay scrollbar slider — kept very translucent so it barely occludes
     // terminal content at rest, lifting slightly on hover/drag.
     scrollbarSliderBackground: 'rgba(201, 209, 217, 0.12)',
     scrollbarSliderHoverBackground: 'rgba(201, 209, 217, 0.28)',
     scrollbarSliderActiveBackground: 'rgba(201, 209, 217, 0.40)',
-    black: '#0a0a0f', brightBlack: '#484848',
+    black: '#0b0b0d', brightBlack: '#484848',
     red: '#ff5050', brightRed: '#ff6b6b',
     green: '#4ade80', brightGreen: '#6ee7a0',
     yellow: '#fbbf24', brightYellow: '#fcd34d',
@@ -170,8 +170,8 @@
     white: '#c9d1d9', brightWhite: '#f1f5f9',
   };
   const lightTheme = {
-    background: '#f5f5f7', foreground: '#1a1a2e', cursor: '#0088cc',
-    selectionBackground: 'rgba(0, 136, 204, 0.18)',
+    background: '#f5f5f7', foreground: '#1a1a2e', cursor: '#007aff',
+    selectionBackground: 'rgba(0, 122, 255, 0.18)',
     scrollbarSliderBackground: 'rgba(26, 26, 46, 0.12)',
     scrollbarSliderHoverBackground: 'rgba(26, 26, 46, 0.26)',
     scrollbarSliderActiveBackground: 'rgba(26, 26, 46, 0.38)',
@@ -179,7 +179,7 @@
     red: '#dc2626', brightRed: '#ef4444',
     green: '#16a34a', brightGreen: '#22c55e',
     yellow: '#ca8a04', brightYellow: '#eab308',
-    blue: '#0088cc', brightBlue: '#2563eb',
+    blue: '#007aff', brightBlue: '#2563eb',
     magenta: '#9333ea', brightMagenta: '#a855f7',
     cyan: '#0891b2', brightCyan: '#06b6d4',
     white: '#1a1a2e', brightWhite: '#0f0f1a',
@@ -2404,7 +2404,7 @@
     min-height: 32px;
   }
   .sel-toolbar-btn:active {
-    background: rgba(0, 212, 255, 0.15);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
   }
 
   .scroll-btn {
