@@ -38,6 +38,22 @@ export function uiZoom(): number {
   return parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-zoom')) || 1;
 }
 
+/**
+ * A POINT as an anchor, for a menu opened by a right-click or a long press.
+ *
+ * The pointer is a zero-size rect, so `menuPlacement` treats it exactly like a
+ * trigger: the menu's right edge lands on the pointer and it flips above when
+ * there is no room below. That is one rule for both kinds of menu instead of two
+ * placement functions that drift apart.
+ *
+ * `x`/`y` are client coordinates (a pointer event gives visual pixels, the same
+ * as a client rect), so they take the same zoom correction.
+ */
+export function pointAnchor(x: number, y: number): AnchorRect {
+  const z = uiZoom();
+  return { left: x / z, right: x / z, top: y / z, bottom: y / z };
+}
+
 /** The trigger's rect in the fixed layer's coordinate space. */
 export function anchorOf(el: Element): AnchorRect {
   const r = el.getBoundingClientRect();

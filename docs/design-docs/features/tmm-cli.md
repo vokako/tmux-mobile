@@ -676,6 +676,36 @@ the conversation only when something is in there (an empty archive is not a plac
 visit), and each row shows the body as pre-wrapped, line-clamped evidence rather
 than rendered markdown — what you are about to forget should be what you see.
 
+## Right-click, and the phone's long press
+
+"还有很多地方增加右键点击操作，和手机长按" (owner, 2026-08-20). Both are the same
+gesture — "tell me what I can do to THIS" — so they share one mechanism rather than
+growing a menu per surface:
+
+- `ui/ContextMenu.svelte` is the menu. Same popover dialect as the agent dot menu
+  and the shared `Select` (a fixed layer placed by `menuPlacement`, dismissed by an
+  outside pointerdown / Escape / any ancestor scroll / a resize, hover and the
+  keyboard cursor sharing ONE highlight), because a second menu language would read
+  as a second kind of menu. It is anchored on a POINT: `pointAnchor(x, y)` makes the
+  pointer a zero-size rect so the existing placement rule — right edge on the
+  anchor, flip above when there is no room, clamp to the viewport — applies
+  unchanged.
+- `ui/longpress.ts` measures the hold, because a phone has no `contextmenu` event.
+  Touch only: a mouse already has a right button, and treating a held left button as
+  a press would fire a menu in the middle of a text selection. Three rules keep it
+  from making a list feel broken — a hold that travels more than 10px is a SCROLL
+  (`isScroll`, pure and tested), a second finger cancels it, and the click that
+  follows the release is swallowed once so a row does not both open its menu and
+  activate itself.
+
+Wired to four subjects, each offering the verbs it already has elsewhere — a context
+menu with its own action set is a second source of truth waiting to disagree: the
+agent card (Watch / Interrupt / Stop / Remove, and Start / Remove when it is
+stopped), the sidebar project row (Open or Close, Rename, Delete), and the message
+bubble (Copy / Raw / Archive). The bubble is desktop-only on purpose: a long press
+on text is the system's own selection gesture, and taking that away to show a menu
+that a tap already opens would be a bad trade.
+
 ## Who a message goes to
 
 Three ways a message can land, and they are NOT shades of one thing:

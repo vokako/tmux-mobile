@@ -1,7 +1,7 @@
 // The popover placement contract — pure geometry, no browser.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { menuPlacement } from './placement.ts';
+import { menuPlacement, pointAnchor } from './placement.ts';
 
 test('menuPlacement puts a context menu beside its trigger, inside the viewport', () => {
   const view = { w: 1200, h: 800 };
@@ -23,4 +23,18 @@ test('menuPlacement puts a context menu beside its trigger, inside the viewport'
   assert.equal(menuPlacement(low, { w: 180, h: 900 }, view).y, 8);
   // Unmeasured height (first frame) must not trigger a flip on a guess.
   assert.equal(menuPlacement(low, { w: 180, h: 0 }, view).y, 736);
+});
+
+test('a right-click or a long press anchors the menu on the pointer', () => {
+  const view = { w: 1200, h: 800 };
+  const size = { w: 180, h: 200 };
+  // A pointer is a zero-size rect, so the ONE placement rule applies: the menu's
+  // right edge lands on the pointer, 6px below it.
+  const at = pointAnchor(500, 300);
+  assert.deepEqual(at, { left: 500, right: 500, top: 300, bottom: 300 });
+  assert.deepEqual(menuPlacement(at, size, view), { x: 320, y: 306 });
+  // Near the bottom it flips above the pointer instead of hanging off screen.
+  assert.deepEqual(menuPlacement(pointAnchor(500, 780), size, view), { x: 320, y: 574 });
+  // Near the left edge it is clamped, not right-aligned into the void.
+  assert.deepEqual(menuPlacement(pointAnchor(40, 300), size, view), { x: 8, y: 306 });
 });

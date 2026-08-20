@@ -28,6 +28,8 @@
   import { sortRows, shortPath } from '../projects/projects.ts';
   import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette, ctxColor, statusNote } from './hub.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
+  import ContextMenu from '../ui/ContextMenu.svelte';
+  import { longpress } from '../ui/longpress.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
   import CreateProjectDialog from '../projects/CreateProjectDialog.svelte';
@@ -853,6 +855,69 @@
   let menuW = $state(0);
   let menuH = $state(0);
 
+  // ── Right-click on the desktop, long press on a phone. One menu component, one
+  // piece of state, three subjects (owner, 2026-08-20: "还有很多地方增加右键点击操
+  // 作，和手机长按"). The ITEMS are built per subject, and each surface offers the
+  // verbs it already has elsewhere — a context menu with its own set of actions is
+  // a second source of truth waiting to disagree.
+  let ctxAt = $state(null);        // { x, y } in client px, or null
+  let ctxItems = $state([]);
+  let ctxWho = $state('');
+
+  function openCtx(at, who, items) {
+    const usable = items.filter(Boolean);
+    if (!usable.length) return;
+    ctxWho = who;
+    ctxItems = usable;
+    ctxAt = at;
+  }
+  const closeCtx = () => { ctxAt = null; ctxItems = []; };
+  /** A pointer event as a plain client point. */
+  const pointOf = (e) => ({ x: e.clientX ?? 0, y: e.clientY ?? 0 });
+
+  /** An agent's verbs — the same ones its dot menu carries. */
+  function agentItems(name) {
+    if (stopped.includes(name)) {
+      return [
+        { label: t('hubStartAgain'), icon: 'refresh', onselect: () => startAgent(name) },
+        { label: t('hubRemove'), icon: 'trash', danger: true, onselect: () => askAction('remove', name) },
+      ];
+    }
+    const a = managedAgents.find((x) => x.name === name);
+    return [
+      { label: t('hubWatch'), icon: 'terminal', onselect: () => { if (a) openDrawer(a); } },
+      { label: t('hubInterrupt'), icon: 'x', onselect: () => interrupt(name) },
+      { label: t('hubStop'), icon: 'stop', danger: true, onselect: () => askAction('stop', name) },
+      { label: t('hubRemove'), icon: 'trash', danger: true, onselect: () => askAction('remove', name) },
+    ];
+  }
+
+  /** A project's verbs. Open/Close mirrors the header's single button, so the two
+   * cannot disagree about which one applies. Rename selects the project first,
+   * because the editor it opens is the chat header's own title. */
+  function projectItems(row) {
+    const session = row?.project?.session ?? '';
+    const name = row?.project?.name ?? '';
+    return [
+      row?.live
+        ? { label: t('projectDown'), icon: 'stop', danger: true, onselect: () => askAction('down', name) }
+        : { label: t('projectUp'), icon: 'zap', onselect: () => { selectProject(session); setTimeout(bringUp, 0); } },
+      { label: t('projectRename'), icon: 'edit',
+        onselect: () => { selectProject(session); setTimeout(startRename, 0); } },
+      { label: t('projectDelete'), icon: 'trash', danger: true,
+        onselect: () => askAction('delete', name) },
+    ];
+  }
+
+  /** A message's verbs: the same three its own overlay offers. */
+  function msgItems(m) {
+    return [
+      { label: t('hubCopy'), icon: 'copy', onselect: () => copyMsg(m.body) },
+      { label: t('hubRaw'), icon: 'command', onselect: () => { rawOpen = rawOpen === m.id ? '' : m.id; } },
+      { label: t('hubArchive'), icon: 'trash', onselect: () => archiveMsg(m.id) },
+    ];
+  }
+
   function toggleAgentMenu(name, trigger) {
     if (menuFor === name) { menuFor = ''; return; }
     // anchorOf divides the client rect by --ui-zoom: a rect is in visual px
@@ -999,7 +1064,13 @@
       <div class="side-scroll">
         <div class="side-h">{t('hubProjects')}</div>
         {#each rows as row (row.project.id)}
-          <button class="side-row" class:open={row.project.session === selected} onclick={() => { selectProject(row.project.session); sideOpen = false; }}>
+          <!-- Right-click (desktop) and long press (phone) open the project's own
+               verbs where the pointer is. The row's normal job — open this
+               conversation — is unchanged. -->
+          <button class="side-row" class:open={row.project.session === selected}
+            onclick={() => { selectProject(row.project.session); sideOpen = false; }}
+            oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), row.project.name, projectItems(row)); }}
+            use:longpress={{ onlongpress: (pt) => openCtx(pt, row.project.name, projectItems(row)) }}>
             <span class="dot" class:off={!row.live}></span>
             <span class="p-name">{row.project.name}</span>
           </button>
@@ -1096,6 +1167,8 @@
             <div class="acard" class:sel={recipient === a.name} role="button" tabindex="0"
               title={[`${a.name} · ${stateLabel(a.state)}`, a.detail, vitalsLine(a.vitals)].filter(Boolean).join(' · ')}
               onclick={() => setRecipient(a.name)}
+              oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), a.name, agentItems(a.name)); }}
+              use:longpress={{ onlongpress: (pt) => openCtx(pt, a.name, agentItems(a.name)) }}
               onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setRecipient(a.name); } }}>
               <div class="ac-top">
                 <span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>
@@ -1138,6 +1211,8 @@
                  has to be ejectable — the slot is what keeps `up` recreating
                  it (owner, 2026-08-19). -->
             <div class="acard off" class:busy={acting} role="button" tabindex="0" title={t('hubStartAgain')}
+              oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), name, agentItems(name)); }}
+              use:longpress={{ onlongpress: (pt) => openCtx(pt, name, agentItems(name)) }}
               onclick={() => !acting && startAgent(name)}
               onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (!acting) startAgent(name); } }}>
               <div class="ac-top">
@@ -1277,6 +1352,7 @@
                      button below. -->
                 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
                 <div class="bubble md"
+                  oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), m.from, msgItems(m)); }}
                   onclick={() => { msgOpen = msgOpen === key ? '' : key; }}>
                   {#if m.from !== 'human'}<div class="m-head">{m.from}</div>{/if}
                   <div class="m-body">
@@ -1570,6 +1646,10 @@
     note={pendingAct ? t(ACT_COPY[pendingAct.kind].note) : ''}
     confirmLabel={pendingAct ? t(ACT_COPY[pendingAct.kind].go) : ''}
     onconfirm={runAction} oncancel={() => (pendingAct = null)} />
+
+  <!-- One context menu for every subject above: right-click on the desktop, long
+       press on a phone. -->
+  <ContextMenu at={ctxAt} items={ctxItems} who={ctxWho} oncancel={closeCtx} />
 
   <!-- Forgetting a message for good. The copy names what is lost AND what
        survives, which is the rule for every destructive verb in this app. -->
