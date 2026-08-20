@@ -943,14 +943,21 @@ where a reader looks (owner, 2026-08-19: "返回的状态信息要用消息的�
 里"). It is now `[tmm done] <summary>` from the agent. A done with NO summary stays
 a lifecycle line, because nothing was said.
 
-Client side the ONLY thing that happens is the marker coming off: `statusNote()`
-(pure, tested) reads both markers and the bubble is exactly the bubble any other
-message gets ("status 消息的样式要和普通消息一样就行", 2026-08-19). A first cut
-rendered it a notch quieter with an attention border for `waiting`/`blocked`, which
-was the same mistake in a new costume — a second visual species for the same thing
-is what made these read as telemetry to begin with. The raw view still shows the
-stored body, marker included, because raw means exact. `record_status` keeps the
-explicit claim in the status record: that is the part only it can answer, and
+Client side the marker comes off (`statusNote()`, pure, tested) and the bubble is
+exactly the bubble any other message gets ("status 消息的样式要和普通消息一样就
+行", 2026-08-19). A first cut rendered it a notch quieter with an attention border
+for `waiting`/`blocked`, which was the same mistake in a new costume — a second
+visual species for the same thing is what made these read as telemetry to begin
+with. The one adornment lives in the HEADER, where a name already goes: the bubble
+head reads `name → state`, the arrow quiet chrome and the state word in its own
+status colour (`noteStateColor()`, pure + tested — working/running `--status-ok`,
+waiting/blocked `--status-warn` because they ask for a person rather than report a
+failure, failed `--status-danger`, done the accent, anything unknown `--text3`).
+That is the owner's ask verbatim ("在消息框的 agent name 后面加一个箭头 指向具体
+的状态 … 为不同状态定义不同的色彩", 2026-08-20): what the note is ABOUT belongs
+to the header, and the words stay an ordinary message. The raw view still shows
+the stored body, marker included, because raw means exact. `record_status` keeps
+the explicit claim in the status record: that is the part only it can answer, and
 `derive_from` needs it for `waiting`.
 
 The other half is the prompt, since a channel nobody is told to use stays empty.
@@ -1115,6 +1122,16 @@ the same confirmation dialog as stopping an agent (it kills every pane in the
 session), and the copy says what survives: the project stays in the list, Open
 brings it back, and each agent resumes its own conversation.
 
+Beside the title, the header shows the project's FULL path, not `shortPath`'s
+`…/last/two` stub: it renders whole when it fits, and when the header's buttons
+leave it too little room it becomes a horizontal scroller instead of
+ellipsizing — the owner's three rules verbatim ("展示得下完整展示 / 展示不下再
+隐藏 / 支持滑动查看，不要省略号", 2026-08-20). The scrollbar is hidden (one
+quiet line), a `wheelX` action pans it with a mouse's vertical wheel (a
+non-passive listener, because it has to preventDefault; it lets the wheel
+through when the path fits), and the full path stays in `title`. Desktop only,
+as before — the phone header never showed the path.
+
 `project_create` also had to change: the session name follows the NAME when
 one is given (`session ?? name ?? basename(path)`). It previously fell
 straight through to the folder, so `tmm project create /tmp --name closetest`
@@ -1267,7 +1284,16 @@ subordinate. The feed reuses `.subtle-scroll`; system events are centered froste
 pills — CONSECUTIVE lifecycle lines fold into one pill ("stopped lead ·
 restarted lead": a stop followed by a restart is one fact, not two rows), and
 at the chat-only level they disappear entirely, because they are the app's
-record, not the conversation. The tap-revealed copy/raw actions are an absolutely-positioned OVERLAY on
+record, not the conversation. Subordinate is not ILLEGIBLE: the pill wears
+reading ink (`--text2`, `--fs-sub`), because `--text3` fine print was reported
+as unreadable ("不要只用灰色小字，让我看不太清", 2026-08-20), and an item that
+IS a `/command` (the record `hub_command` leaves) keeps the composer's command
+dialect — monospace with the accent lean — so the record reads as the thing
+that was typed. The feed also marks calendar days in the same pill dialect: a
+centred date pill (`Today` / `Yesterday` / a local date) before the first block
+of each new LOCAL day (`sameDay()`, pure + tested — the times alone never said
+which day a message was from, 2026-08-20); it is not sticky, because a pinned
+rect would fight the ask-anchor's edge math. The tap-revealed copy/raw actions are an absolutely-positioned OVERLAY on
 the bubble's bottom-right corner, not a row in the flow: opening them must not
 push the conversation around or change the scroll height the anchor math
 depends on. The bubble itself carries a text cursor, not a pointer — it is

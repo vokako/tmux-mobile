@@ -20,14 +20,14 @@
   import ChatImage from './ChatImage.svelte';
   import Icon from '../ui/Icon.svelte';
   import { tick as settled } from 'svelte';
-  import { t } from '../core/i18n.svelte.ts';
+  import { t, i18n } from '../core/i18n.svelte.ts';
   import {
     projectList, projectUp, projectDown, projectDelete, projectCreate, projectRename, listSessionsWithPanes,
     hubPost, hubCommand, modelsList, hubLog, hubMsgArchive, hubMsgRestore, hubMsgPurge, hubArchive, hubRooms, hubAgents, hubSpawn, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
-  import { sortRows, shortPath } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette, ctxColor, statusNote, readlineEdit } from './hub.ts';
+  import { sortRows } from '../projects/projects.ts';
+  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sameDay, readlineEdit } from './hub.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
   import { longpress } from '../ui/longpress.ts';
@@ -1132,6 +1132,36 @@
     const d = new Date(ts);
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
+
+  /** The date separator's label: Today / Yesterday in the app's own words,
+   * otherwise a local-format date (year only when it differs — a chat is
+   * mostly about this week). */
+  const fmtDay = (ts) => {
+    const d = new Date(ts);
+    const now = new Date();
+    const startOf = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const days = Math.round((startOf(now) - startOf(d)) / 86400000);
+    if (days === 0) return t('hubToday');
+    if (days === 1) return t('hubYesterday');
+    const opts = { month: 'short', day: 'numeric', weekday: 'short' };
+    if (d.getFullYear() !== now.getFullYear()) opts.year = 'numeric';
+    return d.toLocaleDateString(i18n.lang === 'zh' ? 'zh-CN' : 'en-US', opts);
+  };
+
+  /** Vertical wheel pans the header path horizontally — the path scrolls
+   * instead of ellipsizing, and a mouse has no horizontal axis of its own.
+   * An action (not `onwheel`) because preventDefault needs a non-passive
+   * listener. */
+  function wheelX(el) {
+    const onWheel = (e) => {
+      if (!e.deltaY || e.deltaX) return; // trackpads already pan natively
+      if (el.scrollWidth <= el.clientWidth) return; // it fits — let the page have the wheel
+      el.scrollLeft += e.deltaY;
+      e.preventDefault();
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return { destroy: () => el.removeEventListener('wheel', onWheel) };
+  }
 </script>
 
 <div class="hub-root" class:compact class:drawer-open={termOpen && !compact}>
@@ -1210,7 +1240,11 @@
             {/if}
           </h1>
         {/if}
-        {#if !compact}<span class="path">{shortPath(selectedRow?.project.path ?? '')}</span>{/if}
+        <!-- The FULL path, not a middle-elided stub: it renders whole when it
+             fits, and when it doesn't the box scrolls (wheel included) instead
+             of ellipsizing — "不要直接用省略号" (owner, 2026-08-20). Desktop
+             only, same as before. -->
+        {#if !compact}<span class="path" use:wheelX title={selectedRow?.project.path ?? ''}>{selectedRow?.project.path ?? ''}</span>{/if}
         <span class="spacer"></span>
         {#if selected}
           <!-- Delete is offered whether or not the session is live: it is the
@@ -1390,11 +1424,27 @@
       {/if}
       <div class="feed subtle-scroll" class:hidden={archiveOpen} bind:this={feedEl} onscroll={onFeedScroll}>
         {#each blocks as b, i (blockKey(b, i))}
+          <!-- A new calendar day gets a centred date pill before its first
+               block — the times alone never said WHICH day a message was from
+               (owner, 2026-08-20). Local-time days (sameDay), Today/Yesterday
+               in the app's words. Not sticky: a pinned rect would fight the
+               ask-anchor's edge math. -->
+          {#if i === 0 || !sameDay(blocks[i - 1].ts, b.ts)}
+            <div class="day-sep" aria-hidden="true"><span class="day-pill">{fmtDay(b.ts)}</span></div>
+          {/if}
           {#if b.type === 'sys'}
-            <!-- The app's own record (spawn/stop/restart), folded: consecutive
-                 lifecycle lines are one fact each, not one row each. Hidden
-                 entirely at the chat-only level (feedBlocks drops them). -->
-            <div class="sysline">{b.items.join(' · ')}</div>
+            <!-- The app's own record (spawn/stop/restart, a /command typed into
+                 a pane), folded: consecutive lifecycle lines are one fact each,
+                 not one row each. Hidden entirely at the chat-only level
+                 (feedBlocks drops them). Readable ink, not fine print — and a
+                 /command keeps the composer's monospace so it reads as the thing
+                 that was typed ("不要只用灰色小字", owner 2026-08-20). -->
+            <div class="sysline">
+              {#each b.items as item, j (`${j}-${item}`)}
+                {#if j > 0}<span class="sys-sep" aria-hidden="true">·</span>{/if}
+                <span class="sys-item" class:cmd={item.startsWith('/')}>{item}</span>
+              {/each}
+            </div>
           {:else if b.type === 'msg'}
             {@const m = b.msg}
             <!-- An agent's note about its own work — a `tmm status` note or a
@@ -1446,7 +1496,14 @@
                 <div class="bubble md"
                   oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), m.from, msgItems(m)); }}
                   onclick={() => { msgOpen = msgOpen === key ? '' : key; }}>
-                  {#if m.from !== 'human'}<div class="m-head">{m.from}</div>{/if}
+                  {#if m.from !== 'human'}
+                    <!-- A status note keeps the ordinary bubble, but its header
+                         says what the words are ABOUT: `name → state`, the state
+                         in its own status colour ("在消息框的 agent name 后面加
+                         一个箭头 指向具体的状态 … 为不同状态定义不同的色彩",
+                         owner 2026-08-20). The name stays the name. -->
+                    <div class="m-head">{m.from}{#if note}<span class="m-arrow" aria-hidden="true">→</span><span class="m-note-state" style:color={noteStateColor(note.state)}>{stateLabel(note.state)}</span>{/if}</div>
+                  {/if}
                   <div class="m-body" class:held-scroll={heldScroll}>
                     {#if parts.text}
                       {#if rawOpen === key}
@@ -1884,7 +1941,17 @@
   .p-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; }
 
   .mid { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-  .path { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Fits → shows whole; doesn't fit → pans (wheelX action), NEVER an ellipsis.
+     `flex: 0 1 auto` + min-width lets the header's buttons take their space
+     first while the path yields, and the hidden scrollbar keeps the header one
+     quiet line. */
+  .path {
+    font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text3);
+    white-space: nowrap; overflow-x: auto; overflow-y: hidden;
+    min-width: 0; flex: 0 1 auto;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  .path::-webkit-scrollbar { display: none; }
   .spacer { flex: 1; }
   .term-toggle.on { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
 
@@ -2110,6 +2177,10 @@
     color: var(--accent); font-weight: 650; font-size: var(--fs-ui);
     letter-spacing: 0.1px; line-height: 1.2; margin: 0 0 2px; user-select: none;
   }
+  /* The status-note header's `name → state`: the arrow is quiet chrome, the
+     state wears its own status colour (set inline from noteStateColor). */
+  .m-head .m-arrow { color: var(--text3); font-weight: 400; margin: 0 5px; }
+  .m-head .m-note-state { font-weight: 650; }
   /* The Telegram inline trailer: time (+ delivery ring on your own messages,
      to its right) FLOATS at the end of the content. On the last line when it
      fits, its own right-aligned line when it doesn't — never a separate
@@ -2160,12 +2231,35 @@
   .m-acts button:hover, .m-acts button.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
   /* Referenced images, under the text they came with. */
   .shots { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; border-radius: 16px; overflow: hidden; }
+  /* Lifecycle lines are the app narrating real actions (an agent stopped, a
+     /command typed into a pane) — reading ink and body-adjacent size, not fine
+     print the reader has to squint at ("不要只用灰色小字，让我看不太清", owner
+     2026-08-20). Still a centred capsule: it is narration, not a speaker. */
   .sysline {
-    align-self: center; display: flex; align-items: baseline; gap: 7px;
+    align-self: center; display: flex; align-items: baseline; gap: 6px;
     max-width: min(92%, 620px); padding: 4px 13px; border-radius: 8px;
-    color: var(--text3); background: color-mix(in srgb, var(--bubble-in) 88%, transparent);
+    color: var(--text2); background: color-mix(in srgb, var(--bubble-in) 88%, transparent);
     border: 1px solid var(--border2); box-shadow: 0 1px 2px rgba(0,0,0,0.06);
-    font-size: var(--fs-meta); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-size: var(--fs-sub); white-space: nowrap; overflow: hidden;
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  }
+  .sysline .sys-sep { color: var(--text3); flex: none; }
+  .sysline .sys-item { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  /* A /command wears the composer's command dialect — monospace with an accent
+     lean — so the record reads as the thing that was typed. */
+  .sysline .sys-item.cmd {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: color-mix(in srgb, var(--accent) 62%, var(--text));
+  }
+
+  /* The feed's date separators: a centred pill in the sysline's capsule
+     dialect, marking where a new calendar day starts. */
+  .day-sep { align-self: center; display: flex; justify-content: center; padding: 6px 0 2px; user-select: none; }
+  .day-pill {
+    font-size: var(--fs-meta); font-weight: 600; letter-spacing: 0.3px;
+    color: var(--text2); background: color-mix(in srgb, var(--bubble-in) 88%, transparent);
+    border: 1px solid var(--border2); border-radius: 999px; padding: 2px 11px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.06);
     -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
   }
 

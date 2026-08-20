@@ -507,6 +507,42 @@ export function statusNote(body: string | null | undefined): { state: string; te
   return text ? { state: m[1] ?? m[2]!, text } : null;
 }
 
+/**
+ * The colour of a status-note's declared state, worn by the `name → state`
+ * tag in the bubble header ("可以在消息框的 agent name 后面加一个箭头 指向具体的
+ * 状态 … 为不同状态定义不同的色彩", owner 2026-08-20). Theme tokens only, like
+ * every other status colour in the app. `waiting`/`blocked` take the attention
+ * colour rather than danger — they ask for a person, they are not failures —
+ * matching the `.prog` row's treatment of the same words. `done` is the accent:
+ * an outcome, not a state on the ok/warn/danger ramp.
+ */
+export function noteStateColor(state: string): string {
+  switch (state) {
+    case 'working':
+    case 'running': return 'var(--status-ok)';
+    case 'waiting':
+    case 'blocked': return 'var(--status-warn)';
+    case 'failed':
+    case 'stuck': return 'var(--status-danger)';
+    case 'done': return 'var(--accent)';
+    default: return 'var(--text3)';
+  }
+}
+
+/**
+ * Same calendar day in LOCAL time — the rule behind the feed's date
+ * separators. UTC arithmetic would flip the divider at 08:00 for a UTC+8
+ * reader, which is exactly the reader who asked for it ("我希望在有新日期的
+ * 地方能有一个标注", owner 2026-08-20).
+ */
+export function sameDay(a: number, b: number): boolean {
+  const da = new Date(a);
+  const db = new Date(b);
+  return da.getFullYear() === db.getFullYear()
+    && da.getMonth() === db.getMonth()
+    && da.getDate() === db.getDate();
+}
+
 /** A draft is a convenience, not a document: capped so a pasted file cannot fill
  * localStorage and take the rest of the Hub's prefs down with it. */
 export const DRAFT_MAX = 8000;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, draftUpdate, DRAFT_MAX, readlineEdit } from './hub.ts';
+import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, sameDay, draftUpdate, DRAFT_MAX, readlineEdit } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -658,6 +658,33 @@ test('statusNote reads an agent status message, and only that', () => {
   assert.equal(systemLine('[tmm done] shipped it'), null);
   // A summary-less done stays a lifecycle line: there is nothing to read.
   assert.equal(systemLine('[tmm] done'), 'done');
+});
+
+test('noteStateColor speaks in status tokens, one per family', () => {
+  // The bubble header's `name → state` tag ("为不同状态定义不同的色彩",
+  // owner 2026-08-20). working/running are progress; waiting/blocked ask for a
+  // person (attention, NOT danger — same reading as the .prog row); failure is
+  // danger; done is the accent (an outcome, not a state on the ramp).
+  assert.equal(noteStateColor('working'), 'var(--status-ok)');
+  assert.equal(noteStateColor('running'), 'var(--status-ok)');
+  assert.equal(noteStateColor('waiting'), 'var(--status-warn)');
+  assert.equal(noteStateColor('blocked'), 'var(--status-warn)');
+  assert.equal(noteStateColor('failed'), 'var(--status-danger)');
+  assert.equal(noteStateColor('done'), 'var(--accent)');
+  // A word we do not know renders quiet, never wrong.
+  assert.equal(noteStateColor('pondering'), 'var(--text3)');
+});
+
+test('sameDay is a LOCAL calendar-day rule', () => {
+  const at = (y: number, mo: number, d: number, h = 12) => new Date(y, mo - 1, d, h).getTime();
+  assert.ok(sameDay(at(2026, 8, 20, 0), at(2026, 8, 20, 23)));
+  assert.ok(!sameDay(at(2026, 8, 20, 23), at(2026, 8, 21, 0)));
+  // Adjacent months and years are different days, not modular arithmetic.
+  assert.ok(!sameDay(at(2026, 7, 20), at(2026, 8, 20)));
+  assert.ok(!sameDay(at(2025, 8, 20), at(2026, 8, 20)));
+  // One millisecond across local midnight flips the separator.
+  const midnight = new Date(2026, 7, 21, 0, 0, 0, 0).getTime();
+  assert.ok(!sameDay(midnight - 1, midnight));
 });
 
 test('a draft belongs to its project, and an empty one leaves no trace', () => {
