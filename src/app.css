@@ -261,6 +261,22 @@ button:disabled {
 .side-row.add { color: var(--text3); font-size: var(--fs-ui); }
 .side-row.add:hover { color: var(--accent); }
 
+/* iOS-style CONTINUOUS corners on the conversation's boxes ("类似于 iOS 那种
+   圆角", owner 2026-08-20): `corner-shape: squircle` blends each corner into
+   its sides as a superellipse instead of a circular arc, inside the SAME
+   border-radius each rule already declares. Progressive by design — Chromium
+   139+ (the Android WebView, desktop Chrome/Edge) draws the smooth curve;
+   WKWebView and older engines keep the plain round corner, nothing to hide or
+   polyfill. Full-round pills (999px capsules, dots) are left alone: a
+   superellipse flattens a stadium's caps. The rule lives HERE rather than in
+   Hub.svelte because svelte-check's CSS service does not know the property yet
+   and the house bar is zero warnings; `.hub-root` scopes it to the chat, where
+   the class names are Hub's own. */
+.hub-root :is(.bubble, .compose-shell, .send-btn, .m-acts button, .sysline,
+  .shots, .steps, .arow, .a-menu, .to-menu, .start-row) {
+  corner-shape: squircle;
+}
+
 /* Rendered-markdown bodies (chat bubbles, skill previews). Compact rhythm —
    these live inside small containers, not documents. */
 .md :is(p, ul, ol, pre, blockquote, table) { margin: 0.35em 0; }

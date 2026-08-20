@@ -1295,7 +1295,13 @@ change, not an appearing element.
 Corner radii are one small scale, tuned down on owner feedback (大圆角 read as
 toy-like): bubbles 12px with a 4px directional corner, the composer capsule
 10px, roster chips 9px, system pills 8px, recipient chip and message actions
-7px.
+7px. On engines that know `corner-shape` (Chromium 139+), the conversation's
+boxes draw those same radii as CONTINUOUS iOS-style corners — `corner-shape:
+squircle`, one `.hub-root`-scoped rule in app.css ("类似于 iOS 那种圆角", owner
+2026-08-20; it lives there because svelte-check's CSS service does not know the
+property yet). Everywhere else the plain circular arc stays — same radius, no
+polyfill — and full-round 999px capsules are excluded on purpose, since a
+superellipse flattens a stadium's caps.
 
 With metadata inline, the sticky anchor `.msg` and the bubble are the same
 box again, and a held bubble is simply that box at full height. Prose bubbles are
