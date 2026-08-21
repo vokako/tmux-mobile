@@ -417,10 +417,10 @@
   .hint { color: var(--text3); font-size: var(--fs-ui); margin: 0; line-height: 1.6; max-width: 420px; }
 
   .editor { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
-  .err { color: var(--danger); font-size: var(--fs-ui); background: var(--danger-bg); border-radius: 8px; padding: 8px 12px; }
+  .err { color: var(--danger); font-size: var(--fs-ui); background: var(--danger-bg); border-radius: var(--ui-radius-row); padding: 8px 12px; }
   label { display: flex; flex-direction: column; gap: 5px; color: var(--text2); font-size: var(--fs-ui); }
   label.check { flex-direction: row; align-items: center; gap: 8px; font-size: var(--fs-body); color: var(--text); }
-  input, textarea { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 9px; color: var(--text); padding: 8px 12px; font-size: var(--fs-body); outline: none; font-family: inherit; }
+  input, textarea { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: var(--ui-radius-control); color: var(--text); padding: 8px 12px; font-size: var(--fs-body); outline: none; font-family: inherit; }
   input:focus, textarea:focus { border-color: var(--accent); }
   input:disabled { opacity: 0.5; }
   textarea { resize: vertical; line-height: 1.5; }
@@ -439,7 +439,7 @@
   .pick.sel { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
   .md-preview { border-top: 1px solid var(--border2); margin-top: 6px; }
   .md-doc {
-    background: var(--surface); border: 1px solid var(--border2); border-radius: 10px;
+    background: var(--surface); border: 1px solid var(--border2); border-radius: var(--ui-radius-panel);
     padding: 12px 14px; font-size: var(--fs-body); color: var(--text); line-height: 1.55;
     overflow-wrap: anywhere;
   }

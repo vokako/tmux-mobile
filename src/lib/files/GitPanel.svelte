@@ -239,7 +239,7 @@
     border-bottom: 1px solid var(--border); flex-shrink: 0;
   }
   .back-btn {
-    padding: 6px; border: none; border-radius: 6px; background: var(--surface2);
+    padding: 6px; border: none; border-radius: var(--ui-radius-control); background: var(--surface2);
     color: var(--text2); cursor: pointer; display: flex; -webkit-tap-highlight-color: transparent;
   }
   .preview-name {
@@ -248,7 +248,7 @@
   }
   .preview-actions { display: flex; gap: 4px; }
   .act-btn {
-    padding: 6px; border: none; border-radius: 6px; background: none;
+    padding: 6px; border: none; border-radius: var(--ui-radius-control); background: none;
     color: var(--text3); cursor: pointer; display: flex; -webkit-tap-highlight-color: transparent;
   }
   .act-btn:active { color: var(--accent); }
@@ -259,7 +259,7 @@
     background: var(--pill-bg); flex-shrink: 0;
   }
   .git-tabs button {
-    padding: 6px 16px; border: none; border-radius: 6px; background: transparent;
+    padding: 6px 16px; border: none; border-radius: var(--ui-radius-control); background: transparent;
     color: var(--text3); font-size: var(--fs-ui); font-weight: 600; cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
@@ -271,7 +271,7 @@
     display: flex; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0;
   }
   .git-act-btn {
-    padding: 5px 12px; border: 1px solid var(--border); border-radius: 6px;
+    padding: 5px 12px; border: 1px solid var(--border); border-radius: var(--ui-radius-control);
     background: var(--surface2); color: var(--text2); font-size: var(--fs-ui); font-weight: 500;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
@@ -281,13 +281,13 @@
     display: flex; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0;
   }
   .git-commit-row textarea {
-    flex: 1; padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 6px;
+    flex: 1; padding: 6px 10px; border: 1px solid var(--input-border); border-radius: var(--ui-radius-control);
     background: var(--input-bg); color: var(--text); font-size: var(--fs-body); outline: none;
     font-family: inherit; resize: none; line-height: 1.4;
   }
   .git-commit-row textarea:focus { border-color: var(--accent); }
   .git-commit-btn {
-    padding: 6px 14px; border: none; border-radius: 6px;
+    padding: 6px 14px; border: none; border-radius: var(--ui-radius-control);
     background: var(--accent-fill); color: var(--accent-fill-ink); font-size: var(--fs-ui); font-weight: 600;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
@@ -295,7 +295,7 @@
   .git-file-row { display: flex; align-items: center; border-bottom: 1px solid var(--border2); }
   .git-file-row .git-file { flex: 1; border-bottom: none; }
   .git-stage-btn {
-    width: 32px; height: 32px; border: none; border-radius: 6px;
+    width: 32px; height: 32px; border: none; border-radius: var(--ui-radius-control);
     /* The label is a +/− GLYPH acting as an icon, so it takes the largest
        chrome step rather than an off-scale size of its own. */
     background: none; color: var(--accent); font-size: var(--fs-title); font-weight: 600;

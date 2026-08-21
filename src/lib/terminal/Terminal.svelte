@@ -2229,12 +2229,12 @@
   .win-split-menu {
     position: absolute; top: 100%; right: 0; z-index: 41; margin-top: 4px;
     display: flex; gap: 3px; padding: 4px;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 9px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--ui-radius-panel);
     box-shadow: 0 8px 24px rgba(0,0,0,0.35);
   }
   .win-split-opt {
     width: 26px; height: 26px; padding: 0;
-    border: 1px solid var(--border2); border-radius: 6px;
+    border: 1px solid var(--border2); border-radius: var(--ui-radius-control);
     background: var(--input-bg); color: var(--text2);
     font-size: var(--fs-ui); font-weight: 600; cursor: pointer;
     -webkit-tap-highlight-color: transparent;
@@ -2263,7 +2263,7 @@
     background: rgba(0, 0, 0, 0.8);
     color: #fff;
     padding: 8px 20px;
-    border-radius: 8px;
+    border-radius: var(--ui-radius-row);
     font-size: var(--fs-body);
     z-index: 20;
     pointer-events: none;
@@ -2377,7 +2377,7 @@
     z-index: 9;
     background: rgba(20, 20, 28, 0.95);
     border: 1px solid var(--border, #2a2a3a);
-    border-radius: 10px;
+    border-radius: var(--ui-radius-row);
     padding: 4px;
     box-shadow: 0 6px 20px rgba(0,0,0,0.4);
     backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
@@ -2397,7 +2397,7 @@
     font-size: var(--fs-body);
     font-weight: 500;
     padding: 6px 14px;
-    border-radius: 6px;
+    border-radius: var(--ui-radius-control);
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
     min-width: 56px;
@@ -2414,7 +2414,7 @@
     width: 36px; height: 36px;
     background: rgba(10,10,15,0.85);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--ui-radius-row);
     color: var(--accent);
     cursor: pointer;
     display: flex;
@@ -2449,7 +2449,7 @@
     background: rgba(10,10,15,0.65);
     backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: var(--ui-radius-panel);
     padding: 8px 10px;
     display: flex;
     flex-direction: column;
@@ -2457,7 +2457,7 @@
   }
   :global(html[data-theme="light"]) .input-bar { background: rgba(245,245,247,0.65); }
   :global(html.keyboard-open) .input-bar {
-    border-radius: 8px;
+    border-radius: var(--ui-radius-row);
     padding: 4px 6px;
     gap: 4px;
   }

@@ -70,7 +70,7 @@
     position: fixed; z-index: 61; left: 50%; top: 50%; transform: translate(-50%, -50%);
     width: min(420px, calc(100vw / var(--ui-zoom, 1) - 32px));
     max-height: calc(100vh / var(--ui-zoom, 1) - 48px); overflow-y: auto;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 16px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 18px;
     box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5); padding: 18px;
     display: flex; flex-direction: column; gap: 10px;
   }
@@ -82,7 +82,7 @@
      on-screen keyboard for the middle of the screen. */
   .dlg.sheet {
     left: 0; top: auto; bottom: 0; transform: none;
-    width: 100%; max-width: none; border-radius: 16px 16px 0 0;
+    width: 100%; max-width: none; border-radius: 18px 18px 0 0;
     border-left: none; border-right: none; border-bottom: none;
     padding: 16px 14px calc(16px + env(safe-area-inset-bottom));
   }

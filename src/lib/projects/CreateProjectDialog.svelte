@@ -100,7 +100,7 @@
   .dlg {
     position: fixed; z-index: 31; top: 50%; left: 50%; transform: translate(-50%, -50%);
     width: min(440px, calc(100vw - 32px)); max-height: min(80vh, 640px); overflow-y: auto;
-    background: var(--bg2); border: 1px solid var(--border); border-radius: 15px;
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 18px;
     padding: 18px; display: flex; flex-direction: column; gap: 9px;
     box-shadow: 0 18px 48px rgba(0,0,0,0.35);
   }
@@ -108,11 +108,11 @@
   /* Phone: the dialog becomes a bottom sheet — reachable with a thumb. */
   .dlg.sheet {
     top: auto; left: 0; right: 0; bottom: 0; transform: none; width: auto;
-    border-radius: 15px 15px 0 0; padding-bottom: calc(18px + env(safe-area-inset-bottom));
+    border-radius: 18px 18px 0 0; padding-bottom: calc(18px + env(safe-area-inset-bottom));
   }
   .dlg.sheet .dlg-agents { max-height: 46vh; overflow-y: auto; }
   .dlg.sheet .agent-pick, .dlg.sheet input, .dlg.sheet .dlg-actions button { min-height: 44px; }
-  .dlg input { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 11px; color: var(--text); padding: 8px 12px; font-size: var(--fs-ui); outline: none; }
+  .dlg input { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: var(--ui-radius-control); color: var(--text); padding: 8px 12px; font-size: var(--fs-ui); outline: none; }
   .dlg input:focus { border-color: var(--accent); }
   .dlg-h { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-meta); text-transform: uppercase; letter-spacing: 1.4px; color: var(--text3); margin-top: 4px; }
   .dlg-agents { display: flex; flex-direction: column; gap: 5px; }
@@ -121,7 +121,7 @@
   .path-row { display: flex; gap: 6px; align-items: stretch; }
   .path-row input { flex: 1; min-width: 0; }
   .path-row :global(.chip-btn) { flex: none; }
-  .agent-pick { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; color: var(--text2); padding: 8px 11px; font-size: var(--fs-ui); cursor: pointer; text-align: left; }
+  .agent-pick { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--ui-radius-control); color: var(--text2); padding: 8px 11px; font-size: var(--fs-ui); cursor: pointer; text-align: left; }
   .agent-pick.sel { border-color: var(--accent-line); background: var(--accent-bg); color: var(--text); }
   .agent-pick :global(svg) { margin-left: auto; color: var(--accent); }
   .ava { width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; color: white; font-size: var(--fs-meta); font-weight: 700; flex: none; }

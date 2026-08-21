@@ -681,13 +681,13 @@
   /* The footer is two utilities, not a call to action: right-aligned so the
      create ROW above stays the only full-width affordance. */
   .sessions.sidebar-mode .bottom-bar { justify-content: flex-end; padding: 6px 2px 0; }
-  .sessions.sidebar-mode .refresh-icon { width: 30px; height: 30px; border-radius: 8px; }
+  .sessions.sidebar-mode .refresh-icon { width: 30px; height: 30px; border-radius: var(--ui-radius-control); }
   /* A session row is a `.side-row`, not a card: 9px radius, no border, and an
      active row carries only the accent BACKGROUND (the accent outline was the
      last card tell left in this column — Chat's open row has none). */
-  .sessions.sidebar-mode .session { border-radius: 11px; }
+  .sessions.sidebar-mode .session { border-radius: var(--ui-radius-row); }
   .sessions.sidebar-mode .session.active { border-color: transparent; }
-  .sessions.sidebar-mode .session-row { padding: 8px 10px; border-radius: 11px; }
+  .sessions.sidebar-mode .session-row { padding: 8px 10px; border-radius: var(--ui-radius-row); }
   .content {
     display: flex;
     flex-direction: column;
@@ -975,7 +975,7 @@
     border: none;
     color: var(--text3);
     cursor: pointer;
-    border-radius: 6px;
+    border-radius: var(--ui-radius-control);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -993,7 +993,7 @@
   .pane-row {
     display: flex;
     align-items: stretch;
-    border-radius: 8px;
+    border-radius: var(--ui-radius-control);
     transition: background 0.15s ease;
   }
   .pane-row.active-pane { background: var(--accent-bg); }
@@ -1015,7 +1015,7 @@
     min-width: 0;
     -webkit-tap-highlight-color: transparent;
   }
-  .pane:active { background: var(--surface2); border-radius: 8px; }
+  .pane:active { background: var(--surface2); border-radius: var(--ui-radius-control); }
   .pane-id {
     font-family: var(--font-mono);
     color: var(--accent);
@@ -1059,7 +1059,7 @@
   .pane-kill {
     padding: 6px;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--ui-radius-control);
     background: transparent;
     color: var(--text3);
     cursor: pointer;
@@ -1078,7 +1078,7 @@
     padding: 6px;
     margin-top: 2px;
     border: 1px dashed var(--border2);
-    border-radius: 7px;
+    border-radius: var(--ui-radius-control);
     background: none;
     color: var(--text3);
     font-size: var(--fs-sub);
@@ -1109,7 +1109,7 @@
     padding: 10px 14px;
     background: var(--danger-bg);
     border: 1px solid var(--danger);
-    border-radius: 10px;
+    border-radius: var(--ui-radius-row);
   }
 
   /* ─── Bottom bar (new / refresh) ───────────────────── */
@@ -1123,7 +1123,7 @@
     flex: 1;
     height: 36px; padding: 0 12px;
     border: 1px solid var(--border);
-    border-radius: 9px;
+    border-radius: var(--ui-radius-control);
     background: none;
     color: var(--text2);
     font-size: var(--fs-body);
@@ -1140,7 +1140,7 @@
   .refresh-icon {
     width: 36px; height: 36px; flex-shrink: 0;
     border: 1px solid var(--border);
-    border-radius: 9px;
+    border-radius: var(--ui-radius-control);
     background: none;
     color: var(--text3);
     cursor: pointer;

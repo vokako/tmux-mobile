@@ -154,7 +154,7 @@
     overflow-y: auto;
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--ui-radius-panel);
     box-shadow: 0 12px 40px rgba(0,0,0,0.4);
     padding: 6px;
   }
@@ -186,7 +186,7 @@
   .picker-add {
     flex-shrink: 0;
     width: 24px; height: 24px; padding: 0;
-    border: 1px solid var(--border2); border-radius: 6px;
+    border: 1px solid var(--border2); border-radius: var(--ui-radius-control);
     background: var(--input-bg); color: var(--text3);
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     -webkit-tap-highlight-color: transparent;

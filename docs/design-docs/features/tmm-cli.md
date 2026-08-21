@@ -1302,18 +1302,20 @@ status ring in that foot, ALWAYS: an empty circle until the agent's prompt
 hook echoes the line back, a green check once it does — the receipt is a state
 change, not an appearing element.
 
-Corner radii are one small scale. It was first tuned DOWN (大圆角 read as
-toy-like on plain circular arcs), then back UP one step once the corners
-became continuous — a squircle's curvature concentrates at the corner, so the
-same radius reads visibly tighter than a circular arc, and the tightened
-scale suddenly read as "too small" (owner, 2026-08-21: "现在圆角有一点太小
-了"). Current scale: bubbles 16px with a 5px directional corner, the composer
-capsule 14px (13px compact), menus/dialogs 13–16px, cards/lanes/rows 11–12px
-(--ui-radius-panel: 12px), chips and actions 9–11px (--ui-radius-control:
-9px); micro tags (4–6px) stay put — at that size the arc and the
-superellipse are the same pixels. On engines that know `corner-shape`
-(Chromium 139+), every rounded RECTANGLE draws those radii as CONTINUOUS
-iOS-style corners —
+Corner radii are one small scale, now TOKENIZED after two owner rounds (first
+tuned down on plain arcs — 大圆角 read as toy-like; then up twice once corners
+became continuous, 2026-08-21: a squircle's curvature concentrates at the
+corner, so the same radius reads tighter, and elements across pages had
+drifted apart — "很多页面里的一些元素，圆角统一下"). Three tiers in app.css +
+two specials, and a swept rule REFERENCES the token instead of restating the
+number: `--ui-radius-control: 10px` (buttons, inputs, chips, menu items),
+`--ui-radius-row: 12px` (list rows, roster cards, toasts, small bars),
+`--ui-radius-panel: 14px` (cards, menus, tool lanes, big panels); specials are
+bubbles 18px with a 6px directional corner + the 16px composer capsule (15px
+compact), and dialogs 18px. Micro tags (4–6px) stay hardcoded — at that size
+the arc and the superellipse are the same pixels. On engines that know
+`corner-shape` (Chromium 139+), every rounded RECTANGLE draws those radii as
+CONTINUOUS iOS-style corners —
 `corner-shape: squircle`, ONE policy block in app.css listing the surfaces by
 component ("有质感一些，类似于 iPad、iOS 或 Mac 上的应用。尤其是标签的圆角过渡",
 owner 2026-08-20; it lives there because svelte-check's CSS service does not

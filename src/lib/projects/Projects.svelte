@@ -287,7 +287,7 @@
   .projects.dense .proj {
     /* 6 + `.proj-main`'s 4 = the 10px inset the whole sidebar shares, so the
        name lines up with the header above it and with the session rows below. */
-    background: none; border: none; border-radius: 11px; padding: 2px 6px; gap: 2px;
+    background: none; border: none; border-radius: var(--ui-radius-row); padding: 2px 6px; gap: 2px;
   }
   .projects.dense .proj:hover { background: var(--surface2); }
   .projects.dense .proj.live { border: none; }
@@ -371,7 +371,7 @@
   .act {
     height: var(--ui-control-height, 28px); padding: 0 9px;
     background: var(--surface2); color: var(--text2);
-    border: 1px solid var(--border); border-radius: 6px;
+    border: 1px solid var(--border); border-radius: var(--ui-radius-control);
     font-family: var(--font-ui); font-size: var(--fs-sub); cursor: pointer;
     transition: background var(--ui-motion-fast, 0.12s) ease;
   }
@@ -383,6 +383,6 @@
 
   .err {
     color: var(--danger); background: var(--danger-bg);
-    border-radius: 6px; padding: 5px 8px; font-size: var(--fs-sub);
+    border-radius: var(--ui-radius-control); padding: 5px 8px; font-size: var(--fs-sub);
   }
 </style>

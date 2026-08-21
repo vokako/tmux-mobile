@@ -85,7 +85,7 @@
   .pk-err { color: var(--danger); font-size: var(--fs-meta); }
   .pk-list {
     flex: 1; min-height: 140px; max-height: 42vh; overflow-y: auto;
-    border: 1px solid var(--border); border-radius: 9px; background: var(--input-bg);
+    border: 1px solid var(--border); border-radius: var(--ui-radius-control); background: var(--input-bg);
   }
   .pk-row {
     display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;

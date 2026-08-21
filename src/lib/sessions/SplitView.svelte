@@ -111,7 +111,7 @@
     min-width: 0;
     min-height: 0;
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-row);
     overflow: hidden;
     position: relative;
     background: var(--bg);

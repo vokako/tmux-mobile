@@ -110,7 +110,7 @@
 <style>
   .picker {
     border: 1px solid var(--border2);
-    border-radius: 10px;
+    border-radius: var(--ui-radius-panel);
     overflow: hidden;
     background: var(--input-bg);
   }
@@ -134,7 +134,7 @@
   .picker-seg:active { color: var(--accent); }
   .picker-sep { color: var(--text3); font-size: var(--fs-sub); }
   .picker-btn {
-    padding: 5px; border: none; border-radius: 6px;
+    padding: 5px; border: none; border-radius: var(--ui-radius-control);
     background: var(--surface2); color: var(--text2);
     cursor: pointer; display: flex; -webkit-tap-highlight-color: transparent;
   }

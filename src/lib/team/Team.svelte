@@ -849,7 +849,7 @@
   }
   .team-pick-item, .team-pick-new {
     display: flex; align-items: center; gap: 8px; width: 100%;
-    padding: 7px 9px; border: none; border-radius: 7px; background: transparent;
+    padding: 7px 9px; border: none; border-radius: var(--ui-radius-control); background: transparent;
     color: var(--text2); font-size: var(--fs-ui); cursor: pointer; text-align: left;
     -webkit-tap-highlight-color: transparent;
   }

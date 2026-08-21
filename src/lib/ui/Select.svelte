@@ -129,7 +129,7 @@
   .sel-trigger {
     display: flex; align-items: center; gap: 6px; width: 100%;
     background: var(--input-bg); border: 1px solid var(--input-border);
-    border-radius: 11px; padding: 8px 12px; color: var(--text);
+    border-radius: var(--ui-radius-row); padding: 8px 12px; color: var(--text);
     font-size: var(--fs-body); font-family: inherit;
     /* `normal`, not a ratio: an <input> computes its line box from `normal`,
        so matching the keyword is what makes the two boxes the same height.
@@ -141,7 +141,7 @@
     -webkit-tap-highlight-color: transparent;
   }
   /* The other field dialect in the app (Team's template editor). */
-  .sel-trigger.dense { padding: 6px 9px; border-radius: 7px; font-size: var(--fs-ui); }
+  .sel-trigger.dense { padding: 6px 9px; border-radius: var(--ui-radius-control); font-size: var(--fs-ui); }
   .sel-trigger:hover:not(:disabled), .sel-trigger.open { border-color: var(--accent); }
   .sel-trigger:disabled { opacity: 0.5; cursor: default; }
   .sel-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -151,7 +151,7 @@
   /* Same popover dialect as the Hub's menus: one menu language app-wide. */
   .sel-menu {
     position: fixed; z-index: 40; max-height: 46vh; overflow-y: auto;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 13px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--ui-radius-panel);
     box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45); padding: 5px;
     display: flex; flex-direction: column; gap: 2px;
     opacity: 0; transition: opacity var(--t-fast) ease;
@@ -159,7 +159,7 @@
   .sel-menu.ready { opacity: 1; }
   .sel-opt {
     display: flex; align-items: center; gap: 8px; min-height: 36px; width: 100%; text-align: left;
-    background: none; border: none; border-radius: 8px; color: var(--text2);
+    background: none; border: none; border-radius: var(--ui-radius-control); color: var(--text2);
     padding: 6px 10px; font-size: var(--ui-font-control); cursor: pointer;
     font-family: ui-monospace, Menlo, monospace;
   }

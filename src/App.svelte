@@ -1223,7 +1223,7 @@
     font-family: var(--font-mono);
     font-size: var(--fs-micro);
     line-height: 1.3;
-    border-radius: 6px;
+    border-radius: var(--ui-radius-control);
     z-index: 9999;
     border: 1px solid rgba(0, 255, 0, 0.2);
     user-select: text;
@@ -1316,11 +1316,11 @@
     border-right: 1px solid var(--border);
     z-index: 12;
   }
-  .rail-brand { border-radius: 7px; margin-bottom: 8px; flex: none; }
+  .rail-brand { border-radius: var(--ui-radius-control); margin-bottom: 8px; flex: none; }
   .rail-btn {
     width: 34px; height: 32px;
     display: grid; place-items: center;
-    border: none; border-radius: 9px; background: none;
+    border: none; border-radius: var(--ui-radius-control); background: none;
     color: var(--text3); cursor: pointer;
     transition: color 160ms, background 160ms;
     -webkit-tap-highlight-color: transparent;
@@ -1363,7 +1363,7 @@
   }
 
   .gear-btn {
-    padding: 6px; border: none; border-radius: 8px; background: none;
+    padding: 6px; border: none; border-radius: var(--ui-radius-control); background: none;
     color: var(--text3); cursor: pointer; display: flex;
     -webkit-tap-highlight-color: transparent;
   }
@@ -1405,7 +1405,7 @@
   @keyframes reconnect-spin { to { transform: rotate(360deg); } }
   .reconnect-cancel {
     margin-left: auto; padding: 2px 10px; border: 1px solid var(--accent);
-    border-radius: 6px; background: none; color: var(--accent); font-size: var(--fs-sub);
+    border-radius: var(--ui-radius-control); background: none; color: var(--accent); font-size: var(--fs-sub);
     font-weight: 600; cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
 
@@ -1473,7 +1473,7 @@
   .split-control { position: absolute; top: 6px; right: 8px; z-index: 12; }
   .split-toggle {
     width: 28px; height: 28px; padding: 0;
-    border: 1px solid var(--border); border-radius: 8px;
+    border: 1px solid var(--border); border-radius: var(--ui-radius-row);
     background: var(--surface); color: var(--text3);
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     -webkit-tap-highlight-color: transparent;
@@ -1484,12 +1484,12 @@
   .split-menu {
     position: absolute; top: 34px; right: 0; z-index: 13;
     display: flex; gap: 2px; padding: 3px;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--ui-radius-panel);
     box-shadow: 0 8px 28px rgba(0,0,0,0.35);
   }
   .split-opt {
     min-width: 28px; height: 28px;
-    border: none; border-radius: 6px; background: transparent;
+    border: none; border-radius: var(--ui-radius-control); background: transparent;
     color: var(--text3); font-size: var(--fs-body); font-weight: 600; cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }

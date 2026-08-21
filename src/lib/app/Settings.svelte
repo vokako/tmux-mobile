@@ -269,7 +269,7 @@
   .hist-btn:active { color: var(--accent); }
   .hist-list {
     display: flex; flex-direction: column;
-    border: 1px solid var(--input-border); border-radius: 8px;
+    border: 1px solid var(--input-border); border-radius: var(--ui-radius-control);
     overflow: hidden; margin-top: 2px;
   }
   .hist-row {
@@ -309,7 +309,7 @@
     width: 100%;
     padding: 11px 14px;
     border: 1px solid var(--input-border);
-    border-radius: 10px;
+    border-radius: var(--ui-radius-control);
     background: var(--input-bg);
     color: var(--text);
     /* The iOS no-auto-zoom threshold; see --fs-input-touch in app.css. */
@@ -349,7 +349,7 @@
     width: 100%;
     padding: 13px;
     border: none;
-    border-radius: 10px;
+    border-radius: var(--ui-radius-row);
     background: var(--accent-fill);
     color: var(--accent-fill-ink);
     font-size: var(--fs-title);
@@ -375,7 +375,7 @@
   .connect-row .connect-btn { flex: 1; }
   .share-btn {
     width: 100%; margin-top: 8px; padding: 10px;
-    border: 1px solid var(--border); border-radius: 10px;
+    border: 1px solid var(--border); border-radius: var(--ui-radius-panel);
     background: none; color: var(--text2); font-size: var(--fs-ui); font-weight: 600;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
     display: flex; align-items: center; justify-content: center; gap: 6px;
@@ -389,7 +389,7 @@
   }
   .about-link:active { color: var(--accent); }
   .cancel-btn {
-    padding: 13px 20px; border: 1px solid var(--border); border-radius: 10px;
+    padding: 13px 20px; border: 1px solid var(--border); border-radius: var(--ui-radius-panel);
     background: none; color: var(--text2); font-size: var(--fs-body); font-weight: 600;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
   }
@@ -409,6 +409,6 @@
     padding: 10px 14px;
     background: var(--danger-bg);
     border: 1px solid color-mix(in srgb, var(--danger) 15%, transparent);
-    border-radius: 10px;
+    border-radius: var(--ui-radius-row);
   }
 </style>

@@ -1565,7 +1565,7 @@
   .bm-path::-webkit-scrollbar { display: none; }
   .bm-path:active { color: var(--accent); }
   .bm-del {
-    padding: 4px; border: none; border-radius: 4px; background: none;
+    padding: 4px; border: none; border-radius: var(--ui-radius-control); background: none;
     color: var(--text3); cursor: pointer; display: flex;
   }
   .bm-del:active { color: var(--danger); }
@@ -1576,12 +1576,12 @@
     border-bottom: 1px solid var(--border2); min-width: 0;
   }
   .new-item input {
-    flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 6px;
+    flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--input-border); border-radius: var(--ui-radius-control);
     background: var(--input-bg); color: var(--text); font-size: var(--fs-body);
     font-family: var(--font-mono);
   }
   .new-item button {
-    padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 6px;
+    padding: 6px 10px; border: 1px solid var(--input-border); border-radius: var(--ui-radius-control);
     background: var(--surface2); color: var(--text2); cursor: pointer;
   }
   .new-type-btn { display: flex; align-items: center; color: var(--accent); }
@@ -1644,7 +1644,7 @@
   .file-size { color: var(--text3); font-size: var(--fs-sub); font-family: var(--font-mono); white-space: nowrap; }
   .file-actions { display: flex; gap: 2px; padding-right: 8px; }
   .act-btn {
-    padding: 6px; border: none; border-radius: 6px; background: none;
+    padding: 6px; border: none; border-radius: var(--ui-radius-control); background: none;
     color: var(--text3); cursor: pointer; display: flex; -webkit-tap-highlight-color: transparent;
   }
   .act-btn:active { color: var(--accent); }
@@ -1660,7 +1660,7 @@
     border-bottom: 1px solid var(--border); flex-shrink: 0;
   }
   .back-btn {
-    padding: 6px; border: none; border-radius: 6px; background: var(--surface2);
+    padding: 6px; border: none; border-radius: var(--ui-radius-control); background: var(--surface2);
     color: var(--text2); cursor: pointer; display: flex; -webkit-tap-highlight-color: transparent;
   }
   .preview-name {
@@ -1710,7 +1710,7 @@
   .md-render :global(h4), .md-render :global(h5), .md-render :global(h6) { font-size: 1em; margin: 8px 0 4px; color: var(--accent); }
   .md-render :global(p) { margin: 8px 0; }
   .md-render :global(code) { background: var(--surface2); padding: 2px 5px; border-radius: 3px; font-size: 0.86em; font-family: var(--font-mono); }
-  .md-render :global(pre) { background: var(--code-bg); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 8px 0; }
+  .md-render :global(pre) { background: var(--code-bg); border-radius: 12px; padding: 12px; overflow-x: auto; margin: 8px 0; }
   .md-render :global(pre code) { background: none; padding: 0; font-size: var(--fs-ui); line-height: 1.5; }
   .md-render :global(strong) { color: var(--text); }
   .md-render :global(em) { color: var(--text2); }
@@ -1726,7 +1726,7 @@
   .md-render :global(th) { background: var(--surface2); color: var(--accent); font-weight: 600; }
   .md-render :global(input[type="checkbox"]) { margin-right: 6px; }
   .md-render :global(.katex-display) { overflow-x: auto; margin: 8px 0; }
-  .md-render :global(.mermaid-block) { background: var(--surface); border-radius: 8px; padding: 12px; margin: 8px 0; overflow-x: auto; }
+  .md-render :global(.mermaid-block) { background: var(--surface); border-radius: 12px; padding: 12px; margin: 8px 0; overflow-x: auto; }
   .md-render :global(.mermaid-block svg) { max-width: 100%; }
   .csv-render { overflow: auto; }
   .csv-render :global(table) { border-collapse: collapse; font-size: var(--fs-ui); width: 100%; }
@@ -1797,7 +1797,7 @@
   .copy-toast {
     position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%);
     background: var(--bg); border: 1px solid var(--border); color: var(--accent); padding: 8px 20px;
-    border-radius: 8px; font-size: var(--fs-body); font-weight: 500;
+    border-radius: var(--ui-radius-row); font-size: var(--fs-body); font-weight: 500;
     box-shadow: 0 4px 16px rgba(0,0,0,0.3); pointer-events: none;
     animation: toast-fade 1.2s ease forwards;
   }
@@ -1825,7 +1825,7 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
   }
   .toast-open {
-    padding: 4px 12px; border: 1px solid var(--accent); border-radius: 6px;
+    padding: 4px 12px; border: 1px solid var(--accent); border-radius: var(--ui-radius-control);
     background: var(--accent-bg); color: var(--accent); font-size: var(--fs-ui);
     font-weight: 600; cursor: pointer; -webkit-tap-highlight-color: transparent;
     flex-shrink: 0;
