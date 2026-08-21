@@ -70,7 +70,7 @@
     position: fixed; z-index: 61; left: 50%; top: 50%; transform: translate(-50%, -50%);
     width: min(420px, calc(100vw / var(--ui-zoom, 1) - 32px));
     max-height: calc(100vh / var(--ui-zoom, 1) - 48px); overflow-y: auto;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 14px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 16px;
     box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5); padding: 18px;
     display: flex; flex-direction: column; gap: 10px;
   }

@@ -287,7 +287,7 @@
   .projects.dense .proj {
     /* 6 + `.proj-main`'s 4 = the 10px inset the whole sidebar shares, so the
        name lines up with the header above it and with the session rows below. */
-    background: none; border: none; border-radius: 9px; padding: 2px 6px; gap: 2px;
+    background: none; border: none; border-radius: 11px; padding: 2px 6px; gap: 2px;
   }
   .projects.dense .proj:hover { background: var(--surface2); }
   .projects.dense .proj.live { border: none; }

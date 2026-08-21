@@ -105,7 +105,7 @@
 <style>
   .ctx {
     position: fixed; z-index: 60; min-width: 156px; max-width: 260px;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 12px;
     box-shadow: 0 14px 38px rgba(0, 0, 0, 0.45); padding: 5px;
     display: flex; flex-direction: column; gap: 1px;
     /* Invisible until measured, so it cannot be seen at the wrong place. */

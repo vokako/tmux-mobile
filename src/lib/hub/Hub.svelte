@@ -1884,11 +1884,11 @@
   .hub-root.compact .feed { padding: 14px 10px 18px; gap: 9px; }
   .hub-root.compact .msg, .hub-root.compact .prompt { max-width: 91%; }
   .hub-root.compact .composer { padding: 8px 9px calc(8px + env(safe-area-inset-bottom)); }
-  .hub-root.compact .compose-shell { padding: 6px 9px; border-radius: 10px; }
+  .hub-root.compact .compose-shell { padding: 6px 9px; border-radius: 13px; }
   .hub-root.compact .to-chip { max-width: 110px; height: 28px; }
   .hub-root.compact .to-label { display: none; }
   .hub-root.compact .c-input { min-height: 30px; font-size: var(--fs-body); max-height: 40vh; }
-  .hub-root.compact .send-btn { width: 32px; height: 32px; right: 6px; bottom: 4.5px; border-radius: 10px; }
+  .hub-root.compact .send-btn { width: 32px; height: 32px; right: 6px; bottom: 4.5px; border-radius: 11px; }
   .hub-root.compact .chip-btn { min-height: 34px; }
   .hub-root.compact .s-head { min-height: 34px; }
   /* Drawer open: the conversation yields but stays present. */
@@ -1969,7 +1969,7 @@
   }
   .arch-bar:hover, .arch-bar.on { color: var(--text); }
   .arch { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
-  .arow { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: var(--surface); }
+  .arow { border: 1px solid var(--border); border-radius: 12px; padding: 8px 10px; background: var(--surface); }
   .ar-head { display: flex; gap: 8px; align-items: baseline; font-size: var(--fs-meta); color: var(--text3); }
   .ar-who { font-family: ui-monospace, Menlo, monospace; color: var(--text2); }
   /* An archived body is EVIDENCE, not prose: it keeps its newlines and is clamped
@@ -1982,7 +1982,7 @@
   .ar-acts { display: flex; gap: 6px; }
   .ar-acts button {
     display: flex; align-items: center; gap: 4px; background: none; cursor: pointer;
-    border: 1px solid var(--border); border-radius: 7px; color: var(--text3);
+    border: 1px solid var(--border); border-radius: 9px; color: var(--text3);
     font-size: var(--fs-meta); padding: 3px 8px;
   }
   .ar-acts button:hover { color: var(--text); border-color: var(--input-border); }
@@ -1994,7 +1994,7 @@
     position: relative; flex: none; display: flex; flex-direction: column;
     align-items: stretch; justify-content: center; gap: 1px; overflow: hidden;
     min-height: 34px; background: var(--surface); border: 1px solid var(--border);
-    border-radius: 9px; padding: 4px 10px 4px 5px; cursor: pointer; text-align: left;
+    border-radius: 11px; padding: 4px 10px 4px 5px; cursor: pointer; text-align: left;
     font-size: var(--fs-ui); color: var(--text2); transition: border-color var(--t-fast), color var(--t-fast);
     -webkit-tap-highlight-color: transparent;
   }
@@ -2040,7 +2040,7 @@
      clamp/flip cannot be seen happening. */
   .a-menu {
     position: fixed; z-index: 24; min-width: 176px; max-width: min(76vw, 280px);
-    background: var(--bg); border: 1px solid var(--border); border-radius: 11px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 13px;
     box-shadow: 0 12px 34px rgba(0,0,0,0.45); padding: 5px;
     display: flex; flex-direction: column; gap: 2px;
     opacity: 0; transition: opacity var(--t-fast) ease;
@@ -2057,7 +2057,7 @@
      --fs-ui read as oversized for a menu (owner, 2026-08-19). */
   .a-menu button {
     display: flex; align-items: center; gap: 8px; min-height: 36px; width: 100%; text-align: left;
-    background: none; border: none; border-radius: 8px; color: var(--text2);
+    background: none; border: none; border-radius: 9px; color: var(--text2);
     padding: 6px 10px; font-size: var(--ui-font-control); cursor: pointer; font-family: ui-monospace, Menlo, monospace;
   }
   /* Touch contract: a menu row is a tap target, so the phone keeps 44px rows
@@ -2165,7 +2165,7 @@
   .bubble {
     position: relative;
     background: var(--bubble-in); border: 1px solid var(--bubble-line);
-    border-radius: 12px 12px 12px 4px; padding: 8px 12px 9px;
+    border-radius: 16px 16px 16px 5px; padding: 8px 12px 9px;
     color: var(--text); font-size: var(--fs-body); line-height: 1.48;
     word-break: break-word; overflow-wrap: anywhere; cursor: text;
     box-shadow: 0 1px 2px rgba(0,0,0,0.10);
@@ -2175,7 +2175,7 @@
   .bubble:hover { border-color: var(--input-border); }
   .msg.me .bubble {
     background: var(--bubble-out); border-color: color-mix(in srgb, var(--accent) 18%, transparent);
-    border-radius: 12px 12px 4px 12px;
+    border-radius: 16px 16px 5px 16px;
   }
   /* Agent name heads the bubble (your own carries none — the right-aligned
      accent bubble already says "yours"). */
@@ -2247,7 +2247,7 @@
   }
   .m-acts button {
     display: inline-flex; align-items: center; gap: 4px; min-height: 26px;
-    background: var(--bubble-in); border: 1px solid var(--border); border-radius: 7px;
+    background: var(--bubble-in); border: 1px solid var(--border); border-radius: 9px;
     color: var(--text2); padding: 3px 10px; font-size: var(--fs-meta); cursor: pointer;
     box-shadow: 0 2px 8px rgba(0,0,0,0.18);
   }
@@ -2260,7 +2260,7 @@
      2026-08-20). Still a centred capsule: it is narration, not a speaker. */
   .sysline {
     align-self: center; display: flex; align-items: baseline; gap: 6px;
-    max-width: min(92%, 620px); padding: 4px 13px; border-radius: 8px;
+    max-width: min(92%, 620px); padding: 4px 13px; border-radius: 10px;
     color: var(--text2); background: color-mix(in srgb, var(--bubble-in) 88%, transparent);
     border: 1px solid var(--border2); box-shadow: 0 1px 2px rgba(0,0,0,0.06);
     font-size: var(--fs-sub); white-space: nowrap; overflow: hidden;
@@ -2348,7 +2348,7 @@
        which is the column the eye follows. ONE number, on the element they all
        inherit from — a second copy is how the column and the rows drift apart. */
     --lane-indent: 30px; --lane-pad-r: 10px;
-    background: var(--lane-bg); border: 1px solid var(--border2); border-radius: 9px;
+    background: var(--lane-bg); border: 1px solid var(--border2); border-radius: 12px;
     overflow: hidden;
   }
   .s-head {
@@ -2434,7 +2434,7 @@
   }
   .compose-shell {
     flex: 1; min-width: 0; position: relative;
-    padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 10px;
+    padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 14px;
     background: var(--bubble-in); box-shadow: 0 1px 3px rgba(0,0,0,0.10);
     transition: border-color var(--t-fast) ease, box-shadow var(--t-fast) ease;
   }
@@ -2455,7 +2455,7 @@
   .to-chip {
     display: flex; align-items: center; gap: 4px; height: 26px;
     background: var(--accent-bg); color: var(--accent); border: 1px solid transparent;
-    border-radius: 7px; padding: 0 9px; font-size: var(--fs-sub); font-weight: 650;
+    border-radius: 9px; padding: 0 9px; font-size: var(--fs-sub); font-weight: 650;
     cursor: pointer; max-width: min(34vw, 220px);
   }
   /* Broadcast and room-note are NOT the default state, so they do not wear the
@@ -2471,12 +2471,12 @@
   .to-menu {
     position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 12;
     min-width: 168px; max-height: 46vh; overflow-y: auto;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 11px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 13px;
     box-shadow: 0 12px 34px rgba(0,0,0,0.45); padding: 5px; display: flex; flex-direction: column; gap: 2px;
   }
   .to-menu button {
     display: flex; align-items: center; gap: 7px; min-height: 36px; width: 100%; text-align: left;
-    background: none; border: none; border-radius: 8px; color: var(--text2);
+    background: none; border: none; border-radius: 9px; color: var(--text2);
     padding: 6px 10px; font-size: var(--ui-font-control); cursor: pointer; font-family: ui-monospace, Menlo, monospace;
   }
   .to-menu button:hover { background: var(--surface2); color: var(--text); }
@@ -2490,13 +2490,13 @@
   .cmd-menu {
     position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; z-index: 14;
     max-height: 44vh; overflow-y: auto; scrollbar-width: thin;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 11px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 13px;
     box-shadow: 0 12px 34px rgba(0,0,0,0.45); padding: 5px;
     display: flex; flex-direction: column; gap: 2px;
   }
   .cmd-opt {
     display: flex; align-items: baseline; gap: 10px; width: 100%; text-align: left;
-    background: none; border: none; border-radius: 8px; color: var(--text2);
+    background: none; border: none; border-radius: 9px; color: var(--text2);
     padding: 6px 10px; font-size: var(--ui-font-control); cursor: pointer;
     font-family: ui-monospace, Menlo, monospace;
   }
@@ -2541,7 +2541,7 @@
   .send-btn {
     position: absolute; right: 7px; bottom: 5.5px;
     width: 30px; height: 30px; display: grid; place-items: center;
-    padding: 0; border: none; border-radius: 9px; cursor: pointer;
+    padding: 0; border: none; border-radius: 11px; cursor: pointer;
     background: var(--accent-fill);
     color: var(--accent-fill-ink);
     transition: filter var(--t-fast) ease, background var(--t-fast) ease, color var(--t-fast) ease, transform var(--t-fast) ease;
@@ -2561,7 +2561,7 @@
   .start-list { display: flex; flex-direction: column; gap: 5px; }
   .start-row {
     display: flex; align-items: center; gap: 8px; min-height: 44px; width: 100%; text-align: left;
-    background: var(--surface); border: 1px solid var(--border); border-radius: 11px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
     color: var(--text); padding: 8px 11px; font-size: var(--fs-ui); cursor: pointer;
   }
   .start-row:hover { border-color: var(--accent); background: var(--accent-bg); }
@@ -2575,7 +2575,7 @@
   .drawer-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--bg2); border-bottom: 1px solid var(--border); }
   .win-list { display: flex; gap: 5px; overflow-x: auto; scrollbar-width: none; }
   .win-list::-webkit-scrollbar { display: none; }
-  .win-pill { display: flex; align-items: center; gap: 5px; flex: none; background: var(--surface); border: 1px solid var(--border); border-radius: 7px; color: var(--text2); padding: 4px 9px; font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); cursor: pointer; }
+  .win-pill { display: flex; align-items: center; gap: 5px; flex: none; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; color: var(--text2); padding: 4px 9px; font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); cursor: pointer; }
   .win-pill.cur { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
   .direct-tag { font-size: var(--fs-micro); color: var(--text3); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; margin-left: 3px; }
   .term-body { flex: 1; min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; }
@@ -2592,7 +2592,7 @@
   .dlg {
     position: fixed; z-index: 31; left: 50%; top: 50%; transform: translate(-50%, -50%);
     width: min(440px, calc(100vw / var(--ui-zoom, 1) - 32px)); max-height: calc(100vh / var(--ui-zoom, 1) - 48px); overflow-y: auto;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 14px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 15px;
     box-shadow: 0 18px 60px rgba(0,0,0,0.5); padding: 18px; display: flex; flex-direction: column; gap: 10px;
   }
   .dlg h2 { margin: 0 0 4px; font-size: var(--fs-title); }  /* Phone: dialogs become bottom sheets — reachable with a thumb, and they
@@ -2605,10 +2605,10 @@
   }
   .dlg.sheet .dlg-agents { max-height: 46vh; overflow-y: auto; }
   .dlg.sheet .agent-pick, .dlg.sheet input, .dlg.sheet .dlg-actions button { min-height: 44px; }
-  .dlg input { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 9px; color: var(--text); padding: 8px 12px; font-size: var(--fs-ui); outline: none; }
+  .dlg input { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 11px; color: var(--text); padding: 8px 12px; font-size: var(--fs-ui); outline: none; }
   .dlg input:focus { border-color: var(--accent); }
   .dlg-agents { display: flex; flex-direction: column; gap: 5px; }
-  .agent-pick { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; color: var(--text2); padding: 8px 11px; font-size: var(--fs-ui); cursor: pointer; text-align: left; }
+  .agent-pick { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 11px; color: var(--text2); padding: 8px 11px; font-size: var(--fs-ui); cursor: pointer; text-align: left; }
   .agent-pick.sel { border-color: var(--accent); color: var(--text); background: var(--accent-bg); }
   .agent-pick :global(svg) { margin-left: auto; color: var(--accent); }
   .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }

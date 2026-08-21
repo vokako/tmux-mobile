@@ -1302,11 +1302,18 @@ status ring in that foot, ALWAYS: an empty circle until the agent's prompt
 hook echoes the line back, a green check once it does — the receipt is a state
 change, not an appearing element.
 
-Corner radii are one small scale, tuned down on owner feedback (大圆角 read as
-toy-like): bubbles 12px with a 4px directional corner, the composer capsule
-10px, roster chips 9px, system pills 8px, recipient chip and message actions
-7px. On engines that know `corner-shape` (Chromium 139+), every rounded
-RECTANGLE in the app draws those same radii as CONTINUOUS iOS-style corners —
+Corner radii are one small scale. It was first tuned DOWN (大圆角 read as
+toy-like on plain circular arcs), then back UP one step once the corners
+became continuous — a squircle's curvature concentrates at the corner, so the
+same radius reads visibly tighter than a circular arc, and the tightened
+scale suddenly read as "too small" (owner, 2026-08-21: "现在圆角有一点太小
+了"). Current scale: bubbles 16px with a 5px directional corner, the composer
+capsule 14px (13px compact), menus/dialogs 13–16px, cards/lanes/rows 11–12px
+(--ui-radius-panel: 12px), chips and actions 9–11px (--ui-radius-control:
+9px); micro tags (4–6px) stay put — at that size the arc and the
+superellipse are the same pixels. On engines that know `corner-shape`
+(Chromium 139+), every rounded RECTANGLE draws those radii as CONTINUOUS
+iOS-style corners —
 `corner-shape: squircle`, ONE policy block in app.css listing the surfaces by
 component ("有质感一些，类似于 iPad、iOS 或 Mac 上的应用。尤其是标签的圆角过渡",
 owner 2026-08-20; it lives there because svelte-check's CSS service does not

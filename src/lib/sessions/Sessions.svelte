@@ -685,9 +685,9 @@
   /* A session row is a `.side-row`, not a card: 9px radius, no border, and an
      active row carries only the accent BACKGROUND (the accent outline was the
      last card tell left in this column — Chat's open row has none). */
-  .sessions.sidebar-mode .session { border-radius: 9px; }
+  .sessions.sidebar-mode .session { border-radius: 11px; }
   .sessions.sidebar-mode .session.active { border-color: transparent; }
-  .sessions.sidebar-mode .session-row { padding: 8px 10px; border-radius: 9px; }
+  .sessions.sidebar-mode .session-row { padding: 8px 10px; border-radius: 11px; }
   .content {
     display: flex;
     flex-direction: column;

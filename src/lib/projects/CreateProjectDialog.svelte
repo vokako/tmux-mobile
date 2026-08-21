@@ -100,7 +100,7 @@
   .dlg {
     position: fixed; z-index: 31; top: 50%; left: 50%; transform: translate(-50%, -50%);
     width: min(440px, calc(100vw - 32px)); max-height: min(80vh, 640px); overflow-y: auto;
-    background: var(--bg2); border: 1px solid var(--border); border-radius: 13px;
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 15px;
     padding: 18px; display: flex; flex-direction: column; gap: 9px;
     box-shadow: 0 18px 48px rgba(0,0,0,0.35);
   }
@@ -108,11 +108,11 @@
   /* Phone: the dialog becomes a bottom sheet — reachable with a thumb. */
   .dlg.sheet {
     top: auto; left: 0; right: 0; bottom: 0; transform: none; width: auto;
-    border-radius: 13px 13px 0 0; padding-bottom: calc(18px + env(safe-area-inset-bottom));
+    border-radius: 15px 15px 0 0; padding-bottom: calc(18px + env(safe-area-inset-bottom));
   }
   .dlg.sheet .dlg-agents { max-height: 46vh; overflow-y: auto; }
   .dlg.sheet .agent-pick, .dlg.sheet input, .dlg.sheet .dlg-actions button { min-height: 44px; }
-  .dlg input { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 9px; color: var(--text); padding: 8px 12px; font-size: var(--fs-ui); outline: none; }
+  .dlg input { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 11px; color: var(--text); padding: 8px 12px; font-size: var(--fs-ui); outline: none; }
   .dlg input:focus { border-color: var(--accent); }
   .dlg-h { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-meta); text-transform: uppercase; letter-spacing: 1.4px; color: var(--text3); margin-top: 4px; }
   .dlg-agents { display: flex; flex-direction: column; gap: 5px; }

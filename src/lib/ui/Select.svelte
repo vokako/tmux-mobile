@@ -129,7 +129,7 @@
   .sel-trigger {
     display: flex; align-items: center; gap: 6px; width: 100%;
     background: var(--input-bg); border: 1px solid var(--input-border);
-    border-radius: 9px; padding: 8px 12px; color: var(--text);
+    border-radius: 11px; padding: 8px 12px; color: var(--text);
     font-size: var(--fs-body); font-family: inherit;
     /* `normal`, not a ratio: an <input> computes its line box from `normal`,
        so matching the keyword is what makes the two boxes the same height.
@@ -151,7 +151,7 @@
   /* Same popover dialect as the Hub's menus: one menu language app-wide. */
   .sel-menu {
     position: fixed; z-index: 40; max-height: 46vh; overflow-y: auto;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 11px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 13px;
     box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45); padding: 5px;
     display: flex; flex-direction: column; gap: 2px;
     opacity: 0; transition: opacity var(--t-fast) ease;
