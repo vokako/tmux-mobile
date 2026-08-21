@@ -690,36 +690,28 @@ behind for good — and the text is capped at `DRAFT_MAX`, because a draft is a
 convenience, not a document, and a pasted file would fill localStorage and take the
 rest of the Hub's preferences down with it.
 
-## Deleting a message is two steps
+## Messages are not deletable in the UI (the archive was tried, and retired)
 
-A transcript is a record, so a misclick on one should be recoverable — and a
-transcript you cannot correct fills up with test debris (owner, 2026-08-19: "这些
-都遗留在了我们的对话消息历史里，请帮我把它们删掉吧 … 我点击一下删除，只是把它
-archive 掉，在 archive 里面删除，才会彻底删掉"). So:
+The room is the record. A two-step archive existed for two days (2026-08-19 →
+21): tap a message → Archive hid it (`hub_msg_archive`, restore free), a bar
+above the feed opened the archive view, and deleting it THERE (`hub_msg_purge`)
+was the confirmed, irreversible step. The owner then asked what it was for and
+had it removed ("没有消息删除 不需要这个功能，彻底去掉吧", 2026-08-21): the
+extra Archive verb on every message read as clutter, and once projects got
+their own recycle bin the message-level one had no job left. A tapped message
+now offers exactly Copy and Raw.
 
-- **Archive hides it** (`hub_msg_archive`). The message never leaves the room's own
-  store, which is what makes a restore free: `hub_log` filters the history against
-  `projects::archived_ids` on the way out. No confirmation — the whole point of the
-  first step is that it is the safe one.
-- **Deleting it IN the archive forgets it** (`hub_msg_purge`). This is the only
-  irreversible verb of the three, so it is the only one that asks, and the copy
-  names what is lost and what survives.
-- `hub_msg_restore` puts it back, and `hub_archive` lists what is hidden.
+What remains, deliberately:
 
-The archive state lives in OUR database (`msg_archive`, state.db v10), not in the
-bus: `agora` is a faithful copy of an upstream crate and hiding a message is this
-app's idea. The row carries a SNAPSHOT of the message (sender, ts, body), so the
-archive view is self-contained — no join across two databases, no dependence on how
-far back the room history was fetched — and a restore is just dropping the row.
-Purge is the one place that reaches into team.db, through the JSON-only
-`TeamBridge::delete_messages` (the `server/` module must never name an agora type);
-it deletes the messages FIRST and drops the archive rows after, so a failure leaves
-the message still listed and retryable rather than orphaned.
-
-Client side the archive is a VIEW of the feed area, not a page: a bar appears above
-the conversation only when something is in there (an empty archive is not a place to
-visit), and each row shows the body as pre-wrapped, line-clamped evidence rather
-than rendered markdown — what you are about to forget should be what you see.
+- **The server API is intact** — `hub_msg_archive` / `hub_msg_restore` /
+  `hub_msg_purge` / `hub_archive`, the `msg_archive` table (state.db v10, with
+  its message snapshot), and `hub_log`'s filter against
+  `projects::archived_ids`. Hiding a message is still something the API can do;
+  this build's client just never calls it. Purge still reaches team.db only
+  through the JSON-only `TeamBridge::delete_messages`, deleting messages FIRST
+  and dropping archive rows after, so a failure stays retryable.
+- Anything archived by an older client stays hidden from `hub_log` — retiring
+  the UI must not resurface what someone chose to hide.
 
 ## Right-click, and the phone's long press
 
