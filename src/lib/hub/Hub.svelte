@@ -2387,10 +2387,17 @@
     overflow-x: hidden;
   }
   /* Ten rows, then scroll. Each step is exactly one line (rows never wrap), so
-     rows and lines are the same thing here. */
+     rows and lines are the same thing here.
+     overscroll-behavior stays AUTO on purpose: when the pointer/finger is over
+     this inner scroller and it reaches its top or bottom, the scroll must
+     CHAIN to the feed — `contain` trapped the gesture and the page "stuck"
+     the moment you scrolled across a tool group (owner, 2026-08-21: "手势点在
+     工具调用框框，就卡住了滚不上去了"). The feed itself never flings from
+     this: chaining only starts at the lane's edge, which is exactly the owner's
+     rule ("小窗口到顶，就继续滚外部的消息框"). */
   .s-body.capped {
     max-height: calc(var(--steps-rows) * (1.5em + 2px) + 11px);
-    overflow-y: auto; overscroll-behavior: contain;
+    overflow-y: auto;
     scrollbar-width: thin;
   }
   .s-all {

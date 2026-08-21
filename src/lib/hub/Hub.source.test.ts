@@ -66,6 +66,11 @@ test('the row cap is still expressed in rows, not pixels', () => {
   // If this becomes a pixel height it stops following the type scale, and the
   // "ten rows" promise silently becomes "some height".
   assert.match(rule('.s-body.capped'), /max-height:\s*calc\(var\(--steps-rows\)/u);
+  // And the inner scroller CHAINS at its edges: `overscroll-behavior: contain`
+  // trapped the gesture, so scrolling across a tool group stuck the whole feed
+  // (owner, 2026-08-21: "手势点在工具调用框框，就卡住了滚不上去了"). The one
+  // legitimate contain is the held-ask's own scroller, pinned elsewhere.
+  assert.doesNotMatch(rule('.s-body.capped'), /overscroll-behavior/u);
 });
 
 test('the lane offsets stay named, and named once', () => {
