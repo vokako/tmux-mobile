@@ -41,11 +41,13 @@ html {
 /* ─── Theme tokens ─────────────────────────────────────────────────────── */
 
 html[data-theme="dark"] {
-  /* Neutral near-black, the iOS/macOS dark family (#1c1c1e's direction at
-     this app's depth). The old #0a0a0f/#0f0f18/#12121a leaned blue-purple —
-     terminal-cyberpunk rather than modern-Apple (owner, 2026-08-20: "更像是
-     现代的 Mac 或 iPad iOS 应用"). Depth steps stay: bg < bg2 < bg3. */
-  --bg: #0b0b0d; --bg2: #121215; --bg3: #161619;
+  /* The BRAND canvas — the blue-leaning near-black triplet is the app's
+     identity and stays (owner, 2026-08-21: "系统配色不要改，就用原来品牌色
+     为主"; a 2026-08-20 attempt to neutralize it toward iOS dark was
+     reverted the next morning). Modernity comes from the TRIM: continuous
+     corners, accent-driven tints, surface elevation — not from repainting
+     the palette. */
+  --bg: #0a0a0f; --bg2: #0f0f18; --bg3: #12121a;
   --text: #e2e8f0; --text2: rgba(226,232,240,0.5); --text3: rgba(226,232,240,0.45);
   --border: rgba(255,255,255,0.06); --border2: rgba(255,255,255,0.04);
   --surface: rgba(255,255,255,0.03); --surface2: rgba(255,255,255,0.06);
@@ -70,15 +72,14 @@ html[data-theme="light"] {
   --bg: #f5f5f7; --bg2: #eeeef0; --bg3: #e8e8ec;
   --text: #1a1a2e; --text2: rgba(26,26,46,0.55); --text3: rgba(26,26,46,0.35);
   --border: rgba(0,0,0,0.08); --border2: rgba(0,0,0,0.05);
-  /* Elevation goes UP in light mode, the Apple grouped-list direction: a
-     card/bar is a translucent WHITE lift on the #f5f5f7 canvas, not a grey
-     wash pressed into it (owner, 2026-08-20: modern Mac/iPad look). Hover
-     (--surface2) stays a grey wash — grey-on-white hover is exactly the
-     platform convention. */
+  /* TRIM, not palette: elevation goes UP in light mode, the Apple
+     grouped-list direction — a card/bar is a translucent WHITE lift on the
+     #f5f5f7 canvas, not a grey wash pressed into it. Hover (--surface2)
+     stays a grey wash; grey-on-white hover is the platform convention.
+     The BRAND accent stays #0088cc (owner, 2026-08-21: an iOS-blue swap
+     was reverted — "就用原来品牌色为主"). */
   --surface: rgba(255,255,255,0.72); --surface2: rgba(0,0,0,0.04);
-  /* iOS system blue. The old #0088cc sat between brand-cyan and Apple blue
-     and read as neither; dark mode keeps the electric cyan (the brand). */
-  --accent: #007aff; --accent-bg: rgba(0,122,255,0.09); --accent-glow: rgba(0,122,255,0.07);
+  --accent: #0088cc; --accent-bg: rgba(0,136,204,0.08); --accent-glow: rgba(0,136,204,0.06);
   --accent-fill: var(--accent);
   --accent-fill-ink: color-mix(in srgb, var(--bg) 30%, white);
   --accent-line: var(--accent);

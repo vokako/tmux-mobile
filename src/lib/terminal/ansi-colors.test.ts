@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { adaptAnsiColors, contrastRatio, type AnsiTheme } from './ansi-colors.ts';
 
 const darkTheme: AnsiTheme = {
-  background: '#0b0b0d', foreground: '#c9d1d9', black: '#0b0b0d', red: '#ff5050', green: '#4ade80', yellow: '#fbbf24', blue: '#00d4ff', magenta: '#c084fc', cyan: '#22d3ee', white: '#c9d1d9', brightBlack: '#484848', brightRed: '#ff6b6b', brightGreen: '#6ee7a0', brightYellow: '#fcd34d', brightBlue: '#38bdf8', brightMagenta: '#d8b4fe', brightCyan: '#67e8f9', brightWhite: '#f1f5f9',
+  background: '#0a0a0f', foreground: '#c9d1d9', black: '#0a0a0f', red: '#ff5050', green: '#4ade80', yellow: '#fbbf24', blue: '#00d4ff', magenta: '#c084fc', cyan: '#22d3ee', white: '#c9d1d9', brightBlack: '#484848', brightRed: '#ff6b6b', brightGreen: '#6ee7a0', brightYellow: '#fcd34d', brightBlue: '#38bdf8', brightMagenta: '#d8b4fe', brightCyan: '#67e8f9', brightWhite: '#f1f5f9',
 };
 const lightTheme: AnsiTheme = {
-  background: '#f5f5f7', foreground: '#1a1a2e', black: '#f5f5f7', red: '#dc2626', green: '#16a34a', yellow: '#ca8a04', blue: '#007aff', magenta: '#9333ea', cyan: '#0891b2', white: '#1a1a2e', brightBlack: '#9ca3af', brightRed: '#ef4444', brightGreen: '#22c55e', brightYellow: '#eab308', brightBlue: '#2563eb', brightMagenta: '#a855f7', brightCyan: '#06b6d4', brightWhite: '#0f0f1a',
+  background: '#f5f5f7', foreground: '#1a1a2e', black: '#f5f5f7', red: '#dc2626', green: '#16a34a', yellow: '#ca8a04', blue: '#0088cc', magenta: '#9333ea', cyan: '#0891b2', white: '#1a1a2e', brightBlack: '#9ca3af', brightRed: '#ef4444', brightGreen: '#22c55e', brightYellow: '#eab308', brightBlue: '#2563eb', brightMagenta: '#a855f7', brightCyan: '#06b6d4', brightWhite: '#0f0f1a',
 };
 
 type Rgb = [number, number, number];
