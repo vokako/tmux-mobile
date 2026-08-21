@@ -2440,8 +2440,12 @@
 
   .input-area {
     flex-shrink: 0;
+    /* Plain 10px, no env(safe-area-inset-bottom): this bar sits above the
+       app's TAB BAR, which already pads for the gesture bar (--sab) — the
+       same double-inset that opened a band under the chat composer (owner,
+       2026-08-21: "terminal的快捷键区和下方标签按钮区上下间距也有点大").
+       Keyboard-open keeps its own tighter override below. */
     padding: 0 10px 10px;
-    padding-bottom: max(10px, env(safe-area-inset-bottom));
   }
   :global(html.keyboard-open) .input-area { padding: 0 4px 2px; }
 

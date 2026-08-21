@@ -1886,7 +1886,9 @@
   .hub-root.compact .page-head .chip-btn::before { content: ''; position: absolute; inset: -8px; }
   .hub-root.compact .page-head h1 { font-size: var(--fs-title); }
   .hub-root.compact .h1-edit { font-size: var(--fs-title); }
-  .hub-root.compact .feed { padding: 14px 10px 18px; gap: 9px; }
+  /* Bottom padding tight against the composer: the capsule brings its own 8px
+     (owner, 2026-08-21: "最后一个消息框，和发送框中间的高度也有点大"). */
+  .hub-root.compact .feed { padding: 14px 10px 6px; gap: 9px; }
   .hub-root.compact .msg, .hub-root.compact .prompt { max-width: 91%; }
   /* No env(safe-area-inset-bottom) here: the composer does not sit at the
      screen's bottom — the TAB BAR below it does, and it already pads for the
