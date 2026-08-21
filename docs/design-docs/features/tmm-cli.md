@@ -1138,6 +1138,20 @@ alone on purpose: **your files** — we only ever delete inside `.tmm/agents/` �
 and **the chat history**, because the room is the record of what happened and
 rooms are keyed by session name.
 
+**In the chat UI, delete is a RECYCLE BIN, not destruction** (owner,
+2026-08-21: "把project里删掉进入archive … 相当于回收站的功能，在archive里可以
+彻底删除project" — the same two-step rule messages already follow: hide first,
+destroy there). The header's Delete closes a live session and ARCHIVES the
+declaration (`project_down` + `project_archive`); the project drops into a
+folded "回收站 · n" section at the sidebar's bottom, which exists only while
+non-empty. Restore is one tap and asks nothing (it destroys nothing — the
+declaration comes back, Open rebuilds the session, agents resume their
+conversations). The irreversible `project_delete` is reachable ONLY from
+inside the bin, behind the one confirmation that means it. Archived projects
+are never re-adopted by the capturer, which is what keeps the bin stable. The
+raw CLI keeps the sharper verbs as-is: `tmm project archive|delete` map to the
+same two steps.
+
 Interrupt moved server-side (`hub_agent_interrupt`) when the CLI gained it:
 one implementation types the named `Escape` key, so the button and the command
 cannot drift and the managed-agent gate is enforced in the same place as

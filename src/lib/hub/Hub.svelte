@@ -22,7 +22,7 @@
   import { tick as settled } from 'svelte';
   import { t, i18n } from '../core/i18n.svelte.ts';
   import {
-    projectList, projectUp, projectDown, projectDelete, projectCreate, projectRename, listSessionsWithPanes,
+    projectList, projectUp, projectDown, projectDelete, projectArchive, projectCreate, projectRename, listSessionsWithPanes,
     hubPost, hubCommand, modelsList, hubLog, hubMsgArchive, hubMsgRestore, hubMsgPurge, hubArchive, hubRooms, hubAgents, hubSpawn, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
@@ -50,6 +50,10 @@
   const compact = $derived(mobile || narrow);
 
   let rows = $state([]);            // ProjectRow[]
+  // The recycle bin: archived projects, folded at the sidebar's bottom.
+  let trash = $state([]);           // ProjectRow[] (archived)
+  let trashOpen = $state(false);
+  let trashAsk = $state(null);      // row pending PERMANENT delete (the only irreversible step)
   let panes = $state([]);           // all tmux panes
   let selected = $state('');        // selected project session
   let agents = $state([]);          // HubAgent[] for selected session (all windows)
@@ -100,11 +104,16 @@
       // The sidebar is ordered by CONVERSATION, so the list needs one more fact:
       // when each room last had a message. One grouped query server-side.
       const [{ projects }, sp, talk] = await Promise.all([
-        projectList(),
+        projectList(true),
         listSessionsWithPanes(),
         hubRooms().then((r) => r.rooms ?? {}).catch(() => ({})),
       ]);
-      rows = sortRows(projects, talk);
+      // Archived projects are the RECYCLE BIN (owner, 2026-08-21: "相当于回收
+      // 站的功能"): they leave the working list and wait, restorable, in the
+      // collapsed section at the bottom of the sidebar.
+      const all = projects ?? [];
+      trash = all.filter((r) => r.project.archived);
+      rows = sortRows(all.filter((r) => !r.project.archived), talk);
       panes = sp.panes ?? [];
       // First load: go back to the conversation that was open, and only fall
       // back to the top row when that project is gone.
@@ -862,10 +871,22 @@
     try {
       if (kind === 'down' || kind === 'delete') {
         const row = rows.find((r) => r.project.session === selected);
-        if (row) await (kind === 'delete' ? projectDelete(row.project.id) : projectDown(row.project.id));
+        if (row) {
+          if (kind === 'delete') {
+            // "Delete" is the RECYCLE BIN, not destruction (owner, 2026-08-21:
+            // "把project里删掉进入archive … 在archive里可以彻底删除"): close the
+            // session if one is live, then archive the declaration. Everything
+            // survives — restore is one tap in the trash section, and the only
+            // irreversible verb lives THERE, behind its own confirmation.
+            if (row.live) await projectDown(row.project.id).catch(() => {});
+            await projectArchive(row.project.id, true);
+          } else {
+            await projectDown(row.project.id);
+          }
+        }
         if (kind === 'delete') {
-          // The project is gone: land on whatever is left rather than an
-          // empty conversation pointing at nothing.
+          // The project left the working list: land on whatever is left rather
+          // than an empty conversation pointing at nothing.
           selected = '';
         }
       } else if (kind === 'remove') {
@@ -880,6 +901,28 @@
       acting = false;
       pendingAct = null;
     }
+  }
+
+  /** Out of the recycle bin: un-archive. Destroys nothing, so it asks nothing
+   * (the same rule as restoring a message from the archive). */
+  async function restoreProject(row) {
+    try {
+      await projectArchive(row.project.id, false);
+      await reload();
+    } catch (e) { console.warn('restore project failed', e); }
+  }
+
+  /** The ONLY irreversible project verb, so the only one that confirms from
+   * the trash: remove the managed agents' homes and forget the declaration.
+   * User files and the chat history survive even this (server contract). */
+  async function purgeProject() {
+    const row = trashAsk;
+    trashAsk = null;
+    if (!row) return;
+    try {
+      await projectDelete(row.project.id);
+      await reload();
+    } catch (e) { console.warn('purge project failed', e); }
   }
 
   /** Bring a stopped agent back. Same RPC as a restart — it tolerates there
@@ -1192,6 +1235,34 @@
         <button class="side-row add" onclick={() => { createOpen = true; sideOpen = false; }}>
           <Icon name="plus" size={13} />{t('projectNew')}
         </button>
+        <!-- ── The recycle bin. "Delete" moves a project here (session closed,
+             declaration kept); this folded section is the way back — restore
+             is one tap and asks nothing — and the way OUT: permanent delete
+             lives only here, behind the one confirmation that means it
+             (owner, 2026-08-21: "相当于回收站的功能，在archive里可以彻底删除
+             project"). Hidden entirely while empty: an empty bin is not a
+             place to visit. -->
+        {#if trash.length}
+          <button class="side-row add trash-bar" onclick={() => trashOpen = !trashOpen}>
+            <Icon name={trashOpen ? 'chevron-down' : 'trash'} size={13} />
+            {t('hubTrashBar').replace('{n}', String(trash.length))}
+          </button>
+          {#if trashOpen}
+            {#each trash as r (r.project.id)}
+              <div class="side-row trash-row" title={r.project.path}>
+                <span class="p-name trash-name">{r.project.name}</span>
+                <button class="t-act" title={t('hubRestore')} aria-label={t('hubRestore')}
+                  onclick={() => restoreProject(r)}>
+                  <Icon name="refresh" size={12} />
+                </button>
+                <button class="t-act danger" title={t('hubPurge')} aria-label={t('hubPurge')}
+                  onclick={() => trashAsk = r}>
+                  <Icon name="trash" size={12} />
+                </button>
+              </div>
+            {/each}
+          {/if}
+        {/if}
       </div>
     </aside>
     {/if}
@@ -1823,6 +1894,14 @@
     confirmLabel={t('hubPurgeGo')}
     onconfirm={() => purgeMsg(purgeAsk?.id)} oncancel={() => (purgeAsk = null)} />
 
+  <!-- Forgetting a PROJECT for good — only reachable from the recycle bin,
+       the same two-step rule as messages: hide first, destroy there. -->
+  <ConfirmDialog open={!!trashAsk} compact={compact}
+    title={trashAsk ? t('projectPurgeTitle').replace('{name}', trashAsk.project.name) : ''}
+    note={t('projectPurgeNote')}
+    confirmLabel={t('hubPurgeGo')}
+    onconfirm={purgeProject} oncancel={() => (trashAsk = null)} />
+
   {#if pickerOpen}
     <!-- ── Start a team: several agents at once ── -->
     <div class="dlg-backdrop" onclick={() => pickerOpen = false} role="presentation"></div>
@@ -1957,6 +2036,18 @@
   .side-scrim { position: fixed; inset: 0; z-index: 25; background: rgba(0,0,0,0.45); }
   .side-scroll { flex: 1; overflow-y: auto; padding: 8px; }
   .p-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; }
+  /* The recycle bin's rows: quieter than a live project (they are parked, not
+     open-able), with the two verbs inline — restore free, purge confirmed. */
+  .trash-row { cursor: default; color: var(--text3); }
+  .trash-row:hover { background: var(--surface); }
+  .trash-name { font-weight: 450; }
+  .t-act {
+    display: grid; place-items: center; width: 24px; height: 24px; flex: none;
+    background: none; border: none; border-radius: var(--ui-radius-control);
+    color: var(--text3); cursor: pointer;
+  }
+  .t-act:hover { background: var(--surface2); color: var(--text); }
+  .t-act.danger:hover { color: var(--danger); }
 
   .mid { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   /* Fits → shows whole; doesn't fit → pans (wheelX action), NEVER an ellipsis.
