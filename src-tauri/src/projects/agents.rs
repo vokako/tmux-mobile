@@ -69,6 +69,17 @@ const KNOWN: &[KnownAgent] = &[
         resume_id: Some("codex resume {id}"),
     },
     KnownAgent {
+        // grok 1.0.5, flags from its own --help: `-c/--continue` — "Continue
+        // the most recent session for the current working directory" (cwd-
+        // scoped, so safe, unlike codex's machine-wide --last); `--resume <id>`
+        // for an exact session (UUID-shaped values always mean ids).
+        backend: "grok",
+        needle: "grok",
+        launch: "grok",
+        resume_recent: Some("grok --continue"),
+        resume_id: Some("grok --resume {id}"),
+    },
+    KnownAgent {
         backend: "openclaw",
         needle: "openclaw",
         launch: "openclaw",

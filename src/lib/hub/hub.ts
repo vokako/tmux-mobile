@@ -83,6 +83,7 @@ export function backendColor(backend: string | null | undefined): string {
     case 'claude': return '#fb923c';
     case 'codex': return '#94a3b8';
     case 'kimi': return '#4ade80';
+    case 'grok': return '#e2e8f0';
     default: return '#818cf8';
   }
 }

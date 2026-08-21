@@ -31,7 +31,7 @@ tmm done [summary]                   completion; also posts "✔ done — summar
 # human-facing AND agent-facing — self-management
 tmm agent list                       windows + agent detection + derived state
 tmm project list                     ● live / ○ down, session + path
-tmm project create <path> [--name n] [--session s] [--with-agent kiro|claude|codex]
+tmm project create <path> [--name n] [--session s] [--with-agent kiro|claude|codex|grok]
 tmm project up|down|archive <session>
 tmm project rename <session> --name "New name"   the LABEL only (session unchanged)
 tmm registry list                    centrally-defined agents
@@ -390,6 +390,42 @@ mirrors the rest of the rendering.
 A CLI reads its config at launch, so patching the file cannot repair a RUNNING
 agent — restart is the only path, which is what the roster's restart button is
 for.
+
+## The grok backend (grok 1.0.5, added 2026-08-21)
+
+The fourth backend, aligned with kiro's shape and verified live (an isolated
+home spawned from the hub answered a real turn on the owner's Bedrock custom
+model, hooks fired, `tmm done` posted, state derived):
+
+- **Isolation**: `GROK_HOME=<ws>/.tmm/agents/<name>/`, like KIRO_HOME.
+- **Identity**: `agents/<name>.md` — YAML frontmatter (`name`, `description`,
+  and the MODEL, honored from frontmatter; same lesson as kiro, nothing on
+  the launch line) with the system prompt as the body; launched as
+  `grok --always-approve --agent <name>`. Skills ride the prompt as the
+  compact index, like claude.
+- **Telemetry**: `hooks/tmux-mobile.json` in the home — that home's "global"
+  hook scope, always trusted. Five events: UserPromptSubmit (prompt +
+  same-turn-dedup reset; payload wraps the text in `<user_query>` tags),
+  Pre/PostToolUse (camelCase keys: `toolName`/`toolInput`), Stop,
+  StopFailure. **A grok `stop` is a completion ONLY with
+  `reason: "end_turn"`** — a second observe-only stop fires at session
+  teardown (`shutdown`/`channel_closed`) and reading it as a completion
+  would double-post; the reply rides `lastAssistantMessage`.
+- **Auth carries, prefs do not**: grok auth is HOME-scoped (`auth.json`,
+  plus custom `[model.*]` entries whose keys ride env vars), so
+  `grok_config_toml` copies the user's `[models]`/`[model.*]` catalog (and
+  `auth.json` when present) into the isolated home — without it the agent is
+  a login screen. User hooks/UI/MCP deliberately do NOT carry. TRAP, paid
+  for once: toml 1.x parses a DOCUMENT via `toml::Table`; `Value::from_str`
+  fails on any real config ("expected nothing") and the catalog silently
+  vanished. `[folder_trust] enabled = false` keeps the TUI from parking at
+  a trust prompt nobody can see.
+- **Resume**: `--continue` is cwd-scoped (safe, unlike codex `--last`);
+  `--resume <id>` exact, id from the hooks' `sessionId`.
+- **Models**: `grok models` enumerates (bullet list, `*` marks the default),
+  so grok ids validate like kiro's; custom models appear by name.
+- **Vitals**: none — the sniffer is kiro-specific and a missing reading is
+  the documented degradation.
 
 **Pane activity is not a work signal for a window that has hooks**, and that
 correction is the point of this rewrite. It used to be: `window_activity` newer

@@ -75,6 +75,7 @@ pub struct HookStatus {
     pub claude: HookBackendStatus,
     pub codex: HookBackendStatus,
     pub kiro: HookBackendStatus,
+    pub grok: HookBackendStatus,
 }
 
 #[derive(Default)]
@@ -385,6 +386,10 @@ impl AgentNotificationHub {
                 installed: json_file_contains(&kiro_path(), OWNER_MARKER)
                     || json_file_contains(&kiro_default_path(), OWNER_MARKER),
             },
+            grok: HookBackendStatus {
+                supported: true,
+                installed: json_file_contains(&grok_path(), OWNER_MARKER),
+            },
         }
     }
 
@@ -398,6 +403,7 @@ impl AgentNotificationHub {
         install_codex(&codex_path(), &helper)?;
         install_kiro(&kiro_path(), &helper)?;
         install_kiro_default(&kiro_default_path(), &helper)?;
+        install_grok(&grok_path(), &helper)?;
         Ok(self.hook_status())
     }
 
@@ -408,6 +414,9 @@ impl AgentNotificationHub {
             std::fs::remove_file(kiro_path()).map_err(|e| e.to_string())?;
         }
         remove_kiro_default_hook(&kiro_default_path())?;
+        if grok_path().is_file() && json_file_contains(&grok_path(), OWNER_MARKER) {
+            std::fs::remove_file(grok_path()).map_err(|e| e.to_string())?;
+        }
         Ok(self.hook_status())
     }
 
@@ -436,7 +445,7 @@ impl AgentNotificationHub {
 umask 077
 exec 2>/dev/null
 backend="${{1:-}}"
-case "$backend" in claude|codex|kiro) ;; *) exit 0 ;; esac
+case "$backend" in claude|codex|kiro|grok) ;; *) exit 0 ;; esac
 pane="${{TMUX_PANE:-}}"
 case "$pane" in %*[!0-9]*|%|"") exit 0 ;; esac
 inbox={inbox}
@@ -506,18 +515,28 @@ fn inbox_files(dir: &Path) -> Vec<PathBuf> {
 /// on a space that a Windows path or a shell command can contain.
 fn tool_event_parts(envelope: &InboxEnvelope) -> Option<(String, String)> {
     let payload = envelope.payload.as_object()?;
-    let event = payload.get("hook_event_name").and_then(Value::as_str)?;
-    if !matches!(event, "PreToolUse" | "PostToolUse" | "preToolUse" | "postToolUse") {
+    // kiro/claude/codex spell the key snake_case; grok camelCase with
+    // snake_case VALUES ("pre_tool_use") — measured on grok 1.0.5.
+    let event = payload
+        .get("hook_event_name")
+        .or_else(|| payload.get("hookEventName"))
+        .and_then(Value::as_str)?;
+    if !matches!(
+        event,
+        "PreToolUse" | "PostToolUse" | "preToolUse" | "postToolUse" | "pre_tool_use" | "post_tool_use"
+    ) {
         return None;
     }
     let tool = payload
         .get("tool_name")
+        .or_else(|| payload.get("toolName"))
         .or_else(|| payload.get("tool"))
         .and_then(Value::as_str)
         .unwrap_or("tool");
     // Best-effort one-arg detail: the file for edits, the command for shells.
     let detail = payload
         .get("tool_input")
+        .or_else(|| payload.get("toolInput"))
         .and_then(Value::as_object)
         .and_then(|i| {
             i.get("file_path")
@@ -574,6 +593,26 @@ fn normalize(envelope: &InboxEnvelope) -> Result<Normalized, String> {
             }
             ("kiro", "completed")
         }
+        "grok" => {
+            // grok's key is camelCase; a turn's true end is `stop` with
+            // reason "end_turn" — a second observe-only stop fires at session
+            // teardown ("shutdown"/"channel_closed") and must not read as a
+            // completion (measured, grok 1.0.5). `stop_failure` is the API-
+            // error end of a turn.
+            let event = string_field(payload, &["hookEventName"]);
+            let kind = match event.as_deref() {
+                Some("stop") => {
+                    let reason = string_field(payload, &["reason"]);
+                    if reason.as_deref() != Some("end_turn") {
+                        return Err("grok stop without end_turn is not a completion".into());
+                    }
+                    "completed"
+                }
+                Some("stop_failure") => "failed",
+                _ => return Err("unsupported grok event".into()),
+            };
+            ("grok", kind)
+        }
         _ => return Err("unsupported backend".into()),
     };
     // The raw reply text, shared between the notification summary (truncated
@@ -584,6 +623,7 @@ fn normalize(envelope: &InboxEnvelope) -> Result<Normalized, String> {
         &[
             "message",
             "last_assistant_message",
+            "lastAssistantMessage",
             "assistant_response",
             "task_subject",
         ],
@@ -599,7 +639,7 @@ fn normalize(envelope: &InboxEnvelope) -> Result<Normalized, String> {
         agent: agent.into(),
         kind: kind.into(),
         summary,
-        agent_session_id: string_field(payload, &["session_id"]),
+        agent_session_id: string_field(payload, &["session_id", "sessionId"]),
         full_reply,
     })
 }
@@ -608,12 +648,20 @@ fn normalize(envelope: &InboxEnvelope) -> Result<Normalized, String> {
 /// which marks the beginning of a new user turn. Used to reset the
 /// `sent_this_turn` flag so the next stop can auto-post.
 fn is_user_prompt_submit(envelope: &InboxEnvelope) -> bool {
-    envelope.backend == "kiro"
-        && envelope
+    match envelope.backend.as_str() {
+        "kiro" => envelope
             .payload
             .get("hook_event_name")
             .and_then(Value::as_str)
-            .is_some_and(|e| e.eq_ignore_ascii_case("userpromptsubmit"))
+            .is_some_and(|e| e.eq_ignore_ascii_case("userpromptsubmit")),
+        // grok 1.0.5: camelCase key, snake_case value (measured).
+        "grok" => envelope
+            .payload
+            .get("hookEventName")
+            .and_then(Value::as_str)
+            .is_some_and(|e| e.eq_ignore_ascii_case("user_prompt_submit")),
+        _ => false,
+    }
 }
 
 fn string_field(map: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
@@ -670,6 +718,10 @@ fn claude_path() -> PathBuf {
 fn codex_path() -> PathBuf {
     home_dir().join(".codex/hooks.json")
 }
+fn grok_path() -> PathBuf {
+    home_dir().join(".grok/hooks/tmux-mobile.json")
+}
+
 fn kiro_path() -> PathBuf {
     home_dir().join(".kiro/hooks/tmux-mobile.json")
 }
@@ -796,6 +848,24 @@ fn add_codex_event(
     entries.retain(|value| !value.to_string().contains(OWNER_MARKER));
     entries.push(json!({ "hooks": [command_hook(command)] }));
     Ok(())
+}
+
+/// Global grok hooks: `~/.grok/hooks/tmux-mobile.json`, a file we own whole
+/// (grok merges hook files, so ours never touches the user's). Stop is
+/// filtered to end_turn by the normalizer; UserPromptSubmit resets the
+/// same-turn dedup flag for direct grok windows the way kiro_default does.
+fn install_grok(path: &Path, helper: &str) -> Result<(), String> {
+    let cmd = format!("{helper} grok # {OWNER_MARKER}");
+    write_json(
+        path,
+        &json!({
+            "hooks": {
+                "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": cmd } ] } ],
+                "Stop": [ { "hooks": [ { "type": "command", "command": cmd } ] } ],
+                "StopFailure": [ { "hooks": [ { "type": "command", "command": cmd } ] } ]
+            }
+        }),
+    )
 }
 
 fn install_kiro(path: &Path, helper: &str) -> Result<(), String> {
@@ -984,6 +1054,37 @@ mod tests {
                 .kind,
             "completed"
         );
+        // grok (1.0.5, payloads measured live): camelCase keys, snake_case
+        // event values. A turn's true end is stop + reason end_turn, and it
+        // carries the reply in lastAssistantMessage.
+        let done = normalize(&envelope(
+            "grok",
+            json!({"hookEventName":"stop","reason":"end_turn","lastAssistantMessage":"OK","sessionId":"01a0-abc"}),
+        ))
+        .unwrap();
+        assert_eq!(done.kind, "completed");
+        assert_eq!(done.full_reply.as_deref(), Some("OK"));
+        assert_eq!(done.agent_session_id.as_deref(), Some("01a0-abc"));
+        // The session-teardown stop ("shutdown"/"channel_closed") fires too and
+        // must NOT read as a completion — it would double-post every reply.
+        assert!(normalize(&envelope("grok", json!({"hookEventName":"stop","reason":"shutdown"}))).is_err());
+        assert_eq!(
+            normalize(&envelope("grok", json!({"hookEventName":"stop_failure","error":"rate_limit"})))
+                .unwrap()
+                .kind,
+            "failed"
+        );
+        // The turn-start reset + tool telemetry recognize grok's spellings.
+        assert!(is_user_prompt_submit(&envelope(
+            "grok",
+            json!({"hookEventName":"user_prompt_submit","prompt":"<user_query>\nhi\n</user_query>"})
+        )));
+        let (tool, detail) = tool_event_parts(&envelope(
+            "grok",
+            json!({"hookEventName":"pre_tool_use","toolName":"run_terminal_command","toolInput":{"command":"npm test"}}),
+        ))
+        .unwrap();
+        assert_eq!((tool.as_str(), detail.as_str()), ("run_terminal_command", "npm test"));
     }
 
     #[test]

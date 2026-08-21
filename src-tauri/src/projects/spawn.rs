@@ -104,6 +104,7 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
         "kiro" => render_kiro(&def, &window_name, &home, &system_prompt, &skills)?,
         "claude" => render_claude(&def, &window_name, &home, &system_prompt, &skills)?,
         "codex" => render_codex(&def, &window_name, &home, &system_prompt, &skills)?,
+        "grok" => render_grok(&def, &window_name, &home, &system_prompt, &skills)?,
         other => return Err(format!("unknown backend '{other}'")),
     };
 
@@ -180,6 +181,7 @@ pub fn relaunch_line(project_path: &str, window_name: &str, session_id: Option<&
     let resume = session_id.filter(|s| !s.is_empty()).and_then(|id| match backend {
         "kiro" => Some(format!("--resume-id {}", shared::shell_quote(id))),
         "claude" => Some(format!("--resume {}", shared::shell_quote(id))),
+        "grok" => Some(format!("--resume {}", shared::shell_quote(id))),
         _ => None,
     });
     let env = recipe.get("env").and_then(|e| e.as_array()).map(|arr| {
@@ -388,6 +390,23 @@ fn codex_hooks(notify: &str) -> Value {
     })
 }
 
+/// grok 1.0.5 hook schema (its own docs, `~/.grok/docs/user-guide/10-hooks.md`,
+/// verified live 2026-08-21: an isolated `GROK_HOME/hooks/*.json` loads as an
+/// always-trusted "global" hook and fires). Payload keys are camelCase
+/// (`hookEventName`, `toolName`, `sessionId`, `lastAssistantMessage`), event
+/// VALUES snake_case (`user_prompt_submit`, `stop`). A `stop` fires once with
+/// `reason: "end_turn"` for the turn AND once at session end (`"shutdown"`) —
+/// the normalizer filters on the reason. An omitted matcher matches everything.
+fn grok_hooks(notify: &str) -> Value {
+    json!({
+        "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
+        "PreToolUse":  [ { "hooks": [ { "type": "command", "command": notify } ] } ],
+        "PostToolUse": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
+        "Stop": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
+        "StopFailure": [ { "hooks": [ { "type": "command", "command": notify } ] } ]
+    })
+}
+
 /// Bring a managed agent's config up to date with this build, in place. Returns
 /// true when a file changed. Two things are ours to rewrite — the `hooks` key
 /// and a `--model` an older build left on the launch line; the prompt is not,
@@ -423,6 +442,10 @@ pub fn refresh_hooks(project_path: &str, window_name: &str) -> bool {
     let codex = home.join("codex").join("hooks.json");
     if codex.is_file() {
         changed |= patch_hooks(&codex, codex_hooks(&notifications.helper_command("codex")));
+    }
+    let grok = home.join("hooks").join("tmux-mobile.json");
+    if grok.is_file() {
+        changed |= patch_hooks(&grok, grok_hooks(&notifications.helper_command("grok")));
     }
     // Agents spawned before launch recipes existed can still be restarted with
     // full identity: for kiro the recipe is reconstructible from the isolated
@@ -728,6 +751,126 @@ fn render_codex(
     })
 }
 
+fn render_grok(
+    def: &RegAgent, name: &str, home: &Path, system_prompt: &str,
+    skills: &[crate::team::skills::ResolvedSkill],
+) -> Result<Rendered, String> {
+    std::fs::create_dir_all(home.join("agents")).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(home.join("hooks")).map_err(|e| e.to_string())?;
+    let notifications = crate::agent_notifications::AgentNotificationHub::load();
+    notifications.ensure_helper()?;
+    let notify = notifications.helper_command("grok");
+
+    // Telemetry hooks: `<GROK_HOME>/hooks/*.json` is that home's "global"
+    // scope, always trusted — no folder-trust dance (verified live, grok
+    // 1.0.5: loaded by `grok inspect`, fired on a real turn).
+    std::fs::write(
+        home.join("hooks").join("tmux-mobile.json"),
+        serde_json::to_string_pretty(&json!({ "hooks": grok_hooks(&notify) })).unwrap(),
+    )
+    .map_err(|e| e.to_string())?;
+
+    // config.toml: folder trust off (the workspace is the user's own project,
+    // spawned deliberately; an untrusted folder would gate project rules and
+    // sit the TUI at a prompt nobody sees), MCP servers, and the USER's model
+    // catalog carried over — grok auth is HOME-scoped (`auth.json` + custom
+    // [model.*] entries whose keys ride env vars), so an isolated home without
+    // the catalog is a logged-out agent (measured: "You are not authenticated").
+    std::fs::write(home.join("config.toml"), grok_config_toml(&mcp_defs(def)))
+        .map_err(|e| e.to_string())?;
+    let user_auth = grok_user_home().join("auth.json");
+    if user_auth.is_file() {
+        let _ = std::fs::copy(&user_auth, home.join("auth.json"));
+    }
+
+    // The agent definition: kiro's pattern in grok's dialect — YAML
+    // frontmatter + the system prompt as the body, selected via `--agent`.
+    // The MODEL lives here, not on the launch line (same lesson as kiro:
+    // verified that a frontmatter `model:` is honored, and it survives every
+    // start path because they all pass --agent). Skills have no isolated-home
+    // mechanism we control, so the compact index rides the prompt like claude.
+    let full_prompt = if skills.is_empty() {
+        system_prompt.to_string()
+    } else {
+        format!("{}\n\n{}", system_prompt, crate::team::skills::skills_index_text(skills))
+    };
+    let mut fm = format!("---\nname: {name}\ndescription: {} (registry agent)\n", def.name);
+    let model = def.model.trim();
+    if !model.is_empty() {
+        fm.push_str(&format!("model: {model}\n"));
+    }
+    fm.push_str("---\n\n");
+    std::fs::write(home.join("agents").join(format!("{name}.md")), format!("{fm}{full_prompt}"))
+        .map_err(|e| e.to_string())?;
+
+    Ok(Rendered {
+        env: vec![("GROK_HOME".into(), home.to_string_lossy().to_string())],
+        cmd: format!("command grok --always-approve --agent {}", shared::shell_quote(name)),
+        confirmation: None,
+    })
+}
+
+/// Where the user's own grok lives. Only read, never written.
+fn grok_user_home() -> PathBuf {
+    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".grok")
+}
+
+/// The isolated home's config.toml: folder-trust off, the user's model
+/// catalog (`[models]` + `[model.*]` — the auth-bearing half of grok config;
+/// hooks/MCP/UI prefs deliberately do NOT carry, that is what isolation is
+/// for), and the registry MCP servers in grok's `[mcp_servers.<name>]` shape.
+fn grok_config_toml(mcps: &[shared::McpDef]) -> String {
+    let user = std::fs::read_to_string(grok_user_home().join("config.toml")).ok();
+    grok_config_toml_from(mcps, user.as_deref())
+}
+
+/// The pure half, so the catalog carry is testable. TRAP, already paid for
+/// once: toml 1.x parses a DOCUMENT via `toml::Table` — `Value::from_str`
+/// parses a single value and fails on any real config with "expected nothing",
+/// which silently dropped the whole catalog and left every spawned grok at a
+/// login screen (caught live, 2026-08-21).
+fn grok_config_toml_from(mcps: &[shared::McpDef], user_config: Option<&str>) -> String {
+    let mut root = toml::value::Table::new();
+    let mut trust = toml::value::Table::new();
+    trust.insert("enabled".into(), toml::Value::Boolean(false));
+    root.insert("folder_trust".into(), toml::Value::Table(trust));
+    if let Some(user) = user_config.and_then(|t| t.parse::<toml::Table>().ok()) {
+        for key in ["models", "model"] {
+            if let Some(v) = user.get(key) {
+                root.insert(key.into(), v.clone());
+            }
+        }
+    }
+    let mut servers = toml::value::Table::new();
+    for m in mcps {
+        let Some(cmd) = m.command.as_deref().filter(|c| !c.is_empty()) else { continue };
+        if m.name.is_empty() {
+            continue;
+        }
+        let mut t = toml::value::Table::new();
+        t.insert("command".into(), toml::Value::String(cmd.to_string()));
+        if !m.args.is_empty() {
+            t.insert(
+                "args".into(),
+                toml::Value::Array(m.args.iter().map(|a| toml::Value::String(a.clone())).collect()),
+            );
+        }
+        if !m.env.is_empty() {
+            let mut env = toml::value::Table::new();
+            for (k, v) in &m.env {
+                env.insert(k.clone(), toml::Value::String(v.clone()));
+            }
+            t.insert("env".into(), toml::Value::Table(env));
+        }
+        servers.insert(m.name.clone(), toml::Value::Table(t));
+    }
+    if !servers.is_empty() {
+        root.insert("mcp_servers".into(), toml::Value::Table(servers));
+    }
+    let body = toml::to_string(&root).unwrap_or_default();
+    format!("# Written by tmux-mobile — regenerated at every spawn.\n{body}")
+}
+
 fn tmm_dir() -> Option<PathBuf> {
     std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf))
 }
@@ -899,6 +1042,78 @@ mod tests {
         let _ = std::fs::remove_dir_all(&ws);
     }
 
+    /// The grok backend, aligned with kiro (owner, 2026-08-21): isolated
+    /// GROK_HOME, identity via `--agent`, MODEL in the definition not on the
+    /// line, telemetry hooks in the home's always-trusted hooks dir, MCP +
+    /// folder-trust-off in config.toml. All shapes verified live on grok 1.0.5
+    /// (an isolated home loaded the agent + hooks and answered a real turn).
+    #[test]
+    fn grok_home_is_isolated_and_wired_to_tmm() {
+        let dir = std::env::temp_dir().join(format!("tmm-spawn-grok-{}", uuid::Uuid::new_v4()));
+        let mut d = def("grok");
+        d.model = "grok-4.6".into();
+        let r = render_grok(&d, "tester", &dir, &build_prompt(&d, "tester", "proj", "fix the bug"), &[]).unwrap();
+        assert!(r.env.iter().any(|(k, v)| k == "GROK_HOME" && v.contains("tmm-spawn-grok")), "home must be the isolated dir");
+        assert!(r.cmd.contains("--agent tester"), "identity via --agent: {}", r.cmd);
+        assert!(r.cmd.contains("--always-approve"), "no interactive permission prompts: {}", r.cmd);
+        assert!(!r.cmd.contains("--model"), "the model lives in the definition, not the line: {}", r.cmd);
+
+        let agent_md = std::fs::read_to_string(dir.join("agents/tester.md")).unwrap();
+        assert!(agent_md.starts_with("---\nname: tester\n"), "frontmatter first: {agent_md}");
+        assert!(agent_md.contains("model: grok-4.6"), "model pinned in frontmatter");
+        assert!(agent_md.contains("tmm send"), "the tmm paragraph IS the integration");
+        assert!(agent_md.contains("fix the bug"), "brief must reach the prompt");
+
+        let hooks: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("hooks/tmux-mobile.json")).unwrap()).unwrap();
+        let h = hooks.get("hooks").unwrap();
+        for ev in ["UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "StopFailure"] {
+            assert!(h.get(ev).is_some(), "grok hook set must carry {ev}");
+        }
+
+        let cfg = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+        assert!(cfg.contains("[folder_trust]") && cfg.contains("enabled = false"),
+            "trust gate off so the TUI never parks at a prompt nobody sees: {cfg}");
+        assert!(cfg.contains("[mcp_servers.files]") && cfg.contains("mcp-files"),
+            "registry MCP def must materialize in grok's dialect: {cfg}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The model catalog is what makes an ISOLATED grok home able to answer at
+    /// all: grok auth is home-scoped, and custom [model.*] entries carry the
+    /// api key wiring (env_key). The first cut parsed the user config with
+    /// `toml::Value::from_str`, which parses a single VALUE — every real
+    /// config failed with "expected nothing" and the catalog silently
+    /// vanished, leaving the spawned agent at a login screen (live, 2026-08-21).
+    #[test]
+    fn grok_config_carries_the_user_model_catalog() {
+        let user = r#"
+[models]
+default = "bedrock-x"
+
+[model.bedrock-x]
+model = "us.xai.grok-4.6"
+base_url = "https://example.com/v1"
+env_key = "SOME_TOKEN_VAR"
+
+[ui]
+yolo = false
+
+[[hooks.PreToolUse]]
+matcher = "Bash"
+hooks = [ { type = "command", command = "/opt/guard.sh" } ]
+"#;
+        let cfg = grok_config_toml_from(&[], Some(user));
+        assert!(cfg.contains("[models]") && cfg.contains("default = \"bedrock-x\""), "catalog default: {cfg}");
+        assert!(cfg.contains("[model.bedrock-x]") && cfg.contains("env_key"), "custom model with key wiring: {cfg}");
+        // Isolation is the point: user hooks/UI prefs must NOT leak in.
+        assert!(!cfg.contains("guard.sh") && !cfg.contains("[ui]"), "only the catalog carries: {cfg}");
+        assert!(cfg.contains("enabled = false"), "folder trust off");
+        // No user config at all still renders a valid file.
+        let bare = grok_config_toml_from(&[], None);
+        assert!(bare.contains("[folder_trust]"));
+    }
+
     /// An empty model means the BACKEND's default — which is what the agent
     /// editor's placeholder promises. The key is omitted rather than pinned to
     /// a hardcoded id (the launch line used to force `claude-sonnet-4.6`).
@@ -1043,3 +1258,4 @@ mod tests {
         assert!(p.contains("review the branch"));
     }
 }
+

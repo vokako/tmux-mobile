@@ -61,7 +61,7 @@ USAGE (human or agent — self-management):
   tmm agent stop|restart <name>       stop it, or bring it back resuming its conversation
   tmm agent remove <name>             eject it: stop + forget its slot + delete its home
   tmm project list                    all projects
-  tmm project create <path> [--name n] [--session s] [--with-agent kiro|claude|codex]
+  tmm project create <path> [--name n] [--session s] [--with-agent kiro|claude|codex|grok]
   tmm project up <session>            bring a project's tmux session up
   tmm project rename <session> --name "New name"   rename the label (session unchanged)
   tmm project delete <session>        forget the project and delete its agents' homes
@@ -292,7 +292,7 @@ async fn main() {
         // interface. can_hire stays a resource gate on spawn only.
         ("project", rest) if rest.first().map(String::as_str) == Some("create") => {
             let Some(path) = rest.get(1).cloned() else {
-                fail(EXIT_USAGE, "project create needs a path: tmm project create /path/to/dir [--name n] [--session s] [--with-agent kiro|claude|codex]");
+                fail(EXIT_USAGE, "project create needs a path: tmm project create /path/to/dir [--name n] [--session s] [--with-agent kiro|claude|codex|grok]");
             };
             let mut params = json!({ "path": path });
             for (flag, key) in [("name", "name"), ("session", "session"), ("with-agent", "agent")] {

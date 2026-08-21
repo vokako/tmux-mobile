@@ -42,6 +42,7 @@ export const AGENTS: Agent[] = [
   // semver-looking process name at the start of the command field.
   { tag: 'Claude',   match: /claude|^\d+\.\d+\.\d+(?:\s|$)/i, icon: '/assets/claude.svg', iconSize: 14 },
   { tag: 'Codex',    match: /codex/i,    icon: '/assets/codex.svg',    iconSize: 14 },
+  { tag: 'Grok',     match: /grok/i,     icon: '/assets/grok.svg',     iconSize: 14 },
   { tag: 'OpenClaw', match: /openclaw/i, icon: '/assets/openclaw.svg', iconSize: 14 },
 ];
 

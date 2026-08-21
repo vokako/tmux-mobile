@@ -60,28 +60,52 @@ pub fn validate(backend: &str, model: &str) -> Result<(), String> {
     ))
 }
 
-/// Ask the backend's own CLI. Only kiro can enumerate its models; claude and
-/// codex take aliases we have no authoritative list for, so they return `None`
-/// (= no validation) instead of a guess.
+/// Ask the backend's own CLI. Kiro and grok can enumerate their models; claude
+/// and codex take aliases we have no authoritative list for, so they return
+/// `None` (= no validation) instead of a guess.
 fn fetch(backend: &str) -> Option<Vec<String>> {
-    if backend != "kiro" {
-        return None;
+    match backend {
+        "kiro" => {
+            let out = std::process::Command::new("kiro-cli")
+                .args(["chat", "--list-models", "-f", "json"])
+                .output()
+                .ok()?;
+            if !out.status.success() {
+                return None;
+            }
+            let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+            let models: Vec<String> = parsed
+                .get("models")?
+                .as_array()?
+                .iter()
+                .filter_map(|m| m.get("model_id")?.as_str().map(str::to_string))
+                .collect();
+            (!models.is_empty()).then_some(models)
+        }
+        // `grok models` (1.0.5) prints a plain list:
+        //   Available models:
+        //     - grok-4.6
+        //     * bedrock-grok46 (default)
+        // The `*` marks the default; a custom model may carry a "(default)"
+        // or description suffix — the id is the first token after the bullet.
+        "grok" => {
+            let out = std::process::Command::new("grok").arg("models").output().ok()?;
+            if !out.status.success() {
+                return None;
+            }
+            let text = String::from_utf8_lossy(&out.stdout);
+            let models: Vec<String> = text
+                .lines()
+                .filter_map(|l| {
+                    let l = l.trim();
+                    let rest = l.strip_prefix("- ").or_else(|| l.strip_prefix("* "))?;
+                    rest.split_whitespace().next().map(str::to_string)
+                })
+                .collect();
+            (!models.is_empty()).then_some(models)
+        }
+        _ => None,
     }
-    let out = std::process::Command::new("kiro-cli")
-        .args(["chat", "--list-models", "-f", "json"])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let parsed: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
-    let models: Vec<String> = parsed
-        .get("models")?
-        .as_array()?
-        .iter()
-        .filter_map(|m| m.get("model_id")?.as_str().map(str::to_string))
-        .collect();
-    (!models.is_empty()).then_some(models)
 }
 
 #[cfg(test)]

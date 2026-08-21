@@ -558,8 +558,8 @@ pub fn registry_save(def: &Value) -> Result<Value, String> {
     if agent.name.trim().is_empty() {
         return Err("agent name must not be empty".into());
     }
-    if !matches!(agent.backend.as_str(), "kiro" | "claude" | "codex") {
-        return Err(format!("backend must be kiro|claude|codex, got '{}'", agent.backend));
+    if !matches!(agent.backend.as_str(), "kiro" | "claude" | "codex" | "grok") {
+        return Err(format!("backend must be kiro|claude|codex|grok, got '{}'", agent.backend));
     }
     // Validate the JSON columns now, not at spawn time.
     serde_json::from_str::<Vec<String>>(&agent.skills).map_err(|e| format!("skills must be a JSON array of refs: {e}"))?;

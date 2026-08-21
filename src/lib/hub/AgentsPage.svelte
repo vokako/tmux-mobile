@@ -15,7 +15,7 @@
 
   /** The backends a registry agent can run on — the same list the server
    * validates against in `registry_save`. */
-  const BACKENDS = ['kiro', 'claude', 'codex'];
+  const BACKENDS = ['kiro', 'claude', 'codex', 'grok'];
 
   let { visible = false } = $props();
 
