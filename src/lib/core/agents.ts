@@ -46,6 +46,23 @@ export const AGENTS: Agent[] = [
   { tag: 'OpenClaw', match: /openclaw/i, icon: '/assets/openclaw.svg', iconSize: 14 },
 ];
 
+// Backend id → the backend's avatar icon, for agent AVATARS (roster cards,
+// registry rows, presets): the logo says which CLI an agent runs on at a
+// glance, where a colored initial said nothing (owner, 2026-08-21: "agent的
+// icon可以用backend的logo，不用字母了"). Falls back to null for a backend we
+// ship no avatar for — callers keep the lettered fallback.
+export function backendIcon(backend: string | null | undefined): string | null {
+  switch ((backend ?? '').toLowerCase()) {
+    case 'kiro': return '/assets/kiro.svg';
+    case 'claude': return '/assets/claude.svg';
+    case 'codex': return '/assets/codex.svg';
+    case 'grok': return '/assets/grok.svg';
+    case 'kimi': return '/assets/kimi.svg';
+    case 'openclaw': return '/assets/openclaw.svg';
+    default: return null;
+  }
+}
+
 // Return the matching AGENTS entry for a blob of text (current_command,
 // pane_title, or a combination), or null if none match.
 //

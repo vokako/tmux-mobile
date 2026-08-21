@@ -13,6 +13,7 @@
   import DirPicker from '../files/DirPicker.svelte';
   import { projectCreate, projectUp, hubSpawn, registryList } from '../core/ws.ts';
   import { backendColor } from '../hub/hub.ts';
+  import { backendIcon } from '../core/agents.ts';
   import { t } from '../core/i18n.svelte.ts';
 
   let { compact = false, oncreated, oncancel } = $props();
@@ -77,7 +78,7 @@
     <div class="dlg-agents">
       {#each registry as r (r.name)}
         <button class="agent-pick" class:sel={agents.includes(r.name)} onclick={() => toggle(r.name)}>
-          <span class="ava" style:background={backendColor(r.backend)}>{r.name.slice(0, 1).toUpperCase()}</span>
+          {#if backendIcon(r.backend)}<img class="ava" src={backendIcon(r.backend)} alt={r.backend} />{:else}<span class="ava" style:background={backendColor(r.backend)}>{r.name.slice(0, 1).toUpperCase()}</span>{/if}
           {r.name} · {r.backend}
           {#if agents.includes(r.name)}<Icon name="check" size={13} />{/if}
         </button>

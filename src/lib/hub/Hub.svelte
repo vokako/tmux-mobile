@@ -28,6 +28,7 @@
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
   import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sameDay, readlineEdit } from './hub.ts';
+  import { backendIcon } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
   import { longpress } from '../ui/longpress.ts';
@@ -1316,7 +1317,7 @@
               use:longpress={{ onlongpress: (pt) => openCtx(pt, a.name, agentItems(a.name)) }}
               onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setRecipient(a.name); } }}>
               <div class="ac-top">
-                <span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>
+                {#if backendIcon(a.agent)}<img class="ava" src={backendIcon(a.agent)} alt={a.agent} />{:else}<span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>{/if}
                 <span class="a-name">{a.name}</span>
                 <span class="st" class:live={a.state === 'running'} style:background={stateDotColor(a.state)}></span>
                 {#if a.since}<span class="s-age">{fmtElapsed(a.since, tick)}</span>{/if}
@@ -1655,7 +1656,7 @@
               <div class="start-list">
                 {#each registry as r (r.name)}
                   <button class="start-row" disabled={starting} onclick={() => addAgents([r.name], '', 'start')}>
-                    <span class="ava" style:background={backendColor(r.backend)}>{r.name.slice(0, 1).toUpperCase()}</span>
+                    {#if backendIcon(r.backend)}<img class="ava" src={backendIcon(r.backend)} alt={r.backend} />{:else}<span class="ava" style:background={backendColor(r.backend)}>{r.name.slice(0, 1).toUpperCase()}</span>{/if}
                     <span class="sr-name">{r.name}</span>
                     <span class="sr-backend">{r.backend}</span>
                     {#if r.can_hire}<span class="sr-cap">{t('agentsCanHire')}</span>{/if}
@@ -1822,7 +1823,7 @@
         {#each registry as r (r.name)}
           <button class="agent-pick" class:sel={startPick.includes(r.name)}
             onclick={() => { startPick = startPick.includes(r.name) ? startPick.filter((n) => n !== r.name) : [...startPick, r.name]; }}>
-            <span class="ava" style:background={backendColor(r.backend)}>{r.name.slice(0, 1).toUpperCase()}</span>
+            {#if backendIcon(r.backend)}<img class="ava" src={backendIcon(r.backend)} alt={r.backend} />{:else}<span class="ava" style:background={backendColor(r.backend)}>{r.name.slice(0, 1).toUpperCase()}</span>{/if}
             {r.name} · {r.backend}
             {#if startPick.includes(r.name)}<Icon name="check" size={13} />{/if}
           </button>
