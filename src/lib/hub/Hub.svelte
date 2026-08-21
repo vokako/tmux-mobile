@@ -1888,7 +1888,14 @@
   .hub-root.compact .h1-edit { font-size: var(--fs-title); }
   .hub-root.compact .feed { padding: 14px 10px 18px; gap: 9px; }
   .hub-root.compact .msg, .hub-root.compact .prompt { max-width: 91%; }
-  .hub-root.compact .composer { padding: 8px 9px calc(8px + env(safe-area-inset-bottom)); }
+  /* No env(safe-area-inset-bottom) here: the composer does not sit at the
+     screen's bottom — the TAB BAR below it does, and it already pads for the
+     gesture bar (`--sab`). Adding the inset here too stacked it twice and
+     opened a wide blank band between the composer and the tabs on Android
+     (owner, 2026-08-21: "消息框和下边的选项标签中间的空白有点大"). With the
+     keyboard open the tabbar hides, but the keyboard covers the inset then —
+     8px is the right gap in both states. */
+  .hub-root.compact .composer { padding: 8px 9px; }
   .hub-root.compact .compose-shell { padding: 6px 9px; border-radius: 15px; }
   .hub-root.compact .to-chip { max-width: 110px; height: 28px; }
   .hub-root.compact .to-label { display: none; }
