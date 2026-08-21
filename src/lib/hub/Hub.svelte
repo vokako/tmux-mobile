@@ -1883,8 +1883,17 @@
      wrapping put the Terminal toggle on a second line (owner, 2026-08-21:
      "打开terminal的按钮给换行到第二行了"). The title is the flexible child —
      .h1-text ellipsizes — and the buttons refuse to shrink. */
-  .hub-root.compact .page-head { flex-wrap: nowrap; row-gap: 6px; padding: 8px 12px; }
-  .hub-root.compact .page-head .chip-btn { flex: none; }
+  .hub-root.compact .page-head { flex-wrap: nowrap; row-gap: 6px; padding: 8px 12px; gap: 7px; }
+  /* Quiet, small chrome: at phone width these are icon squares, and the
+     desktop chip's 5px/11px padding on a 10px radius read as blobs ("这几个
+     按钮好像有点大 看起来笨笨的", owner 2026-08-21). The VISUAL box tightens
+     to ~26px with a proportionally smaller corner; the TAP target stays
+     ~42px via the invisible overlay (the token contract's hit rule). */
+  .hub-root.compact .page-head .chip-btn {
+    flex: none; position: relative;
+    padding: 4px 7px; min-height: 26px; border-radius: 8px;
+  }
+  .hub-root.compact .page-head .chip-btn::before { content: ''; position: absolute; inset: -8px; }
   .hub-root.compact .page-head h1 { font-size: var(--fs-title); }
   .hub-root.compact .h1-edit { font-size: var(--fs-title); }
   .hub-root.compact .feed { padding: 14px 10px 18px; gap: 9px; }
