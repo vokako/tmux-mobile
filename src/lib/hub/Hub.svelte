@@ -1053,6 +1053,38 @@
     };
   });
 
+  // The SAME rule for the other two transient layers — the message action row
+  // (copy/raw under a tapped bubble) and the recipient picker. Both used to
+  // stay up until something happened to replace them, so a tapped message
+  // kept its buttons through scrolling, composing and sending (owner,
+  // 2026-08-22: "在其他操作之后应该自动隐藏 不应该一直常驻显示"). A tap
+  // anywhere outside the layer (or Escape) closes them; the toggles
+  // themselves and clicks INSIDE the layer are excluded so choosing an
+  // option is not also "outside". Raw view is not a popup — an opened raw
+  // source stays until retoggled or the project changes.
+  $effect(() => {
+    if (!msgOpen && !recipientOpen && !palette) return;
+    const onDown = (e) => {
+      const t = e.target;
+      if (msgOpen && !t?.closest?.('.m-acts, .bubble')) msgOpen = '';
+      if (recipientOpen && !t?.closest?.('.to-wrap')) recipientOpen = false;
+      // A tap outside the composer parks the palette exactly like Escape:
+      // paletteOff resets on the next text change, so typing brings it back.
+      if (palette && !t?.closest?.('.cmd-menu, .compose-shell')) paletteOff = true;
+    };
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      if (msgOpen) { msgOpen = ''; e.stopPropagation(); }
+      if (recipientOpen) { recipientOpen = false; e.stopPropagation(); }
+    };
+    window.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  });
+
   // `windowOf` is what lets a reply close the lane it belongs to, so two agents
   // working at once keep ONE growing group each instead of interleaving.
   const blocks = $derived(
@@ -1077,7 +1109,10 @@
     try {
       await navigator.clipboard.writeText(body ?? '');
       copied = body;
-      setTimeout(() => { if (copied === body) copied = ''; }, 1500);
+      // Show the "Copied" confirmation, then put the row away — copying IS
+      // the operation the row was opened for, so it should not stay resident
+      // afterwards (owner, 2026-08-22: "在其他操作之后应该自动隐藏").
+      setTimeout(() => { if (copied === body) { copied = ''; msgOpen = ''; } }, 1500);
     } catch (e) { console.warn('copy failed', e); }
   }
   const isRunning = (b) =>
