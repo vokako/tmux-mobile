@@ -21,6 +21,7 @@
     onAssign = () => {},
     onCloseCell = () => {},
     onPaneExit = () => {},
+    visible = true,
   }: {
     cells: SplitCell[];
     layout: number;
@@ -30,6 +31,7 @@
     onAssign?: (cellId: number, target: string, session: string, command: string) => void;
     onCloseCell?: (cellId: number) => void;
     onPaneExit?: (cellId: number) => void;
+    visible?: boolean;
   } = $props();
 
   // Which cell's pane picker is open (null = none). PanePicker (shared with
@@ -63,6 +65,7 @@
               command={cell.command}
               embedded={true}
               active={cell.id === activeCellId}
+              {visible}
               {fontSize}
               onSwitchPane={(t2: string, cmd: string) => onAssign(cell.id, t2, t2.split(':')[0] ?? '', cmd)}
               onPaneExit={() => onPaneExit(cell.id)}

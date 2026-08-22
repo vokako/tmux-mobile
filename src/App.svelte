@@ -1117,12 +1117,14 @@
           {/if}
           {#if splitActive}
             <SplitView cells={splitCells} layout={splitLayout} {activeCellId} {fontSize}
+              visible={page === 'terminal'}
               onActivate={(id) => activeCellId = id}
               onAssign={assignCell}
               onCloseCell={closeCell}
               onPaneExit={cellPaneExit} />
           {:else}
             <Terminal target={terminalTarget} session={terminalSession} command={terminalCommand} {fontSize}
+              visible={page === 'terminal'}
               splitEligible={splitEligible} {splitActive} {splitLayout} onSetLayout={setLayout}
               onOpenSessions={layout.isTouchDevice ? () => sessListOpen = true : null}
               onSwitchPane={(t, cmd) => { terminalTarget = t; terminalSession = t.split(':')[0]; terminalCommand = cmd || ''; readTarget(t); }} onPaneExit={paneExitFallback} />

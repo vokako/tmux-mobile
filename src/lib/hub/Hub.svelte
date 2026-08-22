@@ -1792,7 +1792,7 @@
       <div class="term-body">
         {#if termTarget}
           {#key termTarget}
-            <Terminal target={termTarget} session={selected} command={termCommand} {fontSize} embedded chromeless active={visible} />
+            <Terminal target={termTarget} session={selected} command={termCommand} {fontSize} embedded chromeless active={visible} visible={visible} />
           {/key}
         {:else}
           <div class="empty">{t('hubNoPane')}</div>

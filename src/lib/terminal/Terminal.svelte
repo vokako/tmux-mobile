@@ -50,7 +50,7 @@
   // `chromeless` = embedded with NO window-switcher bar (used by the desktop
   // agent grid, where each cell is pinned to one agent's pane — there is
   // nothing to switch to, so the bar would only steal vertical space).
-  let { target, session, command: initialCommand = '', fontSize = 14, embedded = false, active = true, chromeless = false, onSwitchPane = null, onPaneExit = () => {}, onClose = null, onOpenSessions = null, splitEligible = false, splitActive = false, splitLayout = 1, onSetLayout = null } = $props();
+  let { target, session, command: initialCommand = '', fontSize = 14, embedded = false, active = true, chromeless = false, visible = true, onSwitchPane = null, onPaneExit = () => {}, onClose = null, onOpenSessions = null, splitEligible = false, splitActive = false, splitLayout = 1, onSetLayout = null } = $props();
   let splitMenuOpen = $state(false);
 
   // svelte-ignore state_referenced_locally — intentional: seeded from the
@@ -79,6 +79,11 @@
   let term;
   let termAtBottom = $state(true);
   let hasNewContent = $state(false); // set when new output arrives while user is scrolled up
+  // The newest frame for THIS target, component-scoped so the repaint-on-show
+  // effect can replay it. Plain lets on purpose: a frame arriving must never
+  // re-run an effect. Reset at the top of the subscription effect.
+  let lastContent = '';
+  let lastCursor = null;
   let toastMsg = $state('');
   const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
   // Visual width of xterm's overlay scrollbar (passed to the Terminal ctor
@@ -232,6 +237,27 @@
     if (!embedded || isMobile || !active || !term) return;
     requestAnimationFrame(() => { try { term?.focus(); } catch {} });
   });
+
+  // Coming back to a hidden terminal replays the newest frame. While hidden,
+  // onPaneOutputCb records frames without rendering them (the whole pipeline —
+  // color adaptation, full-screen write, WebGL draw — ran invisibly for every
+  // busy pane and cooked the machine; owner, 2026-08-22). `lastContent` and
+  // friends are plain lets, so this effect re-runs on `visible` alone.
+  let wasVisible = true;
+  $effect(() => {
+    if (!visible) { wasVisible = false; return; }
+    if (wasVisible) return;
+    wasVisible = true;
+    if (!term || lastContent == null) return;
+    if (termAtBottom) {
+      writeToXterm(lastContent, lastCursor);
+      term.refresh(0, term.rows - 1);
+    } else {
+      // The reader was in scrollback: keep their place, light the pill.
+      hasNewContent = true;
+    }
+  });
+
   let currentWindow = $derived(target.split(':')[1]?.split('.')[0] || '');
 
   // Group panes by window. Representative pane preference:
@@ -489,6 +515,7 @@
     kbLocked = true;
     selection = null; selUI = null;
     keyQueue = []; // queued keys belong to the previous pane
+    lastContent = ''; lastCursor = null; // frames belong to the previous pane
 
     const estCellW = fontSize * CELL_W_RATIO;
     const estCellH = fontSize * CELL_H_RATIO;
@@ -749,8 +776,6 @@
       if (active) requestAnimationFrame(focusTerm);
     }
 
-    let lastContent = '';
-    let lastCursor = null;
     // Uses outer endTouchScrollTimer so unlockKeyboard() and effect cleanup can clear it.
     function endTouchScroll() {
       endTouchScrollTimer = null;
@@ -1693,6 +1718,19 @@
       // Drives the window-switcher agent icons and status-bar highlight.
       if (currentCommand !== undefined) {
         command = currentCommand;
+      }
+      // A HIDDEN terminal only records the frame. The page-layers keep every
+      // page mounted (`visibility: hidden`) so state survives tab switches —
+      // which meant every busy pane kept running the full pipeline (ANSI
+      // color adaptation over the whole snapshot + a full-screen xterm write
+      // + a WebGL draw) at the server's 5 fps cadence, invisibly, per pane
+      // (× cells in split mode). That is CPU-as-heat for nothing: the owner
+      // reported the fans (2026-08-22, "发热挺厉害"). The repaint-on-show
+      // effect below replays the newest frame, which is all a returning
+      // reader can see anyway.
+      if (!visible) {
+        if (content != null) lastContent = content;
+        return;
       }
       if (content != null && content !== lastContent) {
         lastContent = content;
