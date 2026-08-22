@@ -45,6 +45,41 @@ pub fn list(backend: &str) -> Option<Vec<String>> {
 
 /// Reject a model the backend would silently ignore. An empty model means
 /// "backend default" and is always fine.
+/// The reasoning-effort levels each backend's CLI accepts — a FIXED enum per
+/// backend, measured (2026-08-22), never guessed:
+/// * kiro:   `kiro-cli chat --effort` — "e.g. low, medium, high, xhigh, max"
+/// * claude: its own warning text names them: "Valid values: low, medium,
+///           high, xhigh, max" (claude 2.1.239, measured)
+/// * grok:   `/effort` doc: low|medium|high|xhigh (grok 1.0.5)
+/// * codex:  `model_reasoning_effort` (ReasoningEffort enum): minimal..xhigh
+pub fn effort_values(backend: &str) -> &'static [&'static str] {
+    match backend {
+        "kiro" | "claude" => &["low", "medium", "high", "xhigh", "max"],
+        "grok" => &["low", "medium", "high", "xhigh"],
+        "codex" => &["minimal", "low", "medium", "high", "xhigh"],
+        _ => &[],
+    }
+}
+
+/// Effort validation mirrors model validation: empty = the backend default and
+/// always passes; a non-empty value must be one the CLI accepts, because a
+/// wrong one is a warning above the splash and a silent fallback (claude), or
+/// a config error nobody reads (codex).
+pub fn validate_effort(backend: &str, effort: &str) -> Result<(), String> {
+    let effort = effort.trim();
+    if effort.is_empty() {
+        return Ok(());
+    }
+    let known = effort_values(backend);
+    if known.contains(&effort) {
+        return Ok(());
+    }
+    Err(format!(
+        "'{effort}' is not a {backend} effort level. Available: {}",
+        known.join(", ")
+    ))
+}
+
 pub fn validate(backend: &str, model: &str) -> Result<(), String> {
     let model = model.trim();
     if model.is_empty() {

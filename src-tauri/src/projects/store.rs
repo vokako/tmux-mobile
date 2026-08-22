@@ -14,7 +14,7 @@ use std::path::Path;
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 10;
+const SCHEMA_VERSION: i64 = 11;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
@@ -383,6 +383,15 @@ impl Store {
                      );",
                 )
                 .map_err(|e| format!("migrate to 10: {e}"))?;
+        }
+        if version < 11 {
+            // v11: reasoning effort on the agent definition (owner, 2026-08-22:
+            // "agent配置里应该有thinking effort的配置选项"). A plain column, not
+            // a table rebuild, so no foreign-key dance is needed. Empty means
+            // the backend's default, same contract as `model`.
+            self.conn
+                .execute_batch("ALTER TABLE reg_agents ADD COLUMN effort TEXT NOT NULL DEFAULT '';")
+                .map_err(|e| format!("migrate to 11: {e}"))?;
         }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)
@@ -796,7 +805,7 @@ impl Store {
     pub fn reg_list(&self) -> Result<Vec<RegAgent>, String> {
         let mut stmt = self
             .conn
-            .prepare("SELECT name, backend, model, system, skills, mcp, can_hire FROM reg_agents ORDER BY name")
+            .prepare("SELECT name, backend, model, effort, system, skills, mcp, can_hire FROM reg_agents ORDER BY name")
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], row_to_reg_agent)
@@ -809,7 +818,7 @@ impl Store {
     pub fn reg_get(&self, name: &str) -> Result<Option<RegAgent>, String> {
         self.conn
             .query_row(
-                "SELECT name, backend, model, system, skills, mcp, can_hire FROM reg_agents WHERE name = ?1",
+                "SELECT name, backend, model, effort, system, skills, mcp, can_hire FROM reg_agents WHERE name = ?1",
                 [name],
                 row_to_reg_agent,
             )
@@ -821,14 +830,15 @@ impl Store {
     pub fn reg_save(&self, a: &RegAgent, now: u64) -> Result<(), String> {
         self.conn
             .execute(
-                "INSERT INTO reg_agents (name, backend, model, system, skills, mcp, can_hire, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+                "INSERT INTO reg_agents (name, backend, model, effort, system, skills, mcp, can_hire, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
                  ON CONFLICT(name) DO UPDATE SET
-                   backend=?2, model=?3, system=?4, skills=?5, mcp=?6, can_hire=?7, updated_at=?8",
+                   backend=?2, model=?3, effort=?4, system=?5, skills=?6, mcp=?7, can_hire=?8, updated_at=?9",
                 rusqlite::params![
                     a.name,
                     a.backend,
                     a.model,
+                    a.effort,
                     a.system,
                     a.skills,
                     a.mcp,
@@ -862,6 +872,7 @@ impl Store {
                 name: "lead".into(),
                 backend: "kiro".into(),
                 model: String::new(),
+                effort: String::new(),
                 system: "You are the project lead. Break the task down, do the core work yourself, and delegate well-scoped pieces to other agents when it genuinely helps. You may spawn agents with `tmm spawn <registry-name> --brief \"...\"` — check `tmm registry list` for who is available. Keep the human informed of decisions, not process.\n\nHow replies reach the room: the end of every turn is captured automatically from the stop hook and posted to the project room. You do not need to repeat a final result with `tmm send` — doing so wastes a call and the dedup filter drops it anyway. Use `tmm send` while a turn is in flight: that is the only way to report progress on a long task before it finishes. `tmm status waiting|blocked` is for being stuck on something outside your control — announcing that you are working is pointless, since turn boundaries are observed from your own hooks. Use `tmm done` to mark completion; its summary can be one line because the full result is already in the room.\n\nAddressing a teammate with @name is a delivery action, not a mention: `tmm send \"@reviewer 请审\"` types that line into the reviewer's pane and interrupts whatever they are doing. Only address someone when the intent is to hand off a task or ask a question that needs a reply. Never put credentials or secrets in a message — room contents are persisted and rendered to mobile clients.".into(),
                 skills: "[]".into(),
                 mcp: "[]".into(),
@@ -871,6 +882,7 @@ impl Store {
                 name: "reviewer".into(),
                 backend: "claude".into(),
                 model: String::new(),
+                effort: String::new(),
                 system: "You are a code reviewer. Read the diff or branch you are briefed on, verify the change does what it claims, and report concrete findings (file:line) — no style nitpicks unless they hide bugs. Reply to whoever briefed you.\n\nHow replies reach the room: the end of every turn is captured automatically and posted to the project room. You do not need to repeat your findings with `tmm send`. Use `tmm send` only to address a specific teammate mid-task or to report a blocker; use `tmm done` to mark completion with a one-line summary.".into(),
                 skills: "[]".into(),
                 mcp: "[]".into(),
@@ -880,6 +892,7 @@ impl Store {
                 name: "docs".into(),
                 backend: "codex".into(),
                 model: String::new(),
+                effort: String::new(),
                 system: "You are the docs writer. Keep design docs and READMEs in sync with the change you are briefed on. Plain words, specifics over superlatives.\n\nHow replies reach the room: the end of every turn is captured automatically and posted to the project room. You do not need to call `tmm send` to report completion. Use `tmm send` only to address a specific teammate or report a blocker; use `tmm done` to mark completion with a one-line summary.".into(),
                 skills: "[]".into(),
                 mcp: "[]".into(),
@@ -997,6 +1010,10 @@ pub struct RegAgent {
     pub backend: String,
     #[serde(default)]
     pub model: String,
+    /// Reasoning effort (low|medium|high|…, backend-specific). Empty = the
+    /// backend's default, same contract as `model`.
+    #[serde(default)]
+    pub effort: String,
     #[serde(default)]
     pub system: String,
     /// JSON array of skill refs (local names or github URLs).
@@ -1018,10 +1035,11 @@ fn row_to_reg_agent(r: &rusqlite::Row<'_>) -> rusqlite::Result<RegAgent> {
         name: r.get(0)?,
         backend: r.get(1)?,
         model: r.get(2)?,
-        system: r.get(3)?,
-        skills: r.get(4)?,
-        mcp: r.get(5)?,
-        can_hire: r.get::<_, i64>(6)? != 0,
+        effort: r.get(3)?,
+        system: r.get(4)?,
+        skills: r.get(5)?,
+        mcp: r.get(6)?,
+        can_hire: r.get::<_, i64>(7)? != 0,
     })
 }
 

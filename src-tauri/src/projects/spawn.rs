@@ -52,6 +52,7 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
     // defs saved before validation existed can still carry one, so refuse here
     // too rather than open a window that cannot work.
     super::models::validate(&def.backend, &def.model)?;
+    super::models::validate_effort(&def.backend, &def.effort)?;
 
     // can_hire gate: when an AGENT asks, its own registry def must allow
     // hiring. A human caller (empty `by`) is always allowed.
@@ -633,6 +634,20 @@ fn ensure_kiro_settings(home: &Path) -> bool {
     changed && std::fs::write(&path, serde_json::to_string_pretty(&root).unwrap()).is_ok()
 }
 
+/// ` --effort <level>` for the backends whose CLI takes the flag (kiro,
+/// claude, grok — measured; codex takes a config override instead), or the
+/// empty string. The value was validated against `models::effort_values` at
+/// save time, so a typo cannot reach a launch line. Empty = backend default,
+/// same contract as the model.
+fn effort_flag(def: &RegAgent) -> String {
+    let effort = def.effort.trim();
+    if effort.is_empty() {
+        String::new()
+    } else {
+        format!(" --effort {}", shared::shell_quote(effort))
+    }
+}
+
 fn render_kiro(
     def: &RegAgent, name: &str, home: &Path, system_prompt: &str,
     skills: &[crate::team::skills::ResolvedSkill],
@@ -697,8 +712,9 @@ fn render_kiro(
     Ok(Rendered {
         env: vec![("KIRO_HOME".into(), home.to_string_lossy().to_string())],
         cmd: format!(
-            "command kiro-cli chat --agent {} --trust-all-tools",
+            "command kiro-cli chat --agent {} --trust-all-tools{}",
             shared::shell_quote(name),
+            effort_flag(def),
         ),
         confirmation: None,
     })
@@ -770,10 +786,11 @@ fn render_claude(
     Ok(Rendered {
         env: vec![("CLAUDE_CONFIG_DIR".into(), home.to_string_lossy().to_string())],
         cmd: format!(
-            "command claude --mcp-config {} --strict-mcp-config --settings {}{} --dangerously-skip-permissions --append-system-prompt {}",
+            "command claude --mcp-config {} --strict-mcp-config --settings {}{}{} --dangerously-skip-permissions --append-system-prompt {}",
             shared::shell_quote(&mcpfile.to_string_lossy()),
             shared::shell_quote(&settingsfile.to_string_lossy()),
             model_arg,
+            effort_flag(def),
             shared::shell_quote(&full_prompt),
         ),
         confirmation: Some(shared::StartupConfirmation {
@@ -856,6 +873,14 @@ fn render_codex(
     if !def.model.is_empty() {
         config_args.push(format!("--model {}", shared::shell_quote(&def.model)));
     }
+    // Effort is a codex CONFIG key (`model_reasoning_effort`), so it rides a
+    // `-c` override like the rest of codex's identity — the recipe replays it.
+    if !def.effort.trim().is_empty() {
+        config_args.push(shared::codex_config_override(
+            "model_reasoning_effort",
+            Value::String(def.effort.trim().to_string()),
+        ));
+    }
     config_args.push("--dangerously-bypass-approvals-and-sandbox".into());
     config_args.push("--dangerously-bypass-hook-trust".into());
     Ok(Rendered {
@@ -923,7 +948,11 @@ fn render_grok(
 
     Ok(Rendered {
         env: vec![("GROK_HOME".into(), home.to_string_lossy().to_string())],
-        cmd: format!("command grok --always-approve --agent {}", shared::shell_quote(name)),
+        cmd: format!(
+            "command grok --always-approve --agent {}{}",
+            shared::shell_quote(name),
+            effort_flag(def),
+        ),
         confirmation: None,
     })
 }
@@ -1005,6 +1034,7 @@ mod tests {
             name: "tester".into(),
             backend: backend.into(),
             model: String::new(),
+            effort: String::new(),
             system: "Persona text.".into(),
             skills: "[]".into(),
             mcp: r#"[{"name":"files","command":"mcp-files","args":["--root","/tmp"]}]"#.into(),
@@ -1353,6 +1383,38 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
             }
             std::fs::remove_dir_all(&dir).ok();
         }
+    }
+
+    /// Effort rides each backend's own knob (owner, 2026-08-22: "agent配置里
+    /// 应该有thinking effort的配置选项"): a `--effort` flag for kiro/claude/
+    /// grok (measured on each CLI), a `-c model_reasoning_effort=…` config
+    /// override for codex. Empty = the backend default, nothing on the line.
+    #[test]
+    fn effort_reaches_each_backend_in_its_own_dialect() {
+        let dir = std::env::temp_dir().join(format!("tmm-effort-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut d = def("kiro");
+        d.effort = "high".into();
+        let prompt = build_prompt(&d, "t", "p", "");
+        assert!(render_kiro(&d, "t", &dir, &prompt, &[]).unwrap().cmd.ends_with("--effort high"));
+        d.backend = "claude".into();
+        assert!(render_claude(&d, "t", &dir, &prompt, &[]).unwrap().cmd.contains(" --effort high "));
+        d.backend = "grok".into();
+        assert!(render_grok(&d, "t", &dir, &prompt, &[]).unwrap().cmd.ends_with("--effort high"));
+        d.backend = "codex".into();
+        let cx = render_codex(&d, "t", &dir, &prompt, &[]).unwrap().cmd;
+        assert!(cx.contains("model_reasoning_effort=\\\"high\\\"") || cx.contains("model_reasoning_effort=\"high\""), "{cx}");
+        // Empty effort leaves every line clean.
+        d.effort = String::new();
+        d.backend = "kiro".into();
+        assert!(!render_kiro(&d, "t", &dir, &prompt, &[]).unwrap().cmd.contains("--effort"));
+        // Validation is a fixed enum per backend; empty always passes.
+        assert!(super::super::models::validate_effort("kiro", "xhigh").is_ok());
+        assert!(super::super::models::validate_effort("codex", "minimal").is_ok());
+        assert!(super::super::models::validate_effort("grok", "max").is_err(), "grok has no max");
+        assert!(super::super::models::validate_effort("claude", "ultra").is_err());
+        assert!(super::super::models::validate_effort("claude", "").is_ok());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// The turn-start hook is the ONLY reset of the same-turn dedup flag and

@@ -17,6 +17,14 @@
   /** The backends a registry agent can run on — the same list the server
    * validates against in `registry_save`. */
   const BACKENDS = ['kiro', 'claude', 'codex', 'grok'];
+  // Reasoning-effort levels each backend's CLI accepts — mirrors the server's
+  // models::effort_values (measured per CLI, 2026-08-22). '' = backend default.
+  const EFFORTS = {
+    kiro: ['low', 'medium', 'high', 'xhigh', 'max'],
+    claude: ['low', 'medium', 'high', 'xhigh', 'max'],
+    codex: ['minimal', 'low', 'medium', 'high', 'xhigh'],
+    grok: ['low', 'medium', 'high', 'xhigh'],
+  };
 
   let { visible = false } = $props();
 
@@ -164,7 +172,7 @@
           mcpSel: mcpEntries.filter((x) => typeof x === 'string'),
           mcpExtra: mcpEntries.filter((x) => typeof x !== 'string'),
         }
-      : { name: '', backend: 'kiro', model: '', system: '', can_hire: false, skillSel: [], mcpSel: [], mcpExtra: [] };
+      : { name: '', backend: 'kiro', model: '', effort: '', system: '', can_hire: false, skillSel: [], mcpSel: [], mcpExtra: [] };
   }
   function toggleSel(list, name) {
     return list.includes(name) ? list.filter((n) => n !== name) : [...list, name];
@@ -185,6 +193,7 @@
         name: editing.name.trim(),
         backend: editing.backend,
         model: editing.model.trim(),
+        effort: editing.effort ?? '',
         system: editing.system,
         skills: JSON.stringify(editing.skillSel),
         mcp: JSON.stringify([...editing.mcpSel, ...editing.mcpExtra]),
@@ -339,6 +348,18 @@
               </datalist>
             {/if}
           </label>
+        </div>
+        <div class="row2">
+          <label>{t('agentsEffort')}
+            <!-- A fixed enum per backend (the CLI's own levels), so a Select,
+                 not free text: a typo'd effort is a warning above the splash
+                 and a silent fallback to the default. '' = backend default,
+                 same contract as the model. -->
+            <Select bind:value={editing.effort}
+              options={[{ value: '', label: t('agentsModelDefault') }, ...(EFFORTS[editing.backend] ?? [])]}
+              ariaLabel={t('agentsEffort')} />
+          </label>
+          <div></div>
         </div>
         <label class="check">
           <input type="checkbox" bind:checked={editing.can_hire} />

@@ -35,7 +35,7 @@ tmm project create <path> [--name n] [--session s] [--with-agent kiro|claude|cod
 tmm project up|down|archive <session>
 tmm project rename <session> --name "New name"   the LABEL only (session unchanged)
 tmm registry list                    centrally-defined agents
-tmm registry save --name <n> --backend <b> [--system <text>] [--skills a,b] [--mcp <json>] [--can-hire]
+tmm registry save --name <n> --backend <b> [--system <text>] [--model m] [--effort <level>] [--skills a,b] [--mcp <json>] [--can-hire]
 tmm registry delete <name>
 tmm skills list|save|delete          central skill assets (name → ref)
 tmm mcp list|save|delete             central MCP server defs
@@ -350,6 +350,18 @@ everything degrades soft: no CLI, no login, or unparsable output all mean
 "cannot know", and an unknown id is accepted rather than blocking a save.
 `models_list` exposes the same list to the agent editor as a datalist. claude
 and codex take aliases nobody can enumerate, so their field stays free text.
+
+**Reasoning effort is the same kind of identity field** (owner, 2026-08-22:
+"agent配置里应该有thinking effort的配置选项"): `reg_agents.effort` (state.db
+v11), empty = the backend's default, exactly the model's contract. Unlike
+models the levels are a FIXED enum per backend, measured per CLI
+(`models::effort_values`): kiro/claude `low|medium|high|xhigh|max`, grok
+`low|medium|high|xhigh`, codex `minimal|low|medium|high|xhigh` — so the
+editor offers a Select, not free text, and `registry_save`/`spawn` reject a
+value the CLI would answer with a warning and a silent default. Delivery is
+each backend's own knob: a `--effort` launch flag for kiro/claude/grok
+(measured on each CLI; recorded in the recipe so restarts keep it), a
+`-c model_reasoning_effort=…` config override for codex.
 
 ## Config drift: the app owns managed agent configs
 

@@ -69,7 +69,7 @@ USAGE (human or agent — self-management):
   tmm project archive <session>       remove from projects (session survives)
   tmm registry list                   centrally-defined agents
   tmm registry save --name <n> --backend <kiro|claude|codex> [--system <text>]
-                    [--model m] [--skills a,b] [--mcp <json>] [--can-hire]
+                    [--model m] [--effort low|medium|high|…] [--skills a,b] [--mcp <json>] [--can-hire]
   tmm registry delete <name>
   tmm skills list|delete|refresh <name>   app-managed skill store
   tmm skills save --name <n> --source <abs dir|github url>  (imports the files)
@@ -355,6 +355,7 @@ async fn main() {
                 "name": name,
                 "backend": backend,
                 "model": flags.get("model").cloned().flatten().unwrap_or_default(),
+                "effort": flags.get("effort").cloned().flatten().unwrap_or_default(),
                 "system": flags.get("system").cloned().flatten().unwrap_or_default(),
                 "skills": serde_json::to_string(&skills).unwrap(),
                 "mcp": flags.get("mcp").cloned().flatten().unwrap_or_else(|| "[]".into()),
@@ -611,7 +612,7 @@ fn need_agent(ctx: &Ctx) -> String {
 /// the map keeps one value per key by design and that is fine for the rest.
 fn split_flags(args: &[String]) -> (std::collections::HashMap<String, Option<String>>, Vec<String>, Vec<(String, String)>) {
     const VALUED: &[&str] = &["project", "agent", "server", "output", "since", "limit", "brief",
-                          "name", "session", "with-agent", "backend", "model", "system", "skills", "mcp",
+                          "name", "session", "with-agent", "backend", "model", "effort", "system", "skills", "mcp",
                           "ref", "source", "description", "def", "grep", "image"];
     let mut flags = std::collections::HashMap::new();
     let mut pos = Vec::new();

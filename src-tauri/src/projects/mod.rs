@@ -569,6 +569,7 @@ pub fn registry_save(def: &Value) -> Result<Value, String> {
     // not know the id does not fail, it falls back to its default and says so
     // in a line nobody reads. See `models`.
     models::validate(&agent.backend, &agent.model)?;
+    models::validate_effort(&agent.backend, &agent.effort)?;
     with_store(|store| {
         store.reg_save(&agent, now())?;
         Ok(json!({ "ok": true, "name": agent.name }))
