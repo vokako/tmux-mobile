@@ -12,7 +12,7 @@
   import Icon from './Icon.svelte';
   import { anchorOf, menuPlacement, viewBox, type AnchorRect } from './placement.ts';
 
-  interface Option { value: string; label?: string; hint?: string }
+  interface Option { value: string; label?: string; hint?: string; icon?: string }
 
   let {
     value = $bindable(''),
@@ -100,6 +100,7 @@
 <button class="sel-trigger" class:open class:dense bind:this={triggerEl} type="button"
   {disabled} aria-haspopup="listbox" aria-expanded={open} aria-label={ariaLabel || undefined}
   onclick={() => (open ? hide() : show())}>
+  {#if current?.icon}<img class="so-ico" src={current.icon} alt="" />{/if}
   <span class="sel-value" class:ph={!label}>{label || placeholder}</span>
   <Icon name="chevron-down" size={11} />
 </button>
@@ -112,6 +113,7 @@
       <button class="sel-opt" class:sel={o.value === value} class:cur={i === cursor}
         role="option" aria-selected={o.value === value} type="button"
         onclick={() => pick(o.value)} onpointerenter={() => (cursor = i)}>
+        {#if o.icon}<img class="so-ico" src={o.icon} alt="" />{/if}
         <span class="so-label">{o.label ?? o.value}</span>
         {#if o.hint}<span class="so-hint">{o.hint}</span>{/if}
         {#if o.value === value}<Icon name="check" size={12} />{/if}
@@ -129,7 +131,7 @@
   .sel-trigger {
     display: flex; align-items: center; gap: 6px; width: 100%;
     background: var(--input-bg); border: 1px solid var(--input-border);
-    border-radius: var(--ui-radius-row); padding: 8px 12px; color: var(--text);
+    border-radius: var(--ui-radius-control); padding: 8px 12px; color: var(--text);
     font-size: var(--fs-body); font-family: inherit;
     /* `normal`, not a ratio: an <input> computes its line box from `normal`,
        so matching the keyword is what makes the two boxes the same height.
@@ -170,6 +172,8 @@
   .sel-opt :global(svg) { margin-left: auto; flex: none; color: var(--accent); }
   .so-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .so-hint { font-size: var(--fs-meta); color: var(--text3); font-family: inherit; }
+  /* An option's icon (a backend logo): sized to the text line, never stretched. */
+  .so-ico { flex: none; width: 15px; height: 15px; border-radius: 3px; object-fit: contain; }
 
   /* Touch contract: a menu row is a tap target. */
   @media (max-width: 760px) {

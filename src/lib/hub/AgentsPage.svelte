@@ -337,7 +337,8 @@
         </label>
         <div class="row2">
           <label>{t('agentsBackend')}
-            <Select bind:value={editing.backend} options={BACKENDS} ariaLabel={t('agentsBackend')} />
+            <Select bind:value={editing.backend} ariaLabel={t('agentsBackend')}
+              options={BACKENDS.map((b) => ({ value: b, icon: backendIcon(b) ?? undefined }))} />
           </label>
           <label>{t('agentsModel')}
             <input bind:value={editing.model} placeholder={t('agentsModelDefault')}
@@ -441,7 +442,7 @@
   .editor { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
   .err { color: var(--danger); font-size: var(--fs-ui); background: var(--danger-bg); border-radius: var(--ui-radius-row); padding: 8px 12px; }
   label { display: flex; flex-direction: column; gap: 5px; color: var(--text2); font-size: var(--fs-ui); }
-  label.check { flex-direction: row; align-items: center; gap: 8px; font-size: var(--fs-body); color: var(--text); }
+  label.check { flex-direction: row; align-items: center; gap: 8px; }
   input, textarea { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: var(--ui-radius-control); color: var(--text); padding: 8px 12px; font-size: var(--fs-body); outline: none; font-family: inherit; }
   input:focus, textarea:focus { border-color: var(--accent); }
   input:disabled { opacity: 0.5; }
@@ -464,5 +465,11 @@
     background: var(--surface); border: 1px solid var(--border2); border-radius: var(--ui-radius-panel);
     padding: 12px 14px; font-size: var(--fs-body); color: var(--text); line-height: 1.55;
     overflow-wrap: anywhere;
+  }
+  @media (max-width: 760px) {
+    /* Same rule the shared Select carries: iOS zooms a focused control below
+       16px, and a Select at 16px beside an input at --fs-body read as two
+       different sizes (owner, 2026-08-22). One bump for every field. */
+    input, textarea { font-size: var(--fs-input-touch); }
   }
 </style>
