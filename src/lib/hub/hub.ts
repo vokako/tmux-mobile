@@ -717,6 +717,13 @@ export function statusParts(e: HubActivityEvent): { state: string; text: string 
 /** Internal: a tool call before consecutive ones are folded into a group. */
 type ToolItem = { type: 'tool'; ts: number; window: number; event: HubActivityEvent };
 
+/** Every whitespace run becomes one space, ends trimmed — the delivery-echo
+ * match runs on this form (the server's `squash_ws` twin; a test pins the two
+ * to the same behavior via the same cases). */
+export function squashWs(s: string): string {
+  return s.split(/\s+/u).filter(Boolean).join(' ');
+}
+
 /** Internal: a turn boundary that produces NO row — a delivery echo. The echo
  * is consumed as a receipt (rule 1) so it never renders, but it is still the
  * moment `userPromptSubmit` opened a new turn, and a new turn must not pour its
@@ -828,11 +835,16 @@ export function feedBlocks(
     // its own leftover text attached — and a busy agent can submit SEVERAL queued
     // lines in one prompt, in which case each of them was delivered. Marking only
     // the newest left the earlier ones hollow for ever.
+    // Whitespace-canonical, same rule as the server's record_prompt: the line
+    // rides tmux send-keys and the TUI's composer before it echoes back, and a
+    // newline in the body does not survive that byte-for-byte (owner,
+    // 2026-08-22: multi-line messages never confirmed).
     let hit = false;
+    const canonEcho = squashWs(e.text);
     for (const m of msgs) {
       if (m.type !== 'msg' || m.delivered) continue;
-      const body = m.msg?.body ?? '';
-      if (body && m.ts <= e.ts && e.text.includes(body)) {
+      const body = squashWs(m.msg?.body ?? '');
+      if (body && m.ts <= e.ts && canonEcho.includes(body)) {
         m.delivered = true;
         hit = true;
       }

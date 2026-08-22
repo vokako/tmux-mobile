@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, sameDay, draftUpdate, DRAFT_MAX, readlineEdit } from './hub.ts';
+import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -235,6 +235,29 @@ test('an echoed prompt marks its message delivered instead of repeating it', () 
     assert.equal(first?.type === 'msg' && first.delivered, true, `${level}: first message confirmed`);
     assert.equal(second?.type === 'msg' && second.delivered, false, `${level}: the later one is not`);
   }
+});
+
+test('a multi-line message still confirms when its echo drifts in whitespace', () => {
+  // The delivered line rides tmux send-keys and the TUI's composer before the
+  // hook echoes it back — a newline in the body does not survive that round
+  // trip byte-for-byte, so multi-line messages never confirmed (owner,
+  // 2026-08-22: "发送内容有换行 好像就不会被confirm"). Matching is
+  // whitespace-canonical on both sides (squashWs — the server's squash_ws
+  // twin, same cases): newlines/CRLF/tabs/doubled spaces forgive, word
+  // changes do not.
+  assert.equal(squashWs('a\nb\r\n  c\td '), 'a b c d');
+  const feed = [
+    { ts: 100, from: 'human', body: '@dev line one\nline two\n  line three' },
+    { ts: 150, from: 'human', body: '@dev alpha beta' },
+  ];
+  const activity = [
+    ev({ ts: 200, kind: 'prompt', via: 'app', text: '[tmm chat] human: @dev line one line two  line three' }),
+    ev({ ts: 250, kind: 'prompt', via: 'app', text: '[tmm chat] human: @dev alpha gamma' }),
+  ];
+  const blocks = feedBlocks(feed, activity, 'chat');
+  const [a, b] = blocks.filter((x) => x.type === 'msg');
+  assert.equal(a?.type === 'msg' && a.delivered, true, 'newline → space still confirms');
+  assert.equal(b?.type === 'msg' && b.delivered, false, 'different words still refuse');
 });
 
 test('one prompt carrying several queued lines confirms all of them', () => {

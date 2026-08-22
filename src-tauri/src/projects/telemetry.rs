@@ -353,13 +353,27 @@ pub fn record_prompt(session: &str, window: usize, prompt: &str) -> bool {
     let text = truncate_chars(prompt, MAX_PROMPT_CHARS);
     let mut acked = false;
     let ts = now();
+    // Whitespace-canonical matching: a delivered line travels through tmux
+    // send-keys and an agent TUI's composer before it comes back in the
+    // userPromptSubmit echo, and that round trip does not preserve whitespace
+    // — a newline in the body is typed as a C0 key the composer may render as
+    // a space or its own wrap, so a multi-line message NEVER matched its echo
+    // byte-for-byte and sat unconfirmed forever (owner, 2026-08-22: "发送内容
+    // 有换行 好像就不会被confirm"). Collapsing every whitespace run to one
+    // space on BOTH sides keeps the containment semantics while forgiving
+    // newlines, CRLF, tabs and doubled spaces. Words still have to match in
+    // order, so this cannot ack the wrong line.
+    let canon_prompt = squash_ws(prompt);
     with_rec(session, window, |r| {
         // Any outstanding line may be the one this prompt carries — a queue is
         // submitted in order, but an agent can also be steered, so match on
         // CONTENT and remove exactly what was found. One submitted prompt can
         // carry several queued lines at once, so this keeps going.
         let before = r.pending.len();
-        r.pending.retain(|(line, _)| !(prompt.contains(line.as_str()) || line.contains(prompt)));
+        r.pending.retain(|(line, _)| {
+            let canon_line = squash_ws(line);
+            !(canon_prompt.contains(&canon_line) || canon_line.contains(&canon_prompt))
+        });
         acked = r.pending.len() < before;
         // A turn just opened. This is the ONE honest "it started working"
         // signal: pane activity cannot be it, because an agent TUI repaints its
@@ -375,6 +389,13 @@ pub fn record_prompt(session: &str, window: usize, prompt: &str) -> bool {
         if acked { "app".into() } else { "local".into() },
     );
     acked
+}
+
+/// Every whitespace run (space, tab, CR, LF) becomes one space, ends trimmed.
+/// The delivery-receipt containment match runs on THIS form — see
+/// `record_prompt` for why byte-exact matching lost every multi-line message.
+fn squash_ws(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Is a typed line overdue for its echo? Pure, so the rule is testable.
@@ -862,6 +883,30 @@ mod tests {
         // Nothing pending any more, so the sweep stays silent.
         sweep_deliveries("ack-test");
         assert_eq!(recent_events("ack-test", 0).len(), 1, "no warning for a delivered line");
+    }
+
+    /// A multi-line message NEVER matched its echo: the newline is typed as a
+    /// C0 key the composer renders its own way, so the echo comes back with
+    /// different whitespace and byte-exact containment failed — every
+    /// multi-line message sat unconfirmed forever (owner, 2026-08-22:
+    /// "发送内容有换行 好像就不会被confirm"). Matching is whitespace-
+    /// canonical now: newlines, CRLF, tabs and doubled spaces all forgive,
+    /// while word order still has to match.
+    #[test]
+    fn a_multi_line_delivery_is_acknowledged_despite_whitespace_drift() {
+        let line = "[tmm chat] human: @dev line one\nline two\n  line three";
+        record_delivery("ws-test", 1, line);
+        // The composer turned newlines into single spaces and doubled one.
+        assert!(
+            record_prompt("ws-test", 1, "[tmm chat] human: @dev line one line two  line three"),
+            "newline → space must still ack"
+        );
+        // CRLF and trailing whitespace on the echo side.
+        record_delivery("ws-test", 2, "[tmm chat] human: do\nthe thing");
+        assert!(record_prompt("ws-test", 2, "[tmm chat] human: do\r\nthe thing \n"));
+        // Different WORDS still refuse — tolerance must not become fuzz.
+        record_delivery("ws-test", 3, "[tmm chat] human: alpha beta");
+        assert!(!record_prompt("ws-test", 3, "[tmm chat] human: alpha gamma"));
     }
 
     #[test]
