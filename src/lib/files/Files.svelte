@@ -395,9 +395,34 @@
   // CHANGES (you switched pane/team, or cd'd). If it's unchanged, your own
   // in-Files navigation is preserved across tab switches. Re-checked whenever
   // Files becomes visible or the session changes.
+  //
+  // Per-SESSION browse memory (owner, 2026-08-22: "一个project刷新路径后 这个
+  // project当前又动过路径需要暂时记下来，在切到其他project再切回来能返回之前
+  // 这个project的路径状态位置"): switching projects parks where you were
+  // browsing under the project you leave and restores the other project's
+  // parked position. In-memory on purpose — it is a temporary reading
+  // position, not a preference — and the existing rule still outranks it:
+  // when THAT project's tmux cwd moved while you were away (someone cd'd),
+  // following the real cwd wins over the parked position.
   let lastSourceDir = '';
+  // svelte-ignore state_referenced_locally — the INITIAL session is exactly
+  // what "previous" means before the first switch; the effect updates it.
+  let prevSession = session;
+  const browsed = new Map(); // session → { cwd, sourceDir }
   $effect(() => {
-    if (!visible) return;
+    if (!visible) { void session; return; }
+    if (session !== prevSession) {
+      // cwd still holds the OLD session's position — nothing else resets it.
+      browsed.set(prevSession, { cwd, sourceDir: lastSourceDir });
+      prevSession = session;
+      const parked = browsed.get(session);
+      lastSourceDir = parked?.sourceDir ?? '';
+      if (parked?.cwd) {
+        cwd = parked.cwd;
+        view = 'list';
+        loadDir(parked.cwd);
+      }
+    }
     // session may be '' when Files is opened before any terminal pane exists —
     // the server then reports the user's home directory. Once a terminal/team
     // session appears, its cwd differs from home and we follow it.

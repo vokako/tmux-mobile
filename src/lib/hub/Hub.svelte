@@ -37,7 +37,7 @@
   import CreateProjectDialog from '../projects/CreateProjectDialog.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
-  let { visible = false, fontSize = 14, mobile = false, openTerminal = () => {} } = $props();
+  let { visible = false, fontSize = 14, mobile = false, openTerminal = () => {}, onSelectSession = (_s) => {} } = $props();
 
   // Layout follows the viewport, not the device class (a squeezed desktop
   // window must not overflow). `mobile` still decides behavior defaults.
@@ -135,6 +135,10 @@
     selected = session;
     composerText = hubPrefs.draft(session);
     hubPrefs.setProject(session);
+    // The chat's project is a working context like the terminal's: tell App,
+    // so the Files tab follows whichever the user touched LAST (owner,
+    // 2026-08-22: "chat里的路径没有刷新到文件 terminal好像就会刷新路径").
+    onSelectSession(session);
     feed = [];
     activity = [];
     lastActivityTs = 0;

@@ -37,9 +37,13 @@
   let terminalTarget = $state('');
   let terminalSession = $state('');
   let terminalCommand = $state('');
-  // Files follows the terminal's session (the Team context is gone with the
-  // Team tab — the Hub's projects ARE sessions, so terminal context covers it).
-  let filesSession = $derived(terminalSession);
+  // Files follows the session the user touched LAST — opening a terminal pane
+  // OR selecting a chat project both set it. It used to derive from the
+  // terminal alone, so browsing a project in the chat never moved the Files
+  // tab while switching terminal panes did (owner, 2026-08-22: "chat里的路径
+  // 没有刷新到文件 terminal好像就会刷新路径").
+  let filesSession = $state('');
+  $effect(() => { if (terminalSession) filesSession = terminalSession; });
   // Team (team multi-agent bus) is desktop-server-only. We probe once per
   // connection: team_status rejects with method-not-found when the server has
   // no bus, so a resolved probe means the tab should appear.
@@ -1044,7 +1048,7 @@
            switches. Desktop-eligible only (needs width + the bus): mobile
            keeps the tab layout untouched. -->
       <div class="page-layer" class:hidden={page !== 'hub'}>
-        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} />
+        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onSelectSession={(s) => { if (s) filesSession = s; }} />
       </div>
     {/if}
     {#if hubEligible}
