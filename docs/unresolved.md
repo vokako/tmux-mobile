@@ -262,3 +262,26 @@ which directory wins and make the stored relative cwd empty. Surfaced while
 adding `tmm task`, which does not touch `projects`; left alone rather than
 fixed blind. A fix means giving the test its own tmux socket (`-S`) so it
 cannot see other sessions.
+
+## Backend parity gaps that need a live CLI to close (2026-08-22)
+
+The claude/codex/grok ↔ kiro alignment pass (hooks, vitals, resume, palette)
+left three things deliberately open, each blocked on measurement, not effort:
+
+- **claude vitals + palette**: the claude CLI is not installed on this dev
+  machine, so its status-line furniture cannot be captured and its slash
+  command table cannot be transcribed. `sniff_remembered` returns the EMPTY
+  reading for claude (better than reading its pane with kiro's grammar), and
+  `offeredCommands('claude')` returns no palette (a made-up command looks
+  authoritative and then does nothing). Closing either is mechanical once a
+  claude install is available: capture the footer shapes, transcribe the `/`
+  popup, add the table + sniffer with pinned captures like codex's.
+- **Auto-continue for claude/codex/grok** (`projects/recovery.rs`): detection
+  is deliberately narrow — kiro's measured error text only. The other
+  backends' transient-error paints have not been captured, and a guessed
+  pattern would type `continue` into a working agent. Add each backend's
+  pattern when a real error is on screen (capture it verbatim into a test
+  first).
+- **codex `failed` state**: codex-cli 0.148.0 has no StopFailure hook event
+  (binary strings checked), so a codex agent's failed turn is observable only
+  as a stop with no reply. Nothing to wire until the CLI grows the event.

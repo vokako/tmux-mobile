@@ -113,6 +113,13 @@ pub fn sniff_remembered(
 ) -> Vitals {
     let mut v = match backend {
         "grok" => sniff_grok(pane),
+        "codex" => sniff_codex(pane),
+        // claude has NO sniffer yet: the CLI is not installed on this machine,
+        // so its status furniture cannot be measured, and reading its pane
+        // with kiro's grammar (the old `_` fallback) risks a confident wrong
+        // reading — e.g. any `on branch …` in ordinary output becoming the
+        // card's branch. No reading beats a wrong one (owner, 2026-08-22 对齐).
+        "claude" => Vitals::default(),
         _ => sniff_kiro(pane, agent),
     };
     let now = now_secs();
@@ -294,6 +301,88 @@ fn grok_tokens(s: &str) -> Option<f64> {
     };
     let n: f64 = num.trim().parse().ok()?;
     (n >= 0.0).then_some(n * mult)
+}
+
+/// codex's status furniture, measured on codex-cli 0.148.0 (2026-08-22).
+///
+/// The persistent footer is a `·`-joined line whose FIRST segment is
+/// `<model> [<effort>]` and whose SECOND is the cwd:
+/// `xai.grok-4.6 default · /local/home/cfu/work/projects/tmux-mobile`.
+/// Context is spelled `NN% context left` (the binary's own footer format
+/// string; "100% context left" is its zero-use rendering) or, in the /status
+/// card, `NN% left (21.5K used / 258K)` — both say LEFT where kiro says USED,
+/// so the reading is `100 - NN`.
+pub fn sniff_codex(pane: &str) -> Vitals {
+    let mut v = Vitals::default();
+    for line in pane.lines().rev() {
+        let line = line.trim_end();
+        if line.trim().is_empty() {
+            continue;
+        }
+        if v.model.is_none() {
+            if let Some((m, e)) = codex_footer_model(line) {
+                v.model = Some(m);
+                v.effort = e;
+            }
+        }
+        if v.context_pct.is_none() {
+            if let Some(pct) = codex_context_left(line) {
+                v.context_pct = Some(pct);
+            }
+        }
+        if v.model.is_some() && v.context_pct.is_some() {
+            break;
+        }
+    }
+    v
+}
+
+/// `<model> [<effort>] · <cwd> [· …]` → (model, effort). The anchors: the
+/// second `·`-segment must be an absolute path (`/` or `~` — the footer's cwd,
+/// measured), and the model token must contain a digit (`xai.grok-4.6`,
+/// `gpt-5.2-codex` — every model id does), which keeps prose with a
+/// mid-sentence `·` from becoming a reading.
+fn codex_footer_model(line: &str) -> Option<(String, Option<String>)> {
+    let mut segs = line.trim().split('·').map(str::trim);
+    let first = segs.next()?;
+    let second = segs.next()?;
+    if !(second.starts_with('/') || second.starts_with('~')) {
+        return None;
+    }
+    let mut toks = first.split_whitespace();
+    let model = toks.next()?;
+    if !model.chars().any(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let effort = toks.next().map(str::to_string);
+    // More than two tokens is not the footer's shape.
+    if toks.next().is_some() {
+        return None;
+    }
+    Some((model.to_string(), effort))
+}
+
+/// `NN% context left` (footer) or `NN% left (… used / …)` (/status card) →
+/// share of the context USED (`100 - NN`), matching kiro's own wording for
+/// `Vitals::context_pct`. The trailing words are the anchor: a bare `NN%` is
+/// never accepted (same rule as kiro's pie-glyph requirement).
+fn codex_context_left(line: &str) -> Option<u8> {
+    let s = line.trim().trim_matches('│').trim();
+    let idx = s.find("% context left").or_else(|| {
+        let i = s.find("% left (")?;
+        // The /status shape must really be the context card, not prose.
+        s.contains("used /").then_some(i)
+    })?;
+    let digits: String = s[..idx]
+        .chars()
+        .rev()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    let left = digits.parse::<u16>().ok().filter(|n| *n <= 100)?;
+    Some((100 - left) as u8)
 }
 
 /// `◕ 69%` (TUI) or `69% ctx` (lite) — a percentage that is about the context.
@@ -583,5 +672,58 @@ mod tests {
         retain_windows(&session, &[9]);
         let after = sniff_remembered(&session, 7, "\n", "bot", "kiro");
         assert!(after.is_empty());
+    }
+
+    /// codex-cli 0.148.0, real pane capture (2026-08-22): the persistent
+    /// footer under the composer.
+    #[test]
+    fn codex_footer_reads_model_effort_and_nothing_else() {
+        let pane = "\u{2022} ok\n\u{203a} Ask Codex to do anything\n  xai.grok-4.6 default \u{b7} /local/home/cfu/work/projects/tmux-mobile\n";
+        let v = sniff_codex(pane);
+        assert_eq!(v.model.as_deref(), Some("xai.grok-4.6"));
+        assert_eq!(v.effort.as_deref(), Some("default"));
+        assert_eq!(v.context_pct, None, "no context painted in this capture");
+        assert_eq!(v.branch, None);
+    }
+
+    /// The context spellings: the binary's own footer format string renders
+    /// `100% context left` at zero use, and the /status card (captured live)
+    /// says `96% left (21.5K used / 258K)`. Both are LEFT; the vital is USED.
+    #[test]
+    fn codex_context_left_becomes_used() {
+        assert_eq!(codex_context_left("  97% context left"), Some(3));
+        assert_eq!(codex_context_left("100% context left"), Some(0));
+        assert_eq!(
+            codex_context_left("\u{2502}  Context window:       96% left (21.5K used / 258K)  \u{2502}"),
+            Some(4)
+        );
+        // A bare percentage, or "left" prose without the context anchors,
+        // is never a reading.
+        assert_eq!(codex_context_left("97%"), None);
+        assert_eq!(codex_context_left("3 tries left (2 used / x)"), None);
+        assert_eq!(codex_context_left("101% context left"), None);
+    }
+
+    /// The footer anchors: second segment must be a path, model token must
+    /// carry a digit, exactly one optional effort token.
+    #[test]
+    fn codex_footer_rejects_prose_with_middots() {
+        assert_eq!(codex_footer_model("word \u{b7} another word"), None, "no path");
+        assert_eq!(codex_footer_model("plainmodel \u{b7} /tmp"), None, "no digit");
+        assert_eq!(codex_footer_model("a b c 4 \u{b7} /tmp"), None, "too many tokens");
+        assert_eq!(
+            codex_footer_model("gpt-5.2-codex medium \u{b7} ~/my-project"),
+            Some(("gpt-5.2-codex".into(), Some("medium".into())))
+        );
+    }
+
+    /// claude gets NO reading until its furniture is measured — kiro's grammar
+    /// must not be applied to another CLI's screen.
+    #[test]
+    fn claude_panes_are_not_read_with_kiro_grammar() {
+        let session = format!("vitals-claude-{}", std::process::id());
+        let pane = "bot \u{b7} claude-opus-5 \u{b7} \u{25d1} 44%\n(main)\n";
+        let v = sniff_remembered(&session, 3, pane, "bot", "claude");
+        assert!(v.is_empty(), "claude pane must yield the empty reading, got {v:?}");
     }
 }

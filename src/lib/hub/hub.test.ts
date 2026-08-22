@@ -611,6 +611,36 @@ test('an interactive view is not offered — it would park the agent in a panel'
   assert.deepEqual(commandPalette('/agent ', [])?.items.map((i) => i.value), ['swap']);
 });
 
+test('the palette speaks the addressee backend dialect', () => {
+  // grok (1.0.5, table transcribed from its own docs): /model is inline and
+  // dynamic, /effort has grok's four levels (no kiro-only max), /resume is a
+  // picker and never offered.
+  const grokAll = commandPalette('/', [], 'grok')?.items.map((i) => i.value) ?? [];
+  assert.ok(grokAll.includes('/model') && grokAll.includes('/btw'), `${grokAll}`);
+  assert.ok(!grokAll.includes('/resume'), 'grok /resume is a picker');
+  assert.deepEqual(commandPalette('/effort ', [], 'grok')?.items.map((i) => i.value),
+    ['low', 'medium', 'high', 'xhigh']);
+  assert.ok(commandPalette('/model ', ['grok-4.6'], 'grok')?.items.some((i) => i.value === 'grok-4.6'),
+    'grok models are enumerable and complete inline');
+
+  // codex (0.148.0, popup transcribed live): /model is a PICKER there, so it
+  // is a view; /compact and /diff act in the pane.
+  const codexAll = commandPalette('/', [], 'codex')?.items.map((i) => i.value) ?? [];
+  assert.ok(codexAll.includes('/compact') && codexAll.includes('/diff'), `${codexAll}`);
+  assert.ok(!codexAll.includes('/model'), 'codex /model parks the TUI at a picker');
+  assert.ok(!codexAll.includes('/delete'), 'destructive, never offered');
+
+  // kiro stays the default dialect ('' = backend unknown, historically kiro).
+  assert.deepEqual(commandPalette('/', [], '')?.items.length, OFFERED_COMMANDS.length);
+  assert.deepEqual(commandPalette('/', [], 'kiro')?.items.length, OFFERED_COMMANDS.length);
+
+  // claude has no transcribed table (CLI not installed — a made-up command
+  // looks authoritative and then does nothing), and a mixed @all roster has
+  // no single dialect: no palette beats a wrong one.
+  assert.equal(commandPalette('/', [], 'claude'), null);
+  assert.equal(commandPalette('/', [], 'mixed'), null);
+});
+
 test('ctxColor ramps through the theme tokens, never a raw colour', () => {
   // Every value must be expressed in the app's status tokens: a raw hex here
   // would be right in one theme and wrong in the other.

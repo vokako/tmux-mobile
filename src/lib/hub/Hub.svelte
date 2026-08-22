@@ -495,10 +495,22 @@
   // ── Slash-command completion. Typing `/` offers the agent CLI's commands;
   // choosing one that takes an argument offers ITS values next (the model ids
   // come from the server, which asks the CLI). Two stages, one palette.
-  let cmdModels = $state([]);
+  let cmdModels = $state({});          // backend → model ids (each fetched once)
   let paletteIdx = $state(0);
   let paletteOff = $state(false);      // Escape closes it until the text changes
-  const palette = $derived(paletteOff ? null : commandPalette(composerText, cmdModels));
+  // The palette speaks the ADDRESSEE's dialect: each CLI has its own command
+  // table (kiro's /tangent does not exist in codex; codex's /model is a
+  // picker), so the table follows the explicit @name, else the composer's
+  // recipient. @all with a mixed roster gets no palette — one command line
+  // cannot be right in two dialects at once (owner, 2026-08-22 对齐).
+  const paletteBackend = $derived.by(() => {
+    const m = /^\s*@([\w][\w.-]*)\s/u.exec(composerText ?? '');
+    const name = m ? m[1] : (recipient === ALL_TARGET ? null : recipient);
+    if (name) return agents.find((a) => a.managed && a.name === name)?.agent ?? '';
+    const backends = [...new Set(managedAgents.map((a) => a.agent ?? ''))];
+    return backends.length === 1 ? backends[0] : 'mixed';
+  });
+  const palette = $derived(paletteOff ? null : commandPalette(composerText, cmdModels[paletteBackend] ?? [], paletteBackend));
   // The open menu's agent, as its status line reads right now.
   const vitalsFor = $derived(vitalsLine(managedAgents.find((a) => a.name === menuFor)?.vitals));
   $effect(() => { void composerText; paletteOff = false; });
@@ -508,10 +520,12 @@
   $effect(() => { hubPrefs.setDraft(selected, composerText); });
   $effect(() => { void palette; paletteIdx = 0; });
   // The model list is only needed once a command wants it, and the server caches
-  // it for ten minutes — so this asks at most once per Hub visit.
+  // it for ten minutes — so this asks at most once per backend per Hub visit.
+  // kiro and grok can enumerate their models; claude and codex return null.
   $effect(() => {
-    if (!palette || cmdModels.length) return;
-    modelsList('kiro').then((r) => { cmdModels = r.models ?? []; }).catch(() => {});
+    const backend = paletteBackend;
+    if (!palette || cmdModels[backend]) return;
+    modelsList(backend || 'kiro').then((r) => { cmdModels = { ...cmdModels, [backend]: r.models ?? [] }; }).catch(() => {});
   });
 
   /** Put the chosen completion in the box. `more` keeps the palette alive for the

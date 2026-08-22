@@ -416,6 +416,100 @@ export const KIRO_COMMANDS: readonly SlashCmd[] = [
 /** The commands the palette offers: everything that is not an interactive view. */
 export const OFFERED_COMMANDS: readonly SlashCmd[] = KIRO_COMMANDS.filter((c) => !c.view);
 
+/** grok 1.0.5 — transcribed from its own docs (`~/.grok/docs/user-guide/
+ * 04-slash-commands.md`), same contract as KIRO_COMMANDS: a made-up command
+ * looks authoritative in the list and then does nothing in the pane. `view`
+ * entries open a modal/picker/pane nobody here can see or dismiss and are
+ * filtered from the palette; they stay in the table WITH the reason. */
+export const GROK_COMMANDS: readonly SlashCmd[] = [
+  { name: 'model', desc: 'Switch models (name, then optional effort)', dynamic: 'models' },
+  { name: 'effort', desc: 'Set reasoning effort on the current model', args: ['low', 'medium', 'high', 'xhigh'] },
+  { name: 'compact', desc: 'Compress history to reclaim context; a note says what to keep' },
+  { name: 'new', desc: 'Start a fresh session (alias /clear)' },
+  { name: 'plan', desc: 'Enter plan mode, optionally with a description' },
+  { name: 'fork', desc: 'Branch the session into a new agent, keeping history' },
+  { name: 'remember', desc: 'Save a note to memory immediately' },
+  { name: 'btw', desc: 'Send an aside without interrupting the current task' },
+  { name: 'goal', desc: 'Set or manage an autonomous goal', args: ['status', 'pause', 'resume', 'clear'] },
+  { name: 'deep-research', desc: 'Kick off a background research workflow' },
+  { name: 'workflow', desc: 'Launch or manage a saved workflow', args: ['pause', 'resume', 'stop', 'save'] },
+  { name: 'loop', desc: 'Run a prompt on a recurring interval' },
+  { name: 'imagine', desc: 'Generate an image from a description' },
+  { name: 'always-approve', desc: 'Toggle skip-all-permission-prompts mode' },
+  { name: 'auto', desc: 'Toggle classifier-approved permission mode' },
+  { name: 'quit', desc: 'Quit the application (alias /exit)' },
+  // ── Interactive views / pickers / modals: kept for the record, filtered.
+  { name: 'resume', desc: 'Open the session picker', view: true },
+  { name: 'dashboard', desc: 'Open the live agent dashboard', view: true },
+  { name: 'context', desc: 'Show the context-window breakdown', view: true },
+  { name: 'session-info', desc: 'Show session details (alias /status)', view: true },
+  { name: 'rewind', desc: 'Roll back to an earlier turn (alias /undo)', view: true },
+  { name: 'memory', desc: 'Browse and manage saved memories', view: true },
+  { name: 'hooks', desc: 'Extensions modal, Hooks tab', view: true },
+  { name: 'plugins', desc: 'Extensions modal, Plugins tab', view: true },
+  { name: 'skills', desc: 'Extensions modal, Skills tab', view: true },
+  { name: 'mcps', desc: 'MCP servers management modal', view: true },
+  { name: 'theme', desc: 'Switch the color theme (picker)', view: true },
+  { name: 'feedback', desc: 'Bare form opens a report pane', view: true },
+  { name: 'settings', desc: 'Configuration UI', view: true },
+  { name: 'usage', desc: 'Account usage view', view: true },
+  { name: 'delete', desc: 'Deletes the session — destructive, never offered', view: true },
+];
+
+/** codex-cli 0.148.0 — transcribed live from its own `/` popup (2026-08-22).
+ * `/model` and friends are PICKERS in codex (they park the TUI at a selection
+ * UI), so unlike kiro's they are views here. */
+export const CODEX_COMMANDS: readonly SlashCmd[] = [
+  { name: 'new', desc: 'Start a new chat during a conversation' },
+  { name: 'clear', desc: 'Clear the terminal and start a new chat' },
+  { name: 'compact', desc: 'Summarize conversation to prevent hitting the context limit' },
+  { name: 'init', desc: 'Create an AGENTS.md file with instructions for Codex' },
+  { name: 'plan', desc: 'Switch to Plan mode' },
+  { name: 'goal', desc: 'Set or view the goal for a long-running task', args: ['edit', 'pause', 'resume', 'clear'] },
+  { name: 'fork', desc: 'Fork the current chat' },
+  { name: 'diff', desc: 'Show git diff (including untracked files)' },
+  { name: 'status', desc: 'Show current session configuration and token usage' },
+  { name: 'mcp', desc: 'List configured MCP tools' },
+  { name: 'ps', desc: 'List background terminals' },
+  { name: 'stop', desc: 'Stop all background terminals' },
+  { name: 'approve', desc: 'Approve one retry of a recent auto-review denial' },
+  { name: 'archive', desc: 'Archive this session and exit' },
+  { name: 'exit', desc: 'Exit Codex' },
+  // ── Pickers and views: kept for the record, filtered from the palette.
+  { name: 'model', desc: 'Model picker — a view in codex, not an inline arg', view: true },
+  { name: 'permissions', desc: 'Approval-mode picker', view: true },
+  { name: 'review', desc: 'Review-preset picker', view: true },
+  { name: 'resume', desc: 'Saved-chat picker', view: true },
+  { name: 'agent', desc: 'Thread switcher', view: true },
+  { name: 'mention', desc: 'File picker', view: true },
+  { name: 'skills', desc: 'Skills toggle view', view: true },
+  { name: 'memories', desc: 'Memory settings view', view: true },
+  { name: 'hooks', desc: 'Lifecycle hooks view', view: true },
+  { name: 'keymap', desc: 'Shortcut remapping view', view: true },
+  { name: 'feedback', desc: 'Send logs to maintainers (report view)', view: true },
+  { name: 'personality', desc: 'Communication-style picker', view: true },
+  { name: 'delete', desc: 'Permanently deletes the session — destructive, never offered', view: true },
+];
+
+/** The palette's table for a recipient's backend. kiro is the default dialect
+ * (and the empty string is "backend unknown", which historically meant kiro).
+ * claude returns NOTHING on purpose: the CLI is not installed on this machine,
+ * so its command table cannot be transcribed, and offering kiro's table to a
+ * claude agent shows commands that do not exist there (owner, 2026-08-22 对齐).
+ */
+export function offeredCommands(backend?: string | null): readonly SlashCmd[] {
+  switch (backend ?? '') {
+    case 'grok': return GROK_COMMANDS.filter((c) => !c.view);
+    case 'codex': return CODEX_COMMANDS.filter((c) => !c.view);
+    // kiro is the default dialect; the empty string is "backend unknown",
+    // which historically meant kiro and keeps the old behavior.
+    case 'kiro': case '': return OFFERED_COMMANDS;
+    // claude (not installed here — table untranscribable), a mixed @all
+    // roster, kimi, anything else: no palette beats a wrong one.
+    default: return [];
+  }
+}
+
 export interface PaletteItem { value: string; hint: string }
 export interface Palette {
   /** 'command' completes `/mo` → `/model`; 'arg' completes what follows it. */
@@ -437,7 +531,9 @@ export interface Palette {
  * completed. Returns null when there is nothing to offer, which is also how the
  * caller knows to stay out of the way.
  */
-export function commandPalette(text: string, models: readonly string[] = []): Palette | null {
+export function commandPalette(text: string, models: readonly string[] = [], backend?: string | null): Palette | null {
+  const table = offeredCommands(backend);
+  if (!table.length) return null;
   const at = /^(\s*@[\w][\w.-]*\s+)?/u.exec(text ?? '')?.[0]?.length ?? 0;
   const line = (text ?? '').slice(at);
   if (!line.startsWith('/')) return null;
@@ -445,13 +541,13 @@ export function commandPalette(text: string, models: readonly string[] = []): Pa
   const head = parts[0]!.slice(1);              // the command, without the slash
   // Still typing the command itself: `/`, `/mo`, `/model` with no space yet.
   if (parts.length === 1) {
-    const items = OFFERED_COMMANDS.filter((c) => c.name.startsWith(head.toLowerCase())).map((c) => ({
+    const items = table.filter((c) => c.name.startsWith(head.toLowerCase())).map((c) => ({
       value: `/${c.name}`,
       hint: c.desc,
     }));
     return items.length ? { stage: 'command', items, from: at, more: true } : null;
   }
-  const cmd = OFFERED_COMMANDS.find((c) => c.name === head.toLowerCase());
+  const cmd = table.find((c) => c.name === head.toLowerCase());
   if (!cmd) return null;
   const values = [...(cmd.dynamic === 'models' ? models : []), ...(cmd.args ?? [])];
   if (!values.length) return null;

@@ -178,12 +178,27 @@ pub fn relaunch_line(project_path: &str, window_name: &str, session_id: Option<&
     let recipe: Value = serde_json::from_str(&std::fs::read_to_string(home.join("launch.json")).ok()?).ok()?;
     let cmd = recipe.get("cmd")?.as_str()?.to_string();
     let backend = recipe.get("backend").and_then(|b| b.as_str()).unwrap_or("");
-    let resume = session_id.filter(|s| !s.is_empty()).and_then(|id| match backend {
-        "kiro" => Some(format!("--resume-id {}", shared::shell_quote(id))),
-        "claude" => Some(format!("--resume {}", shared::shell_quote(id))),
-        "grok" => Some(format!("--resume {}", shared::shell_quote(id))),
-        _ => None,
-    });
+    let cmd = match session_id.filter(|s| !s.is_empty()) {
+        Some(id) => match backend {
+            "kiro" => format!("{cmd} --resume-id {}", shared::shell_quote(id)),
+            "claude" => format!("{cmd} --resume {}", shared::shell_quote(id)),
+            "grok" => format!("{cmd} --resume {}", shared::shell_quote(id)),
+            // codex's resume is a SUBCOMMAND, so it splices in after the
+            // binary instead of appending: `codex resume <id> <flags>`.
+            // Verified on codex-cli 0.148.0 that `resume` accepts the same
+            // flags render_codex bakes into the recipe (-c overrides,
+            // --model, --dangerously-bypass-*). Never `--last`: that is
+            // machine-wide and could reopen another project's conversation.
+            "codex" => match cmd.strip_prefix("command codex ") {
+                Some(rest) => format!("command codex resume {} {rest}", shared::shell_quote(id)),
+                // An unexpected recipe shape: relaunch without resume rather
+                // than guess at where the subcommand goes.
+                None => cmd,
+            },
+            _ => cmd,
+        },
+        None => cmd,
+    };
     let env = recipe.get("env").and_then(|e| e.as_array()).map(|arr| {
         arr.iter()
             .filter_map(|kv| Some((kv.get(0)?.as_str()?, kv.get(1)?.as_str()?)))
@@ -197,10 +212,6 @@ pub fn relaunch_line(project_path: &str, window_name: &str, session_id: Option<&
         line.push(' ');
     }
     line.push_str(&cmd);
-    if let Some(r) = resume {
-        line.push(' ');
-        line.push_str(&r);
-    }
     Some(line)
 }
 
@@ -260,6 +271,26 @@ mod relaunch_tests {
         // A window with no recipe (hand-started) stays None — the caller falls
         // back to the generic backend line.
         assert!(relaunch_line(ws.to_str().unwrap(), "byhand", None).is_none());
+
+        // codex resumes via a SUBCOMMAND, so the id splices in after the
+        // binary instead of appending (verified on codex-cli 0.148.0:
+        // `codex resume <id>` accepts the recipe's own flags). Appending
+        // would hand `resume` to the interactive CLI as a prompt.
+        let chome = agent_home(ws.to_str().unwrap(), "cx");
+        std::fs::create_dir_all(&chome).unwrap();
+        write_launch_recipe(
+            &chome,
+            "codex",
+            &[("CODEX_HOME".to_string(), chome.to_string_lossy().to_string())],
+            "command codex -c a=b --dangerously-bypass-approvals-and-sandbox",
+        );
+        let cx = relaunch_line(ws.to_str().unwrap(), "cx", Some("01a0-abc")).unwrap();
+        assert!(
+            cx.contains("command codex resume 01a0-abc -c a=b --dangerously-bypass-approvals-and-sandbox"),
+            "subcommand splice: {cx}"
+        );
+        let cx_fresh = relaunch_line(ws.to_str().unwrap(), "cx", None).unwrap();
+        assert!(!cx_fresh.contains("resume"), "{cx_fresh}");
         std::fs::remove_dir_all(&ws).ok();
     }
 }
@@ -375,6 +406,13 @@ fn claude_hooks(notify: &str) -> Value {
     json!({
         "PreToolUse":  [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify } ] } ],
         "PostToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify } ] } ],
+        // Turn start — resets the same-turn dedup flag and carries the
+        // submitted prompt (the delivery receipt). Shipping Stop WITHOUT this
+        // made the flag sticky: the first `tmm send` killed the auto-post for
+        // every later turn of that window, and lines typed by
+        // `deliver_mentions` were never acked (hollow ring forever). Kiro and
+        // grok had it; claude and codex did not (owner, 2026-08-22: 对齐).
+        "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
         "Notification": [ { "matcher": "permission_prompt|idle_prompt|agent_needs_input|agent_completed", "hooks": [ { "type": "command", "command": notify } ] } ],
         "Stop": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
         "StopFailure": [ { "hooks": [ { "type": "command", "command": notify } ] } ]
@@ -385,6 +423,11 @@ fn codex_hooks(notify: &str) -> Value {
     json!({
         "PreToolUse":  [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify } ] } ],
         "PostToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": notify } ] } ],
+        // Same turn-start contract as claude's (measured, codex-cli 0.148.0:
+        // payload {hook_event_name:"UserPromptSubmit", prompt, session_id} on
+        // hook stdin). Codex has NO StopFailure event (binary strings checked),
+        // so `failed` cannot be derived for it.
+        "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
         "PermissionRequest": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
         "Stop": [ { "hooks": [ { "type": "command", "command": notify } ] } ]
     })
@@ -1210,6 +1253,26 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
             assert!(!r.cmd.contains("x-room"), "no team room headers");
             assert!(r.cmd.contains("files") || dir.join("mcp.json").exists(), "registry MCP present");
             std::fs::remove_dir_all(&dir).ok();
+        }
+    }
+
+    /// The turn-start hook is the ONLY reset of the same-turn dedup flag and
+    /// the only carrier of the submitted prompt (the delivery receipt), so it
+    /// must be registered in EVERY backend's hook set. Claude and codex
+    /// shipped without it: their agents lost the stop-hook auto-post forever
+    /// after their first `tmm send`, and every delivered line stayed
+    /// "unconfirmed" (owner, 2026-08-22: 特性对齐). Codex payload measured on
+    /// codex-cli 0.148.0; claude's documented schema is the same family.
+    #[test]
+    fn every_backend_hook_set_registers_the_turn_start_hook() {
+        assert!(kiro_hooks("n")["userPromptSubmit"].is_array(), "kiro");
+        assert!(claude_hooks("n")["UserPromptSubmit"].is_array(), "claude");
+        assert!(codex_hooks("n")["UserPromptSubmit"].is_array(), "codex");
+        assert!(grok_hooks("n")["UserPromptSubmit"].is_array(), "grok");
+        // And every set still ends turns: a stop hook.
+        assert!(kiro_hooks("n")["stop"].is_array());
+        for f in [claude_hooks, codex_hooks, grok_hooks] {
+            assert!(f("n")["Stop"].is_array());
         }
     }
 

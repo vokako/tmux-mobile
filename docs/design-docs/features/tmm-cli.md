@@ -367,7 +367,7 @@ place — kiro's `agents/<name>.json`, claude's `settings.json`, codex's
 agent was given once at spawn and that cannot be rebuilt. It is a no-op when
 already current, and it is called on every start: `hub_agent_restart` and
 `reconcile` when a project comes up. The hook sets themselves live in ONE place
-each (`kiro_hooks` / `claude_hooks` / `codex_hooks`), shared by render and
+each (`kiro_hooks` / `claude_hooks` / `codex_hooks` / `grok_hooks`), shared by render and
 refresh, so the two cannot disagree.
 
 **Settings drift is config drift too.** A managed kiro home carries
@@ -443,6 +443,44 @@ because for them the alternative is no signal.
 Records are dropped when the window disappears (`retain_windows` on every
 `hub_agents`), and notifications feed the store *before* dedupe (dedupe is a
 notification-UI concern; telemetry wants every fact).
+
+## Backend parity (2026-08-22)
+
+The owner asked for claude/codex/grok to match kiro's feature set ("都要和kiro
+我们现在支持的特性能对齐"). What was actually missing, and what was done:
+
+- **Turn-start hooks**: `claude_hooks` and `codex_hooks` registered
+  Pre/PostToolUse + Stop but NOT `UserPromptSubmit` — the only reset of the
+  same-turn dedup flag and the only carrier of the submitted `prompt`. Their
+  agents therefore lost the stop-hook auto-post forever after their first
+  `tmm send`, and every line `deliver_mentions` typed stayed "unconfirmed".
+  Both now register it, `is_user_prompt_submit` recognizes their spelling
+  (snake key, `"UserPromptSubmit"` value), and `refresh_hooks` backfills
+  every already-spawned agent on its next start. Codex payloads were measured
+  live (codex-cli 0.148.0, isolated CODEX_HOME): same schema family as
+  claude — `hook_event_name`, `prompt`, `session_id`, `tool_name`/`tool_input`,
+  `last_assistant_message` on stop. Codex has NO StopFailure event (binary
+  checked), so `failed` cannot be derived for it.
+- **Vitals**: codex has its own dialect now (`sniff_codex`, measured): the
+  persistent footer `<model> [<effort>] · <cwd>` (second segment must be an
+  absolute path, model token must carry a digit) and context as
+  `NN% context left` / the `/status` card's `NN% left (… used / …)` — codex
+  says LEFT where kiro says USED, so the vital is `100 − NN`. claude gets the
+  EMPTY reading on purpose: the CLI is not installed here, its furniture
+  cannot be measured, and the old `_ => sniff_kiro` fallback read its pane
+  with the wrong grammar.
+- **Resume**: managed codex restarts now resume — `relaunch_line` splices the
+  SUBCOMMAND in (`command codex resume <id> <flags>`; verified that `resume`
+  accepts the recipe's own flags). Appending like the flag backends would
+  have handed `resume` to the CLI as a prompt. Still never `--last`
+  (machine-wide).
+- **Palette**: per-backend command tables — see the slash-command section.
+- **Not aligned, with reasons** (also in `docs/unresolved.md`): claude vitals
+  and palette (CLI not installed — nothing to measure or transcribe);
+  auto-continue recovery patterns for claude/codex/grok (their transient
+  error texts have not been captured; detection is deliberately narrow and a
+  guessed pattern types into working agents); codex `failed` state (no
+  StopFailure event exists).
 
 ## Images: a reference, never bytes
 
@@ -582,7 +620,20 @@ worse than no completion at all: it looks authoritative in the list and then doe
 nothing in the pane. Cloud-only and hidden entries are left out, and `/quit` sits
 last because it ends the agent. `/model`'s values are the exception that cannot be
 transcribed: they are fetched through `models_list`, the same server call the agent
-editor uses (cached ten minutes, asked at most once per Hub visit).
+editor uses (cached ten minutes, asked at most once per backend per Hub visit).
+
+**The palette speaks the ADDRESSEE's dialect** (2026-08-22): each CLI has its
+own command table, so `offeredCommands(backend)` picks it by the explicit
+`@name`'s backend, else the composer's recipient — `GROK_COMMANDS` transcribed
+from grok 1.0.5's own docs (its `/model` completes inline and grok models ARE
+enumerable, so the dynamic values work; `/resume`, `/dashboard`, `/mcps` are
+pickers/modals and carry `view: true`), `CODEX_COMMANDS` transcribed live from
+codex-cli 0.148.0's `/` popup (there `/model`, `/permissions`, `/review` are
+PICKERS — views — while `/compact`, `/diff`, `/status`, `/mcp` act in the
+pane; `/delete` stays in the table flagged as destructive and is never
+offered). claude gets NO palette: the CLI is not installed on this machine, so
+its table cannot be transcribed, and `@all` over a mixed roster gets none
+either — one command line cannot be right in two dialects at once.
 
 **Only commands that DO something are offered.** kiro marks the rest
 `inputType: "panel"` — a list or table that takes over the pane and needs a key to

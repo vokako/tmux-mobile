@@ -697,6 +697,17 @@ fn is_user_prompt_submit(envelope: &InboxEnvelope) -> bool {
             .get("hook_event_name")
             .and_then(Value::as_str)
             .is_some_and(|e| e.eq_ignore_ascii_case("userpromptsubmit")),
+        // claude and codex share kiro's snake_case key with PascalCase values
+        // ("UserPromptSubmit"; codex measured on codex-cli 0.148.0 — payload
+        // also carries `prompt` + `session_id`, same as kiro/claude). They
+        // shipped WITHOUT this arm, which made the dedup flag sticky for
+        // their windows: the first `tmm send` suppressed the auto-post for
+        // every later turn, and deliveries were never acked.
+        "claude" | "codex" => envelope
+            .payload
+            .get("hook_event_name")
+            .and_then(Value::as_str)
+            .is_some_and(|e| e.eq_ignore_ascii_case("userpromptsubmit")),
         // grok 1.0.5: camelCase key, snake_case value (measured).
         "grok" => envelope
             .payload
@@ -1128,6 +1139,35 @@ mod tests {
         ))
         .unwrap();
         assert_eq!((tool.as_str(), detail.as_str()), ("run_terminal_command", "npm test"));
+    }
+
+    /// claude and codex spell the turn start snake-key/Pascal-value
+    /// ("hook_event_name":"UserPromptSubmit"). Codex measured on codex-cli
+    /// 0.148.0 (payload carries prompt + session_id, arrives on hook stdin);
+    /// claude's documented schema is the same family. Without these arms the
+    /// dedup flag never reset for their windows — the first `tmm send`
+    /// suppressed every later auto-post, and delivered lines were never acked.
+    #[test]
+    fn claude_and_codex_turn_starts_are_recognized() {
+        let envelope = |backend: &str, payload: Value| InboxEnvelope {
+            backend: backend.into(),
+            pane_id: "%1".into(),
+            payload,
+        };
+        for backend in ["claude", "codex"] {
+            assert!(
+                is_user_prompt_submit(&envelope(
+                    backend,
+                    json!({"hook_event_name":"UserPromptSubmit","prompt":"hi","session_id":"01a0-abc"})
+                )),
+                "{backend} turn start must be recognized"
+            );
+            // Tool events keep routing to telemetry, never to the reset path.
+            assert!(!is_user_prompt_submit(&envelope(
+                backend,
+                json!({"hook_event_name":"PreToolUse","tool_name":"Read"})
+            )));
+        }
     }
 
     #[test]
