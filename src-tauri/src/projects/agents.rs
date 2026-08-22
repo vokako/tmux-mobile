@@ -108,6 +108,37 @@ pub fn detect(text: &str) -> Option<&'static KnownAgent> {
     best.map(|(_, a)| a)
 }
 
+/// The agent in a MANAGED window: the launch recipe's recorded backend first,
+/// the pane sniff (`detect`) as the fallback for windows we did not create.
+///
+/// The sniff is inherently wrong for some backends we ourselves spawned: the
+/// npm-installed codex runs as `node` (`bin/codex.js` shim), its pane title is
+/// the project name, and the window name is the agent's name — nothing says
+/// "codex", so `detect` returned None and the window fell out of delivery,
+/// the roster, vitals and recovery (found live 2026-08-22: a spawned cx-probe
+/// never received its @mention). We WROTE the backend into `launch.json` at
+/// spawn — for our own windows the record beats the sniff.
+pub fn detect_managed(
+    workspace: Option<&str>,
+    window_name: &str,
+    pane_text: &str,
+) -> Option<&'static KnownAgent> {
+    if let Some(ws) = workspace {
+        let recipe = std::path::Path::new(ws)
+            .join(".tmm").join("agents").join(window_name).join("launch.json");
+        if let Some(backend) = std::fs::read_to_string(recipe)
+            .ok()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .and_then(|v| v.get("backend").and_then(|b| b.as_str().map(str::to_owned)))
+        {
+            if let Some(agent) = KNOWN.iter().find(|a| a.backend == backend) {
+                return Some(agent);
+            }
+        }
+    }
+    detect(pane_text)
+}
+
 /// The launch line for a backend name we stored earlier.
 ///
 /// Restoring a workspace should put you back in the conversation, not in a
@@ -195,5 +226,32 @@ mod tests {
     #[test]
     fn an_empty_id_is_not_a_conversation() {
         assert_eq!(launch_line("kiro", Some("")).as_deref(), Some("kiro-cli chat --resume"));
+    }
+
+    /// The exact live failure (2026-08-22): a spawned codex runs under the
+    /// npm `node` shim — pane shows `cmd=node`, title = project name, window
+    /// name = agent name; nothing says "codex", so the sniff misses and the
+    /// window fell out of delivery/roster/vitals/recovery. The recipe we
+    /// wrote at spawn is the record, so it wins for managed windows.
+    #[test]
+    fn a_managed_window_is_detected_by_its_recipe_not_its_process_name() {
+        let ws = std::env::temp_dir().join(format!("tmm-detect-{}", std::process::id()));
+        let home = ws.join(".tmm").join("agents").join("cx-probe");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("launch.json"), r#"{"backend":"codex","cmd":"command codex"}"#).unwrap();
+        let pane_text = "node bedrock-e2e cx-probe"; // measured: cmd/title/window_name
+        assert!(detect(pane_text).is_none(), "the sniff alone must miss — that is the bug");
+        let hit = detect_managed(Some(ws.to_str().unwrap()), "cx-probe", pane_text);
+        assert_eq!(hit.map(|a| a.backend), Some("codex"), "the recipe is the record");
+        // No workspace (a hand-started window) still sniffs.
+        assert!(detect_managed(None, "cx-probe", pane_text).is_none());
+        assert_eq!(
+            detect_managed(None, "w", "kiro-cli chat").map(|a| a.backend),
+            Some("kiro")
+        );
+        // A recipe naming an unknown backend falls back to the sniff.
+        std::fs::write(home.join("launch.json"), r#"{"backend":"martian"}"#).unwrap();
+        assert!(detect_managed(Some(ws.to_str().unwrap()), "cx-probe", pane_text).is_none());
+        std::fs::remove_dir_all(&ws).ok();
     }
 }

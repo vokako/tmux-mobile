@@ -82,7 +82,7 @@ fn observed_from(pane: &TmuxPane, project_path: &str) -> Observed {
     // Shallow → deep, matching the client's detector: an early match is what
     // the user launched, a late one is a subprocess.
     let text = format!("{} {} {}", pane.current_command, pane.pane_title, pane.child_cmd);
-    match agents::detect(&text) {
+    match agents::detect_managed(Some(project_path), &pane.window_name, &text) {
         Some(agent) => Observed {
             window: pane.window,
             window_name: pane.window_name.clone(),

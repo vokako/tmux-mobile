@@ -167,7 +167,7 @@ pub fn check_once() {
                 continue;
             }
             let text = format!("{} {} {}", p.current_command, p.pane_title, p.window_name);
-            if super::agents::detect(&text).is_none()
+            if super::agents::detect_managed(Some(project.path.as_str()), &p.window_name, &text).is_none()
                 || !super::is_managed_in(Some(project.path.as_str()), &p.window_name)
             {
                 continue;

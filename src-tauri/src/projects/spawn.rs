@@ -75,7 +75,7 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
     let agent_windows = panes
         .iter()
         .filter(|p| seen.insert(p.window))
-        .filter(|p| super::agents::detect(&format!("{} {} {}", p.current_command, p.pane_title, p.window_name)).is_some())
+        .filter(|p| super::agents::detect_managed(Some(workspace.as_str()), &p.window_name, &format!("{} {} {}", p.current_command, p.pane_title, p.window_name)).is_some())
         .count();
     if agent_windows >= SPAWN_CAP {
         return Err(format!("project already has {agent_windows} agents (cap {SPAWN_CAP}) — finish or close one first"));
@@ -481,6 +481,16 @@ pub fn refresh_hooks(project_path: &str, window_name: &str) -> bool {
     let claude = home.join("settings.json");
     if claude.is_file() {
         changed |= patch_hooks(&claude, claude_hooks(&notifications.helper_command("claude")));
+        // Channel drift is config drift too: an agent spawned before the
+        // isolated CLAUDE_CONFIG_DIR + inherited-env change has no `env`
+        // block, i.e. no Bedrock switch, and would boot into a login prompt.
+        // Backfilled only when MISSING — an env the owner customized per
+        // agent is not ours to stomp.
+        changed |= ensure_claude_env(&claude);
+        let state = home.join(".claude.json");
+        if !state.exists() && std::fs::write(&state, "{\"hasCompletedOnboarding\": true, \"theme\": \"dark\"}\n").is_ok() {
+            changed = true;
+        }
     }
     let codex = home.join("codex").join("hooks.json");
     if codex.is_file() {
@@ -711,16 +721,36 @@ fn render_claude(
     let mcpfile = home.join("mcp.json");
     std::fs::write(&mcpfile, serde_json::to_string_pretty(&json!({ "mcpServers": mcp_servers })).unwrap())
         .map_err(|e| e.to_string())?;
+    // The isolated home is the agent's CLAUDE_CONFIG_DIR (claude's KIRO_HOME:
+    // history, session state and .claude.json live here, so a managed agent
+    // never leaks into the user's ~/.claude). That relocation also means the
+    // USER's settings layer is no longer read — so the channel config is
+    // INHERITED: the `env` block of ~/.claude/settings.json (the Bedrock
+    // switch: CLAUDE_CODE_USE_BEDROCK/AWS_REGION/ANTHROPIC_MODEL…) is copied
+    // into the isolated settings.json, grok's "auth carries, prefs do not"
+    // pattern in claude's dialect (owner, 2026-08-22: "都用bedrock渠道…复用
+    // 我们全局定义的配置 但是自己管理好类似kirohome这种"). Plugins and
+    // marketplaces deliberately do NOT carry.
     let settingsfile = home.join("settings.json");
     std::fs::write(
         &settingsfile,
         serde_json::to_string_pretty(&json!({
+            "env": claude_user_env(),
             "skipDangerousModePermissionPrompt": true,
             "hooks": claude_hooks(&notify)
         }))
         .unwrap(),
     )
     .map_err(|e| e.to_string())?;
+    // A fresh CLAUDE_CONFIG_DIR parks the TUI at the theme-onboarding picker
+    // before anything else (measured, claude 2.1.239) — a view nobody can
+    // dismiss. Pre-seed the completion flag; never clobber an existing file
+    // (it records folder trust and session state).
+    let state = home.join(".claude.json");
+    if !state.exists() {
+        std::fs::write(&state, "{\"hasCompletedOnboarding\": true, \"theme\": \"dark\"}\n")
+            .map_err(|e| e.to_string())?;
+    }
 
     // Claude has no native skill mechanism — inject the compact index.
     let full_prompt = if skills.is_empty() {
@@ -728,14 +758,22 @@ fn render_claude(
     } else {
         format!("{}\n\n{}", system_prompt, crate::team::skills::skills_index_text(skills))
     };
-    let model = if def.model.is_empty() { "sonnet" } else { &def.model };
+    // An empty model means the BACKEND default — with Bedrock that is the
+    // inherited env's ANTHROPIC_MODEL, so no `--model` is passed (the old
+    // hardcoded `sonnet` alias overrode the env and does not resolve on
+    // Bedrock). A configured model rides `--model`, which wins over env.
+    let model_arg = if def.model.trim().is_empty() {
+        String::new()
+    } else {
+        format!(" --model {}", shared::shell_quote(def.model.trim()))
+    };
     Ok(Rendered {
-        env: Vec::new(),
+        env: vec![("CLAUDE_CONFIG_DIR".into(), home.to_string_lossy().to_string())],
         cmd: format!(
-            "command claude --mcp-config {} --strict-mcp-config --settings {} --model {} --dangerously-skip-permissions --append-system-prompt {}",
+            "command claude --mcp-config {} --strict-mcp-config --settings {}{} --dangerously-skip-permissions --append-system-prompt {}",
             shared::shell_quote(&mcpfile.to_string_lossy()),
             shared::shell_quote(&settingsfile.to_string_lossy()),
-            shared::shell_quote(model),
+            model_arg,
             shared::shell_quote(&full_prompt),
         ),
         confirmation: Some(shared::StartupConfirmation {
@@ -744,6 +782,43 @@ fn render_claude(
             timeout: std::time::Duration::from_secs(120),
         }),
     })
+}
+
+/// The `env` block of the user's own `~/.claude/settings.json` — the channel
+/// configuration (Bedrock switch, region, default model). Only read, never
+/// written; absent or unparsable means an empty object (the agent then runs
+/// on claude's own defaults, which on this machine would be a login prompt —
+/// same soft degradation as grok's missing auth.json).
+fn claude_user_env() -> Value {
+    let path = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_default()
+        .join(".claude")
+        .join("settings.json");
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.get("env").cloned())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}))
+}
+
+/// Backfill a managed claude settings.json with the inherited channel env
+/// (see `claude_user_env`) when it has NONE. Fail-soft: refresh must never
+/// block a start. Returns true when the file changed.
+fn ensure_claude_env(path: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(path) else { return false };
+    let Ok(mut conf) = serde_json::from_str::<Value>(&text) else { return false };
+    let Some(obj) = conf.as_object_mut() else { return false };
+    if obj.get("env").is_some_and(Value::is_object) {
+        return false; // present — the owner's (or an earlier render's) choice stands
+    }
+    let inherited = claude_user_env();
+    if inherited.as_object().is_none_or(|m| m.is_empty()) {
+        return false; // nothing to inherit
+    }
+    obj.insert("env".into(), inherited);
+    std::fs::write(path, serde_json::to_string_pretty(&conf).unwrap()).is_ok()
 }
 
 fn render_codex(
@@ -1252,6 +1327,30 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
             };
             assert!(!r.cmd.contains("x-room"), "no team room headers");
             assert!(r.cmd.contains("files") || dir.join("mcp.json").exists(), "registry MCP present");
+            if backend == "claude" {
+                // The isolated home is claude's KIRO_HOME (measured on claude
+                // 2.1.239: CLAUDE_CONFIG_DIR relocates state AND the user
+                // settings layer, so the channel env is inherited into the
+                // isolated settings.json instead).
+                assert!(
+                    r.env.iter().any(|(k, v)| k == "CLAUDE_CONFIG_DIR" && v == &dir.to_string_lossy()),
+                    "isolated config dir: {:?}", r.env
+                );
+                let settings: Value = serde_json::from_str(
+                    &std::fs::read_to_string(dir.join("settings.json")).unwrap()
+                ).unwrap();
+                assert!(settings.get("env").is_some_and(Value::is_object), "inherited channel env");
+                assert_eq!(settings["skipDangerousModePermissionPrompt"], json!(true));
+                // A fresh config dir parks at the theme onboarding without this.
+                let state: Value = serde_json::from_str(
+                    &std::fs::read_to_string(dir.join(".claude.json")).unwrap()
+                ).unwrap();
+                assert_eq!(state["hasCompletedOnboarding"], json!(true));
+                // def() has no model → the BACKEND default (the inherited
+                // env's ANTHROPIC_MODEL) decides; the old `--model sonnet`
+                // alias overrode it and does not resolve on Bedrock.
+                assert!(!r.cmd.contains("--model"), "{}", r.cmd);
+            }
             std::fs::remove_dir_all(&dir).ok();
         }
     }

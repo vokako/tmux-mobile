@@ -444,6 +444,54 @@ Records are dropped when the window disappears (`retain_windows` on every
 `hub_agents`), and notifications feed the store *before* dedupe (dedupe is a
 notification-UI concern; telemetry wants every fact).
 
+## The claude backend on Bedrock (claude 2.1.239, wired 2026-08-22)
+
+Installed and verified live the same day the owner asked for it ("都用bedrock
+渠道…复用我们全局定义的配置 但是自己管理好类似kirohome这种"): a managed claude
+agent spawned from the hub answered a real turn on
+`global.anthropic.claude-sonnet-4-6` via Bedrock, hooks fired, `tmm done`
+posted, the reply auto-posted.
+
+- **Channel**: the USER's `~/.claude/settings.json` carries an `env` block
+  (`CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION`, `ANTHROPIC_MODEL`,
+  `ANTHROPIC_SMALL_FAST_MODEL`) — SigV4 from the normal AWS credential chain,
+  no API key, same idea as codex's `amazon-bedrock` provider.
+- **Isolation**: `CLAUDE_CONFIG_DIR=<ws>/.tmm/agents/<name>/` — claude's
+  KIRO_HOME. History, session state and `.claude.json` stay in the agent's
+  home. The relocation also unhooks the user settings layer, so the channel
+  is INHERITED: `render_claude` copies the user file's `env` block into the
+  isolated `settings.json` (grok's "auth carries, prefs do not" in claude's
+  dialect; plugins/marketplaces deliberately do not carry), and
+  `refresh_hooks` backfills a missing `env` on every start.
+- **First-run furniture, both measured**: a fresh config dir parks the TUI at
+  the theme-onboarding picker before anything else, so `.claude.json` is
+  pre-seeded with `hasCompletedOnboarding` (never clobbered — it records
+  folder trust); the bypass-permissions acceptance dialog is suppressed by
+  `skipDangerousModePermissionPrompt: true`; the folder-trust prompt is
+  answered by the spawn confirmation machinery
+  (`CLAUDE_FOLDER_TRUST_MARKERS`, wording re-verified on 2.1.239).
+- **Model**: empty means the BACKEND default — the inherited env's
+  `ANTHROPIC_MODEL` — so no `--model` is passed (the old hardcoded `sonnet`
+  alias overrode the env and does not resolve on Bedrock). A configured model
+  rides `--model`, which wins over env.
+- **Hook payloads verified** (they were claude-documented, codex-measured
+  until now): `hook_event_name`/`prompt`/`session_id` on UserPromptSubmit,
+  `last_assistant_message` on Stop — the normalizer's claude arm matches.
+
+Two plumbing lessons came out of the live test, both general:
+
+- **A managed window's backend comes from its RECIPE, not the pane sniff**
+  (`agents::detect_managed`): the npm codex runs as `node` — pane command
+  `node`, title = project name, window name = agent name, nothing says
+  "codex" — so a spawned codex fell out of delivery, the roster, vitals and
+  recovery entirely. We wrote the backend into `launch.json` at spawn; for
+  our own windows the record beats the sniff, and hand-started windows still
+  sniff.
+- **`send_command` sleeps 200 ms between the text and the Enter**: a TUI that
+  receives the burst back-to-back treats the Enter as paste content and
+  parks the delivered line in its composer unsubmitted (measured on codex;
+  Team's `nudge_pane` had learned the same beat earlier).
+
 ## Backend parity (2026-08-22)
 
 The owner asked for claude/codex/grok to match kiro's feature set ("都要和kiro
@@ -476,7 +524,9 @@ The owner asked for claude/codex/grok to match kiro's feature set ("都要和kir
   (machine-wide).
 - **Palette**: per-backend command tables — see the slash-command section.
 - **Not aligned, with reasons** (also in `docs/unresolved.md`): claude vitals
-  and palette (CLI not installed — nothing to measure or transcribe);
+  and palette (the CLI is installed and on Bedrock since later that day — see
+  the claude backend section — but its status furniture and `/` popup are
+  still untranscribed);
   auto-continue recovery patterns for claude/codex/grok (their transient
   error texts have not been captured; detection is deliberately narrow and a
   guessed pattern types into working agents); codex `failed` state (no

@@ -634,6 +634,14 @@ pub fn send_keys(target: &str, keys: &str, literal: bool) -> Result<(), String> 
 /// 向 pane 发送文本 + Enter
 pub fn send_command(target: &str, command: &str) -> Result<(), String> {
     send_keys(target, command, true)?;
+    // A beat between the text and the Enter. An agent TUI that receives the
+    // burst back-to-back can treat the Enter as part of a paste and leave the
+    // line sitting in its composer unsubmitted — measured live on codex-cli
+    // 0.148.0 (a delivered @mention parked in the input box; grok/kiro/claude
+    // tolerate the burst). Team's nudge_pane learned the same lesson earlier
+    // ("the TUI needs a beat to settle"). 200 ms is imperceptible next to a
+    // model turn; shells do not care either way.
+    std::thread::sleep(std::time::Duration::from_millis(200));
     send_keys(target, "Enter", false)?;
     Ok(())
 }

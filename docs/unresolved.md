@@ -268,14 +268,14 @@ cannot see other sessions.
 The claude/codex/grok ↔ kiro alignment pass (hooks, vitals, resume, palette)
 left three things deliberately open, each blocked on measurement, not effort:
 
-- **claude vitals + palette**: the claude CLI is not installed on this dev
-  machine, so its status-line furniture cannot be captured and its slash
-  command table cannot be transcribed. `sniff_remembered` returns the EMPTY
-  reading for claude (better than reading its pane with kiro's grammar), and
-  `offeredCommands('claude')` returns no palette (a made-up command looks
-  authoritative and then does nothing). Closing either is mechanical once a
-  claude install is available: capture the footer shapes, transcribe the `/`
-  popup, add the table + sniffer with pinned captures like codex's.
+- **claude vitals + palette**: claude 2.1.239 is INSTALLED and on Bedrock
+  since 2026-08-22 (see the claude backend section in tmm-cli.md; its hook
+  payloads are measured and match the normalizer). What remains untranscribed
+  is its status-line furniture and its `/` popup: `sniff_remembered` still
+  returns the EMPTY reading for claude and `offeredCommands('claude')` still
+  returns no palette. Closing both is now purely mechanical: capture the
+  footer shapes, transcribe the popup, add the table + sniffer with pinned
+  captures like codex's.
 - **Auto-continue for claude/codex/grok** (`projects/recovery.rs`): detection
   is deliberately narrow — kiro's measured error text only. The other
   backends' transient-error paints have not been captured, and a guessed
