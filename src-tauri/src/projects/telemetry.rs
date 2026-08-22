@@ -299,6 +299,9 @@ pub fn record_notification(session: &str, window: usize, kind: &str, ts: u64) {
 /// "foo.rs")`. The event keeps the two parts apart for rendering; the status
 /// record keeps the joined line, which is what "working — Edit foo.rs" shows.
 pub fn record_tool(session: &str, window: usize, tool: &str, detail: &str) {
+    // A tool call is proof the model answered: whatever transient-error retry
+    // budget this window was burning refills (recovery rule 3).
+    super::recovery::note_tool_activity(session, window);
     let line = if detail.is_empty() { tool.to_string() } else { format!("{tool} {detail}") };
     let ts = now();
     // ONE row per call. We subscribe to both `preToolUse` and `postToolUse` (a
@@ -450,6 +453,13 @@ fn truncate_chars(input: &str, max: usize) -> String {
         out.push('…');
     }
     out
+}
+
+/// An auto-recovery action (`projects::recovery`) made visible: rendered as a
+/// `warn` row because it is ABOUT a window that needed intervention, and warns
+/// stay visible at every feed detail level.
+pub fn record_recovery(session: &str, window: usize, text: &str) {
+    push_event(session, window, "warn", text.to_string());
 }
 
 /// Drop records for windows that no longer exist (called opportunistically

@@ -12,6 +12,7 @@ pub mod agents;
 pub mod capture;
 pub mod models;
 pub mod reconcile;
+pub mod recovery;
 pub mod spawn;
 pub mod store;
 pub mod telemetry;
@@ -934,6 +935,10 @@ pub async fn capture_loop() {
         if let Err(e) = capture_once() {
             eprintln!("projects: capture failed: {e}");
         }
+        // Piggybacks on the capture cadence: a transient model error is
+        // noticed within one tick, and the backoff ladder is measured in tens
+        // of seconds, so 20s granularity costs nothing.
+        recovery::check_once();
     }
 }
 
