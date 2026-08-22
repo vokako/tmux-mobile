@@ -109,14 +109,18 @@ under four gates, each of which exists because of a specific failure:
 2. **Not already sent this turn** — an agent that called `tmm send` would
    otherwise produce two messages for one turn. The flag is reset by
    `userPromptSubmit`, which is why that hook must exist in every config that can
-   auto-post.
+   auto-post. `tmm done` deliberately does NOT set it: its summary is a report
+   ABOUT the work while the stop hook carries the answer itself, and treating
+   done as send made every turn ending in the REQUIRED done lose its final reply
+   (owner, 2026-08-21). The summary is recorded instead, and the auto-post is
+   skipped only when the reply IS the summary verbatim — the one real duplicate.
 3. **`record_only = true`** — an auto-post whose body addresses a peer would be
    typed into that peer's pane, whose stop hook would post back. Forever.
 4. **`MAX_REPLY_CHARS = 6144`** — the chat budget, not the 240-char notification
    budget.
 
 `tmm done` remains a state transition (and ends the turn explicitly); its summary
-can be one line, because the answer itself is already in the room.
+can be one line, because the answer itself still auto-posts to the room.
 
 ## Status: four states, one rule
 

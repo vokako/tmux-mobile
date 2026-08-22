@@ -1305,6 +1305,9 @@
       {#if managedAgents.length || stopped.length}
         <!-- The roster. Tapping an agent makes it the recipient (and this
              project's lead) — the phone gets chips, the desktop gets cards. -->
+        <!-- The roster row: the scrolling strip of cards PLUS the pinned add
+             button. Two children, one row. -->
+        <div class="roster">
         <div class="cards" class:chips={compact} bind:this={cardsEl}>
           {#each managedAgents as a (a.window)}
             <!-- A div, not a button: the dot menu inside contains real buttons,
@@ -1374,12 +1377,18 @@
               </div>
             </div>
           {/each}
-          <!-- Ad hoc: add an agent to a conversation already in progress. -->
-          {#if liveSelected}
-            <button class="acard add" onclick={() => openPicker('add')} title={t('hubSpawn')}>
-              <Icon name="plus" size={14} /><span>{t('hubSpawn')}</span>
-            </button>
-          {/if}
+        </div>
+        <!-- Ad hoc: add an agent to a conversation already in progress. PINNED
+             beside the strip, never inside it: as the strip's last child it
+             scrolled with the cards, and the strip hides its scrollbar — with
+             agents present the button lived off-screen with nothing hinting it
+             existed (owner, 2026-08-21: "agent 不为空的情况下 我都看不到
+             '加 Agent' 的按钮"). -->
+        {#if liveSelected}
+          <button class="acard add" onclick={() => openPicker('add')} title={t('hubSpawn')}>
+            <Icon name="plus" size={14} /><span>{t('hubSpawn')}</span>
+          </button>
+        {/if}
         </div>
       {/if}
 
@@ -1987,7 +1996,10 @@
 
   /* The roster: one line per agent, on every screen size. It answers "who is
      here and are they busy" — anything more was a wall of cards. */
-  .cards { display: flex; gap: 6px; padding: 8px 14px; overflow-x: auto; border-bottom: 1px solid var(--border2); scrollbar-width: none; }
+  /* The roster row: the gutter and the divider belong to the ROW, so the pinned
+     add button shares them with the strip instead of scrolling away inside it. */
+  .roster { display: flex; align-items: stretch; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--border2); min-width: 0; }
+  .cards { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; flex: 0 1 auto; min-width: 0; }
   .cards::-webkit-scrollbar { display: none; }
   .acard {
     position: relative; flex: none; display: flex; flex-direction: column;

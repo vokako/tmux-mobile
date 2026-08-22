@@ -298,10 +298,14 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
                     };
                     let _ = bus.post(&room, agent, &body, false);
                 }
-                // Mark this turn as having an explicit message so the stop
-                // hook doesn't auto-post a duplicate reply.
+                // Record the summary for dedup — NOT mark_sent_this_turn: a
+                // done is a report about the work, the stop hook carries the
+                // answer itself, and blanket suppression is what made every
+                // turn ending in the required `tmm done` lose its final reply
+                // (owner, 2026-08-21: "kiro grok 都好像没看到最后返回的消息").
+                // The auto-post is skipped only when the reply IS the summary.
                 if let Some(hub) = notifications {
-                    hub.mark_sent_this_turn(session, window);
+                    hub.mark_done_this_turn(session, window, summary);
                 }
             } else {
                 let state = match require_str(p, "state") {
@@ -620,7 +624,13 @@ fn agent_states(session: &str) -> serde_json::Value {
             let vitals = if managed {
                 crate::tmux::capture_pane_plain(&format!("{session}:{}", p.window), Some(0))
                     .map(|text| {
-                        crate::projects::vitals::sniff_remembered(session, p.window, &text, &p.window_name)
+                        crate::projects::vitals::sniff_remembered(
+                            session,
+                            p.window,
+                            &text,
+                            &p.window_name,
+                            agent.map(|a| a.backend).unwrap_or(""),
+                        )
                     })
                     .unwrap_or_default()
             } else {

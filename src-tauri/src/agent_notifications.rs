@@ -86,11 +86,20 @@ struct State {
     /// the capturer stamps with it (`src-tauri/src/projects`), because that is
     /// what has to survive the reboot which loses tmux in the first place.
     sessions: HashMap<String, String>,
-    /// window key → true when the agent issued a `tmm send` or `tmm done`
-    /// during the current turn. Reset at `userPromptSubmit` (turn start).
-    /// Used to suppress the automatic stop-hook post so a turn that already
-    /// reported itself does not produce a second identical message.
+    /// window key → true when the agent issued a `tmm send` during the current
+    /// turn. Reset at `userPromptSubmit` (turn start). Used to suppress the
+    /// automatic stop-hook post so a turn that already SPOKE its content into
+    /// the room does not produce a second copy of it.
     sent_this_turn: HashMap<String, bool>,
+    /// window key → the summary the agent passed to `tmm done` in the current
+    /// turn. A done is NOT a `tmm send`: the summary is a report about the work,
+    /// the final reply is the work's answer, and suppressing the reply because a
+    /// summary exists is what made every completed turn end in a one-line
+    /// `[tmm done]` with the answer itself nowhere in the chat (owner,
+    /// 2026-08-21: "kiro grok 都好像没看到最后返回的消息"). It is kept only to
+    /// catch the one case that IS a duplicate — an agent whose summary is
+    /// verbatim its whole answer.
+    done_this_turn: HashMap<String, String>,
     /// Injected by the server after the team bus is ready. `None` on mobile.
     /// Box'd pointer stored here so it shares the Mutex with the rest of state.
     poster: Option<Arc<dyn RoomPoster>>,
@@ -124,6 +133,7 @@ impl AgentNotificationHub {
                 unread,
                 sessions: HashMap::new(),
                 sent_this_turn: HashMap::new(),
+                done_this_turn: HashMap::new(),
                 poster: None,
             })),
             tx,
@@ -136,17 +146,33 @@ impl AgentNotificationHub {
         self.state.lock().unwrap().poster = Some(poster);
     }
 
-    /// Called by `tmm send` / `tmm done` to record that this window's current
-    /// turn already produced an explicit message. The stop hook will skip the
-    /// automatic post for this turn.
+    /// Called by `tmm send` to record that this window's current turn already
+    /// produced an explicit message. The stop hook will skip the automatic
+    /// post for this turn.
     pub fn mark_sent_this_turn(&self, session: &str, window: usize) {
         self.state.lock().unwrap().sent_this_turn.insert(window_key(session, window), true);
     }
 
+    /// Called by `tmm done` with the summary the agent gave. Deliberately NOT
+    /// the same as `mark_sent_this_turn`: a done summary is a report ABOUT the
+    /// work, while the stop hook carries the answer itself — both belong in the
+    /// room. The summary is kept only so a reply that IS the summary verbatim
+    /// can be recognized as a duplicate and skipped.
+    pub fn mark_done_this_turn(&self, session: &str, window: usize, summary: &str) {
+        self.state
+            .lock()
+            .unwrap()
+            .done_this_turn
+            .insert(window_key(session, window), summary.trim().to_string());
+    }
+
     /// Called by the `userPromptSubmit` hook to mark the start of a new turn.
-    /// Clears the "sent this turn" flag so the upcoming stop can auto-post.
+    /// Clears the per-turn flags so the upcoming stop can auto-post.
     pub fn reset_sent_this_turn(&self, session: &str, window: usize) {
-        self.state.lock().unwrap().sent_this_turn.remove(&window_key(session, window));
+        let mut state = self.state.lock().unwrap();
+        let key = window_key(session, window);
+        state.sent_this_turn.remove(&key);
+        state.done_this_turn.remove(&key);
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<String> {
@@ -297,8 +323,11 @@ impl AgentNotificationHub {
         if crate::projects::managed_home(session, &window_name).is_none() {
             return;
         }
-        // Constraint 1: same-turn dedup.
-        if self.already_sent_this_turn(session, window) {
+        // Constraint 1: same-turn dedup. A `tmm send` already spoke into the
+        // room; a `tmm done` only suppresses when its summary IS the reply.
+        if self.already_sent_this_turn(session, window)
+            || self.reply_is_the_done_summary(session, window, reply)
+        {
             return;
         }
         // Constraint 4: truncate at the chat-path budget.
@@ -312,7 +341,7 @@ impl AgentNotificationHub {
     }
 
     /// Constraint 1 (same-turn dedup): skip the automatic post when the agent
-    /// already spoke this turn via `tmm send` / `tmm done`.
+    /// already spoke this turn via `tmm send`.
     fn already_sent_this_turn(&self, session: &str, window: usize) -> bool {
         self.state
             .lock()
@@ -321,6 +350,20 @@ impl AgentNotificationHub {
             .get(&window_key(session, window))
             .copied()
             .unwrap_or(false)
+    }
+
+    /// The one case where a `tmm done` makes the auto-post a duplicate: the
+    /// agent put its WHOLE answer into the summary, so `[tmm done] <text>` and
+    /// the auto-posted reply would be the same message twice. A summary that
+    /// merely overlaps the reply (the normal case — a one-line report about a
+    /// long answer) does not suppress anything.
+    fn reply_is_the_done_summary(&self, session: &str, window: usize, reply: &str) -> bool {
+        self.state
+            .lock()
+            .unwrap()
+            .done_this_turn
+            .get(&window_key(session, window))
+            .is_some_and(|summary| !summary.is_empty() && summary == reply.trim())
     }
 
     fn record(&self, item: AgentNotification) -> Result<(), String> {
@@ -1394,7 +1437,11 @@ mod tests {
         }
 
         // Same turn, second stop after an explicit send: no second message.
-        hub.mark_sent_this_turn(&session, 0);
+        // The window index comes from the pane, not from an assumed 0 — this
+        // machine runs `base-index 1`, and marking the wrong window made the
+        // suppression silently miss.
+        let (_, win, _) = crate::tmux::resolve_pane_id(&pane_id).expect("pane resolves");
+        hub.mark_sent_this_turn(&session, win);
         std::fs::write(
             root.join("inbox").join("2-stop.json"),
             serde_json::to_vec(&json!({
@@ -1432,6 +1479,41 @@ mod tests {
             !hub.already_sent_this_turn("work", 2),
             "a send in one turn must not suppress the auto-post of every later turn"
         );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_done_summary_only_suppresses_a_verbatim_duplicate_reply() {
+        let root = std::env::temp_dir().join(format!("tmm-agent-done-{}", uuid::Uuid::new_v4()));
+        let hub = AgentNotificationHub::load_at(root.clone());
+        // The regression (owner, 2026-08-21): `tmm done` used to set the same
+        // flag as `tmm send`, so every turn that ended with the REQUIRED done
+        // lost its auto-posted final reply — the chat showed a one-line
+        // `[tmm done]` and the answer itself nowhere.
+        hub.mark_done_this_turn("work", 2, "修好了 roster 按钮");
+        assert!(
+            !hub.already_sent_this_turn("work", 2),
+            "a done is not a send: the final reply must still auto-post"
+        );
+        assert!(
+            !hub.reply_is_the_done_summary("work", 2, "详细的最终回复，比 summary 长得多。"),
+            "a summary ABOUT the reply does not suppress the reply"
+        );
+        // The one real duplicate: the whole answer was the summary.
+        assert!(
+            hub.reply_is_the_done_summary("work", 2, "修好了 roster 按钮"),
+            "a verbatim duplicate is skipped"
+        );
+        assert!(
+            hub.reply_is_the_done_summary("work", 2, "  修好了 roster 按钮\n"),
+            "trim before comparing — hooks carry trailing newlines"
+        );
+        // Turn start clears the summary along with the sent flag.
+        hub.reset_sent_this_turn("work", 2);
+        assert!(!hub.reply_is_the_done_summary("work", 2, "修好了 roster 按钮"));
+        // An empty summary (bare `tmm done`) suppresses nothing.
+        hub.mark_done_this_turn("work", 3, "  ");
+        assert!(!hub.reply_is_the_done_summary("work", 3, ""));
         let _ = std::fs::remove_dir_all(root);
     }
 

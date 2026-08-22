@@ -97,11 +97,24 @@ impl Vitals {
 
 /// Sniff a pane and remember what was read, filling gaps from the last reading.
 ///
-/// This is what `hub_agents` calls. `sniff_kiro` stays pure (and tested) — the
+/// This is what `hub_agents` calls. The sniffers stay pure (and tested) — the
 /// memory lives here, keyed by session and window, expiring after
 /// `VITALS_TTL_SECS` so a long-dead reading cannot follow an agent around.
-pub fn sniff_remembered(session: &str, window: usize, pane: &str, agent: &str) -> Vitals {
-    let mut v = sniff_kiro(pane, agent);
+/// `backend` picks the dialect: every CLI paints its own status furniture
+/// (kiro a `·`-joined status line, grok a header ratio + a boxed footer), and
+/// reading one CLI's screen with another CLI's grammar yields confident
+/// nonsense, which is worse than nothing.
+pub fn sniff_remembered(
+    session: &str,
+    window: usize,
+    pane: &str,
+    agent: &str,
+    backend: &str,
+) -> Vitals {
+    let mut v = match backend {
+        "grok" => sniff_grok(pane),
+        _ => sniff_kiro(pane, agent),
+    };
     let now = now_secs();
     let key = (session.to_string(), window);
     let mut map = cache().lock().unwrap();
@@ -189,6 +202,98 @@ pub fn sniff_kiro(pane: &str, agent: &str) -> Vitals {
         }
     }
     v
+}
+
+/// Read what grok's screen says about its current state. grok 1.0.5 paints two
+/// fixtures (measured live, 2026-08-21/22):
+///
+/// - a header line, cwd left + context ratio right: `/w/reports   47K / 500K`
+///   ("上下文长度在右上角" — the owner's words for where to look). The ratio is
+///   used / total tokens, so the percentage is computed, not read.
+/// - the input box's bottom border carries the model (and the approval mode):
+///   `╰──────── Grok 4.6 (Bedrock) · always-approve ─╯`.
+///
+/// No agent-name anchor exists in either fixture, so both fields identify
+/// themselves BY SHAPE: the ratio must be `N[K|M] / N[K|M]` at the end of a
+/// line, the model must sit in a `╰…╯` border. Bottom-up, newest paint wins —
+/// the footer is redrawn at the bottom, and stale headers scroll upward.
+pub fn sniff_grok(pane: &str) -> Vitals {
+    let mut v = Vitals::default();
+    for line in pane.lines().rev() {
+        let line = line.trim_end();
+        if line.trim().is_empty() {
+            continue;
+        }
+        if v.model.is_none() {
+            if let Some(m) = grok_footer_model(line) {
+                v.model = Some(m);
+            }
+        }
+        if v.context_pct.is_none() {
+            if let Some(pct) = grok_context_ratio(line) {
+                v.context_pct = Some(pct);
+            }
+        }
+        if v.model.is_some() && v.context_pct.is_some() {
+            break;
+        }
+    }
+    v
+}
+
+/// The model out of grok's input-box bottom border: `╰─── <model> [· mode] ─╯`.
+/// The border glyphs are the marker — ordinary output does not draw box
+/// corners — and the FIRST `·`-segment inside is the model; what follows is
+/// the approval mode (`always-approve`), which changes per keypress and is not
+/// a vital.
+fn grok_footer_model(line: &str) -> Option<String> {
+    let s = line.trim();
+    if !(s.starts_with('╰') && s.ends_with('╯')) {
+        return None;
+    }
+    let inner = s.trim_matches(|c| matches!(c, '╰' | '╯' | '─')).trim();
+    let model = inner.split('·').next()?.trim();
+    // An empty border (`╰────╯`, no label) is the box with nothing to say.
+    if model.is_empty() || model.chars().all(|c| c == '─' || c.is_whitespace()) {
+        return None;
+    }
+    Some(model.to_string())
+}
+
+/// `47K / 500K` at the END of a line → percentage of the context used. Both
+/// sides must parse as token counts and the ratio must make sense (used ≤
+/// total); a `3 / 5` in ordinary output fails the K/M requirement on the
+/// total, which is what keeps arithmetic in a diff from becoming a reading.
+fn grok_context_ratio(line: &str) -> Option<u8> {
+    let s = line.trim_end();
+    let (head, total_txt) = s.rsplit_once('/')?;
+    let total_txt = total_txt.trim();
+    let used_txt = head.trim_end().rsplit(char::is_whitespace).next()?;
+    // The total is a model's context budget: it always carries a magnitude
+    // suffix (500K, 2M). Requiring it filters out fractions in ordinary text.
+    if !total_txt.ends_with(['K', 'M']) {
+        return None;
+    }
+    let used = grok_tokens(used_txt)?;
+    let total = grok_tokens(total_txt)?;
+    if total == 0.0 || used > total {
+        return None;
+    }
+    Some((used * 100.0 / total).round().clamp(0.0, 100.0) as u8)
+}
+
+/// `47K` → 47_000, `1.2M` → 1_200_000, `800` → 800.
+fn grok_tokens(s: &str) -> Option<f64> {
+    let s = s.trim();
+    let (num, mult) = match s.strip_suffix('M') {
+        Some(n) => (n, 1_000_000.0),
+        None => match s.strip_suffix('K') {
+            Some(n) => (n, 1_000.0),
+            None => (s, 1.0),
+        },
+    };
+    let n: f64 = num.trim().parse().ok()?;
+    (n >= 0.0).then_some(n * mult)
 }
 
 /// `◕ 69%` (TUI) or `69% ctx` (lite) — a percentage that is about the context.
@@ -348,6 +453,69 @@ mod tests {
         assert_eq!(context_pct("◔ abc%"), None);
     }
 
+    /// A real capture of a managed grok pane (tmux capture-pane -p, grok 1.0.5,
+    /// 2026-08-21). Header carries cwd + context ratio, the input box's bottom
+    /// border carries the model and the approval mode.
+    const GROK: &str = "\n\
+        \x20 /local/home/cfu/work/reports          47K / 500K\n\
+        \n\
+        \x20    Worked for 2m8s            stop  [hooks: 1]\n\
+        \n\
+        \x20 ╭──────────────────────────────────────────────╮\n\
+        \x20 │ ❯                                            │\n\
+        \x20 ╰──────── Grok 4.6 (Bedrock) · always-approve ─╯\n\
+        \n\
+        \x20 Shift+Tab:mode  │  Ctrl+x:shortcuts\n";
+
+    #[test]
+    fn reads_a_real_grok_pane() {
+        let v = sniff_grok(GROK);
+        assert_eq!(v.model.as_deref(), Some("Grok 4.6 (Bedrock)"));
+        assert_eq!(v.context_pct, Some(9), "47K of 500K rounds to 9%");
+        assert_eq!(v.effort, None);
+        assert_eq!(v.branch, None, "grok paints no branch");
+    }
+
+    #[test]
+    fn a_grok_footer_without_the_mode_still_names_the_model() {
+        // Wide pane, no `· always-approve` segment (measured, test-grok:2).
+        let v = sniff_grok(
+            "  /local/home/cfu                        13K / 500K\n\
+             \x20 ╰───────────────────────── Grok 4.6 (Bedrock) ─╯\n",
+        );
+        assert_eq!(v.model.as_deref(), Some("Grok 4.6 (Bedrock)"));
+        assert_eq!(v.context_pct, Some(3));
+    }
+
+    #[test]
+    fn grok_ratios_in_ordinary_output_are_not_context() {
+        // Fractions and paths are everywhere; only `N[K|M] / N[K|M]` with a
+        // suffixed total at the end of a line is the header ratio.
+        for text in [
+            "passed 3 / 5 tests\n",
+            "progress: 47 / 500\n",
+            "  a/b\n",
+            "download 900K / 1G\n", // G is not a context magnitude grok paints
+        ] {
+            assert_eq!(sniff_grok(text).context_pct, None, "{text:?}");
+        }
+        // An empty box border is not a model.
+        assert_eq!(sniff_grok("  ╰────────╯\n").model, None);
+        // Used above total is a misread, not a reading.
+        assert_eq!(sniff_grok("  /w  600K / 500K\n").context_pct, None);
+    }
+
+    #[test]
+    fn grok_token_shapes_parse() {
+        assert_eq!(grok_tokens("47K"), Some(47_000.0));
+        assert_eq!(grok_tokens("1.2M"), Some(1_200_000.0));
+        assert_eq!(grok_tokens("800"), Some(800.0));
+        assert_eq!(grok_tokens("abcK"), None);
+        // Full window reads 100, empty reads 0.
+        assert_eq!(grok_context_ratio("  /w  500K / 500K"), Some(100));
+        assert_eq!(grok_context_ratio("  /w  0K / 500K"), Some(0));
+    }
+
     #[test]
     fn a_reading_fills_its_gaps_from_the_last_one() {
         // The flicker: this capture caught the pane between paints, so only the
@@ -392,28 +560,28 @@ mod tests {
     fn a_missed_capture_keeps_the_last_reading() {
         let session = format!("vitals-test-{}", std::process::id());
         let good = "bot · claude-opus-5 · ◔ 12%\n/w/x ·\n(main)\n";
-        let first = sniff_remembered(&session, 7, good, "bot");
+        let first = sniff_remembered(&session, 7, good, "bot", "kiro");
         assert_eq!(first.model.as_deref(), Some("claude-opus-5"));
         assert_eq!(first.context_pct, Some(12));
 
         // A capture with nothing in it — a repaint, a tool's output, a panel.
-        let blind = sniff_remembered(&session, 7, "\n\n$ ls\n", "bot");
+        let blind = sniff_remembered(&session, 7, "\n\n$ ls\n", "bot", "kiro");
         assert_eq!(blind.model.as_deref(), Some("claude-opus-5"), "remembered, not blank");
         assert_eq!(blind.context_pct, Some(12));
         assert_eq!(blind.branch.as_deref(), Some("main"));
 
         // A fresh number replaces the remembered one immediately.
-        let moved = sniff_remembered(&session, 7, "bot · claude-opus-5 · ◑ 44%\n", "bot");
+        let moved = sniff_remembered(&session, 7, "bot · claude-opus-5 · ◑ 44%\n", "bot", "kiro");
         assert_eq!(moved.context_pct, Some(44));
 
         // Another window's reading is its own.
-        let other = sniff_remembered(&session, 9, "\n", "bot");
+        let other = sniff_remembered(&session, 9, "\n", "bot", "kiro");
         assert!(other.is_empty(), "window 9 was never read");
 
         // A window that goes away is forgotten, so a new agent in the same index
         // cannot inherit its numbers.
         retain_windows(&session, &[9]);
-        let after = sniff_remembered(&session, 7, "\n", "bot");
+        let after = sniff_remembered(&session, 7, "\n", "bot", "kiro");
         assert!(after.is_empty());
     }
 }

@@ -424,8 +424,13 @@ model, hooks fired, `tmm done` posted, state derived):
   `--resume <id>` exact, id from the hooks' `sessionId`.
 - **Models**: `grok models` enumerates (bullet list, `*` marks the default),
   so grok ids validate like kiro's; custom models appear by name.
-- **Vitals**: none — the sniffer is kiro-specific and a missing reading is
-  the documented degradation.
+- **Vitals**: its own dialect — a header line ends in the context RATIO
+  (`47K / 500K`; the percentage is computed, K/M suffix required on the
+  total, used ≤ total) and the input box's bottom border names the model
+  (`╰── Grok 4.6 (Bedrock) · always-approve ─╯`, first `·`-segment; the
+  approval mode is not a vital). `sniff_remembered` dispatches on the
+  detected backend, because reading one CLI's screen with another's grammar
+  yields confident nonsense.
 
 **Pane activity is not a work signal for a window that has hooks**, and that
 correction is the point of this rewrite. It used to be: `window_activity` newer
@@ -637,13 +642,17 @@ were showing none of it and asking the owner to go read the terminal ("从输出
 几行原始文本内容 加一下当前状态的嗅探，比如模型名 上下文长度 effort 之类的",
 2026-08-19). There is no API for it: a CLI's live state lives in its own process.
 
-So `projects::vitals::sniff_kiro` reads the last lines of the pane, and
+So `projects::vitals` reads the last lines of the pane, and
 `hub_agents` attaches a `vitals` object per agent. It is a SNIFFER, with a
 sniffer's contract: every field is optional, an unreadable pane yields the empty
 reading and never an error, the object is omitted entirely when nothing could be
 read, and nothing downstream may assume a value is present. It sits on top of the
 hook-derived state, never in place of it — hooks are facts, this is a reading of
-somebody else's screen.
+somebody else's screen. Each backend is its own dialect: `sniff_remembered`
+dispatches on the backend `agents::detect` reported — `sniff_kiro` for kiro's
+`·`-joined status line, `sniff_grok` for grok's header ratio + boxed footer
+(see the grok backend notes above) — because reading one CLI's screen with
+another CLI's grammar yields confident nonsense, which is worse than nothing.
 
 What makes it more than guesswork is that kiro's layout is documented by kiro's
 own source: the status line is a fixed order of segments joined by `·` — `agent ·
@@ -679,7 +688,8 @@ gaps FIELD BY FIELD — a pane often shows the wrapped branch line while the sta
 line itself has scrolled off, and half a reading is still half a reading. A fresh
 value always wins, so a `/model` swap shows up at once; the memory expires after
 `VITALS_TTL_SECS` (5 min) and `retain_windows` drops it with the window, so a new
-agent cannot inherit the last one's numbers. `sniff_kiro` stays pure and tested; the
+agent cannot inherit the last one's numbers. The per-backend sniffers stay pure and
+tested; the
 memory is a thin layer over it.
 
 The owner's other half was right too, and it was a client bug: `loadAgents` did
