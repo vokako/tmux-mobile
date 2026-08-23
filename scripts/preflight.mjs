@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 // Preflight for dev/build commands. Two jobs:
 //
-// 1. `preflight dev`: fail FAST if the dev ports are already taken, and say
-//    exactly who owns them. Without this, a second `tauri dev` half-starts:
-//    vite dies on the port conflict AFTER nuking node_modules/.vite (the
-//    dep-optimizer cache) — every open client then 504s on the next reload
-//    (the "blank white page") — and the Tauri app process survives as an
-//    orphan holding no ports but wasting a build.
+// 1. Development preflights fail FAST when the requested ports are already
+//    taken, and say exactly who owns them. `web` checks 5173, `server` checks
+//    9899, and `dev` checks the complete stack. Without this, a second Vite
+//    process can nuke node_modules/.vite before it loses the port race (the
+//    "blank white page"), while a duplicate backend wastes a build first.
 //
 // 2. `preflight android-apk`: after `tauri android build`, re-point the
 //    machine-local gradle build symlink at THIS checkout's output. A global
@@ -51,21 +50,28 @@ function whoOwnsPort(port) {
   }
 }
 
-if (mode === 'dev') {
+const devPorts = {
+  web: [[5173, 'vite dev server']],
+  server: [[9899, 'tmux-mobile WS server']],
+  dev: [[5173, 'vite dev server'], [9899, 'tmux-mobile WS server']],
+};
+
+if (mode in devPorts) {
   const conflicts = [];
-  for (const [port, what] of [[5173, 'vite dev server'], [9899, 'tmux-mobile WS server']]) {
+  for (const [port, what] of devPorts[mode]) {
     const owner = whoOwnsPort(port);
     if (owner) conflicts.push({ port, what, ...owner });
   }
   if (conflicts.length) {
-    console.error('\n✋ dev stack already running — refusing to half-start a second one.\n');
+    const scope = mode === 'dev' ? 'dev stack' : `${mode} dev service`;
+    console.error(`\n✋ ${scope} already running — refusing to start a duplicate.\n`);
     for (const c of conflicts) {
       console.error(`   port ${c.port} (${c.what}) is held by ${c.cmd} (pid ${c.pid})`);
     }
     console.error('\n   Reuse the running instance, or stop it first:');
     console.error(`   kill ${conflicts.map(c => c.pid).join(' ')}\n`);
-    console.error('   (Starting a second instance corrupts the vite dep cache and');
-    console.error('   leaves an orphaned Tauri process — see scripts/preflight.mjs.)\n');
+    console.error('   (Starting a second Vite instance corrupts the dependency cache;');
+    console.error('   a second backend would only fail after doing build work.)\n');
     process.exit(1);
   }
   process.exit(0);

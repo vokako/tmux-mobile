@@ -13,12 +13,14 @@ Targets: Android (primary), macOS desktop, browser (web UI).
 
 ## Commands
 ```bash
-npm run dev              # Vite dev server (web UI on 0.0.0.0:5173)
+npm run dev:all          # Vite + watched WS server; Ctrl-C stops both
+npm run dev              # Vite dev server only (web UI on 0.0.0.0:5173)
+npm run dev:server:watch # standalone WS server; rebuild/restart on Rust changes
 npm run tauri:dev        # Desktop app + WS server (dev mode)
 npm run tauri:dev:release # Release-mode desktop app + WS server
 npm run build:mac        # macOS .app + .dmg
 npm run build:android    # Android APK (aarch64)
-npm test                 # Frontend tests (node --test, src/**/*.test.{js,ts} — see docs/conventions/testing.md)
+npm test                 # Frontend + dev-script tests (node --test; see docs/conventions/testing.md)
 npm run check            # svelte-check: type-checks .ts/.svelte.ts/.svelte files
 npm run build:server     # server + tmm, no webview needed (release)
 npm run dev:server       # standalone WS server (pair with `npm run dev`)
@@ -38,7 +40,9 @@ changing the project default:
 
 ```bash
 npm run build:server     # server + tmm, release
-npm run dev:server       # run the server (pair with `npm run dev` for the web UI)
+npm run dev:all          # Vite + watched server (recommended browser dev loop)
+npm run dev:server:watch # watched server only; pair with `npm run dev`
+npm run dev:server       # one-shot server only; pair with `npm run dev`
 npm run test:rust        # the Rust tests
 ```
 

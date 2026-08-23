@@ -1,7 +1,7 @@
 # Testing Conventions
 
-Frontend tests run with `npm test` (`node --test`, no framework, no tmux
-needed). Rust tests: `cd src-tauri && cargo test -- --test-threads=1`
+Frontend tests and repository development-script tests run with `npm test`
+(`node --test`, no framework, no tmux needed). Rust tests: `cd src-tauri && cargo test -- --test-threads=1`
 (needs a running tmux). This file governs the frontend side.
 
 ## Two kinds of tests, two naming schemes

@@ -34,12 +34,17 @@ The server runs on your Mac, the UI runs in any browser or as a native app (macO
 ```bash
 npm install
 
-# Option 1: Desktop app (Tauri window + WS server, auto-fills config)
+# Option 1: Browser development stack (recommended)
+# Vite HMR on :5173 + WS server on :9899. Rust changes rebuild and restart
+# the backend automatically; Ctrl-C stops both processes.
+npm run dev:all
+
+# Option 2: Desktop app (Tauri window + WS server, auto-fills config)
 npm run tauri:dev
 
-# Option 2: Server + browser
-npm run dev:server                        # starts WS server on :9899
-npm run dev                               # starts web UI on :5173
+# Option 3: Start browser pieces separately
+npm run dev:server:watch                  # watched WS server on :9899
+npm run dev                               # Vite web UI on :5173
 ```
 
 On first launch, a token is auto-generated and saved to `~/.config/tmux-mobile/config.toml`. The Tauri desktop app auto-fills connection settings from this config.
@@ -124,9 +129,11 @@ them work from your phone. Desktop-server only (the agent bus runs in-process).
 
 | Script | Description |
 |--------|-------------|
-| `npm run dev` | Vite dev server (web UI on 0.0.0.0:5173) |
+| `npm run dev` | Vite dev server only (web UI on 0.0.0.0:5173, HMR) |
+| `npm run dev:all` | Vite + watched WS server; Rust changes rebuild/restart the backend |
+| `npm run dev:server:watch` | Watched standalone WS server; rebuild/restart on Rust changes |
 | `npm run build` | Production web build |
-| `npm test` | Frontend tests (node --test, no tmux needed) |
+| `npm test` | Frontend and development-script tests (node --test, no tmux needed) |
 | `npm run check` | Type-check (.ts / .svelte via svelte-check) |
 | `npm run test:rust` | Rust tests, sequential (needs tmux running) |
 | `npm run dev:server` | Standalone WS server — no webview needed |
