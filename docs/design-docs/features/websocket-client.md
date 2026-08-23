@@ -7,6 +7,17 @@ Mobile connections are unreliable. WebSocket client must handle disconnects, rec
 Custom WebSocket client (`ws.ts`) with auto-reconnect, pending promise cleanup, and multi-address failover.
 
 ## How It Works
+- **Browser development has one public origin.** `npm run dev:all` exposes
+  Vite on `:5173`; Vite proxies WebSocket upgrades at `/ws` and streaming
+  downloads at `/dl` to the watched Rust service bound to loopback. A fresh
+  dev browser defaults its connection field to `ws(s)://location.host/ws`.
+  `httpOriginForWs()` deliberately discards the trailing `/ws` segment when it
+  builds signed download URLs, so downloads use the sibling `/dl` route while
+  a production parent prefix such as `/tmux` remains intact. `dev:all`
+  explicitly disables TLS on the loopback hop even when the persisted server
+  config has certificates; HTTPS/WSS terminates at the public Vite/Tailscale
+  edge. The internal Rust port remains available for the separate-start
+  compatibility workflow.
 - **Pane-output routing is a per-target listener registry**, not a single
   callback. `addPaneOutputListener(target, cb)` / `removePaneOutputListener(target)`
   (and the `…ClosedListener` pair) keep a `Map<target, cb>`; the `pane_output`

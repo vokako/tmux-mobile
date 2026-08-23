@@ -81,6 +81,14 @@ fn dirs_next() -> PathBuf {
     base.join("tmux-mobile")
 }
 
+fn optional_env_override(value: Option<String>, fallback: Option<String>) -> Option<String> {
+    match value {
+        Some(value) if value.trim().is_empty() => None,
+        Some(value) => Some(value),
+        None => fallback,
+    }
+}
+
 impl Config {
     /// Load config: file < env vars. Auto-generates token if missing everywhere.
     pub fn load() -> Self {
@@ -111,8 +119,8 @@ impl Config {
             token,
             machine_id: load_or_create_machine_id(),
             tmux_socket: std::env::var("TMUX_SOCKET").ok().or(file_cfg.tmux_socket),
-            tls_cert: std::env::var("TLS_CERT").ok().or(file_cfg.tls_cert),
-            tls_key: std::env::var("TLS_KEY").ok().or(file_cfg.tls_key),
+            tls_cert: optional_env_override(std::env::var("TLS_CERT").ok(), file_cfg.tls_cert),
+            tls_key: optional_env_override(std::env::var("TLS_KEY").ok(), file_cfg.tls_key),
             scrollback: std::env::var("SCROLLBACK")
                 .ok()
                 .and_then(|s| s.parse().ok())
@@ -280,6 +288,20 @@ mod tests {
         let p = std::env::temp_dir().join("tmux_mobile_cfg_test_nonexistent");
         let _ = std::fs::remove_file(&p);
         harden_path_0600(&p); // must not panic
+    }
+
+    #[test]
+    fn empty_optional_env_value_disables_file_fallback() {
+        let fallback = Some("configured.pem".to_string());
+        assert_eq!(
+            optional_env_override(Some(String::new()), fallback.clone()),
+            None
+        );
+        assert_eq!(optional_env_override(None, fallback.clone()), fallback);
+        assert_eq!(
+            optional_env_override(Some("override.pem".to_string()), None),
+            Some("override.pem".to_string()),
+        );
     }
 }
 

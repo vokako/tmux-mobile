@@ -2,22 +2,26 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DEV_SERVER_PORT_ENV, devServerPort } from './dev-ports.mjs';
 
 export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const STOP_TIMEOUT_MS = 5000;
 
 /** Commands are kept explicit so neither child re-runs a partial preflight. */
-export function serviceSpecs(root = repoRoot) {
+export function serviceSpecs(root = repoRoot, env = process.env) {
+  const port = String(devServerPort(env));
   return [
     {
       name: 'server',
       command: 'bash',
       args: [join(root, 'scripts/dev-server-watch.sh')],
+      env: { HOST: '127.0.0.1', PORT: port, TLS_CERT: '', TLS_KEY: '' },
     },
     {
       name: 'web',
       command: join(root, 'node_modules/.bin/vite'),
       args: ['dev'],
+      env: { [DEV_SERVER_PORT_ENV]: port },
     },
   ];
 }
@@ -113,7 +117,7 @@ export async function runDevStack({
   for (const spec of serviceSpecs(root)) {
     const child = spawnProcess(spec.command, spec.args, {
       cwd: root,
-      env: process.env,
+      env: { ...process.env, ...spec.env },
       stdio: 'inherit',
       // On Unix this makes a new process group without unref'ing the child.
       detached: process.platform !== 'win32',

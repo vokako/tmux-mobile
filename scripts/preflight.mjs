@@ -34,6 +34,7 @@ import { existsSync, readlinkSync, unlinkSync, symlinkSync, readdirSync, statSyn
 import { basename, dirname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { DEV_WEB_PORT, devServerPort } from './dev-ports.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const mode = process.argv[2] || 'dev';
@@ -50,10 +51,11 @@ function whoOwnsPort(port) {
   }
 }
 
+const serverPort = devServerPort();
 const devPorts = {
-  web: [[5173, 'vite dev server']],
-  server: [[9899, 'tmux-mobile WS server']],
-  dev: [[5173, 'vite dev server'], [9899, 'tmux-mobile WS server']],
+  web: [[DEV_WEB_PORT, 'vite dev server']],
+  server: [[serverPort, 'tmux-mobile WS server']],
+  dev: [[DEV_WEB_PORT, 'vite dev server'], [serverPort, 'tmux-mobile WS server']],
 };
 
 if (mode in devPorts) {

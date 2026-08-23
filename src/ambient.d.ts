@@ -10,4 +10,12 @@ declare global {
     __TAURI__?: { core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<any> } };
     __TAURI_INTERNALS__?: unknown;
   }
+
+  interface ImportMetaEnv {
+    readonly DEV: boolean;
+  }
+
+  interface ImportMeta {
+    readonly env: ImportMetaEnv;
+  }
 }

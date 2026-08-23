@@ -35,21 +35,24 @@ The server runs on your Mac, the UI runs in any browser or as a native app (macO
 npm install
 
 # Option 1: Browser development stack (recommended)
-# Vite HMR on :5173 + WS server on :9899. Rust changes rebuild and restart
-# the backend automatically; Ctrl-C stops both processes.
+# One public endpoint on :5173: Vite serves the UI and proxies /ws + /dl to
+# the loopback-only Rust service. Rust changes rebuild/restart automatically.
 npm run dev:all
 
 # Option 2: Desktop app (Tauri window + WS server, auto-fills config)
 npm run tauri:dev
 
-# Option 3: Start browser pieces separately
-npm run dev:server:watch                  # watched WS server on :9899
+# Option 3: Start browser pieces separately (two-port compatibility mode)
+npm run dev:server:watch                  # standalone WS server on :9899
 npm run dev                               # Vite web UI on :5173
 ```
 
 On first launch, a token is auto-generated and saved to `~/.config/tmux-mobile/config.toml`. The Tauri desktop app auto-fills connection settings from this config.
 
-Open `http://<your-mac-ip>:5173` on your phone, enter the address (`ws://host:port`) and token, and you're in.
+With `npm run dev:all`, open `http://<your-mac-ip>:5173`; the connection field
+is pre-filled as `ws://<your-mac-ip>:5173/ws`, so only port 5173 needs to be
+reachable. The Rust listener on 9899 is an internal loopback hop. Separate
+startup remains compatible with the direct `ws://host:9899` address.
 
 ## Configuration
 
@@ -130,7 +133,7 @@ them work from your phone. Desktop-server only (the agent bus runs in-process).
 | Script | Description |
 |--------|-------------|
 | `npm run dev` | Vite dev server only (web UI on 0.0.0.0:5173, HMR) |
-| `npm run dev:all` | Vite + watched WS server; Rust changes rebuild/restart the backend |
+| `npm run dev:all` | One public :5173 endpoint; Vite proxies `/ws` + `/dl` to the watched loopback Rust server |
 | `npm run dev:server:watch` | Watched standalone WS server; rebuild/restart on Rust changes |
 | `npm run build` | Production web build |
 | `npm test` | Frontend and development-script tests (node --test, no tmux needed) |
@@ -201,8 +204,9 @@ If you have Tailscale, serve the web UI over HTTPS:
 
 ```bash
 tailscale serve --bg 5173
-# Access from any device: https://your-machine.tailnet-name.ts.net/
-# WebSocket: use wss:// with Tailscale domain or ws:// with Tailscale IP:9899
+# UI:        https://your-machine.tailnet-name.ts.net/
+# WebSocket: wss://your-machine.tailnet-name.ts.net/ws
+# Port 9899 stays loopback-only; it does not need a Tailscale serve rule.
 ```
 
 ## License

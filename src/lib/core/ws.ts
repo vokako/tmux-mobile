@@ -689,15 +689,23 @@ export const fsRename = (from: string, to: string) => call('fs_rename', { from, 
 // transfer is handled at the WS protocol layer (server PING / browser PONG),
 // so even a 50 MB frame in the air won't make us give up on the socket.
 export const fsDownload = (path: string) => call('fs_download', { path }, 60000);
+
+export function httpOriginForWs(url: string): string {
+  const parsed = new URL(url);
+  const protocol = parsed.protocol === 'wss:' ? 'https:' : 'http:';
+  const path = parsed.pathname.replace(/\/+$/, '');
+  const downloadBasePath = path.endsWith('/ws') ? path.slice(0, -3) : path;
+  return `${protocol}//${parsed.host}${downloadBasePath}`;
+}
 export const fsDownloadUrl = (path: string) => call<{ url: string; name: string }>('fs_download_url', { path });
 export function fsDownloadHttp(path: string) {
   // Both ws:// and wss:// use the streaming HTTP /dl endpoint — the server
   // peeks the first bytes of every accepted (plain or TLS) connection and
-  // branches HTTP vs WS. Streaming avoids the 50 MB cap on fs_download and
-  // the base64 overhead. wsUrl maps cleanly: ws://host → http://host,
-  // wss://host → https://host.
+  // branches HTTP vs WS. Streaming avoids the 50 MB cap and base64 overhead.
+  // wss://host/prefix/ws → https://host/prefix. Only a trailing /ws proxy
+  // segment is discarded; production parent prefixes remain intact.
   return fsDownloadUrl(path).then(({ url, name }) => {
-    const base = wsUrl!.replace(/^ws/, 'http').replace(/\/$/, ''); // connect() set wsUrl before any RPC could run
+    const base = httpOriginForWs(wsUrl!); // connect() set wsUrl before any RPC could run
     return { url: base + url, name };
   });
 }

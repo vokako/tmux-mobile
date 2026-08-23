@@ -51,6 +51,12 @@ Object.defineProperty(globalThis, 'crypto', {
 
 const wsClient = await import(`./ws.ts?lifecycle=${Date.now()}`);
 
+test('HTTP download base removes only the terminal WebSocket proxy segment', () => {
+  assert.equal(wsClient.httpOriginForWs('ws://devbox:5173/ws'), 'http://devbox:5173');
+  assert.equal(wsClient.httpOriginForWs('wss://devbox.example/tmux/ws?x=1'), 'https://devbox.example/tmux');
+  assert.equal(wsClient.httpOriginForWs('wss://devbox.example/tmux'), 'https://devbox.example/tmux');
+});
+
 async function authenticate() {
   const connecting = wsClient.connect('ws://test', 'token');
   const socket = MockWebSocket.instances.at(-1)!;

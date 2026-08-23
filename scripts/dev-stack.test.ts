@@ -44,17 +44,19 @@ function fakeStack(children: FakeChild[]) {
 }
 
 test('dev stack uses the Rust watcher and the local Vite binary', async () => {
-  const specs = serviceSpecs('/workspace');
+  const specs = serviceSpecs('/workspace', {});
   assert.deepEqual(specs, [
     {
       name: 'server',
       command: 'bash',
       args: ['/workspace/scripts/dev-server-watch.sh'],
+      env: { HOST: '127.0.0.1', PORT: '9899', TLS_CERT: '', TLS_KEY: '' },
     },
     {
       name: 'web',
       command: '/workspace/node_modules/.bin/vite',
       args: ['dev'],
+      env: { TMUX_MOBILE_DEV_SERVER_PORT: '9899' },
     },
   ]);
 
@@ -173,13 +175,23 @@ test('timeout kills descendants even after their process-group leader exits', {
 
   for (const pidFile of pidFiles) {
     const descendantPid = Number.parseInt(await readFile(pidFile, 'utf8'), 10);
-    assert.throws(
-      () => process.kill(descendantPid, 0),
-      (error: unknown) => error instanceof Error && 'code' in error && error.code === 'ESRCH',
-      `descendant ${descendantPid} survived after its leader exited`,
-    );
+    let descendantAlive = true;
+    for (let i = 0; i < 100; i += 1) {
+      try {
+        process.kill(descendantPid, 0);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      } catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'ESRCH') {
+          descendantAlive = false;
+          break;
+        }
+        throw error;
+      }
+    }
+    assert.equal(descendantAlive, false, `descendant ${descendantPid} survived after its leader exited`);
   }
 });
+
 test('process-tree stop reaches a watcher foreground child', {
   skip: process.platform === 'win32' ? 'Unix process groups are required by the Bash watcher' : false,
 }, async (t) => {

@@ -13,7 +13,7 @@ Targets: Android (primary), macOS desktop, browser (web UI).
 
 ## Commands
 ```bash
-npm run dev:all          # Vite + watched WS server; Ctrl-C stops both
+npm run dev:all          # one public :5173; proxies /ws + /dl to watched Rust
 npm run dev              # Vite dev server only (web UI on 0.0.0.0:5173)
 npm run dev:server:watch # standalone WS server; rebuild/restart on Rust changes
 npm run tauri:dev        # Desktop app + WS server (dev mode)

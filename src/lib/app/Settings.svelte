@@ -1,5 +1,6 @@
 <script lang="ts">
   import { connect, disconnect } from '../core/ws.ts';
+  import { defaultConnectionAddress } from '../core/connection-address.ts';
   import Icon from '../ui/Icon.svelte';
   import { copyText } from '../core/clipboard.ts';
   import { t } from '../core/i18n.svelte.ts';
@@ -8,7 +9,7 @@
 
   let { onConnected }: { onConnected: () => void } = $props();
 
-  let address = $state(localStorage.getItem('tmux_address') || 'ws://127.0.0.1:9899');
+  let address = $state(localStorage.getItem('tmux_address') || defaultConnectionAddress(location, import.meta.env.DEV));
   let token = $state(localStorage.getItem('tmux_token') || '');
   let socket = $state(localStorage.getItem('tmux_socket') || '');
   let error = $state('');
