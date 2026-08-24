@@ -42,7 +42,15 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
     // It answers before the session gate below, because it has no session to
     // resolve — the sidebar asks it once to order the whole project list.
     if req.method == "hub_rooms" {
-        return Response::ok(id, serde_json::json!({ "rooms": bus.room_latest() }));
+        // The sidebar's summary read: newest message per room AND every
+        // hook-known window's derived state, keyed "<session>:<window>". Both
+        // are about EVERY project, which is why this answers before the
+        // session gate below.
+        let mut states = serde_json::Map::new();
+        for (s, w, st) in crate::projects::telemetry::all_states() {
+            states.insert(format!("{s}:{w}"), serde_json::Value::String(st));
+        }
+        return Response::ok(id, serde_json::json!({ "rooms": bus.room_latest(), "states": states }));
     }
     let asked = match require_str(p, "session") {
         Ok(s) => s,

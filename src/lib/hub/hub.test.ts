@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs } from './hub.ts';
+import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -397,6 +397,20 @@ test('fmtElapsed is compact at every magnitude', () => {
   assert.equal(t(3600 + 5 * 60), '1h05m');
   assert.equal(t(26 * 3600), '1d02h');
   assert.equal(fmtElapsed(0, Date.now()), '', 'no timestamp, no readout');
+});
+
+test('agoShort speaks sidebar precision: one unit, coarser as it ages', () => {
+  // A row's last-reply time is a summary, not a running timer — one unit is
+  // legible in a 40px-wide slot where fmtElapsed's "2h14m" is not (owner,
+  // 2026-08-24: the project list should show "上次回复的时间").
+  const t = (secsAgo: number) => agoShort(1_000_000_000, (1_000_000 + secsAgo) * 1000);
+  assert.equal(t(0), 'now');
+  assert.equal(t(45), 'now', 'under a minute is not worth counting');
+  assert.equal(t(134), '2m');
+  assert.equal(t(3600 + 5 * 60), '1h');
+  assert.equal(t(26 * 3600), '1d');
+  assert.equal(t(9 * 86400), '9d');
+  assert.equal(agoShort(0, Date.now()), '', 'a room that never spoke shows nothing');
 });
 
 test('unreadSenders marks who replied after the user last looked', () => {

@@ -506,6 +506,20 @@ pub fn derive(session: &str, window: usize, activity_ts: u64) -> AgentStatus {
     derive_from(&rec, activity_ts, now())
 }
 
+/// Every window with any hook facts, with its derived state — the sidebar's
+/// one cheap read across ALL projects at once (owner, 2026-08-24: the project
+/// list should show "当前几个 Agent 的简单 logo 状态"). Pure memory: no tmux
+/// call, no pane sniff, so `hub_rooms` can afford it on every poll. Windows
+/// that never produced a hook fact are simply absent — the client reads
+/// absence as idle, which is what no-facts honestly means.
+pub fn all_states() -> Vec<(String, usize, String)> {
+    let t = now();
+    let map = store().lock().unwrap();
+    map.iter()
+        .map(|((s, w), rec)| (s.clone(), *w, derive_from(rec, 0, t).state))
+        .collect()
+}
+
 /// The state machine, in one place. A turn is a bracket: `userPromptSubmit`
 /// opens it, `stop` / `tmm done` closes it, tool calls happen inside it, and a
 /// permission prompt suspends it. So the rule is simply *which boundary is the
@@ -607,6 +621,22 @@ mod tests {
 
     fn rec() -> Rec {
         Rec::default()
+    }
+
+    /// The sidebar's one cheap read: every window with hook facts, derived.
+    /// Sessions are isolated keys, and a window nobody hooked is absent —
+    /// which the client reads as idle.
+    #[test]
+    fn all_states_reports_every_hooked_window_with_its_derived_state() {
+        record_prompt("allst-a", 2, "do the thing");
+        record_notification("allst-b", 3, "completed", 12345);
+        let states = all_states();
+        let get = |s: &str, w: usize| {
+            states.iter().find(|(ss, ww, _)| ss == s && *ww == w).map(|(_, _, st)| st.clone())
+        };
+        assert_eq!(get("allst-a", 2).as_deref(), Some("running"), "an open turn derives running");
+        assert_eq!(get("allst-b", 3).as_deref(), Some("idle"), "a closed turn derives idle");
+        assert_eq!(get("allst-a", 9), None, "no hook facts, no row — absence means idle");
     }
 
     // ── Delivery acknowledgement: when is a typed line actually overdue?

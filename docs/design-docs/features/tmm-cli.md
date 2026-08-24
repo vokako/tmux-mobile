@@ -1327,6 +1327,25 @@ one implementation types the named `Escape` key, so the button and the command
 cannot drift and the managed-agent gate is enforced in the same place as
 stop/restart.
 
+#### The sidebar row is a summary
+
+A project row answers three questions before it is tapped — is it up (the
+live dot), when did it last speak, and who is in it doing what (owner,
+2026-08-24: "目前显示的内容稍微有一点点过于简单了 … 上次回复的时间 … 当前几个
+Agent 的简单 logo 状态"). The last-reply time comes from the SAME `hub_rooms`
+map that orders the list, so the time on the row explains the row's position;
+it renders through `agoShort` (pure + tested) — ONE unit, "5m"/"2h"/"3d",
+because `fmtElapsed`'s two-unit "2h14m" is running-timer language and a row is
+not a timer. Under the name, the project's agents appear as tiny backend logos
+each wearing a state dot in the one progressive status language. The states
+for EVERY project arrive on `hub_rooms` itself: `telemetry::all_states` is a
+pure-memory derive over every hook-known window — no tmux call, no pane sniff,
+so the 20 s sidebar poll costs nothing new — and a window with no hook facts
+is simply absent, which the client reads as idle because that is what no facts
+honestly means. A LIVE row detects its real agent windows with the window
+switcher's own `paneAgent`; a CLOSED row shows its DECLARED agent slots dimmed
+and dotless — what `up` would restore, not anything running now.
+
 #### Opening and closing a project
 
 The chat header carries exactly ONE of two buttons, whichever is true right

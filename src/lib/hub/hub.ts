@@ -137,6 +137,21 @@ export function fmtElapsed(since: number, now: number): string {
   return `${Math.floor(h / 24)}d${String(h % 24).padStart(2, '0')}h`;
 }
 
+/** How long ago, at sidebar precision: "now", "5m", "2h", "3d". One unit only —
+ * the row is a summary, and `fmtElapsed`'s two-unit form ("2h14m") is running-
+ * timer language, not last-reply language (owner, 2026-08-24: the project list
+ * should show "上次回复的时间"). Both arguments in ms; 0/absent → ''. */
+export function agoShort(ts: number, now: number): string {
+  if (!ts) return '';
+  const s = Math.max(0, Math.floor((now - ts) / 1000));
+  if (s < 60) return 'now';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
+}
+
 /** Agents whose newest message the user has not seen yet — the red-dot rule.
  * Keyed by sender name, so a room where three agents replied marks all three.
  * `seenTs` is the newest message timestamp the user has looked at (ms).

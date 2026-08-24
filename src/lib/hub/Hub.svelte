@@ -27,8 +27,8 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit } from './hub.ts';
-  import { backendIcon } from '../core/agents.ts';
+  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit } from './hub.ts';
+  import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
   import { longpress } from '../ui/longpress.ts';
@@ -56,6 +56,8 @@
   let trashOpen = $state(false);
   let trashAsk = $state(null);      // row pending PERMANENT delete (the only irreversible step)
   let panes = $state([]);           // all tmux panes
+  let talkMap = $state({});         // room -> newest message ts (ms) — sidebar row times
+  let agentStates = $state({});     // "<session>:<window>" -> derived state, all projects
   let selected = $state('');        // selected project session
   let agents = $state([]);          // HubAgent[] for selected session (all windows)
   let feed = $state([]);            // chat messages, oldest first
@@ -100,15 +102,55 @@
   const stopped = $derived(stoppedAgents(selectedRow?.slots, managedAgents));
   const working = $derived(managedAgents.filter((a) => a.state === 'working').length);
 
+  // ── Sidebar row summary ──────────────────────────────────────────────────
+  // Each row answers two questions at a glance — "when did this project last
+  // speak" (the same map that ORDERS the list, so the time explains the order)
+  // and "who is in it, doing what" (owner, 2026-08-24: "上次回复的时间 …
+  // 当前几个 Agent 的简单 logo 状态").
+  const rowTalk = (row) => talkMap[row.project.room ?? `proj:${row.project.session}`] ?? 0;
+  // A LIVE project reads its real windows — the same agent detection the
+  // window switcher uses — each coloured by the hook-derived state from
+  // hub_rooms (absence = idle: a window with no hook facts is at rest). A
+  // CLOSED project shows its DECLARED agent slots dimmed, no state dot: the
+  // roster `up` will bring back, not anything running now.
+  function rowAgents(row) {
+    if (row.live) {
+      const out = [];
+      const seen = new Set();
+      for (const p of panes) {
+        if (p.session !== row.project.session || !p.active || seen.has(p.window)) continue;
+        seen.add(p.window);
+        const agent = paneAgent(p);
+        if (!agent) continue;
+        out.push({
+          icon: agent.icon, name: p.window_name,
+          state: agentStates[`${row.project.session}:${p.window}`] ?? 'idle',
+        });
+      }
+      return out.slice(0, 4);
+    }
+    return (row.slots ?? [])
+      .filter((s) => s.kind === 'agent')
+      .slice(0, 4)
+      .map((s) => ({ icon: backendIcon(s.command), name: s.window_name, state: '' }));
+  }
+
   async function reload() {
     try {
       // The sidebar is ordered by CONVERSATION, so the list needs one more fact:
       // when each room last had a message. One grouped query server-side.
-      const [{ projects }, sp, talk] = await Promise.all([
+      const [{ projects }, sp, roomsRes] = await Promise.all([
         projectList(true),
         listSessionsWithPanes(),
-        hubRooms().then((r) => r.rooms ?? {}).catch(() => ({})),
+        hubRooms().catch(() => ({ rooms: {}, states: {} })),
       ]);
+      const talk = roomsRes.rooms ?? {};
+      // Kept for the rows themselves: the same map that orders the sidebar
+      // answers "when did this project last say something" on each row, and
+      // the states map colours the agent chips (owner, 2026-08-24: "上次回复
+      // 的时间 … 当前几个 Agent 的简单 logo 状态").
+      talkMap = talk;
+      agentStates = roomsRes.states ?? {};
       // Archived projects are the RECYCLE BIN (owner, 2026-08-21: "相当于回收
       // 站的功能"): they leave the working list and wait, restorable, in the
       // collapsed section at the bottom of the sidebar.
@@ -1239,7 +1281,22 @@
             oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), row.project.name, projectItems(row)); }}
             use:longpress={{ onlongpress: (pt) => openCtx(pt, row.project.name, projectItems(row)) }}>
             <span class="dot" class:off={!row.live}></span>
-            <span class="p-name">{row.project.name}</span>
+            <span class="p-main">
+              <span class="p-top">
+                <span class="p-name">{row.project.name}</span>
+                {#if rowTalk(row)}<span class="p-when">{agoShort(rowTalk(row), tick)}</span>{/if}
+              </span>
+              {#if rowAgents(row).length}
+                <span class="p-agents">
+                  {#each rowAgents(row) as a (a.name)}
+                    <span class="p-ava" class:dim={!row.live} title={a.name}>
+                      {#if a.icon}<img src={a.icon} alt={a.name} width="12" height="12" />{/if}
+                      {#if a.state}<span class="p-ava-dot" style:background={stateDotColor(a.state)}></span>{/if}
+                    </span>
+                  {/each}
+                </span>
+              {/if}
+            </span>
           </button>
         {/each}
         <button class="side-row add" onclick={() => { createOpen = true; sideOpen = false; }}>
@@ -2052,6 +2109,22 @@
   .side-scrim { position: fixed; inset: 0; z-index: 25; background: rgba(0,0,0,0.45); }
   .side-scroll { flex: 1; overflow-y: auto; padding: 8px; }
   .p-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; }
+  /* ── Sidebar row summary (owner, 2026-08-24): name + last-reply time on the
+     first line, the project's agents as tiny logos with state dots under it.
+     The row stays ONE .side-row (shared box, 10px inset untouched); only its
+     content becomes a column. The time wears meta ink and tabular digits so a
+     column of rows reads as a column of times. */
+  .p-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .p-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .p-when { flex: none; margin-left: auto; font-size: var(--fs-micro); color: var(--text3); font-variant-numeric: tabular-nums; }
+  .p-agents { display: flex; align-items: center; gap: 7px; }
+  .p-ava { position: relative; width: 13px; height: 13px; display: inline-flex; align-items: center; justify-content: center; }
+  .p-ava img { display: block; opacity: 0.9; }
+  /* A closed project's declared roster: recognisable, clearly not running. */
+  .p-ava.dim img { opacity: 0.4; filter: grayscale(1); }
+  /* The state dot sits on the logo's corner, ringed by the panel surface so it
+     reads on any logo — same status language as every other dot. */
+  .p-ava-dot { position: absolute; right: -3px; bottom: -2px; width: 5px; height: 5px; border-radius: 50%; box-shadow: 0 0 0 1.5px var(--surface); }
   /* The recycle bin's rows: quieter than a live project (they are parked, not
      open-able), with the two verbs inline — restore free, purge confirmed. */
   .trash-row { cursor: default; color: var(--text3); }

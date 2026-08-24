@@ -792,7 +792,8 @@ export const hubMsgPurge = (session: string, ids: string[]) =>
 /** Newest message timestamp (ms) per room: `{ "<room>": ts }`. One call for every
  * room, so the sidebar can order projects by conversation without asking per
  * project. */
-export const hubRooms = () => call<{ rooms: Record<string, number> }>('hub_rooms', {});
+export const hubRooms = () =>
+  call<{ rooms: Record<string, number>; states?: Record<string, string> }>('hub_rooms', {});
 /** What is hidden in this room, newest first. Each row carries the message itself,
  * so the archive view needs no second lookup. */
 export const hubArchive = (session: string) =>
