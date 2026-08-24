@@ -1331,7 +1331,20 @@ same two steps.
 Interrupt moved server-side (`hub_agent_interrupt`) when the CLI gained it:
 one implementation types the named `Escape` key, so the button and the command
 cannot drift and the managed-agent gate is enforced in the same place as
-stop/restart.
+stop/restart. It leaves a mark now: a successful interrupt posts
+`[tmm] interrupted <name>` to the room — the sys grammar already had the word
+(amber: a turn cut short, not an ending) and the owner asked to SEE the act in
+the conversation ("发送 interrupt 的状态在消息列表里也要展示出来", 2026-08-24).
+The composer carries the verb too, behind two beats: with the box EMPTY the
+grey send button stays clickable — the first tap ARMS it (amber, `zap` icon,
+a caption pill naming the target, since a phone has no hover to read a title
+from) and the second fires; double Ctrl+C on the empty composer is the same
+arm/fire pair, and with text present Ctrl+C remains the browser's copy. The
+interrupt goes to whoever the composer is addressing — the recipient, or all
+managed agents for `@all`; an unaddressed room note arms nothing, because a
+room note interrupts nobody. An armed button stands down on its own: 3 s
+unfired, any typing, Escape, or switching projects — an armed cancel must not
+lie in wait or follow the user into another room.
 
 #### The sidebar row is a summary
 

@@ -380,7 +380,16 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
                     format!("no window named '{agent}' in session '{session}'"));
             };
             match crate::tmux::send_keys(&format!("{session}:{window}"), "Escape", false) {
-                Ok(()) => Response::ok(id, serde_json::json!({ "interrupted": agent })),
+                Ok(()) => {
+                    // The room records what the app did on a person's behalf —
+                    // same rule as stop/restart/remove. The client's sys
+                    // grammar already speaks `interrupted` (amber: a turn was
+                    // cut short, not an ending); the feed row was the missing
+                    // half of the composer's interrupt affordance (owner,
+                    // 2026-08-24: "发送 interrupt 的状态在消息列表里也要展示").
+                    let _ = bus.post(&room, agent, &format!("[tmm] interrupted {agent}"), false);
+                    Response::ok(id, serde_json::json!({ "interrupted": agent }))
+                }
                 Err(e) => Response::err(id, ERR_INTERNAL, e),
             }
         }
@@ -924,6 +933,48 @@ mod tests {
             let posts = b.posts.lock().unwrap();
             assert_eq!(posts.len(), 1);
             assert!(posts[0].2.contains("[tmm] stopped dev"), "the room records it: {:?}", posts[0].2);
+        }
+        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    /// Interrupt, against real tmux: the window SURVIVES (Escape cancels a
+    /// turn, it does not kill a process) and the room records the act — the
+    /// feed row is half of the composer's interrupt affordance (owner,
+    /// 2026-08-24: "发送 interrupt 的状态在消息列表里也要展示出来").
+    #[test]
+    fn interrupting_a_managed_agent_leaves_the_window_and_says_so() {
+        crate::projects::tests::use_test_store();
+        let session = format!("tmm-int-{}", std::process::id());
+        let ws = std::env::temp_dir().join(format!("tmm-int-ws-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(ws.join(".tmm/agents/dev")).unwrap();
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session, "-n", "dev", "-c",
+                   &ws.to_string_lossy(), "sleep 60"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            return;
+        }
+        let created_project = crate::projects::adopt(&session, Some("int-test")).is_ok();
+
+        let b = Bridge::new();
+        let r = handle_hub_request(
+            &req("hub_agent_interrupt", serde_json::json!({ "session": session, "agent": "dev" })),
+            Some(&b),
+            None,
+        );
+        if !created_project {
+            eprintln!("could not adopt a project — skipping the positive half");
+        } else {
+            assert!(r.error.is_none(), "{:?}", r.error.map(|e| e.message));
+            let panes = crate::tmux::list_panes(&session).unwrap_or_default();
+            assert!(panes.iter().any(|p| p.window_name == "dev"), "the window survives an interrupt");
+            let posts = b.posts.lock().unwrap();
+            assert_eq!(posts.len(), 1);
+            assert!(posts[0].2.contains("[tmm] interrupted dev"), "the room records it: {:?}", posts[0].2);
         }
         let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
         let _ = std::fs::remove_dir_all(&ws);

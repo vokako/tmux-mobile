@@ -79,6 +79,13 @@
   // talking to your lead agent needs no @ ceremony.
   let recipient = $state('');
   let recipientOpen = $state(false);
+  // Empty-composer interrupt (owner, 2026-08-24): with nothing typed, the grey
+  // send button (or Ctrl+C) ARMS — it becomes a "send interrupt" button — and
+  // a second activation fires. Two beats on purpose: interrupt cancels a
+  // running turn, and a single stray tap on the button every message is sent
+  // from should not be able to do that.
+  let intArm = $state(false);
+  let intTimer = 0;
   let feedEl = $state(null);
   let composerEl = $state(null);
   let toChipW = $state(0);        // measured recipient-chip width → first-line indent
@@ -615,6 +622,17 @@
     // Any other keystroke breaks the kill chain: Ctrl-K Ctrl-K accumulates,
     // Ctrl-K <type> Ctrl-K replaces — readline's own rule.
     killChain = false;
+    // Ctrl+C twice on an EMPTY composer sends an interrupt (owner, 2026-08-24)
+    // — the terminal's own cancel gesture, aimed at the addressee. Only while
+    // empty: with text present (or a selection) Ctrl+C stays the browser's
+    // copy, and readlineEdit deliberately lets it fall through.
+    if (e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing
+        && e.key.toLowerCase() === 'c' && !composerText.trim()) {
+      e.preventDefault();
+      armInterrupt();
+      return;
+    }
+    if (e.key === 'Escape' && intArm) { e.preventDefault(); intArm = false; return; }
     // The palette owns the arrows, Tab and Enter while it is open — it is a
     // menu, and a menu that ignores the keyboard is a menu you have to reach for
     // the mouse to use.
@@ -690,6 +708,43 @@
       console.warn('interrupt failed', name, e);
     }
   }
+
+  // The composer's interrupt reaches whoever the composer reaches: the named
+  // recipient, or every managed agent for @all. An unaddressed room note
+  // interrupts NOBODY — same shape as message delivery, no third rule.
+  const intTargets = $derived(
+    recipient === ALL_TARGET ? managedAgents.map((a) => a.name)
+    : recipient ? [recipient] : []);
+  const intWho = $derived(recipient === ALL_TARGET ? '@all' : recipient ? `@${recipient}` : '');
+
+  /** First activation arms; the second (button or Ctrl+C, mixable) fires. */
+  function armInterrupt() {
+    if (!selected || !intTargets.length) return;
+    if (intArm) { void fireInterrupt(); return; }
+    intArm = true;
+    clearTimeout(intTimer);
+    // An armed cancel button should not lie in wait: unfired, it stands down.
+    intTimer = setTimeout(() => { intArm = false; }, 3000);
+  }
+  async function fireInterrupt() {
+    clearTimeout(intTimer);
+    intArm = false;
+    const targets = intTargets;
+    if (!selected || !targets.length) return;
+    following = true;
+    try {
+      await Promise.all(targets.map((n) => hubAgentInterrupt(selected, n)));
+      // The room recorded `[tmm] interrupted <name>` — show it where the
+      // owner asked to see it ("发送 interrupt 的状态在消息列表里也要展示").
+      await loadFeed();
+      scrollFeed(true);
+    } catch (e) { console.warn('interrupt failed', e); }
+  }
+  // Typing disarms — the button means "send" again the moment there is text —
+  // and so does switching projects: an armed cancel must not follow the user
+  // into another room.
+  $effect(() => { if (composerText.trim()) intArm = false; });
+  $effect(() => { void selected; intArm = false; });
 
   /** Run a layout-changing mutation without losing the reader's place.
    *
@@ -1897,10 +1952,18 @@
           onfocus={() => { following = true; scrollFeed(true); setTimeout(() => scrollFeed(true), 300); }}
         ></textarea>
         <!-- Send lives INSIDE the capsule, bottom-right, out of the flow: it
-             stopped costing the composer a whole column. -->
-        <button class="send-btn" onclick={send} title={t('hubSend')} aria-label={t('hubSend')}
-          disabled={!composerText.trim() || !selected}>
-          <Icon name="send-up" size={15} />
+             stopped costing the composer a whole column. Empty, it is still
+             CLICKABLE (grey, muted): the first tap arms it as a "send
+             interrupt" button — amber, named — and the second fires. -->
+        {#if intArm}
+          <div class="int-pill" role="status">{t('hubIntArmed').replace('{who}', intWho)}</div>
+        {/if}
+        <button class="send-btn" class:muted={!composerText.trim() && !intArm} class:arm={intArm}
+          onclick={() => (composerText.trim() ? send() : armInterrupt())}
+          title={intArm ? t('hubIntArmed').replace('{who}', intWho) : composerText.trim() ? t('hubSend') : t('hubIntHint')}
+          aria-label={intArm ? t('hubIntArmed').replace('{who}', intWho) : composerText.trim() ? t('hubSend') : t('hubIntHint')}
+          disabled={!selected || (!composerText.trim() && !intTargets.length)}>
+          <Icon name={intArm ? 'zap' : 'send-up'} size={15} />
         </button>
         </div>
       </div>
@@ -2751,6 +2814,19 @@
   .send-btn:hover:not(:disabled) { filter: brightness(1.07); }
   .send-btn:active:not(:disabled) { transform: scale(0.93); }
   .send-btn:disabled { background: var(--surface2); color: var(--text3); cursor: default; }
+  /* Empty composer: clickable but wearing the resting grey — the tap is an
+     ARM, not a send, and the button must not advertise accent urgency. */
+  .send-btn.muted { background: var(--surface2); color: var(--text3); }
+  /* Armed: the one attention colour — interrupt asks a person to confirm. */
+  .send-btn.arm { background: var(--status-warn); color: var(--accent-fill-ink); }
+  /* What the armed button will do, in words, above it — a phone has no hover
+     for the title. pointer-events off: it is a caption, not a control. */
+  .int-pill {
+    position: absolute; right: 6px; bottom: 44px;
+    font-size: var(--fs-micro); color: var(--text2);
+    background: var(--surface2); border-radius: 6px; padding: 3px 8px;
+    white-space: nowrap; pointer-events: none;
+  }
   /* Phone-first hit areas (contract: primary actions ≥44px): the visual box
      stays small, the tap target grows via an invisible overlay. .to-bottom
      uses ::before — its ::after is the new-output dot. */

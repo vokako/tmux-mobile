@@ -53,6 +53,8 @@ const msgs: Record<string, Record<string, string>> = {
     hubFeedStatus: '+ Status',
     hubFeedTools: '+ Tools',
     hubStepsRows: 'Tool rows',
+    hubIntHint: 'Send interrupt (press twice)',
+    hubIntArmed: 'Press again: interrupt {who}',
     hubStepsRowsHint: 'How many tool calls a folded group shows before it scrolls',
     // The prompt hook echoed our line back, so the CLI accepted it as input.
     hubDeliveredHint: 'The agent’s prompt hook echoed this line back — it reached the CLI’s input, not just the pane.',
@@ -426,6 +428,8 @@ const msgs: Record<string, Record<string, string>> = {
     hubFeedStatus: '+ 状态',
     hubFeedTools: '+ 工具',
     hubStepsRows: '工具行数',
+    hubIntHint: '发送 interrupt（连按两次）',
+    hubIntArmed: '再按一次：打断 {who}',
     hubStepsRowsHint: '折叠的工具组最多显示几行调用，超出后组内滚动',
     hubDeliveredHint: 'agent 的 hook 把这行回传了，说明它真的进了 CLI 的输入。',
     hubPendingHint: '已经敲进 agent 的 pane。忙着的 agent 会先排队，等这一轮结束才接收——那时这个圈就会填上。',
