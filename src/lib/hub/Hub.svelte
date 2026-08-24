@@ -932,17 +932,23 @@
     down:   { title: 'projectDownTitle',   note: 'projectDownNote',   go: 'projectDown' },
     delete: { title: 'projectDeleteTitle', note: 'projectDeleteNote', go: 'projectDelete' },
   };
-  let pendingAct = $state(null);   // { kind: keyof ACT_COPY, name }
+  let pendingAct = $state(null);   // { kind: keyof ACT_COPY, name, session }
   let acting = $state(false);
-  const askAction = (kind, name) => { pendingAct = { kind, name }; };
+  /** Freeze the TARGET at ask time. `name` is what the dialog shows; `session`
+   * is what the action runs on. The context menu opens on ANY row, so the verb
+   * must carry that row's identity — resolving `selected` at confirm time
+   * closed whichever project happened to be open, not the one long-pressed
+   * (owner, 2026-08-24: "关的不是我选中的 是其他的"). Agent verbs keep the
+   * default: the roster only shows the selected project's agents. */
+  const askAction = (kind, name, session = selected) => { pendingAct = { kind, name, session }; };
 
   async function runAction() {
     if (!pendingAct || acting) return;
-    const { kind, name } = pendingAct;
+    const { kind, name, session } = pendingAct;
     acting = true;
     try {
       if (kind === 'down' || kind === 'delete') {
-        const row = rows.find((r) => r.project.session === selected);
+        const row = rows.find((r) => r.project.session === session);
         if (row) {
           if (kind === 'delete') {
             // "Delete" is the RECYCLE BIN, not destruction (owner, 2026-08-21:
@@ -956,15 +962,16 @@
             await projectDown(row.project.id);
           }
         }
-        if (kind === 'delete') {
-          // The project left the working list: land on whatever is left rather
-          // than an empty conversation pointing at nothing.
+        if (kind === 'delete' && session === selected) {
+          // The OPEN project left the working list: land on whatever is left
+          // rather than an empty conversation pointing at nothing. Deleting a
+          // NON-selected row from its context menu moves nothing.
           selected = '';
         }
       } else if (kind === 'remove') {
-        await hubAgentRemove(selected, name);
+        await hubAgentRemove(session, name);
       } else {
-        await hubAgentStop(selected, name);
+        await hubAgentStop(session, name);
       }
       await Promise.all([reload(), loadAgents(), loadFeed()]);
     } catch (e) {
@@ -1099,12 +1106,12 @@
     const name = row?.project?.name ?? '';
     return [
       row?.live
-        ? { label: t('projectDown'), icon: 'stop', danger: true, onselect: () => askAction('down', name) }
+        ? { label: t('projectDown'), icon: 'stop', danger: true, onselect: () => askAction('down', name, session) }
         : { label: t('projectUp'), icon: 'zap', onselect: () => { selectProject(session); setTimeout(bringUp, 0); } },
       { label: t('projectRename'), icon: 'edit',
         onselect: () => { selectProject(session); setTimeout(startRename, 0); } },
       { label: t('projectDelete'), icon: 'trash', danger: true,
-        onselect: () => askAction('delete', name) },
+        onselect: () => askAction('delete', name, session) },
     ];
   }
 

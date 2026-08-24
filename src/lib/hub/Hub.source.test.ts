@@ -190,3 +190,18 @@ test('a command-shaped draft styles the composer, with the mirror in step', () =
   // And the height re-measures when the font flips, not just when text changes.
   assert.match(source, /void composerIsCmd;/u);
 });
+
+test('a confirmed project verb runs on the row it was asked on, never on `selected`', () => {
+  // The context menu opens on ANY sidebar row; the confirm dialog then fired
+  // `rows.find(… === selected)`, closing whichever project was OPEN instead of
+  // the one long-pressed (owner, 2026-08-24: "关的不是我选中的 是其他的").
+  // The target is frozen at ask time: askAction carries the row's session and
+  // runAction resolves with it.
+  assert.match(source, /askAction = \(kind, name, session = selected\)/u);
+  const run = source.slice(source.indexOf('async function runAction'), source.indexOf('function restoreProject'));
+  assert.match(run, /rows\.find\(\(r\) => r\.project\.session === session\)/u);
+  assert.doesNotMatch(run, /rows\.find\(\(r\) => r\.project\.session === selected\)/u);
+  // The context menu's two destructive verbs both pass their row's identity.
+  assert.match(source, /askAction\('down', name, session\)/u);
+  assert.match(source, /askAction\('delete', name, session\)/u);
+});
