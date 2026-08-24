@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs } from './hub.ts';
+import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -515,6 +515,36 @@ test('lifecycle lines fold into one sys row and vanish at chat level', () => {
     { id: 'c', ts: 300, from: 'x', body: '[tmm] done' },
   ], [], 'status');
   assert.deepEqual(split.map((b) => b.type), ['sys', 'msg', 'sys']);
+});
+
+test('a lifecycle line splits into a highlighted verb and its subject', () => {
+  // The reason this exists: folded rows were joined with a `·` and read as one
+  // run-on grey string ("removed k spawned", owner 2026-08-24). The verb comes
+  // out so each row can stand alone with the action set apart.
+  assert.deepEqual(sysParts('spawned k'), { verb: 'spawned', text: 'k', cmd: false });
+  assert.deepEqual(sysParts('removed k'), { verb: 'removed', text: 'k', cmd: false });
+  assert.deepEqual(sysParts('spawned dev — fix the bug'), { verb: 'spawned', text: 'dev — fix the bug', cmd: false });
+  // A verb with nothing after it (`[tmm] done`) is the whole line.
+  assert.deepEqual(sysParts('done'), { verb: 'done', text: '', cmd: false });
+  // A /command record is the thing that was typed: no verb, monospace dialect.
+  assert.deepEqual(sysParts('/model → dev'), { verb: '', text: '/model → dev', cmd: true });
+  // An unknown shape is left WHOLE — guessing a verb would truncate the rest.
+  assert.deepEqual(sysParts('agent k left the building'), { verb: '', text: 'agent k left the building', cmd: false });
+  assert.deepEqual(sysParts(undefined), { verb: '', text: '', cmd: false });
+});
+
+test('a lifecycle verb speaks the one status colour language', () => {
+  // Same vocabulary as noteStateColor/stateDotColor: accent = in motion,
+  // green = ended well, grey = at rest, red = destructive.
+  assert.equal(sysVerbColor('spawned'), 'var(--accent)');
+  assert.equal(sysVerbColor('restarted'), 'var(--accent)');
+  assert.equal(sysVerbColor('done'), 'var(--status-ok)');
+  assert.equal(sysVerbColor('stopped'), 'var(--text3)');
+  assert.equal(sysVerbColor('removed'), 'var(--status-danger)');
+  // Never a literal colour: both themes read the same tokens.
+  for (const v of ['spawned', 'stopped', 'removed', 'done', 'interrupted', 'wat', '']) {
+    assert.match(sysVerbColor(v), /^var\(--|^color-mix\(/u, `${v} must resolve through a token`);
+  }
 });
 
 test('an unconfirmed delivery is visible even at the chat-only level', () => {

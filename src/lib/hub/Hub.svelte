@@ -27,7 +27,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sameDay, readlineEdit } from './hub.ts';
+  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit } from './hub.ts';
   import { backendIcon } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
@@ -1355,11 +1355,16 @@
         </button>
       </div>
 
-      {#if managedAgents.length || stopped.length}
+      {#if managedAgents.length || stopped.length || liveSelected}
         <!-- The roster. Tapping an agent makes it the recipient (and this
              project's lead) — the phone gets chips, the desktop gets cards. -->
         <!-- The roster row: the scrolling strip of cards PLUS the pinned add
-             button. Two children, one row. -->
+             button. Two children, one row. It also survives an EMPTY roster
+             whenever the session is live: gated on "there is somebody here", a
+             project whose last agent was removed lost the only + button with it
+             — and the preset panel that would have replaced it only shows in an
+             EMPTY feed, so a room with history had no way back at all (owner,
+             2026-08-24). -->
         <div class="roster">
         <div class="cards" class:chips={compact} bind:this={cardsEl}>
           {#each managedAgents as a (a.window)}
@@ -1493,15 +1498,26 @@
           {/if}
           {#if b.type === 'sys'}
             <!-- The app's own record (spawn/stop/restart, a /command typed into
-                 a pane), folded: consecutive lifecycle lines are one fact each,
-                 not one row each. Hidden entirely at the chat-only level
-                 (feedBlocks drops them). Readable ink, not fine print — and a
+                 a pane). Consecutive lines still fold into ONE capsule — a stop
+                 plus its restart is one fact — but each gets its OWN ROW inside
+                 it, with the action as a coloured badge: joined with a `·` on one
+                 nowrap line, "removed k" and "spawned k" read as a single grey
+                 string (owner, 2026-08-24: "单独一行，有一些高亮的样式"). Hidden
+                 entirely at the chat-only level (feedBlocks drops them). A
                  /command keeps the composer's monospace so it reads as the thing
                  that was typed ("不要只用灰色小字", owner 2026-08-20). -->
             <div class="sysline">
               {#each b.items as item, j (`${j}-${item}`)}
-                {#if j > 0}<span class="sys-sep" aria-hidden="true">·</span>{/if}
-                <span class="sys-item" class:cmd={item.startsWith('/')}>{item}</span>
+                {@const p = sysParts(item)}
+                {@const c = sysVerbColor(p.verb)}
+                <div class="sys-item" class:cmd={p.cmd}>
+                  {#if p.verb}
+                    <span class="sys-verb" style:color={c}
+                      style:background={`color-mix(in srgb, ${c} 14%, transparent)`}
+                      style:border-color={`color-mix(in srgb, ${c} 34%, transparent)`}>{p.verb}</span>
+                  {/if}
+                  {#if p.text}<span class="sys-text">{p.text}</span>{/if}
+                </div>
               {/each}
             </div>
           {:else if b.type === 'msg'}
@@ -2321,20 +2337,31 @@
   /* Lifecycle lines are the app narrating real actions (an agent stopped, a
      /command typed into a pane) — reading ink and body-adjacent size, not fine
      print the reader has to squint at ("不要只用灰色小字，让我看不太清", owner
-     2026-08-20). Still a centred capsule: it is narration, not a speaker. */
+     2026-08-20). Still a centred capsule: it is narration, not a speaker. One
+     ROW per line inside it, because a folded group joined by `·` read as one
+     run-on string (owner, 2026-08-24). */
   .sysline {
-    align-self: center; display: flex; align-items: baseline; gap: 6px;
-    max-width: min(92%, 620px); padding: 4px 13px; border-radius: var(--ui-radius-row);
+    align-self: center; display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+    max-width: min(92%, 620px); padding: 5px 12px; border-radius: var(--ui-radius-row);
     color: var(--text2); background: color-mix(in srgb, var(--bubble-in) 88%, transparent);
     border: 1px solid var(--border2); box-shadow: 0 1px 2px rgba(0,0,0,0.06);
-    font-size: var(--fs-sub); white-space: nowrap; overflow: hidden;
+    font-size: var(--fs-sub);
     -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
   }
-  .sysline .sys-sep { color: var(--text3); flex: none; }
-  .sysline .sys-item { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .sysline .sys-item { display: flex; align-items: baseline; gap: 6px; max-width: 100%; min-width: 0; }
+  /* The action, as a tinted micro-tag in the app's .pg-tag dialect — the colour
+     is the ONE progressive status language (sysVerbColor), so a spawn reads as
+     motion and a removal as a destructive act at a glance. */
+  .sysline .sys-verb {
+    flex: none; font-size: var(--fs-micro); font-weight: 600; letter-spacing: 0.3px;
+    border: 1px solid transparent; border-radius: 5px; padding: 0 5px; line-height: 1.55;
+  }
+  .sysline .sys-text {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text);
+  }
   /* A /command wears the composer's command dialect — monospace with an accent
      lean — so the record reads as the thing that was typed. */
-  .sysline .sys-item.cmd {
+  .sysline .sys-item.cmd .sys-text {
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     color: color-mix(in srgb, var(--accent) 62%, var(--text));
   }

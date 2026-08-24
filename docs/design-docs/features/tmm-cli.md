@@ -1496,10 +1496,21 @@ box again, and a held bubble is simply that box at full height. Prose bubbles ar
 bounded to `min(76%, 760px)` on a wide screen and 91% on a phone, while tool runs,
 observed prompts and status facts use the same width ceiling but stay visually
 subordinate. The feed reuses `.subtle-scroll`; system events are centered frosted
-pills — CONSECUTIVE lifecycle lines fold into one pill ("stopped lead ·
-restarted lead": a stop followed by a restart is one fact, not two rows), and
+pills — CONSECUTIVE lifecycle lines fold into one pill (a stop followed by a
+restart is one fact, not two rows), and
 at the chat-only level they disappear entirely, because they are the app's
-record, not the conversation. Subordinate is not ILLEGIBLE: the pill wears
+record, not the conversation. Inside the pill each line gets its OWN ROW: they
+used to be joined by a `·` on one nowrap line, so "removed k" and "spawned k"
+ran together into a single grey run-on string ("removed k spawned … 单独一行，
+有一些高亮的样式", 2026-08-24). The row leads with the ACTION as a tinted
+micro-tag — `sysParts()` splits the verb off the subject, `sysVerbColor()`
+tints it in the ONE progressive status language every other coloured state word
+in the Hub uses (accent = something started moving, green = ended well, grey =
+at rest, red = destructive, amber = interrupted; both pure + tested, and the
+value is always a token so the two themes read the same) — and the per-row
+ellipsis sits on the TEXT, so a long subject can never eat the badge. An
+unknown line shape keeps no verb at all and renders whole: guessing one would
+truncate the remainder. Subordinate is not ILLEGIBLE: the pill wears
 reading ink (`--text2`, `--fs-sub`), because `--text3` fine print was reported
 as unreadable ("不要只用灰色小字，让我看不太清", 2026-08-20), and an item that
 IS a `/command` (the record `hub_command` leaves) keeps the composer's command

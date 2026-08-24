@@ -123,7 +123,33 @@ test('the drawer opens and closes through the reading anchor, everywhere', () =>
   assert.match(source, /!el\.classList\.contains\('ask-bottom'\)/u);
 });
 
+test('a lifecycle group is one row per line, with the action highlighted', () => {
+  // Joined by a `·` on one nowrap line, "removed k" and "spawned k" read as a
+  // single grey run-on string (owner, 2026-08-24). The capsule stays (a stop plus
+  // its restart is one fact) and becomes a column; the separator is gone.
+  assert.doesNotMatch(source, /class="sys-sep"/u, 'rows are stacked now, not joined');
+  const line = rule('.sysline');
+  assert.match(line, /flex-direction:\s*column/u);
+  assert.doesNotMatch(line, /white-space:\s*nowrap/u, 'the capsule no longer clips one long line');
+  // The verb is its own badge, coloured through the shared status language.
+  assert.match(source, /class="sys-verb"[\s\S]{0,200}\{p\.verb\}<\/span>/u);
+  assert.match(source, /style:color=\{c\}/u);
+  assert.match(source, /const c = sysVerbColor\(p\.verb\)/u);
+  // Per-row ellipsis lives on the text, so a long subject cannot eat the badge.
+  assert.match(rule('.sysline .sys-text'), /text-overflow:\s*ellipsis/u);
+});
+
+test('the add-agent button survives an empty roster', () => {
+  // Gated on "somebody is here", the + button disappeared with the last agent —
+  // and the preset panel that would replace it only renders in an EMPTY feed, so
+  // a room with history had no way to add anyone back (owner, 2026-08-24).
+  assert.match(source, /\{#if managedAgents\.length \|\| stopped\.length \|\| liveSelected\}/u);
+  // The button itself is still live-session-only: spawning needs a tmux session.
+  assert.match(source, /\{#if liveSelected\}\s*(?:<!--[\s\S]*?-->\s*)?<button class="acard add"/u);
+});
+
 test('a command-shaped draft styles the composer, with the mirror in step', () => {
+
   // The look mirrors send()'s own branch (slashCommand + a target), so the
   // capsule never promises a command that send() would deliver as prose.
   assert.match(source, /class:cmd=\{composerIsCmd\}/u);

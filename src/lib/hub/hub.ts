@@ -597,6 +597,54 @@ export function systemLine(body: string | null | undefined): string | null {
   return null;
 }
 
+/** The lifecycle verbs the server narrates (`hub_rpc.rs`). A line that does not
+ * start with one of them is left whole — an unknown shape must render as its own
+ * text, never as a guessed verb plus a truncated remainder. */
+const SYS_VERBS = new Set(['spawned', 'started', 'stopped', 'restarted', 'removed', 'interrupted', 'done']);
+
+/**
+ * The two halves of ONE lifecycle line: the ACTION and what it acted on.
+ *
+ * Consecutive lines fold into one row (that stays: a stop plus its restart is one
+ * fact), but they used to be JOINED with a `·` on a single nowrap line — so
+ * "removed k" and "spawned k" ran together into one grey ellipsised string, which
+ * is exactly what it read as (owner, 2026-08-24: "removed k spawned 这些消息提示
+ * 也都展示更好一些，单独一行，有一些高亮的样式"). Splitting the verb out is what
+ * lets each line stand alone with the action highlighted.
+ *
+ * A `/command` record (`/model → dev`) has NO verb: the whole line is the thing
+ * that was typed into the pane, and it keeps the composer's monospace dialect.
+ */
+export function sysParts(item: string | null | undefined): { verb: string; text: string; cmd: boolean } {
+  const line = (item ?? '').trim();
+  if (line.startsWith('/')) return { verb: '', text: line, cmd: true };
+  const gap = line.search(/\s/u);
+  const head = (gap < 0 ? line : line.slice(0, gap)).toLowerCase();
+  if (!SYS_VERBS.has(head)) return { verb: '', text: line, cmd: false };
+  return { verb: head, text: gap < 0 ? '' : line.slice(gap).trim(), cmd: false };
+}
+
+/**
+ * The colour of a lifecycle verb's badge — the SAME progressive language as
+ * `noteStateColor` / `stateDotColor`, so one vocabulary covers every coloured
+ * state word in the Hub: accent = something started moving, green = ended well,
+ * grey = at rest, red = destructive (the token the Close/Remove buttons already
+ * wear). An unknown verb takes ordinary reading ink rather than a colour we
+ * would be inventing a meaning for.
+ */
+export function sysVerbColor(verb: string): string {
+  switch (verb) {
+    case 'spawned':
+    case 'started':
+    case 'restarted': return 'var(--accent)';
+    case 'done': return 'var(--status-ok)';
+    case 'interrupted': return 'var(--status-warn)';
+    case 'removed': return 'var(--status-danger)';
+    case 'stopped': return 'var(--text3)';
+    default: return 'var(--text2)';
+  }
+}
+
 /**
  * A note posted by an agent about its own work: `[tmm status working] compiling
  * the server`, or `[tmm done] shipped the palette`.
