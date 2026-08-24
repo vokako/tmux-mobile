@@ -351,17 +351,17 @@
         </label>
         <div class="row2">
           <label>{t('agentsBackend')}
-            <Select bind:value={editing.backend} ariaLabel={t('agentsBackend')}
+            <Select bind:value={editing.backend} dense ariaLabel={t('agentsBackend')}
               options={BACKENDS.map((b) => ({ value: b, icon: backendIcon(b) ?? undefined }))} />
           </label>
           <label>{t('agentsModel')}
-            <input bind:value={editing.model} placeholder={t('agentsModelDefault')}
-              list={models.length ? 'agent-model-ids' : undefined} />
-            {#if models.length}
-              <datalist id="agent-model-ids">
-                {#each models as m (m)}<option value={m}></option>{/each}
-              </datalist>
-            {/if}
+            <!-- Editable Select, not a native <datalist>: the OS suggestion
+                 popup is the seam the shared dropdown exists to remove (owner,
+                 2026-08-24: "模型选择下拉框明显不对"). The value stays free
+                 text — an id we cannot enumerate is still typeable, and
+                 registry_save remains the authority that rejects a bad one. -->
+            <Select bind:value={editing.model} editable dense options={models}
+              placeholder={t('agentsModelDefault')} ariaLabel={t('agentsModel')} />
           </label>
         </div>
         <div class="row2">
@@ -370,7 +370,7 @@
                  not free text: a typo'd effort is a warning above the splash
                  and a silent fallback to the default. '' = backend default,
                  same contract as the model. -->
-            <Select bind:value={editing.effort}
+            <Select bind:value={editing.effort} dense
               options={[{ value: '', label: t('agentsModelDefault') }, ...(EFFORTS[editing.backend] ?? [])]}
               ariaLabel={t('agentsEffort')} />
           </label>
@@ -443,7 +443,9 @@
   .side-scroll { flex: 1; overflow-y: auto; padding: 8px; }
   .r-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; }
   .r-backend { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text3); flex: none; }
-  .r-cap { flex: none; font-size: var(--fs-micro); letter-spacing: 0.4px; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 3px; opacity: 0.75; }
+  /* A wash, not a drawn frame: borders on inner micro atoms read as chrome
+     (owner, 2026-08-24 audit; same rule as the sys-line atoms). */
+  .r-cap { flex: none; font-size: var(--fs-micro); letter-spacing: 0.4px; color: var(--accent); background: var(--accent-bg); border-radius: 4px; padding: 1px 4px; }
 
   .mid { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   .spacer { flex: 1; }
@@ -453,23 +455,30 @@
   .placeholder { flex: 1; display: grid; place-items: center; }
   .hint { color: var(--text3); font-size: var(--fs-ui); margin: 0; line-height: 1.6; max-width: 420px; }
 
-  .editor { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
+  .editor { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; max-width: 720px; }
   .err { color: var(--danger); font-size: var(--fs-ui); background: var(--danger-bg); border-radius: var(--ui-radius-row); padding: 8px 12px; }
-  label { display: flex; flex-direction: column; gap: 5px; color: var(--text2); font-size: var(--fs-ui); }
-  label.check { flex-direction: row; align-items: center; gap: 8px; }
-  input, textarea { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: var(--ui-radius-control); color: var(--text); padding: 8px 12px; font-size: var(--fs-body); outline: none; font-family: inherit; }
+  /* Field captions are QUIET — the field carries the content, the label only
+     names it (the dialog dialect's .dlg-note voice). fs-ui labels over
+     fs-body inputs were the page reading a size too big everywhere
+     (owner, 2026-08-24: "很多字号有点大很奇怪，也和页面风格不符"). */
+  label { display: flex; flex-direction: column; gap: 4px; color: var(--text3); font-size: var(--fs-sub); }
+  label.check { flex-direction: row; align-items: center; gap: 8px; color: var(--text2); font-size: var(--fs-ui); }
+  /* The dense field dialect (Team's template editor / the shared Select's
+     `dense`), so every box in the form is ONE species at ONE size. */
+  input, textarea { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: var(--ui-radius-control); color: var(--text); padding: 6px 9px; font-size: var(--fs-ui); outline: none; font-family: inherit; }
   input:focus, textarea:focus { border-color: var(--accent); }
   input:disabled { opacity: 0.5; }
   textarea { resize: vertical; line-height: 1.5; }
-  textarea.mono { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-ui); }
+  textarea.mono { font-family: ui-monospace, Menlo, monospace; }
+  label.check input { accent-color: var(--accent); width: 14px; height: 14px; margin: 0; }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .pick-block { display: flex; flex-direction: column; gap: 6px; }
-  .pick-label { color: var(--text2); font-size: var(--fs-ui); }
+  .pick-label { color: var(--text3); font-size: var(--fs-sub); }
   .pick-row { display: flex; flex-wrap: wrap; gap: 6px; }
   .pick {
     display: flex; align-items: center; gap: 5px;
     background: var(--surface); border: 1px solid var(--border); border-radius: 999px;
-    color: var(--text2); padding: 5px 12px; font-size: var(--fs-ui); cursor: pointer;
+    color: var(--text2); padding: 4px 10px; font-size: var(--fs-ui); cursor: pointer;
     transition: border-color 160ms, color 160ms;
   }
   .pick:hover { border-color: var(--input-border); }

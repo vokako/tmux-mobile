@@ -22,6 +22,12 @@
      * default one (the agent editor's inputs). A dropdown that lines up with
      * neither is what "左右和上方没有对齐" looked like. */
     dense = false,
+    /** COMBOBOX mode: the trigger is a real text input — the value stays free
+     * text (a model id we cannot enumerate is still typeable), and the menu is
+     * the suggestion list, filtered as you type. Built for the agent editor's
+     * model field, which used a native <datalist> — the OS popup this
+     * component exists to remove (owner, 2026-08-24: "模型选择下拉框明显不对"). */
+    editable = false,
     placeholder = '',
     ariaLabel = '',
     onchange = (_v: string) => {},
@@ -35,19 +41,36 @@
 
   let open = $state(false);
   let triggerEl: HTMLButtonElement | null = $state(null);
+  let inputEl: HTMLInputElement | null = $state(null);
   let anchor = $state<AnchorRect | null>(null);
   let menuW = $state(0);
   let menuH = $state(0);
   /** Keyboard cursor while open; -1 until the user arrows. */
   let cursor = $state(-1);
 
+  /** Editable mode filters as you type — substring, case-blind, the typed
+   * value itself excluded from being "filtered away" logic-wise: an empty or
+   * fully-typed value shows the whole list, which is how the field doubles as
+   * a browser. */
+  const shown = $derived(
+    !editable ? norm : (() => {
+      const q = value.trim().toLowerCase();
+      if (!q) return norm;
+      const hit = norm.filter((o) => (o.label ?? o.value).toLowerCase().includes(q) || o.value.toLowerCase().includes(q));
+      // The full value matching exactly one option means the user picked it
+      // (or finished typing it): offer everything again rather than a
+      // one-row menu that just repeats the field.
+      return hit.length === 1 && hit[0]!.value === value ? norm : hit;
+    })(),
+  );
+
   const pos = $derived(anchor ? menuPlacement(anchor, { w: menuW, h: menuH }, viewBox(), 4) : { x: 0, y: 0 });
 
   function show() {
-    if (disabled || !triggerEl) return;
-    anchor = anchorOf(triggerEl);
+    if (disabled || !(triggerEl ?? inputEl)) return;
+    anchor = anchorOf((triggerEl ?? inputEl)!);
     menuW = 0; menuH = 0;
-    cursor = norm.findIndex((o) => o.value === value);
+    cursor = shown.findIndex((o) => o.value === value);
     open = true;
   }
   function hide() { open = false; }
@@ -73,15 +96,17 @@
       if (!t?.closest?.('.sel-menu, .sel-trigger')) hide();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { hide(); e.stopPropagation(); triggerEl?.focus(); return; }
+      if (e.key === 'Escape') { hide(); e.stopPropagation(); (editable ? inputEl : triggerEl)?.focus(); return; }
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
         const step = e.key === 'ArrowDown' ? 1 : -1;
-        cursor = (cursor + step + norm.length) % norm.length;
+        cursor = shown.length ? (cursor + step + shown.length) % shown.length : -1;
         return;
       }
-      if (e.key === 'Enter' || e.key === ' ') {
-        if (cursor >= 0 && norm[cursor]) { e.preventDefault(); pick(norm[cursor]!.value); }
+      // Space stays typeable in a text field; it only picks for the button.
+      if (e.key === 'Enter' || (e.key === ' ' && !editable)) {
+        if (cursor >= 0 && shown[cursor]) { e.preventDefault(); pick(shown[cursor]!.value); }
+        else if (editable && e.key === 'Enter') hide();
       }
     };
     window.addEventListener('pointerdown', onDown, true);
@@ -97,6 +122,22 @@
   });
 </script>
 
+{#if editable}
+  <!-- COMBOBOX: a real input wearing the trigger's exact clothes, so the two
+       modes are indistinguishable at rest. The chevron rides inside the same
+       box (pointer-events: none) and still says "there is a list here". -->
+  <span class="sel-combo">
+    <input class="sel-trigger combo" class:open class:dense bind:this={inputEl}
+      {disabled} {placeholder} bind:value
+      role="combobox" aria-haspopup="listbox" aria-expanded={open} aria-controls="sel-combo-list"
+      aria-label={ariaLabel || undefined}
+      autocomplete="off" autocapitalize="off" spellcheck="false"
+      oninput={() => { if (!open) show(); cursor = -1; }}
+      onclick={() => { if (!open) show(); }}
+      onkeydown={(e) => { if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); show(); } }} />
+    <span class="combo-chev"><Icon name="chevron-down" size={11} /></span>
+  </span>
+{:else}
 <button class="sel-trigger" class:open class:dense bind:this={triggerEl} type="button"
   {disabled} aria-haspopup="listbox" aria-expanded={open} aria-label={ariaLabel || undefined}
   onclick={() => (open ? hide() : show())}>
@@ -104,12 +145,13 @@
   <span class="sel-value" class:ph={!label}>{label || placeholder}</span>
   <Icon name="chevron-down" size={11} />
 </button>
+{/if}
 
-{#if open}
-  <div class="sel-menu" class:ready={menuH > 0} role="listbox" tabindex="-1"
+{#if open && shown.length}
+  <div class="sel-menu" class:ready={menuH > 0} role="listbox" tabindex="-1" id="sel-combo-list"
     style:left="{pos.x}px" style:top="{pos.y}px" style:width="{fieldW}px"
     bind:clientWidth={menuW} bind:clientHeight={menuH}>
-    {#each norm as o, i (o.value)}
+    {#each shown as o, i (o.value)}
       <button class="sel-opt" class:sel={o.value === value} class:cur={i === cursor}
         role="option" aria-selected={o.value === value} type="button"
         onclick={() => pick(o.value)} onpointerenter={() => (cursor = i)}>
@@ -149,6 +191,15 @@
   .sel-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sel-value.ph { color: var(--text3); }
   .sel-trigger :global(svg) { flex: none; color: var(--text3); }
+  /* Combobox clothes: the input IS the trigger, the chevron rides inside its
+     right padding so the box still promises a list. */
+  .sel-combo { position: relative; display: block; width: 100%; }
+  .sel-trigger.combo { display: block; outline: none; padding-right: 26px; cursor: text; }
+  .sel-trigger.combo::placeholder { color: var(--text3); }
+  .combo-chev {
+    position: absolute; right: 9px; top: 50%; transform: translateY(-50%);
+    display: grid; place-items: center; pointer-events: none; color: var(--text3);
+  }
 
   /* Same popover dialect as the Hub's menus: one menu language app-wide. */
   .sel-menu {
