@@ -1553,20 +1553,25 @@
                instead of vanishing from the room it belongs to. -->
           {#each stopped as name (name)}
             <!-- A div for the same reason as the live card: the dot menu inside
-                 holds real buttons. Clicking the card starts it; removing it
+                 holds real buttons. The card SURFACE is inert — restarting is
+                 the refresh button's job alone (owner, 2026-08-24: "已经停止的
+                 agent我只要点击就自动重启了 并没有点到重启的那个圆圈箭头上" —
+                 a card-wide click restarted agents by accident). Removing it
                  lives in the menu, because a stopped agent you are done with
                  has to be ejectable — the slot is what keeps `up` recreating
                  it (owner, 2026-08-19). -->
-            <div class="acard off" class:busy={acting} role="button" tabindex="0" title={t('hubStartAgain')}
+            <div class="acard off" class:busy={acting} role="group" aria-label={name}
               oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), name, agentItems(name)); }}
-              use:longpress={{ onlongpress: (pt) => openCtx(pt, name, agentItems(name)) }}
-              onclick={() => !acting && startAgent(name)}
-              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (!acting) startAgent(name); } }}>
+              use:longpress={{ onlongpress: (pt) => openCtx(pt, name, agentItems(name)) }}>
               <div class="ac-top">
                 <span class="ava dim">{name.slice(0, 1).toUpperCase()}</span>
                 <span class="a-name">{name}</span>
                 <span class="s-age">{t('hubStopped')}</span>
-                <Icon name="refresh" size={11} />
+                <button class="a-start" title={t('hubStartAgain')} aria-label={t('hubStartAgain')}
+                  disabled={acting}
+                  onclick={(e) => { e.stopPropagation(); startAgent(name); }}>
+                  <Icon name="refresh" size={11} />
+                </button>
                 <span class="a-more" role="button" tabindex="-1" title={t('hubMore')}
                   onclick={(e) => { e.stopPropagation(); toggleAgentMenu(name, e.currentTarget); }}
                   onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); toggleAgentMenu(name, e.currentTarget); } }}>
@@ -2274,8 +2279,10 @@
   /* The `+` card holds one row of two items — it never grew a second line. */
   .acard.add { flex-direction: row; align-items: center; gap: 6px; color: var(--text3); padding-right: 12px; }
   .acard.add:hover { color: var(--accent); }
-  .acard.off { opacity: 0.55; }
-  .acard.off:hover { opacity: 1; border-color: var(--accent); }
+  .acard.off { opacity: 0.55; cursor: default; }
+  /* Waking on hover is fine; promising a click is not — the accent border was
+     the card selling a card-wide restart it no longer has. */
+  .acard.off:hover { opacity: 1; }
   /* An action is in flight: the card stops taking clicks (the handler guards
      too — this is the visible half of that). */
   .acard.busy { opacity: 0.35; pointer-events: none; }
@@ -2288,6 +2295,15 @@
   /* Secondary and destructive actions hide until asked for. */
   .a-more { display: grid; place-items: center; width: 20px; height: 22px; border-radius: 6px; color: var(--text3); flex: none; }
   .a-more:hover { color: var(--text); background: var(--surface2); }
+  /* The stopped card's ONE way back up: a real button in the .a-more dialect,
+     accent-leaning so it reads as the card's action. The card surface around
+     it is inert — see the stopped-card comment in the markup. */
+  .a-start {
+    display: grid; place-items: center; width: 20px; height: 22px; border-radius: 6px;
+    background: none; border: none; padding: 0; cursor: pointer; color: var(--text3); flex: none;
+  }
+  .a-start:hover:not(:disabled) { color: var(--accent); background: var(--surface2); }
+  .a-start:disabled { opacity: 0.5; cursor: default; }
   /* The agent action menu: a fixed popover, positioned in JS from the trigger's
      rect (see toggleAgentMenu). It speaks the same dialect as .to-menu — same
      surface, radius, shadow and row metrics — because this file should have ONE

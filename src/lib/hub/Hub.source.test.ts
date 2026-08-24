@@ -217,3 +217,14 @@ test('a confirmed project verb runs on the row it was asked on, never on `select
     assert.match(body, /if \(selected !== s\) return;/u, `${head} drops a stale answer`);
   }
 });
+
+test('a stopped agent restarts only from its refresh button, never the card', () => {
+  // The whole stopped card used to be onclick=startAgent — brushing it
+  // restarted the agent (owner, 2026-08-24: "已经停止的agent我只要点击就自动
+  // 重启了 并没有点到重启的那个圆圈箭头上"). The surface is inert now; the
+  // one start trigger is the .a-start button wrapping the refresh icon.
+  const off = source.slice(source.indexOf('class="acard off"'), source.indexOf('{/each}', source.indexOf('class="acard off"')));
+  assert.match(off, /class="a-start"/u, 'the refresh icon is a real button');
+  assert.match(off, /stopPropagation\(\); startAgent\(name\)/u, 'and it is what starts the agent');
+  assert.doesNotMatch(off.slice(0, off.indexOf('<div class="ac-top">')), /onclick/u, 'the card surface itself has no click handler');
+});
