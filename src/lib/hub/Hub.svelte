@@ -1355,16 +1355,19 @@
         </button>
       </div>
 
-      {#if managedAgents.length || stopped.length || liveSelected}
+      {#if selected}
         <!-- The roster. Tapping an agent makes it the recipient (and this
              project's lead) — the phone gets chips, the desktop gets cards. -->
         <!-- The roster row: the scrolling strip of cards PLUS the pinned add
-             button. Two children, one row. It also survives an EMPTY roster
-             whenever the session is live: gated on "there is somebody here", a
-             project whose last agent was removed lost the only + button with it
-             — and the preset panel that would have replaced it only shows in an
-             EMPTY feed, so a room with history had no way back at all (owner,
-             2026-08-24). -->
+             button. Two children, one row. It renders for every SELECTED
+             project, empty roster and closed session included, because `+ agent`
+             is the only way into an empty room and both gates hid it: on a
+             non-empty-roster gate it vanished with the last agent, and on a
+             live-session gate a CLOSED project still had none (owner, 2026-08-24,
+             twice — "test 这个 project"). A closed session is not a real
+             constraint either: `hub_spawn` → `projects::spawn` calls
+             `tmux::ensure_session` itself, so spawning into a project that is
+             down OPENS it. -->
         <div class="roster">
         <div class="cards" class:chips={compact} bind:this={cardsEl}>
           {#each managedAgents as a (a.window)}
@@ -1441,12 +1444,14 @@
              scrolled with the cards, and the strip hides its scrollbar — with
              agents present the button lived off-screen with nothing hinting it
              existed (owner, 2026-08-21: "agent 不为空的情况下 我都看不到
-             '加 Agent' 的按钮"). -->
-        {#if liveSelected}
-          <button class="acard add" onclick={() => openPicker('add')} title={t('hubSpawn')}>
-            <Icon name="plus" size={14} /><span>{t('hubSpawn')}</span>
-          </button>
-        {/if}
+             '加 Agent' 的按钮"). Unconditional inside the row: it is the entry
+             point to an EMPTY room, and a closed session is not a reason to hide
+             it — the spawn opens the session on its way in. 'add' is the right
+             mood even for an empty room: addAgents promotes a lead whenever
+             there is no recipient, which is exactly the empty-room case. -->
+        <button class="acard add" onclick={() => openPicker('add')} title={t('hubSpawn')}>
+          <Icon name="plus" size={14} /><span>{t('hubSpawn')}</span>
+        </button>
         </div>
       {/if}
 
@@ -1726,9 +1731,13 @@
           {/if}
         {/each}
         {#if !blocks.length}
-          {#if liveSelected && !managedAgents.length && registry.length}
+          {#if selected && !managedAgents.length && registry.length}
             <!-- Nothing to talk to yet: start from a preset. One tap = that
-                 agent becomes the lead; "several" starts a team in one go. -->
+                 agent becomes the lead; "several" starts a team in one go.
+                 Offered for a CLOSED project too, for the same reason the +
+                 button is: `projects::spawn` ensures the session, so "the
+                 session is down" was never a reason to withhold the only way
+                 to start one. -->
             <div class="start">
               <div class="start-h">{t('hubStartTitle')}</div>
               <div class="start-list">

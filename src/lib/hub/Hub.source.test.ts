@@ -139,13 +139,21 @@ test('a lifecycle group is one row per line, with the action highlighted', () =>
   assert.match(rule('.sysline .sys-text'), /text-overflow:\s*ellipsis/u);
 });
 
-test('the add-agent button survives an empty roster', () => {
-  // Gated on "somebody is here", the + button disappeared with the last agent —
-  // and the preset panel that would replace it only renders in an EMPTY feed, so
-  // a room with history had no way to add anyone back (owner, 2026-08-24).
-  assert.match(source, /\{#if managedAgents\.length \|\| stopped\.length \|\| liveSelected\}/u);
-  // The button itself is still live-session-only: spawning needs a tmux session.
-  assert.match(source, /\{#if liveSelected\}\s*(?:<!--[\s\S]*?-->\s*)?<button class="acard add"/u);
+test('the add-agent button is reachable in every project', () => {
+  // Two gates hid the ONE entry point to an empty room, and each hid it in a
+  // different situation: a non-empty-roster gate lost it with the last agent, and
+  // a live-session gate still hid it on a CLOSED project (owner, 2026-08-24,
+  // twice — "test 这个 project"). So the row hangs off the SELECTION and the
+  // button off nothing: `projects::spawn` calls `tmux::ensure_session`, so a
+  // spawn into a project that is down opens it.
+  const roster = source.match(/\{#if ([^}]*)\}\s*(?:<!--[\s\S]*?-->\s*)*<div class="roster">/u)?.[1];
+  assert.equal(roster, 'selected', 'the roster row is gated on the selection alone');
+  assert.match(source, /(?:<!--[\s\S]*?-->\s*)<button class="acard add"/u,
+    'the add button has no {#if} of its own');
+  assert.doesNotMatch(source, /\{#if liveSelected\}/u, 'no live gate stands between a project and its first agent');
+  // The empty-room preset panel is the same entry point in another shape: it
+  // must not disagree with the button about when adding an agent is possible.
+  assert.match(source, /\{#if selected && !managedAgents\.length && registry\.length\}/u);
 });
 
 test('a command-shaped draft styles the composer, with the mirror in step', () => {
