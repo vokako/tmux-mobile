@@ -139,14 +139,18 @@ test('a lifecycle group is one row per line, in one who/action/detail grammar', 
   assert.match(rule('.sysline .sys-who'), /font-weight:\s*650/u, "the name wears the bubble header's weight");
   assert.match(source, /class="sys-verb" style:color=\{c\}><span class="sv-dot"/u, 'the action badge carries the state dot');
   assert.match(source, /const c = sysVerbColor\(p\.verb\)/u);
-  assert.match(rule('.sysline .sys-verb'), /currentColor/u, 'border and dot follow the one inline colour');
+  // No drawn frames on the inner atoms — they read as chrome, not content
+  // ("不用这种边框的", owner 2026-08-24): the verb is dot + coloured word, the
+  // command a soft --code-bg wash in the inline-code dialect.
+  assert.doesNotMatch(rule('.sysline .sys-verb'), /border/u, 'the verb badge is dot + word, not a pill');
   // A /command's typed line stays ONE object — name and args together in the
   // composer's own command costume; a micro-pill name beside loose args at
   // another size read as fragments ("带参数的渲染好像不是很好", 2026-08-24).
   assert.match(source, /class="sys-cmd">\{p\.text \? `\$\{p\.verb\} \$\{p\.text\}` : p\.verb\}<\/span>/u);
   const cmd = rule('.sysline .sys-cmd');
   assert.match(cmd, /ui-monospace/u);
-  assert.match(cmd, /border:/u, 'the capsule is drawn, like the composer in command mode');
+  assert.match(cmd, /var\(--code-bg\)/u, 'the wash is the inline-code dialect, not a drawn frame');
+  assert.doesNotMatch(cmd, /border:/u, 'no border on the command capsule');
   assert.match(cmd, /text-overflow:\s*ellipsis/u, 'a long command clips itself, not its neighbours');
   assert.doesNotMatch(source, /class="sys-verb cmd"/u, 'no second command dialect');
   // Per-row ellipsis lives on the text, so a long detail cannot eat the badge.

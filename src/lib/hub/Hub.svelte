@@ -2377,22 +2377,20 @@
     flex: none; display: inline-flex; align-items: center; gap: 4px;
     font-size: var(--fs-micro); font-weight: 650;
     text-transform: uppercase; letter-spacing: 0.6px; line-height: 1.6;
-    border: 1px solid color-mix(in srgb, currentColor 55%, transparent);
-    border-radius: 4px; padding: 0 5px;
   }
   .sysline .sys-verb .sv-dot { width: 5px; height: 5px; border-radius: 50%; flex: none; background: currentColor; }
   /* A /command row: the typed line stays ONE object — name and arguments
-     together, in the composer's own command costume (.compose-shell.cmd: mono,
-     accent-tinted capsule, accent-leaning border). The first cut split it into
-     a micro-pill /name plus loose args at another size, which read as fragments
-     of two dialects ("带参数的渲染好像不是很好", owner 2026-08-24). */
+     together ("带参数的渲染好像不是很好", owner 2026-08-24). It wears the
+     rendered-markdown INLINE CODE dialect (.md code: soft --code-bg wash,
+     radius, NO border) with the composer's accent lean — drawn frames on the
+     inner atoms read as chrome, not content ("不用这种边框的", owner same
+     day, which also stripped the verb badge down to dot + word). */
   .sysline .sys-cmd {
     min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     color: color-mix(in srgb, var(--accent) 62%, var(--text));
-    background: color-mix(in srgb, var(--accent) 6%, var(--bubble-in));
-    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-    border-radius: 6px; padding: 0 6px;
+    background: var(--code-bg);
+    border-radius: 4px; padding: 0.1em 0.45em;
   }
   .sysline .sys-text {
     min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text);

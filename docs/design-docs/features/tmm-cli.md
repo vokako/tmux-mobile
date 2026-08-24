@@ -1518,16 +1518,18 @@ third: `sysParts()` parses every shape into `{who, verb, text, cmd}` (`removed
 k`, `spawned dev — brief` with the brief as detail, `/model x → dev, rev` where
 the split is the LAST ` → ` — the one `hub_command` appended, so a typed arrow
 survives). The NAME wears the bubble header's ink (`.m-head`'s 650-weight
-accent), the ACTION wears the status-note badge (dot + state word in a
-currentColor-bordered pill, tinted by `sysVerbColor()` in the ONE progressive
-status language every other coloured state word in the Hub uses: accent =
-something started moving, green = ended well, grey = at rest, red =
-destructive, amber = interrupted; both pure + tested, and the value is always a
-token so the two themes read the same), and a `/command`'s typed line stays ONE
-object — name and arguments together in the composer's own command costume
-(monospace, accent-tinted capsule): the first cut split it into a micro-pill
-name plus loose arguments at another size, which read as fragments of two
-dialects ("带参数的渲染好像不是很好", 2026-08-24). The targets stand as the who.
+accent), the ACTION is the status dot + state word (tinted by `sysVerbColor()`
+in the ONE progressive status language every other coloured state word in the
+Hub uses: accent = something started moving, green = ended well, grey = at
+rest, red = destructive, amber = interrupted; both pure + tested, and the value
+is always a token so the two themes read the same), and a `/command`'s typed
+line stays ONE object — name and arguments together in the rendered-markdown
+INLINE CODE dialect (monospace, soft `--code-bg` wash, the composer's accent
+lean). Two wrong shapes preceded it: a micro-pill name beside loose arguments
+at another size read as fragments of two dialects ("带参数的渲染好像不是很好",
+2026-08-24), and drawn frames on the inner atoms — a bordered verb pill, a
+bordered command capsule — read as chrome rather than content ("不用这种边框的",
+same day). The targets stand as the who.
 The per-row ellipsis sits on the TEXT, so a long detail can never eat the
 badge or the name. An unknown line shape keeps no verb or name at all and
 renders whole: guessing either would truncate the remainder. Subordinate is not
