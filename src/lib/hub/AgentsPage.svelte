@@ -26,7 +26,7 @@
     grok: ['low', 'medium', 'high', 'xhigh'],
   };
 
-  let { visible = false } = $props();
+  let { visible = false, onGoBack = null } = $props();
 
   let defs = $state([]);
   let skills = $state([]);      // central skill assets
@@ -46,6 +46,20 @@
    * 2026-08-19). The words per kind live here so the dialog stays generic. */
   let pending = $state(null);
   let removing = $state(false);
+
+  // The phone's back gesture peels this page's layers like Files does its
+  // views (owner, 2026-08-24): dialog first, then an open editor (compact:
+  // "the list is the page; editing takes the screen"), then the floor.
+  $effect(() => {
+    if (!onGoBack) return;
+    onGoBack(() => {
+      if (pending && !removing) { pending = null; return true; }
+      if (editing) { editing = null; return true; }
+      if (editingSkill) { editingSkill = null; return true; }
+      if (editingMcp) { editingMcp = null; return true; }
+      return false;
+    });
+  });
   const COPY = {
     agent: { title: 'confirmDeleteAgentDefTitle', note: 'confirmDeleteAgentDefNote' },
     skill: { title: 'confirmDeleteSkillTitle',    note: 'confirmDeleteSkillNote' },

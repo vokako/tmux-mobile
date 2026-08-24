@@ -37,7 +37,7 @@
   import CreateProjectDialog from '../projects/CreateProjectDialog.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
-  let { visible = false, fontSize = 14, mobile = false, openTerminal = () => {}, onSelectSession = (_s) => {} } = $props();
+  let { visible = false, fontSize = 14, mobile = false, openTerminal = () => {}, onSelectSession = (_s) => {}, onGoBack = null } = $props();
 
   // Layout follows the viewport, not the device class (a squeezed desktop
   // window must not overflow). `mobile` still decides behavior defaults.
@@ -1095,6 +1095,33 @@
     ctxAt = at;
   }
   const closeCtx = () => { ctxAt = null; ctxItems = []; };
+
+  // ── The phone's BACK GESTURE, the Files page's contract (owner, 2026-08-24:
+  // "chat…对于返回手势适配不太好 像是网页刷新了。像文件管理页面就很好"): App
+  // routes a history pop here, and a `true` means it was CONSUMED by peeling
+  // the topmost layer — the same order a tap-outside or Escape would use.
+  // Only when nothing is left to peel does it fall through to App's re-push,
+  // so a back never looks like the browser leaving. On a phone the project
+  // LIST is the level above the conversation (the Files analogy: cwd = '/'
+  // is the floor); with the list open, back has reached the floor.
+  $effect(() => {
+    if (!onGoBack) return;
+    onGoBack(() => {
+      if (ctxAt) { closeCtx(); return true; }
+      if (menuFor) { menuFor = ''; return true; }
+      if (recipientOpen) { recipientOpen = false; return true; }
+      if (palette) { paletteOff = true; return true; }
+      if (intArm) { intArm = false; return true; }
+      if (pendingAct && !acting) { pendingAct = null; return true; }
+      if (trashAsk) { trashAsk = null; return true; }
+      if (pickerOpen) { pickerOpen = false; return true; }
+      if (createOpen) { createOpen = false; return true; }
+      if (renaming) { renaming = false; return true; }
+      if (termOpen) { closeDrawer(); return true; }
+      if (compact && !sideOpen) { sideOpen = true; return true; }
+      return false;
+    });
+  });
   /** A pointer event as a plain client point. */
   const pointOf = (e) => ({ x: e.clientX ?? 0, y: e.clientY ?? 0 });
 

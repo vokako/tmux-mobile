@@ -1405,6 +1405,30 @@ straight through to the folder, so `tmm project create /tmp --name closetest`
 made a session called `tmp` — the same folder-name-wins bug the Hub dialog hit
 from the other side. An explicit `--session` still overrides.
 
+#### The phone's back gesture peels the Hub, layer by layer
+
+A back swipe on the chat used to reach App's do-nothing fallthrough, and what
+the user saw was Chrome's back-navigation flash — the app looking like a
+reloading web page (owner, 2026-08-24: "chat agent配置等页面 对于返回手势适配
+不太好 像是网页刷新了。像文件管理页面就很好"). The Files page was named the
+reference, so the Hub now speaks the exact contract Files defined: App owns
+the history stack (seeded `{app:true}` entries, `popstate` routed to the
+visible page's registered `onGoBack` closure, re-push at the floor so the
+browser never actually leaves), and the page answers "did I consume this?".
+The Hub consumes by peeling its topmost transient layer — the same order a
+tap outside or Escape would: context menu, agent menu, recipient picker, `/`
+palette, armed interrupt, the confirm dialogs, team picker, create dialog, an
+in-progress rename, then the terminal drawer (through `closeDrawer`, because
+every drawer toggle goes through the reading anchor), and finally — compact
+only — a bare conversation lifts the project list. The list is the FLOOR,
+Files' `/`: with it open, back falls through unconsumed to App's re-push,
+which is what keeps back from cycling the list open and closed forever. The
+Agents page does the same with its two layers (pending delete dialog, then
+whichever editor is open — on compact the editor takes the whole screen, so
+back-to-list is the gesture's plain meaning). A consumed pop re-pushes in App
+so the next back always has an entry to spend. Pages register through the
+`onGoBack` prop; nobody installs a second `popstate` listener.
+
 #### Starting a project, and interrupting an agent
 
 Creating a project asks for a NAME and a PATH, in that order, and the name

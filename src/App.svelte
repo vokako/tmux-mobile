@@ -880,6 +880,8 @@
   // Android back gesture via history API
   // Every navigation push a state, back pops it naturally
   let filesGoBack = $state(null);
+  let hubGoBack = $state(null);
+  let agentsGoBack = $state(null);
 
   function navPush() { history.pushState({ app: true }, ''); }
 
@@ -892,6 +894,14 @@
       }
       if (page === 'files' && filesGoBack && filesGoBack()) return;
       if (page === 'files') { page = 'terminal'; return; }
+      // Chat and Agents peel their own layers (menus, dialogs, drawer,
+      // editor) exactly like Files peels its views — a back with nothing to
+      // peel falls through to the re-push, so it never reads as the browser
+      // navigating away (owner, 2026-08-24: "像是网页刷新了。像文件管理页面
+      // 就很好"). The consumed pop re-pushes so the NEXT back has an entry
+      // to spend no matter how many layers were peeled.
+      if (page === 'hub' && hubGoBack && hubGoBack()) { navPush(); return; }
+      if (page === 'agents' && agentsGoBack && agentsGoBack()) { navPush(); return; }
       // Terminal is the root on a phone: back closes the session sheet if it
       // is open, otherwise there is nowhere below it (re-push prevents exit).
       if (page === 'terminal' && sessListOpen) { sessListOpen = false; navPush(); return; }
@@ -1048,12 +1058,12 @@
            switches. Desktop-eligible only (needs width + the bus): mobile
            keeps the tab layout untouched. -->
       <div class="page-layer" class:hidden={page !== 'hub'}>
-        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onSelectSession={(s) => { if (s) filesSession = s; }} />
+        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onSelectSession={(s) => { if (s) filesSession = s; }} onGoBack={(fn) => hubGoBack = fn} />
       </div>
     {/if}
     {#if hubEligible}
       <div class="page-layer" class:hidden={page !== 'agents'}>
-        <AgentsPage visible={page === 'agents'} />
+        <AgentsPage visible={page === 'agents'} onGoBack={(fn) => agentsGoBack = fn} />
       </div>
     {/if}
     {#if page === 'prefs'}
