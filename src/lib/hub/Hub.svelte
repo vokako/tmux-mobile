@@ -1518,12 +1518,18 @@
                 {@const c = sysVerbColor(p.verb)}
                 <div class="sys-item">
                   {#if p.who}<span class="sys-who">{p.who}</span>{/if}
-                  {#if p.verb && p.cmd}
-                    <span class="sys-verb cmd">{p.verb}</span>
-                  {:else if p.verb}
-                    <span class="sys-verb" style:color={c}><span class="sv-dot" aria-hidden="true"></span>{p.verb}</span>
+                  {#if p.cmd}
+                    <!-- The typed line is ONE object in the composer's own
+                         command costume — splitting it into a micro-pill name
+                         plus loose args at another size broke it into fragments
+                         ("带参数的渲染好像不是很好", owner 2026-08-24). -->
+                    <span class="sys-cmd">{p.text ? `${p.verb} ${p.text}` : p.verb}</span>
+                  {:else}
+                    {#if p.verb}
+                      <span class="sys-verb" style:color={c}><span class="sv-dot" aria-hidden="true"></span>{p.verb}</span>
+                    {/if}
+                    {#if p.text}<span class="sys-text">{p.text}</span>{/if}
                   {/if}
-                  {#if p.text}<span class="sys-text" class:mono={p.cmd}>{p.text}</span>{/if}
                 </div>
               {/each}
             </div>
@@ -2375,20 +2381,21 @@
     border-radius: 4px; padding: 0 5px;
   }
   .sysline .sys-verb .sv-dot { width: 5px; height: 5px; border-radius: 50%; flex: none; background: currentColor; }
-  /* A /command's badge is the command NAME itself — typed text, so no uppercase,
-     no dot, the composer's monospace with its accent lean. Badge + args read
-     back as exactly the line that was typed. */
-  .sysline .sys-verb.cmd {
-    text-transform: none; letter-spacing: 0; font-size: var(--fs-meta); font-weight: 600;
+  /* A /command row: the typed line stays ONE object — name and arguments
+     together, in the composer's own command costume (.compose-shell.cmd: mono,
+     accent-tinted capsule, accent-leaning border). The first cut split it into
+     a micro-pill /name plus loose args at another size, which read as fragments
+     of two dialects ("带参数的渲染好像不是很好", owner 2026-08-24). */
+  .sysline .sys-cmd {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     color: color-mix(in srgb, var(--accent) 62%, var(--text));
+    background: color-mix(in srgb, var(--accent) 6%, var(--bubble-in));
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    border-radius: 6px; padding: 0 6px;
   }
   .sysline .sys-text {
     min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text);
-  }
-  .sysline .sys-text.mono {
-    font-family: ui-monospace, "SF Mono", Menlo, monospace;
-    color: color-mix(in srgb, var(--accent) 62%, var(--text));
   }
 
   /* The feed's date separators: a centred pill in the sysline's capsule

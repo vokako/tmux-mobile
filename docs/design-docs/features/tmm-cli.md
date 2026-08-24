@@ -1523,10 +1523,11 @@ currentColor-bordered pill, tinted by `sysVerbColor()` in the ONE progressive
 status language every other coloured state word in the Hub uses: accent =
 something started moving, green = ended well, grey = at rest, red =
 destructive, amber = interrupted; both pure + tested, and the value is always a
-token so the two themes read the same), and a `/command`'s badge is the command
-NAME itself — typed text, so monospace with the accent lean and never
-uppercased, with its arguments beside it in the same mono: badge + args read
-back as exactly the line that was typed, while the targets stand as the who.
+token so the two themes read the same), and a `/command`'s typed line stays ONE
+object — name and arguments together in the composer's own command costume
+(monospace, accent-tinted capsule): the first cut split it into a micro-pill
+name plus loose arguments at another size, which read as fragments of two
+dialects ("带参数的渲染好像不是很好", 2026-08-24). The targets stand as the who.
 The per-row ellipsis sits on the TEXT, so a long detail can never eat the
 badge or the name. An unknown line shape keeps no verb or name at all and
 renders whole: guessing either would truncate the remainder. Subordinate is not

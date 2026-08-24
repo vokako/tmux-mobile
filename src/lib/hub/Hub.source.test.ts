@@ -140,12 +140,15 @@ test('a lifecycle group is one row per line, in one who/action/detail grammar', 
   assert.match(source, /class="sys-verb" style:color=\{c\}><span class="sv-dot"/u, 'the action badge carries the state dot');
   assert.match(source, /const c = sysVerbColor\(p\.verb\)/u);
   assert.match(rule('.sysline .sys-verb'), /currentColor/u, 'border and dot follow the one inline colour');
-  // A /command's badge is the command itself — typed text, so monospace and
-  // never uppercased; badge + args read back as the line that was typed.
-  assert.match(source, /class="sys-verb cmd"/u);
-  assert.match(rule('.sysline .sys-verb.cmd'), /text-transform:\s*none/u);
-  assert.match(rule('.sysline .sys-verb.cmd'), /ui-monospace/u);
-  assert.match(rule('.sysline .sys-text.mono'), /ui-monospace/u);
+  // A /command's typed line stays ONE object — name and args together in the
+  // composer's own command costume; a micro-pill name beside loose args at
+  // another size read as fragments ("带参数的渲染好像不是很好", 2026-08-24).
+  assert.match(source, /class="sys-cmd">\{p\.text \? `\$\{p\.verb\} \$\{p\.text\}` : p\.verb\}<\/span>/u);
+  const cmd = rule('.sysline .sys-cmd');
+  assert.match(cmd, /ui-monospace/u);
+  assert.match(cmd, /border:/u, 'the capsule is drawn, like the composer in command mode');
+  assert.match(cmd, /text-overflow:\s*ellipsis/u, 'a long command clips itself, not its neighbours');
+  assert.doesNotMatch(source, /class="sys-verb cmd"/u, 'no second command dialect');
   // Per-row ellipsis lives on the text, so a long detail cannot eat the badge.
   assert.match(rule('.sysline .sys-text'), /text-overflow:\s*ellipsis/u);
 });
