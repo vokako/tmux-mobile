@@ -22,7 +22,7 @@
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import { t } from '../core/i18n.svelte.ts';
 
-  let { visible = false, openTerminal, panes = {}, onTracked = () => {}, onReady = () => {}, dense = false }: {
+  let { visible = false, openTerminal, panes = {}, onTracked = () => {}, onReady = () => {}, dense = false, activeTarget = '' }: {
     visible?: boolean;
     openTerminal: (session: string, target: string, command?: string) => void;
     /** Live panes per session, already loaded by the Sessions page. */
@@ -35,6 +35,10 @@
      * (ui-unification "Page skeleton"). The Chat sidebar set that style; the
      * Terminal sidebar has to match it (owner, 2026-08-19). */
     dense?: boolean;
+    /** The pane the terminal is showing (`session:win.pane`) — its project's
+     * row wears the same selected wash the Chat sidebar's open row wears
+     * (owner, 2026-08-24: "选中的有一个背景底色terminal的侧边栏也应该加上"). */
+    activeTarget?: string;
   } = $props();
 
   let rows = $state<ProjectRow[]>([]);
@@ -157,7 +161,8 @@
     {#if !collapsed}
       {#each sorted as row (row.project.id)}
         {@const chips = chipsFor(row)}
-        <div class="proj" class:live={row.live}>
+        <div class="proj" class:live={row.live}
+          class:open={dense && !!activeTarget && activeTarget.startsWith(row.project.session + ':')}>
           <div class="proj-top">
             <button class="proj-main" onclick={() => open(row)} title={row.project.path}>
               <span class="dot" class:on={row.live}></span>
@@ -290,6 +295,10 @@
     background: none; border: none; border-radius: var(--ui-radius-row); padding: 2px 6px; gap: 2px;
   }
   .projects.dense .proj:hover { background: var(--surface2); }
+  /* The project whose pane the terminal is SHOWING — the same selected wash
+     the Chat sidebar's open row wears (.side-row.open), so "where am I" reads
+     identically in both sidebars. */
+  .projects.dense .proj.open { background: var(--accent-bg); }
   .projects.dense .proj.live { border: none; }
   /* 2 + 6 = the 8px vertical rhythm of `.side-row`; rows are one line here,
      so the dot centers instead of hanging off the first text line. */

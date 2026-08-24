@@ -512,6 +512,7 @@
       {openTerminal}
       {panes}
       dense={!chips}
+      {activeTarget}
       onTracked={(names) => trackedSessions = names}
       onReady={(reload) => reloadProjects = reload} />
     <!-- Creating a project is the same ROW in every sidebar (Chat's projects,
