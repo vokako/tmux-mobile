@@ -62,3 +62,28 @@ test('app.css still defines the one sidebar inset both classes share', async () 
   assert.equal(insetOf(row), '10px', '.side-row must keep the shared inset');
   assert.equal(insetOf(head), insetOf(row), 'a header and a row line up, or the sidebar looks broken');
 });
+
+test('the sidebar project-row atoms live in app.css, not in a component', async () => {
+  // The Chat and Terminal sidebars are ONE component visually ("应该和terminal
+  // 侧边栏一样 … 这两个可以共用", owner 2026-08-24): the age readout and the
+  // window/agent chips wear the shared .side-age/.side-win classes. A scoped
+  // rule on those classes outranks app.css silently (0,2,0 vs 0,1,0) — the
+  // same drift that split the two headers, so the same guard: a component may
+  // POSITION the shared containers (.side-wins indent) but never restyle the
+  // atoms themselves.
+  const FILES = ['lib/hub/Hub.svelte', 'lib/projects/Projects.svelte'];
+  for (const file of FILES) {
+    const raw = await readFile(new URL(file, SRC), 'utf8');
+    const style = /<style>([\s\S]*)<\/style>/.exec(raw)?.[1] ?? '';
+    const css = style.replace(/\/\*[\s\S]*?\*\//g, '');
+    for (const [, sel] of css.matchAll(/([^{}]+)\{[^}]*\}/g)) {
+      assert.ok(
+        !/\.side-win(?![s-])|\.side-win-name|\.side-win-dot|\.side-age/.test(sel!),
+        `${file}: \`${sel!.trim()}\` restyles a shared sidebar atom — the look lives in app.css`,
+      );
+    }
+  }
+  const css = await readFile(new URL('app.css', SRC), 'utf8');
+  assert.match(css, /\.side-win\s*\{/u, 'the chip dialect is defined once, in app.css');
+  assert.match(css, /\.side-age\s*\{/u, 'the age dialect is defined once, in app.css');
+});

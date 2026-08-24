@@ -279,6 +279,29 @@ button:disabled {
 .side-row.add { color: var(--text3); font-size: var(--fs-ui); }
 .side-row.add:hover { color: var(--accent); }
 
+/* ── Sidebar project-row atoms, shared by the Chat and Terminal sidebars ──
+   The two sidebars are ONE component visually ("我觉得甚至这两个可以共用",
+   owner 2026-08-24) — the Terminal one just shows more windows. Same rule as
+   .side-h/.side-row above: the look lives HERE so it cannot drift; each
+   sidebar keeps only its own behavior. A row is a name and a state at rest:
+   the age sits quietly at the row's end, and the windows/agents under it are
+   quiet mono text, not a tray of bordered pills. */
+.side-age { margin-left: auto; flex: none; font-size: var(--fs-meta); color: var(--text3); font-variant-numeric: tabular-nums; }
+.side-wins { display: flex; flex-wrap: wrap; gap: 2px 10px; min-width: 0; }
+.side-wins.dim { opacity: 0.65; }
+.side-win {
+  display: inline-flex; align-items: center; gap: 4px; min-width: 0;
+  background: none; border: none; border-radius: 6px; padding: 2px 5px;
+  color: var(--text3); font-family: var(--font-mono); font-size: var(--fs-meta);
+  transition: background var(--t-fast) ease, color var(--t-fast) ease;
+}
+button.side-win { cursor: pointer; }
+button.side-win:hover { background: var(--surface2); color: var(--text); }
+.side-win img { display: block; }
+.side-win .side-win-name { max-width: 16ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Chat-only garnish: the agent's state, one dot in the app's status language. */
+.side-win .side-win-dot { width: 5px; height: 5px; border-radius: 50%; flex: none; }
+
 /* ── iOS/macOS-style CONTINUOUS corners, app-wide ─────────────────────────
    ("把它设计得有质感一些，类似于 iPad、iOS 或 Mac 上的应用。尤其是标签的圆角
    过渡，要自然一点", owner 2026-08-20.)

@@ -1331,7 +1331,7 @@
           <!-- Right-click (desktop) and long press (phone) open the project's own
                verbs where the pointer is. The row's normal job — open this
                conversation — is unchanged. -->
-          <button class="side-row" class:open={row.project.session === selected}
+          <button class="side-row proj-row" class:open={row.project.session === selected}
             onclick={() => { selectProject(row.project.session); sideOpen = false; }}
             oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), row.project.name, projectItems(row)); }}
             use:longpress={{ onlongpress: (pt) => openCtx(pt, row.project.name, projectItems(row)) }}>
@@ -1339,14 +1339,15 @@
             <span class="p-main">
               <span class="p-top">
                 <span class="p-name">{row.project.name}</span>
-                {#if rowTalk(row)}<span class="p-when">{agoShort(rowTalk(row), tick)}</span>{/if}
+                {#if rowTalk(row)}<span class="side-age">{agoShort(rowTalk(row), tick)}</span>{/if}
               </span>
               {#if rowAgents(row).length}
-                <span class="p-agents">
+                <span class="side-wins" class:dim={!row.live}>
                   {#each rowAgents(row) as a (a.name)}
-                    <span class="p-ava" class:dim={!row.live} title={a.name}>
-                      {#if a.icon}<img src={a.icon} alt={a.name} width="12" height="12" />{/if}
-                      {#if a.state}<span class="p-ava-dot" style:background={stateDotColor(a.state)}></span>{/if}
+                    <span class="side-win">
+                      {#if a.icon}<img src={a.icon} alt="" width="11" height="11" />{/if}
+                      <span class="side-win-name">{a.name}</span>
+                      {#if a.state}<span class="side-win-dot" style:background={stateDotColor(a.state)}></span>{/if}
                     </span>
                   {/each}
                 </span>
@@ -2173,22 +2174,18 @@
   .side-scrim { position: fixed; inset: 0; z-index: 25; background: rgba(0,0,0,0.45); }
   .side-scroll { flex: 1; overflow-y: auto; padding: 8px; }
   .p-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; }
-  /* ── Sidebar row summary (owner, 2026-08-24): name + last-reply time on the
-     first line, the project's agents as tiny logos with state dots under it.
-     The row stays ONE .side-row (shared box, 10px inset untouched); only its
-     content becomes a column. The time wears meta ink and tabular digits so a
-     column of rows reads as a column of times. */
-  .p-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-  .p-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-  .p-when { flex: none; margin-left: auto; font-size: var(--fs-micro); color: var(--text3); font-variant-numeric: tabular-nums; }
-  .p-agents { display: flex; align-items: center; gap: 7px; }
-  .p-ava { position: relative; width: 13px; height: 13px; display: inline-flex; align-items: center; justify-content: center; }
-  .p-ava img { display: block; opacity: 0.9; }
-  /* A closed project's declared roster: recognisable, clearly not running. */
-  .p-ava.dim img { opacity: 0.4; filter: grayscale(1); }
-  /* The state dot sits on the logo's corner, ringed by the panel surface so it
-     reads on any logo — same status language as every other dot. */
-  .p-ava-dot { position: absolute; right: -3px; bottom: -2px; width: 5px; height: 5px; border-radius: 50%; box-shadow: 0 0 0 1.5px var(--surface); }
+  /* ── Sidebar row summary. The LOOK is the Terminal sidebar's, atom for atom
+     ("应该和terminal侧边栏一样 … 这两个可以共用", owner 2026-08-24): the age
+     and the agent chips wear the shared .side-age/.side-win classes from
+     app.css — same quiet mono text the Terminal sidebar's window chips wear,
+     with one chat-only garnish, the state dot. Only the two-line structure
+     is local. */
+  .p-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .p-top { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  /* Two-line rows: the dot marks the PROJECT, so it rides the name's line
+     instead of centering across the chips below. */
+  .proj-row { align-items: flex-start; }
+  .proj-row .dot { margin-top: 6px; }
   /* The recycle bin's rows: quieter than a live project (they are parked, not
      open-able), with the two verbs inline — restore free, purge confirmed. */
   .trash-row { cursor: default; color: var(--text3); }

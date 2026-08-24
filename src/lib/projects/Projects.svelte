@@ -164,7 +164,7 @@
               <span class="body">
                 <span class="line">
                   <span class="name">{row.project.name}</span>
-                  <span class="age">{ageLabel(row.project.last_seen_at ?? row.project.last_up_at)}</span>
+                  <span class={dense ? 'side-age' : 'age'}>{ageLabel(row.project.last_seen_at ?? row.project.last_up_at)}</span>
                 </span>
                 {#if !dense}
                   <!-- The path is what tells two same-named folders apart, so a
@@ -203,20 +203,20 @@
                jumping to the window you want is the whole point. A down project
                lists what `up` would restore, and the tap brings it up first. -->
           {#if chips.length}
-            <div class="wins" class:dim={!row.live}>
+            <div class={dense ? 'side-wins wins-indent' : 'wins'} class:dim={!row.live}>
               {#each chips as chip (chip.name + (chip.window ?? ''))}
                 {@const notice = row.live && chip.window != null
                   ? notificationForWindow(row.project.session, chip.window)
                   : null}
-                <button class="win" onclick={() => openWindow(row, chip.name, chip.target)}>
+                <button class={dense ? 'side-win' : 'win'} onclick={() => openWindow(row, chip.name, chip.target)}>
                   {#if chip.agentIcon}<img src={chip.agentIcon} alt={chip.agentTag} width="11" height="11" />{/if}
-                  <span class="win-name">{chip.name}</span>
+                  <span class={dense ? 'side-win-name' : 'win-name'}>{chip.name}</span>
                   {#if notice}<span class="attention-dot" aria-label={t('newOutput')}></span>{/if}
                 </button>
               {/each}
             </div>
           {:else}
-            <div class="wins"><span class="win-empty">{t('projectNoWindows')}</span></div>
+            <div class={dense ? 'side-wins wins-indent' : 'wins'}><span class="win-empty">{t('projectNoWindows')}</span></div>
           {/if}
         </div>
 
@@ -300,7 +300,7 @@
   .projects.dense .dot { width: 6px; height: 6px; margin-top: 0; background: var(--text3); }
   .projects.dense .dot.on { background: var(--status-ok); box-shadow: none; }
   .projects.dense .name { font-weight: 550; }
-  .projects.dense .age, .projects.dense .path { color: var(--text3); }
+  .projects.dense .path { color: var(--text3); }
   /* At rest a row shows what it IS; what you can DO to it appears on hover
      (or focus, for keyboards) — the same restraint the Chat rows have. */
   .projects.dense .acts { opacity: 0; transition: opacity var(--t-fast) ease; }
@@ -311,15 +311,11 @@
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
   }
   /* Windows stay — they are what the project is made of, and picking one is
-     why this sidebar exists — but as quiet text under the row, not a tray of
-     bordered pills (that tray is what still read as a "card"). */
-  .projects.dense .wins { padding: 0 4px 3px 18px; gap: 2px 10px; }
-  .projects.dense .win {
-    background: none; border: none; border-radius: 6px; padding: 2px 5px;
-    color: var(--text3); font-size: var(--fs-meta);
-  }
-  .projects.dense .win:hover { background: var(--surface2); color: var(--text); }
-  .projects.dense .win-name { max-width: 16ch; }
+     why this sidebar exists. Their LOOK is the shared `.side-win` dialect in
+     app.css now (the Chat sidebar's agent chips wear the same class — "这两个
+     可以共用", owner 2026-08-24); only the indent that tucks them under the
+     name is structural and stays here. */
+  .projects.dense .wins-indent { padding: 0 4px 3px 18px; }
 
   .proj {
     display: flex; flex-direction: column; gap: 6px;

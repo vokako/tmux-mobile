@@ -1355,15 +1355,29 @@ Agent 的简单 logo 状态"). The last-reply time comes from the SAME `hub_room
 map that orders the list, so the time on the row explains the row's position;
 it renders through `agoShort` (pure + tested) — ONE unit, "5m"/"2h"/"3d",
 because `fmtElapsed`'s two-unit "2h14m" is running-timer language and a row is
-not a timer. Under the name, the project's agents appear as tiny backend logos
-each wearing a state dot in the one progressive status language. The states
-for EVERY project arrive on `hub_rooms` itself: `telemetry::all_states` is a
-pure-memory derive over every hook-known window — no tmux call, no pane sniff,
-so the 20 s sidebar poll costs nothing new — and a window with no hook facts
-is simply absent, which the client reads as idle because that is what no facts
-honestly means. A LIVE row detects its real agent windows with the window
-switcher's own `paneAgent`; a CLOSED row shows its DECLARED agent slots dimmed
-and dotless — what `up` would restore, not anything running now.
+not a timer. Under the name, the project's agents appear as quiet mono chips —
+11px backend logo + window name — each wearing a chat-only state dot in the
+one progressive status language. The LOOK is the Terminal sidebar's, by
+construction rather than by imitation (owner, same day: "应该和terminal侧边栏
+一样，调整的好看一些，我觉得甚至这两个可以共用，唯一区别是terminal会多显示一
+些window"): the atoms — `.side-age`, `.side-wins`, `.side-win`,
+`.side-win-name`, `.side-win-dot` — live in app.css beside `.side-h` and
+`.side-row`, the Terminal sidebar's dense mode swaps its scoped `.win`/`.age`
+classes for the shared ones, and `ui/sidebar.source.test.ts` forbids either
+component from restyling them (a scoped rule outranks app.css at 0,2,0 vs
+0,1,0 — the same silent drift that once split the two section headers). A
+component may only POSITION the shared containers — the Terminal keeps its
+`.wins-indent` that tucks chips under the name; the Chat row nests them inside
+its two-line body, so alignment is structural. The difference between the two
+sidebars is exactly what the owner named: the Terminal shows every window,
+the Chat shows the agents. The states for EVERY project arrive on `hub_rooms`
+itself: `telemetry::all_states` is a pure-memory derive over every hook-known
+window — no tmux call, no pane sniff, so the 20 s sidebar poll costs nothing
+new — and a window with no hook facts is simply absent, which the client reads
+as idle because that is what no facts honestly means. A LIVE row detects its
+real agent windows with the window switcher's own `paneAgent`; a CLOSED row
+shows its DECLARED agent slots dimmed and dotless — what `up` would restore,
+not anything running now.
 
 #### Opening and closing a project
 
