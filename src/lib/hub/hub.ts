@@ -231,12 +231,22 @@ export function toolColor(tool: string | null | undefined): string {
   return 'var(--text2)';
 }
 
-/** How many tool rows a group shows before its body starts scrolling. A run of
- * forty calls is a wall; ten rows is enough to see what the agent is doing now
- * and where it has been, and the group's OUTER height stops growing there —
- * which is what keeps a live run from shoving the conversation around. "Expand
- * all" lifts the cap for one group. */
-export const STEPS_ROWS = 10;
+/** How many tool rows a group shows before its body starts scrolling — the
+ * DEFAULT for the `hubPrefs.stepsRows` setting (owner, 2026-08-24: "最大显示的
+ * 行数应该也变成一个可配置的参数。现在默认把这个参数配置成 5 行"). Five rows
+ * show what the agent is doing now and where it has just been; the group's
+ * OUTER height stops growing there, which is what keeps a live run from
+ * shoving the conversation around. "Expand all" lifts the cap for one group. */
+export const STEPS_ROWS = 5;
+
+/** The setting's guard: any stored/typed value becomes a usable cap. Not a
+ * free number — 1–2 rows cannot show a run's shape, and past ~30 the cap no
+ * longer caps anything a screen can hold. Non-numbers fall to the default. */
+export function clampStepsRows(v: unknown): number {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n)) return STEPS_ROWS;
+  return Math.min(30, Math.max(3, n));
+}
 
 /** The marker that stands in for what a held bubble is not showing. Full-width
  * ellipsis: this is a Chinese-first UI and `...` reads as three periods. */

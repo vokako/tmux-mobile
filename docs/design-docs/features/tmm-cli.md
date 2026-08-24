@@ -1092,12 +1092,12 @@ and never the area next to it ("参数穿模到工具名左侧了"). Structure b
 `hub/Hub.source.test.ts` pins the markup shape and the CSS that keeps it.
 
 Costs accepted knowingly: rows pan independently (acceptable — each argument is
-read on its own), and the middle cell hides its scrollbar (ten rows each drawing a
+read on its own), and the middle cell hides its scrollbar (a lane of rows each drawing a
 ruler; the cut-off text is the affordance). `min-width: 0` on the scroller is
 load-bearing — without it a flex child refuses to shrink below its content and the
 time is pushed off the row. `.st-text` stays `nowrap` and must never become `pre`:
 a tool detail routinely contains real newlines, and `pre` would turn one call into
-a three-line row, breaking both "one row per call" and the 10-row cap, whose height
+a three-line row, breaking both "one row per call" and the row cap, whose height
 is single-line math. The lane's `--lane-indent`/`--lane-pad-r`/`--lane-bg` stay on
 `.steps` with one value each; `.s-body` is `overflow-x: hidden`.
 
@@ -1220,15 +1220,21 @@ events into rows, and three rules shape what the user sees:
   a reply conservatively ends every run. Because a delivery echo is consumed as
   a receipt it renders nothing, but it is still a turn boundary — otherwise a
   new turn's calls poured into the previous turn's group.
-- **A group is open by default, and ten rows tall.** The default used to be
-  "open only while the agent is working", so a finished run needed a click to
-  read (owner, 2026-08-19). Now every group is open unless the user closed it,
-  the body scrolls past `STEPS_ROWS` (10) rows, and "show all N" lifts the cap
-  for one group. Every call is in the DOM — the cap is a viewport on it, which is
-  what keeps a live run from growing the conversation past ten rows while the
-  inner tail sticks to the newest call (`stickBottom`, released as soon as the
-  user scrolls up inside it). The open/closed choice lives outside the row
-  (`stepsChoice`, keyed by group) so a re-render cannot lose it.
+- **A group is open by default, and its height is a SETTING.** The open
+  default replaced "open only while the agent is working", which made a
+  finished run need a click to read (owner, 2026-08-19). The body scrolls past
+  a configurable row count — `hubPrefs.stepsRows`, a Settings stepper beside
+  the feed-level control, default `STEPS_ROWS` = 5 (owner, 2026-08-24: "最大显
+  示的行数应该也变成一个可配置的参数。现在默认把这个参数配置成 5 行" — it was
+  10, a fixed constant). `clampStepsRows` (pure + tested) pins 3–30 on both
+  the setter and whatever an old localStorage entry hands back: one or two
+  rows cannot show a run's shape, and past ~30 the cap caps nothing. "Show all
+  N" still lifts the cap for one group. Every call is in the DOM — the cap is
+  a viewport on it, which is what keeps a live run from growing the
+  conversation while the inner tail sticks to the newest call (`stickBottom`,
+  released as soon as the user scrolls up inside it). The open/closed choice
+  lives outside the row (`stepsChoice`, keyed by group) so a re-render cannot
+  lose it.
 
 A tool NAME is coloured by what the tool does — changes / runs / looks up /
 reads, four buckets matched on substrings so `fs_write` and `Edit` land in the

@@ -6,7 +6,7 @@
 //   tools  — + individual tool calls ("Edit src/lib.rs")
 // Delivery receipts and undelivered-line reports are NOT levelled: they are
 // about a message the user sent, so feedBlocks() surfaces them at every level.
-import { draftUpdate } from './hub.ts';
+import { draftUpdate, STEPS_ROWS, clampStepsRows } from './hub.ts';
 
 const FEED_LEVEL_KEY = 'tmux_hub_feed_level';
 const LEAD_KEY = 'tmux_hub_lead';
@@ -20,6 +20,10 @@ const PROJECT_KEY = 'tmux_hub_project';
 // somebody else's conversation, and a reload threw it away (owner, 2026-08-19:
 // "前端消息框的消息应该和项目绑定 … 正在输入的内容刷新也还在").
 const DRAFT_KEY = 'tmux_hub_drafts';
+// How many tool rows a folded group shows before its body scrolls. A number,
+// not a level: the right cap depends on the screen and the reader (owner,
+// 2026-08-24: "工具调用最大显示的行数应该也变成一个可配置的参数").
+const STEPS_ROWS_KEY = 'tmux_hub_steps_rows';
 export type FeedLevel = 'chat' | 'status' | 'tools';
 
 const stored = localStorage.getItem(FEED_LEVEL_KEY);
@@ -45,6 +49,9 @@ const state = $state({
   project: localStorage.getItem(PROJECT_KEY) ?? '',
   // Per project: the message being written but not yet sent.
   drafts: readMap<string>(DRAFT_KEY),
+  // Tool-lane cap in rows; the stored value passes the same clamp as the
+  // setter so an old or hand-edited entry cannot render a broken lane.
+  stepsRows: clampStepsRows(localStorage.getItem(STEPS_ROWS_KEY) ?? STEPS_ROWS),
 });
 
 export const hubPrefs = {
@@ -57,6 +64,12 @@ export const hubPrefs = {
   cycleFeedLevel() {
     const order: FeedLevel[] = ['chat', 'status', 'tools'];
     this.setFeedLevel(order[(order.indexOf(state.feedLevel) + 1) % order.length]!);
+  },
+  /** Tool-lane cap: how many rows a folded tool group shows before it scrolls. */
+  get stepsRows() { return state.stepsRows; },
+  setStepsRows(v: number) {
+    state.stepsRows = clampStepsRows(v);
+    localStorage.setItem(STEPS_ROWS_KEY, String(state.stepsRows));
   },
   /** The conversation that was open, '' when none was ever chosen. The caller
    * verifies it still exists — a project can be deleted between two visits. */

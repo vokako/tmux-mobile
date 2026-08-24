@@ -213,6 +213,12 @@
               <button class:active={hubPrefs.feedLevel === 'tools'} onclick={() => hubPrefs.setFeedLevel('tools')}>{t('hubFeedTools')}</button>
             </div>
           </div>
+          <div class="setting-row">
+            <div><strong>{t('hubStepsRows')}</strong><small>{t('hubStepsRowsHint')}</small></div>
+            <div class="stepper">
+              <button onclick={() => hubPrefs.setStepsRows(hubPrefs.stepsRows - 1)}>−</button><span>{hubPrefs.stepsRows}</span><button onclick={() => hubPrefs.setStepsRows(hubPrefs.stepsRows + 1)}>+</button>
+            </div>
+          </div>
           {#if showUiZoom}
             <div class="setting-row">
               <div><strong>{t('uiZoom')}</strong><small>{t('uiZoomHint')}</small></div>

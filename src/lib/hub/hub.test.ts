@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs } from './hub.ts';
+import { isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -411,6 +411,19 @@ test('agoShort speaks sidebar precision: one unit, coarser as it ages', () => {
   assert.equal(t(26 * 3600), '1d');
   assert.equal(t(9 * 86400), '9d');
   assert.equal(agoShort(0, Date.now()), '', 'a room that never spoke shows nothing');
+});
+
+test('the tool-lane cap is a setting with a floor, a ceiling and a default', () => {
+  // "工具调用最大显示的行数应该也变成一个可配置的参数。现在默认把这个参数配置
+  // 成 5 行" (owner, 2026-08-24). The clamp guards BOTH the setter and what an
+  // old localStorage entry feeds back on load.
+  assert.equal(STEPS_ROWS, 5, 'the default the owner asked for');
+  assert.equal(clampStepsRows(5), 5);
+  assert.equal(clampStepsRows('12'), 12, 'localStorage hands back a string');
+  assert.equal(clampStepsRows(1), 3, 'one or two rows cannot show a run');
+  assert.equal(clampStepsRows(999), 30, 'past ~30 the cap caps nothing');
+  assert.equal(clampStepsRows('junk'), STEPS_ROWS, 'garbage falls to the default');
+  assert.equal(clampStepsRows(7.6), 8, 'fractions land on whole rows');
 });
 
 test('unreadSenders marks who replied after the user last looked', () => {

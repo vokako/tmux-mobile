@@ -27,7 +27,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, STEPS_ROWS, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit } from './hub.ts';
+  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit } from './hub.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
@@ -1757,11 +1757,12 @@
                 {/if}
               </button>
               {#if open}
-                {@const capped = !stepsAll[b.key] && b.events.length > STEPS_ROWS}
+                {@const capped = !stepsAll[b.key] && b.events.length > hubPrefs.stepsRows}
                 <!-- Every call is in the DOM; the CAP is a viewport on it, so a
-                     live run stops growing the conversation after ten rows and
-                     the tail stays where the eye already is. -->
-                <div class="s-body" class:capped style:--steps-rows={STEPS_ROWS}
+                     live run stops growing the conversation after the configured
+                     rows (hubPrefs.stepsRows) and the tail stays where the eye
+                     already is. -->
+                <div class="s-body" class:capped style:--steps-rows={hubPrefs.stepsRows}
                   use:stickBottom={capped ? b.events.length : 0}>
                   {#each b.events as e, j (`${e.ts}-${j}`)}
                     {@const ep = toolEventParts(e)}
@@ -1784,7 +1785,7 @@
                     </div>
                   {/each}
                 </div>
-                {#if b.events.length > STEPS_ROWS}
+                {#if b.events.length > hubPrefs.stepsRows}
                   <!-- Outside the scroller on purpose: a control that scrolls
                        away is a control you cannot find. -->
                   <button class="s-all" onclick={() => { stepsAll[b.key] = !stepsAll[b.key]; }}>
