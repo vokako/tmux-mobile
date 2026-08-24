@@ -819,11 +819,13 @@ export function statusParts(e: HubActivityEvent): { state: string; text: string 
 /** Internal: a tool call before consecutive ones are folded into a group. */
 type ToolItem = { type: 'tool'; ts: number; window: number; event: HubActivityEvent };
 
-/** Every whitespace run becomes one space, ends trimmed — the delivery-echo
- * match runs on this form (the server's `squash_ws` twin; a test pins the two
- * to the same behavior via the same cases). */
+/** ALL whitespace removed — the delivery-echo match runs on this form (the
+ * server's `strip_ws` twin; a test pins the two to the same behavior via the
+ * same cases). Squashing to ONE space was not enough: tmux in extended-keys
+ * mode dropped the raw \n byte outright, so the echo came back with the lines
+ * GLUED and "a b" could never contain "ab" (owner, 2026-08-24). */
 export function squashWs(s: string): string {
-  return s.split(/\s+/u).filter(Boolean).join(' ');
+  return s.replace(/\s+/gu, '');
 }
 
 /** Internal: a turn boundary that produces NO row — a delivery echo. The echo

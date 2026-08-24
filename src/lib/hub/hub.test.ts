@@ -240,12 +240,14 @@ test('an echoed prompt marks its message delivered instead of repeating it', () 
 test('a multi-line message still confirms when its echo drifts in whitespace', () => {
   // The delivered line rides tmux send-keys and the TUI's composer before the
   // hook echoes it back — a newline in the body does not survive that round
-  // trip byte-for-byte, so multi-line messages never confirmed (owner,
-  // 2026-08-22: "发送内容有换行 好像就不会被confirm"). Matching is
-  // whitespace-canonical on both sides (squashWs — the server's squash_ws
-  // twin, same cases): newlines/CRLF/tabs/doubled spaces forgive, word
-  // changes do not.
-  assert.equal(squashWs('a\nb\r\n  c\td '), 'a b c d');
+  // trip byte-for-byte (owner, 2026-08-22: "发送内容有换行 好像就不会被confirm"),
+  // and tmux in extended-keys mode DROPPED the raw \n outright, gluing the
+  // lines together in the echo (owner, 2026-08-24: "多行内容…没办法正确已读").
+  // Matching is whitespace-BLIND on both sides (squashWs — the server's
+  // strip_ws twin, same cases): any rendering of a break forgives — space,
+  // wrap, or nothing at all — while character changes do not.
+  assert.equal(squashWs('a\nb\r\n  c\td '), 'abcd');
+  assert.equal(squashWs('AgenticAI\nAgentic AI基础设施'), 'AgenticAIAgenticAI基础设施');
   const feed = [
     { ts: 100, from: 'human', body: '@dev line one\nline two\n  line three' },
     { ts: 150, from: 'human', body: '@dev alpha beta' },

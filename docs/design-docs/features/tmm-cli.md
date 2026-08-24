@@ -596,7 +596,18 @@ accepted the text as a *prompt* is a different question, and the
 the submitted `prompt`, so a typed line that comes back is delivered. So
 `deliver_mentions` records the line as pending (`telemetry::record_delivery`),
 the echo clears it (`record_prompt`, containment match — the CLI may submit our
-line with the agent's own half-typed text attached), and `sweep_deliveries`
+line with the agent's own half-typed text attached; the containment runs
+whitespace-BLIND on both sides (`strip_ws`, mirrored client-side by `squashWs`):
+a newline in the body never survives the round trip — the composer renders it
+as a space or its own wrap (owner, 2026-08-22), and tmux in extended-keys mode
+dropped the raw `\n` byte outright so the echo came back with the lines glued
+together, which a squash-to-one-space canon could never contain (owner,
+2026-08-24, measured live: `AgenticAI\nAgentic…` echoed as
+`AgenticAIAgentic…`). The delivery is fixed at the source too:
+`tmux::send_command` routes any text containing `\n` through `paste_text`,
+because bracketed paste is the one channel that carries a newline INTO a
+composer — send-keys loses the byte and a named `Enter` would submit the
+half-typed line), and `sweep_deliveries`
 reports the ones still pending after 45 s as a `warn` event. The sweep runs
 when a client reads `hub_activity`, which is exactly when the answer is wanted.
 

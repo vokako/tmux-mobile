@@ -633,7 +633,22 @@ pub fn send_keys(target: &str, keys: &str, literal: bool) -> Result<(), String> 
 
 /// 向 pane 发送文本 + Enter
 pub fn send_command(target: &str, command: &str) -> Result<(), String> {
-    send_keys(target, command, true)?;
+    if command.contains('\n') {
+        // A newline cannot ride send-keys: literal mode passes it as a raw C0
+        // byte inside `-l`, and with `extended-keys on` tmux silently DROPS
+        // raw C0 bytes for panes in an extended key mode — every modern agent
+        // TUI. The lines arrived GLUED together ("AgenticAI\nAgentic" reached
+        // the composer as "AgenticAIAgentic"), which both corrupted what the
+        // agent read and broke the delivery receipt (owner, 2026-08-24: "多行
+        // 内容…没办法正确已读"). Naming it `Enter` instead would submit the
+        // half-typed line. Bracketed paste is the one channel that carries a
+        // newline INTO a composer: paste_text wraps the block in ?2004 markers
+        // exactly when the pane app asked for them, and an agent TUI inserts
+        // the break instead of submitting.
+        paste_text(target, command)?;
+    } else {
+        send_keys(target, command, true)?;
+    }
     // A beat between the text and the Enter. An agent TUI that receives the
     // burst back-to-back can treat the Enter as part of a paste and leave the
     // line sitting in its composer unsubmitted — measured live on codex-cli

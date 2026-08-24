@@ -353,17 +353,19 @@ pub fn record_prompt(session: &str, window: usize, prompt: &str) -> bool {
     let text = truncate_chars(prompt, MAX_PROMPT_CHARS);
     let mut acked = false;
     let ts = now();
-    // Whitespace-canonical matching: a delivered line travels through tmux
+    // Whitespace-BLIND matching: a delivered line travels through tmux
     // send-keys and an agent TUI's composer before it comes back in the
-    // userPromptSubmit echo, and that round trip does not preserve whitespace
-    // — a newline in the body is typed as a C0 key the composer may render as
-    // a space or its own wrap, so a multi-line message NEVER matched its echo
-    // byte-for-byte and sat unconfirmed forever (owner, 2026-08-22: "发送内容
-    // 有换行 好像就不会被confirm"). Collapsing every whitespace run to one
-    // space on BOTH sides keeps the containment semantics while forgiving
-    // newlines, CRLF, tabs and doubled spaces. Words still have to match in
-    // order, so this cannot ack the wrong line.
-    let canon_prompt = squash_ws(prompt);
+    // userPromptSubmit echo, and that round trip does not preserve whitespace.
+    // A composer may render a newline as a space or its own wrap — and worse,
+    // tmux in extended-keys mode DROPPED the raw \n byte outright, so the echo
+    // came back with the lines GLUED ("AgenticAI\nAgentic" → "AgenticAIAgentic")
+    // and a squash-to-one-space canon could never contain it (owner,
+    // 2026-08-22 "发送内容有换行 好像就不会被confirm", again 2026-08-24 "多行内容
+    // …没办法正确已读，匹配有问题"). Stripping ALL whitespace on BOTH sides
+    // forgives every rendering of a break — space, wrap, or nothing at all.
+    // The characters still have to match in order, so this cannot ack the
+    // wrong line.
+    let canon_prompt = strip_ws(prompt);
     with_rec(session, window, |r| {
         // Any outstanding line may be the one this prompt carries — a queue is
         // submitted in order, but an agent can also be steered, so match on
@@ -371,7 +373,7 @@ pub fn record_prompt(session: &str, window: usize, prompt: &str) -> bool {
         // carry several queued lines at once, so this keeps going.
         let before = r.pending.len();
         r.pending.retain(|(line, _)| {
-            let canon_line = squash_ws(line);
+            let canon_line = strip_ws(line);
             !(canon_prompt.contains(&canon_line) || canon_line.contains(&canon_prompt))
         });
         acked = r.pending.len() < before;
@@ -391,11 +393,12 @@ pub fn record_prompt(session: &str, window: usize, prompt: &str) -> bool {
     acked
 }
 
-/// Every whitespace run (space, tab, CR, LF) becomes one space, ends trimmed.
-/// The delivery-receipt containment match runs on THIS form — see
-/// `record_prompt` for why byte-exact matching lost every multi-line message.
-fn squash_ws(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
+/// ALL whitespace removed (space, tab, CR, LF). The delivery-receipt
+/// containment match runs on THIS form — see `record_prompt` for why anything
+/// gentler lost multi-line messages: byte-exact lost them to newline→space,
+/// squash-to-one-space lost them to newline→NOTHING (tmux dropped the byte).
+fn strip_ws(s: &str) -> String {
+    s.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
 /// Is a typed line overdue for its echo? Pure, so the rule is testable.
@@ -885,13 +888,14 @@ mod tests {
         assert_eq!(recent_events("ack-test", 0).len(), 1, "no warning for a delivered line");
     }
 
-    /// A multi-line message NEVER matched its echo: the newline is typed as a
-    /// C0 key the composer renders its own way, so the echo comes back with
-    /// different whitespace and byte-exact containment failed — every
-    /// multi-line message sat unconfirmed forever (owner, 2026-08-22:
-    /// "发送内容有换行 好像就不会被confirm"). Matching is whitespace-
-    /// canonical now: newlines, CRLF, tabs and doubled spaces all forgive,
-    /// while word order still has to match.
+    /// A multi-line message NEVER matched its echo. Two shapes, two owner
+    /// reports: the composer renders a newline its own way (a space, a wrap —
+    /// 2026-08-22 "发送内容有换行 好像就不会被confirm"), and tmux in
+    /// extended-keys mode DROPPED the raw \n byte outright so the echo came
+    /// back with the lines GLUED together (2026-08-24 "多行内容…没办法正确已
+    /// 读，匹配有问题"). Matching is whitespace-BLIND now: every rendering of
+    /// a break forgives — space, wrap, or nothing — while the characters
+    /// still have to match in order.
     #[test]
     fn a_multi_line_delivery_is_acknowledged_despite_whitespace_drift() {
         let line = "[tmm chat] human: @dev line one\nline two\n  line three";
@@ -904,6 +908,14 @@ mod tests {
         // CRLF and trailing whitespace on the echo side.
         record_delivery("ws-test", 2, "[tmm chat] human: do\nthe thing");
         assert!(record_prompt("ws-test", 2, "[tmm chat] human: do\r\nthe thing \n"));
+        // tmux dropped the newline byte: the echo comes back GLUED — the
+        // 2026-08-24 shape, measured live in the translator project
+        // ("AgenticAI\nAgentic…" echoed as "AgenticAIAgentic…").
+        record_delivery("ws-test", 4, "[tmm chat] human: @dev AgenticAI\nAgentic AI 基础设施");
+        assert!(
+            record_prompt("ws-test", 4, "[tmm chat] human: @dev AgenticAIAgentic AI 基础设施"),
+            "newline → NOTHING must still ack"
+        );
         // Different WORDS still refuse — tolerance must not become fuzz.
         record_delivery("ws-test", 3, "[tmm chat] human: alpha beta");
         assert!(!record_prompt("ws-test", 3, "[tmm chat] human: alpha gamma"));
