@@ -714,7 +714,15 @@ same reason: `create` and `edit` open an editor in the pane.
 Only the LAST token is completed, and only the FIRST argument: these commands take
 one, and what follows it — a path, a prompt, a free-text name — is not ours to
 guess, so a filled argument closes the palette instead of re-offering the same
-list. The palette owns ArrowUp/Down, Tab and Enter while it is open (a menu that
+list. The match is FUZZY, in three strict tiers — prefix, then substring, then
+subsequence (`fuzzyRank`, pure + tested; stable table order within a tier) —
+because demanding the first characters made the palette useless exactly where it
+matters most: the discriminating part of a model id like `claude-sonnet-4.5`
+never comes first ("不一定从第一个字符开始匹配，可以模糊匹配", owner 2026-08-24).
+The tiers are the safety: Enter accepts the TOP item, so `/co` must keep meaning
+`/compact` even while `/mdl` finds `/model` — a looser match may join the list
+but never outrank a tighter one. The palette owns ArrowUp/Down, Tab and Enter
+while it is open (a menu that
 ignores the keyboard is a menu you have to reach for the mouse to use), Escape
 dismisses it until the text changes, and hover shares ONE highlight with the
 keyboard cursor because two would read as two selections.

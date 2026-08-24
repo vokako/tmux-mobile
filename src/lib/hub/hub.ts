@@ -522,6 +522,40 @@ export interface Palette {
 }
 
 /**
+ * How well a candidate matches what was typed: `0` prefix, `1` substring,
+ * `2` subsequence, `-1` no match. The palette must not demand the first
+ * characters ("不一定从第一个字符开始匹配，可以模糊匹配", owner 2026-08-24) —
+ * the discriminating part of a model id like `claude-sonnet-4.5` never comes
+ * first — but a looser match must never outrank a tighter one: Enter accepts
+ * the TOP item, so `/co` has to keep meaning `/compact`, not whatever else
+ * happens to contain a c and an o. Case-insensitive; the empty query matches
+ * everything as a prefix.
+ */
+export function fuzzyRank(query: string, candidate: string): number {
+  const q = (query ?? '').toLowerCase();
+  if (!q) return 0;
+  const c = (candidate ?? '').toLowerCase();
+  if (c.startsWith(q)) return 0;
+  if (c.includes(q)) return 1;
+  let i = 0;
+  for (const ch of c) {
+    if (ch === q[i] && ++i === q.length) return 2;
+  }
+  return -1;
+}
+
+/** Filter + order by fuzzyRank, keeping the table's own order within a tier
+ * (sort is stable): the table order is the CLI's own, and it is what makes the
+ * list predictable when several candidates tie. */
+function fuzzyPick<T>(query: string, all: readonly T[], key: (t: T) => string): T[] {
+  return all
+    .map((t) => ({ t, r: fuzzyRank(query, key(t)) }))
+    .filter((x) => x.r >= 0)
+    .sort((a, b) => a.r - b.r)
+    .map((x) => x.t);
+}
+
+/**
  * What to offer for the composer's current text — the two-stage completion the
  * owner asked for: "比如我打/ 就会出现compact之类的让我选，还有model 如果支持两个
  * 参数的，可以多次选择".
@@ -539,9 +573,9 @@ export function commandPalette(text: string, models: readonly string[] = [], bac
   if (!line.startsWith('/')) return null;
   const parts = line.split(/(\s+)/u);          // keeps the separators
   const head = parts[0]!.slice(1);              // the command, without the slash
-  // Still typing the command itself: `/`, `/mo`, `/model` with no space yet.
+  // Still typing the command itself: `/`, `/mo`, `/mdl` with no space yet.
   if (parts.length === 1) {
-    const items = table.filter((c) => c.name.startsWith(head.toLowerCase())).map((c) => ({
+    const items = fuzzyPick(head, table, (c) => c.name).map((c) => ({
       value: `/${c.name}`,
       hint: c.desc,
     }));
@@ -560,8 +594,7 @@ export function commandPalette(text: string, models: readonly string[] = [], bac
   // filled argument ends the palette instead of re-offering the same list.
   const tokens = line.split(/\s+/u).filter(Boolean);
   if (tokens.length > 2 || (tokens.length === 2 && typed === '')) return null;
-  const items = values
-    .filter((v) => v.toLowerCase().startsWith(typed.toLowerCase()))
+  const items = fuzzyPick(typed, values, (v) => v)
     .map((v) => ({ value: v, hint: cmd.dynamic === 'models' && !cmd.args?.includes(v) ? 'model' : 'option' }));
   return items.length ? { stage: 'arg', items, from, more: false } : null;
 }

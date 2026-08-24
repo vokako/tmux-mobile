@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs } from './hub.ts';
+import { isSessionStart, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -652,6 +652,32 @@ test('commandPalette completes a command, then its argument', () => {
   for (const s of ['hello', '/tmp/x', '', ' ', '/nope ']) {
     assert.equal(commandPalette(s, models), null, JSON.stringify(s));
   }
+});
+
+test('the palette matches fuzzily, but a tighter match always outranks a looser one', () => {
+  // "我打字提示自动补全的时候，不一定从第一个字符开始匹配，可以模糊匹配"
+  // (owner, 2026-08-24). Three tiers — prefix, substring, subsequence — because
+  // Enter accepts the TOP item: /co must keep meaning /compact even while /mdl
+  // finds /model.
+  assert.equal(fuzzyRank('mo', 'model'), 0, 'prefix');
+  assert.equal(fuzzyRank('son', 'claude-sonnet-4.5'), 1, 'substring');
+  assert.equal(fuzzyRank('mdl', 'model'), 2, 'subsequence');
+  assert.equal(fuzzyRank('xyz', 'model'), -1, 'no match');
+  assert.equal(fuzzyRank('', 'anything'), 0, 'empty query is a prefix of everything');
+  assert.equal(fuzzyRank('SON', 'claude-sonnet-4.5'), 1, 'case-insensitive');
+
+  // Stage one: a subsequence finds the command mid-word.
+  assert.deepEqual(commandPalette('/mdl', [])?.items.map((i) => i.value), ['/model']);
+  // Stage two: the discriminating part of a model id never comes first.
+  const models = ['auto', 'claude-opus-5', 'claude-sonnet-4.5'];
+  assert.deepEqual(commandPalette('/model son', models)?.items.map((i) => i.value),
+    ['claude-sonnet-4.5']);
+  // A prefix match stays on top of a substring match, list order within a tier
+  // stays the table's own.
+  assert.deepEqual(commandPalette('/model op', ['claude-opus-5', 'opus-fast'])?.items.map((i) => i.value),
+    ['opus-fast', 'claude-opus-5'], 'tighter first, then table order');
+  // Nothing matches: the palette closes rather than offering everything.
+  assert.equal(commandPalette('/model zzz', models), null);
 });
 
 test('an interactive view is not offered — it would park the agent in a panel', () => {
