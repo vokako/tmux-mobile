@@ -204,8 +204,15 @@
 
   async function loadFeed() {
     if (!selected) return;
+    // The answer must still be about the question: every poller here freezes
+    // the project it asked ABOUT and drops the reply if the user has switched
+    // meanwhile — a late resolve was merging the OLD room's messages into the
+    // NEW room's feed (same identity bug as the context-menu close: resolving
+    // a live `selected` after the fact; owner, 2026-08-24).
+    const s = selected;
     try {
-      const { messages } = await hubLog(selected, lastTs, 200);
+      const { messages } = await hubLog(s, lastTs, 200);
+      if (selected !== s) return;
       if (messages?.length) {
         feed = mergeMessages(feed, messages);
         lastTs = Math.max(lastTs, ...messages.map((m) => m.ts ?? 0));
@@ -219,8 +226,10 @@
     // reports ride this channel, and those are about the message the user just
     // sent, not opt-in telemetry detail. feedBlocks does the level filtering.
     if (!selected) return;
+    const s = selected;
     try {
-      const { events } = await hubActivity(selected, lastActivityTs);
+      const { events } = await hubActivity(s, lastActivityTs);
+      if (selected !== s) return;
       if (events?.length) {
         activity = [...activity, ...events].slice(-300);
         lastActivityTs = Math.max(lastActivityTs, ...events.map((e) => e.ts));
@@ -233,8 +242,13 @@
 
   async function loadAgents() {
     if (!selected) return;
+    const s = selected;
     try {
-      agents = (await hubAgents(selected)).agents ?? [];
+      const got = (await hubAgents(s)).agents ?? [];
+      // A stale success is as wrong as a stale feed: the OLD project's roster
+      // must not dress the NEW project (and then re-pick its recipient).
+      if (selected !== s) return;
+      agents = got;
       // The recipient follows the room: an agent that left cannot be the
       // recipient, and a room that just gained its first agent gets a lead
       // without the user choosing one. ALL_TARGET is not a window, so it stays.
@@ -686,6 +700,9 @@
   function setRecipient(name) {
     recipient = name;
     recipientOpen = false;
+    // An armed interrupt was armed FOR a target; changing the addressee is a
+    // new intent, so the button stands down (same rule as switching projects).
+    intArm = false;
     if (selected) hubPrefs.setLead(selected, name);
   }
 

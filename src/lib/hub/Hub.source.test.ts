@@ -204,4 +204,16 @@ test('a confirmed project verb runs on the row it was asked on, never on `select
   // The context menu's two destructive verbs both pass their row's identity.
   assert.match(source, /askAction\('down', name, session\)/u);
   assert.match(source, /askAction\('delete', name, session\)/u);
+  // The async flavor of the same bug: a poller's late reply must still be
+  // about the project it asked about, or a project switch mid-flight merges
+  // the OLD room's data into the NEW one. Each poller freezes `selected` and
+  // drops a stale answer.
+  const pollers = ['async function loadFeed', 'async function loadActivity', 'async function loadAgents'];
+  for (const head of pollers) {
+    const at = source.indexOf(head);
+    assert.ok(at >= 0, `${head} exists`);
+    const body = source.slice(at, at + 900);
+    assert.match(body, /const s = selected;/u, `${head} freezes its project`);
+    assert.match(body, /if \(selected !== s\) return;/u, `${head} drops a stale answer`);
+  }
 });
