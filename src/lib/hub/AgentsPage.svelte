@@ -376,10 +376,17 @@
           </label>
           <div></div>
         </div>
-        <label class="check">
-          <input type="checkbox" bind:checked={editing.can_hire} />
-          {t('agentsCanHireLabel')}
-        </label>
+        <!-- can_hire is a MEMBERSHIP toggle like the skill/MCP picks below, so
+             it wears the same .pick chip — a native checkbox next to custom
+             fields read as a different species (owner, 2026-08-24: "can hire
+             样式也不和谐"). -->
+        <div class="pick-block">
+          <button class="pick" class:sel={editing.can_hire} type="button"
+            aria-pressed={editing.can_hire}
+            onclick={() => editing.can_hire = !editing.can_hire}>
+            <Icon name={editing.can_hire ? 'check' : 'bot'} size={11} />{t('agentsCanHireLabel')}
+          </button>
+        </div>
         <label>{t('agentsSystem')}
           <textarea rows="6" bind:value={editing.system} placeholder={t('agentsSystemPh')}></textarea>
         </label>
@@ -462,7 +469,6 @@
      fs-body inputs were the page reading a size too big everywhere
      (owner, 2026-08-24: "很多字号有点大很奇怪，也和页面风格不符"). */
   label { display: flex; flex-direction: column; gap: 4px; color: var(--text3); font-size: var(--fs-sub); }
-  label.check { flex-direction: row; align-items: center; gap: 8px; color: var(--text2); font-size: var(--fs-ui); }
   /* The dense field dialect (Team's template editor / the shared Select's
      `dense`), so every box in the form is ONE species at ONE size. */
   input, textarea { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: var(--ui-radius-control); color: var(--text); padding: 6px 9px; font-size: var(--fs-ui); outline: none; font-family: inherit; }
@@ -470,7 +476,6 @@
   input:disabled { opacity: 0.5; }
   textarea { resize: vertical; line-height: 1.5; }
   textarea.mono { font-family: ui-monospace, Menlo, monospace; }
-  label.check input { accent-color: var(--accent); width: 14px; height: 14px; margin: 0; }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .pick-block { display: flex; flex-direction: column; gap: 6px; }
   .pick-label { color: var(--text3); font-size: var(--fs-sub); }
@@ -489,10 +494,15 @@
     padding: 12px 14px; font-size: var(--fs-body); color: var(--text); line-height: 1.55;
     overflow-wrap: anywhere;
   }
-  @media (max-width: 760px) {
-    /* Same rule the shared Select carries: iOS zooms a focused control below
-       16px, and a Select at 16px beside an input at --fs-body read as two
-       different sizes (owner, 2026-08-22). One bump for every field. */
-    input, textarea { font-size: var(--fs-input-touch); }
+  /* iOS zooms a focused control below 16px — but ONLY iOS. On Android the
+     blanket bump made the name input and the prompt textarea 16px while the
+     dense Selects stayed at --fs-ui (.dense is 0,2,0; a media query adds no
+     specificity), which is the "字号还是偏大不一致" the owner saw. The
+     -webkit-touch-callout gate is iOS-family only, so the bump now fires
+     exactly where the auto-zoom exists (owner, 2026-08-24). */
+  @supports (-webkit-touch-callout: none) {
+    @media (max-width: 760px) {
+      input, textarea { font-size: var(--fs-input-touch); }
+    }
   }
 </style>

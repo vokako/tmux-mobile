@@ -229,7 +229,15 @@
   /* Touch contract: a menu row is a tap target. */
   @media (max-width: 760px) {
     .sel-opt { min-height: 44px; }
-    /* The trigger is an input, and iOS zooms a focused control below this. */
-    .sel-trigger { font-size: var(--fs-input-touch); }
+  }
+  /* iOS (only) zooms a focused control below 16px. On Android this bump made
+     a Select disagree with the fields beside it — and .dense (0,2,0) beat the
+     old media rule anyway, so dense triggers never bumped while inputs did
+     (owner, 2026-08-24: "字号还是偏大不一致"). Gate on the iOS family and
+     include dense, so where the zoom exists everything bumps TOGETHER. */
+  @supports (-webkit-touch-callout: none) {
+    @media (max-width: 760px) {
+      .sel-trigger, .sel-trigger.dense { font-size: var(--fs-input-touch); }
+    }
   }
 </style>
