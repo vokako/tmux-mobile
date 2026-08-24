@@ -603,25 +603,46 @@ export function systemLine(body: string | null | undefined): string | null {
 const SYS_VERBS = new Set(['spawned', 'started', 'stopped', 'restarted', 'removed', 'interrupted', 'done']);
 
 /**
- * The two halves of ONE lifecycle line: the ACTION and what it acted on.
+ * ONE structure for every line the app narrates: WHO it is about, WHAT
+ * happened, and the DETAIL — `{ who, verb, text }` (owner, 2026-08-24: "slash
+ * 命令，以及 agent 的 remove 等状态更新，都用统一的 ui 来展示…包括 agent 的名字，
+ * 状态，或者发送的指令").
  *
- * Consecutive lines fold into one row (that stays: a stop plus its restart is one
- * fact), but they used to be JOINED with a `·` on a single nowrap line — so
- * "removed k" and "spawned k" ran together into one grey ellipsised string, which
- * is exactly what it read as (owner, 2026-08-24: "removed k spawned 这些消息提示
- * 也都展示更好一些，单独一行，有一些高亮的样式"). Splitting the verb out is what
- * lets each line stand alone with the action highlighted.
+ * - `removed k`               → who `k`,   verb `removed`
+ * - `spawned dev — fix bug`   → who `dev`, verb `spawned`, text `fix bug`
+ * - `done`                    → verb `done` (nobody named)
+ * - `/model x → dev, rev`     → who `dev, rev`, verb `/model`, text `x`, cmd
  *
- * A `/command` record (`/model → dev`) has NO verb: the whole line is the thing
- * that was typed into the pane, and it keeps the composer's monospace dialect.
+ * The command splits at the LAST ` → ` because that is the one `hub_command`
+ * appended (`[tmm] {text} → {targets}`) — the typed text may contain an arrow,
+ * the slug-joined target list cannot. An unknown shape keeps only `text`: the
+ * whole line renders as itself, because a guessed verb or name would truncate
+ * the rest.
  */
-export function sysParts(item: string | null | undefined): { verb: string; text: string; cmd: boolean } {
+export function sysParts(item: string | null | undefined): { verb: string; who: string; text: string; cmd: boolean } {
   const line = (item ?? '').trim();
-  if (line.startsWith('/')) return { verb: '', text: line, cmd: true };
+  if (line.startsWith('/')) {
+    const cut = line.lastIndexOf(' → ');
+    const typed = cut < 0 ? line : line.slice(0, cut);
+    const who = cut < 0 ? '' : line.slice(cut + 3).trim();
+    const gap = typed.search(/\s/u);
+    return {
+      verb: gap < 0 ? typed : typed.slice(0, gap),
+      who,
+      text: gap < 0 ? '' : typed.slice(gap).trim(),
+      cmd: true,
+    };
+  }
   const gap = line.search(/\s/u);
   const head = (gap < 0 ? line : line.slice(0, gap)).toLowerCase();
-  if (!SYS_VERBS.has(head)) return { verb: '', text: line, cmd: false };
-  return { verb: head, text: gap < 0 ? '' : line.slice(gap).trim(), cmd: false };
+  if (!SYS_VERBS.has(head)) return { verb: '', who: '', text: line, cmd: false };
+  const rest = gap < 0 ? '' : line.slice(gap).trim();
+  // The subject is one token (spawned window names are registry slugs); what
+  // follows the em-dash is the spawn brief.
+  const wgap = rest.search(/\s/u);
+  const who = wgap < 0 ? rest : rest.slice(0, wgap);
+  const text = wgap < 0 ? '' : rest.slice(wgap).replace(/^\s*—\s*/u, '').trim();
+  return { verb: head, who, text, cmd: false };
 }
 
 /**

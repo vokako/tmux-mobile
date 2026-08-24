@@ -1504,24 +1504,26 @@
           {#if b.type === 'sys'}
             <!-- The app's own record (spawn/stop/restart, a /command typed into
                  a pane). Consecutive lines still fold into ONE capsule — a stop
-                 plus its restart is one fact — but each gets its OWN ROW inside
-                 it, with the action as a coloured badge: joined with a `·` on one
-                 nowrap line, "removed k" and "spawned k" read as a single grey
-                 string (owner, 2026-08-24: "单独一行，有一些高亮的样式"). Hidden
-                 entirely at the chat-only level (feedBlocks drops them). A
-                 /command keeps the composer's monospace so it reads as the thing
-                 that was typed ("不要只用灰色小字", owner 2026-08-20). -->
+                 plus its restart is one fact — and every line speaks ONE grammar:
+                 who it is about, what happened, the detail ("都用统一的 ui 来展示
+                 …agent 的名字，状态，或者发送的指令", owner 2026-08-24). The name
+                 wears the bubble header's ink, the action wears the status-note
+                 badge dialect (dot + word, sysVerbColor), and a /command's badge
+                 is the command itself in the composer's monospace — badge + args
+                 read back as exactly the line that was typed. Hidden entirely at
+                 the chat-only level (feedBlocks drops them). -->
             <div class="sysline">
               {#each b.items as item, j (`${j}-${item}`)}
                 {@const p = sysParts(item)}
                 {@const c = sysVerbColor(p.verb)}
-                <div class="sys-item" class:cmd={p.cmd}>
-                  {#if p.verb}
-                    <span class="sys-verb" style:color={c}
-                      style:background={`color-mix(in srgb, ${c} 14%, transparent)`}
-                      style:border-color={`color-mix(in srgb, ${c} 34%, transparent)`}>{p.verb}</span>
+                <div class="sys-item">
+                  {#if p.who}<span class="sys-who">{p.who}</span>{/if}
+                  {#if p.verb && p.cmd}
+                    <span class="sys-verb cmd">{p.verb}</span>
+                  {:else if p.verb}
+                    <span class="sys-verb" style:color={c}><span class="sv-dot" aria-hidden="true"></span>{p.verb}</span>
                   {/if}
-                  {#if p.text}<span class="sys-text">{p.text}</span>{/if}
+                  {#if p.text}<span class="sys-text" class:mono={p.cmd}>{p.text}</span>{/if}
                 </div>
               {/each}
             </div>
@@ -2358,19 +2360,33 @@
     -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
   }
   .sysline .sys-item { display: flex; align-items: baseline; gap: 6px; max-width: 100%; min-width: 0; }
-  /* The action, as a tinted micro-tag in the app's .pg-tag dialect — the colour
-     is the ONE progressive status language (sysVerbColor), so a spawn reads as
-     motion and a removal as a destructive act at a glance. */
+  /* The three atoms of a narrated line, each in a dialect the feed already
+     speaks (owner, 2026-08-24: "都用统一的 ui 来展示…不要随意瞎写"):
+     the NAME wears the bubble header's ink (.m-head — 650-weight accent), the
+     ACTION wears the status-note badge (.m-note-state — dot + word in a
+     currentColor pill, coloured by the one progressive status language), and a
+     /command is the composer's command dialect (monospace, accent lean). */
+  .sysline .sys-who { flex: none; font-weight: 650; color: var(--accent); letter-spacing: 0.1px; }
   .sysline .sys-verb {
-    flex: none; font-size: var(--fs-micro); font-weight: 600; letter-spacing: 0.3px;
-    border: 1px solid transparent; border-radius: 5px; padding: 0 5px; line-height: 1.55;
+    flex: none; display: inline-flex; align-items: center; gap: 4px;
+    font-size: var(--fs-micro); font-weight: 650;
+    text-transform: uppercase; letter-spacing: 0.6px; line-height: 1.6;
+    border: 1px solid color-mix(in srgb, currentColor 55%, transparent);
+    border-radius: 4px; padding: 0 5px;
+  }
+  .sysline .sys-verb .sv-dot { width: 5px; height: 5px; border-radius: 50%; flex: none; background: currentColor; }
+  /* A /command's badge is the command NAME itself — typed text, so no uppercase,
+     no dot, the composer's monospace with its accent lean. Badge + args read
+     back as exactly the line that was typed. */
+  .sysline .sys-verb.cmd {
+    text-transform: none; letter-spacing: 0; font-size: var(--fs-meta); font-weight: 600;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: color-mix(in srgb, var(--accent) 62%, var(--text));
   }
   .sysline .sys-text {
     min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text);
   }
-  /* A /command wears the composer's command dialect — monospace with an accent
-     lean — so the record reads as the thing that was typed. */
-  .sysline .sys-item.cmd .sys-text {
+  .sysline .sys-text.mono {
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     color: color-mix(in srgb, var(--accent) 62%, var(--text));
   }

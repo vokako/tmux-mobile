@@ -519,18 +519,26 @@ test('lifecycle lines fold into one sys row and vanish at chat level', () => {
 
 test('a lifecycle line splits into a highlighted verb and its subject', () => {
   // The reason this exists: folded rows were joined with a `·` and read as one
-  // run-on grey string ("removed k spawned", owner 2026-08-24). The verb comes
-  // out so each row can stand alone with the action set apart.
-  assert.deepEqual(sysParts('spawned k'), { verb: 'spawned', text: 'k', cmd: false });
-  assert.deepEqual(sysParts('removed k'), { verb: 'removed', text: 'k', cmd: false });
-  assert.deepEqual(sysParts('spawned dev — fix the bug'), { verb: 'spawned', text: 'dev — fix the bug', cmd: false });
-  // A verb with nothing after it (`[tmm] done`) is the whole line.
-  assert.deepEqual(sysParts('done'), { verb: 'done', text: '', cmd: false });
-  // A /command record is the thing that was typed: no verb, monospace dialect.
-  assert.deepEqual(sysParts('/model → dev'), { verb: '', text: '/model → dev', cmd: true });
-  // An unknown shape is left WHOLE — guessing a verb would truncate the rest.
-  assert.deepEqual(sysParts('agent k left the building'), { verb: '', text: 'agent k left the building', cmd: false });
-  assert.deepEqual(sysParts(undefined), { verb: '', text: '', cmd: false });
+  // run-on grey string ("removed k spawned", owner 2026-08-24). One grammar for
+  // every narrated line — who, what happened, detail ("都用统一的 ui 来展示…包括
+  // agent 的名字，状态，或者发送的指令", owner 2026-08-24).
+  assert.deepEqual(sysParts('spawned k'), { verb: 'spawned', who: 'k', text: '', cmd: false });
+  assert.deepEqual(sysParts('removed k'), { verb: 'removed', who: 'k', text: '', cmd: false });
+  // The spawn brief follows the em-dash; the dash itself is layout, not content.
+  assert.deepEqual(sysParts('spawned dev — fix the bug'), { verb: 'spawned', who: 'dev', text: 'fix the bug', cmd: false });
+  // A verb with nothing after it (`[tmm] done`) names nobody.
+  assert.deepEqual(sysParts('done'), { verb: 'done', who: '', text: '', cmd: false });
+  // A /command record (`[tmm] {text} → {targets}`) splits into the same three
+  // atoms: the command is the action, the targets are the who, the arguments are
+  // the detail — badge + args read back as exactly the line that was typed.
+  assert.deepEqual(sysParts('/model claude-4.5 → dev, reviewer'), { verb: '/model', who: 'dev, reviewer', text: 'claude-4.5', cmd: true });
+  assert.deepEqual(sysParts('/clear → dev'), { verb: '/clear', who: 'dev', text: '', cmd: true });
+  // The typed text may contain an arrow; the split is the LAST one — the one
+  // hub_command appended.
+  assert.deepEqual(sysParts('/compact a → b → dev'), { verb: '/compact', who: 'dev', text: 'a → b', cmd: true });
+  // An unknown shape is left WHOLE — a guessed verb or name would truncate it.
+  assert.deepEqual(sysParts('agent k left the building'), { verb: '', who: '', text: 'agent k left the building', cmd: false });
+  assert.deepEqual(sysParts(undefined), { verb: '', who: '', text: '', cmd: false });
 });
 
 test('a lifecycle verb speaks the one status colour language', () => {

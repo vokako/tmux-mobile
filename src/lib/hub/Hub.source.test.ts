@@ -123,7 +123,7 @@ test('the drawer opens and closes through the reading anchor, everywhere', () =>
   assert.match(source, /!el\.classList\.contains\('ask-bottom'\)/u);
 });
 
-test('a lifecycle group is one row per line, with the action highlighted', () => {
+test('a lifecycle group is one row per line, in one who/action/detail grammar', () => {
   // Joined by a `·` on one nowrap line, "removed k" and "spawned k" read as a
   // single grey run-on string (owner, 2026-08-24). The capsule stays (a stop plus
   // its restart is one fact) and becomes a column; the separator is gone.
@@ -131,11 +131,22 @@ test('a lifecycle group is one row per line, with the action highlighted', () =>
   const line = rule('.sysline');
   assert.match(line, /flex-direction:\s*column/u);
   assert.doesNotMatch(line, /white-space:\s*nowrap/u, 'the capsule no longer clips one long line');
-  // The verb is its own badge, coloured through the shared status language.
-  assert.match(source, /class="sys-verb"[\s\S]{0,200}\{p\.verb\}<\/span>/u);
-  assert.match(source, /style:color=\{c\}/u);
+  // Every row speaks the SAME grammar (owner, 2026-08-24: "都用统一的 ui 来展示"),
+  // and each atom reuses a dialect the feed already has: the name wears the
+  // bubble header's ink, the action the status-note badge (dot + word,
+  // sysVerbColor), a /command the composer's monospace.
+  assert.match(source, /class="sys-who"/u, 'the agent name is its own atom');
+  assert.match(rule('.sysline .sys-who'), /font-weight:\s*650/u, "the name wears the bubble header's weight");
+  assert.match(source, /class="sys-verb" style:color=\{c\}><span class="sv-dot"/u, 'the action badge carries the state dot');
   assert.match(source, /const c = sysVerbColor\(p\.verb\)/u);
-  // Per-row ellipsis lives on the text, so a long subject cannot eat the badge.
+  assert.match(rule('.sysline .sys-verb'), /currentColor/u, 'border and dot follow the one inline colour');
+  // A /command's badge is the command itself — typed text, so monospace and
+  // never uppercased; badge + args read back as the line that was typed.
+  assert.match(source, /class="sys-verb cmd"/u);
+  assert.match(rule('.sysline .sys-verb.cmd'), /text-transform:\s*none/u);
+  assert.match(rule('.sysline .sys-verb.cmd'), /ui-monospace/u);
+  assert.match(rule('.sysline .sys-text.mono'), /ui-monospace/u);
+  // Per-row ellipsis lives on the text, so a long detail cannot eat the badge.
   assert.match(rule('.sysline .sys-text'), /text-overflow:\s*ellipsis/u);
 });
 

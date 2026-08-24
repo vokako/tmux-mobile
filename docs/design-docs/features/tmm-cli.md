@@ -1502,20 +1502,29 @@ at the chat-only level they disappear entirely, because they are the app's
 record, not the conversation. Inside the pill each line gets its OWN ROW: they
 used to be joined by a `·` on one nowrap line, so "removed k" and "spawned k"
 ran together into a single grey run-on string ("removed k spawned … 单独一行，
-有一些高亮的样式", 2026-08-24). The row leads with the ACTION as a tinted
-micro-tag — `sysParts()` splits the verb off the subject, `sysVerbColor()`
-tints it in the ONE progressive status language every other coloured state word
-in the Hub uses (accent = something started moving, green = ended well, grey =
-at rest, red = destructive, amber = interrupted; both pure + tested, and the
-value is always a token so the two themes read the same) — and the per-row
-ellipsis sits on the TEXT, so a long subject can never eat the badge. An
-unknown line shape keeps no verb at all and renders whole: guessing one would
-truncate the remainder. Subordinate is not ILLEGIBLE: the pill wears
-reading ink (`--text2`, `--fs-sub`), because `--text3` fine print was reported
-as unreadable ("不要只用灰色小字，让我看不太清", 2026-08-20), and an item that
-IS a `/command` (the record `hub_command` leaves) keeps the composer's command
-dialect — monospace with the accent lean — so the record reads as the thing
-that was typed. The feed also marks calendar days in the same pill dialect: a
+有一些高亮的样式", 2026-08-24). Every row then speaks ONE grammar — WHO it is
+about, WHAT happened, and the DETAIL ("slash 命令，以及 agent 的 remove 等状态
+更新，都用统一的 ui 来展示…包括 agent 的名字，状态，或者发送的指令", 2026-08-24)
+— and each atom reuses a dialect the feed already speaks instead of inventing a
+third: `sysParts()` parses every shape into `{who, verb, text, cmd}` (`removed
+k`, `spawned dev — brief` with the brief as detail, `/model x → dev, rev` where
+the split is the LAST ` → ` — the one `hub_command` appended, so a typed arrow
+survives). The NAME wears the bubble header's ink (`.m-head`'s 650-weight
+accent), the ACTION wears the status-note badge (dot + state word in a
+currentColor-bordered pill, tinted by `sysVerbColor()` in the ONE progressive
+status language every other coloured state word in the Hub uses: accent =
+something started moving, green = ended well, grey = at rest, red =
+destructive, amber = interrupted; both pure + tested, and the value is always a
+token so the two themes read the same), and a `/command`'s badge is the command
+NAME itself — typed text, so monospace with the accent lean and never
+uppercased, with its arguments beside it in the same mono: badge + args read
+back as exactly the line that was typed, while the targets stand as the who.
+The per-row ellipsis sits on the TEXT, so a long detail can never eat the
+badge or the name. An unknown line shape keeps no verb or name at all and
+renders whole: guessing either would truncate the remainder. Subordinate is not
+ILLEGIBLE: the pill wears reading ink (`--text2`, `--fs-sub`), because
+`--text3` fine print was reported as unreadable ("不要只用灰色小字，让我看不太清",
+2026-08-20). The feed also marks calendar days in the same pill dialect: a
 centred date pill (`Today` / `Yesterday` / a local date) before the first block
 of each new LOCAL day (`sameDay()`, pure + tested — the times alone never said
 which day a message was from, 2026-08-20); it is not sticky, because a pinned
