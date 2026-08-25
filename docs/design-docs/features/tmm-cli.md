@@ -968,6 +968,18 @@ recipient IS choosing the project's lead, so it persists per session.
 an empty recipient posts to the room. An empty room offers a preset start
 instead of a composer: tap one agent to begin, or pick several as a team — each
 is the same `hub_spawn`, and the lead of the new roster follows the same rule.
+"Empty" is a VERDICT, not a default. `selectProject` used to clear the arrays
+and let the panel judge them while `hub_log` was still in flight, so every
+switch flashed the "add an agent" pitch in front of rooms full of history
+(owner, 2026-08-25: "先看到添加 agent 一个 agent list那个页面闪了一下，然后再
+出来消息"). Two rules end that: a visited room is PARKED in an in-memory
+per-session cache (`roomCache` — feed, activity, roster, cursors) and restored
+whole on return, with the pollers merging on top (the cached `lastTs` makes the
+refresh incremental) and the cached roster seating the recipient at once via
+the same `pickLead`; and a room with no cache entry renders nothing at all
+until its first `hub_log` answer flips `roomReady` — only then may the feed
+call itself empty. Entering a room lands at its tail either way: a parked
+scrollTop from the last room would point at arbitrary content in this one.
 
 ## Stopping and starting one agent
 

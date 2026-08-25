@@ -176,11 +176,24 @@
     } catch { /* server without projects — the Hub tab is hidden anyway */ }
   }
 
+  // A room you have visited before renders INSTANTLY from memory when you
+  // return; a room you have not shows nothing until its first load answers.
+  // Without both, every switch showed the empty-room PRESET panel for the
+  // beat between `feed = []` and hub_log's answer — an "add an agent" pitch
+  // flashing in front of rooms full of history (owner, 2026-08-25: "先看到
+  // 添加 agent 一个 agent list那个页面闪了一下，然后再出来消息"). In-memory
+  // only, per session; the pollers keep merging on top, so the cache is a
+  // starting point, never a second source of truth.
+  const roomCache = new Map();
+  let roomReady = $state(false);
+
   async function selectProject(session) {
     // An unsent line belongs to the conversation it was written for. Park it on
     // the project we are leaving and pick up whatever was waiting in the new one
     // — carrying the text across would put it in front of the wrong agents.
     if (selected) hubPrefs.setDraft(selected, composerText);
+    // Park the room too, so switching back is instant.
+    if (selected) roomCache.set(selected, { feed, lastTs, activity, lastActivityTs, agents });
     selected = session;
     composerText = hubPrefs.draft(session);
     hubPrefs.setProject(session);
@@ -188,18 +201,30 @@
     // so the Files tab follows whichever the user touched LAST (owner,
     // 2026-08-22: "chat里的路径没有刷新到文件 terminal好像就会刷新路径").
     onSelectSession(session);
-    feed = [];
-    activity = [];
-    lastActivityTs = 0;
-    lastTs = 0;
-    agents = [];
+    const c = roomCache.get(session);
+    feed = c?.feed ?? [];
+    activity = c?.activity ?? [];
+    lastActivityTs = c?.lastActivityTs ?? 0;
+    lastTs = c?.lastTs ?? 0;
+    agents = c?.agents ?? [];
+    // A cached room is ready NOW (its pollers refresh underneath); an unknown
+    // one may not claim "empty" until its first load has actually answered.
+    roomReady = !!c;
     recipient = '';
+    // The cached roster can seat the recipient immediately — same rule as
+    // loadAgents, which will confirm or correct it when the fresh roster lands.
+    if (agents.length) recipient = pickLead(agents, registry, hubPrefs.lead(session));
     recipientOpen = false;
     menuFor = '';
     msgOpen = '';
     rawOpen = '';
     termOpen = false;
+    // Entering a room lands at its tail, cached or not — a parked scrollTop
+    // from the LAST room would point at arbitrary content in this one.
+    following = true;
+    if (feed.length) scrollFeed(true);
     await Promise.all([loadFeed(), loadAgents(), loadActivity()]);
+    if (selected === session) roomReady = true;
   }
 
   async function loadFeed() {
@@ -1939,7 +1964,7 @@
             </div>
           {/if}
         {/each}
-        {#if !blocks.length}
+        {#if !blocks.length && roomReady}
           {#if selected && !managedAgents.length && registry.length}
             <!-- Nothing to talk to yet: start from a preset. One tap = that
                  agent becomes the lead; "several" starts a team in one go.
