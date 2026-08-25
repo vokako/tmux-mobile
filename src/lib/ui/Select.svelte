@@ -89,9 +89,19 @@
   function hide() { open = false; }
   function pick(v: string) {
     open = false;
-    if (v === value) return;
+    if (v === value) { committed = v; return; }
     value = v;
+    committed = v;
     onchange(v);
+  }
+  /** Editable mode: free-typed text commits on Enter/blur (a pick commits via
+   * pick()). `committed` remembers the last reported value so a blur after a
+   * pick, or an untouched field, stays silent. */
+  let committed = $state(value);
+  function commitTyped() {
+    if (!editable || value === committed) return;
+    committed = value;
+    onchange(value);
   }
 
   // Dismissal, on everything that means "I moved on": a click elsewhere,
@@ -119,7 +129,7 @@
       // Space stays typeable in a text field; it only picks for the button.
       if (e.key === 'Enter' || (e.key === ' ' && !editable)) {
         if (cursor >= 0 && shown[cursor]) { e.preventDefault(); pick(shown[cursor]!.value); }
-        else if (editable && e.key === 'Enter') hide();
+        else if (editable && e.key === 'Enter') { hide(); commitTyped(); }
       }
     };
     window.addEventListener('pointerdown', onDown, true);
@@ -147,7 +157,11 @@
       autocomplete="off" autocapitalize="off" spellcheck="false"
       oninput={() => { if (!open) show(); cursor = -1; }}
       onclick={() => { if (!open) show(); }}
-      onkeydown={(e) => { if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); show(); } }} />
+      onblur={commitTyped}
+      onkeydown={(e) => {
+        if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); show(); }
+        if (!open && e.key === 'Enter') commitTyped();
+      }} />
     <span class="combo-chev"><Icon name="chevron-down" size={11} /></span>
   </span>
 {:else}

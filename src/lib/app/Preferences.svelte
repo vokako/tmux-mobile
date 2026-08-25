@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '../ui/Icon.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
+  import Select from '../ui/Select.svelte';
   import { t, i18n, setLocale } from '../core/i18n.svelte.ts';
   import { layout } from './layout.svelte.ts';
   import { fonts, uiFont, displayFont } from './fonts.svelte.ts';
@@ -126,9 +127,6 @@
     return !fontInvalid;
   }
 
-  async function handleFontKeydown(event: KeyboardEvent) {
-    if (event.key === 'Enter' && await saveFont()) (event.currentTarget as HTMLElement | null)?.blur();
-  }
 
   async function saveUiFont() {
     uiFontInput = uiFontInput.trim();
@@ -139,12 +137,6 @@
     displayFontInput = displayFontInput.trim();
     displayFontInvalid = !await displayFont.set(displayFontInput);
     return !displayFontInvalid;
-  }
-  async function handleUiFontKeydown(event: KeyboardEvent) {
-    if (event.key === 'Enter' && await saveUiFont()) (event.currentTarget as HTMLElement | null)?.blur();
-  }
-  async function handleDisplayFontKeydown(event: KeyboardEvent) {
-    if (event.key === 'Enter' && await saveDisplayFont()) (event.currentTarget as HTMLElement | null)?.blur();
   }
 
   function setLineHeight(value: number) {
@@ -261,25 +253,18 @@
           <div class="setting-row">
             <div><strong>{t('uiFontBody')}</strong><small>{t('uiFontBodyHint')}</small></div>
             <div class="font-control">
-              <input class="text-input" class:invalid={uiFontInvalid} type="text" list="sans-families"
-                placeholder={t('fontFamilySystem')} bind:value={uiFontInput} aria-invalid={uiFontInvalid}
-                autocapitalize="off" autocomplete="off" spellcheck="false"
-                oninput={() => uiFontInvalid = false} onchange={saveUiFont}
-                onkeydown={handleUiFontKeydown} />
+              <Select bind:value={uiFontInput} editable dense options={uiFont.common}
+                placeholder={t('fontFamilySystem')} ariaLabel={t('uiFontBody')}
+                onchange={() => saveUiFont()} />
               {#if uiFontInvalid}<small class="font-error">{t('fontFamilyInvalid')}</small>{/if}
             </div>
           </div>
           <div class="setting-row">
             <div><strong>{t('uiFontDisplay')}</strong><small>{t('uiFontDisplayHint')}</small></div>
             <div class="font-control">
-              <input class="text-input" class:invalid={displayFontInvalid} type="text" list="sans-families"
-                placeholder={t('fontFamilySystem')} bind:value={displayFontInput} aria-invalid={displayFontInvalid}
-                autocapitalize="off" autocomplete="off" spellcheck="false"
-                oninput={() => displayFontInvalid = false} onchange={saveDisplayFont}
-                onkeydown={handleDisplayFontKeydown} />
-              <datalist id="sans-families">
-                {#each uiFont.common as family}<option value={family}></option>{/each}
-              </datalist>
+              <Select bind:value={displayFontInput} editable dense options={displayFont.common}
+                placeholder={t('fontFamilySystem')} ariaLabel={t('uiFontDisplay')}
+                onchange={() => saveDisplayFont()} />
               {#if displayFontInvalid}<small class="font-error">{t('fontFamilyInvalid')}</small>{/if}
             </div>
           </div>
@@ -297,14 +282,9 @@
           <div class="setting-row">
             <div><strong>{t('fontFamily')}</strong><small>{t('fontFamilyHint')}</small></div>
             <div class="font-control">
-              <input class="text-input" class:invalid={fontInvalid} type="text" list="font-families"
-                placeholder={t('fontFamilySystem')} bind:value={fontInput} aria-invalid={fontInvalid}
-              autocapitalize="off" autocomplete="off" spellcheck="false"
-                oninput={() => fontInvalid = false} onchange={saveFont}
-                onkeydown={handleFontKeydown} />
-              <datalist id="font-families">
-                {#each fonts.common as family}<option value={family}></option>{/each}
-              </datalist>
+              <Select bind:value={fontInput} editable dense options={fonts.common}
+                placeholder={t('fontFamilySystem')} ariaLabel={t('fontFamily')}
+                onchange={() => saveFont()} />
               {#if fontInvalid}<small class="font-error">{t('fontFamilyInvalid')}</small>{/if}
             </div>
           </div>
@@ -435,9 +415,9 @@
   .segmented button,.stepper button,.reset,.conn-actions button { height:var(--ui-control-height);border:1px solid var(--border2);background:transparent;color:var(--text3);padding:3px 8px;border-radius:var(--ui-radius-control);cursor:pointer;font-size:var(--ui-font-control);white-space:nowrap; }
   .segmented button.active { border-color:var(--accent);background:var(--accent-bg);color:var(--accent); }
   .segmented button:active,.stepper button:active,.reset:active,.conn-actions button:active { border-color:var(--accent);color:var(--accent); }
-  .text-input { width:min(230px,42vw);height:28px;padding:4px 8px;border:1px solid var(--input-border);border-radius:var(--ui-radius-control);background:var(--input-bg);color:var(--text);font:var(--fs-sub) var(--font-mono);outline:none; }
-  .text-input:focus{border-color:var(--accent);}
-  .font-control{display:flex;flex-direction:column;align-items:flex-end;gap:3px}.text-input.invalid{border-color:var(--danger)}.font-error{color:var(--danger)}
+  .font-control{display:flex;flex-direction:column;align-items:flex-end;gap:3px}.font-error{color:var(--danger)}
+  .font-control :global(.sel-combo){width:min(230px,42vw)}
+  .font-control :global(.sel-trigger.combo){width:100%;font-family:var(--font-mono)}
   .stepper { display:flex;align-items:center;gap:4px; }.stepper button{width:24px;padding:0;font-size:var(--fs-body)}.stepper span{min-width:42px;text-align:center;font-family:var(--font-mono);font-size:var(--fs-sub);}
   .range-wrap { display:flex;align-items:center;gap:7px;min-width:min(280px,46vw); }
   .range-wrap input { flex:1;height:14px;margin:0;appearance:none;-webkit-appearance:none;background:transparent;cursor:pointer; }
@@ -461,6 +441,6 @@
      private 640, so a narrow window wore desktop clothes here after every
      other page had switched. The old `inset` hack predates the page-layer
      and positioned nothing. */
-  @media(max-width:760px){.pref-content{padding:12px}.setting-row{min-height:50px;padding:8px 10px;gap:10px}.text-input{width:min(220px,48vw)}.range-wrap{min-width:min(250px,52vw)}.connection-title{align-items:flex-start;flex-direction:column}.conn-actions{width:100%}.conn-actions button{flex:1;justify-content:center}.hook-row{align-items:flex-start;flex-direction:column}.hook-control{width:100%;justify-content:space-between}.segmented button,.stepper button,.hook-action{min-height:32px}}
-  @media(max-width:420px){.setting-row{align-items:flex-start;flex-direction:column;gap:7px}.setting-row>div:last-child,.text-input,.range-wrap{width:100%;min-width:0}.font-control{align-items:flex-start}.segmented button{flex:1}}
+  @media(max-width:760px){.pref-content{padding:12px}.setting-row{min-height:50px;padding:8px 10px;gap:10px}.font-control :global(.sel-combo){width:min(220px,48vw)}.range-wrap{min-width:min(250px,52vw)}.connection-title{align-items:flex-start;flex-direction:column}.conn-actions{width:100%}.conn-actions button{flex:1;justify-content:center}.hook-row{align-items:flex-start;flex-direction:column}.hook-control{width:100%;justify-content:space-between}.segmented button,.stepper button,.hook-action{min-height:32px}}
+  @media(max-width:420px){.setting-row{align-items:flex-start;flex-direction:column;gap:7px}.setting-row>div:last-child,.range-wrap{width:100%;min-width:0}.font-control{align-items:flex-start}.font-control :global(.sel-combo){width:100%}.segmented button{flex:1}}
 </style>

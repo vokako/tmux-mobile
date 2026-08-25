@@ -55,7 +55,6 @@ html {
   --ui-radius-row: 12px;      /* list rows, roster cards, toasts, small bars */
   --ui-radius-panel: 14px;    /* cards, menus, tool lanes, big panels */
   --ui-font-control: var(--fs-sub);
-  --ui-motion-fast: 0.15s ease;
 }
 
 /* ─── Theme tokens ─────────────────────────────────────────────────────── */

@@ -95,7 +95,7 @@
     max-width: 140px;
     box-sizing: border-box;
     -webkit-tap-highlight-color: transparent;
-    transition: border-color var(--ui-motion-fast), background var(--ui-motion-fast), color var(--ui-motion-fast);
+    transition: border-color var(--t-fast), background var(--t-fast), color var(--t-fast);
     position: relative;
   }
   .chip:active {

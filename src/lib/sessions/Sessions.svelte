@@ -744,7 +744,7 @@
     align-items: center;
     justify-content: center;
     -webkit-tap-highlight-color: transparent;
-    transition: color var(--ui-motion-fast), border-color var(--ui-motion-fast), background var(--ui-motion-fast);
+    transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
   }
   .icon-btn:active {
     color: var(--accent);
@@ -822,7 +822,7 @@
     border-radius: var(--ui-radius-panel);
     background: transparent;
     overflow: hidden;
-    transition: border-color var(--ui-motion-fast), background var(--ui-motion-fast);
+    transition: border-color var(--t-fast), background var(--t-fast);
   }
   .session:active { transform: scale(0.996); }
   .session.active {

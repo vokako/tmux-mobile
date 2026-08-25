@@ -399,7 +399,7 @@
     border: 1px solid var(--border); border-radius: 5px;
     padding: 2px 7px; cursor: pointer;
     font-family: var(--font-mono); font-size: var(--fs-meta);
-    transition: color var(--ui-motion-fast, 0.12s) ease, border-color var(--ui-motion-fast, 0.12s) ease;
+    transition: color var(--t-fast), border-color var(--t-fast);
   }
   .win:hover { color: var(--text); border-color: var(--border2); }
   .win-name { max-width: 13ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -411,13 +411,13 @@
 
   .acts { display: flex; align-items: center; gap: 4px; }
   .act {
-    height: var(--ui-control-height, 28px); padding: 0 9px;
+    height: var(--ui-control-height); padding: 0 9px;
     background: var(--surface2); color: var(--text2);
     border: 1px solid var(--border); border-radius: var(--ui-radius-control);
     font-family: var(--font-ui); font-size: var(--fs-sub); cursor: pointer;
-    transition: background var(--ui-motion-fast, 0.12s) ease;
+    transition: border-color var(--t-fast), color var(--t-fast);
   }
-  .act:hover:not(:disabled) { color: var(--text); }
+  .act:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
   .act:disabled { opacity: 0.5; cursor: default; }
   .act.primary { color: var(--accent); border-color: var(--accent-bg); }
   .act.icon { padding: 0 7px; display: flex; align-items: center; }

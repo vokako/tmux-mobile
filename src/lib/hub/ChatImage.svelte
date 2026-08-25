@@ -45,7 +45,7 @@
   .ci-link { display: block; }
   .ci {
     display: block; max-width: 100%; max-height: calc(42vh / var(--ui-zoom, 1)); width: auto; height: auto;
-    border-radius: 9px; border: 1px solid var(--border2); background: var(--surface2);
+    border-radius: var(--ui-radius-control); border: 1px solid var(--border2); background: var(--surface2);
   }
   .ci-ref {
     display: inline-block; font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub);
