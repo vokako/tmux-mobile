@@ -618,6 +618,8 @@
     if (v.branch) parts.push(v.branch);
     return parts.join(' · ');
   })());
+  /** The menu's subject, for its header lines (state + elapsed). */
+  const menuAgent = $derived(managedAgents.find((a) => a.name === menuFor));
   $effect(() => { void composerText; paletteOff = false; });
   // The draft survives a reload because a half-written message is work. Written
   // on every keystroke: one small JSON string, and the alternative (a debounce)
@@ -1608,7 +1610,6 @@
                 {#if backendIcon(a.agent)}<img class="ava" src={backendIcon(a.agent)} alt={a.agent} />{:else}<span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>{/if}
                 <span class="a-name">{a.name}</span>
                 <span class="st" class:live={a.state === 'running'} style:background={stateDotColor(a.state)}></span>
-                {#if a.since}<span class="s-age">{fmtElapsed(a.since, tick)}</span>{/if}
                 {#if unread.has(a.name)}<span class="unread" title={t('hubUnread')}></span>{/if}
                 <!-- Destructive and secondary actions stay behind a dot menu: a
                      roster is for seeing who is here, not a row of hazards. -->
@@ -1700,6 +1701,14 @@
           style:left="{menuPos.x}px" style:top="{menuPos.y}px"
           bind:clientWidth={menuW} bind:clientHeight={menuH}>
           <div class="am-who">{menuFor}</div>
+          <!-- State + running time live HERE, not on the card: the elapsed
+               counter earned its glance-value in the tooltip and menu, and a
+               ticking number on every card was permanent motion the roster
+               did not need (owner, 2026-08-25: "运行时间…没太必要常显示，
+               可以点击三个点显示就行"). -->
+          {#if menuAgent}
+            <div class="am-vitals">{stateLabel(menuAgent.state)}{menuAgent.since ? ` · ${fmtElapsed(menuAgent.since, tick)}` : ''}</div>
+          {/if}
           {#if vitalsFor}<div class="am-vitals">{vitalsFor}</div>{/if}
           {#if stopped.includes(menuFor)}
             <button role="menuitem" disabled={acting} onclick={() => { const n = menuFor; menuFor = ''; startAgent(n); }}>
