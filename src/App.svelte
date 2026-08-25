@@ -223,9 +223,15 @@
   // Settings is a PAGE (ui-unification.md "Settings as a page"), not a modal.
   // The gear toggles into it and back to where you were.
   let pageBeforePrefs = 'terminal';
+  let prefsPushed = false;
   function togglePrefs() {
-    if (page === 'prefs') { page = pageBeforePrefs; slidePage('slide-in-left'); }
-    else { pageBeforePrefs = page; page = 'prefs'; slidePage('slide-in-right'); }
+    if (page === 'prefs') {
+      if (prefsPushed) history.back();
+      else { page = pageBeforePrefs; slidePage('slide-in-left'); }
+    } else {
+      pageBeforePrefs = page; page = 'prefs'; slidePage('slide-in-right');
+      navPush(); prefsPushed = true;
+    }
   }
   // Apply the persisted custom fonts (if any) before first paint — rewrites
   // --font-mono/--font-ui/--font-display inline; a no-op for the defaults.
@@ -911,8 +917,8 @@
       if (page === 'terminal' && sessListOpen) { sessListOpen = false; navPush(); return; }
       // Settings peels its open category back to the list first; only a
       // back with nothing to peel leaves the page.
-      if (page === 'prefs' && prefsGoBack && prefsGoBack()) { navPush(); return; }
-      if (page === 'prefs') { page = pageBeforePrefs; slidePage('slide-in-left'); return; }
+      if (page === 'prefs' && prefsGoBack && prefsGoBack()) { return; }
+      if (page === 'prefs') { page = pageBeforePrefs; slidePage('slide-in-left'); prefsPushed = false; return; }
       // At sessions root, re-push to prevent exit
       navPush();
     };
@@ -1091,6 +1097,7 @@
       onOptimize={optimizeConnection}
       onShare={shareConnectionLink}
       onGoBack={(fn) => prefsGoBack = fn}
+      onDrill={() => navPush()}
       onAddress={(address) => {
         localStorage.setItem('tmux_address', address);
         activeAddress = address;

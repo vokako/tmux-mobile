@@ -32,6 +32,7 @@
     onOptimize = () => {},
     onShare = () => {},
     onGoBack = null,
+    onDrill = () => {},
     onAddress = () => {},
     onDisconnect = () => {},
     onConnectionSetup = () => {},
@@ -56,6 +57,7 @@
     onOptimize?: () => void;
     onShare?: () => void;
     onGoBack?: ((fn: () => boolean) => void) | null;
+    onDrill?: () => void;
     onAddress?: (address: string) => void;
     onDisconnect?: () => void;
     onConnectionSetup?: () => void;
@@ -153,16 +155,18 @@
   // the LEFT — the same 120ms the app-level tab slide speaks. The class
   // toggling fwd↔back is what replays the animation; no timers.
   let drillAnim = $state('');
-  function closeCat() { catOpen = false; drillAnim = 'back'; }
+  const isCompact = () => window.matchMedia('(max-width: 760px)').matches;
+  let drillPushed = false;
+  function closeCat() { catOpen = false; drillAnim = 'back'; drillPushed = false; }
   $effect(() => {
     onGoBack?.(() => {
-      if (catOpen) { closeCat(); return true; }
+      if (catOpen && isCompact()) { closeCat(); return true; }
       return false;
     });
   });
 
   function selectTab(value: string) {
-    if (!catOpen) drillAnim = 'fwd';
+    if (!catOpen && isCompact()) { drillAnim = 'fwd'; onDrill(); drillPushed = true; }
     catOpen = true;
     tab = value;
     recordingShortcut = '';
@@ -211,7 +215,7 @@
       <!-- Compact only: the way back to the category list (the back gesture
            does the same through onGoBack). -->
       <button class="icon-btn back" title={t('settings')} aria-label={t('settings')}
-        onclick={closeCat}>
+        onclick={() => drillPushed ? history.back() : closeCat()}>
         <Icon name="chevron-left" size={15} />
       </button>
       <h1>{tabs.find((x) => x.id === tab)?.label() ?? t('settings')}</h1>

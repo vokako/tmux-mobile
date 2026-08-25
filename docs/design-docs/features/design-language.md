@@ -56,6 +56,19 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   shown. A transform hint (`will-change`) may exist only WHILE a slide runs:
   a resting transform turns the page into a containing block and breaks
   every fixed popover.
+- **History discipline for drill layers**: a navigation that OPENS a layer
+  (entering Settings, a compact drill-down) pushes its history entry AT OPEN
+  TIME, and the pop that peels it SPENDS that entry (no re-push). Reason:
+  the browser's predictive-back preview slides in a SCREENSHOT of the entry
+  being returned to, captured when it was last current — entries pushed only
+  at tab switches made backing out of a Settings level flash an unrelated
+  page for a beat (owner, 2026-08-25: "疑似闪一下其他页面"). Pushed at open,
+  every preview shows the true destination. Two fallbacks keep the stack
+  honest: an open that pushed nothing (reload landed there; drill opened
+  outside compact) closes DIRECTLY instead of calling history.back() into
+  the stack-bottom re-push guard. Layers that only PEEL state without a
+  matching open-time push (Hub menus, dialogs) keep the consume-and-re-push
+  model.
 
 ## 2 · Layout skeletons
 
