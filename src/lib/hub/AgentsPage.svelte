@@ -37,6 +37,9 @@
   let editingSkill = $state(null);
   let skillIsNew = $state(false);
   let editingMcp = $state(null);
+  const drilled = $derived(!!editing || !!editingSkill || !!editingMcp);
+  let drillAnim = $state('');
+  let wasDrilled = false;
   let mcpIsNew = $state(false);
   let error = $state('');
 
@@ -51,6 +54,10 @@
   // views (owner, 2026-08-24): dialog first, then an open editor (compact:
   // "the list is the page; editing takes the screen"), then the floor.
   $effect(() => {
+    // Drill motion (design-language.md §1 navigation grammar): the editor
+    // enters from the right, the list re-enters from the left — derived from
+    // the one compound flag so every open/close path animates alike.
+    if (drilled !== wasDrilled) { drillAnim = drilled ? 'fwd' : 'back'; wasDrilled = drilled; }
     if (!onGoBack) return;
     onGoBack(() => {
       if (pending && !removing) { pending = null; return true; }
@@ -246,7 +253,7 @@
   }
 </script>
 
-<div class="agents-root" class:editing={!!editing || !!editingSkill || !!editingMcp}>
+<div class="agents-root" class:editing={drilled} class:drill-fwd={drillAnim === 'fwd'} class:drill-back={drillAnim === 'back'}>
   <aside class="sidebar">
     <SideHandle />
     <div class="side-scroll">
@@ -461,6 +468,14 @@
     /* Compact: the list is the page; editing takes the screen. */
     .agents-root.editing .sidebar { display: none; }
     .agents-root:not(.editing) .mid { display: none; }
+    /* Drill motion: same 120ms grammar as the app-level page slide. */
+    .agents-root.drill-fwd .mid { animation: drill-in-right 0.12s linear; }
+    .agents-root.drill-back .sidebar { animation: drill-in-left 0.12s linear; }
+  }
+  @keyframes drill-in-right { from { transform: translateX(40%); } to { transform: none; } }
+  @keyframes drill-in-left  { from { transform: translateX(-40%); } to { transform: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .agents-root.drill-fwd .mid, .agents-root.drill-back .sidebar { animation: none; }
   }
 
   .sidebar { position: relative; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }

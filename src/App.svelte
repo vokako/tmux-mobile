@@ -224,8 +224,8 @@
   // The gear toggles into it and back to where you were.
   let pageBeforePrefs = 'terminal';
   function togglePrefs() {
-    if (page === 'prefs') { page = pageBeforePrefs; }
-    else { pageBeforePrefs = page; page = 'prefs'; }
+    if (page === 'prefs') { page = pageBeforePrefs; slidePage('slide-in-left'); }
+    else { pageBeforePrefs = page; page = 'prefs'; slidePage('slide-in-right'); }
   }
   // Apply the persisted custom fonts (if any) before first paint — rewrites
   // --font-mono/--font-ui/--font-display inline; a no-op for the defaults.
@@ -912,7 +912,7 @@
       // Settings peels its open category back to the list first; only a
       // back with nothing to peel leaves the page.
       if (page === 'prefs' && prefsGoBack && prefsGoBack()) { navPush(); return; }
-      if (page === 'prefs') { page = pageBeforePrefs; return; }
+      if (page === 'prefs') { page = pageBeforePrefs; slidePage('slide-in-left'); return; }
       // At sessions root, re-push to prevent exit
       navPush();
     };
@@ -954,12 +954,18 @@
     // rail of buttons with no horizontal motion behind them, and pages slid
     // sideways for no reason (owner report) — worse on the wide three-column
     // pages, where a whole workspace lurches.
-    if (layout.isTouchDevice && fromIdx >= 0 && toIdx >= 0) {
-      slideAnim = toIdx > fromIdx ? 'slide-in-right' : 'slide-in-left';
-      requestAnimationFrame(() => {
-        setTimeout(() => { slideAnim = ''; }, SLIDE_ANIMATION_MS);
-      });
-    }
+    if (fromIdx >= 0 && toIdx >= 0) slidePage(toIdx > fromIdx ? 'slide-in-right' : 'slide-in-left');
+  }
+
+  /** The one page-slide trigger (touch only): every page-level navigation —
+   * tab switches, entering/leaving Settings — speaks the same 120ms grammar:
+   * deeper/rightward enters from the right, back/leftward from the left. */
+  function slidePage(dir) {
+    if (!layout.isTouchDevice || slideAnim) return;
+    slideAnim = dir;
+    requestAnimationFrame(() => {
+      setTimeout(() => { slideAnim = ''; }, SLIDE_ANIMATION_MS);
+    });
   }
 
   $effect(() => {

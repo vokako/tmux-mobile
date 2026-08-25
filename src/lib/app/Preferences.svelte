@@ -148,14 +148,21 @@
   // sidebar every page has — and a tap opens that category full screen, the
   // AgentsPage editor pattern. catOpen only means anything under 760px.
   let catOpen = $state(false);
+  // Drill motion (the navigation grammar in design-language.md §1): opening a
+  // category slides it in from the RIGHT, backing out slides the list in from
+  // the LEFT — the same 120ms the app-level tab slide speaks. The class
+  // toggling fwd↔back is what replays the animation; no timers.
+  let drillAnim = $state('');
+  function closeCat() { catOpen = false; drillAnim = 'back'; }
   $effect(() => {
     onGoBack?.(() => {
-      if (catOpen) { catOpen = false; return true; }
+      if (catOpen) { closeCat(); return true; }
       return false;
     });
   });
 
   function selectTab(value: string) {
+    if (!catOpen) drillAnim = 'fwd';
     catOpen = true;
     tab = value;
     recordingShortcut = '';
@@ -187,7 +194,7 @@
 <!-- Settings is a PAGE in the unified skeleton (ui-unification.md "Settings
      as a page"): shared sidebar with category rows, main column with a
      page-head. No backdrop, no X — the rail/tab bar is the way out. -->
-<section class="preferences" class:cat-open={catOpen} aria-label={t('settings')}>
+<section class="preferences" class:cat-open={catOpen} class:drill-fwd={drillAnim === 'fwd'} class:drill-back={drillAnim === 'back'} aria-label={t('settings')}>
   <aside class="sidebar">
     <SideHandle />
     <div class="side-scroll">
@@ -204,7 +211,7 @@
       <!-- Compact only: the way back to the category list (the back gesture
            does the same through onGoBack). -->
       <button class="icon-btn back" title={t('settings')} aria-label={t('settings')}
-        onclick={() => catOpen = false}>
+        onclick={closeCat}>
         <Icon name="chevron-left" size={15} />
       </button>
       <h1>{tabs.find((x) => x.id === tab)?.label() ?? t('settings')}</h1>
@@ -401,6 +408,15 @@
     .sidebar { border-right: none; }
     .sidebar :global(.side-row) { min-height: 44px; }
     .back { display: grid; }
+    /* Drill motion, compact only: deeper enters from the right, back from
+       the left — same 120ms grammar as the app-level page slide. */
+    .preferences.drill-fwd .pref-shell { animation: drill-in-right 0.12s linear; }
+    .preferences.drill-back .sidebar { animation: drill-in-left 0.12s linear; }
+  }
+  @keyframes drill-in-right { from { transform: translateX(40%); } to { transform: none; } }
+  @keyframes drill-in-left  { from { transform: translateX(-40%); } to { transform: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .preferences.drill-fwd .pref-shell, .preferences.drill-back .sidebar { animation: none; }
   }
   .pref-content { flex:1;min-width:0;overflow:auto;padding:14px clamp(12px,3vw,24px); }
   .setting-card { max-width:720px;margin:0 auto;border:1px solid var(--border2);border-radius:var(--ui-radius-panel);background:var(--surface);overflow:hidden; }

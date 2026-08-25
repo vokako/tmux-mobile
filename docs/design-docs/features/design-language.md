@@ -37,10 +37,25 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   `--status-danger` = failed/destructive, grey = at rest. A literal colour is
   wrong; compute expressions with `color-mix` over tokens (`ctxColor`).
 - **Motion**: `--t-fast 120ms` = micro feedback (hover, border, colour);
-  `--t-move 200ms` = things that move or resize (drawer, bars, width). Page
-  tab slide = 120ms. Spinner tempos are semantic, not tokens: 0.6s = loading,
-  2.2s = "a turn is open" (send button), breathe ≈ 1.3–5s (presence). Every
-  looping animation stills under `prefers-reduced-motion`.
+  `--t-move 200ms` = things that move or resize (drawer, bars, width).
+  Spinner tempos are semantic, not tokens: 0.6s = loading, 2.2s = "a turn is
+  open" (send button), breathe ≈ 1.3–5s (presence). Every looping animation
+  stills under `prefers-reduced-motion`.
+- **Navigation motion grammar** (owner, 2026-08-25: "对于交互动效也应该有
+  规范，大家都共同遵守"): ONE slide language, 120ms linear translateX(40%),
+  for every navigation — no fades, no scales, no second tempo. Direction is
+  meaning: going DEEPER (opening Settings, a drill-down category, an editor)
+  enters from the RIGHT; going BACK (back gesture, back button, closing
+  Settings) enters from the LEFT; lateral tab switches slide in the
+  direction of travel. Page-level slides are TOUCH-ONLY (`slidePage` in App
+  — desktop tabs are a rail with no motion behind them, owner rule);
+  compact drill-downs animate under 760px via the shared `drill-in-right`/
+  `drill-in-left` keyframe pair (Settings, Agents). SHEETS (sidebar
+  slide-overs, phone dialogs) instead slide on `--t-move` with a scrim.
+  POPOVERS (menus, selects) do not animate — they are placed, measured,
+  shown. A transform hint (`will-change`) may exist only WHILE a slide runs:
+  a resting transform turns the page into a containing block and breaks
+  every fixed popover.
 
 ## 2 · Layout skeletons
 
