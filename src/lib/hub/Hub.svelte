@@ -1186,6 +1186,7 @@
     }
     const a = managedAgents.find((x) => x.name === name);
     return [
+      { label: t('hubTalkTo'), icon: 'chat', onselect: () => setRecipient(name) },
       { label: t('hubWatch'), icon: 'terminal', onselect: () => { if (a) openDrawer(a); } },
       { label: t('hubInterrupt'), icon: 'x', onselect: () => interrupt(name) },
       { label: t('hubStop'), icon: 'stop', danger: true, onselect: () => askAction('stop', name) },
@@ -1242,7 +1243,10 @@
   $effect(() => {
     if (!menuFor) return;
     const close = () => { menuFor = ''; };
-    const onDown = (e) => { if (!e.target?.closest?.('.a-menu, .a-more')) close(); };
+    // .acard is the trigger now (the dots are gone): a pointerdown on a card
+    // must not pre-close the menu, or the click's toggle would reopen it —
+    // the toggle itself owns same-card close and other-card switch.
+    const onDown = (e) => { if (!e.target?.closest?.('.a-menu, .acard:not(.add)')) close(); };
     const onKey = (e) => { if (e.key === 'Escape') { close(); e.stopPropagation(); } };
     window.addEventListener('pointerdown', onDown, true);
     window.addEventListener('keydown', onKey, true);
@@ -1600,24 +1604,21 @@
             <!-- A div, not a button: the dot menu inside contains real buttons,
                  and a button inside a button is invalid HTML the browser
                  silently reshuffles. -->
+            <!-- ONE tap surface: the whole card opens the agent menu — the
+                 dots duplicated it for no gain ("交互上就是直接点击卡片出来
+                 选项就行，好像没必要单独点击三个点", owner 2026-08-25).
+                 Choosing the recipient moved into that menu's first item. -->
             <div class="acard" class:sel={recipient === a.name} role="button" tabindex="0"
               title={[`${a.name} · ${stateLabel(a.state)}`, a.detail, vitalsLine(a.vitals)].filter(Boolean).join(' · ')}
-              onclick={() => setRecipient(a.name)}
+              onclick={(e) => toggleAgentMenu(a.name, e.currentTarget)}
               oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), a.name, agentItems(a.name)); }}
               use:longpress={{ onlongpress: (pt) => openCtx(pt, a.name, agentItems(a.name)) }}
-              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setRecipient(a.name); } }}>
+              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleAgentMenu(a.name, e.currentTarget); } }}>
               <div class="ac-top">
                 {#if backendIcon(a.agent)}<img class="ava" src={backendIcon(a.agent)} alt={a.agent} />{:else}<span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>{/if}
                 <span class="a-name">{a.name}</span>
                 <span class="st" class:live={a.state === 'running'} style:background={stateDotColor(a.state)}></span>
                 {#if unread.has(a.name)}<span class="unread" title={t('hubUnread')}></span>{/if}
-                <!-- Destructive and secondary actions stay behind a dot menu: a
-                     roster is for seeing who is here, not a row of hazards. -->
-                <span class="a-more" role="button" tabindex="-1" title={t('hubMore')}
-                  onclick={(e) => { e.stopPropagation(); toggleAgentMenu(a.name, e.currentTarget); }}
-                  onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); toggleAgentMenu(a.name, e.currentTarget); } }}>
-                  <Icon name="dots" size={13} />
-                </span>
               </div>
               <!-- What the agent's own status line says, kept ON the card rather
                    than behind the menu ("这个直接常驻显示吧 可以字号小一点"). Model
@@ -1648,7 +1649,9 @@
                  lives in the menu, because a stopped agent you are done with
                  has to be ejectable — the slot is what keeps `up` recreating
                  it (owner, 2026-08-19). -->
-            <div class="acard off" class:busy={acting} role="group" aria-label={name}
+            <div class="acard off" class:busy={acting} role="button" tabindex="0" aria-label={name}
+              onclick={(e) => toggleAgentMenu(name, e.currentTarget)}
+              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleAgentMenu(name, e.currentTarget); } }}
               oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), name, agentItems(name)); }}
               use:longpress={{ onlongpress: (pt) => openCtx(pt, name, agentItems(name)) }}>
               <div class="ac-top">
@@ -1660,11 +1663,6 @@
                   onclick={(e) => { e.stopPropagation(); startAgent(name); }}>
                   <Icon name="refresh" size={11} />
                 </button>
-                <span class="a-more" role="button" tabindex="-1" title={t('hubMore')}
-                  onclick={(e) => { e.stopPropagation(); toggleAgentMenu(name, e.currentTarget); }}
-                  onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); toggleAgentMenu(name, e.currentTarget); } }}>
-                  <Icon name="dots" size={13} />
-                </span>
               </div>
             </div>
           {/each}
@@ -1715,6 +1713,11 @@
               <Icon name="refresh" size={12} />{t('hubStartAgain')}
             </button>
           {:else}
+            <!-- Choosing the recipient used to be the card's own click; the
+                 card opens this menu now, so the verb lives here, first. -->
+            <button role="menuitem" onclick={() => { const n = menuFor; menuFor = ''; setRecipient(n); }}>
+              <Icon name="chat" size={12} />{t('hubTalkTo')}
+            </button>
             <button role="menuitem" onclick={() => { const a = managedAgents.find((x) => x.name === menuFor); menuFor = ''; if (a) openDrawer(a); }}>
               <Icon name="terminal" size={12} />{t('hubWatch')}
             </button>
@@ -2423,9 +2426,6 @@
   .st.live { animation: s-pulse 1.4s ease-in-out infinite; }
   .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--status-danger); flex: none; }
   .ava.dim { background: var(--surface2) !important; color: var(--text3); }
-  /* Secondary and destructive actions hide until asked for. */
-  .a-more { display: grid; place-items: center; width: 20px; height: 22px; border-radius: 6px; color: var(--text3); flex: none; }
-  .a-more:hover { color: var(--text); background: var(--surface2); }
   /* The stopped card's ONE way back up: a real button in the .a-more dialect,
      accent-leaning so it reads as the card's action. The card surface around
      it is inert — see the stopped-card comment in the markup. */
