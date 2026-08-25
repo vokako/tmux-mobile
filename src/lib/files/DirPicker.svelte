@@ -84,7 +84,7 @@
   }
   .pk-err { color: var(--danger); font-size: var(--fs-meta); }
   .pk-list {
-    flex: 1; min-height: 140px; max-height: 42vh; overflow-y: auto;
+    flex: 1; min-height: 140px; max-height: calc(42vh / var(--ui-zoom, 1)); overflow-y: auto;
     border: 1px solid var(--border); border-radius: var(--ui-radius-control); background: var(--input-bg);
   }
   .pk-row {

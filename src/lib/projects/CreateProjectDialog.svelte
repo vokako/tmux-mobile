@@ -100,7 +100,13 @@
   .dlg-backdrop { position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,0.45); }
   .dlg {
     position: fixed; z-index: 31; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    width: min(440px, calc(100vw - 32px)); max-height: min(80vh, 640px); overflow-y: auto;
+    /* Every vh/vw here is divided by --ui-zoom: the web/Android interface
+       scaling is CSS `zoom` on <html>, which scales rendered pixels but NOT
+       viewport units — at zoom > 1 a raw 80vh dialog is TALLER than the
+       screen, and the DirPicker's confirm footer sat below the bottom edge,
+       unreachable ("创建project选择路径，没看到确认按钮，没法完成选择",
+       owner 2026-08-25). Same convention as ConfirmDialog and main. */
+    width: min(440px, calc(100vw / var(--ui-zoom, 1) - 32px)); max-height: min(calc(80vh / var(--ui-zoom, 1)), 640px); overflow-y: auto;
     background: var(--bg2); border: 1px solid var(--border); border-radius: 18px;
     padding: 18px; display: flex; flex-direction: column; gap: 9px;
     box-shadow: 0 18px 48px rgba(0,0,0,0.35);
@@ -111,7 +117,7 @@
     top: auto; left: 0; right: 0; bottom: 0; transform: none; width: auto;
     border-radius: 18px 18px 0 0; padding-bottom: calc(18px + env(safe-area-inset-bottom));
   }
-  .dlg.sheet .dlg-agents { max-height: 46vh; overflow-y: auto; }
+  .dlg.sheet .dlg-agents { max-height: calc(46vh / var(--ui-zoom, 1)); overflow-y: auto; }
   .dlg.sheet .agent-pick, .dlg.sheet input, .dlg.sheet .dlg-actions button { min-height: 44px; }
   .dlg input { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: var(--ui-radius-control); color: var(--text); padding: 8px 12px; font-size: var(--fs-ui); outline: none; }
   .dlg input:focus { border-color: var(--accent); }

@@ -44,7 +44,7 @@
 <style>
   .ci-link { display: block; }
   .ci {
-    display: block; max-width: 100%; max-height: 42vh; width: auto; height: auto;
+    display: block; max-width: 100%; max-height: calc(42vh / var(--ui-zoom, 1)); width: auto; height: auto;
     border-radius: 9px; border: 1px solid var(--border2); background: var(--surface2);
   }
   .ci-ref {

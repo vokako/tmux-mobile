@@ -150,7 +150,7 @@
     z-index: 31;
     max-width: calc(100% - 12px);
     min-width: 200px;
-    max-height: 60vh;
+    max-height: calc(60vh / var(--ui-zoom, 1));
     overflow-y: auto;
     background: var(--bg);
     border: 1px solid var(--border);

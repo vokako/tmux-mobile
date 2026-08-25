@@ -2244,7 +2244,7 @@
   .hub-root.compact .compose-shell { padding: 6px 9px; border-radius: 15px; }
   .hub-root.compact .to-chip { max-width: 110px; height: 28px; }
   .hub-root.compact .to-label { display: none; }
-  .hub-root.compact .c-input { min-height: 30px; font-size: var(--fs-body); max-height: 40vh; }
+  .hub-root.compact .c-input { min-height: 30px; font-size: var(--fs-body); max-height: calc(40vh / var(--ui-zoom, 1)); }
   .hub-root.compact .send-btn { width: 32px; height: 32px; right: 6px; bottom: 4.5px; border-radius: var(--ui-radius-control); }
   .hub-root.compact .chip-btn { min-height: 34px; }
   .hub-root.compact .s-head { min-height: 34px; }
@@ -2506,7 +2506,7 @@
      through scroll anchoring; the feed has `overflow-anchor: none` now, and this
      cap is entered only by an explicit click, not by the boundary test. */
   .msg.held .m-body.held-scroll {
-    max-height: min(62vh, 560px);
+    max-height: min(calc(62vh / var(--ui-zoom, 1)), 560px);
     overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
     /* Room for the scrollbar: the trailer floats at the text's right edge, and a
        bar drawn over it reads as clutter. */
@@ -2874,7 +2874,7 @@
   .note-dot { border: 1px dashed var(--text3); background: none; }
   .to-menu {
     position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 12;
-    min-width: 168px; max-height: 46vh; overflow-y: auto;
+    min-width: 168px; max-height: calc(46vh / var(--ui-zoom, 1)); overflow-y: auto;
     background: var(--bg); border: 1px solid var(--border); border-radius: var(--ui-radius-panel);
     box-shadow: 0 12px 34px rgba(0,0,0,0.45); padding: 5px; display: flex; flex-direction: column; gap: 2px;
   }
@@ -2893,7 +2893,7 @@
      because a command list is read as rows of name + description. */
   .cmd-menu {
     position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; z-index: 14;
-    max-height: 44vh; overflow-y: auto; scrollbar-width: thin;
+    max-height: calc(44vh / var(--ui-zoom, 1)); overflow-y: auto; scrollbar-width: thin;
     background: var(--bg); border: 1px solid var(--border); border-radius: var(--ui-radius-panel);
     box-shadow: 0 12px 34px rgba(0,0,0,0.45); padding: 5px;
     display: flex; flex-direction: column; gap: 2px;
@@ -2916,7 +2916,7 @@
   .to-menu button.sel { color: var(--accent); background: var(--accent-bg); }
   .all-dot { border: 1px solid var(--text3); background: none; }
   .c-input {
-    display: block; width: 100%; min-height: 28px; max-height: 34vh;
+    display: block; width: 100%; min-height: 28px; max-height: calc(34vh / var(--ui-zoom, 1));
     padding: 5px 0 4px; background: transparent; border: none; outline: none;
     color: var(--text); font-size: var(--fs-body); line-height: 1.5;
     resize: none; overflow-y: auto;
@@ -3026,11 +3026,11 @@
      never fight the on-screen keyboard for the middle of the screen. */
   .dlg.sheet {
     left: 0; top: auto; bottom: 0; transform: none;
-    width: 100%; max-width: none; max-height: 82vh;
+    width: 100%; max-width: none; max-height: calc(82vh / var(--ui-zoom, 1));
     border-radius: 18px 18px 0 0; border-left: none; border-right: none; border-bottom: none;
     padding: 16px 14px calc(16px + env(safe-area-inset-bottom));
   }
-  .dlg.sheet .dlg-agents { max-height: 46vh; overflow-y: auto; }
+  .dlg.sheet .dlg-agents { max-height: calc(46vh / var(--ui-zoom, 1)); overflow-y: auto; }
   .dlg.sheet .agent-pick, .dlg.sheet input, .dlg.sheet .dlg-actions button { min-height: 44px; }
   .dlg input { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: var(--ui-radius-control); color: var(--text); padding: 8px 12px; font-size: var(--fs-ui); outline: none; }
   .dlg input:focus { border-color: var(--accent); }

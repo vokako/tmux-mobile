@@ -843,7 +843,7 @@
   .team-pick-backdrop { position: fixed; inset: 0; z-index: 30; background: transparent; border: none; }
   .team-pick-menu {
     position: absolute; top: 28px; left: 0; z-index: 31;
-    min-width: 200px; max-width: 280px; max-height: 50vh; overflow-y: auto;
+    min-width: 200px; max-width: 280px; max-height: calc(50vh / var(--ui-zoom, 1)); overflow-y: auto;
     background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
     box-shadow: 0 12px 40px rgba(0,0,0,0.4); padding: 4px;
   }

@@ -365,7 +365,7 @@
   .tpl-modal {
     position: fixed; z-index: 41;
     top: 50%; left: 50%; transform: translate(-50%, -50%);
-    width: min(720px, 94vw); height: min(80vh, 720px);
+    width: min(720px, calc(94vw / var(--ui-zoom, 1))); height: min(calc(80vh / var(--ui-zoom, 1)), 720px);
     display: flex; flex-direction: column;
     background: var(--bg); border: 1px solid var(--border); border-radius: 14px;
     box-shadow: 0 20px 60px rgba(0,0,0,0.5); overflow: hidden;
@@ -443,7 +443,7 @@
   .tpl-picker-backdrop { position: fixed; inset: 0; z-index: 50; border: none; background: none; }
   .tpl-picker-menu {
     position: absolute; left: 14px; right: 14px; top: 100%; z-index: 51; margin-top: 2px;
-    max-height: 50vh; overflow-y: auto;
+    max-height: calc(50vh / var(--ui-zoom, 1)); overflow-y: auto;
     background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
     box-shadow: 0 12px 30px rgba(0,0,0,0.4); padding: 4px;
   }

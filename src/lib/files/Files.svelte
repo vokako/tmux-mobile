@@ -1571,7 +1571,7 @@
   /* Bookmarks / Recent panel */
   .bookmarks-panel {
     border-bottom: 1px solid var(--border2); flex-shrink: 0;
-    max-height: 40vh; overflow-y: auto;
+    max-height: calc(40vh / var(--ui-zoom, 1)); overflow-y: auto;
     -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
   }
   .bm-row {

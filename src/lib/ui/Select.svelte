@@ -216,7 +216,7 @@
 
   /* Same popover dialect as the Hub's menus: one menu language app-wide. */
   .sel-menu {
-    position: fixed; z-index: 40; max-height: 46vh; overflow-y: auto;
+    position: fixed; z-index: 40; max-height: calc(46vh / var(--ui-zoom, 1)); overflow-y: auto;
     background: var(--bg); border: 1px solid var(--border); border-radius: var(--ui-radius-panel);
     box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45); padding: 5px;
     display: flex; flex-direction: column; gap: 2px;
