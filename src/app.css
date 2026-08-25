@@ -254,6 +254,7 @@ button:disabled {
   transition: border-color var(--t-fast), color var(--t-fast);
 }
 .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+.icon-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
 
 .side-h {
   /* Identity layer: the display face (was mono). Uppercase Space Grotesk at

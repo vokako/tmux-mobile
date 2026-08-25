@@ -1540,31 +1540,42 @@
              only, same as before. -->
         {#if !compact}<span class="path" use:wheelX title={selectedRow?.project.path ?? ''}>{selectedRow?.project.path ?? ''}</span>{/if}
         <span class="spacer"></span>
+        <!-- Header actions are ONE dialect: icon-only .icon-btn, the label on
+             hover via title (and aria-label for readers). Mixed text-and-icon
+             chips read as three different kinds of control (owner, 2026-08-25:
+             "删除 关闭 命令按钮 都不统一 有的文字 有的图案，可以改成图案 鼠标
+             悬停显示按钮文字"). Icons match the project context menu's verbs:
+             zap=up, stop=down, trash=delete. -->
         {#if selected}
           <!-- Delete is offered whether or not the session is live: it is the
                "this project should stop existing" verb, so it does the closing
                itself. Confirmed like every consequential action. -->
-          <button class="chip-btn danger" title={t('projectDeleteHint')}
+          <button class="icon-btn danger" title={`${t('projectDelete')} — ${t('projectDeleteHint')}`}
+            aria-label={t('projectDelete')}
             onclick={() => askAction('delete', selectedRow?.project.name ?? '')}>
-            <Icon name="trash" size={13} />{#if !compact}{t('projectDelete')}{/if}
+            <Icon name="trash" size={13} />
           </button>
         {/if}
         {#if selected && !liveSelected}
-          <button class="chip-btn" onclick={bringUp}>{t('projectOpen')}</button>
+          <button class="icon-btn" title={t('projectOpen')} aria-label={t('projectOpen')} onclick={bringUp}>
+            <Icon name="zap" size={13} />
+          </button>
         {:else if selected}
           <!-- Closing is the counterpart of Open, in the same slot: it kills
                the tmux session and keeps the project, so the header shows
                exactly one of the two depending on what is true now. -->
-          <button class="chip-btn danger" title={t('projectDownHint')}
+          <button class="icon-btn danger" title={`${t('projectDown')} — ${t('projectDownHint')}`}
+            aria-label={t('projectDown')}
             onclick={() => askAction('down', selectedRow?.project.name ?? '')}>
-            {t('projectDown')}
+            <Icon name="stop" size={13} />
           </button>
         {/if}
         <!-- THE terminal affordance: a button, not a permanent pane. Adding an
              agent belongs to the roster row, and chat detail belongs to
              Settings — a header is not a place to keep spare switches. -->
-        <button class="chip-btn term-toggle" class:on={termOpen} title={t('hubTerminal')} onclick={() => termOpen && !compact ? closeDrawer() : openDrawer()}>
-          <Icon name="terminal" size={14} />{#if !compact}<span>{t('hubTerminal')}</span>{/if}
+        <button class="icon-btn term-toggle" class:on={termOpen} title={t('hubTerminal')} aria-label={t('hubTerminal')}
+          onclick={() => termOpen && !compact ? closeDrawer() : openDrawer()}>
+          <Icon name="terminal" size={14} />
         </button>
       </div>
 
@@ -2220,16 +2231,11 @@
      "打开terminal的按钮给换行到第二行了"). The title is the flexible child —
      .h1-text ellipsizes — and the buttons refuse to shrink. */
   .hub-root.compact .page-head { flex-wrap: nowrap; row-gap: 6px; padding: 8px 12px; gap: 7px; }
-  /* Quiet, small chrome: at phone width these are icon squares, and the
-     desktop chip's 5px/11px padding on a 10px radius read as blobs ("这几个
-     按钮好像有点大 看起来笨笨的", owner 2026-08-21). The VISUAL box tightens
-     to ~26px with a proportionally smaller corner; the TAP target stays
-     ~42px via the invisible overlay (the token contract's hit rule). */
-  .hub-root.compact .page-head .chip-btn {
-    flex: none; position: relative;
-    padding: 4px 7px; min-height: 26px; border-radius: 8px;
-  }
-  .hub-root.compact .page-head .chip-btn::before { content: ''; position: absolute; inset: -8px; }
+  /* The header actions are 28×25 icon squares; on the phone the VISUAL box
+     stays small and the TAP target grows to ~42px via the invisible overlay
+     (the token contract's hit rule). */
+  .hub-root.compact .page-head :global(.icon-btn) { position: relative; }
+  .hub-root.compact .page-head :global(.icon-btn)::before { content: ''; position: absolute; inset: -8px; }
   .hub-root.compact .page-head h1 { font-size: var(--fs-title); }
   .hub-root.compact .h1-edit { font-size: var(--fs-title); }
   /* Bottom padding tight against the composer: the capsule brings its own 8px
