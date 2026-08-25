@@ -1346,7 +1346,7 @@
     display: grid; place-items: center;
     border: none; border-radius: var(--ui-radius-control); background: none;
     color: var(--text3); cursor: pointer;
-    transition: color 160ms, background 160ms;
+    transition: color var(--t-fast), background var(--t-fast);
     -webkit-tap-highlight-color: transparent;
   }
   .rail-btn:hover { color: var(--text); background: var(--surface2); }

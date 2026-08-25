@@ -501,7 +501,7 @@
     display: flex; align-items: center; gap: 5px;
     background: var(--surface); border: 1px solid var(--border); border-radius: 999px;
     color: var(--text2); padding: 4px 10px; font-size: var(--fs-ui); cursor: pointer;
-    transition: border-color 160ms, color 160ms;
+    transition: border-color var(--t-fast), color var(--t-fast);
   }
   .pick:hover { border-color: var(--input-border); }
   .pick.sel { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }

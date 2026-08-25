@@ -892,7 +892,7 @@
     border-radius: 50%;
     background: var(--text3);
     flex-shrink: 0;
-    transition: all 0.2s ease;
+    transition: border-color var(--t-fast), background var(--t-fast), color var(--t-fast);
   }
   .dot.attached {
     background: var(--accent);
@@ -1167,7 +1167,7 @@
     align-items: center;
     justify-content: center;
     -webkit-tap-highlight-color: transparent;
-    transition: color 0.2s, border-color 0.2s;
+    transition: color var(--t-fast), border-color var(--t-fast);
   }
   .refresh-icon:active { color: var(--accent); border-color: var(--accent); }
   .refresh-icon.spinning { color: var(--accent); animation: spin 0.6s ease; }

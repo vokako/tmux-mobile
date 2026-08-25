@@ -20,6 +20,8 @@
   import { notificationForWindow } from '../core/agent-notifications.svelte.ts';
   import Icon from '../ui/Icon.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
+  import ContextMenu from '../ui/ContextMenu.svelte';
+  import { longpress } from '../ui/longpress.ts';
   import { t } from '../core/i18n.svelte.ts';
 
   let { visible = false, openTerminal, panes = {}, onTracked = () => {}, onReady = () => {}, dense = false, activeTarget = '' }: {
@@ -49,6 +51,30 @@
    * the app's confirmation says what actually happens instead (the session is
    * left alone — this forgets the declaration). */
   let pendingArchive = $state<{ id: string; name: string } | null>(null);
+
+  // Right-click / long-press on a row: the SAME verbs the row already offers
+  // (design-language.md §5 — a context menu is never a second source of
+  // truth), in rising-consequence order. The Chat sidebar's rows had this and
+  // the Terminal sidebar's did not (owner, 2026-08-25: "终端页面 侧边栏
+  // 右键/长按效果" in the uniformity sweep).
+  let ctxAt = $state<{ x: number; y: number } | null>(null);
+  let ctxWho = $state('');
+  let ctxItems = $state<{ label: string; icon?: string; danger?: boolean; onselect: () => void }[]>([]);
+  const pointOf = (e: MouseEvent) => ({ x: e.clientX ?? 0, y: e.clientY ?? 0 });
+  const closeCtx = () => { ctxAt = null; ctxItems = []; };
+  function rowItems(row: ProjectRow) {
+    return [
+      row.live
+        ? { label: t('projectDown'), icon: 'stop', danger: true, onselect: () => run(row.project.id, () => projectDown(row.project.id)) }
+        : { label: t('projectUp'), icon: 'zap', onselect: () => run(row.project.id, () => projectUp(row.project.id)) },
+      { label: t('projectArchive'), icon: 'x', danger: true, onselect: () => (pendingArchive = { id: row.project.id, name: row.project.name }) },
+    ];
+  }
+  function openCtx(at: { x: number; y: number }, row: ProjectRow) {
+    ctxWho = row.project.name;
+    ctxItems = rowItems(row);
+    ctxAt = at;
+  }
   let collapsed = $state(false);
 
   const sorted = $derived(sortRows(rows));
@@ -166,7 +192,10 @@
       {#each sorted as row (row.project.id)}
         {@const chips = chipsFor(row)}
         <div class="proj" class:live={row.live}
-          class:open={dense && !!activeTarget && activeTarget.startsWith(row.project.session + ':')}>
+          class:open={dense && !!activeTarget && activeTarget.startsWith(row.project.session + ':')}
+          role="group" aria-label={row.project.name}
+          oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), row); }}
+          use:longpress={{ onlongpress: (pt) => openCtx(pt, row) }}>
           <div class="proj-top">
             <button class="proj-main" onclick={() => open(row)} title={row.project.path}>
               <span class="dot" class:on={row.live}></span>
@@ -237,6 +266,8 @@
     {/if}
   </section>
 {/if}
+
+<ContextMenu at={ctxAt} items={ctxItems} who={ctxWho} oncancel={closeCtx} />
 
 <ConfirmDialog open={!!pendingArchive}
   title={pendingArchive ? t('projectArchiveConfirmTitle').replace('{name}', pendingArchive.name) : ''}

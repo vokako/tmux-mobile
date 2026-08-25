@@ -117,6 +117,7 @@ end up shipping the wrong tree.
 - [Filesystem Service](docs/requirements/backend/services/filesystem.md)
 
 ### Design Docs (the WHY & HOW)
+- [**The design language** (normative: tokens, dialects, hover, menus, motion — check EVERY new surface against it)](docs/design-docs/features/design-language.md)
 - [Fonts (bundled Inter UI face + Space Grotesk identity layer + system mono + symbol bundles + custom override)](docs/design-docs/features/fonts.md)
 - [Terminal Touch Handling](docs/design-docs/pages/terminal-touch.md)
 - [Terminal Gesture State Machine](docs/design-docs/pages/terminal-gestures.md)
@@ -144,6 +145,7 @@ end up shipping the wrong tree.
 - [Unresolved Issues](docs/unresolved.md)
 
 ## Key Patterns
+- **The design language is a CONTRACT** (`docs/design-docs/features/design-language.md`, owner 2026-08-25: "设定好一套规范 让以后的新功能也能完美和谐统一"): six type steps + three font roles + the radius scale + the two hover families (controls: accent border; rows/menu items: surface2 wash) + ONE popover mechanism + rising-consequence menu order + `--t-fast/--t-move` motion + 760px compact with sheet-or-drilldown + 44px touch overlays. New surfaces REUSE the dialects in §3 or retire an old one — a new species is a regression. The doc lists what the source tests already enforce.
 - **TypeScript migration (in progress)**: new modules are written in TS; existing `.js` is converted file-by-file (rename + types, no logic changes in the same commit). Rules: relative imports use **explicit `.ts` extensions** (the same files are executed by both Vite and `node --test`, which does native type stripping — needs Node ≥ 23.6); **erasable syntax only** (no enums/namespaces — `erasableSyntaxOnly` enforces this); type-checking is `npm run check` only (Vite/node never type-check). svelte-check requires TypeScript 5.x (7.x is the incompatible Go rewrite — both are pinned exact).
 - **Platform checks**: `isTauri` (Tauri vs browser), `isAndroid` (Android vs macOS). Always check `isAndroid` first.
 - **Tauri plugins**: Always `await tauriReady` before use. Dynamic imports gated behind platform checks.
