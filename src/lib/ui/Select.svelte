@@ -43,7 +43,6 @@
   let triggerEl: HTMLButtonElement | null = $state(null);
   let inputEl: HTMLInputElement | null = $state(null);
   let anchor = $state<AnchorRect | null>(null);
-  let menuW = $state(0);
   let menuH = $state(0);
   /** Keyboard cursor while open; -1 until the user arrows. */
   let cursor = $state(-1);
@@ -64,12 +63,25 @@
     })(),
   );
 
-  const pos = $derived(anchor ? menuPlacement(anchor, { w: menuW, h: menuH }, viewBox(), 4) : { x: 0, y: 0 });
+  // EXACTLY as wide as the field: with the menu right-aligned to the trigger,
+  // equal widths make both edges line up, which is what a field-shaped picker
+  // has to do. A max-width clamp would break that on the wide side, so the only
+  // clamp is menuPlacement's viewport one.
+  const fieldW = $derived(anchor ? Math.round(anchor.right - anchor.left) : 0);
+
+  // The menu is styled to the FIELD's width, so the placement math uses that
+  // number directly. Measuring the box back (bind:clientWidth) fed
+  // menuPlacement a width MINUS border and — on desktop, where scrollbars are
+  // classic and take real space — minus ~17px of scrollbar whenever the list
+  // was long enough to scroll: right-aligned as `anchor.right - w`, the menu
+  // overshot the field's right edge by exactly that much (owner, 2026-08-25:
+  // "桌面端…下拉框…左右位置偏了"). Overlay-scrollbar platforms never showed it.
+  const pos = $derived(anchor ? menuPlacement(anchor, { w: fieldW, h: menuH }, viewBox(), 4) : { x: 0, y: 0 });
 
   function show() {
     if (disabled || !(triggerEl ?? inputEl)) return;
     anchor = anchorOf((triggerEl ?? inputEl)!);
-    menuW = 0; menuH = 0;
+    menuH = 0;
     cursor = shown.findIndex((o) => o.value === value);
     open = true;
   }
@@ -80,12 +92,6 @@
     value = v;
     onchange(v);
   }
-
-  // EXACTLY as wide as the field: with the menu right-aligned to the trigger,
-  // equal widths make both edges line up, which is what a field-shaped picker
-  // has to do. A max-width clamp would break that on the wide side, so the only
-  // clamp is menuPlacement's viewport one.
-  const fieldW = $derived(anchor ? Math.round(anchor.right - anchor.left) : 0);
 
   // Dismissal, on everything that means "I moved on": a click elsewhere,
   // Escape, a scroll under the anchor, a resize.
@@ -150,7 +156,7 @@
 {#if open && shown.length}
   <div class="sel-menu" class:ready={menuH > 0} role="listbox" tabindex="-1" id="sel-combo-list"
     style:left="{pos.x}px" style:top="{pos.y}px" style:width="{fieldW}px"
-    bind:clientWidth={menuW} bind:clientHeight={menuH}>
+    bind:clientHeight={menuH}>
     {#each shown as o, i (o.value)}
       <button class="sel-opt" class:sel={o.value === value} class:cur={i === cursor}
         role="option" aria-selected={o.value === value} type="button"
