@@ -734,6 +734,17 @@
     : recipient ? [recipient] : []);
   const intWho = $derived(recipient === ALL_TARGET ? '@all' : recipient ? `@${recipient}` : '');
 
+  // The recipient's turn is OPEN (running a turn, or holding an ask) — the
+  // send button wears a slow spinner around a stop square, the reader's cue
+  // that "this one is mid-turn, tapping here is how you cut it" (owner,
+  // 2026-08-25: the lightning bolt "看着好像不是那么容易理解"). Not for
+  // idle/failed: an ended turn has nothing to interrupt.
+  const BUSY_STATES = ['running', 'working', 'waiting', 'blocked'];
+  const recipientBusy = $derived(
+    recipient === ALL_TARGET
+      ? managedAgents.some((a) => BUSY_STATES.includes(a.state))
+      : managedAgents.some((a) => a.name === recipient && BUSY_STATES.includes(a.state)));
+
   /** First activation arms; the second (button or Ctrl+C, mixable) fires. */
   function armInterrupt() {
     if (!selected || !intTargets.length) return;
@@ -2015,12 +2026,25 @@
         {#if intArm}
           <div class="int-pill" role="status">{t('hubIntArmed').replace('{who}', intWho)}</div>
         {/if}
-        <button class="send-btn" class:muted={!composerText.trim() && !intArm} class:arm={intArm}
+        <button class="send-btn" class:muted={!composerText.trim() && !intArm && !recipientBusy} class:arm={intArm}
+          class:busy={recipientBusy && !composerText.trim() && !intArm}
           onclick={() => (composerText.trim() ? send() : armInterrupt())}
           title={intArm ? t('hubIntArmed').replace('{who}', intWho) : composerText.trim() ? t('hubSend') : t('hubIntHint')}
           aria-label={intArm ? t('hubIntArmed').replace('{who}', intWho) : composerText.trim() ? t('hubSend') : t('hubIntHint')}
           disabled={!selected || (!composerText.trim() && !intTargets.length)}>
-          <Icon name={intArm ? 'zap' : 'send-up'} size={15} />
+          {#if !composerText.trim() && (intArm || recipientBusy)}
+            <!-- A stop square inside a slowly circling arc: the "mid-turn, tap
+                 to cut it" glyph every chat product speaks. Armed keeps the
+                 same glyph on the amber ground — same object, hotter state —
+                 instead of the lightning bolt nobody read as "interrupt". -->
+            <svg class="stop-spin" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+              <circle class="ss-ring" cx="10" cy="10" r="8" fill="none" stroke="currentColor"
+                stroke-width="1.6" stroke-linecap="round" stroke-dasharray="37.7 12.6" />
+              <rect x="6.6" y="6.6" width="6.8" height="6.8" rx="1.7" fill="currentColor" />
+            </svg>
+          {:else}
+            <Icon name="send-up" size={15} />
+          {/if}
         </button>
         </div>
       </div>
@@ -2885,8 +2909,18 @@
   /* Empty composer: clickable but wearing the resting grey — the tap is an
      ARM, not a send, and the button must not advertise accent urgency. */
   .send-btn.muted { background: var(--surface2); color: var(--text3); }
+  /* The recipient is mid-turn: same resting ground, but the glyph is the
+     spinner-around-a-stop-square in accent — alive, not urgent. The button
+     still ARMS first; this state only changes what it looks like at rest. */
+  .send-btn.busy { background: var(--surface2); color: var(--accent); }
   /* Armed: the one attention colour — interrupt asks a person to confirm. */
   .send-btn.arm { background: var(--status-warn); color: var(--accent-fill-ink); }
+  /* Deliberately unhurried (owner: "动画不用很快"): a fast spin says
+     "loading", this says "a turn is open". The square stays put; only the
+     arc travels. */
+  .ss-ring { transform-origin: 50% 50%; animation: stop-spin 2.2s linear infinite; }
+  @keyframes stop-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .ss-ring { animation: none; } }
   /* What the armed button will do, in words, above it — a phone has no hover
      for the title. pointer-events off: it is a caption, not a control. */
   .int-pill {

@@ -1345,10 +1345,19 @@ stop/restart. It leaves a mark now: a successful interrupt posts
 (amber: a turn cut short, not an ending) and the owner asked to SEE the act in
 the conversation ("发送 interrupt 的状态在消息列表里也要展示出来", 2026-08-24).
 The composer carries the verb too, behind two beats: with the box EMPTY the
-grey send button stays clickable — the first tap ARMS it (amber, `zap` icon,
+grey send button stays clickable — the first tap ARMS it (amber,
 a caption pill naming the target, since a phone has no hover to read a title
 from) and the second fires; double Ctrl+C on the empty composer is the same
-arm/fire pair, and with text present Ctrl+C remains the browser's copy. The
+arm/fire pair, and with text present Ctrl+C remains the browser's copy. While
+the recipient is MID-TURN (hook-derived running/waiting; any managed agent for
+`@all`) the resting button already says so: a stop square inside a slowly
+circling arc — 2.2s, because a fast spin says "loading" while this says "a
+turn is open"; accent on the resting grey, stilled under
+`prefers-reduced-motion`. The armed state keeps that same glyph on the amber
+ground: one object moving through hotter states, replacing the `zap` bolt that
+read as nothing ("我看打断是闪电，看着好像不是那么容易理解", owner
+2026-08-25). Idle and failed recipients keep the plain grey arrow — an ended
+turn has nothing to interrupt. The
 interrupt goes to whoever the composer is addressing — the recipient, or all
 managed agents for `@all`; an unaddressed room note arms nothing, because a
 room note interrupts nobody. An armed button stands down on its own: 3 s
