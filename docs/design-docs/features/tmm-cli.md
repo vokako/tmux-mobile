@@ -819,10 +819,25 @@ information" made the card blink empty (owner, 2026-08-19: "context window 和�
 gaps FIELD BY FIELD — a pane often shows the wrapped branch line while the status
 line itself has scrolled off, and half a reading is still half a reading. A fresh
 value always wins, so a `/model` swap shows up at once; the memory expires after
-`VITALS_TTL_SECS` (5 min) and `retain_windows` drops it with the window, so a new
+`VITALS_TTL_SECS` (1 h) and `retain_windows` drops it with the window, so a new
 agent cannot inherit the last one's numbers. The per-backend sniffers stay pure and
 tested; the
 memory is a thin layer over it.
+
+And polling is no longer the only thing that FILLS the memory. The poll reads
+whatever the pane happens to show at poll time, so a fresh page often showed
+nothing until some later poll caught the status line (owner, 2026-08-25:
+"在每次有消息发送的或者 hooks 的时候嗅探上下文用量，并且服务端记录这个状态，
+客户端随时能获取到，现在经常看到没有信息，过了一会儿才出来").
+`vitals::sniff_window_soon` sniffs at the EVENTS that make a pane fresh — every
+hook edge (`userPromptSubmit`, a tool row, stop/ask) and every chat line
+`deliver_mentions` types — delayed ~1.2 s because the TUI needs a beat to repaint
+its footer, throttled to one capture per window per 3 s so a burst of tool hooks
+costs one read, on a throwaway thread because telemetry may never block what it
+observes, and behind the same managed-only gate as `hub_agents` (a no-op under
+`cfg(test)`). The reading lands in the same memory the poll answers from, so the
+client sees the last known state immediately instead of waiting for a lucky
+capture.
 
 The owner's other half was right too, and it was a client bug: `loadAgents` did
 `catch { agents = [] }`, so a dropped socket or one timed-out RPC emptied the whole

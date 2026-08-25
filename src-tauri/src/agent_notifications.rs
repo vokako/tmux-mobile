@@ -243,6 +243,9 @@ impl AgentNotificationHub {
             {
                 let (session, window, _) = tmux::resolve_pane_id(&envelope.pane_id)?;
                 crate::projects::telemetry::record_tool(&session, window, &tool, &detail);
+                // The pane just painted a tool row — the freshest moment to
+                // read its status furniture. Throttled + async inside.
+                crate::projects::vitals::sniff_window_soon(&session, window);
             }
             return Ok(());
         }
@@ -259,6 +262,8 @@ impl AgentNotificationHub {
                     crate::projects::telemetry::record_prompt(&session, window, prompt);
                 }
             }
+            // A turn just opened: sniff while the pane is fresh.
+            crate::projects::vitals::sniff_window_soon(&session, window);
             return Ok(());
         }
         let normalized = normalize(&envelope)?;
@@ -267,7 +272,12 @@ impl AgentNotificationHub {
         // Feed the telemetry channel BEFORE dedupe: dedupe is a notification-UI
         // concern; status derivation wants every observed fact.
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        crate::projects::telemetry::record_notification(&session, window, &normalized.kind, timestamp);
+        {
+            crate::projects::telemetry::record_notification(&session, window, &normalized.kind, timestamp);
+            // A turn edge (stop, ask) means the CLI just repainted its footer —
+            // the context-usage number is at its freshest right here.
+            crate::projects::vitals::sniff_window_soon(&session, window);
+        }
 
         // Stop hook auto-post: post the agent's final reply to the project
         // room when all conditions are met:

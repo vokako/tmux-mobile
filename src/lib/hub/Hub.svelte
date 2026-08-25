@@ -37,7 +37,7 @@
   import CreateProjectDialog from '../projects/CreateProjectDialog.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
-  let { visible = false, fontSize = 14, mobile = false, openTerminal = () => {}, onSelectSession = (_s) => {}, onGoBack = null } = $props();
+  let { visible = false, fontSize = 14, mobile = false, openTerminal = () => {}, onSelectSession = (_s) => {}, onGoBack = null, openAgentConfig = null } = $props();
 
   // Layout follows the viewport, not the device class (a squeezed desktop
   // window must not overflow). `mobile` still decides behavior defaults.
@@ -579,7 +579,20 @@
   });
   const palette = $derived(paletteOff ? null : commandPalette(composerText, cmdModels[paletteBackend] ?? [], paletteBackend));
   // The open menu's agent, as its status line reads right now.
-  const vitalsFor = $derived(vitalsLine(managedAgents.find((a) => a.name === menuFor)?.vitals));
+  // The menu header's reading DROPS the model: the model belongs to the
+  // agent's CONFIG, and the menu now links there instead of quoting it
+  // (owner, 2026-08-25: "菜单里不应该有模型名，可以有一个跳转到模型配置的
+  // 页面的选项"). Context/effort/branch stay — they are live state, not
+  // configuration.
+  const vitalsFor = $derived((() => {
+    const v = managedAgents.find((a) => a.name === menuFor)?.vitals;
+    if (!v) return '';
+    const parts = [];
+    if (v.context_pct != null) parts.push(`${v.context_pct}% ctx`);
+    if (v.effort) parts.push(v.effort);
+    if (v.branch) parts.push(v.branch);
+    return parts.join(' · ');
+  })());
   $effect(() => { void composerText; paletteOff = false; });
   // The draft survives a reload because a half-written message is work. Written
   // on every keystroke: one small JSON string, and the alternative (a debounce)
@@ -1662,6 +1675,13 @@
             </button>
             <button role="menuitem" class="danger" onclick={() => { const n = menuFor; menuFor = ''; askAction('stop', n); }}>
               <Icon name="stop" size={12} />{t('hubStop')}
+            </button>
+          {/if}
+          {#if openAgentConfig}
+            <!-- The model's HOME is the config page — the menu links to it
+                 instead of quoting the model name as dead text. -->
+            <button role="menuitem" onclick={() => { const n = menuFor; menuFor = ''; openAgentConfig(n); }}>
+              <Icon name="gear" size={12} />{t('hubAgentConfig')}
             </button>
           {/if}
           <button role="menuitem" class="danger" title={t('hubRemoveHint')} onclick={() => { const n = menuFor; menuFor = ''; askAction('remove', n); }}>

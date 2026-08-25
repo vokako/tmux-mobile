@@ -49,9 +49,13 @@ impl Vitals {
 
 /// How long a remembered reading may stand in for a fresh one. A model or a branch
 /// does not change between polls, and a context percentage that is a minute old is
-/// far better than a card that blinks empty. Past this the agent has probably been
-/// doing something else entirely, so the reading is dropped rather than aged.
-const VITALS_TTL_SECS: u64 = 300;
+/// far better than a card that blinks empty. An hour, not five minutes: readings
+/// are now REFRESHED by events (hooks, deliveries — `sniff_window_soon`), so age
+/// means "nothing has happened", and showing the last known state through a long
+/// quiet spell is exactly what the owner asked of the record (2026-08-25:
+/// "服务端记录这个状态，客户端随时能获取到"). Past this the reading is dropped
+/// rather than aged.
+const VITALS_TTL_SECS: u64 = 3600;
 
 /// Last good reading per (session, window). Sniffing reads somebody else's screen
 /// at an arbitrary instant, so a miss is normal: the pane may be mid-repaint, a
@@ -143,6 +147,74 @@ pub fn sniff_remembered(
 /// telemetry does, called from the same place.
 pub fn retain_windows(session: &str, live: &[usize]) {
     cache().lock().unwrap().retain(|(s, w), _| s != session || live.contains(w));
+}
+
+/// When each (session, window) was last SCHEDULED for an event sniff, for the
+/// throttle below. Separate from the reading cache: a throttled request is not
+/// a reading.
+fn sniff_times() -> &'static std::sync::Mutex<std::collections::HashMap<(String, usize), u64>> {
+    static TIMES: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<(String, usize), u64>>,
+    > = std::sync::OnceLock::new();
+    TIMES.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Sniff one managed window shortly AFTER an event that makes its pane fresh —
+/// a hook fired (a turn opened or closed, a tool ran) or a chat line was just
+/// typed into it. `hub_agents` only sniffed when the client happened to poll,
+/// so a fresh page often showed nothing until a later poll caught the status
+/// line (owner, 2026-08-25: "经常看到没有信息，过了一会儿才出来"); sniffing at
+/// the moments the CLI repaints its footer keeps the memory warm, and the poll
+/// answers from the memory. Runs on a throwaway thread after ~1.2 s (the TUI
+/// needs a beat to repaint; telemetry may never block what it observes), and
+/// is throttled per window so a burst of tool hooks costs one capture, not
+/// thirty. Fail-soft everywhere: an unresolvable window is a no-op.
+pub fn sniff_window_soon(session: &str, window: usize) {
+    if cfg!(test) {
+        // Tests must not reach for a real tmux or spawn sniffer threads.
+        return;
+    }
+    let now = now_secs();
+    {
+        let mut times = sniff_times().lock().unwrap();
+        let key = (session.to_string(), window);
+        if let Some(at) = times.get(&key) {
+            if now.saturating_sub(*at) < 3 {
+                return;
+            }
+        }
+        times.insert(key, now);
+        times.retain(|_, at| now.saturating_sub(*at) < 600);
+    }
+    let session = session.to_string();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(1200));
+        sniff_window_now(&session, window);
+    });
+}
+
+/// The synchronous half: resolve the window, apply the same managed-only gate
+/// as `hub_agents` (we only know OUR agents' status-line shapes), capture, and
+/// remember. The reading lands in the same cache `hub_agents` reads.
+fn sniff_window_now(session: &str, window: usize) {
+    let ws = crate::projects::project_for_session(session)
+        .ok()
+        .flatten()
+        .map(|p| p.path);
+    let Ok(panes) = crate::tmux::list_panes(session) else { return };
+    let Some(p) = panes.iter().find(|p| p.window == window && p.active) else { return };
+    if !crate::projects::is_managed_in(ws.as_deref(), &p.window_name) {
+        return;
+    }
+    let hay = format!("{} {} {}", p.current_command, p.pane_title, p.window_name);
+    let Some(agent) = crate::projects::agents::detect_managed(ws.as_deref(), &p.window_name, &hay)
+    else {
+        return;
+    };
+    let Ok(text) = crate::tmux::capture_pane_plain(&format!("{session}:{window}"), Some(0)) else {
+        return;
+    };
+    sniff_remembered(session, window, &text, &p.window_name, agent.backend);
 }
 
 /// The effort words kiro accepts. A segment matching one of these IS the effort

@@ -583,6 +583,9 @@ fn deliver_mentions(session: &str, from: &str, body: &str) {
             // back; until then it is pending, and telemetry reports it if the
             // echo never comes.
             crate::projects::telemetry::record_delivery(session, p.window, &line);
+            // A line just landed in this pane: sniff its vitals once the TUI
+            // has repainted (delayed + throttled inside).
+            crate::projects::vitals::sniff_window_soon(session, p.window);
         }
     }
 }
@@ -636,7 +639,9 @@ fn agent_states(session: &str) -> serde_json::Value {
             // capture-pane per agent, capped at 4 per project.
             // A miss is normal — the pane may be mid-repaint, a tool's output may
             // have pushed the status line up — so the reading REMEMBERS: gaps are
-            // filled field by field from the last good one (5 min TTL). Treating
+            // filled field by field from the last good one (1 h TTL), and the
+            // memory is kept WARM by `sniff_window_soon` at every hook edge and
+            // delivered chat line, so this poll usually just reads it. Treating
             // every miss as "no information" is what made the card blink empty.
             let vitals = if managed {
                 crate::tmux::capture_pane_plain(&format!("{session}:{}", p.window), Some(0))

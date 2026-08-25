@@ -26,7 +26,7 @@
     grok: ['low', 'medium', 'high', 'xhigh'],
   };
 
-  let { visible = false, onGoBack = null } = $props();
+  let { visible = false, onGoBack = null, editRequest = null } = $props();
 
   let defs = $state([]);
   let skills = $state([]);      // central skill assets
@@ -101,6 +101,20 @@
     try { mcps = (await mcpList()).mcp ?? []; } catch { mcps = []; }
   }
   $effect(() => { if (visible) reload(); });
+
+  // The Hub's agent menu can ask for one agent's editor ("configure agent" —
+  // the model's home is here, not quoted in the menu; owner, 2026-08-25).
+  // Depends on `defs` too: the request usually arrives WITH the tab switch,
+  // before reload() has answered, so it waits for the list and fires once.
+  let editReqDone = 0;
+  $effect(() => {
+    const req = editRequest;
+    if (!req || req.n === editReqDone) return;
+    const def = defs.find((d) => d.name === req.name);
+    if (!def) return;
+    editReqDone = req.n;
+    startEdit(def);
+  });
 
   function closeAll() {
     editing = null; editingSkill = null; editingMcp = null;
