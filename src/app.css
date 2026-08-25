@@ -246,6 +246,14 @@ button:disabled {
 .chip-btn:disabled { opacity: 0.4; cursor: default; }
 .chip-btn.primary { background: var(--accent-bg); color: var(--accent); border-color: transparent; }
 .chip-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
+/* A DESTRUCTIVE confirm is a solid red CTA: the second step of delete/close
+   must LOOK like the consequence, not like the accent-tinted primary next to
+   a cancel (owner, 2026-08-25: "删除关闭二次确认的按钮注意用红色的，可以是
+   实心红色背景的，来表示警示"). Both themes' --danger reads with white ink.
+   Only .primary.danger — the paired combination the ConfirmDialog renders;
+   a lone .danger chip (header delete, menu rows) stays quiet until hover. */
+.chip-btn.primary.danger { background: var(--danger); border-color: transparent; color: #fff; }
+.chip-btn.primary.danger:hover { background: var(--danger); color: #fff; border-color: transparent; filter: brightness(1.1); }
 
 .icon-btn {
   display: grid; place-items: center; flex: none;
