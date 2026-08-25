@@ -1628,6 +1628,7 @@
     flex: 1; display: flex; align-items: center; gap: 10px; padding: 14px 12px;
     border: none; background: none; color: var(--text); cursor: pointer; text-align: left;
     font-size: var(--fs-body); min-width: 0; -webkit-tap-highlight-color: transparent;
+    font-family: var(--font-ui); /* file names are data, not chrome */
   }
   .file-main:active { background: var(--input-bg); }
   /* Symlink badge — small ↗ arrow overlaid on the bottom-right of the

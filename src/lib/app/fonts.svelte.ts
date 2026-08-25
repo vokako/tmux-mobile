@@ -1,21 +1,27 @@
 import { localFontSource, normalizeFontFamily } from './font-validation.ts';
 
-// Terminal monospace font: system stack by default, user-overridable.
+// THREE font roles, each user-overridable, each per-device (owner,
+// 2026-08-25: "总之就三类，正文内容字体，标题按钮等非文本框内的字体，还有
+// 终端字体，这些可以都是系统设置里的字体"):
 //
-// Default = each platform's native mono (SF Mono / Cascadia / Roboto Mono …)
-// + two bundled symbol fonts that only fill glyphs no system font has
-// (agent markers, Nerd PUA icons). See index.html + design doc for why we
-// stopped bundling text fonts.
+// - mono (--font-mono, 'tmux_font'): the terminal and every data surface.
+//   Default = each platform's native mono (SF Mono / Cascadia / Roboto Mono…)
+//   + two bundled symbol fonts that only fill glyphs no system font has
+//   (agent markers, Nerd PUA icons). See index.html + fonts.md for why we
+//   stopped bundling text fonts.
+// - ui (--font-ui, 'tmux_font_ui'): content prose — message bodies, input
+//   text, rendered documents. Default leads with the bundled Inter Variable.
+// - display (--font-display, 'tmux_font_display'): the chrome — titles,
+//   section headers, buttons, names. Default leads with the bundled
+//   Space Grotesk Variable.
 //
-// The override ('tmux_font' in localStorage) lets a user put a font THEY
-// have installed (e.g. 'Maple Mono NF CN') at the front of the stack. It's
-// per-device by design: the same account on a phone without that font just
-// falls through to the system stack — same layout either way, because
-// xterm's cell grid fixes alignment regardless of family.
+// An override puts a font the USER has installed at the front of that
+// role's stack. Per-device by design: the same account on a phone without
+// the font falls through to the default stack — same layout either way
+// (the terminal's alignment comes from xterm's cell grid, and the UI's
+// from the box model, not the family).
 
-const KEY = 'tmux_font';
-
-const COMMON_FAMILIES = [
+const COMMON_MONO = [
   'Maple Mono NF CN',
   'Maple Mono',
   'SF Mono',
@@ -33,6 +39,19 @@ const COMMON_FAMILIES = [
   'Consolas',
 ];
 
+const COMMON_SANS = [
+  'Inter',
+  'Space Grotesk',
+  'SF Pro Text',
+  'Helvetica Neue',
+  'Segoe UI',
+  'Roboto',
+  'Noto Sans',
+  'IBM Plex Sans',
+  'PingFang SC',
+  'Microsoft YaHei',
+];
+
 // Symbol fillers + per-platform fallbacks. The generic `monospace` keyword
 // stays last so an unknown/typo'd custom family degrades safely.
 // The bundled symbol fonts must come AFTER the text families: the CSS line
@@ -47,7 +66,16 @@ const SYSTEM_STACK =
   "'Roboto Mono', 'Droid Sans Mono', 'Noto Sans Mono', " +
   "'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', monospace";
 
-let custom = $state(localStorage.getItem(KEY) || '');
+// These two literals MUST mirror app.css's --font-ui / --font-display
+// declarations: the override rewrites the var inline, and an out-of-sync
+// default would silently change the un-customized rendering.
+const UI_STACK =
+  "'Inter Variable', -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', " +
+  "'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif";
+
+const DISPLAY_STACK =
+  "'Space Grotesk Variable', 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', " +
+  "'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif";
 
 function quote(name: string): string {
   // Wrap in single quotes for CSS; strip any quotes the user typed.
@@ -84,34 +112,65 @@ async function isAvailable(name: string): Promise<boolean> {
   });
 }
 
-export const fonts = {
-  /** The user's custom family name ('' = system default). */
-  get custom() {
-    return custom;
-  },
-  get common() {
-    return COMMON_FAMILIES;
-  },
-  async set(name: string): Promise<boolean> {
-    const next = normalizeFontFamily(name);
-    if (!await isAvailable(next)) return false;
-    custom = next;
-    try {
-      if (custom) localStorage.setItem(KEY, custom);
-      else localStorage.removeItem(KEY);
-    } catch {}
-    applyMonoVar();
-    return true;
-  },
+export interface FontPref {
+  /** The user's custom family name ('' = the role's default stack). */
+  readonly custom: string;
+  readonly common: string[];
   /** Full CSS font-family stack (custom family first when set). */
-  get stack() {
-    const q = quote(custom);
-    return q ? `${q}, ${SYSTEM_STACK}` : SYSTEM_STACK;
-  },
-};
+  readonly stack: string;
+  set(name: string): Promise<boolean>;
+  /** Rewrite the role's CSS var inline on <html> so every consumer follows. */
+  apply(): void;
+}
 
-// --font-mono lives on <html> (App.svelte declares the default); the
-// override just rewrites the inline style so every var() consumer follows.
+function makeFontPref(key: string, defaultStack: string, cssVar: string, common: string[]): FontPref {
+  let custom = $state(localStorage.getItem(key) || '');
+  const pref: FontPref = {
+    get custom() {
+      return custom;
+    },
+    get common() {
+      return common;
+    },
+    get stack() {
+      const q = quote(custom);
+      return q ? `${q}, ${defaultStack}` : defaultStack;
+    },
+    async set(name: string): Promise<boolean> {
+      const next = normalizeFontFamily(name);
+      if (!await isAvailable(next)) return false;
+      custom = next;
+      try {
+        if (custom) localStorage.setItem(key, custom);
+        else localStorage.removeItem(key);
+      } catch {}
+      pref.apply();
+      return true;
+    },
+    apply() {
+      document.documentElement.style.setProperty(cssVar, pref.stack);
+    },
+  };
+  return pref;
+}
+
+/** Terminal + data surfaces. Key predates the split — existing prefs keep working. */
+export const fonts = makeFontPref('tmux_font', SYSTEM_STACK, '--font-mono', COMMON_MONO);
+/** Content prose. */
+export const uiFont = makeFontPref('tmux_font_ui', UI_STACK, '--font-ui', COMMON_SANS);
+/** Chrome: titles, buttons, names. */
+export const displayFont = makeFontPref('tmux_font_display', DISPLAY_STACK, '--font-display', COMMON_SANS);
+
+// --font-* live on <html> (app.css declares the defaults); the overrides just
+// rewrite the inline style so every var() consumer follows.
 export function applyMonoVar() {
-  document.documentElement.style.setProperty('--font-mono', fonts.stack);
+  fonts.apply();
+}
+
+/** Apply every customized role at startup (a no-op writes the default stack,
+ * which is identical to the stylesheet's). */
+export function applyFontVars() {
+  if (fonts.custom) fonts.apply();
+  if (uiFont.custom) uiFont.apply();
+  if (displayFont.custom) displayFont.apply();
 }

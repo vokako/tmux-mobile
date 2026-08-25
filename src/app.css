@@ -144,7 +144,14 @@ input, textarea { user-select: text; -webkit-user-select: text; }
    system), so without this every <button>/<input>/<select> would ignore
    --font-ui. Inherit it; the few controls that must be monospace (command
    inputs, path fields, code editor) set --font-mono explicitly themselves. */
-button, input, textarea, select { font-family: inherit; }
+input, textarea, select { font-family: inherit; }
+/* A button is CHROME, so it speaks the display face (owner, 2026-08-25:
+   "按钮等字体都要特别字体，总之就三类"): the three roles are --font-ui for
+   content (prose, inputs), --font-display for chrome (titles, buttons,
+   names), --font-mono for the terminal and data. Buttons that CARRY DATA
+   (file rows, dropdown values, window chips) opt back out with an explicit
+   font-family — the exception marks itself. */
+button { font-family: var(--font-display); }
 .preview-body, .md-render, .code-preview, .git-diff-body, .info-body, .bubble { user-select: text; -webkit-user-select: text; }
 
 ::selection { background: color-mix(in srgb, var(--accent) 26%, transparent); }

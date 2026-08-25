@@ -187,7 +187,9 @@
     display: flex; align-items: center; gap: 6px; width: 100%;
     background: var(--input-bg); border: 1px solid var(--input-border);
     border-radius: var(--ui-radius-control); padding: 8px 12px; color: var(--text);
-    font-size: var(--fs-body); font-family: inherit;
+    /* The trigger shows a VALUE, so it keeps the content font — the input
+       dialect, not the button/chrome one. */
+    font-size: var(--fs-body); font-family: var(--font-ui);
     /* `normal`, not a ratio: an <input> computes its line box from `normal`,
        so matching the keyword is what makes the two boxes the same height.
        Inheriting the page's 1.5 made the trigger ~4px taller than the field

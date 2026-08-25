@@ -3,7 +3,7 @@
   import SideHandle from '../ui/SideHandle.svelte';
   import { t, i18n, setLocale } from '../core/i18n.svelte.ts';
   import { layout } from './layout.svelte.ts';
-  import { fonts } from './fonts.svelte.ts';
+  import { fonts, uiFont, displayFont } from './fonts.svelte.ts';
   import { terminalPrefs, LINE_HEIGHT_MIN, LINE_HEIGHT_MAX } from './terminal-prefs.svelte.ts';
   import { hubPrefs } from '../hub/hub-prefs.svelte.ts';
   import { SHORTCUT_DEFAULTS, shortcutFromEvent, shortcutLabel, type ShortcutAction } from './shortcuts.ts';
@@ -80,6 +80,13 @@
   ];
   let fontInput = $state(fonts.custom);
   let fontInvalid = $state(false);
+  // The other two roles (owner, 2026-08-25: "总之就三类…这些可以都是系统设
+  // 置里的字体"): content prose and the chrome (titles/buttons/names). Same
+  // validate-then-commit contract as the terminal font.
+  let uiFontInput = $state(uiFont.custom);
+  let uiFontInvalid = $state(false);
+  let displayFontInput = $state(displayFont.custom);
+  let displayFontInvalid = $state(false);
   let recordingShortcut = $state<ShortcutAction | ''>('');
   let shortcutError = $state('');
   type HookAgentStatus = { installed?: boolean };
@@ -117,6 +124,23 @@
 
   async function handleFontKeydown(event: KeyboardEvent) {
     if (event.key === 'Enter' && await saveFont()) (event.currentTarget as HTMLElement | null)?.blur();
+  }
+
+  async function saveUiFont() {
+    uiFontInput = uiFontInput.trim();
+    uiFontInvalid = !await uiFont.set(uiFontInput);
+    return !uiFontInvalid;
+  }
+  async function saveDisplayFont() {
+    displayFontInput = displayFontInput.trim();
+    displayFontInvalid = !await displayFont.set(displayFontInput);
+    return !displayFontInvalid;
+  }
+  async function handleUiFontKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter' && await saveUiFont()) (event.currentTarget as HTMLElement | null)?.blur();
+  }
+  async function handleDisplayFontKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter' && await saveDisplayFont()) (event.currentTarget as HTMLElement | null)?.blur();
   }
 
   function setLineHeight(value: number) {
@@ -217,6 +241,31 @@
             <div><strong>{t('hubStepsRows')}</strong><small>{t('hubStepsRowsHint')}</small></div>
             <div class="stepper">
               <button onclick={() => hubPrefs.setStepsRows(hubPrefs.stepsRows - 1)}>−</button><span>{hubPrefs.stepsRows}</span><button onclick={() => hubPrefs.setStepsRows(hubPrefs.stepsRows + 1)}>+</button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div><strong>{t('uiFontBody')}</strong><small>{t('uiFontBodyHint')}</small></div>
+            <div class="font-control">
+              <input class="text-input" class:invalid={uiFontInvalid} type="text" list="sans-families"
+                placeholder={t('fontFamilySystem')} bind:value={uiFontInput} aria-invalid={uiFontInvalid}
+                autocapitalize="off" autocomplete="off" spellcheck="false"
+                oninput={() => uiFontInvalid = false} onchange={saveUiFont}
+                onkeydown={handleUiFontKeydown} />
+              {#if uiFontInvalid}<small class="font-error">{t('fontFamilyInvalid')}</small>{/if}
+            </div>
+          </div>
+          <div class="setting-row">
+            <div><strong>{t('uiFontDisplay')}</strong><small>{t('uiFontDisplayHint')}</small></div>
+            <div class="font-control">
+              <input class="text-input" class:invalid={displayFontInvalid} type="text" list="sans-families"
+                placeholder={t('fontFamilySystem')} bind:value={displayFontInput} aria-invalid={displayFontInvalid}
+                autocapitalize="off" autocomplete="off" spellcheck="false"
+                oninput={() => displayFontInvalid = false} onchange={saveDisplayFont}
+                onkeydown={handleDisplayFontKeydown} />
+              <datalist id="sans-families">
+                {#each uiFont.common as family}<option value={family}></option>{/each}
+              </datalist>
+              {#if displayFontInvalid}<small class="font-error">{t('fontFamilyInvalid')}</small>{/if}
             </div>
           </div>
           {#if showUiZoom}
