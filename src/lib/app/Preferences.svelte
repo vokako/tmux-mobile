@@ -66,11 +66,13 @@
   const initialTab = validStoredTab ? storedTab : 'appearance';
   let tab = $state<string>(initialTab);
   if (storedTab && storedTab !== initialTab) localStorage.setItem(TAB_KEY, initialTab);
+  // No icons on the category rows (owner, 2026-08-25: "三个子页面就不要图标
+  // 了，不好看") — the words carry it, like the Chat sidebar's project rows.
   const tabs = $derived([
-    { id: 'appearance', label: () => t('settingsAppearance'), icon: 'palette' },
-    { id: 'terminal', label: () => t('settingsTerminal'), icon: 'terminal' },
-    ...(showShortcuts ? [{ id: 'shortcuts', label: () => t('settingsShortcuts'), icon: 'command' }] : []),
-    { id: 'connection', label: () => t('settingsConnection'), icon: 'link' },
+    { id: 'appearance', label: () => t('settingsAppearance') },
+    { id: 'terminal', label: () => t('settingsTerminal') },
+    ...(showShortcuts ? [{ id: 'shortcuts', label: () => t('settingsShortcuts') }] : []),
+    { id: 'connection', label: () => t('settingsConnection') },
   ]);
   const shortcutActions: [ShortcutAction, string][] = [
     ['previousPage', 'shortcutPreviousPage'],
@@ -200,7 +202,7 @@
       <div class="side-h">{t('settings')}</div>
       {#each tabs as item}
         <button class="side-row" class:open={tab === item.id} onclick={() => selectTab(item.id)}>
-          <Icon name={item.icon} size={14} /><span class="r-label">{item.label()}</span>
+          <span class="r-label">{item.label()}</span>
         </button>
       {/each}
     </div>
