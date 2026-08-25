@@ -31,6 +31,14 @@ html {
      monospace stack by construction. */
   --font-mono: ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', Consolas, 'Roboto Mono', 'Droid Sans Mono', 'Noto Sans Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', monospace;
   --font-ui: 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif;
+  /* The third role, added on request ("标题 名称等特殊 字体可以更特别一点",
+     2026-08-25): the IDENTITY layer — page titles, sidebar section headers,
+     the brand, agent/project names. Space Grotesk grew out of Space Mono,
+     so it keeps the app's terminal genes while being a true display sans.
+     ONLY those surfaces take it; body prose, controls and data stay
+     --font-ui / --font-mono, so the count of voices stays at three with
+     one job each. CJK falls through to the same native CJK as --font-ui. */
+  --font-display: 'Space Grotesk Variable', 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif;
 
   /* Shared UI metrics */
   --ui-bar-height: 31px;
@@ -241,7 +249,9 @@ button:disabled {
 .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
 
 .side-h {
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  /* Identity layer: the display face (was mono). Uppercase Space Grotesk at
+     meta size + wide tracking is the "console section" voice. */
+  font-family: var(--font-display);
   font-size: var(--fs-meta); text-transform: uppercase; letter-spacing: 1.4px;
   color: var(--text3); padding: 10px 10px 5px;
 }
@@ -266,8 +276,8 @@ button:disabled {
    ellipsizes (a 4-character name wrapped to four 36px-wide lines between
    five action buttons — owner report, skill editor on a phone). */
 .page-head h1 {
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: var(--fs-title); margin: 0; font-weight: 600;
+  font-family: var(--font-display);
+  font-size: var(--fs-title); margin: 0; font-weight: 600; letter-spacing: 0.2px;
   min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 /* Phone: too many head actions for one row — let them wrap under the title

@@ -2302,7 +2302,7 @@
   .sidebar.sheet .side-row { min-height: 44px; }
   .side-scrim { position: fixed; inset: 0; z-index: 25; background: rgba(0,0,0,0.45); }
   .side-scroll { flex: 1; overflow-y: auto; padding: 8px; }
-  .p-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; }
+  .p-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; font-family: var(--font-display); }
   /* ── Sidebar row summary. The LOOK is the Terminal sidebar's, atom for atom
      ("应该和terminal侧边栏一样 … 这两个可以共用", owner 2026-08-24): the age
      and the agent chips wear the shared .side-age/.side-win classes from
@@ -2386,7 +2386,8 @@
   /* An action is in flight: the card stops taking clicks (the handler guards
      too — this is the visible half of that). */
   .acard.busy { opacity: 0.35; pointer-events: none; }
-  .a-name { font-family: ui-monospace, Menlo, monospace; font-weight: 600; max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Identity layer: names wear the display face (--font-display), not mono. */
+  .a-name { font-family: var(--font-display); font-weight: 600; max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .s-age { color: var(--text3); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; font-family: ui-monospace, Menlo, monospace; }
   .st { width: 6px; height: 6px; border-radius: 50%; flex: none; }
   .st.live { animation: s-pulse 1.4s ease-in-out infinite; }
@@ -2418,7 +2419,7 @@
   }
   .a-menu.ready { opacity: 1; }
   .am-who {
-    font-family: ui-monospace, Menlo, monospace; font-weight: 600;
+    font-family: var(--font-display); font-weight: 600;
     font-size: var(--fs-meta); color: var(--text3);
     padding: 4px 10px 5px; border-bottom: 1px solid var(--border2); margin-bottom: 3px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -2556,6 +2557,7 @@
      2026-08-20) while the name keeps the left edge. */
   .m-head {
     display: flex; align-items: center; gap: 8px;
+    font-family: var(--font-display);
     color: var(--accent); font-weight: 650; font-size: var(--fs-ui);
     letter-spacing: 0.1px; line-height: 1.2; margin: 0 0 2px; user-select: none;
   }

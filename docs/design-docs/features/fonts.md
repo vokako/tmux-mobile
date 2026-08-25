@@ -1,4 +1,4 @@
-# Fonts — one bundled UI face + system mono + bundled symbols + per-device custom override
+# Fonts — bundled UI + display faces, system mono, bundled symbols, per-device override
 
 ## The UI face: Inter Variable, bundled (2026-08-25)
 
@@ -21,6 +21,30 @@ One face, not two: a display face for titles was considered and dropped
 ("字体选择不要太多"). Body text also enables Inter's `cv05`/`cv08`
 character variants (disambiguated `l`/`I` — this UI is full of ids and
 hashes); fonts without the features ignore them.
+
+## The display face: Space Grotesk Variable, the identity layer (2026-08-25)
+
+Same day, the owner asked for the exception explicitly: "除了常用字体外
+标题 名称等特殊 字体可以更特别一点". `--font-display` leads with
+**'Space Grotesk Variable'** (`@fontsource-variable/space-grotesk`, same
+self-hosting rationale; latin subset ~28 KB on the wire) and is applied to
+the IDENTITY layer only:
+
+- page titles (`.page-head h1`, app.css) and sidebar section headers
+  (`.side-h` — uppercase at meta size with the existing 1.4px tracking);
+- names: chat bubble headers (`.m-head`), agent roster cards (`.a-name`)
+  and the agent menu header (`.am-who`), the Chat sidebar's project rows
+  (`.p-name`), Projects rows (`.name`), Sessions rows (`.name`);
+- the brand on the connect card (Settings `h2`).
+
+Space Grotesk grew out of Space Mono, so the identity layer keeps the
+terminal's genes while reading as a designed display sans. Both `.side-h`
+and `.page-head h1` previously wore raw mono stacks — the display face
+REPLACES that role; nothing else may adopt it. Three voices, one job each:
+`--font-display` says WHO/WHERE, `--font-ui` says everything, `--font-mono`
+says data. Window chips, vitals lines, paths and code stay mono — they are
+data, not identity. CJK falls through to the same native CJK stack as
+`--font-ui`.
 
 Chinese stays on each platform's native CJK (PingFang / YaHei / Noto Sans
 CJK) behind Inter in the stack: Inter has no CJK, and a downloadable CJK

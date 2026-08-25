@@ -348,7 +348,9 @@
   .dot.on { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
   .body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .line { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
-  .name { font-size: var(--fs-body); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Identity layer: the project's NAME takes the display face; the window
+     chips beside it stay mono — they are data. */
+  .name { font-size: var(--fs-body); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-display); }
   .age { margin-left: auto; font-size: var(--fs-meta); color: var(--text3); }
   .sub { font-family: var(--font-mono); font-size: var(--fs-sub); color: var(--text2); }
   .path { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

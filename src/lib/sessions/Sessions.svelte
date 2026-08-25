@@ -907,6 +907,7 @@
   }
 
   .name {
+    font-family: var(--font-display);
     font-weight: 600;
     font-size: var(--fs-body);
     color: var(--text);

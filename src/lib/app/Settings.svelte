@@ -241,6 +241,7 @@
 
   h2 {
     margin: 0;
+    font-family: var(--font-display);
     font-size: var(--fs-display);
     font-weight: 700;
     color: var(--text);
