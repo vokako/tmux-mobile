@@ -56,6 +56,12 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   shown. A transform hint (`will-change`) may exist only WHILE a slide runs:
   a resting transform turns the page into a containing block and breaks
   every fixed popover.
+- **Interactive edge-swipe** (Files is the reference): the drag IS the
+  animation — content follows the finger with damping (×0.4, capped ~96px,
+  inline transform, no transition), an intent lock keeps diagonal scrolls
+  vertical (|dx| > 1.2·|dy| after 8px), release under the 60px commit
+  threshold springs back on `--t-fast`, and a commit plays the shared
+  drill-back slide. The transform exists only while the finger does.
 - **History discipline for drill layers**: a navigation that OPENS a layer
   (entering Settings, a compact drill-down) pushes its history entry AT OPEN
   TIME, and the pop that peels it SPENDS that entry (no re-push). Reason:

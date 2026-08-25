@@ -91,17 +91,20 @@
   // Register goBack for Android back gesture
   $effect(() => {
     if (onGoBack) onGoBack(() => {
+      // navAnim('back') rides only the branches that CHANGE the view — the
+      // git panel's internal peel and the unsaved-changes dialog move
+      // nothing, so they must not slide the page.
       if (view === 'git') {
         if (gitPanelRef?.goBack()) return true;
-        view = 'list'; return true;
+        navAnim('back'); view = 'list'; return true;
       }
       if (view === 'edit') {
         if (isEdited) { pendingAct = { kind: 'leave', to: 'preview' }; return true; }
-        view = 'preview'; return true;
+        navAnim('back'); view = 'preview'; return true;
       }
-      if (view === 'info') { view = fromGit ? (fromGit = false, 'git') : currentFile?.content != null ? 'preview' : 'list'; return true; }
-      if (view === 'preview') { if (fromGit) { fromGit = false; view = 'git'; } else { view = 'list'; } currentFile = null; return true; }
-      if (view === 'local') { view = 'list'; return true; }
+      if (view === 'info') { navAnim('back'); view = fromGit ? (fromGit = false, 'git') : currentFile?.content != null ? 'preview' : 'list'; return true; }
+      if (view === 'preview') { navAnim('back'); if (fromGit) { fromGit = false; view = 'git'; } else { view = 'list'; } currentFile = null; return true; }
+      if (view === 'local') { navAnim('back'); view = 'list'; return true; }
       if (cwd !== '/') { goUp(); return true; }
       return false;
     });
@@ -326,22 +329,64 @@
     ));
   }
 
-  // Swipe right to go back (pull-to-refresh was removed — same rationale
-  // as Sessions.svelte: on a scrollable list the gesture conflicts with
-  // ordinary top-edge scrolling and produces dangling-indicator bugs.
-  // Use the explicit refresh button / the automatic reload on directory
-  // change instead.)
-  let swipeStartX = 0;
+  // Edge-swipe back, INTERACTIVE (owner, 2026-08-25: "文件浏览页面的滑动手势
+  // …做的更丝滑一些"): the page follows the finger with damping instead of
+  // firing blind at finger-lift, releases spring back, and a commit plays the
+  // drill-back slide. Two guards the old two-liner lacked: an intent lock
+  // (a diagonal scroll that drifted 60px right used to trigger goBack), and
+  // cancelability (drag out, drag back, release = nothing). The transform
+  // lives only while the finger does — a resting transform would make .files
+  // a containing block and break fixed popovers (design-language.md §2).
+  // (Pull-to-refresh stays removed — it conflicts with top-edge scrolling.)
+  const SWIPE_EDGE = 40, SWIPE_COMMIT = 60, SWIPE_DAMP = 0.4, SWIPE_CAP = 96;
+  let swipeStartX = 0, swipeStartY = 0;
+  let swipeEdge = false;      // started at the left edge
+  let swipeIntent = 0;        // 0 undecided, 1 horizontal, -1 vertical
+  let swipeDX = $state(0);    // damped, drives the live translate
+  let swipeSnap = $state(false); // animate the spring-back
 
   function onTouchStart(e) {
     swipeStartX = e.touches[0].clientX;
+    swipeStartY = e.touches[0].clientY;
+    swipeEdge = swipeStartX < SWIPE_EDGE && !splitEligible;
+    swipeIntent = 0;
+    swipeSnap = false;
+  }
+  function onTouchMove(e) {
+    if (!swipeEdge) return;
+    const dx = e.touches[0].clientX - swipeStartX;
+    const dy = e.touches[0].clientY - swipeStartY;
+    if (swipeIntent === 0 && (Math.abs(dx) > 8 || Math.abs(dy) > 8))
+      swipeIntent = Math.abs(dx) > Math.abs(dy) * 1.2 ? 1 : -1;
+    swipeDX = swipeIntent === 1 ? Math.min(Math.max(dx, 0) * SWIPE_DAMP, SWIPE_CAP) : 0;
   }
   function onTouchEnd(e) {
+    if (!swipeEdge) return;
     const dx = e.changedTouches[0].clientX - swipeStartX;
-    if (dx > 60 && swipeStartX < 40) goBack();
+    swipeEdge = false;
+    if (swipeIntent === 1 && dx > SWIPE_COMMIT) { swipeDX = 0; goBack(); }
+    else if (swipeDX > 0) { swipeSnap = true; swipeDX = 0; }
+  }
+  function onTouchCancel() {
+    if (!swipeEdge) return;
+    swipeEdge = false;
+    if (swipeDX > 0) { swipeSnap = true; swipeDX = 0; }
+  }
+
+  // Navigation motion (the drill grammar in design-language.md §1): going
+  // deeper enters from the right, back from the left — single-pane touch
+  // layout only; the desktop split has no view chain to slide. The class is
+  // dropped and re-added a frame later so a second hop in the SAME direction
+  // replays the animation.
+  let navAnimClass = $state('');
+  function navAnim(dir) {
+    if (splitEligible) return;
+    navAnimClass = '';
+    requestAnimationFrame(() => { navAnimClass = dir; });
   }
 
   function goBack() {
+    navAnim('back');
     if (view === 'edit') { view = 'preview'; }
     else if (view === 'info') { view = fromGit ? (fromGit = false, 'git') : currentFile?.content != null ? 'preview' : 'list'; }
     else if (view === 'preview') { if (fromGit) { fromGit = false; view = 'git'; } else { view = 'list'; } currentFile = null; }
@@ -467,6 +512,7 @@
   });
 
   function goUp() {
+    navAnim('back');
     const parent = cwd.replace(/\/[^/]+\/?$/, '') || '/';
     loadDir(parent);
   }
@@ -518,6 +564,7 @@
   }
 
   async function openEntry(entry) {
+    navAnim('fwd');
     if (entry.type === 'dir') {
       navPush();
       loadDir(entry.path);
@@ -645,6 +692,7 @@
   }
 
   function backToList() {
+    navAnim('back');
     if (fromGit) { fromGit = false; view = 'git'; } else {
       // Stay in the file's parent directory, not session cwd
       const dir = currentFile?.path?.replace(/\/[^/]+$/, '') || cwd;
@@ -655,6 +703,7 @@
   }
 
   function backToPreview() {
+    navAnim('back');
     if (isEdited) { pendingAct = { kind: 'leave', to: 'preview' }; return; }
     view = 'preview';
   }
@@ -1398,7 +1447,7 @@
 {#snippet localPanel()}
     <!-- Local downloaded files -->
     <div class="preview-header">
-      <button class="back-btn" onclick={() => { view = 'list'; }}><Icon name="chevron-left" size={16} /></button>
+      <button class="back-btn" onclick={() => { navAnim('back'); view = 'list'; }}><Icon name="chevron-left" size={16} /></button>
       <span class="preview-name">{t('downloads')}</span>
       <div class="preview-actions">
         <button class="act-btn" onclick={openLocalFiles}><Icon name="refresh" size={14} /></button>
@@ -1423,7 +1472,7 @@
 {#snippet infoPanel()}
     <!-- File info -->
     <div class="preview-header">
-      <button class="back-btn" onclick={() => { view = currentFile?.content != null ? 'preview' : 'list'; }}><Icon name="chevron-left" size={16} /></button>
+      <button class="back-btn" onclick={() => { navAnim('back'); view = currentFile?.content != null ? 'preview' : 'list'; }}><Icon name="chevron-left" size={16} /></button>
       <span class="preview-name">{currentFile?.name}</span>
       <div class="preview-actions">
         {#if isPreviewable(currentFile?.stat, currentFile?.name)}
@@ -1450,7 +1499,10 @@
 
 <!-- Touch handlers implement the edge-swipe back gesture; not an interactive element. -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="files" bind:this={filesEl} ontouchstart={onTouchStart} ontouchend={onTouchEnd}>
+<div class="files" bind:this={filesEl}
+  class:snap={swipeSnap} class:drill-fwd={navAnimClass === 'fwd'} class:drill-back={navAnimClass === 'back'}
+  style:transform={swipeDX > 0 ? `translateX(${swipeDX}px)` : ''}
+  ontouchstart={onTouchStart} ontouchmove={onTouchMove} ontouchend={onTouchEnd} ontouchcancel={onTouchCancel}>
   {#if splitEligible}
     <!-- Desktop: folder browser (left) | draggable splitter | preview (right). -->
     <div class="files-split">
@@ -1515,6 +1567,21 @@
 
 <style>
   .files { display: flex; flex-direction: column; flex: 1; min-height: 0; background: var(--bg); }
+  /* Interactive edge-swipe: the drag itself sets an inline translate (no
+     transition — the finger is the animation); releasing under the commit
+     threshold springs back on --t-fast; a committed back plays the shared
+     drill grammar (120ms, from the left; deeper from the right). Transforms
+     exist only during these beats, so .files is never a resting containing
+     block (design-language.md §2). */
+  .files.snap { transition: transform var(--t-fast); }
+  .files.drill-fwd  { animation: drill-in-right 0.12s linear; }
+  .files.drill-back { animation: drill-in-left 0.12s linear; }
+  @keyframes drill-in-right { from { transform: translateX(40%); } to { transform: none; } }
+  @keyframes drill-in-left  { from { transform: translateX(-40%); } to { transform: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .files.drill-fwd, .files.drill-back { animation: none; }
+    .files.snap { transition: none; }
+  }
 
   /* Desktop two-pane: folder browser | splitter | preview. The columns must be
      flex-column themselves so each panel's sticky header (flex-shrink:0) +
