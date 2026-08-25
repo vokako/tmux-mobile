@@ -42,6 +42,7 @@
   let open = $state(false);
   let triggerEl: HTMLButtonElement | null = $state(null);
   let inputEl: HTMLInputElement | null = $state(null);
+  let menuEl: HTMLDivElement | null = $state(null);
   let anchor = $state<AnchorRect | null>(null);
   let menuH = $state(0);
   /** Keyboard cursor while open; -1 until the user arrows. */
@@ -98,8 +99,14 @@
   $effect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
-      const t = e.target as Element | null;
-      if (!t?.closest?.('.sel-menu, .sel-trigger')) hide();
+      // THIS instance's boxes, not the class names: `.closest('.sel-trigger')`
+      // matched ANY Select in the app, so with three side by side (the agent
+      // editor) opening one and tapping another left the first hanging open
+      // (owner, 2026-08-25: "在其他地方点击之后就应该回收了，不应该一直显示
+      // 展开在那里"). Another instance is OUTSIDE like everything else.
+      const t = e.target as Node | null;
+      if (t && (menuEl?.contains(t) || triggerEl?.contains(t) || inputEl?.contains(t))) return;
+      hide();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { hide(); e.stopPropagation(); (editable ? inputEl : triggerEl)?.focus(); return; }
@@ -156,7 +163,7 @@
 {#if open && shown.length}
   <div class="sel-menu" class:ready={menuH > 0} role="listbox" tabindex="-1" id="sel-combo-list"
     style:left="{pos.x}px" style:top="{pos.y}px" style:width="{fieldW}px"
-    bind:clientHeight={menuH}>
+    bind:this={menuEl} bind:clientHeight={menuH}>
     {#each shown as o, i (o.value)}
       <button class="sel-opt" class:sel={o.value === value} class:cur={i === cursor}
         role="option" aria-selected={o.value === value} type="button"
