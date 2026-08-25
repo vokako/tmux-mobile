@@ -84,7 +84,7 @@
     left: 0; top: auto; bottom: 0; transform: none;
     width: 100%; max-width: none; border-radius: 18px 18px 0 0;
     border-left: none; border-right: none; border-bottom: none;
-    padding: 16px 14px calc(16px + env(safe-area-inset-bottom));
+    padding: 16px 14px calc(16px + var(--sab, 0px)); /* var(--sab): env() is 0 in the APK */
   }
   .dlg.sheet .dlg-actions button { min-height: 44px; flex: 1; justify-content: center; }
 </style>

@@ -149,7 +149,7 @@
     position: fixed;
     left: 50%;
     transform: translateX(-50%);
-    bottom: calc(12px + env(safe-area-inset-bottom));
+    bottom: calc(12px + var(--sab, 0px)); /* var(--sab): env() is 0 in the APK */
     z-index: 200;
     width: min(440px, calc(100vw / var(--ui-zoom, 1) - 24px));
     display: flex;

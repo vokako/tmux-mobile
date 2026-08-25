@@ -16,7 +16,7 @@
   import { t } from './lib/core/i18n.svelte.ts';
   import { layout } from './lib/app/layout.svelte.ts';
   import { teamState } from './lib/core/team.svelte.ts';
-  import { applyMonoVar } from './lib/app/fonts.svelte.ts';
+  import { applyFontVars } from './lib/app/fonts.svelte.ts';
   import { normalizeUiZoom, stepUiZoom, UI_ZOOM_DEFAULT } from './lib/app/ui-zoom.ts';
   import { defaultPage, restorePage, retarget } from './lib/app/nav-state.ts';
   import { createReconnectMachine } from './lib/app/reconnect.ts';
@@ -227,9 +227,9 @@
     if (page === 'prefs') { page = pageBeforePrefs; }
     else { pageBeforePrefs = page; page = 'prefs'; }
   }
-  // Apply the persisted custom terminal font (if any) before first paint of
-  // the terminal — rewrites --font-mono inline; a no-op for the default.
-  applyMonoVar();
+  // Apply the persisted custom fonts (if any) before first paint — rewrites
+  // --font-mono/--font-ui/--font-display inline; a no-op for the defaults.
+  applyFontVars();
   let serverInfo = $state({ hostname: '', machineId: '' });
   let activeAddress = $state(localStorage.getItem('tmux_address') || '');
   let prefAddresses = $derived.by(() => {
@@ -1481,7 +1481,15 @@
     inset: 0;
     display: flex;
     flex-direction: column;
-    z-index: 1;
+    /* NO z-index here. With one, each page layer becomes a stacking context
+       that CAPS every fixed overlay inside it at that value — a dialog's
+       z-index: 31 lost to the tabbar's z-index: 10, so on the phone every
+       bottom sheet's action row (create project, close/delete confirms) sat
+       BEHIND the tabbar once fixed layers anchored to the true viewport
+       ("手机上窗口被下边被最下边挡住了，按钮看不到，包括关闭确认框", owner
+       2026-08-25). Layers are visibility-toggled, never z-fought, so the
+       stacking context bought nothing. */
+    z-index: auto;
   }
   .page-layer.hidden {
     visibility: hidden;

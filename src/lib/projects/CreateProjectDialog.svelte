@@ -115,7 +115,11 @@
   /* Phone: the dialog becomes a bottom sheet — reachable with a thumb. */
   .dlg.sheet {
     top: auto; left: 0; right: 0; bottom: 0; transform: none; width: auto;
-    border-radius: 18px 18px 0 0; padding-bottom: calc(18px + env(safe-area-inset-bottom));
+    border-radius: 18px 18px 0 0;
+    /* var(--sab), not raw env(): on the APK the real inset arrives via
+       MainActivity's --sab override and env() reads 0 (owner, 2026-08-25:
+       sheet buttons hidden behind the gesture bar). */
+    padding-bottom: calc(18px + var(--sab, 0px));
   }
   .dlg.sheet .dlg-agents { max-height: calc(46vh / var(--ui-zoom, 1)); overflow-y: auto; }
   .dlg.sheet .agent-pick, .dlg.sheet input, .dlg.sheet .dlg-actions button { min-height: 44px; }

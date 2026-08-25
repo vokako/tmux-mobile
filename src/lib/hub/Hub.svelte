@@ -3028,7 +3028,7 @@
     left: 0; top: auto; bottom: 0; transform: none;
     width: 100%; max-width: none; max-height: calc(82vh / var(--ui-zoom, 1));
     border-radius: 18px 18px 0 0; border-left: none; border-right: none; border-bottom: none;
-    padding: 16px 14px calc(16px + env(safe-area-inset-bottom));
+    padding: 16px 14px calc(16px + var(--sab, 0px)); /* var(--sab): env() is 0 in the APK */
   }
   .dlg.sheet .dlg-agents { max-height: calc(46vh / var(--ui-zoom, 1)); overflow-y: auto; }
   .dlg.sheet .agent-pick, .dlg.sheet input, .dlg.sheet .dlg-actions button { min-height: 44px; }
