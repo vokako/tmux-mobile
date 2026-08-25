@@ -2224,7 +2224,11 @@
   .sidebar.sheet {
     position: fixed; z-index: 26; inset: 0 auto 0 0; width: min(280px, 82vw);
     box-shadow: 0 0 44px rgba(0,0,0,0.5);
-    padding-top: env(safe-area-inset-top);
+    /* var(--sat), not raw env(): on the APK the real status-bar inset arrives
+       via MainActivity → the --sat inline override, and env() reads 0. Under
+       the old .page containing block (will-change) the geometry hid that; now
+       the sheet anchors to the true viewport and must clear the inset itself. */
+    padding-top: var(--sat);
   }
   .sidebar.sheet .side-row { min-height: 44px; }
   .side-scrim { position: fixed; inset: 0; z-index: 25; background: rgba(0,0,0,0.45); }

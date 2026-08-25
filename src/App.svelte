@@ -1459,7 +1459,16 @@
   }
 
   /* Swipe transition animations */
-  .page { will-change: transform; }
+  /* will-change ONLY while the 120ms slide runs (slideAnim clears right
+     after): a permanent `will-change: transform` makes .page the CONTAINING
+     BLOCK for every position:fixed popover inside it. On the phone .page
+     starts at viewport x=0 so nothing showed, but on desktop the rail pads
+     .page 46px right — and every fixed menu (the shared Select's list, the
+     agent dot menu, context menus) rendered 46px right of where the
+     viewport-space math put it (owner, 2026-08-25: "下拉框整体往右偏了").
+     No popover can be open during the tab slide, so the transient containing
+     block is harmless. */
+  .page.slide-in-left, .page.slide-in-right { will-change: transform; }
   .page.slide-in-left   { animation: slideInLeft 0.12s linear; }
   .page.slide-in-right  { animation: slideInRight 0.12s linear; }
   @keyframes slideInLeft  { from { transform: translateX(-40%); } to { transform: none; } }

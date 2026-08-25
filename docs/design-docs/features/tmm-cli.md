@@ -904,7 +904,16 @@ growing a menu per surface:
   as a second kind of menu. It is anchored on a POINT: `pointAnchor(x, y)` makes the
   pointer a zero-size rect so the existing placement rule — right edge on the
   anchor, flip above when there is no room, clamp to the viewport — applies
-  unchanged.
+  unchanged. All of these layers assume the VIEWPORT is their containing block,
+  which is a rule about everything ABOVE them: a permanent `will-change: transform`
+  on the App's `.page` made each page a containing block for its fixed descendants,
+  and on desktop — where the rail pads `.page` 46px right — every popover rendered
+  46px right of its math ("桌面版…下拉框整体往右偏了", owner 2026-08-25; the
+  phone's `.page` starts at x=0, so it never showed there). The hint now applies
+  only during the 120ms tab slide, when no popover can be open — and with fixed
+  sheets anchored to the true viewport, one that must clear the status bar pads
+  with `var(--sat)` (the APK's MainActivity-fed inset), never raw `env()`, which
+  reads 0 there.
 - `ui/longpress.ts` measures the hold, because a phone has no `contextmenu` event.
   Touch only: a mouse already has a right button, and treating a held left button as
   a press would fire a menu in the middle of a text selection. Three rules keep it
