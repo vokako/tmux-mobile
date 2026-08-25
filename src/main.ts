@@ -1,4 +1,9 @@
 import '@xterm/xterm/css/xterm.css';
+// The ONE UI face, self-hosted (bundled by Vite into dist/ — a CDN <link>
+// would go dark exactly where this app lives: the APK offline, a LAN box
+// behind no internet). Variable weights make the 550/650 mid-weights the
+// design system already asks for render TRUE instead of snapping to 500/700.
+import '@fontsource-variable/inter';
 import './app.css';
 import { mount } from 'svelte';
 import App from './App.svelte';

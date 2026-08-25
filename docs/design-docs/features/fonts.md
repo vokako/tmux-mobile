@@ -1,4 +1,32 @@
-# Fonts — system stack + bundled symbols + per-device custom override
+# Fonts — one bundled UI face + system mono + bundled symbols + per-device custom override
+
+## The UI face: Inter Variable, bundled (2026-08-25)
+
+`--font-ui` leads with **'Inter Variable'**, self-hosted via
+`@fontsource-variable/inter` (imported in `src/main.ts`, bundled by Vite —
+subset files with `unicode-range`, so a client only downloads latin ~48 KB
+unless it renders other scripts; ~224 KB total in dist for all subsets).
+Owner request: "整体ui字体做的更具设计感一些…无衬线字体，但是要具备设计感
+科技感，不同位置字体和谐统一，字体选择不要太多，尽量一致。terminal注意是
+等宽字体" (2026-08-25).
+
+Why bundled rather than a CDN `<link>`: this app lives exactly where a CDN
+goes dark — the APK offline, a LAN server with no internet. Same-origin
+files from `dist/` load everywhere the app itself loads. Why Inter: it is
+THE common UI sans (the "cdn有的常用字体"), designed for screens at UI
+sizes, and the variable weight axis makes the design system's mid-weights
+(550 sidebar names, 650 bubble headers) render TRUE — system stacks
+quantized them to 500/700, which is part of why the UI read as undesigned.
+One face, not two: a display face for titles was considered and dropped
+("字体选择不要太多"). Body text also enables Inter's `cv05`/`cv08`
+character variants (disambiguated `l`/`I` — this UI is full of ids and
+hashes); fonts without the features ignore them.
+
+Chinese stays on each platform's native CJK (PingFang / YaHei / Noto Sans
+CJK) behind Inter in the stack: Inter has no CJK, and a downloadable CJK
+subset is exactly what the 2026-07 un-bundling below traded away. The
+terminal and all `--font-mono` surfaces are untouched by design — the
+monospace story is the rest of this document.
 
 ## Context
 

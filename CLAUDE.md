@@ -117,7 +117,7 @@ end up shipping the wrong tree.
 - [Filesystem Service](docs/requirements/backend/services/filesystem.md)
 
 ### Design Docs (the WHY & HOW)
-- [Fonts (system stack + symbol bundles + custom override)](docs/design-docs/features/fonts.md)
+- [Fonts (bundled Inter UI face + system mono + symbol bundles + custom override)](docs/design-docs/features/fonts.md)
 - [Terminal Touch Handling](docs/design-docs/pages/terminal-touch.md)
 - [Terminal Gesture State Machine](docs/design-docs/pages/terminal-gestures.md)
 - [Terminal Sizing (cols × rows)](docs/design-docs/pages/terminal-sizing.md)

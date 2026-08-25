@@ -20,11 +20,17 @@ html {
      at runtime by fonts.svelte.js, which overwrites this var inline.
      Keep this literal in sync with SYSTEM_STACK there. --font-ui:
      everything else — labels, buttons, chat prose, Chinese body text —
-     proportional, using each platform's native UI font (PingFang / YaHei /
-     Noto Sans CJK for Chinese). Never put a monospace CJK face in
-     --font-ui: it makes Chinese UI text look like code. */
+     ONE designed face: 'Inter Variable' (bundled via @fontsource, so it is
+     identical on macOS/Android/web instead of the SF/Roboto/Segoe lottery;
+     owner, 2026-08-25: "更具设计感…无衬线…不同位置字体和谐统一，字体选择
+     不要太多"). Latin/digits take Inter; Chinese falls through to each
+     platform's native CJK (PingFang / YaHei / Noto Sans CJK) — Inter has no
+     CJK and a downloadable CJK subset was already traded away (fonts.md).
+     Never put a monospace CJK face in --font-ui: it makes Chinese UI text
+     look like code. The terminal NEVER takes --font-ui: it stays on the
+     monospace stack by construction. */
   --font-mono: ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', Consolas, 'Roboto Mono', 'Droid Sans Mono', 'Noto Sans Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', monospace;
-  --font-ui: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif;
+  --font-ui: 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif;
 
   /* Shared UI metrics */
   --ui-bar-height: 31px;
@@ -102,6 +108,12 @@ html[data-theme="light"] {
 body {
   margin: 0;
   font-family: var(--font-ui);
+  /* Inter's character-variant alternates, the quiet half of the "科技感":
+     cv05/cv08 give l and I their disambiguating tails/serifs (this app is
+     full of ids, flags and hashes), tnum is NOT set globally — columns that
+     need it (times, counters) already ask for tabular-nums locally. A font
+     without these features ignores them, so the fallbacks lose nothing. */
+  font-feature-settings: 'cv05' 1, 'cv08' 1;
   background: var(--bg);
   color: var(--text);
   overflow: hidden;
