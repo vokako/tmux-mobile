@@ -1571,8 +1571,8 @@
       {#if selected}
         <!-- The roster. Tapping an agent makes it the recipient (and this
              project's lead) — the phone gets chips, the desktop gets cards. -->
-        <!-- The roster row: the scrolling strip of cards PLUS the pinned add
-             button. Two children, one row. It renders for every SELECTED
+        <!-- The roster row: one scrolling strip, the add button riding INSIDE
+             it as the sticky last card. It renders for every SELECTED
              project, empty roster and closed session included, because `+ agent`
              is the only way into an empty room and both gates hid it: on a
              non-empty-roster gate it vanished with the last agent, and on a
@@ -1656,20 +1656,23 @@
               </div>
             </div>
           {/each}
+        <!-- Ad hoc: add an agent to a conversation already in progress. It
+             lives INSIDE the strip as its last card — one region, one family
+             (owner, 2026-08-25: "加agent应该放到最后，和其他agent放到一起…
+             不用强行一直占一个位置") — but STICKY at the right edge, because
+             the strip hides its scrollbar and a plainly-scrolling last child
+             was invisible with agents present (owner, 2026-08-21: "agent 不为
+             空的情况下 我都看不到'加 Agent'的按钮"). Sticky is both at once:
+             it sits after the last card when everything fits, and floats at
+             the edge while the strip scrolls. Icon-only when agents exist;
+             the label only when the roster is empty and the button IS the
+             room's entry point (a closed session is not a reason to hide it —
+             the spawn opens the session on its way in). -->
+          <button class="acard add" class:mini={managedAgents.length > 0 || stopped.length > 0}
+            onclick={() => openPicker('add')} title={t('hubSpawn')} aria-label={t('hubSpawn')}>
+            <Icon name="plus" size={14} />{#if !managedAgents.length && !stopped.length}<span>{t('hubSpawn')}</span>{/if}
+          </button>
         </div>
-        <!-- Ad hoc: add an agent to a conversation already in progress. PINNED
-             beside the strip, never inside it: as the strip's last child it
-             scrolled with the cards, and the strip hides its scrollbar — with
-             agents present the button lived off-screen with nothing hinting it
-             existed (owner, 2026-08-21: "agent 不为空的情况下 我都看不到
-             '加 Agent' 的按钮"). Unconditional inside the row: it is the entry
-             point to an EMPTY room, and a closed session is not a reason to hide
-             it — the spawn opens the session on its way in. 'add' is the right
-             mood even for an empty room: addAgents promotes a lead whenever
-             there is no recipient, which is exactly the empty-room case. -->
-        <button class="acard add" onclick={() => openPicker('add')} title={t('hubSpawn')}>
-          <Icon name="plus" size={14} /><span>{t('hubSpawn')}</span>
-        </button>
         </div>
       {/if}
 
@@ -2344,17 +2347,17 @@
   .term-toggle.on { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
 
   /* The roster: one line per agent, on every screen size. It answers "who is
-     here and are they busy" — anything more was a wall of cards. */
-  /* The roster row: the gutter and the divider belong to the ROW, so the pinned
-     add button shares them with the strip instead of scrolling away inside it. */
-  .roster { display: flex; align-items: stretch; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--border2); min-width: 0; }
-  .cards { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; flex: 0 1 auto; min-width: 0; }
+     here and are they busy" — anything more was a wall of cards. Metrics run
+     TIGHT (owner, 2026-08-25: "感觉整体占的空间不小"): the card is a chip
+     with a reading, not a panel. */
+  .roster { display: flex; align-items: stretch; padding: 6px 14px; border-bottom: 1px solid var(--border2); min-width: 0; }
+  .cards { display: flex; gap: 5px; overflow-x: auto; scrollbar-width: none; flex: 1 1 auto; min-width: 0; }
   .cards::-webkit-scrollbar { display: none; }
   .acard {
     position: relative; flex: none; display: flex; flex-direction: column;
     align-items: stretch; justify-content: center; gap: 1px; overflow: hidden;
-    min-height: 34px; background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--ui-radius-row); padding: 4px 10px 4px 5px; cursor: pointer; text-align: left;
+    min-height: 30px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--ui-radius-row); padding: 3px 8px 3px 5px; cursor: pointer; text-align: left;
     font-size: var(--fs-ui); color: var(--text2); transition: border-color var(--t-fast), color var(--t-fast);
     -webkit-tap-highlight-color: transparent;
   }
@@ -2365,7 +2368,7 @@
   .ac-vitals {
     font-size: var(--fs-micro); color: var(--meta-ink); line-height: 1.35;
     font-family: ui-monospace, Menlo, monospace; padding: 0 1px 1px 5px;
-    max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   /* One thin horizontal line at the card's bottom edge. Absolute, so it costs no
      height and cannot push the roster taller as it appears. */
@@ -2376,9 +2379,21 @@
   .ac-bar > i { display: block; height: 100%; transition: width var(--t-move), background var(--t-move); }
   .acard:hover { border-color: var(--input-border); color: var(--text); }
   .acard.sel { border-color: var(--accent-line); background: var(--accent-bg); color: var(--text); }
-  /* The `+` card holds one row of two items — it never grew a second line. */
-  .acard.add { flex-direction: row; align-items: center; gap: 6px; color: var(--text3); padding-right: 12px; }
+  /* The add card rides INSIDE the strip as its last member, STICKY at the
+     right edge: after the last card when everything fits, floating at the
+     edge while the strip scrolls (the strip hides its scrollbar, so a
+     plainly-scrolling add button was invisible — owner, 2026-08-21). Opaque
+     ground + a left shadow lift it over cards passing beneath. */
+  .acard.add {
+    flex-direction: row; align-items: center; gap: 6px; color: var(--text3); padding-right: 12px;
+    position: sticky; right: 0; z-index: 1; background: var(--bg);
+    box-shadow: -8px 0 10px -8px rgba(0, 0, 0, 0.5);
+  }
   .acard.add:hover { color: var(--accent); }
+  /* With agents present it is a small square +: it stands at the end of the
+     family without holding a seat wider than it needs (owner, 2026-08-25:
+     "不用强行一直占一个位置"). */
+  .acard.add.mini { padding: 0 7px; }
   .acard.off { opacity: 0.55; cursor: default; }
   /* Waking on hover is fine; promising a click is not — the accent border was
      the card selling a card-wide restart it no longer has. */
