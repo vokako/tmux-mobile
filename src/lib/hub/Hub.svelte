@@ -1177,10 +1177,16 @@
   const pointOf = (e) => ({ x: e.clientX ?? 0, y: e.clientY ?? 0 });
 
   /** An agent's verbs — the same ones its dot menu carries. */
+  /** One order for every agent menu — rising consequence, destructive last
+   * (owner, 2026-08-25: "停止删除应该靠后"), interrupt in the warn tone. */
   function agentItems(name) {
+    const config = openAgentConfig
+      ? [{ label: t('hubAgentConfig'), icon: 'gear', onselect: () => openAgentConfig(name) }]
+      : [];
     if (stopped.includes(name)) {
       return [
         { label: t('hubStartAgain'), icon: 'refresh', onselect: () => startAgent(name) },
+        ...config,
         { label: t('hubRemove'), icon: 'trash', danger: true, onselect: () => askAction('remove', name) },
       ];
     }
@@ -1188,7 +1194,8 @@
     return [
       { label: t('hubTalkTo'), icon: 'chat', onselect: () => setRecipient(name) },
       { label: t('hubWatch'), icon: 'terminal', onselect: () => { if (a) openDrawer(a); } },
-      { label: t('hubInterrupt'), icon: 'x', onselect: () => interrupt(name) },
+      ...config,
+      { label: t('hubInterrupt'), icon: 'x', warn: true, onselect: () => interrupt(name) },
       { label: t('hubStop'), icon: 'stop', danger: true, onselect: () => askAction('stop', name) },
       { label: t('hubRemove'), icon: 'trash', danger: true, onselect: () => askAction('remove', name) },
     ];
@@ -1200,12 +1207,13 @@
   function projectItems(row) {
     const session = row?.project?.session ?? '';
     const name = row?.project?.name ?? '';
+    // Constructive verbs lead, destructive close the menu (owner, 2026-08-25):
+    // Open (when closed) → Rename → Close (when live) → Delete.
     return [
-      row?.live
-        ? { label: t('projectDown'), icon: 'stop', danger: true, onselect: () => askAction('down', name, session) }
-        : { label: t('projectUp'), icon: 'zap', onselect: () => { selectProject(session); setTimeout(bringUp, 0); } },
+      ...(row?.live ? [] : [{ label: t('projectUp'), icon: 'zap', onselect: () => { selectProject(session); setTimeout(bringUp, 0); } }]),
       { label: t('projectRename'), icon: 'edit',
         onselect: () => { selectProject(session); setTimeout(startRename, 0); } },
+      ...(row?.live ? [{ label: t('projectDown'), icon: 'stop', danger: true, onselect: () => askAction('down', name, session) }] : []),
       { label: t('projectDelete'), icon: 'trash', danger: true,
         onselect: () => askAction('delete', name, session) },
     ];
@@ -1708,6 +1716,11 @@
             <div class="am-vitals">{stateLabel(menuAgent.state)}{menuAgent.since ? ` · ${fmtElapsed(menuAgent.since, tick)}` : ''}</div>
           {/if}
           {#if vitalsFor}<div class="am-vitals">{vitalsFor}</div>{/if}
+          <!-- Rising order of consequence, colours saying which is which
+               (owner, 2026-08-25: "停止 删除 打断等颜色不一样…停止删除应该
+               靠后"): reading verbs first, then config, then amber interrupt
+               (a turn cut short — the sys grammar's colour), and the red
+               stop/remove close the menu. -->
           {#if stopped.includes(menuFor)}
             <button role="menuitem" disabled={acting} onclick={() => { const n = menuFor; menuFor = ''; startAgent(n); }}>
               <Icon name="refresh" size={12} />{t('hubStartAgain')}
@@ -1721,18 +1734,20 @@
             <button role="menuitem" onclick={() => { const a = managedAgents.find((x) => x.name === menuFor); menuFor = ''; if (a) openDrawer(a); }}>
               <Icon name="terminal" size={12} />{t('hubWatch')}
             </button>
-            <button role="menuitem" title={t('hubInterruptHint')} onclick={() => { const n = menuFor; menuFor = ''; interrupt(n); }}>
-              <Icon name="x" size={12} />{t('hubInterrupt')}
-            </button>
-            <button role="menuitem" class="danger" onclick={() => { const n = menuFor; menuFor = ''; askAction('stop', n); }}>
-              <Icon name="stop" size={12} />{t('hubStop')}
-            </button>
           {/if}
           {#if openAgentConfig}
             <!-- The model's HOME is the config page — the menu links to it
                  instead of quoting the model name as dead text. -->
             <button role="menuitem" onclick={() => { const n = menuFor; menuFor = ''; openAgentConfig(n); }}>
               <Icon name="gear" size={12} />{t('hubAgentConfig')}
+            </button>
+          {/if}
+          {#if !stopped.includes(menuFor)}
+            <button role="menuitem" class="warn" title={t('hubInterruptHint')} onclick={() => { const n = menuFor; menuFor = ''; interrupt(n); }}>
+              <Icon name="x" size={12} />{t('hubInterrupt')}
+            </button>
+            <button role="menuitem" class="danger" onclick={() => { const n = menuFor; menuFor = ''; askAction('stop', n); }}>
+              <Icon name="stop" size={12} />{t('hubStop')}
             </button>
           {/if}
           <button role="menuitem" class="danger" title={t('hubRemoveHint')} onclick={() => { const n = menuFor; menuFor = ''; askAction('remove', n); }}>
@@ -2466,6 +2481,11 @@
      even though the type got smaller. */
   .hub-root.compact .a-menu button, .hub-root.compact .to-menu button { min-height: 44px; }
   .a-menu button:hover { background: var(--surface2); color: var(--text); }
+  /* Tones live on the verb itself (owner, 2026-08-25): amber = interrupt (a
+     turn cut short, the sys grammar's colour), red = stop/remove. */
+  .a-menu button.warn { color: var(--status-warn); }
+  .a-menu button.warn:hover { background: color-mix(in srgb, var(--status-warn) 14%, transparent); color: var(--status-warn); }
+  .a-menu button.danger { color: var(--status-danger); }
   .a-menu button.danger:hover { background: color-mix(in srgb, var(--status-danger) 14%, transparent); color: var(--status-danger); }
   .a-menu button:disabled { opacity: 0.45; cursor: default; background: none; }
   .a-menu button :global(svg) { flex: none; }

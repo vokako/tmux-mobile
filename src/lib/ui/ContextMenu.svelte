@@ -11,7 +11,7 @@
   import { menuPlacement, pointAnchor, viewBox } from './placement.ts';
 
   /**
-   * @typedef {{ label: string, icon?: string, danger?: boolean, disabled?: boolean,
+   * @typedef {{ label: string, icon?: string, danger?: boolean, warn?: boolean, disabled?: boolean,
    *             onselect: () => void }} MenuItem
    */
   let {
@@ -92,7 +92,7 @@
     bind:clientWidth={w} bind:clientHeight={h}>
     {#if who}<div class="ctx-who">{who}</div>{/if}
     {#each items as it, i (it.label)}
-      <button role="menuitem" class:danger={it.danger} class:cur={i === cursor}
+      <button role="menuitem" class:danger={it.danger} class:warn={it.warn} class:cur={i === cursor}
         disabled={it.disabled}
         onpointerenter={() => (cursor = i)}
         onclick={() => { it.onselect(); oncancel(); }}>
@@ -125,6 +125,10 @@
   /* Hover and the keyboard cursor are ONE highlight: two would read as two
      selections. Same rule as Select and the composer's command palette. */
   .ctx button:hover, .ctx button.cur { background: var(--surface2); color: var(--text); }
+  /* Tones: amber = interrupt-class verbs (a turn cut short), red =
+     destructive. Same language as the Hub's agent menu and the sys rows. */
+  .ctx button.warn { color: var(--status-warn); }
+  .ctx button.warn:hover, .ctx button.warn.cur { background: color-mix(in srgb, var(--status-warn) 14%, transparent); }
   .ctx button.danger { color: var(--danger); }
   .ctx button.danger:hover, .ctx button.danger.cur { background: var(--danger-bg); }
   .ctx button:disabled { opacity: 0.45; cursor: default; }
