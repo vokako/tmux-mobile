@@ -96,9 +96,12 @@
   });
 
   async function reload() {
-    try { defs = (await registryList()).agents ?? []; } catch { defs = []; }
-    try { skills = (await skillsList()).skills ?? []; } catch { skills = []; }
-    try { mcps = (await mcpList()).mcp ?? []; } catch { mcps = []; }
+    // "I could not ask" is not "there is nothing": keep the last known lists
+    // on a failed RPC (same rule as the Hub roster). Wiping them meant one
+    // timed-out call emptied the whole page until the next visit.
+    try { defs = (await registryList()).agents ?? []; } catch { /* keep last */ }
+    try { skills = (await skillsList()).skills ?? []; } catch { /* keep last */ }
+    try { mcps = (await mcpList()).mcp ?? []; } catch { /* keep last */ }
   }
   $effect(() => { if (visible) reload(); });
 

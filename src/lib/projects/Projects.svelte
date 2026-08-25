@@ -73,6 +73,10 @@
       // -32601: this server has no project support. Not an error to show.
       if (code === -32601) { supported = false; onTracked([]); return; }
       error = (e as Error)?.message || String(e);
+      // Report the LAST KNOWN tracking even on failure: the host gates its
+      // untracked-session rendering on "projects have reported", and a silent
+      // failure here must not leave that gate shut forever.
+      onTracked(rows.map((r) => r.project.session));
     }
   }
 

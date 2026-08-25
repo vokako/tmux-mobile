@@ -138,6 +138,7 @@
       }
       panes = grouped;
       error = '';
+      listReady = true;
     } catch (e) {
       error = (e as Error).message;
     }
@@ -286,6 +287,14 @@
    *  reason "no sessions" must stay quiet: with them listed, the column is
    *  not empty and the message contradicts what is on screen. */
   let hasProjects = $derived(trackedSessions.length > 0);
+  /** "Empty" and "untracked" are VERDICTS, not defaults (same rule as the
+   *  Hub's roomReady; owner, 2026-08-25: "不同页面切换会不会有类似的这种问
+   *  题"). Before the first refresh answers, sessions=[] means "not asked
+   *  yet" and must not read as "No sessions"; before Projects reports
+   *  onTracked once, every tracked session would render in the flat
+   *  "Sessions" group and visibly migrate a beat later. */
+  let listReady = $state(false);
+  let trackedReady = $state(false);
 
   let filtered = $derived(
     sessions.filter(s => sessionMatches(s, query) && !trackedSessions.includes(s.name)),
@@ -513,7 +522,7 @@
       {panes}
       dense={!chips}
       {activeTarget}
-      onTracked={(names) => trackedSessions = names}
+      onTracked={(names) => { trackedSessions = names; trackedReady = true; }}
       onReady={(reload) => reloadProjects = reload} />
     <!-- Creating a project is the same ROW in every sidebar (Chat's projects,
          Agents' definitions/skills/MCP): `.side-row.add`, quiet until hovered.
@@ -529,6 +538,11 @@
         <Icon name="plus" size={13} />{t('projectNew')}
       </button>
     {/if}
+    <!-- The untracked list waits for Projects to report once: before that,
+         every TRACKED session would render here as "untracked" and visibly
+         migrate up a beat later (same disease as the Hub's empty-room flash;
+         owner, 2026-08-25). -->
+    {#if trackedReady}
     {#if grouped}
       <div class="group-label" class:side-h={!chips}>
         <Icon name="bot" size={12} />
@@ -569,8 +583,10 @@
     <!-- "No sessions" is about the UNTRACKED list only. With projects above it
          (every session is a project now) the column is not empty at all, and
          saying so next to four listed rows read as a bug. Searching still
-         reports a miss, because then the user asked a question. -->
-    {#if filtered.length === 0 && (isSearching || !hasProjects)}
+         reports a miss, because then the user asked a question. Both claims
+         wait for the FIRST answers (listReady/trackedReady): "not asked yet"
+         must never read as "there is nothing". -->
+    {#if listReady && filtered.length === 0 && (isSearching || !hasProjects)}
       <div class="empty">
         {#if isSearching}
           {t('noMatches')} "<span class="empty-q">{query}</span>"
@@ -578,6 +594,7 @@
           {t('noSessions')}
         {/if}
       </div>
+    {/if}
     {/if}
   </div>
 
