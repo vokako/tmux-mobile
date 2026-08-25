@@ -882,6 +882,7 @@
   let filesGoBack = $state(null);
   let hubGoBack = $state(null);
   let agentsGoBack = $state(null);
+  let prefsGoBack = $state(null);
   // A request from the Hub's agent menu to open one agent's CONFIG editor:
   // {name, n} — n increments so asking for the same agent twice still fires.
   let agentsEditReq = $state(null);
@@ -908,6 +909,9 @@
       // Terminal is the root on a phone: back closes the session sheet if it
       // is open, otherwise there is nowhere below it (re-push prevents exit).
       if (page === 'terminal' && sessListOpen) { sessListOpen = false; navPush(); return; }
+      // Settings peels its open category back to the list first; only a
+      // back with nothing to peel leaves the page.
+      if (page === 'prefs' && prefsGoBack && prefsGoBack()) { navPush(); return; }
       if (page === 'prefs') { page = pageBeforePrefs; return; }
       // At sessions root, re-push to prevent exit
       navPush();
@@ -1080,6 +1084,7 @@
       onDebug={(value) => { debugMode = value; localStorage.setItem('tmux_debug', value ? '1' : ''); }}
       onOptimize={optimizeConnection}
       onShare={shareConnectionLink}
+      onGoBack={(fn) => prefsGoBack = fn}
       onAddress={(address) => {
         localStorage.setItem('tmux_address', address);
         activeAddress = address;

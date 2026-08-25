@@ -30,6 +30,7 @@
     onDebug = () => {},
     onOptimize = () => {},
     onShare = () => {},
+    onGoBack = null,
     onAddress = () => {},
     onDisconnect = () => {},
     onConnectionSetup = () => {},
@@ -53,6 +54,7 @@
     onDebug?: (on: boolean) => void;
     onOptimize?: () => void;
     onShare?: () => void;
+    onGoBack?: ((fn: () => boolean) => void) | null;
     onAddress?: (address: string) => void;
     onDisconnect?: () => void;
     onConnectionSetup?: () => void;
@@ -147,7 +149,20 @@
     terminalPrefs.setLineHeight(Math.round(value * 100) / 100);
   }
 
+  // Compact drill-down (owner, 2026-08-25: "上边一行三个标签这个风格和别的
+  // 页面太不一样"): the phone shows the CATEGORY LIST first — the same shared
+  // sidebar every page has — and a tap opens that category full screen, the
+  // AgentsPage editor pattern. catOpen only means anything under 760px.
+  let catOpen = $state(false);
+  $effect(() => {
+    onGoBack?.(() => {
+      if (catOpen) { catOpen = false; return true; }
+      return false;
+    });
+  });
+
   function selectTab(value: string) {
+    catOpen = true;
     tab = value;
     recordingShortcut = '';
     shortcutError = '';
@@ -178,7 +193,7 @@
 <!-- Settings is a PAGE in the unified skeleton (ui-unification.md "Settings
      as a page"): shared sidebar with category rows, main column with a
      page-head. No backdrop, no X — the rail/tab bar is the way out. -->
-<section class="preferences" aria-label={t('settings')}>
+<section class="preferences" class:cat-open={catOpen} aria-label={t('settings')}>
   <aside class="sidebar">
     <SideHandle />
     <div class="side-scroll">
@@ -192,15 +207,13 @@
   </aside>
   <div class="pref-shell">
     <div class="page-head">
+      <!-- Compact only: the way back to the category list (the back gesture
+           does the same through onGoBack). -->
+      <button class="icon-btn back" title={t('settings')} aria-label={t('settings')}
+        onclick={() => catOpen = false}>
+        <Icon name="chevron-left" size={15} />
+      </button>
       <h1>{tabs.find((x) => x.id === tab)?.label() ?? t('settings')}</h1>
-    </div>
-    <!-- Compact: the sidebar is hidden, categories become a chip row. -->
-    <div class="cat-chips">
-      {#each tabs as item}
-        <button class="pchip" class:sel={tab === item.id} onclick={() => selectTab(item.id)}>
-          <Icon name={item.icon} size={13} />{item.label()}
-        </button>
-      {/each}
     </div>
 
     <div class="pref-content">
@@ -392,22 +405,20 @@
   .sidebar { position: relative; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
   .side-scroll { flex: 1; overflow-y: auto; padding: 8px; }
   .r-label { flex: 1; min-width: 0; }
-  .cat-chips { display: none; }
-  .pchip {
-    display: flex; align-items: center; gap: 6px; flex: none;
-    background: var(--surface); border: 1px solid var(--border); border-radius: 999px;
-    color: var(--text2); padding: 5px 12px; font-size: var(--fs-ui); cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .pchip.sel { border-color: var(--accent-line); color: var(--accent); background: var(--accent-bg); }
+  .pref-shell { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .back { display: none; }
+  /* Compact = the drill-down every other page speaks (AgentsPage's editor
+     pattern): the category LIST is the first screen — the same shared sidebar,
+     full width — and an open category takes the whole screen with a back
+     button in its head. The chip row this replaces was a third navigation
+     species nothing else wore. */
   @media (max-width: 760px) {
     .preferences { grid-template-columns: minmax(0, 1fr); }
-    .sidebar { display: none; }
-    .cat-chips {
-      display: flex; gap: 6px; padding: 10px 12px 0; overflow-x: auto; flex: none;
-      -webkit-overflow-scrolling: touch; scrollbar-width: none;
-    }
-    .cat-chips::-webkit-scrollbar { display: none; }
+    .preferences:not(.cat-open) .pref-shell { display: none; }
+    .preferences.cat-open .sidebar { display: none; }
+    .sidebar { border-right: none; }
+    .sidebar :global(.side-row) { min-height: 44px; }
+    .back { display: grid; }
   }
   .pref-content { flex:1;min-width:0;overflow:auto;padding:14px clamp(12px,3vw,24px); }
   .setting-card { max-width:720px;margin:0 auto;border:1px solid var(--border2);border-radius:var(--ui-radius-panel);background:var(--surface);overflow:hidden; }
