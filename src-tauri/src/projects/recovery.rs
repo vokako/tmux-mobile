@@ -48,6 +48,14 @@ const TRANSIENT: [&str; 3] = [
     "modeltemporarilyunavailable",
     "pleasetryagain",
 ];
+/// Second kiro shape (owner, 2026-08-26): `The model you've selected is
+/// temporarily unavailable. Please use '/model' to select a different model
+/// and try again. (request_id: …)`. No "unexpected error" header — the whole
+/// first sentence IS the header, and it is specific enough on its own: it
+/// self-contains the transient reason ("temporarily unavailable") and kiro
+/// hard-wraps its continuation lines, so requiring a second marker on the
+/// same logical line would miss the real error on any normal-width pane.
+const MODEL_UNAVAILABLE: &str = "themodelyouveselectedistemporarilyunavailable";
 
 /// Lowercase alphanumerics only: the pane wraps the error blob at arbitrary
 /// points (and pads with box furniture), so whitespace and punctuation carry
@@ -68,7 +76,8 @@ pub fn scan_tail(text: &str) -> bool {
         if c.contains("tmmchat") {
             return false;
         }
-        c.contains(HEADER) && TRANSIENT.iter().any(|m| c.contains(m))
+        (c.contains(HEADER) && TRANSIENT.iter().any(|m| c.contains(m)))
+            || c.contains(MODEL_UNAVAILABLE)
     })
 }
 
@@ -219,6 +228,31 @@ mod tests {
     fn the_real_error_is_detected() {
         assert!(scan_tail(REAL));
         assert!(scan_tail(&format!("some output\n{REAL}\n\n╭───╮\n│ ❯ │\n╰───╯\n")));
+    }
+
+    /// The second shape, exactly as kiro painted it (2026-08-26): its own
+    /// hard-wrapped lines, first sentence whole on the first line.
+    const MODEL_ERR: &str = "The model you've selected is temporarily unavailable.\n  Please use '/model' to select a different model and try\n  again. (request_id: db05d310-a189-497d-a6f2-b53410863243)";
+
+    #[test]
+    fn the_model_unavailable_error_is_detected() {
+        assert!(scan_tail(MODEL_ERR));
+        assert!(scan_tail(&format!("some output\n{MODEL_ERR}\n\n╭───╮\n│ ❯ │\n╰───╯\n")));
+        // capture -J re-joins a soft-wrapped paint into one logical line.
+        assert!(scan_tail(&MODEL_ERR.replace('\n', " ")));
+    }
+
+    #[test]
+    fn quoting_the_model_error_is_not_having_it() {
+        // The owner pasted this error into the chat (2026-08-26) — the
+        // delivery lands in an agent's pane stamped, wrapping after it.
+        let quoted = format!("[tmm chat 2026-08-26 15:42] human: @builder-2 {MODEL_ERR} 遇到这个异常，麻烦你也给我处理一下");
+        assert!(!scan_tail(&quoted), "a chat quote must not trigger a retry");
+        // The continuation lines alone (stamp scrolled onto the line above)
+        // never carry the full header sentence, so they cannot hit either.
+        assert!(!scan_tail("Please use '/model' to select a different model and try\n  again. (request_id: x)\n"));
+        // Prose that names the reason without the sentence.
+        assert!(!scan_tail("the model may be temporarily unavailable, retry later\n"));
     }
 
     #[test]
