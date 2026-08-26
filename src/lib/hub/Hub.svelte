@@ -1196,10 +1196,21 @@
     return () => { clearInterval(ai); clearInterval(fi); clearInterval(pi); };
   });
 
-  // Esc closes the drawer (capture so it wins over xterm).
+  // Esc closes the drawer — but ONLY when it is pressed OUTSIDE the terminal.
+  // Escape is how every agent TUI cancels the turn it is running, so an Esc
+  // typed INTO the focused pane belongs to the pane app; stealing it at window
+  // capture closed the drawer instead of reaching the agent (owner,
+  // 2026-08-26: "按键盘的 ESC 键 它就直接退出这个区域了 而不是发送 ESC 键").
+  // The drawer still closes via its ✕, the back gesture, and an Esc pressed
+  // while focus is anywhere else. Gated on `visible` too: pages stay mounted
+  // while hidden, so a drawer left open used to eat the Terminal page's Esc.
   $effect(() => {
-    if (!termOpen) return;
-    const onKey = (e) => { if (e.key === 'Escape') { closeDrawer(); e.stopPropagation(); } };
+    if (!termOpen || !visible) return;
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      if (e.target?.closest?.('.xterm')) return; // focused terminal: the pane gets it
+      closeDrawer(); e.stopPropagation();
+    };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   });

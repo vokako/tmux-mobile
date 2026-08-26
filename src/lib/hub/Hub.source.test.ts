@@ -123,6 +123,17 @@ test('the drawer opens and closes through the reading anchor, everywhere', () =>
   assert.match(source, /!el\.classList\.contains\('ask-bottom'\)/u);
 });
 
+test('an Esc typed into the drawer terminal reaches the pane, not closeDrawer', () => {
+  // Escape is how every agent TUI cancels the turn it is running. The drawer's
+  // window-capture listener used to eat it unconditionally — pressing Esc in
+  // the focused terminal closed the drawer instead of reaching the agent
+  // (owner, 2026-08-26). Two guards, both load-bearing:
+  // an event from inside the terminal is the pane's,
+  assert.match(source, /e\.target\?\.closest\?\.\('\.xterm'\)/u, 'focused-terminal Esc must pass through');
+  // and a HIDDEN Hub (pages stay mounted) must not steal the Terminal page's Esc.
+  assert.match(source, /if \(!termOpen \|\| !visible\) return;/u, 'the listener is gated on visible');
+});
+
 test('a lifecycle group is one row per line, in one who/action/detail grammar', () => {
   // Joined by a `·` on one nowrap line, "removed k" and "spawned k" read as a
   // single grey run-on string (owner, 2026-08-24). The capsule stays (a stop plus
