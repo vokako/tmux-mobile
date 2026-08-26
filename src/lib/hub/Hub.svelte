@@ -198,6 +198,7 @@
     if (selected) roomCache.set(selected, { feed, lastTs, activity, lastActivityTs, agents });
     selected = session;
     composerText = hubPrefs.draft(session);
+    pending = []; // an attachment staged for one room must not ride into another
     hubPrefs.setProject(session);
     // The chat's project is a working context like the terminal's: tell App,
     // so the Files tab follows whichever the user touched LAST (owner,
@@ -479,7 +480,7 @@
 
   async function send() {
     const raw = composerText.trim();
-    if (!raw || !selected) return;
+    if ((!raw && !pending.length) || !selected) return;
     // A SLASH COMMAND goes to the agent's CLI, not to its model, so it is typed
     // verbatim — no `[tmm chat …] human:` stamp, no @address, nothing the TUI
     // would read as prose. It needs a target: an explicit `@name`, else the
@@ -501,15 +502,19 @@
     // The recipient makes "talk to THIS agent" the default rather than a
     // gesture: addressed() prefixes @name unless the user @-addressed someone
     // by hand, and an empty recipient posts to the room.
-    const text = addressed(raw, recipient);
+    const atts = pending;
+    const body = [raw, ...atts.map((a) => a.kind === 'image' ? `![](${a.path})` : a.path)]
+      .filter(Boolean).join('\n');
+    const text = addressed(body, recipient);
     composerText = '';
+    pending = [];
     following = true;
     scrollFeed(true);
     try {
       await hubPost(selected, text);
       await loadFeed();
       scrollFeed(true);
-    } catch (e) { console.warn('hub post failed', e); }
+    } catch (e) { console.warn('hub post failed', e); pending = atts; }
   }
 
   /** Grow to fit what is being typed, up to the CSS ceiling, then let it scroll.
@@ -585,6 +590,12 @@
   // it through ChatImage like any other ref.
   let fileEl = $state(null);
   let attaching = $state(false);
+  // Uploaded, waiting to ride the next send. The composer never shows the
+  // markdown path line (owner, 2026-08-26: "消息框内部不展示完整的上传图片的
+  // markdown 格式路径，就用一个 Image 的 placeholder 代替") — each attachment
+  // is a chip above the textarea; the ref joins the body at SEND time.
+  let pending = $state([]); // [{ path, kind: 'image'|'file', name }]
+  const sendable = $derived(!!composerText.trim() || !!pending.length);
   const IMG_EDGE = 1568;
   const FILE_CAP = 32 * 1024 * 1024; // base64 over one RPC; beyond this, point the agent at the original path instead
 
@@ -622,21 +633,19 @@
       // must never show up in the project's `git status`.
       await fsUpload(`${ws}/.tmm/uploads/.gitignore`, btoa('*\n'));
       for (const f of files) {
-        let path, ref;
         if (f.type.startsWith('image/')) {
           // Images are re-encoded (webp, capped long edge) — 2(c).
           const { b64, ext } = await encodeImage(f);
-          path = uploadImagePath(ws, imageId(), ext);
+          const path = uploadImagePath(ws, imageId(), ext);
           await fsUpload(path, b64);
-          ref = `![](${path})`;
+          pending = [...pending, { path, kind: 'image', name: f.name }];
         } else {
           // Everything else lands BYTE-IDENTICAL under its own name — 2(a)/3(a).
           if (f.size > FILE_CAP) { console.warn('attach skipped (too large)', f.name, f.size); continue; }
-          path = uploadFilePath(ws, imageId(), f.name);
+          const path = uploadFilePath(ws, imageId(), f.name);
           await fsUpload(path, toB64(new Uint8Array(await f.arrayBuffer())));
-          ref = path; // a plain path line — the prompt carries it, 2(b)
+          pending = [...pending, { path, kind: 'file', name: f.name }];
         }
-        composerText = composerText.trim() ? `${composerText.replace(/\s+$/, '')}\n${ref}` : ref;
       }
       composerEl?.focus();
     } catch (err) {
@@ -1963,6 +1972,17 @@
                         </button>
                       {/if}
                     {/if}
+                    {#if parts.images.length}
+                      <!-- Inside the bubble (owner, 2026-08-26): part of the
+                           message, clipped by the bubble's own radius. The
+                           held anchor hides these — a pinned landmark is for
+                           re-reading your words, not for a tall image. -->
+                      <div class="shots">
+                        {#each parts.images as src, k (`${k}-${src}`)}
+                          <ChatImage {src} alt={m.from} onview={(u) => shotView = u} />
+                        {/each}
+                      </div>
+                    {/if}
                     <button class="m-meta" aria-label={t('hubMsgActions')}
                       onclick={(e) => { e.stopPropagation(); msgOpen = msgOpen === key ? '' : key; }}>
                       <span class="m-time">{fmtTime(m.ts)}</span>
@@ -1986,13 +2006,6 @@
                     <button class:on={rawOpen === key} onclick={() => { rawOpen = rawOpen === key ? '' : key; }}>
                       <Icon name="command" size={11} />{t('hubRaw')}
                     </button>
-                  </div>
-                {/if}
-                {#if parts.images.length}
-                  <div class="shots">
-                    {#each parts.images as src, k (`${k}-${src}`)}
-                      <ChatImage {src} alt={m.from} onview={(u) => shotView = u} />
-                    {/each}
                   </div>
                 {/if}
               </div>
@@ -2175,6 +2188,20 @@
             {/each}
           </div>
         {/if}
+        {#if pending.length}
+          <div class="pend-row">
+            {#each pending as a, i (a.path)}
+              <span class="pend-chip" title={a.path}>
+                <Icon name={a.kind === 'image' ? 'image' : 'file'} size={12} />
+                <span class="pend-name">{a.kind === 'image' ? t('hubImage') : a.name}</span>
+                <button class="pend-x" aria-label={t('hubRemoveAttachment')}
+                  onclick={() => pending = pending.filter((_, j) => j !== i)}>
+                  <Icon name="x" size={11} />
+                </button>
+              </span>
+            {/each}
+          </div>
+        {/if}
         <!-- A textarea, not an input: a message you are still writing has to be
              readable. It grows with the text and then scrolls, so a long one is
              never a one-line peephole. -->
@@ -2200,13 +2227,13 @@
           </svg>
           <Icon name="plus" size={13} />
         </button>
-        <button class="send-btn" class:muted={!composerText.trim() && !intArm && !recipientBusy} class:arm={intArm}
-          class:busy={recipientBusy && !composerText.trim() && !intArm}
-          onclick={() => (composerText.trim() ? send() : armInterrupt())}
-          title={intArm ? t('hubIntArmed').replace('{who}', intWho) : composerText.trim() ? t('hubSend') : t('hubIntHint')}
-          aria-label={intArm ? t('hubIntArmed').replace('{who}', intWho) : composerText.trim() ? t('hubSend') : t('hubIntHint')}
-          disabled={!selected || (!composerText.trim() && !intTargets.length)}>
-          {#if !composerText.trim() && (intArm || recipientBusy)}
+        <button class="send-btn" class:muted={!sendable && !intArm && !recipientBusy} class:arm={intArm}
+          class:busy={recipientBusy && !sendable && !intArm}
+          onclick={() => (sendable ? send() : armInterrupt())}
+          title={intArm ? t('hubIntArmed').replace('{who}', intWho) : sendable ? t('hubSend') : t('hubIntHint')}
+          aria-label={intArm ? t('hubIntArmed').replace('{who}', intWho) : sendable ? t('hubSend') : t('hubIntHint')}
+          disabled={!selected || (!sendable && !intTargets.length)}>
+          {#if !sendable && (intArm || recipientBusy)}
             <!-- A stop square inside a slowly circling arc: the "mid-turn, tap
                  to cut it" glyph every chat product speaks. Armed keeps the
                  same glyph on the amber ground — same object, hotter state —
@@ -2770,7 +2797,9 @@
   }
   .m-acts button:hover, .m-acts button.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
   /* Referenced images, under the text they came with. */
-  .shots { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; border-radius: 18px; overflow: hidden; }
+  .shots { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; border-radius: var(--ui-radius-control); overflow: hidden; clear: both; }
+  .m-body > .shots:first-child { margin-top: 2px; }
+  .msg.held .shots { display: none; }
   /* Lifecycle lines are the app narrating real actions (an agent stopped, a
      /command typed into a pane) — reading ink and body-adjacent size, not fine
      print the reader has to squint at ("不要只用灰色小字，让我看不太清", owner
@@ -3086,6 +3115,21 @@
      the absolute `bottom` is measured from the PADDING box, 1px inside the
      border, so 5.5px yields symmetric 6.5px gaps). Bottom-anchored, so it
      stays put as the box grows into multiple lines. */
+  .pend-row { display: flex; flex-wrap: wrap; gap: 5px; padding: 7px 10px 0; }
+  .pend-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 24px; padding: 0 4px 0 8px; max-width: 220px;
+    border: 1px solid var(--border2); border-radius: var(--ui-radius-control);
+    background: var(--surface2); color: var(--text2); font-size: var(--fs-micro);
+  }
+  .pend-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pend-x {
+    display: grid; place-items: center; width: 16px; height: 16px; padding: 0;
+    border: none; border-radius: 5px; background: none; color: var(--text3);
+    cursor: pointer; position: relative;
+  }
+  .pend-x::after { content: ''; position: absolute; inset: -8px; }
+  .pend-x:hover { color: var(--status-danger); }
   .attach-btn {
     position: absolute; right: 43px; bottom: 7.5px;
     width: 26px; height: 26px; display: grid; place-items: center;
