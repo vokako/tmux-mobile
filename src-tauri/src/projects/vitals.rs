@@ -35,6 +35,14 @@ pub struct Vitals {
     pub effort: Option<String>,
     /// Checked-out branch, as the status line shows it.
     pub branch: Option<String>,
+    /// True when the FULL status line was seen this capture (kiro: the anchored
+    /// line with its context segment), so an absent effort is a VERDICT — kiro
+    /// omits the effort segment entirely when it is the backend default (owner,
+    /// 2026-08-26: "effort 这个参数不是百分之百都会显示的"), and without this
+    /// flag a once-misread effort could never clear: backfill re-inserted it
+    /// with a fresh timestamp on every poll, a permanent ghost.
+    #[serde(skip)]
+    pub effort_definitive: bool,
 }
 
 impl Vitals {
@@ -90,7 +98,11 @@ impl Vitals {
         if self.context_pct.is_none() {
             self.context_pct = prev.context_pct;
         }
-        if self.effort.is_none() {
+        // An effort verdict stands: when the full status line was read and
+        // carried no effort segment, the effort IS "backend default" — filling
+        // it from memory would resurrect a stale (or once-misread) value that
+        // kiro will never repaint to contradict.
+        if self.effort.is_none() && !self.effort_definitive {
             self.effort = prev.effort.clone();
         }
         if self.branch.is_none() {
@@ -261,6 +273,15 @@ pub fn sniff_kiro(pane: &str, agent: &str) -> Vitals {
             continue;
         }
 
+        // Is this the status line proper? kiro's left side starts with the
+        // agent's own name, so seg 0 == the anchor. Effort is ONLY read from
+        // this line: unlike context (pie glyph) and branch (parentheses) it has
+        // no shape of its own — it is a bare word, and reading `high`/`max`/
+        // `medium` wherever they sat turned ordinary output (a table cell, a
+        // priority column) into a confident effort reading (owner, 2026-08-26:
+        // "effort 显示好像有的显示不对").
+        let anchored = segs.first().is_some_and(|s| *s == agent);
+
         for (i, seg) in segs.iter().enumerate() {
             if v.context_pct.is_none() {
                 if let Some(pct) = context_pct(seg) {
@@ -268,7 +289,11 @@ pub fn sniff_kiro(pane: &str, agent: &str) -> Vitals {
                     continue;
                 }
             }
-            if v.effort.is_none() && EFFORTS.contains(&seg.to_ascii_lowercase().as_str()) {
+            if anchored
+                && v.effort.is_none()
+                && !v.effort_definitive
+                && EFFORTS.contains(&seg.to_ascii_lowercase().as_str())
+            {
                 v.effort = Some(seg.to_ascii_lowercase());
                 continue;
             }
@@ -282,7 +307,7 @@ pub fn sniff_kiro(pane: &str, agent: &str) -> Vitals {
             // (and the optional `Autonomous` flag). Anchoring on the name the
             // caller gave us is what keeps a cwd or a tangent from being read as
             // a model id.
-            if v.model.is_none() && i == 0 && *seg == agent {
+            if v.model.is_none() && i == 0 && anchored {
                 let next = segs
                     .iter()
                     .skip(1)
@@ -291,6 +316,14 @@ pub fn sniff_kiro(pane: &str, agent: &str) -> Vitals {
                     v.model = Some((*m).to_string());
                 }
             }
+        }
+        // The anchored line carrying its context segment is the FULL left side
+        // (`agent · [autonomous] · model · [effort] · context`): whatever it
+        // says about effort — including "nothing" — is the verdict. kiro omits
+        // the segment when the effort is the backend default, so absence here
+        // is a reading, not a miss, and backfill must not overwrite it.
+        if anchored && v.context_pct.is_some() {
+            v.effort_definitive = true;
         }
     }
     v
@@ -571,7 +604,7 @@ mod tests {
     }
 
     #[test]
-    fn effort_is_read_wherever_it_sits() {
+    fn effort_is_read_only_from_the_anchored_status_line() {
         let v = sniff_kiro("worker · gpt-5.1 · high · ◑ 42%\n", "worker");
         assert_eq!(v.model.as_deref(), Some("gpt-5.1"));
         assert_eq!(v.effort.as_deref(), Some("high"));
@@ -580,6 +613,40 @@ mod tests {
         let no_effort = sniff_kiro("worker · gpt-5.1 · ◑ 42%\n", "worker");
         assert_eq!(no_effort.model.as_deref(), Some("gpt-5.1"));
         assert_eq!(no_effort.effort, None);
+        // A bare effort word in ordinary output is NOT a reading: it has no
+        // shape of its own, so only the line anchored by the agent's name may
+        // provide it (owner, 2026-08-26: "effort 显示好像有的显示不对").
+        for text in [
+            "priority  high  assigned to worker\n",
+            "medium\n",
+            "risk: low · impact: high\n",
+        ] {
+            assert_eq!(sniff_kiro(text, "worker").effort, None, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn an_absent_effort_on_the_full_status_line_is_a_verdict() {
+        // kiro omits the effort segment when it is the backend default, so the
+        // anchored line WITH its context segment and WITHOUT an effort says
+        // "no effort" — and backfill must not resurrect a remembered one, or a
+        // stale/misread value becomes a permanent ghost (re-inserted with a
+        // fresh timestamp on every poll).
+        let mut fresh = sniff_kiro("worker · gpt-5.1 · ◑ 42%\n", "worker");
+        assert!(fresh.effort_definitive);
+        let prev = Vitals { effort: Some("high".into()), ..Default::default() };
+        fresh.backfill(&prev);
+        assert_eq!(fresh.effort, None, "verdict beats memory");
+        // Without the verdict (status line not on screen), memory still fills
+        // the gap — that is the whole point of remembering.
+        let mut miss = sniff_kiro("$ ls\n", "worker");
+        assert!(!miss.effort_definitive);
+        miss.backfill(&prev);
+        assert_eq!(miss.effort.as_deref(), Some("high"));
+        // And an OLDER status line in scrollback cannot re-fill it either: the
+        // newest paint's verdict wins over anything above it.
+        let two = "worker · gpt-5.1 · high · ◑ 40%\nworker · gpt-5.1 · ◑ 42%\n";
+        assert_eq!(sniff_kiro(two, "worker").effort, None);
     }
 
     #[test]

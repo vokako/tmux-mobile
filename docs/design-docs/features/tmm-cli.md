@@ -797,16 +797,26 @@ rules follow from reading a screen rather than an API:
   name, and the optional `Autonomous` flag), so a line that does not start with
   this window's name contributes no model. Without that anchor a cwd, a tangent
   name or a neighbour's status line becomes "the model this agent is running".
-- **Fields that can identify themselves do.** Context, effort and branch are found
-  by shape wherever they sit, because a narrow pane wraps the right-hand segments
-  onto their own lines. Effort in particular cannot be positional: it is absent
-  unless the backend reports one, and by position its slot holds the model.
-  The WIDE pane is the mirror image: with room to spare, kiro right-aligns
-  `location · branch` on the SAME line, joined to the left segments by a padding
-  run of spaces rather than a `·` — so the context segment arrived glued to the
-  cwd (`◔ 5%       /local/home/cfu/temp`) and the percent was refused (owner,
-  2026-08-26: "上下文长度也没嗅探出来"). A run of two or more spaces never
-  occurs inside a segment, so it is treated as a segment boundary too.
+- **Fields that can identify themselves do — and effort cannot, so it is
+  anchored.** Context and branch are found by shape wherever they sit, because a
+  narrow pane wraps the right-hand segments onto their own lines. Effort has no
+  shape of its own — it is a bare word (`low`…`max`), and reading it wherever it
+  sat turned ordinary output (a table cell, a priority column) into a confident
+  effort reading (owner, 2026-08-26: "effort 显示好像有的显示不对") — so it is
+  read ONLY from the line anchored by the agent's name, where kiro's fixed
+  order puts it. And absence there is a VERDICT, not a miss: kiro omits the
+  segment entirely when the effort is the backend default ("effort 这个参数不
+  是百分之百都会显示的"), so when the anchored line carries its context segment
+  (the full left side is on screen) `effort_definitive` is set and backfill may
+  not resurrect a remembered value — without that, a stale or once-misread
+  effort was re-inserted with a fresh timestamp on every poll, a permanent ghost.
+  The WIDE pane is the mirror image of the narrow one: with room to spare, kiro
+  right-aligns `location · branch` on the SAME line, joined to the left segments
+  by a padding run of spaces rather than a `·` — so the context segment arrived
+  glued to the cwd (`◔ 5%       /local/home/cfu/temp`) and the percent was
+  refused (owner, 2026-08-26: "上下文长度也没嗅探出来"). A run of two or more
+  spaces never occurs inside a segment, so it is treated as a segment boundary
+  too.
 - **A bare `69%` is never the context.** Only a percentage carrying the pie glyph
   or the `ctx` suffix counts. A terminal is full of percentages, and a confident
   wrong number on the card is worse than a missing one.

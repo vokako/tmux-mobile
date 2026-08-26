@@ -2590,11 +2590,15 @@
   /* The identity row — what the card used to be in its entirety. */
   .ac-top { display: flex; align-items: center; gap: 6px; }
   /* The sniffed reading: the smallest step on the scale, in monospace so a model
-     id and a percentage do not reflow as they change. */
+     id and a percentage do not reflow as they change. The cap must FIT a real
+     `model · effort` reading (26ch holds `claude-sonnet-4.5 · medium`): at 16ch
+     the effort truncated into a trailing `…` that carried no information — the
+     owner read it as decoration ("模型名 后面又有一个点点点 … 好像有点多余了",
+     2026-08-26). Cards size to content, so short readings stay tight. */
   .ac-vitals {
     font-size: var(--fs-micro); color: var(--meta-ink); line-height: 1.35;
     font-family: ui-monospace, Menlo, monospace; padding: 0 1px 1px 5px;
-    max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    max-width: 26ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   /* One thin horizontal line at the card's bottom edge. Absolute, so it costs no
      height and cannot push the roster taller as it appears. */
