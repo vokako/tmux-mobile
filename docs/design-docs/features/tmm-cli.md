@@ -803,8 +803,10 @@ rules follow from reading a screen rather than an API:
   shape of its own — it is a bare word (`low`…`max`), and reading it wherever it
   sat turned ordinary output (a table cell, a priority column) into a confident
   effort reading (owner, 2026-08-26: "effort 显示好像有的显示不对") — so it is
-  read ONLY from the line anchored by the agent's name, where kiro's fixed
-  order puts it. And absence there is a VERDICT, not a miss: kiro omits the
+  matched by the status line's own PATTERN: on the line anchored by the agent's
+  name, the segment immediately BEFORE the context segment (`… · model ·
+  effort · ◔ N%` — owner, same day: "你要按照这样的模式去匹配 不要直接全文匹
+  配"). And absence there is a VERDICT, not a miss: kiro omits the
   segment entirely when the effort is the backend default ("effort 这个参数不
   是百分之百都会显示的"), so when the anchored line carries its context segment
   (the full left side is on screen) `effort_definitive` is set and backfill may

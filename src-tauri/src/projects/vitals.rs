@@ -274,13 +274,23 @@ pub fn sniff_kiro(pane: &str, agent: &str) -> Vitals {
         }
 
         // Is this the status line proper? kiro's left side starts with the
-        // agent's own name, so seg 0 == the anchor. Effort is ONLY read from
-        // this line: unlike context (pie glyph) and branch (parentheses) it has
-        // no shape of its own — it is a bare word, and reading `high`/`max`/
-        // `medium` wherever they sat turned ordinary output (a table cell, a
-        // priority column) into a confident effort reading (owner, 2026-08-26:
-        // "effort 显示好像有的显示不对").
+        // agent's own name, so seg 0 == the anchor. Effort is ONLY read here,
+        // and only by the line's own PATTERN — `… · model · effort · ◔ N%`,
+        // i.e. the segment immediately BEFORE the context segment (owner,
+        // 2026-08-26: "gpt-5.6-sol · medium · ◔ 5% 所以 effort 显示 你要按照
+        // 这样的模式去匹配 不要直接全文匹配"): unlike context (pie glyph) and
+        // branch (parentheses) it is a bare word with no shape of its own, and
+        // reading `high`/`max`/`medium` wherever they sat turned ordinary
+        // output (a table cell, a priority column) into a confident reading.
         let anchored = segs.first().is_some_and(|s| *s == agent);
+        if anchored && v.effort.is_none() && !v.effort_definitive {
+            if let Some(ci) = segs.iter().position(|s| context_pct(s).is_some()) {
+                let word = segs[ci.saturating_sub(1)].to_ascii_lowercase();
+                if ci > 0 && EFFORTS.contains(&word.as_str()) {
+                    v.effort = Some(word);
+                }
+            }
+        }
 
         for (i, seg) in segs.iter().enumerate() {
             if v.context_pct.is_none() {
@@ -288,14 +298,6 @@ pub fn sniff_kiro(pane: &str, agent: &str) -> Vitals {
                     v.context_pct = Some(pct);
                     continue;
                 }
-            }
-            if anchored
-                && v.effort.is_none()
-                && !v.effort_definitive
-                && EFFORTS.contains(&seg.to_ascii_lowercase().as_str())
-            {
-                v.effort = Some(seg.to_ascii_lowercase());
-                continue;
             }
             if v.branch.is_none() {
                 if let Some(b) = branch(seg) {
@@ -604,7 +606,10 @@ mod tests {
     }
 
     #[test]
-    fn effort_is_read_only_from_the_anchored_status_line() {
+    fn effort_is_matched_by_the_status_line_pattern() {
+        // `… · model · effort · ◔ N%` — the effort is the segment immediately
+        // BEFORE the context segment on the anchored line (owner, 2026-08-26:
+        // "你要按照这样的模式去匹配 不要直接全文匹配").
         let v = sniff_kiro("worker · gpt-5.1 · high · ◑ 42%\n", "worker");
         assert_eq!(v.model.as_deref(), Some("gpt-5.1"));
         assert_eq!(v.effort.as_deref(), Some("high"));
@@ -613,13 +618,14 @@ mod tests {
         let no_effort = sniff_kiro("worker · gpt-5.1 · ◑ 42%\n", "worker");
         assert_eq!(no_effort.model.as_deref(), Some("gpt-5.1"));
         assert_eq!(no_effort.effort, None);
-        // A bare effort word in ordinary output is NOT a reading: it has no
-        // shape of its own, so only the line anchored by the agent's name may
-        // provide it (owner, 2026-08-26: "effort 显示好像有的显示不对").
+        // A bare effort word ANYWHERE else is not a reading — not in ordinary
+        // output, and not even elsewhere on the anchored line (a tangent or
+        // goal segment could be named `high`).
         for text in [
             "priority  high  assigned to worker\n",
             "medium\n",
             "risk: low · impact: high\n",
+            "worker · gpt-5.1 · ◑ 42% · high\n",
         ] {
             assert_eq!(sniff_kiro(text, "worker").effort, None, "{text:?}");
         }
