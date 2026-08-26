@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { uploadImagePath, imageId, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs } from './hub.ts';
+import { uploadImagePath, uploadFilePath, imageId, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -967,5 +967,12 @@ test('composer uploads land under the project .tmm with a random id', () => {
   assert.equal(uploadImagePath('/w/s/', 'abc', 'webp'), '/w/s/.tmm/uploads/abc.webp');
   assert.equal(uploadImagePath('/w/s', 'abc', 'jpg'), '/w/s/.tmm/uploads/abc.jpg');
   assert.match(imageId(), /^[a-z0-9]+-[a-z0-9]{8}$/i);
+  // Non-images keep their OWN name, uniqued and de-spaced (owner, 2026-08-26:
+  // "非图片文件直接原封不动地存放" — the content; the name still has to be
+  // path-safe and unambiguous in a pane).
+  assert.equal(uploadFilePath('/w/s', 'id1', 'report.pdf'), '/w/s/.tmm/uploads/id1-report.pdf');
+  assert.equal(uploadFilePath('/w/s', 'id1', 'my notes v2.pdf'), '/w/s/.tmm/uploads/id1-my_notes_v2.pdf');
+  assert.equal(uploadFilePath('/w/s', 'id1', 'a/b\\c:d?.txt'), '/w/s/.tmm/uploads/id1-cd.txt', 'separators and reserved chars stripped');
+  assert.equal(uploadFilePath('/w/s', 'id1', '   '), '/w/s/.tmm/uploads/id1-file', 'nothing left → generic');
   assert.notEqual(imageId(), imageId(), 'random half differs');
 });

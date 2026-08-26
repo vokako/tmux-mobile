@@ -218,6 +218,18 @@ export function uploadImagePath(ws: string, id: string, ext: string): string {
   return `${ws.replace(/\/+$/, '')}/.tmm/uploads/${id}.${ext}`;
 }
 
+/** A non-image attachment keeps its own name (an agent told about
+ * `report.pdf` should see `report.pdf`), uniqued by the same id and stripped
+ * of separators and whitespace — a space would break the bare-ref grammar
+ * and read ambiguously when typed into a pane. */
+export function uploadFilePath(ws: string, id: string, name: string): string {
+  const safe = (name.split(/[\\/]/).pop() || '').trim()
+    .replace(/\s+/g, '_')
+    .replace(/[<>:"'|?*\x00-\x1f]/g, '')
+    .slice(-80) || 'file';
+  return `${ws.replace(/\/+$/, '')}/.tmm/uploads/${id}-${safe}`;
+}
+
 /** Collision-safe enough for a temp dir, sortable by time, no ceremony. */
 export function imageId(): string {
   const rand = (globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)).slice(0, 8);

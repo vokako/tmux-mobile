@@ -29,7 +29,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit, uploadImagePath, imageId } from './hub.ts';
+  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
@@ -586,6 +586,7 @@
   let fileEl = $state(null);
   let attaching = $state(false);
   const IMG_EDGE = 1568;
+  const FILE_CAP = 32 * 1024 * 1024; // base64 over one RPC; beyond this, point the agent at the original path instead
 
   async function encodeImage(file) {
     const bmp = await createImageBitmap(file);
@@ -599,16 +600,19 @@
     const out = blob?.type === 'image/webp' ? blob
       : await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.85));
     if (!out) throw new Error('encode failed');
-    const bytes = new Uint8Array(await out.arrayBuffer());
-    // Chunked, never one big spread (Key Patterns: base64 large data).
-    let bin = '';
-    for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
-    return { b64: btoa(bin), ext: out.type === 'image/webp' ? 'webp' : 'jpg' };
+    return { b64: toB64(new Uint8Array(await out.arrayBuffer())), ext: out.type === 'image/webp' ? 'webp' : 'jpg' };
   }
 
-  async function onPickImages(e) {
+  // Chunked, never one big spread (Key Patterns: base64 large data).
+  function toB64(bytes) {
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    return btoa(bin);
+  }
+
+  async function onPickFiles(e) {
     const ws = selectedRow?.project.path;
-    const files = [...(e.target.files || [])].filter((f) => f.type.startsWith('image/'));
+    const files = [...(e.target.files || [])];
     e.target.value = ''; // same file re-pickable
     if (!ws || !files.length) return;
     attaching = true;
@@ -618,14 +622,25 @@
       // must never show up in the project's `git status`.
       await fsUpload(`${ws}/.tmm/uploads/.gitignore`, btoa('*\n'));
       for (const f of files) {
-        const { b64, ext } = await encodeImage(f);
-        const path = uploadImagePath(ws, imageId(), ext);
-        await fsUpload(path, b64);
-        composerText = composerText.trim() ? `${composerText.replace(/\s+$/, '')}\n![](${path})` : `![](${path})`;
+        let path, ref;
+        if (f.type.startsWith('image/')) {
+          // Images are re-encoded (webp, capped long edge) — 2(c).
+          const { b64, ext } = await encodeImage(f);
+          path = uploadImagePath(ws, imageId(), ext);
+          await fsUpload(path, b64);
+          ref = `![](${path})`;
+        } else {
+          // Everything else lands BYTE-IDENTICAL under its own name — 2(a)/3(a).
+          if (f.size > FILE_CAP) { console.warn('attach skipped (too large)', f.name, f.size); continue; }
+          path = uploadFilePath(ws, imageId(), f.name);
+          await fsUpload(path, toB64(new Uint8Array(await f.arrayBuffer())));
+          ref = path; // a plain path line — the prompt carries it, 2(b)
+        }
+        composerText = composerText.trim() ? `${composerText.replace(/\s+$/, '')}\n${ref}` : ref;
       }
       composerEl?.focus();
     } catch (err) {
-      console.warn('image attach failed', err);
+      console.warn('attach failed', err);
     } finally {
       attaching = false;
     }
@@ -2176,7 +2191,7 @@
         {#if intArm}
           <div class="int-pill" role="status">{t('hubIntArmed').replace('{who}', intWho)}</div>
         {/if}
-        <input type="file" accept="image/*" multiple hidden bind:this={fileEl} onchange={onPickImages} />
+        <input type="file" multiple hidden bind:this={fileEl} onchange={onPickFiles} />
         <button class="attach-btn" class:busy={attaching} title={t('hubAttach')} aria-label={t('hubAttach')}
           disabled={!selected || attaching} onclick={() => fileEl?.click()}>
           <Icon name="plus" size={15} />
@@ -3070,13 +3085,13 @@
   .attach-btn {
     position: absolute; right: 42px; bottom: 5.5px;
     width: 30px; height: 30px; display: grid; place-items: center;
-    padding: 0; border: 1px solid var(--border2); border-radius: var(--ui-radius-control);
-    background: var(--surface); color: var(--text2); cursor: pointer;
+    padding: 0; border: 1px dashed var(--border2); border-radius: 50%;
+    background: transparent; color: var(--text3); cursor: pointer;
     transition: border-color var(--t-fast) ease, color var(--t-fast) ease;
   }
   .attach-btn::after { content: ''; position: absolute; inset: -7px; }
-  .attach-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
-  .attach-btn:disabled { color: var(--text3); cursor: default; }
+  .attach-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--text2); }
+  .attach-btn:disabled { opacity: 0.55; cursor: default; }
   .attach-btn.busy { animation: attach-pulse 1s ease-in-out infinite; }
   @keyframes attach-pulse { 50% { opacity: 0.4; } }
   .send-btn {
