@@ -309,11 +309,18 @@ test('pickLead ignores direct windows and empty rooms', () => {
   assert.equal(pickLead([], []), '');
 });
 
-test('addressed prefixes the recipient but never rewrites an explicit @', () => {
+test('addressed always keeps the chip; body mentions ride along', () => {
   assert.equal(addressed('  ship it  ', 'dev'), '@dev ship it', 'no @ ceremony for the lead');
-  assert.equal(addressed('@qa look at this', 'dev'), '@qa look at this', 'the user addressed someone by hand');
   assert.equal(addressed('ship it', ''), 'ship it', 'no recipient = the whole room');
   assert.equal(addressed('   ', 'dev'), '', 'nothing to send');
+  // The chip survives an @ in the body — the server delivers to BOTH.
+  assert.equal(addressed('ping @qa about the diff', 'dev'), '@dev ping @qa about the diff', 'mid-body mention never defeats the chip');
+  assert.equal(addressed('mail root@host about it', 'dev'), '@dev mail root@host about it', 'an email is not an address');
+  assert.equal(addressed('@qa look at this', 'dev'), '@dev @qa look at this', 'a hand-typed lead rides along too');
+  // ...but the SAME recipient at the head is not doubled.
+  assert.equal(addressed('@dev go', 'dev'), '@dev go', 'no @dev @dev');
+  assert.equal(addressed('@dev, go', 'dev'), '@dev, go', 'punctuated head counts');
+  assert.equal(addressed('@developer go', 'dev'), '@dev @developer go', 'prefix match is word-bounded');
 });
 
 test('toolEventParts splits the name off legacy glued-together events', () => {

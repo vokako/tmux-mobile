@@ -118,8 +118,17 @@ export function pickLead(
  * people by hand — never rewrite that. */
 export function addressed(text: string, to: string): string {
   const body = text.trim();
-  if (!body || body.includes('@')) return body;
-  return to ? `@${to} ${body}` : body;
+  if (!body || !to) return body;
+  // The chip ALWAYS addresses the recipient (owner, 2026-08-26: "前边的永远
+  // 保留，后边的at如果存在某人的话也会发送过去") — it used to stand down when
+  // the body contained ANY `@`, so an email address or a quoted @all defeated
+  // the chosen recipient silently. Extra @mentions in the body still deliver:
+  // the server scans the WHOLE body for mentions, not just the head. Only a
+  // body already LEADING with this same recipient skips the prefix (no
+  // `@dev @dev`).
+  const esc = to.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (new RegExp(`^@${esc}(?:[\\s,:;.!?]|$)`, 'u').test(body)) return body;
+  return `@${to} ${body}`;
 }
 
 /** "2m14s" / "1h03m" / "12s" — how long the current state has held. Compact on
