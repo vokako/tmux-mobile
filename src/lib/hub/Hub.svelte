@@ -2199,6 +2199,15 @@
             {/each}
           </div>
         {/if}
+        <!-- A textarea, not an input: a message you are still writing has to be
+             readable. It grows with the text and then scrolls, so a long one is
+             never a one-line peephole. -->
+        <textarea class="c-input" rows="1" bind:this={composerEl} bind:value={composerText}
+          style:text-indent={managedAgents.length ? `${toChipW + 8}px` : '0'}
+          placeholder={recipient === ALL_TARGET ? t('hubComposerAll') : recipient ? t('hubComposerDm').replace('{name}', recipient) : t('hubComposerRoom')}
+          onkeydown={onComposerKey}
+          onfocus={() => { following = true; scrollFeed(true); setTimeout(() => scrollFeed(true), 300); }}
+        ></textarea>
         {#if pending.length}
           <div class="pend-row">
             {#each pending as a, i (a.path)}
@@ -2213,15 +2222,6 @@
             {/each}
           </div>
         {/if}
-        <!-- A textarea, not an input: a message you are still writing has to be
-             readable. It grows with the text and then scrolls, so a long one is
-             never a one-line peephole. -->
-        <textarea class="c-input" rows="1" bind:this={composerEl} bind:value={composerText}
-          style:text-indent={managedAgents.length ? `${toChipW + 8}px` : '0'}
-          placeholder={recipient === ALL_TARGET ? t('hubComposerAll') : recipient ? t('hubComposerDm').replace('{name}', recipient) : t('hubComposerRoom')}
-          onkeydown={onComposerKey}
-          onfocus={() => { following = true; scrollFeed(true); setTimeout(() => scrollFeed(true), 300); }}
-        ></textarea>
         <!-- Send lives INSIDE the capsule, bottom-right, out of the flow: it
              stopped costing the composer a whole column. Empty, it is still
              CLICKABLE (grey, muted): the first tap arms it as a "send
@@ -3128,7 +3128,7 @@
      the absolute `bottom` is measured from the PADDING box, 1px inside the
      border, so 5.5px yields symmetric 6.5px gaps). Bottom-anchored, so it
      stays put as the box grows into multiple lines. */
-  .pend-row { display: flex; flex-wrap: wrap; gap: 5px; padding: 7px 10px 0; }
+  .pend-row { display: flex; flex-wrap: wrap; gap: 5px; padding: 6px 88px 4px 4px; }
   .pend-chip {
     display: inline-flex; align-items: center; gap: 5px;
     height: 24px; padding: 0 4px 0 8px; max-width: 220px;
