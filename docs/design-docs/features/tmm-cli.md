@@ -801,6 +801,12 @@ rules follow from reading a screen rather than an API:
   by shape wherever they sit, because a narrow pane wraps the right-hand segments
   onto their own lines. Effort in particular cannot be positional: it is absent
   unless the backend reports one, and by position its slot holds the model.
+  The WIDE pane is the mirror image: with room to spare, kiro right-aligns
+  `location · branch` on the SAME line, joined to the left segments by a padding
+  run of spaces rather than a `·` — so the context segment arrived glued to the
+  cwd (`◔ 5%       /local/home/cfu/temp`) and the percent was refused (owner,
+  2026-08-26: "上下文长度也没嗅探出来"). A run of two or more spaces never
+  occurs inside a segment, so it is treated as a segment boundary too.
 - **A bare `69%` is never the context.** Only a percentage carrying the pie glyph
   or the `ctx` suffix counts. A terminal is full of percentages, and a confident
   wrong number on the card is worse than a missing one.

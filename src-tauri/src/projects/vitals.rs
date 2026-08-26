@@ -240,7 +240,20 @@ pub fn sniff_kiro(pane: &str, agent: &str) -> Vitals {
         if line.is_empty() {
             continue;
         }
-        let segs: Vec<&str> = line.split('·').map(str::trim).filter(|s| !s.is_empty()).collect();
+        // A WIDE pane keeps `location · branch` right-aligned on the SAME line
+        // as the left segments, joined not by `·` but by the padding run of
+        // spaces — so the last left segment arrives glued to the location
+        // (`◔ 5%       /local/home/cfu/temp`) and its parser refuses it
+        // (owner, 2026-08-26: context missing on the chat project). A run of
+        // two or more spaces is that gap and never occurs INSIDE a segment
+        // (`◔ 5%` is single-spaced), so it is a segment boundary too. Narrow
+        // panes wrap the right side onto its own line and are unaffected.
+        let segs: Vec<&str> = line
+            .split('·')
+            .flat_map(|s| s.split("  "))
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect();
 
         // The activity line ("Kiro is working · Type to queue · …") shares the
         // dot separator with the status line, and its words are not segments.
@@ -522,6 +535,31 @@ mod tests {
         assert_eq!(v.branch.as_deref(), Some("feat/projects-and-tasks"));
         assert_eq!(v.effort, None, "kiro only shows effort when the backend reports one");
         assert!(!v.is_empty());
+    }
+
+    /// A real capture of a WIDE managed kiro pane (chat:2, 2026-08-26). With
+    /// room to spare, kiro right-aligns `location · branch` on the SAME line as
+    /// the left segments, joined by a padding run of spaces — so the context
+    /// segment arrived glued to the cwd and the percent was never read (owner:
+    /// "上下文长度也没嗅探出来").
+    #[test]
+    fn a_wide_pane_glues_the_right_side_onto_the_status_line() {
+        let real = "─────────────────────────────────────────────\n\
+            chat · gpt-5.6-sol · medium · ◔ 5%       /local/home/cfu/temp\n\
+            \x20ask a question or describe a task ↵\n\
+            \x20                                 /copy to clipboard\n";
+        let v = sniff_kiro(real, "chat");
+        assert_eq!(v.model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(v.effort.as_deref(), Some("medium"));
+        assert_eq!(v.context_pct, Some(5), "the glued cwd must not eat the percent");
+        assert_eq!(v.branch, None, "no branch painted in a non-repo cwd");
+        // And with a branch, the right side is `location · branch`:
+        let with_branch =
+            "bot · claude-opus-5 · ◕ 71%       /local/home/cfu/work · (feat/x)\n";
+        let b = sniff_kiro(with_branch, "bot");
+        assert_eq!(b.context_pct, Some(71));
+        assert_eq!(b.branch.as_deref(), Some("feat/x"));
+        assert_eq!(b.model.as_deref(), Some("claude-opus-5"));
     }
 
     #[test]
