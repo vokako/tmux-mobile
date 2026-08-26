@@ -8,15 +8,27 @@
 //! window is dead weight. This module watches managed agent panes from the
 //! capture tick and types `continue` at one that shows such an error.
 //!
-//! The owner's three rules ARE the design, in code not prose:
-//! 1. Retries back off EXPONENTIALLY (`BASE_BACKOFF_SECS * 2^(n-1)`), because
-//!    the error means "overloaded" and hammering an overloaded service is how
-//!    you stay overloaded.
-//! 2. After `MAX_ATTEMPTS` the window is left alone (one `warn` event says so)
-//!    — an error that survives four spaced retries is not transient, and an
+//! The owner's rules ARE the design, in code not prose (2026-08-22 original,
+//! tightened 2026-08-26: "针对同一个 error，只发送一次 … 发送后等一会儿，通过
+//! hooks 查看之前发送的指令是否正确生效"):
+//! 1. An INCIDENT is one continuously-visible error. Within it, ONE `continue`
+//!    is the intent; retries exist only for a send the hooks never saw land.
+//!    The record lives exactly as long as the error stays on the screen — the
+//!    tick that no longer sees it drops the record, so a fresh error later
+//!    opens a fresh incident with a full budget.
+//! 2. A send is VERIFIED through the hooks, not the screen: the error text
+//!    stays painted long after the agent moved on, so "error still visible"
+//!    means nothing. Before any retry the tracker asks whether a turn fact
+//!    (accepted prompt, turn end, tool call — `telemetry::turn_fact_since`)
+//!    arrived after the send; if one did the incident is CONFIRMED and goes
+//!    silent. A tool call observed by telemetry confirms it directly too —
+//!    and must never erase the record, because an erased record plus the
+//!    still-painted error re-opened the incident every tick and typed
+//!    `continue` into a working agent (the owner's repeat-send report).
+//! 3. Unverified retries back off EXPONENTIALLY (`BASE_BACKOFF_SECS * 2^(n-1)`)
+//!    and run out after `MAX_ATTEMPTS`, with one `warn` event — an error that
+//!    survives four spaced, never-landing sends is not transient, and an
 //!    unattended loop typing into a broken pane is worse than silence.
-//! 3. Any TOOL CALL from that window resets the counter: a tool call is proof
-//!    the model answered, so the incident is over and the budget refills.
 //!
 //! Detection is deliberately narrow. A pane is full of text ABOUT errors —
 //! the owner pasted this very error into the chat, which typed it into an
@@ -86,6 +98,12 @@ struct Rec {
     attempts: u32,
     /// Unix seconds before which no further attempt may run.
     next_at: u64,
+    /// When the last `continue` was typed — the hook check measures from here.
+    sent_at: u64,
+    /// Hooks showed a turn fact after `sent_at`: the incident is OVER, even
+    /// though the error text is still painted on the screen. Nothing more is
+    /// sent until the error leaves the screen and a fresh one appears.
+    confirmed: bool,
     /// The give-up warning is emitted once per incident, not once per tick.
     gave_up_reported: bool,
 }
@@ -95,13 +113,18 @@ struct Rec {
 pub enum Decision {
     /// Type `continue` now; this is attempt `n` of `MAX_ATTEMPTS`.
     Send { attempt: u32 },
-    /// An attempt is pending its backoff — do nothing this tick.
+    /// A sent attempt has not been verified yet and its backoff has not
+    /// elapsed — do nothing this tick.
     Wait,
-    /// The budget is spent. `true` exactly once, for the warning.
+    /// The hooks JUST verified the last send (a turn fact arrived after it).
+    /// `true` exactly once, for the log line.
+    Confirmed { first: bool },
+    /// The budget is spent with nothing verified. `true` exactly once.
     GiveUp { first: bool },
 }
 
-/// Pure bookkeeping, `now` injected so the backoff ladder is testable.
+/// Pure bookkeeping, `now` and the hook check injected so every path is
+/// testable without tmux or real hooks.
 #[derive(Default)]
 pub struct Tracker {
     map: HashMap<(String, usize), Rec>,
@@ -109,8 +132,28 @@ pub struct Tracker {
 
 impl Tracker {
     /// The error is visible in (session, window) at `now` — what do we do?
-    pub fn decide(&mut self, session: &str, window: usize, now: u64) -> Decision {
+    /// `verified(sent_at)` answers "did any turn fact arrive at/after that
+    /// time" (see `telemetry::turn_fact_since`); it is consulted before any
+    /// retry, so a `continue` that WORKED is never followed by another one
+    /// just because the error text is still painted (owner, 2026-08-26).
+    pub fn decide(
+        &mut self,
+        session: &str,
+        window: usize,
+        now: u64,
+        verified: impl FnOnce(u64) -> bool,
+    ) -> Decision {
         let rec = self.map.entry((session.to_string(), window)).or_default();
+        if rec.confirmed {
+            return Decision::Confirmed { first: false };
+        }
+        // A send exists: ask the hooks FIRST. Verification outranks both the
+        // backoff ladder and the give-up — a 4th attempt that finally landed
+        // is a success, not an exhausted budget.
+        if rec.attempts > 0 && verified(rec.sent_at) {
+            rec.confirmed = true;
+            return Decision::Confirmed { first: true };
+        }
         if rec.attempts >= MAX_ATTEMPTS {
             let first = !rec.gave_up_reported;
             rec.gave_up_reported = true;
@@ -120,13 +163,28 @@ impl Tracker {
             return Decision::Wait;
         }
         rec.attempts += 1;
+        rec.sent_at = now;
         // 30s after the 1st attempt, 60s after the 2nd, 120s after the 3rd.
         rec.next_at = now + BASE_BACKOFF_SECS * (1 << (rec.attempts - 1));
         Decision::Send { attempt: rec.attempts }
     }
 
-    /// Rule 3: a tool call from the window is proof the model answered.
-    pub fn reset(&mut self, session: &str, window: usize) {
+    /// A tool call from the window CONFIRMS an open incident — the model
+    /// answered, so the `continue` (or something else) worked. It must never
+    /// erase the record: the error text is still painted, and a wiped record
+    /// made the next tick open a brand-new incident and type `continue` into
+    /// the now-working agent — the repeat-send the owner reported
+    /// (2026-08-26: "系统会反复发送好几次 auto recovery").
+    pub fn confirm(&mut self, session: &str, window: usize) {
+        if let Some(rec) = self.map.get_mut(&(session.to_string(), window)) {
+            rec.confirmed = true;
+        }
+    }
+
+    /// The error is no longer on the window's screen: the incident is over,
+    /// whatever its state was. The record is dropped so a FRESH error later
+    /// starts a fresh incident with a full budget.
+    pub fn clear(&mut self, session: &str, window: usize) {
         self.map.remove(&(session.to_string(), window));
     }
 
@@ -141,9 +199,11 @@ fn tracker() -> &'static Mutex<Tracker> {
     T.get_or_init(|| Mutex::new(Tracker::default()))
 }
 
-/// Called by telemetry on every observed tool call (rule 3).
+/// Called by telemetry on every observed tool call: work is proof the model
+/// answered, so an open incident is CONFIRMED (never erased — see
+/// `Tracker::confirm` for the repeat-send that erasing caused).
 pub fn note_tool_activity(session: &str, window: usize) {
-    tracker().lock().unwrap().reset(session, window);
+    tracker().lock().unwrap().confirm(session, window);
 }
 
 fn now_secs() -> u64 {
@@ -184,9 +244,18 @@ pub fn check_once() {
             let target = format!("{}:{}.{}", project.session, p.window, p.pane);
             let Ok(tail) = crate::tmux::capture_pane_plain(&target, Some(0)) else { continue };
             if !scan_tail(&tail) {
+                // The error left the screen: the incident (if any) is over.
+                // Dropping the record here is what scopes "one incident" to
+                // one CONTINUOUS sighting — a fresh error later starts fresh.
+                tracker().lock().unwrap().clear(&project.session, p.window);
                 continue;
             }
-            let decision = tracker().lock().unwrap().decide(&project.session, p.window, now_secs());
+            let decision = tracker().lock().unwrap().decide(
+                &project.session,
+                p.window,
+                now_secs(),
+                |sent_at| super::telemetry::turn_fact_since(&project.session, p.window, sent_at),
+            );
             match decision {
                 Decision::Send { attempt } => {
                     if crate::tmux::send_command(&target, CONTINUE_LINE).is_ok() {
@@ -200,6 +269,13 @@ pub fn check_once() {
                         );
                     }
                 }
+                Decision::Confirmed { first: true } => {
+                    super::telemetry::record_recovery(
+                        &project.session,
+                        p.window,
+                        &format!("auto-continue took effect — {} resumed its turn", p.window_name),
+                    );
+                }
                 Decision::GiveUp { first: true } => {
                     super::telemetry::record_recovery(
                         &project.session,
@@ -210,7 +286,9 @@ pub fn check_once() {
                         ),
                     );
                 }
-                Decision::Wait | Decision::GiveUp { first: false } => {}
+                Decision::Wait
+                | Decision::Confirmed { first: false }
+                | Decision::GiveUp { first: false } => {}
             }
         }
     }
@@ -268,50 +346,112 @@ mod tests {
         assert!(!scan_tail(""));
     }
 
-    #[test]
-    fn retries_back_off_exponentially_and_run_out() {
-        let mut t = Tracker::default();
-        let t0 = 1_000_000;
-        // Attempt 1 is immediate.
-        assert_eq!(t.decide("s", 1, t0), Decision::Send { attempt: 1 });
-        // Still inside the 30s backoff: wait.
-        assert_eq!(t.decide("s", 1, t0 + 29), Decision::Wait);
-        assert_eq!(t.decide("s", 1, t0 + 30), Decision::Send { attempt: 2 });
-        // The ladder doubles: 60s after attempt 2, 120s after attempt 3.
-        assert_eq!(t.decide("s", 1, t0 + 89), Decision::Wait);
-        assert_eq!(t.decide("s", 1, t0 + 90), Decision::Send { attempt: 3 });
-        assert_eq!(t.decide("s", 1, t0 + 209), Decision::Wait);
-        assert_eq!(t.decide("s", 1, t0 + 210), Decision::Send { attempt: 4 });
-        // Rule 2: the budget is spent — warned ONCE, then silence.
-        assert_eq!(t.decide("s", 1, t0 + 10_000), Decision::GiveUp { first: true });
-        assert_eq!(t.decide("s", 1, t0 + 20_000), Decision::GiveUp { first: false });
+    /// A hook check that never sees anything land.
+    fn silent(_: u64) -> bool {
+        false
     }
 
     #[test]
-    fn a_tool_call_resets_the_budget() {
+    fn a_verified_send_is_never_repeated() {
         let mut t = Tracker::default();
+        let t0 = 1_000_000;
+        assert_eq!(t.decide("s", 1, t0, silent), Decision::Send { attempt: 1 });
+        // Next tick, error still painted, but a turn fact arrived after the
+        // send: confirmed ONCE, then silence for as long as the error shows.
+        assert_eq!(
+            t.decide("s", 1, t0 + 20, |sent| sent == t0),
+            Decision::Confirmed { first: true }
+        );
+        assert_eq!(
+            t.decide("s", 1, t0 + 40, |_| true),
+            Decision::Confirmed { first: false }
+        );
+        // Even hours later, the painted error must not re-trigger a send.
+        assert_eq!(
+            t.decide("s", 1, t0 + 10_000, |_| true),
+            Decision::Confirmed { first: false }
+        );
+    }
+
+    #[test]
+    fn verification_outranks_backoff_and_the_spent_budget() {
+        let mut t = Tracker::default();
+        let t0 = 1_000_000;
         for i in 0..MAX_ATTEMPTS as u64 {
-            t.decide("s", 1, 1_000 + i * 10_000);
+            t.decide("s", 1, t0 + i * 10_000, silent);
         }
-        assert_eq!(t.decide("s", 1, 99_000), Decision::GiveUp { first: true });
-        // Rule 3: the model answered something — the incident is over.
-        t.reset("s", 1);
-        assert_eq!(t.decide("s", 1, 100_000), Decision::Send { attempt: 1 });
-        // Windows are independent.
-        assert_eq!(t.decide("s", 2, 100_000), Decision::Send { attempt: 1 });
+        // The budget is spent — but the 4th send finally landed: that is a
+        // success, not a give-up.
+        assert_eq!(
+            t.decide("s", 1, t0 + 40_000, |_| true),
+            Decision::Confirmed { first: true }
+        );
+    }
+
+    #[test]
+    fn unverified_retries_back_off_exponentially_and_run_out() {
+        let mut t = Tracker::default();
+        let t0 = 1_000_000;
+        // Attempt 1 is immediate.
+        assert_eq!(t.decide("s", 1, t0, silent), Decision::Send { attempt: 1 });
+        // Still inside the 30s backoff: wait.
+        assert_eq!(t.decide("s", 1, t0 + 29, silent), Decision::Wait);
+        assert_eq!(t.decide("s", 1, t0 + 30, silent), Decision::Send { attempt: 2 });
+        // The ladder doubles: 60s after attempt 2, 120s after attempt 3.
+        assert_eq!(t.decide("s", 1, t0 + 89, silent), Decision::Wait);
+        assert_eq!(t.decide("s", 1, t0 + 90, silent), Decision::Send { attempt: 3 });
+        assert_eq!(t.decide("s", 1, t0 + 209, silent), Decision::Wait);
+        assert_eq!(t.decide("s", 1, t0 + 210, silent), Decision::Send { attempt: 4 });
+        // The budget is spent with nothing verified — warned ONCE, then silence.
+        assert_eq!(t.decide("s", 1, t0 + 10_000, silent), Decision::GiveUp { first: true });
+        assert_eq!(t.decide("s", 1, t0 + 20_000, silent), Decision::GiveUp { first: false });
+    }
+
+    #[test]
+    fn a_tool_call_confirms_the_incident_without_erasing_it() {
+        let mut t = Tracker::default();
+        let t0 = 1_000_000;
+        assert_eq!(t.decide("s", 1, t0, silent), Decision::Send { attempt: 1 });
+        // telemetry::record_tool → note_tool_activity → confirm. The record
+        // SURVIVES: erasing it here re-opened the incident on the next tick
+        // (the error is still painted) and re-sent `continue` into a working
+        // agent — the owner's repeat-send report (2026-08-26).
+        t.confirm("s", 1);
+        assert_eq!(
+            t.decide("s", 1, t0 + 60, silent),
+            Decision::Confirmed { first: false }
+        );
+        // A tool call with no open incident is a no-op, not a new record.
+        t.confirm("s", 2);
+        assert_eq!(t.decide("s", 2, t0, silent), Decision::Send { attempt: 1 });
+    }
+
+    #[test]
+    fn a_vanished_error_ends_the_incident_and_a_fresh_one_starts_over() {
+        let mut t = Tracker::default();
+        let t0 = 1_000_000;
+        for i in 0..MAX_ATTEMPTS as u64 {
+            t.decide("s", 1, t0 + i * 10_000, silent);
+        }
+        assert_eq!(t.decide("s", 1, t0 + 99_000, silent), Decision::GiveUp { first: true });
+        // The screen moved on (check_once calls clear when scan_tail misses):
+        // whatever the incident's state, it is over.
+        t.clear("s", 1);
+        // A NEW error later opens a fresh incident with a full budget.
+        assert_eq!(t.decide("s", 1, t0 + 100_000, silent), Decision::Send { attempt: 1 });
     }
 
     #[test]
     fn dead_windows_are_forgotten() {
         let mut t = Tracker::default();
-        t.decide("s", 1, 1_000);
-        t.decide("s", 7, 1_000);
-        t.decide("other", 1, 1_000);
+        t.decide("s", 1, 1_000, silent);
+        t.decide("s", 7, 1_000, silent);
+        t.decide("other", 1, 1_000, silent);
         t.retain_windows("s", &[7]);
         // Window 1 was dropped: a new agent at the same index starts fresh.
-        assert_eq!(t.decide("s", 1, 1_001), Decision::Send { attempt: 1 });
+        assert_eq!(t.decide("s", 1, 1_001, silent), Decision::Send { attempt: 1 });
         // Window 7 and the other session were untouched.
-        assert_eq!(t.decide("s", 7, 1_001), Decision::Wait);
-        assert_eq!(t.decide("other", 1, 1_001), Decision::Wait);
+        assert_eq!(t.decide("s", 7, 1_001, silent), Decision::Wait);
+        assert_eq!(t.decide("other", 1, 1_001, silent), Decision::Wait);
     }
 }

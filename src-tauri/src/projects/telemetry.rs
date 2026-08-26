@@ -486,6 +486,21 @@ pub fn record_recovery(session: &str, window: usize, text: &str) {
     push_event(session, window, "warn", text.to_string());
 }
 
+/// Did this window produce any turn fact (accepted prompt, turn end, tool
+/// call) at or after `t`? `projects::recovery` asks this to verify that a
+/// typed `continue` actually became a turn: the error text stays painted on
+/// the screen long after the agent moved on, so the screen cannot answer it
+/// (owner, 2026-08-26 — the visible error re-triggered sends into a working
+/// agent). Seconds, same clock as the turn facts themselves.
+pub fn turn_fact_since(session: &str, window: usize, t: u64) -> bool {
+    let map = store().lock().unwrap();
+    map.get(&(session.to_string(), window)).is_some_and(|r| {
+        r.prompt.is_some_and(|p| p >= t)
+            || r.end.as_ref().is_some_and(|(_, ts)| *ts >= t)
+            || r.tool.as_ref().is_some_and(|(_, ts)| *ts >= t)
+    })
+}
+
 /// Drop records for windows that no longer exist (called opportunistically
 /// with the live window set whenever someone lists a session's agents).
 pub fn retain_windows(session: &str, live: &[usize]) {
