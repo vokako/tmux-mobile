@@ -2221,11 +2221,13 @@
         <input type="file" multiple hidden bind:this={fileEl} onchange={onPickFiles} />
         <button class="attach-btn" class:busy={attaching} title={t('hubAttach')} aria-label={t('hubAttach')}
           disabled={!selected || attaching} onclick={() => fileEl?.click()}>
-          <svg class="dash-ring" viewBox="0 0 26 26" aria-hidden="true">
-            <circle cx="13" cy="13" r="12.2" fill="none" stroke="currentColor" stroke-width="1.7"
-              pathLength="72" stroke-dasharray="6 3" stroke-linecap="round" />
+          <svg class="plus-ring" viewBox="0 0 20 20" aria-hidden="true">
+            <g fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round">
+              <circle cx="10" cy="10" r="9.2" />
+              <line x1="10" y1="6.4" x2="10" y2="13.6" />
+              <line x1="6.4" y1="10" x2="13.6" y2="10" />
+            </g>
           </svg>
-          <Icon name="plus" size={10} />
         </button>
         <button class="send-btn" class:muted={!sendable && !intArm && !recipientBusy} class:arm={intArm}
           class:busy={recipientBusy && !sendable && !intArm}
@@ -3134,13 +3136,13 @@
     position: absolute; right: 42px; bottom: 12.5px;
     width: 16px; height: 16px; display: grid; place-items: center;
     padding: 0; border: none; border-radius: 50%;
-    background: transparent; color: var(--text3); cursor: pointer;
+    background: transparent; color: color-mix(in srgb, var(--text3) 78%, transparent); cursor: pointer;
     transition: color var(--t-fast) ease;
   }
-  .attach-btn .dash-ring { position: absolute; inset: 0; color: color-mix(in srgb, var(--text3) 72%, transparent); transition: color var(--t-fast) ease; }
+  .attach-btn .plus-ring { position: absolute; inset: 0; }
   .attach-btn::after { content: ''; position: absolute; inset: -12px; }
-  .attach-btn:hover:not(:disabled) { color: var(--text2); }
-  .attach-btn:hover:not(:disabled) .dash-ring { color: var(--accent); }
+  /* The glyph is ONE drawing: hover lifts circle and plus together. */
+  .attach-btn:hover:not(:disabled) { color: var(--accent); }
   .attach-btn:disabled { opacity: 0.55; cursor: default; }
   .attach-btn.busy { animation: attach-pulse 1s ease-in-out infinite; }
   @keyframes attach-pulse { 50% { opacity: 0.4; } }
