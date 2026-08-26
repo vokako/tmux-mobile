@@ -5,6 +5,16 @@ import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('./Terminal.svelte', import.meta.url), 'utf8');
 
+test('WebKit Escape-cancel blur gives focus straight back to the terminal', () => {
+  // WebKit's default action for Escape blurs the focused element and IGNORES
+  // preventDefault — the first Esc sent \x1b but dropped focus, and every key
+  // after it landed nowhere (owner, 2026-08-26, drawer AND standalone page).
+  // The guard's signature is load-bearing: blur + no relatedTarget (nobody
+  // took the focus) + a fresh Escape keydown.
+  assert.match(source, /if \(e\.relatedTarget \|\| Date\.now\(\) - lastEscAt > 250\) return;/u);
+  assert.match(source, /if \(e\.key === 'Escape'\) lastEscAt = Date\.now\(\);/u);
+});
+
 test('Terminal chrome uses only Team-filtered notification queries', () => {
   assert.match(source, /attention=\{otherTerminalSessionHasNotification\(session\)\}/u);
   assert.match(

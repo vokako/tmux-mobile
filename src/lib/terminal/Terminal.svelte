@@ -766,6 +766,9 @@
     termEl.addEventListener('keydown', onHardwareKeydown, { capture: true });
 
     let focusTerm = null;
+    let escGuardTa = null;
+    let onEscKeydown = null;
+    let onEscBlur = null;
     if (!isMobile) {
       // Desktop has no on-screen keyboard / toggle, so focus the xterm sink
       // on click so ordinary typing (and our handler) works. Auto-focus on
@@ -774,6 +777,26 @@
       focusTerm = () => { try { term.focus(); } catch {} };
       termEl.addEventListener('mousedown', focusTerm);
       if (active) requestAnimationFrame(focusTerm);
+
+      // WebKit (Safari, the macOS app's WKWebView) gives Escape a DEFAULT
+      // ACTION that ignores preventDefault: it "cancels" the focused element,
+      // i.e. blurs xterm's hidden textarea. The first Esc still sends \x1b,
+      // but focus is gone and every key after it lands nowhere — pressing Esc
+      // read as "exiting the terminal" (owner, 2026-08-26, drawer AND page).
+      // Chromium never does this (verified live: focus survives, ^[ arrives).
+      // Detect the signature — a blur immediately after an Escape keydown
+      // with relatedTarget null (nobody TOOK the focus, it was dropped) —
+      // and give the focus straight back. A real focus move (click into the
+      // composer, Tab) always has a relatedTarget or no fresh Escape.
+      let lastEscAt = 0;
+      onEscKeydown = (e) => { if (e.key === 'Escape') lastEscAt = Date.now(); };
+      onEscBlur = (e) => {
+        if (e.relatedTarget || Date.now() - lastEscAt > 250) return;
+        requestAnimationFrame(() => { try { term?.focus(); } catch {} });
+      };
+      escGuardTa = termEl.querySelector('.xterm-helper-textarea');
+      termEl.addEventListener('keydown', onEscKeydown, { capture: true });
+      escGuardTa?.addEventListener('blur', onEscBlur);
     }
 
     // Uses outer endTouchScrollTimer so unlockKeyboard() and effect cleanup can clear it.
@@ -1791,6 +1814,8 @@
       termEl.removeEventListener('keydown', onHardwareKeydown, { capture: true });
       if (onTextInsert) termEl.removeEventListener('input', onTextInsert, { capture: true });
       if (focusTerm) termEl.removeEventListener('mousedown', focusTerm);
+      if (onEscKeydown) termEl.removeEventListener('keydown', onEscKeydown, { capture: true });
+      if (onEscBlur) escGuardTa?.removeEventListener('blur', onEscBlur);
       // Server's resize_tracker auto-restores this window via `resize-window -A` on WS disconnect
       unsubscribe(target);
       removePaneOutputListener(target, onPaneOutputCb);
