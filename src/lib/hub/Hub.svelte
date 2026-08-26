@@ -2194,7 +2194,11 @@
         <input type="file" multiple hidden bind:this={fileEl} onchange={onPickFiles} />
         <button class="attach-btn" class:busy={attaching} title={t('hubAttach')} aria-label={t('hubAttach')}
           disabled={!selected || attaching} onclick={() => fileEl?.click()}>
-          <Icon name="plus" size={15} />
+          <svg class="dash-ring" viewBox="0 0 26 26" aria-hidden="true">
+            <circle cx="13" cy="13" r="12.2" fill="none" stroke="currentColor" stroke-width="1.1"
+              pathLength="72" stroke-dasharray="6 3" stroke-linecap="round" />
+          </svg>
+          <Icon name="plus" size={13} />
         </button>
         <button class="send-btn" class:muted={!composerText.trim() && !intArm && !recipientBusy} class:arm={intArm}
           class:busy={recipientBusy && !composerText.trim() && !intArm}
@@ -2369,7 +2373,7 @@
   .hub-root.compact .to-label { display: none; }
   .hub-root.compact .c-input { min-height: 30px; font-size: var(--fs-body); max-height: calc(40vh / var(--ui-zoom, 1)); }
   .hub-root.compact .send-btn { width: 32px; height: 32px; right: 6px; bottom: 4.5px; border-radius: var(--ui-radius-control); }
-  .hub-root.compact .attach-btn { width: 32px; height: 32px; right: 43px; bottom: 4.5px; }
+  .hub-root.compact .attach-btn { width: 28px; height: 28px; right: 44px; bottom: 6.5px; }
   .hub-root.compact .chip-btn { min-height: 34px; }
   .hub-root.compact .s-head { min-height: 34px; }
   /* Drawer open: the conversation yields but stays present. */
@@ -3083,14 +3087,16 @@
      border, so 5.5px yields symmetric 6.5px gaps). Bottom-anchored, so it
      stays put as the box grows into multiple lines. */
   .attach-btn {
-    position: absolute; right: 42px; bottom: 5.5px;
-    width: 30px; height: 30px; display: grid; place-items: center;
-    padding: 0; border: 1px dashed var(--border2); border-radius: 50%;
+    position: absolute; right: 43px; bottom: 7.5px;
+    width: 26px; height: 26px; display: grid; place-items: center;
+    padding: 0; border: none; border-radius: 50%;
     background: transparent; color: var(--text3); cursor: pointer;
-    transition: border-color var(--t-fast) ease, color var(--t-fast) ease;
+    transition: color var(--t-fast) ease;
   }
+  .attach-btn .dash-ring { position: absolute; inset: 0; color: color-mix(in srgb, var(--text3) 72%, transparent); transition: color var(--t-fast) ease; }
   .attach-btn::after { content: ''; position: absolute; inset: -7px; }
-  .attach-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--text2); }
+  .attach-btn:hover:not(:disabled) { color: var(--text2); }
+  .attach-btn:hover:not(:disabled) .dash-ring { color: var(--accent); }
   .attach-btn:disabled { opacity: 0.55; cursor: default; }
   .attach-btn.busy { animation: attach-pulse 1s ease-in-out infinite; }
   @keyframes attach-pulse { 50% { opacity: 0.4; } }
