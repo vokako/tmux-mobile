@@ -198,7 +198,7 @@
     if (selected) roomCache.set(selected, { feed, lastTs, activity, lastActivityTs, agents });
     selected = session;
     composerText = hubPrefs.draft(session);
-    pending = []; // an attachment staged for one room must not ride into another
+    clearAttachments(); // staged for one room; must not ride into another
     hubPrefs.setProject(session);
     // The chat's project is a working context like the terminal's: tell App,
     // so the Files tab follows whichever the user touched LAST (owner,
@@ -503,8 +503,15 @@
     // gesture: addressed() prefixes @name unless the user @-addressed someone
     // by hand, and an empty recipient posts to the room.
     const atts = pending;
-    const body = [raw, ...atts.map((a) => a.kind === 'image' ? `![](${a.path})` : a.path)]
-      .filter(Boolean).join('\n');
+    let body = raw;
+    const stragglers = [];
+    for (const a of atts) {
+      const ref = a.kind === 'image' ? `![](${a.path})` : a.path;
+      const tok = attachToken(a);
+      if (body.includes(tok)) body = body.replace(tok, ref); // position preserved
+      else stragglers.push(ref);
+    }
+    body = [body, ...stragglers].filter(Boolean).join('\n');
     const text = addressed(body, recipient);
     composerText = '';
     pending = [];
@@ -512,9 +519,11 @@
     scrollFeed(true);
     try {
       await hubPost(selected, text);
+      for (const a of atts) if (a.thumb) URL.revokeObjectURL(a.thumb);
+      attachSeq = 1;
       await loadFeed();
       scrollFeed(true);
-    } catch (e) { console.warn('hub post failed', e); pending = atts; }
+    } catch (e) { console.warn('hub post failed', e); pending = atts; composerText = raw; }
   }
 
   /** Grow to fit what is being typed, up to the CSS ceiling, then let it scroll.
@@ -594,7 +603,33 @@
   // markdown path line (owner, 2026-08-26: "消息框内部不展示完整的上传图片的
   // markdown 格式路径，就用一个 Image 的 placeholder 代替") — each attachment
   // is a chip above the textarea; the ref joins the body at SEND time.
-  let pending = $state([]); // [{ path, kind: 'image'|'file', name }]
+  // [{ path, kind: 'image'|'file', name, n, thumb }] — n is the token number
+  // the composer text carries as `[img:n]` / `[file:n]` at the INSERTION
+  // POINT (owner, 2026-08-26: "会有图片在文本里的相对位置信息吗…要让我能够
+  // 看到图片插入的相对位置在哪里"): the token is the visible position marker
+  // (a textarea cannot style spans), and send() swaps it for the real ref IN
+  // PLACE, so the prompt keeps the image exactly where the words put it.
+  // thumb is an object URL for the picked image — the chip shows the picture
+  // itself, so "哪几张加上去了" is answered by looking.
+  let pending = $state([]);
+  let attachSeq = 1;
+  const attachToken = (a) => `[${a.kind === 'image' ? 'img' : 'file'}:${a.n}]`;
+
+  function removeAttachment(i) {
+    const a = pending[i];
+    if (!a) return;
+    const tok = attachToken(a);
+    // Strip the token (and one adjacent space) wherever the user left it.
+    composerText = composerText.replace(new RegExp(`\\s?${tok.replace(/[[\\]]/g, '\\$&')}`), '');
+    if (a.thumb) URL.revokeObjectURL(a.thumb);
+    pending = pending.filter((_, j) => j !== i);
+    if (!pending.length) attachSeq = 1;
+  }
+  function clearAttachments() {
+    for (const a of pending) if (a.thumb) URL.revokeObjectURL(a.thumb);
+    pending = [];
+    attachSeq = 1;
+  }
   const sendable = $derived(!!composerText.trim() || !!pending.length);
   const IMG_EDGE = 1568;
   const FILE_CAP = 32 * 1024 * 1024; // base64 over one RPC; beyond this, point the agent at the original path instead
@@ -626,6 +661,9 @@
     const files = [...(e.target.files || [])];
     e.target.value = ''; // same file re-pickable
     if (!ws || !files.length) return;
+    // Where the tokens land: the caret's last position (the file dialog
+    // blurs the box but the selection survives), else the end.
+    let at = composerEl?.selectionStart ?? composerText.length;
     attaching = true;
     try {
       await fsMkdir(`${ws}/.tmm/uploads`); // create_dir_all — idempotent
@@ -633,19 +671,27 @@
       // must never show up in the project's `git status`.
       await fsUpload(`${ws}/.tmm/uploads/.gitignore`, btoa('*\n'));
       for (const f of files) {
+        let item;
         if (f.type.startsWith('image/')) {
           // Images are re-encoded (webp, capped long edge) — 2(c).
           const { b64, ext } = await encodeImage(f);
           const path = uploadImagePath(ws, imageId(), ext);
           await fsUpload(path, b64);
-          pending = [...pending, { path, kind: 'image', name: f.name }];
+          item = { path, kind: 'image', name: f.name, n: attachSeq++, thumb: URL.createObjectURL(f) };
         } else {
           // Everything else lands BYTE-IDENTICAL under its own name — 2(a)/3(a).
           if (f.size > FILE_CAP) { console.warn('attach skipped (too large)', f.name, f.size); continue; }
           const path = uploadFilePath(ws, imageId(), f.name);
           await fsUpload(path, toB64(new Uint8Array(await f.arrayBuffer())));
-          pending = [...pending, { path, kind: 'file', name: f.name }];
+          item = { path, kind: 'file', name: f.name, n: attachSeq++, thumb: '' };
         }
+        pending = [...pending, item];
+        // The visible position marker, at the caret.
+        const tok = attachToken(item);
+        const pre = composerText.slice(0, at), post = composerText.slice(at);
+        const sep = pre && !/\s$/.test(pre) ? ' ' : '';
+        composerText = `${pre}${sep}${tok}${post}`;
+        at += sep.length + tok.length;
       }
       composerEl?.focus();
     } catch (err) {
@@ -1714,13 +1760,17 @@
             <!-- ONE tap surface: the whole card opens the agent menu — the
                  dots duplicated it for no gain ("交互上就是直接点击卡片出来
                  选项就行，好像没必要单独点击三个点", owner 2026-08-25).
-                 Choosing the recipient moved into that menu's first item. -->
+                 And the tap ALSO makes this agent the recipient: tapping a
+                 card means "I want to talk to this one", so the conversation
+                 switches without hunting for the menu's first item (owner,
+                 2026-08-26: "每次点击 project 里的 Agent 小卡片时 能自动帮我
+                 切换到跟当前 Agent 的对话"). -->
             <div class="acard" class:sel={recipient === a.name} role="button" tabindex="0"
               title={[`${a.name} · ${stateLabel(a.state)}`, a.detail, vitalsLine(a.vitals)].filter(Boolean).join(' · ')}
-              onclick={(e) => toggleAgentMenu(a.name, e.currentTarget)}
+              onclick={(e) => { setRecipient(a.name); toggleAgentMenu(a.name, e.currentTarget); }}
               oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), a.name, agentItems(a.name)); }}
               use:longpress={{ onlongpress: (pt) => openCtx(pt, a.name, agentItems(a.name)) }}
-              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleAgentMenu(a.name, e.currentTarget); } }}>
+              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setRecipient(a.name); toggleAgentMenu(a.name, e.currentTarget); } }}>
               <div class="ac-top">
                 {#if backendIcon(a.agent)}<img class="ava" src={backendIcon(a.agent)} alt={a.agent} />{:else}<span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>{/if}
                 <span class="a-name">{a.name}</span>
@@ -2211,14 +2261,25 @@
         {#if pending.length}
           <div class="pend-row">
             {#each pending as a, i (a.path)}
-              <span class="pend-chip" title={a.path}>
-                <Icon name={a.kind === 'image' ? 'image' : 'file'} size={12} />
-                <span class="pend-name">{a.kind === 'image' ? t('hubImage') : a.name}</span>
-                <button class="pend-x" aria-label={t('hubRemoveAttachment')}
-                  onclick={() => pending = pending.filter((_, j) => j !== i)}>
-                  <Icon name="x" size={11} />
-                </button>
-              </span>
+              {#if a.kind === 'image'}
+                <span class="pend-thumb" title={`[img:${a.n}] ${a.name}`}>
+                  <img src={a.thumb} alt={a.name} />
+                  <span class="pend-n">{a.n}</span>
+                  <button class="pend-x on-img" aria-label={t('hubRemoveAttachment')}
+                    onclick={() => removeAttachment(i)}>
+                    <Icon name="x" size={10} />
+                  </button>
+                </span>
+              {:else}
+                <span class="pend-chip" title={`[file:${a.n}] ${a.path}`}>
+                  <Icon name="file" size={12} />
+                  <span class="pend-name">{a.name}</span>
+                  <button class="pend-x" aria-label={t('hubRemoveAttachment')}
+                    onclick={() => removeAttachment(i)}>
+                    <Icon name="x" size={11} />
+                  </button>
+                </span>
+              {/if}
             {/each}
           </div>
         {/if}
@@ -3136,6 +3197,23 @@
     background: var(--surface2); color: var(--text2); font-size: var(--fs-micro);
   }
   .pend-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pend-thumb {
+    position: relative; width: 44px; height: 44px; flex: none;
+    border: 1px solid var(--border2); border-radius: var(--ui-radius-control);
+    overflow: hidden; background: var(--surface2);
+  }
+  .pend-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .pend-n {
+    position: absolute; left: 0; bottom: 0; padding: 0 4px;
+    font-size: var(--fs-micro); line-height: 14px; font-family: ui-monospace, Menlo, monospace;
+    color: #fff; background: rgba(0,0,0,0.55); border-top-right-radius: 5px;
+  }
+  .pend-x.on-img {
+    position: absolute; top: 0; right: 0; width: 15px; height: 15px;
+    color: #fff; background: rgba(0,0,0,0.55); border-bottom-left-radius: 6px; border-radius: 0 0 0 6px;
+  }
+  .pend-x.on-img::after { inset: -6px; }
+  .pend-x.on-img:hover { color: #fff; background: var(--status-danger); }
   .pend-x {
     display: grid; place-items: center; width: 16px; height: 16px; padding: 0;
     border: none; border-radius: 5px; background: none; color: var(--text3);
