@@ -859,11 +859,13 @@
   // clutter). The room is the record; the server's hub_msg_* RPCs remain for
   // the API, the client just never calls them.
   /** The card's share of the reading: what makes THIS agent different from its
-   * neighbours. The branch and cwd are project-wide, so they stay in the tooltip
-   * and the menu — repeating them on every card would be chrome, not data. */
+   * neighbours. The MODEL only — effort belongs behind the tap, in the agent
+   * menu's header line, next to context and branch (owner, 2026-08-26: "只展示
+   * 模型名字就可以了 … Effort 只要在我点击额外展开时再去展示"); branch and cwd
+   * are project-wide, so they too stay in the tooltip and the menu — repeating
+   * them on every card would be chrome, not data. */
   function cardVitals(v) {
-    if (!v) return '';
-    return [v.model, v.effort].filter(Boolean).join(' · ');
+    return v?.model ?? '';
   }
 
   /** Choosing a recipient is also choosing this project's lead: it is the same
@@ -1778,8 +1780,9 @@
                 {#if unread.has(a.name)}<span class="unread" title={t('hubUnread')}></span>{/if}
               </div>
               <!-- What the agent's own status line says, kept ON the card rather
-                   than behind the menu ("这个直接常驻显示吧 可以字号小一点"). Model
-                   and effort only: the branch is the same for every agent in a
+                   than behind the menu ("这个直接常驻显示吧 可以字号小一点"). The
+                   MODEL only: effort shows on tap in the menu header (owner,
+                   2026-08-26), and the branch is the same for every agent in a
                    project, so on a card it is noise. -->
               {#if cardVitals(a.vitals)}<div class="ac-vitals">{cardVitals(a.vitals)}</div>{/if}
               <!-- Context used as a thin colour-changing line at the card's own
