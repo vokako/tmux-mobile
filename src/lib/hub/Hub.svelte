@@ -576,9 +576,20 @@
     el.style.height = 'auto';
     el.style.height = `${el.scrollHeight}px`;
     // The composer taking space is the feed losing it — the same way the keyboard
-    // does — so keep the tail parked while it grows.
-    if (following) scrollFeed(true);
+    // does — so keep the tail parked while it grows. ONLY when it actually
+    // grew: this runs per KEYSTROKE, and re-parking an unchanged tail
+    // re-assigns scrollTop (fractional clamping under --ui-zoom lands on a
+    // different pixel each time — the measured 2261 → 2221↔2298 oscillation)
+    // and re-seeds the ask anchor, so the whole feed shivered as you typed
+    // (owner, 2026-08-26: "每打一个字符…内容就会上下闪烁"). The SHELL is what
+    // takes space (chips rows count, not just the textarea).
+    const shellH = el.parentElement?.offsetHeight ?? el.offsetHeight;
+    if (shellH !== lastShellH) {
+      lastShellH = shellH;
+      if (following) scrollFeed(true);
+    }
   }
+  let lastShellH = 0;
   $effect(() => {
     void composerText;   // includes the reset to '' after sending
     void toChipW;        // the indent changes wrapping, so height must re-measure
