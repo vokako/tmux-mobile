@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs } from './hub.ts';
+import { uploadImagePath, imageId, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -385,6 +385,24 @@ test('splitImages pulls image references out of the prose', () => {
   assert.deepEqual(none.images, []);
   assert.equal(none.text, '# title\n**bold** and a (paren)');
   assert.deepEqual(splitImages(undefined), { text: '', images: [] });
+  // BARE refs — how agents actually answer (owner, 2026-08-26: "返回图片
+  // 路径或者 url，然后你正确读图渲染出来"). Alone on a line: folds away.
+  const line = splitImages('看这里\n/tmp/shot.png\n完成');
+  assert.equal(line.text, '看这里\n\n完成');
+  assert.deepEqual(line.images, ['/tmp/shot.png']);
+  // Inside prose: the sentence stays readable AND the image renders.
+  const prose = splitImages('截图在 /tmp/shot.png 里，看 https://x.io/i.jpg?w=2 这张');
+  assert.equal(prose.text, '截图在 /tmp/shot.png 里，看 https://x.io/i.jpg?w=2 这张');
+  assert.deepEqual(prose.images, ['/tmp/shot.png', 'https://x.io/i.jpg?w=2']);
+  // The same ref via markdown AND bare renders once.
+  assert.deepEqual(splitImages('![](/x/a.webp)\n/x/a.webp').images, ['/x/a.webp']);
+  // Not images: plain paths, and a path fragment after a space never yields
+  // a bogus tail segment.
+  assert.deepEqual(splitImages('run /usr/bin/env and /etc/passwd').images, []);
+  assert.deepEqual(splitImages('at /tmp/a b/shot.png ok').images, []);
+  // ~ paths and = boundaries count.
+  assert.deepEqual(splitImages('看 ~/pics/cat.jpeg 这张').images, ['~/pics/cat.jpeg']);
+  assert.deepEqual(splitImages('out=/o/f.webp done').images, ['/o/f.webp']);
 });
 
 test('isDirectUrl separates what a webview can load from what needs the file service', () => {
@@ -943,4 +961,11 @@ test('readline T transposes, F/B move, unknown keys fall through', () => {
   assert.equal(rl('c', 'ab', 0), null);         // copy is the browser's
   assert.equal(rl('v', 'ab', 0), null);
   assert.equal(rl('z', 'ab', 0), null);
+});
+
+test('composer uploads land under the project .tmm with a random id', () => {
+  assert.equal(uploadImagePath('/w/s/', 'abc', 'webp'), '/w/s/.tmm/uploads/abc.webp');
+  assert.equal(uploadImagePath('/w/s', 'abc', 'jpg'), '/w/s/.tmm/uploads/abc.jpg');
+  assert.match(imageId(), /^[a-z0-9]+-[a-z0-9]{8}$/i);
+  assert.notEqual(imageId(), imageId(), 'random half differs');
 });

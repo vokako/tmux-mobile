@@ -25,11 +25,11 @@
   import { t, i18n } from '../core/i18n.svelte.ts';
   import {
     projectList, projectUp, projectDown, projectDelete, projectArchive, projectCreate, projectRename, listSessionsWithPanes,
-    hubPost, hubCommand, modelsList, hubLog, hubRooms, hubAgents, hubSpawn, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
+    hubPost, hubCommand, modelsList, hubLog, hubRooms, hubAgents, fsMkdir, fsUpload, hubSpawn, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit } from './hub.ts';
+  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit, uploadImagePath, imageId } from './hub.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
@@ -523,7 +523,7 @@
      the bubble's meta trailer. A textarea cannot flow around a float, so
      the mirror is the only honest way to know where the last line ends. */
   let mirrorEl = null;
-  const SEND_ZONE = 38; // button 30px + gaps, measured from the textarea's right edge
+  const SEND_ZONE = 74; // attach + send (30px each + gaps), from the textarea's right edge
   function lastLineCollides(el) {
     if (!el.value) return false;
     if (!mirrorEl) {
@@ -551,7 +551,7 @@
       // Scrolled state: the box is at max height and the button permanently
       // overlays its bottom-right corner — EVERY line scrolls past it, so
       // all lines shorten clear of the button zone while scrolling lasts.
-      el.style.paddingRight = '40px';
+      el.style.paddingRight = '76px'; // clear BOTH corner buttons
     } else if (lastLineCollides(el)) {
       // Tail collision: clear the button's full height (top edge sits
       // ~30px above the textarea's bottom; 34px keeps descenders clear),
@@ -571,6 +571,65 @@
     void composerIsCmd;  // the mono flip changes metrics, so height re-measures too
     growComposer();
   });
+
+  // ── Attach an image (owner, 2026-08-26: "我发送图片时可以有一个小的+按钮，
+  // 上传到项目下…创建临时目录，随机图片 id，并且转 webp…限制一下原图"). The
+  // picked image is downscaled CLIENT-side to the models' effective ceiling —
+  // Claude reads best at ≤1568px on the long edge and GPT caps at 2048, so
+  // 1568 serves both and a 12 MB phone photo becomes a ~100 KB webp before it
+  // crosses the wire. Encoding prefers webp; WebKit cannot ENCODE webp, so the
+  // blob's own type decides the extension (jpeg there). The upload lands in
+  // <ws>/.tmm/uploads/ via the same fs_upload the file browser uses, and the
+  // composer gains a `![](path)` line — send() delivers the PATH into the
+  // agent's pane (an image is a reference, never bytes), and the feed renders
+  // it through ChatImage like any other ref.
+  let fileEl = $state(null);
+  let attaching = $state(false);
+  const IMG_EDGE = 1568;
+
+  async function encodeImage(file) {
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, IMG_EDGE / Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * k)), h = Math.max(1, Math.round(bmp.height * k));
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(bmp, 0, 0, w, h);
+    bmp.close?.();
+    const blob = await new Promise((res) => canvas.toBlob(res, 'image/webp', 0.85));
+    const out = blob?.type === 'image/webp' ? blob
+      : await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.85));
+    if (!out) throw new Error('encode failed');
+    const bytes = new Uint8Array(await out.arrayBuffer());
+    // Chunked, never one big spread (Key Patterns: base64 large data).
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    return { b64: btoa(bin), ext: out.type === 'image/webp' ? 'webp' : 'jpg' };
+  }
+
+  async function onPickImages(e) {
+    const ws = selectedRow?.project.path;
+    const files = [...(e.target.files || [])].filter((f) => f.type.startsWith('image/'));
+    e.target.value = ''; // same file re-pickable
+    if (!ws || !files.length) return;
+    attaching = true;
+    try {
+      await fsMkdir(`${ws}/.tmm/uploads`); // create_dir_all — idempotent
+      // Self-gitignored like the other .tmm runtime dirs — a chat attachment
+      // must never show up in the project's `git status`.
+      await fsUpload(`${ws}/.tmm/uploads/.gitignore`, btoa('*\n'));
+      for (const f of files) {
+        const { b64, ext } = await encodeImage(f);
+        const path = uploadImagePath(ws, imageId(), ext);
+        await fsUpload(path, b64);
+        composerText = composerText.trim() ? `${composerText.replace(/\s+$/, '')}\n![](${path})` : `![](${path})`;
+      }
+      composerEl?.focus();
+    } catch (err) {
+      console.warn('image attach failed', err);
+    } finally {
+      attaching = false;
+    }
+  }
 
   // Is what is typed going to be RUN rather than SAID? Mirrors send()'s own
   // branch exactly — slashCommand() recognises the shape, and a target must
@@ -2117,6 +2176,11 @@
         {#if intArm}
           <div class="int-pill" role="status">{t('hubIntArmed').replace('{who}', intWho)}</div>
         {/if}
+        <input type="file" accept="image/*" multiple hidden bind:this={fileEl} onchange={onPickImages} />
+        <button class="attach-btn" class:busy={attaching} title={t('hubAttach')} aria-label={t('hubAttach')}
+          disabled={!selected || attaching} onclick={() => fileEl?.click()}>
+          <Icon name="plus" size={15} />
+        </button>
         <button class="send-btn" class:muted={!composerText.trim() && !intArm && !recipientBusy} class:arm={intArm}
           class:busy={recipientBusy && !composerText.trim() && !intArm}
           onclick={() => (composerText.trim() ? send() : armInterrupt())}
@@ -2290,6 +2354,7 @@
   .hub-root.compact .to-label { display: none; }
   .hub-root.compact .c-input { min-height: 30px; font-size: var(--fs-body); max-height: calc(40vh / var(--ui-zoom, 1)); }
   .hub-root.compact .send-btn { width: 32px; height: 32px; right: 6px; bottom: 4.5px; border-radius: var(--ui-radius-control); }
+  .hub-root.compact .attach-btn { width: 32px; height: 32px; right: 43px; bottom: 4.5px; }
   .hub-root.compact .chip-btn { min-height: 34px; }
   .hub-root.compact .s-head { min-height: 34px; }
   /* Drawer open: the conversation yields but stays present. */
@@ -3002,6 +3067,18 @@
      the absolute `bottom` is measured from the PADDING box, 1px inside the
      border, so 5.5px yields symmetric 6.5px gaps). Bottom-anchored, so it
      stays put as the box grows into multiple lines. */
+  .attach-btn {
+    position: absolute; right: 42px; bottom: 5.5px;
+    width: 30px; height: 30px; display: grid; place-items: center;
+    padding: 0; border: 1px solid var(--border2); border-radius: var(--ui-radius-control);
+    background: var(--surface); color: var(--text2); cursor: pointer;
+    transition: border-color var(--t-fast) ease, color var(--t-fast) ease;
+  }
+  .attach-btn::after { content: ''; position: absolute; inset: -7px; }
+  .attach-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--text); }
+  .attach-btn:disabled { color: var(--text3); cursor: default; }
+  .attach-btn.busy { animation: attach-pulse 1s ease-in-out infinite; }
+  @keyframes attach-pulse { 50% { opacity: 0.4; } }
   .send-btn {
     position: absolute; right: 7px; bottom: 5.5px;
     width: 30px; height: 30px; display: grid; place-items: center;

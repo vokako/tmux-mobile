@@ -184,16 +184,44 @@ export function unreadSenders(feed: readonly { ts?: number; from?: string; body?
  * because a local path is not a URL a webview can load: the src has to go
  * through the file service first, which means the client needs the list, not an
  * `<img>` tag it would have to rewrite afterwards. Text keeps its markdown. */
+/** A bare image reference in prose: an http(s) URL or an absolute/`~` path
+ * ending in an image extension. Agents rarely write markdown image syntax —
+ * they answer "截图在 /tmp/shot.png" (owner, 2026-08-26: "如果有图片的返回
+ * 可以返回图片路径或者 url，然后你正确读图渲染出来"). */
+const BARE_IMG = String.raw`(?:https?:\/\/[^\s<>()"']+?|(?<=^|[\s"'【（(:：=])~?\/[^\s<>()"':]+?)\.(?:png|jpe?g|webp|gif|bmp|svg)(?:\?[^\s<>()"']*)?`;
+
 export function splitImages(body: string | null | undefined): { text: string; images: string[] } {
   const images: string[] = [];
-  const text = (body ?? '')
+  let text = (body ?? '')
     .replace(/!\[[^\]]*\]\(\s*([^)\s]+)[^)]*\)/g, (_m, src: string) => {
       images.push(src);
       return '';
     })
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-  return { text, images };
+    // A bare ref ALONE on its line folds into the image strip; one inside a
+    // sentence keeps the prose readable and STILL renders below.
+    .replace(new RegExp(`^[ \\t]*(${BARE_IMG})[ \\t]*$`, 'gim'), (_m, src: string) => {
+      images.push(src);
+      return '';
+    });
+  for (const m of text.matchAll(new RegExp(BARE_IMG, 'gi'))) images.push(m[0]);
+  const seen = new Set<string>();
+  const deduped = images.filter((s) => !seen.has(s) && (seen.add(s), true));
+  text = text.replace(/\n{3,}/g, '\n\n').trim();
+  return { text, images: deduped };
+}
+
+/** Where a composer attachment lands: a flat temp space under the project's
+ * own `.tmm` (owner, 2026-08-26: "上传到项目下…创建临时目录，随机图片 id，
+ * 并且转 webp"). The extension is the encoder's verdict — webp where the
+ * webview can (Chromium), jpeg where it cannot (WebKit). */
+export function uploadImagePath(ws: string, id: string, ext: string): string {
+  return `${ws.replace(/\/+$/, '')}/.tmm/uploads/${id}.${ext}`;
+}
+
+/** Collision-safe enough for a temp dir, sortable by time, no ceremony. */
+export function imageId(): string {
+  const rand = (globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)).slice(0, 8);
+  return `${Date.now().toString(36)}-${rand}`;
 }
 
 /** True when a reference is already something a webview can load directly; a
