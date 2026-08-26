@@ -79,7 +79,15 @@ html[data-theme="dark"] {
   --accent-fill-ink: color-mix(in srgb, white 90%, var(--accent));
   --accent-line: color-mix(in srgb, var(--accent) 70%, var(--bg));
   --danger: #ff5050; --danger-bg: rgba(255,80,80,0.08);
-  --status-ok: #4ade80; --status-warn: #fbbf24; --status-danger: #ff5050; --status-hot: #fb923c; --status-sleep: #818cf8;
+  /* --status-sleep is what the status language PROMISES: grey = at rest.
+     It shipped as indigo (#818cf8), which sat right next to the accent cyan
+     that means "running" — the two states you most need to tell apart read
+     as neighbours (owner, 2026-08-26: "空闲是偏紫色 正在运行是蓝色 这些颜色
+     太接近了"). A true neutral grey is also the presence convention every
+     chat product speaks: away/idle is grey, activity is coloured. Kept a
+     step brighter than --text3 so a dot still reads as a STATE on the card,
+     not as disabled chrome. */
+  --status-ok: #4ade80; --status-warn: #fbbf24; --status-danger: #ff5050; --status-hot: #fb923c; --status-sleep: #7c8698;
   --nav-bg: rgba(12,12,20,0.95); --pill-bg: rgba(255,255,255,0.04);
   --input-bg: rgba(255,255,255,0.04); --input-border: rgba(255,255,255,0.08);
   --code-bg: rgba(255,255,255,0.05);
@@ -103,7 +111,8 @@ html[data-theme="light"] {
   --accent-fill-ink: color-mix(in srgb, var(--bg) 30%, white);
   --accent-line: var(--accent);
   --danger: #e53e3e; --danger-bg: rgba(229,62,62,0.06);
-  --status-ok: #16a34a; --status-warn: #ca8a04; --status-danger: #e53e3e; --status-hot: #ea580c; --status-sleep: #6366f1;
+  /* Same rule as dark: at-rest is a neutral grey, never an accent neighbour. */
+  --status-ok: #16a34a; --status-warn: #ca8a04; --status-danger: #e53e3e; --status-hot: #ea580c; --status-sleep: #94a0b0;
   --nav-bg: rgba(245,245,247,0.95); --pill-bg: rgba(0,0,0,0.03);
   --input-bg: rgba(0,0,0,0.02); --input-border: rgba(0,0,0,0.08);
   --code-bg: rgba(0,0,0,0.03);
