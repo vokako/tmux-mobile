@@ -18,6 +18,8 @@
   import Terminal from '../terminal/Terminal.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import ChatImage from './ChatImage.svelte';
+  import Lightbox from '../ui/Lightbox.svelte';
+  import 'katex/dist/katex.min.css';
   import Icon from '../ui/Icon.svelte';
   import { tick as settled } from 'svelte';
   import { t, i18n } from '../core/i18n.svelte.ts';
@@ -1155,9 +1157,12 @@
   // so a back never looks like the browser leaving. On a phone the project
   // LIST is the level above the conversation (the Files analogy: cwd = '/'
   // is the floor); with the list open, back has reached the floor.
+  // The lightbox is the topmost transient layer: back peels it first.
+  let shotView = $state('');
   $effect(() => {
     if (!onGoBack) return;
     onGoBack(() => {
+      if (shotView) { shotView = ''; return true; }
       if (ctxAt) { closeCtx(); return true; }
       if (menuFor) { menuFor = ''; return true; }
       if (recipientOpen) { recipientOpen = false; return true; }
@@ -1912,7 +1917,7 @@
                 {#if parts.images.length}
                   <div class="shots">
                     {#each parts.images as src, k (`${k}-${src}`)}
-                      <ChatImage {src} alt={m.from} />
+                      <ChatImage {src} alt={m.from} onview={(u) => shotView = u} />
                     {/each}
                   </div>
                 {/if}
@@ -2233,6 +2238,9 @@
         await selectProject(proj.session);
       }}
       oncancel={() => createOpen = false} />
+  {/if}
+  {#if shotView}
+    <Lightbox src={shotView} onclose={() => shotView = ''} />
   {/if}
 </div>
 
@@ -2640,6 +2648,8 @@
   /* The leading @recipient — the address — reads apart from the words
      without shouting: weight and a quiet accent lean, no chip, no box. */
   .m-body :global(.m-to) { font-weight: 600; color: color-mix(in srgb, var(--accent) 62%, var(--text)); }
+  .m-body :global(.katex-display) { overflow-x: auto; overflow-y: hidden; margin: 8px 0; padding: 2px 0; }
+  .m-body :global(.katex) { font-size: 1.06em; }
   /* A real <button>: the accessible route to copy/raw (the bubble itself is
      text). Styled to stay a quiet trailer. */
   .m-meta {

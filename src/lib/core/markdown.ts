@@ -7,6 +7,7 @@
 // Team.svelte when the Hub (and the skill preview) needed the same contract.
 // Importing this module also registers the CJK-aware autolinker.
 import { marked } from 'marked';
+import katex from 'katex';
 import './markedSafeUrl.ts';
 
 // Strikethrough requires DOUBLE tildes here, unlike GFM, which also accepts
@@ -69,21 +70,58 @@ function unwrapMarkdownFences(src: string): string {
   return fence ? src : out.join('\n');
 }
 
+/** LaTeX in a chat body (owner, 2026-08-26: "latex公式要正确渲染"). Both
+ * families agents actually emit: `\(x\)` / `\[x\]` (what LLMs default to)
+ * and `$x$` / `$$x$$`. Order in the pipeline is load-bearing:
+ * - AFTER code is holed out, so `$i` in a shell snippet is never math;
+ * - BEFORE the & / < escape, so KaTeX reads the raw TeX (`a < b`, `\&`);
+ * - the rendered HTML is holed out and restored AFTER marked, so neither the
+ *   escape nor the parser can touch KaTeX's markup (it is generated from
+ *   text, never from the message's raw HTML).
+ * Dollar-inline follows the pandoc guards, because chat is full of money:
+ * the opener must not be preceded by a word char (US$5) and must be followed
+ * by non-space; the closer must follow non-space and not precede a digit —
+ * so "costs $5, earns $10" stays prose while `$O(n \log n)$` renders. */
+function renderMath(text: string, holes: string[]): string {
+  const hole = (displayMode: boolean) => (_m: string, tex: string) => {
+    let html: string;
+    try { html = katex.renderToString(tex.trim(), { displayMode, throwOnError: false }); }
+    catch { return _m; } // hard parser failure: leave the source visible
+    holes.push(html);
+    return `\x00MATH${holes.length - 1}\x00`;
+  };
+  return text
+    .replace(/\\\[([\s\S]+?)\\\]/g, hole(true))
+    .replace(/\\\(([\s\S]+?)\\\)/g, hole(false))
+    .replace(/\$\$([\s\S]+?)\$\$/g, hole(true))
+    .replace(/(?<![\w$])\$(?!\s)([^$\n]*?[^\s$])\$(?!\d)/g, hole(false));
+}
+
 export function renderMarkdown(body: string | null | undefined): string {
   const src = body || '';
   const hit = cache.get(src);
   if (hit !== undefined) return hit;
+  const rendered = unwrapMarkdownFences(src);
+  // Hole out code so math extraction cannot reach into it, run math on the
+  // RAW text, then put the code back for the normal escape + parse.
+  const codeHoles: string[] = [];
+  const mathHoles: string[] = [];
+  let text = rendered
+    .replace(/(`{3,}|~{3,})[\s\S]*?(?:\1|$)/g, (m) => { codeHoles.push(m); return `\x00CODE${codeHoles.length - 1}\x00`; })
+    .replace(/`[^`\n]+`/g, (m) => { codeHoles.push(m); return `\x00CODE${codeHoles.length - 1}\x00`; });
+  text = renderMath(text, mathHoles);
+  text = text.replace(/\x00CODE(\d+)\x00/g, (_m, i) => codeHoles[Number(i)]!);
   // Escape `&` and `<` — and deliberately NOT `>`. Those two are all that raw
   // HTML needs to be inert: a tag cannot start without `<`, so `&lt;script>`
   // renders as text either way. Escaping `>` as well (which this did) also ate
   // every markdown construct that uses it: `> quote` arrived at the parser as
   // `&gt; quote`, so blockquotes NEVER rendered — reported as "the content is not
   // rendered as markdown", and it was right for that whole class of message.
-  const rendered = unwrapMarkdownFences(src);
-  const escaped = rendered.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;');
   let html: string;
   try { html = marked.parse(escaped, { gfm: true, breaks: true }) as string; }
   catch { html = escaped; }
+  html = html.replace(/\x00MATH(\d+)\x00/g, (_m, i) => mathHoles[Number(i)]!);
   if (cache.size > 500) cache.clear(); // bound the cache
   cache.set(src, html);
   return html;

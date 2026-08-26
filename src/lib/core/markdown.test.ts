@@ -59,3 +59,21 @@ test('only complete markdown fences unwrap; code and malformed fences stay code'
   assert.match(nested, /<h1>Doc<\/h1>/);
   assert.match(nested, /<code class="language-js">/);
 });
+
+test('LaTeX renders in every dialect agents emit; money and code stay prose', () => {
+  // The four delimiter families (owner, 2026-08-26: "latex公式要正确渲染").
+  assert.ok(renderMarkdown('inline $v = 2t$ here').includes('class="katex"'), '$…$');
+  assert.ok(renderMarkdown('$$\\int_0^1 x\\,dx$$').includes('katex-display'), '$$…$$');
+  assert.ok(renderMarkdown('so \\(E = mc^2\\) holds').includes('class="katex"'), '\\(…\\)');
+  assert.ok(renderMarkdown('\\[\\sum_{i=0}^n i\\]').includes('katex-display'), '\\[…\\]');
+  // TeX is read RAW — `<` survives into the formula, not as `&lt;`.
+  assert.ok(renderMarkdown('$a < b$').includes('class="katex"'), 'relational < inside math');
+  // Pandoc guards: everyday dollars are not formulas.
+  assert.ok(!renderMarkdown('costs $5, earns $10 total').includes('katex'), 'money');
+  assert.ok(!renderMarkdown('US$5 vs A$7 deal$').includes('katex'), 'currency prefixes');
+  // Code is holed out before math extraction.
+  assert.ok(!renderMarkdown('```sh\necho $PATH $HOME\n```').includes('katex'), 'fence');
+  assert.ok(!renderMarkdown('run `$x$` now').includes('katex'), 'inline code');
+  // Placeholders never leak into the output.
+  assert.ok(!renderMarkdown('mix `code` and $v=1$ and $$w=2$$').includes('MATH'), 'holes restored');
+});

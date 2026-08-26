@@ -13,7 +13,7 @@
   import { isDirectUrl } from './hub.ts';
   import { fsDownloadHttp } from '../core/ws.ts';
 
-  let { src = '', alt = '' } = $props();
+  let { src = '', alt = '', onview = null } = $props();
 
   let url = $state('');
   let failed = $state(false);
@@ -33,7 +33,11 @@
 </script>
 
 {#if url && !failed}
-  <a class="ci-link" href={url} target="_blank" rel="noopener">
+  <!-- Tap opens the in-app viewer when the host provides one (owner,
+       2026-08-26: "看图片的支持" — a new browser tab is not viewing);
+       middle-click/long-press keep the plain link behaviors. -->
+  <a class="ci-link" href={url} target="_blank" rel="noopener"
+    onclick={(e) => { if (onview) { e.preventDefault(); onview(url); } }}>
     <img class="ci" {alt} src={url} loading="lazy" onerror={() => failed = true} />
   </a>
 {:else}
