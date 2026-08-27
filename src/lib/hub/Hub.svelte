@@ -29,7 +29,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideMiddle, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
+  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
@@ -199,6 +199,7 @@
     selected = session;
     composerText = hubPrefs.draft(session);
     clearAttachments(); // staged for one room; must not ride into another
+    expanded = {};      // an unfold is a reading choice, scoped to its room
     hubPrefs.setProject(session);
     // The chat's project is a working context like the terminal's: tell App,
     // so the Files tab follows whichever the user touched LAST (owner,
@@ -382,29 +383,23 @@
   $effect(() => {
     void blocks; void visible;
     measureHeld();
-    const onResize = () => { naturalH.clear(); measureHeld(); };
+    const onResize = () => measureHeld();
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   });
-  /** How many whole lines fit in that ceiling, minus the bubble's own padding
-   * and the meta trailer's line. Never below three: head + marker + tail is the
-   * floor at which an elision still says anything. */
+  /** How many whole lines a folded user message may show, minus the bubble's
+   * own padding and the meta trailer's line. Never below three: a shorter fold
+   * no longer says anything. */
   const heldLines = $derived(Math.max(3, Math.floor((heldMax - 26) / heldLine)));
-  /** The body a held bubble shows. Identity when it already fits, so the common
-   * case re-renders nothing. */
-  const heldBody = (text) => elideMiddle(text, heldLines);
-  /** The message the reader unfolded by hand. One at a time, and it resets when
-   * the anchor moves on — an unfolded ask is a moment of attention, not a
-   * setting. */
-  let heldExpanded = $state('');
-  $effect(() => { if (askKey !== heldExpanded) heldExpanded = ''; });
-  /** Natural heights, by message key. A folded bubble is SHORTER than the
-   * message it stands for, so the boundary test has to keep using the height it
-   * had unfolded — otherwise folding shrinks the box, that unholds it, the text
-   * comes back, and it holds again: the same blink, sourced from the text
-   * instead of from a clip. The cache refreshes on every tick a bubble is NOT
-   * folded, which includes the tick before it first folds. */
-  const naturalH = new Map();
+  /** The body a folded user message shows: a plain rear truncation (owner,
+   * 2026-08-27: "直接后截断的形式 … 中间不要了，默认用户消息都截断"). Identity
+   * when it already fits, so the common case re-renders nothing. */
+  const foldBody = (text) => elideTail(text, heldLines);
+  /** Messages the reader unfolded by hand, by key. Folding is the DEFAULT for
+   * every long user message, so an unfold is a choice that stays until the
+   * project changes — resetting it whenever the anchor moved would re-fold a
+   * message the reader is still reading. */
+  let expanded = $state({});
 
   function syncAsk(direction = askDir, reset = false) {
     if (!feedEl) { askKey = ''; askEdge = ''; askHeld = false; return; }
@@ -415,16 +410,13 @@
     const stickies = [...feedEl.querySelectorAll('.ask-top, .ask-bottom')];
     for (const el of stickies) el.style.position = 'static';
     const items = [...feedEl.querySelectorAll('[data-ask]')].map((el) => {
+      // Folding is a default property of the TEXT now, never a held-state side
+      // effect, so the box is the same height held or not and the real
+      // offsetHeight is the right answer. (The old naturalH phantom-height
+      // cache existed for fold-on-hold, where holding shrank the box, that
+      // unheld it, and the blink came back sourced from the text.)
       const key = el.dataset.ask ?? '';
-      const height = el.offsetHeight;
-      if (el.dataset.folded === '1') {
-        // Folded: this box is smaller than the message. Answer with the height
-        // it has when unfolded (see naturalH) so the decision that folded it and
-        // the decision that keeps it folded use the same number.
-        return { key, top: el.offsetTop, height: naturalH.get(key) ?? height };
-      }
-      naturalH.set(key, height);
-      return { key, top: el.offsetTop, height };
+      return { key, top: el.offsetTop, height: el.offsetHeight };
     });
     for (const el of stickies) el.style.removeProperty('position');
     const picked = pickAnchor(
@@ -1978,12 +1970,12 @@
                    duplicate and no invisible midpoint swap. -->
               {@const key = blockKey(b, i)}
               {@const isAsk = m.from === 'human'}
-              <!-- Folding is a property of the TEXT: while this ask is the held
-                   anchor and the reader has not unfolded it, the bubble renders a
-                   middle-elided body. `data-folded` tells syncAsk that this box
-                   is smaller than its message (see naturalH). -->
-              {@const folded = isAsk && askKey === key && askHeld && heldExpanded !== key
-                && heldBody(parts.text) !== parts.text}
+              <!-- Folding is a property of the TEXT, and the DEFAULT for every
+                   long user message (owner, 2026-08-27: "默认用户消息都截断 不要
+                   显示太多"): the bubble renders a rear-truncated body until the
+                   reader unfolds it by hand. -->
+              {@const foldable = isAsk && foldBody(parts.text) !== parts.text}
+              {@const folded = foldable && !expanded[key]}
               <!-- Unfolded while STILL HELD: the whole message is now inside a
                    bubble that is pinned to an edge, so a message taller than the
                    screen would have an unreachable bottom half — sticky ignores
@@ -1991,13 +1983,12 @@
                    死钉住", owner 2026-08-20). The BODY becomes its own scroller
                    for exactly this state; back in the normal flow the cap is off
                    and the message reads full-length again. -->
-              {@const heldScroll = isAsk && askKey === key && askHeld && heldExpanded === key}
+              {@const heldScroll = foldable && expanded[key] && askKey === key && askHeld}
               <div class="msg" class:me={m.from === 'human'}
                 class:ask-top={isAsk && askKey === key && askEdge === 'top'}
                 class:ask-bottom={isAsk && askKey === key && askEdge === 'bottom'}
                 class:held={isAsk && askKey === key && askHeld}
-                data-ask={isAsk ? key : undefined}
-                data-folded={folded ? '1' : undefined}>
+                data-ask={isAsk ? key : undefined}>
                 <!-- Telegram-style bubble: agent name heads the bubble; the
                      time — and on your own messages the delivery ring, right
                      of it — is an inline trailer FLOATED at the end of the
@@ -2029,20 +2020,20 @@
                       {#if rawOpen === key}
                         <pre class="raw">{m.body}</pre>
                       {:else}
-                        <!-- Folded: both ends of the ask, with the middle
-                             replaced by ……. Raw view and every other message
-                             render in full. -->
-                        {@html markLeadingMention(renderMarkdown(folded ? heldBody(parts.text) : parts.text))}
+                        <!-- Folded: the start of the message, cut where the
+                             budget runs out, …… glued to the last kept line.
+                             Raw view and agent messages render in full. -->
+                        {@html markLeadingMention(renderMarkdown(folded ? foldBody(parts.text) : parts.text))}
                       {/if}
                       {#if folded}
-                        <!-- The way back to the whole message. A button, because
-                             this is the one thing you might want from a folded
-                             ask; the bubble's own click still opens copy/raw. -->
-                        <button class="m-unfold" onclick={(e) => { e.stopPropagation(); heldExpanded = key; }}>
+                        <!-- The way to the whole message. A button, because this
+                             is the one thing you might want from a folded
+                             message; the bubble's own click still opens copy/raw. -->
+                        <button class="m-unfold" onclick={(e) => { e.stopPropagation(); expanded = { ...expanded, [key]: true }; }}>
                           <Icon name="chevron-down" size={11} />{t('hubUnfold')}
                         </button>
-                      {:else if heldScroll}
-                        <button class="m-unfold" onclick={(e) => { e.stopPropagation(); heldExpanded = ''; }}>
+                      {:else if foldable}
+                        <button class="m-unfold" onclick={(e) => { e.stopPropagation(); const { [key]: _gone, ...rest } = expanded; expanded = rest; }}>
                           <Icon name="chevron-up" size={11} />{t('hubRefold')}
                         </button>
                       {/if}
@@ -2752,7 +2743,7 @@
      below it reads as floating rather than as a rendering glitch. */
   /* NOTHING is clipped or capped here. The bubble keeps its whole box — border,
      radius, padding, meta trailer — and stays as tall as the text it is showing;
-     what shrinks is the TEXT, folded by elideMiddle before it is rendered (owner,
+     what shrinks is the TEXT, folded by elideTail before it is rendered (owner,
      2026-08-19: "我希望是消息内容自己内部折叠 不是框截断 … 气泡什么的都要完整的不要
      任何裁切"). A cap or a clip would cut the bubble itself, which is exactly the
      thing that read as broken in the two earlier attempts. */

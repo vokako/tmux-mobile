@@ -102,9 +102,9 @@ test('a held ask caps only its EXPANDED body, never the bubble', () => {
   assert.match(body, /overscroll-behavior:\s*contain/u, 'its wheel must not fling the feed');
 
   // And the state is entered by an explicit click, not by the boundary test:
-  // the class hangs off heldExpanded === key in the markup.
+  // the class hangs off the reader's own unfold (expanded[key]) in the markup.
   assert.match(source, /class:held-scroll=\{heldScroll\}/u);
-  assert.match(source, /heldExpanded === key/u);
+  assert.match(source, /expanded\[key\] && askKey === key && askHeld/u);
 });
 
 test('the drawer opens and closes through the reading anchor, everywhere', () => {

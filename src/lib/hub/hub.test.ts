@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { uploadImagePath, uploadFilePath, imageId, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideMiddle, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs } from './hub.ts';
+import { uploadImagePath, uploadFilePath, imageId, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -181,43 +181,38 @@ test('a status note is a spoken line at every level, and never breaks a lane', (
   assert.equal(legacy[0]?.type === 'progress' && legacy[0].text, 'no creds');
 });
 
-test('elideMiddle keeps both ends of a held message and skips the middle', () => {
+test('elideTail truncates a long user message at the rear, marker inline', () => {
   const lines = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join('\n');
-  const out = elideMiddle(lines, 6);
+  const out = elideTail(lines, 6);
   const rows = out.split('\n');
-  assert.equal(rows.length, 6, 'the budget INCLUDES the marker row');
-  assert.equal(rows.filter((r) => r === ELIDE).length, 1);
-  // The framing is at the top, the actual ask at the bottom — a tail clamp
-  // would throw away the half that says what to do.
+  // Rear truncation, and the marker is GLUED to the last kept line — never a
+  // line of its own (owner, 2026-08-27: "直接后截断的形式 最后文末不用换行三个
+  // 点 中间不要了").
+  assert.equal(rows.length, 6, 'the marker costs no extra line');
   assert.equal(rows[0], 'line 1');
-  assert.equal(rows.at(-1), 'line 20');
-  assert.ok(rows.indexOf(ELIDE) > 1, 'more lines from the head than the tail');
+  assert.equal(rows.at(-1), `line 6${ELIDE}`);
+  assert.ok(!out.includes(`\n${ELIDE}`), 'no newline before the marker');
 
   // Already short enough: returned unchanged, by identity, so the caller can
   // skip re-rendering.
   const short = 'one\ntwo';
-  assert.equal(elideMiddle(short, 6), short);
-  assert.equal(elideMiddle('', 6), '');
+  assert.equal(elideTail(short, 6), short);
+  assert.equal(elideTail('', 6), '');
 
-  // A single paragraph cannot be cut by lines; it is cut by characters, still
-  // from the middle, and still on a word boundary.
+  // A single paragraph cannot be cut by lines; it is cut by characters, on a
+  // word boundary, marker still inline.
   const para = `${'alpha '.repeat(60)}END`;
-  const cut = elideMiddle(para, 3, 20);
-  assert.ok(cut.includes(ELIDE), cut);
+  const cut = elideTail(para, 3, 20);
+  assert.ok(cut.endsWith(ELIDE), cut);
   assert.ok(cut.startsWith('alpha'), cut);
-  assert.ok(cut.trimEnd().endsWith('END'), 'the end of the ask survives');
   assert.ok(cut.length < para.length / 2, `much shorter: ${cut.length} vs ${para.length}`);
-  assert.ok(!/alph$|alp$/u.test(cut.split('\n')[0] ?? ''), 'no word sliced in half');
+  assert.ok(cut.slice(0, -ELIDE.length).endsWith('alpha'), 'no word sliced in half');
 
-  // An elision that drops a closing fence must not swallow the rest in a code
+  // A cut that drops a closing fence must not swallow the rest in a code
   // block.
   const fenced = ['```js', ...Array.from({ length: 12 }, (_, i) => `const x${i} = 1;`), '```', 'after'].join('\n');
-  const fcut = elideMiddle(fenced, 5);
+  const fcut = elideTail(fenced, 5);
   assert.equal((fcut.match(/^```/gmu) ?? []).length % 2, 0, `fences balanced:\n${fcut}`);
-
-  // A tiny budget still yields something readable rather than only a marker.
-  const tiny = elideMiddle(lines, 2);
-  assert.equal(tiny.split('\n').length, 3, 'head + marker + tail is the floor');
 });
 
 test('an echoed prompt marks its message delivered instead of repeating it', () => {
