@@ -2581,7 +2581,14 @@
      column from it. */
   .sidebar.sheet {
     position: fixed; z-index: 26; inset: 0 auto 0 0; width: min(280px, 82vw);
-    box-shadow: 0 0 44px rgba(0,0,0,0.5);
+    /* Depth, not a rim: the old 0-offset 50%-black halo concentrated its
+       darkest band right at the sheet's edge, and with the 1px border under it
+       the whole thing read as one thick dark line (owner, 2026-08-27: "右边有
+       一个粗粗的线"). The scrim already separates the layers, so the sheet
+       needs no border of its own — just a soft directional cast. Same
+       treatment as .term-side.sheet in App.svelte. */
+    border-right: none;
+    box-shadow: 10px 0 30px rgba(0,0,0,0.22);
     /* var(--sat), not raw env(): on the APK the real status-bar inset arrives
        via MainActivity → the --sat inline override, and env() reads 0. Under
        the old .page containing block (will-change) the geometry hid that; now

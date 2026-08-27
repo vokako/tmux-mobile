@@ -465,7 +465,10 @@
   .agents-root { height: 100%; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 0; background: var(--bg); }
   @media (max-width: 760px) {
     .agents-root { grid-template-columns: minmax(0, 1fr); }
-    /* Compact: the list is the page; editing takes the screen. */
+    /* Compact: the list is the page; editing takes the screen. A full-width
+       list has no column beside it, so its divider would sit at the screen's
+       right edge as a stray line (owner, 2026-08-27). */
+    .sidebar { border-right: none; }
     .agents-root.editing .sidebar { display: none; }
     .agents-root:not(.editing) .mid { display: none; }
     /* Drill motion: same 120ms grammar as the app-level page slide. */

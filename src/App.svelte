@@ -1473,7 +1473,11 @@
     .term-side.sheet {
       position: fixed; z-index: 26; inset: calc(var(--sat)) auto 0 0; width: min(300px, 86vw);
       transform: translateX(-100%); transition: transform var(--t-move) ease;
-      box-shadow: 0 0 44px rgba(0,0,0,0.5);
+      /* Depth, not a rim: 0-offset 50%-black hugged the edge and, with the
+         inherited 1px border, read as one thick dark line (owner, 2026-08-27).
+         The scrim separates the layers; same treatment as Hub's .sidebar.sheet. */
+      border-right: none;
+      box-shadow: 10px 0 30px rgba(0,0,0,0.22);
     }
     .term-side.sheet.open { transform: none; }
     .term-scrim { position: fixed; inset: 0; z-index: 25; background: rgba(0,0,0,0.45); border: none; }
