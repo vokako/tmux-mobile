@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from '../ui/Icon.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
+  import { scrollFade } from '../core/scrollFade.ts';
   import Select from '../ui/Select.svelte';
   import { t, i18n, setLocale } from '../core/i18n.svelte.ts';
   import { layout } from './layout.svelte.ts';
@@ -201,7 +202,7 @@
 <section class="preferences" class:cat-open={catOpen} class:drill-fwd={drillAnim === 'fwd'} class:drill-back={drillAnim === 'back'} aria-label={t('settings')}>
   <aside class="sidebar">
     <SideHandle />
-    <div class="side-scroll">
+    <div class="side-scroll subtle-scroll" use:scrollFade>
       <div class="side-h">{t('settings')}</div>
       {#each tabs as item}
         <button class="side-row" class:open={tab === item.id} onclick={() => selectTab(item.id)}>

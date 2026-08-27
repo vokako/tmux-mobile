@@ -2,6 +2,7 @@
   import { listSessions, listPanes, listSessionsWithPanes, killSession, newWindow, killWindow } from '../core/ws.ts';
   import type { TmuxSession, TmuxPane } from '../core/ws.ts';
   import Icon from '../ui/Icon.svelte';
+  import { scrollFade } from '../core/scrollFade.ts';
   import AgentChip from '../ui/AgentChip.svelte';
   import Projects from '../projects/Projects.svelte';
   import CreateProjectDialog from '../projects/CreateProjectDialog.svelte';
@@ -398,7 +399,7 @@
   </div>
   {/if}
 
-  <div class="content">
+  <div class="content subtle-scroll" use:scrollFade>
     {#if error}
       <div class="error">{error}</div>
     {/if}

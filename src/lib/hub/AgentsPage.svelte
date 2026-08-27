@@ -6,6 +6,7 @@
   // edited HERE and only here; the Hub consumes them.
   import Icon from '../ui/Icon.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
+  import { scrollFade } from '../core/scrollFade.ts';
   import { t } from '../core/i18n.svelte.ts';
   import { registryList, registrySave, registryDelete, modelsList, skillsList, skillsSave, skillsDelete, skillsRefresh, skillsRead, mcpList, mcpSave, mcpDelete } from '../core/ws.ts';
   import { renderMarkdown } from '../core/markdown.ts';
@@ -256,7 +257,7 @@
 <div class="agents-root" class:editing={drilled} class:drill-fwd={drillAnim === 'fwd'} class:drill-back={drillAnim === 'back'}>
   <aside class="sidebar">
     <SideHandle />
-    <div class="side-scroll">
+    <div class="side-scroll subtle-scroll" use:scrollFade>
       <div class="side-h">{t('agentsTitle')}</div>
       {#each defs as d (d.name)}
         <button class="side-row" class:open={editing?.name === d.name && !isNew} onclick={() => startEdit(d)}>

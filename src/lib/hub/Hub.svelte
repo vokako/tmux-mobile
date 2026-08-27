@@ -17,6 +17,7 @@
   //   in this sidebar. New projects pick their agents at creation time.
   import Terminal from '../terminal/Terminal.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
+  import { scrollFade } from '../core/scrollFade.ts';
   import ChatImage from './ChatImage.svelte';
   import Lightbox from '../ui/Lightbox.svelte';
   import 'katex/dist/katex.min.css';
@@ -1644,7 +1645,7 @@
     {/if}
     <aside class="sidebar" class:sheet={compact}>
       {#if !compact}<SideHandle />{/if}
-      <div class="side-scroll">
+      <div class="side-scroll subtle-scroll" use:scrollFade>
         <div class="side-h">{t('hubProjects')}</div>
         {#each rows as row (row.project.id)}
           <!-- Right-click (desktop) and long press (phone) open the project's own
