@@ -367,16 +367,22 @@
    * the viewport, then let CSS sticky catch that SAME element as it leaves in
    * the current scroll direction. In an empty stretch of a long reply, retain
    * it; never swap to another invisible message at an arbitrary midpoint. */
-  /** The height a held ask should not exceed — a fifth of the conversation, the
-   * owner's number. It is an ESTIMATE that feeds the line budget below, never a
-   * cap on the box: the bubble is never clipped, the text is folded to fit. Taken
-   * from the FEED rather than `20vh` because a head, a roster and a composer sit
-   * around it. */
+  /** The height a folded message should not exceed — a fifth of the
+   * conversation, the owner's number. It is an ESTIMATE that feeds the line
+   * budget below, never a cap on the box: the bubble is never clipped, the
+   * text is folded to fit. Measured on the CHAT COLUMN (the feed's parent),
+   * never the feed itself: the feed is the flex leftover after the composer,
+   * so typing a multi-line message shrank it, the next `blocks` tick
+   * re-measured, the budget dropped a line, and EVERY folded message re-cut —
+   * heights shifting with no compensation, which read as the parked tail
+   * drifting on its own (owner, 2026-08-27: "我打字输入，原来是最下方，但是一
+   * 会儿又变化了"). The column holds still while the composer grows. */
   let heldMax = $state(0);
   let heldLine = $state(20);        // measured line box of a bubble, px
   function measureHeld() {
     if (!feedEl) return;
-    heldMax = Math.max(96, Math.round(feedEl.clientHeight * 0.2));
+    const basis = feedEl.parentElement?.clientHeight || feedEl.clientHeight;
+    heldMax = Math.max(96, Math.round(basis * 0.2));
     const bubble = feedEl.querySelector('.bubble');
     const lh = bubble ? parseFloat(getComputedStyle(bubble).lineHeight) : NaN;
     if (Number.isFinite(lh) && lh > 6) heldLine = lh;
@@ -384,7 +390,9 @@
   $effect(() => {
     void blocks; void visible;
     measureHeld();
-    const onResize = () => measureHeld();
+    // A REAL basis change (window resize) may re-cut every folded message, so
+    // it keeps the reader's line still the same way the drawer toggle does.
+    const onResize = () => withReadingAnchor(measureHeld);
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   });
