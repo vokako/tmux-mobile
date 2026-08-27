@@ -360,6 +360,7 @@
       newBelow = false;
       markSeen();
     }
+    autoRefold();
   }
 
   /** One bubble, one continuous motion: select it while it is naturally inside
@@ -400,6 +401,52 @@
    * project changes — resetting it whenever the anchor moved would re-fold a
    * message the reader is still reading. */
   let expanded = $state({});
+  /** Expanding releases the pin (see `pinned` in the markup), so the bubble
+   * returns to its natural flow position — often pages away from the viewport
+   * that was showing its pinned copy, which read as the message VANISHING
+   * (owner, 2026-08-27: "现在点击展开 消息就不见了 应该展开跳转到那条消息的位
+   * 置"). Jump the feed to the message's own position, unless its start is
+   * already in view — then expansion just grows downward in place. */
+  async function expandMsg(key) {
+    expanded = { ...expanded, [key]: true };
+    await settled();
+    if (!feedEl) return;
+    const el = feedEl.querySelector(`[data-ask="${CSS.escape(key)}"]`);
+    if (!(el instanceof HTMLElement)) return;
+    const top = feedEl.scrollTop;
+    if (el.offsetTop >= top && el.offsetTop < top + feedEl.clientHeight - 60) {
+      syncAsk();
+      return;
+    }
+    feedEl.scrollTop = Math.max(0, el.offsetTop - 8);
+    // Programmatic jump: seed the anchor path from the destination, the way
+    // scrollFeed does — the scroll event this assignment fires then sees a
+    // zero delta and invents no direction.
+    askScrollTop = feedEl.scrollTop;
+    askDirTravel = 0;
+    syncAsk(askDir, true);
+  }
+  /** An expanded message the reader scrolled clean away from folds itself back
+   * and rejoins the anchor pool (owner, 2026-08-27: "划走看不到以后 自动折叠
+   * 并且钉住"). "Away" is the whole box out of the viewport by a margin, so a
+   * pixel of overshoot does not snap it shut; the refold changes heights
+   * outside the viewport, so it goes through the reading anchor. */
+  function autoRefold() {
+    if (!feedEl) return;
+    const keys = Object.keys(expanded);
+    if (!keys.length) return;
+    const top = feedEl.scrollTop;
+    const bottom = top + feedEl.clientHeight;
+    const gone = keys.filter((k) => {
+      const el = feedEl.querySelector(`[data-ask="${CSS.escape(k)}"]`);
+      return el instanceof HTMLElement
+        && (el.offsetTop + el.offsetHeight < top - 120 || el.offsetTop > bottom + 120);
+    });
+    if (!gone.length) return;
+    const next = { ...expanded };
+    for (const k of gone) delete next[k];
+    withReadingAnchor(() => { expanded = next; });
+  }
 
   function syncAsk(direction = askDir, reset = false) {
     if (!feedEl) { askKey = ''; askEdge = ''; askHeld = false; return; }
@@ -2029,7 +2076,7 @@
                         <!-- The way to the whole message. A button, because this
                              is the one thing you might want from a folded
                              message; the bubble's own click still opens copy/raw. -->
-                        <button class="m-unfold" onclick={(e) => { e.stopPropagation(); expanded = { ...expanded, [key]: true }; }}>
+                        <button class="m-unfold" onclick={(e) => { e.stopPropagation(); expandMsg(key); }}>
                           <Icon name="chevron-down" size={11} />{t('hubUnfold')}
                         </button>
                       {:else if foldable}
