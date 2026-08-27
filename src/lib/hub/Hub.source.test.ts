@@ -84,27 +84,26 @@ test('the lane offsets stay named, and named once', () => {
   assert.match(rule('.s-all'), /padding:\s*2px var\(--lane-pad-r\) 5px var\(--lane-indent\)/u);
 });
 
-test('a held ask caps only its EXPANDED body, never the bubble', () => {
-  // The bubble itself must stay uncapped: a max-height on `.held`'s flow box is
-  // what fed Chromium's scroll anchoring and produced the infinite blink
-  // (measured 2026-08-19). The one legitimate cap is the BODY, in the one state
-  // where the user explicitly expanded a long ask while it is pinned — a sticky
-  // bubble ignores the feed's scrolling, so without its own scroller the bottom
-  // half of a screen-tall message is unreachable (owner, 2026-08-20).
+test('an expanded message is never pinned, and nothing caps the bubble', () => {
+  // The bubble must stay uncapped: a max-height on `.held`'s flow box is what
+  // fed Chromium's scroll anchoring and produced the infinite blink (measured
+  // 2026-08-19). And an EXPANDED message must leave the anchor pool entirely —
+  // sticky ignores the feed's scrolling, so a pinned screen-tall message had an
+  // unreachable bottom half (owner, 2026-08-27: "如果展开了消息 就要把钉住用户
+  // 消息关掉 不然展开就没法上下滑动了"; the in-body held-scroll scroller was the
+  // earlier answer and is retired — the feed itself scrolls the whole message).
   const heldMsg = rule('.msg.held');
   const heldBubble = rule('.msg.held .bubble');
   assert.doesNotMatch(heldMsg, /max-height/u);
   assert.doesNotMatch(heldBubble, /max-height/u);
+  assert.ok(!source.includes('class:held-scroll'), 'the in-body scroller is retired');
+  assert.ok(!source.includes('.held-scroll'), 'no orphaned held-scroll CSS');
 
-  const body = rule('.msg.held .m-body.held-scroll');
-  assert.match(body, /max-height/u);
-  assert.match(body, /overflow-y:\s*auto/u);
-  assert.match(body, /overscroll-behavior:\s*contain/u, 'its wheel must not fling the feed');
-
-  // And the state is entered by an explicit click, not by the boundary test:
-  // the class hangs off the reader's own unfold (expanded[key]) in the markup.
-  assert.match(source, /class:held-scroll=\{heldScroll\}/u);
-  assert.match(source, /expanded\[key\] && askKey === key && askHeld/u);
+  // Every pin class hangs off ONE gate that excludes the expanded message.
+  assert.match(source, /const pinned = isAsk && askKey === key && !expanded\[key\]/u);
+  assert.match(source, /class:ask-top=\{pinned && askEdge === 'top'\}/u);
+  assert.match(source, /class:ask-bottom=\{pinned && askEdge === 'bottom'\}/u);
+  assert.match(source, /class:held=\{pinned && askHeld\}/u);
 });
 
 test('the drawer opens and closes through the reading anchor, everywhere', () => {

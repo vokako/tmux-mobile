@@ -1976,18 +1976,18 @@
                    reader unfolds it by hand. -->
               {@const foldable = isAsk && foldBody(parts.text) !== parts.text}
               {@const folded = foldable && !expanded[key]}
-              <!-- Unfolded while STILL HELD: the whole message is now inside a
-                   bubble that is pinned to an edge, so a message taller than the
-                   screen would have an unreachable bottom half — sticky ignores
-                   the feed's scrolling ("我展开看的时候，应该可以上下滑动，而不是死
-                   死钉住", owner 2026-08-20). The BODY becomes its own scroller
-                   for exactly this state; back in the normal flow the cap is off
-                   and the message reads full-length again. -->
-              {@const heldScroll = foldable && expanded[key] && askKey === key && askHeld}
+              <!-- An EXPANDED message is never pinned: sticky ignores the feed's
+                   scrolling, so a pinned screen-tall message had an unreachable
+                   bottom half (owner, 2026-08-27: "如果展开了消息 就要把钉住用户
+                   消息关掉 不然展开就没法上下滑动了" — which retired the held-scroll
+                   in-body scroller, 2026-08-20's answer to the same problem: the
+                   feed itself is the scroller now). It rejoins the anchor pool
+                   when folded again. -->
+              {@const pinned = isAsk && askKey === key && !expanded[key]}
               <div class="msg" class:me={m.from === 'human'}
-                class:ask-top={isAsk && askKey === key && askEdge === 'top'}
-                class:ask-bottom={isAsk && askKey === key && askEdge === 'bottom'}
-                class:held={isAsk && askKey === key && askHeld}
+                class:ask-top={pinned && askEdge === 'top'}
+                class:ask-bottom={pinned && askEdge === 'bottom'}
+                class:held={pinned && askHeld}
                 data-ask={isAsk ? key : undefined}>
                 <!-- Telegram-style bubble: agent name heads the bubble; the
                      time — and on your own messages the delivery ring, right
@@ -2015,7 +2015,7 @@
                          "entered this state", not "sent to working". -->
                     <div class="m-head">{m.from}{#if note}<span class="m-note-state" style:color={noteStateColor(note.state)}><span class="mns-dot" aria-hidden="true"></span>{stateLabel(note.state)}</span>{/if}</div>
                   {/if}
-                  <div class="m-body" class:held-scroll={heldScroll}>
+                  <div class="m-body">
                     {#if parts.text}
                       {#if rawOpen === key}
                         <pre class="raw">{m.body}</pre>
@@ -2749,22 +2749,6 @@
      thing that read as broken in the two earlier attempts. */
   .msg.held { -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
   .msg.held .bubble { box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28); }
-  /* EXPANDED while held: the one state where the body scrolls itself. A pinned
-     bubble ignores the feed's scrolling, so a message taller than the screen had
-     an unreachable bottom half. The cap is on the BODY — border, radius and meta
-     trailer stay whole — and only in this state: folded bubbles keep the
-     no-clipping rule, and back in the normal flow the message reads full-length.
-     The blink hazard that banned max-height on `.held` was flow-height feedback
-     through scroll anchoring; the feed has `overflow-anchor: none` now, and this
-     cap is entered only by an explicit click, not by the boundary test. */
-  .msg.held .m-body.held-scroll {
-    max-height: min(calc(62vh / var(--ui-zoom, 1)), 560px);
-    overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
-    /* Room for the scrollbar: the trailer floats at the text's right edge, and a
-       bar drawn over it reads as clutter. */
-    padding-right: 6px;
-  }
-
   /* Back to the tail. */
   .to-bottom {
     position: absolute; right: 14px; bottom: 12px; z-index: 7;
