@@ -12,20 +12,33 @@
 
   let cwd = $state('');
   let dirs = $state([]);
-  let loading = $state(false);
+  let ready = $state(false); // first answer arrived — before it there is nothing to keep
+  let busy = $state(false);
   let error = $state('');
+  let listEl = $state(null);
+  let seq = 0;
 
+  // Navigation KEEPS the current list on screen and swaps it atomically when
+  // the answer arrives — clearing first made every tap blank-then-repaint
+  // (owner, 2026-08-28: "每次点击一个路径…先清空再重新刷新…要交互更流畅").
+  // The rows stay tappable mid-load; `seq` makes the newest tap win, so a
+  // slow earlier answer can never overwrite a later one.
   async function open(path) {
-    loading = true;
+    const my = ++seq;
+    busy = true;
     error = '';
     try {
       const r = await fsList(path, false);
+      if (my !== seq) return;
       cwd = r.path ?? path;
       dirs = (r.entries ?? []).filter((e) => e.type === 'dir');
+      ready = true;
+      if (listEl) listEl.scrollTop = 0; // a NEW directory starts at its top
     } catch (e) {
-      error = e.message ?? String(e);
+      if (my !== seq) return;
+      error = e.message ?? String(e); // the old list stays — the error line says why
     }
-    loading = false;
+    busy = false;
   }
 
   // The parent of an absolute path; '/' is its own parent (no climb past root).
@@ -52,8 +65,8 @@
     <div class="pk-err">{error}</div>
   {/if}
 
-  <div class="pk-list subtle-scroll">
-    {#if loading}
+  <div class="pk-list subtle-scroll" class:busy bind:this={listEl}>
+    {#if !ready}
       <div class="pk-empty">…</div>
     {:else if !dirs.length}
       <div class="pk-empty">{t('dirPickerEmpty')}</div>
@@ -86,7 +99,11 @@
   .pk-list {
     flex: 1; min-height: 140px; max-height: calc(42vh / var(--ui-zoom, 1)); overflow-y: auto;
     border: 1px solid var(--border); border-radius: var(--ui-radius-control); background: var(--input-bg);
+    transition: opacity var(--t-fast) ease;
   }
+  /* In-flight cue that never flashes: the dim only starts after 150ms, so a
+     fast local listing (the normal case) navigates with no visible blink. */
+  .pk-list.busy { opacity: 0.55; transition-delay: 0.15s; }
   .pk-row {
     display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
     /* 40px rows: this is a phone-first list of tap targets. */
