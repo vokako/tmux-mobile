@@ -76,6 +76,17 @@ USAGE (human or agent — self-management):
   tmm mcp list|delete <name>          central MCP server defs
   tmm mcp save --name <n> --def '<json>' 
 
+MCP TOOLS (local; config = $TMM_MCP_CONFIG, else .tmm/mcp.json up from cwd).
+Progressive: each tier loads only what the last one made you want —
+  tmm mcp servers                     1. configured servers (names only)
+  tmm mcp tools [<server>]            2. one line per tool: name — description
+  tmm mcp schema <server> <tool>      3. ONE tool's full input schema
+  tmm mcp call <server> <tool> [key=value ...]   4. call it
+                    [--args-json '{...}']        (whole argument object, verbatim)
+  tmm mcp add <name> --def '{"command":...}'     add a server NOW (or edit
+                                      .tmm/mcp.json); the next call reads it
+  Inspector CLI from $TMM_MCP_CLI (default: npx -y @modelcontextprotocol/inspector --cli)
+
 CONTEXT:
   --project <session>   which project (default: $TMM_PROJECT)
   --agent <name>        who is speaking (default: $TMM_AGENT, else "human")
@@ -122,6 +133,21 @@ async fn main() {
     // command that only talks to tmux has no business doing that.
     if pos[0] == "task" {
         cmd_task(&pos[1..], &cmdv, &flags, json);
+        return;
+    }
+
+    // `mcp servers|tools|call` is the second local subtree: it shells out to
+    // the MCP Inspector CLI against the project's .tmm/mcp.json — no server
+    // socket, and Config::load() has no business running for it either.
+    // (`mcp list|save|delete` — the central registry defs — stay on the RPC
+    // path below.)
+    if pos[0] == "mcp"
+        && matches!(
+            pos.get(1).map(String::as_str),
+            Some("servers") | Some("tools") | Some("call") | Some("schema") | Some("add")
+        )
+    {
+        cmd_mcp_local(&pos[1..], &flags, json);
         return;
     }
 
@@ -434,6 +460,157 @@ type Flags = std::collections::HashMap<String, Option<String>>;
 /// `tmm task …` — background tasks as tmux windows. The only subtree that
 /// opens no socket and reads no config, so it stays usable when the hub is
 /// down. Errors map onto the tiered codes via `task_fail`; 2 is unreachable.
+/// `tmm mcp servers|tools|call` — the unified MCP door (mcp_cli.rs has the
+/// why). Everything here is a thin shell around the inspector: resolve the
+/// config, build the argv, inherit stdio so the agent reads the inspector's
+/// own output, and pass its exit code through (the inspector's codes are a
+/// stable contract: 4 unreachable, 5 tool error…).
+fn cmd_mcp_local(rest: &[String], flags: &Flags, _json: bool) {
+    use tmux_mobile::mcp_cli;
+    let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
+    let resolved = mcp_cli::resolve_config(std::env::var("TMM_MCP_CONFIG").ok(), &cwd);
+    // `add` is allowed to START the config — a fresh workspace has none yet;
+    // every reading verb needs it to exist.
+    let config = match (&resolved, rest[0].as_str()) {
+        (Some(p), "add") => p.clone(),
+        (None, "add") => cwd.join(".tmm").join("mcp.json"),
+        (Some(p), _) if p.is_file() => p.clone(),
+        (Some(p), _) => fail(EXIT_USAGE, &format!("MCP config not found: {}", p.display())),
+        (None, _) => fail(EXIT_USAGE, "no MCP config: create .tmm/mcp.json ({\"mcpServers\":{...}}), set $TMM_MCP_CONFIG, or add a server: tmm mcp add <name> --def '<json>'"),
+    };
+    if rest[0] == "add" {
+        if let Some(dir) = config.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+    }
+    let names = mcp_cli::server_names(&std::fs::read_to_string(&config).unwrap_or_default());
+
+    let run = |args: Vec<String>| -> i32 {
+        let argv = mcp_cli::inspector_argv(std::env::var("TMM_MCP_CLI").ok());
+        let mut cmd = std::process::Command::new(&argv[0]);
+        cmd.args(&argv[1..]).args(&args);
+        match cmd.status() {
+            Ok(st) => st.code().unwrap_or(1),
+            Err(e) => {
+                eprintln!("tmm: cannot run MCP inspector ({}): {e}", argv.join(" "));
+                eprintln!("tmm: set $TMM_MCP_CLI or install it: npm i -g @modelcontextprotocol/inspector");
+                EXIT_ERR
+            }
+        }
+    };
+    // Like `run`, but the JSON result comes back to US for reshaping (the
+    // compact tools tier); the inspector's stderr passes through so its
+    // one-line error envelope stays visible to the agent.
+    let capture = |mut args: Vec<String>| -> Result<String, i32> {
+        args.push("--format".into());
+        args.push("json".into());
+        let argv = mcp_cli::inspector_argv(std::env::var("TMM_MCP_CLI").ok());
+        let mut cmd = std::process::Command::new(&argv[0]);
+        cmd.args(&argv[1..]).args(&args).stderr(std::process::Stdio::inherit());
+        match cmd.output() {
+            Ok(out) if out.status.success() => Ok(String::from_utf8_lossy(&out.stdout).to_string()),
+            Ok(out) => Err(out.status.code().unwrap_or(1)),
+            Err(e) => {
+                eprintln!("tmm: cannot run MCP inspector ({}): {e}", argv.join(" "));
+                eprintln!("tmm: set $TMM_MCP_CLI or install it: npm i -g @modelcontextprotocol/inspector");
+                Err(EXIT_ERR)
+            }
+        }
+    };
+
+    match rest[0].as_str() {
+        "servers" => {
+            if names.is_empty() {
+                println!("(no servers in {})", config.display());
+            } else {
+                for n in &names { println!("{n}"); }
+            }
+        }
+        "tools" => {
+            // PROGRESSIVE by default: one line per tool (name — first line of
+            // the description), never the schemas — a big server's full
+            // listing is pages of JSON nobody asked for yet. `tmm mcp schema
+            // <server> <tool>` is the next tier.
+            let targets: Vec<String> = match rest.get(1) {
+                Some(s) => vec![s.clone()],
+                None => names.clone(),
+            };
+            if targets.is_empty() {
+                fail(EXIT_USAGE, &format!("no servers in {}", config.display()));
+            }
+            let mut worst = 0;
+            for s in &targets {
+                if targets.len() > 1 { println!("── {s} ──"); }
+                match capture(mcp_cli::method_args(&config, s, "tools/list", None, &[], None)) {
+                    Ok(out) => {
+                        let tools = mcp_cli::compact_tools(&out);
+                        if tools.is_empty() {
+                            println!("(no tools)");
+                        }
+                        for (name, desc) in tools {
+                            if desc.is_empty() { println!("{name}"); } else { println!("{name} — {desc}"); }
+                        }
+                    }
+                    Err(code) => worst = code,
+                }
+            }
+            if worst == 0 && targets.len() == 1 {
+                println!("\n(schema: tmm mcp schema {} <tool>)", targets[0]);
+            }
+            std::process::exit(worst);
+        }
+        "schema" => {
+            let (Some(server), Some(tool)) = (rest.get(1), rest.get(2)) else {
+                fail(EXIT_USAGE, "mcp schema <server> <tool>");
+            };
+            match capture(mcp_cli::method_args(&config, server, "tools/list", None, &[], None)) {
+                Ok(out) => match mcp_cli::tool_schema(&out, tool) {
+                    Some(t) => println!("{}", serde_json::to_string_pretty(&t).unwrap()),
+                    None => fail(EXIT_NOT_FOUND, &format!("no tool {tool:?} on server {server:?} (try: tmm mcp tools {server})")),
+                },
+                Err(code) => std::process::exit(code),
+            }
+        }
+        "add" => {
+            // Dynamic by design (owner, 2026-08-28: "可以临时增加工具去调用"):
+            // one line adds a server to .tmm/mcp.json and the NEXT call has it.
+            // Editing the file by hand stays equally valid — this is sugar.
+            let (Some(name), Some(Some(defv))) = (rest.get(1), flags.get("def").cloned()) else {
+                fail(EXIT_USAGE, "mcp add <name> --def '{\"command\":\"npx\",\"args\":[...]}' (or edit .tmm/mcp.json directly)");
+            };
+            let def = match serde_json::from_str::<serde_json::Value>(&defv) {
+                Ok(v) if v.is_object() => v,
+                _ => fail(EXIT_USAGE, "--def must be a JSON object ({\"command\":...} or {\"url\":...})"),
+            };
+            let mut root: serde_json::Value = std::fs::read_to_string(&config)
+                .ok().and_then(|t| serde_json::from_str(&t).ok())
+                .unwrap_or_else(|| serde_json::json!({}));
+            if !root.get("mcpServers").map(|v| v.is_object()).unwrap_or(false) {
+                root["mcpServers"] = serde_json::json!({});
+            }
+            root["mcpServers"][name.as_str()] = def;
+            if let Err(e) = std::fs::write(&config, serde_json::to_string_pretty(&root).unwrap()) {
+                fail(EXIT_ERR, &format!("write {}: {e}", config.display()));
+            }
+            println!("✓ {name} → {} (live on the next call)", config.display());
+        }
+        "call" => {
+            let (Some(server), Some(tool)) = (rest.get(1), rest.get(2)) else {
+                fail(EXIT_USAGE, "mcp call <server> <tool> [key=value ...]");
+            };
+            let kv: Vec<String> = rest[3..].to_vec();
+            if let Some(bad) = kv.iter().find(|s| !mcp_cli::is_kv(s)) {
+                fail(EXIT_USAGE, &format!("tool arguments are key=value (got {bad:?}); or pass --args-json '{{...}}'"));
+            }
+            let args_json = flags.get("args-json").cloned().flatten();
+            std::process::exit(run(mcp_cli::method_args(
+                &config, server, "tools/call", Some(tool), &kv, args_json.as_deref(),
+            )));
+        }
+        _ => unreachable!("dispatch guards the verb"),
+    }
+}
+
 fn cmd_task(rest: &[String], cmdv: &[String], flags: &Flags, json: bool) {
     let verb = rest.first().map(String::as_str).unwrap_or("");
     let arg = rest.get(1).map(String::as_str);

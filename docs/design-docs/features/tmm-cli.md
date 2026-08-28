@@ -113,6 +113,48 @@ not just a read, it seeds a token, a machine id and the team defaults into
 `config.toml`, and a command that only talks to tmux has no business doing
 that.
 
+### One MCP door (`tmm mcp servers|tools|call`) — the inspector, not four dialects
+
+MCP used to be materialized into each backend's NATIVE config at spawn — kiro's
+`agents/<name>.json` `mcpServers`, claude's `mcp.json` + `--mcp-config`,
+codex's `-c mcp_servers.*` overrides, grok's `[mcp_servers.*]` toml: four
+dialects of the same list, each loaded ONCE at CLI start, so adding or fixing a
+server meant restarting the agent (owner, 2026-08-28: "可以不用各种 agent 内部
+的 mcp 工具调用了，可以用 MCP Inspector CLI 来统一来做"). Now there is one
+door, and it is the second purely-local subtree (like `task`, dispatched before
+`Config::load()`):
+
+- The verbs shell out to the **MCP Inspector CLI** (`$TMM_MCP_CLI`, default
+  `npx -y @modelcontextprotocol/inspector --cli`), which connects, invokes one
+  method, prints, and exits — its exit codes are a stable contract (4
+  unreachable, 5 tool error) and pass straight through.
+- Discovery is **progressive, like skills** (owner, 2026-08-28: "渐进式加载…
+  避免一次性加载太多上下文，有点像 toolsearch"): each tier loads only what the
+  previous one made you want. `servers` prints names; `tools <server>` prints
+  ONE LINE per tool (name — first line of the description; the reshaping is
+  `mcp_cli::compact_tools` over the inspector's `--format json` output, so a
+  50-tool server costs 50 lines, not pages of schema); `schema <server> <tool>`
+  prints ONE tool's full record, read just before calling; `call` invokes it.
+  The prompt tells agents to walk the ladder and never dump every schema up
+  front.
+- **Dynamic**: `tmm mcp add <name> --def '{"command":…}'` merges one server
+  into the config NOW (creating `.tmm/mcp.json` in a fresh workspace), and
+  because the inspector reads the file per call, the next call has it. Editing
+  the file directly is equally valid — `add` is sugar.
+- The config is a STANDARD `{"mcpServers": …}` file at
+  `<workspace>/.tmm/mcp.json` — **the agent's file**: `spawn` seeds missing
+  entries from the registry defs (`seed_mcp_config`) but an existing entry
+  always wins and unknown entries are kept, so an agent can edit its own tool
+  set and the NEXT call reads it — no restart, which the native path could
+  never offer. `$TMM_MCP_CONFIG` (set at spawn) names it from any cwd; without
+  the env var the CLI walks up from cwd like git does.
+- The native materialization is GONE from all four renders (kiro/claude keep
+  explicit empty objects — claude stays `--strict-mcp-config` so user-space MCP
+  cannot leak in either). `refresh_hooks` deliberately does not touch this:
+  an already-running agent keeps its old native servers until its next respawn.
+- `tmm mcp list|save|delete` (the central registry defs) stay RPC — they are
+  the catalog that seeds workspaces; `servers|tools|call` is the runtime.
+
 ### Why this belongs to an agent at all
 
 An agent's constraints differ from a human's. Every tool call is a fresh,

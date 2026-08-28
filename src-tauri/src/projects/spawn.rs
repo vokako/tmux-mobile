@@ -100,6 +100,11 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
 
     let system_prompt = build_prompt(&def, &window_name, req.session, req.brief);
     let skills = resolve_skill_refs(&def, &home);
+    // MCP is ONE door now (owner, 2026-08-28): registry defs seed the shared
+    // workspace config that `tmm mcp` reads per call — never a backend's
+    // native config, which loads once at CLI start and made every server
+    // change a restart.
+    let mcp_config = seed_mcp_config(Path::new(&workspace), &mcp_defs(&def))?;
 
     let prepared = match def.backend.as_str() {
         "kiro" => render_kiro(&def, &window_name, &home, &system_prompt, &skills)?,
@@ -113,6 +118,8 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
     let mut env = prepared.env;
     env.push(("TMM_PROJECT".into(), req.session.to_string()));
     env.push(("TMM_AGENT".into(), window_name.clone()));
+    // The MCP config is findable from ANY cwd, not just under the workspace.
+    env.push(("TMM_MCP_CONFIG".into(), mcp_config.to_string_lossy().to_string()));
     // tmm sits next to the server binary; make sure the pane can find it.
     if let Some(dir) = tmm_dir() {
         env.push(("PATH".into(), format!("{}:{}", dir.display(), std::env::var("PATH").unwrap_or_default())));
@@ -330,6 +337,7 @@ fn build_prompt(def: &RegAgent, name: &str, session: &str, brief: &str) -> Strin
          - `tmm status waiting|blocked \"why\"` — when you are stuck on something outside your control (a credential, an answer, another agent). This one asks for attention, so keep it for the real thing\n\
          - `tmm send \"@name message\"` — talk in the project chat (@name to address someone, use @human for the operator). This INTERRUPTS the reader, so use it for something that needs a person: a question, a decision, a result. Plain progress belongs in `tmm status`\n\
          - `tmm log --limit 30` — read recent chat; `tmm agent list` — who is here and their state\n\
+         - MCP tools, one door, loaded PROGRESSIVELY — pull only the tier you need, when you need it: `tmm mcp servers` (names), `tmm mcp tools <server>` (one line per tool), `tmm mcp schema <server> <tool>` (one tool's arguments, read before calling), `tmm mcp call <server> <tool> key=value ...`. Never dump every schema into your context up front. The config is `.tmm/mcp.json` in the workspace: add a server any time with `tmm mcp add <name> --def '<json>'` (or edit the file) — the NEXT call reads it, no restart\n\
          - `tmm done \"summary\"` — REQUIRED when you finish the briefed task\n\
          You can also manage the workspace itself when the task calls for it:\n\
          - `tmm spawn <registry-name> --brief \"...\"` — bring in a teammate (see `tmm registry list`)\n\
@@ -361,6 +369,43 @@ fn resolve_skill_refs(def: &RegAgent, home: &Path) -> Vec<crate::team::skills::R
         .map(|e| central.get(&e).cloned().unwrap_or(e))
         .collect();
     crate::team::skills::resolve_skills(&refs, &home.to_string_lossy())
+}
+
+/// Seed `<ws>/.tmm/mcp.json` from registry defs — MERGE, never clobber: the
+/// file is the AGENT's to edit (owner, 2026-08-28: "agent 自己写一个 mcp 配置
+/// 配件"), so an existing entry always wins over the registry's copy and
+/// unknown entries are kept. The standard shape (claude_mcp_value) is what
+/// the MCP Inspector CLI reads. Returns the config path.
+pub(crate) fn seed_mcp_config(
+    workspace: &Path,
+    defs: &[shared::McpDef],
+) -> Result<std::path::PathBuf, String> {
+    let dir = workspace.join(".tmm");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create .tmm: {e}"))?;
+    let path = dir.join("mcp.json");
+    let mut root: Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_else(|| json!({}));
+    if !root.is_object() {
+        root = json!({});
+    }
+    if !root.get("mcpServers").map(|v| v.is_object()).unwrap_or(false) {
+        root["mcpServers"] = json!({});
+    }
+    let servers = root["mcpServers"].as_object_mut().unwrap();
+    let mut changed = false;
+    for m in defs {
+        if !m.name.is_empty() && !servers.contains_key(&m.name) {
+            servers.insert(m.name.clone(), shared::claude_mcp_value(m));
+            changed = true;
+        }
+    }
+    if changed || !path.is_file() {
+        std::fs::write(&path, serde_json::to_string_pretty(&root).unwrap())
+            .map_err(|e| format!("write mcp.json: {e}"))?;
+    }
+    Ok(path)
 }
 
 /// MCP: an array entry that is a STRING names a central server (reg_mcp);
@@ -673,12 +718,6 @@ fn render_kiro(
         .iter()
         .map(|sk| format!("skill://{}/SKILL.md", sk.dir.to_string_lossy()))
         .collect();
-    let mut mcp_servers = json!({});
-    for m in &mcp_defs(def) {
-        if !m.name.is_empty() {
-            mcp_servers.as_object_mut().unwrap().insert(m.name.clone(), shared::kiro_mcp_value(m));
-        }
-    }
     let mut conf = json!({
         "name": name,
         "description": format!("{} (registry agent)", def.name),
@@ -686,7 +725,10 @@ fn render_kiro(
         "tools": ["*"],
         "allowedTools": ["*"],
         "resources": resources,
-        "mcpServers": mcp_servers,
+        // MCP is deliberately NOT here: servers live in the workspace
+        // .tmm/mcp.json and are called through `tmm mcp` (seed_mcp_config
+        // has the why). A native entry would load at CLI start and go stale.
+        "mcpServers": {},
         "hooks": kiro_hooks(&notify),
     });
     // The model belongs to the agent's IDENTITY, not to one launch of it. It
@@ -728,14 +770,11 @@ fn render_claude(
     notifications.ensure_helper()?;
     let notify = notifications.helper_command("claude");
 
-    let mut mcp_servers = json!({});
-    for m in &mcp_defs(def) {
-        if !m.name.is_empty() {
-            mcp_servers.as_object_mut().unwrap().insert(m.name.clone(), shared::claude_mcp_value(m));
-        }
-    }
+    // Deliberately EMPTY with --strict-mcp-config still on the line: no
+    // native servers, and no user-space MCP leaks in either. Servers live in
+    // the workspace .tmm/mcp.json, called through `tmm mcp` (seed_mcp_config).
     let mcpfile = home.join("mcp.json");
-    std::fs::write(&mcpfile, serde_json::to_string_pretty(&json!({ "mcpServers": mcp_servers })).unwrap())
+    std::fs::write(&mcpfile, serde_json::to_string_pretty(&json!({ "mcpServers": {} })).unwrap())
         .map_err(|e| e.to_string())?;
     // The isolated home is the agent's CLAUDE_CONFIG_DIR (claude's KIRO_HOME:
     // history, session state and .claude.json live here, so a managed agent
@@ -849,12 +888,9 @@ fn render_codex(
     notifications.ensure_helper()?;
     let notify = notifications.helper_command("codex");
 
+    // No native MCP overrides: servers live in the workspace .tmm/mcp.json,
+    // called through `tmm mcp` (seed_mcp_config has the why).
     let mut config_args: Vec<String> = Vec::new();
-    for m in &mcp_defs(def) {
-        if !m.name.is_empty() {
-            config_args.extend(shared::codex_mcp_overrides(m));
-        }
-    }
     let full_prompt = if skills.is_empty() {
         system_prompt.to_string()
     } else {
@@ -919,7 +955,9 @@ fn render_grok(
     // catalog carried over — grok auth is HOME-scoped (`auth.json` + custom
     // [model.*] entries whose keys ride env vars), so an isolated home without
     // the catalog is a logged-out agent (measured: "You are not authenticated").
-    std::fs::write(home.join("config.toml"), grok_config_toml(&mcp_defs(def)))
+    // MCP deliberately absent from the toml: servers live in the workspace
+    // .tmm/mcp.json, called through `tmm mcp` (seed_mcp_config has the why).
+    std::fs::write(home.join("config.toml"), grok_config_toml(&[]))
         .map_err(|e| e.to_string())?;
     let user_auth = grok_user_home().join("auth.json");
     if user_auth.is_file() {
@@ -1073,7 +1111,9 @@ mod tests {
         let p = first_prompt("fix the flaky test").unwrap();
         assert!(p.starts_with(&format!("[{year}-")), "a delivered brief is stamped: {p}");
         assert!(p.ends_with("fix the flaky test"), "the brief is the message: {p}");
-        assert!(conf.get("mcpServers").and_then(|m| m.get("files")).is_some(), "registry MCP def must materialize");
+        // MCP is ONE door (owner, 2026-08-28): NOTHING native — servers live
+        // in the workspace .tmm/mcp.json and are called through `tmm mcp`.
+        assert_eq!(conf.get("mcpServers"), Some(&serde_json::json!({})), "no native MCP in the kiro config");
         // Tool hooks feed telemetry.
         assert!(conf.get("hooks").and_then(|h| h.get("preToolUse")).is_some());
         // The CLI settings ship with the home: queue mode is the DEFAULT for
@@ -1222,8 +1262,9 @@ mod tests {
         let cfg = std::fs::read_to_string(dir.join("config.toml")).unwrap();
         assert!(cfg.contains("[folder_trust]") && cfg.contains("enabled = false"),
             "trust gate off so the TUI never parks at a prompt nobody sees: {cfg}");
-        assert!(cfg.contains("[mcp_servers.files]") && cfg.contains("mcp-files"),
-            "registry MCP def must materialize in grok's dialect: {cfg}");
+        // MCP is ONE door: nothing native in the toml — servers live in the
+        // workspace .tmm/mcp.json, called through `tmm mcp`.
+        assert!(!cfg.contains("mcp_servers"), "no native MCP in grok's toml: {cfg}");
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -1345,6 +1386,35 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
     }
 
     #[test]
+    /// The workspace mcp.json is the AGENT's file: the registry seeds missing
+    /// servers, an existing entry always wins (an agent-edited command must
+    /// survive every respawn), and unknown entries are kept.
+    #[test]
+    fn mcp_config_seeds_and_never_clobbers() {
+        let ws = std::env::temp_dir().join(format!("tmm-mcpseed-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&ws).unwrap();
+        let mk = |name: &str, cmd: &str| -> shared::McpDef {
+            serde_json::from_value(json!({ "name": name, "command": cmd })).unwrap()
+        };
+        // First spawn seeds.
+        let path = seed_mcp_config(&ws, &[mk("files", "mcp-files")]).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(v["mcpServers"]["files"]["command"], json!("mcp-files"));
+        // The agent edits the entry and adds its own server.
+        std::fs::write(&path, serde_json::to_string(&json!({ "mcpServers": {
+            "files": { "command": "my-forked-files" },
+            "mine":  { "command": "hand-added" },
+        }})).unwrap()).unwrap();
+        // A later spawn adds the new def but touches NOTHING the agent wrote.
+        seed_mcp_config(&ws, &[mk("files", "mcp-files"), mk("web", "mcp-web")]).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(v["mcpServers"]["files"]["command"], json!("my-forked-files"), "agent edit survives");
+        assert_eq!(v["mcpServers"]["mine"]["command"], json!("hand-added"), "agent's own server kept");
+        assert_eq!(v["mcpServers"]["web"]["command"], json!("mcp-web"), "new def seeded");
+        std::fs::remove_dir_all(&ws).ok();
+    }
+
+    #[test]
     fn claude_and_codex_render_without_team_plumbing() {
         for backend in ["claude", "codex"] {
             let dir = std::env::temp_dir().join(format!("tmm-spawn-{backend}-{}", uuid::Uuid::new_v4()));
@@ -1356,7 +1426,18 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
                 _ => render_codex(&d, "tester", &dir, &prompt, &[]).unwrap(),
             };
             assert!(!r.cmd.contains("x-room"), "no team room headers");
-            assert!(r.cmd.contains("files") || dir.join("mcp.json").exists(), "registry MCP present");
+            // MCP is ONE door: nothing native on any launch line (servers
+            // live in the workspace .tmm/mcp.json, called through `tmm mcp`),
+            // and the prompt teaches the door.
+            assert!(!r.cmd.contains("mcp_servers"), "no codex -c mcp overrides: {}", r.cmd);
+            assert!(prompt.contains("tmm mcp"), "prompt teaches the MCP door");
+            if backend == "claude" {
+                // Strict + EMPTY: no native servers, no user-space leakage.
+                let mcp: Value = serde_json::from_str(
+                    &std::fs::read_to_string(dir.join("mcp.json")).unwrap()
+                ).unwrap();
+                assert_eq!(mcp["mcpServers"], json!({}), "claude mcp.json stays empty");
+            }
             if backend == "claude" {
                 // The isolated home is claude's KIRO_HOME (measured on claude
                 // 2.1.239: CLAUDE_CONFIG_DIR relocates state AND the user
