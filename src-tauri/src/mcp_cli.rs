@@ -53,9 +53,37 @@ pub fn resolve_config(env_val: Option<String>, cwd: &Path) -> Option<PathBuf> {
 /// The inspector command as an argv. Whitespace-split is deliberate: the value
 /// is a COMMAND LINE ("npx -y @modelcontextprotocol/inspector --cli"), not a
 /// single path, and none of its realistic components carry spaces.
+///
+/// The DEFAULT prefers an installed `mcp-inspector` binary and only falls back
+/// to `npx -y`: npx re-resolves against the registry EVERY run, which measured
+/// 12s of a 15s call on this host — the whole call drops to ~3s with the
+/// binary (2026-08-28). `npm i -g @modelcontextprotocol/inspector` is the
+/// one-time fix the fallback exists to survive without.
 pub fn inspector_argv(env_val: Option<String>) -> Vec<String> {
-    let line = env_val.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| DEFAULT_INSPECTOR.into());
-    line.split_whitespace().map(|s| s.to_string()).collect()
+    if let Some(line) = env_val.filter(|s| !s.trim().is_empty()) {
+        return line.split_whitespace().map(|s| s.to_string()).collect();
+    }
+    if path_has("mcp-inspector") {
+        return vec!["mcp-inspector".into(), "--cli".into()];
+    }
+    DEFAULT_INSPECTOR.split_whitespace().map(|s| s.to_string()).collect()
+}
+
+/// Is `bin` an executable file on $PATH?
+fn path_has(bin: &str) -> bool {
+    let Some(paths) = std::env::var_os("PATH") else { return false };
+    std::env::split_paths(&paths).any(|d| {
+        let p = d.join(bin);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            p.is_file() && p.metadata().map(|m| m.permissions().mode() & 0o111 != 0).unwrap_or(false)
+        }
+        #[cfg(not(unix))]
+        {
+            p.is_file()
+        }
+    })
 }
 
 /// Server names out of a standard mcp.json, sorted for stable output.
@@ -196,12 +224,17 @@ mod tests {
 
     #[test]
     fn inspector_default_and_override() {
-        assert_eq!(
-            inspector_argv(None),
-            vec!["npx", "-y", "@modelcontextprotocol/inspector", "--cli"]
+        // The default is environment-dependent (an installed binary wins over
+        // npx), but it is always one of the two known shapes and the OVERRIDE
+        // is always verbatim.
+        let d = inspector_argv(None);
+        assert!(
+            d == vec!["mcp-inspector".to_string(), "--cli".into()]
+                || d == vec!["npx".to_string(), "-y".into(), "@modelcontextprotocol/inspector".into(), "--cli".into()],
+            "{d:?}"
         );
-        assert_eq!(inspector_argv(Some("mcp-inspector --cli".into())), vec!["mcp-inspector", "--cli"]);
-        assert_eq!(inspector_argv(Some("".into())).len(), 4); // empty = default
+        assert_eq!(inspector_argv(Some("my-inspector --cli --flag".into())), vec!["my-inspector", "--cli", "--flag"]);
+        assert_eq!(inspector_argv(Some("  ".into())), inspector_argv(None)); // blank = default
     }
 
     #[test]
