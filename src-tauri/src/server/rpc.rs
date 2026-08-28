@@ -476,6 +476,7 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
         | "project_archive" | "project_delete" | "project_autostart" | "project_rename"
         | "registry_list" | "registry_save" | "registry_delete" | "models_list"
         | "skills_list" | "skills_save" | "skills_delete" | "skills_refresh" | "skills_read"
+        | "skills_import" | "skills_files" | "skills_file"
         | "mcp_list" | "mcp_save" | "mcp_delete" => {
             handle_project_request(req.method.as_str(), id, p)
         }
@@ -574,6 +575,11 @@ fn handle_project_request(method: &str, id: Option<u64>, p: &serde_json::Value) 
         "skills_delete" => need_id("name").and_then(|n| projects::skill_delete(&n)),
         "skills_refresh" => need_id("name").and_then(|n| projects::skill_refresh(&n)),
         "skills_read" => need_id("name").and_then(|n| projects::skill_read(&n)),
+        "skills_import" => require_str(p, "source").and_then(|s| projects::skill_import(s)),
+        "skills_files" => need_id("name").and_then(|n| projects::skill_files(&n)),
+        "skills_file" => need_id("name").and_then(|n| {
+            require_str(p, "path").and_then(|f| projects::skill_file(&n, f))
+        }),
         "mcp_list" => projects::mcp_list(),
         "mcp_save" => match p.get("def") {
             Some(def) => projects::mcp_save(def),

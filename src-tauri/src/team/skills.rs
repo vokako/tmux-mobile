@@ -69,7 +69,7 @@ pub(crate) fn resolve_skills(refs: &[String], team_dir: &str) -> Vec<ResolvedSki
 }
 
 /// Parse SKILL.md YAML frontmatter for name/description (best-effort).
-fn read_skill_meta(dir: &std::path::Path) -> (String, String) {
+pub(crate) fn read_skill_meta(dir: &std::path::Path) -> (String, String) {
     let fallback = dir.file_name().and_then(|s| s.to_str()).unwrap_or("skill").to_string();
     let md = std::fs::read_to_string(dir.join("SKILL.md")).unwrap_or_default();
     let mut name = fallback;
@@ -139,9 +139,29 @@ fn fetch_git_skill(url: &str) -> Result<PathBuf, String> {
     Ok(resolved)
 }
 
+/// Fetch a GitHub URL with the FULL tree materialized (sparse-checkout
+/// disabled) and return the dir the URL points at. Discovery (a claude
+/// plugin's `skills/*`, a marketplace's `plugins/*`) has to SEE the tree;
+/// the per-subpath sparse fetch above is for a known skill dir.
+pub(crate) fn fetch_git_full(url: &str) -> Result<PathBuf, String> {
+    let (owner, repo, gitref, subpath) = parse_github(url)?;
+    fetch_git_skill(url)?; // ensures the clone exists (cache key owner/repo/ref)
+    let repo_cache = skills_cache_dir().join(&owner).join(&repo).join(&gitref);
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&repo_cache)
+        .args(["sparse-checkout", "disable"])
+        .output()
+        .map_err(|e| format!("spawn git: {}", e))?;
+    if !out.status.success() {
+        return Err(format!("git sparse-checkout disable: {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    Ok(if subpath.is_empty() { repo_cache } else { repo_cache.join(subpath) })
+}
+
 /// Parse a GitHub URL into (owner, repo, ref, subpath). Supports the `tree/<ref>/
 /// <subpath>` form and a bare `owner/repo` (defaults ref=main, no subpath).
-fn parse_github(url: &str) -> Result<(String, String, String, String), String> {
+pub(crate) fn parse_github(url: &str) -> Result<(String, String, String, String), String> {
     let u = url.trim().trim_end_matches('/');
     let rest = u
         .strip_prefix("https://github.com/")

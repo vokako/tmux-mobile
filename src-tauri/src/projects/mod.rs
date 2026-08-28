@@ -672,14 +672,181 @@ fn sync_skill_files(name: &str, source: &str) -> Result<(), String> {
     if !src_dir.join("SKILL.md").is_file() {
         return Err(format!("no SKILL.md in {}", src_dir.display()));
     }
+    install_skill_files(name, &src_dir)
+}
+
+/// Copy an already-resolved skill dir into the managed store (atomic:
+/// build a temp sibling, then swap).
+fn install_skill_files(name: &str, src_dir: &std::path::Path) -> Result<(), String> {
     let root = managed_skills_dir();
     std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
     let tmp = root.join(format!(".tmp-{name}"));
     let dest = root.join(name);
     let _ = std::fs::remove_dir_all(&tmp);
-    copy_dir(&src_dir, &tmp)?;
+    copy_dir(src_dir, &tmp)?;
     let _ = std::fs::remove_dir_all(&dest);
     std::fs::rename(&tmp, &dest).map_err(|e| format!("swap into place: {e}"))
+}
+
+/// Walk `root` for directories containing a SKILL.md (depth-capped). This is
+/// what makes a claude PLUGIN url installable as-is: a plugin keeps skills in
+/// `skills/<name>/`, a marketplace in `plugins/<p>/skills/<name>/` — instead
+/// of teaching each layout, find every SKILL.md and let its own directory be
+/// the skill (owner, 2026-08-28: "输入一个url就能装上 不需要下载下来").
+fn discover_skills(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    fn walk(dir: &std::path::Path, depth: u32, out: &mut Vec<std::path::PathBuf>) {
+        if depth > 5 || out.len() >= 50 {
+            return;
+        }
+        if dir.join("SKILL.md").is_file() {
+            out.push(dir.to_path_buf());
+            return; // a skill dir's subdirs are its assets, not more skills
+        }
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        let mut subdirs: Vec<_> = rd
+            .flatten()
+            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+            .map(|e| e.path())
+            .filter(|p| {
+                let n = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                !n.starts_with('.') && n != "node_modules"
+            })
+            .collect();
+        subdirs.sort();
+        for sub in subdirs {
+            walk(&sub, depth + 1, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, 0, &mut out);
+    out
+}
+
+/// A store-safe skill name off a discovered dir: frontmatter `name:` when it
+/// parses, else the directory basename — squeezed into [a-zA-Z0-9_-].
+fn discovered_name(dir: &std::path::Path) -> String {
+    let (meta_name, _) = crate::team::skills::read_skill_meta(dir);
+    let raw = if meta_name.trim().is_empty() { dir.file_name().and_then(|s| s.to_str()).unwrap_or("skill").to_string() } else { meta_name };
+    let cleaned: String = raw
+        .trim()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect();
+    let cleaned = cleaned.trim_matches('-').to_string();
+    if cleaned.is_empty() { "skill".into() } else { cleaned }
+}
+
+/// Install every skill a source contains. ONE url does the whole job: a bare
+/// skill dir imports as itself, a claude plugin imports each `skills/*`
+/// entry, a marketplace repo imports every plugin's skills. Each row records
+/// a source pointing at ITS OWN directory (a `tree/<ref>/<subpath>` url or an
+/// absolute path), so `skill_refresh` keeps working per skill.
+pub fn skill_import(source: &str) -> Result<Value, String> {
+    let source = source.trim();
+    let (root, mk_source): (std::path::PathBuf, Box<dyn Fn(&std::path::Path) -> String>) =
+        if source.starts_with("http://") || source.starts_with("https://") {
+            crate::team::skills::invalidate_git_cache(source);
+            let (owner, repo, gitref, subpath) = crate::team::skills::parse_github(source)?;
+            let root = crate::team::skills::fetch_git_full(source)?;
+            let base = root.clone();
+            (root.clone(), Box::new(move |dir: &std::path::Path| {
+                let rel = dir.strip_prefix(&base).ok().and_then(|p| p.to_str()).unwrap_or("");
+                let full = [subpath.as_str(), rel].iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join("/");
+                if full.is_empty() {
+                    format!("https://github.com/{owner}/{repo}/tree/{gitref}")
+                } else {
+                    format!("https://github.com/{owner}/{repo}/tree/{gitref}/{full}")
+                }
+            }))
+        } else {
+            let p = std::path::PathBuf::from(source);
+            if !p.is_absolute() {
+                return Err("local source must be an absolute path".into());
+            }
+            (p, Box::new(|dir: &std::path::Path| dir.to_string_lossy().into_owned()))
+        };
+    let found = discover_skills(&root);
+    if found.is_empty() {
+        return Err(format!("no SKILL.md found under {source}"));
+    }
+    let mut imported: Vec<String> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
+    let mut taken: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for dir in &found {
+        let mut name = discovered_name(dir);
+        if builtin_skill(&name).is_some() {
+            skipped.push(format!("{name} (built-in name)"));
+            continue;
+        }
+        // Two skills in one import wearing one name: suffix the later one.
+        let base = name.clone();
+        let mut n = 2;
+        while !taken.insert(name.clone()) {
+            name = format!("{base}-{n}");
+            n += 1;
+        }
+        let (_, desc) = crate::team::skills::read_skill_meta(dir);
+        if let Err(e) = install_skill_files(&name, dir) {
+            skipped.push(format!("{name} ({e})"));
+            continue;
+        }
+        let row = store::RegSkill { name: name.clone(), source: mk_source(dir), description: desc, synced_at: Some(now()) };
+        match with_store(|store| store.skill_save(&row, now())) {
+            Ok(()) => imported.push(name),
+            Err(e) => skipped.push(format!("{name} ({e})")),
+        }
+    }
+    Ok(json!({ "ok": !imported.is_empty(), "imported": imported, "skipped": skipped }))
+}
+
+/// The managed files of a skill, relative paths + sizes (for the UI preview).
+pub fn skill_files(name: &str) -> Result<Value, String> {
+    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err("invalid skill name".into());
+    }
+    let root = managed_skills_dir().join(name);
+    fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<Value>) {
+        if out.len() >= 200 {
+            return;
+        }
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        let mut entries: Vec<_> = rd.flatten().collect();
+        entries.sort_by_key(|e| e.file_name());
+        for e in entries {
+            let p = e.path();
+            if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                walk(&p, root, out);
+            } else if let (Ok(rel), Ok(meta)) = (p.strip_prefix(root), e.metadata()) {
+                out.push(json!({ "path": rel.to_string_lossy(), "size": meta.len() }));
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(&root, &root, &mut files);
+    // SKILL.md leads: it is the file the preview opens with.
+    files.sort_by_key(|f| (f["path"] != "SKILL.md", f["path"].as_str().unwrap_or("").to_string()));
+    Ok(json!({ "name": name, "files": files }))
+}
+
+/// One managed file's text (for the UI preview). Rejects path escapes and
+/// anything that is not small readable text.
+pub fn skill_file(name: &str, rel: &str) -> Result<Value, String> {
+    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err("invalid skill name".into());
+    }
+    let rel_path = std::path::Path::new(rel);
+    if rel_path.is_absolute()
+        || rel_path.components().any(|c| !matches!(c, std::path::Component::Normal(_)))
+    {
+        return Err("invalid file path".into());
+    }
+    let path = managed_skills_dir().join(name).join(rel_path);
+    let meta = std::fs::metadata(&path).map_err(|e| format!("stat {rel}: {e}"))?;
+    if meta.len() > 256 * 1024 {
+        return Err(format!("{rel} is too large to preview ({} KB)", meta.len() / 1024));
+    }
+    let content = std::fs::read_to_string(&path).map_err(|_| format!("{rel} is not a text file"))?;
+    Ok(json!({ "name": name, "path": rel, "content": content }))
 }
 
 fn copy_dir(from: &std::path::Path, to: &std::path::Path) -> Result<(), String> {
@@ -1390,6 +1557,51 @@ pub(crate) mod tests {
         // Reseeding is idempotent.
         seed_builtin_skills();
         assert_eq!(with_store(|st| st.skills_list()).unwrap().len(), listed.len());
+    }
+
+    #[test]
+    fn skill_import_discovers_plugin_layouts() {
+        use_test_store();
+        // A claude-plugin-shaped tree: skills live under skills/<name>/.
+        let root = std::env::temp_dir().join(format!("tmm-plugin-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("skills/alpha")).unwrap();
+        std::fs::create_dir_all(root.join("skills/beta/scripts")).unwrap();
+        std::fs::create_dir_all(root.join(".claude-plugin")).unwrap();
+        std::fs::write(root.join(".claude-plugin/plugin.json"), "{}").unwrap();
+        std::fs::write(root.join("skills/alpha/SKILL.md"), "---\nname: alpha\ndescription: first\n---\nA").unwrap();
+        std::fs::write(root.join("skills/beta/SKILL.md"), "---\nname: beta\n---\nB").unwrap();
+        std::fs::write(root.join("skills/beta/scripts/run.sh"), "echo hi").unwrap();
+
+        let r = skill_import(root.to_str().unwrap()).unwrap();
+        let imported: Vec<String> = serde_json::from_value(r["imported"].clone()).unwrap();
+        assert_eq!(imported, vec!["alpha", "beta"], "both skills of the plugin land");
+        // Each row's source points at ITS OWN dir, so per-skill refresh works.
+        let rows = with_store(|st| st.skills_list()).unwrap();
+        let alpha = rows.iter().find(|s| s.name == "alpha").unwrap();
+        assert!(alpha.source.ends_with("skills/alpha"), "{}", alpha.source);
+        assert_eq!(alpha.description, "first");
+        skill_refresh("alpha").unwrap();
+
+        // The preview RPCs: files listed (SKILL.md first), text served,
+        // escapes refused.
+        let f = skill_files("beta").unwrap();
+        let paths: Vec<String> = f["files"].as_array().unwrap().iter().map(|v| v["path"].as_str().unwrap().to_string()).collect();
+        assert_eq!(paths, vec!["SKILL.md", "scripts/run.sh"]);
+        let c = skill_file("beta", "scripts/run.sh").unwrap();
+        assert_eq!(c["content"], "echo hi");
+        assert!(skill_file("beta", "../alpha/SKILL.md").is_err());
+        assert!(skill_file("beta", "/etc/passwd").is_err());
+
+        // A built-in name inside an import is SKIPPED, not stolen.
+        let clash = std::env::temp_dir().join(format!("tmm-clash-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(clash.join("skills/mem")).unwrap();
+        std::fs::write(clash.join("skills/mem/SKILL.md"), "---\nname: mem\n---\nX").unwrap();
+        let r = skill_import(clash.to_str().unwrap()).unwrap();
+        assert_eq!(r["imported"].as_array().unwrap().len(), 0);
+        assert!(r["skipped"][0].as_str().unwrap().contains("mem"));
+
+        std::fs::remove_dir_all(&root).ok();
+        std::fs::remove_dir_all(&clash).ok();
     }
 
     #[test]

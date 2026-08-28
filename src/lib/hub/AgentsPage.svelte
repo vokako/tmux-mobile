@@ -8,7 +8,7 @@
   import SideHandle from '../ui/SideHandle.svelte';
   import { scrollFade } from '../core/scrollFade.ts';
   import { t } from '../core/i18n.svelte.ts';
-  import { registryList, registrySave, registryDelete, modelsList, skillsList, skillsSave, skillsDelete, skillsRefresh, skillsRead, mcpList, mcpSave, mcpDelete } from '../core/ws.ts';
+  import { registryList, registrySave, registryDelete, modelsList, skillsList, skillsSave, skillsDelete, skillsRefresh, skillsImport, skillsFiles, skillsFile, mcpList, mcpSave, mcpDelete } from '../core/ws.ts';
   import { renderMarkdown } from '../core/markdown.ts';
   import { backendColor } from '../hub/hub.ts';
   import { backendIcon } from '../core/agents.ts';
@@ -43,6 +43,7 @@
   let wasDrilled = false;
   let mcpIsNew = $state(false);
   let error = $state('');
+  let info = $state(''); // a good-news line (e.g. what a plugin import installed)
 
   /** The pending destructive action: `{ kind, name }`. Deleting an agent
    * definition, a skill or an MCP server used to be immediate — one stray tap
@@ -129,31 +130,59 @@
 
   function closeAll() {
     editing = null; editingSkill = null; editingMcp = null;
-    error = '';
+    error = ''; info = '';
   }
 
-  let skillMd = $state('');
+  // The skill's managed files: a chip per file, one previewed at a time.
+  // SKILL.md leads; .md renders, anything else shows as monospace text
+  // (owner, 2026-08-28: "配置页面可以预览skillmd以及其他资源文件").
+  let skFiles = $state([]);
+  let skSel = $state('SKILL.md');
+  let skText = $state('');
   // The YAML frontmatter duplicates the form fields (name/description) —
   // the preview shows the skill's BODY.
   function stripFrontmatter(md) {
     const m = /^---\n[\s\S]*?\n---\n?/.exec(md);
     return m ? md.slice(m[0].length) : md;
   }
+  function loadSkillFiles(name) {
+    skFiles = [];
+    skSel = 'SKILL.md';
+    skText = '';
+    skillsFiles(name)
+      .then((r) => { if (editingSkill?.name === name) skFiles = r.files ?? []; })
+      .catch(() => { skFiles = []; });
+    loadSkillFile(name, 'SKILL.md');
+  }
+  function loadSkillFile(name, path) {
+    skSel = path;
+    skText = '';
+    skillsFile(name, path)
+      .then((r) => { if (editingSkill?.name === name && skSel === path) skText = r.content; })
+      .catch((e) => { if (editingSkill?.name === name && skSel === path) skText = String(e?.message ?? e); });
+  }
   function startSkill(sk) {
     closeAll();
     skillIsNew = !sk;
     editingSkill = sk ? { ...sk } : { name: '', source: '', description: '' };
-    skillMd = '';
-    if (sk) {
-      skillsRead(sk.name)
-        .then((r) => { if (editingSkill?.name === sk.name) skillMd = r.content; })
-        .catch(() => { skillMd = ''; });
-    }
+    if (sk) loadSkillFiles(sk.name); else { skFiles = []; skText = ''; }
   }
   let syncing = $state(false);
   async function saveSkill() {
     syncing = true;
+    error = '';
     try {
+      if (skillIsNew && !editingSkill.name.trim()) {
+        // No name = install whatever the source contains (a claude plugin
+        // url imports each of its skills; the names come from the skills).
+        const r = await skillsImport(editingSkill.source);
+        await reload();
+        const first = skills.find((x) => x.name === r.imported?.[0]);
+        if (first) startSkill(first); else editingSkill = null;
+        const skipped = r.skipped?.length ? ` · ${t('skillsSkipped')}: ${r.skipped.join(', ')}` : '';
+        info = `${t('skillsImported')}: ${(r.imported ?? []).join(', ') || '—'}${skipped}`;
+        return;
+      }
       await skillsSave(editingSkill);
       editingSkill = null;
       await reload();
@@ -167,7 +196,7 @@
       await skillsRefresh(editingSkill.name);
       await reload();
       editingSkill = { ...skills.find((x) => x.name === editingSkill.name) };
-      skillMd = (await skillsRead(editingSkill.name).catch(() => ({ content: '' }))).content;
+      loadSkillFiles(editingSkill.name);
     } catch (e) { error = String(e?.message ?? e); }
     finally { syncing = false; }
   }
@@ -311,14 +340,18 @@
           <button class="chip-btn" disabled={syncing} onclick={refreshSkill}><Icon name="refresh" size={13} />{t('skillsRefresh')}</button>
         {/if}
         <button class="chip-btn" onclick={() => editingSkill = null}>{t('cancel')}</button>
-        <button class="chip-btn primary" disabled={!editingSkill.name.trim() || !editingSkill.source.trim() || syncing} onclick={saveSkill}>{syncing ? '…' : (skillIsNew ? t('skillsImport') : t('save'))}</button>
+        <button class="chip-btn primary" disabled={!editingSkill.source.trim() || (!skillIsNew && !editingSkill.name.trim()) || syncing} onclick={saveSkill}>{syncing ? '…' : (skillIsNew ? t('skillsImport') : t('save'))}</button>
         </div>
       </div>
       <div class="editor">
         {#if error}<div class="err">{error}</div>{/if}
+        {#if info}<p class="hint">{info}</p>{/if}
         <label>{t('agentsName')}
           <input bind:value={editingSkill.name} disabled={!skillIsNew} placeholder="git-review" />
         </label>
+        {#if skillIsNew}
+          <p class="hint">{t('skillsImportHint')}</p>
+        {/if}
         <label>{t('skillsSource')}
           <input bind:value={editingSkill.source} disabled={editingSkill.source === 'builtin'} placeholder="https://github.com/org/repo/tree/main/skills/git-review 或 /abs/local/dir" />
         </label>
@@ -332,10 +365,22 @@
           <p class="hint">{t('skillsSynced')} {new Date(editingSkill.synced_at * 1000).toLocaleString()}</p>
         {/if}
         <p class="hint">{t('skillsHint')}</p>
-        {#if skillMd}
+        {#if !skillIsNew && skFiles.length}
           <div class="md-preview">
-            <div class="side-h">SKILL.md</div>
-            <div class="md md-doc">{@html renderMarkdown(stripFrontmatter(skillMd))}</div>
+            <div class="side-h">{t('skillsFilesTitle')}</div>
+            {#if skFiles.length > 1}
+              <div class="pick-row">
+                {#each skFiles as f (f.path)}
+                  <button class="pick" class:sel={skSel === f.path} type="button"
+                    onclick={() => loadSkillFile(editingSkill.name, f.path)}>{f.path}</button>
+                {/each}
+              </div>
+            {/if}
+            {#if skSel.endsWith('.md')}
+              <div class="md md-doc">{@html renderMarkdown(skSel === 'SKILL.md' ? stripFrontmatter(skText) : skText)}</div>
+            {:else}
+              <pre class="file-pre">{skText}</pre>
+            {/if}
           </div>
         {/if}
       </div>
@@ -529,7 +574,13 @@
   }
   .pick:hover { border-color: var(--input-border); }
   .pick.sel { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
-  .md-preview { border-top: 1px solid var(--border2); margin-top: 6px; }
+  .md-preview { border-top: 1px solid var(--border2); margin-top: 6px; display: flex; flex-direction: column; gap: 8px; }
+  .file-pre {
+    margin: 0; padding: 8px 10px; overflow: auto; max-height: 60vh;
+    font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub);
+    color: var(--text2); background: var(--code-bg, var(--surface));
+    border-radius: var(--ui-radius-control); white-space: pre;
+  }
   .md-doc {
     background: var(--surface); border: 1px solid var(--border2); border-radius: var(--ui-radius-panel);
     padding: 12px 14px; font-size: var(--fs-body); color: var(--text); line-height: 1.55;

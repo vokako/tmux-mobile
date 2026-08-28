@@ -63,6 +63,27 @@ their clone cache invalidated first, so a refresh sees the remote's current
 state). Deleting a skill removes the row AND the managed files. Legacy
 inline mcp objects in old agent defs are preserved and keep working.
 
+ONE url installs whatever it contains (`skills_import` / `tmm skills
+import <url|abs dir>`; owner, 2026-08-28: "对claude plugin的支持…输入一个
+url就能装上 不需要下载下来"): instead of teaching each layout,
+`discover_skills` walks the fetched tree (depth ≤ 5, ≤ 50 hits, dotdirs
+and node_modules skipped) for every directory holding a SKILL.md — so a
+bare skill dir imports as itself, a claude PLUGIN imports each
+`skills/*` entry, and a marketplace repo imports every plugin's skills.
+Discovery needs the WHOLE tree, so `fetch_git_full` clones once and
+disables the sparse checkout (the per-subpath sparse fetch is for a
+known skill dir). Each imported row records a source pointing at ITS OWN
+directory (a `tree/<ref>/<subpath>` url, or an absolute path), which is
+what keeps per-skill Refresh working; names come from the skill's own
+frontmatter (sanitized to the store's [a-zA-Z0-9_-]), a name collision
+inside one import suffixes `-2`, and a built-in name is SKIPPED, never
+stolen. In the UI, leaving the name EMPTY on a new skill routes the
+save through the importer. The editor also previews the whole managed
+dir, not just SKILL.md (`skills_files`/`skills_file`, same owner
+request): a chip per file, `.md` renders, anything else shows as
+monospace text; the server caps previews at 256 KB, refuses non-text,
+and rejects path escapes.
+
 Three skills are BUILT-IN (owner, 2026-08-28: "应该有一个默认的内置的
 skill…来源就是内置的 比如tmm可能就得有一个skill  mem命令也有一个skill"):
 `tmm-cli` (the full CLI reference beyond the system-prompt paragraph),

@@ -73,6 +73,8 @@ USAGE (human or agent — self-management):
   tmm registry delete <name>
   tmm skills list|delete|refresh <name>   app-managed skill store
   tmm skills save --name <n> --source <abs dir|github url>  (imports the files)
+  tmm skills import <url|abs dir>     install EVERYTHING a source contains
+                                      (a claude plugin/marketplace url works as-is)
   tmm mcp list|delete <name>          central MCP server defs
   tmm mcp save --name <n> --def '<json>' 
 
@@ -397,6 +399,21 @@ async fn main() {
                 for sk in r.get("skills").and_then(|v| v.as_array()).unwrap_or(&empty) {
                     let s = |k: &str| sk.get(k).and_then(|v| v.as_str()).unwrap_or("");
                     println!("{} ← {} {}", s("name"), s("source"), s("description"));
+                }
+            }
+        }
+        ("skills", rest) if rest.first().map(String::as_str) == Some("import") => {
+            // One url installs EVERYTHING it contains — a claude plugin or
+            // marketplace imports each of its skills, named by themselves.
+            let Some(source) = rest.get(1).cloned().or_else(|| flags.get("source").cloned().flatten()) else {
+                fail(EXIT_USAGE, "skills import needs a source: tmm skills import https://github.com/org/plugin-repo");
+            };
+            let r = rpc(&ctx, "skills_import", json!({ "source": source })).await;
+            if ctx.json { println!("{r}"); } else {
+                let names = r.get("imported").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default();
+                println!("✓ imported: {names}");
+                if let Some(sk) = r.get("skipped").and_then(|v| v.as_array()).filter(|a| !a.is_empty()) {
+                    println!("  skipped: {}", sk.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(", "));
                 }
             }
         }
