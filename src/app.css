@@ -264,13 +264,21 @@ button:disabled {
 .chip-btn.primary.danger:hover { background: var(--danger); color: #fff; border-color: transparent; filter: brightness(1.1); }
 
 .icon-btn {
+  /* The rail's grammar, not the chip's: an icon-only action wears NO drawn
+     frame — hover/press is the surface2 wash, a toggled/on state the accent
+     wash (owner, 2026-08-28: "细线…中间一个 icon…做成无细线 border 的风格，
+     类似…选 chat terminal 的选项卡图标的风格"). Text chips keep borders. */
   display: grid; place-items: center; flex: none;
-  background: none; border: 1px solid var(--border); color: var(--text2);
-  border-radius: var(--ui-radius-control); width: 28px; height: 25px; cursor: pointer;
-  transition: border-color var(--t-fast), color var(--t-fast);
+  background: none; border: none; color: var(--text2);
+  border-radius: var(--ui-radius-control); width: 28px; height: 26px; cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast);
+  -webkit-tap-highlight-color: transparent;
 }
-.icon-btn:hover { border-color: var(--accent); color: var(--accent); }
-.icon-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
+.icon-btn:hover { background: var(--surface2); color: var(--text); }
+.icon-btn:active { background: var(--accent-bg); color: var(--accent); }
+.icon-btn.danger:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+/* The border used to keep a disabled button visible; the wash cannot. */
+.icon-btn:disabled { opacity: 0.4; cursor: default; background: none; color: var(--text2); }
 
 .side-h {
   /* Identity layer: the display face (was mono). Uppercase Space Grotesk at

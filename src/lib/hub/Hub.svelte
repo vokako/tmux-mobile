@@ -2651,7 +2651,7 @@
   }
   .path::-webkit-scrollbar { display: none; }
   .spacer { flex: 1; }
-  .term-toggle.on { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+  .term-toggle.on { color: var(--accent); background: var(--accent-bg); }
 
   /* The roster: one line per agent, on every screen size. It answers "who is
      here and are they busy" — anything more was a wall of cards. Metrics run

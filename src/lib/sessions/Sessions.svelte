@@ -732,24 +732,17 @@
     flex-shrink: 0;
   }
   .icon-btn {
+    /* Local override keeps only the touch SIZE and pill shape; the skin is
+       the shared borderless grammar (owner, 2026-08-28). */
     flex-shrink: 0;
     width: var(--ui-control-height);
     height: var(--ui-control-height);
     padding: 0;
-    border: 1px solid var(--border2);
     border-radius: var(--ui-radius-pill);
-    background: var(--input-bg);
     color: var(--text3);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    -webkit-tap-highlight-color: transparent;
-    transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
   }
   .icon-btn:active {
     color: var(--accent);
-    border-color: var(--accent);
     background: var(--accent-bg);
   }
 

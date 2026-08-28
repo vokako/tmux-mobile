@@ -102,8 +102,13 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
 - `.chip-btn` — bordered text chip; `.primary` accent wash; lone `.danger`
   quiet until hover. `.chip-btn.primary.danger` = SOLID red with white ink,
   reserved for the confirming button of a destructive dialog.
-- `.icon-btn` — 28×25 bordered icon square; the page-head action dialect;
-  label goes in `title` + `aria-label`. `.danger` variant reds on hover.
+- `.icon-btn` — BORDERLESS icon square (28×26), the page-head action dialect;
+  the rail's grammar, not the chip's (owner, 2026-08-28: icon-only actions
+  drop the thin frame, "类似…选项卡图标的风格"): hover = `--surface2` wash,
+  press/toggled-on = `--accent-bg` + accent ink, disabled = 0.4 opacity (the
+  border used to carry visibility). Label goes in `title` + `aria-label`.
+  `.danger` reds its ink and tints the wash. Files' `.tool-btn` and Sessions'
+  pill variant wear the same skin at their own touch sizes.
 - `.side-row` — sidebar list row; hover `--surface2`, open/selected
   `--accent-bg`.
 - `.pick` / `.agent-pick` / `.pchip` — stadium toggle chips for MEMBERSHIP
@@ -119,8 +124,10 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
 
 ## 4 · Hover / active (desktop), two families only
 
-- CONTROLS (chips, icon buttons, inputs, select triggers): border →
-  `--accent`, text → `--accent` (danger controls red instead). No fills.
+- CONTROLS (text chips, inputs, select triggers — anything wearing a drawn
+  border): border → `--accent`, text → `--accent` (danger controls red
+  instead). No fills. Icon-only buttons are NOT here: borderless, they hover
+  in the wash family below (like the rail).
 - ROWS & MENU ITEMS (side rows, menu buttons, list rows): background →
   `--surface2`, text → `--text`; toned verbs keep their tone and tint their
   wash (`color-mix` 14%).

@@ -1610,15 +1610,17 @@
     border-bottom: 1px solid var(--border); background: transparent; flex-shrink: 0;
   }
   .tool-btn {
+    /* Borderless icon action — the .icon-btn/rail grammar (owner, 2026-08-28),
+       at this toolbar's touch size. */
     width: var(--ui-control-height); height: var(--ui-control-height);
-    padding: 0; border: 1px solid var(--border2); border-radius: var(--ui-radius-pill);
-    background: var(--input-bg); color: var(--text2); cursor: pointer;
+    padding: 0; border: none; border-radius: var(--ui-radius-pill);
+    background: none; color: var(--text2); cursor: pointer;
     font-size: var(--ui-font-control); display: flex; align-items: center; justify-content: center;
     flex-shrink: 0;
     -webkit-tap-highlight-color: transparent;
   }
-  .tool-btn:active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
-  .tool-btn.tool-active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+  .tool-btn:active { background: var(--accent-bg); color: var(--accent); }
+  .tool-btn.tool-active { background: var(--accent-bg); color: var(--accent); }
   .tool-btn.starred { color: var(--accent); }
 
   /* Path row */
