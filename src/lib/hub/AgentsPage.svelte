@@ -331,16 +331,21 @@
         <h1>{skillIsNew ? t('skillsNew') : editingSkill.name}</h1>
         <span class="spacer"></span>
         <div class="head-acts">
+        <!-- Icon-only, borderless, the label on hover — the same grammar the
+             conversation header speaks (owner, 2026-08-28: "能用图标就不用
+             文字了…只有鼠标移在上边才有小的文字alt标签"). -->
         {#if !skillIsNew && editingSkill.source !== 'builtin'}
           <!-- A built-in would reseed at the next server start — offering
                delete would be a lie the restart un-tells. -->
-          <button class="chip-btn danger" onclick={() => ask('skill', editingSkill.name)}><Icon name="trash" size={13} />{t('delete')}</button>
+          <button class="icon-btn danger" title={t('delete')} aria-label={t('delete')} onclick={() => ask('skill', editingSkill.name)}><Icon name="trash" size={14} /></button>
         {/if}
         {#if !skillIsNew}
-          <button class="chip-btn" disabled={syncing} onclick={refreshSkill}><Icon name="refresh" size={13} />{t('skillsRefresh')}</button>
+          <button class="icon-btn" disabled={syncing} title={t('skillsRefresh')} aria-label={t('skillsRefresh')} onclick={refreshSkill}><Icon name="refresh" size={14} /></button>
         {/if}
-        <button class="chip-btn" onclick={() => editingSkill = null}>{t('cancel')}</button>
-        <button class="chip-btn primary" disabled={!editingSkill.source.trim() || (!skillIsNew && !editingSkill.name.trim()) || syncing} onclick={saveSkill}>{syncing ? '…' : (skillIsNew ? t('skillsImport') : t('save'))}</button>
+        <button class="icon-btn" title={t('cancel')} aria-label={t('cancel')} onclick={() => editingSkill = null}><Icon name="x" size={14} /></button>
+        <button class="icon-btn go" disabled={!editingSkill.source.trim() || (!skillIsNew && !editingSkill.name.trim()) || syncing}
+          title={skillIsNew ? t('skillsImport') : t('save')} aria-label={skillIsNew ? t('skillsImport') : t('save')}
+          onclick={saveSkill}><Icon name={skillIsNew ? 'download' : 'check'} size={14} /></button>
         </div>
       </div>
       <div class="editor">
@@ -369,10 +374,15 @@
           <div class="md-preview">
             <div class="side-h">{t('skillsFilesTitle')}</div>
             {#if skFiles.length > 1}
-              <div class="pick-row">
+              <!-- A quiet list, not a chip cloud: file paths are reading
+                   material (owner, 2026-08-28: "可以是小的列表组件展示"). -->
+              <div class="file-list" role="listbox" aria-label={t('skillsFilesTitle')}>
                 {#each skFiles as f (f.path)}
-                  <button class="pick" class:sel={skSel === f.path} type="button"
-                    onclick={() => loadSkillFile(editingSkill.name, f.path)}>{f.path}</button>
+                  <button class="file-row" class:sel={skSel === f.path} type="button" role="option" aria-selected={skSel === f.path}
+                    onclick={() => loadSkillFile(editingSkill.name, f.path)}>
+                    <span class="f-path">{f.path}</span>
+                    <span class="f-size">{f.size < 1024 ? `${f.size} B` : `${Math.round(f.size / 1024)} KB`}</span>
+                  </button>
                 {/each}
               </div>
             {/if}
@@ -390,10 +400,10 @@
         <span class="spacer"></span>
         <div class="head-acts">
         {#if !mcpIsNew}
-          <button class="chip-btn danger" onclick={() => ask('mcp', editingMcp.name)}><Icon name="trash" size={13} />{t('delete')}</button>
+          <button class="icon-btn danger" title={t('delete')} aria-label={t('delete')} onclick={() => ask('mcp', editingMcp.name)}><Icon name="trash" size={14} /></button>
         {/if}
-        <button class="chip-btn" onclick={() => editingMcp = null}>{t('cancel')}</button>
-        <button class="chip-btn primary" disabled={!editingMcp.name.trim()} onclick={saveMcp}>{t('save')}</button>
+        <button class="icon-btn" title={t('cancel')} aria-label={t('cancel')} onclick={() => editingMcp = null}><Icon name="x" size={14} /></button>
+        <button class="icon-btn go" disabled={!editingMcp.name.trim()} title={t('save')} aria-label={t('save')} onclick={saveMcp}><Icon name="check" size={14} /></button>
         </div>
       </div>
       <div class="editor">
@@ -412,10 +422,10 @@
         <span class="spacer"></span>
         <div class="head-acts">
         {#if !isNew}
-          <button class="chip-btn danger" onclick={() => ask('agent', editing.name)}><Icon name="trash" size={13} />{t('delete')}</button>
+          <button class="icon-btn danger" title={t('delete')} aria-label={t('delete')} onclick={() => ask('agent', editing.name)}><Icon name="trash" size={14} /></button>
         {/if}
-        <button class="chip-btn" onclick={() => editing = null}>{t('cancel')}</button>
-        <button class="chip-btn primary" disabled={!editing.name.trim()} onclick={save}>{t('save')}</button>
+        <button class="icon-btn" title={t('cancel')} aria-label={t('cancel')} onclick={() => editing = null}><Icon name="x" size={14} /></button>
+        <button class="icon-btn go" disabled={!editing.name.trim()} title={t('save')} aria-label={t('save')} onclick={save}><Icon name="check" size={14} /></button>
         </div>
       </div>
       <div class="editor">
@@ -545,6 +555,26 @@
   /* The head actions move as ONE block: on a phone they wrap under the
      title together instead of scattering one button per row. */
   .head-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
+  /* The confirm among equals: same borderless button, accent ink says "go". */
+  .head-acts :global(.icon-btn.go:not(:disabled)) { color: var(--accent); }
+  .head-acts :global(.icon-btn.go:not(:disabled):hover) { background: var(--accent-bg); }
+  /* Skill files as a quiet list — rows in the wash hover family, the
+     selected one in the accent wash (same states the sidebar rows speak). */
+  .file-list {
+    display: flex; flex-direction: column; overflow: hidden auto; max-height: 200px;
+    border: 1px solid var(--border2); border-radius: var(--ui-radius-control);
+  }
+  .file-row {
+    display: flex; align-items: center; gap: 8px; padding: 4px 10px;
+    background: none; border: none; cursor: pointer; text-align: left;
+    font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text2);
+    transition: background var(--t-fast), color var(--t-fast);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .file-row:hover { background: var(--surface2); }
+  .file-row.sel { background: var(--accent-bg); color: var(--accent); }
+  .f-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .f-size { margin-left: auto; flex: none; color: var(--text3); font-size: var(--fs-micro); }
   .placeholder { flex: 1; display: grid; place-items: center; }
   .hint { color: var(--text3); font-size: var(--fs-ui); margin: 0; line-height: 1.6; max-width: 420px; }
 

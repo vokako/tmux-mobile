@@ -108,7 +108,13 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   press/toggled-on = `--accent-bg` + accent ink, disabled = 0.4 opacity (the
   border used to carry visibility). Label goes in `title` + `aria-label`.
   `.danger` reds its ink and tints the wash. Files' `.tool-btn` and Sessions'
-  pill variant wear the same skin at their own touch sizes.
+  pill variant wear the same skin at their own touch sizes. Editor heads
+  (AgentsPage) speak it too — save/cancel/delete/refresh are icon-only with
+  the label on hover (owner, 2026-08-28: "能用图标就不用文字了…鼠标移在上边
+  才有小的文字alt标签"); the confirming action is `.go`, the same borderless
+  button in accent ink (hover = accent wash) — emphasis by colour, not by a
+  frame. Dialog CTAs keep their text chips: a destructive confirm must read
+  its consequence.
 - `.side-row` — sidebar list row; hover `--surface2`, open/selected
   `--accent-bg`.
 - `.pick` / `.agent-pick` / `.pchip` — stadium toggle chips for MEMBERSHIP
