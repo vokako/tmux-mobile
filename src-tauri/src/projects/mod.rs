@@ -585,6 +585,57 @@ pub fn registry_delete(name: &str) -> Result<Value, String> {
 
 // ---- central skills / MCP assets ----------------------------------------
 
+/// Built-in skills: shipped IN the binary and materialized into the managed
+/// store at server start (owner, 2026-08-28: "应该有一个默认的内置的skill…
+/// 来源就是内置的"). The row's `source` is the literal "builtin"; refresh and
+/// reseed rewrite the files from the embedded copy, so they always match the
+/// running build — and a deleted/overwritten one would silently drift, which
+/// is why save/delete refuse the reserved names instead.
+pub(crate) const BUILTIN_SKILLS: &[(&str, &str)] = &[
+    ("tmm-cli", include_str!("../../../assets/skills/tmm-cli/SKILL.md")),
+    ("mem", include_str!("../../../assets/skills/mem/SKILL.md")),
+    ("mcp-cli", include_str!("../../../assets/skills/mcp-cli/SKILL.md")),
+];
+
+pub(crate) fn builtin_skill(name: &str) -> Option<&'static str> {
+    BUILTIN_SKILLS.iter().find(|(n, _)| *n == name).map(|(_, md)| *md)
+}
+
+/// Frontmatter description off an embedded SKILL.md (best-effort — the
+/// listed description should read the same as an imported skill's).
+fn builtin_description(md: &str) -> String {
+    md.strip_prefix("---")
+        .and_then(|rest| rest.find("\n---").map(|end| &rest[..end]))
+        .and_then(|fm| {
+            fm.lines().find_map(|l| l.strip_prefix("description:").map(|d| d.trim().to_string()))
+        })
+        .unwrap_or_default()
+}
+
+/// Materialize every built-in into the managed store. Called once at server
+/// start (capture loop startup); fail-soft — a read-only disk must not stop
+/// the server, the skill just stays stale/absent.
+pub fn seed_builtin_skills() {
+    for (name, md) in BUILTIN_SKILLS {
+        let dir = managed_skills_dir().join(name);
+        if std::fs::create_dir_all(&dir).is_err() {
+            continue;
+        }
+        let path = dir.join("SKILL.md");
+        // Rewrite only on change: a no-op start must not bump mtimes.
+        if std::fs::read_to_string(&path).ok().as_deref() != Some(*md) && std::fs::write(&path, md).is_err() {
+            continue;
+        }
+        let row = store::RegSkill {
+            name: (*name).to_string(),
+            source: "builtin".into(),
+            description: builtin_description(md),
+            synced_at: Some(now()),
+        };
+        let _ = with_store(|store| store.skill_save(&row, now()));
+    }
+}
+
 pub fn skills_list() -> Result<Value, String> {
     with_store(|store| Ok(json!({ "skills": store.skills_list()? })))
 }
@@ -600,6 +651,13 @@ pub fn managed_skills_dir() -> std::path::PathBuf {
 /// a temp sibling, then swap).
 fn sync_skill_files(name: &str, source: &str) -> Result<(), String> {
     let source = source.trim();
+    if source == "builtin" {
+        // The embedded copy IS the source; a refresh rewrites from the binary.
+        let md = builtin_skill(name).ok_or_else(|| format!("'{name}' is not a built-in skill"))?;
+        let dir = managed_skills_dir().join(name);
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        return std::fs::write(dir.join("SKILL.md"), md).map_err(|e| e.to_string());
+    }
     if source.starts_with("http://") || source.starts_with("https://") {
         // A refresh must see the remote's CURRENT state, not the clone cache.
         crate::team::skills::invalidate_git_cache(source);
@@ -653,6 +711,9 @@ pub fn skill_save(def: &Value) -> Result<Value, String> {
     if !sk.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
         return Err("skill name must be [a-zA-Z0-9_-] (it names a directory)".into());
     }
+    if builtin_skill(&sk.name).is_some() && sk.source.trim() != "builtin" {
+        return Err(format!("'{}' is a built-in skill — its files ship with the app and reseed at start", sk.name));
+    }
     sync_skill_files(&sk.name, &sk.source)?;
     sk.synced_at = Some(now());
     with_store(|store| {
@@ -685,6 +746,9 @@ pub fn skill_read(name: &str) -> Result<Value, String> {
 }
 
 pub fn skill_delete(name: &str) -> Result<Value, String> {
+    if builtin_skill(name).is_some() {
+        return Err(format!("'{name}' is built-in — it would reseed at the next server start"));
+    }
     let deleted = with_store(|store| store.skill_delete(name))?;
     if deleted {
         let _ = std::fs::remove_dir_all(managed_skills_dir().join(name));
@@ -928,6 +992,8 @@ pub fn capture_once() -> Result<Vec<String>, String> {
 
 /// Background capturer, spawned once by the server.
 pub async fn capture_loop() {
+    // Built-ins materialize once per server start, before the first tick.
+    seed_builtin_skills();
     loop {
         tokio::time::sleep(CAPTURE_INTERVAL).await;
         if let Err(e) = auto_adopt_once() {
@@ -1296,6 +1362,34 @@ pub(crate) mod tests {
         skill_delete("demo-skill").unwrap();
         assert!(!managed.exists());
         std::fs::remove_dir_all(&src).ok();
+    }
+
+    #[test]
+    fn builtin_skills_seed_and_are_guarded() {
+        use_test_store();
+        seed_builtin_skills();
+        // Every built-in: a row with source "builtin" + files in the store.
+        let listed = with_store(|st| st.skills_list()).unwrap();
+        for (name, md) in BUILTIN_SKILLS {
+            let row = listed.iter().find(|s| s.name == *name).unwrap_or_else(|| panic!("{name} seeded"));
+            assert_eq!(row.source, "builtin");
+            assert!(!row.description.is_empty(), "{name}: frontmatter description surfaced");
+            let on_disk = std::fs::read_to_string(managed_skills_dir().join(name).join("SKILL.md")).unwrap();
+            assert_eq!(&on_disk, *md, "{name}: managed copy matches the embedded one");
+        }
+        // Reserved: neither deletable nor overwritable from another source.
+        let err = skill_delete("mem").unwrap_err();
+        assert!(err.contains("built-in"), "{err}");
+        let err = skill_save(&serde_json::json!({ "name": "mem", "source": "/tmp/elsewhere" })).unwrap_err();
+        assert!(err.contains("built-in"), "{err}");
+        // Refresh re-syncs from the BINARY: a drifted managed copy heals.
+        std::fs::write(managed_skills_dir().join("mem").join("SKILL.md"), "drifted").unwrap();
+        skill_refresh("mem").unwrap();
+        let healed = std::fs::read_to_string(managed_skills_dir().join("mem").join("SKILL.md")).unwrap();
+        assert_eq!(healed, builtin_skill("mem").unwrap());
+        // Reseeding is idempotent.
+        seed_builtin_skills();
+        assert_eq!(with_store(|st| st.skills_list()).unwrap().len(), listed.len());
     }
 
     #[test]

@@ -63,6 +63,20 @@ their clone cache invalidated first, so a refresh sees the remote's current
 state). Deleting a skill removes the row AND the managed files. Legacy
 inline mcp objects in old agent defs are preserved and keep working.
 
+Three skills are BUILT-IN (owner, 2026-08-28: "应该有一个默认的内置的
+skill…来源就是内置的 比如tmm可能就得有一个skill  mem命令也有一个skill"):
+`tmm-cli` (the full CLI reference beyond the system-prompt paragraph),
+`mem` (the hierarchical `_MEMORY.md` memory-tree CLI) and `mcp-cli` (the
+MCP escape hatch below). Their SKILL.md files live in `assets/skills/*`
+and are embedded in the binary (`projects::BUILTIN_SKILLS`,
+`include_str!`); `seed_builtin_skills()` materializes them into the
+managed store at every server start with `source = "builtin"`. Refresh
+re-syncs from the RUNNING BUILD (not a path or remote), save/delete
+refuse the reserved names — a deleted built-in would silently resurrect
+at the next restart, so the UI hides delete and locks the source field
+instead. Agents still OPT IN by listing the skill; nothing is injected
+unasked.
+
 ## Self-management: the app operates itself through its own CLI
 
 Everything the UI can do to projects and the registry, `tmm` can do — and the

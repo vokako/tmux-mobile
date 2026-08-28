@@ -302,7 +302,9 @@
         <h1>{skillIsNew ? t('skillsNew') : editingSkill.name}</h1>
         <span class="spacer"></span>
         <div class="head-acts">
-        {#if !skillIsNew}
+        {#if !skillIsNew && editingSkill.source !== 'builtin'}
+          <!-- A built-in would reseed at the next server start — offering
+               delete would be a lie the restart un-tells. -->
           <button class="chip-btn danger" onclick={() => ask('skill', editingSkill.name)}><Icon name="trash" size={13} />{t('delete')}</button>
         {/if}
         {#if !skillIsNew}
@@ -318,8 +320,11 @@
           <input bind:value={editingSkill.name} disabled={!skillIsNew} placeholder="git-review" />
         </label>
         <label>{t('skillsSource')}
-          <input bind:value={editingSkill.source} placeholder="https://github.com/org/repo/tree/main/skills/git-review 或 /abs/local/dir" />
+          <input bind:value={editingSkill.source} disabled={editingSkill.source === 'builtin'} placeholder="https://github.com/org/repo/tree/main/skills/git-review 或 /abs/local/dir" />
         </label>
+        {#if editingSkill.source === 'builtin'}
+          <p class="hint">{t('skillsBuiltin')}</p>
+        {/if}
         <label>{t('skillsDesc')}
           <input bind:value={editingSkill.description} />
         </label>
