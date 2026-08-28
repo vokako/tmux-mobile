@@ -930,11 +930,13 @@
   });
   // Swipe left/right to switch tabs with slide animation
   const tabs = $derived(() => {
+    // Same order as the tab bar and the rail: files sits LEFT of the agent
+    // config (owner, 2026-08-28: "手机下边的栏文件放到agent配置左侧吧").
     const t = [];
     if (hubEligible) t.push('hub');
     t.push('terminal');
-    if (hubEligible) t.push('agents');
     t.push('files');
+    if (hubEligible) t.push('agents');
     return t;
   });
 
@@ -1232,14 +1234,14 @@
       <button tabindex="-1" class:active={page === 'terminal'} onclick={() => switchTab('terminal')}>
         <Icon name="terminal" size={19} /><span>{t('terminal')}</span>
       </button>
+      <button tabindex="-1" class:active={page === 'files'} onclick={() => switchTab('files')}>
+        <Icon name="files" size={19} /><span>{t('files')}</span>
+      </button>
       {#if hubEligible}
         <button tabindex="-1" class:active={page === 'agents'} onclick={() => switchTab('agents')}>
           <Icon name="bot" size={19} /><span>{t('agentsTitle')}</span>
         </button>
       {/if}
-      <button tabindex="-1" class:active={page === 'files'} onclick={() => switchTab('files')}>
-        <Icon name="files" size={19} /><span>{t('files')}</span>
-      </button>
       <button tabindex="-1" class:active={page === 'prefs'} onclick={togglePrefs}>
         <Icon name="gear" size={19} /><span>{t('settings')}</span>
       </button>
