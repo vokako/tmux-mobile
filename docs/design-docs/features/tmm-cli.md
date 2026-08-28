@@ -1706,7 +1706,9 @@ explicit `corner-shape: round` reset next to the policy block.
 
 With metadata inline, the sticky anchor `.msg` and the bubble are the same
 box again, and a held bubble is simply that box at full height. Prose bubbles are
-bounded to `min(76%, 760px)` on a wide screen and 91% on a phone, while tool runs,
+bounded to `var(--msg-max)` = `min(84%, 1360px)` on a wide screen (one variable
+shared by bubble, prompt row and tool lane — the %-term is what rules, so a wide
+monitor gets wide bubbles; owner, 2026-08-28) and 91% on a phone, while tool runs,
 observed prompts and status facts use the same width ceiling but stay visually
 subordinate. The feed reuses `.subtle-scroll`; system events are centered frosted
 pills — CONSECUTIVE lifecycle lines fold into one pill (a stop followed by a

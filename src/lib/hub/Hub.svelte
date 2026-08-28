@@ -2499,6 +2499,14 @@
     height: 100%; display: flex; flex-direction: column; min-height: 0;
     background: var(--bg); position: relative;
     --chat-canvas: color-mix(in srgb, var(--bg) 62%, var(--bg2));
+    /* ONE bubble width budget for message, prompt row and tool lane — three
+       rules sharing a literal is how they drift. The %-term is what rules on
+       a wide screen: the old min(76%, 760px) let the 760px absolute cap win
+       there, leaving bubbles at ~half of a wide chat column (owner,
+       2026-08-28: "屏幕很宽的情况下，只占到了可能一半的宽度"). 84% keeps a
+       readable gutter that says "a message, not a document"; 1360px still
+       stops a full-screen ultrawide from producing 200-char prose lines. */
+    --msg-max: min(84%, 1360px);
     --bubble-in: color-mix(in srgb, var(--bg) 92%, white 8%);
     --bubble-out: color-mix(in srgb, var(--bg) 84%, var(--accent) 16%);
     --bubble-line: color-mix(in srgb, var(--border) 72%, var(--text3) 28%);
@@ -2829,7 +2837,7 @@
     content: ''; position: absolute; top: 1px; right: 1px; width: 9px; height: 9px;
     border-radius: 50%; background: var(--status-danger); border: 2px solid var(--bg);
   }
-  .msg { position: relative; display: flex; flex-direction: column; max-width: min(76%, 760px); }
+  .msg { position: relative; display: flex; flex-direction: column; max-width: var(--msg-max); }
   /* Both sides hug their content (default column-flex STRETCH made every
      agent bubble 76% wide, leaving a short line's inline time stranded at
      the far right). */
@@ -2992,7 +3000,7 @@
   }
 
   /* The input half of a turn — what the agent was asked. */
-  .prompt { align-self: flex-start; max-width: min(76%, 760px); border-left: 2px solid var(--border); padding-left: 9px; margin: 1px 6px; }
+  .prompt { align-self: flex-start; max-width: var(--msg-max); border-left: 2px solid var(--border); padding-left: 9px; margin: 1px 6px; }
   .p-head { display: flex; align-items: baseline; gap: 7px; font-size: var(--fs-meta); color: var(--text3); margin-bottom: 2px; }
   .p-head .p-who { font-family: ui-monospace, Menlo, monospace; font-weight: 600; color: var(--text2); }
   .p-tag { text-transform: uppercase; letter-spacing: 0.8px; font-size: var(--fs-micro); color: var(--text3); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
@@ -3000,7 +3008,7 @@
 
   /* A single observed fact: status declaration, lifecycle hook, warning. */
   .note {
-    display: flex; align-items: baseline; gap: 8px; width: min(76%, 760px);
+    display: flex; align-items: baseline; gap: 8px; width: var(--msg-max);
     font-family: var(--font-mono); font-size: var(--fs-meta); color: var(--text3);
     padding: 1px 8px; max-width: 100%;
   }
