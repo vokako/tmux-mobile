@@ -1478,9 +1478,14 @@
          inherited 1px border, read as one thick dark line (owner, 2026-08-27).
          The scrim separates the layers; same treatment as Hub's .sidebar.sheet. */
       border-right: none;
-      box-shadow: 10px 0 30px rgba(0,0,0,0.22);
+      /* The cast exists only while OPEN: parked at translateX(-100%) the
+         sheet sits just off-screen and its 10px+30px cast leaked back onto
+         the page's left edge — a grey band in the light theme (owner,
+         2026-08-28). It fades with the slide. */
+      box-shadow: none;
+      transition: transform var(--t-move) ease, box-shadow var(--t-move) ease;
     }
-    .term-side.sheet.open { transform: none; }
+    .term-side.sheet.open { transform: none; box-shadow: 10px 0 30px rgba(0,0,0,0.22); }
     .term-scrim { position: fixed; inset: 0; z-index: 25; background: rgba(0,0,0,0.45); border: none; }
   }
 
