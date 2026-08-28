@@ -2734,14 +2734,18 @@
   /* The add card rides INSIDE the strip as its last member, STICKY at the
      right edge: after the last card when everything fits, floating at the
      edge while the strip scrolls (the strip hides its scrollbar, so a
-     plainly-scrolling add button was invisible — owner, 2026-08-21). Opaque
-     ground + a left shadow lift it over cards passing beneath. */
+     plainly-scrolling add button was invisible — owner, 2026-08-21). The
+     opaque ground alone masks cards passing beneath — the left lift shadow
+     read as "a strange shadow" between it and the cards, and the borderless
+     icon-action grammar applies to a lone + as much as to any icon button
+     (owner, 2026-08-28). */
   .acard.add {
     flex-direction: row; align-items: center; gap: 6px; color: var(--text3); padding-right: 12px;
     position: sticky; right: 0; z-index: 1; background: var(--bg);
-    box-shadow: -8px 0 10px -8px rgba(0, 0, 0, 0.5);
+    border-color: transparent;
+    transition: border-color var(--t-fast), color var(--t-fast), background var(--t-fast);
   }
-  .acard.add:hover { color: var(--accent); }
+  .acard.add:hover { color: var(--accent); background: var(--surface2); }
   /* With agents present it is a small square +: it stands at the end of the
      family without holding a seat wider than it needs (owner, 2026-08-25:
      "不用强行一直占一个位置"). */
