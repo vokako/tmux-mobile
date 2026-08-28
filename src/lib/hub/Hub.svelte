@@ -16,6 +16,7 @@
   // · Agent DEFINITIONS are configured on their own page (AgentsPage), not
   //   in this sidebar. New projects pick their agents at creation time.
   import Terminal from '../terminal/Terminal.svelte';
+  import Files from '../files/Files.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import { scrollFade } from '../core/scrollFade.ts';
   import ChatImage from './ChatImage.svelte';
@@ -95,6 +96,12 @@
 
   // Terminal drawer (closed by default — the whole point).
   let termOpen = $state(false);
+  // What the drawer SHOWS: the terminal, or the file browser (owner,
+  // 2026-08-28: "右侧边栏，可以展开文件浏览器的分区，类似展示 terminal 面板
+  // 一样的逻辑"). One drawer, one width handle, two bodies — the hidden one
+  // keeps visibility:hidden (never display:none: a re-laid-out terminal
+  // would resize the pane and make the agent repaint, the .keep-rows story).
+  let drawerView = $state('term');
   let termTarget = $state('');
   let termCommand = $state('');
 
@@ -1316,6 +1323,10 @@
     const onKey = (e) => {
       if (e.key !== 'Escape') return;
       if (e.target?.closest?.('.xterm')) return; // focused terminal: the pane gets it
+      // Same territory rule for the files partition: an Esc from inside it
+      // (editor, rename field, preview) is the browser's own — closing the
+      // drawer here would UNMOUNT an open editor mid-edit.
+      if (e.target?.closest?.('.files-body')) return;
       closeDrawer(); e.stopPropagation();
     };
     window.addEventListener('keydown', onKey, true);
@@ -1793,10 +1804,18 @@
         <!-- THE terminal affordance: a button, not a permanent pane. Adding an
              agent belongs to the roster row, and chat detail belongs to
              Settings — a header is not a place to keep spare switches. -->
-        <button class="icon-btn term-toggle" class:on={termOpen} title={t('hubTerminal')} aria-label={t('hubTerminal')}
-          onclick={() => termOpen && !compact ? closeDrawer() : openDrawer()}>
+        <button class="icon-btn term-toggle" class:on={termOpen && drawerView === 'term'} title={t('hubTerminal')} aria-label={t('hubTerminal')}
+          onclick={() => termOpen && drawerView === 'term' && !compact ? closeDrawer() : (drawerView = 'term', openDrawer())}>
           <Icon name="terminal" size={14} />
         </button>
+        {#if !compact}
+          <!-- The drawer's second partition. No phone variant: the phone has a
+               whole Files tab that already follows the chat's selected project. -->
+          <button class="icon-btn term-toggle" class:on={termOpen && drawerView === 'files'} title={t('files')} aria-label={t('files')}
+            onclick={() => termOpen && drawerView === 'files' ? closeDrawer() : (drawerView = 'files', openDrawer())}>
+            <Icon name="files" size={14} />
+          </button>
+        {/if}
       </div>
 
       {#if selected}
@@ -2399,34 +2418,48 @@
           min={320} max={900} def={520} edge="left" label={t('hubTerminal')} />
       {/if}
       <div class="drawer-head">
-        <div class="win-list">
-          {#each agents as a (a.window)}
-            <button class="win-pill" class:cur={termTarget.startsWith(`${selected}:${a.window}.`)} onclick={() => pickWindow(a)}>
-              <span class="st" style:background={stateDotColor(a.agent ? a.state : 'shell')}></span>
-              {a.window}:{a.name}{#if a.agent && !a.managed}<span class="direct-tag">{t('hubDirect')}</span>{/if}
-            </button>
-          {/each}
-        </div>
-        <span class="spacer"></span>
-        <!-- The roster count the retired statusline carried. Everything else it
-             showed was a second copy of this bar. -->
-        <span class="d-count">{managedAgents.length} · {working} {t('hubState_running')}</span>
-        <button class="icon-btn" title={t('hubOpenFull')} onclick={() => { const m = /^(.+):(\d+)\.(\d+)$/.exec(termTarget); if (m) openTerminal(selected, termTarget, termCommand); }}>
-          <Icon name="maximize" size={14} />
-        </button>
+        {#if drawerView === 'term'}
+          <div class="win-list">
+            {#each agents as a (a.window)}
+              <button class="win-pill" class:cur={termTarget.startsWith(`${selected}:${a.window}.`)} onclick={() => pickWindow(a)}>
+                <span class="st" style:background={stateDotColor(a.agent ? a.state : 'shell')}></span>
+                {a.window}:{a.name}{#if a.agent && !a.managed}<span class="direct-tag">{t('hubDirect')}</span>{/if}
+              </button>
+            {/each}
+          </div>
+          <span class="spacer"></span>
+          <!-- The roster count the retired statusline carried. Everything else it
+               showed was a second copy of this bar. -->
+          <span class="d-count">{managedAgents.length} · {working} {t('hubState_running')}</span>
+          <button class="icon-btn" title={t('hubOpenFull')} onclick={() => { const m = /^(.+):(\d+)\.(\d+)$/.exec(termTarget); if (m) openTerminal(selected, termTarget, termCommand); }}>
+            <Icon name="maximize" size={14} />
+          </button>
+        {:else}
+          <!-- Files carries its own path bar and toolbar; the head only says
+               which partition this is and keeps the one close affordance. -->
+          <span class="d-files"><Icon name="files" size={13} />{t('files')} — {selected}</span>
+          <span class="spacer"></span>
+        {/if}
         <button class="icon-btn" title="Esc" onclick={closeDrawer}>
           <Icon name="x" size={14} />
         </button>
       </div>
-      <div class="term-body">
+      <div class="term-body" class:off={drawerView !== 'term'}>
         {#if termTarget}
           {#key termTarget}
-            <Terminal target={termTarget} session={selected} command={termCommand} {fontSize} embedded chromeless active={visible} visible={visible} />
+            <Terminal target={termTarget} session={selected} command={termCommand} {fontSize} embedded chromeless active={visible && drawerView === 'term'} visible={visible && drawerView === 'term'} />
           {/key}
         {:else}
           <div class="empty">{t('hubNoPane')}</div>
         {/if}
       </div>
+      {#if drawerView === 'files'}
+        <!-- Per-project cwd is Files' own parked-position map (module-scoped,
+             keyed by session), so each project wakes up where you left it. -->
+        <div class="files-body">
+          <Files session={selected} visible={visible} {fontSize} />
+        </div>
+      {/if}
     </section>
     {/if}
   </div>
@@ -3370,6 +3403,13 @@
   .win-pill.cur { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
   .direct-tag { font-size: var(--fs-micro); color: var(--text3); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; margin-left: 3px; }
   .term-body { flex: 1; min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; }
+  /* The files partition replaces the terminal VISUALLY only: the terminal
+     stays laid out under visibility:hidden so its box never changes size —
+     a display:none would re-fit cols×rows and make every agent TUI repaint
+     (the .keep-rows lesson). */
+  .term-body.off { visibility: hidden; position: absolute; inset: 0; }
+  .files-body { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+  .d-files { display: flex; align-items: center; gap: 6px; font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* ONE switcher for the drawer. It used to have two: these pills on top and
      a tmux-style statusline underneath, both listing the same windows and both

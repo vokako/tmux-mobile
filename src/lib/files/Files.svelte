@@ -1,3 +1,11 @@
+<script module>
+  // Browse positions parked per SESSION, shared by every Files instance (the
+  // Files page and the Hub's drawer both mount this component) and outliving
+  // any one instance. In-memory on purpose — a temporary reading position,
+  // not a preference; the follow-the-real-cwd rule still outranks it.
+  const browsed = new Map(); // session → { cwd, sourceDir }
+</script>
+
 <script>
   import * as pdfjsLib from 'pdfjs-dist';
   import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -449,11 +457,20 @@
   // position, not a preference — and the existing rule still outranks it:
   // when THAT project's tmux cwd moved while you were away (someone cd'd),
   // following the real cwd wins over the parked position.
-  let lastSourceDir = '';
   // svelte-ignore state_referenced_locally — the INITIAL session is exactly
   // what "previous" means before the first switch; the effect updates it.
   let prevSession = session;
-  const browsed = new Map(); // session → { cwd, sourceDir }
+  // A NEW instance starts from the shared parked position (the Hub's drawer
+  // mounts a fresh Files on every open — without this it forgot its place;
+  // owner, 2026-08-28: "每个 project 自己记录自己的 current路径").
+  // svelte-ignore state_referenced_locally — the MOUNT-time session is the one
+  // whose parked position a new instance should wake up in.
+  const parked0 = browsed.get(session);
+  let lastSourceDir = parked0?.sourceDir ?? '';
+  if (parked0?.cwd) cwd = parked0.cwd;
+  // Park on unmount too — the drawer instance dies with the drawer, and a
+  // position recorded only at the next session switch would never be written.
+  $effect(() => () => { browsed.set(prevSession, { cwd, sourceDir: lastSourceDir }); });
   $effect(() => {
     if (!visible) { void session; return; }
     if (session !== prevSession) {
@@ -468,6 +485,7 @@
         loadDir(parked.cwd);
       }
     }
+    if (cwd && !entries.length && !loading) loadDir(cwd); // restored park: list it
     // session may be '' when Files is opened before any terminal pane exists —
     // the server then reports the user's home directory. Once a terminal/team
     // session appears, its cwd differs from home and we follow it.
