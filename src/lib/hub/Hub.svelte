@@ -1809,14 +1809,17 @@
           onclick={() => termOpen && drawerView === 'term' && !compact ? closeDrawer() : (drawerView = 'term', openDrawer())}>
           <Icon name="terminal" size={14} />
         </button>
-        {#if !compact}
-          <!-- The drawer's second partition. No phone variant: the phone has a
-               whole Files tab that already follows the chat's selected project. -->
-          <button class="icon-btn term-toggle" class:on={termOpen && drawerView === 'files'} title={t('files')} aria-label={t('files')}
-            onclick={() => termOpen && drawerView === 'files' ? closeDrawer() : (drawerView = 'files', openDrawer())}>
-            <Icon name="files" size={14} />
-          </button>
-        {/if}
+        <!-- The drawer's second partition. On the phone (no drawer) the same
+             button JUMPS to the Files tab — exactly what the terminal toggle
+             does with the Terminal tab (owner, 2026-08-28: "手机上好像没有
+             打开文件侧边栏的按钮"). -->
+        <button class="icon-btn term-toggle" class:on={termOpen && drawerView === 'files' && !compact} title={t('files')} aria-label={t('files')}
+          onclick={() => {
+            if (mobile || compact) { openFilesTab?.(selected, drawerFilesDir); return; }
+            if (termOpen && drawerView === 'files') { closeDrawer(); } else { drawerView = 'files'; openDrawer(); }
+          }}>
+          <Icon name="files" size={14} />
+        </button>
       </div>
 
       {#if selected}
