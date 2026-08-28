@@ -41,8 +41,8 @@ pub(crate) mod launch;
 /// explicit and greppable.
 pub(crate) mod backends_shared {
     pub(crate) use super::backends::{
-        claude_mcp_value, codex_config_override, inherit_codex_system_files,
-        shell_quote, McpDef,
+        claude_mcp_value, codex_config_override, codex_mcp_overrides, inherit_codex_system_files,
+        kiro_mcp_value, shell_quote, McpDef,
     };
     pub(crate) use super::launch::{
         confirm_startup_prompt, write_launch_script, StartupConfirmation,

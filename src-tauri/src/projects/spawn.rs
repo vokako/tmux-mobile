@@ -337,7 +337,7 @@ fn build_prompt(def: &RegAgent, name: &str, session: &str, brief: &str) -> Strin
          - `tmm status waiting|blocked \"why\"` — when you are stuck on something outside your control (a credential, an answer, another agent). This one asks for attention, so keep it for the real thing\n\
          - `tmm send \"@name message\"` — talk in the project chat (@name to address someone, use @human for the operator). This INTERRUPTS the reader, so use it for something that needs a person: a question, a decision, a result. Plain progress belongs in `tmm status`\n\
          - `tmm log --limit 30` — read recent chat; `tmm agent list` — who is here and their state\n\
-         - MCP tools, one door, loaded PROGRESSIVELY — pull only the tier you need, when you need it: `tmm mcp servers` (names), `tmm mcp tools <server>` (one line per tool), `tmm mcp schema <server> <tool>` (one tool's arguments, read before calling), `tmm mcp call <server> <tool> key=value ...`. Never dump every schema into your context up front. The config is `.tmm/mcp.json` in the workspace: add a server any time with `tmm mcp add <name> --def '<json>'` (or edit the file) — the NEXT call reads it, no restart\n\
+
          - `tmm done \"summary\"` — REQUIRED when you finish the briefed task\n\
          You can also manage the workspace itself when the task calls for it:\n\
          - `tmm spawn <registry-name> --brief \"...\"` — bring in a teammate (see `tmm registry list`)\n\
@@ -650,6 +650,13 @@ fn kiro_cli_settings() -> Vec<(&'static str, Value)> {
     vec![
         ("chat.disableTrustAllConfirmation", json!(true)),
         ("chat.defaultInterruptBehavior", json!("queue")),
+        // MCP tool schemas are DEFERRED into a compact list and loaded on
+        // demand via kiro's own tool_search (owner, 2026-08-28: "给 kiro 的
+        // mcp 工具开启 toolsearch"). Thresholds 0/0 = defer whenever any MCP
+        // tools are present, which is the progressive behavior asked for.
+        ("toolSearch.enabled", json!(true)),
+        ("toolSearch.minPct", json!(0)),
+        ("toolSearch.minTokens", json!(0)),
     ]
 }
 
@@ -718,6 +725,12 @@ fn render_kiro(
         .iter()
         .map(|sk| format!("skill://{}/SKILL.md", sk.dir.to_string_lossy()))
         .collect();
+    let mut mcp_servers = json!({});
+    for m in &mcp_defs(def) {
+        if !m.name.is_empty() {
+            mcp_servers.as_object_mut().unwrap().insert(m.name.clone(), shared::kiro_mcp_value(m));
+        }
+    }
     let mut conf = json!({
         "name": name,
         "description": format!("{} (registry agent)", def.name),
@@ -725,10 +738,12 @@ fn render_kiro(
         "tools": ["*"],
         "allowedTools": ["*"],
         "resources": resources,
-        // MCP is deliberately NOT here: servers live in the workspace
-        // .tmm/mcp.json and are called through `tmm mcp` (seed_mcp_config
-        // has the why). A native entry would load at CLI start and go stale.
-        "mcpServers": {},
+        // Native MCP again (owner, 2026-08-28: "mcp 工具还是用原生的方式调用
+        // 吧") — the context cost is handled by toolSearch instead
+        // (kiro_cli_settings enables it): schemas are DEFERRED into a compact
+        // list and loaded on demand via kiro's own tool_search. The `tmm mcp`
+        // CLI stays available as a SKILL, never taught in the prompt.
+        "mcpServers": mcp_servers,
         "hooks": kiro_hooks(&notify),
     });
     // The model belongs to the agent's IDENTITY, not to one launch of it. It
@@ -770,11 +785,14 @@ fn render_claude(
     notifications.ensure_helper()?;
     let notify = notifications.helper_command("claude");
 
-    // Deliberately EMPTY with --strict-mcp-config still on the line: no
-    // native servers, and no user-space MCP leaks in either. Servers live in
-    // the workspace .tmm/mcp.json, called through `tmm mcp` (seed_mcp_config).
+    let mut mcp_servers = json!({});
+    for m in &mcp_defs(def) {
+        if !m.name.is_empty() {
+            mcp_servers.as_object_mut().unwrap().insert(m.name.clone(), shared::claude_mcp_value(m));
+        }
+    }
     let mcpfile = home.join("mcp.json");
-    std::fs::write(&mcpfile, serde_json::to_string_pretty(&json!({ "mcpServers": {} })).unwrap())
+    std::fs::write(&mcpfile, serde_json::to_string_pretty(&json!({ "mcpServers": mcp_servers })).unwrap())
         .map_err(|e| e.to_string())?;
     // The isolated home is the agent's CLAUDE_CONFIG_DIR (claude's KIRO_HOME:
     // history, session state and .claude.json live here, so a managed agent
@@ -888,9 +906,12 @@ fn render_codex(
     notifications.ensure_helper()?;
     let notify = notifications.helper_command("codex");
 
-    // No native MCP overrides: servers live in the workspace .tmm/mcp.json,
-    // called through `tmm mcp` (seed_mcp_config has the why).
     let mut config_args: Vec<String> = Vec::new();
+    for m in &mcp_defs(def) {
+        if !m.name.is_empty() {
+            config_args.extend(shared::codex_mcp_overrides(m));
+        }
+    }
     let full_prompt = if skills.is_empty() {
         system_prompt.to_string()
     } else {
@@ -955,9 +976,7 @@ fn render_grok(
     // catalog carried over — grok auth is HOME-scoped (`auth.json` + custom
     // [model.*] entries whose keys ride env vars), so an isolated home without
     // the catalog is a logged-out agent (measured: "You are not authenticated").
-    // MCP deliberately absent from the toml: servers live in the workspace
-    // .tmm/mcp.json, called through `tmm mcp` (seed_mcp_config has the why).
-    std::fs::write(home.join("config.toml"), grok_config_toml(&[]))
+    std::fs::write(home.join("config.toml"), grok_config_toml(&mcp_defs(def)))
         .map_err(|e| e.to_string())?;
     let user_auth = grok_user_home().join("auth.json");
     if user_auth.is_file() {
@@ -1111,9 +1130,7 @@ mod tests {
         let p = first_prompt("fix the flaky test").unwrap();
         assert!(p.starts_with(&format!("[{year}-")), "a delivered brief is stamped: {p}");
         assert!(p.ends_with("fix the flaky test"), "the brief is the message: {p}");
-        // MCP is ONE door (owner, 2026-08-28): NOTHING native — servers live
-        // in the workspace .tmm/mcp.json and are called through `tmm mcp`.
-        assert_eq!(conf.get("mcpServers"), Some(&serde_json::json!({})), "no native MCP in the kiro config");
+        assert!(conf.get("mcpServers").and_then(|m| m.get("files")).is_some(), "registry MCP def must materialize");
         // Tool hooks feed telemetry.
         assert!(conf.get("hooks").and_then(|h| h.get("preToolUse")).is_some());
         // The CLI settings ship with the home: queue mode is the DEFAULT for
@@ -1124,6 +1141,11 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(dir.join("settings/cli.json")).unwrap()).unwrap();
         assert_eq!(cli.get("chat.defaultInterruptBehavior").and_then(|v| v.as_str()), Some("queue"));
         assert_eq!(cli.get("chat.disableTrustAllConfirmation").and_then(|v| v.as_bool()), Some(true));
+        // MCP schemas defer into kiro's own tool_search — always (0/0), so a
+        // big tool set never floods the context (owner, 2026-08-28).
+        assert_eq!(cli.get("toolSearch.enabled").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(cli.get("toolSearch.minPct").and_then(|v| v.as_u64()), Some(0));
+        assert_eq!(cli.get("toolSearch.minTokens").and_then(|v| v.as_u64()), Some(0));
         // A restart must replay the FULL identity, not the bare backend line:
         // the user-space config's hooks never fire (measured), so losing
         // KIRO_HOME/--agent makes a restarted agent observably deaf.
@@ -1262,9 +1284,8 @@ mod tests {
         let cfg = std::fs::read_to_string(dir.join("config.toml")).unwrap();
         assert!(cfg.contains("[folder_trust]") && cfg.contains("enabled = false"),
             "trust gate off so the TUI never parks at a prompt nobody sees: {cfg}");
-        // MCP is ONE door: nothing native in the toml — servers live in the
-        // workspace .tmm/mcp.json, called through `tmm mcp`.
-        assert!(!cfg.contains("mcp_servers"), "no native MCP in grok's toml: {cfg}");
+        assert!(cfg.contains("[mcp_servers.files]") && cfg.contains("mcp-files"),
+            "registry MCP def must materialize in grok's dialect: {cfg}");
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -1426,18 +1447,10 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
                 _ => render_codex(&d, "tester", &dir, &prompt, &[]).unwrap(),
             };
             assert!(!r.cmd.contains("x-room"), "no team room headers");
-            // MCP is ONE door: nothing native on any launch line (servers
-            // live in the workspace .tmm/mcp.json, called through `tmm mcp`),
-            // and the prompt teaches the door.
-            assert!(!r.cmd.contains("mcp_servers"), "no codex -c mcp overrides: {}", r.cmd);
-            assert!(prompt.contains("tmm mcp"), "prompt teaches the MCP door");
-            if backend == "claude" {
-                // Strict + EMPTY: no native servers, no user-space leakage.
-                let mcp: Value = serde_json::from_str(
-                    &std::fs::read_to_string(dir.join("mcp.json")).unwrap()
-                ).unwrap();
-                assert_eq!(mcp["mcpServers"], json!({}), "claude mcp.json stays empty");
-            }
+            assert!(r.cmd.contains("files") || dir.join("mcp.json").exists(), "registry MCP present");
+            // The prompt does NOT teach `tmm mcp` — the CLI door is a SKILL
+            // an agent opts into, never the native path (owner, 2026-08-28).
+            assert!(!prompt.contains("tmm mcp"), "prompt must not teach the MCP CLI");
             if backend == "claude" {
                 // The isolated home is claude's KIRO_HOME (measured on claude
                 // 2.1.239: CLAUDE_CONFIG_DIR relocates state AND the user

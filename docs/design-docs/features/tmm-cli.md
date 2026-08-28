@@ -113,16 +113,33 @@ not just a read, it seeds a token, a machine id and the team defaults into
 `config.toml`, and a command that only talks to tmux has no business doing
 that.
 
-### One MCP door (`tmm mcp servers|tools|call`) — the inspector, not four dialects
+### `tmm mcp` — the CLI door that became a skill
 
-MCP used to be materialized into each backend's NATIVE config at spawn — kiro's
-`agents/<name>.json` `mcpServers`, claude's `mcp.json` + `--mcp-config`,
-codex's `-c mcp_servers.*` overrides, grok's `[mcp_servers.*]` toml: four
-dialects of the same list, each loaded ONCE at CLI start, so adding or fixing a
-server meant restarting the agent (owner, 2026-08-28: "可以不用各种 agent 内部
-的 mcp 工具调用了，可以用 MCP Inspector CLI 来统一来做"). Now there is one
-door, and it is the second purely-local subtree (like `task`, dispatched before
-`Config::load()`):
+The history matters because it explains the shape: for a few hours on
+2026-08-28 this subtree REPLACED native MCP entirely ("可以不用各种 agent 内部
+的 mcp 工具调用了，可以用 MCP Inspector CLI 来统一来做"), and the same day the
+owner reversed the call ("mcp 工具还是用原生的方式调用吧，给 kiro 的 mcp 工具
+开启 toolsearch。我们这个 cli 方式调用 mcp，只作为另一个 skill 就好"). The
+final shape:
+
+- **Native MCP is the invocation path**: registry defs materialize into each
+  backend's own config at spawn (kiro `mcpServers`, claude `mcp.json` +
+  `--strict-mcp-config`, codex `-c mcp_servers.*`, grok `[mcp_servers.*]`
+  toml), exactly as before the detour.
+- **kiro gets toolSearch**: managed kiro homes carry `toolSearch.enabled=true`
+  with `minPct=0`/`minTokens=0` (`kiro_cli_settings` — written at spawn,
+  backfilled by `refresh_hooks`), so MCP schemas are always DEFERRED into a
+  compact list and loaded on demand through kiro's built-in `tool_search`.
+  That is the progressive-loading behavior, natively.
+- **`tmm mcp` survives as a SKILL** (`assets/skills/mcp-cli/SKILL.md`,
+  imported into the store as `mcp-cli`): the system prompt does NOT teach it
+  (a spawn.rs test pins that); an agent gets it only by listing the skill.
+  Its niche is what native cannot do: per-call config reads, so `tmm mcp add`
+  makes a server callable on the NEXT command with no restart, uniformly on
+  every backend.
+
+The subtree itself is the second purely-local one (like `task`, dispatched
+before `Config::load()`):
 
 - The verbs shell out to the **MCP Inspector CLI** (`$TMM_MCP_CLI`, default
   `npx -y @modelcontextprotocol/inspector --cli`), which connects, invokes one
@@ -135,8 +152,8 @@ door, and it is the second purely-local subtree (like `task`, dispatched before
   `mcp_cli::compact_tools` over the inspector's `--format json` output, so a
   50-tool server costs 50 lines, not pages of schema); `schema <server> <tool>`
   prints ONE tool's full record, read just before calling; `call` invokes it.
-  The prompt tells agents to walk the ladder and never dump every schema up
-  front.
+  The SKILL tells its reader to walk the ladder and never dump every schema up
+  front (the system prompt deliberately says nothing about any of this).
 - **Dynamic**: `tmm mcp add <name> --def '{"command":…}'` merges one server
   into the config NOW (creating `.tmm/mcp.json` in a fresh workspace), and
   because the inspector reads the file per call, the next call has it. Editing
@@ -148,12 +165,8 @@ door, and it is the second purely-local subtree (like `task`, dispatched before
   set and the NEXT call reads it — no restart, which the native path could
   never offer. `$TMM_MCP_CONFIG` (set at spawn) names it from any cwd; without
   the env var the CLI walks up from cwd like git does.
-- The native materialization is GONE from all four renders (kiro/claude keep
-  explicit empty objects — claude stays `--strict-mcp-config` so user-space MCP
-  cannot leak in either). `refresh_hooks` deliberately does not touch this:
-  an already-running agent keeps its old native servers until its next respawn.
 - `tmm mcp list|save|delete` (the central registry defs) stay RPC — they are
-  the catalog that seeds workspaces; `servers|tools|call` is the runtime.
+  the catalog; `servers|tools|schema|call|add` is the runtime.
 
 ### Why this belongs to an agent at all
 
