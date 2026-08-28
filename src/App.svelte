@@ -43,6 +43,7 @@
   // tab while switching terminal panes did (owner, 2026-08-22: "chat里的路径
   // 没有刷新到文件 terminal好像就会刷新路径").
   let filesSession = $state('');
+  let filesNavReq = $state(null); // {path, n} — the Hub drawer's "open in Files tab" handover
   $effect(() => { if (terminalSession) filesSession = terminalSession; });
   // Team (team multi-agent bus) is desktop-server-only. We probe once per
   // connection: team_status rejects with method-not-found when the server has
@@ -1077,7 +1078,7 @@
            switches. Desktop-eligible only (needs width + the bus): mobile
            keeps the tab layout untouched. -->
       <div class="page-layer" class:hidden={page !== 'hub'}>
-        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onSelectSession={(s) => { if (s) filesSession = s; }} onGoBack={(fn) => hubGoBack = fn} openAgentConfig={(name) => { agentsEditReq = { name, n: (agentsEditReq?.n ?? 0) + 1 }; switchTab('agents'); }} />
+        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onSelectSession={(s) => { if (s) filesSession = s; }} onGoBack={(fn) => hubGoBack = fn} openAgentConfig={(name) => { agentsEditReq = { name, n: (agentsEditReq?.n ?? 0) + 1 }; switchTab('agents'); }} openFilesTab={(s, path) => { if (s) filesSession = s; if (path) filesNavReq = { path, n: (filesNavReq?.n ?? 0) + 1 }; switchTab('files'); }} />
       </div>
     {/if}
     {#if hubEligible}
@@ -1112,7 +1113,7 @@
     </div>
     {/if}
     <div class="page-layer" class:hidden={page !== 'files'}>
-      <Files session={filesSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} />
+      <Files session={filesSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} navRequest={filesNavReq} />
     </div>
     <div class="page-layer term-page" class:hidden={page !== 'terminal'}>
       <!-- The session/window list: a column beside the terminal on a wide

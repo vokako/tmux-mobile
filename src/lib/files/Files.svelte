@@ -82,7 +82,7 @@
   mermaid.initialize({ startOnLoad: false, theme: 'dark' });
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
-  let { session = '', onGoBack = null, visible = false, fontSize = 14 } = $props();
+  let { session = '', onGoBack = null, visible = false, fontSize = 14, singlePane = false, navRequest = null, currentDir = $bindable('') } = $props();
 
   /* The confirmation becomes a bottom sheet on a phone-sized viewport, the same
      rule the Hub's dialogs use. */
@@ -137,7 +137,10 @@
   // split the Team tab already ships (Team.svelte).
   const SPLIT_MIN_WIDTH = 900;
   let wideEnough = $state(typeof window !== 'undefined' && window.innerWidth >= SPLIT_MIN_WIDTH);
-  let splitEligible = $derived(!layout.isTouchDevice && (layout.forceDesktop || wideEnough));
+  // singlePane: the embedder (Hub's drawer) opts into the phone view chain —
+  // its column is 320–900px of a WIDE window, so the window-width heuristic
+  // lies there (owner, 2026-08-28: "文件的侧边栏可以是类似手机的单页模式").
+  let splitEligible = $derived(!singlePane && !layout.isTouchDevice && (layout.forceDesktop || wideEnough));
 
   $effect(() => {
     const onResize = () => { wideEnough = window.innerWidth >= SPLIT_MIN_WIDTH; };
@@ -506,15 +509,39 @@
     if (visible && view === 'preview') reloadPreview();
   });
 
+  // The embedder can read where this instance is (the drawer's maximize
+  // button hands its cwd to the Files PAGE instance).
+  $effect(() => { currentDir = cwd; });
+
+  // An imperative "go there" from outside. Same shape as AgentsPage's
+  // editRequest: a bumped `n` re-fires an identical path.
+  let lastNav = 0;
+  $effect(() => {
+    if (!navRequest || navRequest.n === lastNav) return;
+    lastNav = navRequest.n;
+    if (navRequest.path) {
+      view = 'list';
+      loadDir(navRequest.path);
+      // Disarm the cwd-follow for the CURRENT real cwd: without this a
+      // same-moment session switch re-follows the project root and stomps
+      // the requested directory.
+      fsCwd(session).then((r) => { if (r.path) lastSourceDir = r.path; }).catch(() => {});
+    }
+  });
+
+  let loadSeq = 0;
   async function loadDir(path, purpose = 'navigate') {
-    loading = true;
+    const my = ++loadSeq; // several callers can navigate concurrently around a
+    loading = true;       // session switch — the NEWEST intent wins (DirPicker's rule)
     error = '';
     try {
       const r = await fsList(path, showHidden);
+      if (my !== loadSeq) return;
       entries = r.entries;
       cwd = path;
       ({ view, currentFile } = directoryLoadState({ view, currentFile }, purpose));
     } catch (e) {
+      if (my !== loadSeq) return;
       error = e.message;
     }
     loading = false;

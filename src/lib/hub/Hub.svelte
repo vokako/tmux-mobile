@@ -41,7 +41,7 @@
   import CreateProjectDialog from '../projects/CreateProjectDialog.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
-  let { visible = false, fontSize = 14, mobile = false, openTerminal = () => {}, onSelectSession = (_s) => {}, onGoBack = null, openAgentConfig = null } = $props();
+  let { visible = false, fontSize = 14, mobile = false, openTerminal = () => {}, onSelectSession = (_s) => {}, onGoBack = null, openAgentConfig = null, openFilesTab = null } = $props();
 
   // Layout follows the viewport, not the device class (a squeezed desktop
   // window must not overflow). `mobile` still decides behavior defaults.
@@ -102,6 +102,7 @@
   // keeps visibility:hidden (never display:none: a re-laid-out terminal
   // would resize the pane and make the agent repaint, the .keep-rows story).
   let drawerView = $state('term');
+  let drawerFilesDir = $state(''); // where the drawer's Files is — the jump hands it over
   let termTarget = $state('');
   let termCommand = $state('');
 
@@ -2439,6 +2440,10 @@
                which partition this is and keeps the one close affordance. -->
           <span class="d-files"><Icon name="files" size={13} />{t('files')} — {selected}</span>
           <span class="spacer"></span>
+          <button class="icon-btn" title={t('hubFilesFull')} aria-label={t('hubFilesFull')}
+            onclick={() => openFilesTab?.(selected, drawerFilesDir)}>
+            <Icon name="maximize" size={14} />
+          </button>
         {/if}
         <button class="icon-btn" title="Esc" onclick={closeDrawer}>
           <Icon name="x" size={14} />
@@ -2457,7 +2462,7 @@
         <!-- Per-project cwd is Files' own parked-position map (module-scoped,
              keyed by session), so each project wakes up where you left it. -->
         <div class="files-body">
-          <Files session={selected} visible={visible} {fontSize} />
+          <Files session={selected} visible={visible} {fontSize} singlePane bind:currentDir={drawerFilesDir} />
         </div>
       {/if}
     </section>
