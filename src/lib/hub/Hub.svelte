@@ -2324,7 +2324,12 @@
             {#each pending as a, i (a.path)}
               {#if a.kind === 'image'}
                 <span class="pend-thumb" title={`[img:${a.n}] ${a.name}`}>
-                  <img src={a.thumb} alt={a.name} />
+                  <!-- Tap the thumb → the in-app viewer (owner, 2026-08-27:
+                       "文本输入框…显示的图片…我可以点击放大查看…在我应用内的"). -->
+                  <button class="pend-view" aria-label={a.name}
+                    onclick={() => shotView = a.thumb}>
+                    <img src={a.thumb} alt={a.name} />
+                  </button>
                   <span class="pend-n">{a.n}</span>
                   <button class="pend-x on-img" aria-label={t('hubRemoveAttachment')}
                     onclick={() => removeAttachment(i)}>
@@ -3253,10 +3258,12 @@
     background: var(--surface2); color: var(--text2); font-size: var(--fs-micro);
   }
   .pend-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pend-view { display: block; width: 100%; height: 100%; padding: 0; margin: 0; border: 0; background: none; cursor: zoom-in; }
   .pend-thumb {
     position: relative; width: 44px; height: 44px; flex: none;
     border: 1px solid var(--border2); border-radius: var(--ui-radius-control);
     overflow: hidden; background: var(--surface2);
+    cursor: zoom-in;
   }
   .pend-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .pend-n {

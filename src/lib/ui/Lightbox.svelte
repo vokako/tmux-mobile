@@ -14,6 +14,14 @@
   let scale = $state(1);
   let tx = $state(0);
   let ty = $state(0);
+  /* Swipe-to-dismiss (owner, 2026-08-27: "我可以再一划这个图片，它就自动缩小
+     了"): an UNZOOMED single-finger drag carries the image with the finger,
+     shrinking it and thinning the backdrop as it travels; past a threshold the
+     release closes the viewer, short of it the image springs back. Zoomed
+     drags stay pans. */
+  let dismissing = $state(false);
+  let settle = $state(false);
+  const dismissP = $derived(scale === 1 ? Math.min(1, Math.hypot(tx, ty) / 260) : 0);
 
   const MAX_SCALE = 6;
   let pointers = new Map<number, { x: number; y: number }>();
@@ -40,7 +48,9 @@
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     moved = false;
+    settle = false;
     if (pointers.size === 2) {
+      dismissing = false; // a second finger means pinch, not dismiss
       const [a, b] = [...pointers.values()];
       pinchDist = Math.hypot(a!.x - b!.x, a!.y - b!.y);
     }
@@ -58,11 +68,21 @@
       pinchDist = d;
     } else if (scale > 1) {
       tx += dx; ty += dy;
+    } else if (pointers.size === 1) {
+      dismissing = true;
+      tx += dx; ty += dy;
     }
   }
   function onPointerUp(e: PointerEvent) {
     pointers.delete(e.pointerId);
     pinchDist = 0;
+    if (pointers.size === 0 && dismissing) {
+      dismissing = false;
+      if (Math.hypot(tx, ty) > 80) { onclose(); return; }
+      settle = true;   // spring back: the transition does the animation
+      tx = 0; ty = 0;
+      setTimeout(() => { settle = false; }, 200);
+    }
     if (pointers.size === 0 && !moved) {
       const now = performance.now();
       if (now - lastTap < 300) {
@@ -90,11 +110,12 @@
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions, a11y_click_events_have_key_events -->
 <div class="lb" role="dialog" aria-label={alt || 'image'} tabindex="-1"
+  style:background={dismissP ? `color-mix(in srgb, var(--bg) ${Math.round(88 * (1 - 0.6 * dismissP))}%, transparent)` : null}
   onpointerdown={onPointerDown} onpointermove={onPointerMove}
   onpointerup={onPointerUp} onpointercancel={onPointerUp}
   onclick={onBackdrop} onwheel={onWheel}>
-  <img class="lb-img" {src} {alt} draggable="false"
-    style:transform={`translate(${tx}px, ${ty}px) scale(${scale})`} />
+  <img class="lb-img" class:settle {src} {alt} draggable="false"
+    style:transform={`translate(${tx}px, ${ty}px) scale(${scale * (1 - 0.18 * dismissP)})`} />
   <button class="lb-close" aria-label="close" onclick={onclose}>✕</button>
 </div>
 
@@ -116,6 +137,9 @@
     will-change: transform;
     pointer-events: none;
   }
+  /* Springing back from an aborted dismiss swipe is the ONE animated moment;
+     while a finger is down the finger is the animation. */
+  .lb-img.settle { transition: transform 0.2s ease; }
   .lb-close {
     position: absolute; top: calc(8px + var(--sat, 0px)); right: 8px;
     width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;

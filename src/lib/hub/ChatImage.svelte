@@ -33,23 +33,33 @@
 </script>
 
 {#if url && !failed}
-  <!-- Tap opens the in-app viewer when the host provides one (owner,
-       2026-08-26: "看图片的支持" — a new browser tab is not viewing);
-       middle-click/long-press keep the plain link behaviors. -->
-  <a class="ci-link" href={url} target="_blank" rel="noopener"
-    onclick={(e) => { if (onview) { e.preventDefault(); onview(url); } }}>
-    <img class="ci" {alt} src={url} loading="lazy" onerror={() => failed = true} />
-  </a>
+  {#if onview}
+    <!-- With an in-app viewer there is NO link at all: any anchor to a /dl
+         URL leaves a path where a tap navigates or downloads (owner,
+         2026-08-27: "注意图片查看是在我应用内的，不是说我点击图片去下载了一个
+         图片"). The button can only open the Lightbox. -->
+    <button class="ci-link" aria-label={alt || 'image'} onclick={() => onview(url)}>
+      <img class="ci" {alt} src={url} loading="lazy" onerror={() => failed = true} />
+    </button>
+  {:else}
+    <a class="ci-link" href={url} target="_blank" rel="noopener">
+      <img class="ci" {alt} src={url} loading="lazy" onerror={() => failed = true} />
+    </a>
+  {/if}
 {:else}
   <!-- Unresolvable: name what was referenced instead of showing nothing. -->
   <span class="ci-ref" class:failed>{src}</span>
 {/if}
 
 <style>
-  .ci-link { display: block; }
+  .ci-link { display: block; padding: 0; margin: 0; border: 0; background: none; text-align: left; }
   .ci {
-    display: block; max-width: 100%; max-height: calc(42vh / var(--ui-zoom, 1)); width: auto; height: auto;
+    /* A THUMBNAIL by default (owner, 2026-08-27: "消息框里显示的图片，默认使用
+       较小尺寸的缩略图，我可以点击放大查看" — the old 42vh cap let one screenshot
+       take half the conversation); the Lightbox is where it gets big. */
+    display: block; max-width: min(100%, 300px); max-height: 180px; width: auto; height: auto;
     border-radius: var(--ui-radius-control); border: 1px solid var(--border2); background: var(--surface2);
+    cursor: zoom-in;
   }
   .ci-ref {
     display: inline-block; font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub);
