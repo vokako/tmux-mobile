@@ -1123,7 +1123,7 @@
     <div class="page-layer" class:hidden={page !== 'files'}>
       <Files session={filesSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} navRequest={filesNavReq} />
     </div>
-    <div class="page" class:hidden={page !== 'board'}>
+    <div class="page-layer" class:hidden={page !== 'board'}>
       {#if hubEligible}
         <Board session={filesSession} visible={page === 'board'} onGoBack={(fn) => boardGoBack = fn} />
       {/if}
