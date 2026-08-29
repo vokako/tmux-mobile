@@ -118,9 +118,18 @@ test('a feed jump opens its issue in its OWN session (board #13 follow-up)', () 
   // page elsewhere and issue ids are session-gated; the dirty-draft guard
   // still stands between the jump and an open edit.
   assert.match(source, /issueRequest = null/u, 'the request arrives as a prop');
-  assert.match(source, /if \(req\.session && req\.session !== cur\) \{ cur = req\.session; picked = true; \}/u,
-    'the jump re-aims the page at the issue\u2019s session');
+  assert.match(source, /if \(req\.session && req\.session !== cur\) \{ cur = req\.session; picked = !embedded; \}/u,
+    'the jump re-aims the page at the issue\u2019s session — embedded keeps following the room');
   assert.match(source, /guard\(\(\) => \{\s*\n\s*if \(req\.session/u, 'the dirty guard wraps the jump');
   assert.match(source, /void openIssue\(req\.id\);/u, 'and the issue detail opens');
   assert.match(source, /req\.n === issueReqSeen/u, 'each request fires once — the n makes the newest win');
+});
+
+test('the board embeds in the Hub drawer without its sidebar (board #13 follow-up)', () => {
+  assert.match(source, /embedded = false/u, 'embedded is a prop');
+  assert.match(source, /<div class="board-root" class:embedded>/u, 'the root wears it');
+  assert.match(source, /\{#if !embedded\}\s*\n\s*<aside class="sidebar"/u, 'no project sidebar in the drawer');
+  const style = source.slice(source.indexOf('<style>'));
+  assert.match(style, /\.board-root\.embedded \{ grid-template-columns: minmax\(0, 1fr\); \}/u,
+    'one column — the drawer names the project');
 });

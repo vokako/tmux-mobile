@@ -17,6 +17,7 @@
   //   in this sidebar. New projects pick their agents at creation time.
   import Terminal from '../terminal/Terminal.svelte';
   import Files from '../files/Files.svelte';
+  import Board from './Board.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import { scrollFade } from '../core/scrollFade.ts';
   import ChatImage from './ChatImage.svelte';
@@ -102,6 +103,7 @@
   // keeps visibility:hidden (never display:none: a re-laid-out terminal
   // would resize the pane and make the agent repaint, the .keep-rows story).
   let drawerView = $state('term');
+  let drawerIssueReq = $state(null); // a feed board-line tap on desktop: open the issue in the drawer
   let drawerFilesDir = $state(''); // where the drawer's Files is — the jump hands it over
   let termTarget = $state('');
   let termCommand = $state('');
@@ -1438,6 +1440,9 @@
       // (editor, rename field, preview) is the browser's own — closing the
       // drawer here would UNMOUNT an open editor mid-edit.
       if (e.target?.closest?.('.files-body')) return;
+      // And the board partition: its Esc order (drawer → dirty-draft confirm →
+      // detail) belongs to the Board itself.
+      if (e.target?.closest?.('.board-body')) return;
 
       closeDrawer(); e.stopPropagation();
     };
@@ -1936,11 +1941,15 @@
           }}>
           <Icon name="files" size={14} />
         </button>
-        <!-- The task board is its own PAGE (owner, 2026-08-29: "board单独作为
-             一个独立的功能的页面，不用都塞到hub里") — this button jumps there,
-             the same translation the files toggle makes on the phone. -->
-        <button class="icon-btn term-toggle" title={t('board')} aria-label={t('board')}
-          onclick={() => openBoardTab?.(selected)}>
+        <!-- The task board: on the phone this jumps to the board PAGE (owner,
+             2026-08-29: "board单独作为一个独立的功能的页面"); on desktop it is
+             the drawer's THIRD partition ("或者右侧边栏有这个任务侧边栏", same
+             day) — exactly the files toggle's split. -->
+        <button class="icon-btn term-toggle" class:on={termOpen && drawerView === 'board' && !compact} title={t('board')} aria-label={t('board')}
+          onclick={() => {
+            if (mobile || compact) { openBoardTab?.(selected); return; }
+            if (termOpen && drawerView === 'board') { closeDrawer(); } else { drawerView = 'board'; openDrawer(); }
+          }}>
           <Icon name="layout" size={14} />
         </button>
       </div>
@@ -2174,7 +2183,11 @@
                        BUTTON: tapping it jumps to that issue on the board page
                        (same route the header's layout icon takes). -->
                   <button class="sys-item sys-jump" title={t('board')}
-                    onclick={() => openBoardTab?.(selected, Number(bl.id))}>
+                    onclick={() => {
+                      if (mobile || compact) { openBoardTab?.(selected, Number(bl.id)); return; }
+                      drawerIssueReq = { session: selected, id: Number(bl.id), n: (drawerIssueReq?.n ?? 0) + 1 };
+                      drawerView = 'board'; openDrawer();
+                    }}>
                     <span class="sys-who">#{bl.id}</span>
                     <span class="sys-from">{t(`boardStatus_${bl.from}`)} →</span>
                     <span class="sys-verb" style:color={boardStatusColor(bl.to)}><span class="sv-dot" aria-hidden="true"></span>{t(`boardStatus_${bl.to}`)}</span>
@@ -2606,13 +2619,22 @@
           <button class="icon-btn" title={t('hubOpenFull')} onclick={() => { const m = /^(.+):(\d+)\.(\d+)$/.exec(termTarget); if (m) openTerminal(selected, termTarget, termCommand); }}>
             <Icon name="maximize" size={14} />
           </button>
-        {:else}
+        {:else if drawerView === 'files'}
           <!-- Files carries its own path bar and toolbar; the head only says
                which partition this is and keeps the one close affordance. -->
           <span class="d-files"><Icon name="files" size={13} />{t('files')} — {selected}</span>
           <span class="spacer"></span>
           <button class="icon-btn" title={t('hubFilesFull')} aria-label={t('hubFilesFull')}
             onclick={() => openFilesTab?.(selected, drawerFilesDir)}>
+            <Icon name="maximize" size={14} />
+          </button>
+        {:else}
+          <!-- The board partition: the head names it, maximize hands off to
+               the board PAGE — the same translation the files head makes. -->
+          <span class="d-files"><Icon name="layout" size={13} />{t('board')} — {selected}</span>
+          <span class="spacer"></span>
+          <button class="icon-btn" title={t('board')} aria-label={t('board')}
+            onclick={() => openBoardTab?.(selected)}>
             <Icon name="maximize" size={14} />
           </button>
         {/if}
@@ -2634,6 +2656,13 @@
              keyed by session), so each project wakes up where you left it. -->
         <div class="files-body">
           <Files session={selected} visible={visible} {fontSize} singlePane bind:currentDir={drawerFilesDir} />
+        </div>
+      {/if}
+      {#if drawerView === 'board'}
+        <!-- The task sidebar (board #13 follow-up): the REAL Board, embedded —
+             no project sidebar, it follows this room's project. -->
+        <div class="board-body">
+          <Board session={selected} visible={visible && drawerView === 'board'} embedded issueRequest={drawerIssueReq} />
         </div>
       {/if}
     </section>
@@ -3633,6 +3662,8 @@
      (the .keep-rows lesson). */
   .term-body.off { visibility: hidden; position: absolute; inset: 0; }
   .files-body { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+  .board-body { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+  .board-body > :global(.board-root) { flex: 1; min-height: 0; }
   .d-files { display: flex; align-items: center; gap: 6px; font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* ONE switcher for the drawer. It used to have two: these pills on top and

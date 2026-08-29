@@ -391,6 +391,19 @@ test('a board move renders in the sys grammar, transition visible (board #13)', 
   // And the row is a BUTTON that jumps to the issue on the board page — the
   // same openBoardTab route the header's layout icon takes, now carrying the
   // issue id.
-  assert.match(source, /<button class="sys-item sys-jump"[\s\S]{0,200}?openBoardTab\?\.\(selected, Number\(bl\.id\)\)/u,
+  assert.match(source, /<button class="sys-item sys-jump"[\s\S]{0,300}?openBoardTab\?\.\(selected, Number\(bl\.id\)\)/u,
     'tapping a board line opens that issue');
+});
+
+test('the drawer has a board partition, and the tap prefers it on desktop (board #13)', () => {
+  // The task sidebar: the REAL Board component, embedded, following the room's
+  // project — the same split the files partition makes (page on the phone,
+  // partition on desktop).
+  assert.match(source, /\{#if drawerView === 'board'\}[\s\S]{0,400}?<Board session=\{selected\}[^>]*embedded issueRequest=\{drawerIssueReq\}/u,
+    'the drawer hosts the embedded Board');
+  assert.match(source, /drawerView = 'board'; openDrawer\(\);/u, 'the feed tap opens the partition on desktop');
+  assert.match(source, /if \(mobile \|\| compact\) \{ openBoardTab\?\.\(selected, Number\(bl\.id\)\); return; \}/u,
+    'the phone still jumps to the board page');
+  assert.match(source, /e\.target\?\.closest\?\.\('\.board-body'\)/u,
+    'an Esc inside the partition belongs to the Board (the files-body territory rule)');
 });

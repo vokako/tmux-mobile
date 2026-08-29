@@ -18,7 +18,7 @@
   import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft } from './board.ts';
   import { scrollFade } from '../core/scrollFade.ts';
 
-  let { session = '', visible = true, onGoBack = null, issueRequest = null }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null; issueRequest?: { session: string; id: number; n: number } | null } = $props();
+  let { session = '', visible = true, onGoBack = null, issueRequest = null, embedded = false }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null; issueRequest?: { session: string; id: number; n: number } | null; embedded?: boolean } = $props();
 
   // Every project has its OWN board (issues are session-scoped like the chat
   // room), so the page carries the shared project sidebar (owner, 2026-08-29:
@@ -44,7 +44,7 @@
     if (!req || req.n === issueReqSeen) return;
     issueReqSeen = req.n;
     guard(() => {
-      if (req.session && req.session !== cur) { cur = req.session; picked = true; }
+      if (req.session && req.session !== cur) { cur = req.session; picked = !embedded; }
       creating = false; sideOpen = false;
       void openIssue(req.id);
     });
@@ -286,7 +286,8 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="board-root">
+<div class="board-root" class:embedded>
+  {#if !embedded}
   <aside class="sidebar" class:open={sideOpen}>
     <SideHandle />
     <div class="side-scroll subtle-scroll" use:scrollFade>
@@ -307,14 +308,17 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="side-scrim" onclick={() => (sideOpen = false)}></div>
   {/if}
+  {/if}
   <div class="board" onkeydowncapture={onKey}>
   <div class="head">
     <!-- Compact: the hamburger calls the project drawer — the same dialect as
          Chat and Terminal (reopened #11), never a second-page drilldown. -->
+    {#if !embedded}
     <button class="icon-btn side-toggle" title={t('hubProjects')} aria-label={t('hubProjects')}
       onclick={() => (sideOpen = !sideOpen)}>
       <Icon name="menu" size={16} />
     </button>
+    {/if}
     <h1>{t('board')}</h1>
     {#if cur}<span class="h-session">{cur}</span>{/if}
     <span class="spacer"></span>
@@ -460,6 +464,10 @@
   .side-scroll { flex: 1; overflow-y: auto; min-height: 0; }
   .r-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .r-dim { color: var(--text3); font-size: var(--fs-micro); }
+  /* Embedded in the Hub's right drawer: one column, the drawer names the
+     project — no sidebar track, no hamburger (board #13 follow-up). */
+  .board-root.embedded { grid-template-columns: minmax(0, 1fr); }
+  .board-root.embedded .board { padding: 10px 12px; }
   /* Compact: the sidebar is a DRAWER over the board — the same sheet+scrim
      dialect as Chat's project list and Terminal's session list (reopened
      #11), never a second page. */
