@@ -1014,6 +1014,23 @@ pub fn is_managed_in(workspace: Option<&str>, window_name: &str) -> bool {
     })
 }
 
+/// Who spawned this managed agent, read off its launch recipe. `None` means
+/// the human did — or the recipe predates the field / the agent is not
+/// managed — and in every one of those cases there is nobody to deliver a
+/// done summary to, which is the only question this answers.
+pub fn spawned_by(workspace: Option<&str>, window_name: &str) -> Option<String> {
+    let ws = workspace?;
+    let recipe = std::path::Path::new(ws)
+        .join(".tmm")
+        .join("agents")
+        .join(window_name)
+        .join("launch.json");
+    let text = std::fs::read_to_string(recipe).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let by = v.get("spawned_by")?.as_str()?.trim().to_string();
+    (!by.is_empty()).then_some(by)
+}
+
 // ---- archived messages ---------------------------------------------------
 //
 // The archive is OUR state (state.db), not the bus's: `agora` is a faithful copy

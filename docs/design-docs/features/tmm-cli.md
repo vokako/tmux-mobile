@@ -302,7 +302,15 @@ can get wrong to save three characters.
   a window index (telemetry's key) via the window-name match; rejects unknown
   states/names with invalid-params.
 - `hub_done { session, agent, summary? }` — records completion AND posts a
-  `✔ done` line to the room: the chat is the record.
+  `✔ done` line to the room: the chat is the record. A non-empty summary is
+  also DELIVERED into the pane of the agent that spawned this one (the
+  `spawned_by` field `tmm spawn` records in the launch recipe): a record-only
+  room line wakes nobody, so a lead that spawned two builders never learned
+  they finished (owner, 2026-08-29). The line lands as
+  `[tmm chat <ts>] <name>: [done] <summary>` with the same `record_delivery`
+  bookkeeping as an @mention; targeted, one recipient, once per turn end —
+  the chain terminates at the human (empty `spawned_by`), so it cannot loop,
+  and hook-sourced posts stay record-only.
 - `hub_agents { session }` — one row per live window: name, command, agent
   detection (`projects::agents::detect`), derived state.
 

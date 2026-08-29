@@ -98,7 +98,7 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
     std::fs::create_dir_all(&home).map_err(|e| format!("create agent home: {e}"))?;
     ensure_gitignore(&workspace);
 
-    let system_prompt = build_prompt(&def, &window_name, req.session, req.brief);
+    let system_prompt = build_prompt(&def, &window_name, req.session, req.brief, req.by);
     let skills = resolve_skill_refs(&def, &home);
     // MCP is ONE door now (owner, 2026-08-28): registry defs seed the shared
     // workspace config that `tmm mcp` reads per call — never a backend's
@@ -149,7 +149,7 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
         shared::confirm_startup_prompt(pane.clone(), confirmation);
     }
 
-    write_launch_recipe(&home, &def.backend, &env, &prepared.cmd);
+    write_launch_recipe(&home, &def.backend, &env, &prepared.cmd, req.by);
 
     Ok(json!({ "window_name": window_name, "pane": pane, "backend": def.backend }))
 }
@@ -162,15 +162,20 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
 /// no auto-post, every delivery "unconfirmed" (owner report, 2026-08-18).
 /// The kick is NOT part of the recipe: it belongs to the first launch only;
 /// a restart resumes a conversation instead.
-fn write_launch_recipe(home: &Path, backend: &str, env: &[(String, String)], cmd: &str) {
+fn write_launch_recipe(home: &Path, backend: &str, env: &[(String, String)], cmd: &str, by: &str) {
     // `cmd` is the identity command with NO first prompt appended (spawn adds
     // that separately), so the recipe stores it verbatim. It used to strip a
     // trailing quoted argument to remove the kick — a guess that would have
     // eaten a legitimate quoted flag the day a backend ended with one.
+    // `spawned_by` is the feedback edge: `hub_done` delivers the agent's done
+    // summary back into this window's pane, which is what lets a lead SCHEDULE —
+    // a record-only room line wakes nobody, so a lead that spawned two builders
+    // never learned they finished (owner, 2026-08-29). Empty = the human.
     let recipe = json!({
         "backend": backend,
         "env": env.iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>(),
         "cmd": cmd.trim_end(),
+        "spawned_by": by,
     });
     let _ = std::fs::write(
         home.join("launch.json"),
@@ -259,6 +264,7 @@ mod relaunch_tests {
             "kiro",
             &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())],
             "command kiro-cli chat --agent lead --model m --trust-all-tools",
+            "",
         );
         let line = relaunch_line(ws.to_str().unwrap(), "lead", Some("id-1")).unwrap();
         assert!(line.starts_with("KIRO_HOME="), "isolated home first: {line}");
@@ -272,6 +278,7 @@ mod relaunch_tests {
         assert_eq!(
             stored.get("cmd").and_then(|c| c.as_str()).unwrap(),
             "command kiro-cli chat --agent lead --model m --trust-all-tools",
+            "",
         );
         // No recorded conversation → plain identity relaunch, no resume flag.
         let fresh = relaunch_line(ws.to_str().unwrap(), "lead", None).unwrap();
@@ -291,6 +298,7 @@ mod relaunch_tests {
             "codex",
             &[("CODEX_HOME".to_string(), chome.to_string_lossy().to_string())],
             "command codex -c a=b --dangerously-bypass-approvals-and-sandbox",
+            "",
         );
         let cx = relaunch_line(ws.to_str().unwrap(), "cx", Some("01a0-abc")).unwrap();
         assert!(
@@ -324,7 +332,7 @@ fn ensure_gitignore(workspace: &str) {
 
 /// Persona + tmm usage + brief. The tmm paragraph is the ENTIRE integration —
 /// that is the point of the CLI-only substrate.
-fn build_prompt(def: &RegAgent, name: &str, session: &str, brief: &str) -> String {
+fn build_prompt(def: &RegAgent, name: &str, session: &str, brief: &str, by: &str) -> String {
     let mut s = String::new();
     if !def.system.trim().is_empty() {
         s += def.system.trim();
@@ -353,7 +361,17 @@ fn build_prompt(def: &RegAgent, name: &str, session: &str, brief: &str) -> Strin
          Run `tmm --help` for the full command list."
     );
     if !brief.trim().is_empty() {
-        s += &format!("\n\nYour task, briefed by {}:\n{}", if brief.is_empty() { "the operator" } else { "your teammate" }, brief.trim());
+        // Name the briefer: "your teammate" left the agent with nobody to
+        // report back to, and the report-back sentence tells it the feedback
+        // loop is AUTOMATIC — a long done summary re-told the whole reply
+        // (both are posted), so the summary is cast as the one-line verdict.
+        let briefer = if by.trim().is_empty() { "the operator".to_string() } else { format!("your teammate {}", by.trim()) };
+        s += &format!(
+            "\n\nYour task, briefed by {briefer}:\n{}\n\n\
+             When it is complete, `tmm done \"summary\"` reports back for you: the summary is delivered to whoever briefed you automatically, so do not repeat it with `tmm send`. \
+             Keep it to one or two lines — the verdict and what changed — because your full final reply is posted to the room separately.",
+            brief.trim()
+        );
     }
     s
 }
@@ -558,6 +576,9 @@ pub fn refresh_hooks(project_path: &str, window_name: &str) -> bool {
                 "command kiro-cli chat --agent {} --trust-all-tools kick",
                 shared::shell_quote(window_name),
             ),
+            // A backfilled recipe cannot know who spawned the agent — the
+            // feedback edge simply does not exist for pre-recipe spawns.
+            "",
         );
         changed = true;
     }
@@ -1104,7 +1125,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tmm-spawn-kiro-{}", uuid::Uuid::new_v4()));
         let mut d = def("kiro");
         d.model = "claude-haiku-4.5".into();
-        let r = render_kiro(&d, "tester", &dir, &build_prompt(&d, "tester", "proj", "fix the bug"), &[]).unwrap();
+        let r = render_kiro(&d, "tester", &dir, &build_prompt(&d, "tester", "proj", "fix the bug", "lead"), &[]).unwrap();
         assert!(r.env.iter().any(|(k, v)| k == "KIRO_HOME" && v.contains("tmm-spawn-kiro")), "home must be the isolated dir");
         let conf: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("agents/tester.json")).unwrap()).unwrap();
@@ -1149,7 +1170,7 @@ mod tests {
         // A restart must replay the FULL identity, not the bare backend line:
         // the user-space config's hooks never fire (measured), so losing
         // KIRO_HOME/--agent makes a restarted agent observably deaf.
-        write_launch_recipe(&dir, "kiro", &r.env, &r.cmd);
+        write_launch_recipe(&dir, "kiro", &r.env, &r.cmd, "");
         let line = relaunch_line(
             dir.parent().unwrap().parent().unwrap().to_str().unwrap(),
             "tester", Some("abc-123"),
@@ -1262,7 +1283,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tmm-spawn-grok-{}", uuid::Uuid::new_v4()));
         let mut d = def("grok");
         d.model = "grok-4.6".into();
-        let r = render_grok(&d, "tester", &dir, &build_prompt(&d, "tester", "proj", "fix the bug"), &[]).unwrap();
+        let r = render_grok(&d, "tester", &dir, &build_prompt(&d, "tester", "proj", "fix the bug", "lead"), &[]).unwrap();
         assert!(r.env.iter().any(|(k, v)| k == "GROK_HOME" && v.contains("tmm-spawn-grok")), "home must be the isolated dir");
         assert!(r.cmd.contains("--agent tester"), "identity via --agent: {}", r.cmd);
         assert!(r.cmd.contains("--always-approve"), "no interactive permission prompts: {}", r.cmd);
@@ -1359,6 +1380,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
             "kiro",
             &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())],
             "command kiro-cli chat --agent dev --model claude-haiku-4.5 --trust-all-tools",
+            "",
         );
 
         assert!(refresh_hooks(&ws.to_string_lossy(), "dev"), "a stale config is rewritten");
@@ -1395,6 +1417,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
             &[],
             // The owner's real value: one character off `claude-sonnet-4.5`.
             "command kiro-cli chat --agent dev --model claude-sonnet-4-5 --trust-all-tools",
+            "",
         );
 
         refresh_hooks(&ws.to_string_lossy(), "dev");
@@ -1441,7 +1464,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
             let dir = std::env::temp_dir().join(format!("tmm-spawn-{backend}-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(&dir).unwrap();
             let d = def(backend);
-            let prompt = build_prompt(&d, "tester", "proj", "");
+            let prompt = build_prompt(&d, "tester", "proj", "", "");
             let r = match backend {
                 "claude" => render_claude(&d, "tester", &dir, &prompt, &[]).unwrap(),
                 _ => render_codex(&d, "tester", &dir, &prompt, &[]).unwrap(),
@@ -1489,7 +1512,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         std::fs::create_dir_all(&dir).unwrap();
         let mut d = def("kiro");
         d.effort = "high".into();
-        let prompt = build_prompt(&d, "t", "p", "");
+        let prompt = build_prompt(&d, "t", "p", "", "");
         assert!(render_kiro(&d, "t", &dir, &prompt, &[]).unwrap().cmd.ends_with("--effort high"));
         d.backend = "claude".into();
         assert!(render_claude(&d, "t", &dir, &prompt, &[]).unwrap().cmd.contains(" --effort high "));
@@ -1566,7 +1589,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
     #[test]
     fn prompt_carries_identity_project_and_rules() {
         let d = def("kiro");
-        let p = build_prompt(&d, "rev-2", "blog", "review the branch");
+        let p = build_prompt(&d, "rev-2", "blog", "review the branch", "lead");
         assert!(p.starts_with("Persona text."));
         assert!(p.contains("agent \"rev-2\" in project \"blog\""));
         assert!(p.contains("tmm done"));
@@ -1574,6 +1597,31 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         assert!(p.contains("just WAIT at your prompt"), "prompt tells it to idle: {p}");
         assert!(p.contains("[YYYY-MM-DD HH:MM]"), "prompt explains message stamps: {p}");
         assert!(p.contains("review the branch"));
+    }
+
+    #[test]
+    fn prompt_names_the_briefer_and_recipe_records_the_spawner() {
+        // "your teammate" left the agent with nobody to report back to — the
+        // briefer's NAME is what lets a builder answer its lead.
+        let d = def("kiro");
+        let p = build_prompt(&d, "b", "proj", "fix it", "lead");
+        assert!(p.contains("briefed by your teammate lead"), "names the briefer: {p}");
+        assert!(p.contains("delivered to whoever briefed you"), "explains the feedback loop: {p}");
+        let ph = build_prompt(&d, "b", "proj", "fix it", "");
+        assert!(ph.contains("briefed by the operator"), "human brief stays the operator: {ph}");
+
+        // The recipe carries the feedback edge, and `spawned_by` reads it back
+        // through the same path hub_done uses.
+        let ws = std::env::temp_dir().join(format!("tmm-spawnedby-{}", std::process::id()));
+        let home = ws.join(".tmm").join("agents").join("b");
+        std::fs::create_dir_all(&home).unwrap();
+        write_launch_recipe(&home, "kiro", &[], "command kiro-cli chat --agent b", "lead");
+        let ws_str = ws.to_string_lossy().to_string();
+        assert_eq!(crate::projects::spawned_by(Some(&ws_str), "b").as_deref(), Some("lead"));
+        // Empty `by` (a human spawn) yields nobody to deliver to.
+        write_launch_recipe(&home, "kiro", &[], "command kiro-cli chat --agent b", "");
+        assert_eq!(crate::projects::spawned_by(Some(&ws_str), "b"), None);
+        std::fs::remove_dir_all(&ws).ok();
     }
 }
 

@@ -315,6 +315,18 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
                 if let Some(hub) = notifications {
                     hub.mark_done_this_turn(session, window, summary);
                 }
+                // The summary CLOSES the loop with whoever briefed the agent:
+                // a lead that spawned a builder cannot schedule on a
+                // record-only room line — nothing wakes it, so it never
+                // learned its builders finished (owner, 2026-08-29). Deliver
+                // the summary into the SPAWNER's pane like any chat line.
+                // This is a TARGETED delivery, never a mention scan, so
+                // invariant 2 of the hook-sourced posts is untouched; and it
+                // cannot ping-pong — one line, one target, once per turn end,
+                // and the spawned_by chain terminates at the human.
+                if !summary.trim().is_empty() {
+                    deliver_done_to_spawner(session, agent, summary);
+                }
             } else {
                 let state = match require_str(p, "state") {
                     Ok(s) => s,
@@ -544,6 +556,42 @@ pub(super) fn stamp_now() -> String {
 /// windows only — a shell would execute the message, and a window the user
 /// started by hand belongs to the user, not to this app.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+/// Deliver a done summary into the pane of the agent that SPAWNED this one —
+/// the feedback half of `tmm spawn --brief`. Same gates as `deliver_mentions`
+/// (live window, managed, never self), same stamped line shape, same
+/// `record_delivery` bookkeeping so the ack machinery treats it like any
+/// delivered chat line. Quiet on every miss: a human spawner, a dead window,
+/// or a pre-recipe agent simply has nobody to wake, which is not an error.
+fn deliver_done_to_spawner(session: &str, from: &str, summary: &str) {
+    use crate::projects::agents;
+
+    let ws = crate::projects::project_for_session(session).ok().flatten().map(|p| p.path);
+    let Some(spawner) = crate::projects::spawned_by(ws.as_deref(), from) else { return };
+    if spawner == from {
+        return;
+    }
+    let Ok(panes) = crate::tmux::list_panes(session) else { return };
+    for p in &panes {
+        if !p.active || p.window_name != spawner {
+            continue;
+        }
+        let is_agent = agents::detect_managed(ws.as_deref(), &p.window_name, &format!("{} {} {}", p.current_command, p.pane_title, p.window_name)).is_some();
+        if !is_agent || !crate::projects::is_managed_in(ws.as_deref(), &p.window_name) {
+            return;
+        }
+        let target = format!("{}:{}.{}", session, p.window, p.pane);
+        // `[done]` in the body tells the reader WHAT this line is — the
+        // brief's outcome, not a new request — while the stamp and sender
+        // keep the shape of every other delivered chat line.
+        let line = format!("[tmm chat {}] {from}: [done] {summary}", stamp_now());
+        if crate::tmux::send_command(&target, &line).is_ok() {
+            crate::projects::telemetry::record_delivery(session, p.window, &line);
+            crate::projects::vitals::sniff_window_soon(session, p.window);
+        }
+        return;
+    }
+}
+
 fn deliver_mentions(session: &str, from: &str, body: &str) {
     use crate::projects::agents;
 
