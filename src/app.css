@@ -380,26 +380,54 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 
    So the fill stays at FULL strength and the motion is a scale breathe — the
    presence tempo CollabGraph already speaks (design-language.md: breathe
-   ≈ 1.3–5s = presence) — plus a static halo that gives a live dot roughly
-   three times the visual mass of a resting one. That mass difference is the
-   load-bearing half: it survives greyscale, a 5px dot, and
-   prefers-reduced-motion (which stills only the loop). No new colour species —
-   the halo is a color-mix over the dot's OWN hue, `--accent` by default.
+   ≈ 1.3–5s = presence) — plus a static halo that gives a live dot half again
+   the visual mass of a resting one. That mass difference is the load-bearing
+   half: it survives greyscale, a 5px dot, and prefers-reduced-motion (which
+   stills only the loop) — and it has to, because in LIGHT theme the accent and
+   the sleep grey are within 2% of the same relative luminance (measured:
+   #0088cc L=0.220 vs #82828a L=0.225), so with hue gone the halo is the ENTIRE
+   cue. No new colour species — it is a color-mix over the dot's OWN hue,
+   `--accent` by default.
+
+   The halo is FOCUSED, which is a shape rule, not a taste: the first cut spent
+   its light on reach (a 2px hard-edged spread ring + a 6px blur with another
+   1px of spread), which around a 6px dot painted a 14px footprint with a
+   crisp 10px disc inside it — and a hard edge is read as the OBJECT's
+   boundary, so the cue did not say "this dot is alive", it said "this dot is
+   bigger" (owner, 2026-08-29: "整个光晕看起来这个点有点大 不是特别和谐 …
+   做得更加聚焦一点 当然 这个动态是需要保留的"). Two rules follow:
+
+   - EVERY layer is blurred and NONE carries spread. A zero-blur layer is a
+     second boundary by construction, and spread moves light outward, which is
+     the opposite of focus. The dot's own edge stays the only crisp one, so
+     everything past it can only read as light.
+   - The light is CONCENTRATED instead of spread: alphas up (32/45% → 85/50%),
+     extents down. Measured by integrating the composited alpha over the
+     annulus (5/6/7px dots — the sidebar chip, the roster dot, the tool lane):
+     footprint 11/14/15px → 10/11/12px, hard edge 8/10/11px → none, mass
+     2.03/2.14/1.93× → 1.71/1.57/1.47×. So it reaches ~2px past the edge
+     rather than ~4px, at nearly the old strength, and since `transform`
+     scales the shadow with the dot, the breathe's peak now spans ~16px on the
+     7px dot instead of ~20px. The tempo and amplitude are UNTOUCHED — the
+     complaint was the halo, and the dynamic was explicitly to be kept.
 
    Wear it by adding the class next to whatever paints the dot; override
    `--live-hue` when the state is not accent-coloured (Team's roster). */
 .live-dot {
-  --live-ring: 2px;
-  --live-glow: 6px;
+  --live-ring: 2px;   /* inner bloom — a BLUR hugging the dot, never a spread */
+  --live-glow: 5px;   /* outer falloff, also spread-free */
   --live-hue: var(--accent);
   box-shadow:
-    0 0 0 var(--live-ring) color-mix(in srgb, var(--live-hue) 32%, transparent),
-    0 0 var(--live-glow) 1px color-mix(in srgb, var(--live-hue) 45%, transparent);
+    0 0 var(--live-ring) color-mix(in srgb, var(--live-hue) 85%, transparent),
+    0 0 var(--live-glow) color-mix(in srgb, var(--live-hue) 50%, transparent);
   animation: dot-breathe 1.4s ease-in-out infinite;
 }
-/* The sidebar chip's dot is 5px at the END of a dense row — the full ring and
-   glow would reach back across the 4px gap and sit on the name's last glyph. */
-.side-win .side-win-dot.live-dot { --live-ring: 1.5px; --live-glow: 4px; }
+/* The sidebar chip's dot is 5px at the END of a dense row, so it gets the one
+   proportional trim: the outer falloff alone would reach 2.5px back across the
+   4px gap toward the name's last glyph, and a small dot wears a halo
+   proportionally larger than a big one (8px around 5px is already 1.6×). The
+   inner bloom stays — it never leaves the gap. */
+.side-win .side-win-dot.live-dot { --live-glow: 3px; }
 @keyframes dot-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.3); } }
 @media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
 
