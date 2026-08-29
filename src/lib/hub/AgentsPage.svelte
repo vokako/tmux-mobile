@@ -373,9 +373,10 @@
         {#if !skillIsNew && skFiles.length}
           <div class="md-preview">
             <div class="side-h">{t('skillsFilesTitle')}</div>
-            {#if skFiles.length > 1}
-              <!-- A quiet list, not a chip cloud: file paths are reading
-                   material (owner, 2026-08-28: "可以是小的列表组件展示"). -->
+            <!-- A quiet list, not a chip cloud: file paths are reading
+                 material (owner, 2026-08-28: "可以是小的列表组件展示").
+                 A single SKILL.md still shows its one row — hiding the list
+                 read as "file 没有写" (owner, 2026-08-29). -->
               <div class="file-list" role="listbox" aria-label={t('skillsFilesTitle')}>
                 {#each skFiles as f (f.path)}
                   <button class="file-row" class:sel={skSel === f.path} type="button" role="option" aria-selected={skSel === f.path}
@@ -385,7 +386,6 @@
                   </button>
                 {/each}
               </div>
-            {/if}
             {#if skSel.endsWith('.md')}
               <div class="md md-doc">{@html renderMarkdown(skSel === 'SKILL.md' ? stripFrontmatter(skText) : skText)}</div>
             {:else}
