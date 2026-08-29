@@ -12,6 +12,8 @@
   import Icon from '../ui/Icon.svelte';
   import Select from '../ui/Select.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
+  import ConfirmDialog from '../ui/ConfirmDialog.svelte';
+  import { draftOf, draftDirty, draftValid, draftPatch } from './board.ts';
   import { scrollFade } from '../core/scrollFade.ts';
 
   let { session = '', visible = true, onGoBack = null }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null } = $props();
@@ -24,7 +26,9 @@
   let projects = $state<ProjectRow[]>([]);
   let cur = $state('');
   let picked = $state(false);      // compact: a picked project drills into its board
-  $effect(() => { if (session && (!picked || !cur)) cur = session; });
+  // A dirty draft blocks the silent follow: the prop moving under an open
+  // edit would reset the view and lose it with no confirm (board #11).
+  $effect(() => { if (session && (!picked || !cur) && !dirty) cur = session; });
   async function loadProjects() {
     try {
       const r = await projectList();
@@ -39,14 +43,18 @@
     return () => clearInterval(iv);
   });
   function pick(s: string) {
-    if (s !== cur) { cur = s; }
-    picked = true;
+    guard(() => {
+      if (s !== cur) { cur = s; }
+      picked = true;
+    });
   }
 
   // The back gesture peels detail/form → list before leaving the page —
   // the same contract every page registers via onGoBack (Files defined it).
   $effect(() => {
     onGoBack?.(() => {
+      if (pendingDiscard) { pendingDiscard = null; return true; }
+      if (sel && dirty) { pendingDiscard = () => { sel = null; }; return true; }
       if (sel || creating) { sel = null; creating = false; return true; }
       if (picked) { picked = false; return true; }  // compact: back to the project list
       return false;
@@ -65,6 +73,19 @@
   let nBody = $state('');
   let noteText = $state('');
   let busy = $state(false);
+  // ── The DRAFT (board #11): opening an issue edits a COPY; only the explicit
+  // Save persists, Cancel restores, and every path that would drop unsaved
+  // edits (back, Esc, sidebar switch, the phone's back gesture) goes through
+  // the app's confirm dialect instead of losing them silently.
+  let draft = $state({ title: '', body: '' });
+  let pendingDiscard = $state<null | (() => void)>(null);
+  const dirty = $derived(sel ? draftDirty(draft, sel) : false);
+  /** Run now, or park behind the discard confirm when the draft is dirty. */
+  function guard(action: () => void) {
+    if (dirty) pendingDiscard = action;
+    else action();
+  }
+  let nAssignee = $state('');
 
   async function load() {
     try {
@@ -97,42 +118,74 @@
   // Switching projects resets the view to the new board's list.
   $effect(() => {
     void cur;
-    sel = null; creating = false; ready = false; issues = []; noteText = '';
+    sel = null; creating = false; ready = false; issues = []; noteText = ''; nAssignee = ''; pendingDiscard = null;
   });
 
   async function openIssue(id: number) {
-    try { sel = await boardGet(cur, id); err = ''; } catch (e) { err = String((e as Error)?.message ?? e); }
+    try {
+      sel = await boardGet(cur, id);
+      draft = draftOf(sel);
+      err = '';
+    } catch (e) { err = String((e as Error)?.message ?? e); }
   }
-  async function refreshSel() {
-    if (sel) await openIssue(sel.id);
+  /** Re-fetch the open issue WITHOUT resetting the draft — a status/assignee
+   * save or a note must not clobber title/body edits in progress. */
+  async function refetchSel() {
+    if (sel) {
+      try { sel = await boardGet(cur, sel.id); err = ''; } catch (e) { err = String((e as Error)?.message ?? e); }
+    }
     await load();
   }
   // Assigning DOES something (owner, 2026-08-29: "Assign 给某个 Agent 去做"):
   // besides the field, a non-empty assignment posts an @message — hub_post's
-  // delivery types it into that agent's pane, so the agent actually starts
-  // (and is told to take/note/move, which covers "做完之后在上面更新信息").
+  // delivery types it into that agent's pane, so the agent actually starts.
+  // ONE function carries that semantics; the detail Select and the create
+  // dialog both route through it (board #11: create-with-assignee must
+  // dispatch, never just write a label).
+  async function dispatchAssign(id: number, name: string) {
+    await boardSave(cur, { id, assignee: name });
+    if (name) {
+      await hubPost(cur, `@${name} ${t('boardAssignMsg').replace('{id}', String(id))}`);
+    }
+  }
   async function assign(id: number, name: string) {
     busy = true;
     try {
-      await boardSave(cur, { id, assignee: name });
-      if (name) {
-        await hubPost(cur, `@${name} ${t('boardAssignMsg').replace('{id}', String(id))}`);
-      }
-      await refreshSel();
+      await dispatchAssign(id, name);
+      await refetchSel();
     } catch (e) { err = String((e as Error)?.message ?? e); }
     busy = false;
   }
+  /** Explicit save of the draft's changed fields; a failure KEEPS the draft. */
+  async function saveDraft() {
+    if (!sel || busy) return;
+    const patch = draftPatch(draft, sel);
+    if (!patch) return;
+    busy = true;
+    try {
+      await boardSave(cur, { id: sel.id, ...patch });
+      await refetchSel();
+      draft = draftOf(sel);
+    } catch (e) { err = String((e as Error)?.message ?? e); }
+    busy = false;
+  }
+  function cancelDraft() {
+    draft = draftOf(sel);
+  }
   async function move(id: number, status: string) {
     busy = true;
-    try { await boardSave(cur, { id, status }); await refreshSel(); } catch (e) { err = String((e as Error)?.message ?? e); }
+    try { await boardSave(cur, { id, status }); await refetchSel(); } catch (e) { err = String((e as Error)?.message ?? e); }
     busy = false;
   }
   async function createIssue() {
     if (!nTitle.trim() || busy) return;
     busy = true;
     try {
-      await boardSave(cur, { title: nTitle.trim(), body: nBody.trim() });
-      nTitle = ''; nBody = ''; creating = false;
+      const r = await boardSave(cur, { title: nTitle.trim(), body: nBody.trim() });
+      // Create-with-assignee reuses the ONE dispatch semantics: the field is
+      // saved AND the assignment lands in the agent's pane (board #11).
+      if (nAssignee && r?.id) await dispatchAssign(r.id, nAssignee);
+      nTitle = ''; nBody = ''; nAssignee = ''; creating = false;
       await load();
     } catch (e) { err = String((e as Error)?.message ?? e); }
     busy = false;
@@ -140,7 +193,7 @@
   async function addNote() {
     if (!sel || !noteText.trim() || busy) return;
     busy = true;
-    try { await boardNote(cur, sel.id, noteText.trim()); noteText = ''; await refreshSel(); } catch (e) { err = String((e as Error)?.message ?? e); }
+    try { await boardNote(cur, sel.id, noteText.trim()); noteText = ''; await refetchSel(); } catch (e) { err = String((e as Error)?.message ?? e); }
     busy = false;
   }
   async function removeIssue() {
@@ -154,6 +207,8 @@
   // drawer's close sees it — same territory rule as the files partition.
   function onKey(e: KeyboardEvent) {
     if (e.key !== 'Escape') return;
+    if (pendingDiscard) return; // the ConfirmDialog's own capture handler closes itself
+    if (sel && dirty) { pendingDiscard = () => { sel = null; }; e.stopPropagation(); return; }
     if (sel || creating) { sel = null; creating = false; e.stopPropagation(); }
   }
 
@@ -191,16 +246,30 @@
     <!-- ── one issue: the note thread is the issue's own record ── -->
     <div class="detail">
       <div class="d-head">
-        <button class="icon-btn" title={t('back')} aria-label={t('back')} onclick={() => (sel = null)}>
+        <button class="icon-btn" title={t('back')} aria-label={t('back')} onclick={() => guard(() => (sel = null))}>
           <Icon name="arrow-left" size={14} />
         </button>
         <span class="d-id">#{sel.id}</span>
-        <span class="d-title">{sel.title}</span>
         <span class="spacer"></span>
-        <button class="icon-btn" title={t('boardDeleteIssue')} aria-label={t('boardDeleteIssue')} onclick={removeIssue}>
+        {#if dirty}
+          <!-- The draft's own verbs, only while there is a draft to speak of:
+               cancel restores the stored issue, save persists the changed
+               fields — and is the ONLY thing that does (board #11). -->
+          <button class="icon-btn" title={t('cancel')} aria-label={t('cancel')} disabled={busy} onclick={cancelDraft}>
+            <Icon name="undo" size={14} />
+          </button>
+          <button class="icon-btn go" title={t('save')} aria-label={t('save')} disabled={busy || !draftValid(draft)} onclick={saveDraft}>
+            <Icon name="check" size={14} />
+          </button>
+        {/if}
+        <button class="icon-btn" title={t('boardDeleteIssue')} aria-label={t('boardDeleteIssue')} disabled={busy} onclick={removeIssue}>
           <Icon name="trash" size={14} />
         </button>
       </div>
+      <!-- Layout hierarchy (board #11): the title is ONE compact line, the
+           body is the big field — visibly larger, growable, never same-size
+           siblings again. -->
+      <input class="d-title-input" bind:value={draft.title} placeholder={t('boardTitlePh')} />
       <div class="d-meta">
         <Select value={sel.status} options={STATUSES.map((s) => ({ value: s, label: statusLabel(s) }))}
           onchange={(v: string) => move(sel!.id, v)} />
@@ -209,9 +278,7 @@
           onchange={(v: string) => assign(sel!.id, v)} />
         {#if sel.created_by}<span class="meta-bit">{t('boardOpenedBy')} {sel.created_by}</span>{/if}
       </div>
-      {#if sel.body}
-        <div class="d-body">{sel.body}</div>
-      {/if}
+      <textarea class="d-body-edit" bind:value={draft.body} placeholder={t('boardBodyPh')} rows="8"></textarea>
       <div class="notes">
         {#if Array.isArray(sel.notes)}
           {#each sel.notes as n}
@@ -247,7 +314,14 @@
       <!-- svelte-ignore a11y_autofocus -->
       <input class="n-title" placeholder={t('boardTitlePh')} bind:value={nTitle} autofocus
         onkeydown={(e) => e.key === 'Enter' && createIssue()} />
-      <textarea class="n-body" rows="5" placeholder={t('boardBodyPh')} bind:value={nBody}></textarea>
+      <textarea class="n-body d-body-edit" rows="8" placeholder={t('boardBodyPh')} bind:value={nBody}></textarea>
+      <!-- Assign at birth: the same dispatch as the detail picker — the agent
+           is briefed the moment the issue exists (board #11). -->
+      <div class="d-meta">
+        <Select value={nAssignee} dense
+          options={[{ value: '', label: t('boardUnassigned') }, ...agents.map((a) => ({ value: a.name, label: `@${a.name}` }))]}
+          onchange={(v: string) => (nAssignee = v)} />
+      </div>
     </div>
   {:else}
     <!-- ── the board: four fixed columns, cards in movement order ── -->
@@ -280,6 +354,11 @@
   {/if}
   {#if err}<div class="err">{err}</div>{/if}
   </div>
+  <ConfirmDialog open={!!pendingDiscard} danger={false}
+    title={t('confirmDiscardTitle')} note={t('boardDiscardNote')}
+    confirmLabel={t('confirmDiscard')} cancelLabel={t('cancel')}
+    onconfirm={() => { const go = pendingDiscard; pendingDiscard = null; draft = draftOf(sel); go?.(); }}
+    oncancel={() => (pendingDiscard = null)} />
 </div>
 
 <style>
@@ -387,14 +466,30 @@
   .spacer { flex: 1; }
   .d-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .meta-bit { font-size: var(--fs-meta); color: var(--text3); }
-  .d-body {
+  /* The hierarchy (board #11): one compact title LINE, then the body as the
+     visibly bigger field — it is the content, so it gets the space. */
+  .d-title-input {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--ui-radius-control);
+    color: var(--text);
+    font-size: var(--fs-ui);
+    font-weight: 600;
+    padding: 7px 10px;
+  }
+  .d-title-input:focus { outline: none; border-color: var(--accent); }
+  .d-body-edit {
     font-size: var(--fs-ui); color: var(--text);
-    white-space: pre-wrap; overflow-wrap: anywhere;
+    font-family: inherit;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--ui-radius-row);
     padding: 8px 10px;
+    min-height: 200px;
+    resize: vertical;
+    flex: none;
   }
+  .d-body-edit:focus { outline: none; border-color: var(--accent); }
   .notes { display: flex; flex-direction: column; gap: 4px; }
   .note { display: flex; gap: 6px; align-items: baseline; font-size: var(--fs-meta); min-width: 0; }
   .n-author { color: var(--accent); font-weight: 650; flex: none; }
