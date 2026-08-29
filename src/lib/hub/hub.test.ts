@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { uploadImagePath, uploadFilePath, imageId, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs } from './hub.ts';
+import { uploadImagePath, uploadFilePath, imageId, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -27,6 +27,25 @@ const ag = (a: Partial<HubAgent>): HubAgent => ({
 test('every derived state has a dot color and unknown falls back', () => {
   for (const s of ['working', 'waiting', 'blocked', 'stuck', 'failed', 'shell', 'idle']) {
     assert.ok(stateDotColor(s).startsWith('var(--'), s);
+  }
+});
+
+test('the RUNNING cue is worn by exactly the in-motion states', () => {
+  // Colour alone could not carry running-vs-idle at 5–7px (owner, 2026-08-29),
+  // so an in-motion dot also wears app.css `.live-dot` — halo + breathe. Which
+  // states that is has ONE definition, or the sidebar chip, the roster card and
+  // the recipient picker drift apart.
+  assert.equal(stateIsLive('running'), true);
+  assert.equal(stateIsLive('working'), true, "'working' is the pre-2026-08 name for running");
+  // Everything else is NOT in motion — a resting, waiting or failed dot that
+  // breathed would say a turn is open when none is.
+  for (const s of ['idle', 'waiting', 'blocked', 'stuck', 'failed', 'shell', 'done', '']) {
+    assert.equal(stateIsLive(s), false, s);
+  }
+  // The cue and the colour must agree on what "in motion" means: exactly the
+  // states painted with the accent get it.
+  for (const s of ['running', 'working', 'idle', 'waiting', 'failed', 'shell']) {
+    assert.equal(stateIsLive(s), stateDotColor(s) === 'var(--accent)', s);
   }
 });
 

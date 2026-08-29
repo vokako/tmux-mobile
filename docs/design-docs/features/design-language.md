@@ -36,6 +36,22 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   = ended well, `--status-warn` = needs a person / a turn cut short,
   `--status-danger` = failed/destructive, grey = at rest. A literal colour is
   wrong; compute expressions with `color-mix` over tokens (`ctxColor`).
+- **The at-rest grey is ACHROMATIC, and "in motion" is not colour alone**: the
+  two states you most need to tell apart are running and idle, and at 5–7px a
+  dot's hue is not enough — the owner reported them as indistinguishable twice
+  (2026-08-26, again 2026-08-29). Two rules answer it. `--status-sleep` carries
+  no hue: a blue-leaning grey next to the blue-cyan accent is the SAME family at
+  lower chroma (in light theme the two sat 3° apart), so its channels stay
+  equal-ish. And an in-motion dot wears the app-wide `.live-dot` cue (app.css) —
+  full-strength fill, a `color-mix` halo over the dot's own `--live-hue`, and the
+  `dot-breathe` scale loop. The halo is the load-bearing half: it gives a live
+  dot ~3× the visual mass of a resting one, which survives greyscale, a 5px dot
+  and `prefers-reduced-motion` (that only stills the loop). A state dot may
+  NEVER animate opacity — the retired `s-pulse` faded running toward the card
+  and its trough measured 22 L* points DARKER than the idle grey, so half of
+  every cycle the running dot read as the less alive of the two. ONE mechanism,
+  one class; `stateIsLive()` is the single definition of which states wear it,
+  and `ui/statusdot.source.test.ts` pins all of this.
 - **Motion**: `--t-fast 120ms` = micro feedback (hover, border, colour);
   `--t-move 200ms` = things that move or resize (drawer, bars, width).
   Spinner tempos are semantic, not tokens: 0.6s = loading, 2.2s = "a turn is

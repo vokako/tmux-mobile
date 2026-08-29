@@ -36,6 +36,18 @@ export function stateDotColor(state: string): string {
 }
 
 /**
+ * Which states wear the RUNNING cue — app.css `.live-dot`: full-strength fill,
+ * an accent halo, and the presence breathe. ONE definition so the sidebar
+ * chip, the roster card and the recipient picker cannot disagree about what
+ * "in motion" looks like (the colour alone was not enough at 5–7px; see the
+ * .live-dot comment for the measurements). `working` is the pre-2026-08 name
+ * for the same thing, exactly as in stateDotColor above.
+ */
+export function stateIsLive(state: string): boolean {
+  return state === 'running' || state === 'working';
+}
+
+/**
  * The colour of the context-usage bar, as a THEME EXPRESSION rather than a
  * colour: every stop is one of the app's four status tokens, so the ramp is
  * correct in both themes and stays correct if the palette changes.

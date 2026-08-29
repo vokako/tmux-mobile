@@ -61,3 +61,4 @@ These tests `readFile` the component source and assert with regexes.
 | `ui/confirm.source.test.ts` | every destructive verb goes through the shared confirmation |
 | `hub/Hub.source.test.ts` | a tool-lane row is one line (`nowrap`, never `pre`), the argument is never truncated (the lane pans instead), and the row cap stays expressed in rows |
 | `ui/sidebar.source.test.ts` | one sidebar box: a section header takes its padding and type from `.side-h`, and `.side-h`/`.side-row` keep the same 10px inset |
+| `ui/statusdot.source.test.ts` | the running cue: `--status-sleep` stays achromatic, `.live-dot` is defined once in app.css (halo + `dot-breathe` scale, never an opacity fade) and stills under reduced motion, and no component re-implements it |

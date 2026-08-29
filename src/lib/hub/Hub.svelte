@@ -31,7 +31,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
+  import { markLeadingMention, stateDotColor, stateIsLive, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
@@ -1679,7 +1679,7 @@
                     <span class="side-win">
                       {#if a.icon}<img src={a.icon} alt="" width="11" height="11" />{/if}
                       <span class="side-win-name">{a.name}</span>
-                      {#if a.state}<span class="side-win-dot" style:background={stateDotColor(a.state)}></span>{/if}
+                      {#if a.state}<span class="side-win-dot" class:live-dot={stateIsLive(a.state)} style:background={stateDotColor(a.state)}></span>{/if}
                     </span>
                   {/each}
                 </span>
@@ -1858,7 +1858,7 @@
               <div class="ac-top">
                 {#if backendIcon(a.agent)}<img class="ava" src={backendIcon(a.agent)} alt={a.agent} />{:else}<span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>{/if}
                 <span class="a-name">{a.name}</span>
-                <span class="st" class:live={a.state === 'running'} style:background={stateDotColor(a.state)}></span>
+                <span class="st" class:live-dot={stateIsLive(a.state)} style:background={stateDotColor(a.state)}></span>
                 {#if unread.has(a.name)}<span class="unread" title={t('hubUnread')}></span>{/if}
               </div>
               <!-- What the agent's own status line says, kept ON the card rather
@@ -2190,7 +2190,7 @@
             <div class="steps" class:open>
               <button class="s-head" aria-expanded={open} onclick={() => toggleSteps(b, !open)}>
                 {#if isRunning(b)}
-                  <span class="s-live" aria-hidden="true"></span>
+                  <span class="s-live live-dot" aria-hidden="true"></span>
                 {:else}
                   <span class="chev" class:open><Icon name="chevron-right" size={12} /></span>
                 {/if}
@@ -2299,7 +2299,7 @@
               <div class="to-menu">
                 {#each managedAgents as a (a.window)}
                   <button class:sel={recipient === a.name} onclick={() => setRecipient(a.name)}>
-                    <span class="st" style:background={stateDotColor(a.state)}></span>{a.name}
+                    <span class="st" class:live-dot={stateIsLive(a.state)} style:background={stateDotColor(a.state)}></span>{a.name}
                   </button>
                 {/each}
                 <div class="to-sep"></div>
@@ -2761,7 +2761,6 @@
   .a-name { font-family: var(--font-display); font-weight: 600; max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .s-age { color: var(--text3); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; font-family: ui-monospace, Menlo, monospace; }
   .st { width: 6px; height: 6px; border-radius: 50%; flex: none; }
-  .st.live { animation: s-pulse 1.4s ease-in-out infinite; }
   .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--status-danger); flex: none; }
   .ava.dim { background: var(--surface2) !important; color: var(--text3); }
   /* The stopped card's ONE way back up: a real button in the .a-more dialect,
@@ -3122,10 +3121,10 @@
   .chev.open { transform: rotate(90deg); }
   /* A run in motion pulses in the MOTION colour (the accent — see the status
      colour language in hub.ts): green would say "ended well" about something
-     still going. */
-  .s-live { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: s-pulse 1.4s ease-in-out infinite; }
-  @keyframes s-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
-  @media (prefers-reduced-motion: reduce) { .s-live { animation: none; } }
+     still going. The pulse itself is the app-wide `.live-dot` cue in app.css
+     (halo + breathe, never an opacity fade — that fade is what made a running
+     dot read dimmer than a resting one), worn alongside this class. */
+  .s-live { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
   .s-who { flex: none; font-weight: 600; color: var(--text2); }
   .s-count { flex: none; }
   .s-peek { min-width: 0; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

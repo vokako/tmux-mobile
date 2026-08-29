@@ -86,8 +86,15 @@ html[data-theme="dark"] {
      太接近了"). A true neutral grey is also the presence convention every
      chat product speaks: away/idle is grey, activity is coloured. Kept a
      step brighter than --text3 so a dot still reads as a STATE on the card,
-     not as disabled chrome. */
-  --status-ok: #4ade80; --status-warn: #fbbf24; --status-danger: #ff5050; --status-hot: #fb923c; --status-sleep: #7c8698;
+     not as disabled chrome.
+     That fix was only half done: #7c8698 was still a BLUE-leaning grey
+     (Lab C*=10.9, h=272 against the accent's h=229), so running-vs-idle
+     stayed a saturated-blue / desaturated-blue pair — the owner reported the
+     same confusion again on 2026-08-29. Now achromatic (C*=4.6) at the same
+     lightness: measured ΔE(Lab) against --accent goes 42.9 → 49.6, while the
+     gap to the composited --text3 (L*=48.5) stays ~6 so the promise above
+     still holds. See .live-dot below for the other, bigger half. */
+  --status-ok: #4ade80; --status-warn: #fbbf24; --status-danger: #ff5050; --status-hot: #fb923c; --status-sleep: #82828a;
   --nav-bg: rgba(12,12,20,0.95); --pill-bg: rgba(255,255,255,0.04);
   --input-bg: rgba(255,255,255,0.04); --input-border: rgba(255,255,255,0.08);
   --code-bg: rgba(255,255,255,0.05);
@@ -111,8 +118,12 @@ html[data-theme="light"] {
   --accent-fill-ink: color-mix(in srgb, var(--bg) 30%, white);
   --accent-line: var(--accent);
   --danger: #e53e3e; --danger-bg: rgba(229,62,62,0.06);
-  /* Same rule as dark: at-rest is a neutral grey, never an accent neighbour. */
-  --status-ok: #16a34a; --status-warn: #ca8a04; --status-danger: #e53e3e; --status-hot: #ea580c; --status-sleep: #94a0b0;
+  /* Same rule as dark: at-rest is a neutral grey, never an accent neighbour —
+     and light was the worse offender, because #94a0b0 (h=265) sat within 3° of
+     the accent #0088cc (h=262): the SAME hue at a third of the chroma, which is
+     the hardest pair there is to tell apart. Achromatic now, same lightness:
+     ΔE(Lab) vs --accent 36.1 → 41.5, gap to the composited --text3 ~6. */
+  --status-ok: #16a34a; --status-warn: #ca8a04; --status-danger: #e53e3e; --status-hot: #ea580c; --status-sleep: #9c9ca4;
   --nav-bg: rgba(245,245,247,0.95); --pill-bg: rgba(0,0,0,0.03);
   --input-bg: rgba(0,0,0,0.02); --input-border: rgba(0,0,0,0.08);
   --code-bg: rgba(0,0,0,0.03);
@@ -355,6 +366,42 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 .side-win .side-win-name { max-width: 16ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Chat-only garnish: the agent's state, one dot in the app's status language. */
 .side-win .side-win-dot { width: 5px; height: 5px; border-radius: 50%; flex: none; }
+
+/* ── The RUNNING cue: ONE treatment for "a turn is open", app-wide ────────
+   The status language says accent = in motion, grey = at rest, and the colour
+   alone was carrying that at 5–7px. Worse, the motion it was paired with
+   worked AGAINST it: the old `s-pulse` faded the dot's OPACITY to 0.35 and
+   back, so for a good part of every 1.4s cycle a running dot composited
+   toward the card and read LESS alive than a resting one — measured on the
+   dark card (#131320), ΔE(Lab) running-vs-idle collapsed 42.9 → 26.6 and the
+   trough landed at L*=33.9 against idle's L*=55.7, i.e. 22 points DARKER; in
+   light it washed out the other way (L*=82, ΔE 36.1 → 20.2). Hence the owner
+   reporting running and idle as hard to tell apart (2026-08-29).
+
+   So the fill stays at FULL strength and the motion is a scale breathe — the
+   presence tempo CollabGraph already speaks (design-language.md: breathe
+   ≈ 1.3–5s = presence) — plus a static halo that gives a live dot roughly
+   three times the visual mass of a resting one. That mass difference is the
+   load-bearing half: it survives greyscale, a 5px dot, and
+   prefers-reduced-motion (which stills only the loop). No new colour species —
+   the halo is a color-mix over the dot's OWN hue, `--accent` by default.
+
+   Wear it by adding the class next to whatever paints the dot; override
+   `--live-hue` when the state is not accent-coloured (Team's roster). */
+.live-dot {
+  --live-ring: 2px;
+  --live-glow: 6px;
+  --live-hue: var(--accent);
+  box-shadow:
+    0 0 0 var(--live-ring) color-mix(in srgb, var(--live-hue) 32%, transparent),
+    0 0 var(--live-glow) 1px color-mix(in srgb, var(--live-hue) 45%, transparent);
+  animation: dot-breathe 1.4s ease-in-out infinite;
+}
+/* The sidebar chip's dot is 5px at the END of a dense row — the full ring and
+   glow would reach back across the 4px gap and sit on the name's last glyph. */
+.side-win .side-win-dot.live-dot { --live-ring: 1.5px; --live-glow: 4px; }
+@keyframes dot-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.3); } }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
 
 /* ── iOS/macOS-style CONTINUOUS corners, app-wide ─────────────────────────
    ("把它设计得有质感一些，类似于 iPad、iOS 或 Mac 上的应用。尤其是标签的圆角

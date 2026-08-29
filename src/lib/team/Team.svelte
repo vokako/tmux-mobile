@@ -28,6 +28,12 @@
     addTeamMessageListener, removeTeamMessageListener,
     listSessionsWithPanes, fsCwd,
   } from '../core/ws.ts';
+
+  /** Team statuses that are IN MOTION — they wear the app-wide `.live-dot`
+      cue. Team's own vocabulary is wider than the Hub's four states (and its
+      `idle` means "present and ready", not "at rest"), so the set is listed
+      here rather than borrowed from hub.ts. */
+  const TEAM_LIVE = new Set(['thinking', 'working', 'hardworking']);
   import TeamTemplates from './TeamTemplates.svelte';
   import { teamSessionOf } from '../core/team.svelte.ts';
   import {
@@ -569,7 +575,7 @@
       <div class="team-header-scroll">
         {#each agents as a}
           <button class="roster-chip" onclick={() => previewAgent(a.name)} title={a.role || a.name}>
-            <span class="roster-dot status-{a.status}"></span>
+            <span class="roster-dot status-{a.status}" class:live-dot={TEAM_LIVE.has(a.status)}></span>
             <span class="roster-name">{a.name}</span>
           </button>
         {/each}
@@ -966,6 +972,12 @@
   .roster-dot.status-stalled     { background: var(--status-danger); }
   .roster-dot.status-sleeping    { background: var(--status-sleep); }
   .roster-dot.status-online      { background: var(--accent); }
+  /* The in-motion states wear the app-wide `.live-dot` cue (app.css: halo +
+     breathe). Only the halo's HUE is local — Team's vocabulary paints working
+     amber and hardworking orange, and a halo in a colour the dot is not would
+     be a second reading of the same state. */
+  .roster-dot.status-working     { --live-hue: var(--status-warn); }
+  .roster-dot.status-hardworking { --live-hue: var(--status-hot); }
 
   /* Collaboration graph panel (mobile only — toggled from the header button). */
   .collab-wrap { position: relative; flex-shrink: 0; background: var(--surface); border-bottom: 1px solid var(--border); }
