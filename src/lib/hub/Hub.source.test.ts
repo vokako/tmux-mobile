@@ -407,3 +407,12 @@ test('the drawer has a board partition, and the tap prefers it on desktop (board
   assert.match(source, /e\.target\?\.closest\?\.\('\.board-body'\)/u,
     'an Esc inside the partition belongs to the Board (the files-body territory rule)');
 });
+
+test('the header toggles read board, files, terminal — the owner-set order (2026-08-29)', () => {
+  const start = source.indexOf('<!-- The task board:');
+  const bar = source.slice(start, source.indexOf('{#if selected}', start));
+  const iBoard = bar.indexOf("name=\"layout\"");
+  const iFiles = bar.indexOf("name=\"files\"");
+  const iTerm = bar.indexOf("name=\"terminal\"");
+  assert.ok(iBoard >= 0 && iFiles > iBoard && iTerm > iFiles, 'board, then files, then terminal');
+});

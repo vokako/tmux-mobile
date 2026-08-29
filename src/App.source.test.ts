@@ -188,7 +188,8 @@ test('the phone’s tab bar has no Agents icon, and the swipe does not stop ther
   const touchTabs = source.match(/const t = \[\];[\s\S]*?return t;/u)?.[0] ?? '';
   assert.ok(touchTabs, 'the touch tab sequence must still be there');
   assert.doesNotMatch(touchTabs, /'agents'/u, 'agents is not a swipe stop on touch');
-  assert.match(touchTabs, /t\.push\('terminal'\)[\s\S]*?t\.push\('files'\)/u, 'the rest of the order is unchanged');
+  assert.match(touchTabs, /t\.push\('board'\)[\s\S]*?t\.push\('files'\)[\s\S]*?t\.push\('terminal'\)/u,
+    'the owner-set order: chat, board, files, terminal (2026-08-29)');
 });
 
 test('the desktop rail keeps Agents as a draggable page icon', () => {

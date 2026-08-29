@@ -1085,11 +1085,13 @@
     // config (owner, 2026-08-28: "手机下边的栏文件放到agent配置左侧吧").
     // Agents is NOT a stop here: on touch it is a Settings category, and a
     // swipe that reaches a page with no icon is a page you cannot get back to.
+    // Owner-set order (2026-08-29): chat, board, files, terminal — settings
+    // stays the row's last, non-cycling stop.
     const t = [];
     if (hubEligible) t.push('hub');
-    t.push('terminal');
-    t.push('files');
     if (hubEligible) t.push('board');
+    t.push('files');
+    t.push('terminal');
     return t;
   });
 
@@ -1415,18 +1417,16 @@
         <button tabindex="-1" class:active={page === 'hub'} onclick={() => switchTab('hub')}>
           <Icon name="chat" size={19} /><span>{t('hub')}</span>
         </button>
-      {/if}
-      <button tabindex="-1" class:active={page === 'terminal'} onclick={() => switchTab('terminal')}>
-        <Icon name="terminal" size={19} /><span>{t('terminal')}</span>
-      </button>
-      <button tabindex="-1" class:active={page === 'files'} onclick={() => switchTab('files')}>
-        <Icon name="files" size={19} /><span>{t('files')}</span>
-      </button>
-      {#if hubEligible}
         <button tabindex="-1" class:active={page === 'board'} onclick={() => switchTab('board')}>
           <Icon name="layout" size={19} /><span>{t('board')}</span>
         </button>
       {/if}
+      <button tabindex="-1" class:active={page === 'files'} onclick={() => switchTab('files')}>
+        <Icon name="files" size={19} /><span>{t('files')}</span>
+      </button>
+      <button tabindex="-1" class:active={page === 'terminal'} onclick={() => switchTab('terminal')}>
+        <Icon name="terminal" size={19} /><span>{t('terminal')}</span>
+      </button>
       <!-- No Agents icon here: on a phone the agent configuration is a CATEGORY
            OF SETTINGS (nav-state's agentsLivesInSettings), because this row had
            one tab too many (owner, 2026-08-29: "不用单独在底下一行展示了，现在

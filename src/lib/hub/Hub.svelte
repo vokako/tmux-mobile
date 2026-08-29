@@ -1923,12 +1923,16 @@
             <Icon name="stop" size={13} />
           </button>
         {/if}
-        <!-- THE terminal affordance: a button, not a permanent pane. Adding an
-             agent belongs to the roster row, and chat detail belongs to
-             Settings — a header is not a place to keep spare switches. -->
-        <button class="icon-btn term-toggle" class:on={termOpen && drawerView === 'term'} title={t('hubTerminal')} aria-label={t('hubTerminal')}
-          onclick={() => termOpen && drawerView === 'term' && !compact ? closeDrawer() : (drawerView = 'term', openDrawer())}>
-          <Icon name="terminal" size={14} />
+        <!-- The task board: on the phone this jumps to the board PAGE (owner,
+             2026-08-29: "board单独作为一个独立的功能的页面"); on desktop it is
+             the drawer's THIRD partition ("或者右侧边栏有这个任务侧边栏", same
+             day) — exactly the files toggle's split. -->
+        <button class="icon-btn term-toggle" class:on={termOpen && drawerView === 'board' && !compact} title={t('board')} aria-label={t('board')}
+          onclick={() => {
+            if (mobile || compact) { openBoardTab?.(selected); return; }
+            if (termOpen && drawerView === 'board') { closeDrawer(); } else { drawerView = 'board'; openDrawer(); }
+          }}>
+          <Icon name="layout" size={14} />
         </button>
         <!-- The drawer's second partition. On the phone (no drawer) the same
              button JUMPS to the Files tab — exactly what the terminal toggle
@@ -1941,16 +1945,12 @@
           }}>
           <Icon name="files" size={14} />
         </button>
-        <!-- The task board: on the phone this jumps to the board PAGE (owner,
-             2026-08-29: "board单独作为一个独立的功能的页面"); on desktop it is
-             the drawer's THIRD partition ("或者右侧边栏有这个任务侧边栏", same
-             day) — exactly the files toggle's split. -->
-        <button class="icon-btn term-toggle" class:on={termOpen && drawerView === 'board' && !compact} title={t('board')} aria-label={t('board')}
-          onclick={() => {
-            if (mobile || compact) { openBoardTab?.(selected); return; }
-            if (termOpen && drawerView === 'board') { closeDrawer(); } else { drawerView = 'board'; openDrawer(); }
-          }}>
-          <Icon name="layout" size={14} />
+        <!-- THE terminal affordance: a button, not a permanent pane. Adding an
+             agent belongs to the roster row, and chat detail belongs to
+             Settings — a header is not a place to keep spare switches. -->
+        <button class="icon-btn term-toggle" class:on={termOpen && drawerView === 'term'} title={t('hubTerminal')} aria-label={t('hubTerminal')}
+          onclick={() => termOpen && drawerView === 'term' && !compact ? closeDrawer() : (drawerView = 'term', openDrawer())}>
+          <Icon name="terminal" size={14} />
         </button>
       </div>
 
