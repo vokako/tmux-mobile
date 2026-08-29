@@ -20,6 +20,7 @@
   import { applyFontVars } from './lib/app/fonts.svelte.ts';
   import { normalizeUiZoom, stepUiZoom, UI_ZOOM_DEFAULT } from './lib/app/ui-zoom.ts';
   import { defaultPage, restorePage, retarget } from './lib/app/nav-state.ts';
+  import { RAIL_DRAG_THRESHOLD, RAIL_GAP, RAIL_ORDER_KEY, parseRailOrder, railDropAt, railDropIndex, railDropOffset, railOrderToStore, visibleRailSlots } from './lib/app/nav-order.ts';
   import { createReconnectMachine } from './lib/app/reconnect.ts';
   import { cycleItem, shortcutFromEvent } from './lib/app/shortcuts.ts';
   import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.ts';
@@ -932,9 +933,123 @@
     navPush();
     return () => window.removeEventListener('popstate', handler);
   });
+  // ── The rail's icon ORDER is the user's, and remembered ─────────────────
+  // Press a rail icon and drag it up or down (owner, 2026-08-29: "在桌面版的左
+  // 侧侧边栏 可以鼠标长按页面 icon 来调整上下顺序 这个顺序也会在客户端记录下
+  // 来"). DESKTOP RAIL ONLY: the phone's bottom bar is thumb geography rather
+  // than a preference, and press-and-drag is the gesture the terminal already
+  // spends on scrolling. The rules that regress silently — what a saved order
+  // may say, where a page a saved order never heard of goes, what a drop moves
+  // — are pure functions in lib/app/nav-order.ts with their own tests.
+  const RAIL_ITEMS = {
+    hub:      { icon: 'chat',     label: 'hub' },
+    terminal: { icon: 'terminal', label: 'terminal' },
+    files:    { icon: 'files',    label: 'files' },
+    board:    { icon: 'layout',   label: 'board' },
+    agents:   { icon: 'bot',      label: 'agentsTitle' },
+    prefs:    { icon: 'gear',     label: 'settings' },
+  };
+  let railOrder = $state(parseRailOrder(localStorage.getItem(RAIL_ORDER_KEY)));
+  // Only what is AVAILABLE is rendered, but the order keeps every page: hub /
+  // board / agents need the server bus, and a page the bus turned off must come
+  // back where the user put it rather than at the default position.
+  let railSlots = $derived(visibleRailSlots(
+    railOrder,
+    (p) => (p === 'hub' || p === 'board' || p === 'agents' ? hubEligible : true),
+  ));
+  /** The live drag: null, or the carried slot plus the geometry snapshotted at
+   *  drag start. Snapshotted because the carried icon moves by `transform`,
+   *  which reflows nothing — re-measuring mid-drag could only add jitter. */
+  let railDrag = $state(null);
+  let railPress = null;        // pre-threshold bookkeeping; deliberately not reactive
+  let railClickGuard = false;  // a drag must not ALSO switch pages on release
+
+  function setRailOrder(next) {
+    railOrder = next;
+    const raw = railOrderToStore(next);
+    if (raw) localStorage.setItem(RAIL_ORDER_KEY, raw);
+    else localStorage.removeItem(RAIL_ORDER_KEY);
+  }
+  function railPointerDown(e, slot) {
+    if (e.button !== 0 || e.pointerType === 'touch') return;
+    // Cleared on every fresh press, so a guard left behind by a drag whose
+    // click never arrived cannot swallow the NEXT click.
+    railClickGuard = false;
+    railPress = { slot, y: e.clientY, el: e.currentTarget };
+    // Captured at once so a fast drag off the 34px button keeps reporting here
+    // instead of to whatever it passes over.
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+  function railPointerMove(e) {
+    if (!railPress) return;
+    const dy = e.clientY - railPress.y;
+    if (!railDrag) {
+      // A press that moves a few px is a CLICK — mouse jitter must not reorder
+      // the rail, and switching pages is what the icon is for almost always.
+      if (Math.abs(dy) < RAIL_DRAG_THRESHOLD) return;
+      const nav = railPress.el.closest('.rail');
+      if (!nav) return;
+      railDrag = {
+        slot: railPress.slot,
+        dy,
+        navTop: nav.getBoundingClientRect().top,
+        rects: [...nav.querySelectorAll('[data-rail-slot]')].map((el) => {
+          const r = el.getBoundingClientRect();
+          return { slot: el.dataset.railSlot, top: r.top, bottom: r.bottom };
+        }),
+        idx: 0,
+      };
+    }
+    railDrag.dy = dy;
+    railDrag.idx = railDropIndex(railDrag.rects, e.clientY);
+  }
+  function railPointerUp() {
+    if (railDrag) {
+      // Committed with the SAME index the insertion line was drawn from, so
+      // the icon can only land where the line said it would.
+      setRailOrder(railDropAt(railOrder, railDrag.slot, railDrag.rects, railDrag.idx));
+      railClickGuard = true;
+    }
+    railPress = null;
+    railDrag = null;
+  }
+  /** Abandon a drag without reordering — and still swallow the click, because
+   *  the pointer travelled: the user was dragging, not picking a page. */
+  function railCancelDrag() {
+    if (railDrag) railClickGuard = true;
+    railPress = null;
+    railDrag = null;
+  }
+  function railActivate(slot) {
+    if (railClickGuard) { railClickGuard = false; return; }
+    if (slot === 'prefs') togglePrefs();
+    else switchTab(slot);
+  }
+  // Escape abandons a drag and a resize invalidates its snapshotted rects —
+  // the same dismissal contract every transient layer here follows. The
+  // window-level pointerup is a safety net: if the captured button stops
+  // existing mid-drag (the bus dropping hides three icons), the nav never sees
+  // the release and a carried icon would be stranded on screen.
+  $effect(() => {
+    if (!railDrag) return;
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); railCancelDrag(); } };
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('resize', railCancelDrag);
+    window.addEventListener('pointerup', railPointerUp, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('resize', railCancelDrag);
+      window.removeEventListener('pointerup', railPointerUp, true);
+    };
+  });
+
   // Swipe left/right to switch tabs with slide animation
   const tabs = $derived(() => {
-    // Same order as the tab bar and the rail: files sits LEFT of the agent
+    // On DESKTOP the rail IS the order, so keyboard previous/next page follows
+    // the icons the user arranged rather than a second, hidden sequence. The
+    // gap is not a page and the gear is not a cycle stop (it toggles).
+    if (!layout.isTouchDevice) return railSlots.filter((s) => s !== RAIL_GAP && s !== 'prefs');
+    // Same order as the tab bar: files sits LEFT of the agent
     // config (owner, 2026-08-28: "手机下边的栏文件放到agent配置左侧吧").
     const t = [];
     if (hubEligible) t.push('hub');
@@ -1037,25 +1152,44 @@
       </div>
     </nav>
   {:else if !layout.isTouchDevice}
-    <nav class="rail">
-      <img class="rail-brand" src={iconSrc} alt="" width="26" height="26" />
-      {#if hubEligible}
-        <button tabindex="-1" class="rail-btn" class:active={page === 'hub'} title={t('hub')} onclick={() => switchTab('hub')}><Icon name="chat" size={17} /></button>
+    <!-- The icons are the USER's order (railOrder → nav-order.ts), so this is a
+         list rather than six hardcoded buttons. The brand is not part of it: it
+         is the app's mark, not a page. The gap between the two shipped groups —
+         where you WORK above, where you CONFIGURE below (owner, 2026-08-19) —
+         is a MEMBER of the order, so it moves as icons move around it and a
+         drag across it is an ordinary drop instead of a silent refusal. -->
+    <nav
+      class="rail"
+      class:reordering={!!railDrag}
+      onpointermove={railPointerMove}
+      onpointerup={railPointerUp}
+      onpointercancel={railCancelDrag}
+    >
+      <img class="rail-brand" src={iconSrc} alt="" width="26" height="26" draggable="false" />
+      {#each railSlots as slot (slot)}
+        {#if slot === RAIL_GAP}
+          <div class="rail-spacer" data-rail-slot={slot}></div>
+        {:else}
+          <button
+            tabindex="-1"
+            class="rail-btn"
+            class:active={page === slot}
+            class:dragging={railDrag?.slot === slot}
+            data-rail-slot={slot}
+            title={t(RAIL_ITEMS[slot].label)}
+            style:transform={railDrag?.slot === slot ? `translateY(${railDrag.dy}px)` : null}
+            onpointerdown={(e) => railPointerDown(e, slot)}
+            onclick={() => railActivate(slot)}
+          ><Icon name={RAIL_ITEMS[slot].icon} size={17} /></button>
+        {/if}
+      {/each}
+      {#if railDrag}
+        <div
+          class="rail-drop"
+          style:top="{(railDropOffset(railDrag.rects, railDrag.idx) ?? railDrag.navTop) - railDrag.navTop}px"
+          aria-hidden="true"
+        ></div>
       {/if}
-
-      <button tabindex="-1" class="rail-btn" class:active={page === 'terminal'} title={t('terminal')} onclick={() => switchTab('terminal')}><Icon name="terminal" size={17} /></button>
-      <button tabindex="-1" class="rail-btn" class:active={page === 'files'} title={t('files')} onclick={() => switchTab('files')}><Icon name="files" size={17} /></button>
-        {#if hubEligible}<button tabindex="-1" class="rail-btn" class:active={page === 'board'} title={t('board')} onclick={() => switchTab('board')}><Icon name="layout" size={17} /></button>{/if}
-      <div class="rail-spacer"></div>
-      <!-- Agent definitions sit with Settings, not with the workspaces: the top
-           group is where you WORK (a conversation, a terminal, files), while
-           these two are where you CONFIGURE what you work with (owner,
-           2026-08-19). Agents stays above the gear because it is the narrower
-           of the two. -->
-      {#if hubEligible}
-        <button tabindex="-1" class="rail-btn" class:active={page === 'agents'} title={t('agentsTitle')} onclick={() => switchTab('agents')}><Icon name="bot" size={17} /></button>
-      {/if}
-      <button tabindex="-1" class="rail-btn" class:active={page === 'prefs'} title={t('settings')} onclick={togglePrefs}><Icon name="gear" size={17} /></button>
     </nav>
   {/if}
 
@@ -1384,6 +1518,27 @@
   .rail-btn:hover { color: var(--text); background: var(--surface2); }
   .rail-btn.active { color: var(--accent); background: var(--accent-bg); }
   .rail-spacer { flex: 1; }
+
+  /* Reordering the rail. Two cues, because one is not enough to say both WHAT
+     is moving and WHERE it lands: the pressed icon is CARRIED (it follows the
+     pointer by transform, which reflows nothing, so the drop geometry stays the
+     rects snapshotted at drag start) and wears the accent selection it already
+     uses for "active"; the insertion point is an accent LINE on the edge the
+     icon would push down. Hover is suppressed on the icons it passes over —
+     mid-drag, a highlight under the cursor reads as a second selection. */
+  .rail.reordering { cursor: grabbing; user-select: none; }
+  .rail.reordering .rail-btn { cursor: grabbing; }
+  .rail.reordering .rail-btn:not(.dragging):hover { color: var(--text3); background: none; }
+  .rail-btn.dragging {
+    color: var(--accent); background: var(--accent-bg);
+    position: relative; z-index: 2;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  }
+  .rail-drop {
+    position: absolute; left: 7px; right: 7px; height: 2px;
+    background: var(--accent); border-radius: 1px;
+    z-index: 1; pointer-events: none;
+  }
   main.with-rail { padding-left: 46px; }
 
   /* Connected mobile: bottom tab bar in thumb reach. Hidden while the
