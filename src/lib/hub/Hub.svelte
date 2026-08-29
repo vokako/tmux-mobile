@@ -3203,6 +3203,14 @@
     border-top: 1px solid var(--border2); background: color-mix(in srgb, var(--bg) 92%, transparent);
     box-shadow: 0 -8px 28px rgba(0,0,0,0.05);
     -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    /* ONE stacking context for the whole composer, above every layer the FEED
+       makes (pinned .ask-top/.ask-bottom at 6, the action overlay at 8): its
+       popovers — the recipient menu and the / palette — open UPWARD over the
+       feed, and without this the .to-wrap wrapper's own level (2) CAPPED the
+       menu below a pinned bubble (board #1, owner: "应该在钉住的消息图层上方…
+       新弹出的选项都应该优先级高于已有的组件"). Inner levels keep ordering
+       INSIDE the composer; this decides composer-vs-feed once. */
+    position: relative; z-index: 15;
   }
   .compose-shell {
     flex: 1; min-width: 0; position: relative;

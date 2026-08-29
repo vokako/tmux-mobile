@@ -27,6 +27,29 @@ const source = await readFile(new URL('./Hub.svelte', import.meta.url), 'utf8');
 const rule = (selector: string) =>
   source.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`, 'u'))?.[1] ?? '';
 
+test('the composer stacks above every feed layer, so its popovers are never buried', () => {
+  // Board #1: the recipient menu opened UNDER a pinned bubble — .to-wrap's own
+  // z-index:2 capped it below .ask-top's 6. The rule is decided ONCE at the
+  // composer: it is a stacking context whose level beats the feed's layers
+  // (pinned 6, actions overlay 8), so anything opening out of it — the
+  // recipient menu, the / palette — wins without per-popover arithmetic.
+  // `rule('.composer')` would find `.hub-root.compact .composer` first, so
+  // anchor on the base declaration at the start of its own line.
+  const composer = /\n  \.composer \{([^}]*)\}/u.exec(source)?.[1] ?? '';
+  assert.match(composer, /position:\s*relative/u, 'the composer must be positioned to form a stacking context');
+  const z = (css: string) => Number(/z-index:\s*(\d+)/u.exec(css)?.[1] ?? NaN);
+  const composerZ = z(composer);
+  assert.ok(Number.isFinite(composerZ), 'the composer carries an explicit z-index');
+  for (const sel of ['.msg.ask-top', '.msg.ask-bottom']) {
+    const feedZ = z(rule(sel));
+    assert.ok(Number.isFinite(feedZ), `${sel} still declares a z-index`);
+    assert.ok(composerZ > feedZ, `composer (${composerZ}) must stack above ${sel} (${feedZ})`);
+  }
+  // And inside the composer the palette must stay above the recipient menu —
+  // both exist in the same context; the palette is the newer layer.
+  assert.ok(z(rule('.cmd-menu')) > z(rule('.to-menu')), 'palette above recipient menu inside the composer');
+});
+
 test('the argument is wrapped in its own scroller, beside the name and the time', () => {
   // The markup IS the guarantee: text inside .st-scroll, name and time outside it.
   assert.match(
