@@ -581,7 +581,7 @@
   .file-row {
     display: flex; align-items: center; gap: 8px; padding: 4px 10px;
     background: none; border: none; cursor: pointer; text-align: left;
-    font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text2);
+    font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text);
     transition: background var(--t-fast), color var(--t-fast);
     -webkit-tap-highlight-color: transparent;
   }
@@ -590,13 +590,13 @@
   .f-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .f-size { margin-left: auto; flex: none; color: var(--text3); font-size: var(--fs-micro); }
   .placeholder { flex: 1; display: grid; place-items: center; }
-  .hint { color: var(--text3); font-size: var(--fs-ui); margin: 0; line-height: 1.6; max-width: 420px; }
+  .hint { color: var(--text3); font-size: var(--fs-meta); margin: 0; line-height: 1.5; max-width: 420px; }
   /* Description at rest: the text itself, whole and wrapped; the wash on
      hover says "tap to edit" without drawing an input around reading. */
   .desc-view {
     background: none; border: 1px solid transparent; border-radius: var(--ui-radius-control);
     padding: 6px 8px; margin: 0; text-align: left; cursor: text;
-    font: inherit; font-size: var(--fs-ui); color: var(--text2); line-height: 1.55;
+    font: inherit; font-size: var(--fs-ui); color: var(--text); line-height: 1.55;
     white-space: pre-wrap; overflow-wrap: anywhere;
     transition: background var(--t-fast), border-color var(--t-fast);
     -webkit-tap-highlight-color: transparent;
@@ -609,7 +609,11 @@
      names it (the dialog dialect's .dlg-note voice). fs-ui labels over
      fs-body inputs were the page reading a size too big everywhere
      (owner, 2026-08-24: "很多字号有点大很奇怪，也和页面风格不符"). */
-  label { display: flex; flex-direction: column; gap: 4px; color: var(--text3); font-size: var(--fs-sub); }
+  /* The Settings grammar (the owner's reference): a full-ink 600-weight
+     title leads each field, hints are --fs-meta grey UNDER it, values are
+     full ink. One grey for everything left nothing leading. */
+  label { display: flex; flex-direction: column; gap: 4px; color: var(--text); font-size: var(--fs-ui); font-weight: 600; }
+  label > input, label > textarea, label > .desc-view { font-weight: 400; }
   /* The dense field dialect (Team's template editor / the shared Select's
      `dense`), so every box in the form is ONE species at ONE size. */
   input, textarea { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: var(--ui-radius-control); color: var(--text); padding: 6px 9px; font-size: var(--fs-ui); outline: none; font-family: inherit; }
@@ -619,7 +623,7 @@
   textarea.mono { font-family: ui-monospace, Menlo, monospace; }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .pick-block { display: flex; flex-direction: column; gap: 6px; }
-  .pick-label { color: var(--text3); font-size: var(--fs-sub); }
+  .pick-label { color: var(--text); font-size: var(--fs-ui); font-weight: 600; }
   .pick-row { display: flex; flex-wrap: wrap; gap: 6px; }
   .pick {
     display: flex; align-items: center; gap: 5px;
@@ -633,7 +637,7 @@
   .file-pre {
     margin: 0; padding: 8px 10px; overflow: auto; max-height: 60vh;
     font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub);
-    color: var(--text2); background: var(--code-bg, var(--surface));
+    color: var(--text); background: var(--code-bg, var(--surface));
     border-radius: var(--ui-radius-control); white-space: pre;
   }
   .md-doc {
