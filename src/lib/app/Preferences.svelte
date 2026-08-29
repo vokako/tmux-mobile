@@ -11,6 +11,7 @@
   import { SHORTCUT_DEFAULTS, shortcutFromEvent, shortcutLabel, type ShortcutAction } from './shortcuts.ts';
   import { shortcuts } from './shortcuts.svelte.ts';
   import { agentHooksInstall, agentHooksRemove, agentHooksStatus } from '../core/ws.ts';
+  import AgentsPage from '../hub/AgentsPage.svelte';
 
   let {
     connected = false,
@@ -34,6 +35,9 @@
     onShare = () => {},
     onGoBack = null,
     onDrill = () => {},
+    showAgents = false,
+    agentsEditRequest = null,
+    openRequest = null,
     onAddress = () => {},
     onDisconnect = () => {},
     onConnectionSetup = () => {},
@@ -59,6 +63,16 @@
     onShare?: () => void;
     onGoBack?: ((fn: () => boolean) => void) | null;
     onDrill?: () => void;
+    /** Touch only: the agent configuration is a CATEGORY here rather than a page
+     *  of its own (nav-state's agentsLivesInSettings). The desktop rail keeps
+     *  its own Agents page, so this stays false there. */
+    showAgents?: boolean;
+    /** Forwarded to the embedded AgentsPage: the Hub's "configure agent" jump. */
+    agentsEditRequest?: { name: string; n: number } | null;
+    /** A one-shot "open this category" request — `{ tab, n }`, the same shape
+     *  the Files/Agents deep links use. Restoring a saved `agents` page on a
+     *  phone lands here. */
+    openRequest?: { tab: string; n: number } | null;
     onAddress?: (address: string) => void;
     onDisconnect?: () => void;
     onConnectionSetup?: () => void;
@@ -66,16 +80,22 @@
 
   const TAB_KEY = 'tmux_settings_tab';
   const storedTab = localStorage.getItem(TAB_KEY);
-  const validStoredTab = storedTab === 'connection' || storedTab === 'shortcuts';
+  const validStoredTab = storedTab === 'connection' || storedTab === 'shortcuts' || storedTab === 'agents';
   const initialTab = validStoredTab ? storedTab : 'appearance';
   let tab = $state<string>(initialTab);
   if (storedTab && storedTab !== initialTab) localStorage.setItem(TAB_KEY, initialTab);
   // No icons on the category rows (owner, 2026-08-25: "三个子页面就不要图标
   // 了，不好看") — the words carry it, like the Chat sidebar's project rows.
+  //
+  // Agents is a category only where it is not a page: on a phone the bottom bar
+  // had one icon too many (owner, 2026-08-29), so the agent configuration moved
+  // in here — as the REAL AgentsPage embedded below, never a second copy of it.
+  // It sits before Connection, which stays last as the way out.
   const tabs = $derived([
     { id: 'appearance', label: () => t('settingsAppearance') },
     { id: 'terminal', label: () => t('settingsTerminal') },
     ...(showShortcuts ? [{ id: 'shortcuts', label: () => t('settingsShortcuts') }] : []),
+    ...(showAgents ? [{ id: 'agents', label: () => t('agentsTitle') }] : []),
     { id: 'connection', label: () => t('settingsConnection') },
   ]);
   const shortcutActions: [ShortcutAction, string][] = [
@@ -103,10 +123,29 @@
   let hookBusy = $state(false);
   let hookError = $state('');
   let hookLoaded = false;
+  /** The embedded AgentsPage's own back chain, and whether it is showing an
+   *  editor (which brings its own page head). */
+  let agentsBack: (() => boolean) | null = null;
+  let agentsDrilled = $state(false);
 
   $effect(() => {
     if (!showShortcuts && tab === 'shortcuts') selectTab('appearance');
+    // A restored `agents` category on a device that has no such category (the
+    // desktop, where it is a page, or a server with no bus) must not leave the
+    // pane blank. Assigned rather than selectTab'd: this is a correction, and
+    // selectTab would DRILL into a category the user never tapped.
+    if (!showAgents && tab === 'agents') { tab = 'appearance'; localStorage.setItem(TAB_KEY, tab); }
     if (connected && tab === 'connection' && !hookLoaded) loadHookStatus();
+  });
+
+  // A one-shot open request (restoring a saved `agents` page on a phone lands
+  // here). Tracked by `n` so the same category can be re-opened later.
+  let openedRequest = 0;
+  $effect(() => {
+    const req = openRequest;
+    if (!req || req.n === openedRequest) return;
+    openedRequest = req.n;
+    if (tabs.some((x) => x.id === req.tab)) selectTab(req.tab);
   });
 
   async function loadHookStatus() {
@@ -161,6 +200,10 @@
   function closeCat() { catOpen = false; drillAnim = 'back'; drillPushed = false; }
   $effect(() => {
     onGoBack?.(() => {
+      // The embedded AgentsPage peels its OWN layers first (delete dialog, then
+      // an open editor) — the same order it uses as a page. Only when it has
+      // nothing left does back close the category, and only then the page.
+      if (tab === 'agents' && agentsBack?.()) return true;
       if (catOpen && isCompact()) { closeCat(); return true; }
       return false;
     });
@@ -212,16 +255,35 @@
     </div>
   </aside>
   <div class="pref-shell">
-    <div class="page-head">
-      <!-- Compact only: the way back to the category list (the back gesture
-           does the same through onGoBack). -->
-      <button class="icon-btn back" title={t('settings')} aria-label={t('settings')}
-        onclick={() => drillPushed ? history.back() : closeCat()}>
-        <Icon name="chevron-left" size={15} />
-      </button>
-      <h1>{tabs.find((x) => x.id === tab)?.label() ?? t('settings')}</h1>
-    </div>
+    <!-- The embedded AgentsPage brings its OWN page head once it opens an
+         editor, so Settings yields its head there — two stacked title bars is
+         most of a phone's first screenful. -->
+    {#if !(tab === 'agents' && agentsDrilled)}
+      <div class="page-head">
+        <!-- Compact only: the way back to the category list (the back gesture
+             does the same through onGoBack). -->
+        <button class="icon-btn back" title={t('settings')} aria-label={t('settings')}
+          onclick={() => drillPushed ? history.back() : closeCat()}>
+          <Icon name="chevron-left" size={15} />
+        </button>
+        <h1>{tabs.find((x) => x.id === tab)?.label() ?? t('settings')}</h1>
+      </div>
+    {/if}
 
+    {#if tab === 'agents'}
+      <!-- The REAL agent configuration page, not a copy of it: on a phone it is
+           already a single column (its list is the screen, an editor takes it
+           over), which is exactly the shape a Settings category needs. Its back
+           chain is spliced into this page's above. -->
+      <div class="agents-embed">
+        <AgentsPage
+          visible={tab === 'agents'}
+          editRequest={agentsEditRequest}
+          onGoBack={(fn: () => boolean) => agentsBack = fn}
+          onDrilled={(d: boolean) => agentsDrilled = d}
+        />
+      </div>
+    {:else}
     <div class="pref-content">
       {#if tab === 'appearance'}
         <div class="setting-card">
@@ -386,6 +448,7 @@
         {#if connected}<button class="disconnect" onclick={onDisconnect}>{t('disconnect')}</button>{/if}
       {/if}
     </div>
+    {/if}
   </div>
 </section>
 
@@ -424,6 +487,10 @@
     .preferences.drill-fwd .pref-shell, .preferences.drill-back .sidebar { animation: none; }
   }
   .pref-content { flex:1;min-width:0;overflow:auto;padding:14px clamp(12px,3vw,24px); }
+  /* The embedded AgentsPage is a PAGE (its root is height:100%), so it takes the
+     shell's remaining height instead of living inside a padded, scrolling pane —
+     it brings its own list scroller and its own editor. */
+  .agents-embed { flex: 1; min-width: 0; min-height: 0; }
   .setting-card { max-width:720px;margin:0 auto;border:1px solid var(--border2);border-radius:var(--ui-radius-panel);background:var(--surface);overflow:hidden; }
   .setting-row { min-height:52px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:16px; }
   .setting-row+.setting-row { border-top:1px solid var(--border2); } .setting-row>div:first-child{display:flex;flex-direction:column;gap:4px;min-width:0;}

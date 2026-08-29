@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PAGES, defaultPage, restorePage, retarget } from './nav-state.ts';
+import { PAGES, agentsLivesInSettings, defaultPage, restoreNav, restorePage, retarget } from './nav-state.ts';
 
 test('a saved tab is restored, and only a known one', () => {
   for (const p of PAGES) {
@@ -33,4 +33,35 @@ test('retarget follows a renamed session, and only that session', () => {
     ['', 'old', 'new'], ['old:1.0', '', 'new'], ['old:1.0', 'old', ''], ['old:1.0', 'x', 'x'],
   ];
   for (const [target, from, to] of noops) assert.equal(retarget(target, from, to), target);
+});
+
+test('Agents is a Settings category on touch, a page on the desktop', () => {
+  // One definition, because four places must agree or the page becomes
+  // unreachable in one of them: the tab bar, the swipe order, the Settings
+  // category list, and the Hub's "configure agent" jump.
+  assert.equal(agentsLivesInSettings(true), true, 'a phone reaches it through Settings');
+  assert.equal(agentsLivesInSettings(false), false, 'the desktop rail keeps it as a page');
+});
+
+test('a saved `agents` comes back as Settings on touch, never as a stranded page', () => {
+  // On touch the icon is gone from the bottom bar and the swipe skips it, so a
+  // saved 'agents' would restore a page with no way in and no way out.
+  assert.deepEqual(restoreNav('agents', true), { page: 'prefs', settingsTab: 'agents' });
+  // On the desktop it is still a page with its own draggable rail icon.
+  assert.deepEqual(restoreNav('agents', false), { page: 'agents', settingsTab: null });
+});
+
+test('restoreNav is restorePage everywhere else, on both devices', () => {
+  for (const p of PAGES) {
+    if (p === 'agents') continue;
+    assert.deepEqual(restoreNav(p, true), { page: restorePage(p, true), settingsTab: null }, `${p} on a phone`);
+    assert.deepEqual(restoreNav(p, false), { page: restorePage(p, false), settingsTab: null }, `${p} on a desktop`);
+  }
+  for (const bad of [undefined, null, '', 'Agents', 'crew', 42, {}, ['agents']]) {
+    assert.deepEqual(restoreNav(bad, true), { page: 'terminal', settingsTab: null }, `${JSON.stringify(bad)} on a phone`);
+    assert.deepEqual(restoreNav(bad, false), { page: 'hub', settingsTab: null }, `${JSON.stringify(bad)} on a desktop`);
+  }
+  // 'agents' is still a real page name — the redirect is about the DEVICE, not
+  // about retiring the page (the rail needs it).
+  assert.ok((PAGES as readonly string[]).includes('agents'));
 });

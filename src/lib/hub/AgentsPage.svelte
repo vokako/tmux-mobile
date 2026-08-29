@@ -27,7 +27,7 @@
     grok: ['low', 'medium', 'high', 'xhigh'],
   };
 
-  let { visible = false, onGoBack = null, editRequest = null } = $props();
+  let { visible = false, onGoBack = null, editRequest = null, onDrilled = null } = $props();
 
   let defs = $state([]);
   let skills = $state([]);      // central skill assets
@@ -60,6 +60,10 @@
     // enters from the right, the list re-enters from the left — derived from
     // the one compound flag so every open/close path animates alike.
     if (drilled !== wasDrilled) { drillAnim = drilled ? 'fwd' : 'back'; wasDrilled = drilled; }
+    // An EMBEDDING host needs the same flag: mounted as a Settings category on
+    // a phone, this page's editor brings its own `.page-head`, so Settings has
+    // to drop its own or the screen wears two stacked title bars.
+    onDrilled?.(drilled);
     if (!onGoBack) return;
     onGoBack(() => {
       if (pending && !removing) { pending = null; return true; }

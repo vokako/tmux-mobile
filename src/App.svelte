@@ -19,7 +19,7 @@
   import { teamState } from './lib/core/team.svelte.ts';
   import { applyFontVars } from './lib/app/fonts.svelte.ts';
   import { normalizeUiZoom, stepUiZoom, UI_ZOOM_DEFAULT } from './lib/app/ui-zoom.ts';
-  import { defaultPage, restorePage, retarget } from './lib/app/nav-state.ts';
+  import { agentsLivesInSettings, defaultPage, restoreNav, retarget } from './lib/app/nav-state.ts';
   import { RAIL_DRAG_THRESHOLD, RAIL_GAP, RAIL_ORDER_KEY, parseRailOrder, railDropAt, railDropIndex, railDropOffset, railOrderToStore, visibleRailSlots } from './lib/app/nav-order.ts';
   import { createReconnectMachine } from './lib/app/reconnect.ts';
   import { cycleItem, shortcutFromEvent } from './lib/app/shortcuts.ts';
@@ -80,6 +80,13 @@
     if (page === 'sessions') page = 'terminal';
     // Same for the Hub: it needs the bus. Only redirect once the probe answered.
     if ((page === 'hub' || page === 'agents' || page === 'board') && teamState.probed && !teamState.available) page = 'terminal';
+    // On touch the agent configuration is a Settings CATEGORY, so `agents` as a
+    // page has no tab icon and no swipe stop — whatever route set it (a saved
+    // state, a deep link, an older build), it becomes Settings opened there.
+    if (page === 'agents' && agentsLivesInSettings(layout.isTouchDevice)) {
+      page = 'prefs';
+      prefsOpenReq = { tab: 'agents', n: ++prefsOpenSeq };
+    }
   });
 
   // ─── Split-screen (desktop + wide only) ────────────────────────────────
@@ -878,8 +885,12 @@
           }
         }
         // The tab is restored whether or not a terminal came with it; only an
-        // unknown name falls back to the device default.
-        page = restorePage(s.page, layout.isTouchDevice);
+        // unknown name falls back to the device default. On touch a saved
+        // `agents` resolves to Settings opened at its Agents category — there is
+        // no Agents tab to land on there.
+        const nav = restoreNav(s.page, layout.isTouchDevice);
+        page = nav.page;
+        if (nav.settingsTab) prefsOpenReq = { tab: nav.settingsTab, n: ++prefsOpenSeq };
       } catch { page = defaultPage(layout.isTouchDevice); }
     }).catch(() => {
       clearTimeout(timeout);
@@ -895,6 +906,26 @@
   // A request from the Hub's agent menu to open one agent's CONFIG editor:
   // {name, n} — n increments so asking for the same agent twice still fires.
   let agentsEditReq = $state(null);
+  // A one-shot "open this Settings category" request, same {tab, n} shape. The
+  // sequence is a plain counter, NOT read back off the state: one of the writers
+  // is the page-redirect $effect, and reading the state it writes would make
+  // that effect depend on itself.
+  let prefsOpenSeq = 0;
+  let prefsOpenReq = $state(null);
+  /** The ONE way into the agent configuration, wherever it lives on this device:
+   *  a page of its own on the desktop rail, a Settings category on a phone
+   *  (nav-state's agentsLivesInSettings). Every caller — the Hub's "configure
+   *  agent" item and the restore path — goes through here, so the two devices
+   *  cannot drift apart. */
+  function openAgentsConfig(name = null) {
+    if (name) agentsEditReq = { name, n: (agentsEditReq?.n ?? 0) + 1 };
+    if (agentsLivesInSettings(layout.isTouchDevice)) {
+      prefsOpenReq = { tab: 'agents', n: ++prefsOpenSeq };
+      if (page !== 'prefs') togglePrefs();
+    } else {
+      switchTab('agents');
+    }
+  }
   let boardGoBack = $state(null);
 
   function navPush() { history.pushState({ app: true }, ''); }
@@ -1051,12 +1082,13 @@
     if (!layout.isTouchDevice) return railSlots.filter((s) => s !== RAIL_GAP && s !== 'prefs');
     // Same order as the tab bar: files sits LEFT of the agent
     // config (owner, 2026-08-28: "手机下边的栏文件放到agent配置左侧吧").
+    // Agents is NOT a stop here: on touch it is a Settings category, and a
+    // swipe that reaches a page with no icon is a page you cannot get back to.
     const t = [];
     if (hubEligible) t.push('hub');
     t.push('terminal');
     t.push('files');
     if (hubEligible) t.push('board');
-    if (hubEligible) t.push('agents');
     return t;
   });
 
@@ -1220,10 +1252,14 @@
            switches. Desktop-eligible only (needs width + the bus): mobile
            keeps the tab layout untouched. -->
       <div class="page-layer" class:hidden={page !== 'hub'}>
-        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onSelectSession={(s) => { if (s) filesSession = s; }} onGoBack={(fn) => hubGoBack = fn} openAgentConfig={(name) => { agentsEditReq = { name, n: (agentsEditReq?.n ?? 0) + 1 }; switchTab('agents'); }} openFilesTab={(s, path) => { if (s) filesSession = s; if (path) filesNavReq = { path, n: (filesNavReq?.n ?? 0) + 1 }; switchTab('files'); }} openBoardTab={(s) => { if (s) filesSession = s; switchTab('board'); }} />
+        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onSelectSession={(s) => { if (s) filesSession = s; }} onGoBack={(fn) => hubGoBack = fn} openAgentConfig={(name) => openAgentsConfig(name)} openFilesTab={(s, path) => { if (s) filesSession = s; if (path) filesNavReq = { path, n: (filesNavReq?.n ?? 0) + 1 }; switchTab('files'); }} openBoardTab={(s) => { if (s) filesSession = s; switchTab('board'); }} />
       </div>
     {/if}
-    {#if hubEligible}
+    <!-- The Agents PAGE exists where Agents is a page: the desktop rail. On
+         touch the only instance is the one Settings embeds, so this layer is not
+         mounted there — two live copies would both load and both claim a back
+         chain. -->
+    {#if hubEligible && !agentsLivesInSettings(layout.isTouchDevice)}
       <div class="page-layer" class:hidden={page !== 'agents'}>
         <AgentsPage visible={page === 'agents'} onGoBack={(fn) => agentsGoBack = fn} editRequest={agentsEditReq} />
       </div>
@@ -1241,6 +1277,9 @@
       onShare={shareConnectionLink}
       onGoBack={(fn) => prefsGoBack = fn}
       onDrill={() => navPush()}
+      showAgents={hubEligible && agentsLivesInSettings(layout.isTouchDevice)}
+      agentsEditRequest={agentsEditReq}
+      openRequest={prefsOpenReq}
       onAddress={(address) => {
         localStorage.setItem('tmux_address', address);
         activeAddress = address;
@@ -1387,11 +1426,10 @@
           <Icon name="layout" size={19} /><span>{t('board')}</span>
         </button>
       {/if}
-      {#if hubEligible}
-        <button tabindex="-1" class:active={page === 'agents'} onclick={() => switchTab('agents')}>
-          <Icon name="bot" size={19} /><span>{t('agentsTitle')}</span>
-        </button>
-      {/if}
+      <!-- No Agents icon here: on a phone the agent configuration is a CATEGORY
+           OF SETTINGS (nav-state's agentsLivesInSettings), because this row had
+           one tab too many (owner, 2026-08-29: "不用单独在底下一行展示了，现在
+           看着有点多底下的标签"). The desktop rail keeps it as a page. -->
       <button tabindex="-1" class:active={page === 'prefs'} onclick={togglePrefs}>
         <Icon name="gear" size={19} /><span>{t('settings')}</span>
       </button>

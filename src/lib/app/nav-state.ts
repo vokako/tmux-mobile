@@ -28,6 +28,42 @@ export function restorePage(saved: unknown, isTouchDevice: boolean): Page {
 }
 
 /**
+ * Whether the agent configuration is a CATEGORY OF SETTINGS rather than a page
+ * of its own — true on touch devices (owner, 2026-08-29: "手机上的 Agent 设置
+ * 页面应该归到 settings 里边的一个子页面，不用单独在底下一行展示了，现在看着
+ * 有点多底下的标签").
+ *
+ * One definition, because four places have to agree or the page becomes
+ * unreachable in one of them: the bottom tab bar (no icon), the swipe order (not
+ * a stop), the Settings category list (a row), and the Hub's "configure agent"
+ * jump. The desktop rail is untouched — there Agents is a page with its own
+ * draggable icon.
+ */
+export function agentsLivesInSettings(isTouchDevice: boolean): boolean {
+  return isTouchDevice;
+}
+
+/** A Settings category that a saved page name resolves into, or null. */
+export type SettingsCategory = 'agents';
+
+/**
+ * Restoring navigation, which is not always restoring a PAGE: on touch,
+ * `agents` names a page that has no way in and no way out — no tab icon, no
+ * swipe stop — so a saved `agents` (an older build, or the same profile opened
+ * on a phone) must come back as Settings opened at its Agents category rather
+ * than as a page layer nobody can leave.
+ */
+export function restoreNav(
+  saved: unknown,
+  isTouchDevice: boolean,
+): { page: Page; settingsTab: SettingsCategory | null } {
+  if (saved === 'agents' && agentsLivesInSettings(isTouchDevice)) {
+    return { page: 'prefs', settingsTab: 'agents' };
+  }
+  return { page: restorePage(saved, isTouchDevice), settingsTab: null };
+}
+
+/**
  * Retarget a `session:window.pane` reference after its session was renamed.
  *
  * A project rename renames the tmux session, so every saved target that names the

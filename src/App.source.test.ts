@@ -176,3 +176,61 @@ test('the phone keeps the shipped order — the gesture is desktop-only', () => 
   assert.match(source, /const tabs = \$derived[\s\S]*?if \(hubEligible\) t\.push\('hub'\);[\s\S]*?t\.push\('terminal'\);/u,
     'the touch branch is unchanged');
 });
+
+// ── Agents is a Settings category on touch, a rail page on the desktop (#10) ──
+test('the phone’s tab bar has no Agents icon, and the swipe does not stop there', () => {
+  // Owner, 2026-08-29: "不用单独在底下一行展示了，现在看着有点多底下的标签".
+  assert.ok(tabbar, 'the tab bar must still be there');
+  assert.doesNotMatch(tabbar, /switchTab\('agents'\)/u, 'no Agents icon');
+  assert.doesNotMatch(tabbar, /name="bot"/u);
+  assert.match(tabbar, /onclick=\{togglePrefs\}/u, 'the gear is how you reach it now');
+  // A swipe that reaches a page with no icon is a page you cannot get back to.
+  const touchTabs = source.match(/const t = \[\];[\s\S]*?return t;/u)?.[0] ?? '';
+  assert.ok(touchTabs, 'the touch tab sequence must still be there');
+  assert.doesNotMatch(touchTabs, /'agents'/u, 'agents is not a swipe stop on touch');
+  assert.match(touchTabs, /t\.push\('terminal'\)[\s\S]*?t\.push\('files'\)/u, 'the rest of the order is unchanged');
+});
+
+test('the desktop rail keeps Agents as a draggable page icon', () => {
+  // The whole point of scoping this to touch: nothing about the rail changes.
+  assert.match(source, /agents:\s*\{ icon: 'bot',\s*label: 'agentsTitle' \}/u, 'still a rail item');
+  assert.match(rail, /\{#each railSlots as slot \(slot\)\}/u, 'still the user’s draggable order');
+  assert.match(source, /\{#if hubEligible && !agentsLivesInSettings\(layout\.isTouchDevice\)\}\s*<div class="page-layer" class:hidden=\{page !== 'agents'\}>/u,
+    'and still a page layer — but not mounted on touch, where Settings owns the only instance');
+});
+
+test('every route into the agent config goes through ONE device-aware entry', () => {
+  // Four places had to agree or it becomes unreachable in one of them; they all
+  // call openAgentsConfig, which asks nav-state where Agents lives.
+  assert.match(
+    source,
+    /function openAgentsConfig\(name = null\) \{[\s\S]*?if \(agentsLivesInSettings\(layout\.isTouchDevice\)\) \{[\s\S]*?prefsOpenReq = \{ tab: 'agents'[\s\S]*?if \(page !== 'prefs'\) togglePrefs\(\);[\s\S]*?\} else \{\s*switchTab\('agents'\);/u,
+  );
+  // The Hub's "configure agent" item: Settings on a phone, the page on a desktop.
+  assert.match(source, /openAgentConfig=\{\(name\) => openAgentsConfig\(name\)\}/u);
+  assert.doesNotMatch(source, /openAgentConfig=\{\(name\) => \{[^}]*switchTab\('agents'\)/u,
+    'it must not switch straight to a page that does not exist on touch');
+});
+
+test('a saved `agents` page never strands a phone on an unreachable layer', () => {
+  assert.match(source, /const nav = restoreNav\(s\.page, layout\.isTouchDevice\);\s*page = nav\.page;/u,
+    'restore asks nav-state, which redirects agents → Settings on touch');
+  assert.match(source, /if \(nav\.settingsTab\) prefsOpenReq = \{ tab: nav\.settingsTab, n: \+\+prefsOpenSeq \};/u);
+  // The redirect effect is one of the writers, so the sequence must NOT be read
+  // back off the state it writes — that effect would depend on itself.
+  assert.match(source, /let prefsOpenSeq = 0;/u);
+  assert.doesNotMatch(source, /prefsOpenReq\?\.n/u);
+  // And ANY other route that sets the page — a deep link, an older build, the
+  // bus probe — is corrected by the same rule in the redirect effect.
+  assert.match(
+    source,
+    /if \(page === 'agents' && agentsLivesInSettings\(layout\.isTouchDevice\)\) \{\s*page = 'prefs';\s*prefsOpenReq = \{ tab: 'agents', n: \+\+prefsOpenSeq \};/u,
+  );
+});
+
+test('Settings only offers the category when there is a bus and no Agents page', () => {
+  // hubEligible is the desktop-server gate; agentsLivesInSettings is the device.
+  assert.match(source, /showAgents=\{hubEligible && agentsLivesInSettings\(layout\.isTouchDevice\)\}/u);
+  assert.match(source, /agentsEditRequest=\{agentsEditReq\}/u, 'the Hub’s jump reaches the embedded editor');
+  assert.match(source, /openRequest=\{prefsOpenReq\}/u);
+});
