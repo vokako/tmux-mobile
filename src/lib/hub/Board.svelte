@@ -157,6 +157,20 @@
     sel = null; creating = false; ready = false; issues = []; noteText = ''; nAssignee = ''; pendingDiscard = null;
   });
 
+  /** The editor boxes ADAPT to their content (owner, 2026-08-29: "有的框很大
+   * 有空白 应该自适应"): height follows scrollHeight on input and whenever the
+   * bound value changes programmatically (opening an issue swaps the draft).
+   * The CSS min-height is the floor; manual resize stays available. */
+  function autoGrow(el: HTMLTextAreaElement, _value: string) {
+    const fit = () => { el.style.height = 'auto'; el.style.height = `${el.scrollHeight + 2}px`; };
+    el.addEventListener('input', fit);
+    fit();
+    return {
+      update: (_v: string) => fit(),
+      destroy: () => el.removeEventListener('input', fit),
+    };
+  }
+
   async function openIssue(id: number) {
     try {
       sel = await boardGet(cur, id);
@@ -368,7 +382,7 @@
           onchange={(v: string) => assign(sel!.id, v)} />
         {#if sel.created_by}<span class="meta-bit">{t('boardOpenedBy')} <span class="m-name">{sel.created_by}</span></span>{/if}
       </div>
-      <textarea class="d-body-edit" bind:value={draft.body} placeholder={t('boardBodyPh')} rows="8"></textarea>
+      <textarea class="d-body-edit" bind:value={draft.body} use:autoGrow={draft.body} placeholder={t('boardBodyPh')} rows="3"></textarea>
       <!-- The note thread as a TIMELINE (reopened #11): a header line — author
            in the accent ink, time right-aligned — and the content in its own
            box below, so ragged name lengths stop pushing the text around. -->
@@ -380,7 +394,7 @@
                 <span class="n-author">{n.author}</span>
                 <span class="n-at">{ago(n.at)}</span>
               </div>
-              <div class="n-body">{n.body}</div>
+              <div class="n-text">{n.body.trim()}</div>
             </div>
           {/each}
         {/if}
@@ -409,7 +423,7 @@
       <!-- svelte-ignore a11y_autofocus -->
       <input class="n-title" placeholder={t('boardTitlePh')} bind:value={nTitle} autofocus
         onkeydown={(e) => e.key === 'Enter' && createIssue()} />
-      <textarea class="n-body d-body-edit" rows="8" placeholder={t('boardBodyPh')} bind:value={nBody}></textarea>
+      <textarea class="d-body-edit" rows="3" placeholder={t('boardBodyPh')} bind:value={nBody} use:autoGrow={nBody}></textarea>
       <!-- Assign at birth: the same dispatch as the detail picker — the agent
            is briefed the moment the issue exists (board #11). -->
       <div class="d-meta">
@@ -594,7 +608,10 @@
     border: 1px solid var(--border);
     border-radius: var(--ui-radius-row);
     padding: 8px 10px;
-    min-height: 200px;
+    /* A floor, not a size: autoGrow raises the box to its content, so a
+       two-line body is a small box and a long one opens at full height
+       (owner, 2026-08-29: "有的框很大 有空白 应该自适应"). */
+    min-height: 72px;
     resize: vertical;
     flex: none;
   }
@@ -608,16 +625,21 @@
   .n-head { display: flex; align-items: baseline; gap: 8px; }
   .n-author { color: var(--accent); font-weight: 650; font-size: var(--fs-meta); }
   .n-at { color: var(--text3); font-size: var(--fs-micro); margin-left: auto; flex: none; }
-  .n-body {
+  .n-text {
     color: var(--text); font-size: var(--fs-ui);
     white-space: pre-wrap; overflow-wrap: anywhere;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--ui-radius-row);
     padding: 7px 10px;
+    /* The box HUGS its content — a one-word note is a small chip, not a
+       full-width band of blank (owner, 2026-08-29). */
+    width: fit-content;
+    max-width: 100%;
+    box-sizing: border-box;
   }
   .note-add { display: flex; gap: 6px; align-items: center; }
-  .note-add input, .n-title, .n-body {
+  .note-add input, .n-title {
     flex: 1;
     background: var(--surface);
     border: 1px solid var(--border);
@@ -627,6 +649,5 @@
     padding: 7px 10px;
     font-family: inherit;
   }
-  .n-body { resize: vertical; }
-  .note-add input:focus, .n-title:focus, .n-body:focus { outline: none; border-color: var(--accent); }
+  .note-add input:focus, .n-title:focus { outline: none; border-color: var(--accent); }
 </style>

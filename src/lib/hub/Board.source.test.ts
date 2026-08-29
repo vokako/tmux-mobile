@@ -60,9 +60,12 @@ test('the layout hierarchy: one compact title line, the body visibly bigger (boa
   const style = source.slice(source.indexOf('<style>'));
   assert.match(style, /\.d-title-input \{[^}]*padding: 7px 10px;/u, 'the title stays a single compact line');
   assert.ok(!/\.d-title-input \{[^}]*min-height/u.test(style), 'no tall title');
-  const body = /\.d-body-edit \{[^}]*min-height: (\d+)px;[^}]*resize: vertical;/u.exec(style);
+  const body = /\.d-body-edit \{[^}]*min-height: (\d+)px;[\s\S]{0,400}?resize: vertical;/u.exec(style);
   assert.ok(body, 'the body field declares a min-height and grows');
-  assert.ok(Number(body![1]) >= 160, `the body is the BIG field (${body![1]}px)`);
+  // The 200px fixed size was retired for autoGrow (owner, 2026-08-29: "有的框
+  // 很大 有空白 应该自适应"): the min-height is a FLOOR under an adaptive box,
+  // so it stays small — content, not the constant, makes the body big.
+  assert.ok(Number(body![1]) >= 48 && Number(body![1]) <= 120, `the floor is small (${body![1]}px) — autoGrow does the sizing`);
 });
 
 test('the sidebar orders by conversation, and rows are summaries (reopened #11)', () => {
@@ -78,7 +81,7 @@ test('the sidebar orders by conversation, and rows are summaries (reopened #11)'
 test('notes are a timeline: author + time header, content box below (reopened #11)', () => {
   assert.match(source, /<div class="n-head">\s*<span class="n-author">\{n\.author\}<\/span>\s*<span class="n-at">/u,
     'author left, time right, one header line');
-  assert.match(source, /<\/div>\s*<div class="n-body">\{n\.body\}<\/div>/u, 'the content is its own box below');
+  assert.match(source, /<\/div>\s*<div class="n-text">\{n\.body\.trim\(\)\}<\/div>/u, 'the content is its own box below, trimmed');
   const style = source.slice(source.indexOf('<style>'));
   assert.match(style, /\.n-at \{[^}]*margin-left: auto/u, 'the time right-aligns');
   assert.match(style, /\.n-author \{ color: var\(--accent\)/u, 'the author wears the accent ink');
@@ -132,4 +135,16 @@ test('the board embeds in the Hub drawer without its sidebar (board #13 follow-u
   const style = source.slice(source.indexOf('<style>'));
   assert.match(style, /\.board-root\.embedded \{ grid-template-columns: minmax\(0, 1fr\); \}/u,
     'one column — the drawer names the project');
+});
+
+test('the boxes ADAPT to their content (owner, 2026-08-29)', () => {
+  // Editors grow with what is typed OR what openIssue swaps in; the display
+  // box hugs its content instead of banding full-width blank.
+  assert.match(source, /function autoGrow\(el: HTMLTextAreaElement/u, 'one grow helper');
+  assert.match(source, /bind:value=\{draft\.body\} use:autoGrow=\{draft\.body\}/u, 'the body editor wears it');
+  assert.match(source, /bind:value=\{nBody\} use:autoGrow=\{nBody\}/u, 'the create form too');
+  const style = source.slice(source.indexOf('<style>'));
+  assert.match(style, /\.d-body-edit \{[^}]*min-height: 72px/u, 'min-height is a floor, not a size');
+  assert.match(style, /\.n-text \{[^}]*width: fit-content/u, 'a short note is a small box');
+  assert.ok(!style.includes('.n-body'), 'the display/input class collision is retired');
 });
