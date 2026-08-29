@@ -70,7 +70,7 @@ export function ctxColor(pct: number): string {
 /** Merge new chat messages into the feed without duplicates, oldest first.
  * Pushes and cursor polls overlap; identity is the message id when present,
  * else (ts, from, body). */
-export function mergeMessages<T extends { id?: string; ts?: number; from?: string; body?: string }>(
+export function mergeMessages<T extends { id?: string; ts?: number; seq?: number; from?: string; body?: string }>(
   existing: T[],
   incoming: T[],
 ): T[] {
@@ -83,7 +83,11 @@ export function mergeMessages<T extends { id?: string; ts?: number; from?: strin
       merged.push(m);
     }
   }
-  merged.sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
+  // ts, then the bus's own log position: two messages can share a millisecond,
+  // and with paging (board #9) they can arrive in DIFFERENT responses — a
+  // ts-only sort left whichever landed first in front. `seq` is stable and
+  // gapless; rows without one (older servers) keep the ts order they had.
+  merged.sort((a, b) => ((a.ts ?? 0) - (b.ts ?? 0)) || ((a.seq ?? 0) - (b.seq ?? 0)));
   return merged;
 }
 

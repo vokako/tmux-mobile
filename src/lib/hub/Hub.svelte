@@ -404,7 +404,11 @@
         actMore && actCursor ? hubActivity(s, 0, { limit: ACT_PAGE, before: actCursor }) : Promise.resolve(null),
       ]);
       if (selected !== s) return; // the room changed — this page is not ours
-      withReadingAnchor(() => {
+      // AWAITED: withReadingAnchor is async (it settles the DOM and then
+      // compensates scrollTop). Releasing `loadingOlder` before that scroll
+      // lands let the compensation itself re-enter onFeedScroll and walk the
+      // SAME cursor twice (#9 review).
+      await withReadingAnchor(() => {
         if (older) {
           if (older.messages?.length) feed = mergeMessages(feed, older.messages);
           histSeq = older.oldest_seq ?? histSeq;
@@ -2129,6 +2133,11 @@
              confirmed beginning once both walks are parked (board #9). -->
         {#if roomReady && (loadingOlder || (!histMore && !actMore))}
           <div class="older-hint">{loadingOlder ? t('hubOlderLoading') : t('hubFeedStart')}</div>
+        {:else if roomReady && (histMore || actMore)}
+          <!-- A first page shorter than the viewport never fires a scroll
+               event, so the walk needs a hand-hold too (#9 review). Same
+               whisper voice; scrolling near the top still auto-loads. -->
+          <button class="older-hint older-more" onclick={loadOlder}>{t('hubOlderMore')}</button>
         {/if}
         {#each blocks as b, i (blockKey(b, i))}
           <!-- A new calendar day gets a centred date pill before its first
@@ -3345,6 +3354,8 @@
   /* Paging feedback: a whisper at the very top of the scrollback, never a
      component — it shares the sys-line grey and costs one line. */
   .older-hint { text-align: center; color: var(--text3); font-size: var(--fs-micro); padding: 2px 0 6px; }
+  .older-more { display: block; width: 100%; background: none; border: none; cursor: pointer; transition: color var(--t-fast); }
+  .older-more:hover { color: var(--accent); }
 
   /* The filter mode's banner: accent-tinted so it reads as a STATE, not a
      message; sits above the feed inside the chat column. */

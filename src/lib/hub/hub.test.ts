@@ -1100,3 +1100,15 @@ test('mergeEvents: a prepended page and a poll meet without doubles (board #9)',
   const legacy = [{ ts: 500, window: 2, kind: 'status', text: 'w' }];
   assert.equal(mergeEvents(legacy as never, legacy as never).length, 1);
 });
+
+test('mergeMessages orders same-millisecond messages by seq across pages (#9 review)', () => {
+  const m = (id: string, ts: number, seq: number) => ({ id, ts, seq, from: 'a', body: id });
+  // The NEWER half of a burst was already loaded; the older page arrives late.
+  const live = [m('c', 1000, 12), m('d', 1100, 13)];
+  const older = mergeMessages(live, [m('a', 1000, 10), m('b', 1000, 11)]);
+  assert.deepEqual(older.map((x) => x.id), ['a', 'b', 'c', 'd'],
+    'same-ts rows sort by the bus log position, not by arrival');
+  // Rows without seq (older servers) keep plain ts order.
+  const legacy = mergeMessages([{ id: 'x', ts: 5, from: 'h', body: 'x' }], [{ id: 'y', ts: 3, from: 'h', body: 'y' }]);
+  assert.deepEqual(legacy.map((x) => x.id), ['y', 'x']);
+});

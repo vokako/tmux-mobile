@@ -119,7 +119,8 @@ test('history paging: anchored prepend, guarded rooms, parked cursors (board #9)
   // the reader.
   const walk = source.slice(source.indexOf('async function loadOlder'), source.indexOf('function onFeedScroll'));
   assert.match(walk, /if \(selected !== s\) return;/u, 'a room switch drops the in-flight page');
-  assert.match(walk, /withReadingAnchor\(\(\) => \{/u, 'older pages prepend through the reading anchor');
+  assert.match(walk, /await withReadingAnchor\(\(\) => \{/u,
+    'the anchored prepend is AWAITED — releasing loadingOlder before the scroll compensation re-walked the same cursor');
   assert.match(walk, /if \(loadingOlder \|\| !selected \|\| \(!histMore && !actMore\)\) return;/u,
     'one walk at a time, parked at has_more=false');
   // Cursors ride the room cache, so returning to a room never re-walks it.
@@ -131,6 +132,10 @@ test('history paging: anchored prepend, guarded rooms, parked cursors (board #9)
   assert.ok(!source.includes('.slice(-300)'), 'the eviction cap is gone');
   // The reader is told, quietly: fetching, or the confirmed beginning.
   assert.match(source, /class="older-hint"/u, 'top-of-scrollback feedback exists');
+  // A first page shorter than the viewport fires no scroll event, so the
+  // walk has a clickable entry too (visible only while a page remains).
+  assert.match(source, /class="older-hint older-more" onclick=\{loadOlder\}/u,
+    'the load-earlier entry is the same whisper, wired to the same walk');
 });
 
 test('the fold budget goes through foldLines, and the basis is the column', () => {
