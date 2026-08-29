@@ -416,3 +416,16 @@ test('the header toggles read board, files, terminal — the owner-set order (20
   const iTerm = bar.indexOf("name=\"terminal\"");
   assert.ok(iBoard >= 0 && iFiles > iBoard && iTerm > iFiles, 'board, then files, then terminal');
 });
+
+test('the header folds the project verbs into ONE dots menu (owner, 2026-08-29)', () => {
+  // Rename/Open/Close/Delete live behind the same projectItems menu the
+  // sidebar row speaks — one source of truth; the partition toggles stay out
+  // (navigation, not consequence).
+  assert.match(source, /projectItems\(selectedRow\)\);/u, 'the dots button opens the shared menu');
+  const head = source.slice(source.indexOf('class="h1-text"'), source.indexOf('{#if selected}', source.indexOf('class="h1-text"')));
+  assert.ok(!head.includes('h1-pen'), 'the title pencil retired — rename lives in the menu');
+  const bar = source.slice(source.indexOf('<span class="spacer"></span>'), source.indexOf('<!-- The task board:'));
+  assert.ok(!bar.includes("name=\"trash\"") && !bar.includes("name=\"stop\"") && !bar.includes("name=\"zap\""),
+    'no standalone delete/close/open buttons in the header');
+  assert.match(bar, /<Icon name="dots"/u, 'the one overflow affordance');
+});

@@ -1879,12 +1879,6 @@
                  rename affordance, and it is a real button so assistive tech and
                  Enter/Space come for free. -->
             <span class="h1-text">{selectedRow?.project.name ?? ''}</span>
-            {#if selected}
-              <button class="h1-pen" title={t('projectRenameHint')}
-                aria-label={t('projectRename')} onclick={startRename}>
-                <Icon name="edit" size={13} />
-              </button>
-            {/if}
           </h1>
         {/if}
         <!-- The FULL path, not a middle-elided stub: it renders whole when it
@@ -1900,27 +1894,19 @@
              悬停显示按钮文字"). Icons match the project context menu's verbs:
              zap=up, stop=down, trash=delete. -->
         {#if selected}
-          <!-- Delete is offered whether or not the session is live: it is the
-               "this project should stop existing" verb, so it does the closing
-               itself. Confirmed like every consequential action. -->
-          <button class="icon-btn danger" title={`${t('projectDelete')} — ${t('projectDeleteHint')}`}
-            aria-label={t('projectDelete')}
-            onclick={() => askAction('delete', selectedRow?.project.name ?? '')}>
-            <Icon name="trash" size={13} />
-          </button>
-        {/if}
-        {#if selected && !liveSelected}
-          <button class="icon-btn" title={t('projectOpen')} aria-label={t('projectOpen')} onclick={bringUp}>
-            <Icon name="zap" size={13} />
-          </button>
-        {:else if selected}
-          <!-- Closing is the counterpart of Open, in the same slot: it kills
-               the tmux session and keeps the project, so the header shows
-               exactly one of the two depending on what is true now. -->
-          <button class="icon-btn danger" title={`${t('projectDown')} — ${t('projectDownHint')}`}
-            aria-label={t('projectDown')}
-            onclick={() => askAction('down', selectedRow?.project.name ?? '')}>
-            <Icon name="stop" size={13} />
+          <!-- The project's own verbs — Open/Rename/Close/Delete — fold into
+               ONE second-level menu (owner, 2026-08-29: "重命名 删除 停止给我
+               合并到一个二级的选项卡里边吧，不用全显示出来"): the ⋯ opens the
+               SAME projectItems menu the sidebar row's long-press/right-click
+               already speaks, so the two entry points cannot disagree. The
+               partition toggles stay visible — they are navigation, not
+               consequence. -->
+          <button class="icon-btn" title={t('hubProjectMenu')} aria-label={t('hubProjectMenu')}
+            onclick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              openCtx({ x: r.right, y: r.bottom + 4 }, selectedRow?.project.name ?? '', projectItems(selectedRow));
+            }}>
+            <Icon name="dots" size={15} />
           </button>
         {/if}
         <!-- The task board: on the phone this jumps to the board PAGE (owner,
@@ -2806,17 +2792,6 @@
   /* The name is selectable text that ellipsizes; the pencil never shrinks with
      it, and it is the only thing that renames. */
   .h1-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .h1-pen {
-    flex: none; display: inline-grid; place-items: center; background: none;
-    border: 0; padding: 2px; margin-left: 5px; border-radius: 6px; cursor: pointer;
-    color: var(--meta-ink); transition: color var(--t-fast), background var(--t-fast);
-    /* A 13px glyph is not a touch target: the hit area is padded out to 44px
-       without moving the layout, the same trick the primary actions use. */
-    position: relative;
-  }
-  .h1-pen::after { content: ''; position: absolute; inset: -14px; }
-  .h1-pen:hover { color: var(--text); background: var(--surface2); }
-  .h1-pen:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
   .h1-edit {
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     font-size: var(--fs-title); font-weight: 600; color: var(--text);
