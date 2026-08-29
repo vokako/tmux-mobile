@@ -235,3 +235,22 @@ test('Settings only offers the category when there is a bus and no Agents page',
   assert.match(source, /agentsEditRequest=\{agentsEditReq\}/u, 'the Hub’s jump reaches the embedded editor');
   assert.match(source, /openRequest=\{prefsOpenReq\}/u);
 });
+
+test('a jump from the chat returns THERE on back, and deliberate navigation clears it (2026-08-29)', () => {
+  // The one-deep return slot: set by the chat's cross-page jumps, cleared by
+  // any real tab switch, consumed at the target page's back FLOOR.
+  assert.match(source, /jumpedFrom = null; \/\/ deliberate navigation stands the return slot down/u,
+    'switchTab clears the slot');
+  assert.match(source, /if \(from === 'hub'\) jumpedFrom = 'hub';/u, 'opening a pane from the chat remembers');
+  assert.match(source, /switchTab\('files'\); jumpedFrom = 'hub';/u, 'the files jump remembers (after the switch cleared)');
+  assert.match(source, /switchTab\('board'\); jumpedFrom = 'hub';/u, 'the board jump too');
+  for (const p of ['files', 'board', 'terminal']) {
+    assert.match(source, new RegExp(`if \\(page === '${p}' && jumpedFrom\\) \\{ switchTab\\(jumpedFrom\\); return; \\}`, 'u'),
+      `${p}'s floor prefers the return slot`);
+  }
+  // Order matters: the slot fires only at the FLOOR — after the page's own
+  // onGoBack chain (and the terminal's session sheet) had their turn.
+  const idxGoBack = source.indexOf("if (page === 'board' && boardGoBack && boardGoBack())");
+  const idxSlot = source.indexOf("if (page === 'board' && jumpedFrom)");
+  assert.ok(idxGoBack >= 0 && idxGoBack < idxSlot, 'peel first, return second');
+});

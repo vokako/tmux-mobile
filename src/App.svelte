@@ -651,12 +651,14 @@
   }
 
   function openTerminal(session, target, command = '') {
+    const from = page;
     terminalSession = session;
     terminalTarget = target;
     terminalCommand = command;
     page = 'terminal';
     readTarget(target);
     navPush();
+    if (from === 'hub') jumpedFrom = 'hub';
   }
 
   // The shown pane died (Ctrl-D, process exit). Stay in the terminal and
@@ -928,6 +930,14 @@
     }
   }
   let boardGoBack = $state(null);
+  // A cross-page JUMP from the chat (header toggles, a feed board-line tap,
+  // opening a pane full-screen) remembers where it came from, so the phone's
+  // back at the target's FLOOR returns to the conversation instead of the
+  // terminal root (owner, 2026-08-29: "从聊天跳转到terminal或者board或者file，
+  // 我返回 应该回到聊天对话页面"). Any deliberate navigation — a tab tap, a
+  // swipe — clears it: the slot only survives while you stay where the jump
+  // landed.
+  let jumpedFrom = $state(null);
 
   function navPush() { history.pushState({ app: true }, ''); }
 
@@ -939,6 +949,7 @@
         return;
       }
       if (page === 'files' && filesGoBack && filesGoBack()) return;
+      if (page === 'files' && jumpedFrom) { switchTab(jumpedFrom); return; }
       if (page === 'files') { page = 'terminal'; return; }
       // Chat and Agents peel their own layers (menus, dialogs, drawer,
       // editor) exactly like Files peels its views — a back with nothing to
@@ -949,10 +960,14 @@
       if (page === 'hub' && hubGoBack && hubGoBack()) { navPush(); return; }
       if (page === 'agents' && agentsGoBack && agentsGoBack()) { navPush(); return; }
       if (page === 'board' && boardGoBack && boardGoBack()) { navPush(); return; }
+      if (page === 'board' && jumpedFrom) { switchTab(jumpedFrom); return; }
       if (page === 'board') { page = 'terminal'; return; }
       // Terminal is the root on a phone: back closes the session sheet if it
       // is open, otherwise there is nowhere below it (re-push prevents exit).
       if (page === 'terminal' && sessListOpen) { sessListOpen = false; navPush(); return; }
+      // A terminal you JUMPED INTO from the chat is not the root: back
+      // returns to the conversation (switchTab re-pushes and slides left).
+      if (page === 'terminal' && jumpedFrom) { switchTab(jumpedFrom); return; }
       // Settings peels its open category back to the list first; only a
       // back with nothing to peel leaves the page.
       if (page === 'prefs' && prefsGoBack && prefsGoBack()) { return; }
@@ -1107,6 +1122,7 @@
     const t = tabs();
     const curName = page;
     if (target === curName) return;
+    jumpedFrom = null; // deliberate navigation stands the return slot down
     const fromIdx = t.indexOf(curName);
     const toIdx = t.indexOf(target);
     // Apply page change immediately
@@ -1255,7 +1271,7 @@
            switches. Desktop-eligible only (needs width + the bus): mobile
            keeps the tab layout untouched. -->
       <div class="page-layer" class:hidden={page !== 'hub'}>
-        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onSelectSession={(s) => { if (s) filesSession = s; }} onGoBack={(fn) => hubGoBack = fn} openAgentConfig={(name) => openAgentsConfig(name)} openFilesTab={(s, path) => { if (s) filesSession = s; if (path) filesNavReq = { path, n: (filesNavReq?.n ?? 0) + 1 }; switchTab('files'); }} openBoardTab={(s, issue) => { if (s) filesSession = s; if (issue) boardIssueReq = { session: s, id: issue, n: (boardIssueReq?.n ?? 0) + 1 }; switchTab('board'); }} />
+        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onSelectSession={(s) => { if (s) filesSession = s; }} onGoBack={(fn) => hubGoBack = fn} openAgentConfig={(name) => openAgentsConfig(name)} openFilesTab={(s, path) => { if (s) filesSession = s; if (path) filesNavReq = { path, n: (filesNavReq?.n ?? 0) + 1 }; switchTab('files'); jumpedFrom = 'hub'; }} openBoardTab={(s, issue) => { if (s) filesSession = s; if (issue) boardIssueReq = { session: s, id: issue, n: (boardIssueReq?.n ?? 0) + 1 }; switchTab('board'); jumpedFrom = 'hub'; }} />
       </div>
     {/if}
     <!-- The Agents PAGE exists where Agents is a page: the desktop rail. On
