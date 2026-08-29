@@ -111,6 +111,7 @@ Projects section hides itself when these return -32601. See
 | `project_archive` | `id`, `archived?` | Hides/unhides without deleting |
 | `project_rename` | `id`, `name` | `{id, name, session, session_renamed}` — renames the tmux session to `slug(name)` too (not on an adopted project). The chat room is recorded on the project so it does NOT move, and the previous session name keeps resolving for agents already running with `TMM_PROJECT` |
 | `project_autostart` | `id`, `autostart?` | Flag only; no boot integration yet |
+| `project_delete` | `id` | Forgets the project (slots cascade), closes the session, deletes `<path>/.tmm/agents/*` — the chat room and the user's files survive. Reached in the UI only through the recycle bin |
 | `models_list` | `backend?` (default `kiro`) | `{backend, models}` — model ids the backend accepts, asked of its own CLI (cached). `models` is `null` when it cannot be enumerated (claude/codex), and the agent editor keeps free text |
 
 ### Project Hub (desktop-only — the `tmm` CLI's surface)
@@ -132,6 +133,38 @@ humans) and the desktop hub UI. See
 | `hub_done` | `session`, `agent`, `summary?` | `{ok, window}` — a summary is posted as `[tmm done] <summary>` FROM THE AGENT (a message, not app narration); a summary-less done posts the `[tmm] done` lifecycle line |
 | `hub_command` | `session`, `agent` (window name or `all`), `text` (must start with `/`) | `{sent: [names], command}` — types the text VERBATIM into the managed agent's pane (no stamp, no sender): slash commands are read by the CLI, not the model. Recorded in the room as a `[tmm] ` lifecycle line |
 | `hub_agents` | `session` | `{agents: [{window, name, command, agent, managed, state, detail, since, vitals}]}` — `vitals` is `{model, context_pct, effort, branch}` SNIFFED from the last lines of a managed agent's pane (a CLI's live state has no API): every field may be null, and `vitals` itself is null when nothing could be read |
+| `hub_activity` | `session`, `since_ts?`, `limit?` | `{events: […]}` — durable telemetry rows (tool calls, prompts, receipts, warns) the feed folds into tool lanes |
+| `hub_spawn` | `session`, `agent` (registry name), `brief?`, `by?` (spawning agent, empty = human) | `{window_name, pane}` — materializes an isolated home, opens the session if it is down; capped at 4 agents/project; `by` needs `can_hire` and is recorded as `spawned_by` in the launch recipe (the done-summary feedback edge) |
+| `hub_agent_interrupt` | `session`, `agent` | `{ok}` — resets the derived state FIRST (`record_interrupt`), then types the named `Escape` key into the pane; posts `[tmm] interrupted <name>` |
+| `hub_agent_stop` | `session`, `agent` | `{ok}` — kills the window, keeps the slot (a stopped agent restarts via `up`/restart) |
+| `hub_agent_restart` | `session`, `agent` | `{ok}` — replays the launch recipe (full identity: env, `--agent`, model in config) and resumes the recorded conversation |
+| `hub_agent_remove` | `session`, `agent` | `{ok}` — ejects: kills the window, DROPS the slot, deletes the isolated home; refuses only when nothing of the agent is left |
+| `hub_board_list` | `session` | `{issues: […], statuses}` — the project task board, four fixed columns (`todo/doing/review/done`); each issue carries a note COUNT |
+| `hub_board_get` | `session`, `id` | The issue with its full `notes` thread |
+| `hub_board_save` | `session`, `id?`, `title?`, `body?`, `status?`, `assignee?`, `who?` | Create (no id) or PATCH (id + only the changed fields — COALESCE, so a `move` cannot erase a body edited meanwhile). `{ok, id}` |
+| `hub_board_note` | `session`, `id`, `body`, `who?` | Appends to the issue's own thread, bumps `updated_at` |
+| `hub_board_delete` | `session`, `id` | `{ok}` — deletes the issue and cascades its notes |
+
+### Registry, skills & MCP defs (desktop-only)
+Central definitions that `spawn` materializes into isolated agent homes. The
+skill store is app-owned files under `<state dir>/skills/<name>/`; three
+built-ins (`tmm-cli`, `mem`, `mcp-cli`) ship inside the binary and reseed at
+server start (`source = "builtin"`; save/delete refuse their names).
+
+| Method | Params | Response |
+|--------|--------|----------|
+| `registry_list` | — | `{agents: [{name, backend, model, effort, system, skills, mcp, can_hire}]}` |
+| `registry_save` | `def` | Validates backend, model id (against the backend's own CLI) and effort enum |
+| `registry_delete` | `name` | OK |
+| `skills_list` | — | `{skills: [{name, source, description, synced_at}]}` |
+| `skills_save` | `name`, `source`, `description?` | Imports/re-syncs the files from `source` (abs dir, github url, or `builtin`) |
+| `skills_import` | `url` (or abs dir) | `{imported: [names]}` — walks the fetched tree for EVERY dir holding a SKILL.md (claude plugins/marketplaces work as-is); each row's source points at its own subdir; frontmatter names, built-in names skipped |
+| `skills_read` | `name` | `{markdown}` — the managed SKILL.md |
+| `skills_files` | `name` | `{files: [{path, size}]}` — every managed file of the skill |
+| `skills_file` | `name`, `path` | `{content}` — 256 KB cap, text only, path escapes rejected |
+| `skills_refresh` | `name` | Re-syncs from the recorded source (builtin = the running build) |
+| `skills_delete` | `name` | OK (refused for built-ins) |
+| `mcp_list` / `mcp_save` / `mcp_delete` | `name`, `def?` | Central MCP server defs; materialized into each backend's native config at spawn |
 
 ### Team (desktop-only — method-not-found on servers without the bus)
 All chat operations are scoped to a team `room`; `team_status` / `team_teams`

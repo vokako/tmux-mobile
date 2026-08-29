@@ -109,6 +109,7 @@ end up shipping the wrong tree.
 - [File Browser page](docs/requirements/pages/file-browser.md)
 - [Sessions page](docs/requirements/pages/sessions.md)
 - [Settings page](docs/requirements/pages/settings.md)
+- [Hub page (project chat & agent collaboration)](docs/requirements/pages/hub.md)
 - [Team page (multi-agent)](docs/requirements/pages/team.md)
 - [i18n / Localization](docs/requirements/features/i18n.md)
 - [WebSocket RPC API](docs/requirements/api-contracts/websocket-rpc.md)

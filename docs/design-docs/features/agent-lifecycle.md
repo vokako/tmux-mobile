@@ -122,6 +122,23 @@ under four gates, each of which exists because of a specific failure:
 `tmm done` remains a state transition (and ends the turn explicitly); its summary
 can be one line, because the answer itself still auto-posts to the room.
 
+**And the summary reports UP the spawn edge** (owner, 2026-08-29): `tmm spawn`
+records `spawned_by` in the launch recipe, and `hub_done` delivers a non-empty
+summary into the live managed spawner's pane (`[tmm chat <ts>] <name>:
+[done] <summary>`, same delivery bookkeeping as an @mention). Every other
+completion channel is record-only, so a lead that spawned two builders never
+learned they finished. Targeted — one line, one pane, once per turn end, and
+the chain terminates at the human — so it cannot ping-pong; invariants 2 and 3
+above are untouched.
+
+**A turn cancelled from OUTSIDE has no edge of its own**: interrupt
+(`hub_agent_interrupt` / the composer's armed empty-send / `tmm agent
+interrupt`) resets the derived state FIRST (`record_interrupt`: end =
+completed-now, ask and the explicit claim cleared → `idle` immediately), then
+types the named `Escape` into the pane. Without the reset the newest fact
+stays the `userPromptSubmit` that opened the cancelled turn and the card reads
+`running` for as long as the agent lives (owner, 2026-08-29).
+
 ## Status: four states, one rule
 
 ![Status states](agent-status-states.svg)

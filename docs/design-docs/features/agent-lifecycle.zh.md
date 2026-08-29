@@ -105,6 +105,20 @@ agent 答案的 hook。`maybe_auto_post` 在四道门禁下把它发进房间，
 `tmm done` 仍然是一次状态转移（并且显式结束这一轮）；它的摘要可以只有一行，
 因为答案本身仍会自动回帖到房间里。
 
+**摘要还会沿 spawn 边向上汇报**（owner，2026-08-29）：`tmm spawn` 把
+`spawned_by` 记进 launch recipe，`hub_done` 把非空摘要投递进还活着的受管
+spawner 的 pane（`[tmm chat <ts>] <name>: [done] <summary>`，与 @mention 相同
+的投递记账）。其他所有完成通道都是只记录的，所以派了两个 builder 的 lead 从来
+不知道它们完工了。定向投递——一行、一个 pane、每轮一次，链条终点是人——不可能
+ping-pong；上面的不变量 2 和 3 原封不动。
+
+**被外部取消的 turn 没有自己的边界**：打断（`hub_agent_interrupt` /
+composer 的空输入两拍 / `tmm agent interrupt`）会**先**重置派生状态
+（`record_interrupt`：end = 立即 completed，清掉 ask 和显式声明 → 马上读作
+`idle`），然后才把命名的 `Escape` 键打进 pane。不先重置的话，最新事实一直是
+打开那个被取消 turn 的 `userPromptSubmit`，卡片会一直显示 `running`
+（owner，2026-08-29）。
+
 ## 状态：四个状态，一条规则
 
 ![状态机](agent-status-states.zh.svg)
