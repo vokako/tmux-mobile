@@ -82,6 +82,19 @@ test('the agent card speaks the three-stage machine: select, then options, dblcl
   assert.match(source, /if \(filterAgent\) \{ filterAgent = ''; return true; \}/u, 'back gesture exits the filter');
 });
 
+test('sidebar dots and roster cards drink from ONE state map (board #8)', () => {
+  // Both pollers route through mergeStates: the roster poll overlays its
+  // project's keys onto the shared map, and the rooms poll overlays the
+  // CURRENT roster onto its fresh snapshot before adopting it — whichever
+  // response lands last, the freshest source drives the selected project.
+  assert.match(source, /agentStates = mergeStates\(agentStates, s, got\);/u,
+    'the 5s roster poll refreshes the shared dot map');
+  assert.match(source, /agentStates = mergeStates\(roomsRes\.states \?\? \{\}, selected, agents\);/u,
+    'the 20s snapshot is overlaid with the roster before it is adopted');
+  assert.ok(!/agentStates = roomsRes\.states/u.test(source),
+    'the raw snapshot is never adopted bare — that is the rollback bug');
+});
+
 test('the fold budget goes through foldLines, and the basis is the column', () => {
   // Board #4: the budget math lives in hub.ts (pure, tested) — Hub only
   // measures. Re-inlining `* 0.2` here would fork the mapping again, and

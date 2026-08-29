@@ -31,7 +31,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, stateIsLive, mergeMessages, backendColor, feedBlocks, filterBlocks, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
+  import { markLeadingMention, stateDotColor, stateIsLive, mergeMessages, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
@@ -168,7 +168,11 @@
       // the states map colours the agent chips (owner, 2026-08-24: "上次回复
       // 的时间 … 当前几个 Agent 的简单 logo 状态").
       talkMap = talk;
-      agentStates = roomsRes.states ?? {};
+      // Overlay the current roster BEFORE adopting the snapshot: hub_rooms
+      // answers on a 20s cadence, so for the selected project this response
+      // is usually OLDER than the 5s roster — adopting it raw rolled the
+      // sidebar dots back and the two UIs disagreed again (board #8).
+      agentStates = mergeStates(roomsRes.states ?? {}, selected, agents);
       // Archived projects are the RECYCLE BIN (owner, 2026-08-21: "相当于回收
       // 站的功能"): they leave the working list and wait, restorable, in the
       // collapsed section at the bottom of the sidebar.
@@ -288,6 +292,10 @@
       // must not dress the NEW project (and then re-pick its recipient).
       if (selected !== s) return;
       agents = got;
+      // The sidebar chips share this truth (board #8): the roster is the
+      // freshest reading for THIS project, so its states overwrite the
+      // 20s-cadence snapshot's keys instead of disagreeing beside them.
+      agentStates = mergeStates(agentStates, s, got);
       // The recipient follows the room: an agent that left cannot be the
       // recipient, and a room that just gained its first agent gets a lead
       // without the user choosing one. ALL_TARGET is not a window, so it stays.

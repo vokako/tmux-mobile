@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { uploadImagePath, uploadFilePath, imageId, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES } from './hub.ts';
+import { uploadImagePath, uploadFilePath, imageId, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -1050,4 +1050,33 @@ test('foldLines: a phone fold is small and IMMOVABLE, a desktop fold keeps its f
   assert.equal(foldLines(false, 0, 20), 3);
   // An unmeasured line-height falls back to 20 instead of dividing by NaN.
   assert.equal(foldLines(false, 1000, NaN), 8);
+});
+
+test('mergeStates: one truth per dot — the roster overlays its own project only (board #8)', () => {
+  const snapshot = { 'proj:2': 'idle', 'proj:3': 'running', 'other:1': 'waiting' };
+  const roster = [
+    { window: 2, state: 'running', managed: true },   // fresher than the snapshot
+    { window: 5, state: 'waiting', managed: true },   // new window the snapshot missed
+    { window: 7, state: 'running', managed: false },  // a shell asserts nothing
+    { window: 8, state: '', managed: true },          // no reading, no key
+  ];
+  const out = mergeStates(snapshot, 'proj', roster);
+  assert.equal(out['proj:2'], 'running', 'the roster wins for its project');
+  assert.equal(out['proj:5'], 'waiting', 'a window the snapshot lacked appears');
+  assert.equal(out['other:1'], 'waiting', 'other projects keep the snapshot');
+  assert.ok(!('proj:7' in out) && !('proj:8' in out), 'unmanaged / stateless write nothing');
+  assert.equal(out['proj:3'], 'running', 'a stopped/unlisted window\u2019s key passes through — absence is not invented');
+  assert.notEqual(out, snapshot, 'pure: a new map, the input untouched');
+  assert.equal(snapshot['proj:2'], 'idle');
+
+  // Polling order: a STALE rooms response landing after a fresh roster must
+  // not roll the selected project back — reload overlays the roster on top.
+  const staleRooms = { 'proj:2': 'idle', 'other:1': 'idle' };
+  const afterReload = mergeStates(staleRooms, 'proj', roster);
+  assert.equal(afterReload['proj:2'], 'running', 'stale snapshot cannot overwrite the newer roster');
+  assert.equal(afterReload['other:1'], 'idle', 'while other projects take the fresh snapshot');
+
+  // Legacy vocabulary passes through untranslated — stateDotColor/stateIsLive
+  // already read \'working\'; normalizing here would fork the one status language.
+  assert.equal(mergeStates({}, 'p', [{ window: 1, state: 'working', managed: true }])['p:1'], 'working');
 });

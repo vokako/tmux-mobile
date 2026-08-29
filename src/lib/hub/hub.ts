@@ -923,6 +923,35 @@ export function statusParts(e: HubActivityEvent): { state: string; text: string 
 /** Internal: a tool call before consecutive ones are folded into a group. */
 type ToolItem = { type: 'tool'; ts: number; window: number; event: HubActivityEvent };
 
+/** ONE truth per agent dot (board #8): the sidebar's project rows colour
+ * their chips from the `hub_rooms` snapshot (all projects, 20s poll) while
+ * the roster reads `hub_agents` (selected project, 5s poll) — same server
+ * derivation, different ages, so the two UIs disagreed for up to a poll
+ * cycle. This overlays the SELECTED project's roster states onto the
+ * snapshot map, so whichever response lands LAST, the freshest source wins
+ * for the project on screen and the cheap snapshot keeps speaking for the
+ * rest:
+ * - called with the roster after a `hub_agents` poll, it refreshes that
+ *   project's keys in place;
+ * - called with the roster over a fresh `hub_rooms` response, it stops the
+ *   (older-cadence) snapshot from rolling the selected project's dots back;
+ * - only MANAGED agents with a non-empty state write keys (a shell window
+ *   has no state to assert), and a stopped agent's snapshot key passes
+ *   through untouched — absence is the sidebar's own "idle" default, never
+ *   invented here. Pure; returns a new map. */
+export function mergeStates(
+  snapshot: Record<string, string>,
+  session: string,
+  agents: readonly { window: number; state?: string; managed?: boolean }[],
+): Record<string, string> {
+  const out: Record<string, string> = { ...snapshot };
+  for (const a of agents) {
+    if (!a.managed || !a.state) continue;
+    out[`${session}:${a.window}`] = a.state;
+  }
+  return out;
+}
+
 /** Does this body ADDRESS the agent — an `@name` (or `@all`) token, parsed
  * exactly the way the server's `deliver_mentions` does (token after `@` up to
  * whitespace, trailing punctuation trimmed, exact name equality)? Used by the
