@@ -87,6 +87,23 @@ export function mergeMessages<T extends { id?: string; ts?: number; from?: strin
   return merged;
 }
 
+/** Merge activity events without losing history (board #9): id-keyed dedupe
+ * (the durable log's row id; pre-paging rows fall back to a content key),
+ * sorted by (ts, id) so a prepended older page and an appended poll both land
+ * in log order. Returns the EXISTING array when nothing new arrived, so the
+ * poll path can skip a re-render. No length cap: the initial page is bounded
+ * by the server, and everything past it was loaded on purpose. */
+export function mergeEvents<T extends { ts: number; id?: number; window?: number; kind?: string; text?: string }>(
+  existing: T[],
+  incoming: T[],
+): T[] {
+  const key = (e: T) => (e.id != null ? `#${e.id}` : `${e.ts}|${e.window}|${e.kind}|${e.text}`);
+  const seen = new Set(existing.map(key));
+  const fresh = incoming.filter((e) => !seen.has(key(e)));
+  if (!fresh.length) return existing;
+  return [...existing, ...fresh].sort((a, b) => (a.ts - b.ts) || ((a.id ?? 0) - (b.id ?? 0)));
+}
+
 /** Backend identity colors (the prototype's palette): consistent across
  * sidebar, cards and registry so a glance identifies who is who. */
 export function backendColor(backend: string | null | undefined): string {

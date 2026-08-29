@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { uploadImagePath, uploadFilePath, imageId, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates } from './hub.ts';
+import { uploadImagePath, uploadFilePath, imageId, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -1079,4 +1079,24 @@ test('mergeStates: one truth per dot — the roster overlays its own project onl
   // Legacy vocabulary passes through untranslated — stateDotColor/stateIsLive
   // already read \'working\'; normalizing here would fork the one status language.
   assert.equal(mergeStates({}, 'p', [{ window: 1, state: 'working', managed: true }])['p:1'], 'working');
+});
+
+test('mergeEvents: a prepended page and a poll meet without doubles (board #9)', () => {
+  const e = (id: number, ts: number, text = 't') => ({ id, ts, window: 1, kind: 'tool', text });
+  const current = [e(10, 1000), e(11, 1000), e(12, 1200)];
+  // An older page arrives (walked backwards): lands IN FRONT, log order.
+  const older = mergeEvents(current, [e(8, 900), e(9, 950)]);
+  assert.deepEqual(older.map((x) => x.id), [8, 9, 10, 11, 12]);
+  // Same-millisecond siblings order by id — ts alone cannot address them.
+  const sib = mergeEvents(older, [e(9.5 as never, 1000)]);
+  assert.deepEqual(sib.map((x) => x.id), [8, 9, 9.5, 10, 11, 12]);
+  // A page overlapping what is already loaded dedupes by id…
+  const overlap = mergeEvents(older, [e(9, 950), e(13, 1300)]);
+  assert.deepEqual(overlap.map((x) => x.id), [8, 9, 10, 11, 12, 13]);
+  // …and nothing new returns the SAME array, so the poll can skip a render.
+  assert.equal(mergeEvents(older, [e(10, 1000)]), older);
+  assert.equal(mergeEvents(older, []), older);
+  // Pre-paging rows (no id) fall back to a content key: no doubles either.
+  const legacy = [{ ts: 500, window: 2, kind: 'status', text: 'w' }];
+  assert.equal(mergeEvents(legacy as never, legacy as never).length, 1);
 });

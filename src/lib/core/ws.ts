@@ -778,8 +778,15 @@ export const hubPost = (session: string, body: string, from = 'human') =>
  * line, not a message. */
 export const hubCommand = (session: string, agent: string, text: string) =>
   call<{ sent: string[]; command: string }>('hub_command', { session, agent, text });
-export const hubLog = (session: string, sinceTs = 0, limit = 100) =>
-  call<{ messages: TeamMessage[] }>('hub_log', { session, since_ts: sinceTs, limit });
+/** Read the project chat. `sinceTs` (exclusive) is the incremental poll;
+ * `beforeSeq` walks BACKWARDS one page at a time (board #9) — `seq` is the
+ * bus's own stable cursor, carried on every message. The response hands back
+ * `oldest_seq` (this page's cursor for the next walk) and `has_more`. */
+export const hubLog = (session: string, sinceTs = 0, limit = 100, beforeSeq = 0) =>
+  call<{ messages: TeamMessage[]; has_more?: boolean; oldest_seq?: number }>(
+    'hub_log',
+    beforeSeq > 0 ? { session, limit, before_seq: beforeSeq } : { session, since_ts: sinceTs, limit },
+  );
 /** Deleting a message is two steps. `hubMsgArchive` HIDES it — the message stays in
  * the room's store, so a restore costs nothing — and `hubMsgPurge` is the step that
  * forgets it for good. Only the second one destroys anything. */
@@ -843,9 +850,30 @@ export interface HubActivityEvent {
   /** `status` events only: the state the agent declared. The `text` is its note
    * — what it says it is doing — which is the half a human reads. */
   state?: 'working' | 'waiting' | 'blocked';
+  /** The durable log's row id — half of the paging cursor (ts, id): a busy
+   * turn writes several events in one millisecond, so ts alone cannot
+   * address a position (board #9). Absent on rows from pre-paging servers. */
+  id?: number;
 }
-export const hubActivity = (session: string, sinceTs = 0) =>
-  call<{ events: HubActivityEvent[] }>('hub_activity', { session, since_ts: sinceTs });
+/** Read the activity feed. Newest page by default; `before` walks backwards
+ * with the exact (ts, id) pair the previous page's `oldest` handed back. */
+export const hubActivity = (
+  session: string,
+  sinceTs = 0,
+  opts: { limit?: number; before?: { ts: number; id: number } } = {},
+) =>
+  call<{
+    events: HubActivityEvent[];
+    has_more?: boolean;
+    oldest?: { ts: number; id: number } | null;
+    total?: number;
+    first_ts?: number;
+  }>('hub_activity', {
+    session,
+    since_ts: sinceTs,
+    ...(opts.limit ? { limit: opts.limit } : {}),
+    ...(opts.before ? { before_ts: opts.before.ts, before_id: opts.before.id } : {}),
+  });
 export const hubSpawn = (session: string, agent: string, brief = '', by = '') =>
   call('hub_spawn', { session, agent, brief, by });
 /** Kill one agent's window. The declaration survives, so it can come back. */

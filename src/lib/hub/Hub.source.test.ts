@@ -113,6 +113,26 @@ test('can_hire wears ONE atom — the boxed M, words in the title (board #7)', a
   assert.match(i18n, /agentsManager: 'Manager'/u, 'the word is Manager in both languages');
 });
 
+test('history paging: anchored prepend, guarded rooms, parked cursors (board #9)', () => {
+  // The prepend re-enters through the reading anchor — scrollTop compensation
+  // is off (overflow-anchor: none), so without this every older page teleports
+  // the reader.
+  const walk = source.slice(source.indexOf('async function loadOlder'), source.indexOf('function onFeedScroll'));
+  assert.match(walk, /if \(selected !== s\) return;/u, 'a room switch drops the in-flight page');
+  assert.match(walk, /withReadingAnchor\(\(\) => \{/u, 'older pages prepend through the reading anchor');
+  assert.match(walk, /if \(loadingOlder \|\| !selected \|\| \(!histMore && !actMore\)\) return;/u,
+    'one walk at a time, parked at has_more=false');
+  // Cursors ride the room cache, so returning to a room never re-walks it.
+  assert.match(source, /roomCache\.set\(selected, \{ feed, lastTs, activity, lastActivityTs, agents, histSeq, histMore, actCursor, actMore \}\);/u,
+    'both cursors and both has_more flags are parked per room');
+  // The activity poll merges — the old concat-and-slice(-300) EVICTED walked
+  // history, and a bare concat doubles what a page overlap re-sends.
+  assert.match(source, /activity = mergeEvents\(activity, events\);/u, 'poll path merges');
+  assert.ok(!source.includes('.slice(-300)'), 'the eviction cap is gone');
+  // The reader is told, quietly: fetching, or the confirmed beginning.
+  assert.match(source, /class="older-hint"/u, 'top-of-scrollback feedback exists');
+});
+
 test('the fold budget goes through foldLines, and the basis is the column', () => {
   // Board #4: the budget math lives in hub.ts (pure, tested) — Hub only
   // measures. Re-inlining `* 0.2` here would fork the mapping again, and

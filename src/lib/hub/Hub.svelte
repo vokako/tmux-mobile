@@ -31,7 +31,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, stateIsLive, mergeMessages, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
+  import { markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
@@ -199,6 +199,18 @@
   // 添加 agent 一个 agent list那个页面闪了一下，然后再出来消息"). In-memory
   // only, per session; the pollers keep merging on top, so the cache is a
   // starting point, never a second source of truth.
+  // ── History paging (board #9, frontend half): the first load is ONE page,
+  // the poll stays incremental, and scrolling near the TOP walks backwards by
+  // cursor — chat by `seq`, activity by the exact (ts, id) pair the server
+  // hands back. `has_more=false` parks the walk; the cursors ride roomCache
+  // so returning to a room never re-walks what it already loaded.
+  let histSeq = $state(0);          // chat: oldest loaded seq (0 = no page yet)
+  let histMore = $state(true);
+  let actCursor = $state(null);     // activity: { ts, id } of the oldest loaded row
+  let actMore = $state(true);
+  let loadingOlder = $state(false); // one walk at a time — the dedupe
+  const ACT_PAGE = 200;
+
   const roomCache = new Map();
   let roomReady = $state(false);
 
@@ -208,7 +220,7 @@
     // — carrying the text across would put it in front of the wrong agents.
     if (selected) hubPrefs.setDraft(selected, composerText);
     // Park the room too, so switching back is instant.
-    if (selected) roomCache.set(selected, { feed, lastTs, activity, lastActivityTs, agents });
+    if (selected) roomCache.set(selected, { feed, lastTs, activity, lastActivityTs, agents, histSeq, histMore, actCursor, actMore });
     selected = session;
     composerText = hubPrefs.draft(session);
     clearAttachments(); // staged for one room; must not ride into another
@@ -224,6 +236,11 @@
     lastActivityTs = c?.lastActivityTs ?? 0;
     lastTs = c?.lastTs ?? 0;
     agents = c?.agents ?? [];
+    histSeq = c?.histSeq ?? 0;
+    histMore = c?.histMore ?? true;
+    actCursor = c?.actCursor ?? null;
+    actMore = c?.actMore ?? true;
+    loadingOlder = false;
     // A cached room is ready NOW (its pollers refresh underneath); an unknown
     // one may not claim "empty" until its first load has actually answered.
     roomReady = !!c;
@@ -254,8 +271,17 @@
     // a live `selected` after the fact; owner, 2026-08-24).
     const s = selected;
     try {
-      const { messages } = await hubLog(s, lastTs, 200);
+      // First load asks for ONE page (the server's newest 100) and keeps its
+      // cursor; every later call is the same incremental since_ts poll as
+      // before (board #9).
+      const first = lastTs === 0 && histSeq === 0;
+      const res = await hubLog(s, lastTs, 100);
       if (selected !== s) return;
+      const messages = res.messages;
+      if (first) {
+        histSeq = res.oldest_seq ?? 0;
+        histMore = (res.has_more ?? false) && histSeq > 0;
+      }
       if (messages?.length) {
         feed = mergeMessages(feed, messages);
         lastTs = Math.max(lastTs, ...messages.map((m) => m.ts ?? 0));
@@ -271,10 +297,19 @@
     if (!selected) return;
     const s = selected;
     try {
-      const { events } = await hubActivity(s, lastActivityTs);
+      const first = lastActivityTs === 0 && !actCursor;
+      const res = await hubActivity(s, lastActivityTs);
       if (selected !== s) return;
+      const events = res.events;
+      if (first) {
+        actCursor = res.oldest ?? null;
+        actMore = (res.has_more ?? false) && !!actCursor;
+      }
       if (events?.length) {
-        activity = [...activity, ...events].slice(-300);
+        // mergeEvents, not concat-and-slice: the old -300 cap EVICTED the
+        // history pages the user had walked to (board #9), and id-keyed
+        // dedupe is what makes a prepend and a poll meet without doubles.
+        activity = mergeEvents(activity, events);
         lastActivityTs = Math.max(lastActivityTs, ...events.map((e) => e.ts));
         // Telemetry rows are not "news": they extend the tail, so follow if we
         // were following, but they must not raise the new-messages dot.
@@ -354,9 +389,45 @@
   let askDir = 'down';            // committed direction — flips only after real travel
   let askDirTravel = 0;           // accumulated movement AGAINST the committed direction
 
+  /** Walk one page BACK on each channel that still has one (board #9). One
+   * walk at a time; the response is dropped if the room changed underneath;
+   * the prepend re-enters through withReadingAnchor so the line being read
+   * stays put — a jump to the tail here would throw the reader out of the
+   * history they came for. */
+  async function loadOlder() {
+    if (loadingOlder || !selected || (!histMore && !actMore)) return;
+    const s = selected;
+    loadingOlder = true;
+    try {
+      const [older, olderAct] = await Promise.all([
+        histMore && histSeq > 0 ? hubLog(s, 0, 100, histSeq) : Promise.resolve(null),
+        actMore && actCursor ? hubActivity(s, 0, { limit: ACT_PAGE, before: actCursor }) : Promise.resolve(null),
+      ]);
+      if (selected !== s) return; // the room changed — this page is not ours
+      withReadingAnchor(() => {
+        if (older) {
+          if (older.messages?.length) feed = mergeMessages(feed, older.messages);
+          histSeq = older.oldest_seq ?? histSeq;
+          histMore = (older.has_more ?? false) && (older.oldest_seq ?? 0) > 0;
+        }
+        if (olderAct) {
+          if (olderAct.events?.length) activity = mergeEvents(activity, olderAct.events);
+          actCursor = olderAct.oldest ?? actCursor;
+          actMore = (olderAct.has_more ?? false) && !!olderAct.oldest;
+        }
+      });
+    } catch { /* keep the cursors — the next nudge retries */ }
+    finally {
+      if (selected === s) loadingOlder = false;
+    }
+  }
+
   function onFeedScroll() {
     following = atBottom();
     const top = feedEl?.scrollTop ?? 0;
+    // Near the top: reach for the previous page. 120px of runway starts the
+    // fetch before the reader actually hits the edge.
+    if (top < 120 && roomReady) loadOlder();
     const delta = top - askScrollTop;
     askScrollTop = top;
     // Direction hysteresis: trackpad and touch momentum land 1–3px reversals at
@@ -2054,6 +2125,11 @@
         </div>
       {/if}
       <div class="feed subtle-scroll" bind:this={feedEl} onscroll={onFeedScroll}>
+        <!-- Low-presence paging feedback at the very top: fetching, or the
+             confirmed beginning once both walks are parked (board #9). -->
+        {#if roomReady && (loadingOlder || (!histMore && !actMore))}
+          <div class="older-hint">{loadingOlder ? t('hubOlderLoading') : t('hubFeedStart')}</div>
+        {/if}
         {#each blocks as b, i (blockKey(b, i))}
           <!-- A new calendar day gets a centred date pill before its first
                block — the times alone never said WHICH day a message was from
@@ -3266,6 +3342,10 @@
        INSIDE the composer; this decides composer-vs-feed once. */
     position: relative; z-index: 15;
   }
+  /* Paging feedback: a whisper at the very top of the scrollback, never a
+     component — it shares the sys-line grey and costs one line. */
+  .older-hint { text-align: center; color: var(--text3); font-size: var(--fs-micro); padding: 2px 0 6px; }
+
   /* The filter mode's banner: accent-tinted so it reads as a STATE, not a
      message; sits above the feed inside the chat column. */
   .filter-bar {
