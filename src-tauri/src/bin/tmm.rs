@@ -43,6 +43,12 @@ USAGE (agent):
                                       (the note is the point — it shows in the chat)
   tmm done [summary]                  declare completion
   tmm spawn <agent> [--brief <text>]  spawn a registry agent into this project
+  tmm board [list]                    the project task board (kanban)
+  tmm board add "title" [--body <text>] [--assignee <name>]
+  tmm board show <id>                 one issue with its note thread
+  tmm board take <id>                 claim it: assignee = you, status = doing
+  tmm board move <id> <todo|doing|review|done>
+  tmm board note <id> <text>          record progress/decisions ON the issue
 
 USAGE (background tasks — LOCAL tmux only, no server needed, never exits 2):
   tmm task start <name> -- <cmd...>   run <cmd> detached in its own tmux window
@@ -228,6 +234,99 @@ async fn main() {
             let summary = rest.join(" ");
             let r = rpc(&ctx, "hub_done", json!({ "session": session, "agent": agent, "summary": summary })).await;
             if ctx.json { println!("{r}"); } else { println!("✓ done"); }
+        }
+        // The project task board: the human writes issues on the board page,
+        // agents keep their status current here. Identity = the caller
+        // (TMM_AGENT, else "human"), same as chat.
+        ("board", rest) => {
+            let session = need_project(&ctx);
+            let who = ctx.agent.clone().unwrap_or_else(|| "human".into());
+            let sub = rest.first().map(String::as_str).unwrap_or("list");
+            match sub {
+                "list" => {
+                    let r = rpc(&ctx, "hub_board_list", json!({ "session": session })).await;
+                    if ctx.json { println!("{r}"); return; }
+                    let empty = Vec::new();
+                    let issues = r.get("issues").and_then(|v| v.as_array()).unwrap_or(&empty);
+                    if issues.is_empty() {
+                        println!("board is empty — tmm board add \"title\" [--body ...]");
+                        return;
+                    }
+                    for status in ["todo", "doing", "review", "done"] {
+                        let col: Vec<_> = issues.iter().filter(|i| i.get("status").and_then(|v| v.as_str()) == Some(status)).collect();
+                        if col.is_empty() { continue; }
+                        println!("── {status} ──");
+                        for i in col {
+                            let g = |k: &str| i.get(k).and_then(|v| v.as_str()).unwrap_or("");
+                            let id = i.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+                            let notes = i.get("notes").and_then(|v| v.as_i64()).unwrap_or(0);
+                            let assignee = if g("assignee").is_empty() { String::new() } else { format!(" @{}", g("assignee")) };
+                            let n = if notes > 0 { format!(" [{notes} notes]") } else { String::new() };
+                            println!("  #{id} {}{assignee}{n}", g("title"));
+                        }
+                    }
+                }
+                "show" => {
+                    let Some(id) = rest.get(1).and_then(|s| s.trim_start_matches('#').parse::<i64>().ok()) else {
+                        fail(EXIT_USAGE, "board show needs an issue id: tmm board show 3");
+                    };
+                    let r = rpc(&ctx, "hub_board_get", json!({ "session": session, "id": id })).await;
+                    if ctx.json { println!("{r}"); return; }
+                    let g = |k: &str| r.get(k).and_then(|v| v.as_str()).unwrap_or("");
+                    println!("#{} [{}] {}", id, g("status"), g("title"));
+                    if !g("assignee").is_empty() { println!("assignee: {}", g("assignee")); }
+                    if !g("created_by").is_empty() { println!("opened by: {}", g("created_by")); }
+                    if !g("body").is_empty() { println!("\n{}\n", g("body")); }
+                    let empty = Vec::new();
+                    for n in r.get("notes").and_then(|v| v.as_array()).unwrap_or(&empty) {
+                        let a = n.get("author").and_then(|v| v.as_str()).unwrap_or("");
+                        let b = n.get("body").and_then(|v| v.as_str()).unwrap_or("");
+                        println!("  · {a}: {b}");
+                    }
+                }
+                "add" => {
+                    let title = rest[1..].iter().filter(|a| !a.starts_with("--")).cloned().collect::<Vec<_>>().join(" ");
+                    if title.trim().is_empty() {
+                        fail(EXIT_USAGE, "board add needs a title: tmm board add \"fix the login flow\" [--body <text>] [--assignee <name>]");
+                    }
+                    let mut params = json!({ "session": session, "title": title, "who": who });
+                    if let Some(Some(b)) = flags.get("body") { params["body"] = json!(b); }
+                    if let Some(Some(a)) = flags.get("assignee") { params["assignee"] = json!(a); }
+                    let r = rpc(&ctx, "hub_board_save", params).await;
+                    if ctx.json { println!("{r}"); } else { println!("✓ #{} on the board", r.get("id").and_then(|v| v.as_i64()).unwrap_or(0)); }
+                }
+                "delete" => {
+                    let Some(id) = rest.get(1).and_then(|s| s.trim_start_matches('#').parse::<i64>().ok()) else {
+                        fail(EXIT_USAGE, "board delete needs an issue id: tmm board delete 3");
+                    };
+                    let r = rpc(&ctx, "hub_board_delete", json!({ "session": session, "id": id })).await;
+                    if ctx.json { println!("{r}"); } else { println!("✓ deleted #{id}"); }
+                }
+                "take" | "move" | "note" => {
+                    let Some(id) = rest.get(1).and_then(|s| s.trim_start_matches('#').parse::<i64>().ok()) else {
+                        fail(EXIT_USAGE, "board {take|move|note} needs an issue id first: tmm board move 3 review");
+                    };
+                    let r = match sub {
+                        // take = claim it and start: assignee + doing in one move.
+                        "take" => rpc(&ctx, "hub_board_save", json!({ "session": session, "id": id, "assignee": who, "status": "doing", "who": who })).await,
+                        "move" => {
+                            let Some(status) = rest.get(2).cloned() else {
+                                fail(EXIT_USAGE, "board move needs a status: tmm board move 3 todo|doing|review|done");
+                            };
+                            rpc(&ctx, "hub_board_save", json!({ "session": session, "id": id, "status": status, "who": who })).await
+                        }
+                        _ => {
+                            let text = rest[2..].join(" ");
+                            if text.trim().is_empty() {
+                                fail(EXIT_USAGE, "board note needs text: tmm board note 3 \"blocked on the schema question\"");
+                            }
+                            rpc(&ctx, "hub_board_note", json!({ "session": session, "id": id, "body": text, "who": who })).await
+                        }
+                    };
+                    if ctx.json { println!("{r}"); } else { println!("✓ #{id}"); }
+                }
+                other => fail(EXIT_USAGE, &format!("unknown board command '{other}': tmm board [list|show|add|take|move|note|delete]")),
+            }
         }
         ("spawn", rest) => {
             let session = need_project(&ctx);
@@ -807,7 +906,7 @@ fn need_agent(ctx: &Ctx) -> String {
 fn split_flags(args: &[String]) -> (std::collections::HashMap<String, Option<String>>, Vec<String>, Vec<(String, String)>) {
     const VALUED: &[&str] = &["project", "agent", "server", "output", "since", "limit", "brief",
                           "name", "session", "with-agent", "backend", "model", "effort", "system", "skills", "mcp",
-                          "ref", "source", "description", "def", "grep", "image"];
+                          "ref", "source", "description", "def", "grep", "image", "body", "assignee"];
     let mut flags = std::collections::HashMap::new();
     let mut pos = Vec::new();
     let mut repeats: Vec<(String, String)> = Vec::new();

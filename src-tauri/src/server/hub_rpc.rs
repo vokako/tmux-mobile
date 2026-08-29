@@ -356,6 +356,53 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
         // detection + status derivation joined at read time.
         "hub_agents" => Response::ok(id, agent_states(session)),
 
+        // ---- the project task board (owner, 2026-08-29): the human writes
+        // issues on the board page, agents read/update through `tmm board`.
+        // Session-scoped like the chat room; note/move/save record WHO acted.
+        "hub_board_list" => match crate::projects::board_list(session) {
+            Ok(v) => Response::ok(id, v),
+            Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
+        },
+        "hub_board_get" => {
+            let Some(issue_id) = p.get("id").and_then(|v| v.as_i64()) else {
+                return Response::err(id, ERR_INVALID_PARAMS, "id required".into());
+            };
+            match crate::projects::board_get(session, issue_id) {
+                Ok(v) => Response::ok(id, v),
+                Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
+            }
+        }
+        "hub_board_save" => {
+            let issue_id = p.get("id").and_then(|v| v.as_i64());
+            let s = |k: &str| p.get(k).and_then(|v| v.as_str());
+            let who = s("who").unwrap_or("human");
+            match crate::projects::board_save(session, issue_id, s("title"), s("body"), s("status"), s("assignee"), who) {
+                Ok(saved) => Response::ok(id, serde_json::json!({ "ok": true, "id": saved })),
+                Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
+            }
+        }
+        "hub_board_note" => {
+            let Some(issue_id) = p.get("id").and_then(|v| v.as_i64()) else {
+                return Response::err(id, ERR_INVALID_PARAMS, "id required".into());
+            };
+            let body = p.get("body").and_then(|v| v.as_str()).unwrap_or("");
+            let author = p.get("who").and_then(|v| v.as_str()).unwrap_or("human");
+            match crate::projects::board_note(session, issue_id, author, body) {
+                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
+                Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
+            }
+        }
+        "hub_board_delete" => {
+            let Some(issue_id) = p.get("id").and_then(|v| v.as_i64()) else {
+                return Response::err(id, ERR_INVALID_PARAMS, "id required".into());
+            };
+            match crate::projects::board_delete(session, issue_id) {
+                Ok(true) => Response::ok(id, serde_json::json!({ "ok": true })),
+                Ok(false) => Response::err(id, ERR_INVALID_PARAMS, format!("no issue #{issue_id} on this board")),
+                Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
+            }
+        }
+
         // The activity feed: recent observed telemetry events (tool calls,
         // status declarations, notifications) for the chat timeline. An
         // in-memory ring — telemetry made visible, not chat history.

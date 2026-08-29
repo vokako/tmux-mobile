@@ -313,6 +313,20 @@ can get wrong to save three characters.
   and hook-sourced posts stay record-only.
 - `hub_agents { session }` — one row per live window: name, command, agent
   detection (`projects::agents::detect`), derived state.
+- `hub_board_list/get/save/note/delete` — the project TASK BOARD (owner,
+  2026-08-29: "引入一个新的看板功能…借助软件工程，可以把我们的任务管理的更好"):
+  session-scoped issues in four fixed columns (`todo/doing/review/done`,
+  `projects::BOARD_STATUSES` — free-text statuses would fork the vocabulary
+  per agent). `save` creates (no id) or PATCHES (id + only the changed
+  fields, COALESCE in SQL — an agent's `move` must not erase a body the
+  human edited meanwhile); `note` appends to the issue's own thread and
+  bumps `updated_at`; every write records WHO acted. The HUMAN's half is the
+  Hub drawer's board partition (`src/lib/hub/Board.svelte`, third toggle
+  beside terminal and Files, polls while visible); the AGENT's half is
+  `tmm board list|show|add|take|move|note|delete` — `take` = assignee+doing
+  in one move, and the tmm-cli skill carries the conventions (take before
+  you start; note decisions ON the issue; only the acceptor moves to done).
+  Schema v12 (`issues` + `issue_notes`, cascade).
 
 The room is `proj:<session>` on the same agora bus that Team uses —
 `TeamBridge::open_room` provisions it with **no tmux session, no roster, no

@@ -800,6 +800,31 @@ export const hubArchive = (session: string) =>
   call<{ messages: TeamMessage[] }>('hub_archive', { session });
 export const hubAgents = (session: string) =>
   call<{ agents: HubAgent[] }>('hub_agents', { session });
+/** The project task board: session-scoped issues in four fixed columns.
+ * Humans write issues here; agents read and update them via `tmm board`. */
+export interface BoardIssue {
+  id: number;
+  title: string;
+  body: string;
+  status: string;
+  assignee: string;
+  created_by: string;
+  created_at: number;
+  updated_at: number;
+  notes: number | { author: string; body: string; at: number }[];
+}
+export const boardList = (session: string) =>
+  call<{ issues: BoardIssue[]; statuses: string[] }>('hub_board_list', { session });
+export const boardGet = (session: string, id: number) =>
+  call<BoardIssue>('hub_board_get', { session, id });
+/** Create (no id) or patch (id + only the fields to change). `who` records the
+ * actor; the UI always says 'human'. */
+export const boardSave = (session: string, fields: { id?: number; title?: string; body?: string; status?: string; assignee?: string }) =>
+  call<{ ok: boolean; id: number }>('hub_board_save', { session, who: 'human', ...fields });
+export const boardNote = (session: string, id: number, body: string) =>
+  call<{ ok: boolean }>('hub_board_note', { session, id, body, who: 'human' });
+export const boardDelete = (session: string, id: number) =>
+  call<{ ok: boolean }>('hub_board_delete', { session, id });
 export interface HubActivityEvent {
   ts: number;      // epoch ms — merges directly with chat message timestamps
   window: number;

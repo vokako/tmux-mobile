@@ -636,6 +636,62 @@ pub fn seed_builtin_skills() {
     }
 }
 
+// ---- the project task board ------------------------------------------------
+//
+// A kanban over the session, stored beside the projects it serves (owner,
+// 2026-08-29: "借助软件工程，可以把我们的任务管理的更好"). Four fixed columns —
+// a free-text status would fork the vocabulary per agent and the board would
+// stop being readable at a glance. The HUMAN writes issues on the board page;
+// agents read and update them through `tmm board`.
+
+pub const BOARD_STATUSES: [&str; 4] = ["todo", "doing", "review", "done"];
+
+fn board_status_ok(status: Option<&str>) -> Result<(), String> {
+    match status {
+        Some(s) if !BOARD_STATUSES.contains(&s) => Err(format!(
+            "status must be one of {} — got '{s}'",
+            BOARD_STATUSES.join("|")
+        )),
+        _ => Ok(()),
+    }
+}
+
+pub fn board_list(session: &str) -> Result<Value, String> {
+    with_store(|store| Ok(json!({ "issues": store.issues_list(session)?, "statuses": BOARD_STATUSES })))
+}
+
+pub fn board_get(session: &str, id: i64) -> Result<Value, String> {
+    with_store(|store| {
+        store
+            .issue_get(session, id)?
+            .ok_or_else(|| format!("no issue #{id} on this board"))
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn board_save(
+    session: &str,
+    id: Option<i64>,
+    title: Option<&str>,
+    body: Option<&str>,
+    status: Option<&str>,
+    assignee: Option<&str>,
+    who: &str,
+) -> Result<i64, String> {
+    board_status_ok(status)?;
+    let now = chrono::Utc::now().timestamp();
+    with_store(|store| store.issue_save(session, id, title, body, status, assignee, who, now))
+}
+
+pub fn board_note(session: &str, id: i64, author: &str, body: &str) -> Result<(), String> {
+    let now = chrono::Utc::now().timestamp();
+    with_store(|store| store.issue_note(session, id, author, body, now))
+}
+
+pub fn board_delete(session: &str, id: i64) -> Result<bool, String> {
+    with_store(|store| store.issue_delete(session, id))
+}
+
 pub fn skills_list() -> Result<Value, String> {
     with_store(|store| Ok(json!({ "skills": store.skills_list()? })))
 }

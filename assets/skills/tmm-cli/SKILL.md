@@ -33,6 +33,31 @@ Progress is ambient (`tmm status`), messages are addressed (`tmm send`).
 A `tmm send` interrupts its reader — keep it for questions, decisions,
 results that need a person.
 
+## The task board — shared kanban, humans and agents alike
+
+The project has ONE board (todo / doing / review / done). The human writes
+issues on the board page; you read and update the same issues here. If your
+task matches a board issue, keep that issue current — the board is the
+plan's record, and a stale column misleads everyone who schedules by it.
+
+```bash
+tmm board                       # the whole board, grouped by column
+tmm board show <id>             # one issue + its note thread
+tmm board add "title" [--body <text>] [--assignee <name>]
+tmm board take <id>             # claim it: assignee = you, status = doing
+tmm board move <id> review      # done working — hand it to review
+tmm board move <id> done        # accepted
+tmm board note <id> "found the root cause in store.rs; fix is one COALESCE"
+```
+
+Conventions that keep the board honest:
+- `take` before you start — two agents editing one issue's territory is the
+  conflict the board exists to prevent.
+- `note` decisions and findings ON the issue (not only in chat): the issue
+  outlives the conversation and is what the next reader loads first.
+- `move <id> review` when YOUR part is done and someone must accept it;
+  only the acceptor moves it to `done`.
+
 ## Background tasks — LOCAL tmux, no server needed
 
 The one subtree that works even when the server is down. Each task is a

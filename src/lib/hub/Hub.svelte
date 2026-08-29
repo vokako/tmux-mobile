@@ -17,6 +17,7 @@
   //   in this sidebar. New projects pick their agents at creation time.
   import Terminal from '../terminal/Terminal.svelte';
   import Files from '../files/Files.svelte';
+  import Board from './Board.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import { scrollFade } from '../core/scrollFade.ts';
   import ChatImage from './ChatImage.svelte';
@@ -1328,6 +1329,10 @@
       // (editor, rename field, preview) is the browser's own — closing the
       // drawer here would UNMOUNT an open editor mid-edit.
       if (e.target?.closest?.('.files-body')) return;
+      // The board handles Escape itself while a detail or form is open
+      // (its capture listener stops propagation); a bare board lets the
+      // drawer close as usual.
+
       closeDrawer(); e.stopPropagation();
     };
     window.addEventListener('keydown', onKey, true);
@@ -1820,6 +1825,15 @@
           }}>
           <Icon name="files" size={14} />
         </button>
+        <!-- The third partition: the project task board. Humans write issues
+             here; agents keep them current via `tmm board` (owner, 2026-08-29).
+             Desktop drawer only for now — the phone has no board tab to jump to. -->
+        {#if !mobile && !compact}
+          <button class="icon-btn term-toggle" class:on={termOpen && drawerView === 'board'} title={t('board')} aria-label={t('board')}
+            onclick={() => termOpen && drawerView === 'board' ? closeDrawer() : (drawerView = 'board', openDrawer())}>
+            <Icon name="layout" size={14} />
+          </button>
+        {/if}
       </div>
 
       {#if selected}
@@ -2438,7 +2452,7 @@
           <button class="icon-btn" title={t('hubOpenFull')} onclick={() => { const m = /^(.+):(\d+)\.(\d+)$/.exec(termTarget); if (m) openTerminal(selected, termTarget, termCommand); }}>
             <Icon name="maximize" size={14} />
           </button>
-        {:else}
+        {:else if drawerView === 'files'}
           <!-- Files carries its own path bar and toolbar; the head only says
                which partition this is and keeps the one close affordance. -->
           <span class="d-files"><Icon name="files" size={13} />{t('files')} — {selected}</span>
@@ -2447,6 +2461,9 @@
             onclick={() => openFilesTab?.(selected, drawerFilesDir)}>
             <Icon name="maximize" size={14} />
           </button>
+        {:else}
+          <span class="d-files"><Icon name="layout" size={13} />{t('board')} — {selected}</span>
+          <span class="spacer"></span>
         {/if}
         <button class="icon-btn" title="Esc" onclick={closeDrawer}>
           <Icon name="x" size={14} />
@@ -2466,6 +2483,11 @@
              keyed by session), so each project wakes up where you left it. -->
         <div class="files-body">
           <Files session={selected} visible={visible} {fontSize} singlePane bind:currentDir={drawerFilesDir} />
+        </div>
+      {/if}
+      {#if drawerView === 'board'}
+        <div class="board-body">
+          <Board session={selected} visible={visible && drawerView === 'board'} />
         </div>
       {/if}
     </section>
@@ -3420,6 +3442,7 @@
      (the .keep-rows lesson). */
   .term-body.off { visibility: hidden; position: absolute; inset: 0; }
   .files-body { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+  .board-body { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
   .d-files { display: flex; align-items: center; gap: 6px; font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* ONE switcher for the drawer. It used to have two: these pills on top and

@@ -14,7 +14,7 @@ use std::path::Path;
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 11;
+const SCHEMA_VERSION: i64 = 12;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
@@ -392,6 +392,38 @@ impl Store {
             self.conn
                 .execute_batch("ALTER TABLE reg_agents ADD COLUMN effort TEXT NOT NULL DEFAULT '';")
                 .map_err(|e| format!("migrate to 11: {e}"))?;
+        }
+        if version < 12 {
+            // v12: the project task BOARD (owner, 2026-08-29: "引入一个新的看板
+            // 功能…人类有一个看板页面，能写任务issue，agent也可以读任务，修改任务
+            // 状态，在看板上记录信息状态"). Keyed by SESSION like the chat room —
+            // the board belongs to the project's conversation, not its folder.
+            // Status is a fixed four-column vocabulary (todo/doing/review/done);
+            // notes are the issue's own thread, separate from the chat.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE issues (
+                       id         INTEGER PRIMARY KEY,
+                       session    TEXT NOT NULL,
+                       title      TEXT NOT NULL,
+                       body       TEXT NOT NULL DEFAULT '',
+                       status     TEXT NOT NULL DEFAULT 'todo',
+                       assignee   TEXT NOT NULL DEFAULT '',
+                       created_by TEXT NOT NULL DEFAULT '',
+                       created_at INTEGER NOT NULL,
+                       updated_at INTEGER NOT NULL
+                     );
+                     CREATE INDEX issues_session ON issues(session, status, updated_at DESC);
+                     CREATE TABLE issue_notes (
+                       id       INTEGER PRIMARY KEY,
+                       issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+                       author   TEXT NOT NULL DEFAULT '',
+                       body     TEXT NOT NULL,
+                       at       INTEGER NOT NULL
+                     );
+                     CREATE INDEX issue_notes_issue ON issue_notes(issue_id, at);",
+                )
+                .map_err(|e| format!("migrate to 12: {e}"))?;
         }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)
@@ -950,6 +982,176 @@ impl Store {
             .map_err(|e| e.to_string())
     }
 
+    // ---- the project task board (issues) ----------------------------------
+
+    /// All issues of one project's board, newest movement first inside each
+    /// status. `notes` is a COUNT here — the thread comes with `issue_get`.
+    pub fn issues_list(&self, session: &str) -> Result<Vec<serde_json::Value>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT i.id, i.title, i.body, i.status, i.assignee, i.created_by,
+                        i.created_at, i.updated_at,
+                        (SELECT COUNT(*) FROM issue_notes n WHERE n.issue_id = i.id)
+                   FROM issues i WHERE i.session = ?1
+                  ORDER BY i.updated_at DESC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([session], |r| {
+                Ok(serde_json::json!({
+                    "id": r.get::<_, i64>(0)?,
+                    "title": r.get::<_, String>(1)?,
+                    "body": r.get::<_, String>(2)?,
+                    "status": r.get::<_, String>(3)?,
+                    "assignee": r.get::<_, String>(4)?,
+                    "created_by": r.get::<_, String>(5)?,
+                    "created_at": r.get::<_, i64>(6)?,
+                    "updated_at": r.get::<_, i64>(7)?,
+                    "notes": r.get::<_, i64>(8)?,
+                }))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(rows)
+    }
+
+    /// One issue with its full note thread, or None.
+    pub fn issue_get(&self, session: &str, id: i64) -> Result<Option<serde_json::Value>, String> {
+        let issue = self
+            .conn
+            .query_row(
+                "SELECT id, title, body, status, assignee, created_by, created_at, updated_at
+                   FROM issues WHERE session = ?1 AND id = ?2",
+                rusqlite::params![session, id],
+                |r| {
+                    Ok(serde_json::json!({
+                        "id": r.get::<_, i64>(0)?,
+                        "title": r.get::<_, String>(1)?,
+                        "body": r.get::<_, String>(2)?,
+                        "status": r.get::<_, String>(3)?,
+                        "assignee": r.get::<_, String>(4)?,
+                        "created_by": r.get::<_, String>(5)?,
+                        "created_at": r.get::<_, i64>(6)?,
+                        "updated_at": r.get::<_, i64>(7)?,
+                    }))
+                },
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let Some(mut issue) = issue else { return Ok(None) };
+        let mut stmt = self
+            .conn
+            .prepare("SELECT author, body, at FROM issue_notes WHERE issue_id = ?1 ORDER BY at, id")
+            .map_err(|e| e.to_string())?;
+        let notes = stmt
+            .query_map([id], |r| {
+                Ok(serde_json::json!({
+                    "author": r.get::<_, String>(0)?,
+                    "body": r.get::<_, String>(1)?,
+                    "at": r.get::<_, i64>(2)?,
+                }))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        issue["notes"] = serde_json::Value::Array(notes);
+        Ok(Some(issue))
+    }
+
+    /// Create (id = None) or update. Update patches only the given fields, so
+    /// an agent's `move` cannot erase a body the human wrote meanwhile.
+    #[allow(clippy::too_many_arguments)]
+    pub fn issue_save(
+        &self,
+        session: &str,
+        id: Option<i64>,
+        title: Option<&str>,
+        body: Option<&str>,
+        status: Option<&str>,
+        assignee: Option<&str>,
+        who: &str,
+        now: i64,
+    ) -> Result<i64, String> {
+        match id {
+            None => {
+                let title = title.unwrap_or("").trim();
+                if title.is_empty() {
+                    return Err("an issue needs a title".into());
+                }
+                self.conn
+                    .execute(
+                        "INSERT INTO issues (session, title, body, status, assignee, created_by, created_at, updated_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+                        rusqlite::params![
+                            session,
+                            title,
+                            body.unwrap_or(""),
+                            status.unwrap_or("todo"),
+                            assignee.unwrap_or(""),
+                            who,
+                            now
+                        ],
+                    )
+                    .map_err(|e| e.to_string())?;
+                Ok(self.conn.last_insert_rowid())
+            }
+            Some(id) => {
+                let n = self
+                    .conn
+                    .execute(
+                        "UPDATE issues SET
+                           title    = COALESCE(?3, title),
+                           body     = COALESCE(?4, body),
+                           status   = COALESCE(?5, status),
+                           assignee = COALESCE(?6, assignee),
+                           updated_at = ?7
+                         WHERE session = ?1 AND id = ?2",
+                        rusqlite::params![session, id, title, body, status, assignee, now],
+                    )
+                    .map_err(|e| e.to_string())?;
+                if n == 0 {
+                    return Err(format!("no issue #{id} on this board"));
+                }
+                Ok(id)
+            }
+        }
+    }
+
+    pub fn issue_note(&self, session: &str, id: i64, author: &str, body: &str, now: i64) -> Result<(), String> {
+        let body = body.trim();
+        if body.is_empty() {
+            return Err("an empty note says nothing".into());
+        }
+        // Session-scoped existence check first: a note must not attach to
+        // another project's issue through a guessed id.
+        let n = self
+            .conn
+            .execute(
+                "UPDATE issues SET updated_at = ?3 WHERE session = ?1 AND id = ?2",
+                rusqlite::params![session, id, now],
+            )
+            .map_err(|e| e.to_string())?;
+        if n == 0 {
+            return Err(format!("no issue #{id} on this board"));
+        }
+        self.conn
+            .execute(
+                "INSERT INTO issue_notes (issue_id, author, body, at) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![id, author, body, now],
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn issue_delete(&self, session: &str, id: i64) -> Result<bool, String> {
+        self.conn
+            .execute("DELETE FROM issues WHERE session = ?1 AND id = ?2", rusqlite::params![session, id])
+            .map(|n| n > 0)
+            .map_err(|e| e.to_string())
+    }
+
     pub fn mcp_list(&self) -> Result<Vec<RegMcp>, String> {
         let mut stmt = self
             .conn
@@ -1063,6 +1265,47 @@ fn row_to_project(r: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn board_issues_live_move_and_remember() {
+        let store = Store::open_memory().unwrap();
+        // Create, then patch FIELD BY FIELD: an agent's `move` must not erase
+        // the body the human wrote meanwhile (COALESCE semantics).
+        let id = store
+            .issue_save("proj", None, Some("fix login"), Some("the flow breaks at step 2"), None, None, "human", 100)
+            .unwrap();
+        store.issue_save("proj", Some(id), None, None, Some("doing"), Some("builder"), "builder", 200).unwrap();
+        let got = store.issue_get("proj", id).unwrap().unwrap();
+        assert_eq!(got["status"], "doing");
+        assert_eq!(got["assignee"], "builder");
+        assert_eq!(got["body"], "the flow breaks at step 2", "move kept the body");
+        assert_eq!(got["created_by"], "human");
+
+        // Notes thread in order and bump updated_at; the count rides the list.
+        store.issue_note("proj", id, "builder", "root cause found", 300).unwrap();
+        store.issue_note("proj", id, "human", "ship it", 400).unwrap();
+        let got = store.issue_get("proj", id).unwrap().unwrap();
+        let notes = got["notes"].as_array().unwrap();
+        assert_eq!(notes.len(), 2);
+        assert_eq!(notes[0]["author"], "builder");
+        assert_eq!(got["updated_at"], 400, "a note is board activity");
+        let list = store.issues_list("proj").unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0]["notes"], 2);
+
+        // The board is SESSION-scoped: another project sees nothing, and a
+        // guessed id cannot cross boards (note, update, get, delete alike).
+        assert!(store.issues_list("other").unwrap().is_empty());
+        assert!(store.issue_get("other", id).unwrap().is_none());
+        assert!(store.issue_note("other", id, "x", "sneak", 500).is_err());
+        assert!(store.issue_save("other", Some(id), None, None, Some("done"), None, "x", 500).is_err());
+        assert!(!store.issue_delete("other", id).unwrap());
+
+        // A title-less create is refused; delete cascades the notes.
+        assert!(store.issue_save("proj", None, Some("  "), None, None, None, "human", 600).is_err());
+        assert!(store.issue_delete("proj", id).unwrap());
+        assert!(store.issue_get("proj", id).unwrap().is_none());
+    }
 
     fn project(id: &str) -> Project {
         Project {
