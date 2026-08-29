@@ -895,6 +895,52 @@ export function statusParts(e: HubActivityEvent): { state: string; text: string 
 /** Internal: a tool call before consecutive ones are folded into a group. */
 type ToolItem = { type: 'tool'; ts: number; window: number; event: HubActivityEvent };
 
+/** Does this body ADDRESS the agent — an `@name` (or `@all`) token, parsed
+ * exactly the way the server's `deliver_mentions` does (token after `@` up to
+ * whitespace, trailing punctuation trimmed, exact name equality)? Used by the
+ * roster's double-click filter: "发给它的用户消息" means addressed, and a
+ * substring match would collect `@builder-2` for `builder` (board #3). */
+export function mentionsAgent(body: string, name: string): boolean {
+  return body
+    .split('@')
+    .slice(1)
+    .map((rest) => rest.split(/\s/, 1)[0]?.replace(/[,:;.!?]+$/u, '') ?? '')
+    .some((token) => token === name || token === 'all');
+}
+
+/** The feed narrowed to ONE agent (board #3: 双击卡片 "筛选跟某个agent有关的
+ * 消息"). "Related" is defined here, once, and tested:
+ * - a message FROM the agent (its replies, its `[tmm status]`/`[tmm done]`
+ *   bubbles), or ANY message ADDRESSED to it (`@name` / `@all` — from the
+ *   human or a teammate);
+ * - telemetry blocks (prompt / progress / note / steps) of ITS window and no
+ *   other — two agents working concurrently must not leak into each other's
+ *   filter (`window` undefined keeps none: no window, no telemetry);
+ * - sys capsules keep only the lifecycle LINES that name the agent as a whole
+ *   word (`spawned builder-2` must not surface for `builder`), and disappear
+ *   when none do.
+ * Pure so the rules are testable without a DOM. */
+export function filterBlocks(blocks: FeedBlock[], name: string, window?: number): FeedBlock[] {
+  const word = new RegExp(`(?<![\\w-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'u');
+  const out: FeedBlock[] = [];
+  for (const b of blocks) {
+    if (b.type === 'msg') {
+      const from = b.msg?.from ?? '';
+      const body = b.msg?.body ?? '';
+      if (from === name || mentionsAgent(body, name)) out.push(b);
+      continue;
+    }
+    if (b.type === 'sys') {
+      const items = b.items.filter((line) => word.test(line));
+      if (items.length) out.push({ ...b, items });
+      continue;
+    }
+    // prompt / progress / note / steps — all carry the window they belong to.
+    if (window != null && b.window === window) out.push(b);
+  }
+  return out;
+}
+
 /** ALL whitespace removed — the delivery-echo match runs on this form (the
  * server's `strip_ws` twin; a test pins the two to the same behavior via the
  * same cases). Squashing to ONE space was not enough: tmux in extended-keys

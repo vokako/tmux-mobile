@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { uploadImagePath, uploadFilePath, imageId, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs } from './hub.ts';
+import { uploadImagePath, uploadFilePath, imageId, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -989,4 +989,42 @@ test('composer uploads land under the project .tmm with a random id', () => {
   assert.equal(uploadFilePath('/w/s', 'id1', 'a/b\\c:d?.txt'), '/w/s/.tmm/uploads/id1-cd.txt', 'separators and reserved chars stripped');
   assert.equal(uploadFilePath('/w/s', 'id1', '   '), '/w/s/.tmm/uploads/id1-file', 'nothing left → generic');
   assert.notEqual(imageId(), imageId(), 'random half differs');
+});
+
+test('mentionsAgent parses addresses the way deliver_mentions does', () => {
+  assert.ok(mentionsAgent('@builder fix it', 'builder'));
+  assert.ok(mentionsAgent('please @builder: now', 'builder'), 'trailing punctuation trimmed');
+  assert.ok(mentionsAgent('@all standup', 'builder'), '@all reaches every agent');
+  assert.ok(!mentionsAgent('@builder-2 yours', 'builder'), 'a longer name is a DIFFERENT agent');
+  assert.ok(!mentionsAgent('mail me at x@builder.com... wait no', 'builder-2'));
+  assert.ok(!mentionsAgent('no address here', 'builder'));
+});
+
+test('filterBlocks keeps one agent\u2019s world and nobody else\u2019s (board #3)', () => {
+  const msg = (from: string, body: string, ts = 1) => ({ type: 'msg' as const, ts, msg: { from, body }, delivered: false });
+  const blocks = [
+    msg('builder', 'my reply'),                                  // from the agent
+    msg('human', '@builder do this'),                            // addressed to it
+    msg('lead', '@builder-2 yours'),                             // addressed to a LONGER name
+    msg('human', '@all everyone'),                               // broadcast reaches it
+    msg('builder-2', 'concurrent reply'),                        // someone else talking
+    { type: 'steps' as const, ts: 2, window: 2, key: 's2', events: [] },
+    { type: 'steps' as const, ts: 3, window: 4, key: 's4', events: [] },
+    { type: 'prompt' as const, ts: 4, window: 2, text: 'typed locally' },
+    { type: 'progress' as const, ts: 5, window: 4, state: 'working', text: 'other lane' },
+    { type: 'note' as const, ts: 6, window: 2, event: {} as never },
+    { type: 'sys' as const, ts: 7, key: 'sys1', items: ['[tmm] spawned builder — brief', '[tmm] spawned builder-2 — other', '[tmm] interrupted lead'] },
+    { type: 'sys' as const, ts: 8, key: 'sys2', items: ['[tmm] board #1 todo → doing — title'] },
+  ];
+  const out = filterBlocks(blocks as never, 'builder', 2);
+  const kinds = out.map((b) => (b.type === 'msg' ? `msg:${b.msg.from}` : b.type === 'sys' ? `sys:${b.items.length}` : `${b.type}:${'window' in b ? b.window : ''}`));
+  assert.deepEqual(kinds, ['msg:builder', 'msg:human', 'msg:human', 'steps:2', 'prompt:2', 'note:2', 'sys:1'],
+    'from-agent + addressed + own-window telemetry + the one sys line naming it');
+  const sys = out.find((b) => b.type === 'sys');
+  assert.deepEqual(sys && 'items' in sys ? sys.items : [], ['[tmm] spawned builder — brief'],
+    'builder-2\u2019s spawn line and an unrelated board line never surface for builder');
+  // No window (a stopped agent, an unmapped sender): telemetry keeps nothing,
+  // messages still filter by name.
+  const noWin = filterBlocks(blocks as never, 'builder', undefined);
+  assert.ok(noWin.every((b) => b.type === 'msg' || b.type === 'sys'), 'no window \u2192 no telemetry claimed');
 });

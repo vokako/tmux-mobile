@@ -48,6 +48,29 @@ test('the composer stacks above every feed layer, so its popovers are never buri
   // And inside the composer the palette must stay above the recipient menu —
   // both exist in the same context; the palette is the newer layer.
   assert.ok(z(rule('.cmd-menu')) > z(rule('.to-menu')), 'palette above recipient menu inside the composer');
+
+});
+
+test('the agent card speaks the three-stage machine: select, then options, dblclick filters', () => {
+  // Board #3: a click on an UNSELECTED card must only select; the menu is the
+  // SECOND click's job; a double click enters the one-agent filter with the
+  // menu suppressed (the 260ms defer is what keeps it from flashing).
+  const live = source.slice(source.indexOf('class="acard" class:sel'), source.indexOf('class="acard off"'));
+  assert.match(live, /onclick=\{\(e\) => cardClick\(a\.name, e\.currentTarget\)\}/u, 'one click handler, the machine');
+  assert.match(live, /ondblclick=\{\(\) => cardDbl\(a\.name\)\}/u, 'double-click enters the filter');
+  assert.match(live, /onkeydown=[^\n]*cardClick\(a\.name, e\.currentTarget\)/u, 'keyboard mirrors the machine');
+  const machine = source.slice(source.indexOf('function cardClick'), source.indexOf('function setRecipient'));
+  assert.match(machine, /if \(recipient !== name\) \{ setRecipient\(name\); return; \}/u,
+    'an unselected card only selects — no menu on the first click');
+  assert.match(machine, /setTimeout\([\s\S]*?toggleAgentMenu\(name, el\)/u,
+    'the selected card defers the menu one double-click window');
+  assert.match(machine, /filterAgent = filterAgent === name \? '' : name/u,
+    'double-click toggles the filter, so it is also an exit');
+  // The mode is visible and leavable: a banner names the agent, ✕ clears it,
+  // and the back gesture peels it before the drawer.
+  assert.match(source, /class="filter-bar"/u, 'the filter announces itself above the feed');
+  assert.match(source, /onclick=\{\(\) => \(filterAgent = ''\)\}/u, 'the banner carries the exit');
+  assert.match(source, /if \(filterAgent\) \{ filterAgent = ''; return true; \}/u, 'back gesture exits the filter');
 });
 
 test('the argument is wrapped in its own scroller, beside the name and the time', () => {

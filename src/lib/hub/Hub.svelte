@@ -31,7 +31,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, stateIsLive, mergeMessages, backendColor, feedBlocks, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
+  import { markLeadingMention, stateDotColor, stateIsLive, mergeMessages, backendColor, feedBlocks, filterBlocks, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
@@ -229,6 +229,7 @@
     if (agents.length) recipient = pickLead(agents, registry, hubPrefs.lead(session));
     recipientOpen = false;
     menuFor = '';
+    filterAgent = ''; // a filter is a reading choice, scoped to its room
     msgOpen = '';
     rawOpen = '';
     termOpen = false;
@@ -935,6 +936,24 @@
     return v?.model ?? '';
   }
 
+  // ── The card's interaction state machine (board #3, owner): a click on an
+  // UNSELECTED card only selects it; a click on the SELECTED card opens the
+  // menu; a DOUBLE click filters the feed to that agent. The menu waits one
+  // double-click window so click-click never flashes it before the filter.
+  let filterAgent = $state('');
+  let cardTimer = null;
+  function cardClick(name, el) {
+    if (cardTimer) { clearTimeout(cardTimer); cardTimer = null; return; } // 2nd of a double — dblclick acts
+    if (recipient !== name) { setRecipient(name); return; }               // select first, options later
+    cardTimer = setTimeout(() => { cardTimer = null; toggleAgentMenu(name, el); }, 260);
+  }
+  function cardDbl(name) {
+    if (cardTimer) { clearTimeout(cardTimer); cardTimer = null; }
+    menuFor = '';
+    setRecipient(name);
+    filterAgent = filterAgent === name ? '' : name; // double-click again = exit
+  }
+
   /** Choosing a recipient is also choosing this project's lead: it is the same
    * decision ("who am I working with here"), so it persists. */
   function setRecipient(name) {
@@ -1387,6 +1406,7 @@
       if (pickerOpen) { pickerOpen = false; return true; }
       if (createOpen) { createOpen = false; return true; }
       if (renaming) { renaming = false; return true; }
+      if (filterAgent) { filterAgent = ''; return true; }
       if (termOpen) { closeDrawer(); return true; }
       if (compact && !sideOpen) { sideOpen = true; return true; }
       return false;
@@ -1521,9 +1541,13 @@
 
   // `windowOf` is what lets a reply close the lane it belongs to, so two agents
   // working at once keep ONE growing group each instead of interleaving.
-  const blocks = $derived(
-    feedBlocks(feed, activity, hubPrefs.feedLevel, (from) => agents.find((a) => a.name === from)?.window),
-  );
+  const blocks = $derived.by(() => {
+    const all = feedBlocks(feed, activity, hubPrefs.feedLevel, (from) => agents.find((a) => a.name === from)?.window);
+    if (!filterAgent) return all;
+    // The double-click filter: one agent's world (its replies, what was
+    // addressed to it, its own telemetry lane) — rules live in filterBlocks.
+    return filterBlocks(all, filterAgent, agents.find((a) => a.name === filterAgent)?.window);
+  });
   const windowName = (w) => agents.find((a) => a.window === w)?.name ?? `#${w}`;
 
   // Disclosure lives outside the row: `undefined` means "nobody chose", and the
@@ -1859,10 +1883,11 @@
                  切换到跟当前 Agent 的对话"). -->
             <div class="acard" class:sel={recipient === a.name} role="button" tabindex="0"
               title={[`${a.name} · ${stateLabel(a.state)}`, a.detail, vitalsLine(a.vitals)].filter(Boolean).join(' · ')}
-              onclick={(e) => { setRecipient(a.name); toggleAgentMenu(a.name, e.currentTarget); }}
+              onclick={(e) => cardClick(a.name, e.currentTarget)}
+              ondblclick={() => cardDbl(a.name)}
               oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), a.name, agentItems(a.name)); }}
               use:longpress={{ onlongpress: (pt) => openCtx(pt, a.name, agentItems(a.name)) }}
-              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setRecipient(a.name); toggleAgentMenu(a.name, e.currentTarget); } }}>
+              onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cardClick(a.name, e.currentTarget); } }}>
               <div class="ac-top">
                 {#if backendIcon(a.agent)}<img class="ava" src={backendIcon(a.agent)} alt={a.agent} />{:else}<span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>{/if}
                 <span class="a-name">{a.name}</span>
@@ -1999,6 +2024,19 @@
       {/if}
 
       <div class="feed-wrap">
+      <!-- The double-click filter is a MODE, so it says so (board #3, owner:
+           "注意ui上体现我们现在的筛选状态，以及可以再退出"): who is filtered,
+           and one ✕ to leave — double-clicking the card again exits too. -->
+      {#if filterAgent}
+        <div class="filter-bar">
+          <Icon name="search" size={12} />
+          <span class="f-label">{t('hubFilterOn')}</span>
+          <span class="f-name">@{filterAgent}</span>
+          <button class="icon-btn" title={t('hubFilterExit')} aria-label={t('hubFilterExit')} onclick={() => (filterAgent = '')}>
+            <Icon name="x" size={13} />
+          </button>
+        </div>
+      {/if}
       <div class="feed subtle-scroll" bind:this={feedEl} onscroll={onFeedScroll}>
         {#each blocks as b, i (blockKey(b, i))}
           <!-- A new calendar day gets a centred date pill before its first
@@ -3212,6 +3250,18 @@
        INSIDE the composer; this decides composer-vs-feed once. */
     position: relative; z-index: 15;
   }
+  /* The filter mode's banner: accent-tinted so it reads as a STATE, not a
+     message; sits above the feed inside the chat column. */
+  .filter-bar {
+    display: flex; align-items: center; gap: 7px;
+    padding: 5px 12px;
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+    border-bottom: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+    color: var(--text2); font-size: var(--fs-meta);
+  }
+  .filter-bar .f-name { color: var(--accent); font-weight: 650; font-family: ui-monospace, Menlo, monospace; }
+  .filter-bar .icon-btn { margin-left: auto; }
+
   .compose-shell {
     flex: 1; min-width: 0; position: relative;
     padding: 6px 10px; border: 1px solid var(--input-border); border-radius: 16px;
