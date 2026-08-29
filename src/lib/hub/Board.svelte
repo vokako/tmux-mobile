@@ -18,7 +18,7 @@
   import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft } from './board.ts';
   import { scrollFade } from '../core/scrollFade.ts';
 
-  let { session = '', visible = true, onGoBack = null }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null } = $props();
+  let { session = '', visible = true, onGoBack = null, issueRequest = null }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null; issueRequest?: { session: string; id: number; n: number } | null } = $props();
 
   // Every project has its OWN board (issues are session-scoped like the chat
   // room), so the page carries the shared project sidebar (owner, 2026-08-29:
@@ -34,6 +34,21 @@
   // A dirty draft blocks the silent follow: the prop moving under an open
   // edit would reset the view and lose it with no confirm (board #11).
   $effect(() => { if (session && (!picked || !cur) && !dirty) cur = session; });
+  // A jump from the feed's board line (board #13 follow-up): the request names
+  // its OWN session — a manual pick may have parked this page on another
+  // project, and the issue id is session-gated. The dirty-draft guard still
+  // stands between the jump and an open edit.
+  let issueReqSeen = $state(0);
+  $effect(() => {
+    const req = issueRequest;
+    if (!req || req.n === issueReqSeen) return;
+    issueReqSeen = req.n;
+    guard(() => {
+      if (req.session && req.session !== cur) { cur = req.session; picked = true; }
+      creating = false; sideOpen = false;
+      void openIssue(req.id);
+    });
+  });
   let talkMap = $state<Record<string, number>>({});
   const rowTalk = (r: { project: { room?: string; session: string } }) =>
     talkMap[r.project.room || `proj:${r.project.session}`] ?? 0;

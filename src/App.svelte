@@ -45,7 +45,8 @@
   // tab while switching terminal panes did (owner, 2026-08-22: "chat里的路径
   // 没有刷新到文件 terminal好像就会刷新路径").
   let filesSession = $state('');
-  let filesNavReq = $state(null); // {path, n} — the Hub drawer's "open in Files tab" handover
+  let filesNavReq = $state(null);
+  let boardIssueReq = $state(null); // a feed board-line tap: which issue to open // {path, n} — the Hub drawer's "open in Files tab" handover
   $effect(() => { if (terminalSession) filesSession = terminalSession; });
   // Team (team multi-agent bus) is desktop-server-only. We probe once per
   // connection: team_status rejects with method-not-found when the server has
@@ -1252,7 +1253,7 @@
            switches. Desktop-eligible only (needs width + the bus): mobile
            keeps the tab layout untouched. -->
       <div class="page-layer" class:hidden={page !== 'hub'}>
-        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onSelectSession={(s) => { if (s) filesSession = s; }} onGoBack={(fn) => hubGoBack = fn} openAgentConfig={(name) => openAgentsConfig(name)} openFilesTab={(s, path) => { if (s) filesSession = s; if (path) filesNavReq = { path, n: (filesNavReq?.n ?? 0) + 1 }; switchTab('files'); }} openBoardTab={(s) => { if (s) filesSession = s; switchTab('board'); }} />
+        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onSelectSession={(s) => { if (s) filesSession = s; }} onGoBack={(fn) => hubGoBack = fn} openAgentConfig={(name) => openAgentsConfig(name)} openFilesTab={(s, path) => { if (s) filesSession = s; if (path) filesNavReq = { path, n: (filesNavReq?.n ?? 0) + 1 }; switchTab('files'); }} openBoardTab={(s, issue) => { if (s) filesSession = s; if (issue) boardIssueReq = { session: s, id: issue, n: (boardIssueReq?.n ?? 0) + 1 }; switchTab('board'); }} />
       </div>
     {/if}
     <!-- The Agents PAGE exists where Agents is a page: the desktop rail. On
@@ -1298,7 +1299,7 @@
     </div>
     <div class="page-layer" class:hidden={page !== 'board'}>
       {#if hubEligible}
-        <Board session={filesSession} visible={page === 'board'} onGoBack={(fn) => boardGoBack = fn} />
+        <Board session={filesSession} visible={page === 'board'} onGoBack={(fn) => boardGoBack = fn} issueRequest={boardIssueReq} />
       {/if}
     </div>
     <div class="page-layer term-page" class:hidden={page !== 'terminal'}>

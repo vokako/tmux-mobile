@@ -2170,13 +2170,16 @@
                        coloured badge (one progressive status language — review
                        is amber because it WAITS for a person), the title the
                        detail. The FROM stays visible because the transition is
-                       the message: done → todo reads as a REOPEN. -->
-                  <div class="sys-item">
+                       the message: done → todo reads as a REOPEN. The row is a
+                       BUTTON: tapping it jumps to that issue on the board page
+                       (same route the header's layout icon takes). -->
+                  <button class="sys-item sys-jump" title={t('board')}
+                    onclick={() => openBoardTab?.(selected, Number(bl.id))}>
                     <span class="sys-who">#{bl.id}</span>
                     <span class="sys-from">{t(`boardStatus_${bl.from}`)} →</span>
                     <span class="sys-verb" style:color={boardStatusColor(bl.to)}><span class="sv-dot" aria-hidden="true"></span>{t(`boardStatus_${bl.to}`)}</span>
                     {#if bl.title}<span class="sys-text">{bl.title}</span>{/if}
-                  </div>
+                  </button>
                 {:else}
                 {@const p = sysParts(item)}
                 {@const c = sysVerbColor(p.verb)}
@@ -3199,6 +3202,16 @@
   /* A board move's origin status: quiet reading ink — the destination badge
      carries the colour, the origin only situates the transition. */
   .sysline .sys-from { flex: none; font-size: var(--fs-micro); color: var(--text3); }
+  /* The board row is tappable: bare button in the row-hover family (surface2
+     wash, no border — it is a row, not a control), inheriting the capsule's
+     type. */
+  .sysline .sys-jump {
+    background: none; border: none; font: inherit; color: inherit;
+    padding: 1px 5px; margin: -1px -5px; border-radius: 6px;
+    cursor: pointer; text-align: left;
+    transition: background var(--t-fast);
+  }
+  .sysline .sys-jump:hover { background: var(--surface2); }
 
   /* The feed's date separators: a centred pill in the sysline's capsule
      dialect, marking where a new calendar day starts. */

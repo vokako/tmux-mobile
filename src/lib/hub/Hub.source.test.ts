@@ -388,4 +388,9 @@ test('a board move renders in the sys grammar, transition visible (board #13)', 
   assert.match(source, /style:color=\{boardStatusColor\(bl\.to\)\}/u,
     'the destination badge speaks the one progressive status language');
   assert.match(source, /\{t\(`boardStatus_\$\{bl\.to\}`\)\}/u, 'statuses wear the board page\u2019s own labels');
+  // And the row is a BUTTON that jumps to the issue on the board page — the
+  // same openBoardTab route the header's layout icon takes, now carrying the
+  // issue id.
+  assert.match(source, /<button class="sys-item sys-jump"[\s\S]{0,200}?openBoardTab\?\.\(selected, Number\(bl\.id\)\)/u,
+    'tapping a board line opens that issue');
 });

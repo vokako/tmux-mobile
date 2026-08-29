@@ -112,3 +112,15 @@ test('create lives in the head, and compact gets the hamburger drawer (reopened 
     'the sheet parks off-canvas and slides — the shared motion grammar');
   assert.ok(!style.includes('.board-root.picked'), 'the second-page drilldown is retired');
 });
+
+test('a feed jump opens its issue in its OWN session (board #13 follow-up)', () => {
+  // The request names the session because a manual pick may have parked the
+  // page elsewhere and issue ids are session-gated; the dirty-draft guard
+  // still stands between the jump and an open edit.
+  assert.match(source, /issueRequest = null/u, 'the request arrives as a prop');
+  assert.match(source, /if \(req\.session && req\.session !== cur\) \{ cur = req\.session; picked = true; \}/u,
+    'the jump re-aims the page at the issue\u2019s session');
+  assert.match(source, /guard\(\(\) => \{\s*\n\s*if \(req\.session/u, 'the dirty guard wraps the jump');
+  assert.match(source, /void openIssue\(req\.id\);/u, 'and the issue detail opens');
+  assert.match(source, /req\.n === issueReqSeen/u, 'each request fires once — the n makes the newest win');
+});
