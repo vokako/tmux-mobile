@@ -379,6 +379,15 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
                 return Response::err(id, ERR_INVALID_PARAMS,
                     format!("no window named '{agent}' in session '{session}'"));
             };
+            // Reset the derived state BEFORE the key goes in, never after. A
+            // cancelled turn produces no stop hook, so without this the newest
+            // fact stays the `userPromptSubmit` that opened it and the card
+            // reads `running` for ever; and an interrupted agent usually starts
+            // something else within seconds, whose own turn re-derives
+            // `running` — so a reset that raced the next turn would be
+            // indistinguishable from no reset at all, i.e. an interrupt that
+            // looked like it never landed (owner, 2026-08-29).
+            telemetry::record_interrupt(session, window);
             match crate::tmux::send_keys(&format!("{session}:{window}"), "Escape", false) {
                 Ok(()) => {
                     // The room records what the app did on a person's behalf —
@@ -678,6 +687,7 @@ fn agent_states(session: &str) -> serde_json::Value {
 mod tests {
     use super::super::test_util::req;
     use super::*;
+    use crate::projects::telemetry;
 
     // The MockAgora from team_rpc's tests is private to that module; a local
     // minimal bridge keeps this module self-contained.
@@ -944,9 +954,10 @@ mod tests {
     }
 
     /// Interrupt, against real tmux: the window SURVIVES (Escape cancels a
-    /// turn, it does not kill a process) and the room records the act — the
-    /// feed row is half of the composer's interrupt affordance (owner,
-    /// 2026-08-24: "发送 interrupt 的状态在消息列表里也要展示出来").
+    /// turn, it does not kill a process), the derived state is reset to `idle`
+    /// BEFORE the key is typed, and the room records the act — the feed row is
+    /// half of the composer's interrupt affordance (owner, 2026-08-24: "发送
+    /// interrupt 的状态在消息列表里也要展示出来").
     #[test]
     fn interrupting_a_managed_agent_leaves_the_window_and_says_so() {
         crate::projects::tests::use_test_store();
@@ -964,6 +975,10 @@ mod tests {
             return;
         }
         let created_project = crate::projects::adopt(&session, Some("int-test")).is_ok();
+        // A turn is OPEN on that window: the state we are interrupting.
+        let window = window_of_agent(&session, "dev").unwrap_or(0);
+        telemetry::record_prompt(&session, window, "do the long thing");
+        assert_eq!(telemetry::derive(&session, window, 0).state, "running");
 
         let b = Bridge::new();
         let r = handle_hub_request(
@@ -977,6 +992,11 @@ mod tests {
             assert!(r.error.is_none(), "{:?}", r.error.map(|e| e.message));
             let panes = crate::tmux::list_panes(&session).unwrap_or_default();
             assert!(panes.iter().any(|p| p.window_name == "dev"), "the window survives an interrupt");
+            assert_eq!(
+                telemetry::derive(&session, window, 0).state,
+                "idle",
+                "the cancelled turn is closed by the interrupt itself — no stop hook is coming"
+            );
             let posts = b.posts.lock().unwrap();
             assert_eq!(posts.len(), 1);
             assert!(posts[0].2.contains("[tmm] interrupted dev"), "the room records it: {:?}", posts[0].2);

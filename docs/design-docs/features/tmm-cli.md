@@ -1475,7 +1475,19 @@ same two steps.
 Interrupt moved server-side (`hub_agent_interrupt`) when the CLI gained it:
 one implementation types the named `Escape` key, so the button and the command
 cannot drift and the managed-agent gate is enforced in the same place as
-stop/restart. It leaves a mark now: a successful interrupt posts
+stop/restart. **The derived state is reset BEFORE the key goes in**
+(`telemetry::record_interrupt` — `end = ("completed", now)`, `ask` and the
+agent's explicit claim cleared, so `derive` answers `idle` at once). Two
+reasons, and the order is the whole point (owner, 2026-08-29): a turn cancelled
+from OUTSIDE has no edge of its own — the backend fires no stop hook for it — so
+the newest fact would stay the `userPromptSubmit` that opened the turn and the
+card would read `running` for as long as the agent stayed alive; and an
+interrupted agent is usually given something else to do within seconds, whose
+own `userPromptSubmit` re-derives `running` — a reset that raced that new turn
+would be indistinguishable from no reset at all, i.e. an interrupt that looked
+like it never landed. Resetting first makes the effect visible in the gap, and a
+real new turn afterwards is a fact of its own. It leaves a mark too: a
+successful interrupt posts
 `[tmm] interrupted <name>` to the room — the sys grammar already had the word
 (amber: a turn cut short, not an ending) and the owner asked to SEE the act in
 the conversation ("发送 interrupt 的状态在消息列表里也要展示出来", 2026-08-24).

@@ -295,6 +295,32 @@ pub fn record_notification(session: &str, window: usize, kind: &str, ts: u64) {
     });
 }
 
+/// A human interrupted the turn (`hub_agent_interrupt` / `tmm agent
+/// interrupt`). We are ENDING the turn on the agent's behalf, before the Escape
+/// is typed: the hooks report the edges of a turn the agent runs, and a turn
+/// cancelled from outside has no edge of its own — the backend fires no stop for
+/// a cancelled turn, so the newest fact would stay the `userPromptSubmit` that
+/// opened it and the card would read `running` for as long as the agent stayed
+/// alive. And the interrupted agent very often starts something else within
+/// seconds, which would re-derive `running` from a NEW turn — indistinguishable
+/// from the old one never having stopped, so the interrupt looked like it had
+/// not landed (owner, 2026-08-29). Resetting first makes the effect visible in
+/// the gap, and a real turn that starts afterwards is a fact of its own.
+///
+/// Same shape as a `completed` stop, plus the two supersessions a stop cannot
+/// make: `ask` goes (a cancelled turn is not still asking) and the agent's
+/// explicit claim goes (a `blocked` note from before the interrupt would
+/// outrank the end in `derive_from` when they share a second, and it describes
+/// a turn that no longer exists).
+pub fn record_interrupt(session: &str, window: usize) {
+    let ts = now();
+    with_rec(session, window, |r| {
+        r.end = Some(("completed".to_string(), ts));
+        r.ask = None;
+        r.explicit = None;
+    });
+}
+
 /// A hook tool event (isolated-home agents only, Phase B+): `("Edit",
 /// "foo.rs")`. The event keeps the two parts apart for rendering; the status
 /// record keeps the joined line, which is what "working — Edit foo.rs" shows.
@@ -652,6 +678,37 @@ mod tests {
         assert_eq!(get("allst-a", 2).as_deref(), Some("running"), "an open turn derives running");
         assert_eq!(get("allst-b", 3).as_deref(), Some("idle"), "a closed turn derives idle");
         assert_eq!(get("allst-a", 9), None, "no hook facts, no row — absence means idle");
+    }
+
+    /// A human interrupt closes the turn itself, because nothing else will: the
+    /// backend fires no stop hook for a turn cancelled from outside, so the
+    /// newest fact would stay the `userPromptSubmit` and the agent would read
+    /// `running` for ever. The reset also supersedes a `blocked` claim from the
+    /// turn that no longer exists — otherwise the explicit branch outranks the
+    /// end when the two share a second.
+    #[test]
+    fn an_interrupt_closes_the_turn_it_cancelled() {
+        record_prompt("int-a", 1, "do the long thing");
+        record_status("int-a", 1, "blocked", "waiting on a credential");
+        assert_eq!(derive("int-a", 1, 0).state, "waiting", "a claimed block stands");
+
+        record_interrupt("int-a", 1);
+        let after = derive("int-a", 1, 0);
+        assert_eq!(after.state, "idle", "the cancelled turn is over");
+        assert!(after.since > 0, "since moves to the interrupt");
+        // Pane activity must not resurrect it either: a hooked window ignores
+        // the repaint an interrupted TUI does on its way back to the prompt.
+        assert_eq!(derive("int-a", 1, now()).state, "idle");
+        // And a REAL new turn afterwards is a fact of its own, so it reads
+        // running again — which is the point of resetting FIRST. Checked on the
+        // pure state machine because the record's clock is in seconds: an
+        // interrupt and the prompt it enables share one second in a test.
+        let mut r = rec();
+        r.prompt = Some(2000);
+        r.end = Some(("completed".into(), 2000)); // interrupted
+        assert_eq!(derive_from(&r, 0, 2000).state, "idle");
+        r.prompt = Some(2001); // the agent was given something else to do
+        assert_eq!(derive_from(&r, 0, 2001).state, "running");
     }
 
     // ── Delivery acknowledgement: when is a typed line actually overdue?
