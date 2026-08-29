@@ -1255,33 +1255,47 @@ number bounds both, which is what the old design did.
 | what | where | complete? |
 |---|---|---|
 | chat messages (human, agents, `[tmm]` lifecycle lines, status notes, done summaries) | `team.db` `messages`, indexed `(room, seq)` | **YES.** Nothing prunes it — 1483 messages / 18 rooms / 10 days at the time of the audit, 414 KB of bodies. The only removals are explicit: `hub_msg_purge` and the admin `clear_room` |
-| observed telemetry (tool calls, prompts + receipts, notifications, warns) | `state.db` `activity`, indexed `(session, ts)` | **NO, until this change** — 5309 rows, the busiest session 4046 of them, against a 2000-row-per-session prune |
-| outstanding deliveries | `state.db` `deliveries` | YES (board #5) |
+| observed telemetry (tool calls, prompts + receipts, notifications, warns) | `state.db` `activity`, indexed `(session, ts)` | **NO, until this change** — 5309 rows, the busiest session 4046 of them, against a 2000-row-per-session prune || outstanding deliveries | `state.db` `deliveries` | YES (board #5) |
 | derived agent state, vitals readings, the recovery tracker | process memory | By design — each is a CURRENT reading that the next hook re-establishes, not history |
 
 Two truncations remain deliberate and are worth knowing when analysing: a prompt
 event keeps its first 1024 characters and a tool event 2048 of its argument. The
 full text of what an agent SAID is never truncated — that is a message.
 
-**Retention is now opt-in.** `KEEP_EVENTS` was 2000 per session, pruned every 256
-inserts; the busiest session already held 4046 rows, so the cap stood to delete the
-older HALF of it, and the only reason it had not is that the prune counter is per
-process and every restart postponed it — an accident, not a policy. Worse, a
-deleted row is indistinguishable from an event that never happened, which is
-exactly what makes a trace unanalysable. So the default is **keep everything**
-(`TMM_ACTIVITY_KEEP=<n>` opts back in for a host that is short of disk), and
-`prune_activity` survives as the primitive that setting uses.
+**Retention is GONE, not configurable-and-defaulted-off.** `KEEP_EVENTS` was 2000
+per session, pruned every 256 inserts; the busiest session already held 4046 rows,
+so the cap stood to delete the older HALF of it, and the only reason it had not is
+that the prune counter is per process and every restart postponed it — an accident,
+not a policy. Worse, a deleted row is indistinguishable from an event that never
+happened, which is exactly what makes a trace unanalysable. So the recorder prunes
+nothing at all, and a `telemetry.rs` source test stands guard over that (no prune
+call in the write path, no private env knob). If a retention is ever wanted it
+belongs in `Config` with a documented key and a doc entry, like every other
+operational setting; `Store::prune_activity` survives as the primitive it would
+call.
 
 **The cost moved to the read, where it can be bounded without destroying
 anything.** Both feeds page backwards, and both keep their old newest-page
 semantics when the new parameters are absent, so an older client is unaffected:
 
 - `hub_log` pages on the bus's own `seq` (a message's log position — stable,
-  gapless, already on every message the client holds; a millisecond timestamp is
-  none of those, since two messages can share one).
+  gapless per log, already on every message the client holds; a millisecond
+  timestamp is none of those, since two messages can share one). The 1000 in
+  `hub_log` is a PER-PAGE cap, never a history horizon: `history_before` in the bus
+  query layer takes the cursor into SQL (`WHERE room=? AND seq < ?` over the
+  `(room, seq)` index), so a room of any size is walkable page by page. Pinned by a
+  test that appends 1200 messages — past that ceiling — and reassembles the whole
+  conversation from 12 pages of 100, asserting every message came back exactly once
+  and in order.
+- Exact lookups no longer live inside a page either: `message_by_id` (indexed, id
+  is UNIQUE) replaced the archive path's scan of `history(room, 1000)`, which made
+  anything older than the newest 1000 unarchivable. Now that a client can scroll to
+  any message, "the newest 1000" is not a place where correctness may live.
 - `hub_activity` pages on `(ts, id)`. The id is load-bearing: a busy turn writes
   several events inside one millisecond, so a ts-only cursor either skips them or
-  loops on them for ever. The server hands the exact pair back as `oldest`.
+  loops on them for ever. The server hands the exact pair back as `oldest`. Same
+  volume proof: 2500 rows at 5 per millisecond, walked in 10 pages of 250, every
+  row exactly once.
 - `has_more` is measured, not guessed — each store call asks for one row more than
   the caller wanted. Without it a client cannot tell "you have everything" from
   "your page ended exactly at the limit".

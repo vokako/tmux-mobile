@@ -358,6 +358,15 @@ impl TeamBridge for TeamManager {
         serde_json::json!({ "messages": msgs, "has_more": has_more, "head_seq": head_seq })
     }
 
+    /// An indexed lookup by id (`messages.id` is UNIQUE), so an old message is as
+    /// reachable as a new one.
+    fn message_by_id(&self, room: &str, id: &str) -> Option<serde_json::Value> {
+        self.room_bus(room)?;
+        let conn = self.conn.lock().unwrap();
+        let msg = agora::store::message_by_id(&conn, room, id).ok().flatten()?;
+        serde_json::to_value(msg).ok()
+    }
+
     fn roster(&self, room: &str) -> serde_json::Value {
         let roster = self.room_bus(room).and_then(|b| b.roster().ok()).unwrap_or_default();
         serde_json::json!({ "roster": roster })
@@ -673,6 +682,95 @@ mod tests {
         m.ensure_room("alpha", "/tmp/alpha", "default").unwrap();
         assert!(m.room_bus("alpha").is_some());
         assert!(m.post("alpha", "human", "hi", false).is_ok());
+    }
+
+    /// Board #9, the core of it: a room keeps every message it ever held, so
+    /// scrolling up has to reach past ANY single page's limit. 1200 messages —
+    /// deliberately more than the 1000-per-call ceiling — walked back in pages of
+    /// 100 must yield every one of them exactly once, in order, with `has_more`
+    /// telling the truth at both ends. A page cap is not a history horizon.
+    #[tokio::test]
+    async fn a_room_pages_back_past_the_per_call_ceiling_without_a_gap() {
+        let m = manager();
+        m.ensure_room("alpha", "/tmp/shared", "default").unwrap();
+        const TOTAL: usize = 1200;
+        // Bulk-append through the query layer (one transaction: 1200 individual
+        // commits would make this test about fsync). `post` is exercised by the
+        // tests above; what is under test here is the READ.
+        {
+            let conn = m.conn.lock().unwrap();
+            conn.execute_batch("BEGIN").unwrap();
+            for n in 0..TOTAL {
+                agora::store::append(
+                    &conn,
+                    "alpha",
+                    "human",
+                    &[],
+                    agora::envelope::Kind::Msg,
+                    &format!("m{n}"),
+                )
+                .unwrap();
+            }
+            conn.execute_batch("COMMIT").unwrap();
+        }
+        // A room the client has never seen: ask for a small first page.
+        let mut cursor: Option<i64> = None;
+        let mut seen: Vec<String> = Vec::new();
+        let mut pages = 0;
+        loop {
+            let page = m.history_page("alpha", cursor, 100);
+            let msgs = page["messages"].as_array().unwrap().clone();
+            assert!(msgs.len() <= 100, "the page limit is honoured");
+            if msgs.is_empty() {
+                break;
+            }
+            pages += 1;
+            // Oldest first inside the page, and strictly older than the cursor.
+            let seqs: Vec<i64> = msgs.iter().map(|x| x["seq"].as_i64().unwrap()).collect();
+            assert!(seqs.windows(2).all(|w| w[0] < w[1]), "oldest first, page {pages}");
+            if let Some(c) = cursor {
+                assert!(*seqs.last().unwrap() < c, "a page never returns its own cursor back");
+            }
+            assert_eq!(page["head_seq"].as_i64().unwrap(), TOTAL as i64, "the tail is known");
+            let mut bodies: Vec<String> =
+                msgs.iter().map(|x| x["body"].as_str().unwrap().to_string()).collect();
+            bodies.append(&mut seen);
+            seen = bodies;
+            cursor = Some(seqs[0]);
+            if !page["has_more"].as_bool().unwrap() {
+                break;
+            }
+        }
+        assert_eq!(pages, 12, "1200 messages in pages of 100");
+        assert_eq!(seen.len(), TOTAL, "every message came back exactly once");
+        // No duplicates and no holes: the walk reconstructs the whole room in order.
+        let expected: Vec<String> = (0..TOTAL).map(|n| format!("m{n}")).collect();
+        assert_eq!(seen, expected, "the reassembled conversation is the original");
+        // The last page said so: there is nothing older than message 0.
+        assert!(!m.history_page("alpha", Some(1), 100)["has_more"].as_bool().unwrap());
+        assert!(m.history_page("alpha", Some(1), 100)["messages"].as_array().unwrap().is_empty());
+        // And the newest page still reports that history remains behind it.
+        let newest = m.history_page("alpha", None, 100);
+        assert!(newest["has_more"].as_bool().unwrap());
+        assert_eq!(newest["messages"][99]["body"], format!("m{}", TOTAL - 1), "ends at the tail");
+
+        // The old, unpaged read is unchanged for callers that do not page: the
+        // newest `limit`, oldest first.
+        let plain = m.history("alpha", 5);
+        let bodies: Vec<String> = plain["messages"].as_array().unwrap().iter()
+            .map(|x| x["body"].as_str().unwrap().to_string()).collect();
+        assert_eq!(bodies, vec!["m1195", "m1196", "m1197", "m1198", "m1199"]);
+
+        // An exact lookup does not depend on how far back the newest page reaches
+        // — this is what archiving an OLD message needs (it used to scan the
+        // newest 1000, so anything older was invisible to it).
+        let old_id = m.history_page("alpha", Some(2), 1)["messages"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let found = m.message_by_id("alpha", &old_id).expect("message 0 is still findable");
+        assert_eq!(found["body"], "m0");
+        assert!(m.message_by_id("alpha", "no-such-id").is_none());
     }
 
     #[tokio::test]

@@ -120,48 +120,32 @@ fn now_ms() -> u64 {
 /// calls / status changes between the final replies) — an in-memory ring,
 /// NOT chat history: it never touches the bus db and dies with the server.
 const EVENTS_CAP: usize = 120;
-/// Events one session keeps in the durable log, when a retention is asked for at
-/// all. ZERO — the default — means KEEP EVERYTHING.
+/// NOTHING is pruned from the durable log. This is a stated goal, not an
+/// oversight: the owner wants the trace COMPLETE so it can be analysed (board #9,
+/// 2026-08-29: "我希望整个 trace 是非常完整的，以便我们后续去做一些分析").
 ///
-/// It was 2000, pruned every 256 inserts, and that is history thrown away that
-/// nobody asked to lose: the owner wants the trace COMPLETE so it can be analysed
-/// (board #9, 2026-08-29: "我希望整个 trace 是非常完整的，以便我们后续去做一些
-/// 分析"). Measured on this host the day it was changed: the busiest session held
-/// 4046 rows, i.e. the cap would have deleted the older HALF of it, and the only
-/// reason it had not is that `INSERTS` is a process counter reset by every
-/// restart — the prune fired sporadically, which is an accident, not a policy.
-/// A trace with a silent hole in it is worse than a big one: analysis cannot tell
-/// "it did not happen" from "we deleted it". The whole log is ~1.2 MB of text for
-/// ten days of heavy use, so there is nothing to buy by trimming it.
+/// It used to keep 2000 events per session, pruned every 256 inserts. Measured on
+/// this host the day it was removed: the busiest session held 4046 rows, so the
+/// cap stood to delete the older HALF of it, and the only reason it had not is
+/// that the prune counter was per process and every restart postponed it — an
+/// accident, not a policy. And a deleted row is indistinguishable from an event
+/// that never happened, which is exactly what makes a trace unanalysable. The
+/// whole log is ~1.2 MB of text for ten days of heavy use, so there was nothing to
+/// buy by trimming it.
 ///
-/// `TMM_ACTIVITY_KEEP=<n>` opts back in per session (0 or unset = unlimited),
-/// for a host that really is short of disk. Reading is capped and paged instead —
-/// see `events_page`: the cost of a long history belongs to the READ, where it
-/// can be bounded without destroying anything.
-const KEEP_EVENTS_DEFAULT: usize = 0;
-/// Inserts between prunes. Pruning is a scan, and the cap is about boundedness,
-/// not an exact length. Only consulted when a retention is configured.
-const PRUNE_EVERY: u64 = 256;
+/// If a retention is ever wanted it belongs in `Config` with a documented key, not
+/// in an env var of its own — `Store::prune_activity` is the primitive it would
+/// call. What is bounded instead is the READ (see `events_page`): the cost of a
+/// long history belongs where it can be limited without destroying anything.
 /// Events one page returns when the caller does not say. The tail of the history,
 /// which is what a client renders first.
 pub const LOAD_EVENTS: usize = 600;
 /// The most a single page may return however the caller asks. A hard ceiling, so
 /// one RPC can never turn into a multi-megabyte frame: measured on this host, the
-/// newest 600 events of the busiest session already serialize to ~277 KB.
+/// newest 600 events of the busiest session already serialize to ~277 KB. It is a
+/// PAGE cap, not a history horizon — `before_ts`/`before_id` walk as far back as
+/// the log goes.
 pub const MAX_PAGE_EVENTS: usize = 1000;
-/// Inserts so far this process, for the prune schedule.
-static INSERTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-/// Failed durable writes this process, so a broken database is reported once
-/// instead of silently costing us the trace.
-static PERSIST_FAILURES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-/// How many events per session to keep. 0 = every one of them (the default).
-fn retention() -> usize {
-    std::env::var("TMM_ACTIVITY_KEEP")
-        .ok()
-        .and_then(|v| v.trim().parse::<usize>().ok())
-        .unwrap_or(KEEP_EVENTS_DEFAULT)
-}
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ActivityEvent {
@@ -259,22 +243,14 @@ fn persist(session: &str, ev: &ActivityEvent) {
         // whole point of the log is that it is complete. Reported on the first
         // failure and every 100th after that, so a broken database is visible in
         // the server log without becoming the server log.
-        let n = PERSIST_FAILURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        static FAILURES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = FAILURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         if n == 1 || n % 100 == 0 {
             eprintln!("⚠️  activity log write failed ({n} so far): {e}");
         }
-        return;
     }
-    // Prune only when a retention was asked for. The default is to keep the whole
-    // trace (see KEEP_EVENTS_DEFAULT); reads are what is bounded.
-    let keep = retention();
-    if keep == 0 {
-        return;
-    }
-    let n = INSERTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-    if n % PRUNE_EVERY == 0 {
-        let _ = super::with_store(|s| s.prune_activity(session, keep));
-    }
+    // And that is all: no prune. The trace is kept whole (see the note on
+    // EVENTS_CAP / LOAD_EVENTS) and the READ is what is bounded.
 }
 
 /// One page of the activity feed, oldest first, plus whether older events exist.
@@ -1448,24 +1424,31 @@ mod tests {
 
     // ── Board #9: the trace is COMPLETE, and the READ is what is bounded ────
 
-    /// Nothing is thrown away unless a retention was explicitly asked for. The
-    /// old default deleted every event past 2000 per session, sporadically (the
-    /// prune counter is per process, so a restart postponed it) — history lost
-    /// that nobody asked to lose, and analysis cannot tell a deleted row from an
-    /// event that never happened (owner, board #9: "我希望整个 trace 是非常完整
-    /// 的，以便我们后续去做一些分析").
+    /// Nothing is thrown away, full stop. The old default deleted every event past
+    /// 2000 per session, sporadically (the prune counter was per process, so a
+    /// restart postponed it) — history lost that nobody asked to lose, and analysis
+    /// cannot tell a deleted row from an event that never happened (owner, board
+    /// #9: "我希望整个 trace 是非常完整的，以便我们后续去做一些分析"). A retention,
+    /// if one is ever wanted, belongs in `Config` with a documented key; this test
+    /// stands guard over the DEFAULT being "keep it all".
     #[test]
-    fn retention_is_off_by_default_and_only_an_explicit_setting_prunes() {
-        std::env::remove_var("TMM_ACTIVITY_KEEP");
-        assert_eq!(retention(), 0, "keep everything");
-        assert_eq!(KEEP_EVENTS_DEFAULT, 0, "and that is the compiled-in default");
-        // A host that really is short of disk can opt back in, per session.
-        std::env::set_var("TMM_ACTIVITY_KEEP", "500");
-        assert_eq!(retention(), 500);
-        // Nonsense is not a retention: it must not silently start deleting.
-        std::env::set_var("TMM_ACTIVITY_KEEP", "lots");
-        assert_eq!(retention(), 0);
-        std::env::remove_var("TMM_ACTIVITY_KEEP");
+    fn the_durable_trace_is_never_pruned_behind_the_users_back() {
+        // The write path holds no retention constant and no prune call any more:
+        // the only pruning primitive left is `Store::prune_activity`, which nothing
+        // in the recording path calls.
+        let src = include_str!("telemetry.rs");
+        let body = src.split("mod tests").next().unwrap();
+        assert!(
+            !body.contains("s.prune_activity("),
+            "the recorder must not prune: a complete trace is the goal, not a side effect"
+        );
+        assert!(
+            !body.contains("TMM_ACTIVITY_KEEP"),
+            "no private env knob — a retention would go through Config, documented"
+        );
+        // And what IS bounded is the read, by a page cap.
+        assert_eq!(MAX_PAGE_EVENTS, 1000);
+        assert!(LOAD_EVENTS <= MAX_PAGE_EVENTS);
     }
 
     /// A page is bounded however loudly the caller asks, and it walks backwards.

@@ -53,6 +53,23 @@ pub trait TeamBridge: Send + Sync {
         }
         v
     }
+    /// ONE message by its id, however old it is: `Some(message)` or `None`.
+    ///
+    /// An exact lookup, not a scan of the newest page — which is what the archive
+    /// path used to do (`history(room, 1000)`), so a message older than that was
+    /// invisible to it. Now that a client can scroll back to any message, "the
+    /// newest 1000" is not a place where correctness may live.
+    ///
+    /// Defaulted for the same reason `history_page` is: a bridge that cannot look
+    /// up falls back to searching the newest page, i.e. the old behaviour.
+    fn message_by_id(&self, room: &str, id: &str) -> Option<serde_json::Value> {
+        self.history(room, 1000)
+            .get("messages")?
+            .as_array()?
+            .iter()
+            .find(|m| m.get("id").and_then(|v| v.as_str()) == Some(id))
+            .cloned()
+    }
     /// Roster + presence for `room`: `{ "roster": [...] }`.
     fn roster(&self, room: &str) -> serde_json::Value;
     /// Post as a participant in `room`. Returns the stored message JSON.

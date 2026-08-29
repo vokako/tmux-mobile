@@ -1873,6 +1873,57 @@ mod tests {
         assert_eq!(window.len(), 4, "1001 and the three 1002s");
     }
 
+    /// The same walk at VOLUME, past the per-page ceiling: 2500 events, pages of
+    /// 250. A page cap is not a history horizon — the trace is kept whole, so a
+    /// client must be able to reach all of it, and reach each row exactly once.
+    #[test]
+    fn the_activity_log_walks_past_the_page_ceiling_without_a_gap() {
+        let mut store = Store::open_memory().unwrap();
+        const TOTAL: usize = 2500;
+        let tx = store.conn.transaction().unwrap();
+        for n in 0..TOTAL {
+            // Deliberately coarse timestamps: 5 events per millisecond, so the
+            // walk is forced through same-ms ties on nearly every page boundary.
+            tx.execute(
+                "INSERT INTO activity (session, window, ts, kind, text, tool, via, state)
+                 VALUES ('s', 1, ?1, 'tool', ?2, 'Edit', '', '')",
+                rusqlite::params![1_000 + (n as i64) / 5, format!("e{n}")],
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+        assert_eq!(store.activity_stats("s").unwrap().0, TOTAL);
+
+        let mut cursor: Option<(u64, i64)> = None;
+        let mut seen: Vec<String> = Vec::new();
+        let mut pages = 0;
+        loop {
+            let (page, has_more) = store.activity_page("s", 0, cursor, 250).unwrap();
+            if page.is_empty() {
+                break;
+            }
+            pages += 1;
+            assert!(page.len() <= 250);
+            // Oldest first, and strictly older than the cursor we came from.
+            assert!(page.windows(2).all(|w| (w[0].ts, w[0].id) < (w[1].ts, w[1].id)));
+            if let Some((cts, cid)) = cursor {
+                let last = page.last().unwrap();
+                assert!((last.ts, last.id) < (cts, cid), "page {pages} overlapped its cursor");
+            }
+            cursor = Some((page[0].ts, page[0].id));
+            let mut older: Vec<String> = page.into_iter().map(|r| r.text).collect();
+            older.append(&mut seen);
+            seen = older;
+            if !has_more {
+                break;
+            }
+        }
+        assert_eq!(pages, 10, "2500 rows in pages of 250");
+        assert_eq!(seen.len(), TOTAL, "every event exactly once — no duplicate, no hole");
+        let expected: Vec<String> = (0..TOTAL).map(|n| format!("e{n}")).collect();
+        assert_eq!(seen, expected, "and the walk reassembles the log in order");
+    }
+
     #[test]
     fn archiving_hides_a_message_and_restoring_gives_it_back() {
         let store = Store::open_memory().unwrap();

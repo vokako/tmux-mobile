@@ -238,18 +238,16 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
                     // The archive row carries a copy of the message, so the archive
                     // view needs no second lookup and no history window. The bodies
                     // come from the room, not from the client: what gets stored is
-                    // what was actually said.
+                    // what was actually said — and by EXACT id, so a message the
+                    // user scrolled back to is as archivable as a fresh one (this
+                    // used to scan the newest 1000, which quietly excluded
+                    // everything older).
                     if let Err(e) = bus.open_room(&room) {
                         return Response::err(id, ERR_INTERNAL, e);
                     }
-                    let history = bus.history(&room, 1000);
-                    let msgs = history.get("messages").and_then(|m| m.as_array()).cloned().unwrap_or_default();
                     let mut done = 0usize;
-                    for m in &msgs {
-                        let mid = m.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                        if mid.is_empty() || !ids.iter().any(|i| i == mid) {
-                            continue;
-                        }
+                    for mid in &ids {
+                        let Some(m) = bus.message_by_id(&room, mid) else { continue };
                         let ok = crate::projects::archive_msg(
                             &room,
                             mid,
