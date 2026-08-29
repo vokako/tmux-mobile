@@ -326,7 +326,13 @@ can get wrong to save three characters.
   `tmm board list|show|add|take|move|note|delete` — `take` = assignee+doing
   in one move, and the tmm-cli skill carries the conventions (take before
   you start; note decisions ON the issue; only the acceptor moves to done).
-  Schema v12 (`issues` + `issue_notes`, cascade).
+  Schema v12 (`issues` + `issue_notes`, cascade). **Two axes, joined at
+  events**: the board is the issue's lifecycle, `tmm status` the window's
+  live turn. Every status change posts a `[tmm] board #N a → b` room line,
+  and a move TO `review` is a handoff — the REPORTER gets the line typed
+  into its pane (`deliver_chat_line`, shared with the done-summary edge;
+  a human reporter reads the board itself, the actor is never told of its
+  own move, `done` posts a room line only — no delivery loop is possible).
 
 The room is `proj:<session>` on the same agora bus that Team uses —
 `TeamBridge::open_room` provisions it with **no tmux session, no roster, no

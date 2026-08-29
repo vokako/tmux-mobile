@@ -376,8 +376,39 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
             let issue_id = p.get("id").and_then(|v| v.as_i64());
             let s = |k: &str| p.get(k).and_then(|v| v.as_str());
             let who = s("who").unwrap_or("human");
+            // The board and the agents' live states are TWO AXES (an issue's
+            // lifecycle vs a window's turn), joined at EVENTS, not merged: a
+            // status change is recorded in the room so the flow is visible,
+            // and a move to REVIEW is a HANDOFF — the reporter (created_by)
+            // gets the line typed into its pane, because a review nobody is
+            // told about is how issues rot in the third column (owner,
+            // 2026-08-29: the ideal loop is 人填 issue → lead 派 → 子 agent
+            // 完成交 review → 通过标 done). Reporter "human" reads the board
+            // itself; the actor is never notified of its own move.
+            let prev = issue_id.and_then(|iid| crate::projects::board_get(session, iid).ok());
             match crate::projects::board_save(session, issue_id, s("title"), s("body"), s("status"), s("assignee"), who) {
-                Ok(saved) => Response::ok(id, serde_json::json!({ "ok": true, "id": saved })),
+                Ok(saved) => {
+                    if let (Some(prev), Some(new_status)) = (&prev, s("status")) {
+                        let old_status = prev["status"].as_str().unwrap_or("");
+                        if old_status != new_status {
+                            let title = prev["title"].as_str().unwrap_or("");
+                            if bus.open_room(&room).is_ok() {
+                                let _ = bus.post(&room, who, &format!("[tmm] board #{saved} {old_status} → {new_status} — {title}"), false);
+                            }
+                            if new_status == "review" {
+                                let reporter = prev["created_by"].as_str().unwrap_or("");
+                                if !reporter.is_empty() && reporter != "human" && reporter != who {
+                                    let line = format!(
+                                        "[tmm chat {}] {who}: [board #{saved} review] {title} — my part is done. Review it: `tmm board show {saved}`, then `tmm board move {saved} done` to accept, or `tmm board note {saved} \"...\"` with what to fix.",
+                                        stamp_now()
+                                    );
+                                    deliver_chat_line(session, reporter, &line);
+                                }
+                            }
+                        }
+                    }
+                    Response::ok(id, serde_json::json!({ "ok": true, "id": saved }))
+                }
                 Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
             }
         }
@@ -603,40 +634,51 @@ pub(super) fn stamp_now() -> String {
 /// windows only — a shell would execute the message, and a window the user
 /// started by hand belongs to the user, not to this app.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-/// Deliver a done summary into the pane of the agent that SPAWNED this one —
-/// the feedback half of `tmm spawn --brief`. Same gates as `deliver_mentions`
-/// (live window, managed, never self), same stamped line shape, same
-/// `record_delivery` bookkeeping so the ack machinery treats it like any
-/// delivered chat line. Quiet on every miss: a human spawner, a dead window,
-/// or a pre-recipe agent simply has nobody to wake, which is not an error.
-fn deliver_done_to_spawner(session: &str, from: &str, summary: &str) {
+/// Type ONE stamped chat line into ONE named agent's pane — the targeted
+/// sibling of `deliver_mentions` (same gates: live window, managed, never a
+/// shell; same `record_delivery` bookkeeping). Quiet on every miss: a dead
+/// window or an unmanaged name simply has nobody to wake. Used by the
+/// done-summary feedback edge and the board's review handoff — both are
+/// DELIVERIES the server decides on, never mention scans, so the
+/// record-only invariant of hook-sourced posts stays intact.
+fn deliver_chat_line(session: &str, target_name: &str, line: &str) -> bool {
     use crate::projects::agents;
 
+    let ws = crate::projects::project_for_session(session).ok().flatten().map(|p| p.path);
+    let Ok(panes) = crate::tmux::list_panes(session) else { return false };
+    for p in &panes {
+        if !p.active || p.window_name != target_name {
+            continue;
+        }
+        let is_agent = agents::detect_managed(ws.as_deref(), &p.window_name, &format!("{} {} {}", p.current_command, p.pane_title, p.window_name)).is_some();
+        if !is_agent || !crate::projects::is_managed_in(ws.as_deref(), &p.window_name) {
+            return false;
+        }
+        let target = format!("{}:{}.{}", session, p.window, p.pane);
+        if crate::tmux::send_command(&target, line).is_ok() {
+            crate::projects::telemetry::record_delivery(session, p.window, line);
+            crate::projects::vitals::sniff_window_soon(session, p.window);
+            return true;
+        }
+        return false;
+    }
+    false
+}
+
+/// Deliver a done summary into the pane of the agent that SPAWNED this one —
+/// the feedback half of `tmm spawn --brief`. Quiet on every miss: a human
+/// spawner, a dead window, or a pre-recipe agent has nobody to wake.
+fn deliver_done_to_spawner(session: &str, from: &str, summary: &str) {
     let ws = crate::projects::project_for_session(session).ok().flatten().map(|p| p.path);
     let Some(spawner) = crate::projects::spawned_by(ws.as_deref(), from) else { return };
     if spawner == from {
         return;
     }
-    let Ok(panes) = crate::tmux::list_panes(session) else { return };
-    for p in &panes {
-        if !p.active || p.window_name != spawner {
-            continue;
-        }
-        let is_agent = agents::detect_managed(ws.as_deref(), &p.window_name, &format!("{} {} {}", p.current_command, p.pane_title, p.window_name)).is_some();
-        if !is_agent || !crate::projects::is_managed_in(ws.as_deref(), &p.window_name) {
-            return;
-        }
-        let target = format!("{}:{}.{}", session, p.window, p.pane);
-        // `[done]` in the body tells the reader WHAT this line is — the
-        // brief's outcome, not a new request — while the stamp and sender
-        // keep the shape of every other delivered chat line.
-        let line = format!("[tmm chat {}] {from}: [done] {summary}", stamp_now());
-        if crate::tmux::send_command(&target, &line).is_ok() {
-            crate::projects::telemetry::record_delivery(session, p.window, &line);
-            crate::projects::vitals::sniff_window_soon(session, p.window);
-        }
-        return;
-    }
+    // `[done]` in the body tells the reader WHAT this line is — the brief's
+    // outcome, not a new request — while the stamp and sender keep the shape
+    // of every other delivered chat line.
+    let line = format!("[tmm chat {}] {from}: [done] {summary}", stamp_now());
+    deliver_chat_line(session, &spawner, &line);
 }
 
 fn deliver_mentions(session: &str, from: &str, body: &str) {

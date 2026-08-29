@@ -117,6 +117,11 @@ completion).
   Assigning from the detail view picks a managed agent and DELIVERS the
   assignment (`hub_post` @message typed into that agent's pane, with the
   take/note/move instructions) — assignment is a dispatch, not a label.
+- Status changes are recorded in the room (`[tmm] board #N a → b`), and a
+  move to review NOTIFIES the reporter (line typed into their pane) — the
+  handoff loop: file → assign (delivered) → take → review (delivered) →
+  done by the reviewer. Board columns and agent live states are separate
+  axes joined at these events.
 - Carries the shared project sidebar (every project has its own board);
   the followed last-touched session is the default, a pick overrides it
   until that moves again. Compact is the standard drill-down (project list

@@ -55,8 +55,22 @@ Conventions that keep the board honest:
   conflict the board exists to prevent.
 - `note` decisions and findings ON the issue (not only in chat): the issue
   outlives the conversation and is what the next reader loads first.
-- `move <id> review` when YOUR part is done and someone must accept it;
-  only the acceptor moves it to `done`.
+- `move <id> review` when YOUR part is done — this is a HANDOFF, not a
+  label: the issue's reporter is notified automatically (the line lands in
+  their pane) and reviews it. Only the reviewer moves it to `done`; if it
+  needs fixes they `note` what to fix and move it back to `doing`.
+- Board status is the ISSUE's lifecycle; `tmm status` is YOUR live turn.
+  They are different axes — an agent can be `running` on something else
+  while its issue sits in `review`. Keep both current: `tmm status` for
+  what you are doing right now, the board for where the work stands.
+- Every status change is recorded in the room (`[tmm] board #N a → b`),
+  so the chat shows the flow without anyone narrating it.
+
+The ideal loop (and who moves what): the human (or lead) files the issue →
+the lead assigns it (the assignment lands in the assignee's pane) → the
+assignee `take`s it (todo → doing) → finishes and `move review` (the
+reporter is notified) → the reporter accepts with `move done`, or `note`s
+fixes and moves it back to `doing`.
 
 ## Background tasks — LOCAL tmux, no server needed
 
