@@ -420,10 +420,13 @@
           <Icon name="check" size={14} />
         </button>
       </div>
+      <!-- Owner-set order (2026-08-29): the title STARTS as one line and grows
+           with its text; assign comes next; the body takes whatever height is
+           left and scrolls INSIDE itself. -->
       <!-- svelte-ignore a11y_autofocus -->
-      <input class="n-title" placeholder={t('boardTitlePh')} bind:value={nTitle} autofocus
-        onkeydown={(e) => e.key === 'Enter' && createIssue()} />
-      <textarea class="d-body-edit" rows="3" placeholder={t('boardBodyPh')} bind:value={nBody} use:autoGrow={nBody}></textarea>
+      <textarea class="n-title one-line" rows="1" placeholder={t('boardTitlePh')} bind:value={nTitle} autofocus
+        use:autoGrow={nTitle}
+        onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); createIssue(); } }}></textarea>
       <!-- Assign at birth: the same dispatch as the detail picker — the agent
            is briefed the moment the issue exists (board #11). -->
       <div class="d-meta">
@@ -431,6 +434,7 @@
           options={[{ value: '', label: t('boardUnassigned') }, ...agents.map((a) => ({ value: a.name, label: `@${a.name}` }))]}
           onchange={(v: string) => (nAssignee = v)} />
       </div>
+      <textarea class="d-body-edit fill" placeholder={t('boardBodyPh')} bind:value={nBody}></textarea>
     </div>
   {:else}
     <!-- ── the board: four fixed columns, cards in movement order ── -->
@@ -639,6 +643,13 @@
     box-sizing: border-box;
   }
   .note-add { display: flex; gap: 6px; align-items: center; }
+  /* The create form's title: a textarea so it can WRAP as it grows (autoGrow),
+     but dressed exactly like the input it replaces — one line at rest, no
+     manual resize handle, and no flex stretch in the column layout. */
+  .n-title.one-line { flex: none; resize: none; overflow: hidden; }
+  /* The create form's body: takes the height the column has left and scrolls
+     INSIDE itself (owner, 2026-08-29: "下边区域大一点 上下撑满 可以内部滚动"). */
+  .d-body-edit.fill { flex: 1; min-height: 140px; overflow-y: auto; resize: none; }
   .note-add input, .n-title {
     flex: 1;
     background: var(--surface);

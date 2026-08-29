@@ -142,9 +142,25 @@ test('the boxes ADAPT to their content (owner, 2026-08-29)', () => {
   // box hugs its content instead of banding full-width blank.
   assert.match(source, /function autoGrow\(el: HTMLTextAreaElement/u, 'one grow helper');
   assert.match(source, /bind:value=\{draft\.body\} use:autoGrow=\{draft\.body\}/u, 'the body editor wears it');
-  assert.match(source, /bind:value=\{nBody\} use:autoGrow=\{nBody\}/u, 'the create form too');
+  // The create form's body does NOT autoGrow: it FILLS the leftover height
+  // and scrolls inside itself (owner, 2026-08-29 follow-up).
   const style = source.slice(source.indexOf('<style>'));
   assert.match(style, /\.d-body-edit \{[^}]*min-height: 72px/u, 'min-height is a floor, not a size');
   assert.match(style, /\.n-text \{[^}]*width: fit-content/u, 'a short note is a small box');
   assert.ok(!style.includes('.n-body'), 'the display/input class collision is retired');
+});
+
+test('the create form: one-line growing title, assign, then a filling body (owner, 2026-08-29)', () => {
+  const form = source.slice(source.indexOf("{:else if creating}"), source.indexOf("{:else}", source.indexOf("{:else if creating}")));
+  const iTitle = form.indexOf('class="n-title one-line"');
+  const iAssign = form.indexOf('<Select value={nAssignee}');
+  const iBody = form.indexOf('class="d-body-edit fill"');
+  assert.ok(iTitle >= 0 && iAssign > iTitle && iBody > iAssign, 'title, then assign, then the body');
+  assert.match(form, /rows="1"[^>]*bind:value=\{nTitle\}[\s\S]{0,80}?use:autoGrow=\{nTitle\}/u,
+    'the title starts as ONE line and grows with its text');
+  const style = source.slice(source.indexOf('<style>'));
+  assert.match(style, /\.n-title\.one-line \{ flex: none; resize: none; overflow: hidden; \}/u,
+    'the title never stretches in the column and has no resize handle');
+  assert.match(style, /\.d-body-edit\.fill \{ flex: 1;[^}]*overflow-y: auto/u,
+    'the body takes the leftover height and scrolls INSIDE');
 });
