@@ -6,18 +6,49 @@
      with the CLI (`projects::BOARD_STATUSES`), so a free-text status here
      would fork the language. Lives in the Hub drawer as a partition, like the
      terminal and Files. */
-  import { boardList, boardGet, boardSave, boardNote, boardDelete, type BoardIssue } from '../core/ws.ts';
+  import { boardList, boardGet, boardSave, boardNote, boardDelete, projectList, type BoardIssue } from '../core/ws.ts';
+  import type { ProjectRow } from '../projects/projects.ts';
   import { t } from '../core/i18n.svelte.ts';
   import Icon from '../ui/Icon.svelte';
   import Select from '../ui/Select.svelte';
+  import SideHandle from '../ui/SideHandle.svelte';
+  import { scrollFade } from '../core/scrollFade.ts';
 
-  let { session, visible = true, onGoBack = null }: { session: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null } = $props();
+  let { session = '', visible = true, onGoBack = null }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null } = $props();
+
+  // Every project has its OWN board (issues are session-scoped like the chat
+  // room), so the page carries the shared project sidebar (owner, 2026-08-29:
+  // "board是不是也有一个侧边栏，我可以选择不同的项目"). The prop is the
+  // FOLLOW default — the last-touched session, same as Files — and a pick
+  // here overrides it until the prop moves again.
+  let projects = $state<ProjectRow[]>([]);
+  let cur = $state('');
+  let picked = $state(false);      // compact: a picked project drills into its board
+  $effect(() => { if (session && (!picked || !cur)) cur = session; });
+  async function loadProjects() {
+    try {
+      const r = await projectList();
+      projects = r.projects;
+      if (!cur && projects.length) cur = projects[0]?.project.session ?? '';
+    } catch { /* keep the last list — "could not ask" is not "there is nobody" */ }
+  }
+  $effect(() => {
+    if (!visible) return;
+    loadProjects();
+    const iv = setInterval(loadProjects, 20000);
+    return () => clearInterval(iv);
+  });
+  function pick(s: string) {
+    if (s !== cur) { cur = s; }
+    picked = true;
+  }
 
   // The back gesture peels detail/form → list before leaving the page —
   // the same contract every page registers via onGoBack (Files defined it).
   $effect(() => {
     onGoBack?.(() => {
       if (sel || creating) { sel = null; creating = false; return true; }
+      if (picked) { picked = false; return true; }  // compact: back to the project list
       return false;
     });
   });
@@ -37,7 +68,7 @@
 
   async function load() {
     try {
-      const r = await boardList(session);
+      const r = await boardList(cur);
       issues = r.issues;
       ready = true;
       err = '';
@@ -51,19 +82,19 @@
   // should see it without touching anything. Same verdict rule as the rooms —
   // nothing renders as "empty" before the first answer.
   $effect(() => {
-    if (!visible || !session) return;
+    if (!visible || !cur) return;
     load();
     const iv = setInterval(load, 8000);
     return () => clearInterval(iv);
   });
   // Switching projects resets the view to the new board's list.
   $effect(() => {
-    void session;
+    void cur;
     sel = null; creating = false; ready = false; issues = []; noteText = '';
   });
 
   async function openIssue(id: number) {
-    try { sel = await boardGet(session, id); err = ''; } catch (e) { err = String((e as Error)?.message ?? e); }
+    try { sel = await boardGet(cur, id); err = ''; } catch (e) { err = String((e as Error)?.message ?? e); }
   }
   async function refreshSel() {
     if (sel) await openIssue(sel.id);
@@ -71,14 +102,14 @@
   }
   async function move(id: number, status: string) {
     busy = true;
-    try { await boardSave(session, { id, status }); await refreshSel(); } catch (e) { err = String((e as Error)?.message ?? e); }
+    try { await boardSave(cur, { id, status }); await refreshSel(); } catch (e) { err = String((e as Error)?.message ?? e); }
     busy = false;
   }
   async function createIssue() {
     if (!nTitle.trim() || busy) return;
     busy = true;
     try {
-      await boardSave(session, { title: nTitle.trim(), body: nBody.trim() });
+      await boardSave(cur, { title: nTitle.trim(), body: nBody.trim() });
       nTitle = ''; nBody = ''; creating = false;
       await load();
     } catch (e) { err = String((e as Error)?.message ?? e); }
@@ -87,13 +118,13 @@
   async function addNote() {
     if (!sel || !noteText.trim() || busy) return;
     busy = true;
-    try { await boardNote(session, sel.id, noteText.trim()); noteText = ''; await refreshSel(); } catch (e) { err = String((e as Error)?.message ?? e); }
+    try { await boardNote(cur, sel.id, noteText.trim()); noteText = ''; await refreshSel(); } catch (e) { err = String((e as Error)?.message ?? e); }
     busy = false;
   }
   async function removeIssue() {
     if (!sel || busy) return;
     busy = true;
-    try { await boardDelete(session, sel.id); sel = null; await load(); } catch (e) { err = String((e as Error)?.message ?? e); }
+    try { await boardDelete(cur, sel.id); sel = null; await load(); } catch (e) { err = String((e as Error)?.message ?? e); }
     busy = false;
   }
 
@@ -114,10 +145,23 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="board" onkeydowncapture={onKey}>
+<div class="board-root" class:picked>
+  <aside class="sidebar">
+    <SideHandle />
+    <div class="side-scroll subtle-scroll" use:scrollFade>
+      <div class="side-h">{t('hubProjects')}</div>
+      {#each projects as p (p.project.session)}
+        <button class="side-row" class:open={cur === p.project.session} onclick={() => pick(p.project.session)}>
+          <span class="r-name">{p.project.name}</span>
+          {#if !p.live}<span class="r-dim">○</span>{/if}
+        </button>
+      {/each}
+    </div>
+  </aside>
+  <div class="board" onkeydowncapture={onKey}>
   <div class="head">
     <h1>{t('board')}</h1>
-    {#if session}<span class="h-session">{session}</span>{/if}
+    {#if cur}<span class="h-session">{cur}</span>{/if}
   </div>
   {#if !ready && !issues.length}
     <div class="empty">…</div>
@@ -209,9 +253,24 @@
     </button>
   {/if}
   {#if err}<div class="err">{err}</div>{/if}
+  </div>
 </div>
 
 <style>
+  /* Page skeleton (ui-unification §1): the shared sidebar + a main column.
+     Compact is the same drill-down every page speaks: the list is the first
+     screen, a picked project takes it (the back gesture peels it off). */
+  .board-root { height: 100%; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 0; background: var(--bg); }
+  .sidebar { position: relative; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+  .side-scroll { flex: 1; overflow-y: auto; min-height: 0; }
+  .r-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .r-dim { color: var(--text3); font-size: var(--fs-micro); }
+  @media (max-width: 760px) {
+    .board-root { grid-template-columns: minmax(0, 1fr); }
+    .sidebar { border-right: none; }
+    .board-root.picked .sidebar { display: none; }
+    .board-root:not(.picked) .board { display: none; }
+  }
   .board {
     height: 100%;
     display: flex;
@@ -223,6 +282,7 @@
     margin: 0 auto;
     width: 100%;
     box-sizing: border-box;
+    min-width: 0;
   }
   .head { display: flex; align-items: baseline; gap: 10px; }
   .head h1 { font-size: var(--fs-title); font-weight: 600; color: var(--text); margin: 0; }

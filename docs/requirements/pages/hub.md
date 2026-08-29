@@ -113,8 +113,11 @@ completion).
 - The human writes/edits here; agents use `tmm board` (`take` = claim +
   doing; only the acceptor moves to done). Same rows, same vocabulary —
   the board is session-scoped like the room.
-- Polls while visible; a failed poll keeps the last board. Follows the
-  last-touched session (like Files); back gesture peels detail → list.
+- Carries the shared project sidebar (every project has its own board);
+  the followed last-touched session is the default, a pick overrides it
+  until that moves again. Compact is the standard drill-down (project list
+  ⇄ board). Polls while visible; a failed poll keeps the last board; back
+  gesture peels detail → list → project list.
 
 ## Back gesture (compact)
 Peels layers in tap-outside order: context menu → agent menu → recipient
