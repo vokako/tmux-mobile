@@ -1255,7 +1255,8 @@ number bounds both, which is what the old design did.
 | what | where | complete? |
 |---|---|---|
 | chat messages (human, agents, `[tmm]` lifecycle lines, status notes, done summaries) | `team.db` `messages`, indexed `(room, seq)` | **YES.** Nothing prunes it — 1483 messages / 18 rooms / 10 days at the time of the audit, 414 KB of bodies. The only removals are explicit: `hub_msg_purge` and the admin `clear_room` |
-| observed telemetry (tool calls, prompts + receipts, notifications, warns) | `state.db` `activity`, indexed `(session, ts)` | **NO, until this change** — 5309 rows, the busiest session 4046 of them, against a 2000-row-per-session prune || outstanding deliveries | `state.db` `deliveries` | YES (board #5) |
+| observed telemetry (tool calls, prompts + receipts, notifications, warns) | `state.db` `activity`, indexed `(session, ts)` | **NO, until this change** — 5309 rows, the busiest session 4046 of them, against a 2000-row-per-session prune |
+| outstanding deliveries | `state.db` `deliveries` | YES (board #5) |
 | derived agent state, vitals readings, the recovery tracker | process memory | By design — each is a CURRENT reading that the next hook re-establishes, not history |
 
 Two truncations remain deliberate and are worth knowing when analysing: a prompt
@@ -1299,6 +1300,13 @@ semantics when the new parameters are absent, so an older client is unaffected:
 - `has_more` is measured, not guessed — each store call asks for one row more than
   the caller wanted. Without it a client cannot tell "you have everything" from
   "your page ended exactly at the limit".
+- **A page that loses every row still hands back a cursor.** `oldest_seq` prefers a
+  surviving message's seq (what the user can actually see) and falls back to the
+  RAW page's oldest position, because the archive filter and `since_ts` can empty a
+  page completely: `has_more: true` with no cursor is a walk that stops dead at a
+  hidden stretch, with the older visible messages behind it unreachable. Pinned by
+  a test that archives a whole page's worth in the middle of a room and keeps
+  walking to the older visible ones.
 - Limits are CAPPED server-side (`MAX_PAGE_EVENTS`, and 1000 for messages), so one
   RPC can never become a multi-megabyte frame however loudly a client asks.
 - The delivery sweep runs on the LIVE page only. Walking back through history must

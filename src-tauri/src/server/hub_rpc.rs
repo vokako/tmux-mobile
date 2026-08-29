@@ -198,6 +198,14 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
             // here, on the way out.
             let hidden = crate::projects::archived_ids(&room);
             if let Some(msgs) = history.get_mut("messages").and_then(|m| m.as_array_mut()) {
+                // The RAW page's oldest position, read BEFORE any filtering. It is
+                // the cursor of last resort: a page can lose every row to the
+                // filters (one archived stretch, or a `since_ts` tail), and then a
+                // survivor-derived cursor does not exist — the client would be told
+                // `has_more: true` with nothing to ask for and the walk would stop
+                // dead at a hidden run. The raw seq always advances, so the next
+                // request lands strictly further back.
+                let raw_oldest = msgs.first().and_then(|m| m.get("seq")).and_then(|v| v.as_i64());
                 if since_ts > 0 {
                     msgs.retain(|m| m.get("ts").and_then(|t| t.as_i64()).unwrap_or(0) > since_ts);
                 }
@@ -206,10 +214,14 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
                         !m.get("id").and_then(|v| v.as_str()).is_some_and(|i| hidden.iter().any(|h| h == i))
                     });
                 }
-                // The page's own oldest seq is the cursor for the next page back.
-                // Taken from the messages that SURVIVED the filters, so a client
-                // walking back cannot stall on a hidden row.
-                let oldest = msgs.first().and_then(|m| m.get("seq").and_then(|v| v.as_i64()));
+                // Prefer a SURVIVING row's seq — a visible message is what the user
+                // is looking at, so the next page continues from what they can see —
+                // and fall back to the raw one when nothing survived.
+                let oldest = msgs
+                    .first()
+                    .and_then(|m| m.get("seq"))
+                    .and_then(|v| v.as_i64())
+                    .or(raw_oldest);
                 if let Some(obj) = history.as_object_mut() {
                     if let Some(seq) = oldest {
                         obj.insert("oldest_seq".into(), serde_json::json!(seq));
@@ -886,13 +898,30 @@ mod tests {
         posts: std::sync::Mutex<Vec<(String, String, String)>>,
         /// Every `history_page` call, so a test can assert what the RPC asked for.
         pages: std::sync::Mutex<Vec<(Option<i64>, i64)>>,
+        /// A real little message log, ascending by seq. Empty = answer the canned
+        /// two-message page below; non-empty = page over it like the bus does, so
+        /// a test can walk it exactly as a client would.
+        log: std::sync::Mutex<Vec<serde_json::Value>>,
     }
     impl Bridge {
         fn new() -> Self {
             Bridge {
                 posts: std::sync::Mutex::new(Vec::new()),
                 pages: std::sync::Mutex::new(Vec::new()),
+                log: std::sync::Mutex::new(Vec::new()),
             }
+        }
+        /// Seed `n` messages, seq/ts 1..=n, ids `m<seq>`.
+        fn with_log(self, room: &str, n: i64) -> Self {
+            *self.log.lock().unwrap() = (1..=n)
+                .map(|seq| {
+                    serde_json::json!({
+                        "room": room, "seq": seq, "id": format!("m{seq}"),
+                        "ts": seq * 10, "from": "human", "body": format!("body{seq}")
+                    })
+                })
+                .collect();
+            self
         }
     }
     impl TeamBridge for Bridge {
@@ -911,6 +940,25 @@ mod tests {
         }
         fn history_page(&self, room: &str, before_seq: Option<i64>, limit: i64) -> serde_json::Value {
             self.pages.lock().unwrap().push((before_seq, limit));
+            // Seeded log: page over it the way the bus does — newest `limit` rows
+            // strictly older than the cursor, oldest first.
+            let all = self.log.lock().unwrap().clone();
+            if !all.is_empty() {
+                let head_seq = all.last().and_then(|m| m["seq"].as_i64()).unwrap_or(0);
+                let older: Vec<serde_json::Value> = all
+                    .into_iter()
+                    .filter(|m| {
+                        before_seq.is_none_or(|b| m["seq"].as_i64().unwrap_or(0) < b)
+                    })
+                    .collect();
+                let start = older.len().saturating_sub(limit.max(1) as usize);
+                let has_more = start > 0;
+                return serde_json::json!({
+                    "messages": older[start..].to_vec(),
+                    "has_more": has_more,
+                    "head_seq": head_seq,
+                });
+            }
             match before_seq {
                 // The page behind seq 41: one older message, and nothing before it.
                 Some(_) => serde_json::json!({
@@ -949,6 +997,60 @@ mod tests {
             tokio::sync::broadcast::channel(1).1
         }
         fn open_room(&self, _room: &str) -> Result<(), String> { Ok(()) }
+    }
+
+    /// A page can lose EVERY row to the archive filter, and the walk still has to
+    /// continue: `has_more` says there is history behind it, so if no cursor comes
+    /// back with it the client has nothing to ask for and scroll-up stops dead at
+    /// the hidden run. The cursor falls back to the RAW page's oldest seq — the
+    /// position always advances, even when nothing survived to be shown.
+    #[test]
+    fn a_fully_hidden_page_still_hands_back_a_cursor_to_the_older_visible_ones() {
+        crate::projects::tests::use_test_store();
+        let session = format!("hid-{}", uuid::Uuid::new_v4());
+        let room = format!("proj:{session}");
+        // Five messages; the middle stretch (seq 3 and 4) is archived, so one whole
+        // page of two is invisible.
+        let b = Bridge::new().with_log(&room, 5);
+        for seq in [3, 4] {
+            crate::projects::archive_msg(&room, &format!("m{seq}"), seq * 10, "human", "x").unwrap();
+        }
+        let page = |before: Option<i64>| {
+            let mut params = serde_json::json!({ "session": session, "limit": 2 });
+            if let Some(b) = before {
+                params["before_seq"] = serde_json::json!(b);
+            }
+            handle_hub_request(&req("hub_log", params), Some(&b), None).result.expect("result")
+        };
+
+        // Page 1: raw [m4, m5], m4 hidden → the visible tail, cursor from the
+        // SURVIVOR (what the user can actually see).
+        let p1 = page(None);
+        let bodies = |v: &serde_json::Value| {
+            v["messages"].as_array().unwrap().iter()
+                .map(|m| m["body"].as_str().unwrap().to_string()).collect::<Vec<_>>()
+        };
+        assert_eq!(bodies(&p1), vec!["body5"]);
+        assert_eq!(p1["oldest_seq"], 5);
+        assert_eq!(p1["has_more"], true);
+
+        // Page 2: raw [m3, m4] — BOTH hidden. Nothing to render, but the page must
+        // still carry the raw cursor (3) or the walk cannot go on.
+        let p2 = page(p1["oldest_seq"].as_i64());
+        assert!(bodies(&p2).is_empty(), "the whole page is hidden");
+        assert_eq!(p2["has_more"], true, "and there is more behind it");
+        assert_eq!(p2["oldest_seq"], 3, "the raw oldest seq is the cursor of last resort");
+
+        // Page 3: continuing from that cursor reaches the older VISIBLE messages,
+        // which is the behaviour the fallback exists for.
+        let p3 = page(p2["oldest_seq"].as_i64());
+        assert_eq!(bodies(&p3), vec!["body1", "body2"]);
+        assert_eq!(p3["has_more"], false, "that is the start of the conversation");
+        assert_eq!(p3["oldest_seq"], 1);
+
+        // Every visible message was reached exactly once across the walk.
+        let seen: Vec<String> = [bodies(&p3), bodies(&p2), bodies(&p1)].concat();
+        assert_eq!(seen, vec!["body1", "body2", "body5"]);
     }
 
     /// Board #9: the room keeps everything, so the client needs a way to ask for
