@@ -64,3 +64,51 @@ test('the layout hierarchy: one compact title line, the body visibly bigger (boa
   assert.ok(body, 'the body field declares a min-height and grows');
   assert.ok(Number(body![1]) >= 160, `the body is the BIG field (${body![1]}px)`);
 });
+
+test('the sidebar orders by conversation, and rows are summaries (reopened #11)', () => {
+  // Same recipe as the Hub: hub_rooms feeds sortRows, newest talk first.
+  assert.match(source, /projects = sortRows\(\(r\.projects \?\? \[\]\)\.filter\([\s\S]*?archived\), talkMap\);/u,
+    'sortRows over the talk map, archived rows dropped');
+  assert.match(source, /hubRooms\(\)\.catch/u, 'the talk map comes from hub_rooms, fail-soft');
+  const row = source.slice(source.indexOf('class="side-row"'), source.indexOf('</aside>'));
+  assert.match(row, /class="side-age"/u, 'rows carry the last-reply age');
+  assert.ok(!row.includes('side-win'), 'no agent chips — the Board row is a SUMMARY');
+});
+
+test('notes are a timeline: author + time header, content box below (reopened #11)', () => {
+  assert.match(source, /<div class="n-head">\s*<span class="n-author">\{n\.author\}<\/span>\s*<span class="n-at">/u,
+    'author left, time right, one header line');
+  assert.match(source, /<\/div>\s*<div class="n-body">\{n\.body\}<\/div>/u, 'the content is its own box below');
+  const style = source.slice(source.indexOf('<style>'));
+  assert.match(style, /\.n-at \{[^}]*margin-left: auto/u, 'the time right-aligns');
+  assert.match(style, /\.n-author \{ color: var\(--accent\)/u, 'the author wears the accent ink');
+  assert.match(source, /\{t\('boardOpenedBy'\)\} <span class="m-name">\{sel\.created_by\}<\/span>/u,
+    'the opened-by name is highlighted too');
+});
+
+test('columns scroll alone; the page holds still (reopened #11)', () => {
+  const style = source.slice(source.indexOf('<style>'));
+  assert.match(style, /\.board \{[^}]*overflow: hidden/u, 'the page is not the scroller');
+  assert.match(style, /\.cols \{[^}]*flex: 1;\s*\n\s*min-height: 0;/u, 'the column grid takes the available height');
+  assert.match(style, /\.col-scroll \{\s*\n\s*overflow-y: auto;/u, 'each column\u2019s cards area is its own scroller');
+  assert.match(source, /<div class="col-scroll subtle-scroll">/u, 'the scroller wraps the cards, not the header');
+  assert.match(style, /\.detail \{[^}]*overflow-y: auto/u, 'the detail view brings its own scroller');
+});
+
+test('create lives in the head, and compact gets the hamburger drawer (reopened #11)', () => {
+  const head = source.slice(source.indexOf('<div class="head">'), source.indexOf('</div>', source.indexOf('boardNew')));
+  assert.match(head, /class="icon-btn go" title=\{t\('boardNew'\)\}/u, 'new-issue is the head\u2019s top-right action');
+  assert.ok(!source.includes('class="new-issue"'), 'the bottom button is gone');
+  // The drawer speaks the Chat/Terminal dialect: hamburger toggle, sheet,
+  // scrim, and the back gesture closes the drawer FIRST.
+  assert.match(source, /class="icon-btn side-toggle"[^>]*\n?[^>]*onclick=\{\(\) => \(sideOpen = !sideOpen\)\}/u,
+    'the hamburger toggles the drawer');
+  assert.match(source, /<aside class="sidebar" class:open=\{sideOpen\}>/u, 'the sidebar is the sheet');
+  assert.match(source, /class="side-scrim" onclick=\{\(\) => \(sideOpen = false\)\}/u, 'the scrim dismisses');
+  assert.match(source, /if \(sideOpen\) \{ sideOpen = false; return true; \}/u, 'back closes the drawer first');
+  assert.match(source, /sideOpen = false; \/\/ choosing closes the drawer/u, 'picking a project closes it');
+  const style = source.slice(source.indexOf('<style>'));
+  assert.match(style, /transform: translateX\(-100%\); transition: transform var\(--t-move\)/u,
+    'the sheet parks off-canvas and slides — the shared motion grammar');
+  assert.ok(!style.includes('.board-root.picked'), 'the second-page drilldown is retired');
+});

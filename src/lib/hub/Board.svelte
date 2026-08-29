@@ -6,7 +6,9 @@
      with the CLI (`projects::BOARD_STATUSES`), so a free-text status here
      would fork the language. Lives in the Hub drawer as a partition, like the
      terminal and Files. */
-  import { boardList, boardGet, boardSave, boardNote, boardDelete, projectList, hubAgents, hubPost, type BoardIssue, type HubAgent } from '../core/ws.ts';
+  import { boardList, boardGet, boardSave, boardNote, boardDelete, projectList, hubAgents, hubPost, hubRooms, type BoardIssue, type HubAgent } from '../core/ws.ts';
+  import { sortRows } from '../projects/projects.ts';
+  import { agoShort } from './hub.ts';
   import type { ProjectRow } from '../projects/projects.ts';
   import { t } from '../core/i18n.svelte.ts';
   import Icon from '../ui/Icon.svelte';
@@ -25,14 +27,27 @@
   // here overrides it until the prop moves again.
   let projects = $state<ProjectRow[]>([]);
   let cur = $state('');
-  let picked = $state(false);      // compact: a picked project drills into its board
+  let picked = $state(false);      // a manual pick overrides the session follow
+  let sideOpen = $state(false);    // compact: the hamburger DRAWER (same dialect
+                                   // as Chat/Terminal — reopened #11, no more
+                                   // second-page drilldown)
   // A dirty draft blocks the silent follow: the prop moving under an open
   // edit would reset the view and lose it with no confirm (board #11).
   $effect(() => { if (session && (!picked || !cur) && !dirty) cur = session; });
+  let talkMap = $state<Record<string, number>>({});
+  const rowTalk = (r: { project: { room?: string; session: string } }) =>
+    talkMap[r.project.room || `proj:${r.project.session}`] ?? 0;
   async function loadProjects() {
     try {
-      const r = await projectList();
-      projects = r.projects;
+      // The SAME order as the Hub/Chat sidebar (reopened #11): newest
+      // conversation first — one hub_rooms read feeds sortRows, exactly the
+      // recipe the Hub uses; the Board rows just skip the agent chips.
+      const [r, rooms] = await Promise.all([
+        projectList(),
+        hubRooms().catch(() => ({ rooms: {} })),
+      ]);
+      talkMap = rooms.rooms ?? {};
+      projects = sortRows((r.projects ?? []).filter((row) => !row.project.archived), talkMap);
       if (!cur && projects.length) cur = projects[0]?.project.session ?? '';
     } catch { /* keep the last list — "could not ask" is not "there is nobody" */ }
   }
@@ -46,6 +61,7 @@
     guard(() => {
       if (s !== cur) { cur = s; }
       picked = true;
+      sideOpen = false; // choosing closes the drawer
     });
   }
 
@@ -54,9 +70,9 @@
   $effect(() => {
     onGoBack?.(() => {
       if (pendingDiscard) { pendingDiscard = null; return true; }
+      if (sideOpen) { sideOpen = false; return true; } // the drawer peels first
       if (sel && dirty) { pendingDiscard = () => { sel = null; }; return true; }
       if (sel || creating) { sel = null; creating = false; return true; }
-      if (picked) { picked = false; return true; }  // compact: back to the project list
       return false;
     });
   });
@@ -240,6 +256,7 @@
   function onKey(e: KeyboardEvent) {
     if (e.key !== 'Escape') return;
     if (pendingDiscard) return; // the ConfirmDialog's own capture handler closes itself
+    if (sideOpen) { sideOpen = false; e.stopPropagation(); return; }
     if (sel && dirty) { pendingDiscard = () => { sel = null; }; e.stopPropagation(); return; }
     if (sel || creating) { sel = null; creating = false; e.stopPropagation(); }
   }
@@ -254,23 +271,45 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="board-root" class:picked>
-  <aside class="sidebar">
+<div class="board-root">
+  <aside class="sidebar" class:open={sideOpen}>
     <SideHandle />
     <div class="side-scroll subtle-scroll" use:scrollFade>
       <div class="side-h">{t('hubProjects')}</div>
+      <!-- Project SUMMARY rows only — name and last-reply age, no agent chips
+           (reopened #11: "只需隐去我们正在工作的 Agent 即可"). -->
       {#each projects as p (p.project.session)}
         <button class="side-row" class:open={cur === p.project.session} onclick={() => pick(p.project.session)}>
           <span class="r-name">{p.project.name}</span>
           {#if !p.live}<span class="r-dim">○</span>{/if}
+          {#if rowTalk(p)}<span class="side-age">{agoShort(rowTalk(p), Date.now())}</span>{/if}
         </button>
       {/each}
     </div>
   </aside>
+  {#if sideOpen}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="side-scrim" onclick={() => (sideOpen = false)}></div>
+  {/if}
   <div class="board" onkeydowncapture={onKey}>
   <div class="head">
+    <!-- Compact: the hamburger calls the project drawer — the same dialect as
+         Chat and Terminal (reopened #11), never a second-page drilldown. -->
+    <button class="icon-btn side-toggle" title={t('hubProjects')} aria-label={t('hubProjects')}
+      onclick={() => (sideOpen = !sideOpen)}>
+      <Icon name="menu" size={16} />
+    </button>
     <h1>{t('board')}</h1>
     {#if cur}<span class="h-session">{cur}</span>{/if}
+    <span class="spacer"></span>
+    {#if !sel && !creating}
+      <!-- New issue lives in the page head's top-right (reopened #11:
+           "不应该放到最下方…手机操作更友好"). -->
+      <button class="icon-btn go" title={t('boardNew')} aria-label={t('boardNew')} onclick={() => (creating = true)}>
+        <Icon name="plus" size={16} />
+      </button>
+    {/if}
   </div>
   {#if !ready && !issues.length}
     <div class="empty">…</div>
@@ -308,16 +347,21 @@
         <Select value={sel.assignee} dense
           options={[{ value: '', label: t('boardUnassigned') }, ...agents.map((a) => ({ value: a.name, label: `@${a.name}` }))]}
           onchange={(v: string) => assign(sel!.id, v)} />
-        {#if sel.created_by}<span class="meta-bit">{t('boardOpenedBy')} {sel.created_by}</span>{/if}
+        {#if sel.created_by}<span class="meta-bit">{t('boardOpenedBy')} <span class="m-name">{sel.created_by}</span></span>{/if}
       </div>
       <textarea class="d-body-edit" bind:value={draft.body} placeholder={t('boardBodyPh')} rows="8"></textarea>
+      <!-- The note thread as a TIMELINE (reopened #11): a header line — author
+           in the accent ink, time right-aligned — and the content in its own
+           box below, so ragged name lengths stop pushing the text around. -->
       <div class="notes">
         {#if Array.isArray(sel.notes)}
           {#each sel.notes as n}
             <div class="note">
-              <span class="n-author">{n.author}</span>
-              <span class="n-body">{n.body}</span>
-              <span class="n-at">{ago(n.at)}</span>
+              <div class="n-head">
+                <span class="n-author">{n.author}</span>
+                <span class="n-at">{ago(n.at)}</span>
+              </div>
+              <div class="n-body">{n.body}</div>
             </div>
           {/each}
         {/if}
@@ -361,6 +405,7 @@
       {#each STATUSES as s (s)}
         <div class="colm">
           <div class="col-h">{statusLabel(s)}<span class="col-n">{col(s).length}</span></div>
+          <div class="col-scroll subtle-scroll">
           {#each col(s) as i (i.id)}
             <button class="card" onclick={() => openIssue(i.id)}>
               <span class="c-title">{i.title}</span>
@@ -374,15 +419,13 @@
               </span>
             </button>
           {/each}
+          </div>
         </div>
       {/each}
     </div>
     {#if !issues.length && ready}
       <div class="empty">{t('boardEmpty')}</div>
     {/if}
-    <button class="new-issue" onclick={() => (creating = true)}>
-      <Icon name="plus" size={13} /> {t('boardNew')}
-    </button>
   {/if}
   {#if err}<div class="err">{err}</div>{/if}
   </div>
@@ -402,17 +445,31 @@
   .side-scroll { flex: 1; overflow-y: auto; min-height: 0; }
   .r-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .r-dim { color: var(--text3); font-size: var(--fs-micro); }
+  /* Compact: the sidebar is a DRAWER over the board — the same sheet+scrim
+     dialect as Chat's project list and Terminal's session list (reopened
+     #11), never a second page. */
+  .side-toggle { display: none; flex: none; }
   @media (max-width: 760px) {
     .board-root { grid-template-columns: minmax(0, 1fr); }
-    .sidebar { border-right: none; }
-    .board-root.picked .sidebar { display: none; }
-    .board-root:not(.picked) .board { display: none; }
+    .side-toggle { display: inline-flex; }
+    .sidebar {
+      position: fixed; z-index: 26; inset: var(--sat, 0px) auto 0 0;
+      width: min(300px, 86vw);
+      transform: translateX(-100%); transition: transform var(--t-move) ease;
+      border-right: none;
+      box-shadow: 12px 0 34px rgba(0, 0, 0, 0.35);
+    }
+    .sidebar.open { transform: none; }
   }
+  .side-scrim { position: fixed; inset: 0; z-index: 25; background: rgba(0, 0, 0, 0.45); }
+  @media (prefers-reduced-motion: reduce) { .sidebar { transition: none; } }
   .board {
     height: 100%;
     display: flex;
     flex-direction: column;
-    overflow-y: auto;
+    /* The PAGE holds still; each column scrolls its own cards (reopened #11:
+       "应该是分区上下滑动才对"). The detail view brings its own scroller. */
+    overflow: hidden;
     padding: 14px clamp(10px, 3vw, 28px);
     gap: 10px;
     max-width: 1100px;
@@ -433,7 +490,15 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
     gap: 10px;
-    align-items: start;
+    align-items: stretch;
+    flex: 1;
+    min-height: 0;
+  }
+  .col-scroll {
+    overflow-y: auto;
+    min-height: 0;
+    display: flex; flex-direction: column; gap: 6px;
+    padding-bottom: 6px;
   }
   .col-h {
     font-size: var(--fs-meta);
@@ -445,7 +510,7 @@
     display: flex; gap: 6px; align-items: baseline;
   }
   .col-n { color: var(--text3); font-weight: 400; }
-  .colm { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .colm { display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0; }
 
   .card {
     display: flex; flex-direction: column; gap: 3px;
@@ -477,27 +542,16 @@
   .c-meta { font-size: var(--fs-micro); color: var(--text3); display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
   .c-assignee { color: var(--accent); }
 
-  .new-issue {
-    align-self: flex-start;
-    display: inline-flex; align-items: center; gap: 5px;
-    background: none; border: none;
-    color: var(--text3);
-    font-size: var(--fs-ui);
-    padding: 6px 8px;
-    border-radius: var(--ui-radius-control);
-    cursor: pointer;
-    transition: background var(--t-fast), color var(--t-fast);
-  }
-  .new-issue:hover { background: var(--surface2); color: var(--accent); }
 
   /* ── detail / new form ── */
-  .detail { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+  .detail { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: 1; overflow-y: auto; }
   .d-head { display: flex; align-items: center; gap: 6px; }
   .d-id { font-family: var(--ui-font-mono, monospace); font-size: var(--fs-meta); color: var(--text3); }
   .d-title { font-size: var(--fs-ui); font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
   .spacer { flex: 1; }
   .d-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .meta-bit { font-size: var(--fs-meta); color: var(--text3); }
+  .meta-bit .m-name { color: var(--accent); font-weight: 650; }
   /* The hierarchy (board #11): one compact title LINE, then the body as the
      visibly bigger field — it is the content, so it gets the space. */
   .d-title-input {
@@ -522,11 +576,23 @@
     flex: none;
   }
   .d-body-edit:focus { outline: none; border-color: var(--accent); }
-  .notes { display: flex; flex-direction: column; gap: 4px; }
-  .note { display: flex; gap: 6px; align-items: baseline; font-size: var(--fs-meta); min-width: 0; }
-  .n-author { color: var(--accent); font-weight: 650; flex: none; }
-  .n-body { color: var(--text); overflow-wrap: anywhere; }
+  /* Timeline notes (reopened #11): author + right-aligned time on the header
+     line, the content in its own box below — ragged author widths no longer
+     push the text around, and the inks follow the app's hierarchy (accent
+     name / grey time / full-ink content). */
+  .notes { display: flex; flex-direction: column; gap: 8px; }
+  .note { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .n-head { display: flex; align-items: baseline; gap: 8px; }
+  .n-author { color: var(--accent); font-weight: 650; font-size: var(--fs-meta); }
   .n-at { color: var(--text3); font-size: var(--fs-micro); margin-left: auto; flex: none; }
+  .n-body {
+    color: var(--text); font-size: var(--fs-ui);
+    white-space: pre-wrap; overflow-wrap: anywhere;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--ui-radius-row);
+    padding: 7px 10px;
+  }
   .note-add { display: flex; gap: 6px; align-items: center; }
   .note-add input, .n-title, .n-body {
     flex: 1;
