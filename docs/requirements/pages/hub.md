@@ -113,6 +113,10 @@ completion).
 - The human writes/edits here; agents use `tmm board` (`take` = claim +
   doing; only the acceptor moves to done). Same rows, same vocabulary —
   the board is session-scoped like the room.
+- Cards name the REPORTER (`by human` / `by lead`) and the assignee.
+  Assigning from the detail view picks a managed agent and DELIVERS the
+  assignment (`hub_post` @message typed into that agent's pane, with the
+  take/note/move instructions) — assignment is a dispatch, not a label.
 - Carries the shared project sidebar (every project has its own board);
   the followed last-touched session is the default, a pick overrides it
   until that moves again. Compact is the standard drill-down (project list

@@ -6,7 +6,7 @@
      with the CLI (`projects::BOARD_STATUSES`), so a free-text status here
      would fork the language. Lives in the Hub drawer as a partition, like the
      terminal and Files. */
-  import { boardList, boardGet, boardSave, boardNote, boardDelete, projectList, type BoardIssue } from '../core/ws.ts';
+  import { boardList, boardGet, boardSave, boardNote, boardDelete, projectList, hubAgents, hubPost, type BoardIssue, type HubAgent } from '../core/ws.ts';
   import type { ProjectRow } from '../projects/projects.ts';
   import { t } from '../core/i18n.svelte.ts';
   import Icon from '../ui/Icon.svelte';
@@ -76,7 +76,14 @@
       // A failed poll keeps the last board — "could not ask" ≠ "empty".
       err = String((e as Error)?.message ?? e);
     }
+    // The assignee picker offers the project's MANAGED agents (the only ones
+    // an assignment can be typed into). A failed read keeps the last roster.
+    try {
+      const a = await hubAgents(cur);
+      agents = a.agents.filter((x) => x.managed);
+    } catch { /* keep */ }
   }
+  let agents = $state<HubAgent[]>([]);
 
   // Poll while visible: agents move cards from their panes, and the human
   // should see it without touching anything. Same verdict rule as the rooms —
@@ -99,6 +106,21 @@
   async function refreshSel() {
     if (sel) await openIssue(sel.id);
     await load();
+  }
+  // Assigning DOES something (owner, 2026-08-29: "Assign 给某个 Agent 去做"):
+  // besides the field, a non-empty assignment posts an @message — hub_post's
+  // delivery types it into that agent's pane, so the agent actually starts
+  // (and is told to take/note/move, which covers "做完之后在上面更新信息").
+  async function assign(id: number, name: string) {
+    busy = true;
+    try {
+      await boardSave(cur, { id, assignee: name });
+      if (name) {
+        await hubPost(cur, `@${name} ${t('boardAssignMsg').replace('{id}', String(id))}`);
+      }
+      await refreshSel();
+    } catch (e) { err = String((e as Error)?.message ?? e); }
+    busy = false;
   }
   async function move(id: number, status: string) {
     busy = true;
@@ -182,7 +204,9 @@
       <div class="d-meta">
         <Select value={sel.status} options={STATUSES.map((s) => ({ value: s, label: statusLabel(s) }))}
           onchange={(v: string) => move(sel!.id, v)} />
-        {#if sel.assignee}<span class="meta-bit">@{sel.assignee}</span>{/if}
+        <Select value={sel.assignee} dense
+          options={[{ value: '', label: t('boardUnassigned') }, ...agents.map((a) => ({ value: a.name, label: `@${a.name}` }))]}
+          onchange={(v: string) => assign(sel!.id, v)} />
         {#if sel.created_by}<span class="meta-bit">{t('boardOpenedBy')} {sel.created_by}</span>{/if}
       </div>
       {#if sel.body}
@@ -236,7 +260,8 @@
               <span class="c-title">{i.title}</span>
               <span class="c-meta">
                 #{i.id}
-                {#if i.assignee}· @{i.assignee}{/if}
+                {#if i.created_by}· {t('boardBy')} {i.created_by}{/if}
+                {#if i.assignee}· <span class="c-assignee">@{i.assignee}</span>{/if}
                 {#if noteCount(i)}· {noteCount(i)} <Icon name="chat" size={10} />{/if}
                 · {ago(i.updated_at)}
               </span>
@@ -324,6 +349,7 @@
   .card:hover { background: var(--surface2); }
   .c-title { font-size: var(--fs-ui); color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
   .c-meta { font-size: var(--fs-micro); color: var(--text3); display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+  .c-assignee { color: var(--accent); }
 
   .new-issue {
     align-self: flex-start;
