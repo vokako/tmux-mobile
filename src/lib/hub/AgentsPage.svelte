@@ -161,10 +161,16 @@
       .then((r) => { if (editingSkill?.name === name && skSel === path) skText = r.content; })
       .catch((e) => { if (editingSkill?.name === name && skSel === path) skText = String(e?.message ?? e); });
   }
+  // The description is READING by default — skill descriptions run to
+  // paragraphs (they teach the model when to fire) and a one-line input
+  // showed a keyhole's worth. Click to edit, blur to fold back
+  // (owner, 2026-08-29: "description 应该是多行的 默认是让我浏览 点击才能编辑").
+  let descEditing = $state(false);
   function startSkill(sk) {
     closeAll();
     skillIsNew = !sk;
     editingSkill = sk ? { ...sk } : { name: '', source: '', description: '' };
+    descEditing = false;
     if (sk) loadSkillFiles(sk.name); else { skFiles = []; skText = ''; }
   }
   let syncing = $state(false);
@@ -364,7 +370,15 @@
           <p class="hint">{t('skillsBuiltin')}</p>
         {/if}
         <label>{t('skillsDesc')}
-          <input bind:value={editingSkill.description} />
+          {#if skillIsNew || descEditing}
+            <!-- svelte-ignore a11y_autofocus — the user just clicked "edit
+                 this text"; focusing anywhere else would drop the intent. -->
+            <textarea rows="4" bind:value={editingSkill.description} autofocus={descEditing}
+              onblur={() => descEditing = false}></textarea>
+          {:else}
+            <button class="desc-view" type="button" title={t('edit')} onclick={() => descEditing = true}
+              >{editingSkill.description || '—'}</button>
+          {/if}
         </label>
         {#if editingSkill.synced_at}
           <p class="hint">{t('skillsSynced')} {new Date(editingSkill.synced_at * 1000).toLocaleString()}</p>
@@ -577,6 +591,17 @@
   .f-size { margin-left: auto; flex: none; color: var(--text3); font-size: var(--fs-micro); }
   .placeholder { flex: 1; display: grid; place-items: center; }
   .hint { color: var(--text3); font-size: var(--fs-ui); margin: 0; line-height: 1.6; max-width: 420px; }
+  /* Description at rest: the text itself, whole and wrapped; the wash on
+     hover says "tap to edit" without drawing an input around reading. */
+  .desc-view {
+    background: none; border: 1px solid transparent; border-radius: var(--ui-radius-control);
+    padding: 6px 8px; margin: 0; text-align: left; cursor: text;
+    font: inherit; font-size: var(--fs-ui); color: var(--text2); line-height: 1.55;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+    transition: background var(--t-fast), border-color var(--t-fast);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .desc-view:hover { background: var(--surface2); }
 
   .editor { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; max-width: 720px; }
   .err { color: var(--danger); font-size: var(--fs-ui); background: var(--danger-bg); border-radius: var(--ui-radius-row); padding: 8px 12px; }
