@@ -31,7 +31,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, stateIsLive, mergeMessages, backendColor, feedBlocks, filterBlocks, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
+  import { markLeadingMention, stateDotColor, stateIsLive, mergeMessages, backendColor, feedBlocks, filterBlocks, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
@@ -387,12 +387,11 @@
    * heights shifting with no compensation, which read as the parked tail
    * drifting on its own (owner, 2026-08-27: "我打字输入，原来是最下方，但是一
    * 会儿又变化了"). The column holds still while the composer grows. */
-  let heldMax = $state(0);
+  let heldBasis = $state(0);
   let heldLine = $state(20);        // measured line box of a bubble, px
   function measureHeld() {
     if (!feedEl) return;
-    const basis = feedEl.parentElement?.clientHeight || feedEl.clientHeight;
-    heldMax = Math.max(96, Math.round(basis * 0.2));
+    heldBasis = feedEl.parentElement?.clientHeight || feedEl.clientHeight;
     const bubble = feedEl.querySelector('.bubble');
     const lh = bubble ? parseFloat(getComputedStyle(bubble).lineHeight) : NaN;
     if (Number.isFinite(lh) && lh > 6) heldLine = lh;
@@ -406,10 +405,11 @@
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   });
-  /** How many whole lines a folded user message may show, minus the bubble's
-   * own padding and the meta trailer's line. Never below three: a shorter fold
-   * no longer says anything. */
-  const heldLines = $derived(Math.max(3, Math.floor((heldMax - 26) / heldLine)));
+  /** How many whole lines a folded user message may show — the mapping is
+   * `foldLines` in hub.ts (pure, tested; board #4): a flat small budget on
+   * compact (the keyboard resize cannot move it), the screen-derived fifth
+   * on desktop. */
+  const heldLines = $derived(foldLines(compact, heldBasis, heldLine));
   /** The body a folded user message shows: a plain rear truncation (owner,
    * 2026-08-27: "直接后截断的形式 … 中间不要了，默认用户消息都截断"). Identity
    * when it already fits, so the common case re-renders nothing. */

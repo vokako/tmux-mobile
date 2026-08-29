@@ -82,6 +82,21 @@ test('the agent card speaks the three-stage machine: select, then options, dblcl
   assert.match(source, /if \(filterAgent\) \{ filterAgent = ''; return true; \}/u, 'back gesture exits the filter');
 });
 
+test('the fold budget goes through foldLines, and the basis is the column', () => {
+  // Board #4: the budget math lives in hub.ts (pure, tested) — Hub only
+  // measures. Re-inlining `* 0.2` here would fork the mapping again, and
+  // measuring the FEED instead of its parent is the composer-shrink bug
+  // (owner, 2026-08-27) coming back.
+  assert.match(source, /const heldLines = \$derived\(foldLines\(compact, heldBasis, heldLine\)\);/u,
+    'one derivation, the pure mapping');
+  assert.match(source, /heldBasis = feedEl\.parentElement\?\.clientHeight/u,
+    'the basis is the chat COLUMN (the feed parent), which the composer cannot shrink');
+  const script = source.slice(0, source.indexOf('</script>'));
+  assert.ok(!/\*\s*0\.2/u.test(script), 'no inline fifth — the fraction lives in foldLines only');
+  assert.match(source, /const onResize = \(\) => withReadingAnchor\(measureHeld\);/u,
+    'a real window resize still re-enters through the reading anchor');
+});
+
 test('the argument is wrapped in its own scroller, beside the name and the time', () => {
   // The markup IS the guarantee: text inside .st-scroll, name and time outside it.
   assert.match(

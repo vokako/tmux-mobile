@@ -336,6 +336,34 @@ export const ELIDE = '……';
  * Returns the text unchanged when it already fits — the common case, and the
  * caller relies on identity to skip re-rendering.
  */
+/** A folded user message's line budget on a COMPACT screen: a constant.
+ * On the phone the old screen-derived budget (20% of the chat column) gave
+ * 6–8 lines — too tall for a screen that fits three bubbles (board #4) — and
+ * it MOVED: the on-screen keyboard resizes the viewport, so opening it
+ * re-cut every folded message mid-read. One line above the 3-line floor:
+ * the floor is where "a shorter fold no longer says anything", and a fold
+ * must stay distinguishable from it while letting several messages share a
+ * phone screen. Constant on purpose — no basis term means neither the
+ * keyboard nor the composer can change it. */
+export const PHONE_FOLD_LINES = 4;
+
+/** How many whole lines a folded user message may show — the ONE mapping
+ * from (compact, chat-column height, bubble line-height) to a budget
+ * (board #4, testable without a DOM):
+ * - compact: `PHONE_FOLD_LINES`, flat (see above);
+ * - desktop: a fifth of the column (the owner's number), floored at 96px so
+ *   a tiny window still folds meaningfully, minus the bubble's own padding
+ *   and meta line (26px), in whole line boxes — never below the 3-line
+ *   floor. The basis is the chat COLUMN, which holds still while the
+ *   composer grows; a real window resize re-enters through the reading
+ *   anchor. */
+export function foldLines(compact: boolean, basis: number, lineHeight: number): number {
+  if (compact) return PHONE_FOLD_LINES;
+  const maxPx = Math.max(96, Math.round(basis * 0.2));
+  const lh = Number.isFinite(lineHeight) && lineHeight > 6 ? lineHeight : 20;
+  return Math.max(3, Math.floor((maxPx - 26) / lh));
+}
+
 export function elideTail(text: string, maxLines: number, perLine = 80): string {
   const lines = (text ?? '').split('\n');
   const budget = Math.max(1, Math.floor(maxLines));

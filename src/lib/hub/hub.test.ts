@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { uploadImagePath, uploadFilePath, imageId, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks } from './hub.ts';
+import { uploadImagePath, uploadFilePath, imageId, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -1027,4 +1027,27 @@ test('filterBlocks keeps one agent\u2019s world and nobody else\u2019s (board #3
   // messages still filter by name.
   const noWin = filterBlocks(blocks as never, 'builder', undefined);
   assert.ok(noWin.every((b) => b.type === 'msg' || b.type === 'sys'), 'no window \u2192 no telemetry claimed');
+});
+
+test('foldLines: a phone fold is small and IMMOVABLE, a desktop fold keeps its fifth (board #4)', () => {
+  // Compact: constant 4 — one above the 3-line floor (the floor is where a
+  // fold "no longer says anything"), small enough that several messages share
+  // a phone screen, and with NO basis term the on-screen keyboard (which
+  // resizes the viewport) and the composer cannot re-cut a message mid-read.
+  assert.equal(PHONE_FOLD_LINES, 4);
+  for (const basis of [400, 640, 700, 844, 900]) {
+    assert.equal(foldLines(true, basis, 20), PHONE_FOLD_LINES, `compact @${basis}px stays flat`);
+  }
+  assert.equal(foldLines(true, 700, 24), PHONE_FOLD_LINES, 'line-height does not move it either');
+
+  // Desktop keeps the screen-derived budget — no regression: a fifth of the
+  // column minus bubble padding (26px), in whole line boxes.
+  assert.equal(foldLines(false, 1000, 20), 8, 'a 1000px column reads 8 lines');
+  assert.equal(foldLines(false, 700, 20), 5, 'a 700px column reads 5');
+  assert.equal(foldLines(false, 1000, 24), 7, 'a taller line box fits fewer');
+  // The 96px floor and the 3-line floor still hold in a tiny window.
+  assert.equal(foldLines(false, 300, 20), 3);
+  assert.equal(foldLines(false, 0, 20), 3);
+  // An unmeasured line-height falls back to 20 instead of dividing by NaN.
+  assert.equal(foldLines(false, 1000, NaN), 8);
 });
