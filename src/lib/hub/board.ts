@@ -21,18 +21,37 @@ export const draftDirty = (draft: IssueDraft, issue: { title?: string; body?: st
 /** A draft the server would accept: a title is the one required field. */
 export const draftValid = (draft: IssueDraft): boolean => draft.title.trim().length > 0;
 
-/** ONLY the changed fields, aligned with the server's COALESCE patch — a
- * field the user never touched must not ride along (an agent's concurrent
- * note/move bumps updated_at, not these, but sending an unchanged body would
- * still overwrite a concurrent body edit). `null` when there is nothing to
- * save or the draft is invalid. */
+/** ONLY the fields the USER changed, measured against the draft's own BASE —
+ * never against the live issue (#11 review): after a concurrent refetch the
+ * live body may already be an agent's newer text, and diffing against it
+ * would send the user's stale copy of a field they never touched, silently
+ * overwriting the agent. `null` when there is nothing to save or the draft
+ * is invalid. */
 export function draftPatch(
   draft: IssueDraft,
-  issue: { title?: string; body?: string },
+  base: { title?: string; body?: string },
 ): { title?: string; body?: string } | null {
-  if (!draftValid(draft) || !draftDirty(draft, issue)) return null;
+  if (!draftValid(draft) || !draftDirty(draft, base)) return null;
   const patch: { title?: string; body?: string } = {};
-  if (draft.title !== (issue.title ?? '')) patch.title = draft.title.trim();
-  if (draft.body !== (issue.body ?? '')) patch.body = draft.body;
+  if (draft.title !== (base.title ?? '')) patch.title = draft.title.trim();
+  if (draft.body !== (base.body ?? '')) patch.body = draft.body;
   return patch;
+}
+
+/** Three-way rebase after a refetch (#11 review): the server moved while the
+ * user was editing. Per field — UNTOUCHED (draft == base) follows the server
+ * (the editor shows the agent's fresh text), TOUCHED keeps the user's edit
+ * (their save then overwrites that one field, knowingly). The new base is
+ * always the server's copy, so a later `draftPatch(draft, base)` still flags
+ * exactly the touched fields. */
+export function rebaseDraft(
+  draft: IssueDraft,
+  base: IssueDraft,
+  server: IssueDraft,
+): { draft: IssueDraft; base: IssueDraft } {
+  const pick = (field: keyof IssueDraft) => (draft[field] === base[field] ? server[field] : draft[field]);
+  return {
+    draft: { title: pick('title'), body: pick('body') },
+    base: { ...server },
+  };
 }

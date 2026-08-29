@@ -13,7 +13,7 @@
   import Select from '../ui/Select.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
-  import { draftOf, draftDirty, draftValid, draftPatch } from './board.ts';
+  import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft } from './board.ts';
   import { scrollFade } from '../core/scrollFade.ts';
 
   let { session = '', visible = true, onGoBack = null }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null } = $props();
@@ -78,8 +78,13 @@
   // edits (back, Esc, sidebar switch, the phone's back gesture) goes through
   // the app's confirm dialect instead of losing them silently.
   let draft = $state({ title: '', body: '' });
+  // The draft's BASE: the server text the user started from (or last saved/
+  // rebased onto). Dirty and the save patch are measured against IT, never
+  // the live issue — a concurrent refetch moves the live copy, and diffing
+  // against that would ship stale fields the user never touched (#11 review).
+  let draftBase = $state({ title: '', body: '' });
   let pendingDiscard = $state<null | (() => void)>(null);
-  const dirty = $derived(sel ? draftDirty(draft, sel) : false);
+  const dirty = $derived(sel ? draftDirty(draft, draftBase) : false);
   /** Run now, or park behind the discard confirm when the draft is dirty. */
   function guard(action: () => void) {
     if (dirty) pendingDiscard = action;
@@ -125,14 +130,22 @@
     try {
       sel = await boardGet(cur, id);
       draft = draftOf(sel);
+      draftBase = draftOf(sel);
       err = '';
     } catch (e) { err = String((e as Error)?.message ?? e); }
   }
-  /** Re-fetch the open issue WITHOUT resetting the draft — a status/assignee
-   * save or a note must not clobber title/body edits in progress. */
+  /** Re-fetch the open issue and REBASE the draft three-way: untouched
+   * fields follow the server (an agent's new body shows up mid-edit),
+   * touched fields keep the user's text (#11 review). */
   async function refetchSel() {
     if (sel) {
-      try { sel = await boardGet(cur, sel.id); err = ''; } catch (e) { err = String((e as Error)?.message ?? e); }
+      try {
+        sel = await boardGet(cur, sel.id);
+        const r = rebaseDraft(draft, draftBase, draftOf(sel));
+        draft = r.draft;
+        draftBase = r.base;
+        err = '';
+      } catch (e) { err = String((e as Error)?.message ?? e); }
     }
     await load();
   }
@@ -156,21 +169,25 @@
     } catch (e) { err = String((e as Error)?.message ?? e); }
     busy = false;
   }
-  /** Explicit save of the draft's changed fields; a failure KEEPS the draft. */
+  /** Explicit save of the USER's changed fields (diffed against the draft
+   * base, never the live issue); a failure KEEPS the draft. The refetch's
+   * rebase then normalizes: the server now carries the saved text, so base
+   * catches up and the draft reads clean. */
   async function saveDraft() {
     if (!sel || busy) return;
-    const patch = draftPatch(draft, sel);
+    const patch = draftPatch(draft, draftBase);
     if (!patch) return;
     busy = true;
     try {
       await boardSave(cur, { id: sel.id, ...patch });
       await refetchSel();
-      draft = draftOf(sel);
     } catch (e) { err = String((e as Error)?.message ?? e); }
     busy = false;
   }
   function cancelDraft() {
-    draft = draftOf(sel);
+    // Back to the BASE — the server text the user started from (kept fresh
+    // by the rebase), which is also what the live issue reads.
+    draft = { ...draftBase };
   }
   async function move(id: number, status: string) {
     busy = true;
@@ -180,14 +197,29 @@
   async function createIssue() {
     if (!nTitle.trim() || busy) return;
     busy = true;
+    let created: number | null = null;
     try {
-      const r = await boardSave(cur, { title: nTitle.trim(), body: nBody.trim() });
+      created = (await boardSave(cur, { title: nTitle.trim(), body: nBody.trim() }))?.id ?? null;
+    } catch (e) {
+      // The CREATE failed: the form stays, retry is honest.
+      err = String((e as Error)?.message ?? e);
+      busy = false;
+      return;
+    }
+    // The issue EXISTS from here on: close the form unconditionally — a
+    // retryable form after a successful create is how duplicate issues are
+    // born (#11 review). A failed dispatch is reported instead; the issue is
+    // on the board and can be assigned from its detail view.
+    const wantAssign = nAssignee;
+    nTitle = ''; nBody = ''; nAssignee = ''; creating = false;
+    try {
       // Create-with-assignee reuses the ONE dispatch semantics: the field is
       // saved AND the assignment lands in the agent's pane (board #11).
-      if (nAssignee && r?.id) await dispatchAssign(r.id, nAssignee);
-      nTitle = ''; nBody = ''; nAssignee = ''; creating = false;
-      await load();
-    } catch (e) { err = String((e as Error)?.message ?? e); }
+      if (wantAssign && created != null) await dispatchAssign(created, wantAssign);
+    } catch (e) {
+      err = `#${created}: ${String((e as Error)?.message ?? e)}`;
+    }
+    await load();
     busy = false;
   }
   async function addNote() {
@@ -357,7 +389,7 @@
   <ConfirmDialog open={!!pendingDiscard} danger={false}
     title={t('confirmDiscardTitle')} note={t('boardDiscardNote')}
     confirmLabel={t('confirmDiscard')} cancelLabel={t('cancel')}
-    onconfirm={() => { const go = pendingDiscard; pendingDiscard = null; draft = draftOf(sel); go?.(); }}
+    onconfirm={() => { const go = pendingDiscard; pendingDiscard = null; draft = { ...draftBase }; go?.(); }}
     oncancel={() => (pendingDiscard = null)} />
 </div>
 
