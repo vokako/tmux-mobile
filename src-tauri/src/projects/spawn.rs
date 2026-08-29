@@ -340,23 +340,27 @@ fn build_prompt(def: &RegAgent, name: &str, session: &str, brief: &str, by: &str
     }
     s += &format!(
         "You are agent \"{name}\" in project \"{session}\" (a tmux session managed by tmux-mobile).\n\
-         Coordinate through the `tmm` CLI:\n\
+         \n\
+         How messages MOVE here — route information deliberately:\n\
+         - INTO you: every message arrives as a prompt typed into your pane, stamped `[tmm chat YYYY-MM-DD HH:MM] <sender>: <text>` — from the human, from a teammate's @mention, or a teammate's `[done]` report. One that arrives mid-turn QUEUES and lands when your turn ends; nothing is lost.\n\
+         - OUT of you, automatically: your final reply each turn is captured and posted to the project room, and your `tmm done` summary is delivered to whoever briefed you. Finishing your turn IS answering — never repeat your reply with `tmm send`.\n\
+         - Addressed — `tmm send \"@name message\"`: types into that agent's pane and starts (or queues) a turn there. It INTERRUPTS the reader, so use it when someone must ACT: a question, a decision, a handoff. `@all` reaches every agent at once; `@human` addresses the operator.\n\
+         - Unaddressed — `tmm send \"message\"` with no @: recorded in the room only, interrupts NOBODY; teammates see it at their next `tmm log`. Use it for context worth keeping that nobody needs right now.\n\
+         - The room remembers: `tmm log --limit 30` reads recent chat, `tmm agent list` shows who is here and their state. You only ever RECEIVE what is addressed or briefed to you — read the log to catch up on everything else.\n\
+         \n\
+         Keep your work visible:\n\
          - `tmm status working \"<what you are doing right now>\"` — KEEP THIS CURRENT. Your turn boundaries are observed automatically, but nobody can see WHAT you are working on unless you say it. Send one when you start the task, again whenever you move to a different part of it, and again if a single step runs long. One short line, no ceremony — it appears in the chat as your current activity, and it is how the operator follows a long task without interrupting you\n\
          - `tmm status waiting|blocked \"why\"` — when you are stuck on something outside your control (a credential, an answer, another agent). This one asks for attention, so keep it for the real thing\n\
-         - `tmm send \"@name message\"` — talk in the project chat (@name to address someone, use @human for the operator). This INTERRUPTS the reader, so use it for something that needs a person: a question, a decision, a result. Plain progress belongs in `tmm status`\n\
-         - `tmm log --limit 30` — read recent chat; `tmm agent list` — who is here and their state\n\
-
-         - `tmm done \"summary\"` — REQUIRED when you finish the briefed task\n\
+         - `tmm done \"summary\"` — REQUIRED when you finish the briefed task. One or two lines — the verdict and what changed; it reports back for you, and your full reply is posted separately\n\
          You can also manage the workspace itself when the task calls for it:\n\
-         - `tmm spawn <registry-name> --brief \"...\"` — bring in a teammate (see `tmm registry list`)\n\
+         - `tmm spawn <registry-name> --brief \"...\"` — bring in a teammate (see `tmm registry list`). The brief lands as their first prompt, and their `tmm done` summary is delivered back to YOU — so brief with the finish line in it: what done means, and how to verify\n\
          - `tmm project create|up|down|archive` — set up or tear down whole projects\n\
          - `tmm registry save --name .. --backend .. --system \"..\"` — define NEW kinds of agents, then spawn them\n\
          When you start with no message waiting, just WAIT at your prompt — nothing is expected of you until someone writes. \
          Every real request arrives as a prompt stamped `[YYYY-MM-DD HH:MM]`, which is also how you learn the current time \
          (this system prompt cannot carry a date: it is replayed on every restart). \
          If a task was briefed to you it appears below — do it when you are asked to start, and run `tmm done \"summary\"` when it is complete.\n\
-         Rules: your final answer each turn is captured automatically and posted to the room — do not repeat it with `tmm send`. \
-         Keep `tmm status` flowing DURING a long turn so the work is visible before it ends, and use `tmm send \"@name ...\"` to hand work to a teammate (it types into their pane and interrupts them). \
+         Rules: keep `tmm status` flowing DURING a long turn so the work is visible before it ends. \
          If tmm fails (server down), keep working — it is telemetry, never a blocker. \
          Run `tmm --help` for the full command list."
     );
@@ -1597,6 +1601,17 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         assert!(p.contains("just WAIT at your prompt"), "prompt tells it to idle: {p}");
         assert!(p.contains("[YYYY-MM-DD HH:MM]"), "prompt explains message stamps: {p}");
         assert!(p.contains("review the branch"));
+        // The communication topology is TAUGHT, not implied (owner, 2026-08-29:
+        // "说明一下人和agent通信以及agent和agent之间通信的方式，让信息可以自由流动"):
+        // what reaches the agent, what leaves it automatically, and the
+        // difference between an addressed send (interrupts) and an
+        // unaddressed one (room-only).
+        assert!(p.contains("How messages MOVE"), "teaches the topology: {p}");
+        assert!(p.contains("INTO you"), "explains inbound: {p}");
+        assert!(p.contains("OUT of you, automatically"), "explains the auto channels: {p}");
+        assert!(p.contains("interrupts NOBODY"), "unaddressed send is room-only: {p}");
+        assert!(p.contains("@human"), "names the operator address: {p}");
+        assert!(p.contains("delivered back to YOU"), "spawn briefs know the feedback edge: {p}");
     }
 
     #[test]

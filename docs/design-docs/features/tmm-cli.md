@@ -1314,11 +1314,20 @@ still shows the stored body, marker included, because raw means exact.
 only it can answer, and `derive_from` needs it for `waiting`.
 
 The other half is the prompt, since a channel nobody is told to use stays empty.
-`build_prompt` now leads with `tmm status working "<what you are doing right
-now>"` and says when to send one (at the start, when the work moves to a
-different part, when a step runs long), while `tmm send` is described as the
-INTERRUPTING channel reserved for something that needs a person. That ordering
-is the convention: progress is ambient, messages are addressed. NOTE: an agent
+`build_prompt` opens with the communication TOPOLOGY itself (owner, 2026-08-29:
+"说明一下人和agent通信以及agent和agent之间通信的方式，让信息可以自由流动") — a
+"How messages MOVE" section spelling out the five flows: what arrives INTO the
+agent (every message is a stamped prompt typed into its pane, queued if
+mid-turn), what leaves it AUTOMATICALLY (the captured final reply, the done
+summary delivered to its briefer), an ADDRESSED `tmm send "@name …"` (types
+into that pane — it interrupts, so it is for something the reader must act
+on), an UNADDRESSED send (room-only, interrupts nobody, read at the next
+`tmm log`), and the room's memory (`tmm log` / `tmm agent list` — an agent
+only ever RECEIVES what is addressed to it; the log is how it catches up on
+the rest). Then `tmm status working "<what you are doing right now>"` with
+when to send one (at the start, when the work moves to a different part, when
+a step runs long). That ordering is the convention: progress is ambient,
+messages are addressed. NOTE: an agent
 already spawned keeps the prompt it was given — see the def-drift entry in
 `docs/unresolved.md` — so the new convention reaches existing windows only when
 they are re-spawned.
