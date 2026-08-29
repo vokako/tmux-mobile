@@ -1416,6 +1416,75 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    /// The same path with a SERVER RESTART in the middle — board #5. The agent
+    /// is a separate process: it queued our line and submits it when its turn
+    /// ends, which can be after we came back. The receipt used to die with the
+    /// old process, so the recovered echo was filed as keyboard input (`via:
+    /// local`) and the message stayed unconfirmed (owner, 2026-08-29: "后端的服务
+    /// 有重启了，然后agent又收到指令确认hooks，这个hooks没有正确把之前的未确认的
+    /// 消息变成已读状态，被单独写出来了"). Now the queue is in state.db, so the
+    /// hook still recognises the prompt as ours.
+    #[test]
+    fn a_prompt_envelope_after_a_restart_is_still_a_delivery_receipt() {
+        crate::projects::tests::use_test_store();
+        let session = format!("tmm-restart-{}", std::process::id());
+        let created = std::process::Command::new("tmux")
+            .args(["new-session", "-d", "-s", &session, "sleep 30"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            return;
+        }
+        let panes = crate::tmux::list_panes(&session).unwrap_or_default();
+        let pane = panes.first().expect("the new session has a pane").clone();
+        let pane_id = String::from_utf8(
+            std::process::Command::new("tmux")
+                .args(["display-message", "-p", "-t", &session, "#{pane_id}"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string();
+
+        let root = std::env::temp_dir().join(format!("tmm-restart-hub-{}", uuid::Uuid::new_v4()));
+        let hub = AgentNotificationHub::load_at(root.clone());
+        let line = "[tmm chat] human: @dev restart proof";
+        crate::projects::telemetry::record_delivery(&session, pane.window, line);
+        // ── the restart: a fresh process has no telemetry records at all.
+        crate::projects::telemetry::forget_process_state(&session);
+
+        std::fs::create_dir_all(root.join("inbox")).unwrap();
+        let envelope = json!({
+            "backend": "kiro",
+            "pane_id": pane_id,
+            "payload": {
+                "hook_event_name": "userPromptSubmit",
+                "cwd": "/tmp",
+                "prompt": line,
+            }
+        });
+        std::fs::write(
+            root.join("inbox").join("1-prompt.json"),
+            serde_json::to_vec(&envelope).unwrap(),
+        )
+        .unwrap();
+        hub.consume_inbox();
+
+        let events = crate::projects::telemetry::recent_events(&session, 0);
+        let prompt = events.iter().find(|e| e.kind == "prompt").expect("prompt recorded");
+        assert_eq!(
+            prompt.via, "app",
+            "the echo of a line typed before the restart is still OUR delivery"
+        );
+
+        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     /// The whole auto-post path, end to end: a real tmux window, a real managed
     /// home, a real inbox file carrying a real kiro `stop` payload — and the
     /// agent's final answer must land in the room, record-only, with no

@@ -760,6 +760,40 @@ never ack, and pane repaints must not keep a line pending forever). Client side 
 hollow ring now says what it means — "a busy agent queues it and accepts it when
 its turn ends" — because hollow never meant failed.
 
+**The queue is DURABLE, because the agent outlives our restart.** Everything else
+in `Rec` is an observation, and an observation we lost is one the next hook
+re-establishes. A pending delivery is not: it is a promise made to a client ("this
+line was typed into the pane; its receipt is coming"), and the party that will keep
+it is a separate process our restart does not touch — the agent holds our line in
+its own input queue and submits it whenever its turn ends, which can be after we
+came back. With the queue in process memory only, that echo arrived with nothing to
+match: filed as a prompt the human typed at the keyboard (`via: local`, its own
+input row) while the message kept its hollow ring for ever — the same symptom as
+the single-slot bug, from a different cause (owner, board #5, 2026-08-29: "发送了
+一条消息，然后后端的服务有重启了，然后agent又收到指令确认hooks，这个hooks没有正确把
+之前的未确认的消息变成已读状态，被单独写出来了"). So `record_delivery` mirrors the
+line into `deliveries` (state.db v13, keyed by the line so a re-typed line upserts
+exactly as the memory queue replaces it), and `hydrate` folds a window's rows back
+in lazily — once per window per process, at the echo path (`record_prompt`) and at
+the sweep, which is the one that has to see queues belonging to windows this
+process never heard from. Four rules keep the recovery honest: memory WINS on a
+line it already holds (a line typed by this process keeps its own clock), a
+recovered line's ack clock starts at the recovery (nothing was listening for its
+echo while we were down, so sweeping it on the first feed read after a restart
+would warn seconds before the echo we are trying to catch), a settled line is
+deleted — acked or reported alike, so a restart cannot re-warn about it — and a
+window that no longer exists has its whole queue dropped rather than left for a
+recycled window index to inherit. Lines older than 24 h are pruned once per
+process: the agent that would have echoed them is long gone. Whitespace-blind
+containment and the multi-line-per-prompt match are untouched — the recovery hands
+the same `pending` vector to the same matcher, which is what the regression tests
+assert (record → drop every in-process record → echo → `via: app`), including one
+through the real hook path in `agent_notifications.rs`. The table is also created
+IDEMPOTENTLY on every open (`Store::heal`), not only in the v13 step: a binary
+built in the seconds between the version bump and its migration block stamps the
+database at v13 without the table and every later build then skips the step for
+ever — measured on the dev host while this was being written.
+
 Delivery reaches MANAGED windows only. `projects::managed_home` /
 `is_managed_in` is the one definition of "an agent this app created" — the
 isolated home `spawn` materialized, never the window name — and three gates

@@ -14,7 +14,7 @@ use std::path::Path;
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 12;
+const SCHEMA_VERSION: i64 = 13;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
@@ -133,11 +133,40 @@ impl Store {
             .execute_batch("PRAGMA foreign_keys=OFF;")
             .map_err(|e| format!("pragma: {e}"))?;
         store.migrate()?;
+        store.heal()?;
         store
             .conn
             .execute_batch("PRAGMA foreign_keys=ON;")
             .map_err(|e| format!("pragma: {e}"))?;
         Ok(store)
+    }
+
+    /// Tables that must simply EXIST, created idempotently on every open.
+    ///
+    /// A version step is the right home for a schema change with data to carry
+    /// forward; `deliveries` has none — it holds only lines still waiting for
+    /// their echo, seconds to minutes old. What it does need is to be there even
+    /// when `user_version` LIES about it, which is not hypothetical: a binary
+    /// built from a tree where the version bump had landed and its migration
+    /// block had not stamps the database at the new version without the table,
+    /// and every later build then skips the step for ever (measured on this dev
+    /// host, 2026-08-29 — the watcher rebuilt in the seconds between the two
+    /// edits). The v13 step below still creates it for a database coming from
+    /// v12; this is the floor under both.
+    fn heal(&mut self) -> Result<(), String> {
+        self.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS deliveries (
+                   id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                   session TEXT NOT NULL,
+                   window  INTEGER NOT NULL,
+                   line    TEXT NOT NULL,
+                   ts      INTEGER NOT NULL,
+                   UNIQUE (session, window, line)
+                 );
+                 CREATE INDEX IF NOT EXISTS deliveries_session ON deliveries(session, window);",
+            )
+            .map_err(|e| format!("heal deliveries: {e}"))
     }
 
     fn migrate(&mut self) -> Result<(), String> {
@@ -425,6 +454,37 @@ impl Store {
                 )
                 .map_err(|e| format!("migrate to 12: {e}"))?;
         }
+        if version < 13 {
+            // v13: outstanding DELIVERIES become durable. A line this app typed
+            // into an agent's pane waits for the agent's `userPromptSubmit` echo
+            // to confirm it, and that queue lived only in this process's memory —
+            // so a server restart between the typing and the echo lost the
+            // receipt: the hook could no longer attribute the prompt to us, the
+            // event came back `via: local` (rendered as a prompt the human typed
+            // at the keyboard) and the message it belonged to kept its hollow
+            // ring for ever (owner, 2026-08-29: "发送了一条消息，然后后端的服务
+            // 有重启了，然后agent又收到指令确认hooks，这个hooks没有正确把之前的
+            // 未确认的消息变成已读状态，被单独写出来了"). An agent survives our
+            // restart — it is a separate process, holding our line in its own
+            // input queue — so the record of what we typed has to survive it too.
+            //
+            // One row per outstanding line, keyed by the line itself: re-typing
+            // the same text replaces its entry rather than queueing a duplicate
+            // that could never be acked twice, exactly like the in-memory queue.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS deliveries (
+                       id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                       session TEXT NOT NULL,
+                       window  INTEGER NOT NULL,
+                       line    TEXT NOT NULL,
+                       ts      INTEGER NOT NULL,
+                       UNIQUE (session, window, line)
+                     );
+                     CREATE INDEX IF NOT EXISTS deliveries_session ON deliveries(session, window);",
+                )
+                .map_err(|e| format!("migrate to 13: {e}"))?;
+        }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| format!("set user_version: {e}"))
@@ -578,6 +638,95 @@ impl Store {
                 rusqlite::params![session, keep as i64],
             )
             .map_err(|e| format!("prune activity: {e}"))
+    }
+
+    // ---- outstanding deliveries -----------------------------------------
+
+    /// Remember a line we typed into a pane, so its `userPromptSubmit` echo can
+    /// still be recognised as OUR delivery after a server restart. Upsert on the
+    /// line: the in-memory queue replaces a re-typed line rather than holding two
+    /// copies of it, and the durable half must not disagree.
+    pub fn insert_delivery(
+        &self,
+        session: &str,
+        window: usize,
+        line: &str,
+        ts: u64,
+    ) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO deliveries (session, window, line, ts) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(session, window, line) DO UPDATE SET ts = ?4",
+                rusqlite::params![session, window as i64, line, ts as i64],
+            )
+            .map(|_| ())
+            .map_err(|e| format!("insert delivery: {e}"))
+    }
+
+    /// Outstanding lines, oldest first. `window` narrows it to one window; `None`
+    /// is the whole session, which is what the sweep asks for.
+    pub fn pending_deliveries(
+        &self,
+        session: &str,
+        window: Option<usize>,
+    ) -> Result<Vec<(usize, String, u64)>, String> {
+        let (sql, args): (&str, Vec<Box<dyn rusqlite::ToSql>>) = match window {
+            Some(w) => (
+                "SELECT window, line, ts FROM deliveries
+                 WHERE session = ?1 AND window = ?2 ORDER BY id",
+                vec![Box::new(session.to_string()), Box::new(w as i64)],
+            ),
+            None => (
+                "SELECT window, line, ts FROM deliveries WHERE session = ?1 ORDER BY id",
+                vec![Box::new(session.to_string())],
+            ),
+        };
+        let mut stmt = self
+            .conn
+            .prepare(sql)
+            .map_err(|e| format!("prepare deliveries: {e}"))?;
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())), |r| {
+                Ok((r.get::<_, i64>(0)? as usize, r.get::<_, String>(1)?, r.get::<_, i64>(2)? as u64))
+            })
+            .map_err(|e| format!("query deliveries: {e}"))?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    /// A line is settled — acknowledged by its echo, or reported as unconfirmed.
+    /// Either way it stops being outstanding.
+    pub fn delete_delivery(&self, session: &str, window: usize, line: &str) -> Result<bool, String> {
+        self.conn
+            .execute(
+                "DELETE FROM deliveries WHERE session = ?1 AND window = ?2 AND line = ?3",
+                rusqlite::params![session, window as i64, line],
+            )
+            .map(|n| n > 0)
+            .map_err(|e| format!("delete delivery: {e}"))
+    }
+
+    /// Forget every outstanding line of a window (it no longer exists, so it can
+    /// never ack) or of a whole session.
+    pub fn clear_deliveries(&self, session: &str, window: Option<usize>) -> Result<usize, String> {
+        match window {
+            Some(w) => self.conn.execute(
+                "DELETE FROM deliveries WHERE session = ?1 AND window = ?2",
+                rusqlite::params![session, w as i64],
+            ),
+            None => self
+                .conn
+                .execute("DELETE FROM deliveries WHERE session = ?1", rusqlite::params![session]),
+        }
+        .map_err(|e| format!("clear deliveries: {e}"))
+    }
+
+    /// Drop lines typed before `cutoff`. A delivery nobody ever acked is not
+    /// worth resurrecting days later — the agent that would have echoed it is
+    /// long gone — and this keeps the table bounded without a sweep of its own.
+    pub fn prune_deliveries(&self, cutoff: u64) -> Result<usize, String> {
+        self.conn
+            .execute("DELETE FROM deliveries WHERE ts < ?1", rusqlite::params![cutoff as i64])
+            .map_err(|e| format!("prune deliveries: {e}"))
     }
 
     // ---- projects -------------------------------------------------------
@@ -1266,6 +1415,39 @@ fn row_to_project(r: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
 mod tests {
     use super::*;
 
+    /// The durable half of the delivery receipt (board #5). The rows outlive the
+    /// process that typed the lines, so the SQL has to answer three questions:
+    /// what is still outstanding for a window, what for a whole session (the
+    /// sweep's question), and nothing at all for a neighbouring session.
+    #[test]
+    fn outstanding_deliveries_are_kept_per_window_and_settle_once() {
+        let store = Store::open_memory().unwrap();
+        store.insert_delivery("s", 1, "hello", 100).unwrap();
+        // Re-typing the same line is the same outstanding line with a new clock,
+        // never a second row that could never be acked twice.
+        store.insert_delivery("s", 1, "hello", 150).unwrap();
+        store.insert_delivery("s", 2, "other", 120).unwrap();
+        store.insert_delivery("t", 1, "elsewhere", 130).unwrap();
+
+        let all = store.pending_deliveries("s", None).unwrap();
+        assert_eq!(all, vec![(1, "hello".to_string(), 150), (2, "other".to_string(), 120)]);
+        assert_eq!(store.pending_deliveries("s", Some(2)).unwrap().len(), 1);
+        assert_eq!(store.pending_deliveries("t", None).unwrap().len(), 1, "sessions never cross");
+
+        // Acked or reported, a line leaves — and leaving twice is not an error.
+        assert!(store.delete_delivery("s", 1, "hello").unwrap());
+        assert!(!store.delete_delivery("s", 1, "hello").unwrap());
+        // A window that no longer exists can never echo: drop its whole queue.
+        assert_eq!(store.clear_deliveries("s", Some(2)).unwrap(), 1);
+        assert!(store.pending_deliveries("s", None).unwrap().is_empty());
+
+        // The recovery horizon: a line nobody ever acked is forgotten rather
+        // than resurrected days later, and the fresh one stays.
+        store.insert_delivery("t", 2, "ancient", 10).unwrap();
+        assert_eq!(store.prune_deliveries(100).unwrap(), 1);
+        assert_eq!(store.pending_deliveries("t", None).unwrap().len(), 1);
+    }
+
     #[test]
     fn board_issues_live_move_and_remember() {
         let store = Store::open_memory().unwrap();
@@ -1305,6 +1487,27 @@ mod tests {
         assert!(store.issue_save("proj", None, Some("  "), None, None, None, "human", 600).is_err());
         assert!(store.issue_delete("proj", id).unwrap());
         assert!(store.issue_get("proj", id).unwrap().is_none());
+    }
+
+    /// The heal step, which is not hypothetical: a dev binary built in the
+    /// seconds between the version bump and its migration block stamped this
+    /// host's real state.db at v13 with no `deliveries` table, and a
+    /// version-gated CREATE would have skipped it for ever after that.
+    #[test]
+    fn a_database_stamped_at_the_current_version_without_its_table_heals_on_open() {
+        let dir = std::env::temp_dir().join(format!("tmm-store-heal-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("state.db");
+        {
+            let store = Store::open(&path).unwrap();
+            store.conn.execute_batch("DROP TABLE deliveries;").unwrap();
+            store.conn.pragma_update(None, "user_version", SCHEMA_VERSION).unwrap();
+            assert!(store.pending_deliveries("s", None).is_err(), "the table really is gone");
+        }
+        let store = Store::open(&path).unwrap();
+        store.insert_delivery("s", 1, "hello", 100).unwrap();
+        assert_eq!(store.pending_deliveries("s", None).unwrap().len(), 1, "healed on open");
+        drop(store);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn project(id: &str) -> Project {
