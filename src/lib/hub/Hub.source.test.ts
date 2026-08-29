@@ -62,6 +62,15 @@ test('the agent card speaks the three-stage machine: select, then options, dblcl
   const machine = source.slice(source.indexOf('function cardClick'), source.indexOf('function setRecipient'));
   assert.match(machine, /if \(recipient !== name\) \{ setRecipient\(name\); return; \}/u,
     'an unselected card only selects — no menu on the first click');
+  // Review fix: the pending-menu swallow is per CARD. A click on a DIFFERENT
+  // card inside the 260ms window cancels the stale menu and still acts —
+  // a global swallow ate the selection of the next card.
+  assert.match(machine, /if \(cardTimerFor === name\) return;/u,
+    'only the SAME card\u2019s second click is swallowed');
+  assert.match(machine, /cardTimerFor = name;\s*\n\s*cardTimer = setTimeout/u,
+    'the timer records which card it belongs to');
+  const swallow = /if \(cardTimer\) \{\s*\n\s*clearTimeout\(cardTimer\); cardTimer = null;\s*\n\s*if \(cardTimerFor === name\) return;/u;
+  assert.match(machine, swallow, 'a different card cancels the stale timer and falls through');
   assert.match(machine, /setTimeout\([\s\S]*?toggleAgentMenu\(name, el\)/u,
     'the selected card defers the menu one double-click window');
   assert.match(machine, /filterAgent = filterAgent === name \? '' : name/u,

@@ -942,9 +942,17 @@
   // double-click window so click-click never flashes it before the filter.
   let filterAgent = $state('');
   let cardTimer = null;
+  let cardTimerFor = ''; // WHICH card the pending menu belongs to — a click on
+                         // a DIFFERENT card within the window must still act
+                         // (review of board #3: the global timer swallowed it)
   function cardClick(name, el) {
-    if (cardTimer) { clearTimeout(cardTimer); cardTimer = null; return; } // 2nd of a double — dblclick acts
+    if (cardTimer) {
+      clearTimeout(cardTimer); cardTimer = null;
+      if (cardTimerFor === name) return; // 2nd of a double on the SAME card — dblclick acts
+      // another card's pending menu is stale; fall through and act on THIS one
+    }
     if (recipient !== name) { setRecipient(name); return; }               // select first, options later
+    cardTimerFor = name;
     cardTimer = setTimeout(() => { cardTimer = null; toggleAgentMenu(name, el); }, 260);
   }
   function cardDbl(name) {
