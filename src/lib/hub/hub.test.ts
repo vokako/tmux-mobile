@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { uploadImagePath, uploadFilePath, imageId, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents } from './hub.ts';
+import { uploadImagePath, uploadFilePath, imageId, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -1111,4 +1111,29 @@ test('mergeMessages orders same-millisecond messages by seq across pages (#9 rev
   // Rows without seq (older servers) keep plain ts order.
   const legacy = mergeMessages([{ id: 'x', ts: 5, from: 'h', body: 'x' }], [{ id: 'y', ts: 3, from: 'h', body: 'y' }]);
   assert.deepEqual(legacy.map((x) => x.id), ['y', 'x']);
+});
+
+test('boardLine parses a board move: id, both statuses, title', () => {
+    assert.deepEqual(boardLine('board #12 todo → doing — 回顾开发历史优化'),
+      { id: '12', from: 'todo', to: 'doing', title: '回顾开发历史优化' });
+});
+test('boardLine: a reopen keeps its origin — done → todo is the message', () => {
+    const b = boardLine('board #11 done → todo — board页面优化');
+    assert.equal(b?.from, 'done');
+    assert.equal(b?.to, 'todo');
+});
+test('boardLine: a title-less line still parses; unknown shapes return null', () => {
+    assert.deepEqual(boardLine('board #3 doing → review'), { id: '3', from: 'doing', to: 'review', title: '' });
+    assert.equal(boardLine('spawned dev — brief'), null);
+    assert.equal(boardLine('board #x todo → doing'), null);
+    assert.equal(boardLine(''), null);
+    assert.equal(boardLine(null), null);
+});
+
+test('boardStatusColor speaks the one progressive status language', () => {
+    assert.equal(boardStatusColor('doing'), 'var(--accent)');     // started moving
+    assert.equal(boardStatusColor('review'), 'var(--status-warn)'); // waits for a person
+    assert.equal(boardStatusColor('done'), 'var(--status-ok)');   // ended well
+    assert.equal(boardStatusColor('todo'), 'var(--text3)');       // at rest
+    assert.equal(boardStatusColor('shipped'), 'var(--text2)');    // unknown: reading ink
 });

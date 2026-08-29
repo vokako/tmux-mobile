@@ -804,6 +804,40 @@ export function sysParts(item: string | null | undefined): { verb: string; who: 
 }
 
 /**
+ * A board status-change line: `board #12 todo → doing — 标题` (the body
+ * `hub_board_save` posts, marker already stripped by `systemLine`). Parsed so
+ * the feed can render it in the sys grammar's own atoms — the issue number as
+ * the WHO, the destination status as the coloured badge, the title as the
+ * detail — instead of one grey unparsed line (board #13). The FROM survives
+ * because the transition is the message: `done → todo` is a REOPEN, and that
+ * must read differently from a first take. An unmatched shape returns null and
+ * the line renders whole, exactly like every other unknown sys shape.
+ */
+export function boardLine(item: string | null | undefined): { id: string; from: string; to: string; title: string } | null {
+  const m = /^board #(\d+) ([a-z]+) → ([a-z]+)(?: — ([\s\S]*))?$/u.exec((item ?? '').trim());
+  if (!m) return null;
+  return { id: m[1]!, from: m[2]!, to: m[3]!, title: (m[4] ?? '').trim() };
+}
+
+/**
+ * The colour of the DESTINATION status in a board line's badge — the one
+ * progressive status language again (`noteStateColor` / `stateDotColor` /
+ * `sysVerbColor`): accent = started moving (doing), amber = needs a person
+ * (review waits for its acceptor), green = ended well (done), grey = at rest
+ * (todo — including a reopen landing back there). An unknown word takes
+ * ordinary reading ink, never an invented meaning.
+ */
+export function boardStatusColor(to: string): string {
+  switch (to) {
+    case 'doing': return 'var(--accent)';
+    case 'review': return 'var(--status-warn)';
+    case 'done': return 'var(--status-ok)';
+    case 'todo': return 'var(--text3)';
+    default: return 'var(--text2)';
+  }
+}
+
+/**
  * The colour of a lifecycle verb's badge — the SAME progressive language as
  * `noteStateColor` / `stateDotColor`, so one vocabulary covers every coloured
  * state word in the Hub: accent = something started moving, green = ended well,

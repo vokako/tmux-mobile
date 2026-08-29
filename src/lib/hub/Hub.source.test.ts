@@ -377,3 +377,15 @@ test('a stopped agent restarts only from its refresh button, never the card', ()
   assert.match(surface, /onclick=\{\(e\) => toggleAgentMenu\(name, e\.currentTarget\)\}/u, 'the card surface opens the menu');
   assert.doesNotMatch(surface, /startAgent/u, 'and never starts the agent itself');
 });
+
+test('a board move renders in the sys grammar, transition visible (board #13)', () => {
+  // The issue number is the WHO, the destination the coloured badge, the FROM
+  // stays visible (done → todo is a REOPEN and must read as one).
+  assert.match(source, /\{@const bl = boardLine\(item\)\}/u, 'each sys item is offered to the board parser first');
+  assert.match(source, /<span class="sys-who">#\{bl\.id\}<\/span>/u, 'the issue number wears the name ink');
+  assert.match(source, /<span class="sys-from">\{t\(`boardStatus_\$\{bl\.from\}`\)\} →<\/span>/u,
+    'the origin status is quiet but present');
+  assert.match(source, /style:color=\{boardStatusColor\(bl\.to\)\}/u,
+    'the destination badge speaks the one progressive status language');
+  assert.match(source, /\{t\(`boardStatus_\$\{bl\.to\}`\)\}/u, 'statuses wear the board page\u2019s own labels');
+});

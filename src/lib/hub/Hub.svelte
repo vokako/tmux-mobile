@@ -31,7 +31,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
+  import { markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
@@ -2163,6 +2163,21 @@
                  the chat-only level (feedBlocks drops them). -->
             <div class="sysline">
               {#each b.items as item, j (`${j}-${item}`)}
+                {@const bl = boardLine(item)}
+                {#if bl}
+                  <!-- A board move in the sys grammar's own atoms (board #13):
+                       the issue number is the WHO, the destination status the
+                       coloured badge (one progressive status language — review
+                       is amber because it WAITS for a person), the title the
+                       detail. The FROM stays visible because the transition is
+                       the message: done → todo reads as a REOPEN. -->
+                  <div class="sys-item">
+                    <span class="sys-who">#{bl.id}</span>
+                    <span class="sys-from">{t(`boardStatus_${bl.from}`)} →</span>
+                    <span class="sys-verb" style:color={boardStatusColor(bl.to)}><span class="sv-dot" aria-hidden="true"></span>{t(`boardStatus_${bl.to}`)}</span>
+                    {#if bl.title}<span class="sys-text">{bl.title}</span>{/if}
+                  </div>
+                {:else}
                 {@const p = sysParts(item)}
                 {@const c = sysVerbColor(p.verb)}
                 <div class="sys-item">
@@ -2180,6 +2195,7 @@
                     {#if p.text}<span class="sys-text">{p.text}</span>{/if}
                   {/if}
                 </div>
+                {/if}
               {/each}
             </div>
           {:else if b.type === 'msg'}
@@ -3180,6 +3196,9 @@
   .sysline .sys-text {
     min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text);
   }
+  /* A board move's origin status: quiet reading ink — the destination badge
+     carries the colour, the origin only situates the transition. */
+  .sysline .sys-from { flex: none; font-size: var(--fs-micro); color: var(--text3); }
 
   /* The feed's date separators: a centred pill in the sysline's capsule
      dialect, marking where a new calendar day starts. */
