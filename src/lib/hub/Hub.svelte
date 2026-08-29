@@ -2115,20 +2115,22 @@
       {/if}
 
       <div class="feed-wrap">
-      <!-- The double-click filter is a MODE, so it says so (board #3, owner:
-           "注意ui上体现我们现在的筛选状态，以及可以再退出"): who is filtered,
-           and one ✕ to leave — double-clicking the card again exits too. -->
-      {#if filterAgent}
-        <div class="filter-bar">
-          <Icon name="search" size={12} />
-          <span class="f-label">{t('hubFilterOn')}</span>
-          <span class="f-name">@{filterAgent}</span>
-          <button class="icon-btn" title={t('hubFilterExit')} aria-label={t('hubFilterExit')} onclick={() => (filterAgent = '')}>
-            <Icon name="x" size={13} />
-          </button>
-        </div>
-      {/if}
       <div class="feed subtle-scroll" bind:this={feedEl} onscroll={onFeedScroll}>
+        <!-- The double-click filter is a MODE, so it says so (board #3, owner:
+             "注意ui上体现我们现在的筛选状态，以及可以再退出"): a compact pill
+             INSIDE the feed — as a feed-wrap sibling it became a full-height
+             left COLUMN (feed-wrap is row flex; reopened #3). Sticky at the
+             top so the mode stays visible while reading; content-width. -->
+        {#if filterAgent}
+          <div class="filter-pill">
+            <Icon name="search" size={12} />
+            <span class="f-label">{t('hubFilterOn')}</span>
+            <span class="f-name">@{filterAgent}</span>
+            <button class="icon-btn" title={t('hubFilterExit')} aria-label={t('hubFilterExit')} onclick={() => (filterAgent = '')}>
+              <Icon name="x" size={13} />
+            </button>
+          </div>
+        {/if}
         <!-- Low-presence paging feedback at the very top: fetching, or the
              confirmed beginning once both walks are parked (board #9). -->
         {#if roomReady && (loadingOlder || (!histMore && !actMore))}
@@ -3357,17 +3359,22 @@
   .older-more { display: block; width: 100%; background: none; border: none; cursor: pointer; transition: color var(--t-fast); }
   .older-more:hover { color: var(--accent); }
 
-  /* The filter mode's banner: accent-tinted so it reads as a STATE, not a
-     message; sits above the feed inside the chat column. */
-  .filter-bar {
-    display: flex; align-items: center; gap: 7px;
-    padding: 5px 12px;
-    background: color-mix(in srgb, var(--accent) 8%, var(--bg));
-    border-bottom: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  /* The filter mode's pill: a compact, content-width capsule pinned at the
+     feed's top — accent-tinted so it reads as a STATE, not a message. Sticky
+     (not a layout row): it must never own a column or squeeze the feed
+     (reopened #3: as a feed-wrap sibling it displayed as the left half). */
+  .filter-pill {
+    position: sticky; top: 0; z-index: 9; /* above pinned bubbles (6) and the action overlay (8) */
+    align-self: center;
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 6px 3px 12px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
     color: var(--text2); font-size: var(--fs-meta);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
   }
-  .filter-bar .f-name { color: var(--accent); font-weight: 650; font-family: ui-monospace, Menlo, monospace; }
-  .filter-bar .icon-btn { margin-left: auto; }
+  .filter-pill .f-name { color: var(--accent); font-weight: 650; font-family: ui-monospace, Menlo, monospace; }
 
   .compose-shell {
     flex: 1; min-width: 0; position: relative;

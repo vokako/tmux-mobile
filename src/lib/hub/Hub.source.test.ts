@@ -75,9 +75,19 @@ test('the agent card speaks the three-stage machine: select, then options, dblcl
     'the selected card defers the menu one double-click window');
   assert.match(machine, /filterAgent = filterAgent === name \? '' : name/u,
     'double-click toggles the filter, so it is also an exit');
-  // The mode is visible and leavable: a banner names the agent, ✕ clears it,
-  // and the back gesture peels it before the drawer.
-  assert.match(source, /class="filter-bar"/u, 'the filter announces itself above the feed');
+  // The mode is visible and leavable: a compact pill INSIDE the feed names
+  // the agent (reopened #3: as a feed-wrap sibling it rendered as a
+  // full-height left column — feed-wrap is row flex), ✕ clears it, and the
+  // back gesture peels it before the drawer.
+  assert.match(source, /class="filter-pill"/u, 'the filter pill lives inside the feed');
+  const wrapIdx = source.indexOf('<div class="feed-wrap">');
+  const feedIdx = source.indexOf('<div class="feed subtle-scroll"');
+  const pillIdx = source.indexOf('class="filter-pill"');
+  assert.ok(wrapIdx < feedIdx && feedIdx < pillIdx, 'the pill is a FEED child, never a feed-wrap sibling');
+  const pill = /\.filter-pill \{([^}]*)\}/u.exec(source)?.[1] ?? '';
+  assert.match(pill, /align-self: center/u, 'content width — it owns no column');
+  assert.match(pill, /position: sticky/u, 'and stays visible while reading');
+  assert.ok(!pill.includes('width: 100%'), 'never full width');
   assert.match(source, /onclick=\{\(\) => \(filterAgent = ''\)\}/u, 'the banner carries the exit');
   assert.match(source, /if \(filterAgent\) \{ filterAgent = ''; return true; \}/u, 'back gesture exits the filter');
 });
