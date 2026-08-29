@@ -321,8 +321,8 @@ can get wrong to save three characters.
   fields, COALESCE in SQL — an agent's `move` must not erase a body the
   human edited meanwhile); `note` appends to the issue's own thread and
   bumps `updated_at`; every write records WHO acted. The HUMAN's half is the
-  Hub drawer's board partition (`src/lib/hub/Board.svelte`, third toggle
-  beside terminal and Files, polls while visible); the AGENT's half is
+  board PAGE (`src/lib/hub/Board.svelte` — its own tab, not a Hub drawer
+  partition; the Hub header's layout icon jumps to it); the AGENT's half is
   `tmm board list|show|add|take|move|note|delete` — `take` = assignee+doing
   in one move, and the tmm-cli skill carries the conventions (take before
   you start; note decisions ON the issue; only the acceptor moves to done).

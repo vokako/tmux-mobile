@@ -11,7 +11,16 @@
   import Icon from '../ui/Icon.svelte';
   import Select from '../ui/Select.svelte';
 
-  let { session, visible = true }: { session: string; visible?: boolean } = $props();
+  let { session, visible = true, onGoBack = null }: { session: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null } = $props();
+
+  // The back gesture peels detail/form → list before leaving the page —
+  // the same contract every page registers via onGoBack (Files defined it).
+  $effect(() => {
+    onGoBack?.(() => {
+      if (sel || creating) { sel = null; creating = false; return true; }
+      return false;
+    });
+  });
 
   const STATUSES = ['todo', 'doing', 'review', 'done'];
 
@@ -106,6 +115,10 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="board" onkeydowncapture={onKey}>
+  <div class="head">
+    <h1>{t('board')}</h1>
+    {#if session}<span class="h-session">{session}</span>{/if}
+  </div>
   {#if !ready && !issues.length}
     <div class="empty">…</div>
   {:else if sel}
@@ -204,9 +217,16 @@
     display: flex;
     flex-direction: column;
     overflow-y: auto;
-    padding: 10px;
-    gap: 8px;
+    padding: 14px clamp(10px, 3vw, 28px);
+    gap: 10px;
+    max-width: 1100px;
+    margin: 0 auto;
+    width: 100%;
+    box-sizing: border-box;
   }
+  .head { display: flex; align-items: baseline; gap: 10px; }
+  .head h1 { font-size: var(--fs-title); font-weight: 600; color: var(--text); margin: 0; }
+  .h-session { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-meta); color: var(--text3); }
   .empty { color: var(--text3); font-size: var(--fs-ui); padding: 18px 6px; }
   .err { color: var(--status-danger); font-size: var(--fs-meta); }
 

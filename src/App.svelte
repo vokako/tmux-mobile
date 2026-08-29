@@ -6,6 +6,7 @@
   import Files from './lib/files/Files.svelte';
   import Hub from './lib/hub/Hub.svelte';
   import AgentsPage from './lib/hub/AgentsPage.svelte';
+  import Board from './lib/hub/Board.svelte';
   import Icon from './lib/ui/Icon.svelte';
   import SideHandle from './lib/ui/SideHandle.svelte';
   import InstallPrompt from './lib/ui/InstallPrompt.svelte';
@@ -77,7 +78,7 @@
     // a persisted/deep-linked 'sessions' lands on the terminal it belonged to.
     if (page === 'sessions') page = 'terminal';
     // Same for the Hub: it needs the bus. Only redirect once the probe answered.
-    if ((page === 'hub' || page === 'agents') && teamState.probed && !teamState.available) page = 'terminal';
+    if ((page === 'hub' || page === 'agents' || page === 'board') && teamState.probed && !teamState.available) page = 'terminal';
   });
 
   // ─── Split-screen (desktop + wide only) ────────────────────────────────
@@ -893,6 +894,7 @@
   // A request from the Hub's agent menu to open one agent's CONFIG editor:
   // {name, n} — n increments so asking for the same agent twice still fires.
   let agentsEditReq = $state(null);
+  let boardGoBack = $state(null);
 
   function navPush() { history.pushState({ app: true }, ''); }
 
@@ -913,6 +915,8 @@
       // to spend no matter how many layers were peeled.
       if (page === 'hub' && hubGoBack && hubGoBack()) { navPush(); return; }
       if (page === 'agents' && agentsGoBack && agentsGoBack()) { navPush(); return; }
+      if (page === 'board' && boardGoBack && boardGoBack()) { navPush(); return; }
+      if (page === 'board') { page = 'terminal'; return; }
       // Terminal is the root on a phone: back closes the session sheet if it
       // is open, otherwise there is nowhere below it (re-push prevents exit).
       if (page === 'terminal' && sessListOpen) { sessListOpen = false; navPush(); return; }
@@ -936,6 +940,7 @@
     if (hubEligible) t.push('hub');
     t.push('terminal');
     t.push('files');
+    if (hubEligible) t.push('board');
     if (hubEligible) t.push('agents');
     return t;
   });
@@ -1040,6 +1045,7 @@
 
       <button tabindex="-1" class="rail-btn" class:active={page === 'terminal'} title={t('terminal')} onclick={() => switchTab('terminal')}><Icon name="terminal" size={17} /></button>
       <button tabindex="-1" class="rail-btn" class:active={page === 'files'} title={t('files')} onclick={() => switchTab('files')}><Icon name="files" size={17} /></button>
+        {#if hubEligible}<button tabindex="-1" class="rail-btn" class:active={page === 'board'} title={t('board')} onclick={() => switchTab('board')}><Icon name="layout" size={17} /></button>{/if}
       <div class="rail-spacer"></div>
       <!-- Agent definitions sit with Settings, not with the workspaces: the top
            group is where you WORK (a conversation, a terminal, files), while
@@ -1080,7 +1086,7 @@
            switches. Desktop-eligible only (needs width + the bus): mobile
            keeps the tab layout untouched. -->
       <div class="page-layer" class:hidden={page !== 'hub'}>
-        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onSelectSession={(s) => { if (s) filesSession = s; }} onGoBack={(fn) => hubGoBack = fn} openAgentConfig={(name) => { agentsEditReq = { name, n: (agentsEditReq?.n ?? 0) + 1 }; switchTab('agents'); }} openFilesTab={(s, path) => { if (s) filesSession = s; if (path) filesNavReq = { path, n: (filesNavReq?.n ?? 0) + 1 }; switchTab('files'); }} />
+        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onSelectSession={(s) => { if (s) filesSession = s; }} onGoBack={(fn) => hubGoBack = fn} openAgentConfig={(name) => { agentsEditReq = { name, n: (agentsEditReq?.n ?? 0) + 1 }; switchTab('agents'); }} openFilesTab={(s, path) => { if (s) filesSession = s; if (path) filesNavReq = { path, n: (filesNavReq?.n ?? 0) + 1 }; switchTab('files'); }} openBoardTab={(s) => { if (s) filesSession = s; switchTab('board'); }} />
       </div>
     {/if}
     {#if hubEligible}
@@ -1116,6 +1122,11 @@
     {/if}
     <div class="page-layer" class:hidden={page !== 'files'}>
       <Files session={filesSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} navRequest={filesNavReq} />
+    </div>
+    <div class="page" class:hidden={page !== 'board'}>
+      {#if hubEligible}
+        <Board session={filesSession} visible={page === 'board'} onGoBack={(fn) => boardGoBack = fn} />
+      {/if}
     </div>
     <div class="page-layer term-page" class:hidden={page !== 'terminal'}>
       <!-- The session/window list: a column beside the terminal on a wide
@@ -1237,6 +1248,11 @@
       <button tabindex="-1" class:active={page === 'files'} onclick={() => switchTab('files')}>
         <Icon name="files" size={19} /><span>{t('files')}</span>
       </button>
+      {#if hubEligible}
+        <button tabindex="-1" class:active={page === 'board'} onclick={() => switchTab('board')}>
+          <Icon name="layout" size={19} /><span>{t('board')}</span>
+        </button>
+      {/if}
       {#if hubEligible}
         <button tabindex="-1" class:active={page === 'agents'} onclick={() => switchTab('agents')}>
           <Icon name="bot" size={19} /><span>{t('agentsTitle')}</span>

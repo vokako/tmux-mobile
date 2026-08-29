@@ -101,19 +101,20 @@ completion).
 - **Files**: the real Files component in single-pane mode, per-project
   parked cwd, maximize hands off to the Files tab. Esc inside is the
   browser's own.
-- **Board**: the task board (below). Esc peels detail → list first.
-- On the phone/compact: terminal and files toggles JUMP to their tabs; the
-  board toggle is desktop-drawer-only for now.
+- On the phone/compact: terminal and files toggles JUMP to their tabs.
+- The header also carries a board shortcut — the task board is its own
+  PAGE (tab between Files and Agents), never a drawer partition.
 - Every drawer toggle re-anchors the reading position (`withReadingAnchor`).
 
-## Board (task management)
+## Board page (task management — its own tab)
 - Four fixed columns: **todo / doing / review / done**. Issues carry title,
   body, assignee, opened-by, and their own **note thread** (progress and
   decisions live ON the issue, not only in chat).
 - The human writes/edits here; agents use `tmm board` (`take` = claim +
   doing; only the acceptor moves to done). Same rows, same vocabulary —
   the board is session-scoped like the room.
-- Polls while visible; a failed poll keeps the last board.
+- Polls while visible; a failed poll keeps the last board. Follows the
+  last-touched session (like Files); back gesture peels detail → list.
 
 ## Back gesture (compact)
 Peels layers in tap-outside order: context menu → agent menu → recipient

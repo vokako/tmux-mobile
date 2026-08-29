@@ -5,7 +5,7 @@
 /** The tabs a saved state may name. A stale key from an older build — or a
  * retired tab, like the Team one the Hub replaced — must not strand the app on
  * a page that no longer renders. */
-export const PAGES = ['terminal', 'hub', 'files', 'sessions', 'agents', 'team', 'prefs', 'settings'] as const;
+export const PAGES = ['terminal', 'hub', 'files', 'board', 'sessions', 'agents', 'team', 'prefs', 'settings'] as const;
 export type Page = (typeof PAGES)[number];
 
 /** The default when there is nothing to restore: a phone opens on the terminal
