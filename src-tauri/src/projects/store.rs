@@ -100,6 +100,21 @@ impl Slot {
     }
 }
 
+/// One row of the durable activity log. `id` is the rowid, which doubles as the
+/// paging cursor's tiebreak: several events share one millisecond inside a busy
+/// turn, so a ts-only cursor would skip or repeat them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivityRow {
+    pub id: i64,
+    pub window: usize,
+    pub ts: u64,
+    pub kind: String,
+    pub text: String,
+    pub tool: String,
+    pub via: String,
+    pub state: String,
+}
+
 pub struct Store {
     conn: Connection,
 }
@@ -602,30 +617,92 @@ impl Store {
         session: &str,
         since_ts: u64,
         limit: usize,
-    ) -> Result<Vec<(usize, u64, String, String, String, String, String)>, String> {
+    ) -> Result<Vec<ActivityRow>, String> {
+        self.activity_page(session, since_ts, None, limit).map(|(rows, _)| rows)
+    }
+
+    /// One page of the activity log, always returned OLDEST FIRST so a caller can
+    /// append it to a feed without re-sorting.
+    ///
+    /// Three shapes, one query:
+    /// * neither cursor — the newest `limit` rows (what a first load wants: the
+    ///   END of a conversation, not its beginning);
+    /// * `since_ts > 0` — the tail newer than it, which is the incremental poll;
+    /// * `before` — the page strictly OLDER than that (ts, id) cursor, which is
+    ///   how a client walks backwards through history it has not loaded yet.
+    ///
+    /// The cursor is (ts, id) rather than ts alone because event timestamps are
+    /// milliseconds and a busy turn puts several rows in one millisecond — paging
+    /// on ts alone would either skip them or loop on them. `id` is the rowid, so
+    /// the `(session, ts)` index already orders by (ts, id) and the keyset
+    /// comparison stays index-only.
+    ///
+    /// `has_more` reports whether anything older than the returned page exists,
+    /// measured by asking for one row more than the caller wanted. Without it a
+    /// client cannot tell "you have everything" from "your page happened to end
+    /// exactly at the limit".
+    pub fn activity_page(
+        &self,
+        session: &str,
+        since_ts: u64,
+        before: Option<(u64, i64)>,
+        limit: usize,
+    ) -> Result<(Vec<ActivityRow>, bool), String> {
+        let (b_ts, b_id) = match before {
+            Some((ts, id)) => (ts as i64, id),
+            None => (i64::MAX, i64::MAX),
+        };
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT window, ts, kind, text, tool, via, state FROM activity
-                 WHERE session = ?1 AND ts > ?2 ORDER BY ts DESC, id DESC LIMIT ?3",
+                "SELECT id, window, ts, kind, text, tool, via, state FROM activity
+                 WHERE session = ?1 AND ts > ?2
+                   AND (ts < ?3 OR (ts = ?3 AND id < ?4))
+                 ORDER BY ts DESC, id DESC LIMIT ?5",
             )
             .map_err(|e| format!("prepare activity: {e}"))?;
         let rows = stmt
-            .query_map(rusqlite::params![session, since_ts as i64, limit as i64], |r| {
-                Ok((
-                    r.get::<_, i64>(0)? as usize,
-                    r.get::<_, i64>(1)? as u64,
-                    r.get::<_, String>(2)?,
-                    r.get::<_, String>(3)?,
-                    r.get::<_, String>(4)?,
-                    r.get::<_, String>(5)?,
-                    r.get::<_, String>(6)?,
-                ))
-            })
+            .query_map(
+                rusqlite::params![session, since_ts as i64, b_ts, b_id, limit as i64 + 1],
+                |r| {
+                    Ok(ActivityRow {
+                        id: r.get(0)?,
+                        window: r.get::<_, i64>(1)? as usize,
+                        ts: r.get::<_, i64>(2)? as u64,
+                        kind: r.get(3)?,
+                        text: r.get(4)?,
+                        tool: r.get(5)?,
+                        via: r.get(6)?,
+                        state: r.get(7)?,
+                    })
+                },
+            )
             .map_err(|e| format!("query activity: {e}"))?;
-        let mut out: Vec<_> = rows.filter_map(Result::ok).collect();
+        let mut out: Vec<ActivityRow> = rows.filter_map(Result::ok).collect();
+        let has_more = out.len() > limit;
+        out.truncate(limit);
         out.reverse();
-        Ok(out)
+        Ok((out, has_more))
+    }
+
+    /// How many events this session has ever recorded (and the whole log's oldest
+    /// timestamp), for the storage audit and for a client that wants to say "3 of
+    /// 4046 loaded".
+    pub fn activity_stats(&self, session: &str) -> Result<(usize, u64, u64), String> {
+        self.conn
+            .query_row(
+                "SELECT COUNT(*), COALESCE(MIN(ts), 0), COALESCE(MAX(ts), 0)
+                 FROM activity WHERE session = ?1",
+                rusqlite::params![session],
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)? as usize,
+                        r.get::<_, i64>(1)? as u64,
+                        r.get::<_, i64>(2)? as u64,
+                    ))
+                },
+            )
+            .map_err(|e| format!("activity stats: {e}"))
     }
 
     /// Keep the newest `keep` events of a session and forget the rest. A log
@@ -1721,30 +1798,79 @@ mod tests {
 
         let all = store.activity_since("s1", 0, 100).unwrap();
         assert_eq!(all.len(), 5);
-        assert_eq!(all.first().unwrap().1, 1000, "oldest first");
-        assert_eq!(all.last().unwrap().1, 1004);
-        assert_eq!(all[0].2, "tool");
-        assert_eq!(all[0].4, "Edit", "the tool name is kept apart from its detail");
+        assert_eq!(all.first().unwrap().ts, 1000, "oldest first");
+        assert_eq!(all.last().unwrap().ts, 1004);
+        assert_eq!(all[0].kind, "tool");
+        assert_eq!(all[0].tool, "Edit", "the tool name is kept apart from its detail");
 
         // `since_ts` is exclusive — the client's cursor must not replay a row.
         let tail = store.activity_since("s1", 1002, 100).unwrap();
         assert_eq!(tail.len(), 2);
-        assert_eq!(tail[0].1, 1003);
+        assert_eq!(tail[0].ts, 1003);
 
         // A limit takes the NEWEST rows: a first load wants the tail of a long
         // history, not its beginning.
         let capped = store.activity_since("s1", 0, 2).unwrap();
         assert_eq!(capped.len(), 2);
-        assert_eq!(capped[0].1, 1003);
-        assert_eq!(capped[1].1, 1004);
+        assert_eq!(capped[0].ts, 1003);
+        assert_eq!(capped[1].ts, 1004);
 
-        // Pruning keeps the newest and only touches this session.
+        // Pruning is no longer automatic (board #9: nothing is thrown away unless
+        // a retention was asked for), but it remains the primitive that a
+        // configured retention uses — newest kept, other sessions untouched.
         let dropped = store.prune_activity("s1", 2).unwrap();
         assert_eq!(dropped, 3);
         let left = store.activity_since("s1", 0, 100).unwrap();
         assert_eq!(left.len(), 2);
-        assert_eq!(left[0].1, 1003);
+        assert_eq!(left[0].ts, 1003);
         assert_eq!(store.activity_since("s2", 0, 100).unwrap().len(), 1);
+    }
+
+    /// Paging backwards through a complete log (board #9). The cursor is (ts, id)
+    /// because a busy turn writes several events inside ONE millisecond: a
+    /// ts-only cursor either skips them or loops on them for ever.
+    #[test]
+    fn the_activity_log_pages_backwards_without_losing_a_millisecond_tie() {
+        let store = Store::open_memory().unwrap();
+        // Six events, and three of them share ts 1002 — the shape a real turn has.
+        for (n, ts) in [1000u64, 1001, 1002, 1002, 1002, 1003].into_iter().enumerate() {
+            store.insert_activity("s", 1, ts, "tool", &format!("e{n}"), "Edit", "", "").unwrap();
+        }
+        assert_eq!(store.activity_stats("s").unwrap(), (6, 1000, 1003));
+
+        // The newest page, oldest first, and there IS more behind it.
+        let (page1, more1) = store.activity_page("s", 0, None, 2).unwrap();
+        assert!(more1, "four older events remain");
+        assert_eq!(page1.iter().map(|r| r.text.clone()).collect::<Vec<_>>(), vec!["e4", "e5"]);
+
+        // Walk back with the page's own oldest row as the cursor. The tie at 1002
+        // is respected: e3 comes next, not e1 and not e4 again.
+        let cur = |p: &Vec<ActivityRow>| (p[0].ts, p[0].id);
+        let (page2, more2) = store.activity_page("s", 0, Some(cur(&page1)), 2).unwrap();
+        assert!(more2);
+        assert_eq!(page2.iter().map(|r| r.text.clone()).collect::<Vec<_>>(), vec!["e2", "e3"]);
+        let (page3, more3) = store.activity_page("s", 0, Some(cur(&page2)), 2).unwrap();
+        assert_eq!(page3.iter().map(|r| r.text.clone()).collect::<Vec<_>>(), vec!["e0", "e1"]);
+        assert!(!more3, "the whole log has been walked, and it says so");
+
+        // Every row appeared exactly once — the property a lazy-loading client
+        // depends on (no duplicates to dedupe, no gaps to explain).
+        let mut seen: Vec<String> =
+            [page1, page2, page3].concat().into_iter().map(|r| r.text).collect();
+        seen.sort();
+        assert_eq!(seen, vec!["e0", "e1", "e2", "e3", "e4", "e5"]);
+
+        // A cursor with no id tiebreak means "just before that whole millisecond".
+        let (before_ms, _) = store.activity_page("s", 0, Some((1002, 0)), 10).unwrap();
+        assert_eq!(before_ms.iter().map(|r| r.text.clone()).collect::<Vec<_>>(), vec!["e0", "e1"]);
+
+        // `since_ts` and `before` compose: the window between two cursors. The
+        // cursor is EXCLUSIVE on the pair, so the newest row's own (ts, id)
+        // excludes exactly itself.
+        let head = store.activity_page("s", 0, None, 1).unwrap().0;
+        let (window, _) =
+            store.activity_page("s", 1000, Some((head[0].ts, head[0].id)), 10).unwrap();
+        assert_eq!(window.len(), 4, "1001 and the three 1002s");
     }
 
     #[test]

@@ -120,20 +120,57 @@ fn now_ms() -> u64 {
 /// calls / status changes between the final replies) — an in-memory ring,
 /// NOT chat history: it never touches the bus db and dies with the server.
 const EVENTS_CAP: usize = 120;
-/// How many events one session keeps in the durable log. A busy turn is tens of
-/// rows, so this is days of history at a few hundred KB.
-const KEEP_EVENTS: usize = 2000;
+/// Events one session keeps in the durable log, when a retention is asked for at
+/// all. ZERO — the default — means KEEP EVERYTHING.
+///
+/// It was 2000, pruned every 256 inserts, and that is history thrown away that
+/// nobody asked to lose: the owner wants the trace COMPLETE so it can be analysed
+/// (board #9, 2026-08-29: "我希望整个 trace 是非常完整的，以便我们后续去做一些
+/// 分析"). Measured on this host the day it was changed: the busiest session held
+/// 4046 rows, i.e. the cap would have deleted the older HALF of it, and the only
+/// reason it had not is that `INSERTS` is a process counter reset by every
+/// restart — the prune fired sporadically, which is an accident, not a policy.
+/// A trace with a silent hole in it is worse than a big one: analysis cannot tell
+/// "it did not happen" from "we deleted it". The whole log is ~1.2 MB of text for
+/// ten days of heavy use, so there is nothing to buy by trimming it.
+///
+/// `TMM_ACTIVITY_KEEP=<n>` opts back in per session (0 or unset = unlimited),
+/// for a host that really is short of disk. Reading is capped and paged instead —
+/// see `events_page`: the cost of a long history belongs to the READ, where it
+/// can be bounded without destroying anything.
+const KEEP_EVENTS_DEFAULT: usize = 0;
 /// Inserts between prunes. Pruning is a scan, and the cap is about boundedness,
-/// not an exact length.
+/// not an exact length. Only consulted when a retention is configured.
 const PRUNE_EVERY: u64 = 256;
-/// The most a single read returns — the tail of the history, which is what a
-/// client renders. Above this the feed's own caps take over anyway.
-const LOAD_EVENTS: usize = 600;
+/// Events one page returns when the caller does not say. The tail of the history,
+/// which is what a client renders first.
+pub const LOAD_EVENTS: usize = 600;
+/// The most a single page may return however the caller asks. A hard ceiling, so
+/// one RPC can never turn into a multi-megabyte frame: measured on this host, the
+/// newest 600 events of the busiest session already serialize to ~277 KB.
+pub const MAX_PAGE_EVENTS: usize = 1000;
 /// Inserts so far this process, for the prune schedule.
 static INSERTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Failed durable writes this process, so a broken database is reported once
+/// instead of silently costing us the trace.
+static PERSIST_FAILURES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How many events per session to keep. 0 = every one of them (the default).
+fn retention() -> usize {
+    std::env::var("TMM_ACTIVITY_KEEP")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .unwrap_or(KEEP_EVENTS_DEFAULT)
+}
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ActivityEvent {
+    /// The durable log's row id, and the second half of the paging cursor: a busy
+    /// turn writes several events inside one millisecond, so `ts` alone cannot
+    /// address a position in the log. 0 for an event read from the in-memory ring
+    /// (no database), which is also why a client must treat it as opaque.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub id: i64,
     /// Epoch MILLISECONDS to merge directly with bus message timestamps.
     pub ts: u64,
     pub window: usize,
@@ -156,6 +193,10 @@ pub struct ActivityEvent {
     pub state: String,
 }
 
+fn is_zero(n: &i64) -> bool {
+    *n == 0
+}
+
 fn events() -> &'static Mutex<HashMap<String, std::collections::VecDeque<ActivityEvent>>> {
     static EVENTS: OnceLock<Mutex<HashMap<String, std::collections::VecDeque<ActivityEvent>>>> = OnceLock::new();
     EVENTS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -172,7 +213,16 @@ fn push_event_via(session: &str, window: usize, kind: &str, text: String, via: S
 fn push_full(session: &str, window: usize, kind: &str, text: String, tool: String, via: String) {
     push(
         session,
-        ActivityEvent { ts: now_ms(), window, kind: kind.into(), text, tool, via, state: String::new() },
+        ActivityEvent {
+            id: 0,
+            ts: now_ms(),
+            window,
+            kind: kind.into(),
+            text,
+            tool,
+            via,
+            state: String::new(),
+        },
     );
 }
 
@@ -204,50 +254,108 @@ fn persist(session: &str, ev: &ActivityEvent) {
     let written = super::with_store(|s| {
         s.insert_activity(session, ev.window, ev.ts, &ev.kind, &ev.text, &ev.tool, &ev.via, &ev.state)
     });
-    if written.is_err() {
+    if let Err(e) = written {
+        // Fail-soft, but not SILENT: a lost write is a hole in the trace, and the
+        // whole point of the log is that it is complete. Reported on the first
+        // failure and every 100th after that, so a broken database is visible in
+        // the server log without becoming the server log.
+        let n = PERSIST_FAILURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        if n == 1 || n % 100 == 0 {
+            eprintln!("⚠️  activity log write failed ({n} so far): {e}");
+        }
         return;
     }
-    // Prune occasionally rather than on every insert: the cap is about the log
-    // not growing without bound, not about an exact length.
+    // Prune only when a retention was asked for. The default is to keep the whole
+    // trace (see KEEP_EVENTS_DEFAULT); reads are what is bounded.
+    let keep = retention();
+    if keep == 0 {
+        return;
+    }
     let n = INSERTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
     if n % PRUNE_EVERY == 0 {
-        let _ = super::with_store(|s| s.prune_activity(session, KEEP_EVENTS));
+        let _ = super::with_store(|s| s.prune_activity(session, keep));
     }
 }
 
-/// Events newer than `since_ts` (ms, exclusive), oldest first.
+/// One page of the activity feed, oldest first, plus whether older events exist.
 ///
-/// The durable log is the record; the ring is the fallback for when there is no
-/// database (and for the first moments of a fresh one). A first load — `since_ts`
-/// 0 — gets the TAIL of the history, not its beginning: what the user is looking
-/// at is the end of the conversation.
-pub fn recent_events(session: &str, since_ts: u64) -> Vec<ActivityEvent> {
-    if let Ok(rows) = (if cfg!(test) {
+/// This is the read side of "keep everything": the log is complete, so the COST
+/// of a long history has to live here, bounded — `limit` is clamped to
+/// `MAX_PAGE_EVENTS`, and a client walks backwards with `before` instead of ever
+/// asking for the whole thing (measured: the newest 600 events of the busiest
+/// session are ~277 KB of JSON; the full log is ~1.2 MB of text, which is not
+/// something to put through a phone's socket on every project switch).
+///
+/// Three shapes, exactly as `Store::activity_page`: no cursor = the newest page,
+/// `since_ts` = the incremental tail, `before` = the page older than that cursor.
+/// `since_ts` and `before` are independent, so a client may page backwards while
+/// still polling the tail.
+///
+/// The ring is the fallback for a build with no database at all; it holds only
+/// this process's newest events, so it answers a first page and reports no more.
+pub fn events_page(
+    session: &str,
+    since_ts: u64,
+    before: Option<(u64, i64)>,
+    limit: usize,
+) -> (Vec<ActivityEvent>, bool) {
+    let limit = limit.clamp(1, MAX_PAGE_EVENTS);
+    // The database is off under `cfg(test)` for the same reason the whole ring is:
+    // a unit test must not write invented sessions into the developer's state.db.
+    let paged = if cfg!(test) {
         Err(String::new())
     } else {
-        super::with_store(|s| s.activity_since(session, since_ts, LOAD_EVENTS))
-    }) {
+        super::with_store(|s| s.activity_page(session, since_ts, before, limit))
+    };
+    if let Ok((rows, has_more)) = paged {
         if !rows.is_empty() {
-            return rows
+            let events = rows
                 .into_iter()
-                .map(|(window, ts, kind, text, tool, via, state)| ActivityEvent {
-                    ts,
-                    window,
-                    kind,
-                    text,
-                    tool,
-                    via,
-                    state,
+                .map(|r| ActivityEvent {
+                    id: r.id,
+                    ts: r.ts,
+                    window: r.window,
+                    kind: r.kind,
+                    text: r.text,
+                    tool: r.tool,
+                    via: r.via,
+                    state: r.state,
                 })
                 .collect();
+            return (events, has_more);
         }
     }
-    events()
+    let ring: Vec<ActivityEvent> = events()
         .lock()
         .unwrap()
         .get(session)
-        .map(|q| q.iter().filter(|e| e.ts > since_ts).cloned().collect())
-        .unwrap_or_default()
+        .map(|q| {
+            q.iter()
+                .filter(|e| {
+                    e.ts > since_ts && before.map(|(bts, _)| e.ts < bts).unwrap_or(true)
+                })
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    let skipped = ring.len().saturating_sub(limit);
+    (ring.into_iter().skip(skipped).collect(), false)
+}
+
+/// Events newer than `since_ts` (ms, exclusive), oldest first — the newest page,
+/// which is what a first load wants: the END of a conversation, not its
+/// beginning. Kept as the plain read for callers that do not page.
+pub fn recent_events(session: &str, since_ts: u64) -> Vec<ActivityEvent> {
+    events_page(session, since_ts, None, LOAD_EVENTS).0
+}
+
+/// How much trace this session has: (events, oldest ts, newest ts). For the
+/// client's "N of M loaded" and for anyone auditing what we keep.
+pub fn events_stats(session: &str) -> (usize, u64, u64) {
+    if cfg!(test) {
+        return (0, 0, 0);
+    }
+    super::with_store(|s| s.activity_stats(session)).unwrap_or((0, 0, 0))
 }
 
 fn store() -> &'static Mutex<HashMap<(String, usize), Rec>> {
@@ -1336,6 +1444,61 @@ mod tests {
             0,
             "a dead window's queue is dropped"
         );
+    }
+
+    // ── Board #9: the trace is COMPLETE, and the READ is what is bounded ────
+
+    /// Nothing is thrown away unless a retention was explicitly asked for. The
+    /// old default deleted every event past 2000 per session, sporadically (the
+    /// prune counter is per process, so a restart postponed it) — history lost
+    /// that nobody asked to lose, and analysis cannot tell a deleted row from an
+    /// event that never happened (owner, board #9: "我希望整个 trace 是非常完整
+    /// 的，以便我们后续去做一些分析").
+    #[test]
+    fn retention_is_off_by_default_and_only_an_explicit_setting_prunes() {
+        std::env::remove_var("TMM_ACTIVITY_KEEP");
+        assert_eq!(retention(), 0, "keep everything");
+        assert_eq!(KEEP_EVENTS_DEFAULT, 0, "and that is the compiled-in default");
+        // A host that really is short of disk can opt back in, per session.
+        std::env::set_var("TMM_ACTIVITY_KEEP", "500");
+        assert_eq!(retention(), 500);
+        // Nonsense is not a retention: it must not silently start deleting.
+        std::env::set_var("TMM_ACTIVITY_KEEP", "lots");
+        assert_eq!(retention(), 0);
+        std::env::remove_var("TMM_ACTIVITY_KEEP");
+    }
+
+    /// A page is bounded however loudly the caller asks, and it walks backwards.
+    /// (The durable, indexed version is tested in `store.rs`; here the database is
+    /// off, so this is the no-db fallback — which must still honour the cap rather
+    /// than answering with everything it holds.)
+    #[test]
+    fn a_feed_page_is_capped_and_walks_back_from_its_own_cursor() {
+        let session = format!("page-{}", uuid::Uuid::new_v4());
+        for n in 0..10 {
+            record_tool(&session, 1, "Edit", &format!("f{n}.rs"));
+        }
+        let (newest, _) = events_page(&session, 0, None, 4);
+        assert_eq!(newest.len(), 4, "the caller's limit is honoured");
+        assert!(newest.last().unwrap().text.contains("f9"), "the page ENDS at the newest");
+        assert!(newest.first().unwrap().text.contains("f6"), "oldest first within the page");
+
+        // An absurd limit is clamped, not obeyed: one RPC may never turn into a
+        // multi-megabyte frame.
+        let (capped, _) = events_page(&session, 0, None, usize::MAX);
+        assert!(capped.len() <= MAX_PAGE_EVENTS);
+
+        // Walking back from the page's own oldest row yields older rows only.
+        let cursor = (newest.first().unwrap().ts, newest.first().unwrap().id);
+        let (older, _) = events_page(&session, 0, Some(cursor), 4);
+        assert!(
+            older.iter().all(|e| e.ts <= cursor.0),
+            "a backwards page never returns anything newer than its cursor"
+        );
+        // And the plain read is still the newest page, unchanged for callers that
+        // do not page.
+        let plain = recent_events(&session, 0);
+        assert!(plain.last().unwrap().text.contains("f9"));
     }
 
     #[test]

@@ -32,6 +32,27 @@ use connection::{enable_tcp_keepalive, handle_connection_ws, ws_config};
 pub trait TeamBridge: Send + Sync {
     /// Recent messages for `room`, oldest first: `{ "messages": [...] }`.
     fn history(&self, room: &str, limit: i64) -> serde_json::Value;
+    /// One PAGE of `room`'s messages, oldest first, walking backwards:
+    /// `{ messages, has_more, head_seq }`. `before_seq` is exclusive; `None` is
+    /// the newest page, which is byte-for-byte what `history` answers.
+    ///
+    /// The room is never pruned — the transcript is the record — so a client that
+    /// wants a small first load needs a way to ask for the REST later, and the
+    /// bus's `seq` (a message's log position) is the cursor for it: stable,
+    /// gapless, and already on every message the client holds, which a millisecond
+    /// timestamp is not.
+    ///
+    /// Defaulted rather than required: a bridge that cannot page (a test double,
+    /// an older impl) answers the newest page and says there is no more, which is
+    /// exactly the behaviour every caller had before paging existed.
+    fn history_page(&self, room: &str, before_seq: Option<i64>, limit: i64) -> serde_json::Value {
+        let mut v = self.history(room, limit);
+        if let Some(obj) = v.as_object_mut() {
+            obj.entry("has_more").or_insert(serde_json::json!(false));
+            let _ = before_seq;
+        }
+        v
+    }
     /// Roster + presence for `room`: `{ "roster": [...] }`.
     fn roster(&self, room: &str) -> serde_json::Value;
     /// Post as a participant in `room`. Returns the stored message JSON.

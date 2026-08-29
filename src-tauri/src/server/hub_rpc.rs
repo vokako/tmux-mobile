@@ -178,14 +178,21 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
         }
 
         // Read the project chat, optionally incremental (`since_ts`, exclusive)
-        // — the multica-style cursor so an agent polls without re-reading.
+        // — the multica-style cursor so an agent polls without re-reading — or
+        // backwards by page (`before_seq`), which is how a client reaches history
+        // it never loaded. Nothing is ever pruned from the room, so paging is the
+        // only honest way to keep a first load small (board #9).
         "hub_log" => {
             let limit = p.get("limit").and_then(|v| v.as_i64()).unwrap_or(100).clamp(1, 1000);
             if let Err(e) = bus.open_room(&room) {
                 return Response::err(id, ERR_INTERNAL, e);
             }
             let since_ts = p.get("since_ts").and_then(|v| v.as_i64()).unwrap_or(0);
-            let mut history = bus.history(&room, limit);
+            // The bus's own cursor is `seq`, the message's log position — stable,
+            // gapless and already on every message the client holds, which a ts is
+            // not (two messages can share a millisecond).
+            let before_seq = p.get("before_seq").and_then(|v| v.as_i64()).filter(|n| *n > 0);
+            let mut history = bus.history_page(&room, before_seq, limit);
             // An archived message is hidden, not gone: the room's own store still
             // has it (that is what makes a restore free), so the hiding happens
             // here, on the way out.
@@ -198,6 +205,15 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
                     msgs.retain(|m| {
                         !m.get("id").and_then(|v| v.as_str()).is_some_and(|i| hidden.iter().any(|h| h == i))
                     });
+                }
+                // The page's own oldest seq is the cursor for the next page back.
+                // Taken from the messages that SURVIVED the filters, so a client
+                // walking back cannot stall on a hidden row.
+                let oldest = msgs.first().and_then(|m| m.get("seq").and_then(|v| v.as_i64()));
+                if let Some(obj) = history.as_object_mut() {
+                    if let Some(seq) = oldest {
+                        obj.insert("oldest_seq".into(), serde_json::json!(seq));
+                    }
                 }
             }
             Response::ok(id, history)
@@ -435,15 +451,55 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
         }
 
         // The activity feed: recent observed telemetry events (tool calls,
-        // status declarations, notifications) for the chat timeline. An
-        // in-memory ring — telemetry made visible, not chat history.
+        // status declarations, notifications) for the chat timeline. The durable
+        // log keeps EVERYTHING (board #9), so this read is the bounded half:
+        // newest page by default, `before_ts`/`before_id` walks backwards, and
+        // `limit` is capped server-side however loudly a client asks.
+        //
+        // An older client sends only `since_ts` and still gets exactly what it
+        // got before: the newest page, oldest first, under the same default cap.
         "hub_activity" => {
             let since_ts = p.get("since_ts").and_then(|v| v.as_u64()).unwrap_or(0);
+            let limit = p
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .map(|n| n as usize)
+                .unwrap_or(telemetry::LOAD_EVENTS)
+                .clamp(1, telemetry::MAX_PAGE_EVENTS);
+            // The cursor is (ts, id): several events share one millisecond inside
+            // a busy turn, so ts alone cannot address a position in the log. The
+            // server hands `oldest: {ts, id}` back with every page, so a client
+            // should always have the exact pair. Omitting `before_id` falls back
+            // to "everything strictly older than that whole millisecond": it can
+            // skip same-millisecond siblings the client had not received, but it
+            // always makes PROGRESS, and a cursor that can loop for ever is the
+            // worse failure for a scroll-to-load.
+            let before = p
+                .get("before_ts")
+                .and_then(|v| v.as_u64())
+                .map(|ts| (ts, p.get("before_id").and_then(|v| v.as_i64()).unwrap_or(0)));
             // A client asking for the feed is exactly when an undelivered line
             // matters, so account for the ones that timed out before reading.
-            telemetry::sweep_deliveries(session);
-            let events = telemetry::recent_events(session, since_ts);
-            Response::ok(id, serde_json::json!({ "events": events }))
+            // Only on the LIVE page: a walk back through history must not make
+            // the app warn about deliveries again.
+            if before.is_none() {
+                telemetry::sweep_deliveries(session);
+            }
+            let (events, has_more) = telemetry::events_page(session, since_ts, before, limit);
+            // The oldest row of this page IS the cursor for the next one, handed
+            // back so a client never has to reconstruct it.
+            let oldest = events.first().map(|e| serde_json::json!({ "ts": e.ts, "id": e.id }));
+            let (total, first_ts, _last_ts) = telemetry::events_stats(session);
+            Response::ok(
+                id,
+                serde_json::json!({
+                    "events": events,
+                    "has_more": has_more,
+                    "oldest": oldest,
+                    "total": total,
+                    "first_ts": first_ts,
+                }),
+            )
         }
 
         // Stop / restart ONE agent. The window is the agent's life: killing it
@@ -830,10 +886,15 @@ mod tests {
     // minimal bridge keeps this module self-contained.
     struct Bridge {
         posts: std::sync::Mutex<Vec<(String, String, String)>>,
+        /// Every `history_page` call, so a test can assert what the RPC asked for.
+        pages: std::sync::Mutex<Vec<(Option<i64>, i64)>>,
     }
     impl Bridge {
         fn new() -> Self {
-            Bridge { posts: std::sync::Mutex::new(Vec::new()) }
+            Bridge {
+                posts: std::sync::Mutex::new(Vec::new()),
+                pages: std::sync::Mutex::new(Vec::new()),
+            }
         }
     }
     impl TeamBridge for Bridge {
@@ -846,9 +907,26 @@ mod tests {
 
         fn history(&self, room: &str, _limit: i64) -> serde_json::Value {
             serde_json::json!({ "messages": [
-                { "room": room, "ts": 100, "from": "a", "body": "old" },
-                { "room": room, "ts": 200, "from": "b", "body": "new" },
+                { "room": room, "seq": 41, "ts": 100, "from": "a", "body": "old" },
+                { "room": room, "seq": 42, "ts": 200, "from": "b", "body": "new" },
             ] })
+        }
+        fn history_page(&self, room: &str, before_seq: Option<i64>, limit: i64) -> serde_json::Value {
+            self.pages.lock().unwrap().push((before_seq, limit));
+            match before_seq {
+                // The page behind seq 41: one older message, and nothing before it.
+                Some(_) => serde_json::json!({
+                    "messages": [{ "room": room, "seq": 7, "ts": 50, "from": "a", "body": "older" }],
+                    "has_more": false, "head_seq": 42
+                }),
+                None => serde_json::json!({
+                    "messages": [
+                        { "room": room, "seq": 41, "ts": 100, "from": "a", "body": "old" },
+                        { "room": room, "seq": 42, "ts": 200, "from": "b", "body": "new" },
+                    ],
+                    "has_more": true, "head_seq": 42
+                }),
+            }
         }
         fn roster(&self, _room: &str) -> serde_json::Value { serde_json::json!({ "roster": [] }) }
         fn post(&self, room: &str, from: &str, body: &str, _rr: bool) -> Result<serde_json::Value, String> {
@@ -875,9 +953,93 @@ mod tests {
         fn open_room(&self, _room: &str) -> Result<(), String> { Ok(()) }
     }
 
+    /// Board #9: the room keeps everything, so the client needs a way to ask for
+    /// a SMALL first page and then walk back. Two contracts are pinned here — an
+    /// older client (no new params) gets exactly the newest page it always got,
+    /// and `before_seq` is passed through with a cursor handed back for the step
+    /// after it.
     #[test]
-    fn hub_without_bus_is_method_not_found() {
-        let r = handle_hub_request(&req("hub_post", serde_json::json!({ "session": "s", "body": "hi" })), None, None);
+    fn hub_log_answers_the_newest_page_and_pages_backwards_on_request() {
+        let b = Bridge::new();
+        // An older client: only session (+ maybe since_ts/limit).
+        let r = handle_hub_request(&req("hub_log", serde_json::json!({ "session": "blog" })), Some(&b), None);
+        let v = r.result.expect("result");
+        let msgs = v["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 2, "the newest page, unchanged");
+        assert_eq!(msgs[0]["body"], "old", "oldest first, as before");
+        assert_eq!(v["has_more"], true, "and it says history remains behind it");
+        assert_eq!(v["oldest_seq"], 41, "the cursor for the next page back");
+        assert_eq!(v["head_seq"], 42);
+        assert_eq!(b.pages.lock().unwrap()[0], (None, 100), "default limit, no cursor");
+
+        // Scrolled up: the client asks for what is behind its oldest message.
+        let r = handle_hub_request(
+            &req("hub_log", serde_json::json!({ "session": "blog", "before_seq": 41, "limit": 50 })),
+            Some(&b),
+            None,
+        );
+        let v = r.result.expect("result");
+        assert_eq!(v["messages"].as_array().unwrap().len(), 1);
+        assert_eq!(v["messages"][0]["body"], "older");
+        assert_eq!(v["has_more"], false, "the conversation begins there");
+        assert_eq!(b.pages.lock().unwrap()[1], (Some(41), 50));
+
+        // A nonsense cursor is no cursor: 0/negative means "the newest page",
+        // never a query that could return nothing for ever.
+        let r = handle_hub_request(
+            &req("hub_log", serde_json::json!({ "session": "blog", "before_seq": 0 })),
+            Some(&b),
+            None,
+        );
+        assert_eq!(r.result.expect("result")["messages"].as_array().unwrap().len(), 2);
+    }
+
+    /// The activity feed's half of the same contract. The durable log keeps every
+    /// event, so this read is where the bound lives: a default page, a hard cap,
+    /// and a (ts, id) cursor handed back for walking backwards.
+    #[test]
+    fn hub_activity_pages_and_caps_and_reports_what_it_holds() {
+        let b = Bridge::new();
+        let session = format!("act-rpc-{}", uuid::Uuid::new_v4());
+        for n in 0..6 {
+            telemetry::record_tool(&session, 1, "Edit", &format!("f{n}.rs"));
+        }
+        // An older client sends only since_ts and gets the newest page.
+        let r = handle_hub_request(
+            &req("hub_activity", serde_json::json!({ "session": session, "since_ts": 0 })),
+            Some(&b),
+            None,
+        );
+        let v = r.result.expect("result");
+        let evs = v["events"].as_array().unwrap();
+        assert_eq!(evs.len(), 6, "everything this session has, under the default cap");
+        assert!(v.get("has_more").is_some(), "the client is told whether more exists");
+
+        // A limit is honoured, and the page carries the cursor for the next one.
+        let r = handle_hub_request(
+            &req("hub_activity", serde_json::json!({ "session": session, "limit": 2 })),
+            Some(&b),
+            None,
+        );
+        let v = r.result.expect("result");
+        assert_eq!(v["events"].as_array().unwrap().len(), 2);
+        let oldest = v["oldest"].clone();
+        assert!(oldest["ts"].as_u64().unwrap() > 0, "a usable cursor, got {oldest:?}");
+
+        // And it is a CAP, not a suggestion.
+        let r = handle_hub_request(
+            &req("hub_activity", serde_json::json!({ "session": session, "limit": 99999 })),
+            Some(&b),
+            None,
+        );
+        assert!(
+            r.result.expect("result")["events"].as_array().unwrap().len()
+                <= telemetry::MAX_PAGE_EVENTS
+        );
+    }
+
+    #[test]
+    fn hub_without_bus_is_method_not_found() {        let r = handle_hub_request(&req("hub_post", serde_json::json!({ "session": "s", "body": "hi" })), None, None);
         assert_eq!(r.error.as_ref().map(|e| e.code), Some(ERR_METHOD_NOT_FOUND));
     }
 

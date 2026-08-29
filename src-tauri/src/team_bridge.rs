@@ -331,6 +331,33 @@ impl TeamBridge for TeamManager {
         serde_json::json!({ "messages": msgs })
     }
 
+    /// One page walking backwards. Asks the store for one message MORE than the
+    /// caller wanted so `has_more` is a fact rather than a guess — without it a
+    /// client cannot tell "that is the whole conversation" from "your page happened
+    /// to end exactly at the limit", and it would keep asking for ever or stop too
+    /// early. `head_seq` lets it know whether it is holding the tail.
+    ///
+    /// Goes through the shared connection directly, like `room_latest`: the bus
+    /// handle would lock the same mutex for each call, and the head has to be read
+    /// in the same breath as the page. The room registration is still the gate, so
+    /// an unknown room answers empty exactly as `history` does.
+    fn history_page(&self, room: &str, before_seq: Option<i64>, limit: i64) -> serde_json::Value {
+        let limit = limit.clamp(1, 1000);
+        if self.room_bus(room).is_none() {
+            return serde_json::json!({ "messages": [], "has_more": false, "head_seq": 0 });
+        }
+        let conn = self.conn.lock().unwrap();
+        let mut msgs =
+            agora::store::history_before(&conn, room, before_seq, limit + 1).unwrap_or_default();
+        let has_more = msgs.len() as i64 > limit;
+        if has_more {
+            // The page is oldest-first, so the extra row is at the FRONT.
+            msgs.remove(0);
+        }
+        let head_seq = agora::store::max_seq(&conn, room).unwrap_or(0);
+        serde_json::json!({ "messages": msgs, "has_more": has_more, "head_seq": head_seq })
+    }
+
     fn roster(&self, room: &str) -> serde_json::Value {
         let roster = self.room_bus(room).and_then(|b| b.roster().ok()).unwrap_or_default();
         serde_json::json!({ "roster": roster })

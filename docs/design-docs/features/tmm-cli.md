@@ -1226,18 +1226,80 @@ the messages around them survived — a feed with holes in it (owner, 2026-08-19
 table (state.db v9) is now the record, and the ring is what is left when there is
 no database. Three rules keep an observer from becoming a burden:
 
-- **Writing is FAIL-SOFT.** `push` inserts and ignores the result. Telemetry may
-  never block or break the thing it observes, so a locked or read-only database
-  costs you the history, not the tool call.
-- **Reading takes the TAIL.** A first load (`since_ts` 0) returns the newest
-  `LOAD_EVENTS` rows, oldest-first, because what the user is looking at is the end
-  of the conversation. A cursor read returns everything after it.
-- **It prunes itself.** Every `PRUNE_EVERY` inserts, a session is trimmed to
-  `KEEP_EVENTS`. A log nobody prunes eventually costs more than it is worth.
+- **Writing is FAIL-SOFT, but not silent.** `push` inserts and does not block on
+  the outcome. Telemetry may never break the thing it observes, so a locked or
+  read-only database costs you the history, not the tool call — but a lost write is
+  a hole in the very thing that is supposed to be complete, so the first failure
+  and every hundredth after it are reported on the server log.
+- **Reading takes the TAIL, and it PAGES.** A first load (`since_ts` 0) returns the
+  newest `LOAD_EVENTS` rows, oldest-first, because what the user is looking at is
+  the end of the conversation; a cursor read returns everything after it; and
+  `before_ts` + `before_id` returns the page strictly OLDER than that cursor, which
+  is how a client reaches history it never loaded.
+- **It does NOT prune itself.** See below.
 
 Both halves are OFF under `cfg(test)`: unit tests exercise the ring and the derive
 rules, and the SQL is tested directly in `store.rs`, so `cargo test` cannot write
 rows for invented sessions into the developer's real state.db.
+
+### The trace is COMPLETE; the READ is what is bounded (board #9)
+
+The owner's ask was two-sided: the trace must be complete enough to analyse
+afterwards, and the phone must not pay for that completeness on every project
+switch ("后端：要记录完整，性能完好。前端：要显示通信流畅，同时不要过多地占用前端和
+网络通信的资源", 2026-08-29). Those pull in opposite directions only if the same
+number bounds both, which is what the old design did.
+
+**The storage audit that started it**, measured on the dev host:
+
+| what | where | complete? |
+|---|---|---|
+| chat messages (human, agents, `[tmm]` lifecycle lines, status notes, done summaries) | `team.db` `messages`, indexed `(room, seq)` | **YES.** Nothing prunes it — 1483 messages / 18 rooms / 10 days at the time of the audit, 414 KB of bodies. The only removals are explicit: `hub_msg_purge` and the admin `clear_room` |
+| observed telemetry (tool calls, prompts + receipts, notifications, warns) | `state.db` `activity`, indexed `(session, ts)` | **NO, until this change** — 5309 rows, the busiest session 4046 of them, against a 2000-row-per-session prune |
+| outstanding deliveries | `state.db` `deliveries` | YES (board #5) |
+| derived agent state, vitals readings, the recovery tracker | process memory | By design — each is a CURRENT reading that the next hook re-establishes, not history |
+
+Two truncations remain deliberate and are worth knowing when analysing: a prompt
+event keeps its first 1024 characters and a tool event 2048 of its argument. The
+full text of what an agent SAID is never truncated — that is a message.
+
+**Retention is now opt-in.** `KEEP_EVENTS` was 2000 per session, pruned every 256
+inserts; the busiest session already held 4046 rows, so the cap stood to delete the
+older HALF of it, and the only reason it had not is that the prune counter is per
+process and every restart postponed it — an accident, not a policy. Worse, a
+deleted row is indistinguishable from an event that never happened, which is
+exactly what makes a trace unanalysable. So the default is **keep everything**
+(`TMM_ACTIVITY_KEEP=<n>` opts back in for a host that is short of disk), and
+`prune_activity` survives as the primitive that setting uses.
+
+**The cost moved to the read, where it can be bounded without destroying
+anything.** Both feeds page backwards, and both keep their old newest-page
+semantics when the new parameters are absent, so an older client is unaffected:
+
+- `hub_log` pages on the bus's own `seq` (a message's log position — stable,
+  gapless, already on every message the client holds; a millisecond timestamp is
+  none of those, since two messages can share one).
+- `hub_activity` pages on `(ts, id)`. The id is load-bearing: a busy turn writes
+  several events inside one millisecond, so a ts-only cursor either skips them or
+  loops on them for ever. The server hands the exact pair back as `oldest`.
+- `has_more` is measured, not guessed — each store call asks for one row more than
+  the caller wanted. Without it a client cannot tell "you have everything" from
+  "your page ended exactly at the limit".
+- Limits are CAPPED server-side (`MAX_PAGE_EVENTS`, and 1000 for messages), so one
+  RPC can never become a multi-megabyte frame however loudly a client asks.
+- The delivery sweep runs on the LIVE page only. Walking back through history must
+  not make the app re-warn about deliveries it already reported.
+- Cross-source merge is untouched: both feeds still come back oldest-first with ms
+  timestamps, and the two cursors are independent, so a client may poll the tail
+  (`since_ts`) while paging backwards.
+
+Verified live against the real databases: walking the whole activity log of the
+busiest session in pages of 200 returned 22 pages and exactly 4202 distinct
+events — the server's own total — with no duplicate and no gap, which is the
+property a scroll-to-load depends on; and paging `hub_log` by 30 gave contiguous
+`seq` ranges with zero overlap. The payload difference is the point: the current
+first load is ~96 KB of messages + ~254 KB of events, while a 30-message + 40-event
+first page is ~28 KB + ~19 KB.
 
 A tool row keeps up to `MAX_TOOL_DETAIL_CHARS` (2 KB) of its argument. It kept 80,
 which is shorter than the paths this app's own agents work with: every row ended in
