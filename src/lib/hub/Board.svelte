@@ -258,6 +258,7 @@
           {#each col(s) as i (i.id)}
             <button class="card" onclick={() => openIssue(i.id)}>
               <span class="c-title">{i.title}</span>
+              {#if i.body}<span class="c-body">{i.body}</span>{/if}
               <span class="c-meta">
                 #{i.id}
                 {#if i.created_by}· {t('boardBy')} {i.created_by}{/if}
@@ -348,6 +349,20 @@
   }
   .card:hover { background: var(--surface2); }
   .c-title { font-size: var(--fs-ui); color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
+  /* The body PREVIEW (owner, 2026-08-29): short text shows whole, long text
+     clamps — one mechanism, the clamp; the card is already the door to the
+     detail view, so a clamped preview needs no separate "more" control. */
+  .c-body {
+    font-size: var(--fs-meta);
+    color: var(--text2);
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
   .c-meta { font-size: var(--fs-micro); color: var(--text3); display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
   .c-assignee { color: var(--accent); }
 
