@@ -299,8 +299,9 @@
           {#if backendIcon(d.backend)}<img class="ava" src={backendIcon(d.backend)} alt={d.backend} />{:else}<span class="ava" style:background={backendColor(d.backend)}>{d.name.slice(0, 1).toUpperCase()}</span>{/if}
           <span class="r-name">{d.name}</span>
           <span class="r-backend">{d.backend}</span>
-          <!-- can_hire: this agent may spawn teammates. A tag, not a glyph. -->
-          {#if d.can_hire}<span class="r-cap" title={t('agentsCanHireLabel')}>{t('agentsCanHire')}</span>{/if}
+          <!-- can_hire: the boxed M = Manager (board #7) — one atom, the
+               words live in the title. -->
+          {#if d.can_hire}<span class="m-badge" title={t('agentsManagerHint')} aria-label={t('agentsManagerHint')}>M</span>{/if}
         </button>
       {/each}
       <button class="side-row add" onclick={() => startEdit(null)}>
@@ -481,9 +482,9 @@
              样式也不和谐"). -->
         <div class="pick-block">
           <button class="pick" class:sel={editing.can_hire} type="button"
-            aria-pressed={editing.can_hire}
+            aria-pressed={editing.can_hire} title={t('agentsManagerHint')}
             onclick={() => editing.can_hire = !editing.can_hire}>
-            <Icon name={editing.can_hire ? 'check' : 'bot'} size={11} />{t('agentsCanHireLabel')}
+            <Icon name={editing.can_hire ? 'check' : 'bot'} size={11} /><span class="m-badge">M</span>{t('agentsManager')}
           </button>
         </div>
         <label>{t('agentsSystem')}
@@ -562,7 +563,10 @@
   .r-backend { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text3); flex: none; }
   /* A wash, not a drawn frame: borders on inner micro atoms read as chrome
      (owner, 2026-08-24 audit; same rule as the sys-line atoms). */
-  .r-cap { flex: none; font-size: var(--fs-micro); letter-spacing: 0.4px; color: var(--accent); background: var(--accent-bg); border-radius: 4px; padding: 1px 4px; }
+  /* The Manager atom (board #7): a boxed M, shared verbatim with Hub.svelte
+     (no app.css edits allowed there either — the source test pins the two
+     declarations to the same text). Words live in title/aria. */
+  .m-badge { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border: 1px solid var(--accent); border-radius: 4px; color: var(--accent); font-size: var(--fs-micro); font-weight: 700; line-height: 1; }
 
   .mid { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   .spacer { flex: 1; }

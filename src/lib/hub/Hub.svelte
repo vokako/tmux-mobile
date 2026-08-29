@@ -2320,7 +2320,7 @@
                     {#if backendIcon(r.backend)}<img class="ava" src={backendIcon(r.backend)} alt={r.backend} />{:else}<span class="ava" style:background={backendColor(r.backend)}>{r.name.slice(0, 1).toUpperCase()}</span>{/if}
                     <span class="sr-name">{r.name}</span>
                     <span class="sr-backend">{r.backend}</span>
-                    {#if r.can_hire}<span class="sr-cap">{t('agentsCanHire')}</span>{/if}
+                    {#if r.can_hire}<span class="m-badge" title={t('agentsManagerHint')} aria-label={t('agentsManagerHint')}>M</span>{/if}
                   </button>
                 {/each}
               </div>
@@ -3485,7 +3485,8 @@
   .start-row:disabled { opacity: 0.5; }
   .sr-name { font-family: ui-monospace, Menlo, monospace; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sr-backend { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text3); margin-left: auto; }
-  .sr-cap { font-size: var(--fs-micro); color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 3px; opacity: 0.75; }
+  /* The Manager atom (board #7) — same declaration as AgentsPage's, pinned. */
+  .m-badge { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border: 1px solid var(--accent); border-radius: 4px; color: var(--accent); font-size: var(--fs-micro); font-weight: 700; line-height: 1; }
 
   .drawer { position: relative; }
   .drawer { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #000; border-left: 1px solid var(--border); }

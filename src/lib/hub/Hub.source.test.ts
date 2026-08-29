@@ -95,6 +95,24 @@ test('sidebar dots and roster cards drink from ONE state map (board #8)', () => 
     'the raw snapshot is never adopted bare — that is the rollback bug');
 });
 
+test('can_hire wears ONE atom — the boxed M, words in the title (board #7)', async () => {
+  const agentsPage = await readFile(new URL('./AgentsPage.svelte', import.meta.url), 'utf8');
+  const i18n = await readFile(new URL('../core/i18n.svelte.ts', import.meta.url), 'utf8');
+  // The atom renders as a literal M with the explanation in title/aria.
+  assert.match(source, /class="m-badge" title=\{t\('agentsManagerHint'\)\}[^>]*>M</u, 'Hub preset rows wear the badge');
+  assert.match(agentsPage, /class="m-badge" title=\{t\('agentsManagerHint'\)\}[^>]*>M</u, 'the config list wears the badge');
+  assert.match(agentsPage, /<span class="m-badge">M<\/span>\{t\('agentsManager'\)\}/u, 'the editor toggle: badge + the short word');
+  // One declaration, twice: no app.css edits were allowed, so the two scoped
+  // copies must stay TEXT-IDENTICAL or the atom forks.
+  const decl = (src: string) => /\.m-badge \{([^}]*)\}/u.exec(src)?.[1]?.trim() ?? '';
+  assert.ok(decl(source).length > 0, 'Hub declares the atom');
+  assert.equal(decl(source), decl(agentsPage), 'the two m-badge declarations are the same text');
+  // The old vocabulary is gone from the UI strings (comments may cite history).
+  assert.ok(!i18n.includes("agentsCanHire"), 'the old i18n keys are retired');
+  assert.ok(!i18n.includes('可拉人'), 'the old zh wording is gone');
+  assert.match(i18n, /agentsManager: 'Manager'/u, 'the word is Manager in both languages');
+});
+
 test('the fold budget goes through foldLines, and the basis is the column', () => {
   // Board #4: the budget math lives in hub.ts (pure, tested) — Hub only
   // measures. Re-inlining `* 0.2` here would fork the mapping again, and
