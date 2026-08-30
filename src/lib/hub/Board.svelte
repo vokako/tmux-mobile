@@ -108,12 +108,12 @@
   // Save persists, Cancel restores, and every path that would drop unsaved
   // edits (back, Esc, sidebar switch, the phone's back gesture) goes through
   // the app's confirm dialect instead of losing them silently.
-  let draft = $state({ title: '', body: '' });
+  let draft = $state(draftOf(null));
   // The draft's BASE: the server text the user started from (or last saved/
   // rebased onto). Dirty and the save patch are measured against IT, never
   // the live issue — a concurrent refetch moves the live copy, and diffing
   // against that would ship stale fields the user never touched (#11 review).
-  let draftBase = $state({ title: '', body: '' });
+  let draftBase = $state(draftOf(null));
   let pendingDiscard = $state<null | (() => void)>(null);
   const dirty = $derived(sel ? draftDirty(draft, draftBase) : false);
   /** Run now, or park behind the discard confirm when the draft is dirty. */
@@ -171,6 +171,24 @@
     };
   }
 
+  // ── The status slider (board #15): one segmented track, slide or tap ──
+  // It edits the DRAFT — nothing reaches the server until the ✓ confirms
+  // ("避免手动手滑随便一点就改变了状态"). Pointer capture makes a swipe from
+  // any segment sweep the track; a plain tap lands on its segment.
+  let segEl = $state<HTMLElement | null>(null);
+  let segDrag = $state(false);
+  function segPick(e: PointerEvent) {
+    if (!segEl) return;
+    const r = segEl.getBoundingClientRect();
+    const i = Math.min(STATUSES.length - 1, Math.max(0, Math.floor(((e.clientX - r.left) / r.width) * STATUSES.length)));
+    draft.status = STATUSES[i]!;
+  }
+  function segDown(e: PointerEvent) {
+    segDrag = true;
+    segEl?.setPointerCapture?.(e.pointerId);
+    segPick(e);
+  }
+
   async function openIssue(id: number) {
     try {
       sel = await boardGet(cur, id);
@@ -206,14 +224,6 @@
       await hubPost(cur, `@${name} ${t('boardAssignMsg').replace('{id}', String(id))}`);
     }
   }
-  async function assign(id: number, name: string) {
-    busy = true;
-    try {
-      await dispatchAssign(id, name);
-      await refetchSel();
-    } catch (e) { err = String((e as Error)?.message ?? e); }
-    busy = false;
-  }
   /** Explicit save of the USER's changed fields (diffed against the draft
    * base, never the live issue); a failure KEEPS the draft. The refetch's
    * rebase then normalizes: the server now carries the saved text, so base
@@ -224,19 +234,15 @@
     if (!patch) return;
     busy = true;
     try {
-      await boardSave(cur, { id: sel.id, ...patch });
+      // The assignee travels through dispatchAssign — the ONE carrier of
+      // assignment=dispatch semantics (board #11) — so a change confirmed by
+      // the ✓ briefs the agent exactly like assign-at-birth does. Everything
+      // else is an ordinary field patch.
+      const { assignee, ...rest } = patch;
+      if (Object.keys(rest).length) await boardSave(cur, { id: sel.id, ...rest });
+      if (assignee !== undefined) await dispatchAssign(sel.id, assignee);
       await refetchSel();
     } catch (e) { err = String((e as Error)?.message ?? e); }
-    busy = false;
-  }
-  function cancelDraft() {
-    // Back to the BASE — the server text the user started from (kept fresh
-    // by the rebase), which is also what the live issue reads.
-    draft = { ...draftBase };
-  }
-  async function move(id: number, status: string) {
-    busy = true;
-    try { await boardSave(cur, { id, status }); await refetchSel(); } catch (e) { err = String((e as Error)?.message ?? e); }
     busy = false;
   }
   async function createIssue() {
@@ -333,7 +339,9 @@
       <Icon name="menu" size={16} />
     </button>
     {/if}
-    <h1>{t('board')}</h1>
+    <!-- The page names the PROJECT, not itself (board #15): the tab already
+         says "Board", so the title says WHOSE board this is. -->
+    <h1>{projects.find((p) => p.project.session === cur)?.project.name ?? (cur || t('board'))}</h1>
     {#if cur}<span class="h-session">{cur}</span>{/if}
     <span class="spacer"></span>
     {#if !sel && !creating}
@@ -359,7 +367,10 @@
           <!-- The draft's own verbs, only while there is a draft to speak of:
                cancel restores the stored issue, save persists the changed
                fields — and is the ONLY thing that does (board #11). -->
-          <button class="icon-btn" title={t('cancel')} aria-label={t('cancel')} disabled={busy} onclick={cancelDraft}>
+          <!-- Cancel ASKS (board #15: "当前状态没有保存，是否退出"): the same
+               ConfirmDialog every guarded exit uses — confirming restores the
+               base, so a slid status or picked assignee rolls back. -->
+          <button class="icon-btn" title={t('cancel')} aria-label={t('cancel')} disabled={busy} onclick={() => guard(() => {})}>
             <Icon name="undo" size={14} />
           </button>
           <button class="icon-btn go" title={t('save')} aria-label={t('save')} disabled={busy || !draftValid(draft)} onclick={saveDraft}>
@@ -375,11 +386,23 @@
            siblings again. -->
       <input class="d-title-input" bind:value={draft.title} placeholder={t('boardTitlePh')} />
       <div class="d-meta">
-        <Select value={sel.status} options={STATUSES.map((s) => ({ value: s, label: statusLabel(s) }))}
-          onchange={(v: string) => move(sel!.id, v)} />
-        <Select value={sel.assignee} dense
+        <!-- The status is a SLIDER (board #15): sweep the track or tap a
+             stop. It edits the draft — the head's ✓ is what saves, and
+             cancel asks before losing the change. -->
+        <div class="seg" role="radiogroup" tabindex="-1" aria-label={statusLabel(draft.status || sel.status)}
+          bind:this={segEl}
+          onpointerdown={segDown}
+          onpointermove={(e) => segDrag && segPick(e)}
+          onpointerup={() => (segDrag = false)}
+          onpointercancel={() => (segDrag = false)}>
+          {#each STATUSES as st (st)}
+            <button class="seg-b" class:on={draft.status === st} role="radio" aria-checked={draft.status === st}
+              onclick={() => (draft.status = st)}>{statusLabel(st)}</button>
+          {/each}
+        </div>
+        <Select value={draft.assignee} dense
           options={[{ value: '', label: t('boardUnassigned') }, ...agents.map((a) => ({ value: a.name, label: `@${a.name}` }))]}
-          onchange={(v: string) => assign(sel!.id, v)} />
+          onchange={(v: string) => (draft.assignee = v)} />
         {#if sel.created_by}<span class="meta-bit">{t('boardOpenedBy')} <span class="m-name">{sel.created_by}</span></span>{/if}
       </div>
       <textarea class="d-body-edit" bind:value={draft.body} use:autoGrow={draft.body} placeholder={t('boardBodyPh')} rows="3"></textarea>
@@ -595,6 +618,24 @@
   .d-title { font-size: var(--fs-ui); font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
   .spacer { flex: 1; }
   .d-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  /* The status slider (board #15): one bordered track in the control dialect,
+     equal stops; the chosen stop fills accent (the app's selected-state ink).
+     touch-action none so the sweep is ours, not the page scroll's. */
+  .seg {
+    display: inline-flex; align-items: stretch;
+    border: 1px solid var(--border); border-radius: var(--ui-radius-control);
+    background: var(--surface); overflow: hidden;
+    touch-action: none; user-select: none;
+  }
+  .seg-b {
+    border: none; background: none; cursor: pointer;
+    font-size: var(--fs-meta); color: var(--text2);
+    padding: 5px 12px; position: relative;
+    transition: background var(--t-fast), color var(--t-fast);
+  }
+  .seg-b + .seg-b { border-left: 1px solid var(--border); }
+  .seg-b.on { background: var(--accent-fill); color: var(--accent-fill-ink); }
+  .seg-b:not(.on):hover { background: var(--surface2); }
   .meta-bit { font-size: var(--fs-meta); color: var(--text3); }
   .meta-bit .m-name { color: var(--accent); font-weight: 650; }
   /* The hierarchy (board #11): one compact title LINE, then the body as the

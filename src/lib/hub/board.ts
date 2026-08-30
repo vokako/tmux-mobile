@@ -1,22 +1,34 @@
 /** Pure helpers for the board's issue DRAFT (board #11): opening an issue
  * edits a copy, and only an explicit Save persists it. Kept out of the
- * component so save/cancel/patch semantics are testable without a DOM. */
+ * component so save/cancel/patch semantics are testable without a DOM.
+ * Since board #15 the draft carries ALL FOUR editable fields — status and
+ * assignee joined title/body, because a stray tap on a picker was changing
+ * live state with no confirmation ("避免手动手滑随便一点就改变了状态"):
+ * now every edit waits for the same ✓. */
 
 export interface IssueDraft {
   title: string;
   body: string;
+  status: string;
+  assignee: string;
 }
 
-/** The editable copy of an issue's text fields. */
-export const draftOf = (issue: { title?: string; body?: string } | null | undefined): IssueDraft => ({
+const FIELDS = ['title', 'body', 'status', 'assignee'] as const;
+
+type IssueLike = { title?: string; body?: string; status?: string; assignee?: string };
+
+/** The editable copy of an issue's fields. */
+export const draftOf = (issue: IssueLike | null | undefined): IssueDraft => ({
   title: issue?.title ?? '',
   body: issue?.body ?? '',
+  status: issue?.status ?? '',
+  assignee: issue?.assignee ?? '',
 });
 
 /** Has the draft diverged from the stored issue? Raw comparison — whitespace
  * the user typed is an edit until they remove it. */
-export const draftDirty = (draft: IssueDraft, issue: { title?: string; body?: string }): boolean =>
-  draft.title !== (issue.title ?? '') || draft.body !== (issue.body ?? '');
+export const draftDirty = (draft: IssueDraft, issue: IssueLike): boolean =>
+  FIELDS.some((f) => draft[f] !== (issue[f] ?? ''));
 
 /** A draft the server would accept: a title is the one required field. */
 export const draftValid = (draft: IssueDraft): boolean => draft.title.trim().length > 0;
@@ -29,12 +41,13 @@ export const draftValid = (draft: IssueDraft): boolean => draft.title.trim().len
  * is invalid. */
 export function draftPatch(
   draft: IssueDraft,
-  base: { title?: string; body?: string },
-): { title?: string; body?: string } | null {
+  base: IssueLike,
+): Partial<Record<(typeof FIELDS)[number], string>> | null {
   if (!draftValid(draft) || !draftDirty(draft, base)) return null;
-  const patch: { title?: string; body?: string } = {};
-  if (draft.title !== (base.title ?? '')) patch.title = draft.title.trim();
-  if (draft.body !== (base.body ?? '')) patch.body = draft.body;
+  const patch: Partial<Record<(typeof FIELDS)[number], string>> = {};
+  for (const f of FIELDS) {
+    if (draft[f] !== (base[f] ?? '')) patch[f] = f === 'title' ? draft[f].trim() : draft[f];
+  }
   return patch;
 }
 
@@ -50,8 +63,7 @@ export function rebaseDraft(
   server: IssueDraft,
 ): { draft: IssueDraft; base: IssueDraft } {
   const pick = (field: keyof IssueDraft) => (draft[field] === base[field] ? server[field] : draft[field]);
-  return {
-    draft: { title: pick('title'), body: pick('body') },
-    base: { ...server },
-  };
+  const next = {} as IssueDraft;
+  for (const f of FIELDS) next[f] = pick(f);
+  return { draft: next, base: { ...server } };
 }

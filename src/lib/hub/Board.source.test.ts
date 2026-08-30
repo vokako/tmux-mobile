@@ -14,9 +14,12 @@ test('the issue detail is a DRAFT: explicit save, clean cancel, guarded exits (b
     'save diffs against the draft BASE — diffing the live issue ships stale untouched fields (#11 review)');
   assert.match(source, /onclick=\{saveDraft\}/u, 'save is a button, not a side effect');
   assert.match(source, /disabled=\{busy \|\| !draftValid\(draft\)\}/u, 'saving twice / a blank title is unclickable');
-  assert.match(source, /onclick=\{cancelDraft\}/u, 'cancel is explicit too');
+  // Cancel ASKS since board #15 ("当前状态没有保存，是否退出"): it routes
+  // through the same guard every exit uses, and the dialog's confirm is the
+  // one place that restores the base.
+  assert.match(source, /onclick=\{\(\) => guard\(\(\) => \{\}\)\}/u, 'cancel asks before discarding');
   assert.match(source, /draft = \{ \.\.\.draftBase \};/u,
-    'cancel restores the draft BASE — the server text the user started from, kept fresh by the rebase');
+    'confirming restores the draft BASE — the server text the user started from, kept fresh by the rebase');
   // Every exit that would drop a dirty draft goes through the confirm
   // dialect: the back button, Escape, the phone's back gesture, a sidebar
   // project switch. Nothing silently discards.
@@ -41,7 +44,8 @@ test('assignment is ONE dispatch — the detail picker and the create dialog sha
   // one hubPost call site proves nobody re-implements the delivery half.
   assert.match(source, /async function dispatchAssign\(id: number, name: string\)/u, 'the one dispatch function');
   assert.equal(source.split('hubPost(').length - 1, 1, 'exactly one delivery call site, inside dispatchAssign');
-  assert.match(source, /await dispatchAssign\(id, name\);/u, 'the detail picker routes through it');
+  assert.match(source, /if \(assignee !== undefined\) await dispatchAssign\(sel\.id, assignee\);/u,
+    'a ✓-confirmed assignee change routes through it (board #15: the picker edits the DRAFT)');
   assert.match(source, /if \(wantAssign && created != null\) await dispatchAssign\(created, wantAssign\);/u,
     'create-with-assignee dispatches too — never just a label');
   // The form closes the MOMENT the create succeeds — before the dispatch can
@@ -175,4 +179,20 @@ test('the create form: one-line growing title, assign, then a filling body (owne
     'the title never stretches in the column and has no resize handle');
   assert.match(style, /\.d-body-edit\.fill \{ flex: 1;[^}]*overflow-y: auto/u,
     'the body takes the leftover height and scrolls INSIDE');
+});
+
+test('the detail speaks board #15: project-named page, status slider, confirmed changes', () => {
+  // ① The page names the PROJECT, not itself.
+  assert.match(source, /<h1>\{projects\.find\(\(p\) => p\.project\.session === cur\)\?\.project\.name \?\? \(cur \|\| t\('board'\)\)\}<\/h1>/u,
+    'the title is the project name');
+  // ② The status is a segmented SLIDER editing the draft: sweep (pointer
+  // capture + move) or tap; nothing reaches the server until the ✓.
+  assert.match(source, /onpointerdown=\{segDown\}/u, 'the track takes the pointer');
+  assert.match(source, /onpointermove=\{\(e\) => segDrag && segPick\(e\)\}/u, 'sweeping slides the pick');
+  assert.match(source, /onclick=\{\(\) => \(draft\.status = st\)\}/u, 'tapping a stop picks it — into the DRAFT');
+  assert.ok(!source.includes('Select value={sel.status}'), 'the status Select is retired');
+  // ③ The assignee edits the draft too — dirty raises the head\u2019s ✓/undo,
+  // and only saveDraft dispatches.
+  assert.match(source, /<Select value=\{draft\.assignee\}/u, 'the picker shows the draft');
+  assert.match(source, /onchange=\{\(v: string\) => \(draft\.assignee = v\)\}/u, 'changing it is an edit, not a write');
 });
