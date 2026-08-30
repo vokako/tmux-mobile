@@ -111,14 +111,16 @@ test('create lives in the head, and compact gets the hamburger drawer (reopened 
   // scrim, and the back gesture closes the drawer FIRST.
   assert.match(source, /class="icon-btn side-toggle"[^>]*\n?[^>]*onclick=\{\(\) => \(sideOpen = !sideOpen\)\}/u,
     'the hamburger toggles the drawer');
-  assert.match(source, /<aside class="sidebar side-sheet" class:open=\{sideOpen\}>/u,
-    'the sidebar wears the SHARED sheet dialect (app.css, owner 2026-08-30)');
+  assert.match(source, /<aside class="sidebar" class:side-sheet=\{narrowVp\} class:open=\{narrowVp && sideOpen\}>/u,
+    'the sidebar wears the SHARED sheet dialect, CLASS-driven by the page\u2019s own narrow condition');
   assert.match(source, /class="side-scrim" onclick=\{\(\) => \(sideOpen = false\)\}/u, 'the scrim dismisses');
   assert.match(source, /if \(sideOpen\) \{ sideOpen = false; return true; \}/u, 'back closes the drawer first');
   assert.match(source, /sideOpen = false; \/\/ choosing closes the drawer/u, 'picking a project closes it');
   const style = source.slice(source.indexOf('<style>'));
   assert.match(appCss, /\.side-sheet \{[\s\S]{0,400}?transform: translateX\(-100%\);[\s\S]{0,200}?transition: transform var\(--t-move\)/u,
     'the sheet parks off-canvas and slides — the shared motion grammar, in app.css');
+  assert.ok(!/@media[^{]*\{[^{}]*\n\s*\.side-sheet \{/u.test(appCss),
+    'the sheet is CLASS-driven, never media-gated — a media gate disagreed with the Hub\u2019s wider compact (owner, 2026-08-30)');
   assert.ok(!style.includes('translateX'), 'the component does not re-declare the shared geometry');
   assert.ok(!style.includes('.board-root.picked'), 'the second-page drilldown is retired');
 });
@@ -126,7 +128,7 @@ test('create lives in the head, and compact gets the hamburger drawer (reopened 
 test('a parked drawer casts no shadow back onto the page (board #14, now the SHARED sheet)', () => {
   // The guarantee moved into app.css with the one drawer dialect (owner,
   // 2026-08-30): parked = no cast, depth only while open.
-  const parked = /\.side-sheet \{[\s\S]*?\n  \}/u.exec(appCss)?.[0] ?? '';
+  const parked = /\.side-sheet \{[\s\S]*?\n\}/u.exec(appCss)?.[0] ?? '';
   assert.match(parked, /transform: translateX\(-100%\);/u, 'the closed drawer is parked off-canvas');
   const shadows = [...parked.matchAll(/box-shadow:\s*([^;]+);/gu)].map((m) => m[1]?.trim());
   assert.deepEqual(shadows, ['none'], 'the closed rule has exactly one shadow declaration, and it is invisible');
@@ -152,7 +154,7 @@ test('a feed jump opens its issue in its OWN session (board #13 follow-up)', () 
 test('the board embeds in the Hub drawer without its sidebar (board #13 follow-up)', () => {
   assert.match(source, /embedded = false/u, 'embedded is a prop');
   assert.match(source, /<div class="board-root" class:embedded>/u, 'the root wears it');
-  assert.match(source, /\{#if !embedded\}\s*\n\s*<aside class="sidebar side-sheet"/u, 'no project sidebar in the drawer');
+  assert.match(source, /\{#if !embedded\}\s*\n\s*<aside class="sidebar"/u, 'no project sidebar in the drawer');
   const style = source.slice(source.indexOf('<style>'));
   assert.match(style, /\.board-root\.embedded \{ grid-template-columns: minmax\(0, 1fr\); \}/u,
     'one column — the drawer names the project');

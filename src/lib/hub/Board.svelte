@@ -28,6 +28,15 @@
   let projects = $state<ProjectRow[]>([]);
   let cur = $state('');
   let picked = $state(false);      // a manual pick overrides the session follow
+  // The Board sheet's own condition (≤760px — the old media gate, expressed
+  // where the class is applied; see app.css .side-sheet).
+  let narrowVp = $state(typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches);
+  $effect(() => {
+    const mq = window.matchMedia('(max-width: 760px)');
+    const fn = () => { narrowVp = mq.matches; };
+    mq.addEventListener('change', fn);
+    return () => mq.removeEventListener('change', fn);
+  });
   let sideOpen = $state(false);    // compact: the hamburger DRAWER (same dialect
                                    // as Chat/Terminal — reopened #11, no more
                                    // second-page drilldown)
@@ -322,7 +331,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="board-root" class:embedded>
   {#if !embedded}
-  <aside class="sidebar side-sheet" class:open={sideOpen}>
+  <aside class="sidebar" class:side-sheet={narrowVp} class:open={narrowVp && sideOpen}>
     <SideHandle />
     <div class="side-scroll subtle-scroll" use:scrollFade>
       <div class="side-h">{t('hubProjects')}</div>

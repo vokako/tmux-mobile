@@ -46,7 +46,7 @@ test('the Terminal page uses the shared sidebar geometry', () => {
   // width variable, one resize affordance. Terminal was the last holdout
   // (a hardcoded 280px column with no handle).
   assert.match(source, /\.page-layer\.term-page \{[^}]*grid-template-columns: var\(--sidebar-w\)/u);
-  const aside = source.match(/<aside class="term-side side-sheet"[\s\S]*?<\/aside>/u)?.[0] ?? '';
+  const aside = source.match(/<aside class="term-side"[\s\S]*?<\/aside>/u)?.[0] ?? '';
   assert.match(aside, /<SideHandle \/>/u, 'the sidebar carries the shared handle');
   assert.doesNotMatch(source, /grid-template-columns: 280px/u);
 });
@@ -56,11 +56,14 @@ test('the session list lives inside the Terminal page, sheeted on a phone', () =
   // it slides over and a pick closes it.
   const mounts = source.match(/<Sessions\b/gu) ?? [];
   assert.equal(mounts.length, 1, 'exactly one Sessions mount');
-  // side-sheet is the SHARED drawer dialect (app.css) — one geometry for
-  // Chat/Terminal/Board (owner, 2026-08-30).
-  const aside = source.match(/<aside class="term-side side-sheet"[\s\S]*?<\/aside>/u)?.[0] ?? '';
+  // side-sheet is the SHARED drawer dialect (app.css), CLASS-driven: applied
+  // exactly when this page's own compact condition holds — touch AND narrow,
+  // the old media gate (a media-gated sheet disagreed with the Hub's wider
+  // compact and stacked the sidebar into the page; owner, 2026-08-30).
+  const aside = source.match(/<aside class="term-side"[\s\S]*?<\/aside>/u)?.[0] ?? '';
+  assert.match(aside, /class:side-sheet=\{layout\.isTouchDevice && narrowVp\}/u);
   assert.match(aside, /class:sheet=\{layout\.isTouchDevice\}/u);
-  assert.match(aside, /class:open=\{layout\.isTouchDevice && sessListOpen\}/u);
+  assert.match(aside, /class:open=\{layout\.isTouchDevice && narrowVp && sessListOpen\}/u);
   assert.match(aside, /onPick=\{\(\) => sessListOpen = false\}/u);
   // The terminal's session chip opens that same sheet on a phone.
   assert.match(source, /onOpenSessions=\{layout\.isTouchDevice \? \(\) => sessListOpen = true : null\}/u);

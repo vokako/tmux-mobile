@@ -1115,6 +1115,15 @@
   // screen it is a column; on a phone it slides over the terminal, because
   // the terminal wants the whole screen there.
   let sessListOpen = $state(false);
+  // The Terminal sheet's own condition (touch AND ≤760px — the old media
+  // gate, now expressed where the class is applied; see app.css .side-sheet).
+  let narrowVp = $state(typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches);
+  $effect(() => {
+    const mq = window.matchMedia('(max-width: 760px)');
+    const fn = () => { narrowVp = mq.matches; };
+    mq.addEventListener('change', fn);
+    return () => mq.removeEventListener('change', fn);
+  });
   let slideAnim = $state('');
 
   function switchTab(target) {
@@ -1325,7 +1334,7 @@
            screen, a slide-over sheet on a phone (opened from the switcher's
            session tag). Kept MOUNTED so its polling and expansion state
            survive; `visible` pauses the poll while the page is hidden. -->
-      <aside class="term-side side-sheet" class:sheet={layout.isTouchDevice} class:open={layout.isTouchDevice && sessListOpen}>
+      <aside class="term-side" class:side-sheet={layout.isTouchDevice && narrowVp} class:sheet={layout.isTouchDevice} class:open={layout.isTouchDevice && narrowVp && sessListOpen}>
         {#if !layout.isTouchDevice}<SideHandle />{/if}
         <Sessions {openTerminal} activeTarget={terminalTarget}
           visible={page === 'terminal' && (!layout.isTouchDevice || sessListOpen)}

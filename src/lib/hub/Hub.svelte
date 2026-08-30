@@ -1778,7 +1778,7 @@
     <!-- side-sheet is the SHARED drawer dialect (app.css): inert on desktop,
          the parked-and-sliding sheet on the phone — one width, one shadow,
          one motion for Chat, Terminal and Board (owner, 2026-08-30). -->
-    <aside class="sidebar side-sheet" class:sheet={compact} class:open={compact && sideOpen}>
+    <aside class="sidebar" class:side-sheet={compact} class:sheet={compact} class:open={compact && sideOpen}>
       {#if !compact}<SideHandle />{/if}
       <div class="side-scroll subtle-scroll" use:scrollFade>
         <div class="side-h">{t('hubProjects')}</div>

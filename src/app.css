@@ -317,19 +317,24 @@ button:disabled {
    in the light theme (owner, 2026-08-28) — the cast exists only while open
    and fades with the slide. Full height under the status bar: the sheet
    anchors at 0 and pads with --sat (the APK's real inset arrives via the
-   inline override; raw env() reads 0 there). */
-@media (max-width: 760px) {
-  .side-sheet {
-    position: fixed; z-index: 26; inset: 0 auto 0 0;
-    width: min(300px, 86vw);
-    padding-top: var(--sat);
-    border-right: none;
-    transform: translateX(-100%);
-    box-shadow: none;
-    transition: transform var(--t-move) ease, box-shadow var(--t-move) ease;
-  }
-  .side-sheet.open { transform: none; box-shadow: 10px 0 30px rgba(0, 0, 0, 0.22); }
+   inline override; raw env() reads 0 there).
+   CLASS-driven, never media-gated: each page decides WHEN it is compact (the
+   Hub counts a wide TOUCH device as compact — mobile || narrow), and a
+   media gate here disagreed with that: on a tablet the always-mounted
+   sidebar got NO sheet styles and stacked into the page as a grid child,
+   shoving the conversation down ("怎么连这个屏幕高度都变了", owner
+   2026-08-30). The component applies .side-sheet exactly when its own
+   compact condition holds. */
+.side-sheet {
+  position: fixed; z-index: 26; inset: 0 auto 0 0;
+  width: min(300px, 86vw);
+  padding-top: var(--sat);
+  border-right: none;
+  transform: translateX(-100%);
+  box-shadow: none;
+  transition: transform var(--t-move) ease, box-shadow var(--t-move) ease;
 }
+.side-sheet.open { transform: none; box-shadow: 10px 0 30px rgba(0, 0, 0, 0.22); }
 @media (prefers-reduced-motion: reduce) { .side-sheet { transition: none; } }
 /* Its scrim (a <button> in some pages — strip the chrome). */
 .side-scrim {
