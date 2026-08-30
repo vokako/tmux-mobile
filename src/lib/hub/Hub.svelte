@@ -1902,17 +1902,21 @@
           {#if selected}
             <!-- The project's own verbs — Open/Rename/Close/Delete — as ONE
                  second-level menu (owner, 2026-08-29), glued to the name it
-                 acts on ("直接紧挨着 name，让人觉得是可以点击操作的", owner
-                 2026-08-30). A SIBLING of the h1, inside the group: within
-                 the heading, its overflow:hidden would clip the compact 42px
-                 tap overlay. Opens the SAME projectItems menu the sidebar
-                 row's long-press/right-click speaks. -->
-            <button class="icon-btn" title={t('hubProjectMenu')} aria-label={t('hubProjectMenu')}
+                 acts on. The affordance is a DOWNWARD CHEVRON, tight against
+                 the name — it reads as "expand this name for its options",
+                 the dropdown grammar everyone already knows (owner,
+                 2026-08-30: "换成一个向下的直角箭头…有点像把这个名字展开给
+                 出的下拉标签选项，这样对于人类更好理解"). A SIBLING of the
+                 h1, inside the group: within the heading, its
+                 overflow:hidden would clip the compact 42px tap overlay.
+                 Opens the SAME projectItems menu the sidebar row's
+                 long-press/right-click speaks. -->
+            <button class="icon-btn title-caret" title={t('hubProjectMenu')} aria-label={t('hubProjectMenu')}
               onclick={(e) => {
                 const r = e.currentTarget.getBoundingClientRect();
                 openCtx({ x: r.right, y: r.bottom + 4 }, selectedRow?.project.name ?? '', projectItems(selectedRow));
               }}>
-              <Icon name="dots" size={15} />
+              <Icon name="chevron-down" size={14} />
             </button>
           {/if}
         </div>
@@ -2815,7 +2819,12 @@
      `min-width: 0` so a long name still ellipsizes inside it, and a 3px gap —
      close enough to read as an affordance ON the name (owner, 2026-08-30)
      while the button keeps its own 28×26 box and its enlarged tap overlay. */
-  .title-group { display: flex; align-items: center; gap: 3px; min-width: 0; flex: 0 1 auto; }
+  .title-group { display: flex; align-items: center; gap: 1px; min-width: 0; flex: 0 1 auto; }
+  /* The caret hugs the last letter: a narrow box (the icon-btn's 28px read
+     as a detached control), quiet ink so the NAME stays the subject. The
+     compact rule's invisible tap overlay still gives it a full target. */
+  .title-caret { width: 20px; color: var(--text3); }
+  .title-caret:hover { color: var(--text); }
   /* The global `.page-head h1` rule ellipsizes its own text; with a second child
      it has to be a flex row, or the pencil is pushed out and clipped by the
      heading's own `overflow: hidden` as soon as the name is long. */

@@ -443,8 +443,8 @@ test('the ⋯ is grouped WITH the name, so the row gap cannot separate them (own
   assert.ok(group.length > 0, 'the title group must exist');
   assert.ok(group.includes('class="h1-text"'), 'the name lives in the group');
   assert.ok(group.includes('class="h1-edit"'), 'so does the rename input — the ⋯ must not jump when renaming starts');
-  assert.ok(group.includes('name="dots"'), 'and so does the ⋯');
-  assert.match(source, /\.title-group \{[^}]*gap: 3px[^}]*\}/u, 'a tight, deliberate gap — not the row rhythm');
+  assert.ok(group.includes('name="chevron-down"'), 'and so does its caret — the dropdown grammar (owner, 2026-08-30: "向下的直角箭头…像把这个名字展开")');
+  assert.match(source, /\.title-group \{[^}]*gap: 1px[^}]*\}/u, 'a tight, deliberate gap — not the row rhythm');
   assert.match(source, /\.title-group \{[^}]*min-width: 0[^}]*\}/u, 'a long name still ellipsizes inside the group');
   assert.match(source, /\.title-group \{[^}]*flex: 0 1 auto[^}]*\}/u,
     'content-sized: the group hugs the name, so the leftover row space goes to the spacer and the toggles stay right-aligned');
@@ -452,7 +452,7 @@ test('the ⋯ is grouped WITH the name, so the row gap cannot separate them (own
   // `overflow: hidden` would clip the invisible ~42px tap overlay the compact
   // rule adds, making the affordance read closer but tap worse.
   const h1 = source.slice(source.indexOf('<h1>', source.indexOf('<div class="title-group">')), source.indexOf('</h1>'));
-  assert.ok(!h1.includes('name="dots"'), 'the ⋯ sits beside the h1, never inside it');
+  assert.ok(!h1.includes('name="chevron-down"'), 'the caret sits beside the h1, never inside it');
 });
 
 test('a delivered prompt sheds its stamp and board deliveries wear the dialect (board #18)', () => {
