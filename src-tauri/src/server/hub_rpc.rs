@@ -694,12 +694,6 @@ pub(super) fn stamp_now() -> String {
     chrono::Local::now().format("%Y-%m-%d %H:%M").to_string()
 }
 
-/// Type an @mentioned chat line into each mentioned agent's pane. This is the
-/// delivery half of the hub: the bus stores the record, but an interactive
-/// CLI only reacts to what lands in its input. Delivery goes to MANAGED agent
-/// windows only — a shell would execute the message, and a window the user
-/// started by hand belongs to the user, not to this app.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 /// Type ONE stamped chat line into ONE named agent's pane — the targeted
 /// sibling of `deliver_mentions` (same gates: live window, managed, never a
 /// shell; same `record_delivery` bookkeeping). Quiet on every miss: a dead
@@ -707,6 +701,14 @@ pub(super) fn stamp_now() -> String {
 /// done-summary feedback edge and the board's review handoff — both are
 /// DELIVERIES the server decides on, never mention scans, so the
 /// record-only invariant of hook-sourced posts stays intact.
+///
+/// Desktop-only, like every `crate::projects` reader: the module is cfg'd out
+/// on android/ios. The gate belongs on the FUNCTION, immediately above `fn` —
+/// a doc comment between an attribute and its item is legal, so an attribute
+/// left dangling above someone else's docs is silently adopted by whatever
+/// item comes next. That is how this file broke the Android build once
+/// (see the `projects_readers_are_desktop_gated` test below).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn deliver_chat_line(session: &str, target_name: &str, line: &str) -> bool {
     use crate::projects::agents;
 
@@ -734,6 +736,7 @@ fn deliver_chat_line(session: &str, target_name: &str, line: &str) -> bool {
 /// Deliver a done summary into the pane of the agent that SPAWNED this one —
 /// the feedback half of `tmm spawn --brief`. Quiet on every miss: a human
 /// spawner, a dead window, or a pre-recipe agent has nobody to wake.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn deliver_done_to_spawner(session: &str, from: &str, summary: &str) {
     let ws = crate::projects::project_for_session(session).ok().flatten().map(|p| p.path);
     let Some(spawner) = crate::projects::spawned_by(ws.as_deref(), from) else { return };
@@ -747,6 +750,12 @@ fn deliver_done_to_spawner(session: &str, from: &str, summary: &str) {
     deliver_chat_line(session, &spawner, &line);
 }
 
+/// Type an @mentioned chat line into each mentioned agent's pane. This is the
+/// delivery half of the hub: the bus stores the record, but an interactive
+/// CLI only reacts to what lands in its input. Delivery goes to MANAGED agent
+/// windows only — a shell would execute the message, and a window the user
+/// started by hand belongs to the user, not to this app.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn deliver_mentions(session: &str, from: &str, body: &str) {
     use crate::projects::agents;
 
@@ -1429,5 +1438,88 @@ mod tests {
         // The window lookup fails first for a nonexistent session — either
         // error is INVALID_PARAMS, which is the contract that matters.
         assert_eq!(bad_state.error.as_ref().map(|e| e.code), Some(ERR_INVALID_PARAMS));
+    }
+
+    /// `crate::projects` is compiled out on android/ios, so every top-level
+    /// function in this file that reads it MUST carry the desktop cfg gate.
+    /// Nothing in the normal loop catches a missing one: `cargo test`, `cargo
+    /// build` and the dev server all target the desktop, where the module
+    /// exists — the error only appears in `npm run build:android`, which nobody
+    /// runs per change. It broke exactly that way (board #16): `deliver_chat_line`
+    /// was inserted directly beneath `deliver_mentions`' `#[cfg]`, adopted the
+    /// gate (a doc comment between an attribute and its item is legal, so the
+    /// attribute binds to whatever item follows), and left `deliver_mentions`
+    /// and `deliver_done_to_spawner` ungated — 10 errors, two commits before
+    /// anyone noticed.
+    ///
+    /// So the guard is a source contract, checked on the desktop where it is
+    /// cheap, instead of a cross-compile nobody runs.
+    #[test]
+    fn projects_readers_are_desktop_gated() {
+        const GATE: &str = "target_os = \"android\"";
+        let src = include_str!("hub_rpc.rs");
+        let lines: Vec<&str> = src.lines().collect();
+
+        // Column-0 `fn` only: this is about the file's own top-level items.
+        // Anything nested (an impl, a mod, this test module) inherits its
+        // parent's gate.
+        let is_top_fn = |l: &str| {
+            ["fn ", "pub fn ", "pub(crate) fn ", "pub(super) fn "]
+                .iter()
+                .any(|p| l.starts_with(p))
+        };
+
+        let mut checked = 0usize;
+        let mut ungated: Vec<&str> = Vec::new();
+        for (i, line) in lines.iter().enumerate() {
+            if !is_top_fn(line) {
+                continue;
+            }
+            // The body: from this line until braces balance again.
+            let mut depth = 0i32;
+            let mut body = String::new();
+            for l in &lines[i..] {
+                body.push_str(l);
+                body.push('\n');
+                depth += l.chars().filter(|c| *c == '{').count() as i32;
+                depth -= l.chars().filter(|c| *c == '}').count() as i32;
+                if depth <= 0 && body.contains('{') {
+                    break;
+                }
+            }
+            if !body.contains("crate::projects") {
+                continue;
+            }
+            checked += 1;
+            // The preamble: the contiguous run of attributes and doc comments
+            // above the signature. A gate anywhere in it counts — the rule under
+            // test is "gated", not "gated on a particular line".
+            let mut gated = false;
+            for l in lines[..i].iter().rev() {
+                let t = l.trim_start();
+                if !(t.starts_with('#') || t.starts_with("//")) {
+                    break;
+                }
+                if t.contains(GATE) {
+                    gated = true;
+                    break;
+                }
+            }
+            if !gated {
+                ungated.push(line);
+            }
+        }
+
+        assert!(
+            ungated.is_empty(),
+            "these read crate::projects with no desktop gate, so they break the Android build: {ungated:#?}"
+        );
+        // A guard that silently stops finding anything is not a guard. These
+        // three are the delivery helpers the regression hit; if they are renamed
+        // away, this count is the tripwire that says so.
+        assert!(
+            checked >= 3,
+            "expected at least 3 gated projects readers here, found {checked} — did the scan stop matching?"
+        );
     }
 }
