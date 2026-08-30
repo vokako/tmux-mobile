@@ -103,7 +103,7 @@ test('columns scroll alone; the page holds still (reopened #11)', () => {
 });
 
 test('create lives in the head, and compact gets the hamburger drawer (reopened #11)', () => {
-  const head = source.slice(source.indexOf('<div class="head">'), source.indexOf('</div>', source.indexOf('boardNew')));
+  const head = source.slice(source.indexOf('<div class="page-head">'), source.indexOf('</div>', source.indexOf('boardNew')));
   assert.match(head, /class="icon-btn go" title=\{t\('boardNew'\)\}/u, 'new-issue is the head\u2019s top-right action');
   assert.ok(!source.includes('class="new-issue"'), 'the bottom button is gone');
   // The drawer speaks the Chat/Terminal dialect: hamburger toggle, sheet,
@@ -195,4 +195,14 @@ test('the detail speaks board #15: project-named page, status slider, confirmed 
   // and only saveDraft dispatches.
   assert.match(source, /<Select value=\{draft\.assignee\}/u, 'the picker shows the draft');
   assert.match(source, /onchange=\{\(v: string\) => \(draft\.assignee = v\)\}/u, 'changing it is an edit, not a write');
+});
+
+test('the bar IS Chat\u2019s page-head, and the name appears once (board #15 reopen)', () => {
+  // The shared app.css dialect carries height/padding/border/type — the
+  // component may not re-style it (the drift that split the sidebars once).
+  assert.match(source, /<div class="page-head">/u, 'the shared class, not a scoped .head');
+  const style = source.slice(source.indexOf('<style>'));
+  assert.ok(!style.includes('.page-head'), 'no scoped re-style of the shared bar');
+  assert.ok(!/\.head \{/u.test(style), 'the old scoped head rules are retired');
+  assert.ok(!source.includes('h-session'), 'the project name is written ONCE — the session chip retired');
 });

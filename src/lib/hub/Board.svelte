@@ -329,8 +329,13 @@
     <div class="side-scrim" onclick={() => (sideOpen = false)}></div>
   {/if}
   {/if}
-  <div class="board" onkeydowncapture={onKey}>
-  <div class="head">
+  <div class="bmain" onkeydowncapture={onKey}>
+  <!-- The bar is Chat's own .page-head dialect (board #15: "board上边那一栏
+       应该和chat样式一致…按钮风格也要一致"): the shared app.css class carries
+       the height, padding, border and h1 type — a scoped re-style is the
+       drift that split the sidebars once. The project name appears ONCE
+       ("project名称写一遍就行了" — the session chip retired). -->
+  <div class="page-head">
     <!-- Compact: the hamburger calls the project drawer — the same dialect as
          Chat and Terminal (reopened #11), never a second-page drilldown. -->
     {#if !embedded}
@@ -342,7 +347,6 @@
     <!-- The page names the PROJECT, not itself (board #15): the tab already
          says "Board", so the title says WHOSE board this is. -->
     <h1>{projects.find((p) => p.project.session === cur)?.project.name ?? (cur || t('board'))}</h1>
-    {#if cur}<span class="h-session">{cur}</span>{/if}
     <span class="spacer"></span>
     {#if !sel && !creating}
       <!-- New issue lives in the page head's top-right (reopened #11:
@@ -352,6 +356,7 @@
       </button>
     {/if}
   </div>
+  <div class="board">
   {#if !ready && !issues.length}
     <div class="empty">…</div>
   {:else if sel}
@@ -489,6 +494,7 @@
   {/if}
   {#if err}<div class="err">{err}</div>{/if}
   </div>
+  </div>
   <ConfirmDialog open={!!pendingDiscard} danger={false}
     title={t('confirmDiscardTitle')} note={t('boardDiscardNote')}
     confirmLabel={t('confirmDiscard')} cancelLabel={t('cancel')}
@@ -531,8 +537,12 @@
   }
   .side-scrim { position: fixed; inset: 0; z-index: 25; background: rgba(0, 0, 0, 0.45); }
   @media (prefers-reduced-motion: reduce) { .sidebar { transition: none; } }
+  /* The main column: the shared page-head on top, the padded board below —
+     the head spans full width like Chat's, the padding belongs to the content. */
+  .bmain { display: flex; flex-direction: column; height: 100%; min-width: 0; overflow: hidden; }
   .board {
-    height: 100%;
+    flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     /* The PAGE holds still; each column scrolls its own cards (reopened #11:
@@ -546,9 +556,6 @@
     box-sizing: border-box;
     min-width: 0;
   }
-  .head { display: flex; align-items: baseline; gap: 10px; }
-  .head h1 { font-size: var(--fs-title); font-weight: 600; color: var(--text); margin: 0; }
-  .h-session { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-meta); color: var(--text3); }
   .empty { color: var(--text3); font-size: var(--fs-ui); padding: 18px 6px; }
   .err { color: var(--status-danger); font-size: var(--fs-meta); }
 
