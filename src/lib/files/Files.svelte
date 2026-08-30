@@ -113,7 +113,10 @@
       if (view === 'info') { navAnim('back'); view = fromGit ? (fromGit = false, 'git') : currentFile?.content != null ? 'preview' : 'list'; return true; }
       if (view === 'preview') { navAnim('back'); if (fromGit) { fromGit = false; view = 'git'; } else { view = 'list'; } currentFile = null; return true; }
       if (view === 'local') { navAnim('back'); view = 'list'; return true; }
-      if (cwd !== '/') { goUp(); return true; }
+      // The directory step retraces the user's OWN path (board #17); at the
+      // entry point the stack is empty and the floor decides — App returns a
+      // chat jump to the chat, a tab visit to the root.
+      if (popDir()) return true;
       return false;
     });
   });
@@ -396,12 +399,33 @@
     requestAnimationFrame(() => { navAnimClass = dir; });
   }
 
+  // ── BACK is a HISTORY, not a parent walk (board #17) ─────────────────
+  // "实现一个类似于'后退'的逻辑": every navigation the USER makes inside the
+  // page (entering a directory, a crumb, a bookmark, the up/home buttons)
+  // pushes where they WERE, and back pops exactly that path — so back retraces
+  // the user's own steps. An EXTERNAL move (session switch, the cwd follow
+  // rule, a drawer handoff) RESETS the stack instead: it is a new entry point,
+  // and back from there should leave the page (rule 1: jumped in → back
+  // returns to the origin page, via App's return slot), never climb to /.
+  let dirHist = [];
+  function navTo(path) {
+    if (cwd && path !== cwd) dirHist.push(cwd);
+    loadDir(path);
+  }
+  function popDir() {
+    const prev = dirHist.pop();
+    if (prev == null) return false;
+    navAnim('back');
+    loadDir(prev);
+    return true;
+  }
+
   function goBack() {
     navAnim('back');
     if (view === 'edit') { view = 'preview'; }
     else if (view === 'info') { view = fromGit ? (fromGit = false, 'git') : currentFile?.content != null ? 'preview' : 'list'; }
     else if (view === 'preview') { if (fromGit) { fromGit = false; view = 'git'; } else { view = 'list'; } currentFile = null; }
-    else goUp();
+    else popDir();
   }
 
   async function renderPdf(data) {
@@ -482,6 +506,7 @@
       prevSession = session;
       const parked = browsed.get(session);
       lastSourceDir = parked?.sourceDir ?? '';
+      dirHist = []; // a session switch is a new entry point, not a step
       if (parked?.cwd) {
         cwd = parked.cwd;
         view = 'list';
@@ -497,6 +522,7 @@
         lastSourceDir = r.path;
         cwd = r.path;
         view = 'list';
+        dirHist = []; // the follow rule moved us — a new entry point
         loadDir(r.path);
       }
     }).catch(() => {
@@ -521,6 +547,7 @@
     lastNav = navRequest.n;
     if (navRequest.path) {
       view = 'list';
+      dirHist = []; // a drawer/see-here handoff is a new entry point
       loadDir(navRequest.path);
       // Disarm the cwd-follow for the CURRENT real cwd: without this a
       // same-moment session switch re-follows the project root and stomps
@@ -559,13 +586,13 @@
   function goUp() {
     navAnim('back');
     const parent = cwd.replace(/\/[^/]+\/?$/, '') || '/';
-    loadDir(parent);
+    navTo(parent);
   }
 
   function scrollEnd(el) { el.scrollLeft = el.scrollWidth; }
 
   function goHome() {
-    fsCwd(session).then(r => loadDir(r.path)).catch(() => loadDir('/'));
+    fsCwd(session).then(r => navTo(r.path)).catch(() => navTo('/'));
   }
 
   const PREVIEW_SIZE_LIMIT = 5 * 1024 * 1024;
@@ -612,7 +639,7 @@
     navAnim('fwd');
     if (entry.type === 'dir') {
       navPush();
-      loadDir(entry.path);
+      navTo(entry.path);
       return;
     }
     if (entry.type === 'broken') {
@@ -1282,9 +1309,9 @@
 
     <!-- Path -->
     <div class="bc-path-row" bind:this={bcPathEl}>
-      <button class="bc-seg" onclick={() => loadDir('/')}>/</button>
+      <button class="bc-seg" onclick={() => navTo('/')}>/</button>
       {#each breadcrumbs as bc}
-        <button class="bc-seg" onclick={() => loadDir(bc.path)}>{bc.name}</button>
+        <button class="bc-seg" onclick={() => navTo(bc.path)}>{bc.name}</button>
         <span class="bc-sep">/</span>
       {/each}
     </div>
@@ -1294,7 +1321,7 @@
         {#each bookmarks as bm}
           <div class="bm-row">
             <span class="bm-icon"><Icon name="star-filled" size={13} /></span>
-            <button class="bm-path" onclick={() => { loadDir(bm); showBookmarks = false; }} use:scrollEnd>
+            <button class="bm-path" onclick={() => { navTo(bm); showBookmarks = false; }} use:scrollEnd>
               {bm}
             </button>
             <button class="bm-del" onclick={() => toggleBookmark(bm)}><Icon name="x" size={12} /></button>
