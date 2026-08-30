@@ -422,20 +422,37 @@ test('the header folds the project verbs into ONE dots menu (owner, 2026-08-29)'
   // sidebar row speaks — one source of truth; the partition toggles stay out
   // (navigation, not consequence).
   assert.match(source, /projectItems\(selectedRow\)\);/u, 'the dots button opens the shared menu');
-  // The ⋯ hugs the NAME it acts on; the partition toggles keep the right
-  // edge (owner, 2026-08-30: "...按钮应该在项目名称右边紧挨着，其他board
-  // file terminal按钮就现在的位置就行，靠右对齐").
-  const iDots = source.indexOf('name="dots"');
-  const iSpacer = source.indexOf('<span class="spacer"></span>', source.indexOf('class="h1-text"'));
-  const iToggles = source.indexOf('<!-- The task board:');
-  assert.ok(iDots >= 0 && iDots < iSpacer && iSpacer < iToggles,
-    'dots before the spacer (beside the name), toggles after it (right edge)');
+  // The ⋯/name grouping is pinned by its own test below ("grouped WITH the
+  // name") — the title-group holds them at a 3px gap, sibling of the h1.
   const head = source.slice(source.indexOf('class="h1-text"'), source.indexOf('{#if selected}', source.indexOf('class="h1-text"')));
   assert.ok(!head.includes('h1-pen'), 'the title pencil retired — rename lives in the menu');
   const bar = source.slice(source.indexOf('<span class="spacer"></span>'), source.indexOf('<!-- The task board:'));
   assert.ok(!bar.includes("name=\"trash\"") && !bar.includes("name=\"stop\"") && !bar.includes("name=\"zap\""),
     'no standalone delete/close/open buttons in the header');
   assert.ok(!bar.includes('name="dots"'), 'the ⋯ moved BESIDE the name (owner, 2026-08-30) — not in the right-aligned group');
+});
+
+test('the ⋯ is grouped WITH the name, so the row gap cannot separate them (owner, 2026-08-30)', () => {
+  // "离 project name 还是有点远，可以直接紧挨着 name，让人觉得是可以点击操作的".
+  // Being the next child of .page-head was not enough: the header's own gap
+  // (10px, 7px compact) sat between them, and on ≤760px the shared
+  // `.page-head h1 { flex: 1 1 auto }` stretched the title across the row and
+  // parked the ⋯ at the far right. One content-sized group fixes both without
+  // touching the shared rule.
+  const group = source.slice(source.indexOf('<div class="title-group">'), source.indexOf('<!-- The FULL path'));
+  assert.ok(group.length > 0, 'the title group must exist');
+  assert.ok(group.includes('class="h1-text"'), 'the name lives in the group');
+  assert.ok(group.includes('class="h1-edit"'), 'so does the rename input — the ⋯ must not jump when renaming starts');
+  assert.ok(group.includes('name="dots"'), 'and so does the ⋯');
+  assert.match(source, /\.title-group \{[^}]*gap: 3px[^}]*\}/u, 'a tight, deliberate gap — not the row rhythm');
+  assert.match(source, /\.title-group \{[^}]*min-width: 0[^}]*\}/u, 'a long name still ellipsizes inside the group');
+  assert.match(source, /\.title-group \{[^}]*flex: 0 1 auto[^}]*\}/u,
+    'content-sized: the group hugs the name, so the leftover row space goes to the spacer and the toggles stay right-aligned');
+  // The button must stay a SIBLING of the h1, not a child: the heading's
+  // `overflow: hidden` would clip the invisible ~42px tap overlay the compact
+  // rule adds, making the affordance read closer but tap worse.
+  const h1 = source.slice(source.indexOf('<h1>', source.indexOf('<div class="title-group">')), source.indexOf('</h1>'));
+  assert.ok(!h1.includes('name="dots"'), 'the ⋯ sits beside the h1, never inside it');
 });
 
 test('a delivered prompt sheds its stamp and board deliveries wear the dialect (board #18)', () => {

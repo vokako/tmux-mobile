@@ -1863,41 +1863,59 @@
              exist on a phone, where this page mostly lives. The icon sits INSIDE
              the title button, so it is a hint on the thing it edits rather than
              a second control next to it. -->
-        {#if renaming}
-          <input class="h1-edit" bind:this={renameEl} bind:value={renameDraft}
-            aria-label={t('projectRename')} maxlength="80"
-            onkeydown={(e) => {
-              if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
-              else if (e.key === 'Escape') { e.preventDefault(); renaming = false; }
-            }}
-            onblur={commitRename} />
-        {:else}
-          <h1>
-            <!-- The NAME is text, not a control. Making the whole title clickable
-                 meant every attempt to select it, or a stray tap on the way to
-                 something else, opened an editor ("不应该点击名字都是改名，只有点击
-                 右边小图标才是改名", owner 2026-08-20). The pencil beside it is the
-                 rename affordance, and it is a real button so assistive tech and
-                 Enter/Space come for free. -->
-            <span class="h1-text">{selectedRow?.project.name ?? ''}</span>
-          </h1>
-        {/if}
-        {#if selected}
-          <!-- The project's own verbs — Open/Rename/Close/Delete — fold into
-               ONE second-level menu (owner, 2026-08-29), and the ⋯ sits RIGHT
-               BESIDE the name it acts on (owner, 2026-08-30: "...按钮应该在项
-               目名称右边紧挨着"); the partition toggles keep the right edge.
-               It opens the SAME projectItems menu the sidebar row's
-               long-press/right-click speaks, so the entry points cannot
-               disagree. -->
-          <button class="icon-btn" title={t('hubProjectMenu')} aria-label={t('hubProjectMenu')}
-            onclick={(e) => {
-              const r = e.currentTarget.getBoundingClientRect();
-              openCtx({ x: r.right, y: r.bottom + 4 }, selectedRow?.project.name ?? '', projectItems(selectedRow));
-            }}>
-            <Icon name="dots" size={15} />
-          </button>
-        {/if}
+        <!-- The ⋯ belongs TO the name, so the two are ONE group and the row
+             gap falls OUTSIDE it: 3px between the name and its menu, the
+             header's own spacing between this group and the path/spacer
+             (owner, 2026-08-30: "离 project name 还是有点远，可以直接紧挨着
+             name，让人觉得是可以点击操作的").
+
+             A wrapper rather than the two alternatives: a negative margin
+             cancelling the row gap would be wrong arithmetic the moment that
+             gap changes (it is 10px here, 7px compact), and moving the button
+             INSIDE the h1 would put it under the heading's `overflow: hidden`,
+             which clips the invisible ~42px tap overlay the compact rule adds
+             — the affordance would read closer and be harder to hit. The group
+             also sidesteps the phone's shared `.page-head h1 { flex: 1 1 auto }`
+             without fighting it: the h1 may still stretch, but only inside a
+             group that is itself content-sized, so the ⋯ stays against the
+             name instead of being parked at the far right. -->
+        <div class="title-group">
+          {#if renaming}
+            <input class="h1-edit" bind:this={renameEl} bind:value={renameDraft}
+              aria-label={t('projectRename')} maxlength="80"
+              onkeydown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
+                else if (e.key === 'Escape') { e.preventDefault(); renaming = false; }
+              }}
+              onblur={commitRename} />
+          {:else}
+            <h1>
+              <!-- The NAME is text, not a control. Making the whole title clickable
+                   meant every attempt to select it, or a stray tap on the way to
+                   something else, opened an editor ("不应该点击名字都是改名，只有点击
+                   右边小图标才是改名", owner 2026-08-20). The pencil beside it is the
+                   rename affordance, and it is a real button so assistive tech and
+                   Enter/Space come for free. -->
+              <span class="h1-text">{selectedRow?.project.name ?? ''}</span>
+            </h1>
+          {/if}
+          {#if selected}
+            <!-- The project's own verbs — Open/Rename/Close/Delete — as ONE
+                 second-level menu (owner, 2026-08-29), glued to the name it
+                 acts on ("直接紧挨着 name，让人觉得是可以点击操作的", owner
+                 2026-08-30). A SIBLING of the h1, inside the group: within
+                 the heading, its overflow:hidden would clip the compact 42px
+                 tap overlay. Opens the SAME projectItems menu the sidebar
+                 row's long-press/right-click speaks. -->
+            <button class="icon-btn" title={t('hubProjectMenu')} aria-label={t('hubProjectMenu')}
+              onclick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                openCtx({ x: r.right, y: r.bottom + 4 }, selectedRow?.project.name ?? '', projectItems(selectedRow));
+              }}>
+              <Icon name="dots" size={15} />
+            </button>
+          {/if}
+        </div>
         <!-- The FULL path, not a middle-elided stub: it renders whole when it
              fits, and when it doesn't the box scrolls (wheel included) instead
              of ellipsizing — "不要直接用省略号" (owner, 2026-08-20). Desktop
@@ -2793,6 +2811,11 @@
      like a form, but relying on hover ALONE hid the feature (no hover on a
      phone). The edit state keeps the title's metrics so nothing in the row
      shifts when it appears. */
+  /* The name and its ⋯ are ONE unit: content-sized so the group hugs the text,
+     `min-width: 0` so a long name still ellipsizes inside it, and a 3px gap —
+     close enough to read as an affordance ON the name (owner, 2026-08-30)
+     while the button keeps its own 28×26 box and its enlarged tap overlay. */
+  .title-group { display: flex; align-items: center; gap: 3px; min-width: 0; flex: 0 1 auto; }
   /* The global `.page-head h1` rule ellipsizes its own text; with a second child
      it has to be a flex row, or the pencil is pushed out and clipped by the
      heading's own `overflow: hidden` as soon as the name is long. */
@@ -2800,6 +2823,8 @@
   /* The name is selectable text that ellipsizes; the pencil never shrinks with
      it, and it is the only thing that renames. */
   .h1-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Glued to the name (2px, inside the h1's flex) and never shrinking with
+     it — the retired rename pencil's exact geometry. */
   .h1-edit {
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     font-size: var(--fs-title); font-weight: 600; color: var(--text);
