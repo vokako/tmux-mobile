@@ -145,19 +145,34 @@ test('a parked drawer casts no shadow back onto the page (board #14, now the SHA
   assert.ok(!style.includes('box-shadow: 10px'), 'the Board carries no private sheet cast');
 })
 
-test('the sheet keeps its compositor layer, so finishing the slide cannot blink (board #21)', () => {
-  // The open state is `transform: none`: without a standing will-change the
-  // WebView drops the sheet's layer at transitionend and re-rasterizes it into
-  // the parent — a blank frame at the exact moment the drawer finishes opening.
-  // Android Chrome hides that seam; the compiled APK's System WebView showed it
-  // (owner, 2026-08-30: "完全弹出的一瞬间 好像没有了闪了一下").
+test('the sheet keeps its compositor layer WITHOUT becoming a fixed containing block (board #21)', async () => {
+  // The blink: the open state is `transform: none`, so without a standing
+  // compositing hint the WebView drops the sheet's layer at transitionend and
+  // re-rasterizes it into the parent — a blank frame at the exact moment the
+  // drawer finishes opening. Android Chrome hides that seam; the compiled
+  // APK's System WebView showed it (owner, 2026-08-30).
   const parked = /\.side-sheet\.side-sheet\.side-sheet \{[\s\S]*?\n\}/u.exec(appCss)?.[0] ?? '';
-  assert.match(parked, /will-change: transform;/u,
+  assert.match(parked, /will-change: opacity;/u,
     'the sheet is promoted for its whole mounted life, not just while the transform transitions');
-  // The .page lesson travels with it: a standing will-change makes the sheet
-  // the containing block for fixed descendants, so none may live inside it.
-  assert.match(parked, /Nothing fixed may render inside a\s+sheet/u,
-    'the rule carries its own caution — the constraint is part of the contract');
+  // The hint must NOT come from the containing-block family: a standing
+  // transform/perspective/filter hint re-anchors position:fixed DESCENDANTS to
+  // the 300px sheet (the .page lesson, and the design-language rule) — and the
+  // Terminal sheet's tree really has them, verified structurally below.
+  assert.ok(!/will-change:[^;]*(transform|perspective|filter)/u.test(parked),
+    'no standing containing-block hint on the sheet');
+  // The evidence, kept live so the constraint cannot silently expire: the
+  // term-side sheet mounts Sessions, and Sessions renders dialogs whose
+  // backdrop/dialog are position:fixed — they must keep the VIEWPORT.
+  const app = await readFile(new URL('../../App.svelte', import.meta.url), 'utf8');
+  assert.match(app, /<aside class="term-side" class:side-sheet=\{[^}]+\}[\s\S]{0,200}?<Sessions /u,
+    'the Terminal sheet mounts Sessions inside the aside');
+  const sessions = await readFile(new URL('../sessions/Sessions.svelte', import.meta.url), 'utf8');
+  assert.match(sessions, /<CreateProjectDialog /u, 'Sessions renders the create dialog in its tree');
+  assert.match(sessions, /<ConfirmDialog /u, 'Sessions renders the confirm dialog in its tree');
+  for (const rel of ['../projects/CreateProjectDialog.svelte', '../ui/ConfirmDialog.svelte']) {
+    const dlg = await readFile(new URL(rel, import.meta.url), 'utf8');
+    assert.match(dlg, /position: fixed/u, `${rel} is a fixed overlay — it must anchor to the viewport`);
+  }
 })
 
 test('a feed jump opens its issue in its OWN session (board #13 follow-up)', () => {

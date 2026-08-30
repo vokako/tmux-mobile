@@ -74,7 +74,16 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   are placed, measured, shown. A transform hint (`will-change`) may exist only
   WHILE a slide runs:
   a resting transform turns the page into a containing block and breaks
-  every fixed popover.
+  every fixed popover. A SHEET is the one sanctioned standing hint, and it is
+  `will-change: opacity`, never transform: the Android System WebView drops a
+  sheet's compositor layer at transitionend (open = `transform: none`) and
+  blinks a blank frame while it re-rasterizes (board #21 — Android Chrome
+  hides the seam, the APK does not), so the sheet keeps a standing layer; but
+  the hint must stay OUTSIDE the containing-block family
+  (transform/perspective/filter), because a sheet's TREE contains fixed
+  overlays (Sessions' dialogs) that must keep the viewport. Opacity promotes
+  without re-anchoring anything — it adds only a stacking context, which
+  `position: fixed` + z-index already gave the sheet.
 - **Interactive edge-swipe** (Files is the reference): the drag IS the
   animation — content follows the finger with damping (×0.4, capped ~96px,
   inline transform, no transition), an intent lock keeps diagonal scrolls
