@@ -445,9 +445,12 @@ test('the ⋯ is grouped WITH the name, so the row gap cannot separate them (own
   assert.ok(group.includes('class="h1-edit"'), 'so does the rename input — the ⋯ must not jump when renaming starts');
   assert.ok(group.includes('name="chevron-down"'), 'and so does its caret — the dropdown grammar (owner, 2026-08-30: "向下的直角箭头…像把这个名字展开")');
   assert.match(source, /\.title-group \{[^}]*gap: 1px[^}]*\}/u, 'a tight, deliberate gap — not the row rhythm');
-  assert.match(source, /\.title-group \{[^}]*min-width: 0[^}]*\}/u, 'a long name still ellipsizes inside the group');
-  assert.match(source, /\.title-group \{[^}]*flex: 0 1 auto[^}]*\}/u,
-    'content-sized: the group hugs the name, so the leftover row space goes to the spacer and the toggles stay right-aligned');
+  // The NAME wins the width fight (owner, 2026-08-30: "名字还是优先要显示
+  // 全的"): the group refuses to shrink, the PATH is the dynamic region
+  // (flex-shrink + min-width 0 + its own scroll), buttons never compress.
+  assert.match(source, /\.title-group \{[^}]*flex: none[^}]*\}/u, 'the name group refuses to shrink');
+  assert.match(source, /\.path \{[\s\S]{0,400}?min-width: 0; flex: 0 1 auto;/u,
+    'the path gives way first — it can shrink below content and scrolls');
   // The button must stay a SIBLING of the h1, not a child: the heading's
   // `overflow: hidden` would clip the invisible ~42px tap overlay the compact
   // rule adds, making the affordance read closer but tap worse.

@@ -2819,7 +2819,11 @@
      `min-width: 0` so a long name still ellipsizes inside it, and a 3px gap —
      close enough to read as an affordance ON the name (owner, 2026-08-30)
      while the button keeps its own 28×26 box and its enlarged tap overlay. */
-  .title-group { display: flex; align-items: center; gap: 1px; min-width: 0; flex: 0 1 auto; }
+  /* The NAME displays WHOLE, with priority (owner, 2026-08-30: "名字还是优
+     先要显示全的，尽量不要省略"): the group refuses to shrink — the PATH is
+     the flexible region that gives way (it scrolls), and the buttons never
+     compress. */
+  .title-group { display: flex; align-items: center; gap: 1px; flex: none; max-width: 60%; }
   /* The caret hugs the last letter: a narrow box (the icon-btn's 28px read
      as a detached control), quiet ink so the NAME stays the subject. The
      compact rule's invisible tap overlay still gives it a full target. */
@@ -2887,6 +2891,9 @@
   .path {
     font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text3);
     white-space: nowrap; overflow-x: auto; overflow-y: hidden;
+    /* THE dynamic region: shrinks below its content first (min-width: 0 +
+       scroll) while the name group and the buttons stay whole; the spacer
+       still owns the leftover, keeping the toggles right-aligned. */
     min-width: 0; flex: 0 1 auto;
     scrollbar-width: none; -webkit-overflow-scrolling: touch;
   }
