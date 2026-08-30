@@ -1991,13 +1991,17 @@
             onclick={(e) => { e.stopPropagation(); showPanePicker = !showPanePicker; }}
           />
         {:else if onOpenSessions}
-          <AgentChip
-            attention={otherTerminalSessionHasNotification(session)}
-            label={session}
-            variant="active"
-            title={session}
-            onclick={(e) => { e.stopPropagation(); onOpenSessions(); }}
-          />
+          <!-- The phone's lead-in matches Chat and Board (owner, 2026-08-30:
+               "三个横线 + 项目名"): the hamburger opens the session drawer,
+               the name is the title — the window chips after it keep their
+               quick-switch behavior untouched. The chip's attention cue
+               survives as a dot on the hamburger. -->
+          <button class="icon-btn ham" title={t('sessions')} aria-label={t('sessions')}
+            onclick={(e) => { e.stopPropagation(); onOpenSessions(); }}>
+            <Icon name="menu" size={16} />
+            {#if otherTerminalSessionHasNotification(session)}<span class="ham-dot" aria-hidden="true"></span>{/if}
+          </button>
+          <h1 class="win-title" title={session}>{session}</h1>
         {:else}
           <h1 class="win-title" title={session}>{session}</h1>
         {/if}
@@ -2258,6 +2262,14 @@
   /* The title is identity, the chips are navigation: cap the title so a long
      session name never squeezes the window chips off the bar. */
   .win-title { max-width: 22ch; }
+  /* The hamburger's attention cue — the session chip it replaced carried one,
+     and a notification from another session must survive the restyle. */
+  .ham { position: relative; flex: none; }
+  .ham .ham-dot {
+    position: absolute; top: 3px; right: 3px;
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--status-warn);
+  }
   /* Collapsed head (desktop): the chip sits at the RIGHT end of the bar,
      which is what "compressed to the right end of the bar" always meant. */
   .win-bar-spacer { flex: 1; min-width: 0; }

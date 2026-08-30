@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('./Board.svelte', import.meta.url), 'utf8');
+const appCss = await readFile(new URL('../../app.css', import.meta.url), 'utf8');
 
 test('the issue detail is a DRAFT: explicit save, clean cancel, guarded exits (board #11)', () => {
   // Only the explicit Save persists the text fields — the inputs bind the
@@ -110,27 +111,31 @@ test('create lives in the head, and compact gets the hamburger drawer (reopened 
   // scrim, and the back gesture closes the drawer FIRST.
   assert.match(source, /class="icon-btn side-toggle"[^>]*\n?[^>]*onclick=\{\(\) => \(sideOpen = !sideOpen\)\}/u,
     'the hamburger toggles the drawer');
-  assert.match(source, /<aside class="sidebar" class:open=\{sideOpen\}>/u, 'the sidebar is the sheet');
+  assert.match(source, /<aside class="sidebar side-sheet" class:open=\{sideOpen\}>/u,
+    'the sidebar wears the SHARED sheet dialect (app.css, owner 2026-08-30)');
   assert.match(source, /class="side-scrim" onclick=\{\(\) => \(sideOpen = false\)\}/u, 'the scrim dismisses');
   assert.match(source, /if \(sideOpen\) \{ sideOpen = false; return true; \}/u, 'back closes the drawer first');
   assert.match(source, /sideOpen = false; \/\/ choosing closes the drawer/u, 'picking a project closes it');
   const style = source.slice(source.indexOf('<style>'));
-  assert.match(style, /transform: translateX\(-100%\);[\s\S]{0,300}?transition: transform var\(--t-move\)/u,
-    'the sheet parks off-canvas and slides — the shared motion grammar');
+  assert.match(appCss, /\.side-sheet \{[\s\S]{0,400}?transform: translateX\(-100%\);[\s\S]{0,200}?transition: transform var\(--t-move\)/u,
+    'the sheet parks off-canvas and slides — the shared motion grammar, in app.css');
+  assert.ok(!style.includes('translateX'), 'the component does not re-declare the shared geometry');
   assert.ok(!style.includes('.board-root.picked'), 'the second-page drilldown is retired');
 });
 
-test('a parked drawer casts no shadow back onto the page (board #14)', () => {
-  const style = source.slice(source.indexOf('<style>'));
-  const parked = /\.sidebar \{\s*\n\s*position: fixed;[\s\S]*?\n\s*\}/u.exec(style)?.[0] ?? '';
+test('a parked drawer casts no shadow back onto the page (board #14, now the SHARED sheet)', () => {
+  // The guarantee moved into app.css with the one drawer dialect (owner,
+  // 2026-08-30): parked = no cast, depth only while open.
+  const parked = /\.side-sheet \{[\s\S]*?\n  \}/u.exec(appCss)?.[0] ?? '';
   assert.match(parked, /transform: translateX\(-100%\);/u, 'the closed drawer is parked off-canvas');
-  assert.match(parked, /box-shadow: none;/u,
-    'an off-canvas drawer cannot keep a cast — its blur leaks onto the page’s left edge');
   const shadows = [...parked.matchAll(/box-shadow:\s*([^;]+);/gu)].map((m) => m[1]?.trim());
   assert.deepEqual(shadows, ['none'], 'the closed rule has exactly one shadow declaration, and it is invisible');
-  assert.match(style, /\.sidebar\.open \{ transform: none; box-shadow: 10px 0 30px rgba\(0, 0, 0, 0\.22\); \}/u,
-    'depth appears only while open and matches the shared Terminal/Hub sheet cast');
-});
+  assert.match(appCss, /\.side-sheet\.open \{ transform: none; box-shadow: 10px 0 30px rgba\(0, 0, 0, 0\.22\); \}/u,
+    'depth appears only while open');
+  // And no component keeps a private copy that could drift.
+  const style = source.slice(source.indexOf('<style>'));
+  assert.ok(!style.includes('box-shadow: 10px'), 'the Board carries no private sheet cast');
+})
 
 test('a feed jump opens its issue in its OWN session (board #13 follow-up)', () => {
   // The request names the session because a manual pick may have parked the
@@ -147,7 +152,7 @@ test('a feed jump opens its issue in its OWN session (board #13 follow-up)', () 
 test('the board embeds in the Hub drawer without its sidebar (board #13 follow-up)', () => {
   assert.match(source, /embedded = false/u, 'embedded is a prop');
   assert.match(source, /<div class="board-root" class:embedded>/u, 'the root wears it');
-  assert.match(source, /\{#if !embedded\}\s*\n\s*<aside class="sidebar"/u, 'no project sidebar in the drawer');
+  assert.match(source, /\{#if !embedded\}\s*\n\s*<aside class="sidebar side-sheet"/u, 'no project sidebar in the drawer');
   const style = source.slice(source.indexOf('<style>'));
   assert.match(style, /\.board-root\.embedded \{ grid-template-columns: minmax\(0, 1fr\); \}/u,
     'one column — the drawer names the project');

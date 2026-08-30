@@ -1325,7 +1325,7 @@
            screen, a slide-over sheet on a phone (opened from the switcher's
            session tag). Kept MOUNTED so its polling and expansion state
            survive; `visible` pauses the poll while the page is hidden. -->
-      <aside class="term-side" class:sheet={layout.isTouchDevice} class:open={sessListOpen}>
+      <aside class="term-side side-sheet" class:sheet={layout.isTouchDevice} class:open={layout.isTouchDevice && sessListOpen}>
         {#if !layout.isTouchDevice}<SideHandle />{/if}
         <Sessions {openTerminal} activeTarget={terminalTarget}
           visible={page === 'terminal' && (!layout.isTouchDevice || sessListOpen)}
@@ -1333,7 +1333,7 @@
           chips={false} />
       </aside>
       {#if layout.isTouchDevice && sessListOpen}
-        <button class="term-scrim" aria-label={t('close')} onclick={() => sessListOpen = false}></button>
+        <button class="side-scrim" aria-label={t('close')} onclick={() => sessListOpen = false}></button>
       {/if}
       <div class="term-main">
       {#if terminalTarget}
@@ -1699,22 +1699,8 @@
   .term-main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   @media (max-width: 760px) {
     .page-layer.term-page { grid-template-columns: minmax(0, 1fr); }
-    .term-side.sheet {
-      position: fixed; z-index: 26; inset: calc(var(--sat)) auto 0 0; width: min(300px, 86vw);
-      transform: translateX(-100%); transition: transform var(--t-move) ease;
-      /* Depth, not a rim: 0-offset 50%-black hugged the edge and, with the
-         inherited 1px border, read as one thick dark line (owner, 2026-08-27).
-         The scrim separates the layers; same treatment as Hub's .sidebar.sheet. */
-      border-right: none;
-      /* The cast exists only while OPEN: parked at translateX(-100%) the
-         sheet sits just off-screen and its 10px+30px cast leaked back onto
-         the page's left edge — a grey band in the light theme (owner,
-         2026-08-28). It fades with the slide. */
-      box-shadow: none;
-      transition: transform var(--t-move) ease, box-shadow var(--t-move) ease;
-    }
-    .term-side.sheet.open { transform: none; box-shadow: 10px 0 30px rgba(0,0,0,0.22); }
-    .term-scrim { position: fixed; inset: 0; z-index: 25; background: rgba(0,0,0,0.45); border: none; }
+    /* The sheet geometry/motion is the SHARED .side-sheet dialect in app.css
+       (owner, 2026-08-30: one drawer for Chat/Terminal/Board). */
   }
 
   /* Swipe transition animations */

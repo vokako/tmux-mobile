@@ -322,7 +322,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="board-root" class:embedded>
   {#if !embedded}
-  <aside class="sidebar" class:open={sideOpen}>
+  <aside class="sidebar side-sheet" class:open={sideOpen}>
     <SideHandle />
     <div class="side-scroll subtle-scroll" use:scrollFade>
       <div class="side-h">{t('hubProjects')}</div>
@@ -529,28 +529,14 @@
      project — no sidebar track, no hamburger (board #13 follow-up). */
   .board-root.embedded { grid-template-columns: minmax(0, 1fr); }
   .board-root.embedded .board { padding: 10px 12px; }
-  /* Compact: the sidebar is a DRAWER over the board — the same sheet+scrim
-     dialect as Chat's project list and Terminal's session list (reopened
-     #11), never a second page. */
+  /* Compact: the sidebar is a DRAWER over the board — the sheet geometry and
+     motion are the SHARED .side-sheet dialect in app.css (owner, 2026-08-30:
+     one drawer for Chat/Terminal/Board), never a second page. */
   .side-toggle { display: none; flex: none; }
   @media (max-width: 760px) {
     .board-root { grid-template-columns: minmax(0, 1fr); }
     .side-toggle { display: inline-flex; }
-    .sidebar {
-      position: fixed; z-index: 26; inset: var(--sat, 0px) auto 0 0;
-      width: min(300px, 86vw);
-      transform: translateX(-100%);
-      border-right: none;
-      /* A parked sheet is still painted just off-screen: if its directional
-         cast stays enabled, the blur leaks back onto the page's LEFT edge.
-         Depth belongs to the OPEN layer only, matching Terminal and Hub. */
-      box-shadow: none;
-      transition: transform var(--t-move) ease, box-shadow var(--t-move) ease;
-    }
-    .sidebar.open { transform: none; box-shadow: 10px 0 30px rgba(0, 0, 0, 0.22); }
   }
-  .side-scrim { position: fixed; inset: 0; z-index: 25; background: rgba(0, 0, 0, 0.45); }
-  @media (prefers-reduced-motion: reduce) { .sidebar { transition: none; } }
   /* The main column: the shared page-head on top, the padded board below —
      the head spans full width like Chat's, the padding belongs to the content. */
   .bmain { display: flex; flex-direction: column; height: 100%; min-width: 0; overflow: hidden; }

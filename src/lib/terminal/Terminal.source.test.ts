@@ -136,3 +136,18 @@ test('collapsing the switcher hides the chips, not the desktop page head', () =>
   assert.match(desktopCollapsed, /chevron="left"/u, 'the chip stays the expand control');
   assert.match(desktopCollapsed, /tmux_winswitcher', '1'/u);
 });
+
+test('the phone bar leads with hamburger + name, chips unchanged (board #19)', () => {
+  // Chat and Board's lead-in ("三个横线 + 项目名", owner 2026-08-30): the
+  // hamburger opens the session drawer, the h1 names the session, and the
+  // window chips after it keep their quick-switch behavior.
+  const bar = source.slice(source.indexOf('{:else if onOpenSessions}'), source.indexOf('{:else}', source.indexOf('{:else if onOpenSessions}')));
+  assert.match(bar, /class="icon-btn ham"[\s\S]{0,120}?onOpenSessions\(\)/u, 'the hamburger opens the drawer');
+  assert.match(bar, /<Icon name="menu"/u, 'three lines, like Chat and Board');
+  assert.match(bar, /<h1 class="win-title" title=\{session\}>\{session\}<\/h1>/u, 'the name is the title');
+  assert.match(bar, /ham-dot/u, 'the chip\u2019s attention cue survives on the hamburger');
+  assert.ok(!bar.includes('<AgentChip'), 'the session chip is retired from the lead-in');
+  // The window chips keep their switch handler.
+  assert.match(source, /onSwitchPane\(`\$\{w\.session\}:\$\{w\.window\}\.\$\{w\.pane\}`, w\.current_command\);/u,
+    'chip quick-switch untouched');
+});

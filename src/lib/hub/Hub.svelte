@@ -1772,11 +1772,13 @@
     <!-- ── Projects. A column on the desktop; on the phone the SAME list slides
          in from the left, because these are separate conversations you pick
          between, not tabs you flick through. ─────────── -->
-    {#if !compact || sideOpen}
-    {#if compact}
+    {#if compact && sideOpen}
       <div class="side-scrim" onclick={() => sideOpen = false} role="presentation"></div>
     {/if}
-    <aside class="sidebar" class:sheet={compact}>
+    <!-- side-sheet is the SHARED drawer dialect (app.css): inert on desktop,
+         the parked-and-sliding sheet on the phone — one width, one shadow,
+         one motion for Chat, Terminal and Board (owner, 2026-08-30). -->
+    <aside class="sidebar side-sheet" class:sheet={compact} class:open={compact && sideOpen}>
       {#if !compact}<SideHandle />{/if}
       <div class="side-scroll subtle-scroll" use:scrollFade>
         <div class="side-h">{t('hubProjects')}</div>
@@ -1841,7 +1843,6 @@
         {/if}
       </div>
     </aside>
-    {/if}
 
     <!-- ── Main: the conversation ─────────── -->
     <main class="mid">
@@ -2813,24 +2814,10 @@
   .sidebar { position: relative; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
   /* Phone: the project list slides over the conversation instead of taking a
      column from it. */
-  .sidebar.sheet {
-    position: fixed; z-index: 26; inset: 0 auto 0 0; width: min(280px, 82vw);
-    /* Depth, not a rim: the old 0-offset 50%-black halo concentrated its
-       darkest band right at the sheet's edge, and with the 1px border under it
-       the whole thing read as one thick dark line (owner, 2026-08-27: "右边有
-       一个粗粗的线"). The scrim already separates the layers, so the sheet
-       needs no border of its own — just a soft directional cast. Same
-       treatment as .term-side.sheet in App.svelte. */
-    border-right: none;
-    box-shadow: 10px 0 30px rgba(0,0,0,0.22);
-    /* var(--sat), not raw env(): on the APK the real status-bar inset arrives
-       via MainActivity → the --sat inline override, and env() reads 0. Under
-       the old .page containing block (will-change) the geometry hid that; now
-       the sheet anchors to the true viewport and must clear the inset itself. */
-    padding-top: var(--sat);
-  }
+  /* The sheet geometry/motion is the SHARED .side-sheet dialect in app.css
+     (owner, 2026-08-30: one drawer for Chat/Terminal/Board); only the touch
+     row height is Hub's own. */
   .sidebar.sheet .side-row { min-height: 44px; }
-  .side-scrim { position: fixed; inset: 0; z-index: 25; background: rgba(0,0,0,0.45); }
   .side-scroll { flex: 1; overflow-y: auto; padding: 8px; }
   .p-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; font-family: var(--font-display); }
   /* ── Sidebar row summary. The LOOK is the Terminal sidebar's, atom for atom
