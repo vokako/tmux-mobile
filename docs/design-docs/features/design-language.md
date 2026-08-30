@@ -67,9 +67,12 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   — desktop tabs are a rail with no motion behind them, owner rule);
   compact drill-downs animate under 760px via the shared `drill-in-right`/
   `drill-in-left` keyframe pair (Settings, Agents). SHEETS (sidebar
-  slide-overs, phone dialogs) instead slide on `--t-move` with a scrim.
-  POPOVERS (menus, selects) do not animate — they are placed, measured,
-  shown. A transform hint (`will-change`) may exist only WHILE a slide runs:
+  slide-overs, phone dialogs) instead slide on `--t-move` with a scrim. A
+  sheet's directional shadow belongs to its OPEN state only: a parked
+  `translateX(-100%)` layer is still painted, so a persistent blur leaks back
+  onto the page's left edge. POPOVERS (menus, selects) do not animate — they
+  are placed, measured, shown. A transform hint (`will-change`) may exist only
+  WHILE a slide runs:
   a resting transform turns the page into a containing block and breaks
   every fixed popover.
 - **Interactive edge-swipe** (Files is the reference): the drag IS the

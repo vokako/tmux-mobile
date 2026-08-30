@@ -496,11 +496,15 @@
     .sidebar {
       position: fixed; z-index: 26; inset: var(--sat, 0px) auto 0 0;
       width: min(300px, 86vw);
-      transform: translateX(-100%); transition: transform var(--t-move) ease;
+      transform: translateX(-100%);
       border-right: none;
-      box-shadow: 12px 0 34px rgba(0, 0, 0, 0.35);
+      /* A parked sheet is still painted just off-screen: if its directional
+         cast stays enabled, the blur leaks back onto the page's LEFT edge.
+         Depth belongs to the OPEN layer only, matching Terminal and Hub. */
+      box-shadow: none;
+      transition: transform var(--t-move) ease, box-shadow var(--t-move) ease;
     }
-    .sidebar.open { transform: none; }
+    .sidebar.open { transform: none; box-shadow: 10px 0 30px rgba(0, 0, 0, 0.22); }
   }
   .side-scrim { position: fixed; inset: 0; z-index: 25; background: rgba(0, 0, 0, 0.45); }
   @media (prefers-reduced-motion: reduce) { .sidebar { transition: none; } }

@@ -111,9 +111,21 @@ test('create lives in the head, and compact gets the hamburger drawer (reopened 
   assert.match(source, /if \(sideOpen\) \{ sideOpen = false; return true; \}/u, 'back closes the drawer first');
   assert.match(source, /sideOpen = false; \/\/ choosing closes the drawer/u, 'picking a project closes it');
   const style = source.slice(source.indexOf('<style>'));
-  assert.match(style, /transform: translateX\(-100%\); transition: transform var\(--t-move\)/u,
+  assert.match(style, /transform: translateX\(-100%\);[\s\S]{0,300}?transition: transform var\(--t-move\)/u,
     'the sheet parks off-canvas and slides — the shared motion grammar');
   assert.ok(!style.includes('.board-root.picked'), 'the second-page drilldown is retired');
+});
+
+test('a parked drawer casts no shadow back onto the page (board #14)', () => {
+  const style = source.slice(source.indexOf('<style>'));
+  const parked = /\.sidebar \{\s*\n\s*position: fixed;[\s\S]*?\n\s*\}/u.exec(style)?.[0] ?? '';
+  assert.match(parked, /transform: translateX\(-100%\);/u, 'the closed drawer is parked off-canvas');
+  assert.match(parked, /box-shadow: none;/u,
+    'an off-canvas drawer cannot keep a cast — its blur leaks onto the page’s left edge');
+  const shadows = [...parked.matchAll(/box-shadow:\s*([^;]+);/gu)].map((m) => m[1]?.trim());
+  assert.deepEqual(shadows, ['none'], 'the closed rule has exactly one shadow declaration, and it is invisible');
+  assert.match(style, /\.sidebar\.open \{ transform: none; box-shadow: 10px 0 30px rgba\(0, 0, 0, 0\.22\); \}/u,
+    'depth appears only while open and matches the shared Terminal/Hub sheet cast');
 });
 
 test('a feed jump opens its issue in its OWN session (board #13 follow-up)', () => {
