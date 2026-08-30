@@ -1882,6 +1882,22 @@
             <span class="h1-text">{selectedRow?.project.name ?? ''}</span>
           </h1>
         {/if}
+        {#if selected}
+          <!-- The project's own verbs — Open/Rename/Close/Delete — fold into
+               ONE second-level menu (owner, 2026-08-29), and the ⋯ sits RIGHT
+               BESIDE the name it acts on (owner, 2026-08-30: "...按钮应该在项
+               目名称右边紧挨着"); the partition toggles keep the right edge.
+               It opens the SAME projectItems menu the sidebar row's
+               long-press/right-click speaks, so the entry points cannot
+               disagree. -->
+          <button class="icon-btn" title={t('hubProjectMenu')} aria-label={t('hubProjectMenu')}
+            onclick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              openCtx({ x: r.right, y: r.bottom + 4 }, selectedRow?.project.name ?? '', projectItems(selectedRow));
+            }}>
+            <Icon name="dots" size={15} />
+          </button>
+        {/if}
         <!-- The FULL path, not a middle-elided stub: it renders whole when it
              fits, and when it doesn't the box scrolls (wheel included) instead
              of ellipsizing — "不要直接用省略号" (owner, 2026-08-20). Desktop
@@ -1894,22 +1910,6 @@
              "删除 关闭 命令按钮 都不统一 有的文字 有的图案，可以改成图案 鼠标
              悬停显示按钮文字"). Icons match the project context menu's verbs:
              zap=up, stop=down, trash=delete. -->
-        {#if selected}
-          <!-- The project's own verbs — Open/Rename/Close/Delete — fold into
-               ONE second-level menu (owner, 2026-08-29: "重命名 删除 停止给我
-               合并到一个二级的选项卡里边吧，不用全显示出来"): the ⋯ opens the
-               SAME projectItems menu the sidebar row's long-press/right-click
-               already speaks, so the two entry points cannot disagree. The
-               partition toggles stay visible — they are navigation, not
-               consequence. -->
-          <button class="icon-btn" title={t('hubProjectMenu')} aria-label={t('hubProjectMenu')}
-            onclick={(e) => {
-              const r = e.currentTarget.getBoundingClientRect();
-              openCtx({ x: r.right, y: r.bottom + 4 }, selectedRow?.project.name ?? '', projectItems(selectedRow));
-            }}>
-            <Icon name="dots" size={15} />
-          </button>
-        {/if}
         <!-- The task board: on the phone this jumps to the board PAGE (owner,
              2026-08-29: "board单独作为一个独立的功能的页面"); on desktop it is
              the drawer's THIRD partition ("或者右侧边栏有这个任务侧边栏", same

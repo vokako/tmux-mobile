@@ -422,12 +422,20 @@ test('the header folds the project verbs into ONE dots menu (owner, 2026-08-29)'
   // sidebar row speaks — one source of truth; the partition toggles stay out
   // (navigation, not consequence).
   assert.match(source, /projectItems\(selectedRow\)\);/u, 'the dots button opens the shared menu');
+  // The ⋯ hugs the NAME it acts on; the partition toggles keep the right
+  // edge (owner, 2026-08-30: "...按钮应该在项目名称右边紧挨着，其他board
+  // file terminal按钮就现在的位置就行，靠右对齐").
+  const iDots = source.indexOf('name="dots"');
+  const iSpacer = source.indexOf('<span class="spacer"></span>', source.indexOf('class="h1-text"'));
+  const iToggles = source.indexOf('<!-- The task board:');
+  assert.ok(iDots >= 0 && iDots < iSpacer && iSpacer < iToggles,
+    'dots before the spacer (beside the name), toggles after it (right edge)');
   const head = source.slice(source.indexOf('class="h1-text"'), source.indexOf('{#if selected}', source.indexOf('class="h1-text"')));
   assert.ok(!head.includes('h1-pen'), 'the title pencil retired — rename lives in the menu');
   const bar = source.slice(source.indexOf('<span class="spacer"></span>'), source.indexOf('<!-- The task board:'));
   assert.ok(!bar.includes("name=\"trash\"") && !bar.includes("name=\"stop\"") && !bar.includes("name=\"zap\""),
     'no standalone delete/close/open buttons in the header');
-  assert.match(bar, /<Icon name="dots"/u, 'the one overflow affordance');
+  assert.ok(!bar.includes('name="dots"'), 'the ⋯ moved BESIDE the name (owner, 2026-08-30) — not in the right-aligned group');
 });
 
 test('a delivered prompt sheds its stamp and board deliveries wear the dialect (board #18)', () => {
