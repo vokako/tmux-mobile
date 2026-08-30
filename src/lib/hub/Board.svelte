@@ -218,10 +218,23 @@
   // ONE function carries that semantics; the detail Select and the create
   // dialog both route through it (board #11: create-with-assignee must
   // dispatch, never just write a label).
-  async function dispatchAssign(id: number, name: string) {
+  // The brief CARRIES the issue (owner, 2026-08-30: the message is the
+  // context, tightly budgeted — the agent starts without a lookup; a `…`
+  // means `tmm board show` has the rest).
+  const EXCERPT = 400;
+  const excerpt = (s: string) => {
+    const t = s.trim();
+    return t.length <= EXCERPT ? t : `${t.slice(0, EXCERPT).trimEnd()}…`;
+  };
+  async function dispatchAssign(id: number, name: string, title = '', body = '') {
     await boardSave(cur, { id, assignee: name });
     if (name) {
-      await hubPost(cur, `@${name} ${t('boardAssignMsg').replace('{id}', String(id))}`);
+      const b = body.trim() ? ` — ${excerpt(body)}.` : '.';
+      const msg = t('boardAssignMsg')
+        .replaceAll('{id}', String(id))
+        .replace('{title}', title.trim() || '#' + id)
+        .replace('{body}', b);
+      await hubPost(cur, `@${name} ${msg}`);
     }
   }
   /** Explicit save of the USER's changed fields (diffed against the draft
@@ -240,7 +253,7 @@
       // else is an ordinary field patch.
       const { assignee, ...rest } = patch;
       if (Object.keys(rest).length) await boardSave(cur, { id: sel.id, ...rest });
-      if (assignee !== undefined) await dispatchAssign(sel.id, assignee);
+      if (assignee !== undefined) await dispatchAssign(sel.id, assignee, draft.title, draft.body);
       await refetchSel();
     } catch (e) { err = String((e as Error)?.message ?? e); }
     busy = false;
@@ -262,11 +275,12 @@
     // born (#11 review). A failed dispatch is reported instead; the issue is
     // on the board and can be assigned from its detail view.
     const wantAssign = nAssignee;
+    const wantTitle = nTitle; const wantBody = nBody; // captured — the form clears before the dispatch
     nTitle = ''; nBody = ''; nAssignee = ''; creating = false;
     try {
       // Create-with-assignee reuses the ONE dispatch semantics: the field is
       // saved AND the assignment lands in the agent's pane (board #11).
-      if (wantAssign && created != null) await dispatchAssign(created, wantAssign);
+      if (wantAssign && created != null) await dispatchAssign(created, wantAssign, wantTitle, wantBody);
     } catch (e) {
       err = `#${created}: ${String((e as Error)?.message ?? e)}`;
     }

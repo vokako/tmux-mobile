@@ -32,7 +32,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
+  import { markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
@@ -2324,9 +2324,16 @@
           {:else if b.type === 'prompt'}
             <!-- The input half: what this agent was asked, which only the
                  userPromptSubmit hook can tell us. -->
+            {@const pp = promptParts(b.text)}
             <div class="prompt">
-              <div class="p-head"><span class="p-who">{windowName(b.window)}</span><span class="p-tag">{t('hubPromptIn')}</span><span>{fmtTime(b.ts)}</span></div>
-              <div class="p-body">{b.text}</div>
+              <!-- The machine stamp comes OFF (owner, 2026-08-30): the sender
+                   joins the head, and a board delivery wears the board
+                   dialect — issue chip (+ review badge) — instead of raw
+                   log text. -->
+              <div class="p-head"><span class="p-who">{windowName(b.window)}</span><span class="p-tag">{t('hubPromptIn')}</span>{#if pp.from}<span class="p-from">{pp.from}</span>{/if}<span>{fmtTime(b.ts)}</span></div>
+              <div class="p-body">
+                {#if pp.board}<span class="p-chip">#{pp.board.id}</span>{#if pp.board.review}<span class="p-badge" style:color={boardStatusColor('review')}><span class="pb-dot" aria-hidden="true"></span>{t('boardStatus_review')}</span>{/if}{/if}{pp.text}
+              </div>
             </div>
           {:else if b.type === 'progress'}
             <!-- What the agent says it is doing (`tmm status <state> "note"`).
@@ -3229,6 +3236,18 @@
   }
 
   /* The input half of a turn — what the agent was asked. */
+  /* The delivered line's atoms (owner, 2026-08-30): the sender in the name
+     ink, the issue chip in the sys-who mono dialect, the review badge in the
+     status-badge dialect — the same vocabulary the sysline speaks. */
+  .prompt .p-from { color: var(--accent); font-weight: 650; }
+  .prompt .p-chip { font-family: ui-monospace, Menlo, monospace; color: var(--accent); font-weight: 650; margin-right: 6px; }
+  .prompt .p-badge {
+    display: inline-flex; align-items: center; gap: 4px; margin-right: 6px;
+    font-size: var(--fs-micro); font-weight: 650;
+    text-transform: uppercase; letter-spacing: 0.6px;
+  }
+  .prompt .p-badge .pb-dot { width: 5px; height: 5px; border-radius: 50%; flex: none; background: currentColor; }
+
   .prompt { align-self: flex-start; max-width: var(--msg-max); border-left: 2px solid var(--border); padding-left: 9px; margin: 1px 6px; }
   .p-head { display: flex; align-items: baseline; gap: 7px; font-size: var(--fs-meta); color: var(--text3); margin-bottom: 2px; }
   .p-head .p-who { font-family: ui-monospace, Menlo, monospace; font-weight: 600; color: var(--text2); }

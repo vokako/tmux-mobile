@@ -429,3 +429,12 @@ test('the header folds the project verbs into ONE dots menu (owner, 2026-08-29)'
     'no standalone delete/close/open buttons in the header');
   assert.match(bar, /<Icon name="dots"/u, 'the one overflow affordance');
 });
+
+test('a delivered prompt sheds its stamp and board deliveries wear the dialect (board #18)', () => {
+  assert.match(source, /\{@const pp = promptParts\(b\.text\)\}/u, 'every prompt row goes through the reader');
+  assert.match(source, /\{#if pp\.from\}<span class="p-from">\{pp\.from\}<\/span>\{\/if\}/u,
+    'the sender joins the head — the stamp never renders');
+  assert.match(source, /<span class="p-chip">#\{pp\.board\.id\}<\/span>/u, 'the issue chip');
+  assert.match(source, /style:color=\{boardStatusColor\('review'\)\}/u,
+    'the review badge speaks the one status language');
+});

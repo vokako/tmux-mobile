@@ -424,8 +424,17 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
                             if new_status == "review" {
                                 let reporter = prev["created_by"].as_str().unwrap_or("");
                                 if !reporter.is_empty() && reporter != "human" && reporter != who {
+                                    // The handoff CARRIES the mover's last note —
+                                    // their own account of what was done — so the
+                                    // reviewer can usually decide from the message
+                                    // (owner, 2026-08-30: concise, no busywork).
+                                    let last_note = prev["notes"].as_array()
+                                        .and_then(|n| n.last())
+                                        .and_then(|n| n["body"].as_str())
+                                        .map(|b| format!(" — {}", excerpt(b, NOTICE_EXCERPT)))
+                                        .unwrap_or_default();
                                     let line = format!(
-                                        "[tmm chat {}] {who}: [board #{saved} review] {title} — my part is done. Review it: `tmm board show {saved}`, then `tmm board move {saved} done` to accept, or `tmm board note {saved} \"...\"` with what to fix.",
+                                        "[tmm chat {}] {who}: [board #{saved} review] {title}{last_note}. `tmm board move {saved} done` to accept, or note what to fix + move doing.",
                                         stamp_now()
                                     );
                                     deliver_chat_line(session, reporter, &line);
@@ -447,8 +456,11 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
                         if let Some(what) = board_change_notice(prev, who, s("title"), s("body"), s("status"), s("assignee").is_some()) {
                             let assignee = prev["assignee"].as_str().unwrap_or("");
                             let title = s("title").unwrap_or(prev["title"].as_str().unwrap_or(""));
+                            // The change itself travels in the line (values, not
+                            // "something changed"); the `…` in a long excerpt is
+                            // the one signal that `tmm board show` has more.
                             let line = format!(
-                                "[tmm chat {}] {who}: [board #{saved}] {what} — {title}. Your issue changed: `tmm board show {saved}`.",
+                                "[tmm chat {}] {who}: [board #{saved}] {title}: {what}",
                                 stamp_now()
                             );
                             deliver_chat_line(session, assignee, &line);
@@ -781,13 +793,34 @@ fn board_change_notice(
             changes.push(format!("status {old} → {ns}"));
         }
     }
-    if title.is_some_and(|t| t != prev["title"].as_str().unwrap_or("")) {
-        changes.push("title updated".into());
+    if let Some(t) = title {
+        if t != prev["title"].as_str().unwrap_or("") {
+            changes.push(format!("title → \"{t}\""));
+        }
     }
-    if body.is_some_and(|b| b != prev["body"].as_str().unwrap_or("")) {
-        changes.push("body updated".into());
+    if let Some(b) = body {
+        if b != prev["body"].as_str().unwrap_or("") {
+            changes.push(format!("body now: {}", excerpt(b, NOTICE_EXCERPT)));
+        }
     }
-    if changes.is_empty() { None } else { Some(changes.join(", ")) }
+    if changes.is_empty() { None } else { Some(changes.join("; ")) }
+}
+
+/// The delivered-message budget (owner, 2026-08-30: "尽量保证我们发送的内容
+/// 比较简洁，避免 Agent 去做过多无谓的消耗"): a notification CARRIES its
+/// context so the reader usually needs no lookup round-trip, but never a
+/// wall of text. The `…` is the truncation signal — an agent that sees it
+/// knows `tmm board show N` has the rest; a message without it is complete.
+const NOTICE_EXCERPT: usize = 400;
+
+/// First `max` chars, cut on a char boundary, `…`-marked when shortened.
+fn excerpt(s: &str, max: usize) -> String {
+    let t = s.trim();
+    if t.chars().count() <= max {
+        return t.to_string();
+    }
+    let cut: String = t.chars().take(max).collect();
+    format!("{}…", cut.trim_end())
 }
 
 /// Deliver a done summary into the pane of the agent that SPAWNED this one —
@@ -968,11 +1001,18 @@ mod tests {
             super::board_change_notice(&prev, "human", None, None, Some("todo"), false).as_deref(),
             Some("status doing → todo")
         );
-        // Edits name their fields; several changes join.
+        // Edits CARRY the new values (owner, 2026-08-30: the message is the
+        // context — no lookup round-trip for a short change).
         assert_eq!(
             super::board_change_notice(&prev, "human", Some("T2"), Some("B2"), Some("review"), false).as_deref(),
-            Some("status doing → review, title updated, body updated")
+            Some("status doing → review; title → \"T2\"; body now: B2")
         );
+        // A long body is excerpted, and the `…` is the only pointer needed.
+        let long = "x".repeat(500);
+        let noticed = super::board_change_notice(&prev, "human", None, Some(&long), None, false).unwrap();
+        assert!(noticed.starts_with("body now: xxx"));
+        assert!(noticed.ends_with('…'));
+        assert!(noticed.chars().count() < 420);
         // The actor's own edit is not news.
         assert_eq!(super::board_change_notice(&prev, "builder", None, None, Some("done"), false), None);
         // A save echoing the stored values is a no-op, not an event.

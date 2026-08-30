@@ -838,6 +838,24 @@ export function boardStatusColor(to: string): string {
 }
 
 /**
+ * A delivered prompt, read for display (owner, 2026-08-30: "在 chat 对话视图
+ * 上展示得不是很好"): the machine stamp (`[tmm chat <ts>] <who>: `) comes off
+ * — the row's head shows the SENDER instead — and a `[board #N]` /
+ * `[board #N review]` marker becomes a structured chip so board deliveries
+ * wear the board dialect instead of raw log text. Anything else passes
+ * through whole: an unrecognised shape must render as itself.
+ */
+export function promptParts(text: string | null | undefined): { from: string; board: { id: string; review: boolean } | null; text: string } {
+  const line = (text ?? '').trim();
+  const m = /^\[tmm chat [^\]]*\] (\S+): ([\s\S]*)$/u.exec(line);
+  const from = m ? m[1]!.replace(/:$/u, '') : '';
+  const rest = m ? m[2]! : line;
+  const b = /^\[board #(\d+)( review)?\]\s*([\s\S]*)$/u.exec(rest);
+  if (b) return { from, board: { id: b[1]!, review: !!b[2] }, text: b[3]!.trim() };
+  return { from, board: null, text: rest };
+}
+
+/**
  * The colour of a lifecycle verb's badge — the SAME progressive language as
  * `noteStateColor` / `stateDotColor`, so one vocabulary covers every coloured
  * state word in the Hub: accent = something started moving, green = ended well,

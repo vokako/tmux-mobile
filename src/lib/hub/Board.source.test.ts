@@ -42,12 +42,12 @@ test('assignment is ONE dispatch — the detail picker and the create dialog sha
   // dispatchAssign is the single carrier of assignment=dispatch semantics:
   // saving the assignee AND typing the brief into the agent's pane. Exactly
   // one hubPost call site proves nobody re-implements the delivery half.
-  assert.match(source, /async function dispatchAssign\(id: number, name: string\)/u, 'the one dispatch function');
+  assert.match(source, /async function dispatchAssign\(id: number, name: string, title = '', body = ''\)/u, 'the one dispatch function');
   assert.equal(source.split('hubPost(').length - 1, 1, 'exactly one delivery call site, inside dispatchAssign');
-  assert.match(source, /if \(assignee !== undefined\) await dispatchAssign\(sel\.id, assignee\);/u,
+  assert.match(source, /if \(assignee !== undefined\) await dispatchAssign\(sel\.id, assignee, draft\.title, draft\.body\);/u,
     'a ✓-confirmed assignee change routes through it (board #15: the picker edits the DRAFT)');
-  assert.match(source, /if \(wantAssign && created != null\) await dispatchAssign\(created, wantAssign\);/u,
-    'create-with-assignee dispatches too — never just a label');
+  assert.match(source, /if \(wantAssign && created != null\) await dispatchAssign\(created, wantAssign, wantTitle, wantBody\);/u,
+    'create-with-assignee dispatches too — never just a label, and the brief CARRIES the issue');
   // The form closes the MOMENT the create succeeds — before the dispatch can
   // fail — because a retryable form after a successful create mints
   // duplicate issues (#11 review). Order in the source is the guarantee.

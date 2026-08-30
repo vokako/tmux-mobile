@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { uploadImagePath, uploadFilePath, imageId, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor } from './hub.ts';
+import { uploadImagePath, uploadFilePath, imageId, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -1136,4 +1136,21 @@ test('boardStatusColor speaks the one progressive status language', () => {
     assert.equal(boardStatusColor('done'), 'var(--status-ok)');   // ended well
     assert.equal(boardStatusColor('todo'), 'var(--text3)');       // at rest
     assert.equal(boardStatusColor('shipped'), 'var(--text2)');    // unknown: reading ink
+});
+
+test('promptParts strips the machine stamp and structures board deliveries', () => {
+  // A board change notice: stamp off, sender out, chip + text.
+  assert.deepEqual(
+    promptParts('[tmm chat 2026-08-30 11:33] human: [board #15] board任务交互优化: status doing → todo'),
+    { from: 'human', board: { id: '15', review: false }, text: 'board任务交互优化: status doing → todo' });
+  // A review handoff keeps its review flag for the badge.
+  const r = promptParts('[tmm chat 2026-08-30 12:00] builder: [board #17 review] file返回逻辑 — done. `tmm board move 17 done` to accept, or note what to fix + move doing.');
+  assert.equal(r.from, 'builder');
+  assert.deepEqual(r.board, { id: '17', review: true });
+  // A stamped plain message: stamp off, no chip.
+  assert.deepEqual(promptParts('[tmm chat 2026-08-30 10:00] lead: please rebase'),
+    { from: 'lead', board: null, text: 'please rebase' });
+  // An unstamped local prompt passes through whole.
+  assert.deepEqual(promptParts('fix the tests'), { from: '', board: null, text: 'fix the tests' });
+  assert.deepEqual(promptParts(''), { from: '', board: null, text: '' });
 });
