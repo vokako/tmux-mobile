@@ -324,8 +324,16 @@ button:disabled {
    sidebar got NO sheet styles and stacked into the page as a grid child,
    shoving the conversation down ("怎么连这个屏幕高度都变了", owner
    2026-08-30). The component applies .side-sheet exactly when its own
-   compact condition holds. */
-.side-sheet {
+   compact condition holds.
+   The selector is TRIPLED on purpose: every page's own base rule is scoped
+   (`.sidebar` compiles to `.sidebar.svelte-hash`, specificity 0,2,0) and its
+   `position: relative` silently beat a single-class shared rule — the sheet
+   stayed IN FLOW, took the compact grid's first row (the screen's top half),
+   and the parked transform only moved it visually: half a black screen, the
+   drawer's content when open ("上半部分是抽屉的内容，上下给分开了", owner
+   2026-08-30). 0,3,0 outranks every scoped base; svelte-check cannot see a
+   specificity loss, so the Board source test pins this shape. */
+.side-sheet.side-sheet.side-sheet {
   position: fixed; z-index: 26; inset: 0 auto 0 0;
   width: min(300px, 86vw);
   padding-top: var(--sat);
@@ -334,8 +342,8 @@ button:disabled {
   box-shadow: none;
   transition: transform var(--t-move) ease, box-shadow var(--t-move) ease;
 }
-.side-sheet.open { transform: none; box-shadow: 10px 0 30px rgba(0, 0, 0, 0.22); }
-@media (prefers-reduced-motion: reduce) { .side-sheet { transition: none; } }
+.side-sheet.side-sheet.side-sheet.open { transform: none; box-shadow: 10px 0 30px rgba(0, 0, 0, 0.22); }
+@media (prefers-reduced-motion: reduce) { .side-sheet.side-sheet.side-sheet { transition: none; } }
 /* Its scrim (a <button> in some pages — strip the chrome). */
 .side-scrim {
   position: fixed; inset: 0; z-index: 25;

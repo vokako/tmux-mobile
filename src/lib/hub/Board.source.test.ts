@@ -117,7 +117,7 @@ test('create lives in the head, and compact gets the hamburger drawer (reopened 
   assert.match(source, /if \(sideOpen\) \{ sideOpen = false; return true; \}/u, 'back closes the drawer first');
   assert.match(source, /sideOpen = false; \/\/ choosing closes the drawer/u, 'picking a project closes it');
   const style = source.slice(source.indexOf('<style>'));
-  assert.match(appCss, /\.side-sheet \{[\s\S]{0,400}?transform: translateX\(-100%\);[\s\S]{0,200}?transition: transform var\(--t-move\)/u,
+  assert.match(appCss, /\.side-sheet\.side-sheet\.side-sheet \{[\s\S]{0,400}?transform: translateX\(-100%\);[\s\S]{0,200}?transition: transform var\(--t-move\)/u,
     'the sheet parks off-canvas and slides — the shared motion grammar, in app.css');
   assert.ok(!/@media[^{]*\{[^{}]*\n\s*\.side-sheet \{/u.test(appCss),
     'the sheet is CLASS-driven, never media-gated — a media gate disagreed with the Hub\u2019s wider compact (owner, 2026-08-30)');
@@ -128,12 +128,18 @@ test('create lives in the head, and compact gets the hamburger drawer (reopened 
 test('a parked drawer casts no shadow back onto the page (board #14, now the SHARED sheet)', () => {
   // The guarantee moved into app.css with the one drawer dialect (owner,
   // 2026-08-30): parked = no cast, depth only while open.
-  const parked = /\.side-sheet \{[\s\S]*?\n\}/u.exec(appCss)?.[0] ?? '';
+  const parked = /\.side-sheet\.side-sheet\.side-sheet \{[\s\S]*?\n\}/u.exec(appCss)?.[0] ?? '';
   assert.match(parked, /transform: translateX\(-100%\);/u, 'the closed drawer is parked off-canvas');
   const shadows = [...parked.matchAll(/box-shadow:\s*([^;]+);/gu)].map((m) => m[1]?.trim());
   assert.deepEqual(shadows, ['none'], 'the closed rule has exactly one shadow declaration, and it is invisible');
-  assert.match(appCss, /\.side-sheet\.open \{ transform: none; box-shadow: 10px 0 30px rgba\(0, 0, 0, 0\.22\); \}/u,
+  assert.match(appCss, /\.side-sheet\.side-sheet\.side-sheet\.open \{ transform: none; box-shadow: 10px 0 30px rgba\(0, 0, 0, 0\.22\); \}/u,
     'depth appears only while open');
+  // The TRIPLED selector is load-bearing: each page's scoped base rule
+  // (.sidebar.svelte-hash — 0,2,0) beat a single-class shared rule, the
+  // sheet stayed in flow and took the top half of the screen (owner,
+  // 2026-08-30: "上半部分是抽屉的内容，上下给分开了").
+  assert.match(parked, /position: fixed/u, 'the sheet leaves the flow');
+  assert.ok(!/\n\.side-sheet \{/u.test(appCss), 'no weaker single-class copy that a scoped rule could beat');
   // And no component keeps a private copy that could drift.
   const style = source.slice(source.indexOf('<style>'));
   assert.ok(!style.includes('box-shadow: 10px'), 'the Board carries no private sheet cast');
