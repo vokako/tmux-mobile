@@ -341,6 +341,17 @@ button:disabled {
   transform: translateX(-100%);
   box-shadow: none;
   transition: transform var(--t-move) ease, box-shadow var(--t-move) ease;
+  /* The sheet keeps its OWN compositor layer for its whole mounted life.
+     Without this the layer exists only WHILE the transform transitions: the
+     open state is `transform: none`, so at transitionend the layer is dropped
+     and the content re-rasterizes into the parent — Chrome hides that seam,
+     the Android System WebView (the APK) shows a blank frame at the exact
+     moment the drawer finishes opening ("完全弹出的一瞬间…闪了一下", board
+     #21, owner 2026-08-30; Android Chrome was fine, only the compiled app).
+     CAUTION (the .page lesson): will-change makes the sheet the containing
+     block for position:fixed DESCENDANTS. Nothing fixed may render inside a
+     sheet — ContextMenu and every popover mount OUTSIDE the aside. */
+  will-change: transform;
 }
 .side-sheet.side-sheet.side-sheet.open { transform: none; box-shadow: 10px 0 30px rgba(0, 0, 0, 0.22); }
 @media (prefers-reduced-motion: reduce) { .side-sheet.side-sheet.side-sheet { transition: none; } }
