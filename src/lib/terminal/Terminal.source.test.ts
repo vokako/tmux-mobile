@@ -151,3 +151,11 @@ test('the phone bar leads with hamburger + name, chips unchanged (board #19)', (
   assert.match(source, /onSwitchPane\(`\$\{w\.session\}:\$\{w\.window\}\.\$\{w\.pane\}`, w\.current_command\);/u,
     'chip quick-switch untouched');
 });
+
+test('the title never stretches the bar apart — chips follow the name (owner, 2026-08-30)', () => {
+  // The phone's shared `.page-head h1 { flex: 1 1 auto }` (app.css) grows
+  // titles on other pages; on the win-bar it shoved the chips to the far
+  // right. The scoped win-title opts out.
+  assert.match(source, /\.win-title \{ max-width: 22ch; flex: 0 1 auto; \}/u,
+    'content-sized title — the chips strip takes the leftover space');
+});

@@ -2261,7 +2261,12 @@
   }
   /* The title is identity, the chips are navigation: cap the title so a long
      session name never squeezes the window chips off the bar. */
-  .win-title { max-width: 22ch; }
+  /* Content-sized, never stretched: the phone's shared `.page-head h1
+     { flex: 1 1 auto }` makes OTHER pages' titles take the row — here it
+     shoved the window chips to the far right and filled the middle with
+     blank (owner, 2026-08-30: "window紧跟着项目名称就行 中间不用那么大空
+     白"). The chips strip is this bar's body; the title only names it. */
+  .win-title { max-width: 22ch; flex: 0 1 auto; }
   /* The hamburger's attention cue — the session chip it replaced carried one,
      and a notification from another session must survive the restyle. */
   .ham { position: relative; flex: none; }
