@@ -755,6 +755,12 @@
     // Touch capability is not a reliable hardware-keyboard test: desktop
     // Chromium and WKWebView may expose touch APIs, and phones can have a
     // physical keyboard. App shortcuts run first in window capture.
+    // Shared with the WebKit blur guard below: the capture claim STOPS the
+    // guard's own keydown recorder (same node, same phase, registered later),
+    // so the claim must stamp the time itself — or the un-preventable blur
+    // that follows reads as "not Escape's doing" and focus is never returned
+    // (board #20 reopen: the byte was sent, the focus still dropped).
+    let lastEscAt = 0;
     const onHardwareKeydown = (event) => {
       // Bare Escape is claimed HERE, same as the Ctrl/Alt combos: WebKit
       // (Safari, the macOS app's WKWebView) gives Escape a DEFAULT ACTION
@@ -767,9 +773,10 @@
       // focus lands. IME composition keeps its Escape (cancelling the
       // composition is what the user meant); the blur guard below stays as
       // the safety net for anything else WebKit invents.
-      const data = !event.isComposing && event.key === 'Escape'
-        && !event.ctrlKey && !event.altKey && !event.metaKey
-        ? '\x1b' : encodeTerminalShortcut(event);
+      const bareEsc = !event.isComposing && event.key === 'Escape'
+        && !event.ctrlKey && !event.altKey && !event.metaKey;
+      if (bareEsc) lastEscAt = Date.now();
+      const data = bareEsc ? '\x1b' : encodeTerminalShortcut(event);
       if (!data) return;
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -801,7 +808,6 @@
       // with relatedTarget null (nobody TOOK the focus, it was dropped) —
       // and give the focus straight back. A real focus move (click into the
       // composer, Tab) always has a relatedTarget or no fresh Escape.
-      let lastEscAt = 0;
       onEscKeydown = (e) => { if (e.key === 'Escape') lastEscAt = Date.now(); };
       onEscBlur = (e) => {
         if (e.relatedTarget || Date.now() - lastEscAt > 250) return;

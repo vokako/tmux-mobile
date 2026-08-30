@@ -23,6 +23,11 @@ test('bare Escape is CLAIMED in capture and encoded by hand (board #20)', () => 
   // depends on where focus lands; mid-IME Escape stays with the composition.
   assert.match(source, /!event\.isComposing && event\.key === 'Escape'/u, 'claimed in onHardwareKeydown');
   assert.match(source, /&& !event\.ctrlKey && !event\.altKey && !event\.metaKey/u, 'bare only — combos keep their encoder');
+  // The claim's stopImmediatePropagation KILLS the blur guard's own keydown
+  // recorder (same node, same phase, registered later), so the claim must
+  // stamp lastEscAt itself — or WebKit's un-preventable blur reads as "not
+  // Escape's doing" and focus is never given back (the #20 reopen).
+  assert.match(source, /if \(bareEsc\) lastEscAt = Date\.now\(\);/u, 'the claim feeds the blur guard');
 });
 
 test('Terminal chrome uses only Team-filtered notification queries', () => {
