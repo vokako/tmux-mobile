@@ -756,7 +756,20 @@
     // Chromium and WKWebView may expose touch APIs, and phones can have a
     // physical keyboard. App shortcuts run first in window capture.
     const onHardwareKeydown = (event) => {
-      const data = encodeTerminalShortcut(event);
+      // Bare Escape is claimed HERE, same as the Ctrl/Alt combos: WebKit
+      // (Safari, the macOS app's WKWebView) gives Escape a DEFAULT ACTION
+      // that ignores preventDefault — it "cancels" the focused element,
+      // blurring xterm's hidden textarea — and whether the \x1b even got
+      // sent first depended on whose keydown ran before the blur (board
+      // #20: "esc 没有发送到后端，而是让当前框失去焦点"). Claiming the key
+      // in window-capture and encoding it by hand takes the browser's
+      // default out of the loop entirely: the send never depends on where
+      // focus lands. IME composition keeps its Escape (cancelling the
+      // composition is what the user meant); the blur guard below stays as
+      // the safety net for anything else WebKit invents.
+      const data = !event.isComposing && event.key === 'Escape'
+        && !event.ctrlKey && !event.altKey && !event.metaKey
+        ? '\x1b' : encodeTerminalShortcut(event);
       if (!data) return;
       event.preventDefault();
       event.stopImmediatePropagation();

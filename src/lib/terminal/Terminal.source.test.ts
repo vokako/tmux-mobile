@@ -15,6 +15,16 @@ test('WebKit Escape-cancel blur gives focus straight back to the terminal', () =
   assert.match(source, /if \(e\.key === 'Escape'\) lastEscAt = Date\.now\(\);/u);
 });
 
+test('bare Escape is CLAIMED in capture and encoded by hand (board #20)', () => {
+  // Whether the \x1b reached the pane used to depend on whose keydown ran
+  // before WebKit's un-preventable Escape blur — "esc 没有发送到后端，而是
+  // 让当前框失去焦点" (owner, 2026-08-30). The hardware-capture handler now
+  // claims the bare key exactly like the Ctrl/Alt combos, so the send never
+  // depends on where focus lands; mid-IME Escape stays with the composition.
+  assert.match(source, /!event\.isComposing && event\.key === 'Escape'/u, 'claimed in onHardwareKeydown');
+  assert.match(source, /&& !event\.ctrlKey && !event\.altKey && !event\.metaKey/u, 'bare only — combos keep their encoder');
+});
+
 test('Terminal chrome uses only Team-filtered notification queries', () => {
   assert.match(source, /attention=\{otherTerminalSessionHasNotification\(session\)\}/u);
   assert.match(
