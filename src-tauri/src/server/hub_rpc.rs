@@ -433,6 +433,27 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
                             }
                         }
                     }
+                    // A change SOMEBODY ELSE made to your issue is only real
+                    // once you hear about it (owner, 2026-08-30: "不然这个更
+                    // 改就没有起任何作用。消息就是发给被 assign 的人"): the
+                    // ASSIGNEE gets the change typed into its pane. The pure
+                    // half (`board_change_notice`) decides; skips are part of
+                    // its contract — the actor never hears its own edit, an
+                    // unassigned issue and the human assignee have nobody to
+                    // wake, and a save that CHANGES the assignee is a
+                    // (re)assignment with its own dispatch channel (the UI
+                    // @message), where a second line would be noise.
+                    if let Some(prev) = &prev {
+                        if let Some(what) = board_change_notice(prev, who, s("title"), s("body"), s("status"), s("assignee").is_some()) {
+                            let assignee = prev["assignee"].as_str().unwrap_or("");
+                            let title = s("title").unwrap_or(prev["title"].as_str().unwrap_or(""));
+                            let line = format!(
+                                "[tmm chat {}] {who}: [board #{saved}] {what} — {title}. Your issue changed: `tmm board show {saved}`.",
+                                stamp_now()
+                            );
+                            deliver_chat_line(session, assignee, &line);
+                        }
+                    }
                     Response::ok(id, serde_json::json!({ "ok": true, "id": saved }))
                 }
                 Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
@@ -733,6 +754,42 @@ fn deliver_chat_line(session: &str, target_name: &str, line: &str) -> bool {
     false
 }
 
+/// Pure half of the assignee notification (owner, 2026-08-30): given the
+/// PREVIOUS issue row and what this save carries, decide whether the assignee
+/// should hear about it and name the change. `None` when: nobody is assigned,
+/// the assignee is the actor (your own edit is not news), the assignee is the
+/// human (who reads the board itself), the save (re)assigns (that has its own
+/// dispatch channel), or nothing actually changed (a save echoing the stored
+/// values is a no-op, not an event).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn board_change_notice(
+    prev: &serde_json::Value,
+    who: &str,
+    title: Option<&str>,
+    body: Option<&str>,
+    status: Option<&str>,
+    assigns: bool,
+) -> Option<String> {
+    let assignee = prev["assignee"].as_str().unwrap_or("");
+    if assignee.is_empty() || assignee == who || assignee == "human" || assigns {
+        return None;
+    }
+    let mut changes: Vec<String> = Vec::new();
+    if let Some(ns) = status {
+        let old = prev["status"].as_str().unwrap_or("");
+        if old != ns {
+            changes.push(format!("status {old} → {ns}"));
+        }
+    }
+    if title.is_some_and(|t| t != prev["title"].as_str().unwrap_or("")) {
+        changes.push("title updated".into());
+    }
+    if body.is_some_and(|b| b != prev["body"].as_str().unwrap_or("")) {
+        changes.push("body updated".into());
+    }
+    if changes.is_empty() { None } else { Some(changes.join(", ")) }
+}
+
 /// Deliver a done summary into the pane of the agent that SPAWNED this one —
 /// the feedback half of `tmm spawn --brief`. Quiet on every miss: a human
 /// spawner, a dead window, or a pre-recipe agent has nobody to wake.
@@ -897,6 +954,37 @@ fn agent_states(session: &str) -> serde_json::Value {
 
 #[cfg(all(test, not(any(target_os = "android", target_os = "ios"))))]
 mod tests {
+
+    /// The assignee-notification decision (owner, 2026-08-30): pure, so the
+    /// skips are pinned without tmux. The delivery half reuses the same
+    /// `deliver_chat_line` the review handoff and done-summary edges use.
+    #[test]
+    fn board_change_notice_decides_who_hears() {
+        let prev = serde_json::json!({
+            "title": "T", "body": "B", "status": "doing", "assignee": "builder", "created_by": "human",
+        });
+        // A human status change reaches the assignee, named.
+        assert_eq!(
+            super::board_change_notice(&prev, "human", None, None, Some("todo"), false).as_deref(),
+            Some("status doing → todo")
+        );
+        // Edits name their fields; several changes join.
+        assert_eq!(
+            super::board_change_notice(&prev, "human", Some("T2"), Some("B2"), Some("review"), false).as_deref(),
+            Some("status doing → review, title updated, body updated")
+        );
+        // The actor's own edit is not news.
+        assert_eq!(super::board_change_notice(&prev, "builder", None, None, Some("done"), false), None);
+        // A save echoing the stored values is a no-op, not an event.
+        assert_eq!(super::board_change_notice(&prev, "human", Some("T"), Some("B"), Some("doing"), false), None);
+        // A (re)assignment has its own dispatch channel — no second line.
+        assert_eq!(super::board_change_notice(&prev, "human", None, None, Some("todo"), true), None);
+        // Nobody assigned / the human assignee: nobody to wake.
+        let unassigned = serde_json::json!({ "title": "T", "body": "B", "status": "todo", "assignee": "" });
+        assert_eq!(super::board_change_notice(&unassigned, "human", None, None, Some("doing"), false), None);
+        let human_owned = serde_json::json!({ "title": "T", "body": "B", "status": "todo", "assignee": "human" });
+        assert_eq!(super::board_change_notice(&human_owned, "lead", None, None, Some("doing"), false), None);
+    }
     use super::super::test_util::req;
     use super::*;
     use crate::projects::telemetry;
