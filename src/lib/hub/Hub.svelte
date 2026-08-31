@@ -3704,6 +3704,13 @@
   .files-body { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
   .board-body { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
   .board-body > :global(.board-root) { flex: 1; min-height: 0; }
+  /* Parent-owned suppression (board #23, lead): the drawer head is the ONLY
+     header this partition may have. The embedded Board renders no page-head
+     of its own (its {#if !embedded} gate, pinned by the render test), but the
+     drawer is the container that KNOWS the embedding — so it enforces the
+     contract too: whatever a prop/HMR/child-path drift might leak, a second
+     header can neither show nor keep its height here. */
+  .board-body :global(.page-head) { display: none; }
   .d-files { display: flex; align-items: center; gap: 6px; font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* ONE switcher for the drawer. It used to have two: these pills on top and

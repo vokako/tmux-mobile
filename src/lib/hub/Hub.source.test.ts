@@ -486,4 +486,11 @@ test('the drawer wears the app ground and its head is the page-head\u2019s twin 
   // Board as a request (its own page-head is gone — see Board.source.test).
   assert.match(source, /drawerBoardNew = \{ n: \(drawerBoardNew\?\.n \?\? 0\) \+ 1 \}/u, 'the + issues a request');
   assert.match(source, /<Board [^>]*createRequest=\{drawerBoardNew\}/u, 'and the Board receives it');
+  // Parent-owned suppression (the lead's belt over the child's gate): the
+  // drawer KNOWS the embedding, so it enforces the one-header contract itself —
+  // any page-head a prop/HMR/child-path drift might leak into the partition
+  // neither shows nor keeps its height. display:none, not visibility: a
+  // hidden-but-laid-out header would still push the board down ("保留高度").
+  assert.match(source, /\.board-body :global\(\.page-head\) \{ display: none; \}/u,
+    'the drawer suppresses any child page-head — the drawer head is the only header');
 });
