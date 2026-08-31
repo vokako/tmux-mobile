@@ -346,6 +346,17 @@ can get wrong to save three characters.
   issue id/title and a bounded excerpt. Unassigned, human-assigned, self-note,
   unmanaged or offline cases degrade to the persisted note — never an RPC
   failure, shell injection, self-prompt, or duplicate delivery.
+  **The title is OPTIONAL** (board #31): `issue_save` refuses only a
+  CONTENTLESS issue (create and patch alike — a patch may clear the title
+  while a body remains, and the cleared title persists EMPTY, verbatim);
+  `tmm board add --body "…"` files a body-only issue. Every surface that
+  NAMES an issue — the room's `board #N a → b — {ref}` line, review/change/
+  note notices, `tmm board list|show`, the Board page's cards and delete
+  confirm — speaks ONE fallback, `projects::issue_ref` (client mirror
+  `issueRef` in `board.ts`): trimmed title, else the body whitespace-squashed
+  and cut on a char boundary at `ISSUE_REF_CHARS` with a `…` marker, else
+  `#id`. One helper on each side of the wire, so the same issue never wears
+  two names and no message ever renders an empty head or dangling separator.
 
 The room is `proj:<session>` on the same agora bus that Team uses —
 `TeamBridge::open_room` provisions it with **no tmux session, no roster, no

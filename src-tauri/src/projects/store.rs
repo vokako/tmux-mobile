@@ -1302,9 +1302,14 @@ impl Store {
     ) -> Result<i64, String> {
         match id {
             None => {
+                // A title is OPTIONAL (board #31) — the one rule is that an
+                // issue is never CONTENTLESS: at least one of title/body must
+                // say something. An empty title is stored EMPTY, verbatim;
+                // display fallbacks are the reader's job (`issue_ref`), never
+                // fabricated into persistence.
                 let title = title.unwrap_or("").trim();
-                if title.is_empty() {
-                    return Err("an issue needs a title".into());
+                if title.is_empty() && body.unwrap_or("").trim().is_empty() {
+                    return Err("an issue needs a title or a body".into());
                 }
                 self.conn
                     .execute(
@@ -1324,6 +1329,26 @@ impl Store {
                 Ok(self.conn.last_insert_rowid())
             }
             Some(id) => {
+                // The contentless rule holds through PATCHES too: a save may
+                // clear the title (Some("")) only if what it leaves behind —
+                // patched or kept — still has a body, and vice versa.
+                let cur: Option<(String, String)> = self
+                    .conn
+                    .query_row(
+                        "SELECT title, body FROM issues WHERE session = ?1 AND id = ?2",
+                        rusqlite::params![session, id],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .optional()
+                    .map_err(|e| e.to_string())?;
+                let Some((cur_title, cur_body)) = cur else {
+                    return Err(format!("no issue #{id} on this board"));
+                };
+                if title.unwrap_or(&cur_title).trim().is_empty()
+                    && body.unwrap_or(&cur_body).trim().is_empty()
+                {
+                    return Err("an issue needs a title or a body".into());
+                }
                 let n = self
                     .conn
                     .execute(
@@ -1560,8 +1585,25 @@ mod tests {
         assert!(store.issue_save("other", Some(id), None, None, Some("done"), None, "x", 500).is_err());
         assert!(!store.issue_delete("other", id).unwrap());
 
-        // A title-less create is refused; delete cascades the notes.
+        // A CONTENTLESS create is refused; a body alone is enough (board
+        // #31: the title is optional) and the empty title persists EMPTY —
+        // no fabricated fallback in storage.
         assert!(store.issue_save("proj", None, Some("  "), None, None, None, "human", 600).is_err());
+        assert!(store.issue_save("proj", None, None, Some("  "), None, None, "human", 600).is_err());
+        let bare = store.issue_save("proj", None, None, Some("body only, no title"), None, None, "human", 610).unwrap();
+        let got = store.issue_get("proj", bare).unwrap().unwrap();
+        assert_eq!(got["title"].as_str().unwrap(), "");
+        assert_eq!(got["body"].as_str().unwrap(), "body only, no title");
+        // A patch may CLEAR the title while a body remains…
+        store.issue_save("proj", Some(bare), Some(""), None, None, None, "human", 620).unwrap();
+        // …but never the last content: emptying the body of a title-less
+        // issue (or both at once) is refused, patched-and-kept alike.
+        assert!(store.issue_save("proj", Some(bare), None, Some("  "), None, None, "human", 630).is_err());
+        assert!(store.issue_save("proj", Some(bare), Some(""), Some(""), None, None, "human", 630).is_err());
+        // The other direction: clearing the BODY is fine while a title holds.
+        store.issue_save("proj", Some(bare), Some("now titled"), Some(""), None, None, "human", 640).unwrap();
+        assert!(store.issue_delete("proj", bare).unwrap());
+
         assert!(store.issue_delete("proj", id).unwrap());
         assert!(store.issue_get("proj", id).unwrap().is_none());
     }

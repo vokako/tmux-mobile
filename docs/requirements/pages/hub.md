@@ -125,7 +125,15 @@ completion).
 ## Board page (task management — its own tab)
 - Four fixed columns: **todo / doing / review / done**. Issues carry title,
   body, assignee, opened-by, and their own **note thread** (progress and
-  decisions live ON the issue, not only in chat). The note reply box
+  decisions live ON the issue, not only in chat). The **title is OPTIONAL**
+  (board #31): an issue needs title or body — never neither — and an empty
+  title is STORED empty (no fabricated fallback in persistence). Everything
+  that NAMES an issue (cards, delete confirm, room lines, notices, the CLI's
+  list/show) speaks ONE fallback — `issueRef`/`issue_ref`: trimmed title,
+  else the body squashed to one line and cut Unicode-safe with a `…`
+  marker, else `#id` — so a titleless card wears its body excerpt as the
+  title and the preview line stays empty (the same text twice reads as a
+  bug). The note reply box
   soft-wraps and grows with its content (board #28: a long line used to
   scroll horizontally, hiding what came before) — one line at rest, Enter
   sends, Shift+Enter inserts a newline, an IME composition's Enter never

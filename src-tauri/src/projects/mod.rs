@@ -656,6 +656,34 @@ fn board_status_ok(status: Option<&str>) -> Result<(), String> {
     }
 }
 
+/// The chars kept when a titleless issue is identified by its body — a card
+/// label / message head, not the content (the `…` says the rest lives on the
+/// issue).
+pub const ISSUE_REF_CHARS: usize = 40;
+
+/// The stable display identity of an issue (board #31: titles are optional,
+/// but nothing that SHOWS an issue may render an empty head): the trimmed
+/// title when there is one; else the body, whitespace-squashed to one line
+/// and cut on a char boundary (Unicode-safe) with a `…` marker; a legacy
+/// all-empty issue falls back to `#id`. Every consumer — room lifecycle
+/// lines, review/change/note notices, the CLI's list/show — speaks THIS
+/// fallback, so the same issue never wears two names.
+pub fn issue_ref(title: &str, body: &str, id: i64) -> String {
+    let t = title.trim();
+    if !t.is_empty() {
+        return t.to_string();
+    }
+    let squashed = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    if squashed.is_empty() {
+        return format!("#{id}");
+    }
+    if squashed.chars().count() <= ISSUE_REF_CHARS {
+        return squashed;
+    }
+    let cut: String = squashed.chars().take(ISSUE_REF_CHARS).collect();
+    format!("{}…", cut.trim_end())
+}
+
 pub fn board_list(session: &str) -> Result<Value, String> {
     with_store(|store| Ok(json!({ "issues": store.issues_list(session)?, "statuses": BOARD_STATUSES })))
 }
@@ -1257,6 +1285,26 @@ pub async fn capture_loop() {
 // the user's real state.db.
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn issue_ref_speaks_one_fallback_language() {
+        // A real title wins, trimmed.
+        assert_eq!(issue_ref("  Fix login  ", "whatever", 7), "Fix login");
+        // No title → the body, squashed to one line.
+        assert_eq!(issue_ref("", "the flow\n  breaks   at step 2", 7), "the flow breaks at step 2");
+        // Long bodies cut on a CHAR boundary with the … marker (Unicode-safe:
+        // 40 chars of CJK is 40 chars, not a split codepoint panic).
+        let long = "标题可以为空".repeat(10);
+        let r = issue_ref(" ", &long, 7);
+        assert_eq!(r.chars().count(), ISSUE_REF_CHARS + 1, "cut + one … char");
+        assert!(r.ends_with('…'));
+        assert!(r.starts_with("标题可以为空"));
+        // Exactly at the budget: no marker — the message is complete.
+        let exact = "x".repeat(ISSUE_REF_CHARS);
+        assert_eq!(issue_ref("", &exact, 7), exact);
+        // Legacy all-empty → the id.
+        assert_eq!(issue_ref("", "   ", 7), "#7");
+    }
 
     /// Point the process-wide store at a throwaway database, wiped once per
     /// test process. `STORE` is a `OnceLock`, so every test that touches it must

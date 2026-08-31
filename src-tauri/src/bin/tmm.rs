@@ -262,7 +262,10 @@ async fn main() {
                             let notes = i.get("notes").and_then(|v| v.as_i64()).unwrap_or(0);
                             let assignee = if g("assignee").is_empty() { String::new() } else { format!(" @{}", g("assignee")) };
                             let n = if notes > 0 { format!(" [{notes} notes]") } else { String::new() };
-                            println!("  #{id} {}{assignee}{n}", g("title"));
+                            // A titleless issue is still NAMED (board #31):
+                            // the same title → body → #id fallback every
+                            // notice speaks.
+                            println!("  #{id} {}{assignee}{n}", tmux_mobile::projects::issue_ref(g("title"), g("body"), id));
                         }
                     }
                 }
@@ -273,7 +276,7 @@ async fn main() {
                     let r = rpc(&ctx, "hub_board_get", json!({ "session": session, "id": id })).await;
                     if ctx.json { println!("{r}"); return; }
                     let g = |k: &str| r.get(k).and_then(|v| v.as_str()).unwrap_or("");
-                    println!("#{} [{}] {}", id, g("status"), g("title"));
+                    println!("#{} [{}] {}", id, g("status"), tmux_mobile::projects::issue_ref(g("title"), g("body"), id));
                     if !g("assignee").is_empty() { println!("assignee: {}", g("assignee")); }
                     if !g("created_by").is_empty() { println!("opened by: {}", g("created_by")); }
                     if !g("body").is_empty() { println!("\n{}\n", g("body")); }
@@ -285,9 +288,12 @@ async fn main() {
                     }
                 }
                 "add" => {
+                    // The title is OPTIONAL (board #31): `tmm board add --body "…"`
+                    // files a body-only issue. Something must be said, though.
                     let title = rest[1..].iter().filter(|a| !a.starts_with("--")).cloned().collect::<Vec<_>>().join(" ");
-                    if title.trim().is_empty() {
-                        fail(EXIT_USAGE, "board add needs a title: tmm board add \"fix the login flow\" [--body <text>] [--assignee <name>]");
+                    let has_body = matches!(flags.get("body"), Some(Some(b)) if !b.trim().is_empty());
+                    if title.trim().is_empty() && !has_body {
+                        fail(EXIT_USAGE, "board add needs a title or a --body: tmm board add \"fix the login flow\" [--body <text>] [--assignee <name>]");
                     }
                     let mut params = json!({ "session": session, "title": title, "who": who });
                     if let Some(Some(b)) = flags.get("body") { params["body"] = json!(b); }

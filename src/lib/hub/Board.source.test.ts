@@ -325,8 +325,8 @@ test('every destructive/discarding path confirms through the SHARED dialog (boar
   // time — a poll refetch, a selection change or a project switch while the
   // dialog stands open cannot redirect the delete.
   assert.match(source, /onclick=\{requestDelete\}/u, 'the delete button requests, never deletes');
-  assert.match(source, /pendingDelete = \{ session: cur, id: sel\.id, title: sel\.title \};/u,
-    'the request captures its target');
+  assert.match(source, /pendingDelete = \{ session: cur, id: sel\.id, title: issueRef\(sel\) \};/u,
+    'the request captures its target — named via issueRef, a titleless issue confirms by its body (board #31)');
   assert.equal([...source.matchAll(/boardDelete\(/g)].length, 1, 'ONE call site, inside the confirm executor');
   assert.match(source, /await boardDelete\(cap\.session, cap\.id\);/u, 'the executor deletes the CAPTURED target');
   assert.match(source, /const cap = pendingDelete;\n\s*if \(!cap \|\| busy\) return;/u, 'busy blocks a double confirm');

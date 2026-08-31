@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft } from './board.ts';
+import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, ISSUE_REF_CHARS } from './board.ts';
 
 // Since board #15 a draft carries all four editable fields; these helpers
 // build the full shape from the short form the assertions speak.
@@ -28,10 +28,14 @@ test('an issue draft saves explicitly, cancels cleanly, and patches only what ch
   const both = d({ title: '  new title ', body: 'b' });
   assert.deepEqual(draftPatch(both, issue), { title: 'new title', body: 'b' });
 
-  // A blank title is invalid: the save stays disabled, the draft survives.
+  // A blank title is FINE while a body holds (board #31: title optional) —
+  // the patch clears it verbatim; blanking BOTH is contentless and invalid.
   const blank = { ...clean, title: '   ' };
-  assert.ok(!draftValid(blank));
-  assert.equal(draftPatch(blank, issue), null);
+  assert.ok(draftValid(blank), 'body still says something');
+  assert.deepEqual(draftPatch(blank, issue), { title: '' });
+  const contentless = { ...clean, title: '   ', body: ' ' };
+  assert.ok(!draftValid(contentless));
+  assert.equal(draftPatch(contentless, issue), null);
 
   // Cancel = draftOf(sel) again: identity with the stored issue.
   assert.ok(!draftDirty(draftOf(issue), issue));
@@ -105,4 +109,24 @@ test('rebase: the agent\u2019s concurrent edit survives a title-only save (#11 r
   // normalizes the draft to clean without an explicit reset.
   const saved = rebaseDraft(d({ title: 'A2', body: 'B' }), base, d({ title: 'A2', body: 'B' }));
   assert.equal(draftPatch(saved.draft, saved.base), null);
+});
+
+test('issueRef: one fallback names every titleless issue (board #31)', () => {
+  // A real title wins, trimmed.
+  assert.equal(issueRef({ id: 7, title: '  Fix login  ', body: 'whatever' }), 'Fix login');
+  // No title → the body, whitespace squashed to one line.
+  assert.equal(issueRef({ id: 7, title: '', body: 'the flow\n  breaks   at step 2' }), 'the flow breaks at step 2');
+  // Long bodies cut on a CODE POINT boundary with the … marker (no split
+  // surrogate: 𝓍 is astral).
+  const long = '𝓍标题可空'.repeat(20);
+  const r = issueRef({ id: 7, title: ' ', body: long });
+  assert.equal([...r].length, ISSUE_REF_CHARS + 1, 'cut + one … char');
+  assert.ok(r.endsWith('…'));
+  assert.ok(r.startsWith('𝓍标题可空'));
+  // Exactly at the budget: complete, no marker.
+  const exact = 'x'.repeat(ISSUE_REF_CHARS);
+  assert.equal(issueRef({ id: 7, body: exact }), exact);
+  // Legacy all-empty → the id; missing fields never throw.
+  assert.equal(issueRef({ id: 7, title: '', body: '   ' }), '#7');
+  assert.equal(issueRef(null), '#0');
 });

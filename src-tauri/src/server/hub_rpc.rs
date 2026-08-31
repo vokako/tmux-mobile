@@ -417,7 +417,16 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
                     if let (Some(prev), Some(new_status)) = (&prev, s("status")) {
                         let old_status = prev["status"].as_str().unwrap_or("");
                         if old_status != new_status {
-                            let title = prev["title"].as_str().unwrap_or("");
+                            // Titles are optional (board #31): every surface
+                            // that NAMES an issue speaks issue_ref's fallback
+                            // (title → body excerpt → #id), so a titleless
+                            // issue never renders an empty head or a dangling
+                            // separator.
+                            let title = crate::projects::issue_ref(
+                                prev["title"].as_str().unwrap_or(""),
+                                prev["body"].as_str().unwrap_or(""),
+                                saved,
+                            );
                             if bus.open_room(&room).is_ok() {
                                 let _ = bus.post(&room, who, &format!("[tmm] board #{saved} {old_status} → {new_status} — {title}"), false);
                             }
@@ -455,7 +464,13 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
                     if let Some(prev) = &prev {
                         if let Some(what) = board_change_notice(prev, who, s("title"), s("body"), s("status"), s("assignee").is_some()) {
                             let assignee = prev["assignee"].as_str().unwrap_or("");
-                            let title = s("title").unwrap_or(prev["title"].as_str().unwrap_or(""));
+                            // The head names the issue as it NOW reads (new
+                            // values win), through the same issue_ref fallback.
+                            let title = crate::projects::issue_ref(
+                                s("title").unwrap_or(prev["title"].as_str().unwrap_or("")),
+                                s("body").unwrap_or(prev["body"].as_str().unwrap_or("")),
+                                saved,
+                            );
                             // The change itself travels in the line (values, not
                             // "something changed"); the `…` in a long excerpt is
                             // the one signal that `tmm board show` has more.
@@ -851,7 +866,11 @@ fn board_note_notice(
         return None;
     }
     let id = issue["id"].as_i64().unwrap_or(0);
-    let title = issue["title"].as_str().unwrap_or("");
+    let title = crate::projects::issue_ref(
+        issue["title"].as_str().unwrap_or(""),
+        issue["body"].as_str().unwrap_or(""),
+        id,
+    );
     let note = excerpt(body, NOTICE_EXCERPT);
     if note.is_empty() {
         return None;
@@ -1144,6 +1163,17 @@ mod tests {
         assert_eq!(super::board_note_notice(&unassigned, "human", "hello"), None);
         let human = serde_json::json!({ "id": 1, "title": "T", "assignee": "human" });
         assert_eq!(super::board_note_notice(&human, "lead", "hello"), None);
+
+        // A TITLELESS issue (board #31) is named by its body through the
+        // shared issue_ref fallback — never an empty head + dangling dash.
+        let titleless = serde_json::json!({
+            "id": 31, "title": "", "body": "issue标题可以为空，截前几个字显示", "assignee": "builder",
+        });
+        let (_, n) = super::board_note_notice(&titleless, "human", "ok").unwrap();
+        assert_eq!(
+            n,
+            "[board #31 reply] issue标题可以为空，截前几个字显示 — ok. Reply on the issue with `tmm board note 31 \"...\"`."
+        );
     }
     use super::super::test_util::req;
     use super::*;

@@ -30,8 +30,29 @@ export const draftOf = (issue: IssueLike | null | undefined): IssueDraft => ({
 export const draftDirty = (draft: IssueDraft, issue: IssueLike): boolean =>
   FIELDS.some((f) => draft[f] !== (issue[f] ?? ''));
 
-/** A draft the server would accept: a title is the one required field. */
-export const draftValid = (draft: IssueDraft): boolean => draft.title.trim().length > 0;
+/** A draft the server would accept (board #31: the title is OPTIONAL) —
+ * an issue just may not be contentless: title or body must say something. */
+export const draftValid = (draft: IssueDraft): boolean =>
+  draft.title.trim().length > 0 || draft.body.trim().length > 0;
+
+/** The chars kept when a titleless issue is identified by its body. Mirrors
+ * the Rust `projects::ISSUE_REF_CHARS` — the two ends of the same fallback. */
+export const ISSUE_REF_CHARS = 40;
+
+/** The stable display identity of an issue (board #31): the trimmed title
+ * when there is one; else the body squashed to one line and cut on a code
+ * point boundary (Unicode-safe) with a `…` marker; a legacy all-empty issue
+ * falls back to `#id`. Mirrors Rust `projects::issue_ref` — every surface
+ * that NAMES an issue (cards, dialogs, notices) speaks this one fallback. */
+export function issueRef(issue: { id?: number; title?: string; body?: string } | null | undefined): string {
+  const t = (issue?.title ?? '').trim();
+  if (t) return t;
+  const squashed = (issue?.body ?? '').trim().replace(/\s+/gu, ' ');
+  if (!squashed) return `#${issue?.id ?? 0}`;
+  const chars = [...squashed];
+  if (chars.length <= ISSUE_REF_CHARS) return squashed;
+  return `${chars.slice(0, ISSUE_REF_CHARS).join('').trimEnd()}…`;
+}
 
 /** ONLY the fields the USER changed, measured against the draft's own BASE —
  * never against the live issue (#11 review): after a concurrent refetch the

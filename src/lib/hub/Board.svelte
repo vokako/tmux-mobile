@@ -15,7 +15,7 @@
   import Select from '../ui/Select.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
-  import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft } from './board.ts';
+  import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef } from './board.ts';
   import { scrollFade } from '../core/scrollFade.ts';
 
   let { session = '', visible = true, onGoBack = null, issueRequest = null, embedded = false, createRequest = null }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null; issueRequest?: { session: string; id: number; n: number } | null; embedded?: boolean; createRequest?: { n: number } | null } = $props();
@@ -260,6 +260,8 @@
     await boardSave(cur, { id, assignee: name });
     if (name) {
       const b = body.trim() ? ` — ${excerpt(body)}.` : '.';
+      // The {title} slot names the issue; with the body already riding in
+      // {body}, a titleless issue is named by its id (not the body twice).
       const msg = t('boardAssignMsg')
         .replaceAll('{id}', String(id))
         .replace('{title}', title.trim() || '#' + id)
@@ -289,7 +291,8 @@
     busy = false;
   }
   async function createIssue() {
-    if (!nTitle.trim() || busy) return;
+    // Title OR body — the same not-contentless rule the server enforces.
+    if (!(nTitle.trim() || nBody.trim()) || busy) return;
     busy = true;
     let created: number | null = null;
     try {
@@ -331,7 +334,7 @@
   let pendingDelete = $state<null | { session: string; id: number; title: string }>(null);
   function requestDelete() {
     if (!sel || busy) return;
-    pendingDelete = { session: cur, id: sel.id, title: sel.title };
+    pendingDelete = { session: cur, id: sel.id, title: issueRef(sel) };
   }
   async function confirmDelete() {
     const cap = pendingDelete;
@@ -523,7 +526,7 @@
         </button>
         <span class="d-title">{t('boardNew')}</span>
         <span class="spacer"></span>
-        <button class="icon-btn go" title={t('create')} aria-label={t('create')} disabled={!nTitle.trim() || busy} onclick={createIssue}>
+        <button class="icon-btn go" title={t('create')} aria-label={t('create')} disabled={!(nTitle.trim() || nBody.trim()) || busy} onclick={createIssue}>
           <Icon name="check" size={14} />
         </button>
       </div>
@@ -552,8 +555,11 @@
           <div class="col-scroll subtle-scroll">
           {#each col(s) as i (i.id)}
             <button class="card" onclick={() => openIssue(i.id)}>
-              <span class="c-title">{i.title}</span>
-              {#if i.body}<span class="c-body">{i.body}</span>{/if}
+              <!-- Titleless issues (board #31) wear their body excerpt as the
+                   title (issueRef); the preview line then stays EMPTY — the
+                   same text twice reads as a rendering bug. -->
+              <span class="c-title">{issueRef(i)}</span>
+              {#if i.body && i.title?.trim()}<span class="c-body">{i.body}</span>{/if}
               <span class="c-meta">
                 #{i.id}
                 {#if i.created_by}· {t('boardBy')} {i.created_by}{/if}
