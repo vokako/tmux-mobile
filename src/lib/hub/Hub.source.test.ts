@@ -552,14 +552,24 @@ test('a stage job dies with its room, and nothing sends while one is in flight (
   // Race (2): with text already typed, sendable stayed true while a job was
   // in flight — the message could leave without its attachment, which then
   // landed in an emptied composer as an orphaned token. Both gates, so the
-  // keyboard's Enter (send() entry) and the pointer (disabled) agree.
+  // keyboard's Enter (send() entry) and the pointer (disabled) agree; while
+  // attaching the button is disabled OUTRIGHT, so an empty composer cannot
+  // turn into a clickable interrupt mid-upload.
   const sendFn = /async function send\(\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
   assert.ok(sendFn, 'send found');
   assert.match(sendFn, /if \(attaching\) return;/u, 'send() refuses while a stage job is in flight');
   assert.match(source, /disabled=\{!selected \|\| attaching \|\|/u, 'the send button is disabled too');
-  // attaching is a COUNT-derived gate: paste and the picker can overlap, and
-  // a boolean flag would drop the gate when the FIRST job finished.
-  assert.match(source, /const attaching = \$derived\(attachJobs > 0\);/u);
+  // The gate answers PER GENERATION, and every job books/releases only its
+  // OWN entry: a stale job neither holds the new room's send closed nor —
+  // via its finally — unlocks a job the new room started. A count or a flag
+  // fails one side or the other (a blanket reset in clearAttachments would
+  // let the old finally push it negative and free a running new job).
+  assert.match(source, /const attaching = \$derived\(jobGens\.includes\(attachGen\)\);/u,
+    'attaching asks whether the CURRENT generation has jobs');
+  assert.match(stage, /jobGens = \[\.\.\.jobGens, gen\];/u, 'a job books itself under its own generation');
+  const fin = /finally \{([\s\S]*?)\n    \}/u.exec(stage)?.[1] ?? '';
+  assert.match(fin, /jobGens\.indexOf\(gen\)/u, 'finally releases exactly its own entry');
+  assert.ok(!/jobGens = \[\]/u.test(source), 'nothing blanket-resets the job list');
   // Same genre on the way out: a post failing AFTER a project switch must
   // not restore the old room's draft/attachments into the new room.
   assert.match(sendFn, /if \(selected === room\) \{ pending = atts; composerText = raw; \}/u,

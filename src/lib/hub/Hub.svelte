@@ -787,16 +787,21 @@
   // agent's pane (an image is a reference, never bytes), and the feed renders
   // it through ChatImage like any other ref.
   let fileEl = $state(null);
-  // In-flight stage jobs — a COUNT, not a flag: paste and the picker can
-  // overlap, and a flag would drop the gate when the FIRST job finished.
-  let attachJobs = $state(0);
-  const attaching = $derived(attachJobs > 0);
   // The staged set's generation: bumped whenever it is invalidated (project
   // switch, explicit clear). An async stage job snapshots it at entry and
   // refuses to touch pending/composerText once stale — without this, an
   // upload finishing AFTER a project switch refilled the NEW room's composer
   // with the OLD room's attachment (lead review, board #25).
-  let attachGen = 0;
+  let attachGen = $state(0);
+  // In-flight stage jobs, each remembering the GENERATION it belongs to. A
+  // list and not a flag (paste + picker overlap; a flag dropped the gate when
+  // the first job finished), and per-generation so `attaching` answers for
+  // the room on screen: a stale job from the room the user LEFT neither
+  // holds the new room's send closed nor — via its finally — unlocks a job
+  // the new room started, because every job adds and removes only its OWN
+  // entry (lead review, board #25: 旧 finally 不能解锁新 job).
+  let jobGens = $state([]);
+  const attaching = $derived(jobGens.includes(attachGen));
   // Uploaded, waiting to ride the next send. The composer never shows the
   // markdown path line (owner, 2026-08-26: "消息框内部不展示完整的上传图片的
   // markdown 格式路径，就用一个 Image 的 placeholder 代替") — each attachment
@@ -890,7 +895,7 @@
     // or the sequence counter again: those belong to the room on screen NOW.
     const gen = attachGen;
     const stale = () => gen !== attachGen;
-    attachJobs++;
+    jobGens = [...jobGens, gen];
     try {
       await fsMkdir(`${ws}/.tmm/uploads`); // create_dir_all — idempotent
       if (stale()) return;
@@ -932,7 +937,10 @@
     } catch (err) {
       console.warn('attach failed', err);
     } finally {
-      attachJobs--;
+      // Remove exactly THIS job's entry — never a blanket reset: a stale
+      // job's finally must not unlock a job the new room started.
+      const i = jobGens.indexOf(gen);
+      if (i >= 0) jobGens = [...jobGens.slice(0, i), ...jobGens.slice(i + 1)];
     }
   }
 
