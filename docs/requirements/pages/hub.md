@@ -144,6 +144,14 @@ completion).
   handoff loop: file → assign (delivered) → take → review (delivered) →
   done by the reviewer. Board columns and agent live states are separate
   axes joined at these events.
+- Destructive and discarding actions confirm through the app's ONE
+  ConfirmDialog, phone-sheet aware (board #29): deleting an issue is a
+  danger confirm that CAPTURES its target at request time (a selection or
+  project change while the dialog stands cannot redirect it; success cleans
+  only the matching view); dropping a dirty edit OR typed-but-uncreated
+  form data is a neutral confirm reached from every exit (cancel, Escape,
+  back, sidebar pick), a confirmed discard truly clears the form, and clean
+  navigation never asks.
 - Carries the shared project sidebar (every project has its own board);
   the followed last-touched session is the default, a pick overrides it
   until that moves again. Compact is the standard drill-down (project list

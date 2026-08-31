@@ -103,9 +103,11 @@
   // the same contract every page registers via onGoBack (Files defined it).
   $effect(() => {
     onGoBack?.(() => {
+      if (pendingDelete) { pendingDelete = null; return true; } // back dismisses, never confirms
       if (pendingDiscard) { pendingDiscard = null; return true; }
       if (sideOpen) { sideOpen = false; return true; } // the drawer peels first
       if (sel && dirty) { pendingDiscard = () => { sel = null; }; return true; }
+      if (creating && createDirty) { pendingDiscard = () => { creating = false; }; return true; }
       if (sel || creating) { sel = null; creating = false; return true; }
       return false;
     });
@@ -121,6 +123,7 @@
   let creating = $state(false);
   let nTitle = $state('');
   let nBody = $state('');
+  let nAssignee = $state('');
   let noteText = $state('');
   let busy = $state(false);
   // ── The DRAFT (board #11): opening an issue edits a COPY; only the explicit
@@ -135,12 +138,16 @@
   let draftBase = $state(draftOf(null));
   let pendingDiscard = $state<null | (() => void)>(null);
   const dirty = $derived(sel ? draftDirty(draft, draftBase) : false);
-  /** Run now, or park behind the discard confirm when the draft is dirty. */
+  // The create form's typed-but-uncreated data is the same kind of unsaved
+  // work as a dirty edit (board #29): any exit that would drop it — cancel,
+  // Escape, back, a sidebar project pick — asks through the SAME guard, and
+  // a clean form navigates without a pointless dialog.
+  const createDirty = $derived(creating && !!(nTitle.trim() || nBody.trim() || nAssignee));
+  /** Run now, or park behind the discard confirm when unsaved work exists. */
   function guard(action: () => void) {
-    if (dirty) pendingDiscard = action;
+    if (dirty || createDirty) pendingDiscard = action;
     else action();
   }
-  let nAssignee = $state('');
 
   async function load() {
     try {
@@ -173,7 +180,7 @@
   // Switching projects resets the view to the new board's list.
   $effect(() => {
     void cur;
-    sel = null; creating = false; ready = false; issues = []; noteText = ''; nAssignee = ''; pendingDiscard = null;
+    sel = null; creating = false; ready = false; issues = []; noteText = ''; nTitle = ''; nBody = ''; nAssignee = ''; pendingDiscard = null; pendingDelete = null;
   });
 
   /** The editor boxes ADAPT to their content (owner, 2026-08-29: "有的框很大
@@ -312,20 +319,43 @@
     try { await boardNote(cur, sel.id, noteText.trim()); noteText = ''; await refetchSel(); } catch (e) { err = String((e as Error)?.message ?? e); }
     busy = false;
   }
-  async function removeIssue() {
+  // ── Delete is CONFIRMED, and the request is CAPTURED (board #29): the
+  // dialog carries the session + issue it was opened FOR, and the executor
+  // uses exactly that — a poll refetch, a selection change or a project
+  // switch while the dialog stands open cannot redirect the delete. Nothing
+  // destructive runs before the confirm; busy blocks a double confirm.
+  let pendingDelete = $state<null | { session: string; id: number; title: string }>(null);
+  function requestDelete() {
     if (!sel || busy) return;
+    pendingDelete = { session: cur, id: sel.id, title: sel.title };
+  }
+  async function confirmDelete() {
+    const cap = pendingDelete;
+    if (!cap || busy) return;
     busy = true;
-    try { await boardDelete(cur, sel.id); sel = null; await load(); } catch (e) { err = String((e as Error)?.message ?? e); }
+    try {
+      await boardDelete(cap.session, cap.id);
+      // Only the MATCHING view is cleaned: if the user moved to another
+      // project meanwhile, that board is not ours to touch.
+      if (cur === cap.session) {
+        if (sel?.id === cap.id) sel = null;
+        await load();
+      }
+    } catch (e) {
+      if (cur === cap.session) err = String((e as Error)?.message ?? e);
+    }
     busy = false;
+    pendingDelete = null;
   }
 
   // Esc peels the board's own layers (detail → list, form → list) before the
   // drawer's close sees it — same territory rule as the files partition.
   function onKey(e: KeyboardEvent) {
     if (e.key !== 'Escape') return;
-    if (pendingDiscard) return; // the ConfirmDialog's own capture handler closes itself
+    if (pendingDiscard || pendingDelete) return; // the ConfirmDialog's own capture handler closes itself
     if (sideOpen) { sideOpen = false; e.stopPropagation(); return; }
     if (sel && dirty) { pendingDiscard = () => { sel = null; }; e.stopPropagation(); return; }
+    if (creating && createDirty) { pendingDiscard = () => { creating = false; }; e.stopPropagation(); return; }
     if (sel || creating) { sel = null; creating = false; e.stopPropagation(); }
   }
 
@@ -418,7 +448,7 @@
             <Icon name="check" size={14} />
           </button>
         {/if}
-        <button class="icon-btn" title={t('boardDeleteIssue')} aria-label={t('boardDeleteIssue')} disabled={busy} onclick={removeIssue}>
+        <button class="icon-btn" title={t('boardDeleteIssue')} aria-label={t('boardDeleteIssue')} disabled={busy} onclick={requestDelete}>
           <Icon name="trash" size={14} />
         </button>
       </div>
@@ -484,7 +514,7 @@
     <!-- ── new issue: title is the one required field ── -->
     <div class="detail">
       <div class="d-head">
-        <button class="icon-btn" title={t('cancel')} aria-label={t('cancel')} onclick={() => (creating = false)}>
+        <button class="icon-btn" title={t('cancel')} aria-label={t('cancel')} onclick={() => guard(() => (creating = false))}>
           <Icon name="arrow-left" size={14} />
         </button>
         <span class="d-title">{t('boardNew')}</span>
@@ -540,11 +570,20 @@
   {#if err}<div class="err">{err}</div>{/if}
   </div>
   </div>
-  <ConfirmDialog open={!!pendingDiscard} danger={false}
-    title={t('confirmDiscardTitle')} note={t('boardDiscardNote')}
+  <ConfirmDialog open={!!pendingDiscard} danger={false} compact={narrowVp}
+    title={t('confirmDiscardTitle')} note={creating ? t('boardCreateDiscardNote') : t('boardDiscardNote')}
     confirmLabel={t('confirmDiscard')} cancelLabel={t('cancel')}
-    onconfirm={() => { const go = pendingDiscard; pendingDiscard = null; draft = { ...draftBase }; go?.(); }}
+    onconfirm={() => { const go = pendingDiscard; pendingDiscard = null; draft = { ...draftBase }; nTitle = ''; nBody = ''; nAssignee = ''; go?.(); }}
     oncancel={() => (pendingDiscard = null)} />
+  <!-- Deleting is the DANGER confirmation (board #29): the dialog names the
+       captured issue, nothing reaches boardDelete before the confirm, and
+       busy holds the button through the RPC. -->
+  <ConfirmDialog open={!!pendingDelete} danger compact={narrowVp} {busy}
+    title={t('boardDeleteConfirmTitle').replace('{title}', pendingDelete?.title ?? '')}
+    note={t('boardDeleteConfirmNote')}
+    confirmLabel={t('boardDeleteIssue')} cancelLabel={t('cancel')}
+    onconfirm={confirmDelete}
+    oncancel={() => (pendingDelete = null)} />
 </div>
 
 <style>

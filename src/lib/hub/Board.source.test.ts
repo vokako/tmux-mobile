@@ -318,3 +318,45 @@ test('the note reply wraps and grows — one autoGrow, chat keyboard semantics (
   assert.match(source, /\.note-add \{ display: flex; gap: 6px; align-items: flex-end; \}/u,
     'the button pins to the bottom line');
 });
+
+test('every destructive/discarding path confirms through the SHARED dialog (board #29)', () => {
+  // Delete: the button only REQUESTS; nothing reaches boardDelete before the
+  // confirm, and the executor uses the session+issue CAPTURED at request
+  // time — a poll refetch, a selection change or a project switch while the
+  // dialog stands open cannot redirect the delete.
+  assert.match(source, /onclick=\{requestDelete\}/u, 'the delete button requests, never deletes');
+  assert.match(source, /pendingDelete = \{ session: cur, id: sel\.id, title: sel\.title \};/u,
+    'the request captures its target');
+  assert.equal([...source.matchAll(/boardDelete\(/g)].length, 1, 'ONE call site, inside the confirm executor');
+  assert.match(source, /await boardDelete\(cap\.session, cap\.id\);/u, 'the executor deletes the CAPTURED target');
+  assert.match(source, /const cap = pendingDelete;\n\s*if \(!cap \|\| busy\) return;/u, 'busy blocks a double confirm');
+  assert.match(source, /if \(cur === cap\.session\) \{\n\s*if \(sel\?\.id === cap\.id\) sel = null;/u,
+    'success cleans only the MATCHING view');
+  // The danger dialog is the shared component in the shared shape.
+  assert.match(source, /<ConfirmDialog open=\{!!pendingDelete\} danger compact=\{narrowVp\} \{busy\}/u,
+    'delete confirms in danger tone, phone-sheet aware, busy-held');
+  assert.match(source, /t\('boardDeleteConfirmTitle'\)\.replace\('\{title\}', pendingDelete\?\.title \?\? ''\)/u,
+    'the dialog names the captured issue — not whatever is selected now');
+  // Discard: typed-but-uncreated create data is unsaved work; every exit
+  // (explicit cancel, Escape, back, sidebar pick via guard) asks through the
+  // SAME neutral dialog, a confirmed discard truly clears the form, and a
+  // clean form navigates silently.
+  assert.match(source, /const createDirty = \$derived\(creating && !!\(nTitle\.trim\(\) \|\| nBody\.trim\(\) \|\| nAssignee\)\);/u);
+  assert.match(source, /if \(dirty \|\| createDirty\) pendingDiscard = action;/u, 'ONE guard covers both kinds of unsaved work');
+  assert.match(source, /aria-label=\{t\('cancel'\)\} onclick=\{\(\) => guard\(\(\) => \(creating = false\)\)\}/u,
+    'the create form\u2019s explicit cancel goes through the guard');
+  assert.match(source, /if \(creating && createDirty\) \{ pendingDiscard = \(\) => \{ creating = false; \}; e\.stopPropagation\(\); return; \}/u,
+    'Escape asks before dropping create data');
+  assert.match(source, /if \(creating && createDirty\) \{ pendingDiscard = \(\) => \{ creating = false; \}; return true; \}/u,
+    'the back gesture asks too');
+  assert.match(source, /if \(pendingDelete\) \{ pendingDelete = null; return true; \}/u, 'back DISMISSES an open delete dialog, never confirms');
+  assert.match(source, /pendingDiscard = null; draft = \{ \.\.\.draftBase \}; nTitle = ''; nBody = ''; nAssignee = '';/u,
+    'a confirmed discard actually clears the create fields');
+  assert.match(source, /<ConfirmDialog open=\{!!pendingDiscard\} danger=\{false\} compact=\{narrowVp\}/u,
+    'discard confirms in neutral tone, phone-sheet aware');
+  assert.match(source, /note=\{creating \? t\('boardCreateDiscardNote'\) : t\('boardDiscardNote'\)\}/u,
+    'the words say WHAT is lost — an uncreated issue is not an unsaved edit');
+  // No second confirmation species: no browser confirm(), no hand-rolled modal.
+  assert.ok(!/window\.confirm|[^.\w]confirm\(/u.test(source), 'no browser confirm');
+  assert.equal([...source.matchAll(/<ConfirmDialog /g)].length, 2, 'exactly the two shared dialogs');
+});
