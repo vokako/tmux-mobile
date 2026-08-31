@@ -24,7 +24,14 @@ const DRAFT_KEY = 'tmux_hub_drafts';
 // not a level: the right cap depends on the screen and the reader (owner,
 // 2026-08-24: "工具调用最大显示的行数应该也变成一个可配置的参数").
 const STEPS_ROWS_KEY = 'tmux_hub_steps_rows';
+// Which drawer partition a project had open ('' = closed). The drawer is part
+// of "where I left off" in a room (board #23, owner: "chat的右侧边栏打开哪个
+// 的状态前端帮我记住，这样我切换不同的 project 回来原来的视图还在"):
+// switching projects and returning restores the same partition, and a room
+// where it was closed comes back closed.
+const DRAWER_KEY = 'tmux_hub_drawer';
 export type FeedLevel = 'chat' | 'status' | 'tools';
+const drawerValid = (v: string) => v === 'term' || v === 'files' || v === 'board';
 
 const stored = localStorage.getItem(FEED_LEVEL_KEY);
 const valid = (v: string | null): v is FeedLevel => v === 'chat' || v === 'status' || v === 'tools';
@@ -49,6 +56,8 @@ const state = $state({
   project: localStorage.getItem(PROJECT_KEY) ?? '',
   // Per project: the message being written but not yet sent.
   drafts: readMap<string>(DRAFT_KEY),
+  // Per project: the drawer partition that was open ('' / absent = closed).
+  drawers: readMap<string>(DRAWER_KEY),
   // Tool-lane cap in rows; the stored value passes the same clamp as the
   // setter so an old or hand-edited entry cannot render a broken lane.
   stepsRows: clampStepsRows(localStorage.getItem(STEPS_ROWS_KEY) ?? STEPS_ROWS),
@@ -84,7 +93,7 @@ export const hubPrefs = {
    * lead and its read marker. */
   renameSession(from: string, to: string) {
     if (!from || !to || from === to) return;
-    for (const map of [state.leads, state.seen, state.drafts] as Record<string, unknown>[]) {
+    for (const map of [state.leads, state.seen, state.drafts, state.drawers] as Record<string, unknown>[]) {
       if (from in map) {
         map[to] = map[from];
         delete map[from];
@@ -93,6 +102,7 @@ export const hubPrefs = {
     localStorage.setItem(LEAD_KEY, JSON.stringify(state.leads));
     localStorage.setItem(SEEN_KEY, JSON.stringify(state.seen));
     localStorage.setItem(DRAFT_KEY, JSON.stringify(state.drafts));
+    localStorage.setItem(DRAWER_KEY, JSON.stringify(state.drawers));
     if (state.project === from) this.setProject(to);
   },
   /** The remembered default recipient for a project, '' when none. */
@@ -109,6 +119,18 @@ export const hubPrefs = {
   setSeen(session: string, ts: number) {
     state.seen[session] = ts;
     localStorage.setItem(SEEN_KEY, JSON.stringify(state.seen));
+  },
+  /** The drawer partition a project had open — 'term' | 'files' | 'board',
+   * '' when it was closed (or the stored value is not a partition we have). */
+  drawer(session: string) {
+    const v = state.drawers[session] ?? '';
+    return drawerValid(v) ? v : '';
+  },
+  setDrawer(session: string, view: string) {
+    if (!session) return;
+    if (view) state.drawers[session] = view;
+    else delete state.drawers[session];   // closed leaves no row behind
+    localStorage.setItem(DRAWER_KEY, JSON.stringify(state.drawers));
   },
   /** The unsent message for a project, '' when there is none. */
   draft(session: string) { return state.drafts[session] ?? ''; },

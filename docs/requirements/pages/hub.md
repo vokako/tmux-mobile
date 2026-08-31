@@ -106,6 +106,12 @@ completion).
   parked cwd, maximize hands off to the Files tab. Esc inside is the
   browser's own.
 - On the phone/compact: terminal and files toggles JUMP to their tabs.
+- The open partition is remembered PER PROJECT (board #23: "切换不同的
+  project 回来原来的视图还在"): opening/closing records it
+  (`hubPrefs.drawer`, localStorage), switching projects restores it — a room
+  where the drawer was closed comes back closed, and the terminal partition
+  re-seats its pane from the NEW room's roster (a stale target from the old
+  room never leaks in). Survives reload; renameSession migrates the key.
 - The header also carries a board shortcut — the task board is its own
   PAGE (tab between Files and Agents), never a drawer partition.
 - Every drawer toggle re-anchors the reading position (`withReadingAnchor`).

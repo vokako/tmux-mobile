@@ -248,7 +248,7 @@ test('the drawer opens and closes through the reading anchor, everywhere', () =>
   // path, both wrapped — a bare `termOpen = true/false` outside selectProject is
   // a trigger someone forgot to route.
   const bare = [...source.matchAll(/termOpen = (?:true|false)/g)].length;
-  assert.equal(bare, 3, 'selectProject reset + the two wrapped mutations, nothing else');
+  assert.equal(bare, 2, 'exactly the two wrapped mutations; selectProject restores via termOpen = !!dv');
   assert.match(source, /withReadingAnchor\(\(\) => \{ termOpen = true; \}\)/u);
   assert.match(source, /withReadingAnchor\(\(\) => \{ termOpen = false; \}\)/u);
   // The reference skips every sticky variant: a pinned rect does not move with
@@ -509,4 +509,23 @@ test('paste and the + button stage attachments through ONE pipeline (board #25)'
   const picker = /async function onPickFiles\(e\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
   assert.match(picker, /stageFiles\(files\)/u, 'the + button goes through the same pipeline');
   assert.doesNotMatch(picker, /fsUpload|encodeImage/u, 'the picker holds no upload logic of its own');
+});
+
+test('the drawer follows the project — partition parked and restored per room (board #23)', () => {
+  // Owner: "chat的右侧边栏打开哪个的状态前端帮我记住，这样我切换不同的
+  // project 回来原来的视图还在". ONE record point per direction — openDrawer
+  // (every view switch routes through it) and closeDrawer (the one close
+  // path) — and ONE restore point in selectProject. A second write site for
+  // the same pref is how two sources of truth drift.
+  assert.match(source, /withReadingAnchor\(\(\) => \{ termOpen = true; \}\);\n(?:\s*\/\/[^\n]*\n)*\s*hubPrefs\.setDrawer\(selected, drawerView\);/u,
+    'opening records which partition this room shows');
+  assert.match(source, /withReadingAnchor\(\(\) => \{ termOpen = false; \}\);\n\s*hubPrefs\.setDrawer\(selected, ''\);/u,
+    'closing records closed');
+  assert.equal([...source.matchAll(/hubPrefs\.setDrawer\(/g)].length, 2,
+    'exactly the two record points');
+  // Restore: compact has no drawer, an unknown room comes back closed, and
+  // the old room's pane target never leaks into the new room's terminal.
+  assert.match(source, /const dv = compact \? '' : hubPrefs\.drawer\(session\);/u);
+  assert.match(source, /termOpen = !!dv;/u);
+  assert.match(source, /termTarget = ''; termCommand = '';/u, 'stale pane target cleared on switch');
 });

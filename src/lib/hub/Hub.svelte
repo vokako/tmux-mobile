@@ -256,13 +256,33 @@
     filterAgent = ''; // a filter is a reading choice, scoped to its room
     msgOpen = '';
     rawOpen = '';
-    termOpen = false;
+    // The drawer follows the project (board #23, owner: "chat的右侧边栏打开
+    // 哪个的状态前端帮我记住，这样我切换不同的 project 回来原来的视图还在"):
+    // whichever partition was open when the user LEFT this room reopens on
+    // return, and a room where it was closed comes back closed. No reading
+    // anchor here — selectProject lands at the tail regardless.
+    const dv = compact ? '' : hubPrefs.drawer(session);
+    if (dv) drawerView = dv;
+    termOpen = !!dv;
+    // The old room's pane must never leak into this one's terminal partition.
+    termTarget = ''; termCommand = '';
+    if (dv === 'term') {
+      const pick = agents.find((x) => x.managed) ?? agents[0];
+      if (pick) pickWindow(pick);
+    }
     // Entering a room lands at its tail, cached or not — a parked scrollTop
     // from the LAST room would point at arbitrary content in this one.
     following = true;
     if (feed.length) scrollFeed(true);
     await Promise.all([loadFeed(), loadAgents(), loadActivity()]);
     if (selected === session) roomReady = true;
+    // A restored terminal partition may have had NO roster to pick from (a
+    // first visit after reload restores before any cache exists) — seat it
+    // once the fresh roster is in.
+    if (selected === session && termOpen && drawerView === 'term' && !termTarget) {
+      const pick = agents.find((x) => x.managed) ?? agents[0];
+      if (pick) pickWindow(pick);
+    }
   }
 
   async function loadFeed() {
@@ -1203,11 +1223,15 @@
       return;
     }
     withReadingAnchor(() => { termOpen = true; });
+    // The drawer follows the project (board #23): remember which partition
+    // this room has open, so returning to it restores the same view.
+    hubPrefs.setDrawer(selected, drawerView);
   }
 
   /** The one close path, so every trigger keeps the reader's place. */
   function closeDrawer() {
     withReadingAnchor(() => { termOpen = false; });
+    hubPrefs.setDrawer(selected, '');
   }
 
   function pickWindow(a) {
