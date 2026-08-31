@@ -494,3 +494,19 @@ test('the drawer wears the app ground and its head is the page-head\u2019s twin 
   assert.match(source, /\.board-body :global\(\.page-head\) \{ display: none; \}/u,
     'the drawer suppresses any child page-head — the drawer head is the only header');
 });
+
+test('paste and the + button stage attachments through ONE pipeline (board #25)', () => {
+  // The composer textarea accepts pasted images/files: onpaste routes through
+  // pastedFiles() (files win over co-riding text) into the SAME stageFiles()
+  // the file picker uses — a second upload path would drift (token insertion,
+  // re-encode, .tmm/uploads layout) the moment either one changed.
+  assert.match(source, /class="c-input"[^>]*onpaste=\{onComposerPaste\}/su,
+    'the composer textarea must wire onpaste');
+  const handler = /function onComposerPaste\(e\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
+  assert.match(handler, /pastedFiles\(e\.clipboardData\)/u, 'files come from the pure extractor');
+  assert.match(handler, /preventDefault/u, 'a file paste suppresses the default text insertion');
+  assert.match(handler, /stageFiles\(files\)/u, 'staging is the shared pipeline');
+  const picker = /async function onPickFiles\(e\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
+  assert.match(picker, /stageFiles\(files\)/u, 'the + button goes through the same pipeline');
+  assert.doesNotMatch(picker, /fsUpload|encodeImage/u, 'the picker holds no upload logic of its own');
+});

@@ -93,7 +93,11 @@ completion).
   recorded in the room (`[tmm] interrupted <name>`).
 - Attachments (`+`): images downscale client-side and land in
   `<ws>/.tmm/uploads/`; any other file lands byte-identical; position is a
-  visible `[img:n]` token swapped for the real ref at send.
+  visible `[img:n]` token swapped for the real ref at send. Pasting into the
+  composer stages files the same way (board #25): a clipboard carrying files
+  (screenshot, copied file) goes through the identical pipeline and the
+  default text insertion is suppressed — a copied file's path-as-text would
+  say the same thing twice; a text-only paste is untouched.
 
 ## Drawer (three partitions, one width handle)
 - **Terminal**: the selected agent's live pane (embedded xterm), window

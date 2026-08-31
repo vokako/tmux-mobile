@@ -32,7 +32,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId } from './hub.ts';
+  import { markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles } from './hub.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
@@ -811,12 +811,32 @@
   }
 
   async function onPickFiles(e) {
-    const ws = selectedRow?.project.path;
     const files = [...(e.target.files || [])];
     e.target.value = ''; // same file re-pickable
+    await stageFiles(files);
+  }
+
+  /** Paste is the second door into the SAME staging pipeline (board #25:
+   * "chat 输入框，应该支持剪贴板粘贴图片或者文件等"): a screenshot or a copied
+   * file lands exactly like the + button's pick — image re-encoded, file
+   * uploaded byte-identical, chip above the box, [img:n]/[file:n] token at
+   * the caret. Files WIN over text riding the same clipboard (a copied file
+   * also carries its path as text — inserting it beside the staged chip
+   * would say the same thing twice), so the default insertion is suppressed
+   * exactly when there are files to stage; a plain text paste is untouched. */
+  function onComposerPaste(e) {
+    const files = pastedFiles(e.clipboardData);
+    if (!files.length) return; // text-only paste: the textarea's own business
+    e.preventDefault();
+    stageFiles(files);
+  }
+
+  async function stageFiles(files) {
+    const ws = selectedRow?.project.path;
     if (!ws || !files.length) return;
     // Where the tokens land: the caret's last position (the file dialog
-    // blurs the box but the selection survives), else the end.
+    // blurs the box but the selection survives; a paste's caret is live),
+    // else the end.
     let at = composerEl?.selectionStart ?? composerText.length;
     attaching = true;
     try {
@@ -2538,6 +2558,7 @@
           style:text-indent={managedAgents.length ? `${toChipW + 8}px` : '0'}
           placeholder={recipient === ALL_TARGET ? t('hubComposerAll') : recipient ? t('hubComposerDm').replace('{name}', recipient) : t('hubComposerRoom')}
           onkeydown={onComposerKey}
+          onpaste={onComposerPaste}
           onfocus={() => { following = true; scrollFeed(true); setTimeout(() => scrollFeed(true), 300); }}
         ></textarea>
         {#if pending.length}

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { uploadImagePath, uploadFilePath, imageId, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts } from './hub.ts';
+import { uploadImagePath, uploadFilePath, imageId, pastedFiles, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -989,6 +989,27 @@ test('composer uploads land under the project .tmm with a random id', () => {
   assert.equal(uploadFilePath('/w/s', 'id1', 'a/b\\c:d?.txt'), '/w/s/.tmm/uploads/id1-cd.txt', 'separators and reserved chars stripped');
   assert.equal(uploadFilePath('/w/s', 'id1', '   '), '/w/s/.tmm/uploads/id1-file', 'nothing left → generic');
   assert.notEqual(imageId(), imageId(), 'random half differs');
+});
+
+test('pastedFiles pulls the files out of a paste, or [] for plain text (board #25)', () => {
+  const file = (name: string, type: string) => ({ name, type }) as unknown as File;
+  const item = (f: File | null, kind = 'file') => ({ kind, getAsFile: () => f });
+  const shot = file('image.png', 'image/png');
+  const pdf = file('report.pdf', 'application/pdf');
+  // A screenshot paste: one file item, usually a text/plain item beside it.
+  assert.deepEqual(pastedFiles({ items: [item(null, 'string'), item(shot)] }), [shot],
+    'string items ignored, file items staged');
+  // Some engines expose pasted files only on `files`.
+  assert.deepEqual(pastedFiles({ items: [], files: [pdf] }), [pdf], 'files is the fallback');
+  // Items and files alias the SAME files — never read both (would duplicate).
+  assert.deepEqual(pastedFiles({ items: [item(shot)], files: [shot, pdf] }), [shot],
+    'items win outright when they yield anything');
+  // A file item whose getAsFile() is null is a miss, not a crash.
+  assert.deepEqual(pastedFiles({ items: [item(null)], files: [pdf] }), [pdf]);
+  // Plain text paste: nothing to stage, the textarea's default insertion runs.
+  assert.deepEqual(pastedFiles({ items: [item(null, 'string')] }), []);
+  assert.deepEqual(pastedFiles({}), []);
+  assert.deepEqual(pastedFiles(null), [], 'clipboardData can be null');
 });
 
 test('mentionsAgent parses addresses the way deliver_mentions does', () => {

@@ -263,6 +263,29 @@ export function uploadFilePath(ws: string, id: string, name: string): string {
   return `${ws.replace(/\/+$/, '')}/.tmm/uploads/${id}-${safe}`;
 }
 
+/** The files a paste carries, or [] when it is a plain text paste (board #25:
+ * "chat 输入框，应该支持剪贴板粘贴图片或者文件等"). Files WIN over any text
+ * riding the same clipboard: a Finder/Explorer file copy also carries the
+ * path as text, and inserting that path next to the staged chip would say
+ * the same thing twice — so the caller preventDefaults whenever this is
+ * non-empty. Items are read first (a screenshot paste is an items-only
+ * clipboard on some engines) and `files` is the fallback, never both — the
+ * two views alias the SAME files and reading both would stage duplicates. */
+export function pastedFiles(dt: {
+  items?: ArrayLike<{ kind: string; getAsFile(): File | null }>;
+  files?: ArrayLike<File>;
+} | null | undefined): File[] {
+  if (!dt) return [];
+  const out: File[] = [];
+  for (const it of Array.from(dt.items ?? [])) {
+    if (it.kind !== 'file') continue;
+    const f = it.getAsFile();
+    if (f) out.push(f);
+  }
+  if (out.length) return out;
+  return Array.from(dt.files ?? []);
+}
+
 /** Collision-safe enough for a temp dir, sortable by time, no ceremony. */
 export function imageId(): string {
   const rand = (globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)).slice(0, 8);
