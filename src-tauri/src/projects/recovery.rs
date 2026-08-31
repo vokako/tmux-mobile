@@ -38,11 +38,17 @@
 //!
 //! Detection is deliberately narrow. A pane is full of text ABOUT errors —
 //! the owner pasted this very error into the chat, which typed it into an
-//! agent's pane — so a hit requires the error's own header AND a transient
-//! marker on the SAME logical line (capture joins soft-wrapped lines), and a
-//! line carrying the `[tmm chat …]` stamp is never a hit (that is somebody
-//! QUOTING an error, not having one). A missed real error costs one manual
-//! `continue`; a false positive types into a working agent's conversation.
+//! agent's pane — so detection reads kiro's PAINT BLOCKS (a column-zero head
+//! line plus the indented continuation lines under it; kiro paints its own
+//! errors flush-left and hard-wraps the rest, board #24 2026-08-31, while
+//! everything QUOTED — chat deliveries, tool output, the agent's own prose —
+//! paints indented under a stamp or a `●` bullet head): a hit is a block that
+//! OPENS with the error's own header and carries a transient marker, a block
+//! containing the `[tmm chat …]` stamp is never a hit (that is somebody
+//! QUOTING an error, not having one), and an indented tail whose head
+//! scrolled off the capture is dropped, never guessed at. A missed real error
+//! costs one manual `continue`; a false positive types into a working agent's
+//! conversation.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -58,7 +64,12 @@ pub const BASE_BACKOFF_SECS: u64 = 30;
 const CONTINUE_LINE: &str = "continue";
 
 /// The error's own header, canonicalized. Everything kiro streams out of a
-/// dead turn starts with this sentence.
+/// dead turn starts with this sentence — and since ~2026-08-31 (board #24)
+/// kiro HARD-wraps the paint: header flush-left, the struct dump indented on
+/// real newlines that capture -J cannot rejoin, so the transient markers sit
+/// many physical lines below the header. Detection therefore matches the
+/// reassembled paint BLOCK, and the header must OPEN it (`starts_with`, not
+/// `contains`) — quoted copies always paint under a stamp or bullet head.
 const HEADER: &str = "anunexpectederroroccurred";
 /// Transient markers — the reasons that mean "try again later", canonicalized.
 const TRANSIENT: [&str; 3] = [
@@ -70,9 +81,8 @@ const TRANSIENT: [&str; 3] = [
 /// temporarily unavailable. Please use '/model' to select a different model
 /// and try again. (request_id: …)`. No "unexpected error" header — the whole
 /// first sentence IS the header, and it is specific enough on its own: it
-/// self-contains the transient reason ("temporarily unavailable") and kiro
-/// hard-wraps its continuation lines, so requiring a second marker on the
-/// same logical line would miss the real error on any normal-width pane.
+/// self-contains the transient reason ("temporarily unavailable"), so a block
+/// opening with it needs no second marker.
 const MODEL_UNAVAILABLE: &str = "themodelyouveselectedistemporarilyunavailable";
 
 /// Lowercase alphanumerics only: the pane wraps the error blob at arbitrary
@@ -94,38 +104,58 @@ pub fn scan_tail(text: &str) -> bool {
 /// visible, else `"<hits>|<sorted request_ids>"`. Two ticks that see the SAME
 /// painted error produce the same signature; a SECOND error (the resumed turn
 /// died again) changes it — new hit, new request_id — which is what re-arms a
-/// confirmed incident. Ids are read from the hit line and its next few lines,
-/// because kiro hard-wraps and the `(request_id: …)` tail often lands on its
-/// own continuation line.
+/// confirmed incident. Ids are read from the hit's whole paint block, because
+/// kiro hard-wraps and the `(request_id: …)` tail lands up to ~20 continuation
+/// lines below the header (board #24's paint) — even split mid-id, which is
+/// why the block is de-wrapped (joined without separators) before the scan.
 pub fn error_signature(text: &str) -> Option<String> {
     let lines: Vec<&str> = {
         let mut v: Vec<&str> = text.lines().rev().take(40).collect();
         v.reverse();
         v
     };
+    // Reassemble kiro's PAINT BLOCKS: a column-zero head line owns every
+    // indented line under it, and a blank line ends the paint. Each block is
+    // de-wrapped into one string (lines trimmed, joined WITHOUT a separator —
+    // canonical() drops spaces anyway, and only gluing lets a request_id that
+    // wrapped mid-token be read back whole). An indented line with no open
+    // block above it — the head scrolled off the capture, or a blank sat
+    // between them — is dropped, never guessed at: the invisible head is a
+    // `[tmm chat …]` stamp as easily as a real error header.
+    let mut blocks: Vec<String> = Vec::new();
+    let mut open = false;
+    for line in &lines {
+        if line.trim().is_empty() {
+            open = false;
+            continue;
+        }
+        if line.starts_with(' ') {
+            if open {
+                blocks.last_mut().expect("open implies a block").push_str(line.trim());
+            }
+        } else {
+            blocks.push(line.trim_end().to_string());
+            open = true;
+        }
+    }
     let mut hits = 0u32;
     let mut ids: Vec<String> = Vec::new();
-    for (i, line) in lines.iter().enumerate() {
-        let c = canonical(line);
-        // A chat line QUOTING the error (delivered into the pane, or echoed
-        // back in the conversation) is not the agent having one.
+    for block in &blocks {
+        let c = canonical(block);
+        // A block QUOTING the error (a chat delivery typed into the pane, or
+        // its echo in the conversation) is not the agent having one — and a
+        // quote's id must not pollute the signature either.
         if c.contains("tmmchat") {
             continue;
         }
-        let hit = (c.contains(HEADER) && TRANSIENT.iter().any(|m| c.contains(m)))
-            || c.contains(MODEL_UNAVAILABLE);
+        let hit = (c.starts_with(HEADER) && TRANSIENT.iter().any(|m| c.contains(m)))
+            || c.starts_with(MODEL_UNAVAILABLE);
         if !hit {
             continue;
         }
         hits += 1;
-        for l in lines[i..lines.len().min(i + 4)].iter() {
-            if canonical(l).contains("tmmchat") {
-                continue; // a quote's id must not pollute the signature
-            }
-            if let Some(id) = extract_request_id(l) {
-                ids.push(id);
-                break;
-            }
+        if let Some(id) = extract_request_id(block) {
+            ids.push(id);
         }
     }
     if hits == 0 {
@@ -388,6 +418,66 @@ mod tests {
         assert!(scan_tail(&format!("some output\n{MODEL_ERR}\n\n╭───╮\n│ ❯ │\n╰───╯\n")));
         // capture -J re-joins a soft-wrapped paint into one logical line.
         assert!(scan_tail(&MODEL_ERR.replace('\n', " ")));
+    }
+
+    /// The SAME error as kiro paints it since ~2026-08-31 (board #24, the
+    /// owner's copy verbatim): HARD-wrapped — header at column zero, every
+    /// continuation line indented two spaces, real newlines that capture -J
+    /// cannot rejoin. The old same-logical-line rule missed this shape
+    /// entirely: the header and the transient markers never share a line.
+    const REAL_WRAPPED: &str = "An unexpected error occurred during the response stream:\n  CodewhispererChatResponseStream(ServiceError(ServiceError\n  { source: InternalServerError(InternalServerError {\n  message: \"Encountered unexpectedly high load when\n  processing the request, please try again.\", reason:\n  Some(ModelTemporarilyUnavailable), meta: ErrorMetadata {\n  code: None, message: Some(\"Encountered unexpectedly high\n  load when processing the request, please try again.\"),\n  extras: None } }), raw: Decoded(Message { headers:\n  [Header { name: StrBytes { bytes: b\":exception-type\" },\n  value: String(StrBytes { bytes: b\"error\" }) }, Header {\n  name: StrBytes { bytes: b\":content-type\" }, value:\n  String(StrBytes { bytes: b\"application/json\" }) }, Header\n  { name: StrBytes { bytes: b\":message-type\" }, value:\n  String(StrBytes { bytes: b\"exception\" }) }], payload:\n  b\"{\\\"message\\\":\\\"Encountered unexpectedly high load when\n  processing the request, please try\n  again.\\\",\\\"reason\\\":\\\"MODEL_TEMPORARILY_UNAVAILABLE\\\"}\"\n  }) })) (request_id: c25ab1c3-0214-49c3-9ff7-798665a0bb27)";
+
+    #[test]
+    fn the_hard_wrapped_stream_error_is_detected() {
+        assert!(scan_tail(REAL_WRAPPED), "the 2026-08-31 hard-wrapped paint must hit");
+        // As it actually sits on screen: output above, prompt box below.
+        assert!(scan_tail(&format!(
+            "some earlier output\n{REAL_WRAPPED}\n\n╭───╮\n│ ❯ │\n╰───╯\nbuilder-2 · model · ◔ 9%\n"
+        )));
+        // The request_id sits ~20 continuation lines below the header — the
+        // whole block is its home, not "the next few lines".
+        assert_eq!(
+            error_signature(REAL_WRAPPED),
+            Some("1|c25ab1c3-0214-49c3-9ff7-798665a0bb27".into())
+        );
+    }
+
+    #[test]
+    fn a_narrow_pane_wrapping_the_header_itself_still_hits() {
+        // On a narrow pane even the header sentence hard-wraps; the block
+        // still OPENS with it, which is what the detection reads.
+        let narrow = "An unexpected error\n  occurred during the response stream:\n  … reason: Some(ModelTemporarilyUnavailable) …\n  (request_id: aa11)\n";
+        assert!(scan_tail(narrow));
+        assert_eq!(error_signature(narrow), Some("1|aa11".into()));
+    }
+
+    #[test]
+    fn the_wrapped_error_delivered_as_chat_is_not_a_hit() {
+        // Measured in a live pane (2026-08-31): a chat delivery QUOTING the
+        // wrapped error paints under its `[tmm chat …]` stamp — the stamp is
+        // only on the FIRST line, the error lines are indented continuations,
+        // and a blank line can sit inside the paint. None of it may hit.
+        let quoted = "────────────────\n  [tmm chat 2026-08-31 05:33] human: @builder-2 [board #24]\n  assigned to you: auto recovery 优化 — 对于 Kiro\n  这个报错，要自动恢复\n  An unexpected error occurred during the response stream:\n  \n  CodewhispererChatResponseStream(ServiceError(ServiceError\n    { source: InternalServerError(InternalServerError {\n    message: \"Encountered unexpectedly high load when\n    processing the request, please try again.\", reason:\n    Some(ModelTemporarilyUnavailable), meta: ErrorMetadata\n  {\n    code: None, message: Some(\"Encountered une…. `tmm board\n  take 24` to start, note findings on it.\n";
+        assert!(!scan_tail(quoted), "a stamped delivery quoting the error must not trigger");
+    }
+
+    #[test]
+    fn the_error_inside_tool_output_is_not_a_hit() {
+        // An agent reading the error (board show, grep, cat) paints it as
+        // INDENTED tool output under a `●` bullet head — no stamp anywhere,
+        // so only the block's own head can tell it apart from a real paint.
+        let tooled = "● Shell tmm board show 24\n  #24 [doing] auto recovery 优化\n  An unexpected error occurred during the response stream:\n    CodewhispererChatResponseStream(ServiceError(ServiceError\n    reason: Some(ModelTemporarilyUnavailable), please try again\n    (request_id: c25ab1c3-0214-49c3-9ff7-798665a0bb27)\n";
+        assert!(!scan_tail(tooled), "quoted error in tool output must not trigger");
+    }
+
+    #[test]
+    fn a_headless_tail_of_indented_error_lines_is_not_a_hit() {
+        // The capture can start mid-block (the head scrolled off the top).
+        // Those orphan continuations are unverifiable — the invisible head is
+        // a `[tmm chat …]` stamp as easily as a real error header — so they
+        // are dropped, never guessed at.
+        let orphan = "  processing the request, please try again.\", reason:\n  Some(ModelTemporarilyUnavailable), meta: ErrorMetadata {\n  }) })) (request_id: c25ab1c3-0214-49c3-9ff7-798665a0bb27)\n";
+        assert!(!scan_tail(orphan));
     }
 
     #[test]
