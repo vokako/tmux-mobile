@@ -644,6 +644,12 @@
   async function send() {
     const raw = composerText.trim();
     if ((!raw && !pending.length) || !selected) return;
+    // While a stage job is in flight the message is NOT whole yet: sending
+    // now would post the text without its attachment, and the attachment
+    // would land in an emptied composer as an orphaned token (lead review,
+    // board #25). The button is disabled too — this entry guard covers the
+    // keyboard's Enter and any future caller.
+    if (attaching) return;
     // A SLASH COMMAND goes to the agent's CLI, not to its model, so it is typed
     // verbatim — no `[tmm chat …] human:` stamp, no @address, nothing the TUI
     // would read as prose. It needs a target: an explicit `@name`, else the
@@ -676,6 +682,7 @@
     }
     body = [body, ...stragglers].filter(Boolean).join('\n');
     const text = addressed(body, recipient);
+    const room = selected; // the failure restore below must not cross rooms
     composerText = '';
     pending = [];
     following = true;
@@ -686,7 +693,15 @@
       attachSeq = 1;
       await loadFeed();
       scrollFeed(true);
-    } catch (e) { console.warn('hub post failed', e); pending = atts; composerText = raw; }
+    } catch (e) {
+      console.warn('hub post failed', e);
+      // Same genre as the stage-job race: a post that fails AFTER the user
+      // switched projects must not restore the old room's draft/attachments
+      // into the new one. The refs are already uploaded; the draft is lost
+      // with the failed post — losing it beats corrupting another room.
+      if (selected === room) { pending = atts; composerText = raw; }
+      else for (const a of atts) if (a.thumb) URL.revokeObjectURL(a.thumb);
+    }
   }
 
   /** Grow to fit what is being typed, up to the CSS ceiling, then let it scroll.
@@ -772,7 +787,16 @@
   // agent's pane (an image is a reference, never bytes), and the feed renders
   // it through ChatImage like any other ref.
   let fileEl = $state(null);
-  let attaching = $state(false);
+  // In-flight stage jobs — a COUNT, not a flag: paste and the picker can
+  // overlap, and a flag would drop the gate when the FIRST job finished.
+  let attachJobs = $state(0);
+  const attaching = $derived(attachJobs > 0);
+  // The staged set's generation: bumped whenever it is invalidated (project
+  // switch, explicit clear). An async stage job snapshots it at entry and
+  // refuses to touch pending/composerText once stale — without this, an
+  // upload finishing AFTER a project switch refilled the NEW room's composer
+  // with the OLD room's attachment (lead review, board #25).
+  let attachGen = 0;
   // Uploaded, waiting to ride the next send. The composer never shows the
   // markdown path line (owner, 2026-08-26: "消息框内部不展示完整的上传图片的
   // markdown 格式路径，就用一个 Image 的 placeholder 代替") — each attachment
@@ -800,6 +824,7 @@
     if (!pending.length) attachSeq = 1;
   }
   function clearAttachments() {
+    attachGen++; // any in-flight stage job is now stale — it must not refill
     for (const a of pending) if (a.thumb) URL.revokeObjectURL(a.thumb);
     pending = [];
     attachSeq = 1;
@@ -858,27 +883,43 @@
     // blurs the box but the selection survives; a paste's caret is live),
     // else the end.
     let at = composerEl?.selectionStart ?? composerText.length;
-    attaching = true;
+    // Room snapshot + generation: every await below is a chance for the user
+    // to switch projects (selectProject → clearAttachments bumps the gen). A
+    // stale job may still finish its upload — a harmless orphan in the OLD
+    // room's .tmm/uploads — but must never touch pending, the composer text
+    // or the sequence counter again: those belong to the room on screen NOW.
+    const gen = attachGen;
+    const stale = () => gen !== attachGen;
+    attachJobs++;
     try {
       await fsMkdir(`${ws}/.tmm/uploads`); // create_dir_all — idempotent
+      if (stale()) return;
       // Self-gitignored like the other .tmm runtime dirs — a chat attachment
       // must never show up in the project's `git status`.
       await fsUpload(`${ws}/.tmm/uploads/.gitignore`, btoa('*\n'));
+      if (stale()) return;
       for (const f of files) {
         let item;
         if (f.type.startsWith('image/')) {
           // Images are re-encoded (webp, capped long edge) — 2(c).
           const { b64, ext } = await encodeImage(f);
+          if (stale()) return;
           const path = uploadImagePath(ws, imageId(), ext);
           await fsUpload(path, b64);
+          if (stale()) return;
           item = { path, kind: 'image', name: f.name, n: attachSeq++, thumb: URL.createObjectURL(f) };
         } else {
           // Everything else lands BYTE-IDENTICAL under its own name — 2(a)/3(a).
           if (f.size > FILE_CAP) { console.warn('attach skipped (too large)', f.name, f.size); continue; }
+          const b64 = toB64(new Uint8Array(await f.arrayBuffer()));
+          if (stale()) return;
           const path = uploadFilePath(ws, imageId(), f.name);
-          await fsUpload(path, toB64(new Uint8Array(await f.arrayBuffer())));
+          await fsUpload(path, b64);
+          if (stale()) return;
           item = { path, kind: 'file', name: f.name, n: attachSeq++, thumb: '' };
         }
+        // No await between the last check and these mutations — the commit
+        // is atomic with the verdict that this job's room is still on screen.
         pending = [...pending, item];
         // The visible position marker, at the caret.
         const tok = attachToken(item);
@@ -891,7 +932,7 @@
     } catch (err) {
       console.warn('attach failed', err);
     } finally {
-      attaching = false;
+      attachJobs--;
     }
   }
 
@@ -2638,7 +2679,7 @@
           onclick={() => (sendable ? send() : armInterrupt())}
           title={intArm ? t('hubIntArmed').replace('{who}', intWho) : sendable ? t('hubSend') : t('hubIntHint')}
           aria-label={intArm ? t('hubIntArmed').replace('{who}', intWho) : sendable ? t('hubSend') : t('hubIntHint')}
-          disabled={!selected || (!sendable && !intTargets.length)}>
+          disabled={!selected || attaching || (!sendable && !intTargets.length)}>
           {#if !sendable && (intArm || recipientBusy)}
             <!-- A stop square inside a slowly circling arc: the "mid-turn, tap
                  to cut it" glyph every chat product speaks. Armed keeps the

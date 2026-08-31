@@ -529,3 +529,39 @@ test('the drawer follows the project — partition parked and restored per room 
   assert.match(source, /termOpen = !!dv;/u);
   assert.match(source, /termTarget = ''; termCommand = '';/u, 'stale pane target cleared on switch');
 });
+
+test('a stage job dies with its room, and nothing sends while one is in flight (board #25 review)', () => {
+  // Lead review of 898d888, race (1): stageFiles is async — a project switch
+  // mid-upload used to let the finished job refill the NEW room's composer
+  // with the OLD room's attachment. clearAttachments (which selectProject
+  // calls) bumps the generation; the job snapshots it at entry and re-checks
+  // after EVERY await; the commit (pending, token, sequence) sits after the
+  // last check with no await in between.
+  assert.match(source, /function clearAttachments\(\) \{\n\s*attachGen\+\+;/u,
+    'clear/switch invalidates every in-flight stage job');
+  const stage = /async function stageFiles\(files\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
+  assert.ok(stage, 'stageFiles found');
+  assert.match(stage, /const gen = attachGen;/u, 'the job snapshots its generation at entry');
+  const code = stage.replace(/\/\/[^\n]*/g, ''); // comments SAY "await" too
+  const awaits = [...code.matchAll(/await /g)].length;
+  const checks = [...code.matchAll(/if \(stale\(\)\) return;/g)].length;
+  assert.ok(awaits >= 6, `stageFiles has its awaits (saw ${awaits})`);
+  assert.equal(checks, awaits, 'one staleness check per await — a new await without one is the race back');
+  assert.ok(stage.lastIndexOf('if (stale()) return;') < stage.indexOf('pending = [...pending, item]'),
+    'the commit mutates only after the final check');
+  // Race (2): with text already typed, sendable stayed true while a job was
+  // in flight — the message could leave without its attachment, which then
+  // landed in an emptied composer as an orphaned token. Both gates, so the
+  // keyboard's Enter (send() entry) and the pointer (disabled) agree.
+  const sendFn = /async function send\(\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
+  assert.ok(sendFn, 'send found');
+  assert.match(sendFn, /if \(attaching\) return;/u, 'send() refuses while a stage job is in flight');
+  assert.match(source, /disabled=\{!selected \|\| attaching \|\|/u, 'the send button is disabled too');
+  // attaching is a COUNT-derived gate: paste and the picker can overlap, and
+  // a boolean flag would drop the gate when the FIRST job finished.
+  assert.match(source, /const attaching = \$derived\(attachJobs > 0\);/u);
+  // Same genre on the way out: a post failing AFTER a project switch must
+  // not restore the old room's draft/attachments into the new room.
+  assert.match(sendFn, /if \(selected === room\) \{ pending = atts; composerText = raw; \}/u,
+    'a failed post restores only into its own room');
+});

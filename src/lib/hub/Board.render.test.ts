@@ -52,7 +52,11 @@ test('the embedded Board renders NO head row — the drawer head is the head (bo
     assert.ok(!/class="page-head"/u.test(embedded), 'embedded emits no page-head row');
     assert.ok(!/<h1[^>]*>/u.test(embedded), 'embedded emits no project title');
     assert.ok(!/class="sidebar/u.test(embedded), 'embedded emits no project sidebar');
-    assert.match(embedded, /class="board-root[^"]*embedded[^"]*"><!--\[-1--><!--\]--> <div class="bmain/u,
+    // "Nothing between them" means no ELEMENT: svelte's SSR block markers are
+    // comments whose exact spelling changes across svelte minors (5.38 wrote
+    // <!--[-1-->, 5.53 writes <!--[!-->) — pinning one spelling made a routine
+    // dependency refresh read as a layout regression.
+    assert.match(embedded, /class="board-root[^"]*embedded[^"]*">(?:\s|<!--[^>]*-->)*<div class="bmain/u,
       'the root opens straight into bmain — nothing renders between them');
     assert.match(embedded, /class="board /u, 'the board content is there');
 
