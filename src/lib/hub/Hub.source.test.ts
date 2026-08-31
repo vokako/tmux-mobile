@@ -466,3 +466,24 @@ test('a delivered prompt sheds its stamp and board deliveries wear the dialect (
   assert.match(source, /style:color=\{boardStatusColor\('review'\)\}/u,
     'the review badge speaks the one status language');
 });
+
+test('the drawer wears the app ground and its head is the page-head\u2019s twin (board #23)', () => {
+  // A hardcoded #000 drawer leaked out as a black seam beside the chat column
+  // ("侧边栏竖线现在是一个黑色的线条"): the terminal paints its OWN theme-
+  // adapted background, so every uncovered sliver of the drawer read as black
+  // in a light app. The drawer's ground is the app's.
+  const drawer = /\.drawer \{ display: flex;[^}]*\}/u.exec(source)?.[0] ?? '';
+  assert.match(drawer, /background: var\(--bg\);/u, 'the drawer sits on the theme ground');
+  assert.ok(!source.includes('background: #000'), 'no hardcoded black ground anywhere in the Hub');
+  // The two top bars must read as ONE line through the divider ("横条…没对齐，
+  // 颜色不一致"): same 42px min-height + box-sizing as app.css .page-head,
+  // same border token, and NO private background (bg2 was the mismatch).
+  const head = /\.drawer-head \{[^}]*\}/u.exec(source)?.[0] ?? '';
+  assert.match(head, /min-height: 42px; box-sizing: border-box;/u, 'the head shares the page-head height');
+  assert.match(head, /border-bottom: 1px solid var\(--border\);/u, 'and the page-head border');
+  assert.ok(!head.includes('background'), 'transparent over the shared ground — no second color');
+  // The board partition's + lives in the drawer head and reaches the embedded
+  // Board as a request (its own page-head is gone — see Board.source.test).
+  assert.match(source, /drawerBoardNew = \{ n: \(drawerBoardNew\?\.n \?\? 0\) \+ 1 \}/u, 'the + issues a request');
+  assert.match(source, /<Board [^>]*createRequest=\{drawerBoardNew\}/u, 'and the Board receives it');
+});

@@ -249,3 +249,15 @@ test('the bar IS Chat\u2019s page-head, and the name appears once (board #15 reo
   assert.ok(!/\.head \{/u.test(style), 'the old scoped head rules are retired');
   assert.ok(!source.includes('h-session'), 'the project name is written ONCE — the session chip retired');
 });
+
+test('embedded, the Board brings no head of its own — the drawer head is the head (board #23)', () => {
+  // The embedded page-head only repeated the project name the drawer head
+  // already carries ("不需要 project 单独显示一行了"): the WHOLE bar is gated,
+  // not just the hamburger.
+  assert.match(source, /\{#if !embedded\}\s*\n\s*<div class="page-head">/u,
+    'the page-head renders only on the standalone page');
+  // Creation still has one entry point per surface: the drawer head's + sends
+  // a request, and the guard between it and a dirty draft still stands.
+  assert.match(source, /const req = createRequest;[\s\S]{0,200}?guard\(\(\) => \{ sel = null; creating = true; \}\);/u,
+    'a create request routes through the same dirty-draft guard as every other jump');
+});

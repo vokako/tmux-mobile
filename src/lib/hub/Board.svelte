@@ -18,7 +18,7 @@
   import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft } from './board.ts';
   import { scrollFade } from '../core/scrollFade.ts';
 
-  let { session = '', visible = true, onGoBack = null, issueRequest = null, embedded = false }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null; issueRequest?: { session: string; id: number; n: number } | null; embedded?: boolean } = $props();
+  let { session = '', visible = true, onGoBack = null, issueRequest = null, embedded = false, createRequest = null }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null; issueRequest?: { session: string; id: number; n: number } | null; embedded?: boolean; createRequest?: { n: number } | null } = $props();
 
   // Every project has its OWN board (issues are session-scoped like the chat
   // room), so the page carries the shared project sidebar (owner, 2026-08-29:
@@ -57,6 +57,16 @@
       creating = false; sideOpen = false;
       void openIssue(req.id);
     });
+  });
+  // Embedded, the new-issue button lives in the DRAWER head (board #23: the
+  // embedded page-head was one redundant project-name row), so creation
+  // arrives as a request. The dirty-draft guard still stands.
+  let createReqSeen = $state(0);
+  $effect(() => {
+    const req = createRequest;
+    if (!req || req.n === createReqSeen) return;
+    createReqSeen = req.n;
+    guard(() => { sel = null; creating = true; });
   });
   let talkMap = $state<Record<string, number>>({});
   const rowTalk = (r: { project: { room?: string; session: string } }) =>
@@ -357,16 +367,18 @@
        应该和chat样式一致…按钮风格也要一致"): the shared app.css class carries
        the height, padding, border and h1 type — a scoped re-style is the
        drift that split the sidebars once. The project name appears ONCE
-       ("project名称写一遍就行了" — the session chip retired). -->
+       ("project名称写一遍就行了" — the session chip retired).
+       EMBEDDED there is no bar at all (board #23: the drawer head already
+       names the project — this row repeated it and nothing else); the
+       new-issue + moves up into the drawer head, arriving as createRequest. -->
+  {#if !embedded}
   <div class="page-head">
     <!-- Compact: the hamburger calls the project drawer — the same dialect as
          Chat and Terminal (reopened #11), never a second-page drilldown. -->
-    {#if !embedded}
     <button class="icon-btn side-toggle" title={t('hubProjects')} aria-label={t('hubProjects')}
       onclick={() => (sideOpen = !sideOpen)}>
       <Icon name="menu" size={16} />
     </button>
-    {/if}
     <!-- The page names the PROJECT, not itself (board #15): the tab already
          says "Board", so the title says WHOSE board this is. -->
     <h1>{projects.find((p) => p.project.session === cur)?.project.name ?? (cur || t('board'))}</h1>
@@ -379,6 +391,7 @@
       </button>
     {/if}
   </div>
+  {/if}
   <div class="board">
   {#if !ready && !issues.length}
     <div class="empty">…</div>

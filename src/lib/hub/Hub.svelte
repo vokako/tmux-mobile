@@ -104,6 +104,7 @@
   // would resize the pane and make the agent repaint, the .keep-rows story).
   let drawerView = $state('term');
   let drawerIssueReq = $state(null); // a feed board-line tap on desktop: open the issue in the drawer
+  let drawerBoardNew = $state(null); // the drawer head's + (board #23): new issue, requested into the embedded Board
   let drawerFilesDir = $state(''); // where the drawer's Files is — the jump hands it over
   let termTarget = $state('');
   let termCommand = $state('');
@@ -2646,9 +2647,16 @@
           </button>
         {:else}
           <!-- The board partition: the head names it, maximize hands off to
-               the board PAGE — the same translation the files head makes. -->
+               the board PAGE — the same translation the files head makes.
+               New-issue lives HERE (board #23): the embedded Board renders no
+               page-head of its own — that row only repeated the project name
+               this head already carries. -->
           <span class="d-files"><Icon name="layout" size={13} />{t('board')} — {selected}</span>
           <span class="spacer"></span>
+          <button class="icon-btn go" title={t('boardNew')} aria-label={t('boardNew')}
+            onclick={() => (drawerBoardNew = { n: (drawerBoardNew?.n ?? 0) + 1 })}>
+            <Icon name="plus" size={14} />
+          </button>
           <button class="icon-btn" title={t('board')} aria-label={t('board')}
             onclick={() => openBoardTab?.(selected)}>
             <Icon name="maximize" size={14} />
@@ -2678,7 +2686,7 @@
         <!-- The task sidebar (board #13 follow-up): the REAL Board, embedded —
              no project sidebar, it follows this room's project. -->
         <div class="board-body">
-          <Board session={selected} visible={visible && drawerView === 'board'} embedded issueRequest={drawerIssueReq} />
+          <Board session={selected} visible={visible && drawerView === 'board'} embedded issueRequest={drawerIssueReq} createRequest={drawerBoardNew} />
         </div>
       {/if}
     </section>
@@ -3670,8 +3678,18 @@
   .m-badge { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border: 1px solid var(--accent); border-radius: 4px; color: var(--accent); font-size: var(--fs-micro); font-weight: 700; line-height: 1; }
 
   .drawer { position: relative; }
-  .drawer { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #000; border-left: 1px solid var(--border); }
-  .drawer-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--bg2); border-bottom: 1px solid var(--border); }
+  /* The drawer's GROUND is the app's, not the terminal's (board #23): a
+     hardcoded #000 here leaked out as a black seam beside the chat column —
+     the terminal element paints its own theme-adapted background, so in
+     light theme every uncovered sliver of the drawer read as a black line
+     that matched nothing. The dark surface belongs to the terminal BODY
+     alone; files/board partitions already carry var(--bg). */
+  .drawer { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); border-left: 1px solid var(--border); }
+  /* The head is the page-head's TWIN across the divider (board #23: the two
+     top bars sat at different heights in different colors): same 42px
+     min-height and border so the horizontal line runs THROUGH the divider,
+     same transparent ground over the same var(--bg) as the chat column's. */
+  .drawer-head { display: flex; align-items: center; gap: 8px; min-height: 42px; box-sizing: border-box; padding: 6px 10px; border-bottom: 1px solid var(--border); }
   .win-list { display: flex; gap: 5px; overflow-x: auto; scrollbar-width: none; }
   .win-list::-webkit-scrollbar { display: none; }
   .win-pill { display: flex; align-items: center; gap: 5px; flex: none; background: var(--surface); border: 1px solid var(--border); border-radius: var(--ui-radius-control); color: var(--text2); padding: 4px 9px; font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); cursor: pointer; }
