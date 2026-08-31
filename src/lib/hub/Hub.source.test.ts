@@ -570,8 +570,25 @@ test('a stage job dies with its room, and nothing sends while one is in flight (
   const fin = /finally \{([\s\S]*?)\n    \}/u.exec(stage)?.[1] ?? '';
   assert.match(fin, /jobGens\.indexOf\(gen\)/u, 'finally releases exactly its own entry');
   assert.ok(!/jobGens = \[\]/u.test(source), 'nothing blanket-resets the job list');
-  // Same genre on the way out: a post failing AFTER a project switch must
-  // not restore the old room's draft/attachments into the new room.
+  // Same genre on the way out (round 2): the SUCCESS path after `await
+  // hubPost` used to reset attachSeq and refresh the feed unconditionally —
+  // a room switched to mid-post that had staged its own attachments got its
+  // token numbering reset (colliding numbers) and the wrong feed refreshed.
+  // The post goes to the CAPTURED room; per-room state mutates only if the
+  // user is still there; and a failed post must not restore the old room's
+  // draft/attachments into the new one.
+  assert.match(sendFn, /await hubPost\(room, text\);/u, 'the post names its room, not whatever is on screen');
+  assert.equal([...sendFn.matchAll(/if \(selected !== room\) return;/g)].length, 2,
+    'BOTH branches (command, message) stop their success path at the room boundary');
+  const postIdx = sendFn.indexOf('await hubPost(room, text);');
+  const guardIdx = sendFn.indexOf('if (selected !== room) return;', postIdx);
+  const seqIdx = sendFn.indexOf('attachSeq = 1;');
+  assert.ok(guardIdx > postIdx && seqIdx > guardIdx,
+    'the message-path guard sits BETWEEN the post and the per-room mutations (attachSeq/loadFeed/scroll)');
   assert.match(sendFn, /if \(selected === room\) \{ pending = atts; composerText = raw; \}/u,
     'a failed post restores only into its own room');
+  // The slash-command branch is the same function, same race, same rule.
+  assert.match(sendFn, /await hubCommand\(room, cmdTarget, cmd\.command\);/u);
+  assert.match(sendFn, /if \(selected === room\) composerText = raw;/u,
+    'a failed command restores only into its own room');
 });

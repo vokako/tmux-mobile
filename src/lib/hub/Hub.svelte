@@ -658,14 +658,19 @@
     const cmd = slashCommand(raw);
     const cmdTarget = cmd && (cmd.to || (recipient === ALL_TARGET ? 'all' : recipient));
     if (cmd && cmdTarget) {
+      const room = selected; // same room-snapshot rule as the message path
       composerText = '';
       following = true;
       scrollFeed(true);
       try {
-        await hubCommand(selected, cmdTarget, cmd.command);
+        await hubCommand(room, cmdTarget, cmd.command);
+        if (selected !== room) return;
         await loadFeed();
         scrollFeed(true);
-      } catch (e) { console.warn('hub command failed', e); composerText = raw; }
+      } catch (e) {
+        console.warn('hub command failed', e);
+        if (selected === room) composerText = raw;
+      }
       return;
     }
     // The recipient makes "talk to THIS agent" the default rather than a
@@ -682,23 +687,30 @@
     }
     body = [body, ...stragglers].filter(Boolean).join('\n');
     const text = addressed(body, recipient);
-    const room = selected; // the failure restore below must not cross rooms
+    // Room snapshot: everything after the await below must answer to the
+    // room this message BELONGS to, never to whichever room is on screen
+    // when the RPC returns (lead review, board #25, round 2 — the success
+    // path reset attachSeq into a room that had meanwhile staged its own
+    // attachments, colliding token numbers, and refreshed the wrong feed).
+    const room = selected;
     composerText = '';
     pending = [];
     following = true;
     scrollFeed(true);
     try {
-      await hubPost(selected, text);
+      await hubPost(room, text);
+      // The thumbs belong to the delivered attachments — dead either way.
       for (const a of atts) if (a.thumb) URL.revokeObjectURL(a.thumb);
+      if (selected !== room) return; // the new room's numbering/feed are not ours
       attachSeq = 1;
       await loadFeed();
       scrollFeed(true);
     } catch (e) {
       console.warn('hub post failed', e);
-      // Same genre as the stage-job race: a post that fails AFTER the user
-      // switched projects must not restore the old room's draft/attachments
-      // into the new one. The refs are already uploaded; the draft is lost
-      // with the failed post — losing it beats corrupting another room.
+      // A post that fails AFTER the user switched projects must not restore
+      // the old room's draft/attachments into the new one. The refs are
+      // already uploaded; the draft is lost with the failed post — losing it
+      // beats corrupting another room.
       if (selected === room) { pending = atts; composerText = raw; }
       else for (const a of atts) if (a.thumb) URL.revokeObjectURL(a.thumb);
     }
