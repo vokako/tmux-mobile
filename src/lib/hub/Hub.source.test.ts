@@ -592,3 +592,22 @@ test('a stage job dies with its room, and nothing sends while one is in flight (
   assert.match(sendFn, /if \(selected === room\) composerText = raw;/u,
     'a failed command restores only into its own room');
 });
+
+test('the title caret expands the NAME — left-aligned on its real rect (board #32)', () => {
+  // The project-actions menu used to right-align on the caret and could clip
+  // at the right edge. It now anchors on the name element's REAL rect
+  // (anchorOf → zoom-corrected) with the left alignment, so the menu's left
+  // edge sits where the visible name starts; while renaming (the span is an
+  // input) the caret itself anchors.
+  assert.match(source, /<span class="h1-text" bind:this=\{titleNameEl\}>/u, 'the name span is the anchor');
+  assert.match(source, /openCtx\(\{ anchor: anchorOf\(titleNameEl \?\? e\.currentTarget\), align: 'left' \}/u,
+    'the title entry alone chooses the left alignment');
+  // Every OTHER context menu keeps the pointer default (right-aligned):
+  // exactly one opener passes an anchor/align.
+  const opens = [...source.matchAll(/openCtx\((?!at, who)/g)].length; // call sites, not the definition
+  const aligned = [...source.matchAll(/openCtx\(\{ anchor:/g)].length;
+  assert.equal(aligned, 1, 'ONE left-aligned entry');
+  assert.equal(opens - aligned, 7, 'the seven pointer entries stay pointer-anchored');
+  assert.ok(!/getBoundingClientRect\(\)[^]{0,80}openCtx/u.test(source),
+    'no raw client rect reaches openCtx — anchorOf owns the zoom correction');
+});

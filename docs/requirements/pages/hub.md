@@ -21,6 +21,12 @@ completion).
 - **A project is a directory + a tmux session**; every session is a project
   (auto-adopted). The chat **room is recorded on the project** and survives
   renames. See `docs/design-docs/features/projects.md`.
+- The header chevron beside the project name opens the project-actions
+  menu as the NAME expanding downward (board #32): its left edge aligns
+  with the visible name's left edge (anchored on the name element's real
+  rect, zoom-corrected), and the shared placement clamp keeps it whole
+  inside the viewport — never clipped at the right edge. Every other
+  context menu keeps the right-aligned pointer placement.
 - **Agents are windows** in the project session. A *managed* agent was
   spawned by the app into an isolated home (`<ws>/.tmm/agents/<name>/`) from
   a **registry definition** (backend, model, effort, system prompt, skills,

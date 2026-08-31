@@ -38,3 +38,40 @@ test('a right-click or a long press anchors the menu on the pointer', () => {
   // Near the left edge it is clamped, not right-aligned into the void.
   assert.deepEqual(menuPlacement(pointAnchor(40, 300), size, view), { x: 8, y: 306 });
 });
+
+test('left alignment expands a NAME downward — same clamp, same flip (board #32)', async () => {
+  const view = { w: 1200, h: 800 };
+  const size = { w: 260, h: 200 };
+  // The menu's LEFT edge sits on the name's left edge, 6px below it.
+  const name = { left: 300, right: 420, top: 50, bottom: 78 };
+  assert.deepEqual(menuPlacement(name, size, view, 6, 8, 'left'), { x: 300, y: 84 });
+  // Near the right viewport edge the clamp still wins — the menu is never
+  // clipped, which is the bug this alignment exists to fix.
+  const tight = { left: 1100, right: 1190, top: 50, bottom: 78 };
+  assert.deepEqual(menuPlacement(tight, size, view, 6, 8, 'left'), { x: 932, y: 84 }, 'clamped to view.w - w - 8');
+  // Near the left edge it cannot go under the 8px margin either.
+  assert.equal(menuPlacement({ left: 2, right: 60, top: 50, bottom: 78 }, size, view, 6, 8, 'left').x, 8);
+  // The flip above is shared verbatim with the right alignment.
+  const low = { left: 300, right: 420, top: 700, bottom: 730 };
+  assert.deepEqual(menuPlacement(low, size, view, 6, 8, 'left'), { x: 300, y: 494 });
+  // And the DEFAULT stays right-aligned: every existing caller, unchanged.
+  assert.deepEqual(menuPlacement(name, size, view), { x: 160, y: 84 });
+
+  // The anchor is zoom-compatible: anchorOf divides the element's client rect
+  // (visual px) by --ui-zoom, landing in the fixed layer's own pixel space —
+  // the 46px-drift class of bug (board #21's lesson) cannot come back through
+  // this entry. Simulated DOM: a rect at 2x zoom halves.
+  const g = globalThis as Record<string, unknown>;
+  const hadDoc = 'document' in g, oldDoc = g.document;
+  const hadGcs = 'getComputedStyle' in g, oldGcs = g.getComputedStyle;
+  g.document = { documentElement: {} };
+  g.getComputedStyle = () => ({ getPropertyValue: () => '2' });
+  try {
+    const { anchorOf } = await import('./placement.ts');
+    const el = { getBoundingClientRect: () => ({ left: 600, right: 840, top: 100, bottom: 128 }) } as unknown as Element;
+    assert.deepEqual(anchorOf(el), { left: 300, right: 420, top: 50, bottom: 64 });
+  } finally {
+    if (hadDoc) g.document = oldDoc; else delete g.document;
+    if (hadGcs) g.getComputedStyle = oldGcs; else delete g.getComputedStyle;
+  }
+});

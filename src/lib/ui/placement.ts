@@ -14,6 +14,11 @@ export interface AnchorRect { left: number; right: number; top: number; bottom: 
  * "not measured yet", and then the flip is skipped rather than guessed — the
  * caller keeps the menu invisible for that one frame.
  *
+ * `align: 'left'` is the dropdown reading (board #32): the menu's LEFT edge
+ * sits on the anchor's left edge — a menu that expands a NAME downward starts
+ * where the name starts. Same flip, same clamp; only the wanted x differs, so
+ * the two alignments cannot drift apart.
+ *
  * Everything is in CSS pixels of the fixed layer's coordinate space; a caller
  * under CSS `zoom` must divide the trigger's client rect first (a client rect is
  * in visual pixels, a fixed child's `left` is in its own zoomed pixels).
@@ -24,8 +29,10 @@ export function menuPlacement(
   view: { w: number; h: number },
   gap = 6,
   edge = 8,
+  align: 'right' | 'left' = 'right',
 ): { x: number; y: number } {
-  const x = Math.max(edge, Math.min(anchor.right - size.w, view.w - size.w - edge));
+  const want = align === 'left' ? anchor.left : anchor.right - size.w;
+  const x = Math.max(edge, Math.min(want, view.w - size.w - edge));
   let y = anchor.bottom + gap;
   if (size.h && y + size.h > view.h - edge) y = Math.max(edge, anchor.top - size.h - gap);
   return { x, y };

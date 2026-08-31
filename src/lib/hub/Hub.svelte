@@ -1320,6 +1320,7 @@
   let renaming = $state(false);
   let renameDraft = $state('');
   let renameEl = $state(null);
+  let titleNameEl = $state(null); // the h1's name span — the title menu's anchor (board #32)
 
   function startRename() {
     if (!selectedRow) return;
@@ -2002,7 +2003,7 @@
                    右边小图标才是改名", owner 2026-08-20). The pencil beside it is the
                    rename affordance, and it is a real button so assistive tech and
                    Enter/Space come for free. -->
-              <span class="h1-text">{selectedRow?.project.name ?? ''}</span>
+              <span class="h1-text" bind:this={titleNameEl}>{selectedRow?.project.name ?? ''}</span>
             </h1>
           {/if}
           {#if selected}
@@ -2019,8 +2020,16 @@
                  long-press/right-click speaks. -->
             <button class="icon-btn title-caret" title={t('hubProjectMenu')} aria-label={t('hubProjectMenu')}
               onclick={(e) => {
-                const r = e.currentTarget.getBoundingClientRect();
-                openCtx({ x: r.right, y: r.bottom + 4 }, selectedRow?.project.name ?? '', projectItems(selectedRow));
+                // The menu is the NAME expanding downward (board #32): its
+                // LEFT edge sits on the name's own left edge, measured from
+                // the name element's REAL rect (anchorOf carries the zoom
+                // correction), so a wide menu near the right edge stops
+                // clipping — the placement clamp still owns the viewport
+                // edges. While renaming, the span is an input and the caret
+                // itself anchors. Every other context menu keeps the
+                // right-aligned pointer default.
+                openCtx({ anchor: anchorOf(titleNameEl ?? e.currentTarget), align: 'left' },
+                  selectedRow?.project.name ?? '', projectItems(selectedRow));
               }}>
               <Icon name="chevron-down" size={14} />
             </button>

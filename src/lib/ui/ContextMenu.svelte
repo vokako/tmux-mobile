@@ -15,7 +15,11 @@
    *             onselect: () => void }} MenuItem
    */
   let {
-    /** Client coordinates of the pointer, or null when closed. */
+    /** Client coordinates of the pointer, or null when closed. May instead
+     * carry `{ anchor, align }` — an element's AnchorRect (already
+     * zoom-corrected via anchorOf) and 'left' for the dropdown reading, used
+     * by the title caret (board #32). A plain `{x, y}` keeps the pointer
+     * default: right-aligned, exactly as every right-click/long-press was. */
     at = null,
     /** @type {MenuItem[]} */ items = [],
     /** Optional heading — usually the name of what was clicked. */
@@ -30,7 +34,9 @@
 
   // Measured before it is placed: an unmeasured menu would be positioned from a
   // zero height and jump. Hidden for that one frame, exactly like the agent menu.
-  const pos = $derived(at ? menuPlacement(pointAnchor(at.x, at.y), { w, h }, viewBox()) : { x: 0, y: 0 });
+  const pos = $derived(at
+    ? menuPlacement(at.anchor ?? pointAnchor(at.x, at.y), { w, h }, viewBox(), 6, 8, at.align ?? 'right')
+    : { x: 0, y: 0 });
 
   $effect(() => {
     if (!at) {
