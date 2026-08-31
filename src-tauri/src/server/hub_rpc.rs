@@ -478,7 +478,23 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
             let body = p.get("body").and_then(|v| v.as_str()).unwrap_or("");
             let author = p.get("who").and_then(|v| v.as_str()).unwrap_or("human");
             match crate::projects::board_note(session, issue_id, author, body) {
-                Ok(()) => Response::ok(id, serde_json::json!({ "ok": true })),
+                Ok(()) => {
+                    // A Board reply is communication, not just storage (board
+                    // #26): after the note is durable, wake the issue's current
+                    // assignee with the same targeted pane delivery/receipt path
+                    // used by review handoffs. Every miss is fail-soft — an
+                    // unassigned/human/self-owned issue has nobody to notify,
+                    // and an offline or unmanaged target reads the persisted
+                    // thread later instead of turning a successful note into an
+                    // RPC failure.
+                    if let Ok(issue) = crate::projects::board_get(session, issue_id) {
+                        if let Some((assignee, notice)) = board_note_notice(&issue, author, body) {
+                            let line = format!("[tmm chat {}] {author}: {notice}", stamp_now());
+                            deliver_chat_line(session, &assignee, &line);
+                        }
+                    }
+                    Response::ok(id, serde_json::json!({ "ok": true }))
+                }
                 Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
             }
         }
@@ -806,6 +822,34 @@ fn board_change_notice(
     if changes.is_empty() { None } else { Some(changes.join("; ")) }
 }
 
+/// A reply on an issue reaches its CURRENT assignee (board #26). Pure half:
+/// decide whether there is an agent to wake and carry enough issue context that
+/// the recipient can act without first fetching the board. Delivery itself is
+/// still `deliver_chat_line`, whose managed/live gate and receipt bookkeeping
+/// are the authority. No target for unassigned/human/self replies — persistence
+/// remains the fallback, never an RPC error or a duplicate self-prompt.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn board_note_notice(
+    issue: &serde_json::Value,
+    author: &str,
+    body: &str,
+) -> Option<(String, String)> {
+    let assignee = issue["assignee"].as_str().unwrap_or("");
+    if assignee.is_empty() || assignee == "human" || assignee == author {
+        return None;
+    }
+    let id = issue["id"].as_i64().unwrap_or(0);
+    let title = issue["title"].as_str().unwrap_or("");
+    let note = excerpt(body, NOTICE_EXCERPT);
+    if note.is_empty() {
+        return None;
+    }
+    let notice = format!(
+        "[board #{id} reply] {title} — {note}. Reply on the issue with `tmm board note {id} \"...\"`."
+    );
+    Some((assignee.to_string(), notice))
+}
+
 /// The delivered-message budget (owner, 2026-08-30: "尽量保证我们发送的内容
 /// 比较简洁，避免 Agent 去做过多无谓的消耗"): a notification CARRIES its
 /// context so the reader usually needs no lookup round-trip, but never a
@@ -1024,6 +1068,35 @@ mod tests {
         assert_eq!(super::board_change_notice(&unassigned, "human", None, None, Some("doing"), false), None);
         let human_owned = serde_json::json!({ "title": "T", "body": "B", "status": "todo", "assignee": "human" });
         assert_eq!(super::board_change_notice(&human_owned, "lead", None, None, Some("doing"), false), None);
+    }
+
+    #[test]
+    fn board_note_notice_targets_only_the_other_agent() {
+        let issue = serde_json::json!({
+            "id": 26, "title": "Reply delivery", "assignee": "builder",
+        });
+        let (target, notice) = super::board_note_notice(
+            &issue,
+            "human",
+            "please revise the retry path",
+        )
+        .expect("a human reply wakes the assigned agent");
+        assert_eq!(target, "builder");
+        assert_eq!(
+            notice,
+            "[board #26 reply] Reply delivery — please revise the retry path. Reply on the issue with `tmm board note 26 \"...\"`."
+        );
+
+        let long = "x".repeat(500);
+        let (_, shortened) = super::board_note_notice(&issue, "lead", &long).unwrap();
+        assert!(shortened.contains('…'), "a long note names that more is on the issue");
+        assert!(shortened.chars().count() < 500, "the interrupt stays concise");
+
+        assert_eq!(super::board_note_notice(&issue, "builder", "my own note"), None);
+        let unassigned = serde_json::json!({ "id": 1, "title": "T", "assignee": "" });
+        assert_eq!(super::board_note_notice(&unassigned, "human", "hello"), None);
+        let human = serde_json::json!({ "id": 1, "title": "T", "assignee": "human" });
+        assert_eq!(super::board_note_notice(&human, "lead", "hello"), None);
     }
     use super::super::test_util::req;
     use super::*;
@@ -1310,6 +1383,68 @@ mod tests {
         let posts = b.posts.lock().unwrap();
         assert_eq!(posts.len(), 1, "record-only posts are stored in the room");
         assert_eq!(posts[0].2, "@reviewer 自动结果");
+    }
+
+    /// A Board reply is first persisted, then delivered into the assigned
+    /// managed pane. This real-tmux edge pins the part a pure decision test
+    /// cannot: the note actually reaches INPUT through `deliver_chat_line`.
+    #[test]
+    fn a_board_reply_is_persisted_and_typed_into_the_assignees_pane() {
+        crate::projects::tests::use_test_store();
+        let session = format!("tmm-board-reply-{}", uuid::Uuid::new_v4());
+        let ws = std::env::temp_dir().join(format!("tmm-board-reply-ws-{}", uuid::Uuid::new_v4()));
+        let home = ws.join(".tmm/agents/dev");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(
+            home.join("launch.json"),
+            r#"{"backend":"kiro","cmd":"kiro-cli chat --agent dev"}"#,
+        )
+        .unwrap();
+        let created = std::process::Command::new("tmux")
+            .args([
+                "new-session", "-d", "-s", &session, "-n", "dev", "-c",
+                &ws.to_string_lossy(), "cat",
+            ])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            let _ = std::fs::remove_dir_all(&ws);
+            return;
+        }
+        crate::projects::adopt(&session, Some("board-reply-test")).expect("adopt test project");
+        let issue_id = crate::projects::board_save(
+            &session,
+            None,
+            Some("Retry edge"),
+            Some("Keep the receipt semantics"),
+            None,
+            Some("dev"),
+            "human",
+        )
+        .unwrap();
+
+        let b = Bridge::new();
+        let r = handle_hub_request(
+            &req("hub_board_note", serde_json::json!({
+                "session": session, "id": issue_id, "who": "human",
+                "body": "Please cover the restart case",
+            })),
+            Some(&b),
+            None,
+        );
+        assert!(r.error.is_none(), "{:?}", r.error.map(|e| e.message));
+
+        let issue = crate::projects::board_get(&session, issue_id).unwrap();
+        assert_eq!(issue["notes"][0]["body"], "Please cover the restart case");
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let pane = crate::tmux::capture_pane_plain(&format!("{session}:dev"), Some(0)).unwrap_or_default();
+        assert!(pane.contains(&format!("[board #{issue_id} reply] Retry edge")), "pane: {pane:?}");
+        assert!(pane.contains("Please cover the restart case"), "pane: {pane:?}");
+
+        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
+        let _ = std::fs::remove_dir_all(&ws);
     }
 
     /// Stop/restart act on a process, so the gate is the same one delivery and

@@ -333,6 +333,12 @@ can get wrong to save three characters.
   into its pane (`deliver_chat_line`, shared with the done-summary edge;
   a human reporter reads the board itself, the actor is never told of its
   own move, `done` posts a room line only — no delivery loop is possible).
+  A Board NOTE is a direct reply as well as durable thread history: after the
+  note is stored, an author other than the current non-human assignee wakes
+  that assignee through the same targeted delivery + receipt path, carrying
+  issue id/title and a bounded excerpt. Unassigned, human-assigned, self-note,
+  unmanaged or offline cases degrade to the persisted note — never an RPC
+  failure, shell injection, self-prompt, or duplicate delivery.
 
 The room is `proj:<session>` on the same agora bus that Team uses —
 `TeamBridge::open_room` provisions it with **no tmux session, no roster, no
