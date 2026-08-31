@@ -296,6 +296,7 @@ const msgs: Record<string, Record<string, string>> = {
 
     loading: 'Loading...',
     emptyDir: 'Empty directory',
+    dropToUpload: 'Drop to upload here',
     noDownloads: 'No downloaded files',
     downloads: 'Downloads',
     selectFile: 'Select a file to preview',
@@ -709,6 +710,7 @@ const msgs: Record<string, Record<string, string>> = {
 
     loading: '加载中...',
     emptyDir: '空目录',
+    dropToUpload: '松开上传到当前目录',
     noDownloads: '没有已下载的文件',
     downloads: '下载',
     selectFile: '选择文件预览',

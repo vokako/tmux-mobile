@@ -43,13 +43,14 @@
   import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsDownloadHttp, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref, fsConvert } from '../core/ws.ts';
 
   // Tauri plugin imports (tree-shaken in browser builds)
-  let tauriFs, tauriDialog, tauriOpener, tauriPath;
+  let tauriFs, tauriDialog, tauriOpener, tauriPath, tauriWebview;
   const isTauri = typeof window !== 'undefined' && !!(window.__TAURI__ || window.__TAURI_INTERNALS__);
   const tauriReady = isTauri ? Promise.all([
     import('@tauri-apps/plugin-fs').then(m => tauriFs = m),
     import('@tauri-apps/plugin-dialog').then(m => tauriDialog = m),
     import('@tauri-apps/plugin-opener').then(m => tauriOpener = m),
     import('@tauri-apps/api/path').then(m => tauriPath = m),
+    import('@tauri-apps/api/webview').then(m => tauriWebview = m),
   ]) : Promise.resolve();
 
   hljs.registerLanguage('javascript', javascript);
@@ -1055,24 +1056,55 @@
     }
   }
 
+  // ONE destination rule and ONE byte→b64 encoder for every upload entry point
+  // (toolbar picker and drag-drop), so they cannot disagree about where a file
+  // lands or how it travels.
+  const uploadDest = (name) => cwd.replace(/\/$/, '') + '/' + name;
+  function bytesToB64(bytes) {
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 8192) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    }
+    return btoa(binary);
+  }
+
+  // Browser File objects (the picker's input, a drop's DataTransfer). A
+  // per-file try/catch: one unreadable item (a dropped DIRECTORY reads as a
+  // File whose FileReader errors) must not abandon the rest of the batch.
+  async function uploadBlobFiles(files) {
+    for (const file of files) {
+      try {
+        const b64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result).split(',')[1]);
+          reader.onerror = () => reject(new Error(`cannot read: ${file.name}`));
+          reader.readAsDataURL(file);
+        });
+        await fsUpload(uploadDest(file.name), b64);
+      } catch (e) { error = e.message; }
+    }
+    loadDir(cwd);
+  }
+
+  // Tauri filesystem paths (the native picker, the webview's drag-drop event).
+  async function uploadTauriPaths(paths) {
+    await tauriReady;
+    for (const filePath of paths) {
+      try {
+        const name = String(filePath).split('/').pop().split('\\').pop();
+        const bytes = new Uint8Array(await tauriFs.readFile(filePath));
+        await fsUpload(uploadDest(name), bytesToB64(bytes));
+      } catch (e) { error = e.message; }
+    }
+    loadDir(cwd);
+  }
+
   async function handleUpload() {
     if (isTauri) {
       await tauriReady;
       const selected = await tauriDialog.open({ multiple: true });
       if (!selected) return;
-      const files = Array.isArray(selected) ? selected : [selected];
-      for (const filePath of files) {
-        const name = String(filePath).split('/').pop().split('\\').pop();
-        const bytes = new Uint8Array(await tauriFs.readFile(filePath));
-        let binary = '';
-        for (let i = 0; i < bytes.length; i += 8192) {
-          binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-        }
-        const b64 = btoa(binary);
-        const dest = cwd.replace(/\/$/, '') + '/' + name;
-        try { await fsUpload(dest, b64); } catch (e) { error = e.message; }
-      }
-      loadDir(cwd);
+      await uploadTauriPaths(Array.isArray(selected) ? selected : [selected]);
       return;
     }
     // Browser fallback
@@ -1081,23 +1113,89 @@
     input.multiple = true;
     document.body.appendChild(input);
     input.onchange = async () => {
-      for (const file of Array.from(input.files || [])) {
-        const reader = new FileReader();
-        await new Promise((resolve) => {
-          reader.onload = async () => {
-            const b64 = reader.result.split(',')[1];
-            const path = cwd.replace(/\/$/, '') + '/' + file.name;
-            try { await fsUpload(path, b64); } catch (e) { error = e.message; }
-            resolve();
-          };
-          reader.readAsDataURL(file);
-        });
-      }
+      await uploadBlobFiles(Array.from(input.files || []));
       document.body.removeChild(input);
-      loadDir(cwd);
     };
     input.click();
   }
+
+  // ── Drag a file in from OUTSIDE, drop it on the listing, it uploads to the
+  //    current directory (board #22). Two transports for one gesture:
+  //    · Browser: the HTML5 events on the listing itself.
+  //    · Compiled app: the webview INTERCEPTS native drags (Tauri's default
+  //      dragDropEnabled), so DataTransfer never carries files there — the
+  //      drop arrives as the webview's own drag-drop event with fs PATHS, and
+  //      a hit-test against the listing's rect stands in for event targeting.
+  let dragOver = $state(false);
+  let fileListEl = $state(null);
+
+  const dragHasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes('Files');
+  function onListDragOver(e) {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    dragOver = true;
+  }
+  function onListDragLeave(e) {
+    // dragleave also fires when the cursor enters a CHILD row; only a real
+    // exit (relatedTarget outside the listing) parks the highlight.
+    if (e.currentTarget.contains(e.relatedTarget)) return;
+    dragOver = false;
+  }
+  async function onListDrop(e) {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault();
+    dragOver = false;
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length) await uploadBlobFiles(files);
+  }
+
+  // A missed drop must not NAVIGATE the tab to the file (which tears down the
+  // whole app, socket included). While Files is visible in a browser, stray
+  // drags over the window are neutralized; the listing's own handlers still
+  // run first in the bubble.
+  $effect(() => {
+    if (!visible || isTauri) return;
+    const block = (e) => { if (dragHasFiles(e)) e.preventDefault(); };
+    window.addEventListener('dragover', block);
+    window.addEventListener('drop', block);
+    return () => {
+      window.removeEventListener('dragover', block);
+      window.removeEventListener('drop', block);
+    };
+  });
+
+  // The compiled app's half: subscribe once per mounted instance, gate by
+  // position. checkVisibility covers the parked page-layer instance
+  // (visibility: hidden keeps layout, so a rect test alone would still hit).
+  function listHit(pos) {
+    const el = fileListEl;
+    if (!el || !(el.checkVisibility?.() ?? true)) return false;
+    // The webview reports PHYSICAL pixels; client rects are CSS pixels.
+    const dpr = window.devicePixelRatio || 1;
+    const x = pos.x / dpr, y = pos.y / dpr;
+    const r = el.getBoundingClientRect();
+    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+  }
+  $effect(() => {
+    if (!isTauri) return;
+    let unlisten = null, dead = false;
+    (async () => {
+      await tauriReady;
+      const un = await tauriWebview.getCurrentWebview().onDragDropEvent((ev) => {
+        const t = ev.payload.type;
+        if (t === 'leave') { dragOver = false; return; }
+        const hit = listHit(ev.payload.position);
+        if (t === 'enter' || t === 'over') dragOver = hit;
+        else if (t === 'drop') {
+          dragOver = false;
+          if (hit && ev.payload.paths?.length) uploadTauriPaths(ev.payload.paths);
+        }
+      });
+      if (dead) un(); else unlisten = un;
+    })();
+    return () => { dead = true; unlisten?.(); };
+  });
 
   let copyToast = $state(false);
   let copyTimer;
@@ -1382,9 +1480,16 @@
       <div class="error">{error}</div>
     {/if}
 
-    <!-- File list -->
-    <div class="file-list" class:panel-open={showBookmarks || showRecent}>
-      {#if loading}
+    <!-- File list. Also the drop target for OS files (board #22): the browser
+         path via the HTML5 events here, the compiled app via the webview's
+         drag-drop event hit-testing this element's rect. -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="file-list" class:panel-open={showBookmarks || showRecent} class:drop-hot={dragOver}
+      bind:this={fileListEl}
+      ondragover={onListDragOver} ondragleave={onListDragLeave} ondrop={onListDrop}>
+      {#if dragOver}
+        <div class="drop-hint"><Icon name="upload" size={16} />{t('dropToUpload')}</div>
+      {/if}      {#if loading}
         <div class="loading">{t('loading')}</div>
       {:else}
         {#each entries as entry}
@@ -1758,7 +1863,18 @@
   }
 
   /* File list */
-  .file-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .file-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; position: relative; }
+  /* The drop target speaks the attach-affordance dialect (dashed accent, like
+     the composer's +): a frame over the listing while an OS drag hovers it,
+     pointer-events none so dragleave/drop still land on the list itself. */
+  .drop-hint {
+    position: absolute; inset: 6px; z-index: 5;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    border: 2px dashed var(--accent-line); border-radius: var(--ui-radius-panel);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    color: var(--accent); font-size: var(--fs-ui); font-weight: 600;
+    pointer-events: none;
+  }
   /* When the bookmarks/recent panel is open, lock the file list so touch
      gestures on the panel can't bleed through and drag the list too. */
   .file-list.panel-open { overflow: hidden; touch-action: none; }
