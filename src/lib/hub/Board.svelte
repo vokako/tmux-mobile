@@ -577,19 +577,40 @@
     width: 100%;
     box-sizing: border-box;
     min-width: 0;
+    /* The board is the CONTAINER the column count answers to (board #27):
+       the standalone page and the Hub drawer are the same rule by
+       construction, because each asks its own width — the viewport plays
+       no part. inline-size only: width comes from bmain either way. */
+    container-type: inline-size;
+    container-name: board;
   }
   .empty { color: var(--text3); font-size: var(--fs-ui); padding: 18px 6px; }
   .err { color: var(--status-danger); font-size: var(--fs-meta); }
 
-  /* Columns: wide drawer shows them side by side, a narrow one stacks them —
-     same content, no second layout species. */
+  /* Columns: four areas can honestly tile as 1, 2 or 4 — NEVER 3 (board #27:
+     "总共只有 4 个区域，控制列数在 1 2 4 不要出现 3"): at three across, the
+     fourth wraps into a lonely orphan row, which is neither the side-by-side
+     reading nor the stack. auto-fit was exactly the 3-column bug — it packs
+     as many 170px tracks as fit, viewport and drawer alike. The ladder asks
+     the BOARD container (see .board), so the standalone page and the Hub
+     drawer obey the same thresholds by construction; the steps are the same
+     math auto-fit used (170px min card, 10px gap): 2×170+10 = 350,
+     4×170+3×10 = 710. Stacked modes cap each area's share of the height so
+     every column keeps its OWN scroller — the page still holds still. */
   .cols {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: minmax(0, 1fr);
     gap: 10px;
     align-items: stretch;
     flex: 1;
     min-height: 0;
+  }
+  @container board (min-width: 350px) {
+    .cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @container board (min-width: 710px) {
+    .cols { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   }
   .col-scroll {
     overflow-y: auto;

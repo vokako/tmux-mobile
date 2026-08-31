@@ -261,3 +261,30 @@ test('embedded, the Board brings no head of its own — the drawer head is the h
   assert.match(source, /const req = createRequest;[\s\S]{0,200}?guard\(\(\) => \{ sel = null; creating = true; \}\);/u,
     'a create request routes through the same dirty-draft guard as every other jump');
 });
+
+test('four areas tile as 1, 2 or 4 — never 3 — and the BOARD is the ruler (board #27)', () => {
+  // auto-fit packed as many 170px tracks as fit, so a ~560–700px board (a
+  // routine drawer width) showed 3 across with the fourth orphaned on its
+  // own row — neither the side-by-side reading nor the stack. The count is
+  // now a ladder of container queries against the BOARD itself, so the
+  // standalone page and the Hub drawer obey the same thresholds by
+  // construction and the viewport plays no part.
+  assert.match(source, /\.board \{[^}]*container-type: inline-size/su, 'the board is an inline-size container');
+  assert.match(source, /\.board \{[^}]*container-name: board/su, 'named, so the ladder cannot silently re-anchor');
+  assert.ok(!/repeat\(auto-(?:fit|fill)/u.test(source), 'no auto-packing — that is where 3 came from');
+  // The complete set of shapes .cols may take: 1 (the base), 2, 4.
+  assert.match(source, /\.cols \{[^}]*grid-template-columns: minmax\(0, 1fr\);/su, 'the base is ONE column');
+  assert.match(source, /@container board \(min-width: 350px\) \{\s*\.cols \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}\s*\}/u);
+  assert.match(source, /@container board \(min-width: 710px\) \{\s*\.cols \{ grid-template-columns: repeat\(4, minmax\(0, 1fr\)\); \}\s*\}/u);
+  assert.equal([...source.matchAll(/@container board/g)].length, 2, 'exactly the two steps — a third step is a fifth shape');
+  assert.ok(!/repeat\(3/u.test(source), 'three columns exist nowhere');
+  // The thresholds keep the cards' own 170px minimum honest (gap 10):
+  // 2×170+10 = 350, 4×170+3×10 = 710 — and the 4-step sits above the 2-step.
+  const steps = [...source.matchAll(/@container board \(min-width: (\d+)px\)/g)].map((m) => Number(m[1]));
+  const [two = 0, four = 0] = steps;
+  assert.ok(two < four, 'the ladder ascends');
+  assert.ok(two >= 2 * 170 + 10 && four >= 4 * 170 + 3 * 10, 'each step affords its tracks at 170px min');
+  // Stacked modes share the height equally so EVERY area keeps its own
+  // scroller (the page holds still — reopened #11's rule survives 1/2-col).
+  assert.match(source, /\.cols \{[^}]*grid-auto-rows: minmax\(0, 1fr\);/su, 'rows split the height; content cannot content-size them');
+});

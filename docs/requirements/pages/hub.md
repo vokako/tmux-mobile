@@ -120,6 +120,13 @@ completion).
 - Four fixed columns: **todo / doing / review / done**. Issues carry title,
   body, assignee, opened-by, and their own **note thread** (progress and
   decisions live ON the issue, not only in chat).
+- The four areas tile as **1, 2 or 4 columns — never 3** (board #27: with
+  four areas, three across orphans the fourth on its own row). The count is
+  decided by the BOARD's own container width (CSS container queries), so
+  the standalone page and the Hub drawer's embedded board obey the same
+  thresholds by construction — the viewport plays no part. Movement order
+  and per-column scrolling hold in every shape (stacked modes split the
+  height equally; the page itself never scrolls).
 - The human writes/edits here; agents use `tmm board` (`take` = claim +
   doing; only the acceptor moves to done). Same rows, same vocabulary —
   the board is session-scoped like the room.
