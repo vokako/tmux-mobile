@@ -40,9 +40,13 @@
   let sideOpen = $state(false);    // compact: the hamburger DRAWER (same dialect
                                    // as Chat/Terminal — reopened #11, no more
                                    // second-page drilldown)
-  // A dirty draft blocks the silent follow: the prop moving under an open
-  // edit would reset the view and lose it with no confirm (board #11).
-  $effect(() => { if (session && (!picked || !cur) && !dirty) cur = session; });
+  // UNSAVED WORK blocks the silent follow — a dirty edit or typed create
+  // data alike (board #11; #29 review): the prop moving under either would
+  // reset the view and wipe it with no confirm, bypassing the shared
+  // ConfirmDialog. The board keeps its current project until the user
+  // explicitly cancels/creates/saves; the effect reads both flags, so the
+  // moment they clear it follows again.
+  $effect(() => { if (session && (!picked || !cur) && !dirty && !createDirty) cur = session; });
   // A jump from the feed's board line (board #13 follow-up): the request names
   // its OWN session — a manual pick may have parked this page on another
   // project, and the issue id is session-gated. The dirty-draft guard still

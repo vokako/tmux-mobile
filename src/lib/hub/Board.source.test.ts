@@ -359,4 +359,11 @@ test('every destructive/discarding path confirms through the SHARED dialog (boar
   // No second confirmation species: no browser confirm(), no hand-rolled modal.
   assert.ok(!/window\.confirm|[^.\w]confirm\(/u.test(source), 'no browser confirm');
   assert.equal([...source.matchAll(/<ConfirmDialog /g)].length, 2, 'exactly the two shared dialogs');
+  // The EXTERNAL session follow is a cur write point too (#29 review): the
+  // last-touched session moving under typed create data would reset the view
+  // and wipe it with no dialog at all. The gate blocks on BOTH kinds of
+  // unsaved work and resumes the moment they clear; the other cur writes are
+  // guard-wrapped (pick, the feed jump) or fire only while no board shows.
+  assert.match(source, /\$effect\(\(\) => \{ if \(session && \(!picked \|\| !cur\) && !dirty && !createDirty\) cur = session; \}\);/u,
+    'the follow gate blocks dirty AND createDirty');
 });
