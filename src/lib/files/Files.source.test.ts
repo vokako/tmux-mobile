@@ -26,15 +26,32 @@ test('back retraces the USER\u2019s steps — a history, not a parent walk (boar
 });
 
 test('an OS drag onto the listing uploads into the CURRENT directory (board #22)', () => {
-  // ONE destination rule and ONE encoder for every upload entry point — the
-  // toolbar picker and both drop transports route through the same helpers,
-  // so they cannot disagree about where a file lands.
-  assert.match(source, /const uploadDest = \(name\) => cwd\.replace\(\/\\\/\$\/, ''\) \+ '\/' \+ name;/u,
-    'one destination rule');
-  assert.match(source, /await fsUpload\(uploadDest\(file\.name\), b64\);/u, 'browser files route through it');
-  assert.match(source, /await fsUpload\(uploadDest\(name\), bytesToB64\(bytes\)\);/u, 'tauri paths route through it');
-  assert.equal(source.split('fsUpload(').length - 1, 2,
-    'exactly the two helpers call fsUpload — no side channel');
+  // ONE destination rule for every upload entry point — and the DIR is a
+  // PARAMETER bound at the gesture, never a live read: navigating away while
+  // a batch uploads must not re-route the remaining files (review of
+  // 82da1c9). Both helpers snapshot cwd on entry, every fsUpload routes
+  // through uploadDest(dir, …), and nothing inside the loops re-reads cwd.
+  assert.match(source, /const uploadDest = \(dir, name\) => dir\.replace\(\/\\\/\$\/, ''\) \+ '\/' \+ name;/u,
+    'one destination rule, dir as a parameter');
+  const helper = (name: string) => {
+    const m = new RegExp(`async function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n  \\}`, 'u').exec(source)?.[0] ?? '';
+    assert.ok(m, `${name} exists`);
+    return m;
+  };
+  for (const name of ['uploadBlobFiles', 'uploadTauriPaths']) {
+    const body = helper(name);
+    assert.match(body, /const dir = cwd; \/\/ the batch's target, fixed at the gesture/u,
+      `${name} snapshots its target ONCE, at entry`);
+    assert.match(body, /uploadDest\(dir, /u, `${name} uploads to the snapshot`);
+    assert.match(body, /refreshAfterBatch\(dir\);/u, `${name} refreshes via the snapshot rule`);
+    assert.equal(body.split('cwd').length - 1, 1,
+      `${name} reads cwd exactly once — the snapshot; nothing in the loop can see a navigation`);
+  }
+  // The refresh rule: still looking at the target → show the arrivals; moved
+  // on → touch NOTHING (reloading the snapshot dir would hijack the view
+  // back, reloading the new dir would announce files that landed elsewhere).
+  assert.match(source, /const refreshAfterBatch = \(dir\) => \{ if \(cwd === dir\) loadDir\(dir\); \};/u,
+    'refresh only the directory the user is still in');
   // The browser transport: HTML5 events on the listing, files only (an app-
   // internal drag carries no Files type and must pass through untouched).
   assert.match(source, /ondragover=\{onListDragOver\} ondragleave=\{onListDragLeave\} ondrop=\{onListDrop\}/u,
@@ -43,14 +60,19 @@ test('an OS drag onto the listing uploads into the CURRENT directory (board #22)
     'only real OS file drags engage');
   assert.match(source, /if \(e\.currentTarget\.contains\(e\.relatedTarget\)\) return;/u,
     'entering a child row is not leaving the listing');
-  // The compiled app's transport: the webview INTERCEPTS native drags, so
-  // DataTransfer never carries files there — the drop arrives as the
-  // webview's drag-drop event with PATHS, gated by a hit-test on the
-  // listing's rect, physical→CSS px via devicePixelRatio, and
-  // checkVisibility so the parked page-layer instance cannot claim it.
-  assert.match(source, /onDragDropEvent/u, 'the webview event is subscribed in the app');
+  // The compiled app's transport: the webview INTERCEPTS native drags, so the
+  // drop arrives as the webview's event with PATHS. The listener exists ONLY
+  // while this instance is visible — the real gate against the parked
+  // page-layer twin, because bare checkVisibility() does NOT check the
+  // visibility property (visibilityProperty defaults FALSE — review of
+  // 82da1c9) and .page-layer.hidden is exactly visibility:hidden.
+  assert.match(source, /if \(!isTauri \|\| !visible\) return;[\s\S]{0,700}?onDragDropEvent/u,
+    'the webview listener mounts only while visible, and unmounts with it');
+  assert.match(source, /checkVisibility\(\{ visibilityProperty: true, checkVisibilityCSS: true \}\)/u,
+    'the defense-in-depth check names the option — a bare call ignores visibility:hidden');
+  assert.match(source, /getComputedStyle\(el\)\.visibility !== 'hidden'/u,
+    'and falls back to computed style where the API is missing');
   assert.match(source, /pos\.x \/ dpr/u, 'physical pixels are converted before the rect test');
-  assert.match(source, /checkVisibility/u, 'a hidden instance never wins the hit-test');
   // A missed drop must not navigate the tab away (that tears down the app):
   // stray drags are neutralized at the window while Files is visible, browser
   // only — and removed when it is not.

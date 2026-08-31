@@ -1058,8 +1058,17 @@
 
   // ONE destination rule and ONE byte→b64 encoder for every upload entry point
   // (toolbar picker and drag-drop), so they cannot disagree about where a file
-  // lands or how it travels.
-  const uploadDest = (name) => cwd.replace(/\/$/, '') + '/' + name;
+  // lands or how it travels. The DIR is a parameter, never a live read: a
+  // batch SNAPSHOTS its target at the gesture (drop / picker confirm), so
+  // navigating away mid-upload cannot re-route the rest of the files.
+  const uploadDest = (dir, name) => dir.replace(/\/$/, '') + '/' + name;
+
+  // After a batch: refresh ONLY if the user is still looking at the target.
+  // Reloading the snapshot dir after they navigated away would hijack their
+  // view back; refreshing their NEW dir would announce files that landed
+  // elsewhere. Still there → show the arrivals; moved on → touch nothing.
+  const refreshAfterBatch = (dir) => { if (cwd === dir) loadDir(dir); };
+
   function bytesToB64(bytes) {
     let binary = '';
     for (let i = 0; i < bytes.length; i += 8192) {
@@ -1072,6 +1081,7 @@
   // per-file try/catch: one unreadable item (a dropped DIRECTORY reads as a
   // File whose FileReader errors) must not abandon the rest of the batch.
   async function uploadBlobFiles(files) {
+    const dir = cwd; // the batch's target, fixed at the gesture
     for (const file of files) {
       try {
         const b64 = await new Promise((resolve, reject) => {
@@ -1080,23 +1090,24 @@
           reader.onerror = () => reject(new Error(`cannot read: ${file.name}`));
           reader.readAsDataURL(file);
         });
-        await fsUpload(uploadDest(file.name), b64);
+        await fsUpload(uploadDest(dir, file.name), b64);
       } catch (e) { error = e.message; }
     }
-    loadDir(cwd);
+    refreshAfterBatch(dir);
   }
 
   // Tauri filesystem paths (the native picker, the webview's drag-drop event).
   async function uploadTauriPaths(paths) {
+    const dir = cwd; // the batch's target, fixed at the gesture
     await tauriReady;
     for (const filePath of paths) {
       try {
         const name = String(filePath).split('/').pop().split('\\').pop();
         const bytes = new Uint8Array(await tauriFs.readFile(filePath));
-        await fsUpload(uploadDest(name), bytesToB64(bytes));
+        await fsUpload(uploadDest(dir, name), bytesToB64(bytes));
       } catch (e) { error = e.message; }
     }
-    loadDir(cwd);
+    refreshAfterBatch(dir);
   }
 
   async function handleUpload() {
@@ -1165,12 +1176,21 @@
     };
   });
 
-  // The compiled app's half: subscribe once per mounted instance, gate by
-  // position. checkVisibility covers the parked page-layer instance
-  // (visibility: hidden keeps layout, so a rect test alone would still hit).
+  // The compiled app's half: the listener EXISTS only while this instance is
+  // visible — that is the real gate against the parked page-layer twin (App's
+  // hidden layer keeps LAYOUT under visibility:hidden, and bare
+  // checkVisibility() does NOT check the visibility property — its
+  // visibilityProperty option defaults false — so a rect test alone, or a
+  // bare checkVisibility, would still let the hidden instance double-claim a
+  // drop). The in-test visibility check stays as defense in depth, with the
+  // option set and a computed-style fallback for engines without the API.
   function listHit(pos) {
     const el = fileListEl;
-    if (!el || !(el.checkVisibility?.() ?? true)) return false;
+    if (!el) return false;
+    const shown = el.checkVisibility
+      ? el.checkVisibility({ visibilityProperty: true, checkVisibilityCSS: true })
+      : getComputedStyle(el).visibility !== 'hidden';
+    if (!shown) return false;
     // The webview reports PHYSICAL pixels; client rects are CSS pixels.
     const dpr = window.devicePixelRatio || 1;
     const x = pos.x / dpr, y = pos.y / dpr;
@@ -1178,7 +1198,7 @@
     return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
   }
   $effect(() => {
-    if (!isTauri) return;
+    if (!isTauri || !visible) return;
     let unlisten = null, dead = false;
     (async () => {
       await tauriReady;
@@ -1194,7 +1214,7 @@
       });
       if (dead) un(); else unlisten = un;
     })();
-    return () => { dead = true; unlisten?.(); };
+    return () => { dead = true; dragOver = false; unlisten?.(); };
   });
 
   let copyToast = $state(false);
