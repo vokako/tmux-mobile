@@ -367,3 +367,30 @@ test('every destructive/discarding path confirms through the SHARED dialog (boar
   assert.match(source, /\$effect\(\(\) => \{ if \(session && \(!picked \|\| !cur\) && !dirty && !createDirty\) cur = session; \}\);/u,
     'the follow gate blocks dirty AND createDirty');
 });
+
+test('titles are optional, and the WIRING honors it — not just the pure helpers (board #31)', () => {
+  // The lead's review point: draftValid/issueRef being green proves the
+  // helpers, not the component. These pins hold the four joints where a
+  // regression would silently restore the title-only world.
+
+  // 1) The create ENTRY and the create BUTTON both speak title||body — a
+  //    body-only issue must be creatable from either path.
+  assert.match(source, /if \(!\(nTitle\.trim\(\) \|\| nBody\.trim\(\)\) \|\| busy\) return;/u,
+    'createIssue gates on title OR body');
+  assert.match(source, /disabled=\{!\(nTitle\.trim\(\) \|\| nBody\.trim\(\)\) \|\| busy\} onclick=\{createIssue\}/u,
+    'the create button disables only when BOTH are empty');
+
+  // 2) The card's title is the shared fallback, never the raw field…
+  assert.match(source, /<span class="c-title">\{issueRef\(i\)\}<\/span>/u,
+    'a titleless card wears its body excerpt via issueRef');
+  assert.ok(!/<span class="c-title">\{i\.title\}<\/span>/u.test(source),
+    'the raw i.title rendering must not return');
+
+  // 3) …and a titleless card does NOT repeat the same body as a preview.
+  assert.match(source, /\{#if i\.body && i\.title\?\.trim\(\)\}<span class="c-body">/u,
+    'the preview renders only under a real title — the same text twice reads as a bug');
+
+  // 4) The wiring exists at all: issueRef is imported from the pure module.
+  assert.match(source, /import \{[^}]*\bissueRef\b[^}]*\} from '\.\/board\.ts';/u,
+    'issueRef comes from board.ts — no component-local copy');
+});
