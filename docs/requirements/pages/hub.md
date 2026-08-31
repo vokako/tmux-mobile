@@ -119,7 +119,12 @@ completion).
 ## Board page (task management — its own tab)
 - Four fixed columns: **todo / doing / review / done**. Issues carry title,
   body, assignee, opened-by, and their own **note thread** (progress and
-  decisions live ON the issue, not only in chat).
+  decisions live ON the issue, not only in chat). The note reply box
+  soft-wraps and grows with its content (board #28: a long line used to
+  scroll horizontally, hiding what came before) — one line at rest, Enter
+  sends, Shift+Enter inserts a newline, an IME composition's Enter never
+  sends, and a sent note shrinks the box back; the send button rides the
+  last line.
 - The four areas tile as **1, 2 or 4 columns — never 3** (board #27: with
   four areas, three across orphans the fourth on its own row). The count is
   decided by the BOARD's own container width (CSS container queries), so

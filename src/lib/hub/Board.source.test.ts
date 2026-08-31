@@ -288,3 +288,33 @@ test('four areas tile as 1, 2 or 4 — never 3 — and the BOARD is the ruler (b
   // scroller (the page holds still — reopened #11's rule survives 1/2-col).
   assert.match(source, /\.cols \{[^}]*grid-auto-rows: minmax\(0, 1fr\);/su, 'rows split the height; content cannot content-size them');
 });
+
+test('the note reply wraps and grows — one autoGrow, chat keyboard semantics (board #28)', () => {
+  // "发送消息如果消息过长要自动帮我换行，现在是一直在一行里，前边都看不到了":
+  // the reply was a single-line <input> that scrolled horizontally. It is now
+  // a textarea in the input's exact clothes — soft wrap is the element's
+  // default, autoGrow raises it, one line at rest.
+  assert.match(source, /<textarea class="note-input" rows="1"[^>]*bind:value=\{noteText\}/su,
+    'the reply is a one-line-at-rest textarea');
+  assert.match(source, /class="note-input"[^>]*use:autoGrow=\{noteText\}/su, 'it grows through the SHARED action');
+  assert.ok(!/<input[^>]*noteText/su.test(source), 'the single-line input is gone');
+  assert.equal([...source.matchAll(/function autoGrow/g)].length, 1, 'ONE autoGrow — no second copy');
+  // Keyboard: Enter sends, Shift+Enter is a real newline (no preventDefault
+  // on that path), and an IME composition's Enter commits the composition,
+  // never the note. preventDefault on the send path keeps the sent text free
+  // of a trailing newline.
+  assert.match(source,
+    /note-input[^>]*onkeydown=\{\(e\) => \{ if \(e\.key === 'Enter' && !e\.shiftKey && !e\.isComposing\) \{ e\.preventDefault\(\); addNote\(\); \} \}\}/su,
+    'Enter sends; Shift+Enter and IME Enter do not');
+  // Sending clears the bound value, and autoGrow's update refits — that is
+  // the shrink-back path, so both halves must exist.
+  assert.match(source, /noteText = ''; await refetchSel\(\);/u, 'send clears the value');
+  assert.match(source, /update: \(_v: string\) => fit\(\)/u, 'the action refits when the bound value changes');
+  // The dress is the input's own (shared rule with the create title), the
+  // box never shows a scrollbar while measuring, and the send button rides
+  // the LAST line instead of stranding mid-text.
+  assert.match(source, /\.note-input, \.n-title \{/u, 'one dress, shared');
+  assert.match(source, /\.note-input \{ resize: none; overflow: hidden; \}/u);
+  assert.match(source, /\.note-add \{ display: flex; gap: 6px; align-items: flex-end; \}/u,
+    'the button pins to the bottom line');
+});

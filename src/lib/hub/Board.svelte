@@ -464,8 +464,17 @@
         {/if}
       </div>
       <div class="note-add">
-        <input placeholder={t('boardNotePh')} bind:value={noteText}
-          onkeydown={(e) => e.key === 'Enter' && addNote()} />
+        <!-- A textarea, not an input (board #28: "消息过长要自动帮我换行，
+             现在是一直在一行里，前边都看不到了"): long text soft-wraps in
+             the visible width and the box grows with it — the same shared
+             autoGrow the title/body edits use, one line at rest. Enter
+             sends (guarded: Shift+Enter inserts a real newline, and an IME
+             composition's Enter commits the composition, never the note);
+             clearing on send shrinks the box back through autoGrow's
+             update. -->
+        <textarea class="note-input" rows="1" placeholder={t('boardNotePh')} bind:value={noteText}
+          use:autoGrow={noteText}
+          onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); addNote(); } }}></textarea>
         <button class="icon-btn go" title={t('save')} aria-label={t('save')} disabled={!noteText.trim() || busy} onclick={addNote}>
           <Icon name="check" size={14} />
         </button>
@@ -737,15 +746,21 @@
     max-width: 100%;
     box-sizing: border-box;
   }
-  .note-add { display: flex; gap: 6px; align-items: center; }
+  /* The send button rides the LAST line as the box grows (board #28) —
+     flex-end, not center: centered, a five-line note strands the button in
+     the middle of the text block. At one line the two are the same place. */
+  .note-add { display: flex; gap: 6px; align-items: flex-end; }
   /* The create form's title: a textarea so it can WRAP as it grows (autoGrow),
      but dressed exactly like the input it replaces — one line at rest, no
      manual resize handle, and no flex stretch in the column layout. */
   .n-title.one-line { flex: none; resize: none; overflow: hidden; }
+  /* The note reply is the same species (board #28): soft wrap in the visible
+     width, autoGrow raises it, no scrollbar flash while it measures. */
+  .note-input { resize: none; overflow: hidden; }
   /* The create form's body: takes the height the column has left and scrolls
      INSIDE itself (owner, 2026-08-29: "下边区域大一点 上下撑满 可以内部滚动"). */
   .d-body-edit.fill { flex: 1; min-height: 140px; overflow-y: auto; resize: none; }
-  .note-add input, .n-title {
+  .note-input, .n-title {
     flex: 1;
     background: var(--surface);
     border: 1px solid var(--border);
@@ -755,5 +770,5 @@
     padding: 7px 10px;
     font-family: inherit;
   }
-  .note-add input:focus, .n-title:focus { outline: none; border-color: var(--accent); }
+  .note-input:focus, .n-title:focus { outline: none; border-color: var(--accent); }
 </style>
