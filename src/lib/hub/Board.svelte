@@ -550,10 +550,15 @@
     <!-- ── the board: four fixed columns, cards in movement order ── -->
     <div class="cols">
       {#each STATUSES as s (s)}
-        <div class="colm">
-          <div class="col-h">{statusLabel(s)}<span class="col-n">{col(s).length}</span></div>
+        {@const items = col(s)}
+        <!-- SPARSE (0–1 cards) vs DENSE (2+) drives the 1-column layout
+             (board #33): a sparse area takes header+content height only,
+             dense areas flex-share what remains — the class is inert in the
+             2/4-column grids (flex properties do nothing for grid items). -->
+        <div class="colm" class:sparse={items.length <= 1}>
+          <div class="col-h">{statusLabel(s)}<span class="col-n">{items.length}</span></div>
           <div class="col-scroll subtle-scroll">
-          {#each col(s) as i (i.id)}
+          {#each items as i (i.id)}
             <button class="card" onclick={() => openIssue(i.id)}>
               <!-- Titleless issues (board #31) wear their body excerpt as the
                    title (issueRef); the preview line then stays EMPTY — the
@@ -655,17 +660,32 @@
      math auto-fit used (170px min card, 10px gap): 2×170+10 = 350,
      4×170+3×10 = 710. Stacked modes cap each area's share of the height so
      every column keeps its OWN scroller — the page still holds still. */
+  /* The 1-column BASE is a column flex, not an equal-row grid (board #33:
+     four unconditionally equal areas squeezed every real column to a
+     quarter-screen while empty ones stood stretched): a SPARSE area (0–1
+     cards) is content-sized — header plus what it actually holds — and
+     DENSE areas (2+) flex-share the remaining height, each keeping its own
+     scroller. All four sparse leaves the leftover blank at the BOTTOM,
+     never inflated into empty areas. No fixed card heights, no JS
+     measuring — the class is the whole mechanism. */
   .cols {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    grid-auto-rows: minmax(0, 1fr);
+    display: flex;
+    flex-direction: column;
     gap: 10px;
     align-items: stretch;
     flex: 1;
     min-height: 0;
   }
+  .colm.sparse { flex: none; }
+  .colm:not(.sparse) { flex: 1 1 0; }
+  /* ≥2 columns: back to the #27 grid — equal rows, never 3 across; flex
+     properties on .colm are inert here (grid items ignore them). */
   @container board (min-width: 350px) {
-    .cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cols {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-auto-rows: minmax(0, 1fr);
+    }
   }
   @container board (min-width: 710px) {
     .cols { grid-template-columns: repeat(4, minmax(0, 1fr)); }

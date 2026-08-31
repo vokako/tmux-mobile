@@ -144,8 +144,13 @@ completion).
   decided by the BOARD's own container width (CSS container queries), so
   the standalone page and the Hub drawer's embedded board obey the same
   thresholds by construction — the viewport plays no part. Movement order
-  and per-column scrolling hold in every shape (stacked modes split the
-  height equally; the page itself never scrolls).
+  and per-column scrolling hold in every shape; the page itself never
+  scrolls. The 1-column stack is ADAPTIVE (board #33): a **sparse** area
+  (0–1 cards) takes header + content height only, **dense** areas (2+)
+  flex-share the remaining height with their own internal scroll, and when
+  all four are sparse the leftover blank stays at the bottom — empty areas
+  are never inflated. The ≥2-column grids keep splitting the height
+  equally (rows must not content-size, or the page would scroll).
 - The human writes/edits here; agents use `tmm board` (`take` = claim +
   doing; only the acceptor moves to done). Same rows, same vocabulary —
   the board is session-scoped like the room.

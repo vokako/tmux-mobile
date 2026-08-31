@@ -272,9 +272,11 @@ test('four areas tile as 1, 2 or 4 — never 3 — and the BOARD is the ruler (b
   assert.match(source, /\.board \{[^}]*container-type: inline-size/su, 'the board is an inline-size container');
   assert.match(source, /\.board \{[^}]*container-name: board/su, 'named, so the ladder cannot silently re-anchor');
   assert.ok(!/repeat\(auto-(?:fit|fill)/u.test(source), 'no auto-packing — that is where 3 came from');
-  // The complete set of shapes .cols may take: 1 (the base), 2, 4.
-  assert.match(source, /\.cols \{[^}]*grid-template-columns: minmax\(0, 1fr\);/su, 'the base is ONE column');
-  assert.match(source, /@container board \(min-width: 350px\) \{\s*\.cols \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}\s*\}/u);
+  // The complete set of shapes .cols may take: 1 (the base — since board
+  // #33 a COLUMN FLEX so sparse/dense areas can size independently), 2, 4.
+  assert.match(source, /\.cols \{[^}]*display: flex;\s*flex-direction: column;/su, 'the base is ONE column (flex, adaptive)');
+  assert.match(source, /@container board \(min-width: 350px\) \{\s*\.cols \{[^}]*display: grid;[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/su,
+    'the 2-step RESTORES the grid');
   assert.match(source, /@container board \(min-width: 710px\) \{\s*\.cols \{ grid-template-columns: repeat\(4, minmax\(0, 1fr\)\); \}\s*\}/u);
   assert.equal([...source.matchAll(/@container board/g)].length, 2, 'exactly the two steps — a third step is a fifth shape');
   assert.ok(!/repeat\(3/u.test(source), 'three columns exist nowhere');
@@ -284,9 +286,30 @@ test('four areas tile as 1, 2 or 4 — never 3 — and the BOARD is the ruler (b
   const [two = 0, four = 0] = steps;
   assert.ok(two < four, 'the ladder ascends');
   assert.ok(two >= 2 * 170 + 10 && four >= 4 * 170 + 3 * 10, 'each step affords its tracks at 170px min');
-  // Stacked modes share the height equally so EVERY area keeps its own
-  // scroller (the page holds still — reopened #11's rule survives 1/2-col).
-  assert.match(source, /\.cols \{[^}]*grid-auto-rows: minmax\(0, 1fr\);/su, 'rows split the height; content cannot content-size them');
+  // GRID modes (2-col stacks two rows) still share the height equally so
+  // every area keeps its own scroller (the page holds still); since #33 the
+  // equal-rows rule lives INSIDE the query — the 1-col base is adaptive.
+  assert.match(source, /@container board \(min-width: 350px\) \{\s*\.cols \{[^}]*grid-auto-rows: minmax\(0, 1fr\);/su,
+    'equal rows are a GRID rule, scoped to the ≥2-col steps');
+  assert.ok(!/\.cols \{[^}]*grid-auto-rows[^}]*\}\s*@container/su.test(source.slice(0, source.indexOf('@container'))),
+    'the base declares no equal rows — sparse areas must be free to hug content');
+});
+
+test('the 1-column base sizes areas by their CONTENT class — sparse hugs, dense shares (board #33)', () => {
+  // Four unconditionally equal areas squeezed every real column to a
+  // quarter-screen while empty ones stood stretched. The mechanism is ONE
+  // class computed from the data, no fixed card heights, no JS measuring.
+  assert.match(source, /\{@const items = col\(s\)\}/u, 'each area computes its items ONCE');
+  assert.match(source, /class:sparse=\{items\.length <= 1\}/u, '0 or 1 card marks the area sparse');
+  // The two flex behaviors, and only in the base (grid items ignore flex):
+  assert.match(source, /\.colm\.sparse \{ flex: none; \}/u, 'sparse: header + content, nothing stretched');
+  assert.match(source, /\.colm:not\(\.sparse\) \{ flex: 1 1 0; \}/u, 'dense areas share the leftover equally');
+  // The count and the list read the SAME computation (no double col(s) call
+  // that could disagree mid-poll).
+  assert.match(source, /<span class="col-n">\{items\.length\}<\/span>/u, 'the header count reads items');
+  assert.match(source, /\{#each items as i \(i\.id\)\}/u, 'the cards read items');
+  // Every column keeps its own scroller in all shapes (#27's rule survives).
+  assert.match(source, /\.col-scroll \{\s*overflow-y: auto;/su, 'the internal scroller stays');
 });
 
 test('the note reply wraps and grows — one autoGrow, chat keyboard semantics (board #28)', () => {
