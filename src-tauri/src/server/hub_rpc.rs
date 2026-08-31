@@ -787,8 +787,14 @@ fn deliver_chat_line(session: &str, target_name: &str, line: &str) -> bool {
 /// should hear about it and name the change. `None` when: nobody is assigned,
 /// the assignee is the actor (your own edit is not news), the assignee is the
 /// human (who reads the board itself), the save (re)assigns (that has its own
-/// dispatch channel), or nothing actually changed (a save echoing the stored
-/// values is a no-op, not an event).
+/// dispatch channel), the save MOVES the issue to done (board #30, owner
+/// 2026-08-31: "如果任务我标记为done可以不用给agent发送提示了" — acceptance
+/// ENDS the work, there is nothing left for the executor to act on, so even
+/// title/body riding along with the closing save stay quiet; the room's
+/// `[tmm] board … → done` line still records it, and a LATER edit to an
+/// already-done issue — a reopen included — is ordinary news again), or
+/// nothing actually changed (a save echoing the stored values is a no-op,
+/// not an event).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn board_change_notice(
     prev: &serde_json::Value,
@@ -805,6 +811,12 @@ fn board_change_notice(
     let mut changes: Vec<String> = Vec::new();
     if let Some(ns) = status {
         let old = prev["status"].as_str().unwrap_or("");
+        // The closing act suppresses the WHOLE save, not just the status
+        // atom: a mixed save's title/body arrived as part of accepting the
+        // work, and a wake with the status line stripped would still wake.
+        if ns == "done" && old != "done" {
+            return None;
+        }
         if old != ns {
             changes.push(format!("status {old} → {ns}"));
         }
@@ -1068,6 +1080,41 @@ mod tests {
         assert_eq!(super::board_change_notice(&unassigned, "human", None, None, Some("doing"), false), None);
         let human_owned = serde_json::json!({ "title": "T", "body": "B", "status": "todo", "assignee": "human" });
         assert_eq!(super::board_change_notice(&human_owned, "lead", None, None, Some("doing"), false), None);
+    }
+
+    #[test]
+    fn a_move_to_done_never_wakes_the_assignee() {
+        let prev = serde_json::json!({
+            "title": "T", "body": "B", "status": "review", "assignee": "builder",
+        });
+        // Acceptance is the END of the work — there is nothing for the
+        // executor to act on, so the whole save stays quiet (board #30).
+        assert_eq!(super::board_change_notice(&prev, "human", None, None, Some("done"), false), None);
+        let todo = serde_json::json!({ "title": "T", "body": "B", "status": "todo", "assignee": "builder" });
+        assert_eq!(super::board_change_notice(&todo, "human", None, None, Some("done"), false), None);
+        // Even a MIXED save (title/body riding along with the acceptance) is
+        // suppressed wholesale — the fields arrived as part of closing it.
+        assert_eq!(
+            super::board_change_notice(&prev, "human", Some("T2"), Some("B2"), Some("done"), false),
+            None
+        );
+        // But an ALREADY-done issue edited later is ordinary news again: the
+        // suppression is about the closing act, not the done state.
+        let done = serde_json::json!({ "title": "T", "body": "B", "status": "done", "assignee": "builder" });
+        assert_eq!(
+            super::board_change_notice(&done, "human", Some("T2"), None, None, false).as_deref(),
+            Some("title → \"T2\"")
+        );
+        // ... including when the save echoes status "done" back unchanged.
+        assert_eq!(
+            super::board_change_notice(&done, "human", None, Some("B2"), Some("done"), false).as_deref(),
+            Some("body now: B2")
+        );
+        // And REOPENING (done → doing) is exactly the wake the rule preserves.
+        assert_eq!(
+            super::board_change_notice(&done, "human", None, None, Some("doing"), false).as_deref(),
+            Some("status done → doing")
+        );
     }
 
     #[test]

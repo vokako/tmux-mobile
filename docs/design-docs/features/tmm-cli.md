@@ -333,6 +333,13 @@ can get wrong to save three characters.
   into its pane (`deliver_chat_line`, shared with the done-summary edge;
   a human reporter reads the board itself, the actor is never told of its
   own move, `done` posts a room line only — no delivery loop is possible).
+  A change somebody else makes to an ASSIGNED issue reaches the assignee the
+  same way (`board_change_notice`, pure) — with one carve-out (board #30,
+  owner 2026-08-31: "如果任务我标记为done可以不用给agent发送提示了"): a save
+  that MOVES the issue to done wakes nobody, even when title/body ride along
+  with the acceptance — closing the work leaves the executor nothing to act
+  on, and the room's `[tmm] board … → done` line still records it. A later
+  edit to an already-done issue (a reopen included) is ordinary news again.
   A Board NOTE is a direct reply as well as durable thread history: after the
   note is stored, an author other than the current non-human assignee wakes
   that assignee through the same targeted delivery + receipt path, carrying
