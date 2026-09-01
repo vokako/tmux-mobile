@@ -246,25 +246,40 @@ impl Store {
                 .execute_batch("ALTER TABLE issues ADD COLUMN project_number INTEGER;")
                 .map_err(|e| format!("add Board project number: {e}"))?;
         }
-        // Idempotent partial-migration repair: the correlated rank fills only
-        // rows an interrupted/partial build left NULL, never renumbering a
-        // healthy board after deletions. One UPDATE is atomic in SQLite.
+        // Idempotent partial-migration repair. When every row is NULL (the
+        // normal v15→v16 ALTER), this is the dense 1..N rank. If an older
+        // binary later inserted NULL rows into an already-numbered v16 table,
+        // start after BOTH the visible maximum and the durable sequence —
+        // never collide with a gap or reuse a deleted high number.
         self.conn
             .execute_batch(
-                "UPDATE issues
-                    SET project_number = (
-                      SELECT COUNT(*)
-                        FROM issues earlier
-                       WHERE earlier.session = issues.session
-                         AND earlier.id <= issues.id
-                    )
-                  WHERE project_number IS NULL;
-                 CREATE UNIQUE INDEX IF NOT EXISTS issues_session_number
-                   ON issues(session, project_number);
-                 CREATE TABLE IF NOT EXISTS issue_sequences (
+                "CREATE TABLE IF NOT EXISTS issue_sequences (
                    session     TEXT PRIMARY KEY,
                    next_number INTEGER NOT NULL
                  );
+                 UPDATE issues
+                    SET project_number = MAX(
+                          COALESCE((
+                            SELECT MAX(numbered.project_number)
+                              FROM issues numbered
+                             WHERE numbered.session = issues.session
+                               AND numbered.project_number IS NOT NULL
+                          ), 0),
+                          COALESCE((
+                            SELECT seq.next_number - 1
+                              FROM issue_sequences seq
+                             WHERE seq.session = issues.session
+                          ), 0)
+                        ) + (
+                          SELECT COUNT(*)
+                            FROM issues pending
+                           WHERE pending.session = issues.session
+                             AND pending.project_number IS NULL
+                             AND pending.id <= issues.id
+                        )
+                  WHERE project_number IS NULL;
+                 CREATE UNIQUE INDEX IF NOT EXISTS issues_session_number
+                   ON issues(session, project_number);
                  INSERT INTO issue_sequences (session, next_number)
                    SELECT session, MAX(project_number) + 1
                      FROM issues
@@ -2209,7 +2224,29 @@ mod tests {
         assert_eq!(orphan_notes, 0, "foreign keys are off in migration, so v14 removes orphan notes explicitly");
         let version: i64 = repaired.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
         assert_eq!(version, 16);
+
+        // A rolled-back v15 binary does not know project_number and can insert
+        // NULL into an upgraded (nullable-by-ALTER) table. With a visible gap,
+        // dense rank would collide; heal must continue after the remembered
+        // sequence instead.
+        assert_eq!(repaired.issue_save("old", None, Some("two"), None, None, None, "human", 40).unwrap(), 2);
+        assert_eq!(repaired.issue_save("old", None, Some("three"), None, None, None, "human", 41).unwrap(), 3);
+        assert!(repaired.issue_delete("old", 2).unwrap());
+        repaired.conn.execute(
+            "INSERT INTO issues
+               (session, title, body, status, assignee, created_by, created_at, updated_at, agent_touched)
+             VALUES ('old', 'written by v15', '', 'todo', '', 'human', 42, 42, 0)",
+            [],
+        ).unwrap();
         drop(repaired);
+        let healed = Store::open(&path).unwrap();
+        assert_eq!(healed.issue_get("old", 4).unwrap().unwrap()["title"], "written by v15");
+        assert_eq!(
+            healed.issue_save("old", None, Some("after heal"), None, None, None, "human", 43).unwrap(),
+            5,
+            "rollback repair advances without collision or reuse",
+        );
+        drop(healed);
         let _ = std::fs::remove_dir_all(dir);
     }
 
