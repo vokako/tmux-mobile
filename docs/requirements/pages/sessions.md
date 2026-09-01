@@ -17,7 +17,10 @@ glance without requiring interaction.
 
 ## Components
 
-- Session rows, MRU chips, and expanded pane rows show a compact attention dot when the corresponding session or window has an unread coding-agent lifecycle notification.
+- Session rows, MRU chips and pane rows carry NO unread attention dots: the
+  per-window notification inbox retired 2026-09-01 (the Hub room's auto-post +
+  read cursor and the derived agent status dots are the one notification
+  language). A source test pins the absence.
 
 ### Top row
 - **Single row combining MRU chips and search**. Chips fill the left, a

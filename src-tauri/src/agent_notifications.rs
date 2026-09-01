@@ -96,8 +96,20 @@ impl AgentNotificationHub {
         Self::load_at(config::config_dir().join("agent-notifications"))
     }
 
+    /// Test-only constructor for OTHER modules' boundary tests (team_rpc's
+    /// retired-RPC pin): same as `load_at`, kept off the public API.
+    #[cfg(test)]
+    pub(crate) fn load_at_for_tests(root: PathBuf) -> Self {
+        Self::load_at(root)
+    }
+
     fn load_at(root: PathBuf) -> Self {
         let _ = std::fs::create_dir_all(root.join("inbox"));
+        // The unread-inbox UI retired 2026-09-01; nothing reads unread.json
+        // any more, so a file left by an older build would sit on disk for
+        // ever carrying stale reply summaries. Best-effort: a failure to
+        // remove is not a failure to start.
+        let _ = std::fs::remove_file(root.join("unread.json"));
         Self { root, state: Arc::new(Mutex::new(State::default())) }
     }
 
@@ -942,6 +954,22 @@ fn json_file_contains(path: &Path, needle: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A legacy build's unread.json is REMOVED at load (the retired unread
+    /// inbox must not leave stale reply summaries on disk for ever), and the
+    /// hub stays functional: the inbox dir exists for the helper to write into.
+    #[test]
+    fn load_removes_the_legacy_unread_file_and_keeps_the_inbox() {
+        let root = std::env::temp_dir().join(format!("tmm-legacy-unread-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("unread.json"), r#"[{"summary":"stale"}]"#).unwrap();
+        let hub = AgentNotificationHub::load_at(root.clone());
+        assert!(!root.join("unread.json").exists(), "legacy file removed at load");
+        assert!(root.join("inbox").is_dir(), "the hook inbox is still provisioned");
+        // The surviving surfaces still answer.
+        assert!(hub.agent_session_for("none", 0).is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     /// Consume order IS render order, because an event is stamped when it is
     /// consumed. Filesystem order is arbitrary, so the listing sorts by the

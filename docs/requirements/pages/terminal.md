@@ -28,15 +28,11 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
   after connecting, even before a pane has been selected. With no active target,
   the page renders a stable empty state; opening a pane from Sessions or Team
   fills that same layer instead of creating the tab on demand.
-- Window chips and the all-session pane picker show unread agent attention dots
-  for ordinary sessions without changing chip height; Team (`tmm-team-*`)
-  session/window chrome suppresses these dots because Team owns its Agent
-  status display. This is presentation-only: hooks and persisted notifications
-  remain active. For ordinary sessions, the left session chip signals only
-  unread notifications in other ordinary sessions; the picker omits a summary
-  dot for the current session because its window chips already carry precise
-  dots. Opening a window still marks its server-persisted notification read
-  across connected clients.
+- Window chips and the all-session pane picker carry NO unread attention dots
+  (retired 2026-09-01 with the notification inbox): an agent's backend icon
+  still marks WHAT runs in a window, while "finished/needs attention" lives in
+  the Hub room (auto-posted replies + read cursor) and the derived status
+  dots. Source tests pin the absence.
 - Expanded window-switcher chips and every mobile shortcut-key button share a 24px control height and pill geometry. Their text and icons use the same 1px optical baseline correction so visible glyphs are vertically centered. Shortcut rows add no vertical padding, preserving terminal viewport space.
 - xterm.js v6 terminal emulator with theme-aware color schemes (light/dark)
 - Shortcut buttons: Esc, Ctrl, ^C, Tab, arrows — with long-press repeat for repeatable keys

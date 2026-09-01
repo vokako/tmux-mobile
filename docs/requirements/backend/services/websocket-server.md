@@ -4,7 +4,7 @@
 Rust-based WebSocket server providing JSON-RPC interface to tmux and filesystem operations.
 
 ## Implementation
-- Module: `src-tauri/src/server/` (`mod.rs` listener/bridge trait, `wire.rs` framing+crypto, `rpc.rs` dispatch, `team_rpc.rs` team/notification RPCs, `download.rs` HTTP side-channel, `connection.rs` connection pump)
+- Module: `src-tauri/src/server/` (`mod.rs` listener/bridge trait, `wire.rs` framing+crypto, `rpc.rs` dispatch, `team_rpc.rs` team/agent-hooks RPCs, `download.rs` HTTP side-channel, `connection.rs` connection pump)
 - Dependencies: tokio, tokio-tungstenite, hmac, sha2, aes-gcm, base64
 - Starts on desktop only (`#[cfg(desktop)]`)
 - Standalone binary: `src-tauri/src/bin/server.rs`
@@ -50,9 +50,14 @@ Rust-based WebSocket server providing JSON-RPC interface to tmux and filesystem 
 - Git operations whitelisted to safe subset, shell metacharacters rejected in args
 - iframe sandbox: `allow-same-origin` only (no scripts)
 
-## Agent Notification RPC
+## Agent hooks RPC
 
-- `agent_notifications_list` returns the server-persisted unread window snapshot.
-- `agent_notifications_mark_read(session, window)` clears one window and broadcasts the resulting snapshot.
 - `agent_hooks_status`, `agent_hooks_install`, and `agent_hooks_remove` manage only tmux-mobile-owned Claude Code, Codex, and Kiro hooks.
-- `agent_notification` is a server push carrying the complete unread snapshot; clients re-list after authentication/reconnect.
+- The hooks feed telemetry (status derivation, tool/prompt rows), the managed
+  stop-hook auto-post into the project room, and the per-window conversation-id
+  memory that project restore resumes with.
+- The unread-inbox surface retired 2026-09-01: `agent_notifications_list`,
+  `agent_notifications_mark_read` and the `agent_notification` push are no
+  longer served — an old client's call gets METHOD_NOT_FOUND (soft error, same
+  dispatcher still answers `agent_hooks_*`; a boundary test pins both). The
+  room's auto-post + read cursor and the derived status dots carry the signal.

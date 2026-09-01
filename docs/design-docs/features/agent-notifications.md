@@ -12,9 +12,11 @@
 
 ## Purpose
 
-Agent notifications turn structured lifecycle events from coding agents running
-inside tmux into persistent, per-window attention markers in tmux-mobile. The
-first supported backends are Claude Code, Codex CLI, and Kiro CLI.
+Agent hooks turn structured lifecycle events from coding agents running inside
+tmux into observed facts: telemetry for status derivation, the auto-posted
+final reply, and the conversation id a restored window resumes with. The
+supported backends are Claude Code, Codex CLI, Kiro CLI and Grok.
+(Originally this fed per-window attention markers — retired, see above.)
 
 Terminal output is not the source of truth. Prompts and completion text change
 between versions, themes, models, and languages. Each backend's lifecycle hooks
@@ -27,10 +29,14 @@ low-confidence signals.
 agent lifecycle hook
   -> notification helper writes one atomic inbox file
   -> desktop server consumes the inbox
-  -> NotificationHub stores unread window state
-  -> existing authenticated WebSocket pushes agent_notification
-  -> Sessions and Terminal window chips render attention markers
+  -> telemetry (status derivation, tool/prompt rows)
+  -> managed stop-hook auto-post into the project room
+  -> per-window conversation-id memory (project resume)
 ```
+
+(Until 2026-09-01 the consumer ALSO stored unread window state and pushed
+`agent_notification` snapshots that Sessions/Terminal chips rendered as
+attention markers — that half is retired; see the note above.)
 
 The helper uses a filesystem inbox under tmux-mobile's config directory rather
 than a second HTTP listener. This avoids another exposed port and authentication
@@ -58,41 +64,33 @@ execution with status 137.
   installer also writes the v3 workspace/global hook format for forward
   compatibility; it never edits unrelated custom agents.
 
-Duplicate completion events from one turn are collapsed by backend session,
-pane, event kind, and a short time window.
+(Historical: the unread inbox collapsed duplicate completion events from one
+turn by backend session, pane, event kind and a short time window. Telemetry
+deliberately takes every observed fact instead — dedupe was a UI concern.)
 
 ## Tmux Identity
 
 Hook processes inherit `TMUX_PANE` from the agent process. The helper records
 that stable pane id (for example `%18`). The server resolves it through tmux to
-the current `session:window.pane` target. Notifications aggregate at window
-level because that is the navigation unit shown in Terminal's chip bar.
+the current `session:window.pane` target; telemetry keys its facts by
+`session:window`, the unit agents are managed at.
 
 Events without `TMUX_PANE`, or whose pane no longer exists when consumed, are
 discarded: guessing from cwd or process names can associate attention with the
 wrong session. This also makes globally installed hooks inert when an Agent is
 running outside tmux.
 
-## Unread Model
+## Unread Model (RETIRED 2026-09-01)
 
-Unread state is persisted by the desktop server, not only held by one client.
-It therefore survives WebSocket reconnects and mobile app backgrounding.
-
-- `completed`: normal attention marker
-- `input_required` and `permission_required`: urgent marker
-- `failed`: error marker
-
-Opening the corresponding window calls `agent_notifications_mark_read`. The
-server then broadcasts the complete unread snapshot so every connected client
-converges. Listing notifications after authentication supplies the initial
-snapshot for a reconnecting client.
-
-Terminal chrome deliberately filters attention dots for recognized
-`tmm-team-*` sessions: Team already presents Agent status, and repeating the
-marker on its session/window chips adds noise. The filter is downstream of this
-unread model. Hook ingestion, server persistence, system notification delivery,
-and ordinary session dots are unchanged; Sessions remains a complete unread
-overview.
+This section is history, kept because it explains what the retirement removed.
+The desktop server persisted per-window unread state (`unread.json`) with
+normal/urgent/error marker kinds; opening a window called
+`agent_notifications_mark_read`, the server broadcast the snapshot, and
+Terminal chrome filtered `tmm-team-*` dots. All of it is gone: the RPCs answer
+METHOD_NOT_FOUND (a boundary test pins it), a legacy `unread.json` is removed
+at server start (regression-tested), and the event kinds live on only inside
+telemetry's status derivation. The project room and the derived status dots
+are the one notification language.
 
 ## Hook Management
 

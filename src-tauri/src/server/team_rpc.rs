@@ -164,6 +164,29 @@ mod tests {
     use super::*;
     use super::super::test_util::req;
 
+    // ─── the retired unread-inbox RPCs stay retired (board #37) ─────────
+    /// An old client still calls `agent_notifications_list`/`mark_read`; it
+    /// must get a soft METHOD_NOT_FOUND — never a panic, never a resurrected
+    /// snapshot — while the hook-management surface on the SAME dispatcher
+    /// keeps answering.
+    #[test]
+    fn retired_notification_rpcs_degrade_soft_and_hooks_survive() {
+        let root = std::env::temp_dir().join(format!("tmm-retired-rpc-{}", uuid::Uuid::new_v4()));
+        let hub = AgentNotificationHub::load_at_for_tests(root.clone());
+        for method in ["agent_notifications_list", "agent_notifications_mark_read"] {
+            let resp = handle_notification_request(
+                &req(method, serde_json::json!({ "session": "s", "window": 0 })),
+                &hub,
+            );
+            let err = resp.error.expect("retired method answers with an error");
+            assert_eq!(err.code, super::super::rpc::ERR_METHOD_NOT_FOUND, "{method}");
+            assert!(resp.result.is_none(), "{method} must not return a snapshot");
+        }
+        let resp = handle_notification_request(&req("agent_hooks_status", serde_json::json!({})), &hub);
+        assert!(resp.error.is_none() && resp.result.is_some(), "hook status still answers");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     // ─── team WS proxy dispatch ─────────────────────────────────────────
     // A tiny in-memory TeamBridge stand-in so we can exercise
     // handle_team_request without pulling in the real (desktop-only) bus.
