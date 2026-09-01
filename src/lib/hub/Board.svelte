@@ -547,7 +547,18 @@
       <!-- Layout hierarchy (board #11): the title is ONE compact line, the
            body is the big field — visibly larger, growable, never same-size
            siblings again. -->
-      <input class="d-title-input" bind:value={draft.title} placeholder={t('boardTitlePh')} />
+      <!-- Locked text is the RECORD (board #43, backend 842f970): once an
+           agent has touched the issue — or while it is assigned — the server
+           refuses title/body patches, so the frontend renders the ORIGINAL
+           text as semantic static prose: complete, swipe-selectable, and
+           carrying NO edit affordance (the bordered box read as "tap to
+           edit" — a disabled input would be the same lie). The workflow
+           stays live either way: status slider, assignee, note reply. -->
+      {#if sel.editable}
+        <input class="d-title-input" bind:value={draft.title} placeholder={t('boardTitlePh')} />
+      {:else if sel.title.trim()}
+        <div class="d-title-static">{sel.title}</div>
+      {/if}
       <div class="d-meta">
         <!-- The status is a SLIDER (board #15): sweep the track or tap a
              stop. It edits the draft — the head's ✓ is what saves, and
@@ -568,7 +579,16 @@
           onchange={(v: string) => (draft.assignee = v)} />
         {#if sel.created_by}<span class="meta-bit">{t('boardOpenedBy')} <span class="m-name">{sel.created_by}</span></span>{/if}
       </div>
-      <textarea class="d-body-edit" bind:value={draft.body} use:autoGrow={draft.body} placeholder={t('boardBodyPh')} rows="3"></textarea>
+      {#if sel.editable}
+        <textarea class="d-body-edit" bind:value={draft.body} use:autoGrow={draft.body} placeholder={t('boardBodyPh')} rows="3"></textarea>
+      {:else if sel.body.trim()}
+        <!-- The full body, never clipped: pre-wrap keeps its line breaks and
+             the reader selects it like any document text. The draft still
+             mirrors it (draftOf), so dirty/save/rebase keep working for the
+             fields that REMAIN writable — with no input bound to title/body
+             a patch can never carry them, matching the server's refusal. -->
+        <div class="d-body-static">{sel.body.trim()}</div>
+      {/if}
       <!-- The note thread as a TIMELINE (reopened #11): a header line — author
            in the accent ink, time right-aligned — and the content in its own
            box below, so ragged name lengths stop pushing the text around. -->
@@ -890,6 +910,21 @@
     flex: none;
   }
   .d-body-edit:focus { outline: none; border-color: var(--accent); }
+  /* Locked title/body (board #43): the same type as their editable twins,
+     but PROSE — no surface, no border, no focus ring, nothing that invites
+     a tap. Explicitly selectable: the app shell's global user-select:none
+     (app.css) only opts inputs back in, and these are no longer inputs. */
+  .d-title-static {
+    color: var(--text); font-size: var(--fs-ui); font-weight: 600;
+    padding: 7px 0;
+    user-select: text; -webkit-user-select: text; cursor: text;
+  }
+  .d-body-static {
+    color: var(--text); font-size: var(--fs-ui);
+    white-space: pre-wrap; overflow-wrap: anywhere;
+    padding: 2px 0;
+    user-select: text; -webkit-user-select: text; cursor: text;
+  }
   /* Timeline notes (reopened #11): author + right-aligned time on the header
      line, the content in its own box below — ragged author widths no longer
      push the text around, and the inks follow the app's hierarchy (accent
@@ -906,6 +941,10 @@
     border: 1px solid var(--border);
     border-radius: var(--ui-radius-row);
     padding: 7px 10px;
+    /* Every historical note is a document to READ (board #43: "所有的历史
+       消息都可以手动滑动选择"): explicit opt-out of the shell's global
+       user-select:none, with the text cursor saying so. */
+    user-select: text; -webkit-user-select: text; cursor: text;
     /* The box HUGS its content — a one-word note is a small chip, not a
        full-width band of blank (owner, 2026-08-29). */
     width: fit-content;

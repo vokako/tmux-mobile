@@ -538,3 +538,45 @@ test('titles are optional, and the WIRING honors it — not just the pure helper
   assert.match(source, /import \{[^}]*\bissueRef\b[^}]*\} from '\.\/board\.ts';/u,
     'issueRef comes from board.ts — no component-local copy');
 });
+
+test('locked issue text is static selectable prose; the workflow stays live (board #43)', () => {
+  // Exactly TWO editable branches — the title and the body. editable comes
+  // from the server (assignee empty AND no agent ever touched it, 842f970);
+  // the frontend only consumes it.
+  const branches = [...source.matchAll(/\{#if sel\.editable\}([\s\S]*?)\{\/if\}/gu)];
+  assert.equal(branches.length, 2, 'title + body, nothing else forks on editable');
+
+  // Editable keeps the REAL inputs; locked renders the ORIGINAL text as a
+  // static div — never a disabled input (an input is an edit affordance
+  // whether or not it accepts keys).
+  assert.match(branches[0]![1]!, /<input class="d-title-input" bind:value=\{draft\.title\}/u, 'editable title is the input');
+  assert.match(branches[0]![1]!, /\{:else if sel\.title\.trim\(\)\}\s*<div class="d-title-static">\{sel\.title\}<\/div>/u, 'locked title is static text');
+  assert.match(branches[1]![1]!, /<textarea class="d-body-edit" bind:value=\{draft\.body\}/u, 'editable body is the textarea');
+  assert.match(branches[1]![1]!, /\{:else if sel\.body\.trim\(\)\}[\s\S]*<div class="d-body-static">\{sel\.body\.trim\(\)\}<\/div>/u, 'locked body is static text');
+  assert.ok(!/d-title-input[^>]*\bdisabled\b/u.test(source) && !/d-body-edit[^>]*\bdisabled\b/u.test(source),
+    'locked is a different ELEMENT, not a disabled input');
+
+  // The workflow controls live OUTSIDE both branches: a locked issue still
+  // slides status, picks an assignee, and takes note replies — the draft
+  // machinery keeps patching those (with no input bound, a patch can never
+  // carry title/body, matching the server's refusal).
+  for (const [, inner] of branches) {
+    assert.ok(!inner!.includes('class="seg"') && !inner!.includes('<Select') && !inner!.includes('note-input'),
+      'status slider / assignee / note reply never fork on editable');
+  }
+  assert.match(source, /class="seg" role="radiogroup"/u, 'the slider is still there');
+  assert.match(source, /class="note-input"/u, 'the note composer is still there');
+
+  // Selectability is EXPLICIT (the app shell's global user-select:none only
+  // opts inputs back in): locked title/body and every historical note body
+  // carry the full trio.
+  const style = source.slice(source.indexOf('<style>'));
+  for (const cls of ['.d-title-static', '.d-body-static', '.n-text']) {
+    const at = style.indexOf(cls);
+    assert.ok(at > -1, `${cls} styled`);
+    const block = style.slice(at, style.indexOf('}', at));
+    assert.match(block, /user-select: text/u, `${cls} selectable`);
+    assert.match(block, /-webkit-user-select: text/u, `${cls} selectable in WebKit`);
+    assert.match(block, /cursor: text/u, `${cls} reads as text`);
+  }
+});
