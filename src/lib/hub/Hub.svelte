@@ -2959,7 +2959,13 @@
   /* The caret hugs the last letter: a narrow box (the icon-btn's 28px read
      as a detached control), quiet ink so the NAME stays the subject. The
      compact rule's invisible tap overlay still gives it a full target. */
-  .title-caret { width: 20px; color: var(--text3); }
+  /* padding: 0 resets the BROWSER's default button padding (Chromium: 1px
+     6px), which .icon-btn never clears: in the base 28px button the 16px
+     content box hides it, but narrowed to 20px only 8px remains and the 14px
+     glyph overflowed flush against the RIGHT edge — measured live, svg right
+     == button right, reading as "clipped" the moment the wash shows
+     (owner, 2026-09-01: "右边一小条被挡住了"). */
+  .title-caret { width: 20px; padding: 0; color: var(--text3); }
   .title-caret:hover { color: var(--text); }
   /* The global `.page-head h1` rule ellipsizes its own text; with a second child
      it has to be a flex row, or the pencil is pushed out and clipped by the

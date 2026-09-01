@@ -610,6 +610,11 @@ test('the title caret expands the NAME — left-aligned on its real rect (board 
   assert.equal(opens - aligned, 7, 'the seven pointer entries stay pointer-anchored');
   assert.ok(!/getBoundingClientRect\(\)[^]{0,80}openCtx/u.test(source),
     'no raw client rect reaches openCtx — anchorOf owns the zoom correction');
+  // The narrowed caret resets the BROWSER's button padding (Chromium: 1px 6px,
+  // which .icon-btn never clears): without it the 14px glyph overflowed flush
+  // against the button's right edge — measured live, svg.right == button.right
+  // — and read as clipped the moment the wash showed (owner, 2026-09-01).
+  assert.match(source, /\.title-caret \{ width: 20px; padding: 0;/u, 'the 20px caret zeroes the UA padding');
 });
 
 test('the composer scrollbar exists exactly while overflowing, and placeholders are short (board #34)', async () => {
