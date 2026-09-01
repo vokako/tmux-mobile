@@ -15,11 +15,13 @@ test('back retraces the USER\u2019s steps — a history, not a parent walk (boar
     /navTo\(bc\.path\)/u,              // a crumb
     /navTo\(bm\);/u,                   // a bookmark
   ]) assert.match(source, site, `user navigation pushes: ${site}`);
-  // …back pops exactly that path; an empty stack falls to the FLOOR, where
-  // App returns a chat jump to the chat (rule 1) instead of climbing to /.
-  assert.match(source, /if \(popDir\(\)\) return true;\s*\n\s*return false;/u,
-    'the back gesture\u2019s directory step is the pop, and the entry point is the floor');
-  assert.ok(!source.includes('if (cwd !== \'/\') { goUp(); return true; }'), 'the parent walk to / is retired');
+  // …back pops exactly that path FIRST; the user's own steps always outrank
+  // the parent climb below them (board #47 reopened the climb — see the next
+  // test — but never above the pop, and never through navTo).
+  assert.match(source, /if \(popDir\(\)\) return true;[\s\S]{0,700}?if \(!jumped/u,
+    'the back gesture\u2019s directory step is the pop, before the gated climb');
+  assert.ok(!source.includes('if (cwd !== \'/\') { goUp(); return true; }'),
+    'the UNGATED history-pushing parent walk stays retired (goUp/navTo would bounce)');
   // External moves are new ENTRY POINTS, not steps: they reset the history.
   const resets = source.split('dirHist = []').length - 1;
   assert.equal(resets, 4, 'the declaration + session switch, cwd follow rule, and navRequest handoff resets');
@@ -78,4 +80,14 @@ test('an OS drag onto the listing uploads into the CURRENT directory (board #22)
   // only — and removed when it is not.
   assert.match(source, /if \(!visible \|\| isTauri\) return;/u, 'the guard is visible-gated and browser-only');
   assert.match(source, /window\.removeEventListener\('drop', block\);/u, 'and it cleans up after itself');
+});
+
+test('below its own path, a tab visit climbs to the parent — never the terminal (board #47)', () => {
+  // popDir retraces the user's OWN steps (board #17); when that stack is
+  // exhausted a TAB visit climbs parent directories via loadDir — NEVER
+  // navTo, which would push the child back onto the history for the next
+  // back to bounce down into — and only a chat-jumped visit falls through
+  // to App's return slot (the conversation).
+  assert.match(source, /if \(popDir\(\)\) return true;[\s\S]{0,700}?if \(!jumped && cwd && cwd !== '\/'\) \{ navAnim\('back'\); loadDir\(cwd\.replace\(\/\\\/\[\^\/\]\+\\\/\?\$\/, ''\) \|\| '\/'\); return true; \}/u,
+    'the climb sits under the user-path pop, gated on the return slot, and loads without pushing');
 });

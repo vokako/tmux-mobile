@@ -263,6 +263,11 @@ test('board back on a phone lifts the project drawer, never the terminal (board 
   // exactly like Hub. Only the chat's jump (the return slot) leaves the page.
   assert.ok(!/if \(page === 'board'\) \{ page = 'terminal'; return; \}/u.test(source),
     'the board→terminal floor stays retired');
+  // Files' floor is the SAME rule (owner, on the issue): its own chain climbs
+  // parent directories; App adds no terminal fallback below it either.
+  assert.ok(!/if \(page === 'files'\) \{ page = 'terminal'; return; \}/u.test(source),
+    'the files→terminal floor stays retired');
+  assert.match(source, /<Files [^\n]*jumped=\{!!jumpedFrom\}/u, 'the files page instance gets the return-slot gate');
   // Board is told whether a return slot exists, so its drawer lift can stand
   // aside and let back fall through to the conversation.
   assert.match(source, /<Board [^\n]*jumped=\{!!jumpedFrom\}/u, 'the return slot reaches the drawer-lift gate');

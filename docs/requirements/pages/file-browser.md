@@ -33,6 +33,10 @@ directory, or the server's home directory when no session is open yet.
 - Star button → bookmark current directory
 - Refresh button in the toolbar → re-list current directory
 - Swipe right from left edge → go back
+- The back gesture retraces the user's own directory path first (a history,
+  not a parent walk); below it a tab visit climbs parent directories to `/`
+  and then stays (board #47 — the terminal is not below Files). Only a visit
+  jumped from the chat returns to the conversation instead.
 - Upload button → file picker (Tauri on desktop/Android, `<input>` in browser)
 - Download button → save file locally
 

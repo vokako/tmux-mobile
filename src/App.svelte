@@ -937,7 +937,8 @@
       }
       if (page === 'files' && filesGoBack && filesGoBack()) return;
       if (page === 'files' && jumpedFrom) { switchTab(jumpedFrom); return; }
-      if (page === 'files') { page = 'terminal'; return; }
+      // Files with nothing to peel has climbed to /: fall through to the
+      // re-push — the terminal is not below it (board #47).
       // Chat and Agents peel their own layers (menus, dialogs, drawer,
       // editor) exactly like Files peels its views — a back with nothing to
       // peel falls through to the re-push, so it never reads as the browser
@@ -1311,7 +1312,7 @@
     </div>
     {/if}
     <div class="page-layer" class:hidden={page !== 'files'}>
-      <Files session={filesSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} navRequest={filesNavReq} />
+      <Files session={filesSession} visible={page === 'files'} {fontSize} onGoBack={(fn) => filesGoBack = fn} navRequest={filesNavReq} jumped={!!jumpedFrom} />
     </div>
     <div class="page-layer" class:hidden={page !== 'board'}>
       {#if hubEligible}

@@ -83,7 +83,7 @@
   mermaid.initialize({ startOnLoad: false, theme: 'dark' });
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
-  let { session = '', onGoBack = null, visible = false, fontSize = 14, singlePane = false, navRequest = null, currentDir = $bindable('') } = $props();
+  let { session = '', onGoBack = null, visible = false, fontSize = 14, singlePane = false, navRequest = null, jumped = false, currentDir = $bindable('') } = $props();
 
   /* The confirmation becomes a bottom sheet on a phone-sized viewport, the same
      rule the Hub's dialogs use. */
@@ -118,6 +118,13 @@
       // entry point the stack is empty and the floor decides — App returns a
       // chat jump to the chat, a tab visit to the root.
       if (popDir()) return true;
+      // Own path exhausted: a TAB visit CLIMBS to the parent instead of
+      // leaving the page (board #47: "应该返回上级目录 不是去terminal") —
+      // via loadDir, never navTo, or the climb would push history for the
+      // next back to bounce back down. At / there is nothing above, so it
+      // falls through (App re-pushes). A chat-jumped visit stands aside:
+      // its floor is the conversation, App's return slot below.
+      if (!jumped && cwd && cwd !== '/') { navAnim('back'); loadDir(cwd.replace(/\/[^/]+\/?$/, '') || '/'); return true; }
       return false;
     });
   });
@@ -405,9 +412,9 @@
   // page (entering a directory, a crumb, a bookmark, the up/home buttons)
   // pushes where they WERE, and back pops exactly that path — so back retraces
   // the user's own steps. An EXTERNAL move (session switch, the cwd follow
-  // rule, a drawer handoff) RESETS the stack instead: it is a new entry point,
-  // and back from there should leave the page (rule 1: jumped in → back
-  // returns to the origin page, via App's return slot), never climb to /.
+  // rule, a drawer handoff) RESETS the stack instead: it is a new entry point.
+  // Below the stack, a tab visit climbs parent directories to / (board #47);
+  // only a chat-jumped visit leaves the page, via App's return slot.
   let dirHist = [];
   function navTo(path) {
     if (cwd && path !== cwd) dirHist.push(cwd);
