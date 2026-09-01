@@ -464,7 +464,7 @@
               <span class="p-name">{p.project.name}</span>
               {#if rowTalk(p)}<span class="side-age">{agoShort(rowTalk(p), Date.now())}</span>{/if}
             </span>
-            <span class="side-wins">
+            <span class="side-wins grid">
               {#each STATUSES as st (st)}
                 <span class="side-win">
                   <span class="side-win-dot" style:background={countColor(st)}></span>

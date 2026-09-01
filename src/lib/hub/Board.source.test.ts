@@ -413,6 +413,21 @@ test('the sidebar consumes ONE bulk counts read and reacts to local writes at on
     'four chips, fixed vocabulary order, count present even at 0');
 });
 
+test('the four count chips sit in a fixed 2×2 grid — never a ragged 3+1 wrap (board #39, owner)', () => {
+  // Owner (2026-09-01): "几个条目给我排整齐吧，比如 4x 1 2x2 等，不要 3 1
+  // 这样的布局，列之间左侧点点要对齐" — the shared .side-wins is flex-WRAP
+  // (right for Chat's variable-count agent chips), so at sidebar widths the
+  // four fixed chips broke 3+1 with a ragged orphan. The Board row wears the
+  // .grid modifier: TWO equal grid columns — a rectangle at every width
+  // (2×2), left dots aligned per column by construction. auto-fit would be
+  // wrong here: at a width that fits three it recreates exactly the 3+1 the
+  // owner rejected.
+  assert.match(source, /<span class="side-wins grid">/u,
+    'the Board row wears the grid modifier');
+  assert.match(appCss, /\.side-wins\.grid \{ display: grid; grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}/u,
+    'the modifier is the shared sidebar skeleton in app.css: two equal columns, deterministic 2×2');
+});
+
 test("the sidebar count chips wear the owner's four categorical colours — locally, never in the language (board #39, owner)", () => {
   // Owner (2026-09-01), third ruling on these chips: "done 和 todo 颜色又不
   // 一样了，四个设为 红 橙 黄 紫四个颜色吧" — the two near-greys (todo's
