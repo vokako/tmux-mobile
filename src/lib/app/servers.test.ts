@@ -315,3 +315,11 @@ test('the REAL caller sequence cannot poison the old server’s parked machine i
   assert.equal(s.getItem(MACHINE_PREFIX + aId), 'm-a', 'A’s slot holds A’s id — never B’s');
   assert.equal(s.getItem('tmux_machine_id'), 'm-b', 'the live key is B’s, written by parkAndPoint');
 });
+
+test('removeServer with a vanished id is a harmless no-op (stale confirm, board #55)', () => {
+  const s = mem({ tmux_address: 'ws://a:1', tmux_token: 'ta' });
+  migrateServers(s);
+  const before = loadServers(s);
+  assert.equal(removeServer(s, 'gone-id').length, before.length, 'nothing filtered');
+  assert.deepEqual(loadServers(s), before, 'registry byte-identical');
+});

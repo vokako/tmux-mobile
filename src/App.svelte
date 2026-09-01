@@ -11,6 +11,7 @@
   import SideHandle from './lib/ui/SideHandle.svelte';
   import InstallPrompt from './lib/ui/InstallPrompt.svelte';
   import Preferences from './lib/app/Preferences.svelte';
+  import ConfirmDialog from './lib/ui/ConfirmDialog.svelte';
   import { copyText } from './lib/core/clipboard.ts';
   import { teamStatus } from './lib/core/ws.ts';
   import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable, listPanes, listSessions } from './lib/core/ws.ts';
@@ -775,8 +776,24 @@
     if (smClickTimer) { clearTimeout(smClickTimer); smClickTimer = null; }
     serverRenameStart(s);
   }
-  function serverRemoveRow(id) {
-    serverList = removeServer(localStorage, id);
+  /** Removing a saved server is DESTRUCTIVE (config + parked state gone for
+   *  good), so it goes through the shared ConfirmDialog like every other
+   *  discarding path (lead blocker #3; the × sits in a dense popover where a
+   *  stray tap is real). The row's IDENTITY is captured at click time — the
+   *  confirm never re-reads the menu or the current id, so a menu that
+   *  switched, refreshed or closed underneath cannot retarget the delete. */
+  let pendingServerRemove = $state(null);   // { id, name, address } | null
+  function serverRemoveAsk(s) {
+    pendingServerRemove = { id: s.id, name: s.name, address: s.address };
+  }
+  function serverRemoveConfirm() {
+    const victim = pendingServerRemove;
+    pendingServerRemove = null;
+    if (!victim) return;
+    // removeServer's own guards keep a stale confirm harmless: the current
+    // entry is refused, an id that no longer exists filters to a no-op.
+    serverList = removeServer(localStorage, victim.id);
+    serverCurId = currentServerId(localStorage);
   }
   function serverRenameStart(s) {
     serverRenaming = s.id;
@@ -1421,13 +1438,22 @@
           {#if s.id === serverCurId}
             <span class="sm-check" title={t('serverCurrent')}><Icon name="check" size={13} /></span>
           {:else}
-            <button class="sm-del" title={t('serverRemove')} onclick={() => serverRemoveRow(s.id)}><Icon name="x" size={12} /></button>
+            <button class="sm-del" title={t('serverRemove')} onclick={() => serverRemoveAsk(s)}><Icon name="x" size={12} /></button>
           {/if}
         </div>
       {/each}
       <button class="sm-add" onclick={serverAddRow}><Icon name="plus" size={13} /><span>{t('serverAdd')}</span></button>
     </div>
   {/if}
+
+  <!-- Forgetting a saved server (board #55): the shared confirmation, danger
+       tone — the entry, its token and its parked view state are gone for
+       good; the machine itself is untouched. -->
+  <ConfirmDialog open={!!pendingServerRemove}
+    title={pendingServerRemove ? t('serverRemoveTitle').replace('{name}', pendingServerRemove.name) : ''}
+    note={t('serverRemoveNote')}
+    confirmLabel={t('serverRemove')}
+    onconfirm={serverRemoveConfirm} oncancel={() => (pendingServerRemove = null)} />
 
   {#if reconnecting && page !== 'settings'}
     <div class="reconnect-bar">

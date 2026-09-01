@@ -370,3 +370,20 @@ test('doConnect never writes the live tmux_machine_id — activateConnected owns
   assert.match(boot, /recordServer\(localStorage[\s\S]*?setItem\('tmux_machine_id', mid\)/u,
     'boot stamps the live key AFTER recording — it is the current server');
 });
+
+test('removing a saved server goes through the shared ConfirmDialog (board #55)', () => {
+  // Lead blocker #3: the × called removeServer directly — a destructive path
+  // with no confirmation, in a dense popover. Now the × only CAPTURES the
+  // row's identity, the shared dialog asks, and the confirm consumes the
+  // captured id — never a re-read of the menu row or the current id, so a
+  // menu that switched or closed cannot retarget a delayed confirm.
+  assert.match(source, /onclick=\{\(\) => serverRemoveAsk\(s\)\}/u, 'the × only asks');
+  assert.ok(!/onclick=\{\(\) => serverRemoveRow/u.test(source), 'the direct-remove handler is retired');
+  assert.match(source, /pendingServerRemove = \{ id: s\.id, name: s\.name, address: s\.address \}/u,
+    'identity captured at click time');
+  const fn = source.match(/function serverRemoveConfirm\(\) \{[\s\S]*?\n  \}/u)?.[0] ?? '';
+  assert.match(fn, /const victim = pendingServerRemove/u, 'confirm consumes the CAPTURED identity');
+  assert.match(fn, /removeServer\(localStorage, victim\.id\)/u, 'and removes by that id alone');
+  assert.match(source, /<ConfirmDialog open=\{!!pendingServerRemove\}[\s\S]*?onconfirm=\{serverRemoveConfirm\} oncancel=\{\(\) => \(pendingServerRemove = null\)\}/u,
+    'the shared dialog, cancel drops the capture');
+});
