@@ -2056,11 +2056,6 @@
   .split-opt:hover { background: var(--surface2); color: var(--text2); }
   .split-opt.active { background: var(--accent-bg); color: var(--accent); }
   .split-menu-backdrop { position: fixed; inset: 0; z-index: 12; background: transparent; border: none; cursor: default; }
-  /* The vitals corner (board #56): informational chrome pinned to the real
-     bottom-left, safe-area aware. pointer-events: none is the OCCLUSION
-     CONTRACT (pinned by App.source.test.ts) — clicks pass through, so no
-     page action or rail button can ever hide behind it. The soft wash keeps
-     the micro line legible over whatever the page puts underneath. */
   /* The vitals footer (board #56): IN FLOW, so it owns its row — .page is
      the column's flex:1 and shrinks above it, which shortens the absolute
      page layers (inset:0 tracks .page's box) and every direct child alike.

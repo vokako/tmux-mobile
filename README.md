@@ -25,7 +25,9 @@ You're running [Kiro CLI](https://kiro.dev), Claude Code, or any coding agent in
 - **Sessions** — browse all tmux sessions/windows/panes, create or kill sessions, pull-to-refresh
 - **Team (multi-agent)** — spin up a roster of coding agents (Kiro / Claude Code / Codex / Grok) that collaborate in a shared group chat; watch them work live, tap any agent to preview its pane
 - **Settings** — terminal font/family/line-spacing controls, native desktop interface scaling, light/dark/auto theme, language switching (EN/中文), connection info, and diagnostics
-- **Multi-address reconnect** — server machine ID tracks alternate addresses, auto-failover on disconnect; socket, encryption, and queued-send state are isolated across reconnects
+- **Named servers** — save several server machines, switch from the desktop rail, and restore each server's own page/terminal state; each machine still keeps its LAN/Tailscale/WAN failover addresses together
+- **Message alerts** — an away running client can play a cue and, when permitted, use system Web Notifications; replay/history batches are deduplicated
+- **Server vitals** — connected desktop clients show low-frequency CPU, memory, and root-disk readings in a non-overlapping footer
 
 The server runs on your Mac, the UI runs in any browser or as a native app (macOS, Android).
 

@@ -130,6 +130,14 @@ completion).
 - Room state is cached per session (`roomCache`) — switching projects
   restores instantly, "empty" is a verdict reached only after the first
   `hub_log` answer.
+- New-message alerts (board #57) are for an **away running client**: a hidden
+  or unfocused document, or another visible app page. The persisted Hub bell
+  enables/mutes the placeholder cue and is the only gesture that requests Web
+  Notification permission. Initial/history/cache loads and poll replays never
+  alert; seen ids (or `from/ts/body`) dedupe, watched/muted batches never
+  backfill, and own/sys/ambient-status rows are filtered while agent replies
+  and `[tmm done]` remain news. Unsupported notification/audio paths fail soft;
+  this is not remote push after the app has closed.
 
 ## Composer
 - ONE capsule: recipient chip (`@name`, always prefixed on send), auto-grow
