@@ -396,15 +396,25 @@ test('the system-vitals corner mounts connected-desktop-only and can never occlu
   assert.match(source, /import \{[^}]*\bsystemStatus\b[^}]*\} from '\.\/lib\/core\/ws\.ts'/u,
     'the typed wrapper is the injected transport');
   assert.match(source, /load=\{systemStatus\}/u, 'load is INJECTED — the component never imports ws');
-  // Desktop + connected only: a phone never mounts it (its server is remote
-  // and its corners belong to the bottom bar), and a disconnected client
-  // must not poll a socket that is not there.
-  assert.match(source, /connected && !layout\.isTouchDevice[\s\S]{0,200}<SystemStatus/u,
-    'mount gate is connected desktop');
+  // Desktop + connected only, ONE flag for mount AND inset: a phone never
+  // mounts it, a disconnected client must not poll, and the reserved strip
+  // must never exist without its corner (or vice versa).
+  assert.match(source, /sysMounted = \$derived\(connected && !layout\.isTouchDevice\)/u,
+    'one flag: connected desktop');
+  assert.match(source, /\{#if sysMounted\}[\s\S]{0,400}<SystemStatus/u,
+    'mount gate is the flag');
+  assert.match(source, /class:vitals-inset=\{sysMounted\}/u,
+    'the page inset rides the SAME flag');
   assert.match(source, /<SystemStatus[^/]*visible=\{connected\}/u,
     'visible tracks the connection so a drop stops the timer');
-  // The no-occlusion contract: the corner is informational chrome — clicks
-  // pass THROUGH it, so it cannot cover the rail or any page action.
+  // The no-occlusion contract, v2 (builder-3's #56 review: pass-through
+  // clicks do not un-hide pixels): the corner RESERVES its strip — the page
+  // ends above it — and starts right of the 46px rail, so overlap is
+  // impossible by construction. pointer-events: none stays as the belt.
+  assert.match(source, /\.page\.vitals-inset \.page-layer \{ bottom: 2\dpx; \}/u,
+    'every page LAYER ends above the strip (layers are absolute — padding would not move them)');
+  assert.match(source, /\.sys-corner \{[^}]*left: calc\(46px/u,
+    'the corner clears the rail column');
   assert.match(source, /\.sys-corner \{[^}]*pointer-events: none/u,
     'pointer-events: none on the fixed corner');
 });

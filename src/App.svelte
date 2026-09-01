@@ -107,6 +107,10 @@
   const SPLIT_MIN_WIDTH = 900;
   let wideEnough = $state(typeof window !== 'undefined' && window.innerWidth >= SPLIT_MIN_WIDTH);
   let splitEligible = $derived(!layout.isTouchDevice && (layout.forceDesktop || wideEnough));
+  // The vitals corner's ONE flag (board #56): it gates the mount AND the
+  // .page bottom inset that reserves the corner's strip — tied together so
+  // there is never dead space without a corner, or a corner over content.
+  let sysMounted = $derived(connected && !layout.isTouchDevice);
   // Shared sidebar width (ui-unification.md): the shell owns the geometry,
   // pages consume var(--sidebar-w), SideHandle is the only other writer.
   $effect(() => {
@@ -1464,7 +1468,7 @@
     </div>
   {/if}
 
-  <div class="page {slideAnim}" class:page-terminal={page === 'terminal'}>
+  <div class="page {slideAnim}" class:page-terminal={page === 'terminal'} class:vitals-inset={sysMounted}>
     {#if page === 'settings'}
       <Settings {onConnected} />
     {/if}
@@ -1664,13 +1668,15 @@
     </nav>
   {/if}
 
-  <!-- Server system vitals (board #56): the true bottom-left corner, desktop
-       + connected ONLY — a phone's server is remote and its corners belong to
-       the bottom bar. `visible` tracks the connection so a drop stops the
-       poll; the wrapper takes NO pointer events, so it can never occlude the
-       rail or a page action (the tooltip is sacrificed for that guarantee —
-       the numbers ARE the reading). -->
-  {#if connected && !layout.isTouchDevice}
+  <!-- Server system vitals (board #56): the CONTENT's bottom-left corner,
+       desktop + connected ONLY. builder-3's acceptance measured the first cut
+       overlapping the rail's bottom buttons and the sidebar's last row —
+       pointer-events pass-through does not un-hide pixels — so the corner now
+       RESERVES its strip instead of floating over anything: `.page` takes a
+       matching bottom inset while the corner is mounted (the same flag), and
+       the corner itself starts right of the rail. Nothing can render under
+       it, on any page, at any scroll position. -->
+  {#if sysMounted}
     <div class="sys-corner">
       <SystemStatus load={systemStatus} visible={connected} />
     </div>
@@ -2054,15 +2060,21 @@
      CONTRACT (pinned by App.source.test.ts) — clicks pass through, so no
      page action or rail button can ever hide behind it. The soft wash keeps
      the micro line legible over whatever the page puts underneath. */
+  /* The reserved strip: while the corner is mounted every page LAYER ends
+     20px above the viewport bottom (the layers are position:absolute, so a
+     padding on .page would not move them), and the corner sits in space no
+     page content can reach — overlap impossible by construction, not by
+     transparency (builder-3's #56 review: the floating cut visually covered
+     the rail's Settings button and the sidebar's last row). */
+  .page.vitals-inset .page-layer { bottom: 20px; }
   .sys-corner {
     position: fixed;
-    left: calc(8px + var(--sal, 0px));
-    bottom: calc(6px + var(--sab, 0px));
+    left: calc(46px + 8px + var(--sal, 0px)); /* right of the 46px rail */
+    bottom: calc(2px + var(--sab, 0px));
+    height: 16px;
+    display: flex;
+    align-items: center;
     z-index: 11;
     pointer-events: none;
-    padding: 3px 8px;
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--surface) 78%, transparent);
-    backdrop-filter: blur(4px);
   }
 </style>
