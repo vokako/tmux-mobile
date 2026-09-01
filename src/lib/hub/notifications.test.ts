@@ -146,6 +146,19 @@ test('playCue: a REJECTED play rolls the window back — autoplay block must not
   assert.equal(ok, 1);
 });
 
+test('playCue: a DEFERRED old rejection cannot reopen the window a newer cue claimed', async () => {
+  const st = fresh();
+  let rejectA: (e: Error) => void = () => {};
+  const playA = () => new Promise<void>((_res, rej) => { rejectA = rej; });
+  assert.equal(playCue(1000, st, playA), true);           // A claims, hangs
+  const tB = 1000 + CUE_COOLDOWN_MS;
+  assert.equal(playCue(tB, st, () => Promise.resolve()), true); // B claims later, succeeds
+  rejectA(new Error('late autoplay block'));              // A's rejection lands AFTER B
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(st.lastCueAt, tB, "A's late catch must not roll back B's claim");
+  assert.equal(playCue(tB + 1, st, () => Promise.resolve()), false, 'the cooldown B claimed still holds');
+});
+
 // ─── Text ───────────────────────────────────────────────────────────────────
 
 test('notifyText: names only, deduped, last body excerpted', () => {
@@ -182,6 +195,14 @@ test('the permission request and the audio unlock ride the BELL, never the send 
   assert.match(hub, /setNotifyEnabled\(notifyOn\);\s*\n\s*if \(notifyOn\) \{ ensurePermission\(\); previewCue\(\); \}/u);
   const asks = hub.match(/ensurePermission\(\)/gu) ?? [];
   assert.equal(asks.length, 1);
+});
+
+test('the bell wears the ONE shared Icon (bell/bell-off), never a second inline SVG', () => {
+  assert.match(hub, /<Icon name=\{notifyOn \? 'bell' : 'bell-off'\}/u);
+  assert.ok(!/M6 8a6 6 0 0 1 12 0/u.test(hub), 'the bell path lives in ui/Icon.svelte only');
+  const icon = readFileSync(join(here, '..', 'ui', 'Icon.svelte'), 'utf8');
+  assert.match(icon, /name === 'bell'/u);
+  assert.match(icon, /name === 'bell-off'/u);
 });
 
 test('the placeholder cue asset exists where CUE_SRC points', () => {

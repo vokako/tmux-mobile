@@ -2153,19 +2153,14 @@
              permission and unlocks audio (previewing the cue doubles as both
              the unlock and "what will it sound like"). Muting persists. The
              send path never asks for anything (lead review). Same icon-only
-             .icon-btn dialect; the glyph is inline until ui/Icon.svelte is in
-             territory to host a 'bell'. -->
+             .icon-btn dialect, glyphs from the ONE shared Icon. -->
         <button class="icon-btn" class:on={notifyOn} title={notifyOn ? t('hubNotifyOn') : t('hubNotifyOff')} aria-label={notifyOn ? t('hubNotifyOn') : t('hubNotifyOff')} aria-pressed={notifyOn}
           onclick={() => {
             notifyOn = !notifyOn;
             setNotifyEnabled(notifyOn);
             if (notifyOn) { ensurePermission(); previewCue(); }
           }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
-            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
-            {#if !notifyOn}<line x1="2" y1="2" x2="22" y2="22" />{/if}
-          </svg>
+          <Icon name={notifyOn ? 'bell' : 'bell-off'} size={14} />
         </button>
         <!-- The task board: on the phone this jumps to the board PAGE (owner,
              2026-08-29: "board单独作为一个独立的功能的页面"); on desktop it is

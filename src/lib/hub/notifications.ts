@@ -126,16 +126,20 @@ const defaultPlay = (): Promise<void> => {
  * same-tick batches must not double-fire) but a REJECTED play rolls it back:
  * autoplay commonly blocks before the user's first gesture, and a failure
  * that still consumed the window would swallow the first REAL cue for
- * 3 seconds after the user unlocks (lead review, board #57). */
+ * 3 seconds after the user unlocks (lead review, board #57). The rollback is
+ * IDENTITY-GUARDED (lead follow-up): a rejection lands whenever the browser
+ * pleases, so an OLD attempt's late catch must not reopen the window a NEWER
+ * successful cue has claimed — it may only roll back the claim it made, i.e.
+ * while `st.lastCueAt` still equals its own `now`. */
 export function playCue(now = Date.now(), st: NotifyState = state, play: () => Promise<void> = defaultPlay): boolean {
   if (!cueDue(st.lastCueAt, now)) return false;
   const before = st.lastCueAt;
   st.lastCueAt = now;
   try {
-    play().catch(() => { st.lastCueAt = before; });
+    play().catch(() => { if (st.lastCueAt === now) st.lastCueAt = before; });
     return true;
   } catch {
-    st.lastCueAt = before;
+    if (st.lastCueAt === now) st.lastCueAt = before;
     return false;
   }
 }
