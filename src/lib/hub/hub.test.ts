@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { uploadImagePath, uploadFilePath, imageId, pastedFiles, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts } from './hub.ts';
+import { TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -1174,4 +1174,20 @@ test('promptParts strips the machine stamp and structures board deliveries', () 
   // An unstamped local prompt passes through whole.
   assert.deepEqual(promptParts('fix the tests'), { from: '', board: null, text: 'fix the tests' });
   assert.deepEqual(promptParts(''), { from: '', board: null, text: '' });
+});
+
+test('tail intent is a bottom GAP, and hidden scroll noise cannot flip it (board #38)', () => {
+  // The measure: distance from the bottom edge — never absolute scrollTop.
+  assert.equal(bottomGap({ scrollHeight: 1000, scrollTop: 700, clientHeight: 300 }), 0, 'parked at the tail');
+  assert.equal(bottomGap({ scrollHeight: 1000, scrollTop: 500, clientHeight: 300 }), 200, 'reading history');
+  assert.equal(bottomGap(null), 0, 'no element yet reads as the tail');
+
+  // Visible, the gap decides — the threshold boundary is exact.
+  assert.equal(tailAfterScroll(true, false, TAIL_GAP - 1), true, 'inside the margin regains the tail');
+  assert.equal(tailAfterScroll(true, true, TAIL_GAP), false, 'at the threshold the tail is lost');
+
+  // Hidden, the event is layout noise: it can neither TAKE the intent from a
+  // reader who left at the tail, nor GRANT it to one who left in history.
+  assert.equal(tailAfterScroll(false, true, 9999), true, 'hidden noise cannot pollute following');
+  assert.equal(tailAfterScroll(false, false, 0), false, 'hidden settling cannot fake a return to the tail');
 });

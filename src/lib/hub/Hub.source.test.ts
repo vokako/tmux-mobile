@@ -643,3 +643,30 @@ test('the composer scrollbar exists exactly while overflowing, and placeholders 
   assert.match(source, /<small>\{t\('hubToAllHint'\)\}<\/small>/u, 'the menu hint stays');
   assert.match(source, /<small>\{t\('hubToRoomHint'\)\}<\/small>/u, 'the menu hint stays');
 });
+
+test('leaving at the tail means returning to the tail — and ONLY then (board #38)', () => {
+  // Tail intent survives a page switch through three joints, each pinned:
+  // 1) every scroll event routes `following` through the ONE pure transition
+  //    (visible + bottom gap), so a hidden page's layout noise cannot pollute
+  //    it, and the rest of the handler stops off-screen;
+  assert.match(source, /following = tailAfterScroll\(visible, following, feedEl \? bottomGap\(feedEl\) : 0\);\n\s*if \(!visible\) return;/u,
+    'the scroll handler speaks the transition rule, then stops when hidden');
+  assert.match(source, /const atBottom = \(\) => !feedEl \|\| bottomGap\(feedEl\) < TAIL_GAP;/u,
+    'atBottom is the same gap measure — no second definition of the tail');
+  assert.ok(!/scrollHeight - feedEl\.scrollTop - feedEl\.clientHeight/u.test(source),
+    'no inline gap math survives outside the pure helper');
+  // 2) the physical jump is DEFERRED while hidden (data updates freely);
+  assert.match(source, /if \(!feedEl \|\| !visible\) return;\n\s*feedEl\.scrollTop = feedEl\.scrollHeight;/u,
+    'scrollFeed defers the physical scroll off-screen');
+  // 3) the visible-restore effect settles Svelte, then forces the tail — but
+  //    NEVER for a reader parked in history.
+  const restore = source.match(/let hubWasVisible = false;\n\s*\$effect\(\(\) => \{[\s\S]*?\}\);/u)?.[0] || '';
+  assert.match(restore, /if \(!visible\) \{ hubWasVisible = false; return; \}/u, 'hidden re-arms the restore');
+  assert.match(restore, /if \(hubWasVisible\) return;/u, 'restore fires on the false→true edge only');
+  assert.match(restore, /if \(!following\) return;/u, 'a history reader is never yanked to the bottom');
+  assert.match(restore, /settled\(\)\.then\(\(\) => scrollFeed\(true\)\);/u,
+    'settle first; scrollFeed(true) then rAFs, re-seeds the ask anchor and marks seen');
+  // Project switch keeps its own forced tail (untouched by this feature).
+  assert.match(source, /following = true;\n\s*if \(feed\.length\) scrollFeed\(true\);/u,
+    'entering a room still lands at its tail');
+});

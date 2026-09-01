@@ -1460,3 +1460,26 @@ export function readlineEdit(r: ReadlineReq): ReadlineEdit | null {
     default: return null;
   }
 }
+
+// ── Tail intent (board #38) ──────────────────────────────────────────────────
+/** A feed is "at the tail" within this bottom gap (px). The margin absorbs
+ * sub-pixel rounding and the last message's own padding. */
+export const TAIL_GAP = 40;
+
+/** Distance from the scrollport's bottom edge — the ONE measure of tail
+ * intent. Never the absolute scrollTop: content growth moves scrollTop's
+ * meaning, while the gap keeps meaning "how far from the newest message". */
+export function bottomGap(box: { scrollHeight: number; scrollTop: number; clientHeight: number } | null): number {
+  if (!box) return 0;
+  return box.scrollHeight - box.scrollTop - box.clientHeight;
+}
+
+/** The transition rule for `following` on a scroll event. A HIDDEN page's
+ * scroll events are layout noise (another tab moved the viewport var, content
+ * grew under a hidden feed): they can neither TAKE the tail intent away from a
+ * reader who left at the tail, nor GRANT it to one who left reading history.
+ * Visible, the gap decides. */
+export function tailAfterScroll(visible: boolean, wasFollowing: boolean, gap: number): boolean {
+  if (!visible) return wasFollowing;
+  return gap < TAIL_GAP;
+}

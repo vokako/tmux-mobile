@@ -87,6 +87,14 @@ completion).
   markdown + LaTeX render in bubbles.
 - Feed levels: chat-only / +tools / everything. Receipts and warnings are
   always visible.
+- Tail intent survives a page switch (board #38): "at the tail" is measured
+  as the BOTTOM GAP (`scrollHeight − scrollTop − clientHeight < TAIL_GAP`),
+  never absolute scrollTop; a hidden page's scroll/layout events cannot flip
+  `following` in either direction; messages arriving while hidden update the
+  data with the physical scroll deferred; on return the feed settles, then
+  forces the tail and re-seeds the ask anchor + seen marker — but ONLY for a
+  reader who left at the tail. One parked in history returns exactly where
+  they were. Entering a room still lands at its tail.
 - Room state is cached per session (`roomCache`) — switching projects
   restores instantly, "empty" is a verdict reached only after the first
   `hub_log` answer.

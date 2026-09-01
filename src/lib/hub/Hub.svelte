@@ -32,7 +32,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles } from './hub.ts';
+  import { TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles } from './hub.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
@@ -377,7 +377,9 @@
   function scrollFeed(force = false) {
     if (!force && !following) return;
     requestAnimationFrame(() => {
-      if (!feedEl) return;
+      // Hidden, the jump is DEFERRED, not lost: data may update freely and the
+      // visible-restore effect forces the tail when the page comes back.
+      if (!feedEl || !visible) return;
       feedEl.scrollTop = feedEl.scrollHeight;
       // Programmatic jumps have no continuous path to preserve. Seed from the
       // destination (latest passed message), and do not depend on a scroll event
@@ -400,7 +402,7 @@
     const newest = feed.reduce((max, m) => Math.max(max, m.ts ?? 0), 0);
     if (newest > hubPrefs.seen(selected)) hubPrefs.setSeen(selected, newest);
   }
-  const atBottom = () => !feedEl || feedEl.scrollHeight - feedEl.scrollTop - feedEl.clientHeight < 40;
+  const atBottom = () => !feedEl || bottomGap(feedEl) < TAIL_GAP;
   const unread = $derived(unreadSenders(feed, hubPrefs.seen(selected)));
 
   let following = $state(true);   // the feed is parked at the tail
@@ -450,7 +452,13 @@
   }
 
   function onFeedScroll() {
-    following = atBottom();
+    // Tail intent goes through the ONE transition rule: a hidden page's
+    // scroll events (layout noise from other tabs, content growing under a
+    // hidden feed) must not pollute `following` in either direction — and
+    // nothing below is worth doing off-screen either; the visible-restore
+    // effect re-parks the tail (board #38).
+    following = tailAfterScroll(visible, following, feedEl ? bottomGap(feedEl) : 0);
+    if (!visible) return;
     const top = feedEl?.scrollTop ?? 0;
     // Near the top: reach for the previous page. 120px of runway starts the
     // fetch before the reader actually hits the edge.
@@ -629,6 +637,21 @@
   $effect(() => {
     void blocks;   // a new message changes both the set and the geometry
     requestAnimationFrame(syncAsk);
+  });
+
+  // Coming back to the page lands where the reader LEFT it (board #38): at
+  // the tail when they were following — messages kept arriving while the page
+  // was hidden and the physical scroll was deferred — and exactly where they
+  // parked when they were reading history (a reader must never be yanked to
+  // the bottom). Settle Svelte first, then scrollFeed's own rAF forces the
+  // tail and re-seeds the ask anchor + seen marker.
+  let hubWasVisible = false;
+  $effect(() => {
+    if (!visible) { hubWasVisible = false; return; }
+    if (hubWasVisible) return;
+    hubWasVisible = true;
+    if (!following) return;
+    settled().then(() => scrollFeed(true));
   });
 
   // The keyboard shrinks the visible viewport (App sets --app-height and fires
