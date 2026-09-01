@@ -365,7 +365,15 @@ can get wrong to save three characters.
   that assignee through the same targeted delivery + receipt path, carrying
   issue id/title and a bounded excerpt. Unassigned, human-assigned, self-note,
   unmanaged or offline cases degrade to the persisted note — never an RPC
-  failure, shell injection, self-prompt, or duplicate delivery.
+  failure, shell injection, self-prompt, or duplicate delivery. On the Board
+  page a note bubble also wears Chat's ONE shared `.m-acts` overlay (board
+  #46): tap reveals Copy, raw body goes to the clipboard, text selection wins,
+  and the timestamp is the accessible trigger. The overlay is absolute and
+  transient (outside/Escape/context/Copied close). Its pure
+  `{open,copied,gen}` transitions guard both sides of the async boundary — the
+  attempt gen is captured before `writeText` awaits and the beat's gen is
+  captured before its timer — so deferred resolves and stale timeouts are
+  no-ops in a later note/issue.
   **The title is OPTIONAL** (board #31): `issue_save` refuses only a
   CONTENTLESS issue (create and patch alike — a patch may clear the title
   while a body remains, and the cleared title persists EMPTY, verbatim);

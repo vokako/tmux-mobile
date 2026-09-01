@@ -159,7 +159,14 @@ completion).
   scroll horizontally, hiding what came before) — one line at rest, Enter
   sends, Shift+Enter inserts a newline, an IME composition's Enter never
   sends, and a sent note shrinks the box back; the send button rides the
-  last line. The CREATE form submits from the keyboard too (board #36:
+  last line. Tapping a historical note reveals the same absolute `.m-acts`
+  action row Chat bubbles use, with one **Copy** verb that writes the note's
+  raw body; selection drags do not trigger it, the time is the accessible
+  action trigger, and outside/Escape/issue switch or the brief Copied beat
+  dismisses it without changing detail scroll height (board #46). Copy state
+  is generation-scoped before and after the async clipboard write, so an old
+  timeout or deferred resolve cannot affect another note or issue. The
+  CREATE form submits from the keyboard too (board #36:
   "我在 board 填写完 issue 描述后，可以 cmd+enter 直接提交确认"): the
   title's Enter creates, and the multi-line body creates on **Cmd+Enter /
   Ctrl+Enter** (both modifiers, cross-platform) — a bare or Shift Enter in
