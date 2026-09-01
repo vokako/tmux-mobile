@@ -74,13 +74,17 @@ test('the layout hierarchy: one compact title line, the body visibly bigger (boa
 });
 
 test('the sidebar orders by conversation, and rows are summaries (reopened #11)', () => {
-  // Same recipe as the Hub: hub_rooms feeds sortRows, newest talk first.
-  assert.match(source, /projects = sortRows\(\(r\.projects \?\? \[\]\)\.filter\([\s\S]*?archived\), talkMap\);/u,
+  // Same recipe as the Hub: hub_rooms feeds sortRows, newest talk first —
+  // into the FULL list; the shown rows are the derived filter (board #39).
+  assert.match(source, /allProjects = sortRows\(\(r\.projects \?\? \[\]\)\.filter\([\s\S]*?archived\), talkMap\);/u,
     'sortRows over the talk map, archived rows dropped');
   assert.match(source, /hubRooms\(\)\.catch/u, 'the talk map comes from hub_rooms, fail-soft');
-  const row = source.slice(source.indexOf('class="side-row"'), source.indexOf('</aside>'));
+  const row = source.slice(source.indexOf('class="side-row proj-row"'), source.indexOf('</aside>'));
   assert.match(row, /class="side-age"/u, 'rows carry the last-reply age');
-  assert.ok(!row.includes('side-win'), 'no agent chips — the Board row is a SUMMARY');
+  // The second line is COLUMN COUNTS in the shared chip dress — never the
+  // Chat row's agent chips (board #39 kept the summary rule: no roster here).
+  assert.ok(!row.includes('a.icon'), 'no agent chips — the Board row summarises the BOARD, not the roster');
+  assert.match(row, /boardStatusColor\(st\)/u, 'the chips speak the one board status language');
 });
 
 test('notes are a timeline: author + time header, content box below (reopened #11)', () => {
@@ -225,8 +229,9 @@ test('the create form: one-line growing title, assign, then a filling body (owne
 });
 
 test('the detail speaks board #15: project-named page, status slider, confirmed changes', () => {
-  // ① The page names the PROJECT, not itself.
-  assert.match(source, /<h1>\{projects\.find\(\(p\) => p\.project\.session === cur\)\?\.project\.name \?\? \(cur \|\| t\('board'\)\)\}<\/h1>/u,
+  // ① The page names the PROJECT, not itself — from the FULL list since
+  // board #39: an empty board is hidden from the sidebar but keeps its name.
+  assert.match(source, /<h1>\{boardTitle\(allProjects, cur\) \?\? \(cur \|\| t\('board'\)\)\}<\/h1>/u,
     'the title is the project name');
   // ② The status is a segmented SLIDER editing the draft: sweep (pointer
   // capture + move) or tap; nothing reaches the server until the ✓.
@@ -369,6 +374,38 @@ test('the create form submits from the keyboard: title Enter, body Cmd/Ctrl+Ente
   // create body is the scope; the docs mandate no uniformity): its save is
   // the diffed, guarded saveDraft button.
   assert.ok(!/d-body-edit" [^>]*onkeydown/su.test(source), 'the detail body editor binds no keydown');
+});
+
+test('the sidebar consumes ONE bulk counts read and reacts to local writes at once (board #39)', () => {
+  // The bulk read rides loadProjects' parallel batch — never a per-project
+  // boardList walk, which is the N+1 hub_board_counts exists to prevent.
+  assert.match(source, /boardCounts\(\)\.catch\(\(\) => null\)/u,
+    'boardCounts joins the Promise.all batch, fail-soft');
+  assert.equal([...source.matchAll(/boardList\(/g)].length, 1,
+    'exactly ONE boardList call site — the current board\'s own load(), no sidebar walk');
+  // The sidebar list is DERIVED through the pure filter: only boards with
+  // issues render (total>0), and a local counts change re-filters without
+  // waiting for any poll.
+  assert.match(source, /const projects = \$derived\(visibleBoards\(allProjects, countsMap\)\);/u,
+    'the shown rows are derived from the full list + counts');
+  // load() folds the fresh issues into the counts map — create-first appears
+  // and delete-last disappears NOW, not at the 20 s poll.
+  const load = source.slice(source.indexOf('async function load()'), source.indexOf('let agents ='));
+  assert.match(load, /countsMap = applyCounts\(countsMap, cur, issues\);/u,
+    'a successful boardList refreshes this session\'s counts immediately');
+  // The page-head names the CURRENT board from the FULL list: an empty board
+  // is hidden from the sidebar yet still shows its name, and its main area
+  // can create the first issue.
+  assert.match(source, /<h1>\{boardTitle\(allProjects, cur\) \?\? \(cur \|\| t\('board'\)\)\}<\/h1>/u,
+    'the h1 reads the unfiltered list with the old fallbacks');
+  // No session to follow → the first NON-EMPTY board, i.e. the first row the
+  // sidebar actually shows.
+  assert.match(source, /if \(!cur\) cur = visibleBoards\(allProjects, countsMap\)\[0\]\?\.project\.session \?\? '';/u,
+    'the default selection is the first visible board');
+  // Each row's second line is the four columns in FIXED order, zeros
+  // included, wearing the shared chip atoms + the one board status language.
+  assert.match(source, /\{#each STATUSES as st \(st\)\}[\s\S]*?side-win-dot" style:background=\{boardStatusColor\(st\)\}[\s\S]*?\{statusLabel\(st\)\}[\s\S]*?\{c\?\.\[st as keyof BoardCountRow\] \?\? 0\}/u,
+    'four chips, fixed vocabulary order, count present even at 0');
 });
 
 test('every destructive/discarding path confirms through the SHARED dialog (board #29)', () => {

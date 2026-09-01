@@ -175,6 +175,20 @@ completion).
 - The human writes/edits here; agents use `tmm board` (`take` = claim +
   doing; only the acceptor moves to done). Same rows, same vocabulary —
   the board is session-scoped like the room.
+- The sidebar lists only projects whose board HAS issues (board #39: "如果
+  该项目完全为空 则直接不显示该 project"), fed by ONE bulk `hub_board_counts`
+  read alongside `project_list`/`hub_rooms` — never a per-project
+  `hub_board_list` walk. Each row is the Chat sidebar's two-line shape (the
+  shared `.proj-row` skeleton: dot + name + last-reply age) with the four
+  column counts as the quiet second line — fixed todo/doing/review/done
+  order, zeros included, each chip coloured by the one board status
+  language. The CURRENT board's counts refresh from its own `hub_board_list`
+  the moment it answers, so deleting the last issue hides the project and
+  creating the first shows it at once — no poll wait. An empty CURRENT
+  board stays usable while hidden: the page-head still names it (the name
+  lookup runs over the full project list) and its main area creates the
+  first issue; with no session to follow, the first NON-EMPTY board is the
+  default selection.
 - Cards name the REPORTER (`by human` / `by lead`) and the assignee.
   Assigning from the detail view picks a managed agent and DELIVERS the
   assignment (`hub_post` @message typed into that agent's pane, with the

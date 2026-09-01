@@ -88,3 +88,67 @@ export function rebaseDraft(
   for (const f of FIELDS) next[f] = pick(f);
   return { draft: next, base: { ...server } };
 }
+
+// ── Sidebar counts (board #39: "在 board 侧边栏的 projects 列表中 列出当前
+// 每个项目中 4 个 board 分别的数量 如果该项目完全为空 则直接不显示该
+// project"). The server's hub_board_counts is the bulk read; these helpers
+// keep the CLIENT's copy speaking the same dialect — four statuses always
+// present, total explicit, an EMPTY board ABSENT from the map (absence =
+// hide) — so the sidebar can react to a local create/delete instantly
+// instead of waiting out the poll.
+
+import type { BoardCountRow } from '../core/ws.ts';
+
+export const BOARD_STATUSES = ['todo', 'doing', 'review', 'done'] as const;
+
+/** Counts a freshly-listed board the way the server shapes its rows: the
+ * four fixed statuses zero-filled, `total` explicit — and `null` for an
+ * empty list, mirroring the RPC's absence semantics (a key that exists with
+ * total 0 would make "hide empty boards" two different checks). A foreign
+ * status string counts toward total only, exactly like the server. */
+export function countsOf(issues: { status: string }[]): BoardCountRow | null {
+  if (!issues.length) return null;
+  const c: BoardCountRow = { todo: 0, doing: 0, review: 0, done: 0, total: 0 };
+  for (const i of issues) {
+    if ((BOARD_STATUSES as readonly string[]).includes(i.status)) c[i.status as (typeof BOARD_STATUSES)[number]]++;
+    c.total++;
+  }
+  return c;
+}
+
+/** Fold one board's fresh local read into the counts map — IMMUTABLY, so a
+ * $state consumer sees the change. A now-empty board's key is REMOVED (the
+ * sidebar hides it the moment the last issue dies, board #39: "删除最后一条
+ * 立即从 sidebar 消失"); other sessions' counts are untouched. */
+export function applyCounts(
+  map: Record<string, BoardCountRow>,
+  session: string,
+  issues: { status: string }[],
+): Record<string, BoardCountRow> {
+  const next = { ...map };
+  const c = countsOf(issues);
+  if (c) next[session] = c;
+  else delete next[session];
+  return next;
+}
+
+/** The sidebar's filter: only projects whose board HAS issues. Absence and
+ * total agree by construction (countsOf/the server both refuse zero rows),
+ * but the check is total>0 so a defensive zero row could never render. */
+export function visibleBoards<T extends { project: { session: string } }>(
+  rows: T[],
+  counts: Record<string, BoardCountRow>,
+): T[] {
+  return rows.filter((r) => (counts[r.project.session]?.total ?? 0) > 0);
+}
+
+/** The page-head's name lookup runs over the FULL project list, never the
+ * filtered one: the current board may be empty — hidden from the sidebar —
+ * yet the head must still name it (board #39) so the first issue can be
+ * created somewhere that visibly IS the project. */
+export function boardTitle(
+  rows: { project: { session: string; name: string } }[],
+  session: string,
+): string | null {
+  return rows.find((r) => r.project.session === session)?.project.name ?? null;
+}

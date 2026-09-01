@@ -130,3 +130,72 @@ test('issueRef: one fallback names every titleless issue (board #31)', () => {
   assert.equal(issueRef({ id: 7, title: '', body: '   ' }), '#7');
   assert.equal(issueRef(null), '#0');
 });
+
+// ── Sidebar counts (board #39) ──────────────────────────────────────────────
+
+test('countsOf speaks the server dialect: zero-filled vocabulary, explicit total, null for empty (board #39)', async () => {
+  const { countsOf, BOARD_STATUSES } = await import('./board.ts');
+  // One todo, two done: every OTHER status is PRESENT as 0 — the client
+  // never guesses the vocabulary — and total is a field, not a sum.
+  const c = countsOf([{ status: 'todo' }, { status: 'done' }, { status: 'done' }]);
+  assert.deepEqual(c, { todo: 1, doing: 0, review: 0, done: 2, total: 3 });
+  for (const s of BOARD_STATUSES) assert.ok(c && typeof c[s] === 'number', `${s} always present`);
+  // EMPTY is null, never an all-zeros row — absence is the hide signal,
+  // mirroring hub_board_counts (a zero row would make emptiness two checks).
+  assert.equal(countsOf([]), null);
+  // A foreign status counts toward total only, exactly like the server.
+  assert.deepEqual(countsOf([{ status: 'weird' }]), { todo: 0, doing: 0, review: 0, done: 0, total: 1 });
+});
+
+test('applyCounts makes create/delete IMMEDIATE: first issue appears, last issue removes the key (board #39)', async () => {
+  const { applyCounts } = await import('./board.ts');
+  const before = { other: { todo: 1, doing: 0, review: 0, done: 0, total: 1 } };
+  // Creating the FIRST issue: the session's key appears at once — the
+  // sidebar must not wait out the 20 s poll.
+  const created = applyCounts(before, 'mine', [{ status: 'todo' }]);
+  assert.deepEqual(created['mine'], { todo: 1, doing: 0, review: 0, done: 0, total: 1 });
+  assert.deepEqual(created['other'], before['other'], 'other boards untouched');
+  // Deleting the LAST issue: the key is REMOVED (absence = hide), never
+  // left as zeros.
+  const gone = applyCounts(created, 'mine', []);
+  assert.ok(!('mine' in gone), 'empty board leaves the map');
+  assert.ok('other' in gone, 'other boards survive');
+  // Immutable: $state consumers see a NEW map, the old one is unchanged.
+  assert.ok(!('mine' in before), 'input map never mutated');
+  assert.notEqual(created, before);
+});
+
+test('visibleBoards hides empty boards and keeps the given order (board #39)', async () => {
+  const { visibleBoards } = await import('./board.ts');
+  const rows = [
+    { project: { session: 'a', name: 'A' } },
+    { project: { session: 'b', name: 'B' } },
+    { project: { session: 'c', name: 'C' } },
+  ];
+  const counts = {
+    a: { todo: 0, doing: 0, review: 0, done: 1, total: 1 },
+    c: { todo: 2, doing: 0, review: 0, done: 0, total: 2 },
+  };
+  // b has NO key (empty board) → hidden; order of the rest is the caller's
+  // (sortRows already ordered by conversation).
+  assert.deepEqual(visibleBoards(rows, counts).map((r) => r.project.session), ['a', 'c']);
+  // A defensive zero row hides too: the check is total>0, not key-exists.
+  assert.deepEqual(visibleBoards(rows, { b: { todo: 0, doing: 0, review: 0, done: 0, total: 0 } }), []);
+  assert.deepEqual(visibleBoards([], counts), []);
+});
+
+test('boardTitle answers from the FULL list — a hidden empty board still has its name (board #39)', async () => {
+  const { boardTitle } = await import('./board.ts');
+  const all = [
+    { project: { session: 'shown', name: 'Shown' } },
+    { project: { session: 'empty', name: 'Empty but named' } },
+  ];
+  // The current board is empty and filtered OUT of the sidebar, yet the
+  // page-head names it — that is where the first issue gets created.
+  assert.equal(boardTitle(all, 'empty'), 'Empty but named');
+  assert.equal(boardTitle(all, 'shown'), 'Shown');
+  // Unknown session → null, and the component falls back (session string,
+  // then the generic page name) exactly like before.
+  assert.equal(boardTitle(all, 'gone'), null);
+  assert.equal(boardTitle([], 'x'), null);
+});

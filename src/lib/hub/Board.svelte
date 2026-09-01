@@ -6,16 +6,16 @@
      with the CLI (`projects::BOARD_STATUSES`), so a free-text status here
      would fork the language. Lives in the Hub drawer as a partition, like the
      terminal and Files. */
-  import { boardList, boardGet, boardSave, boardNote, boardDelete, projectList, hubAgents, hubPost, hubRooms, type BoardIssue, type HubAgent } from '../core/ws.ts';
+  import { boardList, boardGet, boardSave, boardNote, boardDelete, boardCounts, projectList, hubAgents, hubPost, hubRooms, type BoardIssue, type BoardCountRow, type HubAgent } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { agoShort } from './hub.ts';
+  import { agoShort, boardStatusColor } from './hub.ts';
   import type { ProjectRow } from '../projects/projects.ts';
   import { t } from '../core/i18n.svelte.ts';
   import Icon from '../ui/Icon.svelte';
   import Select from '../ui/Select.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
-  import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef } from './board.ts';
+  import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, countsOf, applyCounts, visibleBoards, boardTitle } from './board.ts';
   import { scrollFade } from '../core/scrollFade.ts';
 
   let { session = '', visible = true, onGoBack = null, issueRequest = null, embedded = false, createRequest = null }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null; issueRequest?: { session: string; id: number; n: number } | null; embedded?: boolean; createRequest?: { n: number } | null } = $props();
@@ -25,7 +25,6 @@
   // "board是不是也有一个侧边栏，我可以选择不同的项目"). The prop is the
   // FOLLOW default — the last-touched session, same as Files — and a pick
   // here overrides it until the prop moves again.
-  let projects = $state<ProjectRow[]>([]);
   let cur = $state('');
   let picked = $state(false);      // a manual pick overrides the session follow
   // The Board sheet's own condition (≤760px — the old media gate, expressed
@@ -75,18 +74,36 @@
   let talkMap = $state<Record<string, number>>({});
   const rowTalk = (r: { project: { room?: string; session: string } }) =>
     talkMap[r.project.room || `proj:${r.project.session}`] ?? 0;
+  // The FULL non-archived list vs what the sidebar shows (board #39: "如果该
+  // 项目完全为空 则直接不显示该 project"): the rows are filtered by the bulk
+  // counts — total>0 — but allProjects stays whole, because the CURRENT board
+  // may be empty and hidden while its page-head still names it and its main
+  // area still creates the first issue. DERIVED, so a local counts update
+  // (create/delete below) re-filters without waiting for any poll.
+  let allProjects = $state<ProjectRow[]>([]);
+  let countsMap = $state<Record<string, BoardCountRow>>({});
+  const projects = $derived(visibleBoards(allProjects, countsMap));
   async function loadProjects() {
     try {
       // The SAME order as the Hub/Chat sidebar (reopened #11): newest
       // conversation first — one hub_rooms read feeds sortRows, exactly the
-      // recipe the Hub uses; the Board rows just skip the agent chips.
-      const [r, rooms] = await Promise.all([
+      // recipe the Hub uses. boardCounts is the third bulk read (board #39):
+      // ONE grouped RPC for every project's four column counts — a
+      // per-project boardList walk here is the N+1 the server call exists
+      // to prevent.
+      const [r, rooms, bc] = await Promise.all([
         projectList(),
         hubRooms().catch(() => ({ rooms: {} })),
+        boardCounts().catch(() => null),
       ]);
       talkMap = rooms.rooms ?? {};
-      projects = sortRows((r.projects ?? []).filter((row) => !row.project.archived), talkMap);
-      if (!cur && projects.length) cur = projects[0]?.project.session ?? '';
+      allProjects = sortRows((r.projects ?? []).filter((row) => !row.project.archived), talkMap);
+      // A failed counts read keeps the last map — "could not ask" is not
+      // "every board is empty" (the sidebar would blank otherwise).
+      if (bc) countsMap = bc.counts ?? {};
+      // No session to follow: land on the first NON-EMPTY board — the ones
+      // the sidebar actually shows (board #39).
+      if (!cur) cur = visibleBoards(allProjects, countsMap)[0]?.project.session ?? '';
     } catch { /* keep the last list — "could not ask" is not "there is nobody" */ }
   }
   $effect(() => {
@@ -159,6 +176,13 @@
       issues = r.issues;
       ready = true;
       err = '';
+      // The fresh list IS this board's counts: fold them into the bulk map
+      // at once (board #39: "删除最后一条立即从 sidebar 消失，创建第一条立即
+      // 出现") — load() runs after every create/delete/save, so the sidebar
+      // reacts NOW instead of waiting out the 20 s projects poll. applyCounts
+      // removes the key when the list is empty, the same absence the server
+      // speaks.
+      countsMap = applyCounts(countsMap, cur, issues);
     } catch (e) {
       // A failed poll keeps the last board — "could not ask" ≠ "empty".
       err = String((e as Error)?.message ?? e);
@@ -382,13 +406,34 @@
     <SideHandle />
     <div class="side-scroll subtle-scroll" use:scrollFade>
       <div class="side-h">{t('hubProjects')}</div>
-      <!-- Project SUMMARY rows only — name and last-reply age, no agent chips
-           (reopened #11: "只需隐去我们正在工作的 Agent 即可"). -->
+      <!-- The Chat sidebar's two-line row, atom for atom (board #39: "board
+           侧边栏的样式也要和 chat terminal 的侧边栏对齐"): dot + name + age up
+           top from the SHARED .proj-row/.p-* atoms in app.css, and the quiet
+           second line wears the same .side-win chips the Terminal's windows
+           and Chat's agents wear — here each chip is a COLUMN: its status
+           color (boardStatusColor, the one board status language) and count,
+           all four in fixed order, zeros included, so every row reads the
+           same shape. Only boards WITH issues are listed (visibleBoards —
+           the empty ones are hidden, never zero-rows). -->
       {#each projects as p (p.project.session)}
-        <button class="side-row" class:open={cur === p.project.session} onclick={() => pick(p.project.session)}>
-          <span class="r-name">{p.project.name}</span>
-          {#if !p.live}<span class="r-dim">○</span>{/if}
-          {#if rowTalk(p)}<span class="side-age">{agoShort(rowTalk(p), Date.now())}</span>{/if}
+        {@const c = countsMap[p.project.session]}
+        <button class="side-row proj-row" class:open={cur === p.project.session} onclick={() => pick(p.project.session)}>
+          <span class="dot" class:off={!p.live}></span>
+          <span class="p-main">
+            <span class="p-top">
+              <span class="p-name">{p.project.name}</span>
+              {#if rowTalk(p)}<span class="side-age">{agoShort(rowTalk(p), Date.now())}</span>{/if}
+            </span>
+            <span class="side-wins">
+              {#each STATUSES as st (st)}
+                <span class="side-win">
+                  <span class="side-win-dot" style:background={boardStatusColor(st)}></span>
+                  <span class="side-win-name">{statusLabel(st)}</span>
+                  <span class="b-count">{c?.[st as keyof BoardCountRow] ?? 0}</span>
+                </span>
+              {/each}
+            </span>
+          </span>
         </button>
       {/each}
     </div>
@@ -418,7 +463,7 @@
     </button>
     <!-- The page names the PROJECT, not itself (board #15): the tab already
          says "Board", so the title says WHOSE board this is. -->
-    <h1>{projects.find((p) => p.project.session === cur)?.project.name ?? (cur || t('board'))}</h1>
+    <h1>{boardTitle(allProjects, cur) ?? (cur || t('board'))}</h1>
     <span class="spacer"></span>
     {#if !sel && !creating}
       <!-- New issue lives in the page head's top-right (reopened #11:
@@ -615,9 +660,13 @@
      screen, a picked project takes it (the back gesture peels it off). */
   .board-root { height: 100%; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 0; background: var(--bg); }
   .sidebar { position: relative; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
-  .side-scroll { flex: 1; overflow-y: auto; min-height: 0; }
-  .r-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .r-dim { color: var(--text3); font-size: var(--fs-micro); }
+  /* The same 8px scroll inset the Chat sidebar wears — the row/header INSET
+     is .side-h/.side-row's own 10px in app.css, but the container padding
+     was Board's silent 0 and the whole list sat 8px left of Chat's (board
+     #39: "我看 projects 这些写的位置都不一样"). */
+  .side-scroll { flex: 1; overflow-y: auto; min-height: 0; padding: 8px; }
+  /* The count on a column chip: tabular so 9→10 does not wiggle the row. */
+  .b-count { font-variant-numeric: tabular-nums; }
   /* Embedded in the Hub's right drawer: one column, the drawer names the
      project — no sidebar track, no hamburger (board #13 follow-up). */
   .board-root.embedded { grid-template-columns: minmax(0, 1fr); }

@@ -71,7 +71,7 @@ test('the sidebar project-row atoms live in app.css, not in a component', async 
   // same drift that split the two headers, so the same guard: a component may
   // POSITION the shared containers (.side-wins indent) but never restyle the
   // atoms themselves.
-  const FILES = ['lib/hub/Hub.svelte', 'lib/projects/Projects.svelte'];
+  const FILES = ['lib/hub/Hub.svelte', 'lib/projects/Projects.svelte', 'lib/hub/Board.svelte'];
   for (const file of FILES) {
     const raw = await readFile(new URL(file, SRC), 'utf8');
     const style = /<style>([\s\S]*)<\/style>/.exec(raw)?.[1] ?? '';
@@ -86,4 +86,38 @@ test('the sidebar project-row atoms live in app.css, not in a component', async 
   const css = await readFile(new URL('app.css', SRC), 'utf8');
   assert.match(css, /\.side-win\s*\{/u, 'the chip dialect is defined once, in app.css');
   assert.match(css, /\.side-age\s*\{/u, 'the age dialect is defined once, in app.css');
+});
+
+test('the two-line project ROW is one shared skeleton — Chat and Board wear it, app.css owns it (board #39)', async () => {
+  // The row structure (.proj-row + .dot/.p-main/.p-top/.p-name) lived scoped
+  // in Hub.svelte while Board grew its own one-line variant — which is how
+  // the two sidebars stopped matching ("board 侧边栏的样式也要和 chat
+  // terminal 的侧边栏对齐，我看 projects 这些写的位置都不一样"). The skeleton
+  // was lifted to app.css; a scoped re-declaration outranks it silently
+  // (0,2,0 vs the lifted rule's specificity), so the guard is the same as
+  // the atoms': components may USE the classes, never restyle them.
+  const ROW_ATOMS = /\.p-name(?![\w-])|\.p-main(?![\w-])|\.p-top(?![\w-])|\.proj-row(?![\w-])/;
+  for (const file of ['lib/hub/Hub.svelte', 'lib/hub/Board.svelte']) {
+    const raw = await readFile(new URL(file, SRC), 'utf8');
+    const style = /<style>([\s\S]*)<\/style>/.exec(raw)?.[1] ?? '';
+    const css = style.replace(/\/\*[\s\S]*?\*\//g, '');
+    for (const [, sel] of css.matchAll(/([^{}]+)\{[^}]*\}/g)) {
+      assert.ok(
+        !ROW_ATOMS.test(sel!),
+        `${file}: \`${sel!.trim()}\` re-declares the shared project-row skeleton — it lives in app.css since board #39`,
+      );
+    }
+    // And both sidebars actually WEAR the shared skeleton in markup.
+    const markup = raw.replace(/<style>[\s\S]*<\/style>/, '');
+    assert.match(markup, /class="side-row proj-row"/u, `${file} renders the shared row`);
+    assert.match(markup, /class="p-name"/u, `${file} names through the shared atom`);
+  }
+  const css = await readFile(new URL('app.css', SRC), 'utf8');
+  for (const atom of ['\\.proj-row\\s*\\{', '\\.proj-row \\.dot\\s*\\{', '\\.p-name\\s*\\{', '\\.p-main\\s*\\{', '\\.p-top\\s*\\{']) {
+    assert.match(css, new RegExp(atom, 'u'), `app.css defines the skeleton atom ${atom}`);
+  }
+  // The dot is deliberately SCOPED to .proj-row in app.css: Sessions and the
+  // Terminal sidebar have their own scoped .dot species, and a bare global
+  // `.dot` would leak into them.
+  assert.ok(!/(^|\n)\.dot\s*\{/.test(css), 'no bare global .dot — it must stay qualified to .proj-row');
 });

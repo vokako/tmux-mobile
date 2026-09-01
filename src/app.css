@@ -426,6 +426,21 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 /* Chat-only garnish: the agent's state, one dot in the app's status language. */
 .side-win .side-win-dot { width: 5px; height: 5px; border-radius: 50%; flex: none; }
 
+/* ── The TWO-LINE project row itself, shared by the Chat and Board sidebars
+   (board #39: "board 侧边栏的样式也要和 chat terminal 的侧边栏对齐，我看
+   projects 这些写的位置都不一样"): dot + name/age on the first line, the
+   quiet .side-wins chips on the second. These lived scoped in Hub.svelte and
+   Board grew its own one-line variant — exactly the drift the atoms above
+   were lifted to prevent, so the row's skeleton lives HERE now too. The dot
+   is scoped to .proj-row (a bare global `.dot` would leak into Sessions'
+   and the Terminal sidebar's own scoped dots). */
+.proj-row { align-items: flex-start; }
+.proj-row .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--status-ok); flex: none; margin-top: 6px; }
+.proj-row .dot.off { background: var(--text3); }
+.p-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; font-family: var(--font-display); }
+.p-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.p-top { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+
 /* ── The RUNNING cue: ONE treatment for "a turn is open", app-wide ────────
    The status language says accent = in motion, grey = at rest, and the colour
    alone was carrying that at 5–7px. Worse, the motion it was paired with

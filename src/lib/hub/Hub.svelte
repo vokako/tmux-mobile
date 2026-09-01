@@ -3007,8 +3007,9 @@
     padding: 2px 6px; box-sizing: border-box;
   }
   .h1-edit:focus { outline: none; }
-  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--status-ok); flex: none; }
-  .dot.off { background: var(--text3); }
+  /* The two-line project row (.proj-row/.dot/.p-*) is the SHARED skeleton in
+     app.css since board #39 — Board wears it too, so a scoped copy here would
+     be the silent-override drift the sidebar source test forbids. */
 
   .sidebar { position: relative; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
   /* Phone: the project list slides over the conversation instead of taking a
@@ -3018,19 +3019,6 @@
      row height is Hub's own. */
   .sidebar.sheet .side-row { min-height: 44px; }
   .side-scroll { flex: 1; overflow-y: auto; padding: 8px; }
-  .p-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; font-family: var(--font-display); }
-  /* ── Sidebar row summary. The LOOK is the Terminal sidebar's, atom for atom
-     ("应该和terminal侧边栏一样 … 这两个可以共用", owner 2026-08-24): the age
-     and the agent chips wear the shared .side-age/.side-win classes from
-     app.css — same quiet mono text the Terminal sidebar's window chips wear,
-     with one chat-only garnish, the state dot. Only the two-line structure
-     is local. */
-  .p-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-  .p-top { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
-  /* Two-line rows: the dot marks the PROJECT, so it rides the name's line
-     instead of centering across the chips below. */
-  .proj-row { align-items: flex-start; }
-  .proj-row .dot { margin-top: 6px; }
   /* The recycle bin's rows: quieter than a live project (they are parked, not
      open-able), with the two verbs inline — restore free, purge confirmed. */
   .trash-row { cursor: default; color: var(--text3); }
