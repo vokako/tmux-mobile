@@ -120,11 +120,19 @@
       if (popDir()) return true;
       // Own path exhausted: a TAB visit CLIMBS to the parent instead of
       // leaving the page (board #47: "应该返回上级目录 不是去terminal") —
-      // via loadDir, never navTo, or the climb would push history for the
-      // next back to bounce back down. At / there is nothing above, so it
+      // via loadDir, never navTo, or the climb would push DIR history for the
+      // next back to bounce back down. This climb itself has no forward
+      // navigation entry to consume (unlike popDir), so replenish the APP
+      // history entry that this pop just spent; otherwise a deep path stalls
+      // once the older entries run out. At / there is nothing above, so it
       // falls through (App re-pushes). A chat-jumped visit stands aside:
       // its floor is the conversation, App's return slot below.
-      if (!jumped && cwd && cwd !== '/') { navAnim('back'); loadDir(cwd.replace(/\/[^/]+\/?$/, '') || '/'); return true; }
+      if (!jumped && cwd && cwd !== '/') {
+        navAnim('back');
+        navPush();
+        loadDir(cwd.replace(/\/[^/]+\/?$/, '') || '/');
+        return true;
+      }
       return false;
     });
   });

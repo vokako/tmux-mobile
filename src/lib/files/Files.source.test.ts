@@ -85,9 +85,11 @@ test('an OS drag onto the listing uploads into the CURRENT directory (board #22)
 test('below its own path, a tab visit climbs to the parent — never the terminal (board #47)', () => {
   // popDir retraces the user's OWN steps (board #17); when that stack is
   // exhausted a TAB visit climbs parent directories via loadDir — NEVER
-  // navTo, which would push the child back onto the history for the next
-  // back to bounce down into — and only a chat-jumped visit falls through
-  // to App's return slot (the conversation).
-  assert.match(source, /if \(popDir\(\)\) return true;[\s\S]{0,700}?if \(!jumped && cwd && cwd !== '\/'\) \{ navAnim\('back'\); loadDir\(cwd\.replace\(\/\\\/\[\^\/\]\+\\\/\?\$\/, ''\) \|\| '\/'\); return true; \}/u,
-    'the climb sits under the user-path pop, gated on the return slot, and loads without pushing');
+  // navTo, which would push the child back onto DIR history for the next
+  // back to bounce down. The synthetic climb has no forward browser entry,
+  // so it must replenish the APP entry consumed by this pop; otherwise a
+  // deep path stalls after the pre-existing entries run out. Only a
+  // chat-jumped visit falls through to App's return slot (the conversation).
+  assert.match(source, /if \(popDir\(\)\) return true;[\s\S]{0,900}?if \(!jumped && cwd && cwd !== '\/'\) \{\s*navAnim\('back'\);\s*navPush\(\);\s*loadDir\(cwd\.replace\(\/\\\/\[\^\/\]\+\\\/\?\$\/, ''\) \|\| '\/'\);\s*return true;\s*\}/u,
+    'the climb sits under the user-path pop, replenishes app history, and loads without pushing dir history');
 });
