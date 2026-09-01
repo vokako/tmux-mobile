@@ -413,19 +413,34 @@ test('the sidebar consumes ONE bulk counts read and reacts to local writes at on
     'four chips, fixed vocabulary order, count present even at 0');
 });
 
-test('the four count chips sit in a fixed 2×2 grid — never a ragged 3+1 wrap (board #39, owner)', () => {
-  // Owner (2026-09-01): "几个条目给我排整齐吧，比如 4x 1 2x2 等，不要 3 1
-  // 这样的布局，列之间左侧点点要对齐" — the shared .side-wins is flex-WRAP
-  // (right for Chat's variable-count agent chips), so at sidebar widths the
-  // four fixed chips broke 3+1 with a ragged orphan. The Board row wears the
-  // .grid modifier: TWO equal grid columns — a rectangle at every width
-  // (2×2), left dots aligned per column by construction. auto-fit would be
-  // wrong here: at a width that fits three it recreates exactly the 3+1 the
-  // owner rejected.
-  assert.match(source, /<span class="side-wins grid">/u,
-    'the Board row wears the grid modifier');
+test('the four count chips adapt 4×1 / 2×2 / 1×4 — never a ragged 3+1 (board #39, owner)', () => {
+  // Owner (2026-09-01), twice: "不要 3 1 这样的布局，列之间左侧点点要对齐",
+  // then "如果一行能 放下放一行也行，甚至两行放不下，就放一列，动态适配".
+  // The columns are EQUAL (1fr), so fitting is exact arithmetic on the
+  // WIDEST chip — chipCols (pure, tested in board.test.ts) maps every width
+  // into {4, 2, 1}. The measurement comes from a hidden GHOST row (the
+  // composer's mirror-div pattern): same structure as a real row, height 0,
+  // nowrap chips at natural width, carrying the sidebar's widest count so
+  // digits are priced in.
+  assert.match(source, /<div class="side-row proj-row mirror" aria-hidden="true">/u,
+    'the ghost row measures, and assistive tech never hears it');
+  assert.match(source, /bind:clientWidth=\{winsW\}/u, 'the ghost reports the row width');
+  assert.match(source, /bind:clientWidth=\{chipWs\[i\]\}/u, 'each ghost chip reports its natural width');
+  assert.match(source, /chipCols\(winsW, Math\.max\(\.\.\.chipWs\), CHIP_GAP_X\)/u,
+    'the column count is the pure function of the measurements');
+  assert.match(source, /<span class="side-wins grid" style:grid-template-columns=\{`repeat\(\$\{cols\}, minmax\(0, 1fr\)\)`\}>/u,
+    'every real row wears the measured column count');
+  // The shared base rule stays: 2×2 is the pre-measure fallback every width
+  // can wear without a 3+1 flash.
   assert.match(appCss, /\.side-wins\.grid \{ display: grid; grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}/u,
-    'the modifier is the shared sidebar skeleton in app.css: two equal columns, deterministic 2×2');
+    'the app.css base: two equal columns until the mirror reports');
+  // The ghost's own clothes are load-bearing: without them it renders as a
+  // VISIBLE empty row and its chips wrap — which both shows a duplicate and
+  // measures the wrapped (wrong) widths.
+  assert.match(appCss, /\.proj-row\.mirror \{ height: 0; padding-top: 0; padding-bottom: 0; overflow: hidden; visibility: hidden; pointer-events: none; \}/u,
+    'the ghost is zero-height, invisible and inert');
+  assert.match(appCss, /\.proj-row\.mirror \.side-wins \{ flex-wrap: nowrap; \}[\s\S]{0,10}\.proj-row\.mirror \.side-win \{ flex: none; \}/u,
+    'ghost chips sit nowrap at natural width — that IS the measurement');
 });
 
 test("the sidebar count chips wear the owner's four categorical colours — locally, never in the language (board #39, owner)", () => {

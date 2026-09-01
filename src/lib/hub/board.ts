@@ -206,3 +206,18 @@ export function assignNotes(
   const tail = cut || more > 0 ? `\n…${more > 0 ? ` +${more} more` : ''} — \`tmm board show ${id}\`` : '';
   return `\n\nNotes (${ordered.length}):\n${lines.join('\n')}${tail}`;
 }
+
+/** How many EQUAL grid columns the four sidebar count chips get (board #39,
+ * owner 2026-09-01: "如果一行能 放下放一行也行，甚至两行放不下，就放一列，动
+ * 态适配" — layered on the standing 不要 3+1 rule). The columns are 1fr, so
+ * every column must hold the WIDEST chip: n fits iff n·chip + (n−1)·gap ≤ w.
+ * The domain is {4, 2, 1} by construction — three across is a ragged 3+1 the
+ * moment there is a fourth chip, so it is never offered. Unmeasured inputs
+ * (first paint, before the mirror row reports) answer 2: the rectangle is
+ * the one layout every width wears without a flash. */
+export function chipCols(w: number, chip: number, gap: number): 1 | 2 | 4 {
+  if (w <= 0 || chip <= 0) return 2;
+  if (4 * chip + 3 * gap <= w) return 4;
+  if (2 * chip + gap <= w) return 2;
+  return 1;
+}

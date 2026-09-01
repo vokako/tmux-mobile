@@ -418,13 +418,24 @@ button:disabled {
 .side-age { margin-left: auto; flex: none; font-size: var(--fs-meta); color: var(--text3); font-variant-numeric: tabular-nums; }
 .side-wins { display: flex; flex-wrap: wrap; gap: 2px 10px; min-width: 0; }
 /* .grid: the Board sidebar's four count chips are a FIXED set, and flex-wrap
-   broke them 3+1 with a ragged orphan at sidebar widths (owner, 2026-09-01:
-   "几个条目给我排整齐吧，比如 4x 1 2x2 等，不要 3 1 这样的布局，列之间左侧
-   点点要对齐"). Two equal grid columns make a rectangle at every width (2×2)
-   and align the left dots per column by construction — auto-fit would
-   recreate exactly the 3+1 at a width that fits three. Chat's agent chips
-   keep the bare flex-wrap: their count varies, so a grid would pad ghosts. */
+   broke them 3+1 with a ragged orphan (owner, 2026-09-01: "不要 3 1 这样的布
+   局，列之间左侧点点要对齐"). Equal grid columns align the left dots per
+   column by construction. Two columns here is the BASE — the pre-measure
+   fallback every width can wear — and Board.svelte's ghost-row measurement
+   overrides the count inline (4×1 / 2×2 / 1×4 via chipCols, same owner:
+   "动态适配"; three across is never offered — with a fourth chip it IS the
+   3+1). Chat's agent chips keep the bare flex-wrap: their count varies, so
+   a grid would pad ghosts. */
 .side-wins.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* .mirror: the measurement ghost behind that override (Board.svelte renders
+   one) — a real row's structure IN FLOW (so its width IS a row's width, no
+   positioned-ancestor guesswork) at zero height, invisible and inert, chips
+   nowrap at natural width: that IS the measurement. Lives here because the
+   sidebar skeleton's every wearer is styled from app.css — a scoped rule on
+   these atoms is the drift the source test forbids. */
+.proj-row.mirror { height: 0; padding-top: 0; padding-bottom: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
+.proj-row.mirror .side-wins { flex-wrap: nowrap; }
+.proj-row.mirror .side-win { flex: none; }
 .side-wins.dim { opacity: 0.65; }
 .side-win {
   display: inline-flex; align-items: center; gap: 4px; min-width: 0;

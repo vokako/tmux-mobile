@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, ISSUE_REF_CHARS, assignNotes } from './board.ts';
+import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, ISSUE_REF_CHARS, assignNotes, chipCols } from './board.ts';
 
 // Since board #15 a draft carries all four editable fields; these helpers
 // build the full shape from the short form the assertions speak.
@@ -265,4 +265,26 @@ test('assignNotes: an explicit budget truncates — one giant note cannot flood 
   // Within budget: identity — no marker, no pointer.
   const fits = assignNotes(4, [{ author: 'a', body: 'short', at: 1 }], 200);
   assert.ok(!fits.includes('tmm board show'), 'a fitting thread needs no pointer');
+});
+
+test('chipCols: one row when it fits, else 2×2, else one column — never three (board #39, owner)', () => {
+  // Owner (2026-09-01): "如果一行能 放下放一行也行，甚至两行放不下，就放一
+  // 列，动态适配" — on top of the standing rule 不要 3+1. Grid columns are
+  // EQUAL (1fr), so the widest chip is the exact unit: n columns fit iff
+  // n·chip + (n−1)·gap ≤ width.
+  // chip 50, gap 10: 4 cols need 230, 2 cols need 110.
+  assert.equal(chipCols(230, 50, 10), 4, 'exactly fits four across');
+  assert.equal(chipCols(229, 50, 10), 2, 'one pixel short of four → the 2×2 rectangle');
+  assert.equal(chipCols(110, 50, 10), 2, 'exactly fits two columns');
+  assert.equal(chipCols(109, 50, 10), 1, 'one pixel short of two → single column');
+  assert.equal(chipCols(1, 50, 10), 1, 'a sliver still renders one column');
+  // Unmeasured (first paint, before the mirror reports) keeps the rectangle:
+  // 2×2 is the layout every width can wear without a 3+1 flash.
+  assert.equal(chipCols(0, 50, 10), 2, 'unmeasured width → default rectangle');
+  assert.equal(chipCols(230, 0, 10), 2, 'unmeasured chip → default rectangle');
+  // NEVER three: the whole domain maps into {1, 2, 4}.
+  for (let w = 0; w <= 400; w++) {
+    const c = chipCols(w, 50, 10);
+    assert.ok(c === 1 || c === 2 || c === 4, `w=${w} gave ${c}`);
+  }
 });

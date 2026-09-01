@@ -15,7 +15,7 @@
   import Select from '../ui/Select.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
-  import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, countsOf, applyCounts, visibleBoards, boardTitle, assignNotes } from './board.ts';
+  import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, countsOf, applyCounts, visibleBoards, boardTitle, assignNotes, chipCols } from './board.ts';
   import { scrollFade } from '../core/scrollFade.ts';
 
   let { session = '', visible = true, onGoBack = null, issueRequest = null, embedded = false, createRequest = null }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null; issueRequest?: { session: string; id: number; n: number } | null; embedded?: boolean; createRequest?: { n: number } | null } = $props();
@@ -431,6 +431,20 @@
     done: 'var(--status-purple)',
   };
   const countColor = (st: string) => COUNT_COLORS[st] ?? boardStatusColor(st);
+  /** Dynamic chip layout (owner, 2026-09-01: "如果一行能 放下放一行也行，甚
+   * 至两行放不下，就放一列，动态适配" — layered on 不要 3+1): a hidden GHOST
+   * row (the composer's mirror-div pattern) with nowrap natural-width chips
+   * reports the row width and the widest chip; chipCols (pure, tested) turns
+   * the two into 4, 2 or 1 equal columns, and every real row wears the
+   * answer inline. The ghost carries the sidebar's WIDEST count so digit
+   * width is priced in, and its labels re-render with the locale. */
+  const CHIP_GAP_X = 10; // .side-wins column-gap in app.css
+  let winsW = $state(0);
+  let chipWs = $state<number[]>([0, 0, 0, 0]);
+  const maxCount = $derived(Math.max(0, ...Object.values(countsMap).flatMap(
+    (c) => STATUSES.map((st) => Number(c[st as keyof BoardCountRow]) || 0),
+  )));
+  const cols = $derived(chipCols(winsW, Math.max(...chipWs), CHIP_GAP_X));
   const col = (s: string) => issues.filter((i) => i.status === s);
   const noteCount = (i: BoardIssue) => (typeof i.notes === 'number' ? i.notes : i.notes.length);
   const ago = (ts: number) => {
@@ -455,6 +469,23 @@
            all four in fixed order, zeros included, so every row reads the
            same shape. Only boards WITH issues are listed (visibleBoards —
            the empty ones are hidden, never zero-rows). -->
+      <!-- The measurement ghost: a real row's structure at height 0, chips
+           nowrap at natural width. Its binds feed chipCols; it renders the
+           WIDEST count so the answer already fits every real row. -->
+      <div class="side-row proj-row mirror" aria-hidden="true">
+        <span class="dot off"></span>
+        <span class="p-main">
+          <span class="side-wins" bind:clientWidth={winsW}>
+            {#each STATUSES as st, i (st)}
+              <span class="side-win" bind:clientWidth={chipWs[i]}>
+                <span class="side-win-dot"></span>
+                <span class="side-win-name">{statusLabel(st)}</span>
+                <span class="b-count">{maxCount}</span>
+              </span>
+            {/each}
+          </span>
+        </span>
+      </div>
       {#each projects as p (p.project.session)}
         {@const c = countsMap[p.project.session]}
         <button class="side-row proj-row" class:open={cur === p.project.session} onclick={() => pick(p.project.session)}>
@@ -464,7 +495,7 @@
               <span class="p-name">{p.project.name}</span>
               {#if rowTalk(p)}<span class="side-age">{agoShort(rowTalk(p), Date.now())}</span>{/if}
             </span>
-            <span class="side-wins grid">
+            <span class="side-wins grid" style:grid-template-columns={`repeat(${cols}, minmax(0, 1fr))`}>
               {#each STATUSES as st (st)}
                 <span class="side-win">
                   <span class="side-win-dot" style:background={countColor(st)}></span>
