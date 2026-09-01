@@ -751,7 +751,16 @@
     el.style.paddingRight = '';
     el.style.height = 'auto';
     const maxH = parseFloat(getComputedStyle(el).maxHeight) || Infinity;
-    if (el.scrollHeight > maxH + 1) {
+    const overflowing = el.scrollHeight > maxH + 1;
+    // The scrollbar exists exactly while there is something to scroll
+    // (board #34): the base state is hidden (an empty composer must never
+    // show a track), auto ONLY when the natural height exceeds max-height —
+    // decided here, in the SAME measurement, so shrinking or the post-send
+    // reset flips it back to hidden on the very next run. Never hide it
+    // permanently and never scrollbar-width:none — a long message must
+    // really scroll.
+    el.style.overflowY = overflowing ? 'auto' : 'hidden';
+    if (overflowing) {
       // Scrolled state: the box is at max height and the button permanently
       // overlays its bottom-right corner — EVERY line scrolls past it, so
       // all lines shorten clear of the button zone while scrolling lasts.
@@ -3665,7 +3674,7 @@
     display: block; width: 100%; min-height: 28px; max-height: calc(34vh / var(--ui-zoom, 1));
     padding: 5px 0 4px; background: transparent; border: none; outline: none;
     color: var(--text); font-size: var(--fs-body); line-height: 1.5;
-    resize: none; overflow-y: auto;
+    resize: none; overflow-y: hidden; /* growComposer flips to auto only while overflowing (board #34) */
   }
   /* growComposer's layout mirror: same metrics as .c-input, invisible.
      Created by JS, so it has no scope class — hence :global under the shell. */

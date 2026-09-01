@@ -27,6 +27,12 @@ completion).
   rect, zoom-corrected), and the shared placement clamp keeps it whole
   inside the viewport — never clipped at the right edge. Every other
   context menu keeps the right-aligned pointer placement.
+- The composer's scrollbar exists exactly while there is something to
+  scroll (board #34): hidden at rest and while the text fits, auto only
+  when the natural height exceeds the max — decided in growComposer's one
+  measurement, so shrinking or sending flips it back at once. Placeholders
+  name the reach and stop ("Message every agent…", "Leave a note…"); the
+  recipient menu's small hints keep the delivery semantics.
 - **Agents are windows** in the project session. A *managed* agent was
   spawned by the app into an isolated home (`<ws>/.tmm/agents/<name>/`) from
   a **registry definition** (backend, model, effort, system prompt, skills,

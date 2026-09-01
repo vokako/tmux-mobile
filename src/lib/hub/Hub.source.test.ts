@@ -611,3 +611,30 @@ test('the title caret expands the NAME — left-aligned on its real rect (board 
   assert.ok(!/getBoundingClientRect\(\)[^]{0,80}openCtx/u.test(source),
     'no raw client rect reaches openCtx — anchorOf owns the zoom correction');
 });
+
+test('the composer scrollbar exists exactly while overflowing, and placeholders are short (board #34)', async () => {
+  // hidden → auto → hidden: the base CSS state is hidden (an empty composer
+  // never shows a track), growComposer flips it in its ONE measurement — the
+  // same `scrollHeight > maxH + 1` verdict that drives the padding — so a
+  // shrink or the post-send reset (growComposer re-runs on composerText)
+  // lands back on hidden immediately.
+  assert.match(source, /const overflowing = el\.scrollHeight > maxH \+ 1;/u, 'one verdict for scrollbar AND padding');
+  assert.match(source, /el\.style\.overflowY = overflowing \? 'auto' : 'hidden';/u, 'the toggle rides that verdict');
+  assert.match(source, /resize: none; overflow-y: hidden;/u, 'the base state is hidden');
+  // Not hidden PERMANENTLY: a long message must really scroll — the .c-input
+  // block declares overflow-y exactly once (the hidden base; auto comes only
+  // from the JS toggle), and no masking the scrollbar.
+  const cInput = source.match(/\n  \.c-input \{[^}]*\}/su)?.[0] ?? '';
+  assert.equal([...cInput.matchAll(/overflow-y/g)].length, 1, 'one overflow-y in .c-input, the hidden base');
+  assert.ok(!/\.c-input[^}]*scrollbar-width:\s*none/su.test(source), 'the real scrollbar is never masked away');
+
+  // The placeholders name the reach and stop (the recipient MENU keeps the
+  // explanatory small hints — hubToAllHint/hubToRoomHint still render there).
+  const i18n = await readFile(new URL('../core/i18n.svelte.ts', import.meta.url), 'utf8');
+  assert.equal([...i18n.matchAll(/hubComposerAll: 'Message every agent…',/g)].length, 1, 'EN all is short');
+  assert.equal([...i18n.matchAll(/hubComposerRoom: 'Leave a note…',/g)].length, 1, 'EN room is short');
+  assert.equal([...i18n.matchAll(/hubComposerAll: '发给所有 agent…',/g)].length, 1, 'zh all is short');
+  assert.equal([...i18n.matchAll(/hubComposerRoom: '留一句话…',/g)].length, 1, 'zh room is short');
+  assert.match(source, /<small>\{t\('hubToAllHint'\)\}<\/small>/u, 'the menu hint stays');
+  assert.match(source, /<small>\{t\('hubToRoomHint'\)\}<\/small>/u, 'the menu hint stays');
+});
