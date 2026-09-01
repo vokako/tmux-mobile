@@ -317,7 +317,12 @@ can get wrong to save three characters.
   2026-08-29: "引入一个新的看板功能…借助软件工程，可以把我们的任务管理的更好"):
   session-scoped issues in four fixed columns (`todo/doing/review/done`,
   `projects::BOARD_STATUSES` — free-text statuses would fork the vocabulary
-  per agent). `save` creates (no id) or PATCHES (id + only the changed
+  per agent). The numeric `id` is a database-wide surrogate, not a per-project
+  counter: a board may start above `#1`, while every single-row operation is
+  still gated by `session + id` (a guessed id from another project matches
+  nothing). Rename migrates the rows with the declaration; archive retains
+  them; permanent project delete removes the issues + notes before the session
+  alias is released (board #41). `save` creates (no id) or PATCHES (id + only the changed
   fields, COALESCE in SQL — an agent's `move` must not erase a body the
   human edited meanwhile); `note` appends to the issue's own thread and
   bumps `updated_at`; every write records WHO acted. The HUMAN's half is the
@@ -1635,7 +1640,11 @@ sibling: it closes the session, removes every `<path>/.tmm/agents/<name>/` the
 app created, and forgets the row (slots cascade). Two things both verbs leave
 alone on purpose: **your files** — we only ever delete inside `.tmm/agents/` —
 and **the chat history**, because the room is the record of what happened and
-rooms are keyed by session name.
+rooms are keyed by session name. The Board is different: it is PROJECT task
+state, not the durable conversation record. Archive keeps it (restore must be
+lossless); irreversible `project_delete` removes its issues + note threads
+before releasing the session name, so a later project with that name cannot
+inherit somebody else's tasks (board #41).
 
 **In the chat UI, delete is a RECYCLE BIN, not destruction** (owner,
 2026-08-21: "把project里删掉进入archive … 相当于回收站的功能，在archive里可以

@@ -14,7 +14,7 @@ use std::path::Path;
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 13;
+const SCHEMA_VERSION: i64 = 14;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
@@ -500,6 +500,50 @@ impl Store {
                 )
                 .map_err(|e| format!("migrate to 13: {e}"))?;
         }
+        if version < 14 {
+            // v14: Board rows follow the PROJECT session through a rename and
+            // die with a permanently deleted project (board #41). v12 keyed
+            // issues by session, but set_session only moved projects.session;
+            // those issues became invisible, and reusing the old name could
+            // expose them to a different project. Likewise delete_project
+            // left issues behind. Repair existing databases in this order:
+            // first move the most recent prev_session alias onto its current
+            // session. Old builds could already have reused that alias: in
+            // that case issues older than the new current owner follow the
+            // previous project, while its newer issues stay put. Then remove
+            // notes + issues whose session belongs to no project. Foreign
+            // keys are OFF during migrations, so notes must be deleted
+            // explicitly rather than relying on ON DELETE CASCADE.
+            self.conn
+                .execute_batch(
+                    "UPDATE issues
+                        SET session = (
+                          SELECT previous_owner.session
+                            FROM projects previous_owner
+                           WHERE previous_owner.prev_session = issues.session
+                           ORDER BY previous_owner.created_at DESC
+                           LIMIT 1
+                        )
+                      WHERE EXISTS (SELECT 1 FROM projects p WHERE p.prev_session = issues.session)
+                        AND (
+                          NOT EXISTS (SELECT 1 FROM projects current_owner WHERE current_owner.session = issues.session)
+                          OR issues.created_at < (
+                            SELECT current_owner.created_at
+                              FROM projects current_owner
+                             WHERE current_owner.session = issues.session
+                             LIMIT 1
+                          )
+                        );
+                     DELETE FROM issue_notes
+                      WHERE issue_id IN (
+                        SELECT i.id FROM issues i
+                         WHERE NOT EXISTS (SELECT 1 FROM projects p WHERE p.session = i.session)
+                      );
+                     DELETE FROM issues
+                      WHERE NOT EXISTS (SELECT 1 FROM projects p WHERE p.session = issues.session);",
+                )
+                .map_err(|e| format!("migrate to 14: {e}"))?;
+        }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|e| format!("set user_version: {e}"))
@@ -879,7 +923,13 @@ impl Store {
     pub fn session_taken_by_other(&self, session: &str, id: &str) -> Result<bool, String> {
         self.conn
             .query_row(
-                "SELECT 1 FROM projects WHERE session = ?1 AND id <> ?2 LIMIT 1",
+                // prev_session is a live alias for already-running agents.
+                // Reusing it for another project would make one name resolve
+                // to two owners and is exactly the cross-project ambiguity
+                // Board #41 forbids.
+                "SELECT 1 FROM projects
+                  WHERE (session = ?1 OR prev_session = ?1) AND id <> ?2
+                  LIMIT 1",
                 params![session, id],
                 |_| Ok(()),
             )
@@ -902,14 +952,28 @@ impl Store {
     /// one. `prev_session` is what keeps an ALREADY RUNNING agent working: its
     /// `TMM_PROJECT` env var holds the name the session had when it started, and
     /// a process cannot be told otherwise.
-    pub fn set_session(&self, id: &str, session: &str, prev: &str) -> Result<bool, String> {
-        self.conn
+    pub fn set_session(&mut self, id: &str, session: &str, prev: &str) -> Result<bool, String> {
+        let tx = self.conn.transaction().map_err(|e| format!("rename session transaction: {e}"))?;
+        let n = tx
             .execute(
                 "UPDATE projects SET session = ?2, prev_session = ?3 WHERE id = ?1",
                 params![id, session, prev],
             )
-            .map(|n| n > 0)
-            .map_err(|e| format!("rename session: {e}"))
+            .map_err(|e| format!("rename session: {e}"))?;
+        if n > 0 {
+            // The Board is project-scoped by session. Move its rows in the
+            // SAME transaction as the declaration, or a rename makes the
+            // board disappear under the old key and a later project reusing
+            // that name inherits it (board #41). issue_notes follow by the
+            // globally unique issue_id and need no rewrite.
+            tx.execute(
+                "UPDATE issues SET session = ?1 WHERE session = ?2",
+                params![session, prev],
+            )
+            .map_err(|e| format!("rename board session: {e}"))?;
+        }
+        tx.commit().map_err(|e| format!("commit session rename: {e}"))?;
+        Ok(n > 0)
     }
 
     /// A project by the session name it used to have. Only the most recent
@@ -1001,14 +1065,30 @@ impl Store {
     /// Replace a project's whole slot list in one transaction. The declaration
     /// is always written as a set, never patched row by row, so a capture can
     /// never leave a half-applied topology behind.
-    /// Forget a project entirely: the row plus its slots (FK cascade). Archive
-    /// hides a project and is reversible; this is the "I am done with it" verb,
-    /// so the caller is responsible for tearing the session down first.
-    pub fn delete_project(&self, id: &str) -> Result<bool, String> {
-        let n = self
-            .conn
+    /// Forget a project entirely: its Board task state, then the row plus its
+    /// slots (FK cascade). Archive hides a project and is reversible; this is
+    /// the "I am done with it" verb, so the caller is responsible for tearing
+    /// the session down first.
+    pub fn delete_project(&mut self, id: &str) -> Result<bool, String> {
+        let tx = self.conn.transaction().map_err(|e| format!("delete project transaction: {e}"))?;
+        let session: Option<String> = tx
+            .query_row("SELECT session FROM projects WHERE id = ?1", params![id], |r| r.get(0))
+            .optional()
+            .map_err(|e| format!("find project to delete: {e}"))?;
+        let Some(session) = session else {
+            tx.commit().map_err(|e| format!("commit missing project delete: {e}"))?;
+            return Ok(false);
+        };
+        // Archive is reversible and keeps the board. Permanent delete means
+        // the project stops existing: remove its task state before releasing
+        // the session name, or a new project with that name would inherit the
+        // old issues (board #41). issue_notes cascade from issues at runtime.
+        tx.execute("DELETE FROM issues WHERE session = ?1", params![session])
+            .map_err(|e| format!("delete project board: {e}"))?;
+        let n = tx
             .execute("DELETE FROM projects WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| format!("commit project delete: {e}"))?;
         Ok(n > 0)
     }
 
@@ -1738,26 +1818,109 @@ mod tests {
     }
 
     #[test]
-    fn deleting_a_project_takes_its_slots() {
+    fn deleting_a_project_takes_its_slots_and_board() {
         let mut store = Store::open_memory().unwrap();
         store.insert_project(&project("alpha")).unwrap();
         store.replace_slots("alpha", &[slot("shell", 0)]).unwrap();
-        store
-            .conn
-            .execute("DELETE FROM projects WHERE id = 'alpha'", [])
+        let issue = store
+            .issue_save("alpha", None, Some("private task"), None, None, None, "human", 10)
             .unwrap();
-        assert!(store.slots("alpha").unwrap().is_empty());
+        store.issue_note("alpha", issue, "human", "private note", 11).unwrap();
+
+        assert!(store.delete_project("alpha").unwrap());
+        assert!(store.slots("alpha").unwrap().is_empty(), "slots cascade with the project");
+        assert!(store.issues_list("alpha").unwrap().is_empty(), "the released session name keeps no Board rows");
+        let notes: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM issue_notes WHERE issue_id = ?1", [issue], |r| r.get(0))
+            .unwrap();
+        assert_eq!(notes, 0, "issue notes cascade with the permanently deleted board");
+    }
+
+    #[test]
+    fn renaming_a_project_moves_its_board_and_closes_the_old_key() {
+        let mut store = Store::open_memory().unwrap();
+        store.insert_project(&project("alpha")).unwrap();
+        let issue = store
+            .issue_save("alpha", None, Some("rename-safe"), Some("body"), None, None, "human", 10)
+            .unwrap();
+        store.issue_note("alpha", issue, "human", "kept with it", 11).unwrap();
+
+        assert!(store.set_session("alpha", "beta", "alpha").unwrap());
+        assert!(store.issues_list("alpha").unwrap().is_empty(), "the old session key is closed");
+        let moved = store.issue_get("beta", issue).unwrap().expect("the board follows the project");
+        assert_eq!(moved["title"], "rename-safe");
+        assert_eq!(moved["notes"].as_array().unwrap().len(), 1, "notes follow their globally unique issue id");
+        // The old name cannot be used as a cross-project write handle after
+        // the rename; every CRUD path still requires session + id.
+        assert!(store.issue_save("alpha", Some(issue), None, None, Some("done"), None, "x", 12).is_err());
+        assert!(store.issue_note("alpha", issue, "x", "sneak", 12).is_err());
+        assert!(!store.issue_delete("alpha", issue).unwrap());
+        assert!(store.issue_get("beta", issue).unwrap().is_some());
     }
 
     #[test]
     fn session_conflicts_are_detectable() {
-        let store = Store::open_memory().unwrap();
+        let mut store = Store::open_memory().unwrap();
         store.insert_project(&project("alpha")).unwrap();
         assert!(store.session_taken_by_other("alpha", "beta").unwrap());
         assert!(!store.session_taken_by_other("alpha", "alpha").unwrap());
         assert!(!store.session_taken_by_other("nope", "beta").unwrap());
         assert_eq!(store.project_by_session("alpha").unwrap().unwrap().id, "alpha");
         assert!(store.project_by_session("nope").unwrap().is_none());
+
+        store.set_session("alpha", "beta", "alpha").unwrap();
+        assert!(store.session_taken_by_other("alpha", "new-project").unwrap(), "the previous name remains a reserved live alias");
+        assert!(!store.session_taken_by_other("alpha", "alpha").unwrap(), "the alias still belongs to its own project");
+    }
+
+    #[test]
+    fn migrating_v13_repairs_renamed_and_orphaned_boards() {
+        let dir = std::env::temp_dir().join(format!("tmm-board-v14-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("state.db");
+
+        // Seed the shape a pre-v14 build could leave: the project declaration
+        // already moved old→new, its Board rows did not; a permanently deleted
+        // project also left an orphan Board + note.
+        let seed = Store::open(&path).unwrap();
+        seed.insert_project(&project("alpha")).unwrap();
+        let mut current_owner = project("current");
+        current_owner.session = "old".into();
+        current_owner.created_at = 20;
+        seed.insert_project(&current_owner).unwrap();
+        let moved = seed.issue_save("old", None, Some("follow rename"), None, None, None, "human", 10).unwrap();
+        seed.issue_note("old", moved, "human", "keep me", 11).unwrap();
+        let stays = seed.issue_save("old", None, Some("new owner task"), None, None, None, "human", 30).unwrap();
+        let orphan = seed.issue_save("deleted", None, Some("orphan"), None, None, None, "human", 12).unwrap();
+        seed.issue_note("deleted", orphan, "human", "remove me", 13).unwrap();
+        seed.conn.execute(
+            "UPDATE projects SET session = 'new', prev_session = 'old' WHERE id = 'alpha'",
+            [],
+        ).unwrap();
+        seed.conn.pragma_update(None, "user_version", 13).unwrap();
+        drop(seed);
+
+        let repaired = Store::open(&path).unwrap();
+        assert!(repaired.issue_get("old", moved).unwrap().is_none(), "the previous owner's issue left the reused alias");
+        let got = repaired.issue_get("new", moved).unwrap().expect("renamed board repaired");
+        assert_eq!(got["notes"].as_array().unwrap().len(), 1, "the issue thread survives the repair");
+        assert_eq!(
+            repaired.issue_get("old", stays).unwrap().unwrap()["title"],
+            "new owner task",
+            "an alias reused by an old build keeps issues created after its new owner",
+        );
+        assert!(repaired.issues_list("deleted").unwrap().is_empty(), "orphan board removed");
+        let orphan_notes: i64 = repaired.conn.query_row(
+            "SELECT COUNT(*) FROM issue_notes WHERE issue_id = ?1",
+            [orphan],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(orphan_notes, 0, "foreign keys are off in migration, so v14 removes orphan notes explicitly");
+        let version: i64 = repaired.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, 14);
+        drop(repaired);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// v1 shipped `path` as UNIQUE, which rejected the second session in a

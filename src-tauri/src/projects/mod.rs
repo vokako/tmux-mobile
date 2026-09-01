@@ -465,7 +465,9 @@ pub fn set_archived(id: &str, archived: bool) -> Result<Value, String> {
 /// recipes this app wrote — and never the user's files. The chat room is kept
 /// too: it is the record of what happened, and rooms are addressed by session
 /// name, so a later project with the same name inherits its history rather
-/// than losing it.
+/// than losing it. The Board is project task state, not the room record: its
+/// issues and note threads are deleted before the session name is released,
+/// so another project can never inherit them (board #41).
 pub fn delete(id: &str) -> Result<Value, String> {
     let project = with_store(|store| store.project(id))?
         .ok_or_else(|| format!("no project with id '{id}'"))?;
@@ -1504,6 +1506,16 @@ pub(crate) mod tests {
             room: String::new(),
         };
         with_store(|store| store.insert_project(&project)).unwrap();
+        let issue = board_save(
+            "hand-made",
+            None,
+            Some("board follows rename"),
+            Some("private to this project"),
+            None,
+            None,
+            "human",
+        ).unwrap();
+        board_note("hand-made", issue, "human", "keep the thread").unwrap();
 
         let out = rename("adopted-1", "A Better Label").unwrap();
         assert_eq!(out["name"].as_str(), Some("A Better Label"));
@@ -1518,6 +1530,10 @@ pub(crate) mod tests {
             Some("adopted-1"),
         );
         assert_eq!(after.room, "proj:hand-made");
+        let moved = board_get("a-better-label", issue).expect("the Board follows the current session name");
+        assert_eq!(moved["title"], "board follows rename");
+        assert_eq!(moved["notes"].as_array().unwrap().len(), 1);
+        assert!(board_get("hand-made", issue).is_err(), "the raw old Board key no longer owns rows");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1581,6 +1597,9 @@ pub(crate) mod tests {
         let path = dir.to_string_lossy().to_string();
         let made = create(&path, Some("deltest"), None, None).unwrap();
         let id = made.get("id").and_then(|v| v.as_str()).unwrap().to_string();
+        let session = made.get("session").and_then(|v| v.as_str()).unwrap().to_string();
+        let issue = board_save(&session, None, Some("delete with project"), None, None, None, "human").unwrap();
+        board_note(&session, issue, "human", "this task is project state").unwrap();
 
         let r = delete(&id).unwrap();
         assert_eq!(r.get("deleted").and_then(|v| v.as_bool()), Some(true));
@@ -1596,6 +1615,7 @@ pub(crate) mod tests {
             .filter_map(|p| p.get("id").and_then(|v| v.as_str()).map(str::to_string))
             .collect();
         assert!(!ids.contains(&id), "delete removes the row: {ids:?}");
+        assert!(board_get(&session, issue).is_err(), "permanent delete releases the session with no old Board to inherit");
         // Deleting twice is an error, not a silent success — the caller asked
         // about a project that no longer exists.
         assert!(delete(&id).is_err());

@@ -113,9 +113,9 @@ Projects section hides itself when these return -32601. See
 | `project_up` | `id` | `{session, created_session, slots: [{window_name, status, error?}]}` |
 | `project_down` | `id` | `{session, live: false}` — kills the session, keeps the declaration |
 | `project_archive` | `id`, `archived?` | Hides/unhides without deleting |
-| `project_rename` | `id`, `name` | `{id, name, session, session_renamed}` — renames the tmux session to `slug(name)` too (not on an adopted project). The chat room is recorded on the project so it does NOT move, and the previous session name keeps resolving for agents already running with `TMM_PROJECT` |
+| `project_rename` | `id`, `name` | `{id, name, session, session_renamed}` — renames the tmux session to `slug(name)` too. The chat room is recorded on the project so it does NOT move, the Board rows move transactionally to the new session key, and the previous session name stays reserved/resolving for agents already running with `TMM_PROJECT` (another project cannot reuse the alias) |
 | `project_autostart` | `id`, `autostart?` | Flag only; no boot integration yet |
-| `project_delete` | `id` | Forgets the project (slots cascade), closes the session, deletes `<path>/.tmm/agents/*` — the chat room and the user's files survive. Reached in the UI only through the recycle bin |
+| `project_delete` | `id` | Forgets the project (slots cascade), closes the session, deletes `<path>/.tmm/agents/*` and its Board issues/note threads — the chat room and the user's files survive. Reached in the UI only through the recycle bin |
 | `models_list` | `backend?` (default `kiro`) | `{backend, models}` — model ids the backend accepts, asked of its own CLI (cached). `models` is `null` when it cannot be enumerated (claude/codex), and the agent editor keeps free text |
 
 ### Project Hub (desktop-only — the `tmm` CLI's surface)
@@ -143,7 +143,7 @@ humans) and the desktop hub UI. See
 | `hub_agent_stop` | `session`, `agent` | `{ok}` — kills the window, keeps the slot (a stopped agent restarts via `up`/restart) |
 | `hub_agent_restart` | `session`, `agent` | `{ok}` — replays the launch recipe (full identity: env, `--agent`, model in config) and resumes the recorded conversation |
 | `hub_agent_remove` | `session`, `agent` | `{ok}` — ejects: kills the window, DROPS the slot, deletes the isolated home; refuses only when nothing of the agent is left |
-| `hub_board_list` | `session` | `{issues: […], statuses}` — the project task board, four fixed columns (`todo/doing/review/done`); each issue carries a note COUNT |
+| `hub_board_list` | `session` | `{issues: […], statuses}` — the project task board, four fixed columns (`todo/doing/review/done`); each issue carries a note COUNT. `id` is a database-wide handle, not a per-project counter (a board need not start at `#1`); isolation is the required `session + id` on every single-issue operation |
 | `hub_board_counts` | — (no `session`, like `hub_rooms`) | `{counts: {"<session>": {todo, doing, review, done, total}}}` — issue counts for EVERY board in one grouped read; the four statuses are zero-filled server-side, `total` is explicit, and a project with an empty board is ABSENT (absence = hide) |
 | `hub_board_get` | `session`, `id` | The issue with its full `notes` thread |
 | `hub_board_save` | `session`, `id?`, `title?`, `body?`, `status?`, `assignee?`, `who?` | Create (no id) or PATCH (id + only the changed fields — COALESCE, so a `move` cannot erase a body edited meanwhile). `{ok, id}` |
