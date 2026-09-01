@@ -719,3 +719,22 @@ test('the fold measures its own line — perLine is never assumed (board #53 rev
   assert.match(source, /const onResize = \(\) => withReadingAnchor\(measureHeld\);/u,
     'resize re-measures through the reading anchor, unchanged');
 });
+
+test('the anchor transaction re-measures the fold line it is about to restore (board #46, second blocker)', () => {
+  // The drawer regrids the columns WITHOUT a window resize, so the resize
+  // listener never fires and heldPerLine kept the OLD width until some later
+  // blocks tick — a drawer toggle could leave every folded message over
+  // budget (lead, 2026-09-01). The re-measure is part of the transaction
+  // itself, in ORDER: mutate → settled (new grid) → measureHeld (new width/
+  // glyph → heldPerLine → folds re-cut) → settled (re-cut rendered) → only
+  // then take the tail or restore the reference offset. Both branches.
+  const tx = source.match(/async function withReadingAnchor\(mutate\) \{[\s\S]*?\n  \}/u)?.[0] || '';
+  const step = String.raw`(?:\s*//[^\n]*\n)*\s*`; // why-comments allowed between steps, order is not
+  assert.match(tx, new RegExp(String.raw`mutate\(\);\n\s*await settled\(\);\n${step}measureHeld\(\);\n${step}await settled\(\);\n${step}scrollFeed\(true\);`, 'u'),
+    'the FOLLOWING branch re-measures and lets folds re-cut before taking the tail');
+  assert.match(tx, new RegExp(String.raw`mutate\(\);\n\s*await settled\(\);\n${step}measureHeld\(\);\n${step}await settled\(\);\n${step}if \(ref\?\.isConnected\)`, 'u'),
+    'the HISTORY branch re-measures and lets folds re-cut before restoring the offset');
+  // The width halves live in measureHeld, so ONE call is the whole re-read —
+  // no second measurement dialect inside the transaction.
+  assert.ok(!/withReadingAnchor[\s\S]*?heldWidth =/u.test(tx), 'the transaction never writes measurements directly');
+});

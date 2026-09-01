@@ -1323,6 +1323,13 @@
     if (following) {
       mutate();
       await settled();
+      // The mutation may have changed the COLUMN WIDTH without a window
+      // resize (the drawer regrid is exactly that), and the fold budget is
+      // MEASURED (board #46 second blocker): re-read the new line, let every
+      // folded message re-cut at the new perLine, and only then take the
+      // tail — a tail taken before the re-cut lands on heights about to move.
+      measureHeld();
+      await settled();
       scrollFeed(true);
       return;
     }
@@ -1335,6 +1342,12 @@
       && el.getBoundingClientRect().bottom > feedTop + 1);
     const delta = ref ? ref.getBoundingClientRect().top - feedTop : 0;
     mutate();
+    await settled();
+    // Same rule for the history reader: the reference offset is only worth
+    // restoring against FINAL heights, and heights are final only after the
+    // measured fold has re-cut for the new width. One measureHeld call is
+    // the whole re-read — width, glyph and line box all live there.
+    measureHeld();
     await settled();
     if (ref?.isConnected) {
       const now = ref.getBoundingClientRect().top - feedEl.getBoundingClientRect().top;
