@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, touchContextMenu } from './hub.ts';
+import { TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, touchContextMenu, perLineOf } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -1255,4 +1255,25 @@ test('the fold budget is CHARACTERS, not source lines (board #53)', () => {
   // Identity when everything fits — the caller skips re-rendering on it.
   const fits = 'short\nlines\nonly';
   assert.equal(elideTail(fits, 5), fits);
+});
+
+test('perLine is MEASURED from the real line, never assumed (board #53 review)', () => {
+  // Lead blocker (2026-09-01, real Chromium): at 1280px the content line is
+  // ~723px ≈ 82 latin chars, so the default 80 was accidentally right; at
+  // 420px it is ~338px ≈ 38 chars, and foldBody still said 80 — wrap
+  // underestimated ~2.1×, a "folded" bubble rendered ~8 lines on a 4-line
+  // budget. The mapping from a measured line to a perLine: width ÷ average
+  // glyph, floored, clamped against degenerate measurements.
+  assert.equal(perLineOf(723, 8.8), 82, 'the desktop line the default was tuned on');
+  assert.equal(perLineOf(338, 8.8), 38, 'the 420px drawer line that broke it');
+  // Unmeasured inputs answer the historic default — same fallback posture as
+  // chipCols' pre-measure 2 columns.
+  assert.equal(perLineOf(0, 8.8), 80, 'no width yet');
+  assert.equal(perLineOf(723, 0), 80, 'no glyph yet');
+  assert.equal(perLineOf(NaN, 8.8), 80);
+  assert.equal(perLineOf(723, NaN), 80);
+  // Degenerate measurements clamp instead of folding to nothing or never:
+  // a sliver of a column still shows words, a wall of glass still folds.
+  assert.equal(perLineOf(40, 9), 16, 'floor: never fewer than 16 units');
+  assert.equal(perLineOf(9000, 3), 240, 'cap: never more than 240 units');
 });

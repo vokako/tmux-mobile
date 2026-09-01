@@ -32,7 +32,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, touchContextMenu } from './hub.ts';
+  import { TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, touchContextMenu, perLineOf } from './hub.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
@@ -503,12 +503,55 @@
    * 会儿又变化了"). The column holds still while the composer grows. */
   let heldBasis = $state(0);
   let heldLine = $state(20);        // measured line box of a bubble, px
+  /** The measured halves of perLine (board #53 review blocker): the widest
+   * content line a bubble can wrap at, and the bubble font's average latin
+   * glyph. The default 80 was only right at ~1280px; a 420px drawer line is
+   * ~38 glyphs, so the fold under-priced wrapping ~2.1× and a "folded"
+   * bubble rendered ~8 lines on a 4-line budget. Both start unmeasured (0):
+   * `perLineOf` answers the historic default until the first real bubble is
+   * seen — the same pre-measure posture as the Board's chip columns. */
+  let heldWidth = $state(0);
+  let heldGlyph = $state(0);
+  /** One canvas measures every font once — measureHeld runs on every blocks
+   * tick, and layout-thrashing a probe span there would be a poll tax. */
+  let glyphCanvas = null;
+  const glyphCache = new Map();
+  function glyphWidth(font) {
+    if (!font) return 0;
+    const hit = glyphCache.get(font);
+    if (hit !== undefined) return hit;
+    glyphCanvas ??= document.createElement('canvas');
+    const gctx = glyphCanvas.getContext('2d');
+    if (!gctx) return 0;
+    gctx.font = font;
+    // A representative chat line, not the alphabet: word spacing, case mix
+    // and digits at their natural frequency. CJK is deliberately absent —
+    // elideTail prices it separately at 2 units.
+    const sample = 'the quick brown fox jumps over the lazy dog, THE QUICK BROWN FOX 0123456789.';
+    const w = gctx.measureText(sample).width / sample.length;
+    glyphCache.set(font, w);
+    return w;
+  }
   function measureHeld() {
     if (!feedEl) return;
     heldBasis = feedEl.parentElement?.clientHeight || feedEl.clientHeight;
     const bubble = feedEl.querySelector('.bubble');
-    const lh = bubble ? parseFloat(getComputedStyle(bubble).lineHeight) : NaN;
+    if (!bubble) return;
+    const cs = getComputedStyle(bubble);
+    const lh = parseFloat(cs.lineHeight);
     if (Number.isFinite(lh) && lh > 6) heldLine = lh;
+    // The widest line a folded bubble can wrap at: the feed's content box ×
+    // the --msg-max cap (min(84%, 1360px) — the CSS constant, pinned by the
+    // source test so the two cannot drift apart), minus the bubble's own
+    // horizontal padding. Never the sampled bubble's width: bubbles hug
+    // their content, so a short message's bubble lies about the line.
+    const fcs = getComputedStyle(feedEl);
+    const feedW = feedEl.clientWidth - (parseFloat(fcs.paddingLeft) || 0) - (parseFloat(fcs.paddingRight) || 0);
+    const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+    const w = Math.min(feedW * 0.84, 1360) - padX;
+    if (w > 0) heldWidth = w;
+    const g = glyphWidth(cs.font || `${cs.fontSize} ${cs.fontFamily}`);
+    if (g > 0) heldGlyph = g;
   }
   $effect(() => {
     void blocks; void visible;
@@ -524,10 +567,12 @@
    * compact (the keyboard resize cannot move it), the screen-derived fifth
    * on desktop. */
   const heldLines = $derived(foldLines(compact, heldBasis, heldLine));
+  /** perLine, measured — the ONE mapping is perLineOf (pure, tested). */
+  const heldPerLine = $derived(perLineOf(heldWidth, heldGlyph));
   /** The body a folded user message shows: a plain rear truncation (owner,
    * 2026-08-27: "直接后截断的形式 … 中间不要了，默认用户消息都截断"). Identity
    * when it already fits, so the common case re-renders nothing. */
-  const foldBody = (text) => elideTail(text, heldLines);
+  const foldBody = (text) => elideTail(text, heldLines, heldPerLine);
   /** Messages the reader unfolded by hand, by key. Folding is the DEFAULT for
    * every long user message, so an unfold is a choice that stays until the
    * project changes — resetting it whenever the anchor moved would re-fold a

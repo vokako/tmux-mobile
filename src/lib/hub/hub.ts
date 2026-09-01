@@ -1550,3 +1550,18 @@ export function tailAfterScroll(visible: boolean, wasFollowing: boolean, gap: nu
 export function touchContextMenu(pointerType: string | undefined): boolean {
   return pointerType === 'touch' || pointerType === 'pen';
 }
+
+/** The perLine estimate, MEASURED (board #53 review blocker): elideTail's
+ * default 80 was tuned on a 1280px window whose content line is ~723px ≈ 82
+ * latin glyphs — at 420px the same line is ~338px ≈ 38 glyphs, so the fold
+ * under-priced wrapping ~2.1× and a "folded" bubble rendered ~8 lines on a
+ * 4-line budget (lead, real-Chromium measurements, 2026-09-01). The mapping:
+ * the widest content line a bubble can wrap at ÷ the bubble font's average
+ * latin glyph (CJK is elideTail's 2-unit half, not this one's). Unmeasured
+ * or degenerate inputs answer the historic default — the same pre-measure
+ * posture as chipCols' 2 columns — and real answers clamp to [16, 240] so a
+ * sliver of a column still shows words and an ultrawide still folds. */
+export function perLineOf(contentPx: number, glyphPx: number): number {
+  if (!Number.isFinite(contentPx) || !Number.isFinite(glyphPx) || contentPx <= 0 || glyphPx <= 0) return 80;
+  return Math.min(240, Math.max(16, Math.floor(contentPx / glyphPx)));
+}

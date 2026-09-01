@@ -692,3 +692,30 @@ test('long-press on a message is the system selection gesture, never our menu (b
   assert.match(source, /\.m-body \{[^}]*user-select: text;[^}]*-webkit-user-select: text;/u,
     'bubble text is selectable — both vendor forms, like the Board notes');
 });
+
+test('the fold measures its own line — perLine is never assumed (board #53 review)', () => {
+  // Lead blocker: foldBody passed elideTail's default 80 at every width; at
+  // 420px the real line is ~38 latin glyphs, so wrap was under-priced ~2.1×
+  // and a folded bubble showed ~8 lines on a 4-line budget. The fold now
+  // measures BOTH halves and maps them through the one pure function.
+  assert.match(source, /const heldPerLine = \$derived\(perLineOf\(heldWidth, heldGlyph\)\);/u,
+    'perLine derives through the pure mapping, no inline math');
+  assert.match(source, /const foldBody = \(text\) => elideTail\(text, heldLines, heldPerLine\);/u,
+    'foldBody spends the MEASURED perLine, not the default');
+  // The width half: the feed content box × the --msg-max cap minus bubble
+  // padding — computed with the SAME constants the CSS declares, and this
+  // pin holds calc and CSS together so neither drifts alone.
+  assert.match(source, /Math\.min\(feedW \* 0\.84, 1360\) - padX/u,
+    'the calc speaks 84% / 1360px');
+  assert.match(source, /--msg-max: min\(84%, 1360px\);/u,
+    'and the CSS still declares the same pair');
+  // The glyph half: the bubble font's own average, measured once per font on
+  // a cached canvas — never a hardcoded px.
+  assert.match(source, /gctx\.measureText\(sample\)\.width \/ sample\.length/u,
+    'average glyph is measured from a representative sample');
+  assert.match(source, /glyphCache\.get\(font\)/u, 'and cached per font string');
+  // Both measurements ride the existing measureHeld path, so the resize
+  // re-cut still routes through the reading anchor (2026-08-27 rule).
+  assert.match(source, /const onResize = \(\) => withReadingAnchor\(measureHeld\);/u,
+    'resize re-measures through the reading anchor, unchanged');
+});
