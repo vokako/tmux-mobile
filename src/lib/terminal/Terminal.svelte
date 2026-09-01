@@ -2165,9 +2165,8 @@
       {/if}
     {/if}
     {#if !termAtBottom}
-      <button class="scroll-btn" class:has-new={hasNewContent} onclick={() => term?.scrollToBottom()} aria-label={hasNewContent ? t('newOutput') : t('scrollToBottom')}>
+      <button class="to-tail scroll-btn" class:news={hasNewContent} onclick={() => term?.scrollToBottom()} aria-label={hasNewContent ? t('newOutput') : t('scrollToBottom')}>
         <Icon name="arrow-down" size={16} />
-        {#if hasNewContent}<span class="new-dot"></span>{/if}
       </button>
     {/if}
   </div>
@@ -2489,36 +2488,10 @@
     background: color-mix(in srgb, var(--accent) 15%, transparent);
   }
 
-  .scroll-btn {
-    position: absolute;
-    bottom: 12px;
-    right: 16px;
-    width: 36px; height: 36px;
-    background: rgba(10,10,15,0.85);
-    border: 1px solid var(--border);
-    border-radius: var(--ui-radius-row);
-    color: var(--accent);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 5;
-    -webkit-tap-highlight-color: transparent;
-    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-  }
-  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
-    .scroll-btn { background: rgba(10,10,15,0.45); }
-    :global(html[data-theme="light"]) .scroll-btn { background: rgba(245,245,247,0.45); }
-  }
-  :global(html[data-theme="light"]) .scroll-btn { background: rgba(245,245,247,0.85); }
-  .scroll-btn:active { transform: scale(0.9); }
-  .scroll-btn.has-new { border-color: var(--accent); color: var(--accent); }
-  .new-dot {
-    position: absolute; top: 4px; right: 4px;
-    width: 8px; height: 8px; border-radius: 50%;
-    background: var(--danger, #ff5050);
-    box-shadow: 0 0 0 2px var(--bg);
-  }
+  /* Back to the live tail: the LOOK is the shared .to-tail in app.css
+     (board #49 unified it with the chat feed's — one circle, one surface,
+     one news dot, one 44px overlay) — only the placement lives here. */
+  .scroll-btn { bottom: 12px; right: 16px; z-index: 5; }
 
   .input-area {
     flex-shrink: 0;

@@ -460,6 +460,29 @@ button:disabled {
   box-shadow: 0 2px 8px rgba(0,0,0,0.18);
 }
 .m-acts button:hover, .m-acts button.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+
+/* ── Back to the tail (board #49) ─────────────────────────────────────────
+   ONE floating "jump to the newest" button for every scrolling record —
+   the chat feed and the terminal wore two species of it (36px rounded
+   square, glass rgba, always-accent, span dot vs 38px circle, surface,
+   hover accent, ::after dot). These are the shared atoms; a component
+   adds only its own PLACEMENT (bottom/right/z-index) in a scoped rule.
+   The dot is the one "something arrived below" cue (class `news`), the
+   ::before overlay grows the 38px visual box past the 44px touch floor. */
+.to-tail {
+  position: absolute;
+  width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--surface); border: 1px solid var(--border); color: var(--text2);
+  cursor: pointer; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  -webkit-tap-highlight-color: transparent;
+}
+.to-tail:hover { color: var(--accent); border-color: var(--accent); }
+.to-tail:active { transform: scale(0.9); }
+.to-tail::before { content: ''; position: absolute; inset: -3px; }
+.to-tail.news::after {
+  content: ''; position: absolute; top: 1px; right: 1px; width: 9px; height: 9px;
+  border-radius: 50%; background: var(--status-danger); border: 2px solid var(--bg);
+}
 .side-wins.dim { opacity: 0.65; }
 .side-win {
   display: inline-flex; align-items: center; gap: 4px; min-width: 0;
@@ -597,7 +620,7 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
   .sessions.sidebar-mode .refresh-icon, .w-badge,
   .proj, .win, .act, .err, .error,
   /* Terminal + app shell */
-  .input-bar, .scroll-btn, .sel-toolbar, .sel-toolbar-btn, .toast,
+  .input-bar, .sel-toolbar, .sel-toolbar-btn, .toast,
   .win-split-menu, .win-split-opt, .rail-btn, .rail-brand, .gear-btn,
   .split-menu, .split-opt, .split-toggle, .reconnect-cancel, .debug-overlay,
   /* Files / Git */
