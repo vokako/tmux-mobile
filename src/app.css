@@ -95,6 +95,10 @@ html[data-theme="dark"] {
      gap to the composited --text3 (L*=48.5) stays ~6 so the promise above
      still holds. See .live-dot below for the other, bigger half. */
   --status-ok: #4ade80; --status-warn: #fbbf24; --status-danger: #ff5050; --status-hot: #fb923c; --status-sleep: #82828a;
+  /* --status-purple: the 紫 of the Board sidebar's four categorical count
+     colours (owner, 2026-09-01: "四个设为 红 橙 黄 紫") — violet-400 here,
+     violet-600 in light, readable at a 5px dot on either ground. */
+  --status-purple: #a78bfa;
   --nav-bg: rgba(12,12,20,0.95); --pill-bg: rgba(255,255,255,0.04);
   --input-bg: rgba(255,255,255,0.04); --input-border: rgba(255,255,255,0.08);
   --code-bg: rgba(255,255,255,0.05);
@@ -124,6 +128,7 @@ html[data-theme="light"] {
      the hardest pair there is to tell apart. Achromatic now, same lightness:
      ΔE(Lab) vs --accent 36.1 → 41.5, gap to the composited --text3 ~6. */
   --status-ok: #16a34a; --status-warn: #ca8a04; --status-danger: #e53e3e; --status-hot: #ea580c; --status-sleep: #9c9ca4;
+  --status-purple: #7c3aed;
   --nav-bg: rgba(245,245,247,0.95); --pill-bg: rgba(0,0,0,0.03);
   --input-bg: rgba(0,0,0,0.02); --input-border: rgba(0,0,0,0.08);
   --code-bg: rgba(0,0,0,0.03);

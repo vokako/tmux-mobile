@@ -408,16 +408,20 @@ test('the sidebar consumes ONE bulk counts read and reacts to local writes at on
     'four chips, fixed vocabulary order, count present even at 0');
 });
 
-test("the sidebar count chips remap done off the live dot's green — locally, never in the language (board #39, owner)", () => {
-  // Owner (2026-09-01): "done 的标识就不要用绿色了，和前边的冲突了" — in
-  // THESE rows done's status-ok green sat five pixels under the row's green
-  // LIVE dot. The remap is deliberately scoped (lead): the feed's "→ done"
-  // badge keeps boardStatusColor's green so it agrees with the [tmm done]
-  // state badge beside it, and the sidebar chip alone wears the at-rest
-  // token.
+test("the sidebar count chips wear the owner's four categorical colours — locally, never in the language (board #39, owner)", () => {
+  // Owner (2026-09-01), third ruling on these chips: "done 和 todo 颜色又不
+  // 一样了，四个设为 红 橙 黄 紫四个颜色吧" — the two near-greys (todo's
+  // --text3 vs done's --status-sleep) read as inconsistent, so the four
+  // columns take four clearly-distinct CATEGORICAL colours in board order:
+  // red, orange, yellow, purple. All theme tokens (a literal hex would only
+  // be right in one theme), none of them the live dot's green — the earlier
+  // ruling stands by construction. The remap stays deliberately scoped
+  // (lead): the feed's "→ done" badge keeps boardStatusColor's language.
   assert.match(source,
-    /const countColor = \(st: string\) => \(st === 'done' \? 'var\(--status-sleep\)' : boardStatusColor\(st\)\);/u,
-    'the remap: done → --status-sleep, everything else delegates to the one language');
+    /const COUNT_COLORS: Record<string, string> = \{\s*todo: 'var\(--status-danger\)',\s*doing: 'var\(--status-hot\)',\s*review: 'var\(--status-warn\)',\s*done: 'var\(--status-purple\)',\s*\};/u,
+    'the four-colour map: 红橙黄紫 in board order, tokens only');
+  assert.match(source, /const countColor = \(st: string\) => COUNT_COLORS\[st\] \?\? boardStatusColor\(st\);/u,
+    'unknown statuses still delegate to the one language');
   assert.ok(!/side-win-dot" style:background=\{boardStatusColor\(st\)\}/.test(source),
     'the chip dot never bypasses the remap');
   // Colour is a garnish, not the identity: every chip carries its LABEL and

@@ -849,9 +849,11 @@ export function boardLine(item: string | null | undefined): { id: string; from: 
  * (review waits for its acceptor), green = ended well (done), grey = at rest
  * (todo — including a reopen landing back there). An unknown word takes
  * ordinary reading ink, never an invented meaning. The Board SIDEBAR's count
- * chips remap done locally (Board.svelte `countColor`, owner 2026-09-01) —
- * there, and only there, done's green sits adjacent to the row's green LIVE
- * dot; everywhere else done keeps the language's green.
+ * chips are the one sanctioned departure (Board.svelte `countColor`, owner
+ * 2026-09-01): there the four columns wear four CATEGORICAL colours
+ * (红橙黄紫), because next to the row's green LIVE dot this language's green
+ * lied and its two greys blurred; everywhere else the board dialect is
+ * exactly this function.
  */
 export function boardStatusColor(to: string): string {
   switch (to) {

@@ -404,15 +404,24 @@
   }
 
   const statusLabel = (s: string) => t(`boardStatus_${s}`);
-  /** The SIDEBAR count chips' colour — boardStatusColor with ONE local remap
-   * (owner 2026-09-01: "done 的标识就不要用绿色了，和前边的冲突了"; lead
-   * scoped it here): only in these rows does done's status-ok green sit five
-   * pixels under the row's green LIVE dot — one colour, two meanings — so
-   * done wears the at-rest --status-sleep HERE, while the feed's "→ done"
-   * badge keeps the language's green (it must agree with the [tmm done]
-   * state badge beside it). The chips stay non-colour-readable regardless:
-   * every one carries its label and count. */
-  const countColor = (st: string) => (st === 'done' ? 'var(--status-sleep)' : boardStatusColor(st));
+  /** The SIDEBAR count chips' colours — the owner's four CATEGORICAL colours
+   * in board order (2026-09-01, third ruling on these chips: "done 和 todo
+   * 颜色又不一样了，四个设为 红 橙 黄 紫四个颜色吧" — the near-greys the
+   * second ruling left on todo/done read as inconsistent). These are counts,
+   * not severities: red-todo is category paint, not alarm. All theme tokens
+   * (a hex literal is only right in one theme), none of them green — the
+   * first ruling (no collision with the row's green LIVE dot) holds by
+   * construction. Still deliberately SCOPED (lead): the feed's "→ done"
+   * badge keeps boardStatusColor's language, unknown statuses delegate to
+   * it, and the chips stay non-colour-readable — every one carries its
+   * label and count. */
+  const COUNT_COLORS: Record<string, string> = {
+    todo: 'var(--status-danger)',
+    doing: 'var(--status-hot)',
+    review: 'var(--status-warn)',
+    done: 'var(--status-purple)',
+  };
+  const countColor = (st: string) => COUNT_COLORS[st] ?? boardStatusColor(st);
   const col = (s: string) => issues.filter((i) => i.status === s);
   const noteCount = (i: BoardIssue) => (typeof i.notes === 'number' ? i.notes : i.notes.length);
   const ago = (ts: number) => {
