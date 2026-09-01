@@ -288,8 +288,8 @@ test('the multi-server registry wires migrate → deep-link → boot, in that or
   const idxConsume = source.indexOf('consumeConnectUrlParams();');
   assert.ok(idxMigrate >= 0, 'boot migrates the single-server keys');
   assert.ok(idxMigrate < idxConsume, 'migrate BEFORE the deep-link consumer');
-  assert.match(source, /upsertServer\(localStorage, \{ address: a2, token: token \|\| ''/u,
-    'a deep-linked server joins the registry');
+  assert.match(source, /activateConnected\(localStorage, \{ address: a2, token: token \|\| ''/u,
+    'a deep-linked server joins the registry AND activates pre-boot (parks the old current)');
 });
 
 test('the rail server switcher sits above the configure group and only places (board #55)', () => {
@@ -316,12 +316,42 @@ test('a server switch fully drops the old socket, applies the plan, and reboots 
     'cancel → disconnect → applySwitch → reload');
 });
 
-test('failover success refreshes the registry entry by machine identity (board #55)', () => {
+test('failover success RECORDS by machine identity — and never moves CURRENT (board #55)', () => {
   // onReconnectSuccess proved a DIFFERENT address of the SAME machine —
-  // upsert with machineId merges it into the one entry instead of growing a
-  // second "server" (the lead-review invariant: multi-server must not break
-  // the multi-address semantics).
+  // recordServer merges it into the one entry instead of growing a second
+  // "server" (the lead-review invariant: multi-server must not break the
+  // multi-address semantics), and recording is NOT activating: CURRENT
+  // stays put, no reload, the failover semantics own the socket swap.
   const fn = source.match(/function onReconnectSuccess\(useAddr, primaryAddr\) \{[\s\S]*?\n  \}/u)?.[0] ?? '';
-  assert.match(fn, /upsertServer\(localStorage, \{[\s\S]*?address: useAddr/u, 'the active address follows the connect');
+  assert.match(fn, /recordServer\(localStorage, \{[\s\S]*?address: useAddr/u, 'the active address follows the connect');
   assert.match(fn, /machineId: mid/u, 'merged by machine identity, never by address alone');
+  assert.ok(!fn.includes('activateConnected') && !fn.includes('applySwitch'),
+    'failover records; it never activates');
+});
+
+test('a Settings connect to a DIFFERENT server reboots before onConnected (board #55)', async () => {
+  // The lead blocker: connect() swaps the socket but Hub room caches,
+  // mounted terminals and Files cwds are old-server memory, and the old
+  // tmux_state was never parked. The form therefore asks activateConnected
+  // AFTER auth and BEFORE onConnected: same server → proceed in place,
+  // different server → location.reload() through the one boot path (the
+  // reload return also skips onConnected — no flash of the old world).
+  const settings = await readFile(new URL('./lib/app/Settings.svelte', import.meta.url), 'utf8');
+  const fn = settings.match(/async function doConnect\(\) \{[\s\S]*?\n  \}/u)?.[0] ?? '';
+  const iAct = fn.indexOf('activateConnected(localStorage');
+  const iReload = fn.indexOf('if (act.reload) { location.reload(); return; }');
+  const iDone = fn.indexOf('onConnected()');
+  assert.ok(iAct >= 0 && iReload > iAct && iDone > iReload,
+    'activate → maybe-reload-and-return → only then onConnected');
+  assert.match(fn, /machineId: mid/u, 'the learned machine identity rides the activation');
+});
+
+test('the boot auto-connect RECORDS the machine identity, never activates (board #55)', () => {
+  // Most sessions connect through the boot path; without this stamp an
+  // entry never learns its machineId and a later connect to an alternate
+  // address of the SAME machine reads as a new server (live Chromium
+  // finding). Record only — the entry booted as current.
+  const fn = source.match(/connect\(addr, token\)\.then\(\(\) => \{[\s\S]*?\n    \}\)/u)?.[0] ?? '';
+  assert.match(fn, /recordServer\(localStorage, \{[\s\S]*?machineId: mid/u, 'boot stamps the identity');
+  assert.ok(!fn.includes('activateConnected'), 'boot never activates — it IS the current server');
 });

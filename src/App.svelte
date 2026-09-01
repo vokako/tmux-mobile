@@ -22,7 +22,7 @@
   import { agentsLivesInSettings, defaultPage, restoreNav, retarget } from './lib/app/nav-state.ts';
   import { RAIL_DRAG_THRESHOLD, RAIL_GAP, RAIL_ORDER_KEY, parseRailOrder, railDropAt, railDropIndex, railDropOffset, railOrderToStore, visibleRailSlots } from './lib/app/nav-order.ts';
   import { createReconnectMachine } from './lib/app/reconnect.ts';
-  import { applySwitch, currentServerId, loadServers, migrateServers, removeServer, renameServer, upsertServer } from './lib/app/servers.ts';
+  import { activateConnected, applySwitch, currentServerId, loadServers, migrateServers, recordServer, removeServer, renameServer } from './lib/app/servers.ts';
   import { anchorOf, menuPlacement, viewBox } from './lib/ui/placement.ts';
   import { cycleItem, shortcutFromEvent } from './lib/app/shortcuts.ts';
   import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.ts';
@@ -622,11 +622,12 @@
     serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
     if (useAddr !== primaryAddr) { localStorage.setItem('tmux_address', useAddr); activeAddress = useAddr; }
     // Keep the registry entry's active address fresh (board #55): failover
-    // just proved a different address of the SAME machine — merge by
-    // machineId, so no second "server" appears.
+    // just proved a different address of the SAME machine — RECORD by
+    // machineId (no second "server", and CURRENT does not move: recording
+    // and activating are different acts).
     try {
       const mid = getMachineId?.();
-      upsertServer(localStorage, {
+      recordServer(localStorage, {
         address: useAddr, token: localStorage.getItem('tmux_token') || '',
         ...(localStorage.getItem('tmux_socket') ? { socket: localStorage.getItem('tmux_socket') } : {}),
         ...(mid ? { machineId: mid } : {}),
@@ -880,11 +881,14 @@
       if (socket) localStorage.setItem('tmux_socket', socket);
       localStorage.removeItem('tmux_disconnected'); // explicit intent to connect
       // A deep-linked server joins the registry like a hand-typed one (board
-      // #55): same upsert-by-address, so a re-shared link never duplicates.
+      // #55) — and ACTIVATES like one: a different server parks the leaving
+      // server's live state under its id BEFORE the boot restore reads
+      // tmux_state (this runs pre-boot, so no reload is needed on top), while
+      // an alternate address of the current machine folds into its entry.
       if (addrRaw) {
         let a2 = addrRaw.trim();
         if (!/^wss?:\/\//.test(a2)) a2 = (location.protocol === 'https:' ? 'wss://' : 'ws://') + a2;
-        try { upsertServer(localStorage, { address: a2, token: token || '', ...(socket ? { socket } : {}) }); } catch {}
+        try { activateConnected(localStorage, { address: a2, token: token || '', ...(socket ? { socket } : {}) }); } catch {}
       }
       history.replaceState(null, '', location.pathname + location.hash.split('?')[0]);
     } catch { /* malformed URL — ignore, fall back to saved/settings */ }
@@ -959,6 +963,21 @@
       clearTimeout(timeout);
       connected = true;
       serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
+      // RECORD the machine identity onto the current registry entry (board
+      // #55): the boot path is how most sessions connect, and without this
+      // stamp an entry never learns its machineId — a later connect to an
+      // alternate address of the SAME machine would then read as a new
+      // server. Record only: the entry booted as current, nothing activates.
+      try {
+        const mid = getMachineId?.();
+        if (mid) {
+          recordServer(localStorage, {
+            address: addr, token,
+            ...(localStorage.getItem('tmux_socket') ? { socket: localStorage.getItem('tmux_socket') } : {}),
+            machineId: mid,
+          });
+        }
+      } catch {}
       probeTeam();
       try {
         const s = JSON.parse(localStorage.getItem('tmux_state') || '{}');

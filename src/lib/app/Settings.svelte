@@ -1,7 +1,7 @@
 <script lang="ts">
   import { connect, disconnect } from '../core/ws.ts';
   import { defaultConnectionAddress } from '../core/connection-address.ts';
-  import { upsertServer } from './servers.ts';
+  import { activateConnected } from './servers.ts';
   import Icon from '../ui/Icon.svelte';
   import { copyText } from '../core/clipboard.ts';
   import { t } from '../core/i18n.svelte.ts';
@@ -94,16 +94,21 @@
           localStorage.setItem('tmux_machines', JSON.stringify(map));
           localStorage.setItem('tmux_machine_id', mid);
         }
-        // The multi-server registry (board #55): a successful connect upserts
-        // by MACHINE identity — reconnecting to a known machine over a new
-        // address updates its entry in place (LAN/Tailscale/WAN are one
-        // server), a new machine becomes a new named entry, and either way
-        // this server is now the current one.
-        upsertServer(localStorage, {
+        // The multi-server registry (board #55): a successful connect RECORDS
+        // by machine identity and then asks whether this was a different
+        // server. Same machine (a LAN/Tailscale alternate) — nothing to
+        // activate, the socket swap was the whole event. A DIFFERENT server —
+        // the old one's live state is parked under its id and the app must
+        // REBOOT through the boot path: Hub room caches, mounted terminals
+        // and Files cwds are old-server memory that no in-place connect can
+        // reset (lead blocker). The mirror keys already point here — this
+        // form wrote them before dialing.
+        const act = activateConnected(localStorage, {
           address: url, token,
           ...(socket.trim() ? { socket: socket.trim() } : {}),
           ...(mid ? { machineId: mid } : {}),
         });
+        if (act.reload) { location.reload(); return; }
       } catch {}
       onConnected();
     } catch (e) {

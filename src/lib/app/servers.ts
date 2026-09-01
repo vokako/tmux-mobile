@@ -170,40 +170,109 @@ export function migrateServers(storage: Store): ServerEntry[] {
   return loadServers(storage);
 }
 
+/** machineId → addresses, read off the failover map (identity authority). */
+function machinesMap(storage: Store): Record<string, string[]> {
+  try {
+    const raw = JSON.parse(storage.getItem('tmux_machines') || '{}');
+    if (raw && typeof raw === 'object') return raw;
+  } catch { /* unreadable map — address-level matching still applies */ }
+  return {};
+}
+
+function ownerOfAddr(machines: Record<string, string[]>, addr: string): string {
+  for (const [mid, addrs] of Object.entries(machines)) {
+    if (Array.isArray(addrs) && addrs.includes(addr)) return mid;
+  }
+  return '';
+}
+
 /**
- * Record a connection the user just made by hand (the Settings form, a deep
- * link) or that just authenticated. Identity is the MACHINE when known: a
- * `machineId` match updates that entry in place — active address, token,
- * socket — however different the address looks (LAN vs Tailscale vs WAN is
- * the same server). Otherwise it matches by address (and stamps a provided
- * machineId onto a pre-connect entry), and only then creates a new entry.
- * Existing names are kept — a rename must survive reconnects. Returns the
- * updated list.
+ * RECORD a connection in the registry — and nothing else (lead review #2:
+ * recording and ACTIVATING are different acts; the first must never move
+ * CURRENT, or a Settings connect skips the park/restore contract).
+ *
+ * Identity is the machine when known: an explicit `machineId` (or, absent
+ * that, the failover map's attribution of the address) matches that entry —
+ * a new address of a known machine updates it in place. Otherwise address
+ * match, then a new entry. Names survive (a rename outlives reconnects).
  */
-export function upsertServer(
+export function recordServer(
   storage: Store,
   conn: { address: string; token: string; socket?: string; machineId?: string },
-): ServerEntry[] {
+): { servers: ServerEntry[]; entry: ServerEntry } {
   const servers = loadServers(storage);
-  let entry = conn.machineId ? servers.find((s) => s.machineId === conn.machineId) : undefined;
+  const mid = conn.machineId || ownerOfAddr(machinesMap(storage), conn.address);
+  let entry = mid ? servers.find((s) => s.machineId === mid) : undefined;
   if (!entry) entry = servers.find((s) => s.address === conn.address);
   if (entry) {
     entry.address = conn.address;               // the address that just worked is the active one
     entry.token = conn.token;
     if (conn.socket) entry.socket = conn.socket; else delete entry.socket;
-    if (conn.machineId) entry.machineId = conn.machineId;
+    if (mid) entry.machineId = mid;
   } else {
     entry = {
       id: serverId(), name: hostLabel(conn.address),
       address: conn.address, token: conn.token,
       ...(conn.socket ? { socket: conn.socket } : {}),
-      ...(conn.machineId ? { machineId: conn.machineId } : {}),
+      ...(mid ? { machineId: mid } : {}),
     };
     servers.push(entry);
   }
   saveServers(storage, servers);
-  storage.setItem(CURRENT_KEY, entry.id);
-  return servers;
+  return { servers, entry };
+}
+
+/** The park/restore core every activation path shares: park the leaving
+ *  server's live pair under ITS id, surface the target's parked pair (or
+ *  clear — a first visit inherits nothing), mark the target current. The
+ *  MIRROR keys are the caller's business — applySwitch writes them from the
+ *  entry, a connect path has already written them. */
+function parkAndPoint(storage: Store, fromId: string, target: ServerEntry): void {
+  if (fromId) {
+    const liveState = storage.getItem('tmux_state');
+    if (liveState != null) storage.setItem(STATE_PREFIX + fromId, liveState);
+    else storage.removeItem(STATE_PREFIX + fromId);
+    const liveMachine = storage.getItem('tmux_machine_id');
+    if (liveMachine != null) storage.setItem(MACHINE_PREFIX + fromId, liveMachine);
+    else storage.removeItem(MACHINE_PREFIX + fromId);
+  }
+  const parkedState = storage.getItem(STATE_PREFIX + target.id);
+  if (parkedState != null) storage.setItem('tmux_state', parkedState);
+  else storage.removeItem('tmux_state');
+  const targetMachine = target.machineId || storage.getItem(MACHINE_PREFIX + target.id);
+  if (targetMachine) storage.setItem('tmux_machine_id', targetMachine);
+  else storage.removeItem('tmux_machine_id');
+  storage.setItem(CURRENT_KEY, target.id);
+}
+
+/**
+ * A connect just succeeded (the Settings form, a deep link) — record it and
+ * decide whether the app must REBOOT.
+ *
+ * Same server as current (same entry — machine alternates fold into one by
+ * recordServer): nothing to activate; the socket swap was the whole event
+ * and the failover semantics own it. Returns `{ reload: false }`.
+ *
+ * A DIFFERENT server: this connect bypassed applySwitch, but the contract
+ * is the same — the old server's live `tmux_state`/`tmux_machine_id` are
+ * parked under the OLD current id BEFORE anything overwrites them (the
+ * caller runs this before flipping `connected`, so the state effect has not
+ * yet written the new world), the target's parked pair is surfaced, CURRENT
+ * moves, and the caller must `location.reload()`: Hub room caches, mounted
+ * terminals and Files cwds are OLD-server memory that only the boot path
+ * resets by construction (lead blocker, board #55). The mirror keys already
+ * point at the new server — the connect path wrote them before dialing.
+ */
+export function activateConnected(
+  storage: Store,
+  conn: { address: string; token: string; socket?: string; machineId?: string },
+): { reload: boolean } {
+  const { entry } = recordServer(storage, conn);
+  const fromId = currentServerId(storage);
+  if (entry.id === fromId) return { reload: false };
+  parkAndPoint(storage, fromId, entry);
+  storage.removeItem('tmux_disconnected');
+  return { reload: true };
 }
 
 export function renameServer(storage: Store, id: string, name: string): ServerEntry[] {
@@ -246,31 +315,12 @@ export function applySwitch(storage: Store, toId: string): boolean {
   const fromId = currentServerId(storage);
   if (!target || toId === fromId) return false;
 
-  if (fromId) {
-    const liveState = storage.getItem('tmux_state');
-    if (liveState != null) storage.setItem(STATE_PREFIX + fromId, liveState);
-    else storage.removeItem(STATE_PREFIX + fromId);
-    const liveMachine = storage.getItem('tmux_machine_id');
-    if (liveMachine != null) storage.setItem(MACHINE_PREFIX + fromId, liveMachine);
-    else storage.removeItem(MACHINE_PREFIX + fromId);
-  }
-
-  const parkedState = storage.getItem(STATE_PREFIX + toId);
-  if (parkedState != null) storage.setItem('tmux_state', parkedState);
-  else storage.removeItem('tmux_state');
-  // The target's machine identity: the entry's own machineId when known (it
-  // is the SAME fact the parked key held, and fresher), else the parked one,
-  // else cleared — never the leaving server's, so A's failover set is never
-  // consulted while connected to B.
-  const targetMachine = target.machineId || storage.getItem(MACHINE_PREFIX + toId);
-  if (targetMachine) storage.setItem('tmux_machine_id', targetMachine);
-  else storage.removeItem('tmux_machine_id');
+  parkAndPoint(storage, fromId, target);
 
   storage.setItem('tmux_address', target.address);
   storage.setItem('tmux_token', target.token);
   if (target.socket) storage.setItem('tmux_socket', target.socket);
   else storage.removeItem('tmux_socket');
-  storage.setItem(CURRENT_KEY, toId);
   storage.removeItem('tmux_disconnected');
   return true;
 }
