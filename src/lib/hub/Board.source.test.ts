@@ -422,6 +422,11 @@ test("the sidebar count chips wear the owner's four categorical colours — loca
     'the four-colour map: 红橙黄紫 in board order, tokens only');
   assert.match(source, /const countColor = \(st: string\) => COUNT_COLORS\[st\] \?\? boardStatusColor\(st\);/u,
     'unknown statuses still delegate to the one language');
+  // Purple is the only NEW token in the four-colour map. Pin BOTH theme
+  // definitions: the component contract alone would stay green if one theme
+  // silently lost the variable and rendered a transparent Done dot.
+  const purples = [...appCss.matchAll(/--status-purple:\s*#([0-9a-f]{6})/giu)].map((m) => String(m[1]).toLowerCase());
+  assert.deepEqual(purples, ['a78bfa', '7c3aed'], 'purple is defined once per theme: dark violet-400, light violet-600');
   assert.ok(!/side-win-dot" style:background=\{boardStatusColor\(st\)\}/.test(source),
     'the chip dot never bypasses the remap');
   // Colour is a garnish, not the identity: every chip carries its LABEL and
