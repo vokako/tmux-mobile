@@ -552,7 +552,11 @@ test('locked issue text is static selectable prose; the workflow stays live (boa
   assert.match(branches[0]![1]!, /<input class="d-title-input" bind:value=\{draft\.title\}/u, 'editable title is the input');
   assert.match(branches[0]![1]!, /\{:else if sel\.title\.trim\(\)\}\s*<div class="d-title-static">\{sel\.title\}<\/div>/u, 'locked title is static text');
   assert.match(branches[1]![1]!, /<textarea class="d-body-edit" bind:value=\{draft\.body\}/u, 'editable body is the textarea');
-  assert.match(branches[1]![1]!, /\{:else if sel\.body\.trim\(\)\}[\s\S]*<div class="d-body-static">\{sel\.body\.trim\(\)\}<\/div>/u, 'locked body is static text');
+  // trim() may only GATE the render — the output is the original, verbatim:
+  // a CLI-written body's leading/trailing newlines are history too, and
+  // pre-wrap makes them real (review blocker on ebda03b).
+  assert.match(branches[1]![1]!, /\{:else if sel\.body\.trim\(\)\}[\s\S]*<div class="d-body-static">\{sel\.body\}<\/div>/u, 'locked body renders RAW');
+  assert.ok(!branches[1]![1]!.includes('d-body-static">{sel.body.trim()}'), 'the display layer never rewrites the record');
   assert.ok(!/d-title-input[^>]*\bdisabled\b/u.test(source) && !/d-body-edit[^>]*\bdisabled\b/u.test(source),
     'locked is a different ELEMENT, not a disabled input');
 

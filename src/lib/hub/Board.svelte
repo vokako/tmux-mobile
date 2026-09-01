@@ -582,12 +582,12 @@
       {#if sel.editable}
         <textarea class="d-body-edit" bind:value={draft.body} use:autoGrow={draft.body} placeholder={t('boardBodyPh')} rows="3"></textarea>
       {:else if sel.body.trim()}
-        <!-- The full body, never clipped: pre-wrap keeps its line breaks and
-             the reader selects it like any document text. The draft still
-             mirrors it (draftOf), so dirty/save/rebase keep working for the
-             fields that REMAIN writable — with no input bound to title/body
-             a patch can never carry them, matching the server's refusal. -->
-        <div class="d-body-static">{sel.body.trim()}</div>
+        <!-- The full body, VERBATIM (review blocker on ebda03b): this is the
+             original history, so the display layer must not rewrite it —
+             trim() only decides whether the field renders at all; the output
+             is sel.body untouched, leading/trailing whitespace included
+             (pre-wrap makes it real). -->
+        <div class="d-body-static">{sel.body}</div>
       {/if}
       <!-- The note thread as a TIMELINE (reopened #11): a header line — author
            in the accent ink, time right-aligned — and the content in its own
