@@ -311,16 +311,25 @@
       const b = body.trim() ? ` — ${excerpt(body)}.` : '.';
       // The {title} slot names the issue; with the body already riding in
       // {body}, a titleless issue is named by its id (not the body twice).
+      // The SUBJECT leads (board #51: "前边有谁分给他一个主体名称"): who
+      // assigned it, then the issue, then the notes, then the ask — the
+      // reading order of a handoff. The UI's dispatch is the operator's act,
+      // and 'human' is the name agents know the operator by (hubPost below
+      // posts as the same identity).
       const msg = t('boardAssignMsg')
         .replaceAll('{id}', String(id))
+        .replace('{who}', 'human')
         .replace('{title}', title.trim() || '#' + id)
         .replace('{body}', b);
       // The note thread rides along (board #42): the discussion under an
       // issue is context the agent must not miss, appended AFTER the rendered
       // message under its own header, chronological, authors kept, and
       // budget-capped with the `tmm board show` pointer — assignNotes owns
-      // that shape. A fresh issue has no notes and appends nothing.
-      await hubPost(cur, `@${name} ${msg}${assignNotes(id, notes)}`);
+      // that shape. A fresh issue has no notes and appends nothing. The tmm
+      // instructions come LAST (board #51: "please tmm xxxx这样的顺序") —
+      // after the content, never between the issue and its thread.
+      const take = t('boardAssignTake').replaceAll('{id}', String(id));
+      await hubPost(cur, `@${name} ${msg}${assignNotes(id, notes)}\n${take}`);
     }
   }
   /** Explicit save of the USER's changed fields (diffed against the draft

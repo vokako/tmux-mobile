@@ -48,8 +48,14 @@ test('assignment is ONE dispatch — the detail picker and the create dialog sha
   // The brief carries the NOTE THREAD too (board #42): the delivery appends
   // assignNotes — chronological, authored, budget-capped in board.ts — so an
   // agent cannot miss the discussion under the issue.
-  assert.match(source, /await hubPost\(cur, `@\$\{name\} \$\{msg\}\$\{assignNotes\(id, notes\)\}`\);/u,
-    'the dispatch message ends with the assignNotes block');
+  // …and the reading order is a HANDOFF (board #51): who assigned it leads
+  // the message, the note thread follows the issue, and the tmm instructions
+  // ride LAST — never between the issue and its thread.
+  assert.match(source, /await hubPost\(cur, `@\$\{name\} \$\{msg\}\$\{assignNotes\(id, notes\)\}\\n\$\{take\}`\);/u,
+    'the dispatch order: message, notes, then the take instructions last');
+  assert.match(source, /\.replace\('\{who\}', 'human'\)/u, 'the assigner is the subject at the front');
+  assert.match(source, /const take = t\('boardAssignTake'\)\.replaceAll\('\{id\}', String\(id\)\);/u,
+    'the instructions are their own i18n atom, filled per issue');
   assert.match(source, /if \(assignee !== undefined\) await dispatchAssign\(sel\.id, assignee, draft\.title, draft\.body, Array\.isArray\(sel\.notes\) \? sel\.notes : \[\]\);/u,
     'a ✓-confirmed assignee change routes through it (board #15) and carries the OPEN issue\u2019s thread (board #42)');
   assert.match(source, /if \(wantAssign && created != null\) await dispatchAssign\(created, wantAssign, wantTitle, wantBody\);/u,
