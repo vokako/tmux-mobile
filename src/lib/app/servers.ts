@@ -269,7 +269,15 @@ export function activateConnected(
 ): { reload: boolean } {
   const { entry } = recordServer(storage, conn);
   const fromId = currentServerId(storage);
-  if (entry.id === fromId) return { reload: false };
+  if (entry.id === fromId) {
+    // Same server: the socket swap was the whole event — but the LIVE
+    // machine id is THIS function's to keep fresh. The caller must never
+    // pre-write it (lead blocker #2): on the different-server path below,
+    // parkAndPoint parks the live value under the OLD id, and a pre-written
+    // new mid would be filed in the old server's slot.
+    if (entry.machineId) storage.setItem('tmux_machine_id', entry.machineId);
+    return { reload: false };
+  }
   parkAndPoint(storage, fromId, entry);
   storage.removeItem('tmux_disconnected');
   return { reload: true };

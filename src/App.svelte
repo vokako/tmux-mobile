@@ -976,6 +976,10 @@
             ...(localStorage.getItem('tmux_socket') ? { socket: localStorage.getItem('tmux_socket') } : {}),
             machineId: mid,
           });
+          // Boot's server IS the current entry — refreshing the live key
+          // here has no park to poison, and the reconnect machine needs it
+          // for the failover set (Settings no longer writes it).
+          localStorage.setItem('tmux_machine_id', mid);
         }
       } catch {}
       probeTeam();

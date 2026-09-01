@@ -355,3 +355,18 @@ test('the boot auto-connect RECORDS the machine identity, never activates (board
   assert.match(fn, /recordServer\(localStorage, \{[\s\S]*?machineId: mid/u, 'boot stamps the identity');
   assert.ok(!fn.includes('activateConnected'), 'boot never activates — it IS the current server');
 });
+
+test('doConnect never writes the live tmux_machine_id — activateConnected owns it (board #55)', async () => {
+  // Lead blocker #2: the form pre-wrote the NEW machine's id into the live
+  // key before activating, so parkAndPoint filed it under the OLD server's
+  // parking slot. The map (tmux_machines, keyed by machineId) stays the
+  // form's to update; the live key belongs to the activation.
+  const settings = await readFile(new URL('./lib/app/Settings.svelte', import.meta.url), 'utf8');
+  const fn = settings.match(/async function doConnect\(\) \{[\s\S]*?\n  \}/u)?.[0] ?? '';
+  assert.ok(!fn.includes("setItem('tmux_machine_id'"), 'no live machine-id pre-write in the form');
+  assert.match(fn, /setItem\('tmux_machines'/u, 'the identity MAP update stays');
+  // The boot path may write it: its server IS the current entry, no park to poison.
+  const boot = source.match(/connect\(addr, token\)\.then\(\(\) => \{[\s\S]*?\n    \}\)/u)?.[0] ?? '';
+  assert.match(boot, /recordServer\(localStorage[\s\S]*?setItem\('tmux_machine_id', mid\)/u,
+    'boot stamps the live key AFTER recording — it is the current server');
+});

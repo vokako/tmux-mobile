@@ -282,3 +282,36 @@ test('applySwitch prefers the entry’s own machineId for the failover set', () 
   assert.equal(applySwitch(s, a.id), true);
   assert.equal(s.getItem('tmux_machine_id'), 'm-a', 'and back — never crossed');
 });
+
+test('activateConnected owns the live machine id — same machine refreshes it (lead blocker #2)', () => {
+  const s = mem({
+    tmux_address: 'ws://a-lan:1', tmux_token: 'ta',
+    tmux_machines: JSON.stringify({ 'm-a': ['ws://a-lan:1', 'ws://a-alt:2'] }),
+    // live key stale/absent — Settings no longer pre-writes it
+  });
+  migrateServers(s);
+  const act = activateConnected(s, { address: 'ws://a-alt:2', token: 'ta', machineId: 'm-a' });
+  assert.equal(act.reload, false);
+  assert.equal(s.getItem('tmux_machine_id'), 'm-a', 'the same-machine branch refreshes the live key');
+});
+
+test('the REAL caller sequence cannot poison the old server’s parked machine id', () => {
+  // Regression for the exact bug: Settings used to write the NEW machine's
+  // id into the live key BEFORE activating, so parkAndPoint filed m-b under
+  // A's slot. The contract is now: the caller never pre-writes the live key,
+  // activateConnected parks whatever the OLD server left there.
+  const s = mem({
+    tmux_address: 'ws://a:1', tmux_token: 'ta', tmux_machine_id: 'm-a',
+    tmux_state: '{"page":"hub"}',
+  });
+  migrateServers(s);
+  const aId = currentServerId(s);
+  // The real caller: mirror keys pre-written, map updated, live key UNTOUCHED.
+  s.setItem('tmux_address', 'ws://b:2');
+  s.setItem('tmux_token', 'tb');
+  s.setItem('tmux_machines', JSON.stringify({ 'm-a': ['ws://a:1'], 'm-b': ['ws://b:2'] }));
+  const act = activateConnected(s, { address: 'ws://b:2', token: 'tb', machineId: 'm-b' });
+  assert.equal(act.reload, true);
+  assert.equal(s.getItem(MACHINE_PREFIX + aId), 'm-a', 'A’s slot holds A’s id — never B’s');
+  assert.equal(s.getItem('tmux_machine_id'), 'm-b', 'the live key is B’s, written by parkAndPoint');
+});

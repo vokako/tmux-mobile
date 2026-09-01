@@ -92,7 +92,12 @@
           if (!addrs.includes(url)) addrs.push(url);
           map[mid] = addrs.slice(-8);
           localStorage.setItem('tmux_machines', JSON.stringify(map));
-          localStorage.setItem('tmux_machine_id', mid);
+          // The LIVE tmux_machine_id is deliberately NOT written here:
+          // activateConnected owns that key. A pre-write would poison the
+          // park on the different-server path — parkAndPoint would file the
+          // NEW machine's id under the OLD server's parking slot (lead
+          // blocker #2, board #55). The map above is safe: it is keyed by
+          // machineId and never read through the live key.
         }
         // The multi-server registry (board #55): a successful connect RECORDS
         // by machine identity and then asks whether this was a different
