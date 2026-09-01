@@ -13,7 +13,8 @@
   import Preferences from './lib/app/Preferences.svelte';
   import ConfirmDialog from './lib/ui/ConfirmDialog.svelte';
   import { copyText } from './lib/core/clipboard.ts';
-  import { teamStatus } from './lib/core/ws.ts';
+  import { teamStatus, systemStatus } from './lib/core/ws.ts';
+  import SystemStatus from './lib/system/SystemStatus.svelte';
   import { connect, isConnected, disconnect, setOnDisconnect, subscribe as wsSubscribe, resubscribeActive as wsResubscribeActive, getMachineId, getHostname, findBestAddress, classifyAddress, ADDRESS_LABELS, isAddressViable, noteAddressUnreachable, listPanes, listSessions } from './lib/core/ws.ts';
   import { t } from './lib/core/i18n.svelte.ts';
   import { layout } from './lib/app/layout.svelte.ts';
@@ -1662,6 +1663,18 @@
       </button>
     </nav>
   {/if}
+
+  <!-- Server system vitals (board #56): the true bottom-left corner, desktop
+       + connected ONLY — a phone's server is remote and its corners belong to
+       the bottom bar. `visible` tracks the connection so a drop stops the
+       poll; the wrapper takes NO pointer events, so it can never occlude the
+       rail or a page action (the tooltip is sacrificed for that guarantee —
+       the numbers ARE the reading). -->
+  {#if connected && !layout.isTouchDevice}
+    <div class="sys-corner">
+      <SystemStatus load={systemStatus} visible={connected} />
+    </div>
+  {/if}
 </main>
 
 <style>
@@ -2036,4 +2049,20 @@
   .split-opt:hover { background: var(--surface2); color: var(--text2); }
   .split-opt.active { background: var(--accent-bg); color: var(--accent); }
   .split-menu-backdrop { position: fixed; inset: 0; z-index: 12; background: transparent; border: none; cursor: default; }
+  /* The vitals corner (board #56): informational chrome pinned to the real
+     bottom-left, safe-area aware. pointer-events: none is the OCCLUSION
+     CONTRACT (pinned by App.source.test.ts) — clicks pass through, so no
+     page action or rail button can ever hide behind it. The soft wash keeps
+     the micro line legible over whatever the page puts underneath. */
+  .sys-corner {
+    position: fixed;
+    left: calc(8px + var(--sal, 0px));
+    bottom: calc(6px + var(--sab, 0px));
+    z-index: 11;
+    pointer-events: none;
+    padding: 3px 8px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--surface) 78%, transparent);
+    backdrop-filter: blur(4px);
+  }
 </style>

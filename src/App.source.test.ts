@@ -387,3 +387,24 @@ test('removing a saved server goes through the shared ConfirmDialog (board #55)'
   assert.match(source, /<ConfirmDialog open=\{!!pendingServerRemove\}[\s\S]*?onconfirm=\{serverRemoveConfirm\} oncancel=\{\(\) => \(pendingServerRemove = null\)\}/u,
     'the shared dialog, cancel drops the capture');
 });
+
+test('the system-vitals corner mounts connected-desktop-only and can never occlude (board #56)', () => {
+  // ONE component (src/lib/system/), transport injected from ws.ts — App
+  // wires, it does not re-implement.
+  assert.match(source, /import SystemStatus from '\.\/lib\/system\/SystemStatus\.svelte'/u,
+    'the shared component, not a second rendering');
+  assert.match(source, /import \{[^}]*\bsystemStatus\b[^}]*\} from '\.\/lib\/core\/ws\.ts'/u,
+    'the typed wrapper is the injected transport');
+  assert.match(source, /load=\{systemStatus\}/u, 'load is INJECTED — the component never imports ws');
+  // Desktop + connected only: a phone never mounts it (its server is remote
+  // and its corners belong to the bottom bar), and a disconnected client
+  // must not poll a socket that is not there.
+  assert.match(source, /connected && !layout\.isTouchDevice[\s\S]{0,200}<SystemStatus/u,
+    'mount gate is connected desktop');
+  assert.match(source, /<SystemStatus[^/]*visible=\{connected\}/u,
+    'visible tracks the connection so a drop stops the timer');
+  // The no-occlusion contract: the corner is informational chrome — clicks
+  // pass THROUGH it, so it cannot cover the rail or any page action.
+  assert.match(source, /\.sys-corner \{[^}]*pointer-events: none/u,
+    'pointer-events: none on the fixed corner');
+});

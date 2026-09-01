@@ -6,6 +6,7 @@
 // changes server-side, change it here — every consumer then fails to
 // type-check instead of silently reading `undefined`.
 import type { ProjectRow } from '../projects/projects.ts';
+import type { SystemStatus as SystemStatusReading } from '../system/system.ts';
 export interface TmuxSession {
   name: string;
   windows: number;
@@ -790,6 +791,15 @@ export const hubMsgPurge = (session: string, ids: string[]) =>
  * project. */
 export const hubRooms = () =>
   call<{ rooms: Record<string, number>; states?: Record<string, string> }>('hub_rooms', {});
+// ── Server system vitals (board #56) ────────────────────────────────────────
+/** One low-frequency reading of the machine the SERVER runs on (cpu/mem/root
+ * disk — `src-tauri/src/system_status.rs` is the authority on the shape).
+ * Null instead of a rejection on ANY failure: a mobile or older server
+ * answers method-not-found, and the corner's contract is "a failed ask keeps
+ * the last reading / nothing renders before the first" — an exception here
+ * would be the one thing the fail-soft chain cannot absorb. */
+export const systemStatus = (): Promise<SystemStatusReading | null> =>
+  call<SystemStatusReading>('system_status', {}).catch(() => null);
 /** What is hidden in this room, newest first. Each row carries the message itself,
  * so the archive view needs no second lookup. */
 export const hubArchive = (session: string) =>

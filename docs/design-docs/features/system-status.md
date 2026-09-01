@@ -68,6 +68,22 @@ concurrent work.
   reads as a fraction (`210/473G`), one decimal only under 10. Labels
   CPU/MEM/DISK are universal abbreviations — no i18n entries needed.
 
+## Integration (App, board #56 final phase)
+
+`ws.ts` exports the typed wrapper — `systemStatus(): Promise<SystemStatus |
+null>` — whose `catch(() => null)` absorbs EVERY failure including an older
+or mobile server's method-not-found: null is the reading the component
+already treats as "keep what I have / say nothing", so no error can escape
+into the page. App mounts the corner once, gated `connected &&
+!layout.isTouchDevice` (a phone's server is remote and its corners belong to
+the bottom bar), with `visible={connected}` so a dropped connection stops the
+timer even before the unmount. The `.sys-corner` wrapper is fixed to the real
+bottom-left (safe-area aware) and takes **`pointer-events: none`** — the
+occlusion contract, pinned by `App.source.test.ts`: clicks pass through, so
+no rail button or page action can ever hide behind it (the hover tooltip is
+deliberately sacrificed for that guarantee). Verified live: the hit test at
+the corner's own center reaches the sidebar row UNDER it.
+
 ## Tests
 
 - Rust (`system_status.rs` module tests): first-call-null then bounded
