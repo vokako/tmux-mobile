@@ -14,7 +14,7 @@ use std::path::Path;
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 14;
+const SCHEMA_VERSION: i64 = 15;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
@@ -169,6 +169,10 @@ impl Store {
     /// edits). The v13 step below still creates it for a database coming from
     /// v12; this is the floor under both.
     fn heal(&mut self) -> Result<(), String> {
+        // An additive Board column gets the same partial-build protection as
+        // deliveries below: if a dev build stamped v15 before its ALTER landed,
+        // the next open still repairs the schema instead of trusting the stamp.
+        self.ensure_issue_edit_lock()?;
         self.conn
             .execute_batch(
                 "CREATE TABLE IF NOT EXISTS deliveries (
@@ -182,6 +186,40 @@ impl Store {
                  CREATE INDEX IF NOT EXISTS deliveries_session ON deliveries(session, window);",
             )
             .map_err(|e| format!("heal deliveries: {e}"))
+    }
+
+    /// Ensure the durable half of Board editability exists, then
+    /// conservatively backfill evidence an Agent already processed the issue.
+    /// Current assignment is checked separately at read/write time: assigning
+    /// and then undoing it before the Agent acts may legitimately reopen text.
+    fn ensure_issue_edit_lock(&self) -> Result<(), String> {
+        let has_column: bool = self
+            .conn
+            .query_row(
+                "SELECT EXISTS(
+                   SELECT 1 FROM pragma_table_info('issues')
+                    WHERE name = 'agent_touched'
+                 )",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("inspect Board edit lock: {e}"))?;
+        if !has_column {
+            self.conn
+                .execute_batch(
+                    "ALTER TABLE issues ADD COLUMN agent_touched INTEGER NOT NULL DEFAULT 0;
+                     UPDATE issues
+                        SET agent_touched = 1
+                      WHERE status <> 'todo'
+                         OR created_by <> 'human'
+                         OR EXISTS (
+                           SELECT 1 FROM issue_notes n
+                            WHERE n.issue_id = issues.id AND n.author <> 'human'
+                         );",
+                )
+                .map_err(|e| format!("add/backfill Board edit lock: {e}"))?;
+        }
+        Ok(())
     }
 
     fn migrate(&mut self) -> Result<(), String> {
@@ -453,9 +491,10 @@ impl Store {
                        body       TEXT NOT NULL DEFAULT '',
                        status     TEXT NOT NULL DEFAULT 'todo',
                        assignee   TEXT NOT NULL DEFAULT '',
-                       created_by TEXT NOT NULL DEFAULT '',
-                       created_at INTEGER NOT NULL,
-                       updated_at INTEGER NOT NULL
+                       created_by    TEXT NOT NULL DEFAULT '',
+                       created_at    INTEGER NOT NULL,
+                       updated_at    INTEGER NOT NULL,
+                       agent_touched INTEGER NOT NULL DEFAULT 0
                      );
                      CREATE INDEX issues_session ON issues(session, status, updated_at DESC);
                      CREATE TABLE issue_notes (
@@ -543,6 +582,13 @@ impl Store {
                       WHERE NOT EXISTS (SELECT 1 FROM projects p WHERE p.session = issues.session);",
                 )
                 .map_err(|e| format!("migrate to 14: {e}"))?;
+        }
+        if version < 15 {
+            // v15: original issue text becomes immutable once an Agent has
+            // acted. A current assignee also locks it, but that part is live
+            // state; this bit remembers activity after the issue is unassigned
+            // or moved back (board #43).
+            self.ensure_issue_edit_lock()?;
         }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)
@@ -1297,7 +1343,7 @@ impl Store {
             .conn
             .prepare(
                 "SELECT i.id, i.title, i.body, i.status, i.assignee, i.created_by,
-                        i.created_at, i.updated_at,
+                        i.created_at, i.updated_at, i.agent_touched,
                         (SELECT COUNT(*) FROM issue_notes n WHERE n.issue_id = i.id)
                    FROM issues i WHERE i.session = ?1
                   ORDER BY i.updated_at DESC",
@@ -1305,16 +1351,19 @@ impl Store {
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([session], |r| {
+                let assignee = r.get::<_, String>(4)?;
+                let agent_touched = r.get::<_, i64>(8)? != 0;
                 Ok(serde_json::json!({
                     "id": r.get::<_, i64>(0)?,
                     "title": r.get::<_, String>(1)?,
                     "body": r.get::<_, String>(2)?,
                     "status": r.get::<_, String>(3)?,
-                    "assignee": r.get::<_, String>(4)?,
+                    "assignee": assignee,
                     "created_by": r.get::<_, String>(5)?,
                     "created_at": r.get::<_, i64>(6)?,
                     "updated_at": r.get::<_, i64>(7)?,
-                    "notes": r.get::<_, i64>(8)?,
+                    "editable": assignee.is_empty() && !agent_touched,
+                    "notes": r.get::<_, i64>(9)?,
                 }))
             })
             .map_err(|e| e.to_string())?
@@ -1347,19 +1396,23 @@ impl Store {
         let issue = self
             .conn
             .query_row(
-                "SELECT id, title, body, status, assignee, created_by, created_at, updated_at
+                "SELECT id, title, body, status, assignee, created_by, created_at, updated_at,
+                        agent_touched
                    FROM issues WHERE session = ?1 AND id = ?2",
                 rusqlite::params![session, id],
                 |r| {
+                    let assignee = r.get::<_, String>(4)?;
+                    let agent_touched = r.get::<_, i64>(8)? != 0;
                     Ok(serde_json::json!({
                         "id": r.get::<_, i64>(0)?,
                         "title": r.get::<_, String>(1)?,
                         "body": r.get::<_, String>(2)?,
                         "status": r.get::<_, String>(3)?,
-                        "assignee": r.get::<_, String>(4)?,
+                        "assignee": assignee,
                         "created_by": r.get::<_, String>(5)?,
                         "created_at": r.get::<_, i64>(6)?,
                         "updated_at": r.get::<_, i64>(7)?,
+                        "editable": assignee.is_empty() && !agent_touched,
                     }))
                 },
             )
@@ -1412,8 +1465,9 @@ impl Store {
                 }
                 self.conn
                     .execute(
-                        "INSERT INTO issues (session, title, body, status, assignee, created_by, created_at, updated_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+                        "INSERT INTO issues
+                           (session, title, body, status, assignee, created_by, created_at, updated_at, agent_touched)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?8)",
                         rusqlite::params![
                             session,
                             title,
@@ -1421,7 +1475,8 @@ impl Store {
                             status.unwrap_or("todo"),
                             assignee.unwrap_or(""),
                             who,
-                            now
+                            now,
+                            (who != "human") as i64
                         ],
                     )
                     .map_err(|e| e.to_string())?;
@@ -1431,18 +1486,28 @@ impl Store {
                 // The contentless rule holds through PATCHES too: a save may
                 // clear the title (Some("")) only if what it leaves behind —
                 // patched or kept — still has a body, and vice versa.
-                let cur: Option<(String, String)> = self
+                let cur: Option<(String, String, String, bool)> = self
                     .conn
                     .query_row(
-                        "SELECT title, body FROM issues WHERE session = ?1 AND id = ?2",
+                        "SELECT title, body, assignee, agent_touched
+                           FROM issues WHERE session = ?1 AND id = ?2",
                         rusqlite::params![session, id],
-                        |r| Ok((r.get(0)?, r.get(1)?)),
+                        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? != 0)),
                     )
                     .optional()
                     .map_err(|e| e.to_string())?;
-                let Some((cur_title, cur_body)) = cur else {
+                let Some((cur_title, cur_body, cur_assignee, agent_touched)) = cur else {
                     return Err(format!("no issue #{id} on this board"));
                 };
+                // The original brief is history after dispatch or Agent work.
+                // Workflow fields remain patchable — status/assignee are how
+                // the issue continues moving — but title/body cannot be
+                // rewritten under the discussion that already followed them.
+                if (title.is_some() || body.is_some())
+                    && (!cur_assignee.is_empty() || agent_touched)
+                {
+                    return Err("issue title/body are locked after assignment or Agent activity".into());
+                }
                 if title.unwrap_or(&cur_title).trim().is_empty()
                     && body.unwrap_or(&cur_body).trim().is_empty()
                 {
@@ -1456,9 +1521,10 @@ impl Store {
                            body     = COALESCE(?4, body),
                            status   = COALESCE(?5, status),
                            assignee = COALESCE(?6, assignee),
-                           updated_at = ?7
+                           updated_at = ?7,
+                           agent_touched = CASE WHEN ?8 <> 'human' THEN 1 ELSE agent_touched END
                          WHERE session = ?1 AND id = ?2",
-                        rusqlite::params![session, id, title, body, status, assignee, now],
+                        rusqlite::params![session, id, title, body, status, assignee, now, who],
                     )
                     .map_err(|e| e.to_string())?;
                 if n == 0 {
@@ -1479,8 +1545,11 @@ impl Store {
         let n = self
             .conn
             .execute(
-                "UPDATE issues SET updated_at = ?3 WHERE session = ?1 AND id = ?2",
-                rusqlite::params![session, id, now],
+                "UPDATE issues
+                    SET updated_at = ?3,
+                        agent_touched = CASE WHEN ?4 <> 'human' THEN 1 ELSE agent_touched END
+                  WHERE session = ?1 AND id = ?2",
+                rusqlite::params![session, id, now, author],
             )
             .map_err(|e| e.to_string())?;
         if n == 0 {
@@ -1708,6 +1777,40 @@ mod tests {
     }
 
     #[test]
+    fn original_issue_text_locks_on_assignment_or_agent_activity() {
+        let store = Store::open_memory().unwrap();
+
+        let id = store.issue_save("proj", None, Some("brief"), Some("body"), None, None, "human", 100).unwrap();
+        assert_eq!(store.issue_get("proj", id).unwrap().unwrap()["editable"], true);
+
+        // Assignment locks immediately, but undoing it before the Agent acts
+        // reopens the text: current assignment and durable activity are the
+        // two independent gates from board #43.
+        store.issue_save("proj", Some(id), None, None, None, Some("builder"), "human", 110).unwrap();
+        assert_eq!(store.issue_get("proj", id).unwrap().unwrap()["editable"], false);
+        assert!(store.issue_save("proj", Some(id), Some("rewrite"), None, None, None, "human", 120).is_err());
+        store.issue_save("proj", Some(id), None, None, None, Some(""), "human", 130).unwrap();
+        assert_eq!(store.issue_get("proj", id).unwrap().unwrap()["editable"], true);
+        store.issue_save("proj", Some(id), Some("clarified"), None, None, None, "human", 140).unwrap();
+
+        // Any Agent mutation is durable: unassigning or moving back cannot
+        // make the original brief editable again. Workflow still moves.
+        store.issue_save("proj", Some(id), None, None, Some("doing"), Some("builder"), "builder", 150).unwrap();
+        store.issue_save("proj", Some(id), None, None, Some("todo"), Some(""), "human", 160).unwrap();
+        let got = store.issue_get("proj", id).unwrap().unwrap();
+        assert_eq!(got["editable"], false);
+        assert_eq!(got["title"], "clarified");
+        assert!(store.issue_save("proj", Some(id), None, Some("rewrite history"), None, None, "human", 170).is_err());
+
+        let noted = store.issue_save("proj", None, Some("note lock"), None, None, None, "human", 200).unwrap();
+        store.issue_note("proj", noted, "builder", "started", 210).unwrap();
+        assert_eq!(store.issue_get("proj", noted).unwrap().unwrap()["editable"], false);
+
+        let agent_owned = store.issue_save("proj", None, Some("agent filed"), None, None, None, "builder", 300).unwrap();
+        assert_eq!(store.issue_get("proj", agent_owned).unwrap().unwrap()["editable"], false);
+    }
+
+    #[test]
     fn issue_counts_group_across_sessions_in_one_read() {
         let store = Store::open_memory().unwrap();
         // Two boards, mixed statuses — the grouped read must keep them apart
@@ -1741,13 +1844,24 @@ mod tests {
         let path = dir.join("state.db");
         {
             let store = Store::open(&path).unwrap();
-            store.conn.execute_batch("DROP TABLE deliveries;").unwrap();
+            // Seed legacy evidence before removing the new column: v14 had no
+            // updater field, so a non-todo issue must conservatively reopen as
+            // locked when v15 repairs the schema.
+            let legacy = store.issue_save("legacy", None, Some("already moving"), None, None, None, "human", 10).unwrap();
+            store.issue_save("legacy", Some(legacy), None, None, Some("doing"), None, "human", 11).unwrap();
+            store.conn.execute_batch(
+                "DROP TABLE deliveries;
+                 ALTER TABLE issues DROP COLUMN agent_touched;"
+            ).unwrap();
             store.conn.pragma_update(None, "user_version", SCHEMA_VERSION).unwrap();
             assert!(store.pending_deliveries("s", None).is_err(), "the table really is gone");
         }
         let store = Store::open(&path).unwrap();
         store.insert_delivery("s", 1, "hello", 100).unwrap();
         assert_eq!(store.pending_deliveries("s", None).unwrap().len(), 1, "healed on open");
+        assert_eq!(store.issue_get("legacy", 1).unwrap().unwrap()["editable"], false, "legacy workflow evidence is locked during repair");
+        let id = store.issue_save("s", None, Some("editable"), None, None, None, "human", 100).unwrap();
+        assert_eq!(store.issue_get("s", id).unwrap().unwrap()["editable"], true, "Board edit lock column healed too");
         drop(store);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1918,7 +2032,7 @@ mod tests {
         ).unwrap();
         assert_eq!(orphan_notes, 0, "foreign keys are off in migration, so v14 removes orphan notes explicitly");
         let version: i64 = repaired.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(version, 14);
+        assert_eq!(version, 15);
         drop(repaired);
         let _ = std::fs::remove_dir_all(dir);
     }

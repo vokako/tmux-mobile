@@ -145,8 +145,8 @@ humans) and the desktop hub UI. See
 | `hub_agent_remove` | `session`, `agent` | `{ok}` — ejects: kills the window, DROPS the slot, deletes the isolated home; refuses only when nothing of the agent is left |
 | `hub_board_list` | `session` | `{issues: […], statuses}` — the project task board, four fixed columns (`todo/doing/review/done`); each issue carries a note COUNT. `id` is a database-wide handle, not a per-project counter (a board need not start at `#1`); isolation is the required `session + id` on every single-issue operation |
 | `hub_board_counts` | — (no `session`, like `hub_rooms`) | `{counts: {"<session>": {todo, doing, review, done, total}}}` — issue counts for EVERY board in one grouped read; the four statuses are zero-filled server-side, `total` is explicit, and a project with an empty board is ABSENT (absence = hide) |
-| `hub_board_get` | `session`, `id` | The issue with its full `notes` thread |
-| `hub_board_save` | `session`, `id?`, `title?`, `body?`, `status?`, `assignee?`, `who?` | Create (no id) or PATCH (id + only the changed fields — COALESCE, so a `move` cannot erase a body edited meanwhile). `{ok, id}` |
+| `hub_board_get` | `session`, `id` | The issue with its full `notes` thread and server-computed `editable` (`true` only while unassigned and before any Agent save/note activity) |
+| `hub_board_save` | `session`, `id?`, `title?`, `body?`, `status?`, `assignee?`, `who?` | Create (no id) or PATCH (id + only the changed fields — COALESCE, so a `move` cannot erase a body edited meanwhile). Once assigned or touched by an Agent, title/body are immutable server-side; workflow fields remain patchable. `{ok, id}` |
 | `hub_board_note` | `session`, `id`, `body`, `who?` | Appends to the issue's own thread, bumps `updated_at` |
 | `hub_board_delete` | `session`, `id` | `{ok}` — deletes the issue and cascades its notes |
 

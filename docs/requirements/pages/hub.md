@@ -49,6 +49,13 @@ completion).
 - **The task board** is the project's plan of record: the human writes
   issues here, agents keep them current via `tmm board`
   (todo/doing/review/done, fixed vocabulary).
+- **Board detail is a selectable history, not a mutable chat log** (board
+  #43): note bodies and a locked issue's original title/body explicitly allow
+  text selection. The original brief is editable only while the issue is
+  currently unassigned AND no Agent has ever saved or noted on it; the server
+  persists that activity bit and rejects later title/body patches, so clearing
+  an assignee or moving back to todo cannot rewrite history. Status, assignee
+  and new notes remain active workflow controls.
 
 ## Sidebar (projects)
 - Ordered by **conversation recency** (newest message per room), live-only

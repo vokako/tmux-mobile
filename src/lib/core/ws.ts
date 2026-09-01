@@ -807,6 +807,8 @@ export interface BoardIssue {
   created_by: string;
   created_at: number;
   updated_at: number;
+  /** Original title/body may change only while unassigned and before any Agent activity. */
+  editable: boolean;
   notes: number | { author: string; body: string; at: number }[];
 }
 export const boardList = (session: string) =>

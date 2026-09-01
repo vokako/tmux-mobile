@@ -331,7 +331,16 @@ can get wrong to save three characters.
   `tmm board list|show|add|take|move|note|delete` — `take` = assignee+doing
   in one move, and the tmm-cli skill carries the conventions (take before
   you start; note decisions ON the issue; only the acceptor moves to done).
-  Schema v12 (`issues` + `issue_notes`, cascade). **Two axes, joined at
+  Schema v12 (`issues` + `issue_notes`, cascade); v15 adds the durable
+  `agent_touched` edit lock (board #43). **The original brief becomes
+  history**: `hub_board_get.editable` is true only while the current assignee
+  is empty and `agent_touched` is false. Any non-human save/note sets the bit
+  permanently, and `issue_save` rejects later title/body patches even if the
+  issue is unassigned or moved back; status/assignee/note remain writable so
+  workflow never freezes. Existing rows backfill conservatively from
+  non-todo status, Agent authorship, or Agent notes. The detail renders locked
+  title/body and every note as selectable static text, not fake editors.
+  **Two axes, joined at
   events**: the board is the issue's lifecycle, `tmm status` the window's
   live turn. Every status change posts a `[tmm] board #N a → b` room line,
   and a move TO `review` is a handoff — the REPORTER gets the line typed
