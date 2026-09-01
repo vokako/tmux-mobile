@@ -19,7 +19,7 @@
   import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, countsOf, applyCounts, visibleBoards, boardTitle, assignNotes, chipCols, noteActsSet, noteActsCopyLanded, noteActsExpired, NOTE_ACTS_IDLE, type NoteActsState } from './board.ts';
   import { scrollFade } from '../core/scrollFade.ts';
 
-  let { session = '', visible = true, onGoBack = null, issueRequest = null, embedded = false, createRequest = null }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null; issueRequest?: { session: string; id: number; n: number } | null; embedded?: boolean; createRequest?: { n: number } | null } = $props();
+  let { session = '', visible = true, onGoBack = null, issueRequest = null, embedded = false, createRequest = null, jumped = false }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null; issueRequest?: { session: string; id: number; n: number } | null; embedded?: boolean; createRequest?: { n: number } | null; jumped?: boolean } = $props();
 
   // Every project has its OWN board (issues are session-scoped like the chat
   // room), so the page carries the shared project sidebar (owner, 2026-08-29:
@@ -127,10 +127,16 @@
     onGoBack?.(() => {
       if (pendingDelete) { pendingDelete = null; return true; } // back dismisses, never confirms
       if (pendingDiscard) { pendingDiscard = null; return true; }
-      if (sideOpen) { sideOpen = false; return true; } // the drawer peels first
       if (sel && dirty) { pendingDiscard = () => { sel = null; }; return true; }
       if (creating && createDirty) { pendingDiscard = () => { creating = false; }; return true; }
       if (sel || creating) { sel = null; creating = false; return true; }
+      // Compact bare list: back LIFTS the project drawer — the drawer is the
+      // FLOOR, exactly Hub's compact rule (back with it open falls through,
+      // so it can never cycle open/close). Except when the page was JUMPED
+      // INTO from the chat: then App's return slot below is the floor, and
+      // back belongs to the conversation (board #47: the bottom-bar entry
+      // used to fall straight to the terminal).
+      if (narrowVp && !sideOpen && !jumped) { sideOpen = true; return true; }
       return false;
     });
   });

@@ -256,3 +256,14 @@ test('a jump from the chat returns THERE on back, and deliberate navigation clea
   const idxSlot = source.indexOf("if (page === 'board' && jumpedFrom)");
   assert.ok(idxGoBack >= 0 && idxGoBack < idxSlot, 'peel first, return second');
 });
+
+test('board back on a phone lifts the project drawer, never the terminal (board #47)', () => {
+  // The bottom-bar entry's floor is the DRAWER (Board's own chain lifts it);
+  // App must not add a terminal fallback below it — a fall-through re-pushes,
+  // exactly like Hub. Only the chat's jump (the return slot) leaves the page.
+  assert.ok(!/if \(page === 'board'\) \{ page = 'terminal'; return; \}/u.test(source),
+    'the board→terminal floor stays retired');
+  // Board is told whether a return slot exists, so its drawer lift can stand
+  // aside and let back fall through to the conversation.
+  assert.match(source, /<Board [^\n]*jumped=\{!!jumpedFrom\}/u, 'the return slot reaches the drawer-lift gate');
+});

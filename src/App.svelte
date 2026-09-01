@@ -948,7 +948,9 @@
       if (page === 'agents' && agentsGoBack && agentsGoBack()) { navPush(); return; }
       if (page === 'board' && boardGoBack && boardGoBack()) { navPush(); return; }
       if (page === 'board' && jumpedFrom) { switchTab(jumpedFrom); return; }
-      if (page === 'board') { page = 'terminal'; return; }
+      // Board with nothing to peel is like Hub: the drawer is its compact
+      // floor (lifted by its own chain above), so a fall-through just
+      // re-pushes — it never dumps the reader on the terminal (board #47).
       // Terminal is the root on a phone: back closes the session sheet if it
       // is open, otherwise there is nowhere below it (re-push prevents exit).
       if (page === 'terminal' && sessListOpen) { sessListOpen = false; navPush(); return; }
@@ -1313,7 +1315,7 @@
     </div>
     <div class="page-layer" class:hidden={page !== 'board'}>
       {#if hubEligible}
-        <Board session={filesSession} visible={page === 'board'} onGoBack={(fn) => boardGoBack = fn} issueRequest={boardIssueReq} />
+        <Board session={filesSession} visible={page === 'board'} onGoBack={(fn) => boardGoBack = fn} issueRequest={boardIssueReq} jumped={!!jumpedFrom} />
       {/if}
     </div>
     <div class="page-layer term-page" class:hidden={page !== 'terminal'}>

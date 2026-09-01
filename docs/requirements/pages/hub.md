@@ -244,7 +244,11 @@ completion).
   the followed last-touched session is the default, a pick overrides it
   until that moves again. Compact is the standard drill-down (project list
   ⇄ board). Polls while visible; a failed poll keeps the last board; back
-  gesture peels detail → list → project list.
+  gesture peels detail → list, then LIFTS the project drawer as the floor
+  (Hub's compact rule — back with it open falls through and re-pushes; it
+  never dumps the reader on the terminal, board #47). Only when the page
+  was jumped into from the chat's board icon does back return to the
+  conversation instead (App's one-deep return slot outranks the lift).
 
 ## Back gesture (compact)
 Peels layers in tap-outside order: context menu → agent menu → recipient

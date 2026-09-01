@@ -126,7 +126,13 @@ test('create lives in the head, and compact gets the hamburger drawer (reopened 
   assert.match(source, /<aside class="sidebar" class:side-sheet=\{narrowVp\} class:open=\{narrowVp && sideOpen\}>/u,
     'the sidebar wears the SHARED sheet dialect, CLASS-driven by the page\u2019s own narrow condition');
   assert.match(source, /class="side-scrim" onclick=\{\(\) => \(sideOpen = false\)\}/u, 'the scrim dismisses');
-  assert.match(source, /if \(sideOpen\) \{ sideOpen = false; return true; \}/u, 'back closes the drawer first');
+  // Back does NOT close the drawer: the drawer is the compact FLOOR — Hub's
+  // own rule — lifted by the chain's last step and falling through while
+  // open, so it can never cycle open/close (board #47).
+  assert.match(source, /if \(narrowVp && !sideOpen && !jumped\) \{ sideOpen = true; return true; \}/u,
+    'a bare compact list lifts the drawer as the floor');
+  assert.ok(!/if \(sideOpen\) \{ sideOpen = false; return true; \}/u.test(source),
+    'the retired drawer-peel stays retired — a peel would cycle against the lift');
   assert.match(source, /sideOpen = false; \/\/ choosing closes the drawer/u, 'picking a project closes it');
   const style = source.slice(source.indexOf('<style>'));
   assert.match(appCss, /\.side-sheet\.side-sheet\.side-sheet \{[\s\S]{0,400}?transform: translateX\(-100%\);[\s\S]{0,200}?transition: transform var\(--t-move\)/u,
