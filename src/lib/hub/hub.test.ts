@@ -1154,7 +1154,13 @@ test('boardLine: a title-less line still parses; unknown shapes return null', ()
 test('boardStatusColor speaks the one progressive status language', () => {
     assert.equal(boardStatusColor('doing'), 'var(--accent)');     // started moving
     assert.equal(boardStatusColor('review'), 'var(--status-warn)'); // waits for a person
-    assert.equal(boardStatusColor('done'), 'var(--status-ok)');   // ended well
+    // done is SETTLED, not celebrated (owner, 2026-09-01: "done 的标识就不要
+    // 用绿色了，和前边的冲突了" — in the Board sidebar the green sat directly
+    // under the row's green LIVE dot, two meanings in one colour): it wears
+    // the at-rest STATE token, which the live-dot work already tuned to
+    // differ from todo's chrome-grey --text3.
+    assert.equal(boardStatusColor('done'), 'var(--status-sleep)');
+    assert.notEqual(boardStatusColor('done'), 'var(--status-ok)', 'done is never the live dot\'s green');
     assert.equal(boardStatusColor('todo'), 'var(--text3)');       // at rest
     assert.equal(boardStatusColor('shipped'), 'var(--text2)');    // unknown: reading ink
 });

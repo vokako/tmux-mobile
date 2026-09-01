@@ -846,15 +846,22 @@ export function boardLine(item: string | null | undefined): { id: string; from: 
  * The colour of the DESTINATION status in a board line's badge — the one
  * progressive status language again (`noteStateColor` / `stateDotColor` /
  * `sysVerbColor`): accent = started moving (doing), amber = needs a person
- * (review waits for its acceptor), green = ended well (done), grey = at rest
- * (todo — including a reopen landing back there). An unknown word takes
- * ordinary reading ink, never an invented meaning.
+ * (review waits for its acceptor), grey = at rest (todo — including a reopen
+ * landing back there). An unknown word takes ordinary reading ink, never an
+ * invented meaning. DONE is the one owner-ruled exception (2026-09-01, on
+ * the #39 sidebar counts: "done 的标识就不要用绿色了，和前边的冲突了"): the
+ * status-ok green it wore sat directly under the sidebar row's green LIVE
+ * dot — one colour, two meanings, five pixels apart — so done wears
+ * --status-sleep instead: the at-rest STATE token, already tuned by the
+ * live-dot work to read as a state (≈6 ΔE off the --text3 chrome todo
+ * wears) without celebrating. Wherever the board dialect is spoken (feed
+ * badges, sidebar chips) done is settled, never the live green.
  */
 export function boardStatusColor(to: string): string {
   switch (to) {
     case 'doing': return 'var(--accent)';
     case 'review': return 'var(--status-warn)';
-    case 'done': return 'var(--status-ok)';
+    case 'done': return 'var(--status-sleep)';
     case 'todo': return 'var(--text3)';
     default: return 'var(--text2)';
   }
