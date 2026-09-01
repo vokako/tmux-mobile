@@ -74,15 +74,31 @@ concurrent work.
 null>` — whose `catch(() => null)` absorbs EVERY failure including an older
 or mobile server's method-not-found: null is the reading the component
 already treats as "keep what I have / say nothing", so no error can escape
-into the page. App mounts the corner once, gated `connected &&
-!layout.isTouchDevice` (a phone's server is remote and its corners belong to
-the bottom bar), with `visible={connected}` so a dropped connection stops the
-timer even before the unmount. The `.sys-corner` wrapper is fixed to the real
-bottom-left (safe-area aware) and takes **`pointer-events: none`** — the
-occlusion contract, pinned by `App.source.test.ts`: clicks pass through, so
-no rail button or page action can ever hide behind it (the hover tooltip is
-deliberately sacrificed for that guarantee). Verified live: the hit test at
-the corner's own center reaches the sidebar row UNDER it.
+into the page. App mounts the corner once, gated by ONE derived flag
+(`sysMounted = connected && !layout.isTouchDevice` — a phone's server is
+remote and its corners belong to the bottom bar), with `visible={connected}`
+so a dropped connection stops the timer even before the unmount.
+
+**The corner RESERVES its ground; it never floats over content.** The first
+cut was a fixed overlay with `pointer-events: none` — builder-3's acceptance
+measured it visually covering the rail's Settings button and the Hub
+sidebar's last row: pass-through clicks do not un-hide pixels. Now the SAME
+`sysMounted` flag drives `.page.vitals-inset .page-layer { bottom: 20px }`:
+every page layer ends 20px above the viewport bottom while the corner
+exists, so no content can paint under it on any page at any scroll position
+— zero visual intersection by construction. The inset sits on the LAYERS,
+not on `.page` padding, because the layers are `position: absolute`
+(`inset: 0`) and padding on their containing block would not move them. The
+corner itself starts right of the 46px rail (`left: 54px`, 16px tall inside
+the 20px strip); `pointer-events: none` remains as the belt. One flag for
+both mount and inset means the strip can never exist without its corner or
+vice versa — `App.source.test.ts` pins the whole contract.
+
+Verifying "no overlap" needs a CLIP-AWARE intersection test:
+`getBoundingClientRect` ignores overflow clipping, so a row half-scrolled
+out of its `overflow: hidden` scroller has a rect crossing the strip
+boundary while painting nothing there — intersect each rect with every
+clipping ancestor first, then test overlap against the corner.
 
 ## Tests
 
