@@ -377,7 +377,12 @@ can get wrong to save three characters.
   `{open,copied,gen}` transitions guard both sides of the async boundary — the
   attempt gen is captured before `writeText` awaits and the beat's gen is
   captured before its timer — so deferred resolves and stale timeouts are
-  no-ops in a later note/issue.
+  no-ops in a later note/issue. **The detail ✓ answers the edit** (board #48):
+  `saveDraft` returns to the refreshed board list only after every requested
+  field save/assignment dispatch succeeds; an error stays on the detail with
+  the typed draft available for retry. The header orders its trailing verbs as
+  delete → cancel → ✓, so ✓ is rightmost whenever a draft exists and cancel is
+  the harmless buffer between confirmation and deletion.
   **The title is OPTIONAL** (board #31): `issue_save` refuses only a
   CONTENTLESS issue (create and patch alike — a patch may clear the title
   while a body remains, and the cleared title persists EMPTY, verbatim);

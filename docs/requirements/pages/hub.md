@@ -55,7 +55,12 @@ completion).
   currently unassigned AND no Agent has ever saved or noted on it; the server
   persists that activity bit and rejects later title/body patches, so clearing
   an assignee or moving back to todo cannot rewrite history. Status, assignee
-  and new notes remain active workflow controls.
+  and new notes remain active workflow controls. Detail changes remain a draft
+  until the explicit ✓: a successful save returns to the board list, while a
+  failed save stays in detail with its draft and error intact for retry. In the
+  detail header, delete precedes cancel and ✓; whenever the draft actions are
+  present, ✓ is the rightmost control so a habitual confirm tap cannot hit the
+  destructive action (board #48).
 
 ## Sidebar (projects)
 - Ordered by **conversation recency** (newest message per room), live-only
