@@ -670,3 +670,25 @@ test('leaving at the tail means returning to the tail — and ONLY then (board #
   assert.match(source, /following = true;\n\s*if \(feed\.length\) scrollFeed\(true\);/u,
     'entering a room still lands at its tail');
 });
+
+test('long-press on a message is the system selection gesture, never our menu (board #48)', () => {
+  // Owner: "在chat页面长按消息选中文字的时候 不应该出现选项卡 应该走手机系统本身
+  // 默认选中文字的逻辑" (2026-09-01). On Android a long-press over text fires
+  // contextmenu; the bubble's handler must route through the pure gate and
+  // RETURN — without preventDefault — for a touch-sourced event, so the
+  // native selection proceeds. A mouse right-click keeps the menu.
+  assert.match(source,
+    /oncontextmenu=\{\(e\) => \{ if \(touchContextMenu\(e\.pointerType\)\) return; e\.preventDefault\(\); openCtx\(pointOf\(e\), m\.from, msgItems\(m\)\); \}\}/u,
+    'the bubble contextmenu yields to the system on touch, before preventDefault');
+  // The selection's tail click must not toggle the action row — the same
+  // isCollapsed guard the Board notes wear (#46). Without it, finishing a
+  // selection ALSO pops the overlay the owner just asked to keep away.
+  assert.match(source,
+    /onclick=\{\(\) => \{ if \(typeof getSelection === 'function' && !\(getSelection\(\)\?\.isCollapsed \?\? true\)\) return; msgOpen = msgOpen === key \? '' : key; \}\}/u,
+    'a non-collapsed selection swallows the bubble tap');
+  // For the system gesture to have anything to select, the message body must
+  // be selectable at all — the app shell's global user-select:none reaches it
+  // otherwise (the Board's .n-text re-enable is the precedent).
+  assert.match(source, /\.m-body \{[^}]*user-select: text;[^}]*-webkit-user-select: text;/u,
+    'bubble text is selectable — both vendor forms, like the Board notes');
+});

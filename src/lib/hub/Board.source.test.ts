@@ -694,3 +694,16 @@ test('a note bubble reveals ONE Copy action in Chat\u2019s own dialect (board #4
     'the wrapper pins the overlay to the bubble corner');
   assert.match(source, /<div class="n-wrap">/u, 'and the markup wears it');
 });
+
+test('a note never intercepts contextmenu — long-press selection is the system\u2019s (board #48)', () => {
+  // Owner: "类似对于board里的每条也适用" (2026-09-01) — the Board's notes must
+  // keep the phone's native long-press selection. They conform today by
+  // ABSENCE: no contextmenu handler anywhere in Board.svelte, so an Android
+  // long-press over .n-text reaches the system untouched (the text is
+  // explicitly selectable and the #46 isCollapsed guard already swallows a
+  // selection's tail click). This pin keeps the absence deliberate: a future
+  // context menu on this page must route through the same touch gate the chat
+  // bubble wears, never an unconditional preventDefault.
+  assert.ok(!/oncontextmenu/u.test(source),
+    'Board.svelte intercepts no contextmenu — the system owns the long-press');
+});

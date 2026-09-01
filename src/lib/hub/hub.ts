@@ -1488,3 +1488,23 @@ export function tailAfterScroll(visible: boolean, wasFollowing: boolean, gap: nu
   if (!visible) return wasFollowing;
   return gap < TAIL_GAP;
 }
+
+/** Does this contextmenu event belong to the SYSTEM, not to us? (board #48)
+ *
+ * On Android a long-press over selectable text FIRES `contextmenu`, so an
+ * unconditional preventDefault kills the native selection the finger was
+ * asking for and pops our menu over it — the owner's report: "长按消息选中
+ * 文字的时候 不应该出现选项卡 应该走手机系统本身默认选中文字的逻辑"
+ * (2026-09-01). The long-press doctrine already said the bubble's hold is
+ * the selection gesture (2026-08-20, why `use:longpress` skips the bubble);
+ * the contextmenu path was the hole in it.
+ *
+ * Chromium delivers contextmenu as a PointerEvent: 'touch' is the finger,
+ * 'pen' the same gesture with a stylus — both yield to the system. 'mouse'
+ * is a right BUTTON (a menu request, never mid-selection), '' is the
+ * keyboard menu key, and undefined is a browser that predates PointerEvent
+ * contextmenu (WebKit's MouseEvent) — all three keep our menu, because none
+ * of them is a finger holding text. */
+export function touchContextMenu(pointerType: string | undefined): boolean {
+  return pointerType === 'touch' || pointerType === 'pen';
+}

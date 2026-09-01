@@ -32,7 +32,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles } from './hub.ts';
+  import { TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, touchContextMenu } from './hub.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
@@ -2418,8 +2418,8 @@
                      button below. -->
                 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
                 <div class="bubble md"
-                  oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), m.from, msgItems(m)); }}
-                  onclick={() => { msgOpen = msgOpen === key ? '' : key; }}>
+                  oncontextmenu={(e) => { if (touchContextMenu(e.pointerType)) return; e.preventDefault(); openCtx(pointOf(e), m.from, msgItems(m)); }}
+                  onclick={() => { if (typeof getSelection === 'function' && !(getSelection()?.isCollapsed ?? true)) return; msgOpen = msgOpen === key ? '' : key; }}>
                   {#if m.from !== 'human'}
                     <!-- A status note keeps the ordinary bubble, but its header
                          says what the words are ABOUT. The first cut was
@@ -2618,8 +2618,8 @@
       <!-- Parked away from the tail: one tap back, with a dot when something
            arrived while you were reading. -->
       {#if !following}
-        <button class="to-bottom" class:news={newBelow} title={t('hubToBottom')} onclick={() => scrollFeed(true)}>
-          <Icon name="arrow-down" size={15} />
+        <button class="to-tail to-bottom" class:news={newBelow} title={t('hubToBottom')} aria-label={t('hubToBottom')} onclick={() => scrollFeed(true)}>
+          <Icon name="arrow-down" size={16} />
         </button>
       {/if}
       </div>
@@ -3226,18 +3226,9 @@
      thing that read as broken in the two earlier attempts. */
   .msg.held { -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
   .msg.held .bubble { box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28); }
-  /* Back to the tail. */
-  .to-bottom {
-    position: absolute; right: 14px; bottom: 12px; z-index: 7;
-    width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center;
-    background: var(--surface); border: 1px solid var(--border); color: var(--text2);
-    cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,0.35);
-  }
-  .to-bottom:hover { color: var(--accent); border-color: var(--accent); }
-  .to-bottom.news::after {
-    content: ''; position: absolute; top: 1px; right: 1px; width: 9px; height: 9px;
-    border-radius: 50%; background: var(--status-danger); border: 2px solid var(--bg);
-  }
+  /* Back to the tail: the LOOK is the shared .to-tail in app.css (board #49
+     unified it with the Terminal's) — only the feed placement lives here. */
+  .to-bottom { right: 14px; bottom: 12px; z-index: 7; }
   .msg { position: relative; display: flex; flex-direction: column; max-width: var(--msg-max); }
   /* Both sides hug their content (default column-flex STRETCH made every
      agent bubble 76% wide, leaving a short line's inline time stranded at
@@ -3297,8 +3288,12 @@
      content element (when it is a <p>) turns inline so the float can share
      its line box, and .m-body is flow-root so the bubble's height contains
      the float. The 7px top margin bottoms the 10px trailer within the
-     ~20px line box. */
-  .m-body { min-width: 0; display: flow-root; }
+     ~20px line box. Selectable ON PURPOSE (board #48): the app shell's
+     global user-select:none would otherwise reach the message text, and the
+     phone's long-press-to-select — which the bubble's contextmenu handler
+     now yields to — would have nothing to grab. Head and meta already opt
+     out: a drag that starts on the words must not smear into chrome. */
+  .m-body { min-width: 0; display: flow-root; user-select: text; -webkit-user-select: text; }
   .m-body > :global(p:nth-last-child(2)) { display: inline; }
   /* The leading @recipient — the address — reads apart from the words
      without shouting: weight and a quiet accent lean, no chip, no box. */
@@ -3788,10 +3783,9 @@
     white-space: nowrap; pointer-events: none;
   }
   /* Phone-first hit areas (contract: primary actions ≥44px): the visual box
-     stays small, the tap target grows via an invisible overlay. .to-bottom
-     uses ::before — its ::after is the new-output dot. */
+     stays small, the tap target grows via an invisible overlay. (.to-tail
+     brings its own ::before from app.css.) */
   .send-btn::after { content: ''; position: absolute; inset: -7px; }
-  .to-bottom::before { content: ''; position: absolute; inset: -3px; }
 
   /* Empty room: start from a preset — one agent, or a team. */
   .start { margin: auto; display: flex; flex-direction: column; gap: 8px; width: min(420px, 100%); }
