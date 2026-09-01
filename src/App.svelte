@@ -1468,7 +1468,7 @@
     </div>
   {/if}
 
-  <div class="page {slideAnim}" class:page-terminal={page === 'terminal'} class:vitals-inset={sysMounted}>
+  <div class="page {slideAnim}" class:page-terminal={page === 'terminal'}>
     {#if page === 'settings'}
       <Settings {onConnected} />
     {/if}
@@ -1668,18 +1668,19 @@
     </nav>
   {/if}
 
-  <!-- Server system vitals (board #56): the CONTENT's bottom-left corner,
-       desktop + connected ONLY. builder-3's acceptance measured the first cut
-       overlapping the rail's bottom buttons and the sidebar's last row —
-       pointer-events pass-through does not un-hide pixels — so the corner now
-       RESERVES its strip instead of floating over anything: `.page` takes a
-       matching bottom inset while the corner is mounted (the same flag), and
-       the corner itself starts right of the rail. Nothing can render under
-       it, on any page, at any scroll position. -->
+  <!-- Server system vitals (board #56): a FLOW footer, not an overlay.
+       main is a column flex and .page is its flex:1 row, so this footer takes
+       its own 20px row and .page — with EVERYTHING inside it: the absolute
+       page layers AND direct children like <Settings> — ends above it, on
+       every current and future page (lead review: the first fixed cut covered
+       the rail and sidebar pixels; the second, a layer-only inset, missed
+       .page's direct children). main.with-rail's padding-left starts it right
+       of the rail. Desktop + connected only; a phone's corners belong to the
+       bottom bar. -->
   {#if sysMounted}
-    <div class="sys-corner">
+    <footer class="sys-footer">
       <SystemStatus load={systemStatus} visible={connected} />
-    </div>
+    </footer>
   {/if}
 </main>
 
@@ -2060,21 +2061,16 @@
      CONTRACT (pinned by App.source.test.ts) — clicks pass through, so no
      page action or rail button can ever hide behind it. The soft wash keeps
      the micro line legible over whatever the page puts underneath. */
-  /* The reserved strip: while the corner is mounted every page LAYER ends
-     20px above the viewport bottom (the layers are position:absolute, so a
-     padding on .page would not move them), and the corner sits in space no
-     page content can reach — overlap impossible by construction, not by
-     transparency (builder-3's #56 review: the floating cut visually covered
-     the rail's Settings button and the sidebar's last row). */
-  .page.vitals-inset .page-layer { bottom: 20px; }
-  .sys-corner {
-    position: fixed;
-    left: calc(46px + 8px + var(--sal, 0px)); /* right of the 46px rail */
-    bottom: calc(2px + var(--sab, 0px));
-    height: 16px;
+  /* The vitals footer (board #56): IN FLOW, so it owns its row — .page is
+     the column's flex:1 and shrinks above it, which shortens the absolute
+     page layers (inset:0 tracks .page's box) and every direct child alike.
+     Overlap with ANY page content is impossible by construction; no
+     pointer-events games, no z-index, and the tooltip survives. */
+  .sys-footer {
+    flex: 0 0 auto;
+    height: 20px;
     display: flex;
     align-items: center;
-    z-index: 11;
-    pointer-events: none;
+    padding: 0 8px calc(var(--sab, 0px) / 2);
   }
 </style>

@@ -79,26 +79,24 @@ into the page. App mounts the corner once, gated by ONE derived flag
 remote and its corners belong to the bottom bar), with `visible={connected}`
 so a dropped connection stops the timer even before the unmount.
 
-**The corner RESERVES its ground; it never floats over content.** The first
-cut was a fixed overlay with `pointer-events: none` — builder-3's acceptance
-measured it visually covering the rail's Settings button and the Hub
-sidebar's last row: pass-through clicks do not un-hide pixels. Now the SAME
-`sysMounted` flag drives `.page.vitals-inset .page-layer { bottom: 20px }`:
-every page layer ends 20px above the viewport bottom while the corner
-exists, so no content can paint under it on any page at any scroll position
-— zero visual intersection by construction. The inset sits on the LAYERS,
-not on `.page` padding, because the layers are `position: absolute`
-(`inset: 0`) and padding on their containing block would not move them. The
-corner itself starts right of the 46px rail (`left: 54px`, 16px tall inside
-the 20px strip); `pointer-events: none` remains as the belt. One flag for
-both mount and inset means the strip can never exist without its corner or
-vice versa — `App.source.test.ts` pins the whole contract.
+**The corner is a FLOW footer; it never floats over content.** Two earlier
+cuts each failed the lead/builder-3 review geometry: a fixed overlay with
+`pointer-events: none` visually covered the rail and the sidebar's last row
+(pass-through clicks do not un-hide pixels), and a `.page-layer`-only bottom
+inset missed `.page`'s DIRECT children — `<Settings>` renders straight into
+`.page`, not into a layer. The footer is now the LAST flow child of `main`'s
+column flex: `.page` is the `flex: 1` row and shrinks above it, which
+shortens the absolute layers (`inset: 0` tracks `.page`'s box) AND every
+direct child alike — zero visual intersection on every current and FUTURE
+page, by layout rather than by policing. `main.with-rail`'s `padding-left`
+starts it right of the rail; no fixed positioning, no z-index, no
+pointer-events games, and the hover tooltip survives.
 
 Verifying "no overlap" needs a CLIP-AWARE intersection test:
 `getBoundingClientRect` ignores overflow clipping, so a row half-scrolled
-out of its `overflow: hidden` scroller has a rect crossing the strip
+out of its `overflow: hidden` scroller has a rect crossing the footer
 boundary while painting nothing there — intersect each rect with every
-clipping ancestor first, then test overlap against the corner.
+clipping ancestor first, then test overlap.
 
 ## Tests
 

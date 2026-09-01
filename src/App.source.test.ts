@@ -396,25 +396,25 @@ test('the system-vitals corner mounts connected-desktop-only and can never occlu
   assert.match(source, /import \{[^}]*\bsystemStatus\b[^}]*\} from '\.\/lib\/core\/ws\.ts'/u,
     'the typed wrapper is the injected transport');
   assert.match(source, /load=\{systemStatus\}/u, 'load is INJECTED — the component never imports ws');
-  // Desktop + connected only, ONE flag for mount AND inset: a phone never
-  // mounts it, a disconnected client must not poll, and the reserved strip
-  // must never exist without its corner (or vice versa).
+  // Desktop + connected only, ONE flag: a phone never mounts it and a
+  // disconnected client must not poll a socket that is not there.
   assert.match(source, /sysMounted = \$derived\(connected && !layout\.isTouchDevice\)/u,
     'one flag: connected desktop');
-  assert.match(source, /\{#if sysMounted\}[\s\S]{0,400}<SystemStatus/u,
-    'mount gate is the flag');
-  assert.match(source, /class:vitals-inset=\{sysMounted\}/u,
-    'the page inset rides the SAME flag');
+  assert.match(source, /\{#if sysMounted\}[\s\S]{0,200}<footer class="sys-footer">[\s\S]{0,100}<SystemStatus/u,
+    'mount gate wraps the footer');
   assert.match(source, /<SystemStatus[^/]*visible=\{connected\}/u,
     'visible tracks the connection so a drop stops the timer');
-  // The no-occlusion contract, v2 (builder-3's #56 review: pass-through
-  // clicks do not un-hide pixels): the corner RESERVES its strip — the page
-  // ends above it — and starts right of the 46px rail, so overlap is
-  // impossible by construction. pointer-events: none stays as the belt.
-  assert.match(source, /\.page\.vitals-inset \.page-layer \{ bottom: 2\dpx; \}/u,
-    'every page LAYER ends above the strip (layers are absolute — padding would not move them)');
-  assert.match(source, /\.sys-corner \{[^}]*left: calc\(46px/u,
-    'the corner clears the rail column');
-  assert.match(source, /\.sys-corner \{[^}]*pointer-events: none/u,
-    'pointer-events: none on the fixed corner');
+  // The no-occlusion contract, v3 (lead's #56 review chain: a fixed overlay
+  // covered pixels; a layer-only inset missed .page's DIRECT children like
+  // <Settings>): the footer is IN FLOW after .page in main's column flex, so
+  // .page — layers and direct children alike — ends above it by layout, on
+  // every current and future page. No fixed positioning, no z-index.
+  assert.match(source, /\{#if sysMounted\}\s*<footer class="sys-footer">[\s\S]{0,200}?<\/footer>\s*\{\/if\}\s*<\/main>/u,
+    'the footer is main\'s LAST flow child — .page (flex:1) shrinks above it');
+  assert.match(source, /\.sys-footer \{[^}]*flex: 0 0 auto/u,
+    'the footer owns its flex row (flow reservation, not overlay)');
+  assert.ok(!/\.sys-footer \{[^}]*position: fixed/u.test(source),
+    'never a fixed overlay again');
+  assert.ok(!/vitals-inset/u.test(source),
+    'the layer-only inset is retired (it missed .page direct children)');
 });
