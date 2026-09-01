@@ -33,6 +33,7 @@
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
   import { TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, touchContextMenu, perLineOf } from './hub.ts';
+  import { notifyNews, notifyEnabled, setNotifyEnabled, ensurePermission, previewCue } from './notifications.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
@@ -97,6 +98,8 @@
 
   // Terminal drawer (closed by default — the whole point).
   let termOpen = $state(false);
+  // The bell's persisted mute (board #57): read once, written on toggle.
+  let notifyOn = $state(notifyEnabled());
   // What the drawer SHOWS: the terminal, or the file browser (owner,
   // 2026-08-28: "右侧边栏，可以展开文件浏览器的分区，类似展示 terminal 面板
   // 一样的逻辑"). One drawer, one width handle, two bodies — the hidden one
@@ -308,6 +311,11 @@
       if (messages?.length) {
         feed = mergeMessages(feed, messages);
         lastTs = Math.max(lastTs, ...messages.map((m) => m.ts ?? 0));
+        // New-message notification (board #57): a poll batch that lands while
+        // the reader is AWAY — tab hidden, window unfocused, or another page
+        // on screen — plays the cue and raises a system notification. The
+        // first page is history, never news; the gate drops the rest.
+        notifyNews(messages, { first, away: document.hidden || !document.hasFocus() || !visible, project: s });
         if (following) scrollFeed(); else newBelow = true;
       }
     } catch { /* hub not available */ }
@@ -2140,6 +2148,25 @@
              "删除 关闭 命令按钮 都不统一 有的文字 有的图案，可以改成图案 鼠标
              悬停显示按钮文字"). Icons match the project context menu's verbs:
              zap=up, stop=down, trash=delete. -->
+        <!-- New-message notifications (board #57): the bell is the EXPLICIT
+             enable — its own click is the user gesture that requests system
+             permission and unlocks audio (previewing the cue doubles as both
+             the unlock and "what will it sound like"). Muting persists. The
+             send path never asks for anything (lead review). Same icon-only
+             .icon-btn dialect; the glyph is inline until ui/Icon.svelte is in
+             territory to host a 'bell'. -->
+        <button class="icon-btn" class:on={notifyOn} title={notifyOn ? t('hubNotifyOn') : t('hubNotifyOff')} aria-label={notifyOn ? t('hubNotifyOn') : t('hubNotifyOff')} aria-pressed={notifyOn}
+          onclick={() => {
+            notifyOn = !notifyOn;
+            setNotifyEnabled(notifyOn);
+            if (notifyOn) { ensurePermission(); previewCue(); }
+          }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+            {#if !notifyOn}<line x1="2" y1="2" x2="22" y2="22" />{/if}
+          </svg>
+        </button>
         <!-- The task board: on the phone this jumps to the board PAGE (owner,
              2026-08-29: "board单独作为一个独立的功能的页面"); on desktop it is
              the drawer's THIRD partition ("或者右侧边栏有这个任务侧边栏", same
