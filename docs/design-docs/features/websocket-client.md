@@ -87,6 +87,38 @@ Custom WebSocket client (`ws.ts`) with auto-reconnect, pending promise cleanup, 
 - `JSON.parse` wrapped in try-catch in `onmessage`
 - Optional chaining on server push params (`data.params?.target`)
 
+## Multi-Server (board #55)
+
+`src/lib/app/servers.ts` is the named-server registry over the same keys this
+doc already describes. Design decisions, in the order they bit:
+
+- **The old keys stay the ACTIVE MIRROR.** `tmux_address`/`tmux_token`/
+  `tmux_socket` keep meaning "the server we are on": ws.ts, the reconnect
+  machine, deep links and the boot auto-connect read them unchanged, and a
+  downgraded client sees the single-server world it expects. The registry
+  (`tmux_servers` + `tmux_server_current`) only remembers what else exists.
+- **Identity is the MACHINE, not the address** (lead review). `tmux_machines`
+  (machineId → addresses) is the existing failover authority; an entry
+  persists `machineId` and upsert merges on it first, so a reconnect over
+  Tailscale updates the LAN entry instead of minting a second "server".
+  Migration attributes history addresses through the same map: the current
+  machine's alternates never re-materialize as entries, an unseen machine
+  yields one entry, unattributed addresses dedupe by address.
+- **Switching is storage writes + reload** (`applySwitch`): park the leaving
+  server's `tmux_state`/`tmux_machine_id` under `tmux_state::<id>` /
+  `tmux_machine_id::<id>`, restore the target's pair (or clear — a first
+  visit must not inherit A's terminal targets), point the mirror keys, clear
+  `tmux_disconnected`, reload. The boot path is the ONE way up against a
+  server, so the Hub room cache, mounted terminals, Files parked cwds and
+  Team state reset by construction instead of by per-component sweeps. The
+  caller cancels the reconnect machine and closes the socket FIRST — a live
+  retry loop re-reads `tmux_address` and would race the writes.
+- **The rail entry is a control, not a page**: it rides the RAIL_GAP branch
+  (above the configure group — "右下角agent上边"), carries no rail slot, and
+  its popover follows the app's one menu recipe (fixed layer, measured then
+  shown, outside-pointerdown/Escape/resize dismissal). The Settings connect
+  form IS the add flow; the `+` row only navigates there.
+
 ## Alternatives Considered
 - **Socket.IO**: Rejected — adds dependency, WebSocket is sufficient for JSON-RPC
 - **No auto-reconnect**: Rejected — mobile connections drop frequently

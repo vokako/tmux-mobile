@@ -1,6 +1,7 @@
 <script lang="ts">
   import { connect, disconnect } from '../core/ws.ts';
   import { defaultConnectionAddress } from '../core/connection-address.ts';
+  import { upsertServer } from './servers.ts';
   import Icon from '../ui/Icon.svelte';
   import { copyText } from '../core/clipboard.ts';
   import { t } from '../core/i18n.svelte.ts';
@@ -93,6 +94,16 @@
           localStorage.setItem('tmux_machines', JSON.stringify(map));
           localStorage.setItem('tmux_machine_id', mid);
         }
+        // The multi-server registry (board #55): a successful connect upserts
+        // by MACHINE identity — reconnecting to a known machine over a new
+        // address updates its entry in place (LAN/Tailscale/WAN are one
+        // server), a new machine becomes a new named entry, and either way
+        // this server is now the current one.
+        upsertServer(localStorage, {
+          address: url, token,
+          ...(socket.trim() ? { socket: socket.trim() } : {}),
+          ...(mid ? { machineId: mid } : {}),
+        });
       } catch {}
       onConnected();
     } catch (e) {

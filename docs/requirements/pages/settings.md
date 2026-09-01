@@ -17,6 +17,17 @@ rounded shape, muted idle state, and accent active state. Desktop Settings uses 
 - Address field: `ws://host:port` or `wss://host:port`
 - Token field
 - Address history: cached recent connections with token, quick switching
+- Multi-server registry (board #55): named server configs persist in
+  `tmux_servers` (id, name, address, token, optional socket + machineId);
+  identity is the MACHINE, so LAN/Tailscale/WAN alternates of one server are
+  ONE entry (the failover map `tmux_machines` stays the address authority). A
+  successful connect upserts by machineId; the desktop rail carries a
+  switcher above the configure group — current entry marked, click switches
+  (full socket teardown + reload through the one boot path, per-server
+  `tmux_state`/`tmux_machine_id` parked and restored so restore targets never
+  cross servers), double-click renames, non-current rows removable, `+` row
+  opens this page as the add flow. Migration from the single-server keys is
+  one-time, idempotent, and never loses the current user.
 - Server info: hostname, machine ID, address
 - Language selector: EN / 中文 (pill buttons)
 - Theme selector: Auto / Light / Dark (pill buttons)

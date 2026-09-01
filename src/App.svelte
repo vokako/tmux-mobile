@@ -22,6 +22,8 @@
   import { agentsLivesInSettings, defaultPage, restoreNav, retarget } from './lib/app/nav-state.ts';
   import { RAIL_DRAG_THRESHOLD, RAIL_GAP, RAIL_ORDER_KEY, parseRailOrder, railDropAt, railDropIndex, railDropOffset, railOrderToStore, visibleRailSlots } from './lib/app/nav-order.ts';
   import { createReconnectMachine } from './lib/app/reconnect.ts';
+  import { applySwitch, currentServerId, loadServers, migrateServers, removeServer, renameServer, upsertServer } from './lib/app/servers.ts';
+  import { anchorOf, menuPlacement, viewBox } from './lib/ui/placement.ts';
   import { cycleItem, shortcutFromEvent } from './lib/app/shortcuts.ts';
   import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.ts';
   import { installExternalLinkHandler } from './lib/core/external-links.ts';
@@ -619,6 +621,17 @@
     connected = true;
     serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
     if (useAddr !== primaryAddr) { localStorage.setItem('tmux_address', useAddr); activeAddress = useAddr; }
+    // Keep the registry entry's active address fresh (board #55): failover
+    // just proved a different address of the SAME machine — merge by
+    // machineId, so no second "server" appears.
+    try {
+      const mid = getMachineId?.();
+      upsertServer(localStorage, {
+        address: useAddr, token: localStorage.getItem('tmux_token') || '',
+        ...(localStorage.getItem('tmux_socket') ? { socket: localStorage.getItem('tmux_socket') } : {}),
+        ...(mid ? { machineId: mid } : {}),
+      });
+    } catch {}
     resubscribeAll();
     probeTeam();
     // Tell Terminal to reset stale resize state + re-fit against the new server.
@@ -691,6 +704,99 @@
     page = 'settings';
     localStorage.removeItem('tmux_state');
     localStorage.setItem('tmux_disconnected', '1');
+  }
+
+  // --- Server switcher (board #55: "在桌面上能右下角agent上边快速切换按钮") ---
+  // The registry lives in servers.ts (named entries mirroring the active
+  // tmux_address/token keys); this is only the rail entry: a popover listing
+  // the entries, the current one marked, a click switching. The switch itself
+  // is applySwitch (park/restore per-server state) + a full reload — the boot
+  // path is the ONE way up against a server, so nothing in-memory can leak
+  // across (Hub room cache, mounted terminals, Files parked cwds).
+  let serverMenuOpen = $state(false);
+  let serverList = $state([]);
+  let serverCurId = $state('');
+  let serverMenuAnchor = null;
+  let serverMenuW = $state(0);
+  let serverMenuH = $state(0);
+  let serverRenaming = $state('');   // entry id whose name is an input
+  let serverRenameDraft = $state('');
+
+  function toggleServerMenu(e) {
+    if (serverMenuOpen) { serverMenuOpen = false; return; }
+    serverList = loadServers(localStorage);
+    serverCurId = currentServerId(localStorage);
+    serverMenuAnchor = anchorOf(e.currentTarget);
+    serverMenuW = 0; serverMenuH = 0;
+    serverRenaming = '';
+    serverMenuOpen = true;
+  }
+  const serverMenuPos = $derived.by(() =>
+    serverMenuOpen && serverMenuAnchor
+      ? menuPlacement(serverMenuAnchor, { w: serverMenuW, h: serverMenuH }, viewBox())
+      : { x: 0, y: 0 },
+  );
+  $effect(() => {
+    if (!serverMenuOpen) return;
+    const close = () => { serverMenuOpen = false; };
+    const onDown = (e) => { if (!e.target?.closest?.('.server-menu, .rail-server')) close(); };
+    const onKey = (e) => { if (e.key === 'Escape') { close(); e.stopPropagation(); } };
+    window.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('resize', close);
+    };
+  });
+
+  /** Switch: fully drop the old socket FIRST (cancel any reconnect loop so it
+   *  cannot race the storage writes with the old address), apply the storage
+   *  plan, reload. `tmux_disconnected` is cleared by the plan, so the boot
+   *  auto-connect brings the app up against the target. */
+  function doServerSwitch(id) {
+    if (id === serverCurId) return; // "you are here" — the row is a fact, not an action
+    reconnectMachine.cancel();
+    disconnect();
+    if (applySwitch(localStorage, id)) location.reload();
+    else serverMenuOpen = false; // stale row (entry vanished) — just close
+  }
+  // Click switches, double-click renames — the same 260ms disambiguation the
+  // Hub's agent cards use (a dblclick's first click must not fire the switch,
+  // which would reload the page out from under the rename).
+  let smClickTimer = null;
+  function smRowClick(id) {
+    if (smClickTimer) { clearTimeout(smClickTimer); smClickTimer = null; return; }
+    smClickTimer = setTimeout(() => { smClickTimer = null; doServerSwitch(id); }, 260);
+  }
+  function smRowDbl(s) {
+    if (smClickTimer) { clearTimeout(smClickTimer); smClickTimer = null; }
+    serverRenameStart(s);
+  }
+  function serverRemoveRow(id) {
+    serverList = removeServer(localStorage, id);
+  }
+  function serverRenameStart(s) {
+    serverRenaming = s.id;
+    serverRenameDraft = s.name;
+  }
+  /** svelte action: focus + select the rename input the moment it mounts. */
+  function focusOnMount(el) {
+    el.focus();
+    el.select?.();
+  }
+  function serverRenameCommit() {
+    if (serverRenaming) serverList = renameServer(localStorage, serverRenaming, serverRenameDraft);
+    serverRenaming = '';
+  }
+  /** The `+` row: the Settings connect form IS the add flow (it upserts by
+   *  address on success), so the row only takes you there. No disconnect —
+   *  the current server stays live until the new one authenticates. */
+  function serverAddRow() {
+    serverMenuOpen = false;
+    pageBeforePrefs = page;
+    page = 'settings';
   }
 
   // --- Optimal address selection ---
@@ -773,9 +879,22 @@
       if (token != null) localStorage.setItem('tmux_token', token);
       if (socket) localStorage.setItem('tmux_socket', socket);
       localStorage.removeItem('tmux_disconnected'); // explicit intent to connect
+      // A deep-linked server joins the registry like a hand-typed one (board
+      // #55): same upsert-by-address, so a re-shared link never duplicates.
+      if (addrRaw) {
+        let a2 = addrRaw.trim();
+        if (!/^wss?:\/\//.test(a2)) a2 = (location.protocol === 'https:' ? 'wss://' : 'ws://') + a2;
+        try { upsertServer(localStorage, { address: a2, token: token || '', ...(socket ? { socket } : {}) }); } catch {}
+      }
       history.replaceState(null, '', location.pathname + location.hash.split('?')[0]);
     } catch { /* malformed URL — ignore, fall back to saved/settings */ }
   }
+  // Multi-server registry (board #55): migrate the single-server keys into
+  // named entries BEFORE the deep-link consumer runs, so a link on a
+  // pre-registry client first preserves the current user as entry one and
+  // then upserts the linked server — never the reverse (an upsert creating
+  // the registry would make migrateServers a no-op and drop the history).
+  migrateServers(localStorage);
   consumeConnectUrlParams();
 
   // Copy the CURRENT connection as a deep link (consumed by consumeConnectUrlParams
@@ -1219,6 +1338,17 @@
       {#each railSlots as slot (slot)}
         {#if slot === RAIL_GAP}
           <div class="rail-spacer" data-rail-slot={slot}></div>
+          <!-- Server switcher (board #55): "右下角agent上边" — glued to the top
+               of the rail's bottom (configure) group, above the agents icon in
+               the shipped order. A CONTROL, not a page: never draggable, never
+               active, opens the registry popover. -->
+          <button
+            tabindex="-1"
+            class="rail-btn rail-server"
+            title={t('serversTitle')}
+            aria-label={t('serversTitle')}
+            onclick={(e) => toggleServerMenu(e)}
+          ><Icon name="swap-h" size={17} /></button>
         {:else}
           <button
             tabindex="-1"
@@ -1243,6 +1373,38 @@
     </nav>
   {/if}
 
+
+  {#if serverMenuOpen}
+    <!-- The server registry popover (board #55). Same popover mechanics as the
+         Hub's agent menu: fixed layer, menuPlacement from the trigger's rect,
+         invisible until measured, outside-pointerdown/Escape/resize dismiss. -->
+    <div class="server-menu" class:ready={serverMenuH > 0} role="menu" tabindex="-1"
+      style:left="{serverMenuPos.x}px" style:top="{serverMenuPos.y}px"
+      bind:clientWidth={serverMenuW} bind:clientHeight={serverMenuH}>
+      <div class="sm-title">{t('serversTitle')}</div>
+      {#each serverList as s (s.id)}
+        <div class="sm-row" class:cur={s.id === serverCurId}>
+          {#if serverRenaming === s.id}
+            <input class="sm-rename" bind:value={serverRenameDraft} use:focusOnMount
+              onkeydown={(e) => { e.stopPropagation(); if (e.key === 'Enter') serverRenameCommit(); else if (e.key === 'Escape') serverRenaming = ''; }}
+              onblur={serverRenameCommit} />
+          {:else}
+            <button class="sm-pick" role="menuitem" title={s.address}
+              onclick={() => smRowClick(s.id)} ondblclick={() => smRowDbl(s)}>
+              <span class="sm-name">{s.name}</span>
+              <span class="sm-addr">{s.address}</span>
+            </button>
+          {/if}
+          {#if s.id === serverCurId}
+            <span class="sm-check" title={t('serverCurrent')}><Icon name="check" size={13} /></span>
+          {:else}
+            <button class="sm-del" title={t('serverRemove')} onclick={() => serverRemoveRow(s.id)}><Icon name="x" size={12} /></button>
+          {/if}
+        </div>
+      {/each}
+      <button class="sm-add" onclick={serverAddRow}><Icon name="plus" size={13} /><span>{t('serverAdd')}</span></button>
+    </div>
+  {/if}
 
   {#if reconnecting && page !== 'settings'}
     <div class="reconnect-bar">
@@ -1572,6 +1734,58 @@
   .rail-btn:hover { color: var(--text); background: var(--surface2); }
   .rail-btn.active { color: var(--accent); background: var(--accent-bg); }
   .rail-spacer { flex: 1; }
+
+  /* Server switcher (board #55): the rail entry is an ordinary rail-btn (a
+     control, never .active — no page answers to it), separated a touch from
+     the configure group below. The popover follows the app's ONE menu recipe
+     (the Hub .a-menu dialect: fixed layer, measured-then-shown, panel radius,
+     row hover in the surface wash). */
+  .rail-server { margin-bottom: 4px; }
+  .server-menu {
+    position: fixed; z-index: 24; min-width: 220px; max-width: min(76vw, 320px);
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--ui-radius-panel);
+    box-shadow: 0 12px 34px rgba(0,0,0,0.45); padding: 5px;
+    display: flex; flex-direction: column; gap: 2px;
+    opacity: 0; transition: opacity var(--t-fast) ease;
+  }
+  .server-menu.ready { opacity: 1; }
+  .sm-title {
+    font-family: var(--font-display); font-weight: 600; font-size: var(--fs-micro);
+    color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 4px 8px 2px;
+  }
+  .sm-row { display: flex; align-items: center; gap: 2px; min-width: 0; }
+  .sm-pick {
+    flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+    background: none; border: none; border-radius: var(--ui-radius-control);
+    padding: 5px 8px; cursor: pointer; text-align: left;
+    transition: background var(--t-fast);
+  }
+  .sm-pick:hover { background: var(--surface2); }
+  .sm-name { font-size: var(--fs-ui); color: var(--text); font-weight: 550; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sm-addr { font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--text3); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sm-row.cur .sm-name { color: var(--accent); }
+  .sm-check { color: var(--accent); display: grid; place-items: center; padding: 0 6px; flex: none; }
+  .sm-del {
+    background: none; border: none; border-radius: var(--ui-radius-control);
+    color: var(--text3); cursor: pointer; display: grid; place-items: center;
+    padding: 4px 6px; flex: none; transition: color var(--t-fast), background var(--t-fast);
+  }
+  .sm-del:hover { color: var(--status-danger); background: var(--surface2); }
+  .sm-rename {
+    flex: 1; min-width: 0; font-size: var(--fs-ui); color: var(--text);
+    background: var(--surface); border: 1px solid var(--accent-line, var(--accent));
+    border-radius: var(--ui-radius-control); padding: 4px 7px; outline: none;
+  }
+  .sm-add {
+    display: flex; align-items: center; gap: 6px;
+    background: none; border: none; border-top: 1px solid var(--border);
+    border-radius: 0 0 var(--ui-radius-control) var(--ui-radius-control);
+    margin-top: 3px; padding: 6px 8px; cursor: pointer;
+    color: var(--text2); font-size: var(--fs-ui); text-align: left;
+    transition: background var(--t-fast), color var(--t-fast);
+  }
+  .sm-add:hover { background: var(--surface2); color: var(--text); }
 
   /* Reordering the rail. Two cues, because one is not enough to say both WHAT
      is moving and WHERE it lands: the pressed icon is CARRIED (it follows the

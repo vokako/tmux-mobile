@@ -97,14 +97,20 @@ test('the rail renders the SAVED order, not a hardcoded sequence', () => {
 });
 
 test('every page icon is draggable and the brand is not', () => {
-  // Consistency is the rule the rail is judged by: every .rail-btn is a page
-  // icon, so every one of them carries the gesture — a single icon that refuses
-  // to move is unexplainable. The brand is the app's mark, not a page.
+  // Consistency is the rule the rail is judged by: every page icon carries
+  // the gesture — a single icon that refuses to move is unexplainable. The
+  // brand is the app's mark, not a page; the server switcher (board #55) is
+  // the one CONTROL among the buttons — no slot, no drag, only a popover.
   const buttons = rail.match(/<button[\s\S]*?<\/button>/gu) ?? [];
-  assert.equal(buttons.length, 1, 'one templated button, not six copies');
-  assert.match(String(buttons[0]), /data-rail-slot=\{slot\}/u, 'the drop geometry is read off these');
-  assert.match(String(buttons[0]), /onpointerdown=\{\(e\) => railPointerDown\(e, slot\)\}/u);
-  assert.match(String(buttons[0]), /class:dragging=\{railDrag\?\.slot === slot\}/u);
+  assert.equal(buttons.length, 2, 'the templated page button and the server-switcher control');
+  const pageBtn = buttons.find((b) => b.includes('data-rail-slot={slot}')) ?? '';
+  assert.ok(pageBtn, 'the drop geometry is read off the page button');
+  assert.match(String(pageBtn), /onpointerdown=\{\(e\) => railPointerDown\(e, slot\)\}/u);
+  assert.match(String(pageBtn), /class:dragging=\{railDrag\?\.slot === slot\}/u);
+  const serverBtn = buttons.find((b) => b.includes('rail-server')) ?? '';
+  assert.ok(serverBtn, 'the switcher is the other button');
+  assert.doesNotMatch(String(serverBtn), /data-rail-slot|onpointerdown/u,
+    'a control: never a drag handle, never a drop anchor');
 
   const brand = rail.match(/<img class="rail-brand"[^>]*>/u)?.[0] ?? '';
   assert.ok(brand, 'the brand stays at the top of the rail');
@@ -271,4 +277,51 @@ test('board back on a phone lifts the project drawer, never the terminal (board 
   // Board is told whether a return slot exists, so its drawer lift can stand
   // aside and let back fall through to the conversation.
   assert.match(source, /<Board [^\n]*jumped=\{!!jumpedFrom\}/u, 'the return slot reaches the drawer-lift gate');
+});
+
+test('the multi-server registry wires migrate → deep-link → boot, in that order (board #55)', () => {
+  // Migration must run BEFORE the deep-link consumer: on a pre-registry
+  // client a link would otherwise create the registry via upsert, turn
+  // migrateServers into a no-op, and silently drop the current user +
+  // history. The consumer then upserts the linked server by address.
+  const idxMigrate = source.indexOf('migrateServers(localStorage)');
+  const idxConsume = source.indexOf('consumeConnectUrlParams();');
+  assert.ok(idxMigrate >= 0, 'boot migrates the single-server keys');
+  assert.ok(idxMigrate < idxConsume, 'migrate BEFORE the deep-link consumer');
+  assert.match(source, /upsertServer\(localStorage, \{ address: a2, token: token \|\| ''/u,
+    'a deep-linked server joins the registry');
+});
+
+test('the rail server switcher sits above the configure group and only places (board #55)', () => {
+  // "右下角agent上边": the entry rides the RAIL_GAP branch — glued to the top
+  // of the bottom group, above agents in the shipped order — and is a
+  // CONTROL: no data-rail-slot, so it can never become a drag target.
+  const gapBranch = source.match(/\{#if slot === RAIL_GAP\}[\s\S]*?\{:else\}/u)?.[0] ?? '';
+  assert.match(gapBranch, /class="rail-btn rail-server"/u, 'the switcher lives in the gap branch');
+  assert.ok(!/rail-server[^>]*data-rail-slot/u.test(source), 'a control, not a draggable slot');
+  assert.match(source, /onclick=\{\(e\) => toggleServerMenu\(e\)\}/u, 'it opens the registry popover');
+});
+
+test('a server switch fully drops the old socket, applies the plan, and reboots (board #55)', () => {
+  // Order is the contract: cancel any reconnect loop (it re-reads
+  // tmux_address and would race the storage writes), close the socket, THEN
+  // applySwitch (park/restore per-server state) and reload — the boot path
+  // is the one way up against a server, so nothing in-memory can leak across.
+  const fn = source.match(/function doServerSwitch\(id\) \{[\s\S]*?\n  \}/u)?.[0] ?? '';
+  const iCancel = fn.indexOf('reconnectMachine.cancel()');
+  const iDisc = fn.indexOf('disconnect()');
+  const iApply = fn.indexOf('applySwitch(localStorage, id)');
+  const iReload = fn.indexOf('location.reload()');
+  assert.ok(iCancel >= 0 && iCancel < iDisc && iDisc < iApply && iApply < iReload,
+    'cancel → disconnect → applySwitch → reload');
+});
+
+test('failover success refreshes the registry entry by machine identity (board #55)', () => {
+  // onReconnectSuccess proved a DIFFERENT address of the SAME machine —
+  // upsert with machineId merges it into the one entry instead of growing a
+  // second "server" (the lead-review invariant: multi-server must not break
+  // the multi-address semantics).
+  const fn = source.match(/function onReconnectSuccess\(useAddr, primaryAddr\) \{[\s\S]*?\n  \}/u)?.[0] ?? '';
+  assert.match(fn, /upsertServer\(localStorage, \{[\s\S]*?address: useAddr/u, 'the active address follows the connect');
+  assert.match(fn, /machineId: mid/u, 'merged by machine identity, never by address alone');
 });
