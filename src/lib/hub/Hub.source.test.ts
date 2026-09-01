@@ -738,3 +738,14 @@ test('the anchor transaction re-measures the fold line it is about to restore (b
   // no second measurement dialect inside the transaction.
   assert.ok(!/withReadingAnchor[\s\S]*?heldWidth =/u.test(tx), 'the transaction never writes measurements directly');
 });
+
+test('the agent-card menu opens on the CARD’s left edge (board #47)', () => {
+  // Owner: "点击 agent 卡片，出来的选项卡应该和 agent 卡片左边缘对齐，而不是
+  // 右边缘对齐" (2026-09-01). The tap menu anchors on the card rect
+  // (toggleAgentMenu → anchorOf) and menuPos passes the LEFT alignment to the
+  // shared menuPlacement — the same reading the title menu chose in #32, same
+  // flip and clamp, so the two alignments cannot drift apart. The right-click/
+  // long-press context menu stays pointer-anchored (pinned in the #32 test).
+  assert.match(source, /menuPlacement\(menuAnchor, \{ w: menuW, h: menuH \}, viewBox\(\), 6, 8, 'left'\)/u,
+    'the card tap menu is left-aligned via the shared placement math');
+});

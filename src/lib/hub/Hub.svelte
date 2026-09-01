@@ -1769,13 +1769,16 @@
     menuFor = name;
   }
 
-  /** Under the trigger, right-aligned to it, flipped above when the bottom of
-   * the viewport is closer than the menu is tall, and always clamped into
-   * view. Measured size arrives one frame after mount, which is why the menu
-   * stays invisible until it has one. The math is `menuPlacement` in hub.ts,
-   * unit-tested there. */
+  /** Under the trigger, LEFT-aligned to it (board #47: "应该和 agent 卡片
+   * 左边缘对齐，而不是右边缘对齐" — the card reads name-first from its left
+   * edge, and the menu expanding that card starts where the card starts,
+   * the same reading the title menu chose in #32), flipped above when the
+   * bottom of the viewport is closer than the menu is tall, and always
+   * clamped into view. Measured size arrives one frame after mount, which
+   * is why the menu stays invisible until it has one. The math is
+   * `menuPlacement` in placement.ts, unit-tested there. */
   const menuPos = $derived.by(() =>
-    menuAnchor ? menuPlacement(menuAnchor, { w: menuW, h: menuH }, viewBox()) : { x: 0, y: 0 },
+    menuAnchor ? menuPlacement(menuAnchor, { w: menuW, h: menuH }, viewBox(), 6, 8, 'left') : { x: 0, y: 0 },
   );
 
   // Any click elsewhere, Escape, a scroll of the roster or a resize dismisses

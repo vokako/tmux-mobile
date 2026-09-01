@@ -73,7 +73,10 @@ completion).
   (at-rest is achromatic grey; running wears the `.live-dot` halo + breathe),
   sniffed **vitals** (model + effort at `--fs-micro`, context% as a 2px
   bottom edge line), and a context menu (Watch / Interrupt / Stop / Restart /
-  Remove / configure agent — rising consequence order).
+  Remove / configure agent — rising consequence order). The card TAP menu
+  aligns to the card's LEFT edge (board #47 — the card reads name-first
+  from its left edge; same shared placement flip/clamp as the title menu);
+  right-click/long-press keeps the pointer placement.
 - A **stopped** agent (slot, no window) keeps its card and menu (Start /
   Remove). The `+ agent` card is the strip's sticky last card and renders
   for every selected project — empty roster and closed session included
