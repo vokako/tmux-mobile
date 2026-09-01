@@ -290,33 +290,43 @@ test('chipCols: one row when it fits, else 2×2, else one column — never three
 });
 
 test('note-acts gen: a stale Copy timeout can never touch a later context (board #46 review)', async () => {
-  const { NOTE_ACTS_IDLE, noteActsSet, noteActsCopied, noteActsExpired } = await import('./board.ts');
-  // The reported race, replayed: Copy on note A, switch to note B and Copy
-  // there within the beat — A's timeout fires holding ITS gen and must be a
-  // no-op, B's own timeout (its gen current) puts the row away.
+  const { NOTE_ACTS_IDLE, noteActsSet, noteActsCopyLanded, noteActsExpired } = await import('./board.ts');
+  // The REAL copy order: the attempt's gen is captured at the TAP (before
+  // the clipboard await), the stamp lands only if the state is still that
+  // context, and the dismiss timer is armed only on a landing.
+
+  // Blocker 1 replayed: Copy on A lands, switch to B and Copy there within
+  // the beat — A's timeout fires holding ITS gen and must be a no-op, B's
+  // own timeout puts the row away.
   let s = noteActsSet(NOTE_ACTS_IDLE, 0);   // open A
-  s = noteActsCopied(s);                     // Copy A
-  const genA = s.gen;
+  let attempt = s.gen;                       // A taps Copy
+  s = noteActsCopyLanded(s, attempt);        // clipboard resolves in place
+  const timerA = s.gen;
   s = noteActsSet(s, 1);                     // switch to B (within 1.5s)
-  s = noteActsCopied(s);                     // Copy B
-  const genB = s.gen;
-  const afterStaleA = noteActsExpired(s, genA);
-  assert.deepEqual(afterStaleA, s, 'A\u2019s stale timeout changes NOTHING — B keeps its row and its Copied beat');
-  const afterB = noteActsExpired(afterStaleA, genB);
-  assert.deepEqual(afterB, { open: -1, copied: false, gen: genB }, 'B\u2019s own timeout closes B');
+  attempt = s.gen;                           // B taps Copy
+  s = noteActsCopyLanded(s, attempt);        // lands
+  const timerB = s.gen;
+  const afterStaleA = noteActsExpired(s, timerA);
+  assert.equal(afterStaleA, s, 'A\u2019s stale timeout changes NOTHING — B keeps its row and its Copied beat');
+  assert.deepEqual(noteActsExpired(afterStaleA, timerB), { open: -1, copied: false, gen: timerB }, 'B\u2019s own timeout closes B');
 
-  // Cross-issue/project: a copy in flight, then the context resets (openIssue
-  // or a project switch both call noteActsSet(-1)) — the orphaned timeout
-  // must not close or dirty the NEW context.
-  let c = noteActsCopied(noteActsSet(NOTE_ACTS_IDLE, 2));
-  const inFlight = c.gen;
-  c = noteActsSet(c, -1);                    // issue switched; row reset
-  c = noteActsSet(c, 0);                     // user already opened a row in the new issue
-  const afterOrphan = noteActsExpired(c, inFlight);
-  assert.deepEqual(afterOrphan, c, 'an orphaned beat cannot pollute the new issue\u2019s open row');
+  // Blocker 2 replayed, real await order: A taps Copy, the clipboard promise
+  // is STILL PENDING while the user switches issue and opens note B — then
+  // A's resolve arrives. It must not stamp Copied on B (nor arm a timer:
+  // the same-reference return is the caller's no-arm signal).
+  let c = noteActsSet(NOTE_ACTS_IDLE, 0);    // open A
+  const pendingAttempt = c.gen;              // A taps Copy — promise pending
+  c = noteActsSet(c, -1);                    // issue switched: context reset
+  c = noteActsSet(c, 0);                     // user opens B's row in the new issue
+  const resolved = noteActsCopyLanded(c, pendingAttempt);
+  assert.equal(resolved, c, 'the deferred resolve is orphaned — B is never marked Copied by A\u2019s copy');
+  assert.equal(resolved.copied, false, 'and no Copied beat begins');
 
-  // And the happy path still expires: gen only moves FORWARD.
-  let h = noteActsCopied(noteActsSet(NOTE_ACTS_IDLE, 3));
+  // The undisturbed happy path still lands and expires; gen only moves FORWARD.
+  let h = noteActsSet(NOTE_ACTS_IDLE, 3);
+  const hAttempt = h.gen;
+  h = noteActsCopyLanded(h, hAttempt);
+  assert.equal(h.copied, true, 'an in-place copy lands');
   assert.equal(noteActsExpired(h, h.gen).open, -1, 'an undisturbed beat closes its own row');
   assert.ok(noteActsSet(h, -1).gen > h.gen, 'every transition bumps the gen — monotonic, never reused');
 });

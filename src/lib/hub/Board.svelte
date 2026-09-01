@@ -16,7 +16,7 @@
   import Select from '../ui/Select.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
-  import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, countsOf, applyCounts, visibleBoards, boardTitle, assignNotes, chipCols, noteActsSet, noteActsCopied, noteActsExpired, NOTE_ACTS_IDLE, type NoteActsState } from './board.ts';
+  import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, countsOf, applyCounts, visibleBoards, boardTitle, assignNotes, chipCols, noteActsSet, noteActsCopyLanded, noteActsExpired, NOTE_ACTS_IDLE, type NoteActsState } from './board.ts';
   import { scrollFade } from '../core/scrollFade.ts';
 
   let { session = '', visible = true, onGoBack = null, issueRequest = null, embedded = false, createRequest = null }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null; issueRequest?: { session: string; id: number; n: number } | null; embedded?: boolean; createRequest?: { n: number } | null } = $props();
@@ -423,14 +423,20 @@
     acts = noteActsSet(acts, acts.open === i ? -1 : i);
   }
   async function copyNote(body: string) {
+    // The attempt's identity, captured BEFORE the await (second blocker):
+    // the clipboard write is async, and by resolve time the user may be on
+    // another note or another issue — that resolve must not stamp Copied
+    // onto the new context, nor arm a timer against it.
+    const attempt = acts.gen;
     try {
       await navigator.clipboard.writeText(body ?? '');
-      acts = noteActsCopied(acts);
+      const next = noteActsCopyLanded(acts, attempt);
+      if (next === acts) return; // the context moved mid-flight; the resolve is orphaned
+      acts = next;
       // The Copied beat, then the row puts itself away — copying IS what the
       // row was opened for (Chat's own 1.5 s). The timeout captures ITS gen:
-      // it may expire only the copy it belongs to — never a later copy on
-      // another note, never a fresh context after an issue/project switch.
-      const gen = acts.gen;
+      // it may expire only the copy it belongs to.
+      const gen = next.gen;
       setTimeout(() => { acts = noteActsExpired(acts, gen); }, 1500);
     } catch (e) { console.warn('copy failed', e); }
   }

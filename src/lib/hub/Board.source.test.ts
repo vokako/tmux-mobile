@@ -632,8 +632,15 @@ test('a note bubble reveals ONE Copy action in Chat\u2019s own dialect (board #4
   assert.match(source, /onclick=\{\(\) => copyNote\(n\.body\)\}/u, 'copy carries the raw body');
   assert.ok(!source.includes('copyNote(n.body.trim()'), 'never the trimmed rendering');
   assert.match(source, /navigator\.clipboard\.writeText\(body \?\? ''\)/u, 'the one clipboard write');
-  // The Copied beat captures ITS OWN gen and may expire only itself.
-  assert.match(source, /const gen = acts\.gen;\n\s+setTimeout\(\(\) => \{ acts = noteActsExpired\(acts, gen\); \}, 1500\);/u,
+  // The attempt's identity is captured BEFORE the clipboard await (second
+  // blocker: a deferred resolve stamped Copied onto whatever was open by
+  // then); the stamp lands only into its own context, and the dismiss timer
+  // arms only on a landing.
+  assert.match(source, /const attempt = acts\.gen;[\s\S]{0,400}await navigator\.clipboard\.writeText/u,
+    'the attempt gen is read before the await');
+  assert.match(source, /const next = noteActsCopyLanded\(acts, attempt\);\n\s+if \(next === acts\) return; \/\/ the context moved mid-flight/u,
+    'a stale resolve is orphaned — no stamp, no timer');
+  assert.match(source, /const gen = next\.gen;\n\s+setTimeout\(\(\) => \{ acts = noteActsExpired\(acts, gen\); \}, 1500\);/u,
     'copied → the timeout puts away only the copy it belongs to');
 
   // Close semantics: outside pointerdown, Escape as the topmost peel, and
