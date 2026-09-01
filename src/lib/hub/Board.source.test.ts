@@ -713,3 +713,51 @@ test('a note never intercepts contextmenu — long-press selection is the system
   assert.ok(!/oncontextmenu/u.test(source),
     'Board.svelte intercepts no contextmenu — the system owns the long-press');
 });
+
+test('the \u2713 answers the edit: save returns to the board, and sits RIGHTMOST (board #48 v2)', () => {
+  // Owner: "我改了后点击对勾应该自动回到主页面，不用停留在详情页。而且按钮
+  // 顺序帮我调整一下，一般习惯对勾在最右边，防止误点击" (2026-09-01).
+  // 1) A SUCCESSFUL save leaves the detail view — the ✓ answered the edit;
+  //    a FAILED save stays put with the error and the typed draft (retry is
+  //    honest, the same asymmetry createIssue already has).
+  const save = source.match(/async function saveDraft\(\) \{[\s\S]*?\n  \}/u)?.[0] || '';
+  assert.match(save, /sel = null;/u, 'success path returns to the list');
+  assert.ok(save.indexOf('sel = null') < save.indexOf('} catch'),
+    'the return is the SUCCESS path — the catch keeps the detail open');
+  assert.ok(!/refetchSel\(\)/u.test(save),
+    'no refetch of a detail view the save just left');
+  // 2) Button order in the detail head: … spacer, trash, then the draft's
+  //    undo + ✓ — the ✓ is the LAST control, and undo separates it from
+  //    trash so the muscle-memory rightmost tap can never hit delete.
+  const head = source.match(/<div class="d-head">[\s\S]*?<\/div>/u)?.[0] || '';
+  const trashAt = head.indexOf('requestDelete');
+  const undoAt = head.indexOf('guard(() => {})');
+  const checkAt = head.indexOf('saveDraft');
+  assert.ok(trashAt >= 0 && undoAt >= 0 && checkAt >= 0, 'all three verbs live in the head');
+  assert.ok(trashAt < undoAt && undoAt < checkAt,
+    `order is trash < undo < \u2713 (got ${trashAt}, ${undoAt}, ${checkAt})`);
+});
+
+test('the \u2713 answers the edit: save returns to the board, and sits RIGHTMOST (board #48 v2)', () => {
+  // Owner: "我改了后点击对勾应该自动回到主页面，不用停留在详情页。而且按钮
+  // 顺序帮我调整一下，一般习惯对勾在最右边，防止误点击" (2026-09-01).
+  // 1) A SUCCESSFUL save leaves the detail view — the ✓ answered the edit;
+  //    a FAILED save stays put with the error and the typed draft (retry is
+  //    honest, the same asymmetry createIssue already has).
+  const save = source.match(/async function saveDraft\(\) \{[\s\S]*?\n  \}/u)?.[0] || '';
+  assert.match(save, /sel = null;/u, 'success path returns to the list');
+  assert.ok(save.indexOf('sel = null') < save.indexOf('} catch'),
+    'the return is the SUCCESS path — the catch keeps the detail open');
+  assert.ok(!/refetchSel\(\)/u.test(save),
+    'no refetch of a detail view the save just left');
+  // 2) Button order in the detail head: … spacer, trash, then the draft's
+  //    undo + ✓ — the ✓ is the LAST control, and undo separates it from
+  //    trash so the muscle-memory rightmost tap can never hit delete.
+  const head = source.match(/<div class="d-head">[\s\S]*?onclick=\{saveDraft\}[\s\S]*?<\/div>/u)?.[0] ?? '';
+  const trashAt = head.indexOf('requestDelete');
+  const undoAt = head.indexOf('guard(() => {})');
+  const checkAt = head.indexOf('saveDraft');
+  assert.ok(trashAt >= 0 && undoAt >= 0 && checkAt >= 0, 'all three verbs live in the head');
+  assert.ok(trashAt < undoAt && undoAt < checkAt,
+    `order is trash < undo < \u2713 (got ${trashAt}, ${undoAt}, ${checkAt})`);
+});

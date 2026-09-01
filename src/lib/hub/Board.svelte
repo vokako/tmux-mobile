@@ -352,7 +352,14 @@
       // (board #42) — sel is the boardGet copy, so its notes are the array
       // (list rows only carry a count, which assignNotes treats as none).
       if (assignee !== undefined) await dispatchAssign(sel.id, assignee, draft.title, draft.body, Array.isArray(sel.notes) ? sel.notes : []);
-      await refetchSel();
+      // The ✓ ANSWERS the edit (board #48 v2, owner: "点击对勾应该自动回到
+      // 主页面，不用停留在详情页"): a successful save leaves the detail view
+      // for the refreshed board. A FAILED save takes the catch instead —
+      // the detail stays open with the error and the typed draft, because
+      // a form that closes on failure eats the retry (createIssue's rule).
+      err = '';
+      sel = null;
+      await load();
     } catch (e) { err = String((e as Error)?.message ?? e); }
     busy = false;
   }
@@ -634,6 +641,13 @@
         </button>
         <span class="d-id">#{sel.id}</span>
         <span class="spacer"></span>
+        <!-- Verb order (board #48 v2, owner: "一般习惯对勾在最右边，防止误
+             点击"): trash first, then the draft's undo + ✓ — the ✓ is the
+             LAST control so the muscle-memory rightmost tap confirms, and
+             undo stands between it and delete. -->
+        <button class="icon-btn" title={t('boardDeleteIssue')} aria-label={t('boardDeleteIssue')} disabled={busy} onclick={requestDelete}>
+          <Icon name="trash" size={14} />
+        </button>
         {#if dirty}
           <!-- The draft's own verbs, only while there is a draft to speak of:
                cancel restores the stored issue, save persists the changed
@@ -648,9 +662,6 @@
             <Icon name="check" size={14} />
           </button>
         {/if}
-        <button class="icon-btn" title={t('boardDeleteIssue')} aria-label={t('boardDeleteIssue')} disabled={busy} onclick={requestDelete}>
-          <Icon name="trash" size={14} />
-        </button>
       </div>
       <!-- Layout hierarchy (board #11): the title is ONE compact line, the
            body is the big field — visibly larger, growable, never same-size
