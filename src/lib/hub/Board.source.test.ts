@@ -84,7 +84,7 @@ test('the sidebar orders by conversation, and rows are summaries (reopened #11)'
   // The second line is COLUMN COUNTS in the shared chip dress — never the
   // Chat row's agent chips (board #39 kept the summary rule: no roster here).
   assert.ok(!row.includes('a.icon'), 'no agent chips — the Board row summarises the BOARD, not the roster');
-  assert.match(row, /boardStatusColor\(st\)/u, 'the chips speak the one board status language');
+  assert.match(row, /countColor\(st\)/u, 'the chips speak the board status language through the sidebar remap');
 });
 
 test('notes are a timeline: author + time header, content box below (reopened #11)', () => {
@@ -404,8 +404,26 @@ test('the sidebar consumes ONE bulk counts read and reacts to local writes at on
     'the default selection is the first visible board');
   // Each row's second line is the four columns in FIXED order, zeros
   // included, wearing the shared chip atoms + the one board status language.
-  assert.match(source, /\{#each STATUSES as st \(st\)\}[\s\S]*?side-win-dot" style:background=\{boardStatusColor\(st\)\}[\s\S]*?\{statusLabel\(st\)\}[\s\S]*?\{c\?\.\[st as keyof BoardCountRow\] \?\? 0\}/u,
+  assert.match(source, /\{#each STATUSES as st \(st\)\}[\s\S]*?side-win-dot" style:background=\{countColor\(st\)\}[\s\S]*?\{statusLabel\(st\)\}[\s\S]*?\{c\?\.\[st as keyof BoardCountRow\] \?\? 0\}/u,
     'four chips, fixed vocabulary order, count present even at 0');
+});
+
+test("the sidebar count chips remap done off the live dot's green — locally, never in the language (board #39, owner)", () => {
+  // Owner (2026-09-01): "done 的标识就不要用绿色了，和前边的冲突了" — in
+  // THESE rows done's status-ok green sat five pixels under the row's green
+  // LIVE dot. The remap is deliberately scoped (lead): the feed's "→ done"
+  // badge keeps boardStatusColor's green so it agrees with the [tmm done]
+  // state badge beside it, and the sidebar chip alone wears the at-rest
+  // token.
+  assert.match(source,
+    /const countColor = \(st: string\) => \(st === 'done' \? 'var\(--status-sleep\)' : boardStatusColor\(st\)\);/u,
+    'the remap: done → --status-sleep, everything else delegates to the one language');
+  assert.ok(!/side-win-dot" style:background=\{boardStatusColor\(st\)\}/.test(source),
+    'the chip dot never bypasses the remap');
+  // Colour is a garnish, not the identity: every chip carries its LABEL and
+  // COUNT, so the four columns stay readable with no colour at all.
+  assert.match(source, /\{statusLabel\(st\)\}<\/span>\s*<span class="b-count">/u,
+    'label + count on every chip — non-colour-identifiable');
 });
 
 test('load() is pinned to the board it was asked FOR — a stale response never writes the new board (board #39 review)', () => {

@@ -404,6 +404,15 @@
   }
 
   const statusLabel = (s: string) => t(`boardStatus_${s}`);
+  /** The SIDEBAR count chips' colour — boardStatusColor with ONE local remap
+   * (owner 2026-09-01: "done 的标识就不要用绿色了，和前边的冲突了"; lead
+   * scoped it here): only in these rows does done's status-ok green sit five
+   * pixels under the row's green LIVE dot — one colour, two meanings — so
+   * done wears the at-rest --status-sleep HERE, while the feed's "→ done"
+   * badge keeps the language's green (it must agree with the [tmm done]
+   * state badge beside it). The chips stay non-colour-readable regardless:
+   * every one carries its label and count. */
+  const countColor = (st: string) => (st === 'done' ? 'var(--status-sleep)' : boardStatusColor(st));
   const col = (s: string) => issues.filter((i) => i.status === s);
   const noteCount = (i: BoardIssue) => (typeof i.notes === 'number' ? i.notes : i.notes.length);
   const ago = (ts: number) => {
@@ -440,7 +449,7 @@
             <span class="side-wins">
               {#each STATUSES as st (st)}
                 <span class="side-win">
-                  <span class="side-win-dot" style:background={boardStatusColor(st)}></span>
+                  <span class="side-win-dot" style:background={countColor(st)}></span>
                   <span class="side-win-name">{statusLabel(st)}</span>
                   <span class="b-count">{c?.[st as keyof BoardCountRow] ?? 0}</span>
                 </span>
