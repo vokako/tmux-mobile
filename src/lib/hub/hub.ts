@@ -408,26 +408,68 @@ export function foldLines(compact: boolean, basis: number, lineHeight: number): 
   return Math.max(3, Math.floor((maxPx - 26) / lh));
 }
 
+/** Fold a long user message to `maxLines` VISUAL lines (board #53).
+ *
+ * The first cut budgeted SOURCE lines and only fell back to characters when
+ * the line count already fit — so one giant paragraph among the first lines
+ * wrapped into pages and the fold held nothing back (owner, 2026-09-01:
+ * "应该是按照消息字符长度来，不只是行数，不然一大段就占满了，没起到折叠
+ * 作用"). The budget is now spent line by line at each line's RENDERED
+ * height: a short line costs one visual line, a wrapping line costs
+ * ceil(width / perLine), and the line that exhausts the budget is cut
+ * mid-line at the units that remain. CJK is priced at TWO units per
+ * character — it renders double width, and counting it at one folded the
+ * owner's own messages at twice the promised height. An estimate, like
+ * perLine itself: a line off makes the bubble a line taller, nothing is
+ * lost, and the unfold control shows the whole message either way. */
 export function elideTail(text: string, maxLines: number, perLine = 80): string {
-  const lines = (text ?? '').split('\n');
+  const t = text ?? '';
   const budget = Math.max(1, Math.floor(maxLines));
-  if (lines.length > budget) {
-    const out = lines.slice(0, budget).join('\n').trimEnd();
-    return closeFences(`${out}${ELIDE}`);
+  const lines = t.split('\n');
+  const kept: string[] = [];
+  let used = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const rows = Math.max(1, Math.ceil(visualUnits(line) / perLine));
+    if (used + rows <= budget) {
+      used += rows;
+      kept.push(line);
+      if (i === lines.length - 1) return text; // everything fits: identity, the caller skips re-rendering
+      continue;
+    }
+    // This line exhausts the budget: keep what the remaining rows can show.
+    const remain = (budget - used) * perLine;
+    if (remain > 0) kept.push(cutUnits(line, remain));
+    break;
   }
-  // Short enough in lines, but a single paragraph can still be pages long once
-  // it wraps.
-  const cap = budget * perLine;
-  if (text.length <= cap) return text;
-  return closeFences(`${cutAt(text, cap)}${ELIDE}`);
+  const out = kept.join('\n').trimEnd();
+  return closeFences(`${out}${ELIDE}`);
 }
 
-/** Cut `s` down to its first `n` characters, backing up to the nearest space
- * so a word is not sliced in half. */
-function cutAt(s: string, n: number): string {
-  const slice = s.slice(0, n);
+/** Rendered width of a line in perLine units: CJK and other fullwidth
+ * codepoints occupy two columns where a latin letter takes one. A width
+ * ESTIMATE for a fold budget — not a text-shaping engine. */
+function visualUnits(s: string): number {
+  let w = 0;
+  for (const ch of s) w += /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6\u{20000}-\u{3fffd}]/u.test(ch) ? 2 : 1;
+  return w;
+}
+
+/** Cut `s` down to its first `n` visual units, backing up to the nearest
+ * space so a latin word is not sliced in half; CJK has no spaces to honor
+ * and cuts clean anywhere. */
+function cutUnits(s: string, n: number): string {
+  let w = 0;
+  let end = 0;
+  for (const ch of s) {
+    const cw = visualUnits(ch);
+    if (w + cw > n) break;
+    w += cw;
+    end += ch.length;
+  }
+  const slice = s.slice(0, end);
   const at = slice.lastIndexOf(' ');
-  return (at > n * 0.7 ? slice.slice(0, at) : slice).trimEnd();
+  return (at > end * 0.7 ? slice.slice(0, at) : slice).trimEnd();
 }
 
 /** An elision can drop the closing half of a fenced block, which would swallow

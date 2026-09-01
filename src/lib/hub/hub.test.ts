@@ -1212,3 +1212,47 @@ test('a touch long-press leaves the context menu to the SYSTEM (board #48)', () 
   assert.equal(touchContextMenu(''), false);
   assert.equal(touchContextMenu(undefined), false);
 });
+
+test('the fold budget is CHARACTERS, not source lines (board #53)', () => {
+  // Owner: "chat 用户消息的折叠 应该是按照消息字符长度来，不只是行数，不然
+  // 一大段就占满了，没起到折叠作用" (2026-09-01). The old line branch kept
+  // `budget` SOURCE lines whole — one giant paragraph among them wrapped
+  // into pages and the fold held nothing back.
+  const wall = 'word '.repeat(600).trim(); // ~3000 chars on ONE source line
+  const mixed = ['intro line', wall, 'after 1', 'after 2', 'after 3', 'after 4', 'after 5'].join('\n');
+  const out = elideTail(mixed, 5, 80);
+  // 5 visual lines ≈ 5×80 chars is the whole budget; the wall is cut INSIDE
+  // it, not carried whole (old output kept all ~3000 chars).
+  assert.ok(out.length <= 5 * 80 + ELIDE.length + 'intro line\n'.length,
+    `bounded by the visual budget: ${out.length} chars`);
+  assert.ok(out.endsWith(ELIDE), 'marker glued inline at the cut');
+  assert.ok(!out.includes('after 1'), 'nothing after the wall survives');
+  assert.ok(!out.includes(`\n${ELIDE}`), 'the marker never takes its own line');
+
+  // Whole short lines still spend ONE visual line each — the 2026-08-27 rear
+  // truncation is unchanged when no line wraps.
+  const lines = Array.from({ length: 20 }, (_, i) => `l${i + 1}`).join('\n');
+  const cut = elideTail(lines, 4);
+  assert.equal(cut.split('\n').length, 4, 'four visual lines kept');
+  assert.equal(cut.split('\n').at(-1), `l4${ELIDE}`, 'marker on the LAST kept line');
+
+  // A wrapped line is priced at its real height: two 200-char lines exhaust a
+  // 5-line budget before a third short line fits.
+  const two = [`${'a'.repeat(200)}`, `${'b'.repeat(200)}`, 'tail'].join('\n');
+  const tcut = elideTail(two, 5, 80);
+  assert.ok(!tcut.includes('tail'), 'the third line is beyond the wrapped budget');
+  assert.ok(tcut.endsWith(ELIDE), tcut);
+
+  // CJK renders two units wide, so a Chinese paragraph reaches the SAME
+  // visual height at half the characters — the estimate must price that in,
+  // or the owner's own messages fold at twice the promised height.
+  const zh = '中文字符宽度是两倍。'.repeat(100); // 1000 chars ≈ 2000 units
+  const zcut = elideTail(zh, 5, 80);
+  assert.ok(zcut.length - ELIDE.length <= Math.ceil((5 * 80) / 2) + 1,
+    `CJK cut at half the latin count: ${zcut.length}`);
+  assert.ok(zcut.endsWith(ELIDE), zcut);
+
+  // Identity when everything fits — the caller skips re-rendering on it.
+  const fits = 'short\nlines\nonly';
+  assert.equal(elideTail(fits, 5), fits);
+});
