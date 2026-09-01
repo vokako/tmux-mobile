@@ -1148,12 +1148,19 @@ mod tests {
                 command.env("TMUX_PANE", pane);
             }
             let mut child = command.spawn().unwrap();
-            child
+            let write = child
                 .stdin
                 .take()
                 .unwrap()
-                .write_all(br#"{"hook_event_name":"Stop"}"#)
-                .unwrap();
+                .write_all(br#"{"hook_event_name":"Stop"}"#);
+            // With no TMUX_PANE the helper is REQUIRED to exit immediately,
+            // before reading stdin. It may therefore close the pipe before
+            // this parent write wins the race; BrokenPipe is the expected
+            // shape of that successful early exit. With a pane, the payload
+            // is load-bearing and must be accepted.
+            if pane.is_some() {
+                write.unwrap();
+            }
             child.wait_with_output().unwrap()
         };
 
