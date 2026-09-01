@@ -221,3 +221,26 @@ export function chipCols(w: number, chip: number, gap: number): 1 | 2 | 4 {
   if (2 * chip + gap <= w) return 2;
   return 1;
 }
+
+/** The note action row's state (board #46 review blocker): `gen` is a
+ * MONOTONIC token — every transition bumps it, and the Copy beat's timeout
+ * captures the gen of ITS OWN copy, so a stale timeout (anything happened
+ * since: another copy, a switched row, a different issue, a project change)
+ * is a no-op instead of closing somebody else's row or truncating their
+ * Copied feedback. Pure transitions; Board.svelte holds one $state triple. */
+export interface NoteActsState { open: number; copied: boolean; gen: number }
+export const NOTE_ACTS_IDLE: NoteActsState = { open: -1, copied: false, gen: 0 };
+/** Any context change — toggle/switch/outside/Escape/issue open/project
+ * switch — sets which row is open (−1 = none) and orphans in-flight beats. */
+export function noteActsSet(s: NoteActsState, open: number): NoteActsState {
+  return { open, copied: false, gen: s.gen + 1 };
+}
+/** A successful copy: the Copied beat begins, stamped with a fresh gen. */
+export function noteActsCopied(s: NoteActsState): NoteActsState {
+  return { ...s, copied: true, gen: s.gen + 1 };
+}
+/** The beat's timeout fires: it may put away only ITS OWN copy — a stale
+ * gen leaves the state exactly as it found it. */
+export function noteActsExpired(s: NoteActsState, gen: number): NoteActsState {
+  return gen === s.gen ? { open: -1, copied: false, gen: s.gen } : s;
+}

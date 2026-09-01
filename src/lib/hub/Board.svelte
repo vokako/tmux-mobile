@@ -11,11 +11,12 @@
   import { agoShort, boardStatusColor } from './hub.ts';
   import type { ProjectRow } from '../projects/projects.ts';
   import { t } from '../core/i18n.svelte.ts';
+  import { untrack } from 'svelte';
   import Icon from '../ui/Icon.svelte';
   import Select from '../ui/Select.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
-  import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, countsOf, applyCounts, visibleBoards, boardTitle, assignNotes, chipCols } from './board.ts';
+  import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, countsOf, applyCounts, visibleBoards, boardTitle, assignNotes, chipCols, noteActsSet, noteActsCopied, noteActsExpired, NOTE_ACTS_IDLE, type NoteActsState } from './board.ts';
   import { scrollFade } from '../core/scrollFade.ts';
 
   let { session = '', visible = true, onGoBack = null, issueRequest = null, embedded = false, createRequest = null }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null; issueRequest?: { session: string; id: number; n: number } | null; embedded?: boolean; createRequest?: { n: number } | null } = $props();
@@ -221,7 +222,11 @@
   // Switching projects resets the view to the new board's list.
   $effect(() => {
     void cur;
-    sel = null; creating = false; ready = false; issues = []; noteText = ''; nTitle = ''; nBody = ''; nAssignee = ''; pendingDiscard = null; pendingDelete = null; noteOpen = -1; noteCopied = false;
+    sel = null; creating = false; ready = false; issues = []; noteText = ''; nTitle = ''; nBody = ''; nAssignee = ''; pendingDiscard = null; pendingDelete = null;
+    // untrack: this effect runs on `cur` — reading acts to bump its gen
+    // would ALSO subscribe the effect to acts, and writing it back loops
+    // the effect to death (caught live: effect_update_depth_exceeded).
+    acts = noteActsSet(untrack(() => acts), -1);
   });
 
   /** The editor boxes ADAPT to their content (owner, 2026-08-29: "有的框很大
@@ -261,7 +266,7 @@
       sel = await boardGet(cur, id);
       draft = draftOf(sel);
       draftBase = draftOf(sel);
-      noteOpen = -1; noteCopied = false; // a different issue, a fresh slate (board #46)
+      acts = noteActsSet(acts, -1); // a different issue, a fresh slate (board #46)
       err = '';
     } catch (e) { err = String((e as Error)?.message ?? e); }
   }
@@ -404,26 +409,29 @@
   // ── Note actions (board #46: "点击中间 Agent 或人回复的消息…出现一个 copy
   // 按钮"): tapping a note's body reveals ONE Copy action on the bubble's
   // corner — Chat's action-row pattern, wearing Chat's own .m-acts atoms
-  // from app.css (a scoped copy is dialect drift). noteOpen is the single
+  // from app.css (a scoped copy is dialect drift). acts.open is the single
   // source of WHICH row is open; another note's tap switches, the same
-  // note's tap closes, outside/Escape/issue-switch put it away.
-  let noteOpen = $state(-1);
-  let noteCopied = $state(false);
+  // note's tap closes, outside/Escape/issue-switch put it away. Every
+  // transition is a pure board.ts function over ONE state triple, and
+  // acts.gen makes the Copy beat's timeout self-scoped (review blocker:
+  // a global boolean let Copy A's stale timeout close Copy B's row).
+  let acts = $state<NoteActsState>(NOTE_ACTS_IDLE);
   function toggleNoteActs(i: number) {
     // A drag-selection's tail click must not steal the selection — the note
     // text is swipe-selectable (#43); the action row is for a plain tap.
     if (typeof getSelection === 'function' && !(getSelection()?.isCollapsed ?? true)) return;
-    noteCopied = false;
-    noteOpen = noteOpen === i ? -1 : i;
+    acts = noteActsSet(acts, acts.open === i ? -1 : i);
   }
   async function copyNote(body: string) {
     try {
       await navigator.clipboard.writeText(body ?? '');
-      noteCopied = true;
+      acts = noteActsCopied(acts);
       // The Copied beat, then the row puts itself away — copying IS what the
-      // row was opened for (Chat's own 1.5 s, owner 2026-08-22: "在其他操作
-      // 之后应该自动隐藏").
-      setTimeout(() => { if (noteCopied) { noteCopied = false; noteOpen = -1; } }, 1500);
+      // row was opened for (Chat's own 1.5 s). The timeout captures ITS gen:
+      // it may expire only the copy it belongs to — never a later copy on
+      // another note, never a fresh context after an issue/project switch.
+      const gen = acts.gen;
+      setTimeout(() => { acts = noteActsExpired(acts, gen); }, 1500);
     } catch (e) { console.warn('copy failed', e); }
   }
   // Outside pointerdown / Escape close the open row — the transient-layer
@@ -432,14 +440,14 @@
   // and a .bmain-scoped key handler would never hear the Escape (measured —
   // the row survived it). Open dialogs keep their own Escape.
   $effect(() => {
-    if (noteOpen < 0) return;
+    if (acts.open < 0) return;
     const onDown = (e: PointerEvent) => {
       const el = e.target as HTMLElement | null;
-      if (!el?.closest?.('.m-acts, .n-wrap, .n-at')) { noteOpen = -1; noteCopied = false; }
+      if (!el?.closest?.('.m-acts, .n-wrap, .n-at')) acts = noteActsSet(acts, -1);
     };
     const onEsc = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || pendingDiscard || pendingDelete) return;
-      noteOpen = -1; noteCopied = false; e.stopPropagation();
+      acts = noteActsSet(acts, -1); e.stopPropagation();
     };
     window.addEventListener('pointerdown', onDown, true);
     window.addEventListener('keydown', onEsc, true);
@@ -682,17 +690,17 @@
                      bubble — so the time is a real borderless button, Chat's
                      meta-trailer pattern. -->
                 <button class="n-at" aria-label={t('hubMsgActions')}
-                  onclick={(e) => { e.stopPropagation(); noteCopied = false; noteOpen = noteOpen === i ? -1 : i; }}>{ago(n.at)}</button>
+                  onclick={(e) => { e.stopPropagation(); acts = noteActsSet(acts, acts.open === i ? -1 : i); }}>{ago(n.at)}</button>
               </div>
               <!-- fit-content relative wrapper: the overlay anchors to the
                    BUBBLE's corner, never the full row's far right. -->
               <div class="n-wrap">
                 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
                 <div class="n-text" onclick={() => toggleNoteActs(i)}>{n.body.trim()}</div>
-                {#if noteOpen === i}
+                {#if acts.open === i}
                   <div class="m-acts">
                     <button onclick={() => copyNote(n.body)}>
-                      <Icon name="copy" size={11} />{noteCopied ? t('hubCopied') : t('hubCopy')}
+                      <Icon name="copy" size={11} />{acts.copied ? t('hubCopied') : t('hubCopy')}
                     </button>
                   </div>
                 {/if}

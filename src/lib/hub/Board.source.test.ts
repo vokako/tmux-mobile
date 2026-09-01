@@ -619,33 +619,38 @@ test('locked issue text is static selectable prose; the workflow stays live (boa
 });
 
 test('a note bubble reveals ONE Copy action in Chat\u2019s own dialect (board #46)', async () => {
-  // ONE state variable answers "which row is open" — unique by construction:
-  // the toggle closes the same index and switches to another.
-  assert.match(source, /let noteOpen = \$state\(-1\);/u, 'one open-row state');
-  assert.equal(source.split('{#if noteOpen === i}').length - 1, 1, 'exactly one action-row render site');
-  assert.match(source, /noteOpen = noteOpen === i \? -1 : i;/u, 'tap the same note to close, another to switch');
+  // ONE state triple answers "which row is open" — every transition is a
+  // pure board.ts function, and the gen token self-scopes the Copy beat
+  // (review blocker: a global boolean let Copy A's stale timeout close
+  // Copy B's row — the race is replayed executable in board.test.ts).
+  assert.match(source, /let acts = \$state<NoteActsState>\(NOTE_ACTS_IDLE\);/u, 'one open-row state');
+  assert.equal(source.split('{#if acts.open === i}').length - 1, 1, 'exactly one action-row render site');
+  assert.match(source, /acts = noteActsSet\(acts, acts\.open === i \? -1 : i\);/u, 'tap the same note to close, another to switch');
 
   // The clipboard gets the RAW n.body — the display trims, the record does
   // not (the #43 verbatim rule, applied to what leaves the app).
   assert.match(source, /onclick=\{\(\) => copyNote\(n\.body\)\}/u, 'copy carries the raw body');
   assert.ok(!source.includes('copyNote(n.body.trim()'), 'never the trimmed rendering');
   assert.match(source, /navigator\.clipboard\.writeText\(body \?\? ''\)/u, 'the one clipboard write');
-  // The Copied beat, then self-dismiss — Chat's 1.5 s.
-  assert.match(source, /setTimeout\(\(\) => \{ if \(noteCopied\) \{ noteCopied = false; noteOpen = -1; \} \}, 1500\);/u,
-    'copied → put the row away');
+  // The Copied beat captures ITS OWN gen and may expire only itself.
+  assert.match(source, /const gen = acts\.gen;\n\s+setTimeout\(\(\) => \{ acts = noteActsExpired\(acts, gen\); \}, 1500\);/u,
+    'copied → the timeout puts away only the copy it belongs to');
 
   // Close semantics: outside pointerdown, Escape as the topmost peel, and
   // every context switch (issue open, project change) resets.
-  assert.match(source, /if \(!el\?\.closest\?\.\('\.m-acts, \.n-wrap, \.n-at'\)\) \{ noteOpen = -1; noteCopied = false; \}/u,
+  assert.match(source, /if \(!el\?\.closest\?\.\('\.m-acts, \.n-wrap, \.n-at'\)\) acts = noteActsSet\(acts, -1\);/u,
     'outside pointerdown closes');
   // Escape closes via a WINDOW-capture listener (the note text is a div, so
   // focus stays on <body> and a .bmain-scoped handler never hears the key),
   // standing down for open dialogs and stopping the press it consumes.
-  assert.match(source, /if \(e\.key !== 'Escape' \|\| pendingDiscard \|\| pendingDelete\) return;\n\s+noteOpen = -1; noteCopied = false; e\.stopPropagation\(\);/u,
+  assert.match(source, /if \(e\.key !== 'Escape' \|\| pendingDiscard \|\| pendingDelete\) return;\n\s+acts = noteActsSet\(acts, -1\); e\.stopPropagation\(\);/u,
     'Escape peels the action row before the board\u2019s other layers');
   assert.match(source, /window\.addEventListener\('keydown', onEsc, true\);/u, 'at window capture, while a row is open');
-  assert.match(source, /noteOpen = -1; noteCopied = false; \/\/ a different issue, a fresh slate/u, 'openIssue resets');
-  assert.match(source, /pendingDelete = null; noteOpen = -1; noteCopied = false;/u, 'a project switch resets');
+  assert.match(source, /acts = noteActsSet\(acts, -1\); \/\/ a different issue, a fresh slate/u, 'openIssue resets');
+  // The project-switch effect must UNTRACK its acts read: the effect keys on
+  // `cur`, and subscribing it to what it writes loops it to death (caught
+  // live as effect_update_depth_exceeded).
+  assert.match(source, /acts = noteActsSet\(untrack\(\(\) => acts\), -1\);/u, 'a project switch resets, untracked');
 
   // #43 must survive: a drag-selection's tail click never toggles the row.
   assert.match(source, /if \(typeof getSelection === 'function' && !\(getSelection\(\)\?\.isCollapsed \?\? true\)\) return;/u,
