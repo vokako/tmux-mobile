@@ -52,6 +52,18 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
         }
         return Response::ok(id, serde_json::json!({ "rooms": bus.room_latest(), "states": states }));
     }
+    // The board twin of `hub_rooms`: issue counts per column for EVERY
+    // project's board, one grouped read (board #39) — the Board sidebar
+    // shows per-project counts and hides empty boards, and a per-project
+    // `hub_board_list` walk is the N+1 this exists to prevent. No `session`
+    // param by design, so it answers before the session gate like the other
+    // all-rooms reads; same authenticated reader as everything here.
+    if req.method == "hub_board_counts" {
+        return match crate::projects::board_counts() {
+            Ok(v) => Response::ok(id, v),
+            Err(e) => Response::err(id, ERR_INTERNAL, e),
+        };
+    }
     let asked = match require_str(p, "session") {
         Ok(s) => s,
         Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
@@ -1174,6 +1186,25 @@ mod tests {
             n,
             "[board #31 reply] issue标题可以为空，截前几个字显示 — ok. Reply on the issue with `tmm board note 31 \"...\"`."
         );
+    }
+
+    #[test]
+    fn board_counts_answers_without_a_session_like_hub_rooms() {
+        crate::projects::tests::use_test_store();
+        let session = format!("counts-rpc-{}", uuid::Uuid::new_v4());
+        crate::projects::board_save(&session, None, Some("count me"), None, None, None, "human").unwrap();
+        let b = Bridge::new();
+        // NO `session` in params, by design: the method is about EVERY board,
+        // so it must answer BEFORE the session gate — a "session required"
+        // error here means it slid below the gate (the hub_rooms precedent).
+        let r = handle_hub_request(&req("hub_board_counts", serde_json::json!({})), Some(&b), None);
+        assert!(r.error.is_none(), "{:?}", r.error.map(|e| e.message));
+        let v = r.result.expect("result");
+        let counts = v["counts"].as_object().expect("counts object");
+        let row = counts.get(&session).expect("the seeded board is present");
+        assert_eq!(row["todo"], 1);
+        assert_eq!(row["doing"], 0, "zero-filled vocabulary over the wire");
+        assert_eq!(row["total"], 1, "emptiness is one explicit field");
     }
     use super::super::test_util::req;
     use super::*;

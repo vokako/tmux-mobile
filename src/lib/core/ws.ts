@@ -811,6 +811,22 @@ export interface BoardIssue {
 }
 export const boardList = (session: string) =>
   call<{ issues: BoardIssue[]; statuses: string[] }>('hub_board_list', { session });
+/** Per-column counts on every returned row (server-side zero-filled over the
+ * four fixed statuses) plus an explicit total — "is this board empty" is one
+ * field, never a client-side sum. */
+export interface BoardCountRow {
+  todo: number;
+  doing: number;
+  review: number;
+  done: number;
+  total: number;
+}
+/** Issue counts for EVERY project's board in one call (board #39) — the Board
+ * sidebar's grouped read, like hubRooms: no session param, answered before the
+ * per-session gate. A project with an EMPTY board is ABSENT from the map
+ * (absence = hide), so callers must not expect all-zeros rows. */
+export const boardCounts = () =>
+  call<{ counts: Record<string, BoardCountRow> }>('hub_board_counts', {});
 export const boardGet = (session: string, id: number) =>
   call<BoardIssue>('hub_board_get', { session, id });
 /** Create (no id) or patch (id + only the fields to change). `who` records the

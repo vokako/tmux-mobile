@@ -1243,6 +1243,25 @@ impl Store {
         Ok(rows)
     }
 
+    /// Issue counts per (session, status) — ONE grouped query over every
+    /// board (board #39): the sidebar wants "which projects have work, how
+    /// much, in which column" for ALL projects at once, and asking
+    /// `issues_list` per project is the N+1 the grouped read exists to
+    /// prevent. Raw rows here; the projects layer shapes them (zero-fill,
+    /// totals) so the SQL stays a plain aggregate.
+    pub fn issue_counts(&self) -> Result<Vec<(String, String, i64)>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT session, status, COUNT(*) FROM issues GROUP BY session, status")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(rows)
+    }
+
     /// One issue with its full note thread, or None.
     pub fn issue_get(&self, session: &str, id: i64) -> Result<Option<serde_json::Value>, String> {
         let issue = self
@@ -1606,6 +1625,30 @@ mod tests {
 
         assert!(store.issue_delete("proj", id).unwrap());
         assert!(store.issue_get("proj", id).unwrap().is_none());
+    }
+
+    #[test]
+    fn issue_counts_group_across_sessions_in_one_read() {
+        let store = Store::open_memory().unwrap();
+        // Two boards, mixed statuses — the grouped read must keep them apart
+        // and count within (session, status), never across (board #39).
+        let a1 = store.issue_save("proj-a", None, Some("t1"), None, None, None, "human", 100).unwrap();
+        store.issue_save("proj-a", None, Some("t2"), None, None, None, "human", 110).unwrap();
+        store.issue_save("proj-a", Some(a1), None, None, Some("doing"), None, "human", 120).unwrap();
+        let b1 = store.issue_save("proj-b", None, Some("t3"), None, None, None, "human", 130).unwrap();
+        store.issue_save("proj-b", Some(b1), None, None, Some("done"), None, "human", 140).unwrap();
+
+        let rows = store.issue_counts().unwrap();
+        let n = |s: &str, st: &str| rows.iter().find(|(a, b, _)| a == s && b == st).map(|(_, _, n)| *n);
+        assert_eq!(n("proj-a", "todo"), Some(1));
+        assert_eq!(n("proj-a", "doing"), Some(1));
+        assert_eq!(n("proj-b", "done"), Some(1));
+        // A (session, status) cell with no issues yields NO row — absence,
+        // not zero: the shaping layer owns the vocabulary fill.
+        assert_eq!(n("proj-a", "done"), None);
+        assert_eq!(n("proj-b", "todo"), None);
+        // A session with no issues at all appears nowhere.
+        assert!(!rows.iter().any(|(s, _, _)| s == "proj-empty"));
     }
 
     /// The heal step, which is not hypothetical: a dev binary built in the
