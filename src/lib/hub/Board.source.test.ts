@@ -411,15 +411,18 @@ test('the sidebar consumes ONE bulk counts read and reacts to local writes at on
 test("the sidebar count chips wear the owner's four categorical colours — locally, never in the language (board #39, owner)", () => {
   // Owner (2026-09-01), third ruling on these chips: "done 和 todo 颜色又不
   // 一样了，四个设为 红 橙 黄 紫四个颜色吧" — the two near-greys (todo's
-  // --text3 vs done's --status-sleep) read as inconsistent, so the four
-  // columns take four clearly-distinct CATEGORICAL colours in board order:
-  // red, orange, yellow, purple. All theme tokens (a literal hex would only
-  // be right in one theme), none of them the live dot's green — the earlier
+  // --text3 vs done's --status-sleep) read as inconsistent — then the FOURTH
+  // (same day): "红 蓝 黄紫 吧，橙色和红色区分不明显" — at a 5px dot the
+  // red/orange pair blurred, so doing swaps to BLUE. Four clearly-distinct
+  // CATEGORICAL colours in board order: red, blue, yellow, purple; blue is
+  // var(--accent), the app's own blue and incidentally the colour the global
+  // language already gives doing. All theme tokens (a literal hex would only
+  // be right in one theme), none of them the live dot's green — the first
   // ruling stands by construction. The remap stays deliberately scoped
   // (lead): the feed's "→ done" badge keeps boardStatusColor's language.
   assert.match(source,
-    /const COUNT_COLORS: Record<string, string> = \{\s*todo: 'var\(--status-danger\)',\s*doing: 'var\(--status-hot\)',\s*review: 'var\(--status-warn\)',\s*done: 'var\(--status-purple\)',\s*\};/u,
-    'the four-colour map: 红橙黄紫 in board order, tokens only');
+    /const COUNT_COLORS: Record<string, string> = \{\s*todo: 'var\(--status-danger\)',\s*doing: 'var\(--accent\)',\s*review: 'var\(--status-warn\)',\s*done: 'var\(--status-purple\)',\s*\};/u,
+    'the four-colour map: 红蓝黄紫 in board order, tokens only');
   assert.match(source, /const countColor = \(st: string\) => COUNT_COLORS\[st\] \?\? boardStatusColor\(st\);/u,
     'unknown statuses still delegate to the one language');
   // Purple is the only NEW token in the four-colour map. Pin BOTH theme
