@@ -20,6 +20,12 @@ pub mod team;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod projects;
 
+/// Server system vitals (board #56). Desktop-gated like `projects`: only the
+/// desktop server answers `system_status` — a phone is a client of one, so
+/// compiling a sampler into the mobile shell would be dead weight.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub mod system_status;
+
 #[cfg(all(desktop, feature = "gui"))]
 use config::Config;
 

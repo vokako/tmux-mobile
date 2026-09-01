@@ -1,0 +1,73 @@
+// Server system vitals, client half — board #56 「服务端系统状态显示」.
+// Pure types + formatting only: the component renders what these functions
+// say, and the tests exercise the words without a DOM.
+
+/** Wire shape of the `system_status` RPC (system_status.rs is the authority).
+ * Bytes everywhere; `cpu_pct` is null on the server's first-ever sample
+ * (no delta window yet — the next poll fills it in). */
+export interface SystemStatus {
+  cpu_pct: number | null;
+  mem_used: number;
+  mem_total: number;
+  disk_used: number;
+  disk_total: number;
+}
+
+/** How often the corner refreshes. The owner asked for a LOW rate ("可以不用
+ * 很高刷新率 大概看个数就行") — 20s keeps the number honest while costing one
+ * tiny RPC per interval. */
+export const SYS_POLL_MS = 20000;
+
+/** The floor no caller may go under: the server computes CPU% over the poll
+ * interval itself, so a sub-second poll would both hammer the wire and make
+ * the reading noise. */
+export const SYS_POLL_MIN_MS = 5000;
+
+const UNITS = ['B', 'K', 'M', 'G', 'T', 'P'] as const;
+
+/** One byte count, humanised: unit steps of 1024, one decimal under 10 so
+ * "3.1G" stays informative while "473G" stays short. Negative or unreadable
+ * inputs render as '0'. */
+export function fmtBytes(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '0';
+  let v = n;
+  let u = 0;
+  while (v >= 1024 && u < UNITS.length - 1) {
+    v /= 1024;
+    u++;
+  }
+  const num = v < 10 && u > 0 ? v.toFixed(1).replace(/\.0$/u, '') : String(Math.round(v));
+  return `${num}${UNITS[u]}`;
+}
+
+/** used/total wearing ONE unit — the TOTAL's unit — so the pair reads as a
+ * fraction ("210/473G"), never as two differently-scaled numbers. */
+export function fmtPair(used: number, total: number): string {
+  if (!Number.isFinite(total) || total <= 0) return '';
+  let v = total;
+  let u = 0;
+  while (v >= 1024 && u < UNITS.length - 1) {
+    v /= 1024;
+    u++;
+  }
+  const scale = 1024 ** u;
+  const one = (x: number) => {
+    const s = x / scale;
+    return s < 10 && u > 0 ? s.toFixed(1).replace(/\.0$/u, '') : String(Math.round(s));
+  };
+  return `${one(Math.max(0, used))}/${one(total)}${UNITS[u]}`;
+}
+
+/** What the corner SAYS. Null/absent readings yield [] (the verdict rule:
+ * render nothing rather than a row of zeros); each unknowable field simply
+ * drops its part — a first sample shows MEM/DISK and picks CPU up next tick. */
+export function sysParts(s: SystemStatus | null | undefined): { k: string; v: string }[] {
+  if (!s) return [];
+  const parts: { k: string; v: string }[] = [];
+  if (s.cpu_pct !== null && s.cpu_pct !== undefined && Number.isFinite(s.cpu_pct)) {
+    parts.push({ k: 'CPU', v: `${Math.round(Math.min(100, Math.max(0, s.cpu_pct)))}%` });
+  }
+  if (s.mem_total > 0) parts.push({ k: 'MEM', v: fmtPair(s.mem_used, s.mem_total) });
+  if (s.disk_total > 0) parts.push({ k: 'DISK', v: fmtPair(s.disk_used, s.disk_total) });
+  return parts;
+}

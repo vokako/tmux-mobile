@@ -85,6 +85,17 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
     match req.method.as_str() {
         "ping" => Response::ok(id, serde_json::json!("pong")),
 
+        // ---- server system vitals (board #56) ------------------------------
+        // Desktop-only like the project_* methods: the sampler is not
+        // compiled for Android/iOS (a phone is a client of a desktop server),
+        // where this reports method-not-found and the client shows nothing.
+        // No params, fail-soft by construction: a reading is always returned,
+        // with unknowable fields as null/0 for the client's verdict rule.
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        "system_status" => {
+            Response::ok(id, serde_json::to_value(crate::system_status::read()).unwrap())
+        }
+
         "list_sessions" => match tmux::list_sessions() {
             Ok(sessions) => Response::ok(id, serde_json::to_value(&sessions).unwrap()),
             Err(e) => Response::err(id, ERR_INTERNAL, e),
@@ -643,6 +654,26 @@ mod tests {
         assert!(valid_process_arg("--format=%h|%s|%ar|%an"));
         assert!(valid_process_arg("subject; $HOME & <literal>"));
         assert!(!valid_process_arg("bad\0argument"));
+    }
+
+    /// Board #56: the router answers `system_status` with the documented
+    /// wire shape — no params required, never an error (fail-soft is the
+    /// module's contract; the router must not add a failure mode).
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[test]
+    fn system_status_routes_and_answers_the_wire_shape() {
+        let req = Request {
+            id: Some(7),
+            method: "system_status".into(),
+            params: serde_json::json!({}),
+        };
+        let resp = handle_request(&req, "");
+        assert!(resp.error.is_none(), "system_status must be fail-soft");
+        let v = resp.result.expect("a reading");
+        for k in ["cpu_pct", "mem_used", "mem_total", "disk_used", "disk_total"] {
+            assert!(v.get(k).is_some(), "missing key {k}");
+        }
+        assert!(v["mem_total"].as_u64().unwrap_or(0) > 0, "memory reads on a live machine");
     }
 
     fn convert(path: &str) -> Response {

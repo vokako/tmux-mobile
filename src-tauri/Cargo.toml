@@ -86,6 +86,18 @@ socket2 = "0.5"
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 agora = { path = "crates/agora" }
 rusqlite = { version = "0.32", features = ["bundled"] }
+# Server system vitals for board #56 (CPU / memory / root-disk shown in the
+# desktop client). Pinned EXACT: the crate's reading APIs have a history of
+# renames between minors (0.30 → 0.31 → 0.33 all moved methods), so a floating
+# caret would compile-break on an unrelated `cargo update`. default-features
+# off + only the `system` (CPU+memory) and `disk` features: no process table,
+# no network counters, no multithread refresh — the poll is low-frequency and
+# reads exactly three numbers. Chosen over hand-rolled /proc + mach readers
+# because the macOS half (host_statistics64 / sysctl) is unsafe FFI that this
+# Linux dev host can never execute, while sysinfo's implementations of both
+# platforms are the ecosystem-standard, widely exercised ones. Desktop-gated:
+# only the desktop server answers `system_status` (a phone is a client).
+sysinfo = { version = "=0.39.6", default-features = false, features = ["system", "disk"] }
 # Local wall-clock formatting for the lines we type into an agent's pane and for
 # `tmm log`. Already in this graph (agora -> rmcp -> chrono), so declaring it
 # directly adds no compilation; desktop-gated because those two paths are.
