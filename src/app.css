@@ -255,6 +255,11 @@ button:disabled {
      jank on a phone-first form. Any touch-size input rule uses this. */
   --fs-input-touch: 16px;
   --meta-ink: color-mix(in srgb, var(--text2) 55%, var(--text3));
+  /* The incoming-bubble surface. Born in Hub's scoped vars; promoted here
+     with the shared .m-acts atoms (board #46) — the action row renders on
+     Board notes too, and a var only Hub defines would leave those buttons
+     transparent. One definition: Hub no longer re-declares it. */
+  --bubble-in: color-mix(in srgb, var(--bg) 92%, white 8%);
   --t-fast: 120ms; --t-move: 200ms;
 }
 
@@ -436,6 +441,25 @@ button:disabled {
 .proj-row.mirror { height: 0; padding-top: 0; padding-bottom: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
 .proj-row.mirror .side-wins { flex-wrap: nowrap; }
 .proj-row.mirror .side-win { flex: none; }
+
+/* What you can DO with a bubble's content, revealed by tapping it — Chat's
+   message action row, lifted here VERBATIM from Hub's scoped styles when the
+   Board's note bubbles started wearing it too (board #46): one dialect, two
+   wearers — a second scoped copy is how dialects drift. An OVERLAY on the
+   bubble's bottom-right corner, out of the flow: opening it must not push
+   the feed around or change the scroll height the anchor math (or the Board
+   detail) depends on. */
+.m-acts {
+  position: absolute; z-index: 8; bottom: -13px; right: 10px;
+  display: flex; gap: 5px; margin: 0;
+}
+.m-acts button {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 26px;
+  background: var(--bubble-in); border: 1px solid var(--border); border-radius: var(--ui-radius-control);
+  color: var(--text2); padding: 3px 10px; font-size: var(--fs-meta); cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+}
+.m-acts button:hover, .m-acts button.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .side-wins.dim { opacity: 0.65; }
 .side-win {
   display: inline-flex; align-items: center; gap: 4px; min-width: 0;

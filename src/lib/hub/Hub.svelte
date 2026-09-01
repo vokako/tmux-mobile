@@ -2916,7 +2916,8 @@
        readable gutter that says "a message, not a document"; 1360px still
        stops a full-screen ultrawide from producing 200-char prose lines. */
     --msg-max: min(84%, 1360px);
-    --bubble-in: color-mix(in srgb, var(--bg) 92%, white 8%);
+    /* --bubble-in moved to :root in app.css with the shared .m-acts atoms
+       (board #46) — one definition, every wearer. */
     --bubble-out: color-mix(in srgb, var(--bg) 84%, var(--accent) 16%);
     --bubble-line: color-mix(in srgb, var(--border) 72%, var(--text3) 28%);
   
@@ -3325,20 +3326,10 @@
   .m-state.ok { color: var(--status-ok); opacity: 1; }
   .m-time { font-variant-numeric: tabular-nums; }
   .bubble .raw { margin: 0; font-family: var(--font-mono); font-size: var(--fs-sub); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text2); }
-  /* What you can DO with a message, revealed by tapping it. An OVERLAY on the
-     bubble's bottom-right corner, out of the flow: opening it must not push
-     the feed around or change the scroll height the anchor math depends on. */
-  .m-acts {
-    position: absolute; z-index: 8; bottom: -13px; right: 10px;
-    display: flex; gap: 5px; margin: 0;
-  }
-  .m-acts button {
-    display: inline-flex; align-items: center; gap: 4px; min-height: 26px;
-    background: var(--bubble-in); border: 1px solid var(--border); border-radius: var(--ui-radius-control);
-    color: var(--text2); padding: 3px 10px; font-size: var(--fs-meta); cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
-  }
-  .m-acts button:hover, .m-acts button.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  /* What you can DO with a message, revealed by tapping it: the action row
+     (.m-acts) is a SHARED atom in app.css since board #46 — the Board's note
+     bubbles wear the same row, and a scoped copy here is the dialect drift
+     the source tests forbid. */
   /* Referenced images, under the text they came with. */
   .shots { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; border-radius: var(--ui-radius-control); overflow: hidden; clear: both; }
   .m-body > .shots:first-child { margin-top: 2px; }

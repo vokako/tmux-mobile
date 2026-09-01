@@ -93,9 +93,12 @@ test('the sidebar orders by conversation, and rows are summaries (reopened #11)'
 });
 
 test('notes are a timeline: author + time header, content box below (reopened #11)', () => {
-  assert.match(source, /<div class="n-head">\s*<span class="n-author">\{n\.author\}<\/span>\s*<span class="n-at">/u,
+  // The time became a real <button> with board #46 (the accessible action
+  // trigger) but keeps its place and clothes: right of the author, one line.
+  assert.match(source, /<div class="n-head">\s*<span class="n-author">\{n\.author\}<\/span>[\s\S]*?<button class="n-at"/u,
     'author left, time right, one header line');
-  assert.match(source, /<\/div>\s*<div class="n-text">\{n\.body\.trim\(\)\}<\/div>/u, 'the content is its own box below, trimmed');
+  assert.match(source, /<div class="n-text" onclick=\{\(\) => toggleNoteActs\(i\)\}>\{n\.body\.trim\(\)\}<\/div>/u,
+    'the content is its own box below, trimmed');
   const style = source.slice(source.indexOf('<style>'));
   assert.match(style, /\.n-at \{[^}]*margin-left: auto/u, 'the time right-aligns');
   assert.match(style, /\.n-author \{ color: var\(--accent\)/u, 'the author wears the accent ink');
@@ -613,4 +616,63 @@ test('locked issue text is static selectable prose; the workflow stays live (boa
     assert.match(block, /-webkit-user-select: text/u, `${cls} selectable in WebKit`);
     assert.match(block, /cursor: text/u, `${cls} reads as text`);
   }
+});
+
+test('a note bubble reveals ONE Copy action in Chat\u2019s own dialect (board #46)', async () => {
+  // ONE state variable answers "which row is open" — unique by construction:
+  // the toggle closes the same index and switches to another.
+  assert.match(source, /let noteOpen = \$state\(-1\);/u, 'one open-row state');
+  assert.equal(source.split('{#if noteOpen === i}').length - 1, 1, 'exactly one action-row render site');
+  assert.match(source, /noteOpen = noteOpen === i \? -1 : i;/u, 'tap the same note to close, another to switch');
+
+  // The clipboard gets the RAW n.body — the display trims, the record does
+  // not (the #43 verbatim rule, applied to what leaves the app).
+  assert.match(source, /onclick=\{\(\) => copyNote\(n\.body\)\}/u, 'copy carries the raw body');
+  assert.ok(!source.includes('copyNote(n.body.trim()'), 'never the trimmed rendering');
+  assert.match(source, /navigator\.clipboard\.writeText\(body \?\? ''\)/u, 'the one clipboard write');
+  // The Copied beat, then self-dismiss — Chat's 1.5 s.
+  assert.match(source, /setTimeout\(\(\) => \{ if \(noteCopied\) \{ noteCopied = false; noteOpen = -1; \} \}, 1500\);/u,
+    'copied → put the row away');
+
+  // Close semantics: outside pointerdown, Escape as the topmost peel, and
+  // every context switch (issue open, project change) resets.
+  assert.match(source, /if \(!el\?\.closest\?\.\('\.m-acts, \.n-wrap, \.n-at'\)\) \{ noteOpen = -1; noteCopied = false; \}/u,
+    'outside pointerdown closes');
+  // Escape closes via a WINDOW-capture listener (the note text is a div, so
+  // focus stays on <body> and a .bmain-scoped handler never hears the key),
+  // standing down for open dialogs and stopping the press it consumes.
+  assert.match(source, /if \(e\.key !== 'Escape' \|\| pendingDiscard \|\| pendingDelete\) return;\n\s+noteOpen = -1; noteCopied = false; e\.stopPropagation\(\);/u,
+    'Escape peels the action row before the board\u2019s other layers');
+  assert.match(source, /window\.addEventListener\('keydown', onEsc, true\);/u, 'at window capture, while a row is open');
+  assert.match(source, /noteOpen = -1; noteCopied = false; \/\/ a different issue, a fresh slate/u, 'openIssue resets');
+  assert.match(source, /pendingDelete = null; noteOpen = -1; noteCopied = false;/u, 'a project switch resets');
+
+  // #43 must survive: a drag-selection's tail click never toggles the row.
+  assert.match(source, /if \(typeof getSelection === 'function' && !\(getSelection\(\)\?\.isCollapsed \?\? true\)\) return;/u,
+    'a live selection wins over the action row');
+
+  // The dialect is SHARED, not copied: the atoms live in app.css (lifted
+  // verbatim from Hub), and neither wearer re-styles them — the same
+  // anti-drift rule the sidebar atoms follow.
+  assert.match(appCss, /\.m-acts \{\n  position: absolute; z-index: 8; bottom: -13px; right: 10px;/u,
+    'app.css owns the action row, out of the flow (absolute overlay)');
+  assert.match(appCss, /\.m-acts button \{/u, 'and its buttons');
+  assert.match(appCss, /--bubble-in: color-mix\(in srgb, var\(--bg\) 92%, white 8%\);/u,
+    'the bubble surface token is global — the buttons render outside Hub');
+  assert.ok(!/^\s*\.m-acts/mu.test(source.slice(source.indexOf('<style>'))), 'Board carries no scoped .m-acts rule');
+  const hub = await readFile(new URL('./Hub.svelte', import.meta.url), 'utf8');
+  assert.ok(!/^\s*\.m-acts/mu.test(hub.slice(hub.indexOf('<style>'))), 'Hub carries no scoped .m-acts rule either');
+  assert.ok(!hub.includes("--bubble-in: color-mix"), 'Hub no longer re-declares the promoted token');
+
+  // Accessibility: the note text stays TEXT (no role=button on it); the time
+  // is the real focusable trigger, Chat's meta-trailer pattern.
+  assert.ok(!/n-text[^>]*role=/u.test(source), 'the note body is text to assistive tech');
+  assert.match(source, /<button class="n-at" aria-label=\{t\('hubMsgActions'\)\}\n\s+onclick=\{\(e\) => \{ e\.stopPropagation\(\);/u,
+    'the time is the accessible trigger and never bubbles into the body toggle');
+
+  // The overlay anchors to the bubble, not the row: relative fit-content
+  // wrapper in Board's own clothes.
+  assert.match(source, /\.n-wrap \{ position: relative; width: fit-content; max-width: 100%; \}/u,
+    'the wrapper pins the overlay to the bubble corner');
+  assert.match(source, /<div class="n-wrap">/u, 'and the markup wears it');
 });

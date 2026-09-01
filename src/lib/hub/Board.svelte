@@ -221,7 +221,7 @@
   // Switching projects resets the view to the new board's list.
   $effect(() => {
     void cur;
-    sel = null; creating = false; ready = false; issues = []; noteText = ''; nTitle = ''; nBody = ''; nAssignee = ''; pendingDiscard = null; pendingDelete = null;
+    sel = null; creating = false; ready = false; issues = []; noteText = ''; nTitle = ''; nBody = ''; nAssignee = ''; pendingDiscard = null; pendingDelete = null; noteOpen = -1; noteCopied = false;
   });
 
   /** The editor boxes ADAPT to their content (owner, 2026-08-29: "有的框很大
@@ -261,6 +261,7 @@
       sel = await boardGet(cur, id);
       draft = draftOf(sel);
       draftBase = draftOf(sel);
+      noteOpen = -1; noteCopied = false; // a different issue, a fresh slate (board #46)
       err = '';
     } catch (e) { err = String((e as Error)?.message ?? e); }
   }
@@ -400,8 +401,55 @@
     pendingDelete = null;
   }
 
+  // ── Note actions (board #46: "点击中间 Agent 或人回复的消息…出现一个 copy
+  // 按钮"): tapping a note's body reveals ONE Copy action on the bubble's
+  // corner — Chat's action-row pattern, wearing Chat's own .m-acts atoms
+  // from app.css (a scoped copy is dialect drift). noteOpen is the single
+  // source of WHICH row is open; another note's tap switches, the same
+  // note's tap closes, outside/Escape/issue-switch put it away.
+  let noteOpen = $state(-1);
+  let noteCopied = $state(false);
+  function toggleNoteActs(i: number) {
+    // A drag-selection's tail click must not steal the selection — the note
+    // text is swipe-selectable (#43); the action row is for a plain tap.
+    if (typeof getSelection === 'function' && !(getSelection()?.isCollapsed ?? true)) return;
+    noteCopied = false;
+    noteOpen = noteOpen === i ? -1 : i;
+  }
+  async function copyNote(body: string) {
+    try {
+      await navigator.clipboard.writeText(body ?? '');
+      noteCopied = true;
+      // The Copied beat, then the row puts itself away — copying IS what the
+      // row was opened for (Chat's own 1.5 s, owner 2026-08-22: "在其他操作
+      // 之后应该自动隐藏").
+      setTimeout(() => { if (noteCopied) { noteCopied = false; noteOpen = -1; } }, 1500);
+    } catch (e) { console.warn('copy failed', e); }
+  }
+  // Outside pointerdown / Escape close the open row — the transient-layer
+  // rule every popover follows. WINDOW-level capture, active only while a
+  // row is open: the note text is a div, so a click leaves focus on <body>
+  // and a .bmain-scoped key handler would never hear the Escape (measured —
+  // the row survived it). Open dialogs keep their own Escape.
+  $effect(() => {
+    if (noteOpen < 0) return;
+    const onDown = (e: PointerEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (!el?.closest?.('.m-acts, .n-wrap, .n-at')) { noteOpen = -1; noteCopied = false; }
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || pendingDiscard || pendingDelete) return;
+      noteOpen = -1; noteCopied = false; e.stopPropagation();
+    };
+    window.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('keydown', onEsc, true);
+    return () => { window.removeEventListener('pointerdown', onDown, true); window.removeEventListener('keydown', onEsc, true); };
+  });
+
   // Esc peels the board's own layers (detail → list, form → list) before the
   // drawer's close sees it — same territory rule as the files partition.
+  // (The note action row peels FIRST, via its own window-capture listener
+  // above — it stops propagation, so this handler never sees that press.)
   function onKey(e: KeyboardEvent) {
     if (e.key !== 'Escape') return;
     if (pendingDiscard || pendingDelete) return; // the ConfirmDialog's own capture handler closes itself
@@ -625,13 +673,30 @@
            box below, so ragged name lengths stop pushing the text around. -->
       <div class="notes">
         {#if Array.isArray(sel.notes)}
-          {#each sel.notes as n}
+          {#each sel.notes as n, i}
             <div class="note">
               <div class="n-head">
                 <span class="n-author">{n.author}</span>
-                <span class="n-at">{ago(n.at)}</span>
+                <!-- The accessible route to the action row (board #46): the
+                     note text stays TEXT to assistive tech — like the Chat
+                     bubble — so the time is a real borderless button, Chat's
+                     meta-trailer pattern. -->
+                <button class="n-at" aria-label={t('hubMsgActions')}
+                  onclick={(e) => { e.stopPropagation(); noteCopied = false; noteOpen = noteOpen === i ? -1 : i; }}>{ago(n.at)}</button>
               </div>
-              <div class="n-text">{n.body.trim()}</div>
+              <!-- fit-content relative wrapper: the overlay anchors to the
+                   BUBBLE's corner, never the full row's far right. -->
+              <div class="n-wrap">
+                <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+                <div class="n-text" onclick={() => toggleNoteActs(i)}>{n.body.trim()}</div>
+                {#if noteOpen === i}
+                  <div class="m-acts">
+                    <button onclick={() => copyNote(n.body)}>
+                      <Icon name="copy" size={11} />{noteCopied ? t('hubCopied') : t('hubCopy')}
+                    </button>
+                  </div>
+                {/if}
+              </div>
             </div>
           {/each}
         {/if}
@@ -964,7 +1029,16 @@
   .note { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
   .n-head { display: flex; align-items: baseline; gap: 8px; }
   .n-author { color: var(--accent); font-weight: 650; font-size: var(--fs-meta); }
-  .n-at { color: var(--text3); font-size: var(--fs-micro); margin-left: auto; flex: none; }
+  /* A real <button> since board #46 (the accessible route to Copy — the note
+     text stays text), still dressed as the quiet time it always was. */
+  .n-at {
+    color: var(--text3); font-size: var(--fs-micro); margin-left: auto; flex: none;
+    background: none; border: none; padding: 0; font-family: inherit; line-height: 1; cursor: pointer;
+  }
+  /* The overlay's anchor (board #46): relative + fit-content, so .m-acts
+     sits on the BUBBLE's corner — anchored to the full-width row it would
+     float at the far right, nowhere near a short note. */
+  .n-wrap { position: relative; width: fit-content; max-width: 100%; }
   .n-text {
     color: var(--text); font-size: var(--fs-ui);
     white-space: pre-wrap; overflow-wrap: anywhere;
