@@ -331,6 +331,12 @@ can get wrong to save three characters.
   `tmm board list|show|add|take|move|note|delete` — `take` = assignee+doing
   in one move, and the tmm-cli skill carries the conventions (take before
   you start; note decisions ON the issue; only the acceptor moves to done).
+  UI assignment is a real `hub_post` dispatch. Its brief carries the original
+  title/body AND `assignNotes()`'s chronological authored note thread (board
+  #42), separated under `Notes (N):`; note lines share a 1200-character budget,
+  and a partial/omitted tail points to `tmm board show <id>`, so the discussion
+  reaches the Agent without one giant note flooding its pane. A freshly
+  created issue has no thread and appends nothing.
   Schema v12 (`issues` + `issue_notes`, cascade); v15 adds the durable
   `agent_touched` edit lock (board #43). **The original brief becomes
   history**: `hub_board_get.editable` is true only while the current assignee
