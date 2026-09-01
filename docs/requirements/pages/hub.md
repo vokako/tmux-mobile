@@ -90,8 +90,14 @@ completion).
   truncated).
 - Long user messages fold at the rear (`elideTail`) with an in-bubble
   expand; ONE user-message anchor pins the reading position (never while
-  expanded). Images render as thumbnails and open the in-app Lightbox;
-  markdown + LaTeX render in bubbles.
+  expanded). The budget is rendered rows, not source newlines: each line is
+  priced by character width, CJK/fullwidth counts double, and the exhausting
+  line is cut at the remaining units. `perLine` is measured from the actual
+  chat content width and current bubble font (not a desktop-only 80-char
+  constant), so narrow phones keep the same approximate row budget. Window
+  resize and drawer regrids re-measure/re-cut inside `withReadingAnchor`
+  before restoring tail or history position (board #53). Images render as
+  thumbnails and open the in-app Lightbox; markdown + LaTeX render in bubbles.
 - **Selectable prose belongs to the system on touch** (board #48): `.m-body`
   explicitly enables selection while message head/meta stay chrome. Android's
   touch/pen long-press `contextmenu` returns before `preventDefault` and opens

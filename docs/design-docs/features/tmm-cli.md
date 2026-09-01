@@ -2089,57 +2089,48 @@ conversation for a twenty-line one. Then it was capped with `max-height` +
 clothes: "我希望是消息内容自己内部折叠 不是框截断 … 气泡什么的都要完整的不要任何裁
 切" (2026-08-19).
 
-So: no clip, no cap, no `overflow: hidden` anywhere near `.held`. The bubble keeps
-its whole box — border, radius, padding, meta trailer — and is exactly as tall as
-the text it is showing. What shrinks is the CONTENT: while an ask is the held
-anchor, `elideMiddle` folds its body before it is rendered, and a `Show the whole
-message` control inside the bubble unfolds it (one at a time, reset when the anchor
-moves on — an unfolded ask is a moment of attention, not a setting).
+So: no clip, no cap, no `overflow: hidden` anywhere near `.held`. The bubble
+keeps its whole box — border, radius, padding, meta trailer — and is exactly as
+tall as the text it is showing. **Every long user message folds by default**, not
+only the held one: `elideTail` cuts the BODY at the rear before Markdown render,
+glues the full-width `……` marker onto the last kept line, and an in-bubble `Show
+the whole message` control releases it. Expanded messages are never pinned: they
+rejoin the feed so the whole body is reachable; `Fold it away again` reverses the
+choice, and an expanded message that leaves the viewport refolds through the
+reading anchor.
 
-**Except one state: unfolded while still held.** The whole message is now inside a
-bubble pinned to an edge, and a sticky element ignores the feed's scrolling — so a
-message taller than the screen had an unreachable bottom half ("我展开看的时候，应该
-可以上下滑动，而不是死死钉住，下半部分消息内容我怎么都没办法看到了", owner
-2026-08-20). In exactly this state the BODY becomes its own scroller
-(`.m-body.held-scroll`, `max-height: min(62vh, 560px)`, `overscroll-behavior:
-contain` so its wheel does not fling the feed), with a `Fold it away again` control
-as the way back down. The bubble's box still is not clipped — border, radius and
-trailer stay whole — and the cap is entered only by the user's explicit click,
-never by the boundary test, which together with the feed's `overflow-anchor: none`
-is what keeps the old max-height blink loop from coming back. Back in the normal
-flow the cap is off and the message reads full-length. `Hub.source.test.ts` pins
-all of it: no `max-height` on `.msg.held` or its bubble, the cap only on
-`.held-scroll`, and the class hanging off `heldExpanded === key`.
+The budget is VISUAL rows, not source newlines (board #53). Each source line costs
+`ceil(visualUnits / perLine)` rows (at least one); the line that exhausts the
+budget is cut at the units still available, backing up to a Latin word boundary.
+CJK/fullwidth codepoints cost two units. This prevents one 3,000-character source
+paragraph from riding through whole while preserving the simple short-line case.
+A cut that strands a Markdown fence appends its closing fence, and text that fits
+comes back by identity.
 
-The fold keeps BOTH ends. A long ask puts its subject at the top and the actual
-request at the bottom, so a line clamp discards the half that says what to do.
-`elideMiddle` (`hub.ts`, pure and unit-tested) handles the two shapes separately —
-many lines are cut by WHOLE lines, which keeps the markdown parseable and
-rebalances a fence the cut would have orphaned, while one long paragraph is cut by
-characters on a word boundary, because counting lines cannot help there. More is
-kept from the head than the tail, the marker is the full-width `……`, and text that
-already fits comes back by identity so the common case re-renders nothing.
+Both dimensions are measured from the real chat, never guessed. `measureHeld`
+takes 20% of the stable CHAT COLUMN height (the feed's parent, not the composer-
+shrunk feed) and divides by the bubble line box for `heldLines`. For `perLine`, it
+computes the bubble's maximum content width from the feed content box and the
+shared `--msg-max` (`min(84%, 1360px)` minus bubble padding), then divides by a
+cached canvas measurement of the current bubble font's representative Latin
+glyph width (`perLineOf`, clamped 16–240; 80 only before measurement). Thus the
+same text keeps roughly the promised rows at 1280px and 420px, while CJK's 2-unit
+pricing preserves the same physical height. A line of error only makes the bubble
+a line taller — nothing is clipped and unfold always holds the source.
 
-How much to keep is an ESTIMATE from the screen, not a constant: `measureHeld`
-takes 20% of the FEED's height (not `20vh` — a head, a roster and a composer sit
-around it) and divides it by the bubble's computed line box. A phone shows ~2 head
-lines + `……` + 1 tail line, a desktop ~4 + `……` + 2; three lines is the floor at
-which a fold still says anything. Being an estimate is fine precisely because
-nothing is clipped — if it is a line off, the bubble is a line taller, not cut.
+A width-changing layout mutation is part of the same reading-anchor transaction:
+mutate → settle the new grid → `measureHeld` → settle the re-cut messages → only
+then restore the reader's reference offset or the live tail. This matters for the
+right drawer, which changes chat width without a window resize; waiting for a
+future poll left stale wide-screen folds in the narrow column.
 
-**Folding changes the box's height, and two things keep that from blinking.** The
-original `max-height` collapse closed a feedback loop: the flow height changed,
-Chromium's scroll anchoring compensated `scrollTop` (measured: assigning 2261
-landed on 2221↔2298), the compensation flipped the boundary test, and the anchor
-blinked indefinitely — the reported "一闪一闪". Folding the text shrinks the box
-just as a cap did, so both guards stay: (1) the feed sets `overflow-anchor: none`,
-the root cause switched off — it follows its tail explicitly (`scrollFeed`), so
-nothing depended on the compensation; and (2) a folded bubble reports its UNFOLDED
-height to the boundary test (`naturalH`, cached on every tick it is not folded,
-cleared on resize), so the decision that folded it and the decision that keeps it
-folded use the same number. Answer that question with the folded height and it
-unholds, the text returns, and it holds again — the same blink sourced from the
-text instead of from a clip.
+**Folding changes the box's height, so one browser guard stays.** The original
+`max-height` collapse closed a feedback loop: Chromium's scroll anchoring
+compensated `scrollTop`, the compensation flipped the boundary test, and the
+anchor blinked indefinitely. The feed therefore keeps `overflow-anchor: none`
+and follows its tail explicitly. The old second guard (`naturalH`, an unfolded
+height fed to the boundary test) retired when fold-on-hold retired: folding no
+longer toggles at the sticky boundary, so the real `offsetHeight` is honest.
 
 The bubble is made opaque rather than replaced: bubble tints are rgba, so reply
 text otherwise reads through them. Compositing the same tint over the page colour
