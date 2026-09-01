@@ -342,6 +342,35 @@ test('the note reply wraps and grows — one autoGrow, chat keyboard semantics (
     'the button pins to the bottom line');
 });
 
+test('the create form submits from the keyboard: title Enter, body Cmd/Ctrl+Enter, IME never (board #36)', () => {
+  // Owner (2026-09-01): "我在 board 填写完 issue 描述后，可以 cmd+enter 直接
+  // 提交确认". The body is MULTI-LINE, so a bare Enter must stay a newline —
+  // the submit chord is Cmd+Enter (mac) / Ctrl+Enter (everywhere else), the
+  // pair every chat product speaks. Both modifiers, one handler: metaKey OR
+  // ctrlKey, so the contract holds cross-platform.
+  assert.match(source,
+    /d-body-edit fill[^>]*onkeydown=\{\(e\) => \{ if \(e\.key === 'Enter' && \(e\.metaKey \|\| e\.ctrlKey\) && !e\.isComposing\) \{ e\.preventDefault\(\); createIssue\(\); \} \}\}/su,
+    'the create body submits on Cmd/Ctrl+Enter only — a bare or Shift Enter falls through to a real newline');
+  // The IME guard is load-bearing on BOTH create inputs: a composition's
+  // Enter commits the candidate text, never the issue (the note box set the
+  // precedent, board #28). The title's plain-Enter submit shipped without
+  // the guard — a CJK title committed by Enter would have created the issue
+  // mid-composition.
+  assert.match(source,
+    /n-title one-line[^>]*onkeydown=\{\(e\) => \{ if \(e\.key === 'Enter' && !e\.shiftKey && !e\.isComposing\) \{ e\.preventDefault\(\); createIssue\(\); \} \}\}/su,
+    "the title's Enter submit carries the same isComposing guard");
+  // Same createIssue as the ✓ button — the chord is a trigger, not a second
+  // submit path (createIssue itself holds the not-contentless + busy gates,
+  // so a submit with neither field filled is a no-op from any trigger).
+  const triggers = [...source.matchAll(/e\.preventDefault\(\); createIssue\(\);/g)].length;
+  assert.equal(triggers, 2, 'exactly two keyboard trigger sites (title, body) — the button references the fn');
+  assert.match(source, /onclick=\{createIssue\}/u, 'the ✓ button shares the one submit');
+  // The DETAIL editor deliberately does NOT take the chord (lead, board #36:
+  // create body is the scope; the docs mandate no uniformity): its save is
+  // the diffed, guarded saveDraft button.
+  assert.ok(!/d-body-edit" [^>]*onkeydown/su.test(source), 'the detail body editor binds no keydown');
+});
+
 test('every destructive/discarding path confirms through the SHARED dialog (board #29)', () => {
   // Delete: the button only REQUESTS; nothing reaches boardDelete before the
   // confirm, and the executor uses the session+issue CAPTURED at request

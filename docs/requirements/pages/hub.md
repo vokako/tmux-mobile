@@ -138,7 +138,14 @@ completion).
   scroll horizontally, hiding what came before) — one line at rest, Enter
   sends, Shift+Enter inserts a newline, an IME composition's Enter never
   sends, and a sent note shrinks the box back; the send button rides the
-  last line.
+  last line. The CREATE form submits from the keyboard too (board #36:
+  "我在 board 填写完 issue 描述后，可以 cmd+enter 直接提交确认"): the
+  title's Enter creates, and the multi-line body creates on **Cmd+Enter /
+  Ctrl+Enter** (both modifiers, cross-platform) — a bare or Shift Enter in
+  the body stays a real newline, an IME composition's Enter commits the
+  candidate text and never the issue (on the title too), and every trigger
+  is the same createIssue the ✓ button calls. The DETAIL editor takes no
+  chord — its save is the diffed, guarded Save button.
 - The four areas tile as **1, 2 or 4 columns — never 3** (board #27: with
   four areas, three across orphans the fourth on its own row). The count is
   decided by the BOARD's own container width (CSS container queries), so

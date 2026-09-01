@@ -536,7 +536,7 @@
       <!-- svelte-ignore a11y_autofocus -->
       <textarea class="n-title one-line" rows="1" placeholder={t('boardTitlePh')} bind:value={nTitle} autofocus
         use:autoGrow={nTitle}
-        onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); createIssue(); } }}></textarea>
+        onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); createIssue(); } }}></textarea>
       <!-- Assign at birth: the same dispatch as the detail picker — the agent
            is briefed the moment the issue exists (board #11). -->
       <div class="d-meta">
@@ -544,7 +544,15 @@
           options={[{ value: '', label: t('boardUnassigned') }, ...agents.map((a) => ({ value: a.name, label: `@${a.name}` }))]}
           onchange={(v: string) => (nAssignee = v)} />
       </div>
-      <textarea class="d-body-edit fill" placeholder={t('boardBodyPh')} bind:value={nBody}></textarea>
+      <!-- The body is MULTI-LINE, so Enter must stay a newline — the submit
+           chord is Cmd+Enter (mac) / Ctrl+Enter (elsewhere), the pair every
+           chat product speaks (board #36, owner 2026-09-01: "我在 board 填写
+           完 issue 描述后，可以 cmd+enter 直接提交确认"). Same createIssue as
+           the ✓ — a trigger, not a second submit path — and an IME
+           composition's Enter commits the candidate text, never the issue
+           (the note box's precedent, board #28). -->
+      <textarea class="d-body-edit fill" placeholder={t('boardBodyPh')} bind:value={nBody}
+        onkeydown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.isComposing) { e.preventDefault(); createIssue(); } }}></textarea>
     </div>
   {:else}
     <!-- ── the board: four fixed columns, cards in movement order ── -->
