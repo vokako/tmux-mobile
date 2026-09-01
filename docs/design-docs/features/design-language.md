@@ -190,7 +190,9 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
 
 - Primary actions ≥ 44px hit area — small visual boxes grow an invisible
   `::before/::after` overlay. Menu rows ≥ 40–44px on compact. Keyboard
-  equivalents (Enter/Space) on anything with role=button.
+  equivalents (Enter/Space) on anything with role=button. A scrolling
+  record's back-to-tail action is always global `.to-tail` (board #49), with
+  component CSS limited to placement — never a page-specific redraw.
 
 ## 7 · Data honesty (the "verdict" rule)
 

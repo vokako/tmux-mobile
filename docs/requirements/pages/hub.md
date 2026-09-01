@@ -109,7 +109,10 @@ completion).
   data with the physical scroll deferred; on return the feed settles, then
   forces the tail and re-seeds the ask anchor + seen marker — but ONLY for a
   reader who left at the tail. One parked in history returns exactly where
-  they were. Entering a room still lands at its tail.
+  they were. Entering a room still lands at its tail. The visible return
+  control is the same global `.to-tail` button Terminal uses (board #49):
+  shared circle/surface/ink/motion/touch target/news dot, while Chat keeps
+  only its right/bottom/z placement.
 - Room state is cached per session (`roomCache`) — switching projects
   restores instantly, "empty" is a verdict reached only after the first
   `hub_log` answer.

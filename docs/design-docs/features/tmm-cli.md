@@ -1899,7 +1899,10 @@ place instead of hiding in a stylesheet:
   that way.
 - Touch targets: PRIMARY actions get a ≥44px hit area on phone — visual size
   stays in the small-radius design language, the extension is an invisible
-  `::after` overlay (send button, jump-to-tail). Dense secondary rows
+  pseudo-element overlay. The back-to-tail control is the shared global
+  `.to-tail` atom (board #49): Chat and Terminal wear the same 38px circle,
+  token surface/ink/border/shadow, hover/press motion, 44px `::before`, and
+  token-red `.news::after`; components may declare only placement. Dense secondary rows
   (the drawer's window pills, roster, message actions) accept the WCAG-web 24px
   minimum with ≥8px gaps instead: inflating them to 44px would destroy the
   density that page exists for. The recipient chip cannot expand upward or

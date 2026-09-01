@@ -57,7 +57,11 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
     expanded state and a smaller footprint in its collapsed state, not
     two different visual languages.
   - State (collapsed vs expanded) is persisted in localStorage.
-- Floating scroll-to-bottom button (frosted glass style) with an accent state and red dot when deferred output is waiting
+- Floating **back-to-tail** button wears the app-wide `.to-tail` control
+  shared with Chat: 38px token-surface circle, quiet ink with accent hover,
+  scale press, invisible 44px touch target, and the same token-red `.news`
+  dot when deferred output is waiting. Terminal owns only its bottom/right/z
+  placement; no glass/square/span-dot variant (board #49).
 - Status bar: session:pane and running command
 
 ## Interactions (Mobile)
