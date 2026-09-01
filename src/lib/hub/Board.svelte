@@ -15,7 +15,7 @@
   import Select from '../ui/Select.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
-  import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, countsOf, applyCounts, visibleBoards, boardTitle } from './board.ts';
+  import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, countsOf, applyCounts, visibleBoards, boardTitle, assignNotes } from './board.ts';
   import { scrollFade } from '../core/scrollFade.ts';
 
   let { session = '', visible = true, onGoBack = null, issueRequest = null, embedded = false, createRequest = null }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null; issueRequest?: { session: string; id: number; n: number } | null; embedded?: boolean; createRequest?: { n: number } | null } = $props();
@@ -293,7 +293,7 @@
     const t = s.trim();
     return t.length <= EXCERPT ? t : `${t.slice(0, EXCERPT).trimEnd()}…`;
   };
-  async function dispatchAssign(id: number, name: string, title = '', body = '') {
+  async function dispatchAssign(id: number, name: string, title = '', body = '', notes: { author: string; body: string; at: number }[] = []) {
     await boardSave(cur, { id, assignee: name });
     if (name) {
       const b = body.trim() ? ` — ${excerpt(body)}.` : '.';
@@ -303,7 +303,12 @@
         .replaceAll('{id}', String(id))
         .replace('{title}', title.trim() || '#' + id)
         .replace('{body}', b);
-      await hubPost(cur, `@${name} ${msg}`);
+      // The note thread rides along (board #42): the discussion under an
+      // issue is context the agent must not miss, appended AFTER the rendered
+      // message under its own header, chronological, authors kept, and
+      // budget-capped with the `tmm board show` pointer — assignNotes owns
+      // that shape. A fresh issue has no notes and appends nothing.
+      await hubPost(cur, `@${name} ${msg}${assignNotes(id, notes)}`);
     }
   }
   /** Explicit save of the USER's changed fields (diffed against the draft
@@ -322,7 +327,10 @@
       // else is an ordinary field patch.
       const { assignee, ...rest } = patch;
       if (Object.keys(rest).length) await boardSave(cur, { id: sel.id, ...rest });
-      if (assignee !== undefined) await dispatchAssign(sel.id, assignee, draft.title, draft.body);
+      // A reassign from the detail view carries the OPEN issue's note thread
+      // (board #42) — sel is the boardGet copy, so its notes are the array
+      // (list rows only carry a count, which assignNotes treats as none).
+      if (assignee !== undefined) await dispatchAssign(sel.id, assignee, draft.title, draft.body, Array.isArray(sel.notes) ? sel.notes : []);
       await refetchSel();
     } catch (e) { err = String((e as Error)?.message ?? e); }
     busy = false;

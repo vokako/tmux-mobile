@@ -43,12 +43,17 @@ test('assignment is ONE dispatch — the detail picker and the create dialog sha
   // dispatchAssign is the single carrier of assignment=dispatch semantics:
   // saving the assignee AND typing the brief into the agent's pane. Exactly
   // one hubPost call site proves nobody re-implements the delivery half.
-  assert.match(source, /async function dispatchAssign\(id: number, name: string, title = '', body = ''\)/u, 'the one dispatch function');
+  assert.match(source, /async function dispatchAssign\(id: number, name: string, title = '', body = '', notes: \{ author: string; body: string; at: number \}\[\] = \[\]\)/u, 'the one dispatch function');
   assert.equal(source.split('hubPost(').length - 1, 1, 'exactly one delivery call site, inside dispatchAssign');
-  assert.match(source, /if \(assignee !== undefined\) await dispatchAssign\(sel\.id, assignee, draft\.title, draft\.body\);/u,
-    'a ✓-confirmed assignee change routes through it (board #15: the picker edits the DRAFT)');
+  // The brief carries the NOTE THREAD too (board #42): the delivery appends
+  // assignNotes — chronological, authored, budget-capped in board.ts — so an
+  // agent cannot miss the discussion under the issue.
+  assert.match(source, /await hubPost\(cur, `@\$\{name\} \$\{msg\}\$\{assignNotes\(id, notes\)\}`\);/u,
+    'the dispatch message ends with the assignNotes block');
+  assert.match(source, /if \(assignee !== undefined\) await dispatchAssign\(sel\.id, assignee, draft\.title, draft\.body, Array\.isArray\(sel\.notes\) \? sel\.notes : \[\]\);/u,
+    'a ✓-confirmed assignee change routes through it (board #15) and carries the OPEN issue\u2019s thread (board #42)');
   assert.match(source, /if \(wantAssign && created != null\) await dispatchAssign\(created, wantAssign, wantTitle, wantBody\);/u,
-    'create-with-assignee dispatches too — never just a label, and the brief CARRIES the issue');
+    'create-with-assignee dispatches too — a fresh issue HAS no notes, so none ride (board #42)');
   // The form closes the MOMENT the create succeeds — before the dispatch can
   // fail — because a retryable form after a successful create mints
   // duplicate issues (#11 review). Order in the source is the guarantee.
