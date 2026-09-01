@@ -1151,21 +1151,27 @@ growing a menu per surface:
   sheets anchored to the true viewport, one that must clear the status bar pads
   with `var(--sat)` (the APK's MainActivity-fed inset), never raw `env()`, which
   reads 0 there.
-- `ui/longpress.ts` measures the hold, because a phone has no `contextmenu` event.
-  Touch only: a mouse already has a right button, and treating a held left button as
-  a press would fire a menu in the middle of a text selection. Three rules keep it
-  from making a list feel broken — a hold that travels more than 10px is a SCROLL
-  (`isScroll`, pure and tested), a second finger cancels it, and the click that
-  follows the release is swallowed once so a row does not both open its menu and
-  activate itself.
+- `ui/longpress.ts` measures the hold for NON-TEXT subjects. Touch only: a
+  mouse already has a right button, and treating a held left button as a press
+  would fire a menu in the middle of a text selection. Three rules keep it
+  from making a list feel broken — a hold that travels more than 10px is a
+  SCROLL (`isScroll`, pure and tested), a second finger cancels it, and the
+  click that follows the release is swallowed once so a row does not both
+  open its menu and activate itself. Android does emit `contextmenu` for a
+  long-press on selectable text; message bubbles therefore use
+  `touchContextMenu(pointerType)` at their native handler instead: touch/pen
+  return BEFORE `preventDefault` and belong to system selection, while mouse
+  right-click and the keyboard menu key keep the app menu (board #48).
 
-Wired to four subjects, each offering the verbs it already has elsewhere — a context
-menu with its own action set is a second source of truth waiting to disagree: the
-agent card (Watch / Interrupt / Stop / Remove, and Start / Remove when it is
-stopped), the sidebar project row (Open or Close, Rename, Delete), and the message
-bubble (Copy / Raw / Archive). The bubble is desktop-only on purpose: a long press
-on text is the system's own selection gesture, and taking that away to show a menu
-that a tap already opens would be a bad trade.
+Wired to the agent card and sidebar project row, each offering the verbs it
+already has elsewhere — a context menu with its own action set is a second
+source of truth waiting to disagree. The message bubble is the deliberate
+text exception: mouse right-click offers Copy / Raw, but touch/pen long-press
+is native selection and a non-collapsed selection also swallows the following
+click so no action row appears. `.m-body` explicitly enables text selection;
+its head/meta stay chrome. Board notes intercept no contextmenu at all, keep
+selectable `.n-text`, and use the same selection-before-tap rule for their Copy
+overlay.
 
 ## Who a message goes to
 

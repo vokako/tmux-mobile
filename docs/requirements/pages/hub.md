@@ -92,6 +92,14 @@ completion).
   expand; ONE user-message anchor pins the reading position (never while
   expanded). Images render as thumbnails and open the in-app Lightbox;
   markdown + LaTeX render in bubbles.
+- **Selectable prose belongs to the system on touch** (board #48): `.m-body`
+  explicitly enables selection while message head/meta stay chrome. Android's
+  touch/pen long-press `contextmenu` returns before `preventDefault` and opens
+  no app menu; mouse right-click and the keyboard menu key still open Copy /
+  Raw. A non-collapsed selection wins over the following bubble click, so
+  finishing a drag/long-press never reveals the action row. Board note text
+  follows the same rule and intercepts no contextmenu; a plain tap still opens
+  its Copy overlay.
 - Feed levels: chat-only / +tools / everything. Receipts and warnings are
   always visible.
 - Tail intent survives a page switch (board #38): "at the tail" is measured

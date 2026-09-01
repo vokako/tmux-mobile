@@ -179,6 +179,9 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   job (owner rule, 2026-08-22).
 - Right-click and long-press are ONE gesture (`ui/ContextMenu` +
   `ui/longpress`), offering the verbs the surface already has elsewhere.
+  **Selectable prose is the exception**: a touch/pen hold belongs to native
+  text selection (never `preventDefault` its `contextmenu`); only mouse/
+  keyboard contextmenu opens the app menu, and selection beats the tail click.
 - Menu ORDER = rising consequence: read/constructive verbs first, configure
   next, amber interrupt-class verbs after, red destructive verbs LAST.
   Tones sit on the verb at rest, not only on hover.
