@@ -171,8 +171,19 @@
   }
 
   async function load() {
+    // FROZEN at entry (lead review, board #39): every await below is a window
+    // for the user to switch projects, and with live `cur` the OLD board's
+    // response would paint its issues into the NEW board — and, worse since
+    // the counts fold, apply the old list's counts to the new session,
+    // hiding/showing the wrong project in the sidebar. So the whole call is
+    // about `s`: the RPCs ask for it, and every landing re-checks identity
+    // before touching state — a stale response (or a stale ERROR) is dropped
+    // whole; the switch effect already reset the view, and s's own next
+    // reader is gone.
+    const s = cur;
     try {
-      const r = await boardList(cur);
+      const r = await boardList(s);
+      if (cur !== s) return;
       issues = r.issues;
       ready = true;
       err = '';
@@ -181,16 +192,18 @@
       // 出现") — load() runs after every create/delete/save, so the sidebar
       // reacts NOW instead of waiting out the 20 s projects poll. applyCounts
       // removes the key when the list is empty, the same absence the server
-      // speaks.
-      countsMap = applyCounts(countsMap, cur, issues);
+      // speaks. Keyed by the FROZEN session — the one the issues belong to.
+      countsMap = applyCounts(countsMap, s, issues);
     } catch (e) {
+      if (cur !== s) return;
       // A failed poll keeps the last board — "could not ask" ≠ "empty".
       err = String((e as Error)?.message ?? e);
     }
     // The assignee picker offers the project's MANAGED agents (the only ones
     // an assignment can be typed into). A failed read keeps the last roster.
     try {
-      const a = await hubAgents(cur);
+      const a = await hubAgents(s);
+      if (cur !== s) return;
       agents = a.agents.filter((x) => x.managed);
     } catch { /* keep */ }
   }

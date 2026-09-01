@@ -423,7 +423,10 @@ button.side-win { cursor: pointer; }
 button.side-win:hover { background: var(--surface2); color: var(--text); }
 .side-win img { display: block; }
 .side-win .side-win-name { max-width: 16ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* Chat-only garnish: the agent's state, one dot in the app's status language. */
+/* The chip's dot garnish — TWO wearers, one dress: the Chat sidebar's agent
+   STATE (stateDotColor) and the Board sidebar's column STATUS
+   (boardStatusColor, board #39). Both speak the app's one status-colour
+   language; the chip itself stays the same quiet mono text. */
 .side-win .side-win-dot { width: 5px; height: 5px; border-radius: 50%; flex: none; }
 
 /* ── The TWO-LINE project row itself, shared by the Chat and Board sidebars

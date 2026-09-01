@@ -391,8 +391,8 @@ test('the sidebar consumes ONE bulk counts read and reacts to local writes at on
   // load() folds the fresh issues into the counts map — create-first appears
   // and delete-last disappears NOW, not at the 20 s poll.
   const load = source.slice(source.indexOf('async function load()'), source.indexOf('let agents ='));
-  assert.match(load, /countsMap = applyCounts\(countsMap, cur, issues\);/u,
-    'a successful boardList refreshes this session\'s counts immediately');
+  assert.match(load, /countsMap = applyCounts\(countsMap, s, issues\);/u,
+    'a successful boardList refreshes this session\'s counts immediately (keyed by the frozen session)');
   // The page-head names the CURRENT board from the FULL list: an empty board
   // is hidden from the sidebar yet still shows its name, and its main area
   // can create the first issue.
@@ -406,6 +406,26 @@ test('the sidebar consumes ONE bulk counts read and reacts to local writes at on
   // included, wearing the shared chip atoms + the one board status language.
   assert.match(source, /\{#each STATUSES as st \(st\)\}[\s\S]*?side-win-dot" style:background=\{boardStatusColor\(st\)\}[\s\S]*?\{statusLabel\(st\)\}[\s\S]*?\{c\?\.\[st as keyof BoardCountRow\] \?\? 0\}/u,
     'four chips, fixed vocabulary order, count present even at 0');
+});
+
+test('load() is pinned to the board it was asked FOR — a stale response never writes the new board (board #39 review)', () => {
+  // The race: load() awaits boardList while the user switches projects; with
+  // live `cur` the OLD board's response then paints its issues into the NEW
+  // board and — since the counts fold — applies the old list's counts to the
+  // new session, hiding/showing the wrong project in the sidebar. So the
+  // session is FROZEN at entry, every RPC asks for the frozen name, and
+  // every await re-checks identity before touching state.
+  const load = source.slice(source.indexOf('async function load()'), source.indexOf('let agents ='));
+  assert.match(load, /const s = cur;/u, 'the session is frozen at entry');
+  assert.match(load, /await boardList\(s\)/u, 'the board read asks for the frozen session');
+  assert.match(load, /await hubAgents\(s\)/u, 'the roster read asks for the frozen session');
+  assert.ok(!/boardList\(cur\)|hubAgents\(cur\)/.test(load), 'no RPC in load() reads the LIVE cur');
+  // Both awaited branches guard before writing — including the CATCH: an
+  // error about a board we already left must not paint on the new one.
+  const guards = [...load.matchAll(/if \(cur !== s\) return;/g)].length;
+  assert.ok(guards >= 3, `every await (boardList ok/err, hubAgents ok) re-checks identity — found ${guards} guards`);
+  assert.match(load, /countsMap = applyCounts\(countsMap, s, issues\);/u,
+    'the counts fold names the FROZEN session, never live cur');
 });
 
 test('every destructive/discarding path confirms through the SHARED dialog (board #29)', () => {
