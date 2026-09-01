@@ -39,6 +39,9 @@ The project has ONE board (todo / doing / review / done). The human writes
 issues on the board page; you read and update the same issues here. If your
 task matches a board issue, keep that issue current — the board is the
 plan's record, and a stale column misleads everyone who schedules by it.
+`<id>` is the CURRENT PROJECT's number: each project starts at `#1` and has
+its own independent sequence, so always run the command in the intended
+`TMM_PROJECT` (or pass `--project <session>`).
 
 ```bash
 tmm board                       # the whole board, grouped by column

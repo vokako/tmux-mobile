@@ -799,6 +799,7 @@ export const hubAgents = (session: string) =>
 /** The project task board: session-scoped issues in four fixed columns.
  * Humans write issues here; agents read and update them via `tmm board`. */
 export interface BoardIssue {
+  /** Session-local durable number: every project starts at 1; the DB row key is hidden. */
   id: number;
   title: string;
   body: string;

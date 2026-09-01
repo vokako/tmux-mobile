@@ -199,14 +199,16 @@ completion).
   equally (rows must not content-size, or the page would scroll).
 - The human writes/edits here; agents use `tmm board` (`take` = claim +
   doing; only the acceptor moves to done). Same rows, same vocabulary —
-  the board is session-scoped like the room. `#N` is a database-wide issue
-  handle from the shared `issues` table, **not** a per-project sequence, so
-  a project's first visible issue need not be `#1` and gaps are normal. The
-  number is not the isolation boundary: every list/get/save/note/delete uses
-  `session + id`, and a guessed id from another project matches nothing.
-  Renaming a project moves its Board rows to the new session key in the same
-  transaction as the declaration; archive keeps the Board, while permanent
-  project deletion removes the Board and its note threads before releasing
+  the board is session-scoped like the room. Public `#N` is the project's own
+  durable sequence: every project starts at `#1`, advances independently, and
+  never reuses a deleted number (gaps therefore remain honest history). The
+  database-wide `issues.id` survives only as an internal row key for note FKs;
+  UI, room events and `tmm board` expose the project number. Every
+  list/get/save/note/delete resolves `session + id`, so two projects may both
+  have `#1` without sharing a row. Schema v16 backfills existing rows densely
+  by their old creation order within each session. Renaming a project moves
+  both its Board rows and number sequence in the same transaction; archive
+  keeps both, while permanent project deletion removes both before releasing
   the session name (board #41).
 - The sidebar lists only projects whose board HAS issues (board #39: "如果
   该项目完全为空 则直接不显示该 project"), fed by ONE bulk `hub_board_counts`

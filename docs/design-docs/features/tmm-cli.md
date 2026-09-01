@@ -317,12 +317,16 @@ can get wrong to save three characters.
   2026-08-29: "引入一个新的看板功能…借助软件工程，可以把我们的任务管理的更好"):
   session-scoped issues in four fixed columns (`todo/doing/review/done`,
   `projects::BOARD_STATUSES` — free-text statuses would fork the vocabulary
-  per agent). The numeric `id` is a database-wide surrogate, not a per-project
-  counter: a board may start above `#1`, while every single-row operation is
-  still gated by `session + id` (a guessed id from another project matches
-  nothing). Rename migrates the rows with the declaration; archive retains
-  them; permanent project delete removes the issues + notes before the session
-  alias is released (board #41). `save` creates (no id) or PATCHES (id + only the changed
+  per agent). Public numeric `id` / `#N` is a PROJECT-LOCAL durable sequence
+  (board #41's final owner ruling): every session starts at 1, advances
+  independently, and never reuses a deleted number. All UI, room and `tmm
+  board` operations resolve `session + id`, so project A and B may both have
+  `#1` without ambiguity. `issues.id` remains a hidden database-wide row key
+  solely so `issue_notes.issue_id` needs no rebuild. Schema v16 adds
+  `project_number`, a unique `(session, project_number)` index, and
+  `issue_sequences`; migration ranks old rows by their former global id within
+  each session, rename moves rows + sequence transactionally, archive retains
+  them, and permanent delete removes both before releasing the alias. `save` creates (no id) or PATCHES (id + only the changed
   fields, COALESCE in SQL — an agent's `move` must not erase a body the
   human edited meanwhile); `note` appends to the issue's own thread and
   bumps `updated_at`; every write records WHO acted. The HUMAN's half is the

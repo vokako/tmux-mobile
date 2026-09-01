@@ -14,7 +14,7 @@ use std::path::Path;
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 15;
+const SCHEMA_VERSION: i64 = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
@@ -169,10 +169,10 @@ impl Store {
     /// edits). The v13 step below still creates it for a database coming from
     /// v12; this is the floor under both.
     fn heal(&mut self) -> Result<(), String> {
-        // An additive Board column gets the same partial-build protection as
-        // deliveries below: if a dev build stamped v15 before its ALTER landed,
-        // the next open still repairs the schema instead of trusting the stamp.
+        // Additive Board state gets the same partial-build protection as
+        // deliveries below: never trust a version stamp more than the schema.
         self.ensure_issue_edit_lock()?;
+        self.ensure_issue_numbering()?;
         self.conn
             .execute_batch(
                 "CREATE TABLE IF NOT EXISTS deliveries (
@@ -220,6 +220,75 @@ impl Store {
                 .map_err(|e| format!("add/backfill Board edit lock: {e}"))?;
         }
         Ok(())
+    }
+
+    /// Ensure every visible Board number is project/session-local while the
+    /// original `issues.id` remains an invisible database row key for notes.
+    /// A separate sequence remembers deleted high numbers, matching
+    /// AUTOINCREMENT semantics independently for every project.
+    fn ensure_issue_numbering(&self) -> Result<(), String> {
+        let has_column: bool = self
+            .conn
+            .query_row(
+                "SELECT EXISTS(
+                   SELECT 1 FROM pragma_table_info('issues')
+                    WHERE name = 'project_number'
+                 )",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("inspect Board project numbers: {e}"))?;
+        if !has_column {
+            // SQLite cannot add a NOT NULL column to a populated table without
+            // a fabricated default. Add nullable, then fill deterministically
+            // by the old global row order inside EACH session.
+            self.conn
+                .execute_batch("ALTER TABLE issues ADD COLUMN project_number INTEGER;")
+                .map_err(|e| format!("add Board project number: {e}"))?;
+        }
+        // Idempotent partial-migration repair: the correlated rank fills only
+        // rows an interrupted/partial build left NULL, never renumbering a
+        // healthy board after deletions. One UPDATE is atomic in SQLite.
+        self.conn
+            .execute_batch(
+                "UPDATE issues
+                    SET project_number = (
+                      SELECT COUNT(*)
+                        FROM issues earlier
+                       WHERE earlier.session = issues.session
+                         AND earlier.id <= issues.id
+                    )
+                  WHERE project_number IS NULL;
+                 CREATE UNIQUE INDEX IF NOT EXISTS issues_session_number
+                   ON issues(session, project_number);
+                 CREATE TABLE IF NOT EXISTS issue_sequences (
+                   session     TEXT PRIMARY KEY,
+                   next_number INTEGER NOT NULL
+                 );
+                 INSERT INTO issue_sequences (session, next_number)
+                   SELECT session, MAX(project_number) + 1
+                     FROM issues
+                    GROUP BY session
+                 ON CONFLICT(session) DO UPDATE SET
+                   next_number = MAX(issue_sequences.next_number, excluded.next_number);",
+            )
+            .map_err(|e| format!("heal Board project numbers: {e}"))
+    }
+
+    /// Allocate one visible number atomically for a session. The sequence is
+    /// advanced before the issue INSERT; a failed insert may leave a gap (like
+    /// AUTOINCREMENT) but can never reuse a number that was already observed.
+    fn next_issue_number(&self, session: &str) -> Result<i64, String> {
+        self.conn
+            .query_row(
+                "INSERT INTO issue_sequences (session, next_number) VALUES (?1, 2)
+                 ON CONFLICT(session) DO UPDATE SET
+                   next_number = issue_sequences.next_number + 1
+                 RETURNING next_number - 1",
+                [session],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("allocate Board project number: {e}"))
     }
 
     fn migrate(&mut self) -> Result<(), String> {
@@ -494,9 +563,15 @@ impl Store {
                        created_by    TEXT NOT NULL DEFAULT '',
                        created_at    INTEGER NOT NULL,
                        updated_at    INTEGER NOT NULL,
-                       agent_touched INTEGER NOT NULL DEFAULT 0
+                       agent_touched INTEGER NOT NULL DEFAULT 0,
+                       project_number INTEGER NOT NULL
                      );
                      CREATE INDEX issues_session ON issues(session, status, updated_at DESC);
+                     CREATE UNIQUE INDEX issues_session_number ON issues(session, project_number);
+                     CREATE TABLE issue_sequences (
+                       session     TEXT PRIMARY KEY,
+                       next_number INTEGER NOT NULL
+                     );
                      CREATE TABLE issue_notes (
                        id       INTEGER PRIMARY KEY,
                        issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
@@ -589,6 +664,12 @@ impl Store {
             // state; this bit remembers activity after the issue is unassigned
             // or moved back (board #43).
             self.ensure_issue_edit_lock()?;
+        }
+        if version < 16 {
+            // v16: visible/CLI #N values belong to ONE project and start at 1
+            // there (latest owner ruling on board #41). The old global PK stays
+            // internal so issue_notes need no rebuild.
+            self.ensure_issue_numbering()?;
         }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)
@@ -1012,6 +1093,19 @@ impl Store {
             // board disappear under the old key and a later project reusing
             // that name inherits it (board #41). issue_notes follow by the
             // globally unique issue_id and need no rewrite.
+            if session != prev {
+                // The local-number allocator is Board state too. Move even an
+                // empty board's sequence so deleting its latest card and then
+                // renaming cannot make the next number restart/reuse. A stale
+                // orphan at the free destination name is safe to discard.
+                tx.execute("DELETE FROM issue_sequences WHERE session = ?1", params![session])
+                    .map_err(|e| format!("clear destination Board sequence: {e}"))?;
+                tx.execute(
+                    "UPDATE issue_sequences SET session = ?1 WHERE session = ?2",
+                    params![session, prev],
+                )
+                .map_err(|e| format!("rename Board sequence: {e}"))?;
+            }
             tx.execute(
                 "UPDATE issues SET session = ?1 WHERE session = ?2",
                 params![session, prev],
@@ -1131,6 +1225,8 @@ impl Store {
         // old issues (board #41). issue_notes cascade from issues at runtime.
         tx.execute("DELETE FROM issues WHERE session = ?1", params![session])
             .map_err(|e| format!("delete project board: {e}"))?;
+        tx.execute("DELETE FROM issue_sequences WHERE session = ?1", params![session])
+            .map_err(|e| format!("delete project Board sequence: {e}"))?;
         let n = tx
             .execute("DELETE FROM projects WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
@@ -1342,7 +1438,7 @@ impl Store {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT i.id, i.title, i.body, i.status, i.assignee, i.created_by,
+                "SELECT i.project_number, i.title, i.body, i.status, i.assignee, i.created_by,
                         i.created_at, i.updated_at, i.agent_touched,
                         (SELECT COUNT(*) FROM issue_notes n WHERE n.issue_id = i.id)
                    FROM issues i WHERE i.session = ?1
@@ -1396,35 +1492,35 @@ impl Store {
         let issue = self
             .conn
             .query_row(
-                "SELECT id, title, body, status, assignee, created_by, created_at, updated_at,
-                        agent_touched
-                   FROM issues WHERE session = ?1 AND id = ?2",
+                "SELECT id, project_number, title, body, status, assignee, created_by,
+                        created_at, updated_at, agent_touched
+                   FROM issues WHERE session = ?1 AND project_number = ?2",
                 rusqlite::params![session, id],
                 |r| {
-                    let assignee = r.get::<_, String>(4)?;
-                    let agent_touched = r.get::<_, i64>(8)? != 0;
-                    Ok(serde_json::json!({
-                        "id": r.get::<_, i64>(0)?,
-                        "title": r.get::<_, String>(1)?,
-                        "body": r.get::<_, String>(2)?,
-                        "status": r.get::<_, String>(3)?,
+                    let assignee = r.get::<_, String>(5)?;
+                    let agent_touched = r.get::<_, i64>(9)? != 0;
+                    Ok((r.get::<_, i64>(0)?, serde_json::json!({
+                        "id": r.get::<_, i64>(1)?,
+                        "title": r.get::<_, String>(2)?,
+                        "body": r.get::<_, String>(3)?,
+                        "status": r.get::<_, String>(4)?,
                         "assignee": assignee,
-                        "created_by": r.get::<_, String>(5)?,
-                        "created_at": r.get::<_, i64>(6)?,
-                        "updated_at": r.get::<_, i64>(7)?,
+                        "created_by": r.get::<_, String>(6)?,
+                        "created_at": r.get::<_, i64>(7)?,
+                        "updated_at": r.get::<_, i64>(8)?,
                         "editable": assignee.is_empty() && !agent_touched,
-                    }))
+                    })))
                 },
             )
             .optional()
             .map_err(|e| e.to_string())?;
-        let Some(mut issue) = issue else { return Ok(None) };
+        let Some((row_id, mut issue)) = issue else { return Ok(None) };
         let mut stmt = self
             .conn
             .prepare("SELECT author, body, at FROM issue_notes WHERE issue_id = ?1 ORDER BY at, id")
             .map_err(|e| e.to_string())?;
         let notes = stmt
-            .query_map([id], |r| {
+            .query_map([row_id], |r| {
                 Ok(serde_json::json!({
                     "author": r.get::<_, String>(0)?,
                     "body": r.get::<_, String>(1)?,
@@ -1463,13 +1559,15 @@ impl Store {
                 if title.is_empty() && body.unwrap_or("").trim().is_empty() {
                     return Err("an issue needs a title or a body".into());
                 }
+                let number = self.next_issue_number(session)?;
                 self.conn
                     .execute(
                         "INSERT INTO issues
-                           (session, title, body, status, assignee, created_by, created_at, updated_at, agent_touched)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?8)",
+                           (session, project_number, title, body, status, assignee, created_by, created_at, updated_at, agent_touched)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9)",
                         rusqlite::params![
                             session,
+                            number,
                             title,
                             body.unwrap_or(""),
                             status.unwrap_or("todo"),
@@ -1480,7 +1578,7 @@ impl Store {
                         ],
                     )
                     .map_err(|e| e.to_string())?;
-                Ok(self.conn.last_insert_rowid())
+                Ok(number)
             }
             Some(id) => {
                 // The contentless rule holds through PATCHES too: a save may
@@ -1490,7 +1588,7 @@ impl Store {
                     .conn
                     .query_row(
                         "SELECT title, body, assignee, agent_touched
-                           FROM issues WHERE session = ?1 AND id = ?2",
+                           FROM issues WHERE session = ?1 AND project_number = ?2",
                         rusqlite::params![session, id],
                         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? != 0)),
                     )
@@ -1523,7 +1621,7 @@ impl Store {
                            assignee = COALESCE(?6, assignee),
                            updated_at = ?7,
                            agent_touched = CASE WHEN ?8 <> 'human' THEN 1 ELSE agent_touched END
-                         WHERE session = ?1 AND id = ?2",
+                         WHERE session = ?1 AND project_number = ?2",
                         rusqlite::params![session, id, title, body, status, assignee, now, who],
                     )
                     .map_err(|e| e.to_string())?;
@@ -1540,25 +1638,28 @@ impl Store {
         if body.is_empty() {
             return Err("an empty note says nothing".into());
         }
-        // Session-scoped existence check first: a note must not attach to
-        // another project's issue through a guessed id.
-        let n = self
+        // Resolve the session-local visible number to the hidden global row
+        // key in the same gated statement. Notes keep their existing FK.
+        let row_id: Option<i64> = self
             .conn
-            .execute(
+            .query_row(
                 "UPDATE issues
                     SET updated_at = ?3,
                         agent_touched = CASE WHEN ?4 <> 'human' THEN 1 ELSE agent_touched END
-                  WHERE session = ?1 AND id = ?2",
+                  WHERE session = ?1 AND project_number = ?2
+                  RETURNING id",
                 rusqlite::params![session, id, now, author],
+                |r| r.get(0),
             )
+            .optional()
             .map_err(|e| e.to_string())?;
-        if n == 0 {
+        let Some(row_id) = row_id else {
             return Err(format!("no issue #{id} on this board"));
-        }
+        };
         self.conn
             .execute(
                 "INSERT INTO issue_notes (issue_id, author, body, at) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![id, author, body, now],
+                rusqlite::params![row_id, author, body, now],
             )
             .map(|_| ())
             .map_err(|e| e.to_string())
@@ -1566,7 +1667,10 @@ impl Store {
 
     pub fn issue_delete(&self, session: &str, id: i64) -> Result<bool, String> {
         self.conn
-            .execute("DELETE FROM issues WHERE session = ?1 AND id = ?2", rusqlite::params![session, id])
+            .execute(
+                "DELETE FROM issues WHERE session = ?1 AND project_number = ?2",
+                rusqlite::params![session, id],
+            )
             .map(|n| n > 0)
             .map_err(|e| e.to_string())
     }
@@ -1759,6 +1863,7 @@ mod tests {
         assert!(store.issue_save("proj", None, Some("  "), None, None, None, "human", 600).is_err());
         assert!(store.issue_save("proj", None, None, Some("  "), None, None, "human", 600).is_err());
         let bare = store.issue_save("proj", None, None, Some("body only, no title"), None, None, "human", 610).unwrap();
+        assert_eq!(bare, 2, "rejected contentless creates do not consume a visible number");
         let got = store.issue_get("proj", bare).unwrap().unwrap();
         assert_eq!(got["title"].as_str().unwrap(), "");
         assert_eq!(got["body"].as_str().unwrap(), "body only, no title");
@@ -1811,6 +1916,37 @@ mod tests {
     }
 
     #[test]
+    fn issue_numbers_start_at_one_per_project_and_never_reuse() {
+        let store = Store::open_memory().unwrap();
+        let a1 = store.issue_save("a", None, Some("a1"), None, None, None, "human", 10).unwrap();
+        let b1 = store.issue_save("b", None, Some("b1"), None, None, None, "human", 11).unwrap();
+        let a2 = store.issue_save("a", None, Some("a2"), None, None, None, "human", 12).unwrap();
+        assert_eq!((a1, b1, a2), (1, 1, 2), "each project owns a sequence starting at one");
+
+        // The same visible #1 resolves independently through session + number.
+        store.issue_save("a", Some(1), None, None, Some("doing"), None, "human", 13).unwrap();
+        store.issue_note("b", 1, "human", "only b", 14).unwrap();
+        assert_eq!(store.issue_get("a", 1).unwrap().unwrap()["title"], "a1");
+        assert_eq!(store.issue_get("a", 1).unwrap().unwrap()["notes"].as_array().unwrap().len(), 0);
+        assert_eq!(store.issue_get("b", 1).unwrap().unwrap()["title"], "b1");
+        assert_eq!(store.issue_get("b", 1).unwrap().unwrap()["notes"].as_array().unwrap().len(), 1);
+
+        // Deleting the high card never reuses a number somebody may have seen
+        // in chat/CLI history; each session advances independently.
+        assert!(store.issue_delete("a", 2).unwrap());
+        assert_eq!(store.issue_save("a", None, Some("a3"), None, None, None, "human", 15).unwrap(), 3);
+        assert_eq!(store.issue_save("b", None, Some("b2"), None, None, None, "human", 16).unwrap(), 2);
+        assert!(store.issue_get("a", 2).unwrap().is_none(), "the deleted number stays a gap");
+        assert!(store.issue_delete("a", 1).unwrap());
+        assert!(store.issue_delete("a", 3).unwrap());
+        assert_eq!(
+            store.issue_save("a", None, Some("a4"), None, None, None, "human", 17).unwrap(),
+            4,
+            "even an empty board remembers its next number until the project is permanently deleted",
+        );
+    }
+
+    #[test]
     fn issue_counts_group_across_sessions_in_one_read() {
         let store = Store::open_memory().unwrap();
         // Two boards, mixed statuses — the grouped read must keep them apart
@@ -1851,7 +1987,10 @@ mod tests {
             store.issue_save("legacy", Some(legacy), None, None, Some("doing"), None, "human", 11).unwrap();
             store.conn.execute_batch(
                 "DROP TABLE deliveries;
-                 ALTER TABLE issues DROP COLUMN agent_touched;"
+                 DROP INDEX issues_session_number;
+                 DROP TABLE issue_sequences;
+                 ALTER TABLE issues DROP COLUMN agent_touched;
+                 ALTER TABLE issues DROP COLUMN project_number;"
             ).unwrap();
             store.conn.pragma_update(None, "user_version", SCHEMA_VERSION).unwrap();
             assert!(store.pending_deliveries("s", None).is_err(), "the table really is gone");
@@ -1860,8 +1999,14 @@ mod tests {
         store.insert_delivery("s", 1, "hello", 100).unwrap();
         assert_eq!(store.pending_deliveries("s", None).unwrap().len(), 1, "healed on open");
         assert_eq!(store.issue_get("legacy", 1).unwrap().unwrap()["editable"], false, "legacy workflow evidence is locked during repair");
+        assert_eq!(
+            store.issue_save("legacy", None, Some("next"), None, None, None, "human", 100).unwrap(),
+            2,
+            "the repaired sequence continues after the backfilled local #1",
+        );
         let id = store.issue_save("s", None, Some("editable"), None, None, None, "human", 100).unwrap();
-        assert_eq!(store.issue_get("s", id).unwrap().unwrap()["editable"], true, "Board edit lock column healed too");
+        assert_eq!(id, 1, "a different repaired project starts at one");
+        assert_eq!(store.issue_get("s", id).unwrap().unwrap()["editable"], true, "Board edit lock and local number healed together");
         drop(store);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1881,6 +2026,14 @@ mod tests {
             archived: false,
             room: String::new(),
         }
+    }
+
+    fn issue_row_id(store: &Store, session: &str, number: i64) -> i64 {
+        store.conn.query_row(
+            "SELECT id FROM issues WHERE session = ?1 AND project_number = ?2",
+            rusqlite::params![session, number],
+            |r| r.get(0),
+        ).unwrap()
     }
 
     fn slot(name: &str, ord: i64) -> Slot {
@@ -1940,15 +2093,22 @@ mod tests {
             .issue_save("alpha", None, Some("private task"), None, None, None, "human", 10)
             .unwrap();
         store.issue_note("alpha", issue, "human", "private note", 11).unwrap();
+        let row_id = issue_row_id(&store, "alpha", issue);
 
         assert!(store.delete_project("alpha").unwrap());
         assert!(store.slots("alpha").unwrap().is_empty(), "slots cascade with the project");
         assert!(store.issues_list("alpha").unwrap().is_empty(), "the released session name keeps no Board rows");
         let notes: i64 = store
             .conn
-            .query_row("SELECT COUNT(*) FROM issue_notes WHERE issue_id = ?1", [issue], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM issue_notes WHERE issue_id = ?1", [row_id], |r| r.get(0))
             .unwrap();
         assert_eq!(notes, 0, "issue notes cascade with the permanently deleted board");
+        store.insert_project(&project("alpha")).unwrap();
+        assert_eq!(
+            store.issue_save("alpha", None, Some("fresh project"), None, None, None, "human", 12).unwrap(),
+            1,
+            "permanent project deletion releases its numbering sequence too",
+        );
     }
 
     #[test]
@@ -1959,12 +2119,20 @@ mod tests {
             .issue_save("alpha", None, Some("rename-safe"), Some("body"), None, None, "human", 10)
             .unwrap();
         store.issue_note("alpha", issue, "human", "kept with it", 11).unwrap();
+        let removed = store.issue_save("alpha", None, Some("seen #2"), None, None, None, "human", 11).unwrap();
+        assert_eq!(removed, 2);
+        assert!(store.issue_delete("alpha", removed).unwrap());
 
         assert!(store.set_session("alpha", "beta", "alpha").unwrap());
         assert!(store.issues_list("alpha").unwrap().is_empty(), "the old session key is closed");
         let moved = store.issue_get("beta", issue).unwrap().expect("the board follows the project");
         assert_eq!(moved["title"], "rename-safe");
-        assert_eq!(moved["notes"].as_array().unwrap().len(), 1, "notes follow their globally unique issue id");
+        assert_eq!(moved["notes"].as_array().unwrap().len(), 1, "notes follow their hidden globally unique row id");
+        assert_eq!(
+            store.issue_save("beta", None, Some("after rename"), None, None, None, "human", 12).unwrap(),
+            3,
+            "rename carries the per-project sequence, including deleted high numbers",
+        );
         // The old name cannot be used as a cross-project write handle after
         // the rename; every CRUD path still requires session + id.
         assert!(store.issue_save("alpha", Some(issue), None, None, Some("done"), None, "x", 12).is_err());
@@ -2005,34 +2173,42 @@ mod tests {
         seed.insert_project(&current_owner).unwrap();
         let moved = seed.issue_save("old", None, Some("follow rename"), None, None, None, "human", 10).unwrap();
         seed.issue_note("old", moved, "human", "keep me", 11).unwrap();
-        let stays = seed.issue_save("old", None, Some("new owner task"), None, None, None, "human", 30).unwrap();
+        let _stays = seed.issue_save("old", None, Some("new owner task"), None, None, None, "human", 30).unwrap();
         let orphan = seed.issue_save("deleted", None, Some("orphan"), None, None, None, "human", 12).unwrap();
         seed.issue_note("deleted", orphan, "human", "remove me", 13).unwrap();
+        let orphan_row = issue_row_id(&seed, "deleted", orphan);
         seed.conn.execute(
             "UPDATE projects SET session = 'new', prev_session = 'old' WHERE id = 'alpha'",
             [],
+        ).unwrap();
+        // Remove the v16-only shape: the repair must first split the alias
+        // (v14), then assign dense local numbers independently (v16).
+        seed.conn.execute_batch(
+            "DROP INDEX issues_session_number;
+             DROP TABLE issue_sequences;
+             ALTER TABLE issues DROP COLUMN project_number;"
         ).unwrap();
         seed.conn.pragma_update(None, "user_version", 13).unwrap();
         drop(seed);
 
         let repaired = Store::open(&path).unwrap();
-        assert!(repaired.issue_get("old", moved).unwrap().is_none(), "the previous owner's issue left the reused alias");
-        let got = repaired.issue_get("new", moved).unwrap().expect("renamed board repaired");
+        assert!(repaired.issue_get("old", 2).unwrap().is_none(), "the previous owner's old global ordering is not a visible handle");
+        let got = repaired.issue_get("new", 1).unwrap().expect("renamed board repaired and starts at #1");
         assert_eq!(got["notes"].as_array().unwrap().len(), 1, "the issue thread survives the repair");
         assert_eq!(
-            repaired.issue_get("old", stays).unwrap().unwrap()["title"],
+            repaired.issue_get("old", 1).unwrap().unwrap()["title"],
             "new owner task",
-            "an alias reused by an old build keeps issues created after its new owner",
+            "the reused alias owner keeps its row and independently starts at #1",
         );
         assert!(repaired.issues_list("deleted").unwrap().is_empty(), "orphan board removed");
         let orphan_notes: i64 = repaired.conn.query_row(
             "SELECT COUNT(*) FROM issue_notes WHERE issue_id = ?1",
-            [orphan],
+            [orphan_row],
             |r| r.get(0),
         ).unwrap();
         assert_eq!(orphan_notes, 0, "foreign keys are off in migration, so v14 removes orphan notes explicitly");
         let version: i64 = repaired.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(version, 15);
+        assert_eq!(version, 16);
         drop(repaired);
         let _ = std::fs::remove_dir_all(dir);
     }
