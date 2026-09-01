@@ -198,10 +198,14 @@ completion).
   column counts as the quiet second line — fixed todo/doing/review/done
   order, zeros included, each chip coloured by the one board status
   language. Because the set is always four, Board alone adds the shared
-  `.side-wins.grid` modifier: two equal columns form a deterministic 2×2
-  rectangle and align each column's leading dots; it must never fall back to
-  flex-wrap's ragged 3+1. Chat keeps the bare flex-wrap for its variable agent
-  count. The CURRENT board's counts refresh from its own `hub_board_list`
+  `.side-wins.grid` modifier and a zero-height hidden mirror row: it measures
+  the available row, localized labels, and the widest count across boards;
+  `chipCols` then selects equal **4 / 2 / 1** columns (4×1, 2×2, or 1×4).
+  Two columns are the safe pre-measure fallback. Three is never offered, so
+  there is no ragged 3+1; equal tracks align each column's leading dots, and
+  the one-column fallback prevents truncation at very narrow widths. Chat
+  keeps the bare flex-wrap for its variable agent count. The CURRENT board's
+  counts refresh from its own `hub_board_list`
   the moment it answers, so deleting the last issue hides the project and
   creating the first shows it at once — no poll wait. An empty CURRENT
   board stays usable while hidden: the page-head still names it (the name
