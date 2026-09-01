@@ -156,7 +156,7 @@ state and contributes only its note.
 | Chat messages (`bus`, SQLite `team.db`) | ✅ | ✅ | ✅ |
 | Project + agent slots + resume ids (`state.db`) | ✅ | ✅ | ✅ |
 | Isolated homes, hooks, prompts (`<ws>/.tmm/agents/`) | ✅ | ✅ | ✅ |
-| Unread notification inbox (`unread.json`) | ✅ | ✅ | ✅ |
+| Per-window conversation-id memory | ✅ | ❌ (re-learned from the next hook) | ❌ |
 | Telemetry: tool rows, prompt rows, warnings | ✅ | ❌ | ❌ |
 | `sent_this_turn`, pending deliveries | ✅ | ❌ | ❌ |
 | The agent process itself | ✅ (tmux outlives us) | ✅ | ❌ |

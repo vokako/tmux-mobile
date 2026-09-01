@@ -15,7 +15,6 @@
   // without the team bus these fall back to ordinary sessions (consistently
   // with PanePicker and the Team tab).
   import { isTeamSession, teamLabel } from '../core/team.svelte.ts';
-  import { agentNotifications, notificationForWindow, sessionHasNotification } from '../core/agent-notifications.svelte.ts';
 
   // `onPick` lets the host close its slide-over after a choice — this list is
   // Terminal's sidebar now, not a page that navigates away by itself.
@@ -369,11 +368,7 @@
           {#each mruChips as s}
             {@const sum = sessionSummary(s)}
             {@const isActive = activeTarget.startsWith(s.name + ':')}
-            {@const chipNotice = sessionHasNotification(s.name)}
-            {@const chipUrgent = agentNotifications.unread.some(item => item.session === s.name && item.kind !== 'completed')}
             <AgentChip
-              attention={chipNotice}
-              urgent={chipUrgent}
               agent={AGENT_BY_TAG.get(sum.ai)}
               agents={sum.agents}
               label={s.name}
@@ -412,8 +407,6 @@
     {@const team = isTeamSession(s.name)}
     {@const sum = sessionSummary(s)}
     {@const isActive = activeTarget.startsWith(s.name + ':')}
-    {@const hasNotice = sessionHasNotification(s.name)}
-    {@const urgentNotice = agentNotifications.unread.some(item => item.session === s.name && item.kind !== 'completed')}
     {@const isExpanded = !team && ((isSearching && s.windows > 1) || expanded[s.name])}
     {@const ps = panes[s.name] || []}
     {@const visiblePanes = isSearching ? ps.filter(p => paneMatches(p, query)) : ps}
@@ -448,7 +441,6 @@
           </span>
         {/if}
         <span class="trailing">
-          {#if hasNotice}<span class="attention-dot" aria-label="Agent needs attention"></span>{/if}
           {#if team}
             <span class="go-chat" aria-hidden="true"><Icon name="chat" size={13} /></span>
           {:else}
@@ -474,7 +466,6 @@
           {#each visiblePanes as p}
             {@const pAi = paneAgent(p)?.tag || ''}
             {@const isPaneActive = activeTarget === `${p.session}:${p.window}.${p.pane}`}
-            {@const paneNotice = notificationForWindow(p.session, p.window)}
             <div class="pane-row" class:active-pane={isPaneActive}>
               <button class="pane" onclick={() => openPane(s, p)}>
                 <span class="pane-id">{p.window}.{p.pane}</span>
@@ -482,7 +473,6 @@
                 {#if p.current_path}
                   <span class="pane-cwd" use:scrollEndIntoView>{p.current_path}</span>
                 {/if}
-                {#if paneNotice}<span class="attention-dot" aria-label="Agent needs attention"></span>{/if}
                 {#if pAi}
                   <img class="pane-ai-icon" src={aiIcon(pAi)} alt={pAi} />
                 {/if}
@@ -891,13 +881,6 @@
   .dot.attached {
     background: var(--accent);
     box-shadow: 0 0 6px var(--accent-glow);
-  }
-  .attention-dot {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: var(--danger);
-    flex-shrink: 0;
   }
 
   .name {

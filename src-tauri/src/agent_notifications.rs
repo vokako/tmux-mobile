@@ -5,12 +5,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::broadcast;
 
 const MAX_INBOX_BYTES: u64 = 256 * 1024;
-const MAX_SUMMARY_CHARS: usize = 240;
-/// Chat-path budget for hook-sourced auto-replies. Separate from the 240-char
-/// notification summary: a final reply carries full content.
+/// Chat-path budget for hook-sourced auto-replies: a final reply carries full
+/// content.
 const MAX_REPLY_CHARS: usize = 6 * 1024;
 /// How much of a tool's argument is kept. It was 80 characters, which is shorter
 /// than the paths this app's own agents work with: every row in the lane ended in
@@ -21,7 +19,6 @@ const MAX_REPLY_CHARS: usize = 6 * 1024;
 /// two thousand characters identify it. The lane pans, so length costs no layout,
 /// and the durable log is capped by ROW COUNT, so it costs no unbounded storage.
 const MAX_TOOL_DETAIL_CHARS: usize = 2048;
-const DEDUPE_SECS: u64 = 3;
 const OWNER_MARKER: &str = "tmux-mobile-agent-notify";
 
 // ── Room poster ──────────────────────────────────────────────────────────────
@@ -38,22 +35,6 @@ pub trait RoomPoster: Send + Sync {
     /// `record_only`: when true, the message is stored but NOT delivered
     /// (typed) into any agent's pane, regardless of @-mentions in the body.
     fn post_to_room(&self, session: &str, agent: &str, body: &str, record_only: bool);
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AgentNotification {
-    pub id: String,
-    pub agent: String,
-    pub kind: String,
-    pub pane_id: String,
-    pub session: String,
-    pub window: usize,
-    pub pane: usize,
-    pub target: String,
-    pub summary: String,
-    pub timestamp: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent_session_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,7 +61,6 @@ pub struct HookStatus {
 
 #[derive(Default)]
 struct State {
-    unread: HashMap<String, AgentNotification>,
     /// window key → the agent's own conversation id, from the last hook that
     /// carried one. In memory only: the durable copy is the project slot that
     /// the capturer stamps with it (`src-tauri/src/projects`), because that is
@@ -109,7 +89,6 @@ struct State {
 pub struct AgentNotificationHub {
     root: PathBuf,
     state: Arc<Mutex<State>>,
-    tx: broadcast::Sender<String>,
 }
 
 impl AgentNotificationHub {
@@ -119,25 +98,7 @@ impl AgentNotificationHub {
 
     fn load_at(root: PathBuf) -> Self {
         let _ = std::fs::create_dir_all(root.join("inbox"));
-        let unread = std::fs::read(root.join("unread.json"))
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<Vec<AgentNotification>>(&bytes).ok())
-            .unwrap_or_default()
-            .into_iter()
-            .map(|item| (window_key(&item.session, item.window), item))
-            .collect();
-        let (tx, _) = broadcast::channel(64);
-        Self {
-            root,
-            state: Arc::new(Mutex::new(State {
-                unread,
-                sessions: HashMap::new(),
-                sent_this_turn: HashMap::new(),
-                done_this_turn: HashMap::new(),
-                poster: None,
-            })),
-            tx,
-        }
+        Self { root, state: Arc::new(Mutex::new(State::default())) }
     }
 
     /// Inject the room poster. Called once by the server after the team bus is
@@ -175,15 +136,6 @@ impl AgentNotificationHub {
         state.done_this_turn.remove(&key);
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<String> {
-        self.tx.subscribe()
-    }
-
-    pub fn snapshot(&self) -> Value {
-        let state = self.state.lock().unwrap();
-        snapshot_value(&state)
-    }
-
     /// The agent conversation id last reported by a hook in this tmux window,
     /// if any. Used by the project capturer to stamp the slot, so `up` can
     /// resume that conversation rather than open a fresh one.
@@ -194,17 +146,6 @@ impl AgentNotificationHub {
             .sessions
             .get(&window_key(session, window))
             .cloned()
-    }
-
-    pub fn mark_read(&self, session: &str, window: usize) -> Result<Value, String> {        let changed = {
-            let mut state = self.state.lock().unwrap();
-            state.unread.remove(&window_key(session, window)).is_some()
-        };
-        if changed {
-            self.persist()?;
-            self.broadcast_snapshot();
-        }
-        Ok(self.snapshot())
     }
 
     pub async fn run(self: Arc<Self>) {
@@ -292,20 +233,21 @@ impl AgentNotificationHub {
             self.maybe_auto_post(&session, window, &normalized);
         }
 
-        let item = AgentNotification {
-            id: format!("{}-{}-{}", timestamp, std::process::id(), pane),
-            agent: normalized.agent,
-            kind: normalized.kind,
-            pane_id: envelope.pane_id,
-            target: format!("{}:{}.{}", session, window, pane),
-            session,
-            window,
-            pane,
-            summary: normalized.summary,
-            timestamp,
-            agent_session_id: normalized.agent_session_id,
-        };
-        self.record(item)
+        // Remember the agent's own conversation id (even across duplicate
+        // events): this map is how a restored window resumes the exact
+        // conversation instead of starting a blank one. The unread-inbox UI
+        // that used to be recorded here retired 2026-09-01 (owner: "原来我用的
+        // 感觉不是很好用") — the project room's auto-post + read cursor and the
+        // derived status dots are the one notification language now.
+        let _ = pane;
+        if let Some(id) = normalized.agent_session_id {
+            self.state
+                .lock()
+                .unwrap()
+                .sessions
+                .insert(window_key(&session, window), id);
+        }
+        Ok(())
     }
 
     /// Post the agent's final reply to the project room when the window is
@@ -376,52 +318,6 @@ impl AgentNotificationHub {
             .is_some_and(|summary| !summary.is_empty() && summary == reply.trim())
     }
 
-    fn record(&self, item: AgentNotification) -> Result<(), String> {
-        let changed = {
-            let mut state = self.state.lock().unwrap();
-            let key = window_key(&item.session, item.window);
-            // Remember the conversation id even for a duplicate event: this map
-            // is how a restored window resumes the exact conversation instead
-            // of starting a blank one.
-            if let Some(id) = item.agent_session_id.clone() {
-                state.sessions.insert(key.clone(), id);
-            }
-            let duplicate = state.unread.get(&key).is_some_and(|old| {
-                let same_turn = old.agent == item.agent
-                    && old.pane_id == item.pane_id
-                    && old.agent_session_id == item.agent_session_id
-                    && item.timestamp.saturating_sub(old.timestamp) <= DEDUPE_SECS;
-                same_turn
-                    && (old.kind == item.kind || (is_urgent(&old.kind) && item.kind == "completed"))
-            });
-            if duplicate {
-                false
-            } else {
-                state.unread.insert(key, item);
-                true
-            }
-        };
-        if changed {
-            self.persist()?;
-            self.broadcast_snapshot();
-        }
-        Ok(())
-    }
-
-    fn persist(&self) -> Result<(), String> {
-        std::fs::create_dir_all(&self.root).map_err(|e| e.to_string())?;
-        let data = {
-            let state = self.state.lock().unwrap();
-            let mut items: Vec<_> = state.unread.values().cloned().collect();
-            items.sort_by_key(|item| item.timestamp);
-            serde_json::to_vec_pretty(&items).map_err(|e| e.to_string())?
-        };
-        atomic_write(&self.root.join("unread.json"), &data)
-    }
-
-    fn broadcast_snapshot(&self) {
-        let _ = self.tx.send(self.snapshot().to_string());
-    }
 
     pub fn hook_status(&self) -> HookStatus {
         HookStatus {
@@ -602,9 +498,7 @@ fn tool_event_parts(envelope: &InboxEnvelope) -> Option<(String, String)> {
 }
 
 struct Normalized {
-    agent: String,
     kind: String,
-    summary: String,
     agent_session_id: Option<String>,
     /// The full reply text from a stop event, before any truncation. `None`
     /// for non-stop events. Used by the auto-post path, which applies the
@@ -619,7 +513,7 @@ fn normalize(envelope: &InboxEnvelope) -> Result<Normalized, String> {
         .ok_or("payload must be an object")?;
     let event = string_field(payload, &["hook_event_name"]);
     let notification_type = string_field(payload, &["notification_type"]);
-    let (agent, kind) = match envelope.backend.as_str() {
+    let (_agent, kind) = match envelope.backend.as_str() {
         "claude" => {
             let kind = match (event.as_deref(), notification_type.as_deref()) {
                 (Some("Notification"), Some("permission_prompt")) => "permission_required",
@@ -668,8 +562,7 @@ fn normalize(envelope: &InboxEnvelope) -> Result<Normalized, String> {
         }
         _ => return Err("unsupported backend".into()),
     };
-    // The raw reply text, shared between the notification summary (truncated
-    // to MAX_SUMMARY_CHARS) and the auto-post path (truncated to MAX_REPLY_CHARS
+    // The raw reply text for the auto-post path (truncated to MAX_REPLY_CHARS
     // at the call site).
     let raw_reply = string_field(
         payload,
@@ -681,17 +574,11 @@ fn normalize(envelope: &InboxEnvelope) -> Result<Normalized, String> {
             "task_subject",
         ],
     );
-    let summary = raw_reply
-        .as_deref()
-        .map(|s| truncate(s, MAX_SUMMARY_CHARS))
-        .unwrap_or_default();
     // Preserve the untruncated text for the auto-post path only when this is
     // a stop/completion event — other events have no reply body worth posting.
     let full_reply = if kind == "completed" { raw_reply } else { None };
     Ok(Normalized {
-        agent: agent.into(),
         kind: kind.into(),
-        summary,
         agent_session_id: string_field(payload, &["session_id", "sessionId"]),
         full_reply,
     })
@@ -748,16 +635,6 @@ fn truncate(input: &str, max: usize) -> String {
 fn window_key(session: &str, window: usize) -> String {
     format!("{session}:{window}")
 }
-fn is_urgent(kind: &str) -> bool {
-    kind != "completed"
-}
-
-fn snapshot_value(state: &State) -> Value {
-    let mut items: Vec<_> = state.unread.values().cloned().collect();
-    items.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-    json!({ "unread": items })
-}
-
 fn unix_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1310,44 +1187,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
-    #[test]
-    fn record_deduplicates_one_turn() {
-        let root = std::env::temp_dir().join(format!("tmm-agent-state-{}", uuid::Uuid::new_v4()));
-        let hub = AgentNotificationHub::load_at(root.clone());
-        let item = AgentNotification {
-            id: "1".into(),
-            agent: "codex".into(),
-            kind: "completed".into(),
-            pane_id: "%1".into(),
-            session: "work".into(),
-            window: 2,
-            pane: 0,
-            target: "work:2.0".into(),
-            summary: String::new(),
-            timestamp: 100,
-            agent_session_id: Some("session".into()),
-        };
-        hub.record(item.clone()).unwrap();
-        let mut duplicate = item;
-        duplicate.id = "2".into();
-        duplicate.timestamp = 102;
-        hub.record(duplicate).unwrap();
-        assert_eq!(hub.snapshot()["unread"].as_array().unwrap().len(), 1);
-        let mut urgent = hub.snapshot()["unread"][0].clone();
-        urgent["id"] = json!("3");
-        urgent["kind"] = json!("permission_required");
-        urgent["timestamp"] = json!(110);
-        hub.record(serde_json::from_value(urgent).unwrap()).unwrap();
-        let mut completion = hub.snapshot()["unread"][0].clone();
-        completion["id"] = json!("4");
-        completion["kind"] = json!("completed");
-        completion["timestamp"] = json!(111);
-        hub.record(serde_json::from_value(completion).unwrap())
-            .unwrap();
-        assert_eq!(hub.snapshot()["unread"][0]["kind"], "permission_required");
-        let _ = std::fs::remove_dir_all(root);
-    }
-
     /// End-to-end over the real inbox and a real tmux pane: a
     /// `userPromptSubmit` envelope must land in telemetry as the input half of
     /// the transcript AND acknowledge a line we typed. The payload shape here
@@ -1407,10 +1246,8 @@ mod tests {
         let prompt = events.iter().find(|e| e.kind == "prompt").expect("prompt recorded");
         assert_eq!(prompt.text, line, "the input half of the transcript");
         assert_eq!(prompt.via, "app", "and the receipt for the line we typed");
-        // A consumed envelope is removed, and no unread notification is created
-        // for a turn start.
+        // A consumed envelope is removed.
         assert!(!root.join("inbox").join("1-prompt.json").exists(), "envelope consumed");
-        assert_eq!(hub.snapshot()["unread"].as_array().unwrap().len(), 0, "a turn start is not a notification");
 
         let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
         let _ = std::fs::remove_dir_all(root);

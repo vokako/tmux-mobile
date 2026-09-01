@@ -8,16 +8,13 @@ import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('./App.svelte', import.meta.url), 'utf8');
 
-test('every authenticated connection path refreshes agent notifications', () => {
-  const reconnectSuccess = source.match(/function onReconnectSuccess[\s\S]*?\n  \}/u)?.[0] || '';
-  const manualSuccess = source.match(/function onConnected[\s\S]*?\n  \}/u)?.[0] || '';
-  const optimizedConnection = source.match(/async function optimizeConnection[\s\S]*?\n  \}/u)?.[0] || '';
-  const automaticConnection = source.match(/\$effect\(\(\) => \{\n    if \(autoConnectAttempted[\s\S]*?\n  \}\);/u)?.[0] || '';
-
-  assert.match(reconnectSuccess, /syncAgentNotifications\(\)/u);
-  assert.match(manualSuccess, /syncAgentNotifications\(\)/u);
-  assert.match(optimizedConnection, /syncAgentNotifications\(\)/u);
-  assert.match(automaticConnection, /syncAgentNotifications\(\)/u);
+test('the retired unread-notification store stays retired (2026-09-01)', () => {
+  // The old agent-notification dots (unread.json inbox + per-window attention
+  // marks) were replaced by the project room's auto-post + read cursor and the
+  // derived status dots — two unread ledgers never agreed (owner: "原来我用的
+  // 感觉不是很好用"). App must not resurrect the store.
+  assert.doesNotMatch(source, /agent-notifications\.svelte/u);
+  assert.doesNotMatch(source, /syncAgentNotifications|markWindowRead/u);
 });
 
 test('Terminal navigation and page layer exist without an active target', () => {

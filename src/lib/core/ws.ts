@@ -30,7 +30,6 @@ export interface TmuxPane {
 export interface Cursor { x: number; y: number; w: number; h: number; t: number }// Team messages / notification snapshots are consumed by still-unconverted
 // .js modules; keep them loose until those convert and pin the real shape.
 export type TeamMessage = any;
-export type AgentNotificationSnapshot = { unread: any[] } & Record<string, any>;
 export type PaneOutputCb = (
   target: string,
   content: string | undefined,
@@ -117,7 +116,6 @@ const paneClosedListeners = new Map<string, Set<PaneClosedCb>>();
 // Team group-chat message push listeners (Team tab). Unkeyed — one stream
 // for the whole room — so a plain Set, not a per-target map.
 const teamMessageListeners = new Set<(message: TeamMessage) => void>();
-const agentNotificationListeners = new Set<(snapshot: AgentNotificationSnapshot) => void>();
 
 function addListener<CB>(map: Map<string, Set<CB>>, target: string, cb: CB) {
   let set = map.get(target);
@@ -149,8 +147,6 @@ export function addPaneClosedListener(target: string, cb: PaneClosedCb) { addLis
 export function removePaneClosedListener(target: string, cb: PaneClosedCb) { removeListener(paneClosedListeners, target, cb); }
 export function addTeamMessageListener(cb: (message: TeamMessage) => void) { teamMessageListeners.add(cb); }
 export function removeTeamMessageListener(cb: (message: TeamMessage) => void) { teamMessageListeners.delete(cb); }
-export function addAgentNotificationListener(cb: (snapshot: AgentNotificationSnapshot) => void) { agentNotificationListeners.add(cb); }
-export function removeAgentNotificationListener(cb: (snapshot: AgentNotificationSnapshot) => void) { agentNotificationListeners.delete(cb); }
 export function setOnDisconnect(cb: (() => void) | null) { onDisconnect = cb; }
 
 function notifyDisconnect(reason: string) {
@@ -505,11 +501,6 @@ export function connect(url: string, token: string, timeoutMs = CONNECT_TIMEOUT_
         return;
       }
 
-      if (data.method === 'agent_notification') {
-        for (const cb of agentNotificationListeners) cb(data.params || { unread: [] });
-        return;
-      }
-
       if (data.id != null && pending.has(data.id)) {
         const { resolve: res, reject: rej } = pending.get(data.id)!; // guarded by pending.has above
         pending.delete(data.id);
@@ -720,8 +711,6 @@ export const gitCmd = (subcmd: string, args: string[] = [], cwd?: string) => cal
 // team-agnostic (they list teams); the rest take the active room.
 export const teamStatus = () => call('team_status');
 export const teamTeams = () => call('team_teams');
-export const agentNotificationsList = () => call('agent_notifications_list');
-export const agentNotificationsMarkRead = (session: string, window: number) => call('agent_notifications_mark_read', { session, window });
 export const agentHooksStatus = () => call('agent_hooks_status');
 export const agentHooksInstall = () => call('agent_hooks_install');
 export const agentHooksRemove = () => call('agent_hooks_remove');

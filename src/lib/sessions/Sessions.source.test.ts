@@ -4,11 +4,9 @@ import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('./Sessions.svelte', import.meta.url), 'utf8');
 
-test('Sessions imports the notification state used by its template', () => {
-  assert.match(
-    source,
-    /import\s*\{[^}]*agentNotifications[^}]*sessionHasNotification[^}]*\}\s*from\s*['"]\.\.\/core\/agent-notifications\.svelte\.ts['"]/s,
-  );
+test('the retired unread-notification dots stay retired (2026-09-01)', () => {
+  assert.doesNotMatch(source, /agent-notifications\.svelte/u);
+  assert.doesNotMatch(source, /attention-dot|sessionHasNotification/u);
 });
 
 test('the sidebar creates a project with the shared row, not its own button', () => {

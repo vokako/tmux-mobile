@@ -30,15 +30,11 @@ test('bare Escape is CLAIMED in capture and encoded by hand (board #20)', () => 
   assert.match(source, /if \(bareEsc\) lastEscAt = Date\.now\(\);/u, 'the claim feeds the blur guard');
 });
 
-test('Terminal chrome uses only Team-filtered notification queries', () => {
-  assert.match(source, /attention=\{otherTerminalSessionHasNotification\(session\)\}/u);
-  assert.match(
-    source,
-    /\{@const notice = terminalNotificationForWindow\(w\.session, w\.window\)\}/u,
-  );
-  // The unfiltered query must never appear in Terminal chrome — Team dots
-  // would leak into the window switcher.
-  assert.doesNotMatch(source, /\bnotificationForWindow\(/u);
+test('the retired unread-notification dots stay retired (2026-09-01)', () => {
+  // The old per-window attention dots (unread inbox) were replaced by the
+  // project room's auto-post + read cursor and the derived status dots.
+  assert.doesNotMatch(source, /agent-notifications\.svelte/u);
+  assert.doesNotMatch(source, /NotificationForWindow\(|ham-dot/u);
 });
 
 test('the keyboard is an overlay for agent TUIs, not a resize', () => {
@@ -160,7 +156,6 @@ test('the phone bar leads with hamburger + name, chips unchanged (board #19)', (
   assert.match(bar, /class="icon-btn ham"[\s\S]{0,120}?onOpenSessions\(\)/u, 'the hamburger opens the drawer');
   assert.match(bar, /<Icon name="menu"/u, 'three lines, like Chat and Board');
   assert.match(bar, /<h1 class="win-title" title=\{session\}>\{session\}<\/h1>/u, 'the name is the title');
-  assert.match(bar, /ham-dot/u, 'the chip\u2019s attention cue survives on the hamburger');
   assert.ok(!bar.includes('<AgentChip'), 'the session chip is retired from the lead-in');
   // The window chips keep their switch handler.
   assert.match(source, /onSwitchPane\(`\$\{w\.session\}:\$\{w\.window\}\.\$\{w\.pane\}`, w\.current_command\);/u,

@@ -87,11 +87,15 @@ Shell metacharacters rejected in args.
 | `get_prefs` | — | Preferences JSON |
 | `set_pref` | `key`, `value` | OK |
 
-### Agent Notifications (agent lifecycle hooks)
+### Agent hooks (agent lifecycle telemetry)
+The `agent_notifications_list` / `agent_notifications_mark_read` unread-inbox
+RPCs and the `agent_notification` push retired 2026-09-01 with the old
+notification-dot UI: the project room's auto-post + read cursor and the derived
+status dots are the one notification language. The hooks themselves remain — they
+feed telemetry, status derivation and the auto-post.
+
 | Method | Params | Response |
 |--------|--------|----------|
-| `agent_notifications_list` | — | Unread-notification snapshot `{unread: [{session, window, …}]}` |
-| `agent_notifications_mark_read` | `session`, `window` | Updated snapshot |
 | `agent_hooks_status` | — | Per-agent install state `{claude?: {installed}, codex?: {installed}, kiro?: {installed}}` |
 | `agent_hooks_install` | — | Installs the notify hooks into agent configs; returns updated status |
 | `agent_hooks_remove` | — | Removes them; returns updated status |
@@ -191,7 +195,6 @@ are team-agnostic. The Team tab hides itself when these return -32601.
 | `pane_output` | `target`, `content?`, `cursor`, `current_command?` | Pushed on content/cursor change; `current_command` appears on the first push and when the command changes |
 | `pane_closed` | `target` | Pushed when pane becomes unreachable (after repeated capture failures) |
 | `team_message` | `room`, `message` | New group-chat message in a team room |
-| `agent_notification` | notification snapshot | Unread agent-lifecycle notifications changed |
 
 Cursor object: `{x, y, w, h, t}` (x/y position, width, height, trailing trimmed lines).
 Content is omitted when only cursor position changed.

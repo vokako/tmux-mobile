@@ -17,7 +17,6 @@
   import type { TmuxPane } from '../core/ws.ts';
   import type { ProjectRow } from './projects.ts';
   import { ageLabel, declaredWindowChips, liveWindowChips, shortPath, sortRows } from './projects.ts';
-  import { notificationForWindow } from '../core/agent-notifications.svelte.ts';
   import Icon from '../ui/Icon.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import ContextMenu from '../ui/ContextMenu.svelte';
@@ -243,13 +242,9 @@
           {#if chips.length}
             <div class={dense ? 'side-wins wins-indent' : 'wins'} class:dim={!row.live}>
               {#each chips as chip (chip.name + (chip.window ?? ''))}
-                {@const notice = row.live && chip.window != null
-                  ? notificationForWindow(row.project.session, chip.window)
-                  : null}
                 <button class={dense ? 'side-win' : 'win'} onclick={() => openWindow(row, chip.name, chip.target)}>
                   {#if chip.agentIcon}<img src={chip.agentIcon} alt={chip.agentTag} width="11" height="11" />{/if}
                   <span class={dense ? 'side-win-name' : 'win-name'}>{chip.name}</span>
-                  {#if notice}<span class="attention-dot" aria-label={t('newOutput')}></span>{/if}
                 </button>
               {/each}
             </div>
@@ -404,10 +399,6 @@
   .win:hover { color: var(--text); border-color: var(--border2); }
   .win-name { max-width: 13ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .win-empty { font-family: var(--font-mono); font-size: var(--fs-meta); color: var(--text3); }
-  .attention-dot {
-    width: 6px; height: 6px; border-radius: 50%;
-    background: var(--accent); box-shadow: 0 0 5px var(--accent-glow);
-  }
 
   .acts { display: flex; align-items: center; gap: 4px; }
   .act {

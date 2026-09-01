@@ -135,7 +135,7 @@ agent 身上）；声称 `working` 不设置任何状态，只贡献它那句备
 | 聊天消息（`bus`，SQLite `team.db`） | ✅ | ✅ | ✅ |
 | 项目 + agent 槽 + resume id（`state.db`） | ✅ | ✅ | ✅ |
 | 隔离 home、hooks、prompt（`<ws>/.tmm/agents/`） | ✅ | ✅ | ✅ |
-| 未读通知收件箱（`unread.json`） | ✅ | ✅ | ✅ |
+| 每窗口会话 id 记忆 | ✅ | ❌（下一个 hook 重新学到） | ❌ |
 | 遥测：工具行、输入行、警告 | ✅ | ❌ | ❌ |
 | `sent_this_turn`、待确认投递 | ✅ | ❌ | ❌ |
 | agent 进程本身 | ✅（tmux 比我们活得久） | ✅ | ❌ |

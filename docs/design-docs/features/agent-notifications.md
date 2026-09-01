@@ -1,5 +1,15 @@
 # Agent Notifications
 
+> **2026-09-01: the notification UI half of this system is RETIRED** (owner:
+> "原来我用的感觉不是很好用"). The unread inbox (`unread.json`), the
+> `agent_notifications_list`/`mark_read` RPCs, the `agent_notification` push and
+> every attention dot (Terminal window chips, Sessions rows, PanePicker,
+> Projects) are gone: the project room's auto-posted replies + read cursor and
+> the derived status dots (hub) carry the signal now. What SURVIVES of this
+> design is the event path itself — hooks → helper → inbox → `consume_file` —
+> which feeds telemetry (status derivation), the stop-hook auto-post, and the
+> per-window conversation-id memory that `up --resume` depends on.
+
 ## Purpose
 
 Agent notifications turn structured lifecycle events from coding agents running

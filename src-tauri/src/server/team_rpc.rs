@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::agent_notifications::AgentNotificationHub;
 
 use super::rpc::{require_str, Request, Response, ERR_INTERNAL, ERR_INVALID_PARAMS, ERR_METHOD_NOT_FOUND};
-use super::{NotificationHub, Outbound, TeamBridge};
+use super::{Outbound, TeamBridge};
 
 /// Dispatch `team_*` RPC methods to the in-process bus bridge. Returns a
 /// method-not-found error when no bus is wired (mobile builds, or desktop with
@@ -117,44 +117,13 @@ pub(super) fn handle_team_request(req: &Request, team: Option<&dyn TeamBridge>) 
     }
 }
 
-/// Push newly-broadcast team messages to this client as `team_message`
-/// notifications, so the Team tab updates live without polling. Mirrors the
-/// dashboard's SSE stream, but rides the existing encrypted Outbound channel.
-pub(super) async fn notification_push_loop(out_tx: tokio::sync::mpsc::UnboundedSender<Outbound>, hub: NotificationHub) {
-    let mut rx = hub.subscribe();
-    loop {
-        match rx.recv().await {
-            Ok(snapshot_json) => {
-                let frame = serde_json::json!({
-                    "id": null,
-                    "method": "agent_notification",
-                    "params": serde_json::from_str::<serde_json::Value>(&snapshot_json).unwrap_or(serde_json::json!({ "unread": [] })),
-                });
-                if out_tx.send(Outbound::Encrypted(serde_json::to_string(&frame).unwrap())).is_err() { return; }
-            }
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
-        }
-    }
-}
-
+/// The `agent_notifications_*` unread-inbox RPCs retired 2026-09-01 with the
+/// old notification-dot UI (owner: "原来我用的感觉不是很好用") — the project
+/// room's auto-post + read cursor and the derived status dots replaced it.
+/// Only the hook management surface remains.
 pub(super) fn handle_notification_request(req: &Request, hub: &AgentNotificationHub) -> Response {
     let id = req.id;
     match req.method.as_str() {
-        "agent_notifications_list" => Response::ok(id, hub.snapshot()),
-        "agent_notifications_mark_read" => {
-            let session = match require_str(&req.params, "session") {
-                Ok(value) => value,
-                Err(error) => return Response::err(id, ERR_INVALID_PARAMS, error),
-            };
-            let Some(window) = req.params.get("window").and_then(|value| value.as_u64()) else {
-                return Response::err(id, ERR_INVALID_PARAMS, "missing required param: window".into());
-            };
-            match hub.mark_read(session, window as usize) {
-                Ok(snapshot) => Response::ok(id, snapshot),
-                Err(error) => Response::err(id, ERR_INTERNAL, error),
-            }
-        }
         "agent_hooks_status" => Response::ok(id, serde_json::to_value(hub.hook_status()).unwrap()),
         "agent_hooks_install" => match hub.install_hooks() {
             Ok(status) => Response::ok(id, serde_json::to_value(status).unwrap()),

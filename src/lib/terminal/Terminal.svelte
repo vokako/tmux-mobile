@@ -4,7 +4,6 @@
   import { WebLinksAddon } from '@xterm/addon-web-links';
   import Icon from '../ui/Icon.svelte';
   import AgentChip from '../ui/AgentChip.svelte';
-  import { otherTerminalSessionHasNotification, terminalNotificationForWindow } from '../core/agent-notifications.svelte.ts';
   import PanePicker from '../sessions/PanePicker.svelte';
   import { t } from '../core/i18n.svelte.ts';
   import { detectAgent, paneIsAgent, paneAgent, AGENTS } from '../core/agents.ts';
@@ -2003,7 +2002,6 @@
                with no title (owner, 2026-08-19: visual consistency). -->
         {#if embedded}
           <AgentChip
-            attention={otherTerminalSessionHasNotification(session)}
             label={session}
             variant="active"
             title={session}
@@ -2018,7 +2016,6 @@
           <button class="icon-btn ham" title={t('sessions')} aria-label={t('sessions')}
             onclick={(e) => { e.stopPropagation(); onOpenSessions(); }}>
             <Icon name="menu" size={16} />
-            {#if otherTerminalSessionHasNotification(session)}<span class="ham-dot" aria-hidden="true"></span>{/if}
           </button>
           <h1 class="win-title" title={session}>{session}</h1>
         {:else}
@@ -2040,7 +2037,6 @@
         <div class="win-bar-scroll">
           {#each windows as w}
             {@const wAgent = paneAgent(w)}
-            {@const notice = terminalNotificationForWindow(w.session, w.window)}
             <!-- An agent window used to render as a bare icon, which told you
                  a kiro was there but not WHICH agent — unreadable in a project
                  with three of them (owner). Now every chip reads
@@ -2048,8 +2044,6 @@
                  pills use; the icon stays as the backend's mark. A shell keeps
                  its command as the name, which is what identifies it. -->
             <AgentChip
-              attention={!!notice}
-              urgent={notice && notice.kind !== 'completed'}
               agent={wAgent}
               label={`${w.window}:${wAgent ? w.window_name : (w.current_command || w.window_name)}`}
               variant={String(w.window) === currentWindow ? 'active' : 'default'}
@@ -2134,8 +2128,6 @@
       {#if isMobile}
         <div class="win-collapsed-anchor">
           <AgentChip
-            attention={!!terminalNotificationForWindow(cur?.session, cur?.window)}
-            urgent={terminalNotificationForWindow(cur?.session, cur?.window)?.kind !== 'completed'}
             agent={curAgent}
             label={curAgent ? '' : (cur?.current_command || cur?.window_name || '?')}
             chevron="left"
@@ -2147,8 +2139,6 @@
           <h1 class="win-title" title={session}>{session}</h1>
           <span class="win-bar-spacer"></span>
           <AgentChip
-            attention={!!terminalNotificationForWindow(cur?.session, cur?.window)}
-            urgent={terminalNotificationForWindow(cur?.session, cur?.window)?.kind !== 'completed'}
             agent={curAgent}
             label={curAgent ? '' : (cur?.current_command || cur?.window_name || '?')}
             chevron="left"
@@ -2286,14 +2276,7 @@
      blank (owner, 2026-08-30: "window紧跟着项目名称就行 中间不用那么大空
      白"). The chips strip is this bar's body; the title only names it. */
   .win-title { max-width: 22ch; flex: 0 1 auto; }
-  /* The hamburger's attention cue — the session chip it replaced carried one,
-     and a notification from another session must survive the restyle. */
   .ham { position: relative; flex: none; }
-  .ham .ham-dot {
-    position: absolute; top: 3px; right: 3px;
-    width: 6px; height: 6px; border-radius: 50%;
-    background: var(--status-warn);
-  }
   /* Collapsed head (desktop): the chip sits at the RIGHT end of the bar,
      which is what "compressed to the right end of the bar" always meant. */
   .win-bar-spacer { flex: 1; min-width: 0; }

@@ -274,8 +274,7 @@ individual buttons**: a project is a set of windows and jumping into the one you
 want is the whole point. While the session is live the buttons come from the live
 panes — the source of truth for what you can actually open, including a window
 that has not settled into the declaration yet — and each carries the running
-agent's icon plus an attention dot when that window has an unread agent
-notification. While the project is down they come from the declaration instead
+agent's icon. While the project is down they come from the declaration instead
 (dimmed, no targets yet) and tapping one brings the project up and lands you in
 that window.
 

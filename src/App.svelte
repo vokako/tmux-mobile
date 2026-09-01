@@ -24,7 +24,6 @@
   import { createReconnectMachine } from './lib/app/reconnect.ts';
   import { cycleItem, shortcutFromEvent } from './lib/app/shortcuts.ts';
   import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.ts';
-  import { markWindowRead, stopAgentNotifications, syncAgentNotifications } from './lib/core/agent-notifications.svelte.ts';
   import { installExternalLinkHandler } from './lib/core/external-links.ts';
 
   // Tunable constants
@@ -622,7 +621,6 @@
     if (useAddr !== primaryAddr) { localStorage.setItem('tmux_address', useAddr); activeAddress = useAddr; }
     resubscribeAll();
     probeTeam();
-    syncAgentNotifications();
     // Tell Terminal to reset stale resize state + re-fit against the new server.
     window.dispatchEvent(new Event('ws-reconnected'));
   }
@@ -641,13 +639,7 @@
     // Mirrors onReconnectSuccess; on a first-ever connect both are no-ops.
     resubscribeAll();
     probeTeam();
-    syncAgentNotifications();
     window.dispatchEvent(new Event('ws-reconnected'));
-  }
-
-  function readTarget(target) {
-    const match = /^(.+):(\d+)\./.exec(target || '');
-    if (match) markWindowRead(match[1], Number(match[2]));
   }
 
   function openTerminal(session, target, command = '') {
@@ -656,7 +648,6 @@
     terminalTarget = target;
     terminalCommand = command;
     page = 'terminal';
-    readTarget(target);
     navPush();
     if (from === 'hub') jumpedFrom = 'hub';
   }
@@ -683,7 +674,6 @@
       if (pick) {
         terminalTarget = `${pick.session}:${pick.window}.${pick.pane}`;
         terminalCommand = pick.current_command || '';
-        readTarget(terminalTarget);
         return;
       }
     } catch {} // list_panes fails when the whole session died with the pane
@@ -697,7 +687,6 @@
   function doDisconnect() {
     reconnectMachine.cancel();
     disconnect();
-    stopAgentNotifications();
     connected = false;
     page = 'settings';
     localStorage.removeItem('tmux_state');
@@ -743,7 +732,6 @@
       await connect(best, token);
       serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
       resubscribeAll();
-      syncAgentNotifications();
       window.dispatchEvent(new Event('ws-reconnected'));
     } catch {
       // Switch failed — trigger normal reconnect which will try all addresses
@@ -853,7 +841,6 @@
       connected = true;
       serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
       probeTeam();
-      syncAgentNotifications();
       try {
         const s = JSON.parse(localStorage.getItem('tmux_state') || '{}');
         // A saved target names a session that may not exist any more — killed
@@ -1377,7 +1364,7 @@
               visible={page === 'terminal'}
               splitEligible={splitEligible} {splitActive} {splitLayout} onSetLayout={setLayout}
               onOpenSessions={layout.isTouchDevice ? () => sessListOpen = true : null}
-              onSwitchPane={(t, cmd) => { terminalTarget = t; terminalSession = t.split(':')[0]; terminalCommand = cmd || ''; readTarget(t); }} onPaneExit={paneExitFallback} />
+              onSwitchPane={(t, cmd) => { terminalTarget = t; terminalSession = t.split(':')[0]; terminalCommand = cmd || ''; }} onPaneExit={paneExitFallback} />
           {/if}
         </div>
       {:else}

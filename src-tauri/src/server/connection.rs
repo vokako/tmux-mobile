@@ -20,7 +20,7 @@ use crate::tmux;
 
 use super::download::{handle_http_download, looks_like_dl_request};
 use super::rpc::{handle_request, handle_subscribe, handle_unsubscribe, Request, Response, Subscriptions, ERR_AUTH, ERR_INTERNAL, ERR_PARSE};
-use super::team_rpc::{handle_notification_request, handle_team_request, notification_push_loop, team_push_loop};
+use super::team_rpc::{handle_notification_request, handle_team_request, team_push_loop};
 use super::wire::{bytes_to_hex, decode_wire_payload, derive_key, encode_wire_payload, hex_to_bytes, provided_token_matches, HalfCipher};
 use super::{AuthTracker, NotificationHub, OptTeam, Outbound, ResizeTracker,
     AUTH_LOCKOUT_SECS, AUTH_TRACKER_GC_AFTER_SECS, CONN_ID_COUNTER, MAX_AUTH_FAILURES,
@@ -246,7 +246,6 @@ where
     // enqueues Encrypted frames, which need the session cipher in place).
     // Aborted at teardown alongside the other per-connection tasks.
     let mut team_push_handle: Option<tokio::task::JoinHandle<()>> = None;
-    let mut notification_push_handle: Option<tokio::task::JoinHandle<()>> = None;
     // Receive-side cipher lives in this task and guards strict decrypt
     // ordering. Send-side cipher is handed off to the dedicated send task
     // (below) so business tasks can finish out of order without corrupting
@@ -481,7 +480,6 @@ where
                             if let Some(ref a) = team {
                                 team_push_handle = Some(tokio::spawn(team_push_loop(out_tx.clone(), a.clone())));
                             }
-                            notification_push_handle = Some(tokio::spawn(notification_push_loop(out_tx.clone(), notifications.clone())));
                             continue;
                         } else {
                             let mut tracker = auth_tracker.lock().await;
@@ -503,7 +501,6 @@ where
                         if let Some(ref a) = team {
                             team_push_handle = Some(tokio::spawn(team_push_loop(out_tx.clone(), a.clone())));
                         }
-                        notification_push_handle = Some(tokio::spawn(notification_push_loop(out_tx.clone(), notifications.clone())));
                         continue;
                     } else {
                         let mut tracker = auth_tracker.lock().await;
@@ -608,9 +605,6 @@ where
     sub_handle.abort();
     ping_handle.abort();
     if let Some(h) = team_push_handle.take() {
-        h.abort();
-    }
-    if let Some(h) = notification_push_handle.take() {
         h.abort();
     }
     drop(out_tx); // close the channel so the send task finishes
