@@ -5,14 +5,17 @@ Board #57. New project-chat messages can alert a reader who is not currently loo
 ## Channels
 
 - Play the bundled placeholder cue (`/assets/notify.wav`). The owner will choose the final sound later; replacing the asset must not change notification logic.
-- When the Web Notification API exists and permission is granted, also post a system notification. Permission is requested only by the notification bell's own click, never as a side effect of sending a message.
-- The bell persists enabled/muted state. Unsupported APIs, denied permission, and blocked audio all fail soft.
+- When the Web Notification API exists and permission is granted, also post a system notification — through the service worker where one is registered (Android Chrome refuses the page constructor), else the page constructor. One tray card per project (`tag`), replaced on each burst.
+- Permission is requested only by the Settings toggle's own click (Appearance → Message notifications), never as a side effect of sending a message. The toggle persists enabled/muted state and its caption says when only the sound can play (site blocked, or no Notification API as in the Android webview). The Hub header carries no notification switch (board #72).
+- Unsupported APIs, denied permission, and blocked audio all fail soft.
 
 This is a **running-client** notification path for browser/PWA/webview. It does not claim remote push after the page or app has been closed.
 
 ## What counts as news
 
-A message may alert only when the Hub is away: the document is hidden, the window is unfocused, or another app page is visible.
+A message may alert only when the reader is away from that conversation: the document is hidden, the window is unfocused, another app page is visible, or the message belongs to a project other than the selected one (its notification names that project).
+
+- The check runs on the live `team_message` push, which arrives for every room on every page; the visible-only `hub_log` poll is the fallback. A message seen by both alerts once.
 
 - Initial room loads, history pages, cache restores, and inclusive-poll replays never alert.
 - Every observed message is remembered by server id, falling back to its `(from, ts, body)` identity. The same message alerts at most once.

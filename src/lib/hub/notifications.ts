@@ -25,8 +25,18 @@
 //    or the Hub page is not the one on screen.
 //
 // Enabling is EXPLICIT: the permission prompt and the autoplay unlock ride the
-// bell control's own click (a real user gesture that also previews the cue) —
-// never an unrelated send. The choice persists.
+// Settings toggle's own click (a real user gesture that also previews the cue)
+// — never an unrelated send. The choice persists. The toggle lived in the Hub
+// header until board #72: a header is not a place to keep spare switches, and
+// on a phone the switch cost the row a button (owner, 2026-09-02).
+//
+// WHERE the check runs matters as much as the gate (board #72): the feed POLL
+// only runs while the Hub page is on screen, so a poll-only notifier could
+// never fire for "another page is visible" — the very case a phone user is
+// in after switching to Terminal. The `team_message` PUSH arrives for every
+// room whatever page is showing, so `Hub.onPush` is the primary call site and
+// the poll is the fallback; `sift` makes push-then-poll alert exactly once
+// because both carry the server's message id.
 import { systemLine, statusNote } from './hub.ts';
 
 export type FeedMsg = { id?: number | string; ts?: number; from?: string; body?: string };
@@ -48,6 +58,25 @@ const ENABLED_KEY = 'tmux_notify';
  * the from/ts/body triple (what mergeMessages itself dedups by). */
 export function msgKey(m: FeedMsg): string {
   return m.id != null ? `#${m.id}` : `${m.from ?? ''}\u0000${m.ts ?? 0}\u0000${m.body ?? ''}`;
+}
+
+/** The reader-not-looking verdict for the SELECTED room, from the live
+ * document: tab hidden, window unfocused, or the Hub page not on screen.
+ * A message in any OTHER room is away by definition — the caller passes
+ * `true` without asking. */
+export function isAway(visible: boolean, doc: { hidden: boolean; hasFocus(): boolean } = document): boolean {
+  return doc.hidden || !doc.hasFocus() || !visible;
+}
+
+/** The project NAME a bus room belongs to, for the notification title: the
+ * row whose recorded `room` (fallback `proj:<session>`) matches, else the
+ * session spelled by the room itself — never an empty title. */
+export function roomProjectName(
+  rows: readonly { project: { name?: string; session?: string; room?: string | null } }[],
+  room: string,
+): string {
+  const hit = rows.find((r) => (r.project.room ?? `proj:${r.project.session ?? ''}`) === room);
+  return hit?.project.name || room.replace(/^proj:/u, '');
 }
 
 /** Split a batch into the never-seen part, and REMEMBER the whole batch.
@@ -80,11 +109,12 @@ export function notifiable(msgs: readonly FeedMsg[], opts: { first: boolean; awa
 }
 
 /** Title + body for the system notification. Composed from NAMES only —
- * no invented prose, so it reads the same in every UI language. */
-export function notifyText(items: readonly FeedMsg[], project: string): { title: string; body: string } {
+ * no invented prose, so it reads the same in every UI language. The `tag`
+ * is per project, so one room's burst collapses to one tray card. */
+export function notifyText(items: readonly FeedMsg[], project: string): { title: string; body: string; tag: string } {
   const names = [...new Set(items.map((m) => m.from ?? ''))].filter(Boolean);
   const title = `${names.join(', ')} · ${project}`;
-  return { title, body: excerpt(items[items.length - 1]?.body ?? '') };
+  return { title, body: excerpt(items[items.length - 1]?.body ?? ''), tag: `tmm:${project}` };
 }
 
 /** A one-line reading of a message body: the status marker gives way to its
@@ -107,7 +137,7 @@ export function cueDue(lastCueAt: number, now: number, cooldown = CUE_COOLDOWN_M
 const state: NotifyState = { seen: new Set(), lastCueAt: 0 };
 
 /** The persisted mute switch. Sound defaults ON (the owner's ask); the system
- * notification additionally needs the permission the bell click requests. */
+ * notification additionally needs the permission the Settings toggle requests. */
 export function notifyEnabled(): boolean {
   try { return localStorage.getItem(ENABLED_KEY) !== 'off'; } catch { return true; }
 }
@@ -144,31 +174,85 @@ export function playCue(now = Date.now(), st: NotifyState = state, play: () => P
   }
 }
 
-/** The bell's own preview: a plain play on the user's gesture — it doubles as
+/** The toggle's own preview: a plain play on the user's gesture — it doubles as
  * the autoplay unlock, and a preview is never subject to the cooldown. */
 export function previewCue(play: () => Promise<void> = defaultPlay): void {
   try { void play().catch(() => {}); } catch { /* no Audio */ }
 }
 
-/** Show a system notification when the API exists and is already granted —
- * never prompts here (prompting belongs to the bell's gesture, see below).
- * `silent: true` because the cue is ours. */
-export function systemNotify(text: { title: string; body: string }): boolean {
+/** What the platform can do, for the Settings row's caption: `unsupported`
+ * means no Notification API at all (the Tauri Android webview — the cue is
+ * the whole channel there), `denied` means the site is blocked. */
+export type NotifyPermission = 'granted' | 'denied' | 'default' | 'unsupported';
+export function notifyPermission(): NotifyPermission {
   try {
-    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return false;
-    new Notification(text.title, { body: text.body, silent: true });
-    return true;
+    if (typeof Notification === 'undefined') return 'unsupported';
+    const p = Notification.permission;
+    return p === 'granted' || p === 'denied' ? p : 'default';
   } catch {
-    return false;
+    return 'unsupported';
   }
 }
 
-/** Ask for notification permission — call from the BELL's click (a real user
- * gesture), because browsers ignore or penalize unprompted requests. */
-export function ensurePermission(): void {
+export type NotifyEnv = {
+  /** `Notification.permission`, or null where the API is missing. */
+  permission: string | null;
+  /** `new Notification(...)` — REFUSED on Android Chrome ("Illegal
+   * constructor": a page may not construct one, only a service worker may
+   * show one), which is why it is never the only path. */
+  construct: (title: string, opts: NotificationOptions) => unknown;
+  /** The service-worker registration, when the page has one (main.ts
+   * registers `/sw.js` on every non-Tauri secure origin). */
+  registration: () => Promise<{ showNotification(title: string, opts: NotificationOptions): Promise<void> } | undefined>;
+};
+
+const defaultEnv = (): NotifyEnv => ({
+  permission: typeof Notification === 'undefined' ? null : Notification.permission,
+  construct: (title, opts) => new Notification(title, opts),
+  registration: async () => {
+    const sw = typeof navigator === 'undefined' ? undefined : navigator.serviceWorker;
+    if (!sw) return undefined;
+    const reg = await sw.getRegistration();
+    return reg?.active ? reg : undefined;
+  },
+});
+
+/** Show a system notification when the API exists and is already granted —
+ * never prompts here (prompting belongs to the Settings toggle's gesture, see
+ * below). `silent: true` because the cue is ours. `tag` is the project, so a
+ * burst from one room REPLACES its earlier card in the tray instead of
+ * stacking twenty (over-push was half the owner's worry, board #72).
+ *
+ * Prefers `ServiceWorkerRegistration.showNotification`: on Android Chrome the
+ * page-level constructor throws, so the PWA on a phone showed NOTHING and the
+ * catch below quietly said so. The worker path is fire-and-forget; when there
+ * is no registration (desktop browser without the SW, or the SW not yet
+ * active) the constructor is the fallback. Returns whether a channel was
+ * attempted. */
+export function systemNotify(text: { title: string; body: string; tag?: string }, env: NotifyEnv = defaultEnv()): boolean {
+  if (env.permission !== 'granted') return false;
+  const opts: NotificationOptions = { body: text.body, silent: true, ...(text.tag ? { tag: text.tag } : {}) };
+  const construct = (): boolean => {
+    try { env.construct(text.title, opts); return true; } catch { return false; }
+  };
+  try {
+    env.registration()
+      .then((reg) => { if (reg) return reg.showNotification(text.title, opts).catch(() => { construct(); }); construct(); })
+      .catch(() => { construct(); });
+    return true;
+  } catch {
+    return construct();
+  }
+}
+
+/** Ask for notification permission — call from the Settings toggle's click
+ * (a real user gesture), because browsers ignore or penalize unprompted
+ * requests. Resolves once the prompt settles (or at once when there is
+ * nothing to ask), so the caller can re-read `notifyPermission()`. */
+export async function ensurePermission(): Promise<void> {
   try {
     if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-      void Notification.requestPermission();
+      await Notification.requestPermission();
     }
   } catch {
     /* no Notification API — the sound remains */

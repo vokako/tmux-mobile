@@ -8,6 +8,7 @@
   import { fonts, uiFont, displayFont } from './fonts.svelte.ts';
   import { terminalPrefs, LINE_HEIGHT_MIN, LINE_HEIGHT_MAX } from './terminal-prefs.svelte.ts';
   import { hubPrefs } from '../hub/hub-prefs.svelte.ts';
+  import { notifyEnabled, setNotifyEnabled, ensurePermission, previewCue, notifyPermission } from '../hub/notifications.ts';
   import { SHORTCUT_DEFAULTS, shortcutFromEvent, shortcutLabel, type ShortcutAction } from './shortcuts.ts';
   import { shortcuts } from './shortcuts.svelte.ts';
   import { agentHooksInstall, agentHooksRemove, agentHooksStatus } from '../core/ws.ts';
@@ -91,6 +92,22 @@
   // had one icon too many (owner, 2026-08-29), so the agent configuration moved
   // in here — as the REAL AgentsPage embedded below, never a second copy of it.
   // It sits before Connection, which stays last as the way out.
+  // Message notifications (board #57 → #72): the switch lives HERE, not in the
+  // Hub header. Its click is the ONE user gesture that requests system
+  // permission and unlocks audio (the preview doubles as "what will it sound
+  // like"). The caption reads the platform back: blocked site, or no
+  // Notification API at all (the Tauri Android webview — sound only there).
+  let notifyOn = $state(notifyEnabled());
+  let notifyPerm = $state(notifyPermission());
+  async function setNotify(on: boolean) {
+    notifyOn = on;
+    setNotifyEnabled(on);
+    if (!on) return;
+    previewCue();
+    await ensurePermission();
+    notifyPerm = notifyPermission();
+  }
+
   const tabs = $derived([
     { id: 'appearance', label: () => t('settingsAppearance') },
     { id: 'terminal', label: () => t('settingsTerminal') },
@@ -322,6 +339,13 @@
             <div><strong>{t('hubStepsRows')}</strong><small>{t('hubStepsRowsHint')}</small></div>
             <div class="stepper">
               <button onclick={() => hubPrefs.setStepsRows(hubPrefs.stepsRows - 1)}>−</button><span>{hubPrefs.stepsRows}</span><button onclick={() => hubPrefs.setStepsRows(hubPrefs.stepsRows + 1)}>+</button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div><strong>{t('hubNotify')}</strong><small>{notifyPerm === 'denied' ? t('hubNotifyDenied') : notifyPerm === 'unsupported' ? t('hubNotifySoundOnly') : t('hubNotifyHint')}</small></div>
+            <div class="segmented" role="group" aria-label={t('hubNotify')}>
+              <button class:active={notifyOn} aria-pressed={notifyOn} onclick={() => setNotify(true)}>{t('on')}</button>
+              <button class:active={!notifyOn} aria-pressed={!notifyOn} onclick={() => setNotify(false)}>{t('off')}</button>
             </div>
           </div>
           <div class="setting-row">

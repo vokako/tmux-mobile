@@ -445,12 +445,16 @@ test('the ⋯ is grouped WITH the name, so the row gap cannot separate them (own
   assert.ok(group.includes('class="h1-edit"'), 'so does the rename input — the ⋯ must not jump when renaming starts');
   assert.ok(group.includes('name="chevron-down"'), 'and so does its caret — the dropdown grammar (owner, 2026-08-30: "向下的直角箭头…像把这个名字展开")');
   assert.match(source, /\.title-group \{[^}]*gap: 1px[^}]*\}/u, 'a tight, deliberate gap — not the row rhythm');
-  // The NAME wins the width fight (owner, 2026-08-30: "名字还是优先要显示
-  // 全的"): the group refuses to shrink, the PATH is the dynamic region
-  // (flex-shrink + min-width 0 + its own scroll), buttons never compress.
-  assert.match(source, /\.title-group \{[^}]*flex: none[^}]*\}/u, 'the name group refuses to shrink');
-  assert.match(source, /\.path \{[\s\S]{0,400}?min-width: 0; flex: 0 1 auto;/u,
-    'the path gives way first — it can shrink below content and scrolls');
+  // The NAME wins the width fight against the PATH (owner, 2026-08-30: "名字
+  // 还是优先要显示全的") but never against the BUTTONS (owner, 2026-09-02,
+  // board #72: a long name on a phone pushed the icon buttons off-screen while
+  // the group was `flex: none`). So: the group shrinks at weight 1 with
+  // min-width 0 (the ellipsis can engage), the path at weight 1000 (it yields
+  // first, and scrolls), the buttons are flex: none.
+  assert.match(source, /\.title-group \{[^}]*flex: 0 1 auto; min-width: 0;[^}]*\}/u, 'the name group CAN shrink — buttons come first');
+  assert.ok(!/\.title-group \{[^}]*flex: none/u.test(source), 'flex: none is what hid the buttons');
+  assert.match(source, /\.path \{[\s\S]{0,800}?min-width: 0; flex: 0 1000 auto;/u,
+    'the path gives way first — a 1000× shrink weight, below content, scrolls');
   // The button must stay a SIBLING of the h1, not a child: the heading's
   // `overflow: hidden` would clip the invisible ~42px tap overlay the compact
   // rule adds, making the affordance read closer but tap worse.

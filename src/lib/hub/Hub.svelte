@@ -33,7 +33,7 @@
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
   import { TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, touchContextMenu, perLineOf } from './hub.ts';
-  import { notifyNews, notifyEnabled, setNotifyEnabled, ensurePermission, previewCue } from './notifications.ts';
+  import { notifyNews, isAway, roomProjectName } from './notifications.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
@@ -98,8 +98,6 @@
 
   // Terminal drawer (closed by default — the whole point).
   let termOpen = $state(false);
-  // The bell's persisted mute (board #57): read once, written on toggle.
-  let notifyOn = $state(notifyEnabled());
   // What the drawer SHOWS: the terminal, or the file browser (owner,
   // 2026-08-28: "右侧边栏，可以展开文件浏览器的分区，类似展示 terminal 面板
   // 一样的逻辑"). One drawer, one width handle, two bodies — the hidden one
@@ -312,10 +310,13 @@
         feed = mergeMessages(feed, messages);
         lastTs = Math.max(lastTs, ...messages.map((m) => m.ts ?? 0));
         // New-message notification (board #57): a poll batch that lands while
-        // the reader is AWAY — tab hidden, window unfocused, or another page
-        // on screen — plays the cue and raises a system notification. The
-        // first page is history, never news; the gate drops the rest.
-        notifyNews(messages, { first, away: document.hidden || !document.hasFocus() || !visible, project: s });
+        // the reader is AWAY — tab hidden or window unfocused — plays the cue
+        // and raises a system notification. The first page is history, never
+        // news; the gate drops the rest. This is the FALLBACK site: the poll
+        // only runs while this page is visible, so the push handler below is
+        // where an off-screen reader is actually reached (board #72); sift's
+        // seen keys make the two alert once.
+        notifyNews(messages, { first, away: isAway(visible), project: s });
         if (following) scrollFeed(); else newBelow = true;
       }
     } catch { /* hub not available */ }
@@ -1608,6 +1609,19 @@
 
   // Live pushes + polling while visible.
   const onPush = (m) => {
+    // New-message notification, PRIMARY site (board #72): a push arrives for
+    // EVERY project room and whatever page is on screen — the poll above does
+    // not (it stops with the page). A message in another project's room is
+    // away by definition (the reader is not looking at THAT conversation);
+    // the selected room asks the live document. Messages are never "first"
+    // here: a push is by construction newer than any loaded page.
+    if (m?.room) {
+      notifyNews([m], {
+        first: false,
+        away: !selected || m.room !== room(selected) || isAway(visible),
+        project: roomProjectName(rows, m.room),
+      });
+    }
     if (!selected || m?.room !== room(selected)) return;
     feed = mergeMessages(feed, [m]);
     lastTs = Math.max(lastTs, m.ts ?? 0);
@@ -2148,20 +2162,9 @@
              "删除 关闭 命令按钮 都不统一 有的文字 有的图案，可以改成图案 鼠标
              悬停显示按钮文字"). Icons match the project context menu's verbs:
              zap=up, stop=down, trash=delete. -->
-        <!-- New-message notifications (board #57): the bell is the EXPLICIT
-             enable — its own click is the user gesture that requests system
-             permission and unlocks audio (previewing the cue doubles as both
-             the unlock and "what will it sound like"). Muting persists. The
-             send path never asks for anything (lead review). Same icon-only
-             .icon-btn dialect, glyphs from the ONE shared Icon. -->
-        <button class="icon-btn" class:on={notifyOn} title={notifyOn ? t('hubNotifyOn') : t('hubNotifyOff')} aria-label={notifyOn ? t('hubNotifyOn') : t('hubNotifyOff')} aria-pressed={notifyOn}
-          onclick={() => {
-            notifyOn = !notifyOn;
-            setNotifyEnabled(notifyOn);
-            if (notifyOn) { ensurePermission(); previewCue(); }
-          }}>
-          <Icon name={notifyOn ? 'bell' : 'bell-off'} size={14} />
-        </button>
+        <!-- The message-notification switch that stood here moved to Settings
+             (board #72): a header keeps no spare switches, and on a phone it
+             cost this row a button. -->
         <!-- The task board: on the phone this jumps to the board PAGE (owner,
              2026-08-29: "board单独作为一个独立的功能的页面"); on desktop it is
              the drawer's THIRD partition ("或者右侧边栏有这个任务侧边栏", same
@@ -3058,11 +3061,17 @@
      `min-width: 0` so a long name still ellipsizes inside it, and a 3px gap —
      close enough to read as an affordance ON the name (owner, 2026-08-30)
      while the button keeps its own 28×26 box and its enlarged tap overlay. */
-  /* The NAME displays WHOLE, with priority (owner, 2026-08-30: "名字还是优
-     先要显示全的，尽量不要省略"): the group refuses to shrink — the PATH is
-     the flexible region that gives way (it scrolls), and the buttons never
-     compress. */
-  .title-group { display: flex; align-items: center; gap: 1px; flex: none; max-width: 60%; }
+  /* The NAME displays WHOLE, with priority over the PATH (owner, 2026-08-30:
+     "名字还是优先要显示全的，尽量不要省略") — but NEVER over the buttons
+     (owner, 2026-09-02, board #72: "按钮应该优先出现，避免项目名把按钮挤不见").
+     `flex: none` made the group refuse to shrink outright, and in this nowrap
+     header a long name on a phone overflowed the row and pushed the icon
+     buttons off-screen. So the group CAN shrink (min-width: 0 lets the
+     .h1-text ellipsis engage), but at flex-shrink 1 against the path's 1000:
+     negative space is distributed by shrink × basis, so the path absorbs
+     effectively all of it and the name only starts to ellipsize once the
+     path is gone. The buttons are `flex: none` and always keep their box. */
+  .title-group { display: flex; align-items: center; gap: 1px; flex: 0 1 auto; min-width: 0; max-width: 60%; }
   /* The caret hugs the last letter: a narrow box (the icon-btn's 28px read
      as a detached control), quiet ink so the NAME stays the subject. The
      compact rule's invisible tap overlay still gives it a full target. */
@@ -3125,9 +3134,11 @@
     font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text3);
     white-space: nowrap; overflow-x: auto; overflow-y: hidden;
     /* THE dynamic region: shrinks below its content first (min-width: 0 +
-       scroll) while the name group and the buttons stay whole; the spacer
-       still owns the leftover, keeping the toggles right-aligned. */
-    min-width: 0; flex: 0 1 auto;
+       scroll) while the buttons stay whole; the shrink weight of 1000 against
+       the title group's 1 is what makes it yield FIRST and the name only
+       after it (see .title-group); the spacer still owns the leftover,
+       keeping the toggles right-aligned. */
+    min-width: 0; flex: 0 1000 auto;
     scrollbar-width: none; -webkit-overflow-scrolling: touch;
   }
   .path::-webkit-scrollbar { display: none; }

@@ -11,8 +11,9 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   notifiable, notifyText, excerpt, cueDue, msgKey, sift, playCue, notifyNews,
+  isAway, roomProjectName, systemNotify,
   CUE_COOLDOWN_MS, CUE_SRC, SEEN_CAP,
-  type FeedMsg, type NotifyState,
+  type FeedMsg, type NotifyState, type NotifyEnv,
 } from './notifications.ts';
 
 const away = { first: false, away: true };
@@ -22,7 +23,7 @@ function harness(enabled = true) {
   const fired: { cue: number; sys: string[] } = { cue: 0, sys: [] };
   const effects = {
     cue: () => { fired.cue++; return true; },
-    sys: (t: { title: string; body: string }) => { fired.sys.push(t.title); return true; },
+    sys: (t: { title: string; body: string; tag?: string }) => { fired.sys.push(t.title); return true; },
     enabled: () => enabled,
   };
   return { fired, effects };
@@ -168,6 +169,63 @@ test('notifyText: names only, deduped, last body excerpted', () => {
   );
   assert.equal(title, 'a, b · proj');
   assert.equal(body, 'third');
+  assert.equal(notifyText([{ from: 'a', body: 'x' }], 'proj').tag, 'tmm:proj', 'one tray card per project, replaced not stacked');
+});
+
+// ─── Where the check runs (board #72) ───────────────────────────────────────
+
+test('isAway: hidden, unfocused, or another page on screen', () => {
+  const doc = (hidden: boolean, focus: boolean) => ({ hidden, hasFocus: () => focus });
+  assert.equal(isAway(true, doc(false, true)), false, 'looking at the Hub');
+  assert.equal(isAway(false, doc(false, true)), true, 'Terminal/Files/Board on screen');
+  assert.equal(isAway(true, doc(true, true)), true, 'tab hidden');
+  assert.equal(isAway(true, doc(false, false)), true, 'window unfocused');
+});
+
+test('roomProjectName: the recorded room wins, then proj:<session>, then the room itself', () => {
+  const rows = [
+    { project: { name: 'Renamed', session: 'new-name', room: 'proj:old-name' } },
+    { project: { name: 'Plain', session: 'plain', room: null } },
+  ];
+  assert.equal(roomProjectName(rows, 'proj:old-name'), 'Renamed', 'a renamed project keeps its recorded room');
+  assert.equal(roomProjectName(rows, 'proj:plain'), 'Plain');
+  assert.equal(roomProjectName(rows, 'proj:unknown'), 'unknown', 'never an empty title');
+});
+
+// ─── The system channel on a phone (board #72) ──────────────────────────────
+
+function swEnv(permission: string | null, reg: boolean, constructThrows = false) {
+  const log: string[] = [];
+  const env: NotifyEnv = {
+    permission,
+    construct: (title) => { if (constructThrows) throw new TypeError('Illegal constructor'); log.push(`new:${title}`); },
+    registration: async () => (reg ? { showNotification: async (title) => { log.push(`sw:${title}`); } } : undefined),
+  };
+  return { env, log };
+}
+const settle = () => new Promise((r) => setTimeout(r, 0));
+
+test('systemNotify: with a service worker the WORKER shows it — Android Chrome refuses the page constructor', async () => {
+  const { env, log } = swEnv('granted', true, true);
+  assert.equal(systemNotify({ title: 't', body: 'b', tag: 'tmm:p' }, env), true);
+  await settle();
+  assert.deepEqual(log, ['sw:t'], 'the constructor was never tried');
+});
+
+test('systemNotify: without a registration the page constructor is the fallback', async () => {
+  const { env, log } = swEnv('granted', false);
+  assert.equal(systemNotify({ title: 't', body: 'b' }, env), true);
+  await settle();
+  assert.deepEqual(log, ['new:t']);
+});
+
+test('systemNotify: not granted (or no API) attempts nothing — prompting is the Settings toggle\'s job', async () => {
+  for (const p of ['default', 'denied', null]) {
+    const { env, log } = swEnv(p, true);
+    assert.equal(systemNotify({ title: 't', body: 'b' }, env), false);
+    await settle();
+    assert.deepEqual(log, []);
+  }
 });
 
 test('excerpt: status marker gives way to its text, images to prose, 120-char cap', () => {
@@ -182,27 +240,34 @@ test('excerpt: status marker gives way to its text, images to prose, 120-char ca
 const here = dirname(fileURLToPath(import.meta.url));
 const hub = readFileSync(join(here, 'Hub.svelte'), 'utf8');
 
-test('Hub wires notifyNews into the feed merge with the away verdict', () => {
+test('Hub notifies from the PUSH first and the poll second, both through isAway (board #72)', () => {
+  // The poll stops with the page (`if (!visible) return` guards its effect),
+  // so a poll-only notifier could never reach a reader on another page. The
+  // push handler is the primary site; the poll is the fallback; sift dedups.
   const calls = hub.match(/notifyNews\(/gu) ?? [];
-  assert.equal(calls.length, 1);
-  assert.match(hub, /notifyNews\(messages, \{ first, away: document\.hidden \|\| !document\.hasFocus\(\) \|\| !visible/u);
+  assert.equal(calls.length, 2);
+  assert.match(hub, /notifyNews\(messages, \{ first, away: isAway\(visible\), project: s \}\)/u, 'the poll site');
+  const push = hub.slice(hub.indexOf('const onPush = (m) => {'), hub.indexOf('if (!selected || m?.room !== room(selected)) return;'));
+  assert.match(push, /away: !selected \|\| m\.room !== room\(selected\) \|\| isAway\(visible\)/u,
+    'another room is away by definition; the selected one asks the document');
+  assert.match(push, /project: roomProjectName\(rows, m\.room\)/u, 'the title names the project, not the room');
+  assert.match(push, /first: false/u, 'a push is never history');
+  assert.ok(!/document\.hidden \|\| !document\.hasFocus\(\)/u.test(hub), 'ONE away verdict — the helper, never an inline copy');
 });
 
-test('the permission request and the audio unlock ride the BELL, never the send path', () => {
+const prefs = readFileSync(join(here, '..', 'app', 'Preferences.svelte'), 'utf8');
+
+test('the permission request and the audio unlock ride the SETTINGS toggle, never the header or the send path (board #72)', () => {
   const sendBody = hub.slice(hub.indexOf('async function send()'), hub.indexOf('async function send()') + 4000);
   assert.ok(!sendBody.includes('ensurePermission'), 'send() asks for nothing');
-  // The bell's click carries all three: persist, permission, preview.
-  assert.match(hub, /setNotifyEnabled\(notifyOn\);\s*\n\s*if \(notifyOn\) \{ ensurePermission\(\); previewCue\(\); \}/u);
-  const asks = hub.match(/ensurePermission\(\)/gu) ?? [];
+  assert.ok(!hub.includes('ensurePermission') && !hub.includes('setNotifyEnabled') && !hub.includes("'bell'"),
+    'the Hub header carries no notification switch — a header keeps no spare switches, and on a phone it cost the row a button');
+  // The toggle's click carries all three: persist, preview (the unlock), permission.
+  assert.match(prefs, /setNotifyEnabled\(on\);\s*\n\s*if \(!on\) return;\s*\n\s*previewCue\(\);\s*\n\s*await ensurePermission\(\);/u);
+  const asks = prefs.match(/ensurePermission\(\)/gu) ?? [];
   assert.equal(asks.length, 1);
-});
-
-test('the bell wears the ONE shared Icon (bell/bell-off), never a second inline SVG', () => {
-  assert.match(hub, /<Icon name=\{notifyOn \? 'bell' : 'bell-off'\}/u);
-  assert.ok(!/M6 8a6 6 0 0 1 12 0/u.test(hub), 'the bell path lives in ui/Icon.svelte only');
-  const icon = readFileSync(join(here, '..', 'ui', 'Icon.svelte'), 'utf8');
-  assert.match(icon, /name === 'bell'/u);
-  assert.match(icon, /name === 'bell-off'/u);
+  assert.match(prefs, /\{t\('hubNotify'\)\}/u, 'a labelled setting-row in the Chat group');
+  assert.match(prefs, /notifyPerm === 'unsupported' \? t\('hubNotifySoundOnly'\)/u, 'the caption tells a webview user the sound is the whole channel');
 });
 
 test('the placeholder cue asset exists where CUE_SRC points', () => {
