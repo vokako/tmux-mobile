@@ -14,7 +14,7 @@ use std::path::Path;
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 16;
+const SCHEMA_VERSION: i64 = 17;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
@@ -685,6 +685,25 @@ impl Store {
             // there (latest owner ruling on board #41). The old global PK stays
             // internal so issue_notes need no rebuild.
             self.ensure_issue_numbering()?;
+        }
+        if version < 17 {
+            // v17: agent TEAMS (owner, 2026-09-02, board #74: "可以定义 agent
+            // team…agent 加上一个特定的角色补充设定，组成一个小组"). A team
+            // is a named list of members; each member derives from a registry
+            // agent plus a role supplement, or carries a team-only inline
+            // definition. Members are one JSON column, like an agent's skills:
+            // a team is edited whole-row and never joined against.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS reg_teams (
+                       name        TEXT PRIMARY KEY,
+                       description TEXT NOT NULL DEFAULT '',
+                       members     TEXT NOT NULL DEFAULT '[]',
+                       created_at  INTEGER NOT NULL,
+                       updated_at  INTEGER NOT NULL
+                     );",
+                )
+                .map_err(|e| format!("migrate to 17: {e}"))?;
         }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)
@@ -1362,6 +1381,48 @@ impl Store {
             .map_err(|e| e.to_string())
     }
 
+    // ---- agent teams (board #74) -----------------------------------------
+
+    pub fn teams_list(&self) -> Result<Vec<RegTeam>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT name, description, members FROM reg_teams ORDER BY name")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], row_to_reg_team)
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(rows)
+    }
+
+    pub fn team_get(&self, name: &str) -> Result<Option<RegTeam>, String> {
+        self.conn
+            .query_row("SELECT name, description, members FROM reg_teams WHERE name = ?1", [name], row_to_reg_team)
+            .map(Some)
+            .or_else(|e| if e == rusqlite::Error::QueryReturnedNoRows { Ok(None) } else { Err(e.to_string()) })
+    }
+
+    /// Upsert by name — whole-row, like `reg_save`.
+    pub fn team_save(&self, t: &RegTeam, now: u64) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO reg_teams (name, description, members, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?4)
+                 ON CONFLICT(name) DO UPDATE SET description=?2, members=?3, updated_at=?4",
+                rusqlite::params![t.name, t.description, t.members, now as i64],
+            )
+            .map(|_| ())
+            .map_err(|e| format!("save team {}: {e}", t.name))
+    }
+
+    pub fn team_delete(&self, name: &str) -> Result<bool, String> {
+        self.conn
+            .execute("DELETE FROM reg_teams WHERE name = ?1", [name])
+            .map(|n| n > 0)
+            .map_err(|e| e.to_string())
+    }
+
     /// Seed the four backend-native Manager defaults once (empty table only).
     /// `docs` / `reviewer` and `*-default` aliases are deliberately retired:
     /// one obvious entry per backend, with the defaults pinned to the top of
@@ -1790,6 +1851,22 @@ pub struct RegAgent {
 
 fn empty_json_array() -> String {
     "[]".to_string()
+}
+
+/// An agent TEAM (board #74): a named list of members. `members` is a JSON
+/// array of `teams::Member` — kept as text for the same reason an agent's
+/// `skills` is: the row is edited whole and never joined against.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RegTeam {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default = "empty_json_array")]
+    pub members: String,
+}
+
+fn row_to_reg_team(r: &rusqlite::Row<'_>) -> rusqlite::Result<RegTeam> {
+    Ok(RegTeam { name: r.get(0)?, description: r.get(1)?, members: r.get(2)? })
 }
 
 fn row_to_reg_agent(r: &rusqlite::Row<'_>) -> rusqlite::Result<RegAgent> {
@@ -2245,7 +2322,7 @@ mod tests {
         ).unwrap();
         assert_eq!(orphan_notes, 0, "foreign keys are off in migration, so v14 removes orphan notes explicitly");
         let version: i64 = repaired.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(version, 16);
+        assert_eq!(version, SCHEMA_VERSION);
 
         // A rolled-back v15 binary does not know project_number and can insert
         // NULL into an upgraded (nullable-by-ALTER) table. With a visible gap,

@@ -755,6 +755,9 @@ export interface HubAgent {
    * chat participants; direct windows (shells, agents the user started by
    * hand) exist in the terminal drawer only. */
   managed: boolean;
+  /** The configured team this window was started as part of (board #74);
+   * null for a solo agent. The roster groups same-team cards on it. */
+  team?: string | null;
   state: string;
   detail: string;
   since: number;
@@ -894,6 +897,12 @@ export const hubActivity = (
   });
 export const hubSpawn = (session: string, agent: string, brief = '', by = '') =>
   call('hub_spawn', { session, agent, brief, by });
+/** Start a configured agent TEAM (board #74): every member spawns as an
+ * ordinary managed agent with its role block; one failure does not stop the
+ * others and comes back in `errors`. */
+export const hubSpawnTeam = (session: string, team: string, brief = '', by = '') =>
+  call<{ team: string; spawned: { name: string; window_name: string; pane: string | null }[]; errors: { name: string; error: string }[] }>(
+    'hub_spawn_team', { session, team, brief, by }, 120000);
 /** Kill one agent's window. The declaration survives, so it can come back. */
 export const hubAgentStop = (session: string, agent: string) =>
   call<{ stopped: string }>('hub_agent_stop', { session, agent });
@@ -912,6 +921,7 @@ export interface RegAgent {
   name: string;
   backend: string;
   model: string;
+  effort?: string;
   system: string;
   skills: string;
   mcp: string;
@@ -920,6 +930,23 @@ export interface RegAgent {
 export const registryList = () => call<{ agents: RegAgent[] }>('registry_list');
 export const registrySave = (def: RegAgent) => call('registry_save', { def });
 export const registryDelete = (name: string) => call('registry_delete', { name });
+/** An agent TEAM (board #74): members derive from a registry agent (`base`)
+ * plus a `role` supplement, or carry a team-only inline `agent` definition.
+ * `members` is the JSON text of `TeamMember[]`, like an agent's `skills`. */
+export interface TeamMember {
+  name: string;
+  base: string;
+  role: string;
+  agent?: RegAgent | null;
+}
+export interface RegTeam {
+  name: string;
+  description: string;
+  members: string;
+}
+export const teamsList = () => call<{ teams: RegTeam[] }>('teams_list');
+export const teamsSave = (def: RegTeam) => call('teams_save', { def });
+export const teamsDelete = (name: string) => call('teams_delete', { name });
 /** The model ids a backend accepts. `models` is null where the backend cannot
  * enumerate them (claude/codex take aliases), and the editor keeps the field as
  * free text in that case. */

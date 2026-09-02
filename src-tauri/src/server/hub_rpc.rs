@@ -700,7 +700,7 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
             }
             if !resumed {
                 let r = crate::projects::spawn::spawn(&crate::projects::spawn::SpawnRequest {
-                    session, agent, brief: "", by: "",
+                    session, agent, brief: "", by: "", ..Default::default()
                 });
                 if let Err(e) = r {
                     return Response::err(id, ERR_INTERNAL, format!("restart failed: {e}"));
@@ -714,6 +714,36 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
 
         // Spawn a registry agent into this project (tmm spawn / the UI's
         // "+ agent"). can_hire-gated when an agent asks; capped per project.
+        // A configured TEAM, started at once (board #74): every member spawns
+        // as an ordinary managed agent; the room records one `spawned` line
+        // per member, in the grammar the client already reads.
+        "hub_spawn_team" => {
+            let team = match require_str(p, "team") {
+                Ok(s) => s,
+                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
+            };
+            let brief = p.get("brief").and_then(|v| v.as_str()).unwrap_or("");
+            let by = p.get("by").and_then(|v| v.as_str()).unwrap_or("");
+            match crate::projects::spawn::spawn_team(session, team, brief, by) {
+                Ok(result) => {
+                    if bus.open_room(&room).is_ok() {
+                        let who = if by.is_empty() { "human" } else { by };
+                        let empty = Vec::new();
+                        for m in result.get("spawned").and_then(|v| v.as_array()).unwrap_or(&empty) {
+                            let win = m.get("window_name").and_then(|v| v.as_str()).unwrap_or("");
+                            let line = if brief.is_empty() {
+                                format!("[tmm] spawned {win} — team {team}")
+                            } else {
+                                format!("[tmm] spawned {win} — team {team}: {brief}")
+                            };
+                            let _ = bus.post(&room, who, &line, false);
+                        }
+                    }
+                    Response::ok(id, result)
+                }
+                Err(e) => Response::err(id, ERR_INVALID_PARAMS, e),
+            }
+        }
         "hub_spawn" => {
             let agent = match require_str(p, "agent") {
                 Ok(s) => s,
@@ -722,7 +752,7 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
             let brief = p.get("brief").and_then(|v| v.as_str()).unwrap_or("");
             let by = p.get("by").and_then(|v| v.as_str()).unwrap_or("");
             match crate::projects::spawn::spawn(&crate::projects::spawn::SpawnRequest {
-                session, agent, brief, by,
+                session, agent, brief, by, ..Default::default()
             }) {
                 Ok(result) => {
                     // The spawn is chat-visible: the room is the record.
@@ -1062,6 +1092,9 @@ fn agent_states(session: &str) -> serde_json::Value {
                 "command": p.current_command,
                 "agent": agent.map(|a| a.backend),
                 "managed": managed,
+                // The configured team this window was started as part of
+                // (board #74) — the Hub groups same-team cards; null = solo.
+                "team": if managed { crate::projects::team_of(ws.as_deref(), &p.window_name) } else { None },
                 "state": if agent.is_some() { st.state.as_str() } else { "shell" },
                 "detail": st.detail,
                 "since": st.since,

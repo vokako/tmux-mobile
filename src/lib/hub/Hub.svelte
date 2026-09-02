@@ -28,7 +28,7 @@
   import { t, i18n } from '../core/i18n.svelte.ts';
   import {
     projectList, projectUp, projectDown, projectDelete, projectArchive, projectCreate, projectRename, listSessionsWithPanes,
-    hubPost, hubCommand, modelsList, hubLog, hubRooms, hubAgents, fsMkdir, fsUpload, hubSpawn, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
+    hubPost, hubCommand, modelsList, hubLog, hubRooms, hubAgents, fsMkdir, fsUpload, hubSpawn, hubSpawnTeam, teamsList, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
@@ -70,6 +70,7 @@
   let activity = $state([]);        // telemetry events (in-memory ring on the server)
   let lastActivityTs = 0;
   let registry = $state([]);        // RegAgent[]
+  let teams = $state([]);           // RegTeam[] — configured agent teams (board #74)
   // Three ways a message can land, and they are NOT variations of one thing:
   //   a name    → typed into that agent's input; exactly one agent is
   //               interrupted and starts a turn. The default (the lead).
@@ -120,6 +121,21 @@
   const selectedRow = $derived(rows.find((r) => r.project.session === selected) ?? null);
   const liveSelected = $derived(!!selectedRow?.live);
   const managedAgents = $derived(agents.filter((a) => a.managed));
+  /** The roster in display order, same-team cards folded into ONE group at
+   * the position of their first member (board #74: "视图上放到一个 group 里").
+   * Solo agents are groups of one with no team. */
+  const rosterGroups = $derived.by(() => {
+    const out = [];
+    const byTeam = new Map();
+    for (const a of managedAgents) {
+      const team = a.team || null;
+      if (!team) { out.push({ team: null, agents: [a] }); continue; }
+      let g = byTeam.get(team);
+      if (!g) { g = { team, agents: [] }; byTeam.set(team, g); out.push(g); }
+      g.agents.push(a);
+    }
+    return out;
+  });
   // Declared but not running — a stopped agent still belongs to the room.
   const stopped = $derived(stoppedAgents(selectedRow?.slots, managedAgents));
   const working = $derived(managedAgents.filter((a) => a.state === 'working').length);
@@ -1496,6 +1512,33 @@
     }
   }
 
+  /** Member names of a configured team, for the preset rows. */
+  function teamMembers(tm) {
+    try { return (JSON.parse(tm.members) ?? []).map((m) => m.name).filter(Boolean); } catch { return []; }
+  }
+
+  /** Start a configured TEAM (board #74): one RPC spawns every member with its
+   * role; the first member that landed becomes the recipient (the team's own
+   * order is its hierarchy — the lead is listed first). */
+  async function startTeam(name, brief = '') {
+    if (!selected || !name || starting) return;
+    starting = true;
+    pickerOpen = false;
+    try {
+      const r = await hubSpawnTeam(selected, name, brief);
+      for (const e of r?.errors ?? []) console.warn('team member spawn failed', e.name, e.error);
+      await Promise.all([reload(), loadAgents(), loadFeed()]);
+      const first = r?.spawned?.[0]?.window_name;
+      if (first && (pickerMode === 'start' || !recipient)) setRecipient(first);
+    } catch (e) {
+      console.warn('team spawn failed', name, e);
+    } finally {
+      starting = false;
+      startPick = [];
+      startBrief = '';
+    }
+  }
+
   function openPicker(mode) {
     pickerMode = mode;
     startPick = [];
@@ -1636,6 +1679,7 @@
     if (!visible) return;
     reload();
     registryList().then((r) => { registry = r.agents ?? []; }).catch(() => {});
+    teamsList().then((r) => { teams = r.teams ?? []; }).catch(() => {});
     const ai = setInterval(() => { loadAgents(); loadActivity(); }, 5000);
     const fi = setInterval(loadFeed, 10000);
     const pi = setInterval(reload, 20000);
@@ -2211,7 +2255,10 @@
              down OPENS it. -->
         <div class="roster">
         <div class="cards" class:chips={compact} bind:this={cardsEl}>
-          {#each managedAgents as a (a.window)}
+          <!-- ONE card markup, rendered per agent through a snippet, so a
+               team GROUP (board #74) can wrap several without a second copy
+               of the card. -->
+          {#snippet card(a)}
             <!-- A div, not a button: the dot menu inside contains real buttons,
                  and a button inside a button is invalid HTML the browser
                  silently reshuffles. -->
@@ -2253,6 +2300,20 @@
                 </div>
               {/if}
             </div>
+          {/snippet}
+          {#each rosterGroups as g, gi (g.team ?? `solo-${g.agents[0].window}`)}
+            {#if g.team}
+              <!-- Same-team cards sit in one labelled group: a dashed frame in
+                   the row dialect, the team name as a micro label. -->
+              <div class="tgroup" title={t('hubTeamGroup').replace('{name}', g.team)}>
+                <span class="tg-label"><Icon name="collab" size={10} />{g.team}</span>
+                <div class="tg-cards">
+                  {#each g.agents as a (a.window)}{@render card(a)}{/each}
+                </div>
+              </div>
+            {:else}
+              {@render card(g.agents[0])}
+            {/if}
           {/each}
           <!-- Stopped agents: declared by the project, no window right now.
                Starting one resumes its conversation, so it stays on the roster
@@ -2691,6 +2752,15 @@
                     {#if r.can_hire}<span class="m-badge" title={t('agentsManagerHint')} aria-label={t('agentsManagerHint')}>M</span>{/if}
                   </button>
                 {/each}
+                <!-- Configured TEAMS (board #74): one tap starts every member
+                     with its role. -->
+                {#each teams as tm (tm.name)}
+                  <button class="start-row team" disabled={starting} onclick={() => startTeam(tm.name)}>
+                    <span class="ava tava"><Icon name="collab" size={12} /></span>
+                    <span class="sr-name">{tm.name}</span>
+                    <span class="sr-backend">{teamMembers(tm).join(' · ')}</span>
+                  </button>
+                {/each}
               </div>
               <button class="chip-btn" disabled={starting} onclick={() => openPicker('start')}>
                 <Icon name="collab" size={13} /> {t('hubStartTeam')}
@@ -2952,6 +3022,19 @@
     <div class="dlg-backdrop" onclick={() => pickerOpen = false} role="presentation"></div>
     <div class="dlg" class:sheet={compact}>
       <h2>{t('hubStartTeam')}</h2>
+      {#if teams.length}
+        <!-- Configured teams first (board #74): a tap starts the whole team
+             with the brief below; the ad-hoc pick stays underneath. -->
+        <div class="dlg-agents">
+          {#each teams as tm (tm.name)}
+            <button class="agent-pick team" disabled={starting} onclick={() => startTeam(tm.name, startBrief.trim())}>
+              <span class="ava tava"><Icon name="collab" size={12} /></span>
+              {tm.name} · {teamMembers(tm).join(', ')}
+              <span class="ap-go">{t('hubStartTeamNamed')}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
       <div class="dlg-agents">
         {#each registry as r (r.name)}
           <button class="agent-pick" class:sel={startPick.includes(r.name)}
@@ -3152,6 +3235,14 @@
   .roster { display: flex; align-items: stretch; padding: 6px 14px; border-bottom: 1px solid var(--border2); min-width: 0; }
   .cards { display: flex; gap: 5px; overflow-x: auto; scrollbar-width: none; flex: 1 1 auto; min-width: 0; }
   .cards::-webkit-scrollbar { display: none; }
+  /* A team group (board #74): same-team cards in one dashed frame wearing the
+     row radius, the team name as a micro label above them. The frame is
+     `flex: none` like a card so the strip scrolls it as one unit. */
+  .tgroup { flex: none; display: flex; flex-direction: column; gap: 2px; padding: 2px 4px 4px; border: 1px dashed var(--border2); border-radius: var(--ui-radius-row); }
+  .tg-label { display: inline-flex; align-items: center; gap: 3px; font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-micro); color: var(--text3); padding: 0 2px; line-height: 1.4; }
+  .tg-cards { display: flex; gap: 5px; }
+  .tava { display: inline-grid; place-items: center; background: var(--accent-bg); color: var(--accent); }
+  .ap-go { margin-left: auto; font-size: var(--fs-micro); color: var(--accent); }
   .acard {
     position: relative; flex: none; display: flex; flex-direction: column;
     align-items: stretch; justify-content: center; gap: 1px; overflow: hidden;

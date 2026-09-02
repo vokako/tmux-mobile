@@ -88,6 +88,14 @@ completion).
   (spawn into a down project opens it).
 - Tapping a card makes that agent the composer's **recipient** (and the
   remembered project lead — `pickLead`).
+- **Agent teams** (board #74): agents started as one configured team wear a
+  dashed group frame with the team name as a micro label; the group scrolls
+  as one unit of the strip. The empty-room preset lists configured teams as
+  one-tap starts beside the single agents, and the "Start a team" picker
+  offers them above the ad-hoc pick (the brief applies to every member).
+  Teams are configured on the Agents page (Teams section): a member derives
+  from a registry agent plus a role supplement, or is defined for the team
+  only; at most 4 members (the spawn cap).
 
 ## Feed (the conversation)
 - Telegram-like bubbles: name header, floated time trailer, delivery ring on

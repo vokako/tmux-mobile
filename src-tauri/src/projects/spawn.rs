@@ -34,18 +34,36 @@ pub const SPAWN_CAP: usize = 4;
 
 pub struct SpawnRequest<'a> {
     pub session: &'a str,
-    /// Registry definition name to spawn.
+    /// Registry definition name to spawn (ignored when `def` is given).
     pub agent: &'a str,
     /// Opening brief posted into the hub chat and injected into the prompt.
     pub brief: &'a str,
     /// Who asked (agent name from $TMM_AGENT, or empty = the human).
     pub by: &'a str,
+    /// A ready-made definition instead of a registry lookup — how a TEAM
+    /// member spawns (board #74): its base def with the role block appended.
+    pub def: Option<RegAgent>,
+    /// The exact window name to use; the caller has already uniquified it.
+    /// `None` = the def's name, uniquified here.
+    pub window_name: Option<String>,
+    /// The team this spawn belongs to; recorded in the launch recipe so the
+    /// Hub can group the cards.
+    pub team: Option<String>,
+}
+
+impl Default for SpawnRequest<'_> {
+    fn default() -> Self {
+        SpawnRequest { session: "", agent: "", brief: "", by: "", def: None, window_name: None, team: None }
+    }
 }
 
 /// Spawn `agent` into `session`. Returns `{ window_name, pane }`.
 pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
-    let def = super::registry_get(req.agent)?
-        .ok_or_else(|| format!("no agent named '{}' in the registry", req.agent))?;
+    let def = match &req.def {
+        Some(d) => d.clone(),
+        None => super::registry_get(req.agent)?
+            .ok_or_else(|| format!("no agent named '{}' in the registry", req.agent))?,
+    };
     // A model the backend does not know is not a runtime hiccup: kiro answers
     // the first turn with "not available, use /model" and the agent is alive but
     // mute — no reply, no auto-post, nothing for the app to notice. Registry
@@ -85,13 +103,9 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
     // Window name = agent name, uniquified if taken (lead, lead-2, …). The
     // window name is the agent's identity for telemetry and tmm status.
     let taken: std::collections::HashSet<&str> = panes.iter().map(|p| p.window_name.as_str()).collect();
-    let window_name = if taken.contains(def.name.as_str()) {
-        (2..10)
-            .map(|i| format!("{}-{}", def.name, i))
-            .find(|c| !taken.contains(c.as_str()))
-            .ok_or("too many windows with this agent's name")?
-    } else {
-        def.name.clone()
+    let window_name = match &req.window_name {
+        Some(w) => w.clone(),
+        None => uniquify(&def.name, &taken)?,
     };
 
     let home = agent_home(&workspace, &window_name);
@@ -160,9 +174,80 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
         shared::confirm_startup_prompt(pane.clone(), confirmation);
     }
 
-    write_launch_recipe(&home, &def.backend, &env, &prepared.cmd, req.by);
+    write_launch_recipe(&home, &def.backend, &env, &prepared.cmd, req.by, req.team.as_deref());
 
     Ok(json!({ "window_name": window_name, "pane": pane, "backend": def.backend }))
+}
+
+/// Window name = agent name, uniquified if taken (lead, lead-2, …). The window
+/// name is the agent's identity for telemetry and tmm status.
+fn uniquify(name: &str, taken: &std::collections::HashSet<&str>) -> Result<String, String> {
+    if !taken.contains(name) {
+        return Ok(name.to_string());
+    }
+    (2..10)
+        .map(|i| format!("{name}-{i}"))
+        .find(|c| !taken.contains(c.as_str()))
+        .ok_or_else(|| "too many windows with this agent's name".to_string())
+}
+
+/// Spawn every member of a configured TEAM into `session` (board #74). Names
+/// are uniquified up front so the roster block each member receives names the
+/// windows that will actually exist; members spawn in order; one failure does
+/// not stop the others and is reported in `errors`. Returns
+/// `{ team, spawned: [{name, window_name, pane}], errors: [..] }`.
+pub fn spawn_team(session: &str, team_name: &str, brief: &str, by: &str) -> Result<Value, String> {
+    let team = super::team_get(team_name)?
+        .ok_or_else(|| format!("no team named '{team_name}'"))?;
+    let members = super::teams::parse_members(&team)?;
+    if members.is_empty() {
+        return Err(format!("team '{team_name}' has no members"));
+    }
+    let project = super::project_for_session(session)?
+        .ok_or_else(|| format!("no project for session '{session}'"))?;
+    let panes = tmux::list_panes(session).unwrap_or_default();
+    let mut seen = std::collections::HashSet::new();
+    let existing = panes
+        .iter()
+        .filter(|p| seen.insert(p.window))
+        .filter(|p| super::agents::detect_managed(Some(project.path.as_str()), &p.window_name, &format!("{} {} {}", p.current_command, p.pane_title, p.window_name)).is_some())
+        .count();
+    if existing + members.len() > SPAWN_CAP {
+        return Err(format!(
+            "team '{team_name}' has {} members and the project already has {existing} agents (cap {SPAWN_CAP}) — stop some first",
+            members.len()
+        ));
+    }
+    // Final names first, so every member's prompt can name its teammates.
+    let mut taken: std::collections::HashSet<String> = panes.iter().map(|p| p.window_name.clone()).collect();
+    let mut roster: Vec<(String, String)> = Vec::new();
+    for m in &members {
+        let borrowed: std::collections::HashSet<&str> = taken.iter().map(String::as_str).collect();
+        let w = uniquify(m.name.trim(), &borrowed)?;
+        taken.insert(w.clone());
+        roster.push((w, m.role.clone()));
+    }
+    let mut spawned = Vec::new();
+    let mut errors = Vec::new();
+    for (m, (w, _)) in members.iter().zip(roster.iter()) {
+        let base = if m.base.trim().is_empty() { None } else { super::registry_get(m.base.trim())? };
+        let result = super::teams::effective_def(&team, m, base.as_ref(), w, &roster).and_then(|def| {
+            spawn(&SpawnRequest {
+                session,
+                agent: w,
+                brief,
+                by,
+                def: Some(def),
+                window_name: Some(w.clone()),
+                team: Some(team.name.clone()),
+            })
+        });
+        match result {
+            Ok(r) => spawned.push(json!({ "name": m.name, "window_name": w, "pane": r.get("pane").cloned().unwrap_or(Value::Null), "backend": r.get("backend").cloned().unwrap_or(Value::Null) })),
+            Err(e) => errors.push(json!({ "name": m.name, "error": e })),
+        }
+    }
+    Ok(json!({ "team": team.name, "spawned": spawned, "errors": errors }))
 }
 
 /// Persist how this agent is STARTED, so a restart can replay the full
@@ -173,7 +258,7 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
 /// no auto-post, every delivery "unconfirmed" (owner report, 2026-08-18).
 /// The kick is NOT part of the recipe: it belongs to the first launch only;
 /// a restart resumes a conversation instead.
-fn write_launch_recipe(home: &Path, backend: &str, env: &[(String, String)], cmd: &str, by: &str) {
+fn write_launch_recipe(home: &Path, backend: &str, env: &[(String, String)], cmd: &str, by: &str, team: Option<&str>) {
     // `cmd` is the identity command with NO first prompt appended (spawn adds
     // that separately), so the recipe stores it verbatim. It used to strip a
     // trailing quoted argument to remove the kick — a guess that would have
@@ -182,11 +267,14 @@ fn write_launch_recipe(home: &Path, backend: &str, env: &[(String, String)], cmd
     // summary back into this window's pane, which is what lets a lead SCHEDULE —
     // a record-only room line wakes nobody, so a lead that spawned two builders
     // never learned they finished (owner, 2026-08-29). Empty = the human.
+    // `team` (board #74): the configured team this window was spawned as part
+    // of, so the Hub can group the cards; absent for a solo spawn.
     let recipe = json!({
         "backend": backend,
         "env": env.iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>(),
         "cmd": cmd.trim_end(),
         "spawned_by": by,
+        "team": team.unwrap_or(""),
     });
     let _ = std::fs::write(
         home.join("launch.json"),
@@ -275,8 +363,7 @@ mod relaunch_tests {
             "kiro",
             &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())],
             "command kiro-cli chat --agent lead --model m --trust-all-tools",
-            "",
-        );
+            "", None);
         let line = relaunch_line(ws.to_str().unwrap(), "lead", Some("id-1")).unwrap();
         assert!(line.starts_with("KIRO_HOME="), "isolated home first: {line}");
         assert!(line.contains("--agent lead"), "identity: {line}");
@@ -309,8 +396,7 @@ mod relaunch_tests {
             "codex",
             &[("CODEX_HOME".to_string(), chome.to_string_lossy().to_string())],
             "command codex -c a=b --dangerously-bypass-approvals-and-sandbox",
-            "",
-        );
+            "", None);
         let cx = relaunch_line(ws.to_str().unwrap(), "cx", Some("01a0-abc")).unwrap();
         assert!(
             cx.contains("command codex resume 01a0-abc -c a=b --dangerously-bypass-approvals-and-sandbox"),
@@ -365,7 +451,7 @@ fn build_prompt(def: &RegAgent, name: &str, session: &str, brief: &str, by: &str
          - `tmm done \"summary\"` — REQUIRED when you finish the briefed task. One or two lines — the verdict and what changed; it reports back for you, and your full reply is posted separately\n\
          - `tmm board` — the project's task board (todo/doing/review/done), shared with the human's board page. `tmm board take <id>` claims an issue (assignee = you, status = doing), `tmm board note <id> \"...\"` records progress and decisions ON the issue, `tmm board show <id>` reads one issue with its notes. When YOUR part is done, `tmm board move <id> review` — that HANDS IT OFF: the issue's reporter is notified automatically and reviews it; only the reviewer moves it to done. The board tracks the ISSUE's lifecycle; `tmm status` tracks your live turn — keep both current, they answer different questions\n\
          You can also manage the workspace itself when the task calls for it:\n\
-         - `tmm spawn <registry-name> --brief \"...\"` — bring in a teammate (see `tmm registry list`). The brief lands as their first prompt, and their `tmm done` summary is delivered back to YOU — so brief with the finish line in it: what done means, and how to verify\n\
+         - `tmm spawn <registry-name> --brief \"...\"` — bring in a teammate (see `tmm registry list`); `tmm spawn --team <team> --brief \"...\"` starts a configured team at once (`tmm teams list`). The brief lands as their first prompt, and their `tmm done` summary is delivered back to YOU — so brief with the finish line in it: what done means, and how to verify\n\
          - `tmm project create|up|down|archive` — set up or tear down whole projects\n\
          - `tmm registry save --name .. --backend .. --system \"..\"` — define NEW kinds of agents, then spawn them\n\
          When you start with no message waiting, just WAIT at your prompt — nothing is expected of you until someone writes. \
@@ -595,8 +681,7 @@ pub fn refresh_hooks(project_path: &str, window_name: &str) -> bool {
             ),
             // A backfilled recipe cannot know who spawned the agent — the
             // feedback edge simply does not exist for pre-recipe spawns.
-            "",
-        );
+            "", None);
         changed = true;
     }
     changed
@@ -1259,7 +1344,7 @@ mod tests {
         // A restart must replay the FULL identity, not the bare backend line:
         // the user-space config's hooks never fire (measured), so losing
         // KIRO_HOME/--agent makes a restarted agent observably deaf.
-        write_launch_recipe(&dir, "kiro", &r.env, &r.cmd, "");
+        write_launch_recipe(&dir, "kiro", &r.env, &r.cmd, "", None);
         let line = relaunch_line(
             dir.parent().unwrap().parent().unwrap().to_str().unwrap(),
             "tester", Some("abc-123"),
@@ -1493,8 +1578,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
             "kiro",
             &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())],
             "command kiro-cli chat --agent dev --model claude-haiku-4.5 --trust-all-tools",
-            "",
-        );
+            "", None);
 
         assert!(refresh_hooks(&ws.to_string_lossy(), "dev"), "a stale config is rewritten");
         let after: Value = serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
@@ -1530,8 +1614,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
             &[],
             // The owner's real value: one character off `claude-sonnet-4.5`.
             "command kiro-cli chat --agent dev --model claude-sonnet-4-5 --trust-all-tools",
-            "",
-        );
+            "", None);
 
         refresh_hooks(&ws.to_string_lossy(), "dev");
         let after: Value = serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
@@ -1789,11 +1872,11 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         let ws = std::env::temp_dir().join(format!("tmm-spawnedby-{}", std::process::id()));
         let home = ws.join(".tmm").join("agents").join("b");
         std::fs::create_dir_all(&home).unwrap();
-        write_launch_recipe(&home, "kiro", &[], "command kiro-cli chat --agent b", "lead");
+        write_launch_recipe(&home, "kiro", &[], "command kiro-cli chat --agent b", "lead", None);
         let ws_str = ws.to_string_lossy().to_string();
         assert_eq!(crate::projects::spawned_by(Some(&ws_str), "b").as_deref(), Some("lead"));
         // Empty `by` (a human spawn) yields nobody to deliver to.
-        write_launch_recipe(&home, "kiro", &[], "command kiro-cli chat --agent b", "");
+        write_launch_recipe(&home, "kiro", &[], "command kiro-cli chat --agent b", "", None);
         assert_eq!(crate::projects::spawned_by(Some(&ws_str), "b"), None);
         std::fs::remove_dir_all(&ws).ok();
     }

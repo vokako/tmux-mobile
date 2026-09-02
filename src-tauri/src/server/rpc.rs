@@ -486,6 +486,7 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
         "project_list" | "project_create" | "project_adopt" | "project_up" | "project_down"
         | "project_archive" | "project_delete" | "project_autostart" | "project_rename"
         | "registry_list" | "registry_save" | "registry_delete" | "models_list"
+        | "teams_list" | "teams_save" | "teams_delete"
         | "skills_list" | "skills_save" | "skills_delete" | "skills_refresh" | "skills_read"
         | "skills_import" | "skills_files" | "skills_file"
         | "mcp_list" | "mcp_save" | "mcp_delete" => {
@@ -565,6 +566,14 @@ fn handle_project_request(method: &str, id: Option<u64>, p: &serde_json::Value) 
             None => Err("missing required param: def".into()),
         },
         "registry_delete" => need_id("name").and_then(|n| projects::registry_delete(&n)),
+        // Agent teams (board #74): a named list of members derived from
+        // registry agents (+ role) or defined inline for this team only.
+        "teams_list" => projects::teams_list(),
+        "teams_save" => match p.get("def") {
+            Some(def) => projects::teams_save(def),
+            None => Err("missing required param: def".into()),
+        },
+        "teams_delete" => need_id("name").and_then(|n| projects::teams_delete(&n)),
         // The model ids a backend accepts, so the agent editor can offer them
         // instead of letting a one-character typo through. `null` means the
         // backend cannot enumerate them (claude/codex) — the field stays free

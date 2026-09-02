@@ -8,7 +8,7 @@
   import SideHandle from '../ui/SideHandle.svelte';
   import { scrollFade } from '../core/scrollFade.ts';
   import { t } from '../core/i18n.svelte.ts';
-  import { registryList, registrySave, registryDelete, modelsList, skillsList, skillsSave, skillsDelete, skillsRefresh, skillsImport, skillsFiles, skillsFile, mcpList, mcpSave, mcpDelete } from '../core/ws.ts';
+  import { registryList, registrySave, registryDelete, modelsList, skillsList, skillsSave, skillsDelete, skillsRefresh, skillsImport, skillsFiles, skillsFile, mcpList, mcpSave, mcpDelete, teamsList, teamsSave, teamsDelete } from '../core/ws.ts';
   import { renderMarkdown } from '../core/markdown.ts';
   import { backendColor } from '../hub/hub.ts';
   import { backendIcon } from '../core/agents.ts';
@@ -30,6 +30,7 @@
   let { visible = false, onGoBack = null, editRequest = null, onDrilled = null } = $props();
 
   let defs = $state([]);
+  let teams = $state([]);       // agent teams (board #74): RegTeam[]
   let skills = $state([]);      // central skill assets
   let mcps = $state([]);        // central MCP server defs
   let editing = $state(null);   // agent working copy or null
@@ -38,7 +39,10 @@
   let editingSkill = $state(null);
   let skillIsNew = $state(false);
   let editingMcp = $state(null);
-  const drilled = $derived(!!editing || !!editingSkill || !!editingMcp);
+  // A TEAM working copy (board #74): { name, description, members: TeamMember[] }.
+  let editingTeam = $state(null);
+  let teamIsNew = $state(false);
+  const drilled = $derived(!!editing || !!editingSkill || !!editingMcp || !!editingTeam);
   let drillAnim = $state('');
   let wasDrilled = false;
   let mcpIsNew = $state(false);
@@ -68,6 +72,7 @@
     onGoBack(() => {
       if (pending && !removing) { pending = null; return true; }
       if (editing) { editing = null; return true; }
+      if (editingTeam) { editingTeam = null; return true; }
       if (editingSkill) { editingSkill = null; return true; }
       if (editingMcp) { editingMcp = null; return true; }
       return false;
@@ -77,6 +82,7 @@
     agent: { title: 'confirmDeleteAgentDefTitle', note: 'confirmDeleteAgentDefNote' },
     skill: { title: 'confirmDeleteSkillTitle',    note: 'confirmDeleteSkillNote' },
     mcp:   { title: 'confirmDeleteMcpTitle',      note: 'confirmDeleteMcpNote' },
+    team:  { title: 'confirmDeleteTeamTitle',     note: 'confirmDeleteTeamNote' },
   };
   const ask = (kind, name) => { pending = { kind, name }; };
   async function runPending() {
@@ -85,6 +91,7 @@
     removing = true;
     try {
       if (kind === 'agent') await remove(name);
+      else if (kind === 'team') await removeTeam(name);
       else if (kind === 'skill') await removeSkill(name);
       else await removeMcp(name);
       pending = null;
@@ -113,6 +120,7 @@
     // on a failed RPC (same rule as the Hub roster). Wiping them meant one
     // timed-out call emptied the whole page until the next visit.
     try { defs = (await registryList()).agents ?? []; } catch { /* keep last */ }
+    try { teams = (await teamsList()).teams ?? []; } catch { /* keep last */ }
     try { skills = (await skillsList()).skills ?? []; } catch { /* keep last */ }
     try { mcps = (await mcpList()).mcp ?? []; } catch { /* keep last */ }
   }
@@ -133,8 +141,84 @@
   });
 
   function closeAll() {
-    editing = null; editingSkill = null; editingMcp = null;
+    editing = null; editingSkill = null; editingMcp = null; editingTeam = null;
     error = ''; info = '';
+  }
+
+  // ── Agent teams (board #74) ───────────────────────────────────────────
+  // A team is a set of members with roles. A member DERIVES from one of the
+  // registry agents (base + role supplement) — the owner's own agents, not
+  // redefined — or is CUSTOM to this team (an inline definition: backend,
+  // model, effort, persona). Skills/MCP for a custom member are the built-ins;
+  // anything richer is a registry agent, which is what `base` is for.
+  const TEAM_MAX = 4; // mirrors the server's spawn cap (validated there too)
+  const blankMember = () => ({ name: '', base: defs[0]?.name ?? '', role: '', agent: null });
+  const blankCustom = () => ({ name: '', backend: 'claude', model: '', effort: '', system: '', skills: '[]', mcp: '[]', can_hire: false });
+  function startTeam(team) {
+    closeAll();
+    teamIsNew = !team;
+    let members = [];
+    if (team) { try { members = JSON.parse(team.members) ?? []; } catch { members = []; } }
+    editingTeam = team
+      ? { name: team.name, description: team.description ?? '', members: members.map((m) => ({ name: m.name ?? '', base: m.base ?? '', role: m.role ?? '', agent: m.agent ?? null })) }
+      : { name: '', description: '', members: [blankMember()] };
+  }
+  function addMember() {
+    if (!editingTeam || editingTeam.members.length >= TEAM_MAX) return;
+    editingTeam.members = [...editingTeam.members, blankMember()];
+  }
+  function removeMember(i) {
+    if (!editingTeam) return;
+    editingTeam.members = editingTeam.members.filter((_, k) => k !== i);
+  }
+  /** The base Select's value: a registry name, or '' for custom. Switching to
+   * custom seeds an inline def; switching back drops it. */
+  function setBase(i, base) {
+    const m = editingTeam.members[i];
+    m.base = base;
+    m.agent = base ? null : (m.agent ?? blankCustom());
+  }
+  // Model suggestions per backend for CUSTOM members (the same models_list the
+  // agent editor asks); fetched once per backend.
+  let modelsByBackend = $state({});
+  function ensureModels(backend) {
+    if (!backend || backend in modelsByBackend) return;
+    modelsByBackend[backend] = [];
+    modelsList(backend).then((r) => { modelsByBackend[backend] = r.models ?? []; }).catch(() => {});
+  }
+  $effect(() => {
+    for (const m of editingTeam?.members ?? []) if (!m.base && m.agent) ensureModels(m.agent.backend);
+  });
+  const teamSavable = $derived(!!editingTeam && editingTeam.name.trim() && editingTeam.members.length > 0
+    && editingTeam.members.every((m) => m.name.trim() && (m.base || m.agent)));
+  async function saveTeam() {
+    if (!editingTeam) return;
+    error = '';
+    try {
+      await teamsSave({
+        name: editingTeam.name.trim(),
+        description: editingTeam.description.trim(),
+        members: JSON.stringify(editingTeam.members.map((m) => ({
+          name: m.name.trim(), base: m.base, role: m.role.trim(),
+          agent: m.base ? null : { ...m.agent, name: m.name.trim(), model: (m.agent?.model ?? '').trim() },
+        }))),
+      });
+      editingTeam = null;
+      await reload();
+    } catch (e) {
+      error = String(e?.message ?? e);
+    }
+  }
+  async function removeTeam(name) {
+    try {
+      await teamsDelete(name);
+      if (editingTeam?.name === name) editingTeam = null;
+      await reload();
+    } catch (e) { error = String(e?.message ?? e); }
+  }
+  /** One-line summary for the sidebar row: member names, base in parentheses. */
+  function teamSummary(team) {
+    try { return (JSON.parse(team.members) ?? []).map((m) => m.name).filter(Boolean).join(' · '); } catch { return ''; }
   }
 
   // The skill's managed files: a chip per file, one previewed at a time.
@@ -312,6 +396,19 @@
         <Icon name="plus" size={13} />{t('agentsNew')}
       </button>
 
+      <!-- Agent TEAMS (board #74): a named set of the agents above, each with
+           a role. Same row dialect; the second line names the members. -->
+      <div class="side-h">{t('teamsTitle')}</div>
+      {#each teams as tm (tm.name)}
+        <button class="side-row team-row" class:open={editingTeam?.name === tm.name && !teamIsNew} onclick={() => startTeam(tm)}>
+          <Icon name="collab" size={13} />
+          <span class="r-col"><span class="r-name">{tm.name}</span><span class="r-sub">{teamSummary(tm)}</span></span>
+        </button>
+      {/each}
+      <button class="side-row add" onclick={() => startTeam(null)}>
+        <Icon name="plus" size={13} />{t('teamsNew')}
+      </button>
+
       <div class="side-h">{t('skillsTitle')}</div>
       {#each skills as sk (sk.name)}
         <button class="side-row" class:open={editingSkill?.name === sk.name && !skillIsNew} onclick={() => startSkill(sk)}>
@@ -434,6 +531,74 @@
           <textarea class="mono" rows="10" bind:value={editingMcp.defText} spellcheck="false"></textarea>
         </label>
         <p class="hint">{t('mcpHint')}</p>
+      </div>
+    {:else if editingTeam}
+      <div class="page-head">
+        <h1>{teamIsNew ? t('teamsNew') : editingTeam.name}</h1>
+        <span class="spacer"></span>
+        <div class="head-acts">
+        {#if !teamIsNew}
+          <button class="icon-btn danger" title={t('delete')} aria-label={t('delete')} onclick={() => ask('team', editingTeam.name)}><Icon name="trash" size={14} /></button>
+        {/if}
+        <button class="icon-btn" title={t('cancel')} aria-label={t('cancel')} onclick={() => editingTeam = null}><Icon name="x" size={14} /></button>
+        <button class="icon-btn go" disabled={!teamSavable} title={t('save')} aria-label={t('save')} onclick={saveTeam}><Icon name="check" size={14} /></button>
+        </div>
+      </div>
+      <div class="editor">
+        {#if error}<div class="err">{error}</div>{/if}
+        <label>{t('teamsName')}
+          <input bind:value={editingTeam.name} disabled={!teamIsNew} placeholder="dev-squad" />
+        </label>
+        <label>{t('teamsDesc')}
+          <textarea rows="2" bind:value={editingTeam.description} placeholder={t('teamsDescPh')}></textarea>
+        </label>
+        <div class="pick-block">
+          <span class="pick-label">{t('teamsMembers')}</span>
+          {#each editingTeam.members as m, i (i)}
+            <div class="member">
+              <div class="member-head">
+                <input class="member-name" bind:value={m.name} placeholder="dev" aria-label={t('teamsMemberName')} />
+                <Select value={m.base} dense ariaLabel={t('teamsBase')}
+                  options={[...defs.map((d) => ({ value: d.name, label: d.name, icon: backendIcon(d.backend) ?? undefined })), { value: '', label: t('teamsCustom') }]}
+                  onchange={(v) => setBase(i, v)} />
+                <button class="icon-btn danger" title={t('teamsRemoveMember')} aria-label={t('teamsRemoveMember')} disabled={editingTeam.members.length <= 1} onclick={() => removeMember(i)}><Icon name="x" size={13} /></button>
+              </div>
+              {#if !m.base && m.agent}
+                <!-- A team-only member: the agent editor's identity fields, inline. -->
+                <div class="row2">
+                  <label>{t('agentsBackend')}
+                    <Select bind:value={m.agent.backend} dense ariaLabel={t('agentsBackend')}
+                      options={BACKENDS.map((b) => ({ value: b, icon: backendIcon(b) ?? undefined }))} />
+                  </label>
+                  <label>{t('agentsModel')}
+                    <Select bind:value={m.agent.model} editable dense options={modelsByBackend[m.agent.backend] ?? []}
+                      placeholder={t('agentsModelDefault')} ariaLabel={t('agentsModel')} />
+                  </label>
+                </div>
+                <div class="row2">
+                  <label>{t('agentsEffort')}
+                    <Select bind:value={m.agent.effort} dense
+                      options={[{ value: '', label: t('agentsModelDefault') }, ...(EFFORTS[m.agent.backend] ?? [])]}
+                      ariaLabel={t('agentsEffort')} />
+                  </label>
+                  <div></div>
+                </div>
+                <label>{t('agentsSystem')}
+                  <textarea rows="3" bind:value={m.agent.system} placeholder={t('agentsSystemPh')}></textarea>
+                </label>
+              {/if}
+              <label>{t('teamsRole')}
+                <textarea rows="2" bind:value={m.role} placeholder={t('teamsRolePh')}></textarea>
+              </label>
+            </div>
+          {/each}
+          {#if editingTeam.members.length < TEAM_MAX}
+            <button class="pick" type="button" onclick={addMember}><Icon name="plus" size={11} />{t('teamsAddMember')}</button>
+          {:else}
+            <p class="hint">{t('teamsMax').replace('{n}', String(TEAM_MAX))}</p>
+          {/if}
+        </div>
+        <p class="hint">{t('teamsHint')}</p>
       </div>
     {:else if editing}
       <div class="page-head">
@@ -630,6 +795,15 @@
   textarea { resize: vertical; line-height: 1.5; }
   textarea.mono { font-family: ui-monospace, Menlo, monospace; }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  /* A team member is one bordered panel in the editor's own dialect (board
+     #74): the head row is name + base + remove, the body the role (and, for a
+     custom member, the agent identity fields). */
+  .member { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--ui-radius-row); background: var(--surface); }
+  .member-head { display: grid; grid-template-columns: minmax(80px, 1fr) minmax(140px, 1.4fr) auto; gap: 8px; align-items: center; }
+  .member-name { min-width: 0; }
+  .team-row { align-items: flex-start; }
+  .r-col { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+  .r-sub { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-micro); color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pick-block { display: flex; flex-direction: column; gap: 6px; }
   .pick-label { color: var(--text); font-size: var(--fs-ui); font-weight: 600; }
   .pick-row { display: flex; flex-wrap: wrap; gap: 6px; }

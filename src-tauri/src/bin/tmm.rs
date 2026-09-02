@@ -44,6 +44,7 @@ USAGE (agent):
                                       (the note is the point — it shows in the chat)
   tmm done [summary]                  declare completion
   tmm spawn <agent> [--brief <text>]  spawn a registry agent into this project
+  tmm spawn --team <team> [--brief <text>]  start a configured agent team (all members)
   tmm board [list]                    the project task board (kanban)
   tmm board add "title" [--body <text>] [--assignee <name>]
   tmm board show <id>                 one issue with its note thread
@@ -78,6 +79,7 @@ USAGE (human or agent — self-management):
   tmm project down <session>          kill the session, keep the declaration
   tmm project archive <session>       remove from projects (session survives)
   tmm registry list                   centrally-defined agents
+  tmm teams list                      configured agent teams (members + roles)
   tmm registry save --name <n> --backend <kiro|claude|codex> [--system <text>]
                     [--model m] [--effort low|medium|high|…] [--skills a,b] [--mcp <json>] [--can-hire]
   tmm registry delete <name>
@@ -350,6 +352,45 @@ async fn main() {
                     if ctx.json { println!("{r}"); } else { println!("✓ #{id}"); }
                 }
                 other => fail(EXIT_USAGE, &format!("unknown board command '{other}': tmm board [list|show|add|take|move|note|delete]")),
+            }
+        }
+        ("spawn", rest) if flags.get("team").cloned().flatten().is_some() => {
+            let session = need_project(&ctx);
+            let team = flags.get("team").cloned().flatten().unwrap_or_default();
+            let brief = flags.get("brief").cloned().flatten().unwrap_or_default();
+            let by = ctx.agent.clone().unwrap_or_default();
+            let r = rpc(&ctx, "hub_spawn_team", json!({ "session": session, "team": team, "brief": brief, "by": by })).await;
+            if ctx.json {
+                println!("{r}");
+            } else {
+                let empty = Vec::new();
+                for m in r.get("spawned").and_then(|v| v.as_array()).unwrap_or(&empty) {
+                    println!("✓ spawned {} (team {team})", m.get("window_name").and_then(|v| v.as_str()).unwrap_or(""));
+                }
+                for e in r.get("errors").and_then(|v| v.as_array()).unwrap_or(&empty) {
+                    eprintln!("✗ {}: {}", e.get("name").and_then(|v| v.as_str()).unwrap_or(""), e.get("error").and_then(|v| v.as_str()).unwrap_or(""));
+                }
+            }
+        }
+        ("teams", rest) if rest.first().map(String::as_str) == Some("list") => {
+            let r = rpc(&ctx, "teams_list", json!({})).await;
+            if ctx.json {
+                println!("{r}");
+            } else {
+                let empty = Vec::new();
+                for t in r.get("teams").and_then(|v| v.as_array()).unwrap_or(&empty) {
+                    let s = |k: &str| t.get(k).and_then(|v| v.as_str()).unwrap_or("");
+                    let members: Vec<serde_json::Value> = serde_json::from_str(s("members")).unwrap_or_default();
+                    let names: Vec<String> = members
+                        .iter()
+                        .map(|m| {
+                            let n = m.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                            let base = m.get("base").and_then(|v| v.as_str()).unwrap_or("");
+                            if base.is_empty() { n.to_string() } else { format!("{n}←{base}") }
+                        })
+                        .collect();
+                    println!("{} — {} [{}]", s("name"), s("description"), names.join(", "));
+                }
             }
         }
         ("spawn", rest) => {
@@ -930,7 +971,7 @@ fn need_agent(ctx: &Ctx) -> String {
 fn split_flags(args: &[String]) -> (std::collections::HashMap<String, Option<String>>, Vec<String>, Vec<(String, String)>) {
     const VALUED: &[&str] = &["project", "agent", "server", "output", "since", "limit", "brief",
                           "name", "session", "with-agent", "backend", "model", "effort", "system", "skills", "mcp",
-                          "ref", "source", "description", "def", "grep", "image", "body", "assignee"];
+                          "ref", "source", "description", "def", "grep", "image", "body", "assignee", "team"];
     let mut flags = std::collections::HashMap::new();
     let mut pos = Vec::new();
     let mut repeats: Vec<(String, String)> = Vec::new();

@@ -15,6 +15,7 @@ pub mod reconcile;
 pub mod recovery;
 pub mod spawn;
 pub mod store;
+pub mod teams;
 pub mod telemetry;
 pub mod vitals;
 
@@ -576,6 +577,56 @@ pub fn registry_save(def: &Value) -> Result<Value, String> {
         store.reg_save(&agent, now())?;
         Ok(json!({ "ok": true, "name": agent.name }))
     })
+}
+
+// ---- agent teams (board #74) --------------------------------------------
+
+pub fn teams_list() -> Result<Value, String> {
+    with_store(|store| Ok(json!({ "teams": store.teams_list()? })))
+}
+
+pub fn team_get(name: &str) -> Result<Option<store::RegTeam>, String> {
+    with_store(|store| store.team_get(name))
+}
+
+/// Save a team. Validation happens here, not at spawn: a base that is not in
+/// the registry, a duplicate member name, an inline member on an unknown
+/// backend or with a model the backend rejects — each would otherwise be
+/// discovered by the human the moment they try to start the team.
+pub fn teams_save(def: &Value) -> Result<Value, String> {
+    let team: store::RegTeam = serde_json::from_value(def.clone()).map_err(|e| format!("invalid team def: {e}"))?;
+    let known: Vec<String> = with_store(|store| {
+        store.reg_seed(now())?;
+        Ok(store.reg_list()?.into_iter().map(|a| a.name).collect())
+    })?;
+    let members = teams::validate(&team, &known, spawn::SPAWN_CAP)?;
+    for m in &members {
+        if let Some(a) = m.agent.as_ref().filter(|_| m.base.trim().is_empty()) {
+            models::validate(&a.backend, &a.model).map_err(|e| format!("member '{}': {e}", m.name))?;
+            models::validate_effort(&a.backend, &a.effort).map_err(|e| format!("member '{}': {e}", m.name))?;
+            serde_json::from_str::<Vec<String>>(&a.skills).map_err(|e| format!("member '{}': skills must be a JSON array: {e}", m.name))?;
+            serde_json::from_str::<Vec<Value>>(&a.mcp).map_err(|e| format!("member '{}': mcp must be a JSON array: {e}", m.name))?;
+        }
+    }
+    with_store(|store| {
+        store.team_save(&team, now())?;
+        Ok(json!({ "ok": true, "name": team.name, "members": members.len() }))
+    })
+}
+
+pub fn teams_delete(name: &str) -> Result<Value, String> {
+    with_store(|store| Ok(json!({ "ok": store.team_delete(name)? })))
+}
+
+/// The team a managed window was spawned as part of, read off its launch
+/// recipe — `None` for a solo agent or a pre-recipe home. The Hub groups
+/// same-team cards on this.
+pub fn team_of(workspace: Option<&str>, window_name: &str) -> Option<String> {
+    let ws = workspace?;
+    let recipe = std::path::Path::new(ws).join(".tmm").join("agents").join(window_name).join("launch.json");
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(recipe).ok()?).ok()?;
+    let t = v.get("team")?.as_str()?.trim().to_string();
+    (!t.is_empty()).then_some(t)
 }
 
 pub fn registry_delete(name: &str) -> Result<Value, String> {
