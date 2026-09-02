@@ -8,7 +8,7 @@
   import { fonts, uiFont, displayFont } from './fonts.svelte.ts';
   import { terminalPrefs, LINE_HEIGHT_MIN, LINE_HEIGHT_MAX } from './terminal-prefs.svelte.ts';
   import { hubPrefs } from '../hub/hub-prefs.svelte.ts';
-  import { notifyEnabled, setNotifyEnabled, ensurePermission, previewCue, notifyPermission } from '../hub/notifications.ts';
+  import { notifyEnabled, setNotifyEnabled, ensurePermission, previewCue, notifyPermission, systemNotify } from '../hub/notifications.ts';
   import { SHORTCUT_DEFAULTS, shortcutFromEvent, shortcutLabel, type ShortcutAction } from './shortcuts.ts';
   import { shortcuts } from './shortcuts.svelte.ts';
   import { agentHooksInstall, agentHooksRemove, agentHooksStatus } from '../core/ws.ts';
@@ -81,7 +81,7 @@
 
   const TAB_KEY = 'tmux_settings_tab';
   const storedTab = localStorage.getItem(TAB_KEY);
-  const validStoredTab = storedTab === 'connection' || storedTab === 'shortcuts' || storedTab === 'agents';
+  const validStoredTab = storedTab === 'connection' || storedTab === 'shortcuts' || storedTab === 'agents' || storedTab === 'notifications' || storedTab === 'terminal';
   const initialTab = validStoredTab ? storedTab : 'appearance';
   let tab = $state<string>(initialTab);
   if (storedTab && storedTab !== initialTab) localStorage.setItem(TAB_KEY, initialTab);
@@ -92,13 +92,18 @@
   // had one icon too many (owner, 2026-08-29), so the agent configuration moved
   // in here — as the REAL AgentsPage embedded below, never a second copy of it.
   // It sits before Connection, which stays last as the way out.
-  // Message notifications (board #57 → #72): the switch lives HERE, not in the
-  // Hub header. Its click is the ONE user gesture that requests system
-  // permission and unlocks audio (the preview doubles as "what will it sound
-  // like"). The caption reads the platform back: blocked site, or no
-  // Notification API at all (the Tauri Android webview — sound only there).
+  // Message notifications (board #57 → #72): their OWN category, not a row
+  // under Appearance (owner, 2026-09-02: "应该在一个单独的 notification 二级
+  // 页面"), and not the Hub header. The switch's click is the ONE user gesture
+  // that requests system permission and unlocks audio (the preview doubles as
+  // "what will it sound like"). The caption reads the platform back: not
+  // permitted (site blocked, OS refused, or — inside Tauri — never asked yet),
+  // or no Notification API at all (sound only). The TEST row exists because
+  // the real alert only fires while you are NOT looking — there is no other
+  // way to check on a phone that the tray actually shows one.
   let notifyOn = $state(notifyEnabled());
   let notifyPerm = $state(notifyPermission());
+  let notifyTested = $state(false);
   async function setNotify(on: boolean) {
     notifyOn = on;
     setNotifyEnabled(on);
@@ -107,9 +112,18 @@
     await ensurePermission();
     notifyPerm = notifyPermission();
   }
+  async function testNotify() {
+    previewCue();
+    await ensurePermission();
+    notifyPerm = notifyPermission();
+    systemNotify({ title: t('hubNotifyTestTitle'), body: t('hubNotifyTestBody'), tag: 'tmm:test' });
+    notifyTested = true;
+    setTimeout(() => { notifyTested = false; }, 1500);
+  }
 
   const tabs = $derived([
     { id: 'appearance', label: () => t('settingsAppearance') },
+    { id: 'notifications', label: () => t('settingsNotifications') },
     { id: 'terminal', label: () => t('settingsTerminal') },
     ...(showShortcuts ? [{ id: 'shortcuts', label: () => t('settingsShortcuts') }] : []),
     ...(showAgents ? [{ id: 'agents', label: () => t('agentsTitle') }] : []),
@@ -342,13 +356,6 @@
             </div>
           </div>
           <div class="setting-row">
-            <div><strong>{t('hubNotify')}</strong><small>{notifyPerm === 'denied' ? t('hubNotifyDenied') : notifyPerm === 'unsupported' ? t('hubNotifySoundOnly') : t('hubNotifyHint')}</small></div>
-            <div class="segmented" role="group" aria-label={t('hubNotify')}>
-              <button class:active={notifyOn} aria-pressed={notifyOn} onclick={() => setNotify(true)}>{t('on')}</button>
-              <button class:active={!notifyOn} aria-pressed={!notifyOn} onclick={() => setNotify(false)}>{t('off')}</button>
-            </div>
-          </div>
-          <div class="setting-row">
             <div><strong>{t('uiFontBody')}</strong><small>{t('uiFontBodyHint')}</small></div>
             <div class="font-control">
               <Select bind:value={uiFontInput} editable dense options={uiFont.common}
@@ -374,6 +381,20 @@
               </div>
             </div>
           {/if}
+        </div>
+      {:else if tab === 'notifications'}
+        <div class="setting-card">
+          <div class="setting-row">
+            <div><strong>{t('hubNotify')}</strong><small>{notifyPerm === 'denied' ? t('hubNotifyDenied') : notifyPerm === 'unsupported' ? t('hubNotifySoundOnly') : t('hubNotifyHint')}</small></div>
+            <div class="segmented" role="group" aria-label={t('hubNotify')}>
+              <button class:active={notifyOn} aria-pressed={notifyOn} onclick={() => setNotify(true)}>{t('on')}</button>
+              <button class:active={!notifyOn} aria-pressed={!notifyOn} onclick={() => setNotify(false)}>{t('off')}</button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div><strong>{t('hubNotifyTest')}</strong><small>{t('hubNotifyTestHint')}</small></div>
+            <button class="reset" onclick={testNotify}>{notifyTested ? t('hubNotifyTestSent') : t('hubNotifyTestAction')}</button>
+          </div>
         </div>
       {:else if tab === 'terminal'}
         <div class="setting-card">

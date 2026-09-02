@@ -44,7 +44,7 @@ default = ["gui"]
 #
 # `tauri-build` stays a plain build-dependency: it is pure Rust, and build.rs
 # needs it whenever `gui` is on.
-gui = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-fs", "dep:tauri-plugin-opener"]
+gui = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-fs", "dep:tauri-plugin-opener", "dep:tauri-plugin-notification"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -76,6 +76,7 @@ urlencoding = "2"
 hex = "0.4"
 flate2 = "1"
 socket2 = "0.5"
+tauri-plugin-notification = { version = "2", optional = true }
 
 # agora: the multi-agent group-chat bus. Desktop-only — Android/iOS never run
 # the in-process MCP daemon (they connect to a desktop server over WS), so the

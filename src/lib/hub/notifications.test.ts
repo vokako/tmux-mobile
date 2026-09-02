@@ -11,7 +11,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   notifiable, notifyText, excerpt, cueDue, msgKey, sift, playCue, notifyNews,
-  isAway, roomProjectName, systemNotify,
+  isAway, roomProjectName, systemNotify, taskFinished,
   CUE_COOLDOWN_MS, CUE_SRC, SEEN_CAP,
   type FeedMsg, type NotifyState, type NotifyEnv,
 } from './notifications.ts';
@@ -49,6 +49,20 @@ test('notifiable: your own words and nameless rows are not news', () => {
 
 test('notifiable: app narration ([tmm] sys lines) is not news', () => {
   assert.equal(notifiable([{ from: 'builder-2', body: '[tmm] spawned dev — brief' }], away).length, 0);
+  assert.equal(notifiable([{ from: 'builder-2', body: '[tmm] board #7 todo → doing — Fix parser' }], away).length, 0, 'starting a task is not finishing it');
+});
+
+test('notifiable: an agent moving an issue to review/done IS news — "谁完成了什么任务" (board #72)', () => {
+  const out = notifiable([
+    { from: 'builder-2', body: '[tmm] board #7 doing → review — Fix parser' },
+    { from: 'lead', body: '[tmm] board #7 review → done — Fix parser' },
+    { from: 'human', body: '[tmm] board #8 doing → done — Mine' },
+  ], away);
+  assert.equal(out.length, 2, 'the human moving their own issue is not news');
+  assert.deepEqual(taskFinished('[tmm] board #7 doing → review — Fix parser'), { id: '7', to: 'review', title: 'Fix parser' });
+  assert.equal(taskFinished('[tmm] board #7 todo → doing — Fix parser'), null);
+  assert.equal(taskFinished('board #7 doing → review'), null, 'only a lifecycle line, never a message that quotes one');
+  assert.equal(excerpt('[tmm] board #7 doing → review — Fix parser'), '#7 → review · Fix parser');
 });
 
 test('notifiable: ambient [tmm status] progress is not news, [tmm done] is', () => {
@@ -264,9 +278,20 @@ test('the permission request and the audio unlock ride the SETTINGS toggle, neve
     'the Hub header carries no notification switch — a header keeps no spare switches, and on a phone it cost the row a button');
   // The toggle's click carries all three: persist, preview (the unlock), permission.
   assert.match(prefs, /setNotifyEnabled\(on\);\s*\n\s*if \(!on\) return;\s*\n\s*previewCue\(\);\s*\n\s*await ensurePermission\(\);/u);
-  const asks = prefs.match(/ensurePermission\(\)/gu) ?? [];
-  assert.equal(asks.length, 1);
-  assert.match(prefs, /\{t\('hubNotify'\)\}/u, 'a labelled setting-row in the Chat group');
+  const asks = prefs.match(/await ensurePermission\(\)/gu) ?? [];
+  assert.equal(asks.length, 2, 'the toggle and the test row, nothing else');
+  assert.match(prefs, /\{t\('hubNotify'\)\}/u, 'a labelled setting-row');
+  // Its OWN category (owner, 2026-09-02: "应该在一个单独的 notification 二级页面"),
+  // right after Appearance, never a row under it.
+  assert.match(prefs, /\{ id: 'appearance', label: \(\) => t\('settingsAppearance'\) \},\s*\n\s*\{ id: 'notifications', label: \(\) => t\('settingsNotifications'\) \},/u);
+  const appearance = prefs.slice(prefs.indexOf("{#if tab === 'appearance'}"), prefs.indexOf("{:else if tab === 'notifications'}"));
+  assert.ok(appearance.length > 0 && !appearance.includes('hubNotify'), 'no notification row under Appearance');
+  assert.match(prefs, /storedTab === 'notifications'/u, 'the category is restorable');
+  assert.match(prefs, /systemNotify\(\{ title: t\('hubNotifyTestTitle'\)/u, 'a test row — the real alert only fires while you are NOT looking');
+  // Asking whenever not yet granted is what reaches Android's runtime prompt:
+  // the Tauri shim reports `denied` before the first ask.
+  const notif = readFileSync(join(here, 'notifications.ts'), 'utf8');
+  assert.match(notif, /Notification\.permission !== 'granted'\) \{\s*\n\s*await Notification\.requestPermission\(\)/u);
   assert.match(prefs, /notifyPerm === 'unsupported' \? t\('hubNotifySoundOnly'\)/u, 'the caption tells a webview user the sound is the whole channel');
 });
 

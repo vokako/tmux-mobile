@@ -221,3 +221,19 @@ APK: `find ~/.cache/builds -name '*.apk' -newermt '-10 minutes'`.
   installed version under `$ANDROID_HOME/ndk/`).
 - JDK 17 (`JAVA_HOME` → openjdk@17) and the `aarch64-linux-android`
   rustup target are present.
+
+## Native Notifications (board #72)
+
+`tauri-plugin-notification` is part of the `gui` Cargo feature and registered
+in `lib.rs`; the capability is `notification:default`. Nothing in the app's
+own `AndroidManifest.xml` changes: the plugin's manifest is merged by the
+Tauri gradle plugin and already declares `POST_NOTIFICATIONS`, and the plugin
+creates the default notification channel on first use. The webview receives a
+`window.Notification` shim from the plugin's init script, so the chat's
+notification code (`src/lib/hub/notifications.ts`) needs no plugin import —
+see `docs/design-docs/features/notifications.md` for the two shim facts it
+has to respect (permission reads `denied` before the first ask; the shim
+settles asynchronously). Verified here with
+`cargo check --features gui --target aarch64-linux-android` under the NDK
+toolchain env (`CC_aarch64_linux_android` etc. — `aws-lc-sys` needs the
+NDK clang, which `tauri android build` exports itself).

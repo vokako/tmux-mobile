@@ -37,7 +37,19 @@
 // room whatever page is showing, so `Hub.onPush` is the primary call site and
 // the poll is the fallback; `sift` makes push-then-poll alert exactly once
 // because both carry the server's message id.
-import { systemLine, statusNote } from './hub.ts';
+//
+// NATIVE on the phone and the desktop app (board #72, owner: "接入到安卓的消息
+// 通知里…手机提示什么 project 谁完成了什么任务"): the Android and macOS webviews
+// have no Web Notification API of their own, so `tauri-plugin-notification`
+// (registered in lib.rs, `notification:default` capability) INJECTS a
+// `window.Notification` shim that routes the constructor to the OS tray and
+// `requestPermission` to the runtime prompt (Android 13+ POST_NOTIFICATIONS).
+// So the one web path below IS the native path inside Tauri — no plugin
+// import, no second channel. Two shim facts the code has to respect: its
+// `permission` reads `denied` (not `default`) before the user was ever asked,
+// so `ensurePermission` asks whenever it is not `granted`; and it settles
+// asynchronously at startup, so a caption read at mount may lag one tick.
+import { systemLine, statusNote, boardLine } from './hub.ts';
 
 export type FeedMsg = { id?: number | string; ts?: number; from?: string; body?: string };
 export type NotifyState = { seen: Set<string>; lastCueAt: number };
@@ -93,15 +105,25 @@ export function sift(msgs: readonly FeedMsg[], seen: Set<string>, cap = SEEN_CAP
   return fresh;
 }
 
+/** A board line that says a TASK WAS FINISHED: an agent moved an issue to
+ * review (handoff — a person is waited on) or done. Every other lifecycle
+ * line (spawned, started, a move to doing…) stays app narration. */
+export function taskFinished(body: string | null | undefined): { id: string; to: string; title: string } | null {
+  const b = boardLine(systemLine(body));
+  return b && (b.to === 'review' || b.to === 'done') ? { id: b.id, to: b.to, title: b.title } : null;
+}
+
 /** Which of a batch's NEVER-SEEN messages deserve the reader's attention.
  * `first` marks a room's initial page (history, never news); `away` is the
- * reader-not-looking verdict computed by the caller from the live document. */
+ * reader-not-looking verdict computed by the caller from the live document.
+ * News is what the owner asked the phone to say — "谁完成了什么任务": an
+ * agent's reply, its `[tmm done]` summary, and a board move to review/done. */
 export function notifiable(msgs: readonly FeedMsg[], opts: { first: boolean; away: boolean }): FeedMsg[] {
   if (opts.first || !opts.away) return [];
   return msgs.filter((m) => {
     const from = m.from ?? '';
     if (!from || from === 'human') return false;         // your own words
-    if (systemLine(m.body) !== null) return false;       // app narration
+    if (systemLine(m.body) !== null) return taskFinished(m.body) !== null; // narration, unless a task finished
     const note = statusNote(m.body);
     if (note && note.state !== 'done') return false;     // ambient progress
     return true;
@@ -118,10 +140,12 @@ export function notifyText(items: readonly FeedMsg[], project: string): { title:
 }
 
 /** A one-line reading of a message body: the status marker gives way to its
- * text, image refs give way to their prose, whitespace collapses, 120 chars. */
+ * text, a finished-task line to `#N → review · title`, image refs give way
+ * to their prose, whitespace collapses, 120 chars. */
 export function excerpt(body: string, max = 120): string {
   const note = statusNote(body);
-  let text = note ? note.text : body;
+  const task = taskFinished(body);
+  let text = task ? `#${task.id} → ${task.to}${task.title ? ` · ${task.title}` : ''}` : note ? note.text : body;
   text = text.replace(/!\[[^\]]*\]\([^)]*\)/gu, '').replace(/\s+/gu, ' ').trim();
   return text.length > max ? text.slice(0, max - 1).trimEnd() + '…' : text;
 }
@@ -181,8 +205,10 @@ export function previewCue(play: () => Promise<void> = defaultPlay): void {
 }
 
 /** What the platform can do, for the Settings row's caption: `unsupported`
- * means no Notification API at all (the Tauri Android webview — the cue is
- * the whole channel there), `denied` means the site is blocked. */
+ * means no Notification API at all (a plain webview without the plugin —
+ * the cue is the whole channel there), `denied` means the site or the OS
+ * refused (or, inside Tauri, that nobody has asked yet — see the shim note
+ * at the top; turning the setting on asks). */
 export type NotifyPermission = 'granted' | 'denied' | 'default' | 'unsupported';
 export function notifyPermission(): NotifyPermission {
   try {
@@ -251,7 +277,11 @@ export function systemNotify(text: { title: string; body: string; tag?: string }
  * nothing to ask), so the caller can re-read `notifyPermission()`. */
 export async function ensurePermission(): Promise<void> {
   try {
-    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    // `!== 'granted'`, not `=== 'default'`: the Tauri shim reports `denied`
+    // before the first ask, and a browser answers a re-ask on a denied site
+    // immediately without prompting — so asking is always safe and only
+    // this form ever reaches the Android runtime prompt.
+    if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') {
       await Notification.requestPermission();
     }
   } catch {

@@ -9,7 +9,8 @@ uses the compact tab navigation as its only title row. The tab bar and choice
 controls reuse Terminal's 24px outlined chip language, including its spacing,
 rounded shape, muted idle state, and accent active state. Desktop Settings uses three tabs (mobile hides Shortcuts):
 
-- **Appearance** — theme, language, responsive layout, chat detail, message notifications, desktop interface scale, terminal font and spacing
+- **Appearance** — theme, language, responsive layout, chat detail, desktop interface scale, terminal font and spacing
+- **Notifications** — message notifications On/Off and a test row
 - **Shortcuts** — configurable desktop navigation and Terminal window bindings
 - **Connection** — current server/addresses, optimize/share/disconnect, debug
 
@@ -31,7 +32,7 @@ rounded shape, muted idle state, and accent active state. Desktop Settings uses 
 - Server info: hostname, machine ID, address
 - Language selector: EN / 中文 (pill buttons)
 - Theme selector: Auto / Light / Dark (pill buttons)
-- Message notifications: On / Off (pill buttons, persisted to localStorage `tmux_notify`); turning it on is the one user gesture that previews the cue and requests system-notification permission; the caption says when only the sound can play (site blocked, or no Notification API). Moved here from the Hub header (board #72).
+- Message notifications (own category): On / Off (pill buttons, persisted to localStorage `tmux_notify`); turning it on is the one user gesture that previews the cue and requests system-notification permission (Android's runtime prompt inside the app); the caption says when only the sound can play (not permitted, or no Notification API). A Test row plays the cue and posts one notification so the device can be checked. Moved here from the Hub header (board #72).
 - Desktop interface scale (60%–180%, persisted to localStorage `tmux_ui_zoom`; Cmd/Ctrl `+`, `-`, and `0` use the same value)
 - Terminal font size control (+/−), independent from interface scale
 - Terminal font family (editable list of common locally-installed fonts; accepts another family typed by the user; only a valid local font is applied and persisted to localStorage `tmux_font`; empty = system default)

@@ -158,6 +158,12 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        // Native message notifications (board #72): the Android and macOS
+        // webviews have no Web Notification API, so the chat's "someone
+        // finished something" alert reaches the system tray only through
+        // this plugin. The JS side (`hub/notifications.ts`) picks it when it
+        // runs inside Tauri and keeps the browser path otherwise.
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![get_local_config, save_to_downloads, list_downloads, delete_download, get_download_path])
         .setup(|app| {
             // Desktop: build a custom menu WITHOUT the default View → Zoom

@@ -20,6 +20,7 @@
     "fs:allow-appcache-write-recursive",
     "fs:allow-appcache-read-recursive",
     "opener:default",
+    "notification:default",
     {
       "identifier": "opener:allow-open-path",
       "allow": [{ "path": "**" }]
