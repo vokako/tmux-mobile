@@ -169,6 +169,9 @@ completion).
   say the same thing twice; a text-only paste is untouched.
 
 ## Drawer (three partitions, one width handle)
+- The header's terminal button (drawer on desktop, Terminal tab on the phone)
+  opens the window of the agent you are TALKING TO — the composer's recipient
+  — before falling back to the first managed agent (board #76).
 - **Terminal**: the selected agent's live pane (embedded xterm), window
   pills with state dots. Esc inside `.xterm` goes to the pane.
 - **Files**: the real Files component in single-pane mode, per-project

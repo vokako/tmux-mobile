@@ -1409,7 +1409,12 @@
   }
 
   function openDrawer(a = null) {
-    const pick = a ?? agents.find((x) => x.managed) ?? agents[0];
+    // No explicit agent → the one you are TALKING TO (board #76: "应该优先跳转到
+    // 当前所选的 agent 的 terminal window"), then the first managed, then anything.
+    const pick = a
+      ?? agents.find((x) => x.managed && x.name === recipient)
+      ?? agents.find((x) => x.managed)
+      ?? agents[0];
     if (pick) {
       const p = panes.find((p) => p.session === selected && p.window === pick.window && p.active)
         ?? panes.find((p) => p.session === selected && p.window === pick.window);

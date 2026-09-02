@@ -46,10 +46,12 @@
   let supported = $state(true);
   let error = $state('');
   let busy = $state<Record<string, boolean>>({});
-  /** The project awaiting archive confirmation. Two taps used to arm and fire;
-   * the app's confirmation says what actually happens instead (the session is
-   * left alone — this forgets the declaration). */
-  let pendingArchive = $state<{ id: string; name: string } | null>(null);
+  /** The project awaiting a CONFIRMED verb. Archive has always asked (there is
+   * no un-remove); Close asks too since board #77 (owner, 2026-09-02: "关闭需要
+   * 二次确认") — it kills every pane in the session, the same reason the Hub's
+   * Close confirms. Two taps used to arm and fire; the app's confirmation says
+   * what actually happens instead. */
+  let pending = $state<{ kind: 'archive' | 'down'; id: string; name: string } | null>(null);
 
   // Right-click / long-press on a row: the SAME verbs the row already offers
   // (design-language.md §5 — a context menu is never a second source of
@@ -64,9 +66,9 @@
   function rowItems(row: ProjectRow) {
     return [
       row.live
-        ? { label: t('projectDown'), icon: 'stop', danger: true, onselect: () => run(row.project.id, () => projectDown(row.project.id)) }
+        ? { label: t('projectDown'), icon: 'stop', danger: true, onselect: () => (pending = { kind: 'down', id: row.project.id, name: row.project.name }) }
         : { label: t('projectUp'), icon: 'zap', onselect: () => run(row.project.id, () => projectUp(row.project.id)) },
-      { label: t('projectArchive'), icon: 'x', danger: true, onselect: () => (pendingArchive = { id: row.project.id, name: row.project.name }) },
+      { label: t('projectArchive'), icon: 'x', danger: true, onselect: () => (pending = { kind: 'archive', id: row.project.id, name: row.project.name }) },
     ];
   }
   function openCtx(at: { x: number; y: number }, row: ProjectRow) {
@@ -214,9 +216,20 @@
                 {/if}
               </span>
             </button>
+            {#if dense}
+              <!-- The SIDEBAR row (board #77): no verbs in the open — "关闭之类的
+                   应该是点击后才有进一步操作". One quiet ⋯ opens the same context
+                   menu right-click/long-press already speak (rising consequence:
+                   Open/Close, then Remove), and the destructive ones confirm. -->
+              <button class="icon-btn row-menu" disabled={busy[row.project.id]} title={t('hubProjectMenu')} aria-label={t('hubProjectMenu')}
+                onclick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); openCtx({ x: r.right, y: r.bottom }, row); }}>
+                <Icon name="dots" size={13} />
+              </button>
+            {:else}
             <div class="acts">
               {#if row.live}
-                <button class="act" disabled={busy[row.project.id]} onclick={() => run(row.project.id, () => projectDown(row.project.id))}>{t('projectDown')}</button>
+                <!-- Close confirms (board #77): it kills every pane in the session. -->
+                <button class="act" disabled={busy[row.project.id]} onclick={() => (pending = { kind: 'down', id: row.project.id, name: row.project.name })}>{t('projectDown')}</button>
               {:else}
                 <button class="act primary" disabled={busy[row.project.id]} onclick={() => run(row.project.id, () => projectUp(row.project.id))}>{t('projectUp')}</button>
               {/if}
@@ -229,10 +242,11 @@
                 disabled={busy[row.project.id]}
                 aria-label={t('projectArchive')}
                 title={t('projectArchive')}
-                onclick={() => (pendingArchive = { id: row.project.id, name: row.project.name })}>
+                onclick={() => (pending = { kind: 'archive', id: row.project.id, name: row.project.name })}>
                 <Icon name="x" size={13} />
               </button>
             </div>
+            {/if}
           </div>
 
           <!-- Windows belong INSIDE the project card: they are what the project
@@ -264,15 +278,17 @@
 
 <ContextMenu at={ctxAt} items={ctxItems} who={ctxWho} oncancel={closeCtx} />
 
-<ConfirmDialog open={!!pendingArchive}
-  title={pendingArchive ? t('projectArchiveConfirmTitle').replace('{name}', pendingArchive.name) : ''}
-  note={t('projectArchiveConfirmNote')} confirmLabel={t('projectArchive')}
+<ConfirmDialog open={!!pending}
+  title={pending ? t(pending.kind === 'down' ? 'projectDownTitle' : 'projectArchiveConfirmTitle').replace('{name}', pending.name) : ''}
+  note={pending ? t(pending.kind === 'down' ? 'projectDownNote' : 'projectArchiveConfirmNote') : ''}
+  confirmLabel={pending?.kind === 'down' ? t('projectDown') : t('projectArchive')}
   onconfirm={() => {
-    const a = pendingArchive;
-    pendingArchive = null;
-    if (a) void run(a.id, () => projectArchive(a.id, true));
+    const a = pending;
+    pending = null;
+    if (!a) return;
+    void run(a.id, () => (a.kind === 'down' ? projectDown(a.id) : projectArchive(a.id, true)));
   }}
-  oncancel={() => (pendingArchive = null)} />
+  oncancel={() => (pending = null)} />
 
 <style>
   .projects { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
@@ -401,6 +417,9 @@
   .win-empty { font-family: var(--font-mono); font-size: var(--fs-meta); color: var(--text3); }
 
   .acts { display: flex; align-items: center; gap: 4px; }
+  /* The sidebar row's ⋯: the shared borderless icon-btn, quiet until hovered,
+     never shrinking under a long name. */
+  .row-menu { flex: none; width: 24px; height: 24px; color: var(--text3); }
   .act {
     height: var(--ui-control-height); padding: 0 9px;
     background: var(--surface2); color: var(--text2);

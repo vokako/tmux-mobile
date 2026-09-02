@@ -71,7 +71,10 @@ Left-to-right:
   - Relative time of last open (`now`, `5m`, `3h`, `2d`, or month/day).
     Only shown when the session has a `last_opened` timestamp.
   - Window count badge `Nw` — only when `windows > 1`.
-  - Kill button (`×` → "tap to kill" on first tap; 3-second confirm window).
+  - A quiet `⋯` menu button (board #77): opens the row's context menu — the
+    same one right-click / long-press opens — whose only verb is Kill session
+    (danger, confirmed by the app's dialog). No destructive verb sits in the
+    open on a row.
 
 ### Pane list (expanded only when relevant)
 Default: collapsed for every session. Shown when:
@@ -80,7 +83,7 @@ Default: collapsed for every session. Shown when:
   more specifically (search auto-expands).
 
 Each pane row shows: `W.P` index (monospace, accent) · `current_command` ·
-`cwd segment` · AI icon (if any) · `×` kill button.
+`cwd segment` · AI icon (if any) · `⋯` menu (Kill window, confirmed).
 
 Plus a `+ Window` button at the end of the pane list.
 
@@ -115,12 +118,12 @@ Plus a `+ Window` button at the end of the pane list.
 - MRU chips hide while searching to focus attention on results.
 
 ### Kill
-- Session kill: tap `×` → row shows `tap to kill`. Tap again within 3s →
-  `kill_session` RPC → refresh.
-- Window kill: same pattern inside the pane list.
-- Clicking the row instead of the kill button during confirm state activates
-  the session, **not** kill. Kill must be an explicit second tap on the kill
-  button itself.
+- Session kill: `⋯` (or right-click / long-press the row) → Kill session →
+  the shared ConfirmDialog names the session → `kill_session` RPC → refresh.
+- Window kill: same pattern from the pane row's `⋯`.
+- Tapping the row itself always activates the session, never kills. The
+  tracked-project rows beside these follow the same rule (board #77): their
+  Open/Close/Remove verbs live in the `⋯` menu, Close and Remove confirm.
 
 ## API Calls
 - `list_sessions` — sessions with `last_opened` annotation.

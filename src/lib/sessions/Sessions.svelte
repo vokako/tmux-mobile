@@ -8,6 +8,8 @@
   import CreateProjectDialog from '../projects/CreateProjectDialog.svelte';
   import { t } from '../core/i18n.svelte.ts';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
+  import ContextMenu from '../ui/ContextMenu.svelte';
+  import { longpress } from '../ui/longpress.ts';
   import { sessionHasAgent, paneAgent, AGENTS } from '../core/agents.ts';
   // Team-mode sessions (`tmm-team-<room>`) are grouped apart from regular
   // sessions and their clicks route to the Team chat instead of a raw terminal.
@@ -56,6 +58,26 @@
   /** The destructive action awaiting confirmation. `target` is a session name
    * for 'session' and "session:window" for 'window'. */
   let pendingKill = $state<{ kind: 'session' | 'window'; target: string; session?: string } | null>(null);
+  // Board #77 (owner, 2026-09-02: "像关闭之类的应该是点击后才有进一步操作"): the
+  // destructive verb is no longer a trash icon sitting on every row — a quiet ⋯
+  // (and right-click / long-press on the row) opens the ONE context menu, and
+  // Kill still goes through the confirmation above. Same dialect as the
+  // Projects rows beside these.
+  let ctxAt = $state<{ x: number; y: number } | null>(null);
+  let ctxWho = $state('');
+  let ctxItems = $state<{ label: string; icon?: string; danger?: boolean; onselect: () => void }[]>([]);
+  const closeCtx = () => { ctxAt = null; ctxItems = []; };
+  const pointOf = (e: MouseEvent) => ({ x: e.clientX ?? 0, y: e.clientY ?? 0 });
+  function openSessionMenu(at: { x: number; y: number }, s: TmuxSession) {
+    ctxWho = s.name;
+    ctxItems = [{ label: t('confirmKillSessionAction'), icon: 'trash', danger: true, onselect: () => { pendingKill = { kind: 'session', target: s.name }; } }];
+    ctxAt = at;
+  }
+  function openWindowMenu(at: { x: number; y: number }, s: TmuxSession, p: TmuxPane) {
+    ctxWho = `${s.name}:${p.window}`;
+    ctxItems = [{ label: t('confirmKillWindowAction'), icon: 'trash', danger: true, onselect: () => { pendingKill = { kind: 'window', target: `${s.name}:${p.window}`, session: s.name }; } }];
+    ctxAt = at;
+  }
   let killing = $state(false);
 
   let refreshing = $state(false);
@@ -417,6 +439,8 @@
         tabindex="0"
         onclick={() => activateSession(s)}
         onkeydown={(e) => e.key === 'Enter' && activateSession(s)}
+        oncontextmenu={(e) => { if (team) return; e.preventDefault(); openSessionMenu(pointOf(e), s); }}
+        use:longpress={{ onlongpress: (pt) => { if (!team) openSessionMenu(pt, s); } }}
       >
         <span class="dot" class:attached={s.attached}></span>
         <span class="name" class:name-grow={team} title={team ? s.name : null}>{team ? teamLabel(s.name) : s.name}</span>
@@ -452,10 +476,11 @@
             {/if}
             <button
               class="kill"
-              onclick={(e) => { e.stopPropagation(); pendingKill = { kind: 'session', target: s.name }; }}
-              aria-label="Kill session"
+              onclick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); openSessionMenu({ x: r.right, y: r.bottom }, s); }}
+              aria-label={t('hubProjectMenu')}
+              title={t('hubProjectMenu')}
             >
-              <Icon name="trash" size={12} />
+              <Icon name="dots" size={13} />
             </button>
           {/if}
         </span>
@@ -479,9 +504,11 @@
               </button>
               <button
                 class="pane-kill"
-                onclick={(e) => { e.stopPropagation(); pendingKill = { kind: 'window', target: `${s.name}:${p.window}`, session: s.name }; }}
+                onclick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); openWindowMenu({ x: r.right, y: r.bottom }, s, p); }}
+                aria-label={t('hubProjectMenu')}
+                title={t('hubProjectMenu')}
               >
-                <Icon name="trash" size={11} />
+                <Icon name="dots" size={12} />
               </button>
             </div>
           {/each}
@@ -630,6 +657,8 @@
   </div>
   </div>
 </div>
+
+<ContextMenu at={ctxAt} items={ctxItems} who={ctxWho} oncancel={closeCtx} />
 
 <ConfirmDialog open={!!pendingKill} busy={killing} compact={isMobile}
   title={pendingKill
