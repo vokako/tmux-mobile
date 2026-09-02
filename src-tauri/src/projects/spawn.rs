@@ -561,12 +561,12 @@ pub fn refresh_hooks(project_path: &str, window_name: &str) -> bool {
     let claude = home.join("settings.json");
     if claude.is_file() {
         changed |= patch_hooks(&claude, claude_hooks(&notifications.helper_command("claude")));
-        // Channel drift is config drift too: an agent spawned before the
-        // isolated CLAUDE_CONFIG_DIR + inherited-env change has no `env`
-        // block, i.e. no Bedrock switch, and would boot into a login prompt.
-        // Backfilled only when MISSING — an env the owner customized per
-        // agent is not ours to stomp.
+        // Channel drift is config drift too: old homes receive missing global
+        // Bedrock keys without overwriting an explicit per-agent value.
         changed |= ensure_claude_env(&claude);
+        // statusLine is app-owned observation plumbing, like hooks: every
+        // managed Claude must paint the exact row the sniffer understands.
+        changed |= ensure_claude_status_line(&claude);
         let state = home.join(".claude.json");
         if !state.exists() && std::fs::write(&state, "{\"hasCompletedOnboarding\": true, \"theme\": \"dark\"}\n").is_ok() {
             changed = true;
@@ -846,6 +846,7 @@ fn render_claude(
         &settingsfile,
         serde_json::to_string_pretty(&json!({
             "env": shared::claude_user_env(),
+            "statusLine": shared::claude_status_line_config(),
             "skipDangerousModePermissionPrompt": true,
             "hooks": claude_hooks(&notify)
         }))
@@ -928,6 +929,18 @@ fn ensure_claude_env(path: &Path) -> bool {
     if !merge_missing_claude_env(&mut conf, &inherited) {
         return false;
     }
+    std::fs::write(path, serde_json::to_string_pretty(&conf).unwrap()).is_ok()
+}
+
+fn ensure_claude_status_line(path: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(path) else { return false };
+    let Ok(mut conf) = serde_json::from_str::<Value>(&text) else { return false };
+    let Some(root) = conf.as_object_mut() else { return false };
+    let canonical = shared::claude_status_line_config();
+    if root.get("statusLine") == Some(&canonical) {
+        return false;
+    }
+    root.insert("statusLine".into(), canonical);
     std::fs::write(path, serde_json::to_string_pretty(&conf).unwrap()).is_ok()
 }
 
@@ -1289,6 +1302,30 @@ mod tests {
         let _ = std::fs::remove_dir_all(&ws);
     }
 
+    #[test]
+    fn refresh_hooks_backfills_claude_status_line() {
+        let ws = std::env::temp_dir().join(format!("tmm-cc-status-{}", uuid::Uuid::new_v4()));
+        let home = ws.join(".tmm/agents/cc");
+        std::fs::create_dir_all(&home).unwrap();
+        let settings = home.join("settings.json");
+        std::fs::write(&settings, serde_json::to_string_pretty(&json!({
+            "env": { "ANTHROPIC_MODEL": "agent-override" },
+            "hooks": {},
+            "theme": "dark"
+        })).unwrap()).unwrap();
+
+        assert!(refresh_hooks(&ws.to_string_lossy(), "cc"));
+        let read = || -> Value {
+            serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap()
+        };
+        let after = read();
+        assert_eq!(after["statusLine"], shared::claude_status_line_config());
+        assert_eq!(after["env"]["ANTHROPIC_MODEL"], "agent-override");
+        assert_eq!(after["theme"], "dark");
+        assert!(!refresh_hooks(&ws.to_string_lossy(), "cc"), "canonical home is a no-op");
+        std::fs::remove_dir_all(&ws).ok();
+    }
+
     /// The grok backend, aligned with kiro (owner, 2026-08-21): isolated
     /// GROK_HOME, identity via `--agent`, MODEL in the definition not on the
     /// line, telemetry hooks in the home's always-trusted hooks dir, MCP +
@@ -1523,6 +1560,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
                     &std::fs::read_to_string(dir.join("settings.json")).unwrap()
                 ).unwrap();
                 assert!(settings.get("env").is_some_and(Value::is_object), "inherited channel env");
+                assert_eq!(settings["statusLine"], shared::claude_status_line_config());
                 assert_eq!(settings["skipDangerousModePermissionPrompt"], json!(true));
                 // A fresh config dir parks at the theme onboarding without this.
                 let state: Value = serde_json::from_str(

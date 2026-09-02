@@ -18,6 +18,7 @@
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
+use std::io::Read;
 use std::time::Duration;
 use tmux_mobile::tasks;
 use tokio_tungstenite::tungstenite::Message;
@@ -49,6 +50,9 @@ USAGE (agent):
   tmm board take <id>                 claim it: assignee = you, status = doing
   tmm board move <id> <todo|doing|review|done>
   tmm board note <id> <text>          record progress/decisions ON the issue
+
+USAGE (local helpers — no server/config access):
+  tmm claude-statusline                render Claude Code official statusLine JSON from stdin
 
 USAGE (background tasks — LOCAL tmux only, no server needed, never exits 2):
   tmm task start <name> -- <cmd...>   run <cmd> detached in its own tmux window
@@ -135,6 +139,20 @@ async fn main() {
     }
 
     let json = flags.get("output").cloned().flatten().as_deref() == Some("json");
+
+    // Claude Code's official statusLine command: JSON arrives on stdin and one
+    // compact row leaves on stdout. Pure formatting — it must never touch the
+    // hub config/socket, and runs often enough that even a 2s timeout is wrong.
+    if pos[0] == "claude-statusline" {
+        let mut input = String::new();
+        if std::io::stdin().read_to_string(&mut input).is_err() {
+            std::process::exit(EXIT_ERR);
+        }
+        if let Some(line) = tmux_mobile::projects::vitals::claude_status_line(&input) {
+            println!("{line}");
+        }
+        return;
+    }
 
     // Local tmux subtree, dispatched before anything else: `Config::load()`
     // below seeds a token / machine id / team defaults into config.toml, and a

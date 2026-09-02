@@ -473,6 +473,16 @@ pub(crate) fn claude_user_env() -> Value {
     claude_user_env_from(&path)
 }
 
+/// Claude Code's official statusLine extension point. The colocated `tmm`
+/// command reads Claude's JSON stdin and prints the one canonical row that the
+/// pane sniffer recognizes; no jq/Python dependency and no API/token cost.
+pub(crate) fn claude_status_line_config() -> Value {
+    serde_json::json!({
+        "type": "command",
+        "command": "tmm claude-statusline"
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn prepare_claude(
     name: &str, role: &str, goal: &str, team_prompt: &str,
@@ -513,6 +523,7 @@ pub(super) fn prepare_claude(
             // provider channel (Bedrock switch/region/model pins) into it.
             // Plugins and other user preferences remain outside Team.
             "env": claude_user_env(),
+            "statusLine": claude_status_line_config(),
             "skipDangerousModePermissionPrompt": true,
             "hooks": {
                 "PreToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": heartbeat_command(&paths.heartbeat, "pre") } ] } ],
@@ -904,6 +915,7 @@ mod tests {
             Value::Bool(true)
         );
         assert!(claude_settings["env"].is_object(), "provider channel is explicit in Team settings");
+        assert_eq!(claude_settings["statusLine"], claude_status_line_config());
         assert_eq!(
             claude_settings["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"],
             format!("/bin/bash {} pulse", paths.heartbeat.display())

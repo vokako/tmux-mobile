@@ -91,7 +91,13 @@ pub(super) fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &st
         .map(|(_, value)| value.clone())
         .unwrap_or_else(|| std::env::var("PATH").unwrap_or_default());
     env.retain(|(key, _)| key != "PATH");
-    env.push(("PATH".into(), agent_launch_path(None, &inherited_path)));
+    let colocated = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf));
+    env.push((
+        "PATH".into(),
+        agent_launch_path(colocated.as_deref(), &inherited_path),
+    ));
 
     let ws = paths.workspace.to_string_lossy().to_string();
     tmux::ensure_session(session, &ws)?;

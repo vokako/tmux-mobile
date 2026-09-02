@@ -6,13 +6,13 @@
 //! terminal ("从输出的最后几行原始文本内容 加一下当前状态的嗅探，比如模型名 上下文
 //! 长度 effort 之类的", 2026-08-19).
 //!
-//! There is no API for these: a CLI's live state lives in its own process. So we
-//! read the LAST FEW LINES of the pane, which is the one place the CLI publishes
-//! it. That makes this a sniffer, with a sniffer's contract: every field is
-//! optional, an unreadable line yields `Vitals::default()` and NEVER an error,
-//! and nothing downstream may assume a value is present. It is a nicety on top of
-//! the hook-derived state, never a replacement — hooks are facts, this is a
-//! reading of somebody else's screen.
+//! Most CLIs expose no live-state API: their own process owns the footer, so we
+//! read the LAST FEW LINES of the pane. Claude is the useful exception in the
+//! input half: its official `statusLine` command receives exact JSON, which our
+//! local `tmm claude-statusline` renders back into one uniquely anchored pane
+//! row; the server still observes that row through the same sniffer pipeline.
+//! Every field remains optional, an unreadable line yields `Vitals::default()`
+//! and NEVER an error, and nothing downstream may assume a value is present.
 //!
 //! kiro's layout is documented by its own source: the status line is a fixed
 //! order of segments joined by `·` —
@@ -117,9 +117,9 @@ impl Vitals {
 /// memory lives here, keyed by session and window, expiring after
 /// `VITALS_TTL_SECS` so a long-dead reading cannot follow an agent around.
 /// `backend` picks the dialect: every CLI paints its own status furniture
-/// (kiro a `·`-joined status line, grok a header ratio + a boxed footer), and
-/// reading one CLI's screen with another CLI's grammar yields confident
-/// nonsense, which is worse than nothing.
+/// (kiro a `·`-joined status line, claude our official-statusLine `[CC]` row,
+/// grok a header ratio + boxed footer), and reading one CLI's screen with
+/// another CLI's grammar yields confident nonsense, which is worse than nothing.
 pub fn sniff_remembered(
     session: &str,
     window: usize,
@@ -130,12 +130,7 @@ pub fn sniff_remembered(
     let mut v = match backend {
         "grok" => sniff_grok(pane),
         "codex" => sniff_codex(pane),
-        // claude has NO sniffer yet: the CLI is not installed on this machine,
-        // so its status furniture cannot be measured, and reading its pane
-        // with kiro's grammar (the old `_` fallback) risks a confident wrong
-        // reading — e.g. any `on branch …` in ordinary output becoming the
-        // card's branch. No reading beats a wrong one (owner, 2026-08-22 对齐).
-        "claude" => Vitals::default(),
+        "claude" => sniff_claude(pane),
         _ => sniff_kiro(pane, agent),
     };
     let now = now_secs();
@@ -237,6 +232,106 @@ const EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 /// The pie glyphs kiro ramps through for context usage. They are the marker that
 /// a bare `N%` is the context segment and not, say, a percentage in a diff.
 const PIE: [char; 6] = ['○', '◔', '◑', '◕', '●', '◯'];
+
+/// Format Claude Code's official statusLine JSON into one compact, stable row.
+/// This is invoked by the local `tmm claude-statusline` command configured in
+/// Claude settings. The `[CC]` anchor is intentionally unique: `sniff_claude`
+/// can read the pane without guessing from ordinary conversation text.
+pub fn claude_status_line(input: &str) -> Option<String> {
+    let data: serde_json::Value = serde_json::from_str(input).ok()?;
+    let model = data
+        .pointer("/model/display_name")
+        .and_then(serde_json::Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| data.pointer("/model/id").and_then(serde_json::Value::as_str))?
+        .trim();
+    let context = data.get("context_window").and_then(serde_json::Value::as_object);
+    let pct = context
+        .and_then(|c| c.get("used_percentage"))
+        .and_then(serde_json::Value::as_f64)
+        .map(|pct| pct.round().clamp(0.0, 100.0) as u8);
+    let used = context
+        .and_then(|c| c.get("total_input_tokens"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let size = context
+        .and_then(|c| c.get("context_window_size"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+
+    let mut parts = vec!["[CC]".to_string(), model.to_string()];
+    if let Some(pct) = pct {
+        // Percentage comes BEFORE counts so a narrow pane still preserves the
+        // field the card needs; Claude may truncate the right side of the row.
+        parts.push(format!("{pct}% ctx"));
+        if size > 0 {
+            parts.push(format!("{}/{}", short_tokens(used), short_tokens(size)));
+        }
+    }
+    if let Some(effort) = data
+        .pointer("/effort/level")
+        .and_then(serde_json::Value::as_str)
+        .filter(|e| EFFORTS.contains(e))
+    {
+        parts.push(format!("effort {effort}"));
+    }
+    Some(parts.join(" · "))
+}
+
+fn short_tokens(tokens: u64) -> String {
+    fn scaled(tokens: u64, unit: u64, suffix: char) -> String {
+        if tokens % unit == 0 {
+            format!("{}{suffix}", tokens / unit)
+        } else {
+            let value = tokens as f64 / unit as f64;
+            format!("{value:.1}{suffix}")
+        }
+    }
+    if tokens >= 1_000_000 {
+        scaled(tokens, 1_000_000, 'M')
+    } else if tokens >= 1_000 {
+        scaled(tokens, 1_000, 'K')
+    } else {
+        tokens.to_string()
+    }
+}
+
+/// Read the canonical row produced by `tmm claude-statusline`.
+///
+/// Claude's built-in footer is not a stable machine format; statusLine is its
+/// official extension point and hands us exact model/context data. Parsing only
+/// our `[CC]` row makes ordinary output (including pasted examples) inert.
+pub fn sniff_claude(pane: &str) -> Vitals {
+    let mut v = Vitals::default();
+    for line in pane.lines().rev().take(24) {
+        let segs: Vec<&str> = line
+            .trim()
+            .split('·')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect();
+        if segs.first() != Some(&"[CC]") {
+            continue;
+        }
+        if let Some(model) = segs.get(1).filter(|s| !s.is_empty()) {
+            v.model = Some((*model).to_string());
+        }
+        for seg in &segs[2..] {
+            if v.context_pct.is_none() {
+                v.context_pct = context_pct(seg);
+            }
+            if v.effort.is_none() {
+                v.effort = seg
+                    .strip_prefix("effort ")
+                    .filter(|e| EFFORTS.contains(e))
+                    .map(str::to_string);
+            }
+        }
+        v.effort_definitive = v.context_pct.is_some();
+        break;
+    }
+    v
+}
 
 /// Read what the last lines of a pane say about the agent's current state.
 ///
@@ -900,13 +995,62 @@ mod tests {
         );
     }
 
-    /// claude gets NO reading until its furniture is measured — kiro's grammar
-    /// must not be applied to another CLI's screen.
     #[test]
-    fn claude_panes_are_not_read_with_kiro_grammar() {
+    fn claude_official_status_json_becomes_the_canonical_pane_row() {
+        let input = r#"{
+          "model":{"id":"global.anthropic.claude-fable-5-1","display_name":"Fable 5.1"},
+          "context_window":{"total_input_tokens":108450,"context_window_size":200000,"used_percentage":54.2},
+          "effort":{"level":"high"}
+        }"#;
+        assert_eq!(
+            claude_status_line(input).as_deref(),
+            Some("[CC] · Fable 5.1 · 54% ctx · 108.5K/200K · effort high")
+        );
+    }
+
+    #[test]
+    fn claude_null_context_is_absent_not_a_fake_zero() {
+        let input = r#"{
+          "model":{"id":"global.anthropic.claude-fable-5-1","display_name":"Fable 5.1"},
+          "context_window":{"total_input_tokens":0,"context_window_size":200000,"used_percentage":null}
+        }"#;
+        assert_eq!(claude_status_line(input).as_deref(), Some("[CC] · Fable 5.1"));
+    }
+
+    #[test]
+    fn claude_canonical_row_reads_model_context_and_effort() {
+        let pane = "● done\n[CC] · Fable 5.1 · 54% ctx · 108.5K/200K · effort high\n❯ ";
+        let v = sniff_claude(pane);
+        assert_eq!(v.model.as_deref(), Some("Fable 5.1"));
+        assert_eq!(v.context_pct, Some(54));
+        assert_eq!(v.effort.as_deref(), Some("high"));
+        assert!(v.effort_definitive);
+    }
+
+    #[test]
+    fn claude_narrow_real_capture_keeps_model_and_context_before_truncation() {
+        // test:cc_builder resized to 44 columns, Claude Code 2.1.258/Fable 5.1.
+        // The rightmost counts are truncated by Claude, but the two card fields
+        // lead the row and remain complete.
+        let pane = "────────────────────────────────────────────\n❯ \n────────────────────────────────────────────\n  [CC] · Fable 5.1 · 32% ctx · 64.0K/200K…\n  ⏵⏵ bypass permissions on (shift+tab   ·\n";
+        let v = sniff_claude(pane);
+        assert_eq!(v.model.as_deref(), Some("Fable 5.1"));
+        assert_eq!(v.context_pct, Some(32));
+    }
+
+    #[test]
+    fn claude_sniffer_requires_its_unique_anchor_and_remembers_misses() {
         let session = format!("vitals-claude-{}", std::process::id());
-        let pane = "bot \u{b7} claude-opus-5 \u{b7} \u{25d1} 44%\n(main)\n";
-        let v = sniff_remembered(&session, 3, pane, "bot", "claude");
-        assert!(v.is_empty(), "claude pane must yield the empty reading, got {v:?}");
+        let fake = "bot · claude-opus-5 · ◑ 44%\n[CC] appears in prose · 90% ctx";
+        assert!(sniff_claude(fake).is_empty(), "ordinary output is inert");
+
+        let good = "[CC] · Fable 5.1 · 12% ctx · 24K/200K\n";
+        let first = sniff_remembered(&session, 3, good, "bot", "claude");
+        assert_eq!(first.model.as_deref(), Some("Fable 5.1"));
+        assert_eq!(first.context_pct, Some(12));
+        let missed = sniff_remembered(&session, 3, "\n❯ ", "bot", "claude");
+        assert_eq!(missed.model.as_deref(), Some("Fable 5.1"));
+        assert_eq!(missed.context_pct, Some(12));
+        retain_windows(&session, &[]);
     }
 }

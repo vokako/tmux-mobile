@@ -1016,7 +1016,23 @@ dispatches on the backend `agents::detect` reported — `sniff_kiro` for kiro's
 (see the grok backend notes above) — because reading one CLI's screen with
 another CLI's grammar yields confident nonsense, which is worse than nothing.
 
-What makes it more than guesswork is that kiro's layout is documented by kiro's
+Claude 2.1.258 uses its OFFICIAL `statusLine` extension rather than reverse-
+engineering built-in furniture. Claude passes exact local JSON on stdin
+(`model.display_name`, `context_window.total_input_tokens`,
+`context_window.context_window_size`, `context_window.used_percentage`,
+`effort.level`); project and Team settings run the dependency-free local
+`tmm claude-statusline`, which prints
+`[CC] · Fable 5.1 · 32% ctx · 64.0K/200K · effort high`. The command is
+local/event-driven and costs no API tokens. `sniff_claude` accepts ONLY the exact
+`[CC]` first segment, so pasted examples and ordinary percentages are inert.
+The field order is load-bearing: model + percentage precede token counts and
+effort, so the real 44-column paint truncates only the right edge
+(`[CC] · Fable 5.1 · 32% ctx · 64.0K/200K…`) while the card's two fields stay
+complete. Global Claude uses the same command by absolute local `tmm` path;
+managed homes are backfilled on every restart, and both launcher families put
+the colocated `tmm` directory on PATH.
+
+What makes kiro more than guesswork is that kiro's layout is documented by kiro's
 own source: the status line is a fixed order of segments joined by `·` — `agent ·
 autonomous · model · effort · context · tangent · codeIntel · goal` on the left,
 `location · branch` on the right — and the context segment is defined there as
