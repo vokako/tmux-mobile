@@ -706,3 +706,13 @@ the agent's isolated CODEX_HOME alongside config.toml/.env/auth.json.
 - **History window**: the tab loads `team_history(200)`; the full log lives in
   SQLite and is mirrored to the Team-specific
   `<workspace>/.tmm/teams/<team-id>/team-history.jsonl`.
+
+## Rules and their reasons
+
+Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
+
+### Team is desktop-only + JSON-gated
+
+everything we built + the user sees is **Team** (`team_*` RPCs, `TEAM_*` config, `tmm-team-<team-id>` sessions, `src-tauri/src/team/`, `team_bridge.rs`); the **vendored library crate stays `agora`** (faithful upstream copy — `use agora::bus::Bus`). It's a target-gated dep (`cfg(not(android|ios))`); the `server/` module must NEVER name an agora type — it talks to the bus only through the JSON-only `server::TeamBridge` trait (concrete impl `team_bridge::TeamManager`, desktop-only). Mobile passes `None`; `team_*` RPCs then return method-not-found and the Team tab hides itself. The bus runs in-process; the MCP daemon (`:8787`, external agents) and the phone's WS path share it.
+
+**Multiple teams = isolated rooms** (room id = stable canonical-workspace + template slug): room-aware via a `BusProvider` trait (agents pick a room with an `x-room` header, the phone passes `room` per RPC, pushes carry `room`); `TeamManager` is the room registry over ONE shared SQLite connection. Each Team runs in `tmm-team-<team-id>` with agents as named windows; new runtime homes live under `<workspace>/.tmm/teams/<team-id>/` and are self-gitignored. On startup the manager recovers teams still alive in tmux; legacy workspace-only rooms retain their old `.tmm/` layout. The Team tab has a team switcher (new/close). See `docs/design-docs/features/team.md`.

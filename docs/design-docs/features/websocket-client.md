@@ -172,3 +172,15 @@ doc already describes. Design decisions, in the order they bit:
   gate that disconnect on `pending.size === 0` so pollers failing
   behind a long RPC don't kill the connection. When nothing is pending
   and the link still silently fails, the disconnect still fires.
+
+## Rules and their reasons
+
+Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
+
+### WebSocket lifecycle
+
+`connect()` cleans up existing. `onclose` rejects pending. `doDisconnect()` clears timers. Heartbeat ping every 15s; 2 consecutive RPC timeouts → auto-close → reconnect.
+
+### Servers are a named registry; the machine is the identity
+
+(board #55): `src/lib/app/servers.ts` keeps `tmux_servers` (+`tmux_server_current`) while the old `tmux_address`/`tmux_token`/`tmux_socket` stay the ACTIVE MIRROR every existing reader keeps reading. One machine = one entry however many LAN/Tailscale/WAN addresses it answers on — `recordServer` merges by `machineId` (learned at connect) without moving CURRENT, migration attributes `tmux_address_history` through `tmux_machines`, and the same-machine failover semantics are untouched. A different-machine successful connect goes through `activateConnected`: park the old live state/machine id before surfacing the target and reload; a same-machine alternate records in place. Switching (`applySwitch` + reload) parks/restores per-server `tmux_state`/`tmux_machine_id` under `::<id>` keys so restore targets never cross servers, and reuses the boot path so no in-memory cache (Hub rooms, terminals, Files cwds) can leak across; the caller cancels the reconnect machine and drops the socket first. The desktop rail's switcher rides the RAIL_GAP branch above the configure group — a control (no drag slot), popover in the one menu recipe; the Settings form is the add flow and activates only after authentication. Forgetting a non-current server captures its row identity and asks through the shared `ConfirmDialog` before removing config + parked state.

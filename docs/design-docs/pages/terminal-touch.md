@@ -44,3 +44,11 @@ See [Terminal Gestures Design Doc](terminal-gestures.md) for the full gesture pr
 - **Tab swipe vs child gestures** — App-level swipe suppressed when `e.defaultPrevented` or vertical movement > 10px.
 - **Nav buttons must have `tabindex="-1"`** — otherwise Android moves focus to nav buttons when textarea blurs, interfering with keyboard control.
 - **Android `OnGlobalLayoutListener` stale heights** — can fire keyboard-open events when no text input is focused. Guard with `activeElement` check.
+
+## Rules and their reasons
+
+Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
+
+### Terminal touch
+
+All custom (xterm.js v6 has no touch support). Pause updates during touch. Selection is an *object* (`{anchor, head}`, both inclusive buffer-row/col) that persists until explicitly copied or cancelled; both endpoints are draggable via handles; copy is via an explicit floating toolbar (no tap-to-copy heuristics). See `docs/design-docs/pages/terminal-gestures.md` for the full state machine.

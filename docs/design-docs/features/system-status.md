@@ -108,3 +108,11 @@ clipping ancestor first, then test overlap.
 - `system.source.test.ts` pins the contracts refactors would silently break:
   no ws/App/hub imports, the interval clamp, hidden-stops-timer, the
   failed-load-keeps-reading shape, tokens-only type.
+
+## Rules and their reasons
+
+Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
+
+### Server vitals occupy space; they never overlay it
+
+(board #56): desktop `system_status` samples CPU/MEM/root disk in-process through exact-pinned, desktop-gated `sysinfo`; the 20s client poll is the CPU delta window and first CPU is null. `SystemStatus` keeps the last good reading and stops hidden. App mounts it only on a connected desktop as `main`'s LAST flow footer; `.page` shrinks above it, covering absolute page layers and direct children such as Settings. Fixed overlays, pointer-through claims, and layer-only insets are retired — independent Chromium found each of those can still hide pixels.
