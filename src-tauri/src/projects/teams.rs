@@ -31,6 +31,13 @@ pub struct Member {
     /// Role supplement, appended to the base persona.
     #[serde(default)]
     pub role: String,
+    /// Model / effort OVERRIDES for a derived member (owner, 2026-09-02: kiro
+    /// offers many models with no quota, so one base agent can be the seed of
+    /// four reviewers on four different models). Empty = the base's own.
+    #[serde(default)]
+    pub model: String,
+    #[serde(default)]
+    pub effort: String,
     /// Team-only definition (used when `base` is empty). Its `name` is ignored
     /// in favour of the member name.
     #[serde(default)]
@@ -92,6 +99,12 @@ pub fn effective_def(team: &RegTeam, member: &Member, base: Option<&RegAgent>, w
         (true, _, None) => return Err(format!("member '{}' has neither a base agent nor an inline definition", member.name)),
     };
     def.name = window_name.to_string();
+    if !member.model.trim().is_empty() {
+        def.model = member.model.trim().to_string();
+    }
+    if !member.effort.trim().is_empty() {
+        def.effort = member.effort.trim().to_string();
+    }
     let mut system = def.system.trim().to_string();
     let mut block = format!("## Your team: \"{}\"", team.name);
     if !team.description.trim().is_empty() {
@@ -184,6 +197,19 @@ mod tests {
         assert_eq!(d.backend, "grok");
         assert!(d.system.starts_with("Be harsh."));
         assert!(!d.system.contains("teammates"), "a one-member team has no roster block");
-        assert!(effective_def(&t, &Member { name: "x".into(), base: "gone".into(), role: String::new(), agent: None }, None, "x", &[]).is_err());
+        assert!(effective_def(&t, &Member { name: "x".into(), base: "gone".into(), role: String::new(), model: String::new(), effort: String::new(), agent: None }, None, "x", &[]).is_err());
+    }
+
+    #[test]
+    fn effective_def_applies_model_and_effort_overrides() {
+        let t = team(r#"[{"name":"a","base":"kiro","model":"claude-opus-5","effort":"high"},{"name":"b","base":"kiro"}]"#);
+        let members = parse_members(&t).unwrap();
+        let mut base = agent("kiro", "");
+        base.backend = "kiro".into();
+        base.model = "auto".into();
+        let a = effective_def(&t, &members[0], Some(&base), "a", &[]).unwrap();
+        assert_eq!((a.model.as_str(), a.effort.as_str()), ("claude-opus-5", "high"), "an override replaces the base's");
+        let b = effective_def(&t, &members[1], Some(&base), "b", &[]).unwrap();
+        assert_eq!((b.model.as_str(), b.effort.as_str()), ("auto", ""), "empty keeps the base's");
     }
 }

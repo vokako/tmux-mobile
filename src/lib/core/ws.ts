@@ -937,6 +937,9 @@ export interface TeamMember {
   name: string;
   base: string;
   role: string;
+  /** Model / effort overrides for a derived member; empty = the base's. */
+  model?: string;
+  effort?: string;
   agent?: RegAgent | null;
 }
 export interface RegTeam {

@@ -601,6 +601,16 @@ pub fn teams_save(def: &Value) -> Result<Value, String> {
     })?;
     let members = teams::validate(&team, &known, spawn::SPAWN_CAP)?;
     for m in &members {
+        // A derived member's model/effort override is checked against the
+        // BASE's backend — the same rule registry_save applies, for the same
+        // reason (a bad id runs the default model and says so in a line
+        // nobody reads).
+        if !m.base.trim().is_empty() && (!m.model.trim().is_empty() || !m.effort.trim().is_empty()) {
+            if let Some(base) = registry_get(m.base.trim())? {
+                models::validate(&base.backend, m.model.trim()).map_err(|e| format!("member '{}': {e}", m.name))?;
+                models::validate_effort(&base.backend, m.effort.trim()).map_err(|e| format!("member '{}': {e}", m.name))?;
+            }
+        }
         if let Some(a) = m.agent.as_ref().filter(|_| m.base.trim().is_empty()) {
             models::validate(&a.backend, &a.model).map_err(|e| format!("member '{}': {e}", m.name))?;
             models::validate_effort(&a.backend, &a.effort).map_err(|e| format!("member '{}': {e}", m.name))?;

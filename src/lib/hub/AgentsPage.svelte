@@ -171,7 +171,7 @@
   // model, effort, persona). Skills/MCP for a custom member are the built-ins;
   // anything richer is a registry agent, which is what `base` is for.
   const TEAM_MAX = 4; // mirrors the server's spawn cap (validated there too)
-  const blankMember = () => ({ name: '', base: defs[0]?.name ?? '', role: '', agent: null });
+  const blankMember = () => ({ name: '', base: defs[0]?.name ?? '', role: '', model: '', effort: '', agent: null });
   const blankCustom = () => ({ name: '', backend: 'claude', model: '', effort: '', system: '', skills: '[]', mcp: '[]', can_hire: false });
   function startTeam(team) {
     closeAll();
@@ -179,7 +179,7 @@
     let members = [];
     if (team) { try { members = JSON.parse(team.members) ?? []; } catch { members = []; } }
     editingTeam = team
-      ? { name: team.name, description: team.description ?? '', members: members.map((m) => ({ name: m.name ?? '', base: m.base ?? '', role: m.role ?? '', agent: m.agent ?? null })) }
+      ? { name: team.name, description: team.description ?? '', members: members.map((m) => ({ name: m.name ?? '', base: m.base ?? '', role: m.role ?? '', model: m.model ?? '', effort: m.effort ?? '', agent: m.agent ?? null })) }
       : { name: '', description: '', members: [blankMember()] };
   }
   function addMember() {
@@ -205,8 +205,12 @@
     modelsByBackend[backend] = [];
     modelsList(backend).then((r) => { modelsByBackend[backend] = r.models ?? []; }).catch(() => {});
   }
+  const baseBackend = (m) => defs.find((d) => d.name === m.base)?.backend ?? '';
   $effect(() => {
-    for (const m of editingTeam?.members ?? []) if (!m.base && m.agent) ensureModels(m.agent.backend);
+    for (const m of editingTeam?.members ?? []) {
+      if (!m.base && m.agent) ensureModels(m.agent.backend);
+      else if (m.base) ensureModels(baseBackend(m));
+    }
   });
   const teamSavable = $derived(!!editingTeam && editingTeam.name.trim() && editingTeam.members.length > 0
     && editingTeam.members.every((m) => m.name.trim() && (m.base || m.agent)));
@@ -219,6 +223,7 @@
         description: editingTeam.description.trim(),
         members: JSON.stringify(editingTeam.members.map((m) => ({
           name: m.name.trim(), base: m.base, role: m.role.trim(),
+          model: m.base ? (m.model ?? '').trim() : '', effort: m.base ? (m.effort ?? '') : '',
           agent: m.base ? null : { ...m.agent, name: m.name.trim(), model: (m.agent?.model ?? '').trim() },
         }))),
       });
@@ -590,6 +595,22 @@
                   onchange={(v) => setBase(i, v)} />
                 <button class="icon-btn danger" title={t('teamsRemoveMember')} aria-label={t('teamsRemoveMember')} disabled={editingTeam.members.length <= 1} onclick={() => removeMember(i)}><Icon name="x" size={13} /></button>
               </div>
+              {#if m.base}
+                <!-- A derived member may still pick its OWN model/effort (owner,
+                     2026-09-02: kiro's many no-quota models → one base, four
+                     reviewers on four models). Empty = the base's. -->
+                <div class="row2">
+                  <label>{t('agentsModel')}
+                    <Select bind:value={m.model} editable dense options={modelsByBackend[baseBackend(m)] ?? []}
+                      placeholder={t('teamsInherit')} ariaLabel={t('agentsModel')} />
+                  </label>
+                  <label>{t('agentsEffort')}
+                    <Select bind:value={m.effort} dense
+                      options={[{ value: '', label: t('teamsInherit') }, ...(EFFORTS[baseBackend(m)] ?? [])]}
+                      ariaLabel={t('agentsEffort')} />
+                  </label>
+                </div>
+              {/if}
               {#if !m.base && m.agent}
                 <!-- A team-only member: the agent editor's identity fields, inline. -->
                 <div class="row2">
