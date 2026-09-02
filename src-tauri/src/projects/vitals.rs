@@ -335,10 +335,11 @@ pub fn sniff_claude(pane: &str) -> Vitals {
 
 /// Read what the last lines of a pane say about the agent's current state.
 ///
-/// `agent` is the name the CLI prints as its first segment — for a managed agent
-/// that is its window name. It is used as an anchor, not as a filter: fields that
-/// identify themselves by shape (context, effort, branch) are read even when the
-/// anchor never appears, because a narrow pane wraps segments onto later lines.
+/// `agent` is normally the first status segment (the managed window name).
+/// Resumed legacy conversations may retain the exact built-in `kiro_default`
+/// identity, which is accepted as the one narrow fallback. The anchor is not a
+/// filter: fields that identify themselves by shape (context and branch) are
+/// read even when it never appears, because narrow panes wrap later segments.
 pub fn sniff_kiro(pane: &str, agent: &str) -> Vitals {
     let mut v = Vitals::default();
     // Bottom-up: the newest paint of the status line is the last one.
@@ -368,16 +369,17 @@ pub fn sniff_kiro(pane: &str, agent: &str) -> Vitals {
             continue;
         }
 
-        // Is this the status line proper? kiro's left side starts with the
-        // agent's own name, so seg 0 == the anchor. Effort is ONLY read here,
-        // and only by the line's own PATTERN — `… · model · effort · ◔ N%`,
-        // i.e. the segment immediately BEFORE the context segment (owner,
-        // 2026-08-26: "gpt-5.6-sol · medium · ◔ 5% 所以 effort 显示 你要按照
-        // 这样的模式去匹配 不要直接全文匹配"): unlike context (pie glyph) and
-        // branch (parentheses) it is a bare word with no shape of its own, and
-        // reading `high`/`max`/`medium` wherever they sat turned ordinary
-        // output (a table cell, a priority column) into a confident reading.
-        let anchored = segs.first().is_some_and(|s| *s == agent);
+        // Is this the status line proper? Usually kiro's left side starts with
+        // the managed window/registry name. A resumed conversation can retain
+        // Kiro's exact built-in identity `kiro_default` even though the app
+        // window was later named `chat`; that line is still the TUI's own
+        // status and therefore the runtime-model authority. Keep the exception
+        // exact — arbitrary first segments remain ordinary output.
+        // Effort has no identifying glyph, so it is read ONLY on this anchored
+        // line and only as the segment immediately before the context segment.
+        // Matching bare low/medium/high words elsewhere made ordinary output
+        // look like a runtime setting.
+        let anchored = segs.first().is_some_and(|s| *s == agent || *s == "kiro_default");
         if anchored && v.effort.is_none() && !v.effort_definitive {
             if let Some(ci) = segs.iter().position(|s| context_pct(s).is_some()) {
                 let word = segs[ci.saturating_sub(1)].to_ascii_lowercase();
@@ -783,6 +785,20 @@ mod tests {
         // A cwd is not a model even in the model's position.
         let path = sniff_kiro("bot · /local/home/cfu/work · ◔ 9%\n", "bot");
         assert_eq!(path.model, None);
+    }
+
+    #[test]
+    fn resumed_builtin_kiro_identity_still_reports_the_runtime_model() {
+        // Real test:chat capture, 52 columns (2026-09-02): the app window is
+        // `chat`, but the resumed Kiro conversation retained its built-in
+        // status identity and actual running model.
+        let pane = "kiro_default · gpt-5.6-sol · ◔ 6%\n\
+/local/home/cfu/work/projects/tmux-mobile/src-tauri\n\
+(feat/projects-and-tasks)\n";
+        let v = sniff_kiro(pane, "chat");
+        assert_eq!(v.model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(v.context_pct, Some(6));
+        assert_eq!(v.branch.as_deref(), Some("feat/projects-and-tasks"));
     }
 
     #[test]

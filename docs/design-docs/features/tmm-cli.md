@@ -1047,10 +1047,14 @@ autonomous · model · effort · context · tangent · codeIntel · goal` on the
 "Share of the context used" (a pie glyph plus `N%`, or `N% ctx` in lite mode). Four
 rules follow from reading a screen rather than an API:
 
-- **The agent's own name is the anchor.** The model is positional (it follows the
-  name, and the optional `Autonomous` flag), so a line that does not start with
-  this window's name contributes no model. Without that anchor a cwd, a tangent
-  name or a neighbour's status line becomes "the model this agent is running".
+- **The effective agent identity is the anchor.** Normally it is the managed
+  window name; a resumed pre-materialized conversation can retain Kiro's exact
+  built-in `kiro_default` status identity (measured: window `chat`, status
+  `kiro_default · gpt-5.6-sol · ◔ 6%`), which is the ONE accepted fallback.
+  The model is positional after that anchor (and optional `Autonomous`), so an
+  arbitrary line contributes no model. Without the bounded anchor a cwd, a
+  tangent name or a neighbour's status line becomes "the model this agent is
+  running".
 - **Fields that can identify themselves do — and effort cannot, so it is
   anchored.** Context and branch are found by shape wherever they sit, because a
   narrow pane wraps the right-hand segments onto their own lines. Effort has no
