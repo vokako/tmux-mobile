@@ -1398,7 +1398,7 @@ impl Store {
             RegAgent {
                 name: "claude".into(),
                 backend: "claude".into(),
-                model: String::new(),
+                model: "global.anthropic.claude-fable-5-1[1m]".into(),
                 effort: String::new(),
                 system: "You are a powerful 10x developer running on Claude Code who can handle any task with decisive execution and minimal words.".into(),
                 skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),

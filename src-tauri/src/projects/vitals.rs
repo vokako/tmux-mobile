@@ -245,6 +245,11 @@ pub fn claude_status_line(input: &str) -> Option<String> {
         .filter(|s| !s.trim().is_empty())
         .or_else(|| data.pointer("/model/id").and_then(serde_json::Value::as_str))?
         .trim();
+    let model = if model.ends_with("context)") {
+        model.rfind(" (").map(|i| &model[..i]).unwrap_or(model)
+    } else {
+        model
+    };
     let context = data.get("context_window").and_then(serde_json::Value::as_object);
     let pct = context
         .and_then(|c| c.get("used_percentage"))
@@ -1021,6 +1026,18 @@ mod tests {
         assert_eq!(
             claude_status_line(input).as_deref(),
             Some("[CC] · Fable 5.1 · 54% ctx · 108.5K/200K · effort high")
+        );
+    }
+
+    #[test]
+    fn claude_1m_display_name_drops_the_context_suffix() {
+        let input = r#"{
+          "model":{"id":"global.anthropic.claude-fable-5-1[1m]","display_name":"Fable 5.1 (1M context)"},
+          "context_window":{"total_input_tokens":108450,"context_window_size":1000000,"used_percentage":10.8}
+        }"#;
+        assert_eq!(
+            claude_status_line(input).as_deref(),
+            Some("[CC] · Fable 5.1 · 11% ctx · 108.5K/1M")
         );
     }
 
