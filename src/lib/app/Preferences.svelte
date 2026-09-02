@@ -81,7 +81,12 @@
 
   const TAB_KEY = 'tmux_settings_tab';
   const storedTab = localStorage.getItem(TAB_KEY);
-  const validStoredTab = storedTab === 'connection' || storedTab === 'shortcuts' || storedTab === 'agents' || storedTab === 'notifications' || storedTab === 'terminal';
+  /** The four agent-configuration categories a phone shows (owner, 2026-09-02:
+   *  "把 team agent mcp skill 分开几个二级设置页面吧，在手机上") — each embeds
+   *  the REAL AgentsPage narrowed to one section, so the desktop page and the
+   *  four phone pages cannot drift apart. */
+  const AGENT_TABS = ['agents', 'teams', 'skills', 'mcp'];
+  const validStoredTab = storedTab === 'connection' || storedTab === 'shortcuts' || storedTab === 'notifications' || storedTab === 'terminal' || (storedTab != null && AGENT_TABS.includes(storedTab));
   const initialTab = validStoredTab ? storedTab : 'appearance';
   let tab = $state<string>(initialTab);
   if (storedTab && storedTab !== initialTab) localStorage.setItem(TAB_KEY, initialTab);
@@ -130,7 +135,12 @@
     { id: 'notifications', label: () => t('settingsNotifications') },
     { id: 'terminal', label: () => t('settingsTerminal') },
     ...(showShortcuts ? [{ id: 'shortcuts', label: () => t('settingsShortcuts') }] : []),
-    ...(showAgents ? [{ id: 'agents', label: () => t('agentsTitle') }] : []),
+    ...(showAgents ? [
+      { id: 'agents', label: () => t('agentsTitle') },
+      { id: 'teams', label: () => t('teamsTitle') },
+      { id: 'skills', label: () => t('skillsTitle') },
+      { id: 'mcp', label: () => t('mcpTitle') },
+    ] : []),
     { id: 'connection', label: () => t('settingsConnection') },
   ]);
   const shortcutActions: [ShortcutAction, string][] = [
@@ -169,7 +179,7 @@
     // desktop, where it is a page, or a server with no bus) must not leave the
     // pane blank. Assigned rather than selectTab'd: this is a correction, and
     // selectTab would DRILL into a category the user never tapped.
-    if (!showAgents && tab === 'agents') { tab = 'appearance'; localStorage.setItem(TAB_KEY, tab); }
+    if (!showAgents && AGENT_TABS.includes(tab)) { tab = 'appearance'; localStorage.setItem(TAB_KEY, tab); }
     if (connected && tab === 'connection' && !hookLoaded) loadHookStatus();
   });
 
@@ -238,7 +248,7 @@
       // The embedded AgentsPage peels its OWN layers first (delete dialog, then
       // an open editor) — the same order it uses as a page. Only when it has
       // nothing left does back close the category, and only then the page.
-      if (tab === 'agents' && agentsBack?.()) return true;
+      if (AGENT_TABS.includes(tab) && agentsBack?.()) return true;
       if (catOpen && isCompact()) { closeCat(); return true; }
       return false;
     });
@@ -293,7 +303,7 @@
     <!-- The embedded AgentsPage brings its OWN page head once it opens an
          editor, so Settings yields its head there — two stacked title bars is
          most of a phone's first screenful. -->
-    {#if !(tab === 'agents' && agentsDrilled)}
+    {#if !(AGENT_TABS.includes(tab) && agentsDrilled)}
       <div class="page-head">
         <!-- Compact only: the way back to the category list (the back gesture
              does the same through onGoBack). -->
@@ -305,14 +315,17 @@
       </div>
     {/if}
 
-    {#if tab === 'agents'}
+    {#if AGENT_TABS.includes(tab)}
       <!-- The REAL agent configuration page, not a copy of it: on a phone it is
            already a single column (its list is the screen, an editor takes it
            over), which is exactly the shape a Settings category needs. Its back
-           chain is spliced into this page's above. -->
+           chain is spliced into this page's above. ONE instance for the four
+           categories, narrowed by `section` — Agents / Teams / Skills / MCP
+           are separate second-level pages on the phone (owner, 2026-09-02). -->
       <div class="agents-embed">
         <AgentsPage
-          visible={tab === 'agents'}
+          section={tab}
+          visible={AGENT_TABS.includes(tab)}
           editRequest={agentsEditRequest}
           onGoBack={(fn: () => boolean) => agentsBack = fn}
           onDrilled={(d: boolean) => agentsDrilled = d}

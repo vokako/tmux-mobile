@@ -27,7 +27,26 @@
     grok: ['low', 'medium', 'high', 'xhigh'],
   };
 
-  let { visible = false, onGoBack = null, editRequest = null, onDrilled = null } = $props();
+  // `section` narrows the page to ONE kind — 'agents' | 'teams' | 'skills' |
+  // 'mcp' — for the phone's Settings, where each is its own second-level page
+  // (owner, 2026-09-02: "把 team agent mcp skill 分开几个二级设置页面吧，在手机
+  // 上"). null = the desktop page with every section in one sidebar.
+  let { visible = false, onGoBack = null, editRequest = null, onDrilled = null, section = null } = $props();
+  const SECTION_META = {
+    agents: ['agentsTitle', 'agentsHint'],
+    teams: ['teamsTitle', 'teamsHint'],
+    skills: ['skillsTitle', 'skillsHint'],
+    mcp: ['mcpTitle', 'mcpHint'],
+  };
+  const shows = (kind) => !section || section === kind;
+  // Switching category closes whatever editor the previous one had open — the
+  // page-head above already names the new category, an editor from the old
+  // one would contradict it.
+  let lastSection;
+  $effect(() => {
+    if (lastSection !== undefined && section !== lastSection) closeAll();
+    lastSection = section;
+  });
 
   let defs = $state([]);
   let teams = $state([]);       // agent teams (board #74): RegTeam[]
@@ -381,7 +400,8 @@
   <aside class="sidebar">
     <SideHandle />
     <div class="side-scroll subtle-scroll" use:scrollFade>
-      <div class="side-h">{t('agentsTitle')}</div>
+      {#if shows('agents')}
+      {#if !section}<div class="side-h">{t('agentsTitle')}</div>{/if}
       {#each defs as d (d.name)}
         <button class="side-row" class:open={editing?.name === d.name && !isNew} onclick={() => startEdit(d)}>
           {#if backendIcon(d.backend)}<img class="ava" src={backendIcon(d.backend)} alt={d.backend} />{:else}<span class="ava" style:background={backendColor(d.backend)}>{d.name.slice(0, 1).toUpperCase()}</span>{/if}
@@ -395,10 +415,12 @@
       <button class="side-row add" onclick={() => startEdit(null)}>
         <Icon name="plus" size={13} />{t('agentsNew')}
       </button>
+      {/if}
 
       <!-- Agent TEAMS (board #74): a named set of the agents above, each with
            a role. Same row dialect; the second line names the members. -->
-      <div class="side-h">{t('teamsTitle')}</div>
+      {#if shows('teams')}
+      {#if !section}<div class="side-h">{t('teamsTitle')}</div>{/if}
       {#each teams as tm (tm.name)}
         <button class="side-row team-row" class:open={editingTeam?.name === tm.name && !teamIsNew} onclick={() => startTeam(tm)}>
           <Icon name="collab" size={13} />
@@ -408,8 +430,10 @@
       <button class="side-row add" onclick={() => startTeam(null)}>
         <Icon name="plus" size={13} />{t('teamsNew')}
       </button>
+      {/if}
 
-      <div class="side-h">{t('skillsTitle')}</div>
+      {#if shows('skills')}
+      {#if !section}<div class="side-h">{t('skillsTitle')}</div>{/if}
       {#each skills as sk (sk.name)}
         <button class="side-row" class:open={editingSkill?.name === sk.name && !skillIsNew} onclick={() => startSkill(sk)}>
           <Icon name="zap" size={13} />
@@ -419,8 +443,10 @@
       <button class="side-row add" onclick={() => startSkill(null)}>
         <Icon name="plus" size={13} />{t('skillsNew')}
       </button>
+      {/if}
 
-      <div class="side-h">MCP</div>
+      {#if shows('mcp')}
+      {#if !section}<div class="side-h">{t('mcpTitle')}</div>{/if}
       {#each mcps as m (m.name)}
         <button class="side-row" class:open={editingMcp?.name === m.name && !mcpIsNew} onclick={() => startMcp(m)}>
           <Icon name="link" size={13} />
@@ -430,6 +456,7 @@
       <button class="side-row add" onclick={() => startMcp(null)}>
         <Icon name="plus" size={13} />{t('mcpNew')}
       </button>
+      {/if}
     </div>
   </aside>
 
@@ -692,9 +719,9 @@
         </div>
       </div>
     {:else}
-      <div class="page-head"><h1>{t('agentsTitle')}</h1></div>
+      <div class="page-head"><h1>{t(SECTION_META[section]?.[0] ?? 'agentsTitle')}</h1></div>
       <div class="placeholder">
-        <p class="hint">{t('agentsHint')}</p>
+        <p class="hint">{t(SECTION_META[section]?.[1] ?? 'agentsHint')}</p>
       </div>
     {/if}
   </main>

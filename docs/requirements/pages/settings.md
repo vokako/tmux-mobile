@@ -11,6 +11,7 @@ rounded shape, muted idle state, and accent active state. Desktop Settings uses 
 
 - **Appearance** — theme, language, responsive layout, chat detail, desktop interface scale, terminal font and spacing
 - **Notifications** — message notifications On/Off, the level (Finished / Replies / Everything) and a test row
+- **Agents / Teams / Skills / MCP servers** (phone only, where Agents is not a page of its own) — four second-level pages, each the real AgentsPage narrowed to one section (owner, 2026-09-02)
 - **Shortcuts** — configurable desktop navigation and Terminal window bindings
 - **Connection** — current server/addresses, optimize/share/disconnect, debug
 

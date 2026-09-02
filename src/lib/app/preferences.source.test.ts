@@ -27,19 +27,22 @@ test('the category exists only where Agents is not a page of its own', () => {
   // showAgents is App's call (nav-state's agentsLivesInSettings && hubEligible):
   // the desktop rail keeps Agents as a page with its own draggable icon.
   assert.match(source, /showAgents = false/u, 'off by default, so a host that says nothing gets the old Settings');
-  assert.match(source, /\.\.\.\(showAgents \? \[\{ id: 'agents', label: \(\) => t\('agentsTitle'\) \}\] : \[\]\)/u,
-    'one row, labelled with the page’s own name');
+  // Four rows on the phone (owner, 2026-09-02: "把 team agent mcp skill 分开几个
+  // 二级设置页面吧"), each the REAL page narrowed by `section`.
+  assert.match(source, /\.\.\.\(showAgents \? \[\s*\{ id: 'agents', label: \(\) => t\('agentsTitle'\) \},\s*\{ id: 'teams', label: \(\) => t\('teamsTitle'\) \},\s*\{ id: 'skills', label: \(\) => t\('skillsTitle'\) \},\s*\{ id: 'mcp', label: \(\) => t\('mcpTitle'\) \},\s*\] : \[\]\)/u,
+    'four rows, each labelled with its section’s own name');
+  assert.match(source, /<AgentsPage\s+section=\{tab\}/u, 'the one instance is narrowed by the category, never copied');
   // Connection stays LAST — it is the way out (disconnect lives there).
   const list = source.match(/const tabs = \$derived\(\[[\s\S]*?\]\);/u)?.[0] ?? '';
   assert.ok(list.indexOf("id: 'agents'") < list.indexOf("id: 'connection'"), 'Agents sits before Connection');
   // A restored category that does not exist here must not leave a blank pane.
-  assert.match(source, /if \(!showAgents && tab === 'agents'\) \{ tab = 'appearance';/u);
-  assert.doesNotMatch(source, /if \(!showAgents && tab === 'agents'\) selectTab/u,
+  assert.match(source, /if \(!showAgents && AGENT_TABS\.includes\(tab\)\) \{ tab = 'appearance';/u);
+  assert.doesNotMatch(source, /if \(!showAgents && AGENT_TABS\.includes\(tab\)\) selectTab/u,
     'a correction must not DRILL into a category the user never tapped');
 });
 
 test('the category is restorable, and it opens on request', () => {
-  assert.match(source, /storedTab === 'agents'/u, 'a reload comes back to the category you were in');
+  assert.match(source, /AGENT_TABS\.includes\(storedTab\)/u, 'a reload comes back to the category you were in');
   assert.match(source, /let openedRequest = 0;/u);
   assert.match(
     source,
@@ -53,7 +56,7 @@ test('back peels the embedded page first, then the category', () => {
   // backwards drops the user out of Settings mid-edit.
   assert.match(
     source,
-    /onGoBack\?\.\(\(\) => \{[\s\S]*?if \(tab === 'agents' && agentsBack\?\.\(\)\) return true;[\s\S]*?if \(catOpen && isCompact\(\)\) \{ closeCat\(\); return true; \}/u,
+    /onGoBack\?\.\(\(\) => \{[\s\S]*?if \(AGENT_TABS\.includes\(tab\) && agentsBack\?\.\(\)\) return true;[\s\S]*?if \(catOpen && isCompact\(\)\) \{ closeCat\(\); return true; \}/u,
   );
   assert.match(source, /onGoBack=\{\(fn: \(\) => boolean\) => agentsBack = fn\}/u, 'the embedded page hands its chain up');
 });
@@ -61,6 +64,6 @@ test('back peels the embedded page first, then the category', () => {
 test('one head at a time: Settings yields its own to the editor', () => {
   // The embedded editor brings a .page-head of its own; two stacked title bars
   // is most of a phone's first screenful.
-  assert.match(source, /\{#if !\(tab === 'agents' && agentsDrilled\)\}\s*<div class="page-head">/u);
+  assert.match(source, /\{#if !\(AGENT_TABS\.includes\(tab\) && agentsDrilled\)\}\s*<div class="page-head">/u);
   assert.match(source, /onDrilled=\{\(d: boolean\) => agentsDrilled = d\}/u);
 });
