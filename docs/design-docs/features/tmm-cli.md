@@ -422,7 +422,7 @@ boundary is the most recent fact*, and there are exactly four states:
 | a failed stop (StopFailure) | `failed` | the stop |
 | an explicit `tmm status waiting\|blocked`, still fresh (30 min TTL) | `waiting` | the claim |
 | a turn end (`stop` / `tmm done`) | `idle` | the end (detail = done summary) |
-| an ask (`permission_required` / `input_required`) | `waiting` | the ask |
+| an ask (`permission_required` / `input_required` — a real question; Claude's 60 s `idle_prompt` nudge is dropped before it can become one, board #75) | `waiting` | the ask |
 | a turn start (`userPromptSubmit`, or a tool call) | `running` | **the START** |
 | no hook has ever spoken for this window | pane activity < 30 s | `running` else `idle` |
 

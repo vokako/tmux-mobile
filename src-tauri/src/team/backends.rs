@@ -530,7 +530,7 @@ pub(super) fn prepare_claude(
                 "PostToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": heartbeat_command(&paths.heartbeat, "post") } ] } ],
                 "PostToolUseFailure": [ { "matcher": "*", "hooks": [ { "type": "command", "command": heartbeat_command(&paths.heartbeat, "post") } ] } ],
                 "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": heartbeat_command(&paths.heartbeat, "pulse") } ] } ],
-                "Notification": [ { "matcher": "permission_prompt|idle_prompt|agent_needs_input|agent_completed", "hooks": [ { "type": "command", "command": notify } ] } ],
+                "Notification": [ { "matcher": "permission_prompt|agent_needs_input|agent_completed", "hooks": [ { "type": "command", "command": notify } ] } ],
                 "Stop": [ { "hooks": [
                     { "type": "command", "command": bash_script_command(&paths.keepalive) },
                     { "type": "command", "command": notify },

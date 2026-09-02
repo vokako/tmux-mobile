@@ -219,6 +219,19 @@ impl AgentNotificationHub {
             crate::projects::vitals::sniff_window_soon(&session, window);
             return Ok(());
         }
+        // Claude's `idle_prompt` is a NUDGE, not an ask (board #75, measured
+        // 2026-09-02: every one of the 7 `input_required` rows in state.db sat
+        // exactly 60 s after that window's `completed`, nothing in between —
+        // it is Claude Code's "you have been idle for a minute" reminder,
+        // fired AFTER the turn ended). Read as an ask it flipped every
+        // finished Claude agent from `idle` to amber `waiting for you` a
+        // minute later and left a "waiting for input" row in the feed. It is
+        // dropped here — silently, not as an error, so already-spawned agents
+        // whose hooks still match it do not spam the log — and the matchers
+        // no longer subscribe to it. `agent_needs_input` stays a real ask.
+        if is_idle_nudge(&envelope) {
+            return Ok(());
+        }
         let normalized = normalize(&envelope)?;
         let (session, window, pane) = tmux::resolve_pane_id(&envelope.pane_id)?;
         let timestamp = unix_seconds();
@@ -529,9 +542,7 @@ fn normalize(envelope: &InboxEnvelope) -> Result<Normalized, String> {
         "claude" => {
             let kind = match (event.as_deref(), notification_type.as_deref()) {
                 (Some("Notification"), Some("permission_prompt")) => "permission_required",
-                (Some("Notification"), Some("idle_prompt" | "agent_needs_input")) => {
-                    "input_required"
-                }
+                (Some("Notification"), Some("agent_needs_input")) => "input_required",
                 (Some("Notification"), Some("agent_completed")) | (Some("Stop"), _) => "completed",
                 (Some("StopFailure"), _) => "failed",
                 _ => return Err("unsupported Claude event".into()),
@@ -599,6 +610,20 @@ fn normalize(envelope: &InboxEnvelope) -> Result<Normalized, String> {
 /// Returns true when the envelope carries a `userPromptSubmit` event (kiro),
 /// which marks the beginning of a new user turn. Used to reset the
 /// `sent_this_turn` flag so the next stop can auto-post.
+/// The `Notification` types the global Claude install subscribes to. No
+/// `idle_prompt`: that is the idle nudge, not an ask (board #75).
+fn claude_hooks_matcher() -> &'static str {
+    "permission_prompt|agent_needs_input|agent_completed"
+}
+
+/// Claude Code's idle reminder (`Notification` / `idle_prompt`): fires ~60 s
+/// after a turn ended with nobody typing. Not an ask — see `consume_file`.
+fn is_idle_nudge(envelope: &InboxEnvelope) -> bool {
+    envelope.backend == "claude"
+        && envelope.payload.get("hook_event_name").and_then(Value::as_str) == Some("Notification")
+        && envelope.payload.get("notification_type").and_then(Value::as_str) == Some("idle_prompt")
+}
+
 fn is_user_prompt_submit(envelope: &InboxEnvelope) -> bool {
     match envelope.backend.as_str() {
         "kiro" => envelope
@@ -726,7 +751,7 @@ fn install_claude(path: &Path, helper: &str) -> Result<(), String> {
     add_claude_event(
         hooks,
         "Notification",
-        Some("permission_prompt|idle_prompt|agent_needs_input|agent_completed"),
+        Some(claude_hooks_matcher()),
         format!("{helper} claude # {OWNER_MARKER}"),
     )?;
     add_claude_event(
@@ -1011,6 +1036,25 @@ mod tests {
             .kind,
             "permission_required"
         );
+        // board #75: a real question is an ask; the 60 s idle reminder is not
+        // an event at all (consume_file drops it before normalize).
+        assert_eq!(
+            normalize(&envelope(
+                "claude",
+                json!({"hook_event_name":"Notification","notification_type":"agent_needs_input"})
+            ))
+            .unwrap()
+            .kind,
+            "input_required"
+        );
+        let nudge = envelope(
+            "claude",
+            json!({"hook_event_name":"Notification","notification_type":"idle_prompt"}),
+        );
+        assert!(is_idle_nudge(&nudge));
+        assert!(normalize(&nudge).is_err(), "no ask kind is ever derived from the idle nudge");
+        assert!(!is_idle_nudge(&envelope("claude", json!({"hook_event_name":"Notification","notification_type":"permission_prompt"}))));
+        assert!(!claude_hooks_matcher().contains("idle_prompt"), "new configs do not subscribe to the nudge");
         assert_eq!(
             normalize(&envelope("codex", json!({"hook_event_name":"Stop"})))
                 .unwrap()

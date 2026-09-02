@@ -493,7 +493,7 @@ fn claude_hooks(notify: &str) -> Value {
         // `deliver_mentions` were never acked (hollow ring forever). Kiro and
         // grok had it; claude and codex did not (owner, 2026-08-22: 对齐).
         "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
-        "Notification": [ { "matcher": "permission_prompt|idle_prompt|agent_needs_input|agent_completed", "hooks": [ { "type": "command", "command": notify } ] } ],
+        "Notification": [ { "matcher": "permission_prompt|agent_needs_input|agent_completed", "hooks": [ { "type": "command", "command": notify } ] } ],
         "Stop": [ { "hooks": [ { "type": "command", "command": notify } ] } ],
         "StopFailure": [ { "hooks": [ { "type": "command", "command": notify } ] } ]
     })
