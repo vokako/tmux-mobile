@@ -670,15 +670,17 @@ and a Hub-managed Claude launched as
   `refresh_hooks` backfills missing channel keys on every start: global additions
   reach old homes, while an existing per-agent value remains an explicit
   override.
-- **First-run furniture, both measured**: a fresh config dir parks the TUI at
-  the theme-onboarding picker before anything else, so `.claude.json` is
-  pre-seeded with `hasCompletedOnboarding` (never clobbered — it records
-  folder trust); the bypass-permissions acceptance dialog is suppressed by
-  `skipDangerousModePermissionPrompt: true`; the folder-trust prompt is
-  answered by the spawn confirmation machinery. Claude 2.1.258 defaults the
-  cursor to `No, exit`, so its acceptance sequence is `Down` → `Enter`;
-  sending the old bare Enter exits to the shell. Codex keeps its one-Enter
-  sequence (`CLAUDE_FOLDER_TRUST_MARKERS`, wording re-verified on 2.1.258).
+- **First-run furniture, measured and PRESEEDED**: Claude has no supported
+  global-trust switch. Its official permissions docs specify the persisted
+  decision exactly as `projects["<repo-root>"].hasTrustDialogAccepted=true` in
+  `.claude.json` (repository root in git, launch directory outside git). A
+  managed home exists only because the user explicitly spawned it into that
+  workspace, so `ensure_claude_state` canonicalizes the path, finds the nearest
+  `.git` root, merges that key with onboarding/theme before launch, preserves
+  every session/usage field, and tightens the private file to 0600. Restart
+  backfills old homes. The older prompt watcher (`Down` → `Enter` on Claude
+  2.1.258 because `No, exit` is selected by default) remains only as a fallback
+  for legacy/changed CLI shapes; normal managed startup shows no trust page.
 - **Model**: empty means the BACKEND default — the inherited env's
   `ANTHROPIC_MODEL` — so no `--model` is passed (the old hardcoded `sonnet`
   alias overrode the env and does not resolve on Bedrock). A configured model

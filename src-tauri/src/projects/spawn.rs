@@ -108,7 +108,7 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
 
     let prepared = match def.backend.as_str() {
         "kiro" => render_kiro(&def, &window_name, &home, &system_prompt, &skills)?,
-        "claude" => render_claude(&def, &window_name, &home, &system_prompt, &skills)?,
+        "claude" => render_claude(&def, &window_name, &home, Path::new(&workspace), &system_prompt, &skills)?,
         "codex" => render_codex(&def, &window_name, &home, &system_prompt, &skills)?,
         "grok" => render_grok(&def, &window_name, &home, &system_prompt, &skills)?,
         other => return Err(format!("unknown backend '{other}'")),
@@ -567,10 +567,11 @@ pub fn refresh_hooks(project_path: &str, window_name: &str) -> bool {
         // statusLine is app-owned observation plumbing, like hooks: every
         // managed Claude must paint the exact row the sniffer understands.
         changed |= ensure_claude_status_line(&claude);
-        let state = home.join(".claude.json");
-        if !state.exists() && std::fs::write(&state, "{\"hasCompletedOnboarding\": true, \"theme\": \"dark\"}\n").is_ok() {
-            changed = true;
-        }
+        // Workspace trust is app-owned for managed agents: the user explicitly
+        // spawned this isolated home into this project. Pre-seeding Claude's
+        // documented project key avoids an interactive prompt nobody may be
+        // watching; the keypress confirmer remains only as a legacy fallback.
+        changed |= ensure_claude_state(&home, Path::new(project_path)).unwrap_or(false);
     }
     let codex = home.join("codex").join("hooks.json");
     if codex.is_file() {
@@ -814,9 +815,71 @@ fn render_kiro(
     })
 }
 
+fn claude_trust_key(workspace: &Path) -> PathBuf {
+    let start = std::fs::canonicalize(workspace).unwrap_or_else(|_| workspace.to_path_buf());
+    start
+        .ancestors()
+        .find(|path| path.join(".git").exists())
+        .unwrap_or(&start)
+        .to_path_buf()
+}
+
+/// Materialize onboarding + workspace trust in an isolated managed Claude home.
+/// Claude's official permissions docs name this exact persisted shape. Merge,
+/// never replace: `.claude.json` also owns session history, usage and UI state.
+fn ensure_claude_state(home: &Path, workspace: &Path) -> Result<bool, String> {
+    let path = home.join(".claude.json");
+    let mut root = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    let obj = root.as_object_mut().expect("filtered to object");
+    let mut changed = !path.is_file();
+    if obj.get("hasCompletedOnboarding") != Some(&json!(true)) {
+        obj.insert("hasCompletedOnboarding".into(), json!(true));
+        changed = true;
+    }
+    if !obj.contains_key("theme") {
+        obj.insert("theme".into(), json!("dark"));
+        changed = true;
+    }
+    if !obj.get("projects").is_some_and(Value::is_object) {
+        obj.insert("projects".into(), json!({}));
+        changed = true;
+    }
+    let trust_key = claude_trust_key(workspace).to_string_lossy().into_owned();
+    let projects = obj.get_mut("projects").and_then(Value::as_object_mut).unwrap();
+    let entry = projects.entry(trust_key).or_insert_with(|| json!({}));
+    if !entry.is_object() {
+        *entry = json!({});
+        changed = true;
+    }
+    let project = entry.as_object_mut().unwrap();
+    if project.get("hasTrustDialogAccepted") != Some(&json!(true)) {
+        project.insert("hasTrustDialogAccepted".into(), json!(true));
+        changed = true;
+    }
+    if changed {
+        let text = format!("{}\n", serde_json::to_string_pretty(&root).unwrap());
+        std::fs::write(&path, text).map_err(|e| format!("write {}: {e}", path.display()))?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&path).map_err(|e| e.to_string())?.permissions().mode() & 0o777;
+        if mode != 0o600 {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+                .map_err(|e| format!("chmod {}: {e}", path.display()))?;
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
 fn render_claude(
-    def: &RegAgent, _name: &str, home: &Path, system_prompt: &str,
-    skills: &[crate::team::skills::ResolvedSkill],
+    def: &RegAgent, _name: &str, home: &Path, workspace: &Path,
+    system_prompt: &str, skills: &[crate::team::skills::ResolvedSkill],
 ) -> Result<Rendered, String> {
     let notifications = crate::agent_notifications::AgentNotificationHub::load();
     notifications.ensure_helper()?;
@@ -853,15 +916,12 @@ fn render_claude(
         .unwrap(),
     )
     .map_err(|e| e.to_string())?;
-    // A fresh CLAUDE_CONFIG_DIR parks the TUI at the theme-onboarding picker
-    // before anything else (measured, claude 2.1.239) — a view nobody can
-    // dismiss. Pre-seed the completion flag; never clobber an existing file
-    // (it records folder trust and session state).
-    let state = home.join(".claude.json");
-    if !state.exists() {
-        std::fs::write(&state, "{\"hasCompletedOnboarding\": true, \"theme\": \"dark\"}\n")
-            .map_err(|e| e.to_string())?;
-    }
+    // A fresh CLAUDE_CONFIG_DIR otherwise parks at the theme/onboarding and
+    // workspace-trust dialogs before the TUI. Claude documents the persisted
+    // trust shape (`projects[repo_root].hasTrustDialogAccepted = true`); this
+    // home exists only because the user explicitly spawned a managed agent in
+    // this workspace, so materialize that decision before launching.
+    ensure_claude_state(home, workspace)?;
 
     // Claude has no native skill mechanism — inject the compact index.
     let full_prompt = if skills.is_empty() {
@@ -1532,6 +1592,33 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
     }
 
     #[test]
+    fn claude_state_pretrusts_the_git_root_without_clobbering_session_data() {
+        let root = std::env::temp_dir().join(format!("tmm-cc-trust-{}", uuid::Uuid::new_v4()));
+        let workspace = root.join("repo/subdir");
+        let home = root.join("home");
+        std::fs::create_dir_all(root.join("repo/.git")).unwrap();
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::create_dir_all(&home).unwrap();
+        let state = home.join(".claude.json");
+        std::fs::write(&state, r#"{"userID":"keep","projects":{"/other":{"lastSessionId":"abc"}}}"#).unwrap();
+
+        assert!(ensure_claude_state(&home, &workspace).unwrap());
+        let after: Value = serde_json::from_str(&std::fs::read_to_string(&state).unwrap()).unwrap();
+        let repo = std::fs::canonicalize(root.join("repo")).unwrap().to_string_lossy().into_owned();
+        assert_eq!(after["projects"][repo]["hasTrustDialogAccepted"], json!(true));
+        assert_eq!(after["projects"]["/other"]["lastSessionId"], "abc");
+        assert_eq!(after["userID"], "keep");
+        assert_eq!(after["hasCompletedOnboarding"], json!(true));
+        assert!(!ensure_claude_state(&home, &workspace).unwrap(), "canonical state is a no-op");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&state).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
     fn claude_and_codex_render_without_team_plumbing() {
         for backend in ["claude", "codex"] {
             let dir = std::env::temp_dir().join(format!("tmm-spawn-{backend}-{}", uuid::Uuid::new_v4()));
@@ -1539,7 +1626,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
             let d = def(backend);
             let prompt = build_prompt(&d, "tester", "proj", "", "");
             let r = match backend {
-                "claude" => render_claude(&d, "tester", &dir, &prompt, &[]).unwrap(),
+                "claude" => render_claude(&d, "tester", &dir, &dir, &prompt, &[]).unwrap(),
                 _ => render_codex(&d, "tester", &dir, &prompt, &[]).unwrap(),
             };
             assert!(!r.cmd.contains("x-room"), "no team room headers");
@@ -1567,6 +1654,8 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
                     &std::fs::read_to_string(dir.join(".claude.json")).unwrap()
                 ).unwrap();
                 assert_eq!(state["hasCompletedOnboarding"], json!(true));
+                let trust_key = std::fs::canonicalize(&dir).unwrap().to_string_lossy().into_owned();
+                assert_eq!(state["projects"][trust_key]["hasTrustDialogAccepted"], json!(true));
                 // def() has no model → the BACKEND default (the inherited
                 // env's ANTHROPIC_MODEL) decides; the old `--model sonnet`
                 // alias overrode it and does not resolve on Bedrock.
@@ -1589,7 +1678,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         let prompt = build_prompt(&d, "t", "p", "", "");
         assert!(render_kiro(&d, "t", &dir, &prompt, &[]).unwrap().cmd.ends_with("--effort high"));
         d.backend = "claude".into();
-        assert!(render_claude(&d, "t", &dir, &prompt, &[]).unwrap().cmd.contains(" --effort high "));
+        assert!(render_claude(&d, "t", &dir, &dir, &prompt, &[]).unwrap().cmd.contains(" --effort high "));
         d.backend = "grok".into();
         assert!(render_grok(&d, "t", &dir, &prompt, &[]).unwrap().cmd.ends_with("--effort high"));
         d.backend = "codex".into();
