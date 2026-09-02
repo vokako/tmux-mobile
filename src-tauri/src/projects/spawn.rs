@@ -30,7 +30,10 @@ use super::store::RegAgent;
 
 /// Max agents per project for `spawn` — a lead that needs more than this is
 /// fanning out instead of thinking (and each window burns real tokens).
-pub const SPAWN_CAP: usize = 4;
+/// Agent windows per project. 4 until 2026-09-02; raised for NESTED teams
+/// (owner: the dev squad includes the four-reviewer board), so 8 = a squad of
+/// four plus its review board. Still counts every agent-looking window.
+pub const SPAWN_CAP: usize = 8;
 
 pub struct SpawnRequest<'a> {
     pub session: &'a str,
@@ -199,10 +202,10 @@ fn uniquify(name: &str, taken: &std::collections::HashSet<&str>) -> Result<Strin
 pub fn spawn_team(session: &str, team_name: &str, brief: &str, by: &str) -> Result<Value, String> {
     let team = super::team_get(team_name)?
         .ok_or_else(|| format!("no team named '{team_name}'"))?;
-    let members = super::teams::parse_members(&team)?;
-    if members.is_empty() {
-        return Err(format!("team '{team_name}' has no members"));
-    }
+    // Nested teams flatten here (board #74 follow-up): every leaf remembers
+    // the path it came in on, which is what the recipe records and the
+    // roster groups on.
+    let flat = super::teams::expand(&team, &|n| super::team_get(n), SPAWN_CAP)?;
     let project = super::project_for_session(session)?
         .ok_or_else(|| format!("no project for session '{session}'"))?;
     let panes = tmux::list_panes(session).unwrap_or_default();
@@ -212,26 +215,27 @@ pub fn spawn_team(session: &str, team_name: &str, brief: &str, by: &str) -> Resu
         .filter(|p| seen.insert(p.window))
         .filter(|p| super::agents::detect_managed(Some(project.path.as_str()), &p.window_name, &format!("{} {} {}", p.current_command, p.pane_title, p.window_name)).is_some())
         .count();
-    if existing + members.len() > SPAWN_CAP {
+    if existing + flat.len() > SPAWN_CAP {
         return Err(format!(
-            "team '{team_name}' has {} members and the project already has {existing} agents (cap {SPAWN_CAP}) — stop some first",
-            members.len()
+            "team '{team_name}' expands to {} agents and the project already has {existing} (cap {SPAWN_CAP}) — stop some first",
+            flat.len()
         ));
     }
     // Final names first, so every member's prompt can name its teammates.
     let mut taken: std::collections::HashSet<String> = panes.iter().map(|p| p.window_name.clone()).collect();
-    let mut roster: Vec<(String, String)> = Vec::new();
-    for m in &members {
+    let mut roster: Vec<super::teams::RosterEntry> = Vec::new();
+    for f in &flat {
         let borrowed: std::collections::HashSet<&str> = taken.iter().map(String::as_str).collect();
-        let w = uniquify(m.name.trim(), &borrowed)?;
+        let w = uniquify(f.member.name.trim(), &borrowed)?;
         taken.insert(w.clone());
-        roster.push((w, m.role.clone()));
+        roster.push((w, f.member.role.clone(), f.path.clone()));
     }
     let mut spawned = Vec::new();
     let mut errors = Vec::new();
-    for (m, (w, _)) in members.iter().zip(roster.iter()) {
+    for (f, (w, _, path)) in flat.iter().zip(roster.iter()) {
+        let m = &f.member;
         let base = if m.base.trim().is_empty() { None } else { super::registry_get(m.base.trim())? };
-        let result = super::teams::effective_def(&team, m, base.as_ref(), w, &roster).and_then(|def| {
+        let result = super::teams::effective_def(f, base.as_ref(), w, &roster).and_then(|def| {
             spawn(&SpawnRequest {
                 session,
                 agent: w,
@@ -239,12 +243,12 @@ pub fn spawn_team(session: &str, team_name: &str, brief: &str, by: &str) -> Resu
                 by,
                 def: Some(def),
                 window_name: Some(w.clone()),
-                team: Some(team.name.clone()),
+                team: Some(path.clone()),
             })
         });
         match result {
-            Ok(r) => spawned.push(json!({ "name": m.name, "window_name": w, "pane": r.get("pane").cloned().unwrap_or(Value::Null), "backend": r.get("backend").cloned().unwrap_or(Value::Null) })),
-            Err(e) => errors.push(json!({ "name": m.name, "error": e })),
+            Ok(r) => spawned.push(json!({ "name": m.name, "window_name": w, "team": path, "pane": r.get("pane").cloned().unwrap_or(Value::Null), "backend": r.get("backend").cloned().unwrap_or(Value::Null) })),
+            Err(e) => errors.push(json!({ "name": m.name, "team": path, "error": e })),
         }
     }
     Ok(json!({ "team": team.name, "spawned": spawned, "errors": errors }))

@@ -21,7 +21,7 @@
 |---|---|---|
 | `registry_get(agent)` | 读出定义 | 一个 agent 是注册表里的一行，不是一条命令 |
 | `can_hire` 门禁 | agent 想 spawn，得它自己的定义允许 | lead 可以拉人；worker 到处分身是 bug |
-| 上限 `SPAWN_CAP = 4` | 数这个 session 里的 agent 窗口 | 每个窗口都在真烧 token |
+| 上限 `SPAWN_CAP = 8` | 数这个 session 里的 agent 窗口 | 每个窗口都在真烧 token |
 | 窗口名 | `dev`、`dev-2`… | **窗口名就是 agent 的身份** —— 遥测、`tmm`、消息投递、托管门禁全都以它为键 |
 | `agent_home()` | `<ws>/.tmm/agents/<名字>/` | 隔离 home。`KIRO_HOME` / `CODEX_HOME` / `--settings` 都指向这里，用户自己的配置漏不进来；这个目录同时也是"**这个 agent 是我们创建的**"的定义（`projects::managed_home`） |
 | `render_kiro/claude/codex` | 配置 + hooks + MCP + skills | hooks 在这里写下；以后每次启动 `refresh_hooks` 都会重写它 |

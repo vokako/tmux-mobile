@@ -95,7 +95,8 @@ completion).
   offers them above the ad-hoc pick (the brief applies to every member).
   Teams are configured on the Agents page (Teams section): a member derives
   from a registry agent plus a role supplement, or is defined for the team
-  only; at most 4 members (the spawn cap).
+  only, or another team included whole (nesting — drawn as a group inside the
+  group); at most 8 agents once sub-teams are expanded (the spawn cap).
 
 ## Feed (the conversation)
 - Telegram-like bubbles: name header, floated time trailer, delivery ring on

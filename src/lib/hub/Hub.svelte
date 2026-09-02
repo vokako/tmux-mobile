@@ -125,16 +125,42 @@
    * the position of their first member (board #74: "视图上放到一个 group 里").
    * Solo agents are groups of one with no team. */
   const rosterGroups = $derived.by(() => {
-    const out = [];
-    const byTeam = new Map();
+    // A TREE: `team` is a path (`dev/review`) once teams nest, so a group can
+    // hold sub-groups. Order = first appearance.
+    const root = { team: null, path: '', agents: [], children: [] };
+    const nodeFor = (path) => {
+      let node = root;
+      let acc = '';
+      for (const seg of path.split('/')) {
+        acc = acc ? `${acc}/${seg}` : seg;
+        let child = node.children.find((c) => c.path === acc);
+        if (!child) { child = { team: seg, path: acc, agents: [], children: [] }; node.children.push(child); node.order = node.order ?? []; node.order.push(child); }
+        node = child;
+      }
+      return node;
+    };
+    // Items at each level keep arrival order across agents and sub-groups.
+    const items = new Map([[root, []]]);
     for (const a of managedAgents) {
-      const team = a.team || null;
-      if (!team) { out.push({ team: null, agents: [a] }); continue; }
-      let g = byTeam.get(team);
-      if (!g) { g = { team, agents: [] }; byTeam.set(team, g); out.push(g); }
-      g.agents.push(a);
+      const node = a.team ? nodeFor(a.team) : root;
+      if (!items.has(node)) items.set(node, []);
+      // register the node itself in its parent's item list on first sight
+      if (node !== root) {
+        let parent = root;
+        let acc = '';
+        const segs = node.path.split('/');
+        for (let i = 0; i < segs.length; i++) {
+          acc = acc ? `${acc}/${segs[i]}` : segs[i];
+          const child = parent.children.find((c) => c.path === acc);
+          if (!items.has(parent)) items.set(parent, []);
+          if (!items.get(parent).includes(child)) items.get(parent).push(child);
+          parent = child;
+        }
+      }
+      items.get(node).push(a);
     }
-    return out;
+    const build = (node) => (items.get(node) ?? []).map((x) => (x.children ? { ...x, items: build(x) } : x));
+    return build(root);
   });
   // Declared but not running — a stopped agent still belongs to the room.
   const stopped = $derived(stoppedAgents(selectedRow?.slots, managedAgents));
@@ -1514,7 +1540,7 @@
 
   /** Member names of a configured team, for the preset rows. */
   function teamMembers(tm) {
-    try { return (JSON.parse(tm.members) ?? []).map((m) => m.name).filter(Boolean); } catch { return []; }
+    try { return (JSON.parse(tm.members) ?? []).map((m) => (m.team ? `+${m.team}` : m.name)).filter(Boolean); } catch { return []; }
   }
 
   /** Start a configured TEAM (board #74): one RPC spawns every member with its
@@ -2301,19 +2327,21 @@
               {/if}
             </div>
           {/snippet}
-          {#each rosterGroups as g, gi (g.team ?? `solo-${g.agents[0].window}`)}
-            {#if g.team}
-              <!-- Same-team cards sit in one labelled group: a dashed frame in
-                   the row dialect, the team name as a micro label. -->
-              <div class="tgroup" title={t('hubTeamGroup').replace('{name}', g.team)}>
-                <span class="tg-label"><Icon name="collab" size={10} />{g.team}</span>
-                <div class="tg-cards">
-                  {#each g.agents as a (a.window)}{@render card(a)}{/each}
-                </div>
+          {#snippet group(g)}
+            <!-- Same-team cards sit in one labelled group: a dashed frame in
+                 the row dialect, the team name as a micro label. A nested
+                 team is a group inside the group (same snippet, recursive). -->
+            <div class="tgroup" title={t('hubTeamGroup').replace('{name}', g.path)}>
+              <span class="tg-label"><Icon name="collab" size={10} />{g.team}</span>
+              <div class="tg-cards">
+                {#each g.items as x (x.path ?? `w${x.window}`)}
+                  {#if x.items}{@render group(x)}{:else}{@render card(x)}{/if}
+                {/each}
               </div>
-            {:else}
-              {@render card(g.agents[0])}
-            {/if}
+            </div>
+          {/snippet}
+          {#each rosterGroups as x (x.path ?? `w${x.window}`)}
+            {#if x.items}{@render group(x)}{:else}{@render card(x)}{/if}
           {/each}
           <!-- Stopped agents: declared by the project, no window right now.
                Starting one resumes its conversation, so it stays on the roster

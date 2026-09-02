@@ -170,8 +170,8 @@
   // redefined — or is CUSTOM to this team (an inline definition: backend,
   // model, effort, persona). Skills/MCP for a custom member are the built-ins;
   // anything richer is a registry agent, which is what `base` is for.
-  const TEAM_MAX = 4; // mirrors the server's spawn cap (validated there too)
-  const blankMember = () => ({ name: '', base: defs[0]?.name ?? '', role: '', model: '', effort: '', agent: null });
+  const TEAM_MAX = 8; // mirrors the server's spawn cap (validated there too, on the EXPANSION)
+  const blankMember = () => ({ name: '', base: defs[0]?.name ?? '', team: '', role: '', model: '', effort: '', agent: null });
   const blankCustom = () => ({ name: '', backend: 'claude', model: '', effort: '', system: '', skills: '[]', mcp: '[]', can_hire: false });
   function startTeam(team) {
     closeAll();
@@ -179,7 +179,7 @@
     let members = [];
     if (team) { try { members = JSON.parse(team.members) ?? []; } catch { members = []; } }
     editingTeam = team
-      ? { name: team.name, description: team.description ?? '', members: members.map((m) => ({ name: m.name ?? '', base: m.base ?? '', role: m.role ?? '', model: m.model ?? '', effort: m.effort ?? '', agent: m.agent ?? null })) }
+      ? { name: team.name, description: team.description ?? '', members: members.map((m) => ({ name: m.name ?? '', base: m.base ?? '', team: m.team ?? '', role: m.role ?? '', model: m.model ?? '', effort: m.effort ?? '', agent: m.agent ?? null })) }
       : { name: '', description: '', members: [blankMember()] };
   }
   function addMember() {
@@ -190,13 +190,20 @@
     if (!editingTeam) return;
     editingTeam.members = editingTeam.members.filter((_, k) => k !== i);
   }
-  /** The base Select's value: a registry name, or '' for custom. Switching to
-   * custom seeds an inline def; switching back drops it. */
-  function setBase(i, base) {
+  /** The kind Select's value: a registry agent name, `team:<name>` for a
+   * nested team (owner, 2026-09-02: "设计成可以嵌套的"), or '' for custom.
+   * Switching to custom seeds an inline def; switching away drops it. */
+  const kindOf = (m) => (m.team ? `team:${m.team}` : m.base);
+  function setBase(i, v) {
     const m = editingTeam.members[i];
-    m.base = base;
-    m.agent = base ? null : (m.agent ?? blankCustom());
+    if (v.startsWith('team:')) { m.team = v.slice(5); m.base = ''; m.agent = null; return; }
+    m.team = '';
+    m.base = v;
+    m.agent = v ? null : (m.agent ?? blankCustom());
   }
+  /** Teams offerable as a member: every OTHER team (the server also refuses
+   * cycles through longer chains). */
+  const subTeams = $derived(teams.filter((x) => x.name !== editingTeam?.name));
   // Model suggestions per backend for CUSTOM members (the same models_list the
   // agent editor asks); fetched once per backend.
   let modelsByBackend = $state({});
@@ -213,7 +220,7 @@
     }
   });
   const teamSavable = $derived(!!editingTeam && editingTeam.name.trim() && editingTeam.members.length > 0
-    && editingTeam.members.every((m) => m.name.trim() && (m.base || m.agent)));
+    && editingTeam.members.every((m) => m.team || (m.name.trim() && (m.base || m.agent))));
   async function saveTeam() {
     if (!editingTeam) return;
     error = '';
@@ -222,9 +229,9 @@
         name: editingTeam.name.trim(),
         description: editingTeam.description.trim(),
         members: JSON.stringify(editingTeam.members.map((m) => ({
-          name: m.name.trim(), base: m.base, role: m.role.trim(),
-          model: m.base ? (m.model ?? '').trim() : '', effort: m.base ? (m.effort ?? '') : '',
-          agent: m.base ? null : { ...m.agent, name: m.name.trim(), model: (m.agent?.model ?? '').trim() },
+          name: m.team ? '' : m.name.trim(), base: m.team ? '' : m.base, team: m.team ?? '', role: m.role.trim(),
+          model: m.base && !m.team ? (m.model ?? '').trim() : '', effort: m.base && !m.team ? (m.effort ?? '') : '',
+          agent: m.base || m.team ? null : { ...m.agent, name: m.name.trim(), model: (m.agent?.model ?? '').trim() },
         }))),
       });
       editingTeam = null;
@@ -242,7 +249,7 @@
   }
   /** One-line summary for the sidebar row: member names, base in parentheses. */
   function teamSummary(team) {
-    try { return (JSON.parse(team.members) ?? []).map((m) => m.name).filter(Boolean).join(' · '); } catch { return ''; }
+    try { return (JSON.parse(team.members) ?? []).map((m) => (m.team ? `+${m.team}` : m.name)).filter(Boolean).join(' · '); } catch { return ''; }
   }
 
   // The skill's managed files: a chip per file, one previewed at a time.
@@ -589,13 +596,21 @@
           {#each editingTeam.members as m, i (i)}
             <div class="member">
               <div class="member-head">
-                <input class="member-name" bind:value={m.name} placeholder="dev" aria-label={t('teamsMemberName')} />
-                <Select value={m.base} dense ariaLabel={t('teamsBase')}
-                  options={[...defs.map((d) => ({ value: d.name, label: d.name, icon: backendIcon(d.backend) ?? undefined })), { value: '', label: t('teamsCustom') }]}
+                {#if m.team}
+                  <span class="member-team"><Icon name="collab" size={12} />{t('teamsSubTeam')}</span>
+                {:else}
+                  <input class="member-name" bind:value={m.name} placeholder="dev" aria-label={t('teamsMemberName')} />
+                {/if}
+                <Select value={kindOf(m)} dense ariaLabel={t('teamsBase')}
+                  options={[
+                    ...defs.map((d) => ({ value: d.name, label: d.name, icon: backendIcon(d.backend) ?? undefined })),
+                    ...subTeams.map((x) => ({ value: `team:${x.name}`, label: `${t('teamsSubTeam')}: ${x.name}` })),
+                    { value: '', label: t('teamsCustom') },
+                  ]}
                   onchange={(v) => setBase(i, v)} />
                 <button class="icon-btn danger" title={t('teamsRemoveMember')} aria-label={t('teamsRemoveMember')} disabled={editingTeam.members.length <= 1} onclick={() => removeMember(i)}><Icon name="x" size={13} /></button>
               </div>
-              {#if m.base}
+              {#if m.base && !m.team}
                 <!-- A derived member may still pick its OWN model/effort (owner,
                      2026-09-02: kiro's many no-quota models → one base, four
                      reviewers on four models). Empty = the base's. -->
@@ -611,7 +626,7 @@
                   </label>
                 </div>
               {/if}
-              {#if !m.base && m.agent}
+              {#if !m.base && !m.team && m.agent}
                 <!-- A team-only member: the agent editor's identity fields, inline. -->
                 <div class="row2">
                   <label>{t('agentsBackend')}
@@ -635,8 +650,8 @@
                   <textarea rows="3" bind:value={m.agent.system} placeholder={t('agentsSystemPh')}></textarea>
                 </label>
               {/if}
-              <label>{t('teamsRole')}
-                <textarea rows="2" bind:value={m.role} placeholder={t('teamsRolePh')}></textarea>
+              <label>{m.team ? t('teamsSubBrief') : t('teamsRole')}
+                <textarea rows="2" bind:value={m.role} placeholder={m.team ? t('teamsSubBriefPh') : t('teamsRolePh')}></textarea>
               </label>
             </div>
           {/each}
@@ -849,6 +864,7 @@
   .member { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--ui-radius-row); background: var(--surface); }
   .member-head { display: grid; grid-template-columns: minmax(80px, 1fr) minmax(140px, 1.4fr) auto; gap: 8px; align-items: center; }
   .member-name { min-width: 0; }
+  .member-team { display: inline-flex; align-items: center; gap: 5px; min-width: 0; color: var(--text2); font-size: var(--fs-ui); }
   .team-row { align-items: flex-start; }
   .r-col { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
   .r-sub { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-micro); color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

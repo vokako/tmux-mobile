@@ -595,12 +595,31 @@ pub fn team_get(name: &str) -> Result<Option<store::RegTeam>, String> {
 /// discovered by the human the moment they try to start the team.
 pub fn teams_save(def: &Value) -> Result<Value, String> {
     let team: store::RegTeam = serde_json::from_value(def.clone()).map_err(|e| format!("invalid team def: {e}"))?;
-    let known: Vec<String> = with_store(|store| {
+    let (known, known_teams): (Vec<String>, Vec<String>) = with_store(|store| {
         store.reg_seed(now())?;
-        Ok(store.reg_list()?.into_iter().map(|a| a.name).collect())
+        Ok((
+            store.reg_list()?.into_iter().map(|a| a.name).collect(),
+            store.teams_list()?.into_iter().map(|t| t.name).collect(),
+        ))
     })?;
-    let members = teams::validate(&team, &known, spawn::SPAWN_CAP)?;
+    let members = teams::validate(&team, &known, &known_teams, spawn::SPAWN_CAP)?;
+    // Nesting: the EXPANSION must be acyclic and fit the cap — including the
+    // saved team itself, so a team cannot be made to reach itself by editing
+    // a sub-team later either (the sub-team's save runs this same check with
+    // its parents already stored).
+    let saved = team.clone();
+    let lookup = |n: &str| -> Result<Option<store::RegTeam>, String> {
+        if n == saved.name { return Ok(Some(saved.clone())); }
+        team_get(n)
+    };
+    teams::expand(&team, &lookup, spawn::SPAWN_CAP)?;
+    for t in with_store(|store| store.teams_list())? {
+        if t.name != team.name && teams::parse_members(&t).map(|ms| ms.iter().any(|m| m.team.trim() == team.name)).unwrap_or(false) {
+            teams::expand(&t, &lookup, spawn::SPAWN_CAP).map_err(|e| format!("saving would break team '{}': {e}", t.name))?;
+        }
+    }
     for m in &members {
+        if !m.team.trim().is_empty() { continue; }
         // A derived member's model/effort override is checked against the
         // BASE's backend — the same rule registry_save applies, for the same
         // reason (a bad id runs the default model and says so in a line
@@ -625,6 +644,15 @@ pub fn teams_save(def: &Value) -> Result<Value, String> {
 }
 
 pub fn teams_delete(name: &str) -> Result<Value, String> {
+    // A team another team includes cannot vanish under it.
+    let users: Vec<String> = with_store(|store| store.teams_list())?
+        .into_iter()
+        .filter(|t| teams::parse_members(t).map(|ms| ms.iter().any(|m| m.team.trim() == name)).unwrap_or(false))
+        .map(|t| t.name)
+        .collect();
+    if !users.is_empty() {
+        return Err(format!("team '{name}' is included by {} — remove it there first", users.join(", ")));
+    }
     with_store(|store| Ok(json!({ "ok": store.team_delete(name)? })))
 }
 

@@ -26,7 +26,7 @@ never gets to assert anything about the agent.
 |---|---|---|
 | `registry_get(agent)` | loads the definition | an agent is a registry row, not a command line |
 | `can_hire` gate | an agent asking to spawn must be allowed to | a lead can hire; a worker fanning out is a bug |
-| cap `SPAWN_CAP = 4` | counts agent windows in the session | each window burns real tokens |
+| cap `SPAWN_CAP = 8` | counts agent windows in the session | each window burns real tokens |
 | window name | `dev`, `dev-2`, … | **the window name IS the agent identity** — telemetry, `tmm`, delivery and the managed gate all key on it |
 | `agent_home()` | `<ws>/.tmm/agents/<name>/` | the isolated home. `KIRO_HOME` / `CODEX_HOME` / `--settings` point here, so user-space config never leaks in — and this directory is also the *definition* of "an agent this app created" (`projects::managed_home`) |
 | `render_kiro/claude/codex` | config + hooks + MCP + skills | hooks are written here; `refresh_hooks` rewrites them on every later start |

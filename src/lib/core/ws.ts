@@ -936,6 +936,9 @@ export const registryDelete = (name: string) => call('registry_delete', { name }
 export interface TeamMember {
   name: string;
   base: string;
+  /** Another team included whole (nesting); `role` is then a brief for all
+   * of its members. name/base/agent are ignored for this kind. */
+  team?: string;
   role: string;
   /** Model / effort overrides for a derived member; empty = the base's. */
   model?: string;

@@ -8,6 +8,12 @@
 //! - a team-only agent (`agent` = a full inline definition) — "我专门重新定义
 //!   只有这个 team 才有的一个 agent".
 //!
+//! A member may also be another TEAM (`team` = its name; owner, 2026-09-02:
+//! "应该在 dev 里直接加 review 小组…设计成可以嵌套的"): `expand` flattens the
+//! tree depth-first, refuses cycles, and every leaf remembers the PATH it came
+//! in on (`dev/review`) so the roster can draw the nesting and each member's
+//! prompt can say which team it sits in.
+//!
 //! Spawning a team spawns every member as an ordinary managed agent (same
 //! isolated home, same hooks, same `tmm`), so nothing downstream learns a new
 //! species: the ONLY additions are the role block in the prompt, a roster
@@ -22,12 +28,18 @@ use super::store::{RegAgent, RegTeam};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Member {
     /// The member's name in the team — becomes its window name (uniquified
-    /// against the project if taken) and its `@name`.
+    /// against the project if taken) and its `@name`. Empty for a `team` ref.
+    #[serde(default)]
     pub name: String,
     /// Registry agent this member derives from. Empty = `agent` carries the
-    /// whole definition.
+    /// whole definition (or `team` names a sub-team).
     #[serde(default)]
     pub base: String,
+    /// Another team, included whole (nesting). Its members are spawned as if
+    /// listed here; `role` then applies to every one of them as an extra
+    /// brief. `name`/`base`/`agent` are ignored for this kind.
+    #[serde(default)]
+    pub team: String,
     /// Role supplement, appended to the base persona.
     #[serde(default)]
     pub role: String,
@@ -51,9 +63,12 @@ pub fn parse_members(team: &RegTeam) -> Result<Vec<Member>, String> {
 /// Everything `teams_save` refuses. `known` = registry agent names; `cap` =
 /// the project spawn cap, because a team that can never fully start is a
 /// trap, not a configuration.
-pub fn validate(team: &RegTeam, known: &[String], cap: usize) -> Result<Vec<Member>, String> {
+pub fn validate(team: &RegTeam, known: &[String], known_teams: &[String], cap: usize) -> Result<Vec<Member>, String> {
     if team.name.trim().is_empty() {
         return Err("team name must not be empty".into());
+    }
+    if team.name.contains('/') || team.name.contains(char::is_whitespace) {
+        return Err("team name must be one word without '/' — it becomes a path segment in the roster".into());
     }
     let members = parse_members(team)?;
     if members.is_empty() {
@@ -64,6 +79,19 @@ pub fn validate(team: &RegTeam, known: &[String], cap: usize) -> Result<Vec<Memb
     }
     let mut seen = std::collections::HashSet::new();
     for m in &members {
+        if !m.team.trim().is_empty() {
+            let t = m.team.trim();
+            if t == team.name.trim() {
+                return Err(format!("team '{t}' cannot include itself"));
+            }
+            if !known_teams.iter().any(|k| k == t) {
+                return Err(format!("sub-team '{t}' does not exist"));
+            }
+            if !seen.insert(format!("team:{t}")) {
+                return Err(format!("sub-team '{t}' is included twice"));
+            }
+            continue;
+        }
         let n = m.name.trim();
         if n.is_empty() {
             return Err("every member needs a name".into());
@@ -86,12 +114,67 @@ pub fn validate(team: &RegTeam, known: &[String], cap: usize) -> Result<Vec<Memb
     Ok(members)
 }
 
+/// One spawnable leaf of a (possibly nested) team.
+#[derive(Debug, Clone)]
+pub struct Flat {
+    pub member: Member,
+    /// The team the member is DECLARED in (its block names this one).
+    pub team: RegTeam,
+    /// Nesting path from the root, `dev/review`; the root alone for a direct
+    /// member. Recorded in the launch recipe; the roster groups on it.
+    pub path: String,
+    /// Extra briefs inherited from every enclosing `team` reference's `role`,
+    /// outermost first.
+    pub briefs: Vec<String>,
+}
+
+/// Flatten a team depth-first. `lookup` resolves a sub-team by name; a cycle
+/// (a team reaching itself through any chain) is an error, as is a total
+/// beyond `cap` — a team that can never fully start is a trap.
+pub fn expand(root: &RegTeam, lookup: &dyn Fn(&str) -> Result<Option<RegTeam>, String>, cap: usize) -> Result<Vec<Flat>, String> {
+    fn walk(team: &RegTeam, path: &str, briefs: &[String], stack: &mut Vec<String>, out: &mut Vec<Flat>, lookup: &dyn Fn(&str) -> Result<Option<RegTeam>, String>) -> Result<(), String> {
+        if stack.iter().any(|s| s == &team.name) {
+            return Err(format!("team nesting cycle: {} → {}", stack.join(" → "), team.name));
+        }
+        stack.push(team.name.clone());
+        for m in parse_members(team)? {
+            if !m.team.trim().is_empty() {
+                let sub = lookup(m.team.trim())?.ok_or_else(|| format!("sub-team '{}' (in '{}') does not exist", m.team, team.name))?;
+                let mut inner = briefs.to_vec();
+                if !m.role.trim().is_empty() {
+                    inner.push(m.role.trim().to_string());
+                }
+                walk(&sub, &format!("{path}/{}", sub.name), &inner, stack, out, lookup)?;
+            } else {
+                out.push(Flat { member: m, team: team.clone(), path: path.to_string(), briefs: briefs.to_vec() });
+            }
+        }
+        stack.pop();
+        Ok(())
+    }
+    let mut out = Vec::new();
+    let mut stack = Vec::new();
+    walk(root, &root.name, &[], &mut stack, &mut out, lookup)?;
+    if out.is_empty() {
+        return Err(format!("team '{}' has no members", root.name));
+    }
+    if out.len() > cap {
+        return Err(format!("team '{}' expands to {} agents, more than the project spawn cap {cap}", root.name, out.len()));
+    }
+    Ok(out)
+}
+
+/// One roster line's raw material: final window name, role, nesting path.
+pub type RosterEntry = (String, String, String);
+
 /// The definition a member actually spawns with: the base (or inline) def,
 /// renamed to the member, with the role and the team roster appended to its
 /// persona. `roster` is every member's FINAL window name + role, in order —
 /// computed by the caller after uniquifying, so the names in the prompt are
 /// the names that exist.
-pub fn effective_def(team: &RegTeam, member: &Member, base: Option<&RegAgent>, window_name: &str, roster: &[(String, String)]) -> Result<RegAgent, String> {
+pub fn effective_def(flat: &Flat, base: Option<&RegAgent>, window_name: &str, roster: &[RosterEntry]) -> Result<RegAgent, String> {
+    let team = &flat.team;
+    let member = &flat.member;
     let mut def = match (member.base.trim().is_empty(), base, &member.agent) {
         (false, Some(b), _) => b.clone(),
         (false, None, _) => return Err(format!("member '{}' derives from '{}', which is not in the registry", member.name, member.base)),
@@ -107,6 +190,10 @@ pub fn effective_def(team: &RegTeam, member: &Member, base: Option<&RegAgent>, w
     }
     let mut system = def.system.trim().to_string();
     let mut block = format!("## Your team: \"{}\"", team.name);
+    let root = flat.path.split('/').next().unwrap_or(&team.name);
+    if root != team.name {
+        block += &format!(" (a sub-team within \"{root}\": {})", flat.path);
+    }
     if !team.description.trim().is_empty() {
         block += &format!("\n{}", team.description.trim());
     }
@@ -114,13 +201,19 @@ pub fn effective_def(team: &RegTeam, member: &Member, base: Option<&RegAgent>, w
     if !member.role.trim().is_empty() {
         block += &format!(" Your role: {}", member.role.trim());
     }
+    for b in &flat.briefs {
+        block += &format!("\nFrom the enclosing team: {b}");
+    }
     let mates: Vec<String> = roster
         .iter()
-        .filter(|(n, _)| n != window_name)
-        .map(|(n, r)| if r.trim().is_empty() { format!("@{n}") } else { format!("@{n} — {}", one_line(r)) })
+        .filter(|(n, _, _)| n != window_name)
+        .map(|(n, r, p)| {
+            let tag = if p != &flat.path { format!(" [{p}]") } else { String::new() };
+            if r.trim().is_empty() { format!("@{n}{tag}") } else { format!("@{n}{tag} — {}", one_line(r)) }
+        })
         .collect();
     if !mates.is_empty() {
-        block += "\nYour teammates (address one with `tmm send \"@name …\"`):\n";
+        block += "\nYour teammates (address one with `tmm send \"@name …\"`; a [path] marks a different sub-team):\n";
         for m in mates {
             block += &format!("- {m}\n");
         }
@@ -154,34 +247,67 @@ mod tests {
     fn team(members: &str) -> RegTeam {
         RegTeam { name: "dev-squad".into(), description: "Ships features end to end.".into(), members: members.into() }
     }
+    fn named(name: &str, members: &str) -> RegTeam {
+        RegTeam { name: name.into(), description: String::new(), members: members.into() }
+    }
+    fn flat_of(t: &RegTeam, i: usize) -> Flat {
+        Flat { member: parse_members(t).unwrap().remove(i), team: t.clone(), path: t.name.clone(), briefs: vec![] }
+    }
+    const NO_TEAMS: &[String] = &[];
 
     #[test]
     fn validate_pins_the_shape() {
         let known = vec!["claude".to_string(), "codex".to_string()];
         let ok = team(r#"[{"name":"dev","base":"claude","role":"implement"},{"name":"rev","base":"codex","role":"review"}]"#);
-        assert_eq!(validate(&ok, &known, 4).unwrap().len(), 2);
-        assert!(validate(&team("[]"), &known, 4).unwrap_err().contains("at least one"));
-        assert!(validate(&team(r#"[{"name":"a","base":"nope"}]"#), &known, 4).unwrap_err().contains("not in the registry"));
-        assert!(validate(&team(r#"[{"name":"a","base":"claude"},{"name":"a","base":"codex"}]"#), &known, 4).unwrap_err().contains("used twice"));
-        assert!(validate(&team(r#"[{"name":"two words","base":"claude"}]"#), &known, 4).unwrap_err().contains("one word"));
-        assert!(validate(&team(r#"[{"name":"a","base":"claude"},{"name":"b","base":"claude"},{"name":"c","base":"claude"}]"#), &known, 2).unwrap_err().contains("at most 2"));
+        assert_eq!(validate(&ok, &known, NO_TEAMS, 4).unwrap().len(), 2);
+        assert!(validate(&team("[]"), &known, NO_TEAMS, 4).unwrap_err().contains("at least one"));
+        assert!(validate(&team(r#"[{"name":"a","base":"nope"}]"#), &known, NO_TEAMS, 4).unwrap_err().contains("not in the registry"));
+        assert!(validate(&team(r#"[{"name":"a","base":"claude"},{"name":"a","base":"codex"}]"#), &known, NO_TEAMS, 4).unwrap_err().contains("used twice"));
+        assert!(validate(&team(r#"[{"name":"two words","base":"claude"}]"#), &known, NO_TEAMS, 4).unwrap_err().contains("one word"));
+        assert!(validate(&team(r#"[{"name":"a","base":"claude"},{"name":"b","base":"claude"},{"name":"c","base":"claude"}]"#), &known, NO_TEAMS, 2).unwrap_err().contains("at most 2"));
         // inline, team-only member: needs a real backend
-        assert!(validate(&team(r#"[{"name":"x","agent":{"name":"","backend":"gpt"}}]"#), &known, 4).unwrap_err().contains("backend must be"));
-        assert_eq!(validate(&team(r#"[{"name":"x","agent":{"name":"","backend":"grok"}}]"#), &known, 4).unwrap().len(), 1);
-        assert!(validate(&team(r#"[{"name":"x"}]"#), &known, 4).unwrap_err().contains("neither"));
+        assert!(validate(&team(r#"[{"name":"x","agent":{"name":"","backend":"gpt"}}]"#), &known, NO_TEAMS, 4).unwrap_err().contains("backend must be"));
+        assert_eq!(validate(&team(r#"[{"name":"x","agent":{"name":"","backend":"grok"}}]"#), &known, NO_TEAMS, 4).unwrap().len(), 1);
+        assert!(validate(&team(r#"[{"name":"x"}]"#), &known, NO_TEAMS, 4).unwrap_err().contains("neither"));
+        // sub-team references (nesting)
+        let teams = vec!["review".to_string()];
+        assert_eq!(validate(&team(r#"[{"name":"lead","base":"claude"},{"team":"review"}]"#), &known, &teams, 4).unwrap().len(), 2, "a team ref needs no name");
+        assert!(validate(&team(r#"[{"team":"nope"}]"#), &known, &teams, 4).unwrap_err().contains("does not exist"));
+        assert!(validate(&team(r#"[{"team":"dev-squad"}]"#), &known, &teams, 4).unwrap_err().contains("include itself"));
+        assert!(validate(&team(r#"[{"team":"review"},{"team":"review"}]"#), &known, &teams, 4).unwrap_err().contains("included twice"));
+        assert!(validate(&named("a/b", r#"[{"team":"review"}]"#), &known, &teams, 4).unwrap_err().contains("path segment"));
+    }
+
+    #[test]
+    fn expand_flattens_nesting_with_paths_briefs_and_refuses_cycles() {
+        let dev = named("dev", r#"[{"name":"lead","base":"claude","role":"lead"},{"team":"review","role":"Review what dev moves to review."}]"#);
+        let review = named("review", r#"[{"name":"r1","base":"claude","role":"design"},{"name":"r2","base":"claude","role":"security"}]"#);
+        let lookup = |n: &str| -> Result<Option<RegTeam>, String> { Ok(match n { "review" => Some(review.clone()), "dev" => Some(dev.clone()), _ => None }) };
+        let flat = expand(&dev, &lookup, 8).unwrap();
+        assert_eq!(flat.iter().map(|f| f.member.name.as_str()).collect::<Vec<_>>(), ["lead", "r1", "r2"]);
+        assert_eq!(flat[0].path, "dev");
+        assert_eq!(flat[1].path, "dev/review", "a nested leaf remembers the path it came in on");
+        assert_eq!(flat[1].team.name, "review", "and the team whose block names it");
+        assert_eq!(flat[1].briefs, vec!["Review what dev moves to review.".to_string()], "the ref's role becomes a brief for every sub-member");
+        assert!(expand(&dev, &lookup, 2).unwrap_err().contains("expands to 3"), "the cap applies to the EXPANSION");
+        // a cycle: review includes dev
+        let review_cyc = named("review", r#"[{"team":"dev"}]"#);
+        let lookup2 = |n: &str| -> Result<Option<RegTeam>, String> { Ok(match n { "review" => Some(review_cyc.clone()), "dev" => Some(dev.clone()), _ => None }) };
+        assert!(expand(&dev, &lookup2, 8).unwrap_err().contains("cycle"));
+        assert!(expand(&named("x", r#"[{"team":"ghost"}]"#), &lookup, 8).unwrap_err().contains("does not exist"));
     }
 
     #[test]
     fn effective_def_derives_renames_and_names_the_teammates() {
         let t = team(r#"[{"name":"dev","base":"claude","role":"implement the change"},{"name":"rev","base":"claude","role":"review every diff before it merges"}]"#);
-        let members = parse_members(&t).unwrap();
         let base = agent("claude", "You are a 10x developer.");
-        let roster = vec![("dev".to_string(), "implement the change".to_string()), ("rev-2".to_string(), "review every diff before it merges".to_string())];
-        let d = effective_def(&t, &members[0], Some(&base), "dev", &roster).unwrap();
+        let roster: Vec<RosterEntry> = vec![("dev".into(), "implement the change".into(), "dev-squad".into()), ("rev-2".into(), "review every diff before it merges".into(), "dev-squad".into())];
+        let d = effective_def(&flat_of(&t, 0), Some(&base), "dev", &roster).unwrap();
         assert_eq!(d.name, "dev", "the member name is the identity, not the base's");
         assert_eq!(d.backend, "claude", "everything else is inherited");
         assert!(d.system.starts_with("You are a 10x developer."), "base persona first");
         assert!(d.system.contains("## Your team: \"dev-squad\""));
+        assert!(!d.system.contains("sub-team within"), "a root member is not told about nesting");
         assert!(d.system.contains("Ships features end to end."));
         assert!(d.system.contains("You are \"dev\". Your role: implement the change"));
         assert!(d.system.contains("- @rev-2 — review every diff"), "the roster uses the FINAL (uniquified) names");
@@ -189,27 +315,37 @@ mod tests {
     }
 
     #[test]
+    fn effective_def_nested_member_knows_its_path_briefs_and_tags_other_subteams() {
+        let review = named("review", r#"[{"name":"r1","base":"claude","role":"design"}]"#);
+        let f = Flat { member: parse_members(&review).unwrap().remove(0), team: review.clone(), path: "dev/review".into(), briefs: vec!["Review what dev moves to review.".into()] };
+        let roster: Vec<RosterEntry> = vec![("lead".into(), "lead".into(), "dev".into()), ("r1".into(), "design".into(), "dev/review".into())];
+        let d = effective_def(&f, Some(&agent("claude", "")), "r1", &roster).unwrap();
+        assert!(d.system.contains("## Your team: \"review\" (a sub-team within \"dev\": dev/review)"));
+        assert!(d.system.contains("From the enclosing team: Review what dev moves to review."));
+        assert!(d.system.contains("- @lead [dev] — lead"), "a teammate in another sub-team is tagged with its path");
+    }
+
+    #[test]
     fn effective_def_inline_member_ignores_the_inline_name() {
         let t = team(r#"[{"name":"critic","role":"find holes","agent":{"name":"whatever","backend":"grok","system":"Be harsh."}}]"#);
-        let members = parse_members(&t).unwrap();
-        let d = effective_def(&t, &members[0], None, "critic", &[("critic".into(), "find holes".into())]).unwrap();
+        let d = effective_def(&flat_of(&t, 0), None, "critic", &[("critic".into(), "find holes".into(), "dev-squad".into())]).unwrap();
         assert_eq!(d.name, "critic");
         assert_eq!(d.backend, "grok");
         assert!(d.system.starts_with("Be harsh."));
         assert!(!d.system.contains("teammates"), "a one-member team has no roster block");
-        assert!(effective_def(&t, &Member { name: "x".into(), base: "gone".into(), role: String::new(), model: String::new(), effort: String::new(), agent: None }, None, "x", &[]).is_err());
+        let gone = Flat { member: Member { name: "x".into(), base: "gone".into(), team: String::new(), role: String::new(), model: String::new(), effort: String::new(), agent: None }, team: t.clone(), path: t.name.clone(), briefs: vec![] };
+        assert!(effective_def(&gone, None, "x", &[]).is_err());
     }
 
     #[test]
     fn effective_def_applies_model_and_effort_overrides() {
         let t = team(r#"[{"name":"a","base":"kiro","model":"claude-opus-5","effort":"high"},{"name":"b","base":"kiro"}]"#);
-        let members = parse_members(&t).unwrap();
         let mut base = agent("kiro", "");
         base.backend = "kiro".into();
         base.model = "auto".into();
-        let a = effective_def(&t, &members[0], Some(&base), "a", &[]).unwrap();
+        let a = effective_def(&flat_of(&t, 0), Some(&base), "a", &[]).unwrap();
         assert_eq!((a.model.as_str(), a.effort.as_str()), ("claude-opus-5", "high"), "an override replaces the base's");
-        let b = effective_def(&t, &members[1], Some(&base), "b", &[]).unwrap();
+        let b = effective_def(&flat_of(&t, 1), Some(&base), "b", &[]).unwrap();
         assert_eq!((b.model.as_str(), b.effort.as_str()), ("auto", ""), "empty keeps the base's");
     }
 }

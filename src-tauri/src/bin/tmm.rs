@@ -81,7 +81,7 @@ USAGE (human or agent — self-management):
   tmm registry list                   centrally-defined agents
   tmm teams list                      configured agent teams (members + roles)
   tmm teams save --name <n> --def '<members json>' [--description <text>]
-                                      members: [{"name","base","role"[,"model","effort"]} | {"name","role","agent":{…}}]
+                                      members: [{"name","base","role"[,"model","effort"]} | {"name","role","agent":{…}} | {"team":"<other team>"[,"role"]}]
   tmm teams delete <name>
   tmm registry save --name <n> --backend <kiro|claude|codex> [--system <text>]
                     [--model m] [--effort low|medium|high|…] [--skills a,b] [--mcp <json>] [--can-hire]
@@ -390,6 +390,8 @@ async fn main() {
                             let n = m.get("name").and_then(|v| v.as_str()).unwrap_or("");
                             let base = m.get("base").and_then(|v| v.as_str()).unwrap_or("");
                             let model = m.get("model").and_then(|v| v.as_str()).unwrap_or("");
+                            let sub = m.get("team").and_then(|v| v.as_str()).unwrap_or("");
+                            if !sub.is_empty() { return format!("+{sub}"); }
                             match (base.is_empty(), model.is_empty()) {
                                 (true, _) => n.to_string(),
                                 (false, true) => format!("{n}←{base}"),
