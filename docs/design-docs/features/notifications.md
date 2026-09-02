@@ -25,7 +25,7 @@ Recording happens even for initial, watched, or muted batches. This is what prev
 
 ## Effects are downstream of pure gates
 
-`notifiable()` filters first-load/watched batches, own messages, lifecycle narration, and ambient status updates. `notifyNews()` then emits at most one audio cue and one Web Notification for the remaining batch. Effects are injectable in tests, so deduplication, permission-independent behavior, and race handling do not require a real OS notification daemon.
+`notifiable()` filters first-load/watched batches, own messages, lifecycle narration, and — by LEVEL — replies and ambient status updates. The level (owner, 2026-09-02: "只有完成才通知，还是中间状态都通知") is three nested rungs, `done ⊂ replies ⊂ all`: a finished task (`[tmm done]`, or a board move to review/done) is news at every rung; a plain reply from `replies` up; a `[tmm status]` progress note only at `all`. `notifyNews` reads it through an injectable `effects.level`, so the gate stays pure and the default (`replies`) is what a chat app does. `notifyNews()` then emits at most one audio cue and one Web Notification for the remaining batch. Effects are injectable in tests, so deduplication, permission-independent behavior, and race handling do not require a real OS notification daemon.
 
 The cue claims its cooldown before calling `Audio.play()` to prevent same-tick double playback. Rejection rolls the claim back only while that attempt still owns it (`lastCueAt === attemptTime`); an old deferred rejection cannot overwrite a newer successful claim.
 

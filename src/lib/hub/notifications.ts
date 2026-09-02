@@ -65,6 +65,20 @@ export const CUE_COOLDOWN_MS = 3000;
 export const SEEN_CAP = 800;
 
 const ENABLED_KEY = 'tmux_notify';
+const LEVEL_KEY = 'tmux_notify_level';
+
+/** How much of the room is news (owner, 2026-09-02, board #72: "能设置通知的
+ * 级别，比如只有完成才通知，还是中间状态都通知"). Three rungs, each a
+ * superset of the one before:
+ * - `done`    — a task finished: a `[tmm done]` summary, or an agent moving
+ *               a board issue to review/done. Nothing else.
+ * - `replies` — plus every agent reply (the default: what a chat app does).
+ * - `all`     — plus the ambient `[tmm status working|waiting|blocked]`
+ *               progress notes ("中间状态").
+ * App narration (`[tmm] spawned…`) and your own words are never news. */
+export type NotifyLevel = 'done' | 'replies' | 'all';
+export const NOTIFY_LEVELS: readonly NotifyLevel[] = ['done', 'replies', 'all'];
+export const DEFAULT_LEVEL: NotifyLevel = 'replies';
 
 /** A message's replay-stable identity: the id when the server gave one, else
  * the from/ts/body triple (what mergeMessages itself dedups by). */
@@ -118,15 +132,16 @@ export function taskFinished(body: string | null | undefined): { id: string; to:
  * reader-not-looking verdict computed by the caller from the live document.
  * News is what the owner asked the phone to say — "谁完成了什么任务": an
  * agent's reply, its `[tmm done]` summary, and a board move to review/done. */
-export function notifiable(msgs: readonly FeedMsg[], opts: { first: boolean; away: boolean }): FeedMsg[] {
+export function notifiable(msgs: readonly FeedMsg[], opts: { first: boolean; away: boolean; level?: NotifyLevel }): FeedMsg[] {
   if (opts.first || !opts.away) return [];
+  const level = opts.level ?? DEFAULT_LEVEL;
   return msgs.filter((m) => {
     const from = m.from ?? '';
     if (!from || from === 'human') return false;         // your own words
-    if (systemLine(m.body) !== null) return taskFinished(m.body) !== null; // narration, unless a task finished
+    if (systemLine(m.body) !== null) return taskFinished(m.body) !== null; // narration, unless a task finished (every level)
     const note = statusNote(m.body);
-    if (note && note.state !== 'done') return false;     // ambient progress
-    return true;
+    if (note) return note.state === 'done' || level === 'all'; // a done summary always; progress only at `all`
+    return level !== 'done';                             // a plain reply: replies / all
   });
 }
 
@@ -168,6 +183,21 @@ export function notifyEnabled(): boolean {
 
 export function setNotifyEnabled(on: boolean): void {
   try { localStorage.setItem(ENABLED_KEY, on ? 'on' : 'off'); } catch { /* private mode */ }
+}
+
+/** The persisted level; anything unknown (an older build, a typo) reads as
+ * the default so a stale key can never silence or flood. */
+export function notifyLevel(): NotifyLevel {
+  try {
+    const v = localStorage.getItem(LEVEL_KEY);
+    return v === 'done' || v === 'all' ? v : DEFAULT_LEVEL;
+  } catch {
+    return DEFAULT_LEVEL;
+  }
+}
+
+export function setNotifyLevel(level: NotifyLevel): void {
+  try { localStorage.setItem(LEVEL_KEY, level); } catch { /* private mode */ }
 }
 
 const defaultPlay = (): Promise<void> => {
@@ -296,10 +326,10 @@ export function notifyNews(
   msgs: readonly FeedMsg[],
   ctx: { first: boolean; away: boolean; project: string },
   st: NotifyState = state,
-  effects: { cue: typeof playCue; sys: typeof systemNotify; enabled: () => boolean } = { cue: playCue, sys: systemNotify, enabled: notifyEnabled },
+  effects: { cue: typeof playCue; sys: typeof systemNotify; enabled: () => boolean; level?: () => NotifyLevel } = { cue: playCue, sys: systemNotify, enabled: notifyEnabled, level: notifyLevel },
 ): boolean {
   const fresh = sift(msgs, st.seen);
-  const news = notifiable(fresh, ctx);
+  const news = notifiable(fresh, { ...ctx, level: effects.level?.() ?? DEFAULT_LEVEL });
   if (!news.length || !effects.enabled()) return false;
   effects.cue(Date.now(), st);
   effects.sys(notifyText(news, ctx.project));

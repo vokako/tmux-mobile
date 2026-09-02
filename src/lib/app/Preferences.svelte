@@ -8,7 +8,7 @@
   import { fonts, uiFont, displayFont } from './fonts.svelte.ts';
   import { terminalPrefs, LINE_HEIGHT_MIN, LINE_HEIGHT_MAX } from './terminal-prefs.svelte.ts';
   import { hubPrefs } from '../hub/hub-prefs.svelte.ts';
-  import { notifyEnabled, setNotifyEnabled, ensurePermission, previewCue, notifyPermission, systemNotify } from '../hub/notifications.ts';
+  import { notifyEnabled, setNotifyEnabled, ensurePermission, previewCue, notifyPermission, systemNotify, notifyLevel, setNotifyLevel, NOTIFY_LEVELS, type NotifyLevel } from '../hub/notifications.ts';
   import { SHORTCUT_DEFAULTS, shortcutFromEvent, shortcutLabel, type ShortcutAction } from './shortcuts.ts';
   import { shortcuts } from './shortcuts.svelte.ts';
   import { agentHooksInstall, agentHooksRemove, agentHooksStatus } from '../core/ws.ts';
@@ -104,6 +104,10 @@
   let notifyOn = $state(notifyEnabled());
   let notifyPerm = $state(notifyPermission());
   let notifyTested = $state(false);
+  // The LEVEL (owner, 2026-09-02: "只有完成才通知，还是中间状态都通知"):
+  // done < replies < all, each a superset — see notifications.ts.
+  let notifyLvl = $state<NotifyLevel>(notifyLevel());
+  function setLevel(l: NotifyLevel) { notifyLvl = l; setNotifyLevel(l); }
   async function setNotify(on: boolean) {
     notifyOn = on;
     setNotifyEnabled(on);
@@ -389,6 +393,14 @@
             <div class="segmented" role="group" aria-label={t('hubNotify')}>
               <button class:active={notifyOn} aria-pressed={notifyOn} onclick={() => setNotify(true)}>{t('on')}</button>
               <button class:active={!notifyOn} aria-pressed={!notifyOn} onclick={() => setNotify(false)}>{t('off')}</button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div><strong>{t('hubNotifyLevel')}</strong><small>{t('hubNotifyLevelHint')}</small></div>
+            <div class="segmented" role="group" aria-label={t('hubNotifyLevel')}>
+              {#each NOTIFY_LEVELS as l (l)}
+                <button class:active={notifyLvl === l} aria-pressed={notifyLvl === l} onclick={() => setLevel(l)}>{t('hubNotifyLevel_' + l)}</button>
+              {/each}
             </div>
           </div>
           <div class="setting-row">

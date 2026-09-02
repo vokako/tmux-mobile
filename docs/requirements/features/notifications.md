@@ -12,6 +12,16 @@ Board #57. New project-chat messages can alert a reader who is not currently loo
 
 This is a **running-client** notification path for browser/PWA/webview. It does not claim remote push after the page or app has been closed.
 
+## Level
+
+Settings → Notifications carries a level, persisted to `tmux_notify_level`, three nested rungs:
+
+- **Finished** (`done`): `[tmm done]` summaries and an agent's board move to review/done only.
+- **Replies** (`replies`, default): Finished plus every agent reply.
+- **Everything** (`all`): Replies plus ambient `[tmm status working|waiting|blocked]` progress notes.
+
+App narration and the human's own messages are never news at any level. An unknown stored value reads as the default.
+
 ## What counts as news
 
 A message may alert only when the reader is away from that conversation: the document is hidden, the window is unfocused, another app page is visible, or the message belongs to a project other than the selected one (its notification names that project).

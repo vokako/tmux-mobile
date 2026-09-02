@@ -11,7 +11,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   notifiable, notifyText, excerpt, cueDue, msgKey, sift, playCue, notifyNews,
-  isAway, roomProjectName, systemNotify, taskFinished,
+  isAway, roomProjectName, systemNotify, taskFinished, DEFAULT_LEVEL, NOTIFY_LEVELS,
   CUE_COOLDOWN_MS, CUE_SRC, SEEN_CAP,
   type FeedMsg, type NotifyState, type NotifyEnv,
 } from './notifications.ts';
@@ -72,6 +72,23 @@ test('notifiable: ambient [tmm status] progress is not news, [tmm done] is', () 
   ], away);
   assert.equal(out.length, 1);
   assert.match(out[0]?.body ?? '', /\[tmm done\]/u);
+});
+
+test('notifiable: the LEVEL is three nested rungs — done ⊂ replies ⊂ all (board #72)', () => {
+  const batch: FeedMsg[] = [
+    { from: 'b', body: 'a plain reply' },
+    { from: 'b', body: '[tmm done] shipped it' },
+    { from: 'b', body: '[tmm] board #3 doing → review — Task' },
+    { from: 'b', body: '[tmm status working] still at it' },
+    { from: 'b', body: '[tmm] spawned dev — brief' },
+  ];
+  const bodies = (level: 'done' | 'replies' | 'all') => notifiable(batch, { ...away, level }).map((m) => m.body);
+  assert.deepEqual(bodies('done'), ['[tmm done] shipped it', '[tmm] board #3 doing → review — Task']);
+  assert.deepEqual(bodies('replies'), ['a plain reply', '[tmm done] shipped it', '[tmm] board #3 doing → review — Task']);
+  assert.deepEqual(bodies('all'), ['a plain reply', '[tmm done] shipped it', '[tmm] board #3 doing → review — Task', '[tmm status working] still at it']);
+  assert.equal(DEFAULT_LEVEL, 'replies');
+  assert.deepEqual(notifiable(batch, away), notifiable(batch, { ...away, level: DEFAULT_LEVEL }), 'no level = the default');
+  assert.deepEqual([...NOTIFY_LEVELS], ['done', 'replies', 'all'], 'the Settings row offers them in rising order');
 });
 
 // ─── Layer 1: seen keys — replays and backfill ──────────────────────────────
@@ -288,6 +305,8 @@ test('the permission request and the audio unlock ride the SETTINGS toggle, neve
   assert.ok(appearance.length > 0 && !appearance.includes('hubNotify'), 'no notification row under Appearance');
   assert.match(prefs, /storedTab === 'notifications'/u, 'the category is restorable');
   assert.match(prefs, /systemNotify\(\{ title: t\('hubNotifyTestTitle'\)/u, 'a test row — the real alert only fires while you are NOT looking');
+  assert.match(prefs, /\{#each NOTIFY_LEVELS as l \(l\)\}/u, 'the level row is driven by the ONE list, in its order');
+  assert.match(prefs, /setNotifyLevel\(l\)/u);
   // Asking whenever not yet granted is what reaches Android's runtime prompt:
   // the Tauri shim reports `denied` before the first ask.
   const notif = readFileSync(join(here, 'notifications.ts'), 'utf8');

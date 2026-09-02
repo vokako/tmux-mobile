@@ -10,7 +10,7 @@ controls reuse Terminal's 24px outlined chip language, including its spacing,
 rounded shape, muted idle state, and accent active state. Desktop Settings uses three tabs (mobile hides Shortcuts):
 
 - **Appearance** — theme, language, responsive layout, chat detail, desktop interface scale, terminal font and spacing
-- **Notifications** — message notifications On/Off and a test row
+- **Notifications** — message notifications On/Off, the level (Finished / Replies / Everything) and a test row
 - **Shortcuts** — configurable desktop navigation and Terminal window bindings
 - **Connection** — current server/addresses, optimize/share/disconnect, debug
 
