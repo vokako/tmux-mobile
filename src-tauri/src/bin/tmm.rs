@@ -80,6 +80,9 @@ USAGE (human or agent — self-management):
   tmm project archive <session>       remove from projects (session survives)
   tmm registry list                   centrally-defined agents
   tmm teams list                      configured agent teams (members + roles)
+  tmm teams save --name <n> --def '<members json>' [--description <text>]
+                                      members: [{"name","base","role"} | {"name","role","agent":{…}}]
+  tmm teams delete <name>
   tmm registry save --name <n> --backend <kiro|claude|codex> [--system <text>]
                     [--model m] [--effort low|medium|high|…] [--skills a,b] [--mcp <json>] [--can-hire]
   tmm registry delete <name>
@@ -392,6 +395,27 @@ async fn main() {
                     println!("{} — {} [{}]", s("name"), s("description"), names.join(", "));
                 }
             }
+        }
+        ("teams", rest) if rest.first().map(String::as_str) == Some("save") => {
+            let Some(name) = flags.get("name").cloned().flatten() else {
+                fail(EXIT_USAGE, "teams save needs --name <team> --def '<members json>'");
+            };
+            let Some(members) = flags.get("def").cloned().flatten() else {
+                fail(EXIT_USAGE, "teams save needs --def '<members json>' (an array of {name, base, role} / {name, role, agent})");
+            };
+            if serde_json::from_str::<serde_json::Value>(&members).is_err() {
+                fail(EXIT_USAGE, "--def must be valid JSON");
+            }
+            let description = flags.get("description").cloned().flatten().unwrap_or_default();
+            let r = rpc(&ctx, "teams_save", json!({ "def": { "name": name, "description": description, "members": members } })).await;
+            if ctx.json { println!("{r}"); } else { println!("✓ saved team {name} ({} members)", r.get("members").and_then(|v| v.as_u64()).unwrap_or(0)); }
+        }
+        ("teams", rest) if rest.first().map(String::as_str) == Some("delete") => {
+            let Some(name) = rest.get(1).cloned() else {
+                fail(EXIT_USAGE, "teams delete needs a team name");
+            };
+            let r = rpc(&ctx, "teams_delete", json!({ "name": name })).await;
+            if ctx.json { println!("{r}"); } else { println!("✓ deleted team {name}"); }
         }
         ("spawn", rest) => {
             let session = need_project(&ctx);
