@@ -355,7 +355,7 @@ async fn main() {
         ("spawn", rest) => {
             let session = need_project(&ctx);
             let Some(agent) = rest.first().cloned() else {
-                fail(EXIT_USAGE, "spawn needs a registry agent name: tmm spawn reviewer --brief \"...\"");
+                fail(EXIT_USAGE, "spawn needs a registry agent name: tmm spawn codex --brief \"...\"");
             };
             let brief = flags.get("brief").cloned().flatten().unwrap_or_default();
             let by = ctx.agent.clone().unwrap_or_default();

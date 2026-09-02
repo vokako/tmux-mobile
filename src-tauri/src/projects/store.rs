@@ -1300,7 +1300,17 @@ impl Store {
     pub fn reg_list(&self) -> Result<Vec<RegAgent>, String> {
         let mut stmt = self
             .conn
-            .prepare("SELECT name, backend, model, effort, system, skills, mcp, can_hire FROM reg_agents ORDER BY name")
+            .prepare(
+                "SELECT name, backend, model, effort, system, skills, mcp, can_hire
+                   FROM reg_agents
+                  ORDER BY CASE name
+                    WHEN 'kiro' THEN 0
+                    WHEN 'codex' THEN 1
+                    WHEN 'claude' THEN 2
+                    WHEN 'grok' THEN 3
+                    ELSE 4
+                  END, name"
+            )
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], row_to_reg_agent)
@@ -1352,8 +1362,10 @@ impl Store {
             .map_err(|e| e.to_string())
     }
 
-    /// Seed the built-in defs once (empty table only) so `+ agent` has
-    /// something to offer out of the box. Mirrors the prototype's roster.
+    /// Seed the four backend-native Manager defaults once (empty table only).
+    /// `docs` / `reviewer` and `*-default` aliases are deliberately retired:
+    /// one obvious entry per backend, with the defaults pinned to the top of
+    /// every registry consumer by `reg_list`.
     pub fn reg_seed(&self, now: u64) -> Result<(), String> {
         let count: i64 = self
             .conn
@@ -1364,34 +1376,44 @@ impl Store {
         }
         let seeds = [
             RegAgent {
-                name: "lead".into(),
+                name: "kiro".into(),
                 backend: "kiro".into(),
                 model: String::new(),
                 effort: String::new(),
-                system: "You are the project lead. Break the task down, do the core work yourself, and delegate well-scoped pieces to other agents when it genuinely helps. You may spawn agents with `tmm spawn <registry-name> --brief \"...\"` — check `tmm registry list` for who is available. Keep the human informed of decisions, not process.\n\nHow replies reach the room: the end of every turn is captured automatically from the stop hook and posted to the project room. You do not need to repeat a final result with `tmm send` — doing so wastes a call and the dedup filter drops it anyway. Use `tmm send` while a turn is in flight: that is the only way to report progress on a long task before it finishes. `tmm status waiting|blocked` is for being stuck on something outside your control — announcing that you are working is pointless, since turn boundaries are observed from your own hooks. Use `tmm done` to mark completion; its summary can be one line because the full result is already in the room.\n\nAddressing a teammate with @name is a delivery action, not a mention: `tmm send \"@reviewer 请审\"` types that line into the reviewer's pane and interrupts whatever they are doing. Only address someone when the intent is to hand off a task or ask a question that needs a reply. Never put credentials or secrets in a message — room contents are persisted and rendered to mobile clients.".into(),
-                skills: "[]".into(),
+                system: "You are a powerful 10x developer running on Kiro CLI who can handle any task with decisive execution and minimal words.".into(),
+                skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
                 mcp: "[]".into(),
                 can_hire: true,
             },
             RegAgent {
-                name: "reviewer".into(),
-                backend: "claude".into(),
-                model: String::new(),
-                effort: String::new(),
-                system: "You are a code reviewer. Read the diff or branch you are briefed on, verify the change does what it claims, and report concrete findings (file:line) — no style nitpicks unless they hide bugs. Reply to whoever briefed you.\n\nHow replies reach the room: the end of every turn is captured automatically and posted to the project room. You do not need to repeat your findings with `tmm send`. Use `tmm send` only to address a specific teammate mid-task or to report a blocker; use `tmm done` to mark completion with a one-line summary.".into(),
-                skills: "[]".into(),
-                mcp: "[]".into(),
-                can_hire: false,
-            },
-            RegAgent {
-                name: "docs".into(),
+                name: "codex".into(),
                 backend: "codex".into(),
                 model: String::new(),
                 effort: String::new(),
-                system: "You are the docs writer. Keep design docs and READMEs in sync with the change you are briefed on. Plain words, specifics over superlatives.\n\nHow replies reach the room: the end of every turn is captured automatically and posted to the project room. You do not need to call `tmm send` to report completion. Use `tmm send` only to address a specific teammate or report a blocker; use `tmm done` to mark completion with a one-line summary.".into(),
-                skills: "[]".into(),
-                mcp: "[]".into(),
-                can_hire: false,
+                system: "You are a powerful 10x developer running on Codex who can handle any task with decisive execution and minimal words.".into(),
+                skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
+                mcp: r#"[{"name":"kiro-web-search","command":"uvx","args":["kiro-web-search==0.1.3"]}]"#.into(),
+                can_hire: true,
+            },
+            RegAgent {
+                name: "claude".into(),
+                backend: "claude".into(),
+                model: String::new(),
+                effort: String::new(),
+                system: "You are a powerful 10x developer running on Claude Code who can handle any task with decisive execution and minimal words.".into(),
+                skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
+                mcp: r#"[{"name":"kiro-web-search","command":"uvx","args":["kiro-web-search==0.1.3"]}]"#.into(),
+                can_hire: true,
+            },
+            RegAgent {
+                name: "grok".into(),
+                backend: "grok".into(),
+                model: String::new(),
+                effort: String::new(),
+                system: "You are a powerful 10x developer running on Grok who can handle any task with decisive execution and minimal words.".into(),
+                skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
+                mcp: r#"[{"name":"kiro-web-search","command":"uvx","args":["kiro-web-search==0.1.3"]}]"#.into(),
+                can_hire: true,
             },
         ];
         for s in &seeds {
@@ -2314,22 +2336,49 @@ mod tests {
         let store = Store::open_memory().unwrap();
         store.reg_seed(100).unwrap();
         let seeded = store.reg_list().unwrap();
-        assert_eq!(seeded.len(), 3, "lead/reviewer/docs seeds");
-        assert!(seeded.iter().any(|a| a.name == "lead" && a.can_hire));
+        assert_eq!(
+            seeded.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
+            ["kiro", "codex", "claude", "grok"],
+            "the four backend defaults are the fixed leading group"
+        );
+        assert!(seeded.iter().all(|a| a.can_hire), "every default is a Manager");
+        assert!(seeded.iter().all(|a| a.skills == r#"["tmm-cli","mem","mcp-cli"]"#));
+        assert_eq!(seeded[0].mcp, "[]", "Kiro uses its built-in web search");
+        assert!(seeded[1..].iter().all(|a| a.mcp.contains("kiro-web-search")));
+        assert!(!seeded.iter().any(|a| matches!(a.name.as_str(), "docs" | "reviewer")));
+
         // Seeding twice must not duplicate.
         store.reg_seed(200).unwrap();
-        assert_eq!(store.reg_list().unwrap().len(), 3);
+        assert_eq!(store.reg_list().unwrap().len(), 4);
+
+        // A custom definition alphabetically before the defaults stays AFTER
+        // their fixed group; the rest of the list is alphabetical.
+        let custom = RegAgent {
+            name: "aaa-custom".into(),
+            backend: "kiro".into(),
+            model: String::new(),
+            effort: String::new(),
+            system: "custom".into(),
+            skills: "[]".into(),
+            mcp: "[]".into(),
+            can_hire: false,
+        };
+        store.reg_save(&custom, 250).unwrap();
+        assert_eq!(
+            store.reg_list().unwrap().iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
+            ["kiro", "codex", "claude", "grok", "aaa-custom"]
+        );
 
         // Upsert edits in place.
-        let mut lead = store.reg_get("lead").unwrap().unwrap();
-        lead.model = "claude-opus-4.6".into();
-        store.reg_save(&lead, 300).unwrap();
-        assert_eq!(store.reg_get("lead").unwrap().unwrap().model, "claude-opus-4.6");
-        assert_eq!(store.reg_list().unwrap().len(), 3, "save by name is an upsert");
+        let mut kiro = store.reg_get("kiro").unwrap().unwrap();
+        kiro.model = "gpt-5.6-sol".into();
+        store.reg_save(&kiro, 300).unwrap();
+        assert_eq!(store.reg_get("kiro").unwrap().unwrap().model, "gpt-5.6-sol");
+        assert_eq!(store.reg_list().unwrap().len(), 5, "save by name is an upsert");
 
-        assert!(store.reg_delete("docs").unwrap());
-        assert!(!store.reg_delete("docs").unwrap(), "second delete is a no-op");
-        assert_eq!(store.reg_list().unwrap().len(), 2);
+        assert!(store.reg_delete("aaa-custom").unwrap());
+        assert!(!store.reg_delete("aaa-custom").unwrap(), "second delete is a no-op");
+        assert_eq!(store.reg_list().unwrap().len(), 4);
     }
 
     #[test]
@@ -2352,7 +2401,12 @@ mod tests {
         .unwrap();
         let store = Store::init(conn).unwrap();
         store.reg_seed(1).unwrap();
-        assert_eq!(store.reg_list().unwrap().len(), 3);
+        let seeded = store.reg_list().unwrap();
+        assert_eq!(seeded.len(), 4);
+        assert_eq!(
+            seeded.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
+            ["kiro", "codex", "claude", "grok"]
+        );
         let v: i64 = store.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
         assert_eq!(v, SCHEMA_VERSION);
         // v6 assets exist and are usable on a migrated db.

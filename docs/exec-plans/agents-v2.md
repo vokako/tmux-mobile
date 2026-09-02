@@ -126,7 +126,7 @@ offline   ← tmux 窗口没了
 tmm send "@reviewer 看一下 src/lib.rs 的改动"   # 说话（最终回复也走这里）
 tmm log --since <ts> [--output json]           # 拉新消息（增量游标，学 multica）
 tmm status waiting "等接口定稿"                  # 显式状态宣告
-tmm spawn reviewer --brief "review 当前分支"     # lead 拉起同伴（can_hire 门控）
+tmm spawn codex --brief "review 当前分支"        # Manager 拉起同伴（can_hire 门控）
 tmm done "PR 已提交"                            # 完成宣告
 
 # 人用
@@ -157,7 +157,7 @@ agent 定义 = {
 用户场景直接映射（不变）：
 
 - **(a) 布置任务**：项目里 `+ agent` 拉起 lead，人在它的窗口（或 UI 中枢 @它）布置任务——对话就是任务，没有 issue 表单。
-- **(b) 动态拉起**：lead 需要帮手 → `tmm spawn reviewer --brief "..."` → 同一项目 session 开新窗口、按 registry 物化、brief 作为开场消息。
+- **(b) 动态拉起**：Manager 需要帮手 → `tmm spawn codex --brief "..."` → 同一项目 session 开新窗口、按 registry 物化、brief 作为开场消息。
 - **(c) 状态监控**：§4.3 的推导状态 + 遥测活动行，三处可见。
 
 第一版不做 leader briefing 自动名册注入——lead 用 `tmm agent list` / `tmm registry list` 主动查，把判断留给 agent。观察效果后再定。
