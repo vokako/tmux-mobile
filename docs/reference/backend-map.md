@@ -1,8 +1,8 @@
-# src-tauri — backend map
+# Backend map — `src-tauri/`
 
 Rust side of tmux-mobile: the WebSocket server, the `tmm` CLI, project/agent
 management, and the Tauri shell. Rules with their reasons live in the design
-docs linked from the root `CLAUDE.md`; this file only says where things are.
+docs (`../design-docs/`); this page only says where things are.
 
 ## Modules
 

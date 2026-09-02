@@ -18,7 +18,7 @@ WebSocket JSON-RPC with token auth + optional E2E encryption. Targets: Android
 - **Backend**: Rust (Tauri 2), tokio, tokio-tungstenite, rusqlite (`state.db`), vendored `agora` bus (`team.db`)
 - **Preview / rendering**: highlight.js, marked (+ KaTeX in chat), mermaid, pdfjs-dist
 - **Agent side**: the `tmm` CLI (`src-tauri/src/bin/tmm.rs`) + hooks telemetry; no MCP for the integration itself
-- **Layout**: `src/lib/{app,core,files,hub,projects,sessions,system,team,terminal,ui}` · `src-tauri/src/{server,projects,team,bin}` (backend map in `src-tauri/CLAUDE.md`)
+- **Layout**: `src/lib/{app,core,files,hub,projects,sessions,system,team,terminal,ui}` · `src-tauri/src/{server,projects,team,bin}` (backend map: [docs/reference/backend-map.md](docs/reference/backend-map.md))
 
 ## Commands
 
@@ -66,7 +66,7 @@ Each links to the doc that holds the reason and the details.
 | `docs/requirements/` | WHAT the product does (pages, features, API contracts, backend services) | before changing behaviour a user sees |
 | `docs/design-docs/` | WHY it is built this way and HOW — `features/` cross-cutting, `pages/` per screen; each ends with **Rules and their reasons** | before touching that area |
 | `docs/conventions/` | how we WORK: development loop, frontend rules, testing | first day, and whenever a build misbehaves |
-| `docs/reference/` | FACTS to look up: configuration keys and defaults | when configuring or deploying |
+| `docs/reference/` | FACTS to look up: configuration keys, the backend module map | when configuring or deploying |
 | `docs/exec-plans/` | HISTORY: dated plans and prototypes that led here | to understand a past decision |
 | `docs/unresolved.md` | known open problems | before filing a duplicate |
 
@@ -89,10 +89,13 @@ Each links to the doc that holds the reason and the details.
 
 ### Conventions, reference, history
 - [Development (commands, dev loop, build gotchas)](docs/conventions/development.md) · [Frontend conventions](docs/conventions/frontend.md) · [Testing](docs/conventions/testing.md)
-- [Configuration reference](docs/reference/config.md)
+- [Configuration reference](docs/reference/config.md) · [Backend module map](docs/reference/backend-map.md)
 - [Execution plans (history)](docs/exec-plans/) · [Unresolved issues](docs/unresolved.md)
 
-## Memory files elsewhere in the tree
+## One entry point
 
-- `src-tauri/CLAUDE.md` — the backend module map and Rust-only rules.
-- `temp/` is gitignored scratch (its `AGENTS.md` belongs to another repo); `.tmm/agents/*/CLAUDE.md` are generated agent homes — neither is project memory.
+This is the ONLY memory file in the repository (owner, 2026-09-02: source
+folders carry no `CLAUDE.md`/`AGENTS.md` — a second entry point is a second
+place to look). Everything else is under `docs/`. `temp/` is gitignored
+scratch and `.tmm/agents/*/` are generated agent homes; files inside them are
+not project memory.
