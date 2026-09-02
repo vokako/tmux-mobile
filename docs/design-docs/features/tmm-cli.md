@@ -639,8 +639,9 @@ notification-UI concern; telemetry wants every fact).
 
 The owner uses Claude through Bedrock ("都用bedrock渠道…复用我们全局定义的配置
 但是自己管理好类似kirohome这种"). The current live gate covers BOTH doors:
-a direct `claude -p` answered on `global.anthropic.claude-sonnet-4-6`, and a
-Hub-managed Claude launched from its isolated home with the same channel.
+a direct `claude -p` answered on `global.anthropic.claude-sonnet-4-6[1m]`,
+and a Hub-managed Claude launched as
+`global.anthropic.claude-fable-5-1[1m]` from its isolated home.
 
 - **Channel**: the USER's `~/.claude/settings.json` carries an `env` block
   (`CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION`, `ANTHROPIC_MODEL`,
@@ -681,7 +682,14 @@ Hub-managed Claude launched from its isolated home with the same channel.
 - **Model**: empty means the BACKEND default — the inherited env's
   `ANTHROPIC_MODEL` — so no `--model` is passed (the old hardcoded `sonnet`
   alias overrode the env and does not resolve on Bedrock). A configured model
-  rides `--model`, which wins over env.
+  rides `--model`, which wins over env. Supported PRIMARY pins carry Claude
+  Code's literal `[1m]` suffix: global Sonnet 4.6 and `cc_builder` Fable 5.1.
+  Both were invoked live; Fable's official statusLine moved from
+  `64.0K/200K · 32% ctx` to `64.0K/1M · 6% ctx`. The Haiku 4.5 background pin
+  deliberately has NO suffix — Anthropic's Bedrock 1M compatibility list does
+  not include it. `[1m]` is also a zsh glob, so a launch line MUST carry it
+  through `shell_quote`; hand-writing it bare makes zsh fail with `no matches
+  found` before Claude starts.
 - **Hook payloads verified** (they were claude-documented, codex-measured
   until now): `hook_event_name`/`prompt`/`session_id` on UserPromptSubmit,
   `last_assistant_message` on Stop — the normalizer's claude arm matches.

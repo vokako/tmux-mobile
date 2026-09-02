@@ -1145,9 +1145,13 @@ mod tests {
     }
 
     #[test]
-    fn shell_quote_wraps_spaces_and_unicode() {
+    fn shell_quote_wraps_spaces_unicode_and_globs() {
         assert_eq!(shell_quote("hello world"), "'hello world'");
         assert_eq!(shell_quote("你是「经理」"), "'你是「经理」'");
+        assert_eq!(
+            shell_quote("global.anthropic.claude-fable-5-1[1m]"),
+            "'global.anthropic.claude-fable-5-1[1m]'"
+        );
     }
 
     #[test]
