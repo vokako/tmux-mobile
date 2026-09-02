@@ -452,6 +452,27 @@ pub(super) fn prepare_kiro(
 }
 
 // ---- Claude Code ----
+fn claude_user_env_from(path: &Path) -> Value {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.get("env").cloned())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
+/// The provider channel from the user's Claude settings. Managed homes copy
+/// only this block: Bedrock auth selection, region and model pins travel with
+/// the agent, while plugins and unrelated user preferences do not.
+pub(crate) fn claude_user_env() -> Value {
+    let path = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default()
+        .join(".claude")
+        .join("settings.json");
+    claude_user_env_from(&path)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn prepare_claude(
     name: &str, role: &str, goal: &str, team_prompt: &str,
@@ -488,6 +509,10 @@ pub(super) fn prepare_claude(
     std::fs::write(
         &settingsfile,
         serde_json::to_string_pretty(&serde_json::json!({
+            // Team's settings file is explicit, so carry only the user's
+            // provider channel (Bedrock switch/region/model pins) into it.
+            // Plugins and other user preferences remain outside Team.
+            "env": claude_user_env(),
             "skipDangerousModePermissionPrompt": true,
             "hooks": {
                 "PreToolUse": [ { "matcher": "*", "hooks": [ { "type": "command", "command": heartbeat_command(&paths.heartbeat, "pre") } ] } ],
@@ -507,13 +532,15 @@ pub(super) fn prepare_claude(
     )
     .map_err(|e| e.to_string())?;
 
-    let m = model.unwrap_or("sonnet");
+    let model_arg = model
+        .map(|m| format!(" --model {}", shell_quote(m)))
+        .unwrap_or_default();
     let system_prompt = build_cli_system_prompt(role, goal, team_prompt, cfg, &extras.skills);
     let cmd = format!(
-        "command claude --mcp-config {} --strict-mcp-config --settings {} --model {} --dangerously-skip-permissions --append-system-prompt {} {}",
+        "command claude --mcp-config {} --strict-mcp-config --settings {}{} --dangerously-skip-permissions --append-system-prompt {} {}",
         shell_quote(&mcpfile.to_string_lossy()),
         shell_quote(&settingsfile.to_string_lossy()),
-        shell_quote(m),
+        model_arg,
         shell_quote(&system_prompt),
         shell_quote(&cfg.team_kick)
     )
@@ -525,6 +552,7 @@ pub(super) fn prepare_claude(
     let confirmation = StartupConfirmation {
         markers: CLAUDE_FOLDER_TRUST_MARKERS.to_vec(),
         ready_markers: vec!["bypass permissions on"],
+        accept_keys: vec!["Down", "Enter"],
         timeout: Duration::from_secs(120),
     };
     let mut env = hb_env(name, room, cfg);
@@ -590,6 +618,7 @@ pub(super) fn prepare_codex(
     let confirmation = StartupConfirmation {
         markers: CODEX_FOLDER_TRUST_MARKERS.to_vec(),
         ready_markers: vec!["Starting MCP servers"],
+        accept_keys: vec!["Enter"],
         timeout: Duration::from_secs(120),
     };
     Ok((env, cmd, Some(confirmation)))
@@ -644,9 +673,27 @@ mod tests {
     use super::*;
     use super::super::launch::{folder_trust_prompt_visible, startup_already_ready, startup_prompt_visible};
     use super::super::workspace::prepare_home;
-    
-    
 
+    #[test]
+    fn claude_channel_inherits_only_the_user_env_block() {
+        let root = std::env::temp_dir().join(format!(
+            "teamtest-claude-env-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let settings = root.join("settings.json");
+        std::fs::write(
+            &settings,
+            r#"{"env":{"CLAUDE_CODE_USE_BEDROCK":"1","AWS_REGION":"us-west-2"},"enabledPlugins":{"private":true},"theme":"light"}"#,
+        )
+        .unwrap();
+        let inherited = claude_user_env_from(&settings);
+        assert_eq!(inherited["CLAUDE_CODE_USE_BEDROCK"], "1");
+        assert_eq!(inherited["AWS_REGION"], "us-west-2");
+        assert!(inherited.get("enabledPlugins").is_none());
+        assert!(inherited.get("theme").is_none());
+        std::fs::remove_dir_all(&root).ok();
+    }
     #[test]
     fn codex_system_files_link_config_env_and_auth_idempotently() {
         let root = std::env::temp_dir().join(format!("teamtest-codex-system-{}", uuid::Uuid::new_v4()));
@@ -838,7 +885,10 @@ mod tests {
         )
         .unwrap();
         assert!(claude_cmd.contains("--dangerously-skip-permissions"));
-        assert!(claude_cmd.contains("--model sonnet"));
+        assert!(
+            !claude_cmd.contains("--model"),
+            "empty model inherits the provider channel: {claude_cmd}"
+        );
         assert!(claude_cmd.contains("--append-system-prompt"));
         assert!(claude_cmd.contains("<role-system-prompt>"));
         assert!(
@@ -853,6 +903,7 @@ mod tests {
             claude_settings["skipDangerousModePermissionPrompt"],
             Value::Bool(true)
         );
+        assert!(claude_settings["env"].is_object(), "provider channel is explicit in Team settings");
         assert_eq!(
             claude_settings["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"],
             format!("/bin/bash {} pulse", paths.heartbeat.display())
@@ -890,6 +941,7 @@ mod tests {
             "0".to_string()
         )));
         let confirmation = claude_confirmation.unwrap();
+        assert_eq!(confirmation.accept_keys, vec!["Down", "Enter"]);
         assert_eq!(confirmation.timeout, Duration::from_secs(120));
         assert!(startup_prompt_visible(
             "Accessing workspace:\nYes, I trust this folder\nEnter to confirm",
@@ -939,6 +991,7 @@ mod tests {
         .unwrap();
         assert!(profiled_cmd.contains("--profile personal"));
         let confirmation = codex_confirmation.unwrap();
+        assert_eq!(confirmation.accept_keys, vec!["Enter"]);
         assert!(startup_prompt_visible(
             "Do you trust the contents of this directory?\n1. Yes, continue\nPress enter to continue",
             &confirmation

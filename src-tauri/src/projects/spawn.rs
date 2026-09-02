@@ -120,10 +120,21 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
     env.push(("TMM_AGENT".into(), window_name.clone()));
     // The MCP config is findable from ANY cwd, not just under the workspace.
     env.push(("TMM_MCP_CONFIG".into(), mcp_config.to_string_lossy().to_string()));
-    // tmm sits next to the server binary; make sure the pane can find it.
-    if let Some(dir) = tmm_dir() {
-        env.push(("PATH".into(), format!("{}:{}", dir.display(), std::env::var("PATH").unwrap_or_default())));
-    }
+    // tmm sits next to the server binary, while user-installed backends and
+    // MCP runners commonly sit in ~/.local/bin or ~/.cargo/bin. The server is
+    // often supervised with a minimal PATH, so make the recipe self-sufficient
+    // instead of relying on the interactive shell to repair it later.
+    let inherited_path = env
+        .iter()
+        .rev()
+        .find(|(key, _)| key == "PATH")
+        .map(|(_, value)| value.clone())
+        .unwrap_or_else(|| std::env::var("PATH").unwrap_or_default());
+    env.retain(|(key, _)| key != "PATH");
+    env.push((
+        "PATH".into(),
+        shared::agent_launch_path(tmm_dir().as_deref(), &inherited_path),
+    ));
 
     tmux::ensure_session(req.session, &workspace)?;
     let pane = tmux::new_named_window(req.session, &window_name, &workspace)?;
@@ -834,7 +845,7 @@ fn render_claude(
     std::fs::write(
         &settingsfile,
         serde_json::to_string_pretty(&json!({
-            "env": claude_user_env(),
+            "env": shared::claude_user_env(),
             "skipDangerousModePermissionPrompt": true,
             "hooks": claude_hooks(&notify)
         }))
@@ -879,45 +890,44 @@ fn render_claude(
         confirmation: Some(shared::StartupConfirmation {
             markers: shared::CLAUDE_FOLDER_TRUST_MARKERS.to_vec(),
             ready_markers: vec!["bypass permissions on"],
+            accept_keys: vec!["Down", "Enter"],
             timeout: std::time::Duration::from_secs(120),
         }),
     })
 }
 
-/// The `env` block of the user's own `~/.claude/settings.json` — the channel
-/// configuration (Bedrock switch, region, default model). Only read, never
-/// written; absent or unparsable means an empty object (the agent then runs
-/// on claude's own defaults, which on this machine would be a login prompt —
-/// same soft degradation as grok's missing auth.json).
-fn claude_user_env() -> Value {
-    let path = std::env::var_os("HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_default()
-        .join(".claude")
-        .join("settings.json");
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-        .and_then(|v| v.get("env").cloned())
-        .filter(Value::is_object)
-        .unwrap_or_else(|| json!({}))
+/// Merge missing provider-channel keys into a managed Claude settings object.
+/// Existing values are per-agent overrides and win; newly introduced global
+/// keys (for example ANTHROPIC_DEFAULT_HAIKU_MODEL replacing the deprecated
+/// small-fast key) still reach old homes on their next start.
+fn merge_missing_claude_env(conf: &mut Value, inherited: &Value) -> bool {
+    let Some(root) = conf.as_object_mut() else { return false };
+    let Some(source) = inherited.as_object().filter(|env| !env.is_empty()) else { return false };
+    if !root.get("env").is_some_and(Value::is_object) {
+        root.insert("env".into(), Value::Object(source.clone()));
+        return true;
+    }
+    let target = root.get_mut("env").and_then(Value::as_object_mut).unwrap();
+    let mut changed = false;
+    for (key, value) in source {
+        if !target.contains_key(key) {
+            target.insert(key.clone(), value.clone());
+            changed = true;
+        }
+    }
+    changed
 }
 
-/// Backfill a managed claude settings.json with the inherited channel env
-/// (see `claude_user_env`) when it has NONE. Fail-soft: refresh must never
+/// Backfill a managed claude settings.json with missing inherited channel keys
+/// (see `backends_shared::claude_user_env`). Fail-soft: refresh must never
 /// block a start. Returns true when the file changed.
 fn ensure_claude_env(path: &Path) -> bool {
     let Ok(text) = std::fs::read_to_string(path) else { return false };
     let Ok(mut conf) = serde_json::from_str::<Value>(&text) else { return false };
-    let Some(obj) = conf.as_object_mut() else { return false };
-    if obj.get("env").is_some_and(Value::is_object) {
-        return false; // present — the owner's (or an earlier render's) choice stands
+    let inherited = shared::claude_user_env();
+    if !merge_missing_claude_env(&mut conf, &inherited) {
+        return false;
     }
-    let inherited = claude_user_env();
-    if inherited.as_object().is_none_or(|m| m.is_empty()) {
-        return false; // nothing to inherit
-    }
-    obj.insert("env".into(), inherited);
     std::fs::write(path, serde_json::to_string_pretty(&conf).unwrap()).is_ok()
 }
 
@@ -972,6 +982,7 @@ fn render_codex(
         confirmation: Some(shared::StartupConfirmation {
             markers: shared::CODEX_FOLDER_TRUST_MARKERS.to_vec(),
             ready_markers: vec!["Starting MCP servers", "OpenAI Codex"],
+            accept_keys: vec!["Enter"],
             timeout: std::time::Duration::from_secs(120),
         }),
     })
@@ -1461,6 +1472,26 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         assert_eq!(v["mcpServers"]["mine"]["command"], json!("hand-added"), "agent's own server kept");
         assert_eq!(v["mcpServers"]["web"]["command"], json!("mcp-web"), "new def seeded");
         std::fs::remove_dir_all(&ws).ok();
+    }
+
+    #[test]
+    fn claude_channel_backfill_adds_new_keys_without_stomping_overrides() {
+        let mut managed = json!({
+            "env": {
+                "CLAUDE_CODE_USE_BEDROCK": "1",
+                "ANTHROPIC_MODEL": "agent-specific-model"
+            },
+            "hooks": {}
+        });
+        let global = json!({
+            "CLAUDE_CODE_USE_BEDROCK": "1",
+            "ANTHROPIC_MODEL": "global-model",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "global-haiku"
+        });
+        assert!(merge_missing_claude_env(&mut managed, &global));
+        assert_eq!(managed["env"]["ANTHROPIC_MODEL"], "agent-specific-model");
+        assert_eq!(managed["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "global-haiku");
+        assert!(!merge_missing_claude_env(&mut managed, &global), "second refresh is a no-op");
     }
 
     #[test]

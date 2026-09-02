@@ -2,9 +2,40 @@
 //! inline kick prompt, and startup-prompt auto-confirmation (permissions /
 //! folder-trust dialogs). Split from team.rs 2026-07-22 — content unchanged.
 
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::Value;
+
+/// Build the PATH used by managed agent launch scripts. The server is often
+/// supervised with a deliberately small service PATH, while user-installed
+/// CLIs (`claude`, `uvx`, cargo tools) live under the standard per-user bin
+/// directories. A launch recipe must be self-sufficient: inheriting only the
+/// server PATH made a configured Claude agent open a shell and fail with
+/// `command not found: claude`.
+fn agent_launch_path_from(home: Option<&Path>, prepend: Option<&Path>, base: &str) -> String {
+    let mut parts: Vec<PathBuf> = Vec::new();
+    if let Some(p) = prepend.filter(|p| !p.as_os_str().is_empty()) {
+        parts.push(p.to_path_buf());
+    }
+    if let Some(home) = home {
+        parts.push(home.join(".local/bin"));
+        parts.push(home.join("bin"));
+        parts.push(home.join(".cargo/bin"));
+    }
+    parts.extend(std::env::split_paths(base));
+    let mut seen = std::collections::HashSet::new();
+    parts.retain(|p| seen.insert(p.as_os_str().to_os_string()));
+    std::env::join_paths(parts)
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
+}
+
+pub(crate) fn agent_launch_path(prepend: Option<&Path>, base: &str) -> String {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    agent_launch_path_from(home.as_deref(), prepend, base)
+}
 
 use crate::tmux;
 
@@ -47,12 +78,20 @@ pub(super) fn launch_agent(name: &str, spec: &Value, cfg: &TeamConfig, room: &st
     let skills = resolve_skills(&skill_refs, team_dir_ref);
     let extras = Extras { env, mcp, skills };
 
-    let (env, cmd, startup_confirmation) = match backend {
+    let (mut env, cmd, startup_confirmation) = match backend {
         "kiro" => prepare_kiro(name, role, goal, team_prompt, cfg, room, paths, model, &extras)?,
         "claude" => prepare_claude(name, role, goal, team_prompt, cfg, room, paths, model, &extras)?,
         "codex" => prepare_codex(name, role, goal, team_prompt, cfg, room, paths, model, &extras)?,
         other => return Err(format!("unknown backend: {}", other)),
     };
+    let inherited_path = env
+        .iter()
+        .rev()
+        .find(|(key, _)| key == "PATH")
+        .map(|(_, value)| value.clone())
+        .unwrap_or_else(|| std::env::var("PATH").unwrap_or_default());
+    env.retain(|(key, _)| key != "PATH");
+    env.push(("PATH".into(), agent_launch_path(None, &inherited_path)));
 
     let ws = paths.workspace.to_string_lossy().to_string();
     tmux::ensure_session(session, &ws)?;
@@ -102,6 +141,10 @@ pub(crate) fn write_launch_script(home: &std::path::Path, name: &str, full_cmd: 
 pub(crate) struct StartupConfirmation {
     pub(crate) markers: Vec<&'static str>,
     pub(crate) ready_markers: Vec<&'static str>,
+    /// Named tmux keys used to accept the detected prompt. Claude 2.1.258
+    /// defaults its folder-trust cursor to "No, exit", so Enter alone exits;
+    /// Codex still defaults to the affirmative row.
+    pub(crate) accept_keys: Vec<&'static str>,
     pub(crate) timeout: Duration,
 }
 
@@ -150,7 +193,10 @@ pub(crate) fn confirm_startup_prompt(pane: String, confirmation: StartupConfirma
             if let Ok(content) = tmux::capture_pane_plain(&pane, Some(80)) {
                 if startup_prompt_visible(&content, &confirmation) {
                     println!("🜂 team: confirming folder trust in new pane {}", pane);
-                    let _ = tmux::send_keys(&pane, "Enter", false);
+                    for key in &confirmation.accept_keys {
+                        let _ = tmux::send_keys(&pane, key, false);
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
                     return;
                 }
                 if startup_already_ready(&content, &confirmation) {
@@ -189,6 +235,32 @@ pub(super) fn build_agent_prompt(role: &str, goal: &str, team_prompt: &str, cfg:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn managed_agent_path_includes_user_cli_bins_even_with_a_service_path() {
+        let home = Path::new("/home/tester");
+        let path = agent_launch_path_from(
+            Some(home),
+            Some(Path::new("/opt/tmm/bin")),
+            "/usr/bin:/home/tester/.local/bin:/usr/bin",
+        );
+        let parts: Vec<_> = std::env::split_paths(&path).collect();
+        assert_eq!(parts[0], PathBuf::from("/opt/tmm/bin"));
+        assert_eq!(parts[1], PathBuf::from("/home/tester/.local/bin"));
+        assert!(parts.contains(&PathBuf::from("/home/tester/bin")));
+        assert!(parts.contains(&PathBuf::from("/home/tester/.cargo/bin")));
+        assert_eq!(
+            parts.iter().filter(|p| *p == &PathBuf::from("/usr/bin")).count(),
+            1
+        );
+        assert_eq!(
+            parts
+                .iter()
+                .filter(|p| *p == &PathBuf::from("/home/tester/.local/bin"))
+                .count(),
+            1
+        );
+    }
 
     #[test]
     fn launch_script_keeps_typed_line_short() {

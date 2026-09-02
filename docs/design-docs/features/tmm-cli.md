@@ -635,32 +635,49 @@ Records are dropped when the window disappears (`retain_windows` on every
 `hub_agents`), and notifications feed the store *before* dedupe (dedupe is a
 notification-UI concern; telemetry wants every fact).
 
-## The claude backend on Bedrock (claude 2.1.239, wired 2026-08-22)
+## The claude backend on Bedrock (claude 2.1.258, re-verified 2026-09-02)
 
-Installed and verified live the same day the owner asked for it ("都用bedrock
-渠道…复用我们全局定义的配置 但是自己管理好类似kirohome这种"): a managed claude
-agent spawned from the hub answered a real turn on
-`global.anthropic.claude-sonnet-4-6` via Bedrock, hooks fired, `tmm done`
-posted, the reply auto-posted.
+The owner uses Claude through Bedrock ("都用bedrock渠道…复用我们全局定义的配置
+但是自己管理好类似kirohome这种"). The current live gate covers BOTH doors:
+a direct `claude -p` answered on `global.anthropic.claude-sonnet-4-6`, and a
+Hub-managed Claude launched from its isolated home with the same channel.
 
 - **Channel**: the USER's `~/.claude/settings.json` carries an `env` block
   (`CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION`, `ANTHROPIC_MODEL`,
-  `ANTHROPIC_SMALL_FAST_MODEL`) — SigV4 from the normal AWS credential chain,
-  no API key, same idea as codex's `amazon-bedrock` provider.
+  `ANTHROPIC_DEFAULT_HAIKU_MODEL`) — SigV4 from the normal AWS credential
+  chain, no Anthropic API key. Project agents copy that block into their
+  isolated settings; Team's explicit Claude settings do the same. Plugins and
+  marketplaces deliberately do NOT carry.
+- **Launch PATH is part of identity**: supervised server processes often have
+  only `/usr/local/bin:/usr/bin`, while Claude/uvx live in `~/.local/bin`.
+  Every managed launch recipe therefore prepends the `tmm` binary directory
+  plus `~/.local/bin`, `~/bin` and `~/.cargo/bin` (deduped) before the inherited
+  PATH. Without this, a valid registry agent opened a shell and failed with
+  `command not found: claude`; restart replayed the same broken PATH.
+- **Bedrock web search**: Anthropic documents that its built-in WebSearch is
+  unavailable on Bedrock. This host registers `kiro-web-search==0.1.3` as a
+  user-scope Claude MCP and as the native MCP on the default managed Claude
+  definitions. Its `KIRO_API_KEY` stays in local private config/state only,
+  never the repository. The upstream server wraps an internal, explicitly
+  unstable Kiro endpoint, so it is convenience rather than a production API.
 - **Isolation**: `CLAUDE_CONFIG_DIR=<ws>/.tmm/agents/<name>/` — claude's
   KIRO_HOME. History, session state and `.claude.json` stay in the agent's
   home. The relocation also unhooks the user settings layer, so the channel
   is INHERITED: `render_claude` copies the user file's `env` block into the
   isolated `settings.json` (grok's "auth carries, prefs do not" in claude's
   dialect; plugins/marketplaces deliberately do not carry), and
-  `refresh_hooks` backfills a missing `env` on every start.
+  `refresh_hooks` backfills missing channel keys on every start: global additions
+  reach old homes, while an existing per-agent value remains an explicit
+  override.
 - **First-run furniture, both measured**: a fresh config dir parks the TUI at
   the theme-onboarding picker before anything else, so `.claude.json` is
   pre-seeded with `hasCompletedOnboarding` (never clobbered — it records
   folder trust); the bypass-permissions acceptance dialog is suppressed by
   `skipDangerousModePermissionPrompt: true`; the folder-trust prompt is
-  answered by the spawn confirmation machinery
-  (`CLAUDE_FOLDER_TRUST_MARKERS`, wording re-verified on 2.1.239).
+  answered by the spawn confirmation machinery. Claude 2.1.258 defaults the
+  cursor to `No, exit`, so its acceptance sequence is `Down` → `Enter`;
+  sending the old bare Enter exits to the shell. Codex keeps its one-Enter
+  sequence (`CLAUDE_FOLDER_TRUST_MARKERS`, wording re-verified on 2.1.258).
 - **Model**: empty means the BACKEND default — the inherited env's
   `ANTHROPIC_MODEL` — so no `--model` is passed (the old hardcoded `sonnet`
   alias overrode the env and does not resolve on Bedrock). A configured model

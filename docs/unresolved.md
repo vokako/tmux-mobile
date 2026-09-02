@@ -268,10 +268,10 @@ cannot see other sessions.
 The claude/codex/grok ↔ kiro alignment pass (hooks, vitals, resume, palette)
 left three things deliberately open, each blocked on measurement, not effort:
 
-- **claude vitals + palette**: claude 2.1.239 is INSTALLED and on Bedrock
-  since 2026-08-22 (see the claude backend section in tmm-cli.md; its hook
-  payloads are measured and match the normalizer). What remains untranscribed
-  is its status-line furniture and its `/` popup: `sniff_remembered` still
+- **claude vitals + palette**: claude 2.1.258 is installed and its core
+  managed path was re-verified on Bedrock on 2026-09-02 (including isolated
+  channel config and native MCP). What remains untranscribed is its status-line
+  furniture and its `/` popup: `sniff_remembered` still
   returns the EMPTY reading for claude and `offeredCommands('claude')` still
   returns no palette. Closing both is now purely mechanical: capture the
   footer shapes, transcribe the popup, add the table + sniffer with pinned
