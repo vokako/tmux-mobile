@@ -64,8 +64,17 @@ test('the session list lives inside the Terminal page, sheeted on a phone', () =
   assert.match(aside, /onPick=\{\(\) => sessListOpen = false\}/u);
   // The terminal's session chip opens that same sheet on a phone.
   assert.match(source, /onOpenSessions=\{layout\.isTouchDevice \? \(\) => sessListOpen = true : null\}/u);
-  // A phone back gesture closes the sheet instead of leaving the app.
-  assert.match(source, /page === 'terminal' && sessListOpen.*sessListOpen = false/u);
+  // The phone Back gesture uses this sheet as Terminal's FLOOR (board #58),
+  // matching Chat/Board: a bare Terminal lifts it; once open it falls through
+  // and stays open, so Back can never close→open cycle. A Chat jump returns
+  // to Chat before the ordinary floor lift.
+  const jumpAt = source.indexOf("if (page === 'terminal' && jumpedFrom)");
+  const liftAt = source.indexOf("if (page === 'terminal' && layout.isTouchDevice && narrowVp && !sessListOpen)");
+  assert.ok(jumpAt >= 0 && liftAt > jumpAt, 'a Chat return slot outranks the Terminal floor');
+  assert.match(source, /if \(page === 'terminal' && layout\.isTouchDevice && narrowVp && !sessListOpen\) \{\s*sessListOpen = true;\s*navPush\(\);\s*return;\s*\}/u,
+    'bare compact Terminal lifts the session drawer and replenishes history');
+  assert.ok(!/page === 'terminal' && sessListOpen[^\n]*sessListOpen = false/u.test(source),
+    'an open floor never peels closed — no open/close loop');
 });
 
 // ── The desktop rail's icon order is the user's (board #6) ──────────────────

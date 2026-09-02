@@ -1116,12 +1116,18 @@
       // Board with nothing to peel is like Hub: the drawer is its compact
       // floor (lifted by its own chain above), so a fall-through just
       // re-pushes — it never dumps the reader on the terminal (board #47).
-      // Terminal is the root on a phone: back closes the session sheet if it
-      // is open, otherwise there is nowhere below it (re-push prevents exit).
-      if (page === 'terminal' && sessListOpen) { sessListOpen = false; navPush(); return; }
-      // A terminal you JUMPED INTO from the chat is not the root: back
-      // returns to the conversation (switchTab re-pushes and slides left).
+      // A terminal JUMPED INTO from Chat returns there before the ordinary
+      // terminal floor gets a chance to lift its drawer.
       if (page === 'terminal' && jumpedFrom) { switchTab(jumpedFrom); return; }
+      // Compact Terminal has the same FLOOR semantics as Chat/Board (board
+      // #58): a bare page lifts the session drawer. Once open, Back falls
+      // through to the final re-push — it must never peel closed and then
+      // re-open on the next gesture (an open/close cycle).
+      if (page === 'terminal' && layout.isTouchDevice && narrowVp && !sessListOpen) {
+        sessListOpen = true;
+        navPush();
+        return;
+      }
       // Settings peels its open category back to the list first; only a
       // back with nothing to peel leaves the page.
       if (page === 'prefs' && prefsGoBack && prefsGoBack()) { return; }

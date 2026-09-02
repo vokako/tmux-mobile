@@ -20,9 +20,12 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
   project cards) plus the terminal. On a touch layout the column becomes a
   slide-over sheet: the switcher's session chip opens it (instead of the
   smaller pane popover, which stays for desktop where the column is already
-  visible), picking a pane closes it via `onPick`, and the back gesture closes
-  it before it can leave the app. Terminal is therefore the ROOT page on a
-  phone and the connect/fallback landing everywhere.
+  visible), and picking a pane closes it via `onPick`. On a compact phone the
+  sheet is Terminal's **Back floor** (board #58): Back on a bare Terminal opens
+  it; Back while it is open falls through/re-pushes and leaves it open, so the
+  gesture cannot cycle close→open or leave the page. A Terminal reached through
+  Chat's jump slot returns to Chat before this ordinary floor is considered.
+  Terminal remains the connect/fallback landing everywhere.
 
 - The Terminal tab and its always-mounted page layer are available immediately
   after connecting, even before a pane has been selected. With no active target,
