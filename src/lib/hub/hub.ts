@@ -153,12 +153,19 @@ export function backendColor(backend: string | null | undefined): string {
  *   2. the only managed agent, when there is exactly one;
  *   3. an agent whose registry definition can hire (that IS the lead role);
  *   4. the lowest window index, so the answer is stable rather than arbitrary.
- * Returns '' when the project has no managed agent to talk to. */
+ * Returns '' when the project has no managed agent to talk to.
+ *
+ * `stored` has THREE states, and the middle one is load-bearing (review C,
+ * 2026-09-03): a name = the user chose that agent; `''` = the user chose the
+ * ROOM ("send to nobody, record only") and that choice is kept; `null`/absent =
+ * nobody chose, so the rule seats a lead. Before, '' and unset were the same
+ * value, so "no recipient" was re-seated by the next 5 s roster poll. */
 export function pickLead(
   agents: readonly HubAgent[],
   registry: readonly { name: string; can_hire?: boolean }[],
   stored?: string | null,
 ): string {
+  if (stored === '') return '';
   const managed = agents.filter((a) => a.managed);
   if (!managed.length) return '';
   if (stored && managed.some((a) => a.name === stored)) return stored;

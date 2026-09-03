@@ -336,6 +336,16 @@ test('pickLead: a remembered choice wins while that agent is present', () => {
   assert.equal(pickLead(agents, [], 'gone'), 'dev', 'a departed agent falls back to the rule');
 });
 
+test('pickLead: an explicit ROOM choice is kept; only "nobody chose" seats a lead', () => {
+  // Review C (2026-09-03): '' and unset used to be one value, so "send to the
+  // room, no recipient" was undone by the next roster poll's pickLead.
+  const agents = [ag({ name: 'dev', window: 1 }), ag({ name: 'qa', window: 2 })];
+  assert.equal(pickLead(agents, [], ''), '', 'the room stays the room');
+  assert.equal(pickLead(agents, [], null), 'dev', 'nobody chose → the rule seats a lead');
+  assert.equal(pickLead(agents, []), 'dev', 'absent is the same as null');
+  assert.equal(pickLead([ag({ name: 'solo' })], [], ''), '', 'even a one-agent room, once the user said so');
+});
+
 test('pickLead: one agent needs no rule, several prefer the one that can hire', () => {
   assert.equal(pickLead([ag({ name: 'solo' })], []), 'solo');
   const agents = [ag({ window: 3, name: 'dev' }), ag({ window: 2, name: 'boss' })];

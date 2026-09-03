@@ -1296,7 +1296,10 @@
   }
 
   /** Choosing a recipient is also choosing this project's lead: it is the same
-   * decision ("who am I working with here"), so it persists. */
+   * decision ("who am I working with here"), so it persists. That includes
+   * choosing the ROOM (`''`): hubPrefs stores it as a real value, and pickLead
+   * keeps it — before, '' was "unset" and the next roster poll re-seated a lead
+   * the user had just dismissed (review C, 2026-09-03). */
   function setRecipient(name) {
     recipient = name;
     recipientOpen = false;

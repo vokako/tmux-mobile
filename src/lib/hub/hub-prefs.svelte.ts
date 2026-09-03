@@ -105,11 +105,20 @@ export const hubPrefs = {
     localStorage.setItem(DRAWER_KEY, JSON.stringify(state.drawers));
     if (state.project === from) this.setProject(to);
   },
-  /** The remembered default recipient for a project, '' when none. */
-  lead(session: string) { return state.leads[session] ?? ''; },
+  /** The remembered recipient for a project: an agent's name, `''` when the
+   * user chose the ROOM (no recipient — record only), `null` when nobody has
+   * chosen yet and `pickLead` should seat a lead. The empty string is a real
+   * choice here, not "unset" (review C, 2026-09-03): storing it as an absent
+   * key made the next roster poll re-seat a lead the user had just dismissed. */
+  lead(session: string): string | null { return state.leads[session] ?? null; },
   setLead(session: string, name: string) {
-    if (name) state.leads[session] = name;
-    else delete state.leads[session];
+    state.leads[session] = name;
+    localStorage.setItem(LEAD_KEY, JSON.stringify(state.leads));
+  },
+  /** Forget the choice for a project — back to "nobody chose". */
+  clearLead(session: string) {
+    if (!(session in state.leads)) return;
+    delete state.leads[session];
     localStorage.setItem(LEAD_KEY, JSON.stringify(state.leads));
   },
   /** Newest message timestamp (ms) the user has looked at, per project. Drives
