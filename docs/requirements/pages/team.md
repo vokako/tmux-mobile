@@ -18,7 +18,8 @@ server. See `docs/design-docs/features/team.md` for architecture.
   canonical workspace + selected template. Conversation, roster, Agent runtime
   files, and tmux session are all scoped by that same id. Different templates
   may therefore run concurrently in one project directory.
-- **Header dropdown** lists active teams (room · live agent count); pick one to
+- **Header dropdown** lists active teams (project name · live agent count;
+  the raw room id is a tooltip); pick one to
   switch the chat + agent grid to it. Live agent status chips sit on the same
   header row (dot + name; wrap on overflow; tap → preview pane).
 - **+ New team** opens the workspace picker (folder browser) + a **roster

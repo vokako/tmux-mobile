@@ -35,3 +35,10 @@ test('the team switcher is the shared ContextMenu, not a backdrop panel (2026-09
   assert.match(source, /\{ anchor: anchorOf\(e\.currentTarget\), align: 'left', trigger: e\.currentTarget \}/u);
   assert.doesNotMatch(source, /team-pick-backdrop|team-pick-menu|switcherOpen/u);
 });
+
+test('the switcher shows the project name; the raw room id is only a tooltip (2026-09-03)', () => {
+  assert.match(source, /const nameOf = \(tm\) => teamDisplayName\(tm, projects\);/u);
+  assert.match(source, /<span class="team-pick-name">\{activeTeam \? nameOf\(activeTeam\)/u);
+  assert.match(source, /label: nameOf\(tm\),\s*title: tm\.room,/u);
+  assert.doesNotMatch(source, /<span class="team-pick-name">\{activeTeam \? activeTeam\.room/u);
+});

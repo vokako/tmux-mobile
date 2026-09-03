@@ -151,7 +151,13 @@ all rooms.
 - **Team tab UI**: the header's team pill opens the shared `ui/ContextMenu`
   (left-aligned from the pill, like the Hub's title caret; the current team
   `checked`, the agent count as the row `hint`, "+ New team" as the last row
-  — it was a hand-rolled backdrop panel until 2026-09-03), and "×" closes the active team
+  — it was a hand-rolled backdrop panel until 2026-09-03). Rows and the pill
+  show the team's NAME — `teamDisplayName` (team-selection.ts, pure + tested):
+  the project whose path is the team's canonical workspace names it, exactly
+  as the Hub/Projects pages do; without one the workspace basename; the raw
+  room id (`<basename>-<template>-<6hex>`, stable and unreadable) is only the
+  row/pill `title` tooltip. The project list rides along with `team_status`
+  and a server without projects leaves it empty. "×" closes the active team
   (`team_close_team` kills its tmux session; the chat log persists in the db, so
   re-starting the same workspace+template pair resumes its history).
 

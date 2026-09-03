@@ -28,7 +28,7 @@
     teamCloseTeam, teamEmployees, teamTemplateSave, teamTemplateDelete,
     teamSystemPromptSave,
     addTeamMessageListener, removeTeamMessageListener,
-    listSessionsWithPanes, fsCwd,
+    listSessionsWithPanes, fsCwd, projectList,
   } from '../core/ws.ts';
 
   /** Team statuses that are IN MOTION — they wear the app-wide `.live-dot`
@@ -39,7 +39,7 @@
   import TeamTemplates from './TeamTemplates.svelte';
   import { teamSessionOf } from '../core/team.svelte.ts';
   import {
-    pickActiveRoom, readStoredActiveRoom, writeStoredActiveRoom,
+    pickActiveRoom, readStoredActiveRoom, writeStoredActiveRoom, teamDisplayName,
   } from './team-selection.ts';
 
   let {
@@ -118,6 +118,12 @@
   // the one in view. All chat data is scoped to activeRoom; pushes are filtered
   // by their message's room. `newTeam` toggles the start-a-new-team panel.
   let teams = $state([]);        // [{ room, workspace, session, started, agents }]
+  // The projects list names teams (review, 2026-09-03: the switcher showed the
+  // raw room id — `<basename>-<template>-<6hex>` — where the Hub shows the
+  // project's NAME). Loaded with the team list; a server without projects
+  // (method-not-found) leaves it empty and the workspace basename names them.
+  let projects = $state([]);     // [{ name, path }]
+  const nameOf = (tm) => teamDisplayName(tm, projects);
   let activeRoom = $state(readStoredActiveRoom());
   let newTeam = $state(false);   // true = showing the "new team" workspace picker
   // The team switcher is the shared ContextMenu (the same left-aligned
@@ -132,7 +138,8 @@
   const switcherItems = $derived([
     ...(teams.length
       ? teams.map((tm) => ({
-          label: tm.room,
+          label: nameOf(tm),
+          title: tm.room,
           hint: String(tm.agents),
           checked: tm.room === activeRoom,
           onselect: () => selectTeam(tm.room),
@@ -205,9 +212,13 @@
 
   // Refresh the team list + default workspace. Picks an active room if none.
   async function refreshTeams(shouldApply = () => true) {
-    const s = await teamStatus();
+    const [s, pl] = await Promise.all([
+      teamStatus(),
+      projectList().then((r) => (r?.projects || []).map((row) => row.project)).catch(() => null),
+    ]);
     if (!shouldApply()) return false;
     teams = s?.teams || [];
+    if (pl) projects = pl;
     templates = s?.templates || [];
     systemPrompt = s?.system_prompt || '';
     // Keep selectedTemplate valid (default if the chosen one vanished).
@@ -558,8 +569,9 @@
        without consuming the entire chat viewport. -->
   <div class="team-header">
     <div class="team-pick">
-      <button class="team-pick-btn" aria-haspopup="menu" aria-expanded={!!switcherAt} onclick={toggleSwitcher}>
-        <span class="team-pick-name">{activeTeam ? activeTeam.room : (newTeam ? t('teamNew') : t('teamNone'))}</span>
+      <button class="team-pick-btn" aria-haspopup="menu" aria-expanded={!!switcherAt} onclick={toggleSwitcher}
+        title={activeTeam ? activeTeam.room : undefined}>
+        <span class="team-pick-name">{activeTeam ? nameOf(activeTeam) : (newTeam ? t('teamNew') : t('teamNone'))}</span>
         <Icon name="chevron-down" size={10} />
       </button>
       <ContextMenu at={switcherAt} items={switcherItems} oncancel={() => (switcherAt = null)} />

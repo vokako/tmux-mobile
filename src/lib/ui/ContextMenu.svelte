@@ -11,14 +11,15 @@
   import { menuPlacement, pointAnchor, viewBox } from './placement.ts';
 
   /**
-   * @typedef {{ label: string, icon?: string, hint?: string, checked?: boolean,
+   * @typedef {{ label: string, icon?: string, hint?: string, checked?: boolean, title?: string,
    *             danger?: boolean, warn?: boolean, disabled?: boolean,
    *             onselect: () => void }} MenuItem
    *
    * `checked` marks the CURRENT choice when the menu is a pick-one over a
    * control that is not a field (the split layout, the Team switcher) — the
    * same trailing check Select draws, so a menu and a dropdown say "you are
-   * here" in one glyph. `hint` is Select's secondary text (a count, a path).
+   * here" in one glyph. `hint` is Select's secondary text (a count, a path);
+   * `title` is the hover tooltip for what the label elides (a raw id).
    */
   let {
     /** Client coordinates of the pointer, or null when closed. May instead
@@ -109,7 +110,7 @@
     {#if who}<div class="ctx-who">{who}</div>{/if}
     {#each items as it, i (it.label)}
       <button role="menuitem" class:danger={it.danger} class:warn={it.warn} class:cur={i === cursor}
-        disabled={it.disabled}
+        disabled={it.disabled} title={it.title}
         onpointerenter={() => (cursor = i)}
         onclick={() => { it.onselect(); oncancel(); }}>
         {#if it.icon}<Icon name={it.icon} size={12} />{/if}<span class="ctx-label">{it.label}</span>

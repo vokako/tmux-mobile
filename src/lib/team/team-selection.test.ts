@@ -4,6 +4,7 @@ import {
   TEAM_ACTIVE_ROOM_KEY,
   pickActiveRoom,
   readStoredActiveRoom,
+  teamDisplayName,
   writeStoredActiveRoom,
 } from './team-selection.ts';
 
@@ -44,4 +45,18 @@ test('ignores unavailable storage', () => {
 
   assert.equal(readStoredActiveRoom(storage), '');
   assert.doesNotThrow(() => writeStoredActiveRoom('alpha', storage));
+});
+
+test('a team is named by its project, then its folder, never by its room id (2026-09-03)', () => {
+  const projects = [{ name: 'Mobile App', path: '/home/u/work/tmux-mobile' }];
+  const team = { room: 'tmux-mobile-default-9f3a1c', workspace: '/home/u/work/tmux-mobile' };
+  assert.equal(teamDisplayName(team, projects), 'Mobile App');
+  // Trailing slashes do not break the match.
+  assert.equal(teamDisplayName({ ...team, workspace: '/home/u/work/tmux-mobile/' }, projects), 'Mobile App');
+  // No project owns the folder: the folder's own name, as Sessions labels a team session.
+  assert.equal(teamDisplayName({ room: 'other-default-aa11bb', workspace: '/srv/other' }, projects), 'other');
+  assert.equal(teamDisplayName({ room: 'other-default-aa11bb', workspace: '/srv/other' }), 'other');
+  // No workspace at all: the room minus its 6-hex tail — still never the raw id.
+  assert.equal(teamDisplayName({ room: 'other-default-aa11bb' }), 'other-default');
+  assert.equal(teamDisplayName(null), '');
 });
