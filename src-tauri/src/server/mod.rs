@@ -316,7 +316,17 @@ pub async fn start_with_socket(
 
     let scheme = if tls_acceptor.is_some() { "wss" } else { "ws" };
     println!("🚀 tmux-mobile server listening on {}://{}", scheme, addr);
-    println!("🔑 Token: {}", token);
+    // The token is the one secret. Show it to a person at a terminal (first
+    // run, pairing a phone); never write it into a log — a supervised server's
+    // stdout is a file, and that file would undo config.toml's 0600.
+    {
+        use std::io::IsTerminal;
+        if std::io::stdout().is_terminal() {
+            println!("🔑 Token: {}", token);
+        } else {
+            println!("🔑 Token: not printed (stdout is not a terminal) — see {}", crate::config::config_dir().join("config.toml").display());
+        }
+    }
     println!("   Methods: auth, list_sessions, list_panes, capture_pane, send_keys, send_command, new_session, kill_session, subscribe, unsubscribe");
 
     loop {

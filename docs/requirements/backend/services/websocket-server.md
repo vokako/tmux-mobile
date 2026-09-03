@@ -14,7 +14,7 @@ Rust-based WebSocket server providing JSON-RPC interface to tmux and filesystem 
 - Server sends `server_nonce` (+ `e2e: 2`, the newest handshake it speaks) on connect; client responds with `client_nonce` + HMAC proof (+ the `e2e` version it wants), or plain token
 - E2E v2 derives three keys per session (proof, client→server, server→client) so the two directions never share a (key, nonce); a client that does not ask for v2 gets the single-key v1 handshake. Contract: `docs/requirements/api-contracts/websocket-rpc.md`
 - Encrypted mode: all subsequent messages are binary AES-256-GCM frames; decrypted payloads use a one-byte raw-JSON/raw-deflate framing tag
-- Token auto-generated on first run, persisted in `~/.config/tmux-mobile/config.toml`
+- Token auto-generated on first run, persisted in `~/.config/tmux-mobile/config.toml` (mode 0600). Printed at startup only when stdout is a terminal; under a supervisor or redirect the line names the config file instead, so the secret never lands in a log
 - Environment variable `TOKEN` overrides config
 - Rate limiting: per-IP auth failure tracking with lockout after repeated failures
 
