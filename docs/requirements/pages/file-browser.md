@@ -103,3 +103,4 @@ Both rules are implemented once in `src/lib/files/persisted-list.ts`
 - Filenames sanitized server-side (`sanitize_filename()`) to prevent path traversal
 - Error states (downloading, uploading) always reset in catch blocks
 - Git arguments are passed directly as argv, not through a shell; log format separators such as `|` are valid argument data
+- Every git verb (stage, unstage, add all, commit, push) reports its outcome in the same 3-second banner under the panel header; a failure shows `✗ ` + git's stderr (or the exit code when stderr is empty) — a failing stage never looks like a button that did nothing

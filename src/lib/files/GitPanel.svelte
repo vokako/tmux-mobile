@@ -52,7 +52,9 @@
       gitRoot = r.stdout.trim();
     }
     const r = await gitCmd(subcmd, args, gitRoot);
-    if (r.code !== 0 && r.stderr) throw new Error(r.stderr.trim());
+    // A silent non-zero exit is still a failure — name the exit so the banner
+    // never has nothing to show.
+    if (r.code !== 0) throw new Error(r.stderr.trim() || `git ${subcmd} exited ${r.code}`);
     return r.stdout;
   }
 
@@ -110,29 +112,42 @@
     gitLoading = false;
   }
 
+  // THE outcome banner for every git VERB (push, commit, stage, unstage): a
+  // 3 s flash under the header, `✗ ` marks a failure. One timer — a fresh
+  // message restarts it, so a slow earlier timeout cannot blank a newer one.
+  // Stage/unstage used to `catch {}` and say nothing, so a failing `git add`
+  // (permissions, a lock file, an index.lock left by a crash) looked like
+  // "the plus button did nothing" (review, 2026-09-03).
+  let flashTimer: ReturnType<typeof setTimeout> | undefined;
+  function flash(msg: string) {
+    pushResult = msg;
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => { pushResult = ''; }, 3000);
+  }
+  const failed = (e: unknown) => flash('✗ ' + ((e as Error)?.message || String(e)));
+
   async function gitPush() {
     gitLoading = true;
     pushResult = '';
     try {
       const r = await git('push');
-      pushResult = r.trim() || 'Pushed';
-    } catch (e) { pushResult = '✗ ' + (e as Error).message; }
+      flash(r.trim() || 'Pushed');
+    } catch (e) { failed(e); }
     gitLoading = false;
-    setTimeout(() => { pushResult = ''; }, 3000);
   }
 
   async function gitAddAll() {
-    try { await git('add', '.'); } catch {}
+    try { await git('add', '.'); } catch (e) { failed(e); }
     loadGitStatus();
   }
 
   async function gitAddFile(file: string) {
-    try { await git('add', file); } catch {}
+    try { await git('add', file); } catch (e) { failed(e); }
     loadGitStatus();
   }
 
   async function gitRestoreFile(file: string) {
-    try { await git('restore', '--staged', file); } catch {}
+    try { await git('restore', '--staged', file); } catch (e) { failed(e); }
     loadGitStatus();
   }
 
@@ -142,13 +157,12 @@
     pushResult = '';
     try {
       await git('commit', '-m', commitMsg.trim());
-      pushResult = 'Committed';
+      flash('Committed');
       commitMsg = '';
       showCommitInput = false;
       loadGitStatus();
-    } catch (e) { pushResult = '✗ ' + (e as Error).message; }
+    } catch (e) { failed(e); }
     gitLoading = false;
-    setTimeout(() => { pushResult = ''; }, 3000);
   }
 
   // Initial load on mount (the panel mounts each time the git view opens).
