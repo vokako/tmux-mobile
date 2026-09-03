@@ -1,5 +1,6 @@
 // Hub display preferences — the chat feed's detail level (owner ask:
-// configurable in Settings, reachable from the Hub itself).
+// configurable in Settings, reachable from the Hub itself — the project
+// title's menu carries the three levels; the old cycle control was dead code).
 // Three levels, each a superset of the last:
 //   chat   — messages only (what people SAID)
 //   status — + status declarations and lifecycle notifications
@@ -68,11 +69,6 @@ export const hubPrefs = {
   setFeedLevel(v: FeedLevel) {
     state.feedLevel = v;
     localStorage.setItem(FEED_LEVEL_KEY, v);
-  },
-  /** Cycle chat → status → tools → chat, for the Hub's own compact control. */
-  cycleFeedLevel() {
-    const order: FeedLevel[] = ['chat', 'status', 'tools'];
-    this.setFeedLevel(order[(order.indexOf(state.feedLevel) + 1) % order.length]!);
   },
   /** Tool-lane cap: how many rows a folded tool group shows before it scrolls. */
   get stepsRows() { return state.stepsRows; },

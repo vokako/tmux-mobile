@@ -109,6 +109,26 @@ test('a waiting agent\u2019s card carries the cue, in the dot\u2019s own amber, 
   assert.match(rule('.ac-needs'), /var\(--status-warn\)/u, 'the word speaks the same token');
 });
 
+test('the filter and the detail level are reachable from menus, not only from a gesture and Settings', () => {
+  // Review, 2026-09-03: filtering by agent existed only as an undocumented
+  // double-click; the detail level only in Settings (cycleFeedLevel was dead).
+  // Both card menus — the tap menu and the right-click/long-press ContextMenu
+  // — carry the filter verb from ONE toggle (a menu with its own action set is
+  // a second source of truth), and the project title's menu carries the three
+  // levels with the current one ticked.
+  const items = source.slice(source.indexOf('function agentItems'), source.indexOf('function projectItems'));
+  assert.equal([...items.matchAll(/filterItem\(name\)/g)].length, 2, 'live AND stopped agents get the filter verb');
+  const menu = source.slice(source.indexOf('{#if menuFor}'), source.indexOf("t('hubRemoveHint')"));
+  assert.match(menu, /onclick=\{\(\) => toggleFilter\(menuFor\)\}/u, 'the tap menu uses the same toggle');
+  assert.match(source, /function toggleFilter\(name\) \{\s*\n\s*menuFor = '';\s*\n\s*filterAgent = filterAgent === name \? '' : name;/u,
+    'the menu toggle is the double-click\u2019s rule, minus the recipient change');
+  assert.match(source, /projectItems\(selectedRow, true\)/u, 'the title caret asks for the view rows');
+  const lv = source.slice(source.indexOf('function feedLevelItems'), source.indexOf('function msgItems'));
+  assert.match(lv, /hubPrefs\.feedLevel === level \? 'check' : 'circle'/u, 'radio semantics through the menu\u2019s own icons');
+  assert.match(lv, /hubPrefs\.setFeedLevel\(level\)/u, 'and it writes the one pref Settings reads');
+  assert.ok(!source.includes('cycleFeedLevel'), 'the dead cycle control stays gone');
+});
+
 test('sidebar dots and roster cards drink from ONE state map (board #8)', () => {
   // Both pollers route through mergeStates: the roster poll overlays its
   // project's keys onto the shared map, and the rooms poll overlays the
@@ -438,7 +458,9 @@ test('the header folds the project verbs into ONE dots menu (owner, 2026-08-29)'
   // Rename/Open/Close/Delete live behind the same projectItems menu the
   // sidebar row speaks — one source of truth; the partition toggles stay out
   // (navigation, not consequence).
-  assert.match(source, /projectItems\(selectedRow\)\);/u, 'the dots button opens the shared menu');
+  // `true` = plus the feed's detail-level rows (review, 2026-09-03) — the same
+  // shared list, one flag, not a second menu.
+  assert.match(source, /projectItems\(selectedRow, true\)\);/u, 'the dots button opens the shared menu');
   // The ⋯/name grouping is pinned by its own test below ("grouped WITH the
   // name") — the title-group holds them at a 3px gap, sibling of the h1.
   const head = source.slice(source.indexOf('class="h1-text"'), source.indexOf('{#if selected}', source.indexOf('class="h1-text"')));

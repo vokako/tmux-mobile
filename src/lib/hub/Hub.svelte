@@ -1313,6 +1313,19 @@
     setRecipient(name);
     filterAgent = filterAgent === name ? '' : name; // double-click again = exit
   }
+  /** The filter as a MENU verb (review, 2026-09-03: the double-click was the
+   * only way in, undocumented, and a selected card waited 260 ms for its menu).
+   * Same toggle as the double-click; it does not touch the recipient, so a
+   * STOPPED agent's history can be narrowed to without seating it as lead. */
+  function toggleFilter(name) {
+    menuFor = '';
+    filterAgent = filterAgent === name ? '' : name;
+  }
+  const filterItem = (name) => ({
+    label: filterAgent === name ? t('hubFilterExit') : t('hubFilterItem'),
+    icon: 'search',
+    onselect: () => toggleFilter(name),
+  });
 
   /** Choosing a recipient is also choosing this project's lead: it is the same
    * decision ("who am I working with here"), so it persists. That includes
@@ -1861,6 +1874,7 @@
     if (stopped.includes(name)) {
       return [
         { label: t('hubStartAgain'), icon: 'refresh', onselect: () => startAgent(name) },
+        filterItem(name),
         ...config,
         { label: t('hubRemove'), icon: 'trash', danger: true, onselect: () => askAction('remove', name) },
       ];
@@ -1869,6 +1883,7 @@
     return [
       { label: t('hubTalkTo'), icon: 'chat', onselect: () => setRecipient(name) },
       { label: t('hubWatch'), icon: 'terminal', onselect: () => { if (a) openDrawer(a); } },
+      filterItem(name),
       ...config,
       { label: t('hubInterrupt'), icon: 'x', warn: true, onselect: () => interrupt(name) },
       { label: t('hubStop'), icon: 'stop', danger: true, onselect: () => askAction('stop', name) },
@@ -1879,19 +1894,36 @@
   /** A project's verbs. Open/Close mirrors the header's single button, so the two
    * cannot disagree about which one applies. Rename selects the project first,
    * because the editor it opens is the chat header's own title. */
-  function projectItems(row) {
+  function projectItems(row, withView = false) {
     const session = row?.project?.session ?? '';
     const name = row?.project?.name ?? '';
     // Constructive verbs lead, destructive close the menu (owner, 2026-08-25):
-    // Open (when closed) → Rename → Close (when live) → Delete.
+    // Open (when closed) → Rename → [view] → Close (when live) → Delete.
     return [
       ...(row?.live ? [] : [{ label: t('projectUp'), icon: 'zap', onselect: () => { selectProject(session); setTimeout(bringUp, 0); } }]),
       { label: t('projectRename'), icon: 'edit',
         onselect: () => { selectProject(session); setTimeout(startRename, 0); } },
+      ...(withView ? feedLevelItems() : []),
       ...(row?.live ? [{ label: t('projectDown'), icon: 'stop', danger: true, onselect: () => askAction('down', name, session) }] : []),
       { label: t('projectDelete'), icon: 'trash', danger: true,
         onselect: () => askAction('delete', name, session) },
     ];
+  }
+
+  /** The feed's detail level as three menu rows — chat / + status / + tools —
+   * the current one ticked. It lives in the project TITLE's menu (the one
+   * menu about "this conversation") rather than as a header switch: the
+   * header keeps no spare switches (board #72), and Settings was the only
+   * other way to reach it (review, 2026-09-03: dead code in the Hub, a
+   * setting three pages away). Radio semantics through the two icons the menu
+   * already has — a tick on the chosen level, a hollow circle on the rest. */
+  function feedLevelItems() {
+    const levels = [['chat', 'hubFeedChat'], ['status', 'hubFeedStatus'], ['tools', 'hubFeedTools']];
+    return levels.map(([level, key]) => ({
+      label: `${t('hubFeedLevel')} · ${t(key)}`,
+      icon: hubPrefs.feedLevel === level ? 'check' : 'circle',
+      onselect: () => hubPrefs.setFeedLevel(level),
+    }));
   }
 
   /** A message's verbs: the same two its own overlay offers. No delete —
@@ -2265,7 +2297,7 @@
                 // itself anchors. Every other context menu keeps the
                 // right-aligned pointer default.
                 openCtx({ anchor: anchorOf(titleNameEl ?? e.currentTarget), align: 'left' },
-                  selectedRow?.project.name ?? '', projectItems(selectedRow));
+                  selectedRow?.project.name ?? '', projectItems(selectedRow, true));
               }}>
               <Icon name="chevron-down" size={14} />
             </button>
@@ -2309,8 +2341,9 @@
           <Icon name="files" size={14} />
         </button>
         <!-- THE terminal affordance: a button, not a permanent pane. Adding an
-             agent belongs to the roster row, and chat detail belongs to
-             Settings — a header is not a place to keep spare switches. -->
+             agent belongs to the roster row, and chat detail belongs to the
+             title's menu (and Settings) — a header is not a place to keep
+             spare switches. -->
         <button class="icon-btn term-toggle" class:on={termOpen && drawerView === 'term'} title={t('hubTerminal')} aria-label={t('hubTerminal')}
           onclick={() => termOpen && drawerView === 'term' && !compact ? closeDrawer() : (drawerView = 'term', openDrawer())}>
           <Icon name="terminal" size={14} />
@@ -2492,6 +2525,14 @@
               <Icon name="terminal" size={12} />{t('hubWatch')}
             </button>
           {/if}
+          <!-- The one-agent feed filter, as a verb you can SEE (review,
+               2026-09-03) — the double-click stays as the shortcut. A reading
+               verb, so it sits with Message/Watch, before configure. Offered
+               for a stopped agent too: its history is exactly what you narrow
+               to when it is gone. -->
+          <button role="menuitem" onclick={() => toggleFilter(menuFor)}>
+            <Icon name="search" size={12} />{filterAgent === menuFor ? t('hubFilterExit') : t('hubFilterItem')}
+          </button>
           {#if openAgentConfig}
             <!-- The model's HOME is the config page — the menu links to it
                  instead of quoting the model name as dead text. -->

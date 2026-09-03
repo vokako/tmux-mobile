@@ -79,8 +79,9 @@ completion).
   waiting/blocked puts an amber frame + wash + `needs you` word on the whole
   card — same `--status-warn` token, no motion),
   sniffed **vitals** (model + effort at `--fs-micro`, context% as a 2px
-  bottom edge line), and a context menu (Watch / Interrupt / Stop / Restart /
-  Remove / configure agent — rising consequence order). The card TAP menu
+  bottom edge line), and a context menu (Message / Watch / Only its messages
+  — the one-agent feed filter, also a double-click on the card / configure
+  agent / Interrupt / Stop / Restart / Remove — rising consequence order). The card TAP menu
   aligns to the card's LEFT edge (board #47 — the card reads name-first
   from its left edge; same shared placement flip/clamp as the title menu);
   right-click/long-press keeps the pointer placement.
@@ -125,7 +126,8 @@ completion).
   finishing a drag/long-press never reveals the action row. Board note text
   follows the same rule and intercepts no contextmenu; a plain tap still opens
   its Copy overlay.
-- Feed levels: chat-only / +tools / everything. Receipts and warnings are
+- Feed levels: chat-only / +status / +tools, chosen in Settings or from the
+  project title's menu (the current one ticked). Receipts and warnings are
   always visible.
 - Tail intent survives a page switch (board #38): "at the tail" is measured
   as the BOTTOM GAP (`scrollHeight − scrollTop − clientHeight < TAIL_GAP`),
