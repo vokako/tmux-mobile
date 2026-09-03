@@ -95,7 +95,9 @@ test('the running cue is defined once in app.css: halo + breathe, and it stills'
   assert.match(live, /--live-hue/u, 'the halo takes the dot’s OWN hue, so no new colour species');
   assert.match(live, /animation:\s*dot-breathe/u, 'the motion is the shared breathe');
 
-  const kf = /@keyframes\s+dot-breathe\s*\{(?:[^{]*\{[^}]*\}\s*)+\}/u.exec(appCss)?.[0] ?? '';
+  // `[^{}]*` between stops, not `[^{]*`: the old class ran past the block's own
+  // closing brace into whatever keyframes followed it (motion.md's intro set).
+  const kf = /@keyframes\s+dot-breathe\s*\{(?:[^{}]*\{[^}]*\}\s*)+\}/u.exec(appCss)?.[0] ?? '';
   assert.ok(kf, 'dot-breathe must be defined');
   assert.match(kf, /transform:\s*scale/u, 'breathe is a SCALE — presence, per design-language.md');
   assert.ok(!/opacity/u.test(kf), 'an opacity fade converges on the idle grey; that is the old bug');

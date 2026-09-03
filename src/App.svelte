@@ -2024,6 +2024,7 @@
     animation: reconnect-spin 0.6s linear infinite;
   }
   @keyframes reconnect-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .reconnect-spinner { animation: none; } }
   .reconnect-cancel {
     margin-left: auto; padding: 2px 10px; border: 1px solid var(--accent);
     border-radius: var(--ui-radius-control); background: none; color: var(--accent); font-size: var(--fs-sub);

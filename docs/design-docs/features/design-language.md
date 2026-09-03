@@ -56,7 +56,14 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   `--t-move 200ms` = things that move or resize (drawer, bars, width).
   Spinner tempos are semantic, not tokens: 0.6s = loading, 2.2s = "a turn is
   open" (send button), breathe ≈ 1.3–5s (presence). Every looping animation
-  stills under `prefers-reduced-motion`.
+  stills under `prefers-reduced-motion`. **Micro-motion** (owner, 2026-09-03:
+  a state change is a movement, not a swap): a glyph that reads two ways
+  TURNS (`.chev`/`.flip`), things that enter fade or rise in (`.appear*`),
+  a control's selected clothes cross-fade (`.state-ctl`), a keyed list
+  reorders with `animate:flip` on `moveMs()`; exits are cuts, layout is never
+  animated, `svelte/transition` is not used. The full principles, vocabulary
+  and the 2026-09-03 plan: [motion.md](motion.md); `ui/motion.source.test.ts`
+  pins it.
 - **Navigation motion grammar** (owner, 2026-08-25: "对于交互动效也应该有
   规范，大家都共同遵守"): ONE slide language, 120ms linear translateX(40%),
   for every navigation — no fades, no scales, no second tempo. Direction is

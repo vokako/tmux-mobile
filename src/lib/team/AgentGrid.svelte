@@ -265,4 +265,5 @@
     animation: ag-spin 0.6s linear infinite;
   }
   @keyframes ag-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .reconnect-spinner-sm { animation: none; } }
 </style>

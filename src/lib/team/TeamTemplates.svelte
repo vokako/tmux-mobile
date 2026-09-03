@@ -529,6 +529,7 @@
     border-top-color: var(--accent); border-radius: 50%; animation: tpl-spin 0.6s linear infinite;
   }
   @keyframes tpl-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .tpl-spin { animation: none; } }
 
   /* Phone overrides. Placed LAST so they win over the base rules above (a media
      query adds no specificity — source order decides between equal selectors). */

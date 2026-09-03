@@ -3884,8 +3884,7 @@
   }
   .steps:hover { border-color: var(--input-border); }
   .s-head:hover { color: var(--text2); }
-  .chev { display: inline-flex; flex: none; transition: transform var(--t-move); }
-  .chev.open { transform: rotate(90deg); }
+  /* .chev / .chev.open are the app.css turning-glyph atom (design-language §1 Micro-motion). */
   /* A run in motion pulses in the MOTION colour (the accent — see the status
      colour language in hub.ts): green would say "ended well" about something
      still going. The pulse itself is the app-wide `.live-dot` cue in app.css
@@ -4158,6 +4157,7 @@
   .attach-btn:disabled { opacity: 0.55; cursor: default; }
   .attach-btn.busy { animation: attach-pulse 1s ease-in-out infinite; }
   @keyframes attach-pulse { 50% { opacity: 0.4; } }
+  @media (prefers-reduced-motion: reduce) { .attach-btn.busy { animation: none; } }
   .send-btn {
     position: absolute; right: 7px; bottom: 5.5px;
     width: 30px; height: 30px; display: grid; place-items: center;

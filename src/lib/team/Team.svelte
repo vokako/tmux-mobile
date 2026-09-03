@@ -952,6 +952,7 @@
     animation: team-spin 0.6s linear infinite;
   }
   @keyframes team-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .reconnect-spinner-sm { animation: none; } }
   .roster-chip {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 3px 8px; height: var(--ui-control-height); box-sizing: border-box;
