@@ -141,7 +141,7 @@
   .dot {
     stroke: var(--bg); stroke-width: 1.5;
     transform-box: fill-box; transform-origin: center;
-    transition: transform 0.25s ease;
+    transition: transform var(--t-move) ease; /* a dot that moves — --t-move, not a third tempo */
   }
   .dot.status-idle        { fill: var(--status-ok); }
   .dot.status-thinking    { fill: var(--accent); }

@@ -191,7 +191,7 @@
   <div class="sys-section">
     <div class="sys-label-row">
       <button class="sys-toggle" onclick={() => sysOpen = !sysOpen}>
-        <Icon name={sysOpen ? 'chevron-down' : 'chevron-right'} size={12} />
+        <span class="chev" class:open={sysOpen}><Icon name="chevron-right" size={12} /></span>
         <span class="sys-label">{t('teamSystemPrompt')}</span>
         {#if sysDraft && sysDraft.trim()}<span class="ag-adv-badge">●</span>{/if}
       </button>
@@ -202,7 +202,7 @@
       {/if}
     </div>
     {#if sysOpen}
-      <textarea class="sys-input" bind:value={sysDraft} oninput={() => sysDirty = true}
+      <textarea class="sys-input appear" bind:value={sysDraft} oninput={() => sysDirty = true}
         placeholder={t('teamSystemPromptHint')} rows="3"></textarea>
     {/if}
   </div>
@@ -248,14 +248,14 @@
 
         <!-- Team-wide config: applies to EVERY agent in this team. -->
         <button class="tw-toggle" onclick={() => teamWideOpen = !teamWideOpen}>
-          <Icon name={teamWideOpen ? 'chevron-down' : 'chevron-right'} size={12} />
+          <span class="chev" class:open={teamWideOpen}><Icon name="chevron-right" size={12} /></span>
           {t('teamWide')}
           {#if (sel.mcp?.length || sel.skills?.length || (sel.env && Object.keys(sel.env).length) || (sel.prompt && sel.prompt.trim()))}
             <span class="ag-adv-badge">●</span>
           {/if}
         </button>
         {#if teamWideOpen}
-          <div class="ag-adv tw-adv">
+          <div class="ag-adv tw-adv appear">
             <span class="ag-adv-label">{t('teamWidePrompt')}</span>
             <textarea class="ag-field ag-area" rows="3" placeholder={t('teamWidePromptHint')}
               value={sel.prompt ?? ''} oninput={(e) => { sel.prompt = e.currentTarget.value; markDirty(); }}></textarea>
@@ -299,14 +299,14 @@
             <input class="ag-field" bind:value={ag.model} oninput={markDirty} placeholder={t('teamModel')} />
 
             <button class="ag-adv-toggle" onclick={() => toggleAdv(i)}>
-              <Icon name={advSet.has(i) ? 'chevron-down' : 'chevron-right'} size={12} />
+              <span class="chev" class:open={advSet.has(i)}><Icon name="chevron-right" size={12} /></span>
               {t('teamAdvanced')}
               {#if (ag.mcp?.length || ag.skills?.length || (ag.env && Object.keys(ag.env).length))}
                 <span class="ag-adv-badge">{(ag.mcp?.length || 0) + (ag.skills?.length || 0) + (ag.env ? Object.keys(ag.env).length : 0)}</span>
               {/if}
             </button>
             {#if advSet.has(i)}
-              <div class="ag-adv">
+              <div class="ag-adv appear">
                 <span class="ag-adv-label">{t('teamSkills')}</span>
                 <textarea class="ag-field ag-area" rows="2" placeholder={t('teamSkillsHint')}
                   value={arrToLines(ag.skills)} oninput={(e) => setSkills(ag, e.currentTarget.value)}></textarea>
@@ -413,6 +413,7 @@
     background: var(--input-bg); color: var(--text2); font-size: var(--fs-ui); cursor: pointer;
     text-align: left; -webkit-tap-highlight-color: transparent;
     font-family: var(--font-ui);
+    transition: border-color var(--t-fast), color var(--t-fast), background var(--t-fast);
   }
   .tpl-item.active { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
   .tpl-count { color: var(--text3); font-size: var(--fs-sub); }

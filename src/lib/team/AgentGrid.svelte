@@ -153,8 +153,9 @@
 </div>
 
 {#if expandedCell}
-  <!-- A maximized cell takes over the whole preview pane (graph or any agent). -->
-  <div class="ag-expanded">
+  <!-- A maximized cell takes over the whole preview pane (graph or any agent).
+       It FADES in and nothing more: it is an xterm ancestor (motion.md 9). -->
+  <div class="ag-expanded appear">
     <div class="ag-head">
       {#if expandedCell.collab}
         <Icon name="collab" size={12} />
@@ -218,6 +219,9 @@
     border-radius: var(--ui-radius-row);
     overflow: hidden;
     background: var(--bg);
+    /* Frame colour and ring cross-fade — colour only, never a transform or a
+       size: the cell is an xterm ancestor (motion.md principle 9). */
+    transition: border-color var(--t-fast), box-shadow var(--t-fast);
   }
   .ag-cell.active {
     border-color: var(--accent);
@@ -229,6 +233,7 @@
     border-bottom: 1px solid var(--border2);
     background: var(--surface);
     font-size: var(--fs-sub); font-weight: 600; color: var(--text2);
+    transition: color var(--t-fast);
   }
   .ag-cell.active .ag-head { color: var(--accent); }
   .ag-head-actions { margin-left: auto; display: flex; gap: 2px; }
@@ -236,6 +241,7 @@
     background: none; border: none; color: var(--text3);
     padding: 2px; display: inline-flex; cursor: pointer;
     -webkit-tap-highlight-color: transparent;
+    transition: color var(--t-fast);
   }
   .ag-head-btn:active { color: var(--accent); }
   .ag-collab .ag-body { background: var(--surface); }

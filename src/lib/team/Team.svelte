@@ -11,6 +11,8 @@
   // Availability: a server without the bus (mobile, or desktop with team
   // disabled) makes the team_* RPCs reject with method-not-found; we surface
   // that as an "unavailable" state and the App hides the tab.
+  import { flip } from 'svelte/animate';
+  import { moveMs } from '../ui/motion.ts';
   import Icon from '../ui/Icon.svelte';
   import Select from '../ui/Select.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
@@ -160,6 +162,10 @@
   }
 
   let messages = $state([]);     // active room Message[] (oldest first)
+  // Ids of messages that arrived LIVE (the push path), so only those rise in:
+  // a history load of two hundred rows must not animate (motion.md principle
+  // 13). Plain Set — a row reads it once when it mounts, after the add.
+  const liveIds = new Set();
   let roster = $state([]);       // active room AgentRow[]
   let available = $state(true);  // false when the server has no team bus
   let starting = $state(false);
@@ -254,6 +260,7 @@
           teamHistory(room, 200), teamRoster(room), teamEmployees(room),
         ]);
         if (!isCurrent() || activeRoom !== room || roomGeneration !== generation) return;
+        liveIds.clear();
         messages = h?.messages || [];
         roster = r?.roster || [];
         employees = e?.employees || [];
@@ -393,6 +400,7 @@
       refreshRoster();
     }
     if (messages.some(x => x.id === m.id)) return;
+    liveIds.add(m.id);
     messages = [...messages, m];
     if (visible) scrollToBottom();
   }
@@ -593,8 +601,8 @@
          visible (desktop grid, or mobile panel open) — agents show there. -->
     {#if !newTeam && activeRoom && !splitEligible && !collabOpen}
       <div class="team-header-scroll">
-        {#each agents as a}
-          <button class="roster-chip" onclick={() => previewAgent(a.name)} title={a.role || a.name}>
+        {#each agents as a (a.name)}
+          <button class="roster-chip appear-pop" animate:flip={{ duration: moveMs() }} onclick={() => previewAgent(a.name)} title={a.role || a.name}>
             <span class="roster-dot status-{a.status}" class:live-dot={TEAM_LIVE.has(a.status)}></span>
             <span class="roster-name">{a.name}</span>
           </button>
@@ -673,7 +681,7 @@
 
     <!-- Mobile-only graph (toggled from the header button; phones have no preview grid). -->
     {#if !splitEligible && collabOpen}
-      <div class="collab-wrap" style="height:{collabHeight}px">
+      <div class="collab-wrap appear-rise" style="height:{collabHeight}px">
         <CollabGraph {agents} event={lastEvent} />
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div class="collab-resize" onmousedown={startCollabResize} ontouchstart={startCollabResize} title="Drag to resize"></div>
@@ -689,7 +697,7 @@
           {#if isSystem(m)}
             <div class="msg-system">{m.body}</div>
           {:else}
-            <div class="msg-row" class:mine={isMine(m)}>
+            <div class="msg-row" class:mine={isMine(m)} class:appear-rise={liveIds.has(m.id)}>
               <div class="msg-bubble" class:mine={isMine(m)}>
                 {#if !isMine(m)}<div class="msg-from"><span class="roster-dot status-{statusOf(m.from)}"></span>{m.from}</div>{/if}
                 <!-- eslint-disable-next-line svelte/no-at-html-tags -->
@@ -814,7 +822,7 @@
   }
   .team-splitter {
     flex: 0 0 6px; cursor: col-resize; background: var(--border);
-    transition: background 0.15s ease;
+    transition: background var(--t-fast);
   }
   .team-splitter:hover { background: var(--accent); }
 
@@ -872,6 +880,7 @@
     background: var(--input-bg); color: var(--text3); box-sizing: border-box;
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     -webkit-tap-highlight-color: transparent;
+    transition: color var(--t-fast), border-color var(--t-fast);
   }
   .team-close:active { color: var(--danger); border-color: var(--danger); }
   .team-close { margin-left: auto; }
@@ -960,11 +969,12 @@
     background: var(--input-bg); color: var(--text2);
     font-size: var(--ui-font-control); line-height: 1.3; font-weight: 500; cursor: pointer; flex-shrink: 0;
     white-space: nowrap; -webkit-tap-highlight-color: transparent;
-    transition: border-color 0.15s ease, color 0.15s ease;
+    transition: border-color var(--t-fast), color var(--t-fast);
   }
   .roster-chip:active { border-color: var(--accent); color: var(--accent); }
   .roster-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
-  .roster-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--text3); }
+  /* A state dot changes COLOUR (and its halo), never opacity (design-language §1). */
+  .roster-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--text3); transition: background var(--t-fast), box-shadow var(--t-fast); }
   .roster-dot.status-idle        { background: var(--status-ok); }
   .roster-dot.status-thinking    { background: var(--accent); }
   .roster-dot.status-working     { background: var(--status-warn); }
@@ -1093,7 +1103,8 @@
     content: ''; position: absolute; left: 50%; top: 3px;
     width: 42px; height: 3px; transform: translateX(-50%);
     border-radius: 2px; background: var(--border2);
-    transition: background 0.15s ease, width 0.15s ease;
+    /* Colour only: a width is layout and is never animated (motion.md 3). */
+    transition: background var(--t-fast);
   }
   .compose-resize:hover::after,
   .compose-resize:focus-visible::after,
@@ -1131,7 +1142,7 @@
     background: var(--accent-bg); color: var(--accent);
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     -webkit-tap-highlight-color: transparent;
-    transition: opacity 0.15s ease;
+    transition: opacity var(--t-fast);
   }
   .compose-send:disabled { opacity: 0.4; cursor: default; }
   .compose-send:not(:disabled):active { background: var(--accent-fill); color: var(--accent-fill-ink); }
