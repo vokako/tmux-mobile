@@ -131,6 +131,10 @@
     overflow: hidden;
     position: relative;
     background: var(--bg);
+    /* The frame cross-fades its colour and ring (motion.md principle 9 allows
+       this: colour is neither a containing block nor a size). No transform,
+       no opacity, no flip on a cell — it is an xterm ancestor. */
+    transition: border-color var(--t-fast), box-shadow var(--t-fast);
   }
   .cell.active {
     border-color: var(--accent);
@@ -152,6 +156,7 @@
     color: var(--text3); font-size: var(--fs-body);
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
+    transition: color var(--t-fast);
   }
   .cell-empty:hover { color: var(--accent); }
 </style>

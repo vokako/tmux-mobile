@@ -239,7 +239,7 @@
     background: var(--input-bg); color: var(--text3);
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     -webkit-tap-highlight-color: transparent;
-    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+    transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
   }
   .picker-add:active { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
   .picker-add:disabled { opacity: 0.4; cursor: default; }

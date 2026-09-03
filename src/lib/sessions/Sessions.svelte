@@ -10,6 +10,8 @@
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import ContextMenu from '../ui/ContextMenu.svelte';
   import { longpress } from '../ui/longpress.ts';
+  import { flip } from 'svelte/animate';
+  import { moveMs } from '../ui/motion.ts';
   import { sessionHasAgent, paneAgent, AGENTS } from '../core/agents.ts';
   // Team-mode sessions (`tmm-team-<room>`) are grouped apart from regular
   // sessions and their clicks route to the Team chat instead of a raw terminal.
@@ -368,7 +370,7 @@
   {#if chips || searchOpen}
   <div class="top-row">
     {#if searchOpen}
-      <div class="search-bar">
+      <div class="search-bar appear">
         <Icon name="search" size={14} />
         <input
           bind:this={searchInputEl}
@@ -387,16 +389,20 @@
     {:else}
       {#if mruChips.length > 0}
         <div class="chips-row">
-          {#each mruChips as s}
+          {#each mruChips as s (s.name)}
             {@const sum = sessionSummary(s)}
             {@const isActive = activeTarget.startsWith(s.name + ':')}
-            <AgentChip
-              agent={AGENT_BY_TAG.get(sum.ai)}
-              agents={sum.agents}
-              label={s.name}
-              variant={isActive ? 'active' : 'default'}
-              onclick={() => chipOpen(s)}
-            />
+            <!-- Keyed + flipped (motion.md): an opened session moves to the
+                 front of the strip instead of every chip repainting. -->
+            <div class="mru-chip appear" animate:flip={{ duration: moveMs() }}>
+              <AgentChip
+                agent={AGENT_BY_TAG.get(sum.ai)}
+                agents={sum.agents}
+                label={s.name}
+                variant={isActive ? 'active' : 'default'}
+                onclick={() => chipOpen(s)}
+              />
+            </div>
           {/each}
         </div>
       {:else}
@@ -487,7 +493,7 @@
       </div>
 
       {#if isExpanded && visiblePanes.length}
-        <div class="pane-list">
+        <div class="pane-list appear-rise">
           {#each visiblePanes as p}
             {@const pAi = paneAgent(p)?.tag || ''}
             {@const isPaneActive = activeTarget === `${p.session}:${p.window}.${p.pane}`}
@@ -568,7 +574,7 @@
         <span class="group-count">{teamGroup.length}</span>
       </div>
       {#each teamGroup as s (s.name)}
-        {@render sessionItem(s)}
+        <div animate:flip={{ duration: moveMs() }}>{@render sessionItem(s)}</div>
       {/each}
       {#if regularGroup.length > 0}
         <div class="group-label" class:side-h={!chips}>
@@ -577,7 +583,7 @@
           <span class="group-count">{regularGroup.length}</span>
         </div>
         {#each regularGroup as s (s.name)}
-          {@render sessionItem(s)}
+          <div animate:flip={{ duration: moveMs() }}>{@render sessionItem(s)}</div>
         {/each}
       {/if}
     {:else}
@@ -593,8 +599,10 @@
           <span class="group-count">{filtered.length}</span>
         </div>
       {/if}
+      <!-- A row that changes rank (an activation re-sorts by recency) MOVES
+           there (motion.md, animate:flip on the each's one child). -->
       {#each filtered as s (s.name)}
-        {@render sessionItem(s)}
+        <div animate:flip={{ duration: moveMs() }}>{@render sessionItem(s)}</div>
       {/each}
     {/if}
 
@@ -779,7 +787,7 @@
     border: 1px solid var(--border2);
     border-radius: var(--ui-radius-pill);
     color: var(--text3);
-    transition: border-color 0.15s ease;
+    transition: border-color var(--t-fast), color var(--t-fast);
   }
   .search-bar:focus-within {
     border-color: var(--accent);
@@ -821,6 +829,8 @@
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
   }
+  /* The flip box around a chip (the chip is a component): same flex posture. */
+  .mru-chip { display: flex; flex: none; }
   .chips-row::-webkit-scrollbar { display: none; }
   .chips-row.chips-empty { min-height: 24px; }
 
@@ -835,7 +845,7 @@
     border-radius: var(--ui-radius-panel);
     background: transparent;
     overflow: hidden;
-    transition: border-color var(--t-fast), background var(--t-fast);
+    transition: border-color var(--t-fast), background var(--t-fast), transform var(--t-fast);
   }
   .session:active { transform: scale(0.996); }
   .session.active {
@@ -1004,7 +1014,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: color 0.15s ease;
+    transition: color var(--t-fast);
     -webkit-tap-highlight-color: transparent;
   }
 
@@ -1019,7 +1029,7 @@
     display: flex;
     align-items: stretch;
     border-radius: var(--ui-radius-control);
-    transition: background 0.15s ease;
+    transition: background var(--t-fast);
   }
   .pane-row.active-pane { background: var(--accent-bg); }
 
@@ -1091,7 +1101,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: color 0.15s ease;
+    transition: color var(--t-fast);
     -webkit-tap-highlight-color: transparent;
   }
   .pane-add {
@@ -1109,7 +1119,7 @@
     font-size: var(--fs-sub);
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
-    transition: all 0.15s ease;
+    transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
   }
   .pane-add:active {
     color: var(--accent);
@@ -1159,7 +1169,7 @@
     justify-content: center;
     gap: 6px;
     -webkit-tap-highlight-color: transparent;
-    transition: color 0.15s ease, border-color 0.15s ease;
+    transition: color var(--t-fast), border-color var(--t-fast);
   }
   .new-btn:active { color: var(--accent); border-color: var(--accent); }
   .refresh-icon {

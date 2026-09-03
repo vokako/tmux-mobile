@@ -280,3 +280,18 @@ switch with one tap without search; search is a click away when needed.
 Rule: if a secondary UI is accessed occasionally, prefer "collapsed on
 demand" over "always shown". Mobile viewports are too narrow to
 permanently spend a row on every potentially-useful action.
+
+## Motion
+
+The list follows [motion.md](../features/motion.md). Every `{#each}` of rows
+and MRU chips is keyed by session name and its one child carries
+`animate:flip={{ duration: moveMs() }}`, so a session that changes rank (an
+activation re-sorts by recency) moves to its new place instead of every row
+repainting. The pane list under an expanded row `.appear-rise`s — the row's
+height change itself is a cut, never a slide (principle 3). The search bar
+fades in when it replaces the chip strip; the press scale on `.session:active`
+transitions on `--t-fast` with the row's other colours. There is no
+disclosure caret on a session row (the row has no such glyph, and adding one
+would be a new element), so the expand has nothing to turn. A split `.cell`
+cross-fades only its border colour and ring — never a transform or a flip: it
+is an xterm ancestor (principle 9).
