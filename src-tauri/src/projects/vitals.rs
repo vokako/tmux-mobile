@@ -213,9 +213,7 @@ fn sniff_window_now(session: &str, window: usize) {
     if !crate::projects::is_managed_in(ws.as_deref(), &p.window_name) {
         return;
     }
-    let hay = format!("{} {} {}", p.current_command, p.pane_title, p.window_name);
-    let Some(agent) = crate::projects::agents::detect_managed(ws.as_deref(), &p.window_name, &hay)
-    else {
+    let Some(agent) = crate::projects::agents::detect_pane(ws.as_deref(), p) else {
         return;
     };
     let Ok(text) = crate::tmux::capture_pane_plain(&format!("{session}:{window}"), Some(0)) else {

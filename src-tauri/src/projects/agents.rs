@@ -22,6 +22,8 @@ pub struct KnownAgent {
     pub resume_id: Option<&'static str>,
 }
 
+use crate::tmux::TmuxPane;
+
 /// Kimi must precede Kiro: a Kimi pane's process chain contains its
 /// `kiro-web-search` helper, so an array-order rule would paint it as Kiro.
 /// Earliest match in the text wins regardless (see `detect`), but keeping the
@@ -189,6 +191,31 @@ pub fn detect_managed(
     detect(pane_text)
 }
 
+/// Every clue a pane offers about the agent in it, shallow → deep, in the
+/// order `detect` wants: `pane_current_command` (the process tmux started),
+/// the pane title and the window name (labels the launcher set — for a
+/// spawned window the name IS the agent's identity), then the foreground
+/// child's argv (the deepest process, where an interpreter-launched CLI such
+/// as the npm codex finally says its own name).
+///
+/// ONE function because seven callers used to build this string by hand and
+/// one of them differently: the capturer looked at `child_cmd` and not the
+/// window name, the roster/delivery/vitals/recovery looked at the window name
+/// and not `child_cmd` — so the declaration and the roster could disagree
+/// about whether the same window was an agent.
+pub fn pane_text(pane: &TmuxPane) -> String {
+    format!(
+        "{} {} {} {}",
+        pane.current_command, pane.pane_title, pane.window_name, pane.child_cmd
+    )
+}
+
+/// The agent in `pane`, by its recipe first and every pane clue second — the
+/// one way to ask about a pane (`detect_managed` over `pane_text`).
+pub fn detect_pane(workspace: Option<&str>, pane: &TmuxPane) -> Option<&'static KnownAgent> {
+    detect_managed(workspace, &pane.window_name, &pane_text(pane))
+}
+
 /// The launch line for a backend name we stored earlier.
 ///
 /// Restoring a workspace should put you back in the conversation, not in a
@@ -236,6 +263,47 @@ mod tests {
         }
         assert!(valid_name(&"x".repeat(MAX_NAME_LEN)).is_ok());
         assert!(valid_name(&"x".repeat(MAX_NAME_LEN + 1)).is_err());
+    }
+
+    fn pane(cmd: &str, title: &str, window_name: &str, child: &str) -> TmuxPane {
+        TmuxPane {
+            session: "s".into(),
+            window: 1,
+            pane: 0,
+            width: 80,
+            height: 24,
+            current_command: cmd.into(),
+            window_name: window_name.into(),
+            pane_title: title.into(),
+            current_path: "/w".into(),
+            active: true,
+            child_cmd: child.into(),
+        }
+    }
+
+    /// The two clues the old call sites disagreed on both count now: the
+    /// window name (a spawned window is named after its agent) and the
+    /// foreground child's argv (where an interpreter-launched CLI says its
+    /// name). And the order stays shallow → deep, so a shell whose child is
+    /// an agent is still the agent, while a label never outranks the process.
+    #[test]
+    fn a_pane_is_read_by_every_clue_in_one_order() {
+        // The npm codex: `node` process, project title, agent-named window —
+        // the window name is what says codex (roster's view).
+        assert_eq!(detect_pane(None, &pane("node", "myproj", "codex-2", "")).map(|a| a.backend), Some("codex"));
+        // Same process, anonymous window, but argv names it (capturer's view).
+        assert_eq!(
+            detect_pane(None, &pane("node", "myproj", "win3", "node /x/@openai/codex/bin/codex.js")).map(|a| a.backend),
+            Some("codex")
+        );
+        // Shallow beats deep: the process tmux started wins over a subprocess.
+        assert_eq!(
+            detect_pane(None, &pane("kiro-cli", "chat", "w", "node kiro-web-search")).map(|a| a.backend),
+            Some("kiro")
+        );
+        // A bare shell with an ordinary name is not an agent.
+        assert!(detect_pane(None, &pane("zsh", "~", "shell", "")).is_none());
+        assert_eq!(pane_text(&pane("a", "b", "c", "d")), "a b c d");
     }
 
     #[test]

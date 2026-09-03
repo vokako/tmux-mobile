@@ -79,10 +79,10 @@ pub fn observe(session: &str, project_path: &str, sessions: &dyn AgentSessions) 
 }
 
 fn observed_from(pane: &TmuxPane, project_path: &str) -> Observed {
-    // Shallow → deep, matching the client's detector: an early match is what
-    // the user launched, a late one is a subprocess.
-    let text = format!("{} {} {}", pane.current_command, pane.pane_title, pane.child_cmd);
-    match agents::detect_managed(Some(project_path), &pane.window_name, &text) {
+    // The same question the roster, delivery, vitals and recovery ask, by the
+    // same clues in the same order — so the declaration never disagrees with
+    // them about which windows are agents.
+    match agents::detect_pane(Some(project_path), pane) {
         Some(agent) => Observed {
             window: pane.window,
             window_name: pane.window_name.clone(),

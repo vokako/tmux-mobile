@@ -7,6 +7,9 @@
 
 use super::agents;
 use super::store::{Project, Slot, SlotKind};
+// ONE shell quoter for every line typed into a pane — the same one `spawn`
+// uses. This module carried its own copy with a narrower safe set.
+use crate::team::backends_shared::shell_quote;
 use crate::tmux;
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -196,16 +199,6 @@ pub fn absolute_cwd(project_path: &str, slot_cwd: &str) -> String {
         return slot_cwd.to_string();
     }
     format!("{}/{}", project_path.trim_end_matches('/'), slot_cwd)
-}
-
-fn shell_quote(s: &str) -> String {
-    if !s.is_empty()
-        && s.bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'/'))
-    {
-        return s.to_string();
-    }
-    format!("'{}'", s.replace('\'', r"'\''"))
 }
 
 #[cfg(test)]

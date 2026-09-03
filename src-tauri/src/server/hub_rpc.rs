@@ -843,7 +843,7 @@ fn deliver_chat_line(session: &str, target_name: &str, line: &str) -> bool {
         if !p.active || p.window_name != target_name {
             continue;
         }
-        let is_agent = agents::detect_managed(ws.as_deref(), &p.window_name, &format!("{} {} {}", p.current_command, p.pane_title, p.window_name)).is_some();
+        let is_agent = agents::detect_pane(ws.as_deref(), p).is_some();
         if !is_agent || !crate::projects::is_managed_in(ws.as_deref(), &p.window_name) {
             return false;
         }
@@ -1002,7 +1002,7 @@ fn deliver_mentions(session: &str, from: &str, body: &str) {
         if !seen.insert(p.window) || !p.active {
             continue;
         }
-        let is_agent = agents::detect_managed(ws.as_deref(), &p.window_name, &format!("{} {} {}", p.current_command, p.pane_title, p.window_name)).is_some();
+        let is_agent = agents::detect_pane(ws.as_deref(), p).is_some();
         if !is_agent || p.window_name == from {
             continue;
         }
@@ -1075,7 +1075,7 @@ fn agent_states(session: &str) -> serde_json::Value {
     let rows: Vec<serde_json::Value> = windows
         .values()
         .map(|p| {
-            let agent = agents::detect_managed(ws.as_deref(), &p.window_name, &format!("{} {} {}", p.current_command, p.pane_title, p.window_name));
+            let agent = agents::detect_pane(ws.as_deref(), p);
             let st = telemetry::derive(session, p.window, activity.get(&p.window).copied().unwrap_or(0));
             let managed = agent.is_some() && crate::projects::is_managed_in(ws.as_deref(), &p.window_name);
             // What the agent's own status line says: model, context used, effort,

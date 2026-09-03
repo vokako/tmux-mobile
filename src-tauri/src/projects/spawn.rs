@@ -97,7 +97,7 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
     let agent_windows = panes
         .iter()
         .filter(|p| seen.insert(p.window))
-        .filter(|p| super::agents::detect_managed(Some(workspace.as_str()), &p.window_name, &format!("{} {} {}", p.current_command, p.pane_title, p.window_name)).is_some())
+        .filter(|p| super::agents::detect_pane(Some(workspace.as_str()), p).is_some())
         .count();
     if agent_windows >= SPAWN_CAP {
         return Err(format!("project already has {agent_windows} agents (cap {SPAWN_CAP}) — finish or close one first"));
@@ -222,7 +222,7 @@ pub fn spawn_team(session: &str, team_name: &str, brief: &str, by: &str) -> Resu
     let existing = panes
         .iter()
         .filter(|p| seen.insert(p.window))
-        .filter(|p| super::agents::detect_managed(Some(project.path.as_str()), &p.window_name, &format!("{} {} {}", p.current_command, p.pane_title, p.window_name)).is_some())
+        .filter(|p| super::agents::detect_pane(Some(project.path.as_str()), p).is_some())
         .count();
     if existing + flat.len() > SPAWN_CAP {
         return Err(format!(
