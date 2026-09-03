@@ -270,6 +270,11 @@
   applyFontVars();
   let serverInfo = $state({ hostname: '', machineId: '' });
   let activeAddress = $state(localStorage.getItem('tmux_address') || '');
+  // The address whose row was just tapped and is still dialing (review,
+  // 2026-09-03: switching an address gave no feedback on the row itself — the
+  // old one stayed lit while the socket was rebuilt). Set before the direct
+  // connect, cleared when it settles either way; the row wears the running cue.
+  let pendingAddress = $state('');
   let prefAddresses = $derived.by(() => {
     if (!serverInfo.machineId) return [];
     try {
@@ -1533,7 +1538,7 @@
     {/if}
     {#if page === 'prefs'}
     <div class="page-layer">
-    <Preferences {connected} {theme} {fontSize} {debugMode} {serverInfo} {activeAddress} addresses={prefAddresses}
+    <Preferences {connected} {theme} {fontSize} {debugMode} {serverInfo} {activeAddress} {pendingAddress} addresses={prefAddresses}
       {optimizing} {linkCopied}
       onClose={togglePrefs}
       onTheme={setTheme}
@@ -1550,6 +1555,7 @@
       onAddress={(address) => {
         localStorage.setItem('tmux_address', address);
         activeAddress = address;
+        pendingAddress = address;
         // A typed address is a NEW intent: end any running reconnect loop
         // before the direct connect, or its next attempt races this socket
         // and the loser's timeout marks a reachable address unreachable.
@@ -1558,7 +1564,8 @@
         connect(address, localStorage.getItem('tmux_token') || '').then(() => {
           serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };
           resubscribeAll();
-        }).catch(() => { reconnectMachine.start(); });
+        }).catch(() => { reconnectMachine.start(); })
+          .finally(() => { if (pendingAddress === address) pendingAddress = ''; });
       }}
       onDisconnect={() => { page = 'settings'; doDisconnect(); }}
       onConnectionSetup={() => { page = 'settings'; }} />

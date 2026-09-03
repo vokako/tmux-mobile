@@ -67,3 +67,15 @@ test('one head at a time: Settings yields its own to the editor', () => {
   assert.match(source, /\{#if !\(AGENT_TABS\.includes\(tab\) && agentsDrilled\)\}\s*<div class="page-head">/u);
   assert.match(source, /onDrilled=\{\(d: boolean\) => agentsDrilled = d\}/u);
 });
+
+test('a tapped address wears the running cue until the socket settles (2026-09-03)', () => {
+  // The dot is the app-wide class from app.css, never a local re-implementation.
+  assert.match(source, /<span class="addr-dot" class:live-dot=\{pending\}><\/span>/u);
+  assert.match(source, /\{@const pending = address === pendingAddress\}/u);
+  const dotRules = style.match(/[^{}]*addr-dot[^{]*\{[^}]*\}/gu)?.join('\n') ?? '';
+  assert.ok(dotRules, 'the dot has rules');
+  assert.doesNotMatch(dotRules, /animation|box-shadow|@keyframes/u, 'no local re-implementation — .live-dot is the one running cue');
+  // At rest achromatic; the current and the dialing row accent.
+  assert.match(style, /\.addr-dot\{[^}]*background:var\(--status-sleep\)/u);
+  assert.match(style, /\.address-list button\.active \.addr-dot,\.address-list button\.pending \.addr-dot\{background:var\(--accent\)\}/u);
+});

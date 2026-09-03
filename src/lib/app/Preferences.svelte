@@ -24,6 +24,7 @@
     debugMode = false,
     serverInfo = { hostname: '', machineId: '' },
     activeAddress = '',
+    pendingAddress = '',
     addresses = [],
     optimizing = false,
     linkCopied = false,
@@ -52,6 +53,9 @@
     debugMode?: boolean;
     serverInfo?: { hostname: string; machineId: string };
     activeAddress?: string;
+    /** The address whose row was tapped and is still connecting — it wears the
+     *  app-wide running cue (`.live-dot`) until App reports the outcome. */
+    pendingAddress?: string;
     addresses?: string[];
     optimizing?: boolean;
     linkCopied?: boolean;
@@ -483,9 +487,17 @@
                 <button onclick={onShare}><Icon name={linkCopied ? 'check' : 'copy'} size={13} /> {t('shareLink')}</button>
               </div>
             </div>
+            <!-- One status-dot language (design-language.md §Colour): at rest
+                 achromatic, the current address accent, the one still dialing
+                 accent + `.live-dot` — the same cue an agent in motion wears. -->
             <div class="address-list">
               {#each (addresses.length ? addresses : [activeAddress]) as address}
-                <button class:active={address === activeAddress} onclick={() => address !== activeAddress && onAddress(address)}>{address}</button>
+                {@const pending = address === pendingAddress}
+                <button class:active={address === activeAddress} class:pending
+                  title={pending ? t('connecting') : undefined} aria-busy={pending || undefined}
+                  onclick={() => address !== activeAddress && onAddress(address)}>
+                  <span class="addr-dot" class:live-dot={pending}></span><span class="addr-text">{address}</span>
+                </button>
               {/each}
             </div>
             <div class="setting-row hook-row">
@@ -588,6 +600,9 @@
   .shortcut-error{max-width:720px;margin:7px auto 0;color:var(--danger);font-size:var(--fs-meta);text-align:center}.shortcut-reset{display:block;margin:8px auto;padding:5px 10px;border:1px solid var(--border2);border-radius:var(--ui-radius-control);background:transparent;color:var(--text3);font-size:var(--fs-sub);cursor:pointer}
   .connection-title{padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px}.connection-title>div:first-child{display:flex;flex-direction:column;gap:3px}.conn-actions{display:flex;gap:4px}.conn-actions button{display:flex;align-items:center;gap:4px}
   .address-list{padding:0 12px 10px;display:flex;flex-direction:column;gap:3px}.address-list button{padding:7px 9px;border:1px solid var(--border2);border-radius:var(--ui-radius-control);background:var(--input-bg);color:var(--text3);font:var(--fs-sub) var(--font-mono);text-align:left;word-break:break-all;cursor:pointer}.address-list button.active{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}
+  .address-list button{display:flex;align-items:center;gap:8px}.addr-text{min-width:0}
+  .addr-dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--status-sleep)}
+  .address-list button.active .addr-dot,.address-list button.pending .addr-dot{background:var(--accent)}
   .hook-row{border-top:1px solid var(--border2)}.hook-control{display:flex;align-items:center;gap:7px;flex-shrink:0}.hook-backends{display:flex;gap:3px}.hook-backends span{padding:2px 5px;border-radius:var(--ui-radius-pill);background:var(--surface2);color:var(--text3);font-size:var(--fs-micro)}.hook-backends span.on{background:var(--accent-bg);color:var(--accent)}.hook-action{height:var(--ui-control-height);padding:3px 8px;border:1px solid var(--border2);border-radius:var(--ui-radius-control);background:transparent;color:var(--text3);font-size:var(--ui-font-control);cursor:pointer}.hook-action.primary{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}.hook-action:disabled{opacity:.5}.hook-error{padding:0 12px 8px;color:var(--danger);font-size:var(--fs-meta)}
   /* Lone danger dialect (design-language.md §3): quiet at rest — border2 box,
      red ink — and only hover raises the red border + wash. The always-red

@@ -143,6 +143,15 @@ doc already describes. Design decisions, in the order they bit:
   Team state reset by construction instead of by per-component sweeps. The
   caller cancels the reconnect machine and closes the socket FIRST — a live
   retry loop re-reads `tmux_address` and would race the writes.
+- **An address switch shows on the row that was tapped** (review, 2026-09-03):
+  App keeps `pendingAddress` from the moment `onAddress` dials until the
+  connect settles either way (`.finally`, guarded so a second tap's pending
+  is not cleared by the first's outcome), and Preferences' address list gives
+  every row a dot in the ONE status language — `--status-sleep` at rest, accent
+  on the current address, accent + app.css `.live-dot` on the one still dialing
+  (`aria-busy`, title "Connecting…"). Before, the old row stayed lit while the
+  socket was rebuilt and nothing said the tap had landed. A failed direct
+  connect hands over to the reconnect machine, whose bar carries on from there.
 - **The rail entry is a control, not a page**: it rides the RAIL_GAP branch
   (above the configure group — "右下角agent上边"), carries no rail slot, and
   its popover follows the app's one menu recipe (fixed layer, measured then

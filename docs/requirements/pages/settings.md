@@ -30,7 +30,9 @@ rounded shape, muted idle state, and accent active state. Desktop Settings uses 
   cross servers), double-click renames, non-current rows removable, `+` row
   opens this page as the add flow. Migration from the single-server keys is
   one-time, idempotent, and never loses the current user.
-- Server info: hostname, machine ID, address
+- Server info: hostname, machine ID, address; the address list marks the
+  current address and shows a connecting cue on a tapped address until the
+  switch settles
 - Language selector: EN / 中文 (pill buttons)
 - Theme selector: Auto / Light / Dark (pill buttons)
 - Message notifications (own category): On / Off (pill buttons, persisted to localStorage `tmux_notify`); turning it on is the one user gesture that previews the cue and requests system-notification permission (Android's runtime prompt inside the app); the caption says when only the sound can play (not permitted, or no Notification API). A Test row plays the cue and posts one notification so the device can be checked. Moved here from the Hub header (board #72).
