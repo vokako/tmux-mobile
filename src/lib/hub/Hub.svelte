@@ -2756,16 +2756,15 @@
                              Raw view and agent messages render in full. -->
                         {@html markLeadingMention(renderMarkdown(folded ? foldBody(parts.text) : parts.text))}
                       {/if}
-                      {#if folded}
-                        <!-- The way to the whole message. A button, because this
-                             is the one thing you might want from a folded
-                             message; the bubble's own click still opens copy/raw. -->
-                        <button class="m-unfold" onclick={(e) => { e.stopPropagation(); expandMsg(key); }}>
-                          <Icon name="chevron-down" size={11} />{t('hubUnfold')}
-                        </button>
-                      {:else if foldable}
-                        <button class="m-unfold" onclick={(e) => { e.stopPropagation(); const { [key]: _gone, ...rest } = expanded; expanded = rest; }}>
-                          <Icon name="chevron-up" size={11} />{t('hubRefold')}
+                      {#if foldable}
+                        <!-- The way to the whole message and back. A button, because
+                             this is the one thing you might want from a folded
+                             message; the bubble's own click still opens copy/raw.
+                             ONE button for both directions so its caret can TURN
+                             (motion.md principle 4) — the body itself is a cut,
+                             never a slide (principle 10: the feed owns its scroll). -->
+                        <button class="m-unfold" onclick={(e) => { e.stopPropagation(); if (folded) expandMsg(key); else { const { [key]: _gone, ...rest } = expanded; expanded = rest; } }}>
+                          <span class="flip" class:on={!folded}><Icon name="chevron-down" size={11} /></span>{folded ? t('hubUnfold') : t('hubRefold')}
                         </button>
                       {/if}
                     {/if}
@@ -2976,7 +2975,10 @@
                    understate it (review, 2026-09-03). Accent even on the grey
                    note chip — this part IS a delivery. -->
               {#if toExtras.length}<span class="to-extra">{toExtras.map((n) => '+@' + n).join(' ')}</span>{/if}
-              <Icon name={recipientOpen ? 'chevron-down' : 'chevron-up'} size={11} />
+              <!-- ONE arrow that TURNS (motion.md principle 4): it points up while
+                   the menu is closed (the menu opens upward) and rotates to down
+                   once it is open — never two glyphs swapped. -->
+              <span class="flip" class:on={recipientOpen}><Icon name="chevron-up" size={11} /></span>
             </button>
             {#if recipientOpen}
               <div class="to-menu">

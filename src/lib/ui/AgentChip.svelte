@@ -63,7 +63,9 @@
       <span class="chip-label">{label}</span>
     {/if}
     {#if chevron}
-      <Icon name="chevron-{chevron}" size={10} />
+      <!-- One glyph that turns (motion.md principle 4): down at rest, rotated
+           to up — never two chevrons swapped. -->
+      <span class="flip" class:on={chevron === 'up'}><Icon name="chevron-down" size={10} /></span>
     {/if}
   </span>
 </button>
@@ -131,6 +133,7 @@
     height: 12px;
     flex-shrink: 0;
     opacity: 0.85;
+    transition: opacity var(--t-fast);
   }
   .chip-agents { display: inline-flex; align-items: center; gap: 3px; overflow: visible; }
 
