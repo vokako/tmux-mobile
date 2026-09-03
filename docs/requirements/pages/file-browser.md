@@ -7,7 +7,10 @@ The starting directory follows the active terminal/team session's working
 directory, or the server's home directory when no session is open yet.
 
 ## Components
-- Unified toolbar: all actions in one compact icon row
+- Unified toolbar: all actions in one compact icon row. Its first control
+  (terminal glyph, "Session directory") returns to the active session's
+  working directory; it is NOT a home button — the house icon means the
+  user's home (`~`) wherever it appears (the directory picker)
 - Breadcrumb path row (separate from toolbar)
 - File/directory list with icons, size, modified date
 - Bookmark panel (star current dir, scrollable saved paths)

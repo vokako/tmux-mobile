@@ -660,7 +660,11 @@
 
   function scrollEnd(el) { el.scrollLeft = el.scrollWidth; }
 
-  function goHome() {
+  // Back to the SESSION's working directory (the pane's cwd) — not the user's
+  // home. The button wore the house icon until 2026-09-03 while DirPicker's
+  // house meant `~`: one glyph, two destinations. Home now means `~`
+  // everywhere; this control is the terminal glyph, labelled for what it is.
+  function goSessionDir() {
     fsCwd(session).then(r => navTo(r.path)).catch(() => navTo('/'));
   }
 
@@ -1459,7 +1463,7 @@
 {#snippet listPanel()}
     <!-- Toolbar: all buttons in one row -->
     <div class="toolbar">
-      <button class="tool-btn" onclick={goHome}><Icon name="home" size={13} /></button>
+      <button class="tool-btn" onclick={goSessionDir} title={t('filesSessionDir')} aria-label={t('filesSessionDir')}><Icon name="terminal" size={13} /></button>
       <button class="tool-btn" onclick={() => loadDir(cwd)} aria-label="Refresh"><Icon name="refresh" size={13} /></button>
       <button class="tool-btn" onclick={() => { newType = newType ? '' : 'file'; newName = ''; }}><Icon name="plus" size={13} /></button>
       <button class="tool-btn" onclick={handleUpload}><Icon name="upload" size={13} /></button>
