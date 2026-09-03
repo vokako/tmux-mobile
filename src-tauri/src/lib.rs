@@ -29,74 +29,6 @@ pub mod system_status;
 #[cfg(all(desktop, feature = "gui"))]
 use config::Config;
 
-/// macOS: keep Escape inside the webview (terminal-keyboard.md § Escape on
-/// desktop WebKit).
-///
-/// AppKit's standard key bindings translate a bare Escape into the
-/// `cancelOperation:` command. WKWebView collects that command while
-/// interpreting the key (`interpretKeyEvents:` → `doCommandBySelector:`) and
-/// executes it when the page does not swallow the key — but the page often
-/// CANNOT: WebKit hands the key to the active input method before the DOM sees
-/// the keydown ("preventing default handling of keydown and keypress events
-/// has no effect on IM input" — WebCore EventHandler::keyEvent), and an input
-/// method that answers it makes WebKit run the command straight away
-/// (`WebViewImpl::doCommandBySelector` → `_web_superDoCommandBySelector:`).
-/// Either way the command leaves the webview: NSResponder forwards an
-/// unanswered `doCommandBySelector:` up the responder chain, and AppKit's own
-/// handling of `cancelOperation:` — "the window sends cancelOperation: to the
-/// first responder and from there up the chain", re-dispatching Escape as a key
-/// equivalent — ended with the webview no longer the window's first responder.
-/// The DOM still reported the terminal's textarea as focused, so every
-/// JS-side `focus()` was a no-op and three rounds of DOM guards changed
-/// nothing (board #20 and its reopen; owner 2026-09-03: "之前修了好几次都没修好").
-///
-/// The fix answers the command ON the webview: an added `cancelOperation:`
-/// that does nothing. NSResponder's `doCommandBySelector:` finds it on the
-/// instance's class and stops there; nothing above the webview ever hears
-/// Escape. The keydown itself is unaffected — the terminal's capture handler
-/// still receives and encodes it (`\x1b`). Cmd+. maps to the same command and
-/// is silenced too; nothing in this window relies on it.
-#[cfg(target_os = "macos")]
-mod escape_stays_in_webview {
-    use objc2::runtime::{AnyClass, AnyObject, Sel};
-    use objc2::{ffi, sel};
-
-    unsafe extern "C-unwind" fn cancel_operation_noop(
-        _this: *mut AnyObject,
-        _sel: Sel,
-        _sender: *mut AnyObject,
-    ) {
-    }
-
-    /// `webview` is the WKWebView pointer Tauri hands to `with_webview`.
-    /// Adds the method to the instance's runtime class (wry's `WryWebView`);
-    /// idempotent — a class that already answers `cancelOperation:` is left
-    /// alone, so a second window or a re-run never redefines it.
-    pub unsafe fn install(webview: *mut std::ffi::c_void) -> bool {
-        if webview.is_null() {
-            return false;
-        }
-        let obj: &AnyObject = &*(webview as *const AnyObject);
-        let cls: &AnyClass = obj.class();
-        if cls.instance_method(sel!(cancelOperation:)).is_some() {
-            return false;
-        }
-        let imp: objc2::runtime::Imp = std::mem::transmute::<
-            unsafe extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject),
-            objc2::runtime::Imp,
-        >(cancel_operation_noop);
-        // "v@:@": returns void, takes self, _cmd and the sender.
-        let types = c"v@:@";
-        ffi::class_addMethod(
-            cls as *const AnyClass as *mut AnyClass,
-            sel!(cancelOperation:),
-            imp,
-            types.as_ptr(),
-        )
-        .as_bool()
-    }
-}
-
 // Everything from here to the end of `run()` is the Tauri shell: the IPC
 // commands the webview calls and the app entry point. Gated on the `gui`
 // feature so a headless build (`npm run build:server`) drops the webview
@@ -287,17 +219,6 @@ pub fn run() {
             {
                 use tauri::menu::Menu;
                 app.set_menu(Menu::new(app)?)?;
-            }
-            // macOS: Escape must stay in the webview (see escape_stays_in_webview).
-            #[cfg(target_os = "macos")]
-            {
-                use tauri::Manager;
-                if let Some(win) = app.get_webview_window("main") {
-                    win.with_webview(|pw| {
-                        let added = unsafe { escape_stays_in_webview::install(pw.inner()) };
-                        eprintln!("[escape] cancelOperation: answered on the webview: {added}");
-                    })?;
-                }
             }
             Ok(())
         })

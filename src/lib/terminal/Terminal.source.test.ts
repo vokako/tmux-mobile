@@ -5,62 +5,29 @@ import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('./Terminal.svelte', import.meta.url), 'utf8');
 
-test('Escape on desktop WebKit: the guard watches PAGE focus, not just the DOM (round four)', () => {
-  // What Escape drops in the macOS app is the webview's first-responder
-  // status, not the DOM focus: AppKit turns the key into `cancelOperation:`,
-  // WebKit hands the key to the input method before the DOM sees it (so
-  // preventDefault cannot stop the command), the command walks the native
-  // responder chain, and WebKit fires a relatedTarget-less blur while
-  // document.activeElement STAYS the textarea. Three rounds of `term.focus()`
-  // were therefore no-ops (board #20 + reopen; owner 2026-09-03 "之前修了好几
-  // 次都没修好"). The guard now reads `document.hasFocus()` — false means the
-  // page lost native focus whatever the DOM says — and reclaims through
-  // Tauri's Webview.setFocus() (makeFirstResponder) before the DOM focus.
-  assert.match(source, /const pageFocused = document\.hasFocus\(\);/u, 'native focus is the signal');
-  assert.match(source, /getCurrentWebview\(\)\.setFocus\(\)/u, 'reclaims native focus through Tauri');
-  assert.match(source, /if \(!pageFocused && nativeFocus\) nativeFocus\(\)\.then\(domFocus, domFocus\);/u, 'native first, DOM after');
-  // Both signatures reclaim: the DOM-level blur (nobody took the focus) and
-  // the page-level window blur; the watch also polls twice after the claim.
-  assert.match(source, /if \(e\.relatedTarget \|\| !escRecent\(\)\) return;/u, 'textarea blur signature');
-  assert.match(source, /window\.addEventListener\('blur', onEscWindowBlur\)/u, 'page-level blur');
-  assert.match(source, /setTimeout\(escCheck\('60ms'\), 60\), setTimeout\(escCheck\('300ms'\), 300\)/u, 'two checks after the claim');
-  // Bounded per Escape: a genuine window switch right after an Escape must
-  // not turn into a focus tug-of-war.
-  assert.match(source, /if \(!escRecent\(\) \|\| escReclaims >= ESC_RECLAIM_MAX\) return;/u);
-  // Evidence goes to the debug panel, keyCode included — 229 is WebKit's
-  // "the input method answered this key" marker, the case preventDefault
-  // cannot reach.
-  assert.match(source, /kb: esc claimed keyCode=\$\{event\.keyCode\}/u);
-  // Listeners and timers are torn down with the terminal.
-  assert.match(source, /window\.removeEventListener\('blur', onEscWindowBlur\)/u);
-  assert.match(source, /for \(const t of escWatchTimers\) clearTimeout\(t\);/u);
+test('WebKit Escape-cancel blur gives focus straight back to the terminal', () => {
+  // WebKit's default action for Escape blurs the focused element and IGNORES
+  // preventDefault — the first Esc sent \x1b but dropped focus, and every key
+  // after it landed nowhere (owner, 2026-08-26, drawer AND standalone page).
+  // The guard's signature is load-bearing: blur + no relatedTarget (nobody
+  // took the focus) + a fresh Escape keydown.
+  assert.match(source, /if \(e\.relatedTarget \|\| Date\.now\(\) - lastEscAt > 250\) return;/u);
+  assert.match(source, /if \(e\.key === 'Escape'\) lastEscAt = Date\.now\(\);/u);
 });
 
 test('bare Escape is CLAIMED in capture and encoded by hand (board #20)', () => {
   // Whether the \x1b reached the pane used to depend on whose keydown ran
   // before WebKit's un-preventable Escape blur — "esc 没有发送到后端，而是
-  // 让当前框失去焦点" (owner, 2026-08-30). The hardware-capture handler
+  // 让当前框失去焦点" (owner, 2026-08-30). The hardware-capture handler now
   // claims the bare key exactly like the Ctrl/Alt combos, so the send never
   // depends on where focus lands; mid-IME Escape stays with the composition.
   assert.match(source, /!event\.isComposing && event\.key === 'Escape'/u, 'claimed in onHardwareKeydown');
   assert.match(source, /&& !event\.ctrlKey && !event\.altKey && !event\.metaKey/u, 'bare only — combos keep their encoder');
-  // The claim's stopImmediatePropagation kills any later same-node keydown
-  // listener, so the claim itself stamps the time the guard reads and arms
-  // the focus watch.
-  assert.match(source, /if \(bareEsc\) \{\n\s+lastEscAt = Date\.now\(\);/u, 'the claim feeds the guard');
-  assert.match(source, /armEscFocusWatch\?\.\(\);/u, 'the claim arms the watch');
-});
-
-test('the native half of the Escape fix lives in the Tauri shell (macOS)', async () => {
-  // The command is answered ON the webview so the responder-chain walk never
-  // starts: a no-op `cancelOperation:` added to the WKWebView's class.
-  const rs = await readFile(new URL('../../../src-tauri/src/lib.rs', import.meta.url), 'utf8');
-  assert.match(rs, /mod escape_stays_in_webview/u);
-  assert.match(rs, /sel!\(cancelOperation:\)/u);
-  assert.match(rs, /win\.with_webview\(\|pw\| \{\n\s+let added = unsafe \{ escape_stays_in_webview::install\(pw\.inner\(\)\) \};/u);
-  const cargo = await readFile(new URL('../../../src-tauri/Cargo.toml', import.meta.url), 'utf8');
-  assert.match(cargo, /\[target\.'cfg\(target_os = "macos"\)'\.dependencies\]\nobjc2 = \{ version = "0\.6", optional = true \}/u);
-  assert.match(cargo, /"dep:objc2"/u, 'gated behind the gui feature like the rest of the shell');
+  // The claim's stopImmediatePropagation KILLS the blur guard's own keydown
+  // recorder (same node, same phase, registered later), so the claim must
+  // stamp lastEscAt itself — or WebKit's un-preventable blur reads as "not
+  // Escape's doing" and focus is never given back (the #20 reopen).
+  assert.match(source, /if \(bareEsc\) lastEscAt = Date\.now\(\);/u, 'the claim feeds the blur guard');
 });
 
 test('the retired unread-notification dots stay retired (2026-09-01)', () => {
