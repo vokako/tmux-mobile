@@ -36,6 +36,16 @@ test('Terminal navigation and page layer exist without an active target', () => 
   // else-branch opens with `.page-head` and the empty block follows it.
   assert.match(source, /\{:else\}[\s\S]{0,400}?<div class="page-head">\s*<h1>\{t\('terminal'\)\}<\/h1>/u);
   assert.match(source, /<div class="terminal-empty">/u);
+  // The empty state's "Sessions" button goes through the one opener: a touch
+  // layout lifts the drawer, the desktop hands focus to the list that is
+  // already on screen. Setting `sessListOpen` alone did nothing on the
+  // desktop — no desktop rule reads it (review, 2026-09-03).
+  assert.match(source, /<div class="terminal-empty">[\s\S]*?<button class="chip-btn" onclick=\{openSessionsList\}>/u);
+  const opener = /function openSessionsList\(\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
+  assert.match(opener, /if \(layout\.isTouchDevice\) \{ sessListOpen = true; return; \}/u);
+  assert.match(opener, /termSideEl\?\.querySelector\('\.sessions \.content \[tabindex="0"\], \.sessions \.content button'\)\?\.focus\(\)/u,
+    'desktop: focus the list itself, never the SideHandle separator');
+  assert.match(source, /<aside class="term-side"[^>]*bind:this=\{termSideEl\}>/u);
 });
 
 test('the Terminal page uses the shared sidebar geometry', () => {

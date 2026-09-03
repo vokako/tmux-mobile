@@ -79,6 +79,7 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
 - **Horizontal swipe (App level)** → switch tabs (lowest priority, suppressed by all above)
 
 ## Interactions (Desktop)
+- **Empty state "Sessions" button** (no pane selected) → moves keyboard focus into the Sessions sidebar (first list row, or the create row when nothing is listed); the sidebar is already the left column on the desktop, so the button has nothing to slide open. On a touch layout the same button lifts the session drawer. One opener (`openSessionsList` in `App.svelte`) serves both
 - App-configured shortcuts are consumed before terminal input
 - Clicking an HTTP(S) URL opens the system browser and never navigates the app
   WebView

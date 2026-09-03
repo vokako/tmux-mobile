@@ -1275,6 +1275,19 @@
   // screen it is a column; on a phone it slides over the terminal, because
   // the terminal wants the whole screen there.
   let sessListOpen = $state(false);
+  let termSideEl = $state(null);
+  // The empty state's "Sessions" action — the ONE way it reaches the list.
+  // On a touch layout it lifts the drawer (sessListOpen), like the switcher's
+  // hamburger. On the desktop the list is already the left column, so "open"
+  // means hand it keyboard focus: the first row of the list, or the create
+  // row when nothing is listed yet. Before this the button only set
+  // `sessListOpen`, which no desktop rule reads, and did nothing (review,
+  // 2026-09-03). The SideHandle is skipped on purpose — it is a separator,
+  // not the list.
+  function openSessionsList() {
+    if (layout.isTouchDevice) { sessListOpen = true; return; }
+    termSideEl?.querySelector('.sessions .content [tabindex="0"], .sessions .content button')?.focus();
+  }
   // The Terminal sheet's own condition (touch AND ≤760px — the old media
   // gate, now expressed where the class is applied; see app.css .side-sheet).
   let narrowVp = $state(typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches);
@@ -1550,7 +1563,7 @@
            screen, a slide-over sheet on a phone (opened from the switcher's
            session tag). Kept MOUNTED so its polling and expansion state
            survive; `visible` pauses the poll while the page is hidden. -->
-      <aside class="term-side" class:side-sheet={layout.isTouchDevice && narrowVp} class:sheet={layout.isTouchDevice} class:open={layout.isTouchDevice && narrowVp && sessListOpen}>
+      <aside class="term-side" class:side-sheet={layout.isTouchDevice && narrowVp} class:sheet={layout.isTouchDevice} class:open={layout.isTouchDevice && narrowVp && sessListOpen} bind:this={termSideEl}>
         {#if !layout.isTouchDevice}<SideHandle />{/if}
         <Sessions {openTerminal} activeTarget={terminalTarget}
           visible={page === 'terminal' && (!layout.isTouchDevice || sessListOpen)}
@@ -1607,7 +1620,7 @@
         <div class="terminal-empty">
           <Icon name="terminal" size={22} />
           <span>{t('noTerminalSelected')}</span>
-          <button class="chip-btn" onclick={() => sessListOpen = true}>
+          <button class="chip-btn" onclick={openSessionsList}>
             <Icon name="sessions" size={14} />{t('sessions')}
           </button>
         </div>
