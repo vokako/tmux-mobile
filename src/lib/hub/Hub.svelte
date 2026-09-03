@@ -38,6 +38,8 @@
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
   import { longpress } from '../ui/longpress.ts';
+  import { flip } from 'svelte/animate';
+  import { moveMs } from '../ui/motion.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
   import CreateProjectDialog from '../projects/CreateProjectDialog.svelte';
@@ -57,6 +59,9 @@
   const compact = $derived(mobile || narrow);
 
   let rows = $state([]);            // ProjectRow[]
+  /** Project ids present when the sidebar first filled (motion.md principle
+   * 13): the first fill is not news, a project that joins later fades in. */
+  let rowsBase = $state(null);
   // The recycle bin: archived projects, folded at the sidebar's bottom.
   let trash = $state([]);           // ProjectRow[] (archived)
   let trashOpen = $state(false);
@@ -232,6 +237,7 @@
       const all = projects ?? [];
       trash = all.filter((r) => r.project.archived);
       rows = sortRows(all.filter((r) => !r.project.archived), talk);
+      if (!rowsBase && rows.length) rowsBase = new Set(rows.map((r) => r.project.id));
       panes = sp.panes ?? [];
       // First load: go back to the conversation that was open, and only fall
       // back to the top row when that project is gone.
@@ -2213,8 +2219,12 @@
         {#each rows as row (row.project.id)}
           <!-- Right-click (desktop) and long press (phone) open the project's own
                verbs where the pointer is. The row's normal job — open this
-               conversation — is unchanged. -->
+               conversation — is unchanged. The list is ordered by the
+               CONVERSATION, so a row that moves MOVES (animate:flip on
+               moveMs(), motion.md wave 5); a project that joins fades in. -->
           <button class="side-row proj-row" class:open={row.project.session === selected}
+            class:appear={!!rowsBase && !rowsBase.has(row.project.id)}
+            animate:flip={{ duration: moveMs() }}
             onclick={() => { selectProject(row.project.session); sideOpen = false; }}
             oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), row.project.name, projectItems(row)); }}
             use:longpress={{ onlongpress: (pt) => openCtx(pt, row.project.name, projectItems(row)) }}>
@@ -2501,6 +2511,7 @@
                  has to be ejectable — the slot is what keeps `up` recreating
                  it (owner, 2026-08-19). -->
             <div class="acard off" class:busy={acting} class:appear-pop={!!rosterBase && !rosterBase.has(name)} role="button" tabindex="0" aria-label={`${name} · ${t('hubStopped')}`}
+              animate:flip={{ duration: moveMs() }}
               onclick={(e) => toggleAgentMenu(name, e.currentTarget)}
               onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleAgentMenu(name, e.currentTarget); } }}
               oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), name, agentItems(name)); }}
