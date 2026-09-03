@@ -75,7 +75,7 @@ Primary view for interacting with tmux panes. Renders terminal output with ANSI 
 - **Selection toolbar** → explicitly copy the selected text; tapping outside or switching panes cancels the selection
 - **Swipe right edge** → scrollbar drag
 - **Tap shortcut button** → sends key sequence; long-press repeats
-- **Tap Ctrl** → arms a one-shot modifier; the next letter typed on the system keyboard sends Ctrl+letter, then Ctrl releases; tapping Ctrl again cancels it
+- **Tap Ctrl** → arms a one-shot modifier (the pill highlights); the next letter typed on the system keyboard sends Ctrl+letter, then Ctrl releases. It also releases when tapped again, on a shortcut-bar key, on pane switch, when the terminal loses focus, and on its own after 4 s — the highlight drops with it
 - **Horizontal swipe (App level)** → switch tabs (lowest priority, suppressed by all above)
 
 ## Interactions (Desktop)

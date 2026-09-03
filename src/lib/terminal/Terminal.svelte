@@ -17,7 +17,7 @@
   import { computeCursorLayout } from './cursor-layout.ts';
   import { restoreViewportAfterPaneSwitch } from './terminal-viewport.ts';
   import { cycleItem } from '../app/shortcuts.ts';
-  import { createDoubleTapDetector, encodeTerminalShortcut } from './terminal-keyboard.ts';
+  import { createDoubleTapDetector, createOneShotCtrl, encodeTerminalShortcut } from './terminal-keyboard.ts';
   import { openExternalUrl } from '../core/external-links.ts';
 
   // Timing constants
@@ -106,7 +106,11 @@
   const UNLOCK_RETRY_MAX = 2;
   let endTouchScrollTimer = null;
   let kbTa = null; // set in $effect after term.open
+  // The shortcut bar's Ctrl one-shot (terminal-keyboard.md). The arming,
+  // consumption and 4 s expiry live in terminal-keyboard.ts; `ctrlArmed` is
+  // the template's reactive mirror and is written ONLY through onChange.
   let ctrlArmed = $state(false);
+  const ctrlOneShot = createOneShotCtrl({ onChange: (armed) => { ctrlArmed = armed; } });
 
   function preparePaneSwitch() {
     document.activeElement?.blur();
@@ -120,7 +124,8 @@
 
   $effect(() => {
     target;
-    ctrlArmed = false;
+    ctrlOneShot.disarm(); // pane switch
+    return () => ctrlOneShot.disarm(); // teardown: no expiry timer outlives the component
   });
 
   // The ONLY two writers of `kbLocked` (terminal-keyboard.md): unlockKeyboard()
@@ -714,11 +719,7 @@
             lastInputComposing = false;
             window.__dbg?.(`input: forward insertText ${JSON.stringify(e.data).slice(0,20)}`);
             ta.value = '';
-            const ctrlByte = ctrlArmed && e.data.length === 1 && /[a-z]/i.test(e.data)
-              ? String.fromCharCode(e.data.toLowerCase().charCodeAt(0) - 96)
-              : null;
-            if (ctrlByte != null) ctrlArmed = false;
-            enqueueKeys(ctrlByte ?? e.data, true);
+            enqueueKeys(ctrlOneShot.apply(e.data), true);
           }
         };
         termEl.addEventListener('input', onTextInsert, { capture: true });
@@ -751,10 +752,6 @@
           if (ta && ta.value) ta.value = '';
         });
       }
-      const ctrlByte = ctrlArmed && !isPasting && data.length === 1 && /[a-z]/i.test(data)
-        ? String.fromCharCode(data.toLowerCase().charCodeAt(0) - 96)
-        : null;
-      if (ctrlByte != null) ctrlArmed = false;
       if (isPasting) {
         isPasting = false;
         // Paste is input too: same live-tail reset as a keystroke.
@@ -776,7 +773,8 @@
           });
         return;
       }
-      enqueueKeys(ctrlByte ?? data, true);
+      // Paste returned above, so a pasted single letter never consumes Ctrl.
+      enqueueKeys(ctrlOneShot.apply(data), true);
     });
     // Plain printable keys must go through the browser's input pipeline
     // (textarea `input` event), NOT xterm's keydown fast path. CJK IMEs
@@ -1591,6 +1589,10 @@
     if (kbTa) {
       onTaBlur = () => {
         clearTimeout(kbBlurTimer);
+        // Focus left the terminal: whatever is typed next goes elsewhere, so
+        // the armed Ctrl must not wait for it. (The bar's own buttons
+        // preventDefault their touchstart and never blur the textarea.)
+        ctrlOneShot.disarm(); // blur
         kbBlurTimer = setTimeout(() => {
           if (Date.now() < unlockUntil && unlockRetries < UNLOCK_RETRY_MAX) {
             unlockRetries++;
@@ -1970,7 +1972,7 @@
 
   function toggleCtrl() {
     stopRepeat();
-    ctrlArmed = !ctrlArmed;
+    ctrlOneShot.toggle();
     navigator.vibrate?.(8);
   }
 
@@ -1979,7 +1981,7 @@
   let repeatInterval = null;
 
   function startRepeat(key) {
-    ctrlArmed = false;
+    ctrlOneShot.disarm(); // a shortcut key is not "the next letter"
     const ta = termEl?.querySelector('.xterm-helper-textarea');
     window.__dbg?.(`kb: shortcut "${key}" locked=${kbLocked} inputmode=${ta?.getAttribute('inputmode')} focused=${document.activeElement === ta}`);
     navigator.vibrate?.(8); // haptic tick on press; silent during repeat interval

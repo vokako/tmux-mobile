@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createDoubleTapDetector, encodeTerminalShortcut } from './terminal-keyboard.ts';
+import { CTRL_ONE_SHOT_MS, createDoubleTapDetector, createOneShotCtrl, encodeTerminalShortcut } from './terminal-keyboard.ts';
 
 function key(key: string, modifiers: Partial<KeyboardEvent> = {}): KeyboardEvent {
   return { key, code: '', metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...modifiers } as KeyboardEvent;
@@ -56,4 +56,73 @@ test('a non-tap gesture between two taps breaks the pair', () => {
   d.tap({ x: 100, y: 100, t: 1000 });
   d.reset(); // e.g. the finger scrolled, or the tap cancelled a selection
   assert.equal(d.tap({ x: 100, y: 100, t: 1100 }), false);
+});
+
+// --- Ctrl one-shot ------------------------------------------------------------
+
+/** Manual clock: `fire()` runs the pending expiry, as the wall clock would. */
+function fakeTimer() {
+  let pending: (() => void) | null = null;
+  let armedFor = -1;
+  let cleared = 0;
+  return {
+    setTimer: (fn: () => void, ms: number) => { pending = fn; armedFor = ms; return 1; },
+    clearTimer: () => { pending = null; cleared++; },
+    fire() { const fn = pending; pending = null; fn?.(); },
+    get pending() { return pending != null; },
+    get armedFor() { return armedFor; },
+    get cleared() { return cleared; },
+  };
+}
+
+test('the armed Ctrl turns the next letter into its C0 byte and releases', () => {
+  const changes: boolean[] = [];
+  const ctrl = createOneShotCtrl({ onChange: (a) => changes.push(a), ...fakeTimer() });
+  ctrl.toggle();
+  assert.equal(ctrl.armed, true);
+  assert.equal(ctrl.apply('c'), '\x03');
+  assert.equal(ctrl.armed, false, 'one shot');
+  assert.equal(ctrl.apply('c'), 'c', 'released: the next letter is plain');
+  assert.deepEqual(changes, [true, false]);
+});
+
+test('non-letters pass through and leave the arm alone; tapping Ctrl again cancels', () => {
+  const ctrl = createOneShotCtrl(fakeTimer());
+  ctrl.toggle();
+  assert.equal(ctrl.apply('1'), '1');
+  assert.equal(ctrl.apply('，'), '，');
+  assert.equal(ctrl.apply('ab'), 'ab', 'a two-character IME commit is not a letter');
+  assert.equal(ctrl.armed, true);
+  ctrl.toggle();
+  assert.equal(ctrl.armed, false);
+  assert.equal(ctrl.apply('a'), 'a');
+});
+
+test('the arm expires on its own after CTRL_ONE_SHOT_MS', () => {
+  const timer = fakeTimer();
+  const changes: boolean[] = [];
+  const ctrl = createOneShotCtrl({ onChange: (a) => changes.push(a), ...timer });
+  ctrl.toggle();
+  assert.equal(timer.pending, true, 'arming starts the clock');
+  assert.equal(timer.armedFor, CTRL_ONE_SHOT_MS);
+  timer.fire();
+  assert.equal(ctrl.armed, false);
+  assert.deepEqual(changes, [true, false], 'the template mirror sees the expiry');
+  assert.equal(ctrl.apply('c'), 'c', 'a letter typed minutes later is plain');
+});
+
+test('consuming, cancelling or disarming stops the clock; re-arming restarts it', () => {
+  const timer = fakeTimer();
+  const ctrl = createOneShotCtrl(timer);
+  ctrl.toggle();
+  ctrl.apply('x');
+  assert.equal(timer.pending, false, 'consumed: no stale expiry left to fire');
+  ctrl.toggle();
+  ctrl.disarm(); // blur or pane switch
+  assert.equal(timer.pending, false);
+  assert.equal(ctrl.armed, false);
+  ctrl.disarm(); // idempotent
+  ctrl.toggle();
+  assert.equal(timer.pending, true, 'a fresh arm gets a fresh clock');
+  assert.ok(timer.cleared >= 2, 'every release clears before it re-sets — one clock at most');
 });

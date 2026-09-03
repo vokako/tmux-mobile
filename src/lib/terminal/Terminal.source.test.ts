@@ -212,8 +212,8 @@ test('double-tap is the ONE terminal-area gesture that opens the keyboard (revie
   // single tap does nothing" while the only caller of unlockKeyboard() was the
   // toggle button. The detector is pure (terminal-keyboard.ts) and is fed from
   // exactly one place: the clean-tap branch of onTouchEnd.
-  assert.match(source, /import \{ createDoubleTapDetector, encodeTerminalShortcut \} from '\.\/terminal-keyboard\.ts';/u);
-  const end = /const onTouchEnd = \(e\) => \{([\s\S]*?)\n    \};/u.exec(source)?.[1] ?? '';
+  assert.match(source, /import \{[^}]*\bcreateDoubleTapDetector\b[^}]*\} from '\.\/terminal-keyboard\.ts';/u);
+  const end =/const onTouchEnd = \(e\) => \{([\s\S]*?)\n    \};/u.exec(source)?.[1] ?? '';
   assert.ok(end, 'onTouchEnd must exist');
   const down = /if \(endedMode === 'down'\) \{([\s\S]*?)\n        return;\n      \}/u.exec(end)?.[1] ?? '';
   assert.ok(down, 'the clean-tap branch must exist');
@@ -234,4 +234,25 @@ test('double-tap is the ONE terminal-area gesture that opens the keyboard (revie
   const ets = /function endTouchScroll\(\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1] ?? '';
   assert.ok(ets, 'endTouchScroll must exist');
   assert.doesNotMatch(ets, /kbLocked|lockKeyboard|unlockKeyboard/u);
+});
+
+test('the Ctrl one-shot lives in terminal-keyboard.ts; ctrlArmed is only its mirror (review 2026-09-03)', () => {
+  // The armed modifier used to be a bare boolean toggled in four places and
+  // never expired: a letter typed minutes after tapping Ctrl still became a
+  // control character. Arming, consumption and the 4 s expiry are one object
+  // now, so the template flag has exactly one writer — the onChange mirror.
+  assert.match(source, /import \{[^}]*\bcreateOneShotCtrl\b[^}]*\} from '\.\/terminal-keyboard\.ts';/u);
+  assert.match(source, /const ctrlOneShot = createOneShotCtrl\(\{ onChange: \(armed\) => \{ ctrlArmed = armed; \} \}\);/u);
+  const writes = [...source.matchAll(/ctrlArmed = ([^;]+);/gu)].map(m => m[1]);
+  assert.deepEqual(writes, ['$state(false)', 'armed'], 'the declaration and the mirror — no direct ctrlArmed writes');
+  // Both typed-input paths route through apply(): the capture-phase insertText
+  // forwarder and onData (after the paste branch has returned).
+  assert.match(source, /enqueueKeys\(ctrlOneShot\.apply\(e\.data\), true\);/u);
+  assert.match(source, /enqueueKeys\(ctrlOneShot\.apply\(data\), true\);/u);
+  // The release sites are labelled like the lock sites.
+  for (const label of ['pane switch', 'blur']) {
+    assert.match(source, new RegExp(`ctrlOneShot\\.disarm\\(\\); // ${label}`, 'u'), `release "${label}" labelled`);
+  }
+  // The armed state is visible on the bar and drops with the expiry.
+  assert.match(source, /<button class="modifier" class:active=\{ctrlArmed\} aria-pressed=\{ctrlArmed\}/u);
 });

@@ -125,3 +125,73 @@ export function createDoubleTapDetector(
     },
   };
 }
+
+// --- Ctrl one-shot (terminal-keyboard.md "The Ctrl one-shot expires") -------
+//
+// The shortcut bar's Ctrl arms a modifier for the NEXT letter typed on the
+// system keyboard. It is a one-shot, not a latch: it releases when consumed,
+// when tapped again, on pane switch, when the terminal loses focus, and — the
+// part that was missing until 2026-09-03 — after CTRL_ONE_SHOT_MS on its own.
+
+export const CTRL_ONE_SHOT_MS = 4000;
+
+export interface OneShotModifier {
+  readonly armed: boolean;
+  /** Tap on the bar: arm (starting the expiry) or cancel. */
+  toggle(): void;
+  /** Release without consuming — pane switch, blur, teardown. Idempotent. */
+  disarm(): void;
+  /**
+   * Route one typed string. A single letter becomes its C0 byte and releases
+   * the modifier; anything else (digits, punctuation, multi-char IME commits,
+   * paste) passes through untouched and leaves the arm alone.
+   */
+  apply(data: string): string;
+}
+
+export interface OneShotModifierOptions {
+  ttlMs?: number;
+  /** Reactive mirror for the template; called on every armed change. */
+  onChange?: (armed: boolean) => void;
+  /** Timer injection for tests. */
+  setTimer?: (fn: () => void, ms: number) => unknown;
+  clearTimer?: (id: unknown) => void;
+}
+
+export function createOneShotCtrl(opts: OneShotModifierOptions = {}): OneShotModifier {
+  const ttl = opts.ttlMs ?? CTRL_ONE_SHOT_MS;
+  const setTimer = opts.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
+  const clearTimer = opts.clearTimer ?? ((id) => clearTimeout(id as ReturnType<typeof setTimeout>));
+  let armed = false;
+  let timer: unknown = null;
+
+  // One clock at most: clear before re-setting, so a stale expiry from an
+  // earlier arm can never disarm a newer one.
+  function set(next: boolean): void {
+    if (timer != null) {
+      clearTimer(timer);
+      timer = null;
+    }
+    if (next) timer = setTimer(() => { timer = null; set(false); }, ttl);
+    if (armed === next) return;
+    armed = next;
+    opts.onChange?.(armed);
+  }
+
+  return {
+    get armed() {
+      return armed;
+    },
+    toggle() {
+      set(!armed);
+    },
+    disarm() {
+      set(false);
+    },
+    apply(data) {
+      if (!armed || data.length !== 1 || !/[a-z]/i.test(data)) return data;
+      set(false);
+      return String.fromCharCode(data.toLowerCase().charCodeAt(0) - 96);
+    },
+  };
+}
