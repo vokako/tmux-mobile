@@ -88,13 +88,17 @@
     cursor: col-resize;
     z-index: 5;
     touch-action: none;
-  }
-  .side-handle:hover, .side-handle.dragging {
+    /* The accent line is always painted; hover/drag only turn its opacity up,
+       so the reveal is one cross-fade on --t-fast (motion.md: transform and
+       opacity only). */
     background: linear-gradient(90deg, transparent 40%, var(--accent) 40%, var(--accent) 60%, transparent 60%);
-    opacity: 0.6;
+    opacity: 0;
+    transition: opacity var(--t-fast);
   }
+  .side-handle:hover, .side-handle.dragging { opacity: 0.6; }
   .side-handle.on-left { right: auto; left: -3px; }
-  .side-handle:focus-visible { outline: none; background: var(--accent-bg); }
+  .side-handle:focus-visible { outline: none; background: var(--accent-bg); opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { .side-handle { transition: none; } }
   /* Narrow layouts have no sidebar to resize (single-column pages keep their
      list full-width) — the handle disappears with the geometry it controls. */
   @media (max-width: 760px) {

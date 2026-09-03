@@ -74,7 +74,11 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   — desktop tabs are a rail with no motion behind them, owner rule);
   compact drill-downs animate under 760px via the shared `drill-in-right`/
   `drill-in-left` keyframe pair (Settings, Agents). SHEETS (sidebar
-  slide-overs, phone dialogs) instead slide on `--t-move` with a scrim. A
+  slide-overs, phone dialogs) instead slide on `--t-move` with a scrim: a
+  side sheet transitions its transform, a phone DIALOG sheet (ConfirmDialog)
+  rises through the shared `sheet-up` keyframe (app.css) while `.dlg-backdrop`
+  fades in — and the DESKTOP dialog only fades (`fade-in` on `--t-fast`),
+  because it is centred BY a transform that no keyframe may fight. A
   sheet's directional shadow belongs to its OPEN state only: a parked
   `translateX(-100%)` layer is still painted, so a persistent blur leaks back
   onto the page's left edge. POPOVERS (menus, selects) do not animate — they
@@ -85,7 +89,8 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   `will-change: opacity`, never transform: the Android System WebView drops a
   sheet's compositor layer at transitionend (open = `transform: none`) and
   blinks a blank frame while it re-rasterizes (board #21 — Android Chrome
-  hides the seam, the APK does not), so the sheet keeps a standing layer; but
+  hides the seam, the APK does not), so the sheet keeps a standing layer
+  (the side sheets and ConfirmDialog's `.dlg.sheet` all wear it); but
   the hint must stay OUTSIDE the containing-block family
   (transform/perspective/filter), because a sheet's TREE contains fixed
   overlays (Sessions' dialogs) that must keep the viewport. Opacity promotes
@@ -161,7 +166,12 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
 - Segmented rows / steppers (Preferences) — `--ui-control-height`,
   `--ui-radius-control`, `--ui-font-control`; active = accent border + wash.
 - Dialogs — `ui/ConfirmDialog` for every confirm; phone = bottom sheet with
-  44px buttons. Solid red confirm per above.
+  44px buttons that rises on `sheet-up` under a fading scrim, desktop = a
+  centred card that fades. Solid red confirm per above.
+- The `Select` trigger's chevron is a `.flip` that turns 180° while the list
+  is open (both the button and the combobox mode — the combobox puts the
+  rotation on an inner wrapper so its own centring transform stays put); the
+  list itself does not animate beyond the "invisible until measured" guard.
 
 ## 4 · Hover / active (desktop), two families only
 

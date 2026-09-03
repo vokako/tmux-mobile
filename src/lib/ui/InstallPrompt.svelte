@@ -162,11 +162,18 @@
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
-    animation: install-rise 0.32s cubic-bezier(0.2, 0.9, 0.3, 1);
+    /* Its own keyframe rather than .appear-rise: the banner is centred BY a
+       translateX, so the rise has to carry that transform along. Tempo and
+       curve are the vocabulary's (motion.md: arrive decelerating on --t-move). */
+    animation: install-rise var(--t-move) ease-out;
   }
   @keyframes install-rise {
     from { opacity: 0; transform: translateX(-50%) translateY(16px); }
     to { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .install-banner { animation: none; }
+    .install-btn, .install-dismiss { transition: none; }
   }
   .install-icon {
     width: 40px;
@@ -206,6 +213,7 @@
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
     font-family: inherit;
+    transition: transform var(--t-fast);
   }
   .install-btn:active { transform: scale(0.94); }
   .install-dismiss {
@@ -219,6 +227,7 @@
     -webkit-tap-highlight-color: transparent;
     font-family: inherit;
     white-space: nowrap;
+    transition: color var(--t-fast);
   }
   .install-dismiss:active { color: var(--text2); }
 </style>

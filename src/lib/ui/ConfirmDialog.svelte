@@ -65,9 +65,13 @@
 
 <style>
   /* Same dialog shape as the Hub's — this component IS that dialog, lifted. */
-  .dlg-backdrop { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.45); }
+  /* Motion (motion.md): the scrim fades in on --t-move beside the sheet; the
+     desktop dialog only FADES (--t-fast) — it is centred BY a transform, so a
+     transform keyframe on it would fight its own placement. */
+  .dlg-backdrop { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.45); animation: fade-in var(--t-move) ease-out; }
   .dlg {
     position: fixed; z-index: 61; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    animation: fade-in var(--t-fast) ease-out;
     width: min(420px, calc(100vw / var(--ui-zoom, 1) - 32px));
     max-height: calc(100vh / var(--ui-zoom, 1) - 48px); overflow-y: auto;
     background: var(--bg); border: 1px solid var(--border); border-radius: 18px;
@@ -79,12 +83,20 @@
   .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
   .dlg-actions button { min-height: 34px; }
   /* Phone: a bottom sheet — reachable with a thumb, and it never fights the
-     on-screen keyboard for the middle of the screen. */
+     on-screen keyboard for the middle of the screen. It RISES from the bottom
+     edge (sheet-up, app.css) because its resting transform is none; the
+     standing `will-change: opacity` is the one sanctioned sheet hint
+     (design-language §1): the Android System WebView drops the compositor
+     layer when the rise ends and blinks a blank frame while it re-rasterizes,
+     and opacity promotes a layer without becoming a containing block. */
   .dlg.sheet {
     left: 0; top: auto; bottom: 0; transform: none;
     width: 100%; max-width: none; border-radius: 18px 18px 0 0;
     border-left: none; border-right: none; border-bottom: none;
     padding: 16px 14px calc(16px + var(--sab, 0px)); /* var(--sab): env() is 0 in the APK */
+    animation: sheet-up var(--t-move) ease-out;
+    will-change: opacity;
   }
   .dlg.sheet .dlg-actions button { min-height: 44px; flex: 1; justify-content: center; }
+  @media (prefers-reduced-motion: reduce) { .dlg-backdrop, .dlg, .dlg.sheet { animation: none; } }
 </style>

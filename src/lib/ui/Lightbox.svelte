@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { moveMs } from './motion.ts';
   // Fullscreen image viewer (owner, 2026-08-26: "看图片的支持"). One fixed
   // overlay above everything — like every fixed layer it assumes the VIEWPORT
   // as containing block (design-language.md §2). Gestures are the ones a photo
@@ -81,7 +82,7 @@
       if (Math.hypot(tx, ty) > 80) { onclose(); return; }
       settle = true;   // spring back: the transition does the animation
       tx = 0; ty = 0;
-      setTimeout(() => { settle = false; }, 200);
+      setTimeout(() => { settle = false; }, moveMs());
     }
     if (pointers.size === 0 && !moved) {
       const now = performance.now();
@@ -139,13 +140,15 @@
   }
   /* Springing back from an aborted dismiss swipe is the ONE animated moment;
      while a finger is down the finger is the animation. */
-  .lb-img.settle { transition: transform 0.2s ease; }
+  .lb-img.settle { transition: transform var(--t-move) ease; }
+  @media (prefers-reduced-motion: reduce) { .lb-img.settle, .lb-close { transition: none; } }
   .lb-close {
     position: absolute; top: calc(8px + var(--sat, 0px)); right: 8px;
     width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
     border-radius: var(--ui-radius-control); border: 1px solid var(--border2);
     background: var(--surface); color: var(--text2); font-size: var(--fs-body);
     cursor: pointer;
+    transition: border-color var(--t-fast), color var(--t-fast);
   }
   .lb-close::after { content: ''; position: absolute; inset: -5px; }
   .lb-close:hover { border-color: var(--accent); color: var(--text); }

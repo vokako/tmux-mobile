@@ -170,7 +170,7 @@
         if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); show(); }
         if (!open && e.key === 'Enter') commitTyped();
       }} />
-    <span class="combo-chev"><Icon name="chevron-down" size={11} /></span>
+    <span class="combo-chev"><span class="flip" class:on={open}><Icon name="chevron-down" size={11} /></span></span>
   </span>
 {:else}
 <button class="sel-trigger" class:open class:dense bind:this={triggerEl} type="button"
@@ -178,7 +178,7 @@
   onclick={() => (open ? hide() : show())}>
   {#if current?.icon}<img class="so-ico" src={current.icon} alt="" />{/if}
   <span class="sel-value" class:ph={!label}>{label || placeholder}</span>
-  <Icon name="chevron-down" size={11} />
+  <span class="flip" class:on={open}><Icon name="chevron-down" size={11} /></span>
 </button>
 {/if}
 
@@ -229,7 +229,9 @@
   .sel-value.ph { color: var(--text3); }
   .sel-trigger :global(svg) { flex: none; color: var(--text3); }
   /* Combobox clothes: the input IS the trigger, the chevron rides inside its
-     right padding so the box still promises a list. */
+     right padding so the box still promises a list. The chevron's 180° turn
+     (.flip, motion.md) sits on an INNER wrapper in both modes: here because
+     .combo-chev is centred by its own translateY, which must stay put. */
   .sel-combo { position: relative; display: block; width: 100%; }
   .sel-trigger.combo { display: block; outline: none; padding-right: 26px; cursor: text; }
   .sel-trigger.combo::placeholder { color: var(--text3); }
