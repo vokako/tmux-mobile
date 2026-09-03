@@ -472,3 +472,12 @@ test('navigation is reachable by keyboard: no nav item opts out of the Tab order
   const style = source.match(/<style>[^]*<\/style>/u)?.[0] ?? '';
   assert.doesNotMatch(style, /\.(?:rail-btn|tabbar button|gear-btn)[^{]*\{[^}]*outline:\s*none/u, 'the ring must not be switched off');
 });
+
+test('the server registry has an entry on the touch layout (2026-09-03)', () => {
+  assert.match(source, /onServers=\{connected && layout\.isTouchDevice \? toggleServerMenu : null\}/u,
+    'Settings gets the opener only where the rail (and its switcher) does not exist');
+  assert.match(source, /const serverName = \$derived\(\s*serverList\.find\(\(x\) => x\.id === serverCurId\)\?\.name \|\| hostLabel\(activeAddress\),/u);
+  // The popover's outside-dismissal spares whichever control opened it.
+  assert.match(source, /serverMenuTrigger\?\.contains\?\.\(e\.target\)/u);
+  assert.doesNotMatch(source, /closest\?\.\('\.server-menu, \.rail-server'\)/u);
+});

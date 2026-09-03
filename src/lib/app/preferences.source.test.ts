@@ -79,3 +79,13 @@ test('a tapped address wears the running cue until the socket settles (2026-09-0
   assert.match(style, /\.addr-dot\{[^}]*background:var\(--status-sleep\)/u);
   assert.match(style, /\.address-list button\.active \.addr-dot,\.address-list button\.pending \.addr-dot\{background:var\(--accent\)\}/u);
 });
+
+test('the phone reaches the server registry from the top of Settings (2026-09-03)', () => {
+  // The row exists only when App hands over the opener (touch layout); it is a
+  // .side-row like the categories, not a new species, and it opens the SAME
+  // registry popover the desktop rail opens.
+  assert.match(source, /\{#if onServers\}\s*<button class="side-row server-row"[^>]*aria-haspopup="menu"/u);
+  assert.match(source, /onclick=\{\(e\) => onServers\?\.\(e\)\}/u);
+  assert.match(source, /<span class="r-label">\{serverName\}<\/span>/u, 'the NAME, never the raw address');
+  assert.match(source, /onServers = null,/u, 'off by default — the desktop rail has its own control');
+});

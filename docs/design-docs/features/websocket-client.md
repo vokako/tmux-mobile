@@ -157,6 +157,16 @@ doc already describes. Design decisions, in the order they bit:
   its popover follows the app's one menu recipe (fixed layer, measured then
   shown, outside-pointerdown/Escape/resize dismissal). The Settings connect
   form IS the add flow; the `+` row only navigates there.
+- **The phone's entry is a row at the top of Settings** (review, 2026-09-03):
+  the rail does not exist on the touch layout, so the registry had no door
+  there at all — named servers were invisible on the device the app is for.
+  App passes `onServers` (= `toggleServerMenu`) and the current entry's
+  `serverName` to Preferences only when `connected && layout.isTouchDevice`;
+  Preferences renders a `.side-row` (swap icon + NAME, never the raw address)
+  above the category list that opens the SAME popover, anchored to the row.
+  The popover's outside-dismissal spares whichever control opened it
+  (`serverMenuTrigger`), not a class name, so both doors toggle cleanly. The
+  registry is read at boot and on open/rename, so the name follows a rename.
 
 ## Alternatives Considered
 - **Socket.IO**: Rejected — adds dependency, WebSocket is sufficient for JSON-RPC

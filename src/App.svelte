@@ -24,7 +24,7 @@
   import { agentsLivesInSettings, defaultPage, restoreNav, retarget } from './lib/app/nav-state.ts';
   import { RAIL_DRAG_THRESHOLD, RAIL_GAP, RAIL_ORDER_KEY, parseRailOrder, railDropAt, railDropIndex, railDropOffset, railOrderToStore, visibleRailSlots } from './lib/app/nav-order.ts';
   import { createReconnectMachine } from './lib/app/reconnect.ts';
-  import { activateConnected, applySwitch, currentServerId, loadServers, migrateServers, recordServer, removeServer, renameServer } from './lib/app/servers.ts';
+  import { activateConnected, applySwitch, currentServerId, hostLabel, loadServers, migrateServers, recordServer, removeServer, renameServer } from './lib/app/servers.ts';
   import { anchorOf, menuPlacement, viewBox } from './lib/ui/placement.ts';
   import ContextMenu from './lib/ui/ContextMenu.svelte';
   import { cycleItem, shortcutFromEvent } from './lib/app/shortcuts.ts';
@@ -743,16 +743,29 @@
   let serverList = $state([]);
   let serverCurId = $state('');
   let serverMenuAnchor = null;
+  let serverMenuTrigger = null;      // the control that opened it — not "outside"
   let serverMenuW = $state(0);
   let serverMenuH = $state(0);
   let serverRenaming = $state('');   // entry id whose name is an input
   let serverRenameDraft = $state('');
+  // The current server's NAME, for the phone's Settings row (review,
+  // 2026-09-03: the registry had no entry at all on the touch layout — the
+  // switcher rode the desktop rail only, so named servers were invisible on
+  // the device the app is for). Registry state is read at boot and whenever
+  // the menu opens/renames, so the name follows a rename without a reload.
+  const serverName = $derived(
+    serverList.find((x) => x.id === serverCurId)?.name || hostLabel(activeAddress),
+  );
+  function loadServerRegistry() {
+    serverList = loadServers(localStorage);
+    serverCurId = currentServerId(localStorage);
+  }
 
   function toggleServerMenu(e) {
     if (serverMenuOpen) { serverMenuOpen = false; return; }
-    serverList = loadServers(localStorage);
-    serverCurId = currentServerId(localStorage);
+    loadServerRegistry();
     serverMenuAnchor = anchorOf(e.currentTarget);
+    serverMenuTrigger = e.currentTarget;
     serverMenuW = 0; serverMenuH = 0;
     serverRenaming = '';
     serverMenuOpen = true;
@@ -765,7 +778,10 @@
   $effect(() => {
     if (!serverMenuOpen) return;
     const close = () => { serverMenuOpen = false; };
-    const onDown = (e) => { if (!e.target?.closest?.('.server-menu, .rail-server')) close(); };
+    const onDown = (e) => {
+      if (e.target?.closest?.('.server-menu') || serverMenuTrigger?.contains?.(e.target)) return;
+      close();
+    };
     const onKey = (e) => { if (e.key === 'Escape') { close(); e.stopPropagation(); } };
     window.addEventListener('pointerdown', onDown, true);
     window.addEventListener('keydown', onKey, true);
@@ -940,6 +956,7 @@
   // then upserts the linked server — never the reverse (an upsert creating
   // the registry would make migrateServers a no-op and drop the history).
   migrateServers(localStorage);
+  loadServerRegistry();
   consumeConnectUrlParams();
 
   // Copy the CURRENT connection as a deep link (consumed by consumeConnectUrlParams
@@ -1556,6 +1573,7 @@
     {#if page === 'prefs'}
     <div class="page-layer">
     <Preferences {connected} {theme} {fontSize} {debugMode} {serverInfo} {activeAddress} {pendingAddress} addresses={prefAddresses}
+      {serverName} onServers={connected && layout.isTouchDevice ? toggleServerMenu : null}
       {optimizing} {linkCopied}
       onClose={togglePrefs}
       onTheme={setTheme}

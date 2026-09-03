@@ -43,6 +43,8 @@
     onAddress = () => {},
     onDisconnect = () => {},
     onConnectionSetup = () => {},
+    serverName = '',
+    onServers = null,
   }: {
     connected?: boolean;
     theme?: string;
@@ -81,6 +83,12 @@
     onAddress?: (address: string) => void;
     onDisconnect?: () => void;
     onConnectionSetup?: () => void;
+    /** The current server's registry name (board #55). */
+    serverName?: string;
+    /** Touch layout only: opens App's server registry popover from the row
+     *  at the top of the category list. The desktop rail has its own control,
+     *  so App passes null there and the row does not render. */
+    onServers?: ((e: MouseEvent) => void) | null;
   } = $props();
 
   const TAB_KEY = 'tmux_settings_tab';
@@ -299,6 +307,18 @@
     <SideHandle />
     <div class="side-scroll subtle-scroll" use:scrollFade>
       <div class="side-h">{t('settings')}</div>
+      <!-- The phone's way to the server registry (review, 2026-09-03): the
+           desktop rail carries the switcher above its configure group; on the
+           touch layout nothing did, so named servers were invisible where
+           they matter most. A .side-row like the categories — swap icon, the
+           current server's NAME — opening the same popover the rail opens. -->
+      {#if onServers}
+        <button class="side-row server-row" title={t('serversTitle')} aria-haspopup="menu"
+          onclick={(e) => onServers?.(e)}>
+          <Icon name="swap-h" size={14} />
+          <span class="r-label">{serverName}</span>
+        </button>
+      {/if}
       {#each tabs as item}
         <button class="side-row" class:open={tab === item.id} onclick={() => selectTab(item.id)}>
           <span class="r-label">{item.label()}</span>
@@ -546,6 +566,11 @@
   }
   .sidebar { position: relative; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
   .side-scroll { flex: 1; overflow-y: auto; padding: 8px; }
+  /* A control among categories: muted like the rail's server control, set
+     off from the category rows by a divider; the name ellipsizes. */
+  .server-row { color: var(--text2); margin-bottom: 6px; padding-bottom: 8px; border-bottom: 1px solid var(--border2); border-radius: var(--ui-radius-row) var(--ui-radius-row) 0 0; }
+  .server-row :global(svg) { flex: none; color: var(--text3); }
+  .server-row .r-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .r-label { flex: 1; min-width: 0; }
   .pref-shell { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   .back { display: none; }

@@ -24,7 +24,9 @@ rounded shape, muted idle state, and accent active state. Desktop Settings uses 
   identity is the MACHINE, so LAN/Tailscale/WAN alternates of one server are
   ONE entry (the failover map `tmux_machines` stays the address authority). A
   successful connect upserts by machineId; the desktop rail carries a
-  switcher above the configure group — current entry marked, click switches
+  switcher above the configure group, and on the phone a row at the top of
+  the Settings category list (swap icon + current server name) opens the same
+  switcher — current entry marked, click switches
   (full socket teardown + reload through the one boot path, per-server
   `tmux_state`/`tmux_machine_id` parked and restored so restore targets never
   cross servers), double-click renames, non-current rows removable, `+` row
