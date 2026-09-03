@@ -187,7 +187,9 @@ pub fn start(
         // session, otherwise drop it so the task does not exist twice.
         Some(t) if t.session == session => t.pane,
         Some(t) => {
-            let _ = tmux::kill_window(&t.pane);
+            // If the old window will not go, starting a second one would make
+            // the task exist twice — the one thing the registry promises not to.
+            tmux::kill_window(&t.pane).map_err(Error::Tmux)?;
             create_window(&session, name, &cwd)?
         }
         None => create_window(&session, name, &cwd)?,

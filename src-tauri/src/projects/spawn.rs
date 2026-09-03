@@ -157,6 +157,13 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
         shared::agent_launch_path(tmm_dir().as_deref(), &inherited_path),
     ));
 
+    // Record before acting: the recipe is what makes this window OURS on
+    // restart (`detect_managed` reads the backend off it, `relaunch_line`
+    // replays it). Written here, before the window exists, so a write failure
+    // is a spawn failure with nothing left running — not a live agent that
+    // restarts deaf on the generic launch path.
+    write_launch_recipe(&home, &def.backend, &env, &prepared.cmd, req.by, req.team.as_deref())?;
+
     tmux::ensure_session(req.session, &workspace)?;
     let pane = tmux::new_named_window(req.session, &window_name, &workspace)?;
     std::thread::sleep(std::time::Duration::from_millis(800));
@@ -180,8 +187,6 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
     if let Some(confirmation) = prepared.confirmation {
         shared::confirm_startup_prompt(pane.clone(), confirmation);
     }
-
-    write_launch_recipe(&home, &def.backend, &env, &prepared.cmd, req.by, req.team.as_deref());
 
     Ok(json!({ "window_name": window_name, "pane": pane, "backend": def.backend }))
 }
@@ -266,7 +271,7 @@ pub fn spawn_team(session: &str, team_name: &str, brief: &str, by: &str) -> Resu
 /// no auto-post, every delivery "unconfirmed" (owner report, 2026-08-18).
 /// The kick is NOT part of the recipe: it belongs to the first launch only;
 /// a restart resumes a conversation instead.
-fn write_launch_recipe(home: &Path, backend: &str, env: &[(String, String)], cmd: &str, by: &str, team: Option<&str>) {
+fn write_launch_recipe(home: &Path, backend: &str, env: &[(String, String)], cmd: &str, by: &str, team: Option<&str>) -> Result<(), String> {
     // `cmd` is the identity command with NO first prompt appended (spawn adds
     // that separately), so the recipe stores it verbatim. It used to strip a
     // trailing quoted argument to remove the kick — a guess that would have
@@ -284,10 +289,11 @@ fn write_launch_recipe(home: &Path, backend: &str, env: &[(String, String)], cmd
         "spawned_by": by,
         "team": team.unwrap_or(""),
     });
-    let _ = std::fs::write(
+    std::fs::write(
         home.join("launch.json"),
         serde_json::to_string_pretty(&recipe).unwrap(),
-    );
+    )
+    .map_err(|e| format!("write launch recipe {}: {e}", home.join("launch.json").display()))
 }
 
 /// The full relaunch line for a managed agent: recipe env + identity command +
@@ -371,7 +377,7 @@ mod relaunch_tests {
             "kiro",
             &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())],
             "command kiro-cli chat --agent lead --model m --trust-all-tools",
-            "", None);
+            "", None).unwrap();
         let line = relaunch_line(ws.to_str().unwrap(), "lead", Some("id-1")).unwrap();
         assert!(line.starts_with("KIRO_HOME="), "isolated home first: {line}");
         assert!(line.contains("--agent lead"), "identity: {line}");
@@ -404,7 +410,7 @@ mod relaunch_tests {
             "codex",
             &[("CODEX_HOME".to_string(), chome.to_string_lossy().to_string())],
             "command codex -c a=b --dangerously-bypass-approvals-and-sandbox",
-            "", None);
+            "", None).unwrap();
         let cx = relaunch_line(ws.to_str().unwrap(), "cx", Some("01a0-abc")).unwrap();
         assert!(
             cx.contains("command codex resume 01a0-abc -c a=b --dangerously-bypass-approvals-and-sandbox"),
@@ -687,7 +693,9 @@ pub fn refresh_hooks(project_path: &str, window_name: &str) -> bool {
     // full identity: for kiro the recipe is reconstructible from the isolated
     // home itself (env = KIRO_HOME, cmd = --agent <name>).
     if kiro.is_file() && !home.join("launch.json").exists() {
-        write_launch_recipe(
+        // Best effort: a backfill that cannot be written changes nothing, and
+        // the restart then takes the generic launch path it took before.
+        changed |= write_launch_recipe(
             &home,
             "kiro",
             &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())],
@@ -697,8 +705,8 @@ pub fn refresh_hooks(project_path: &str, window_name: &str) -> bool {
             ),
             // A backfilled recipe cannot know who spawned the agent — the
             // feedback edge simply does not exist for pre-recipe spawns.
-            "", None);
-        changed = true;
+            "", None)
+        .is_ok();
     }
     changed
 }
@@ -1360,7 +1368,7 @@ mod tests {
         // A restart must replay the FULL identity, not the bare backend line:
         // the user-space config's hooks never fire (measured), so losing
         // KIRO_HOME/--agent makes a restarted agent observably deaf.
-        write_launch_recipe(&dir, "kiro", &r.env, &r.cmd, "", None);
+        write_launch_recipe(&dir, "kiro", &r.env, &r.cmd, "", None).unwrap();
         let line = relaunch_line(
             dir.parent().unwrap().parent().unwrap().to_str().unwrap(),
             "tester", Some("abc-123"),
@@ -1594,7 +1602,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
             "kiro",
             &[("KIRO_HOME".to_string(), home.to_string_lossy().to_string())],
             "command kiro-cli chat --agent dev --model claude-haiku-4.5 --trust-all-tools",
-            "", None);
+            "", None).unwrap();
 
         assert!(refresh_hooks(&ws.to_string_lossy(), "dev"), "a stale config is rewritten");
         let after: Value = serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
@@ -1630,7 +1638,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
             &[],
             // The owner's real value: one character off `claude-sonnet-4.5`.
             "command kiro-cli chat --agent dev --model claude-sonnet-4-5 --trust-all-tools",
-            "", None);
+            "", None).unwrap();
 
         refresh_hooks(&ws.to_string_lossy(), "dev");
         let after: Value = serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
@@ -1641,7 +1649,6 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         std::fs::remove_dir_all(&ws).ok();
     }
 
-    #[test]
     /// The workspace mcp.json is the AGENT's file: the registry seeds missing
     /// servers, an existing entry always wins (an agent-edited command must
     /// survive every respawn), and unknown entries are kept.
@@ -1888,11 +1895,11 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         let ws = std::env::temp_dir().join(format!("tmm-spawnedby-{}", std::process::id()));
         let home = ws.join(".tmm").join("agents").join("b");
         std::fs::create_dir_all(&home).unwrap();
-        write_launch_recipe(&home, "kiro", &[], "command kiro-cli chat --agent b", "lead", None);
+        write_launch_recipe(&home, "kiro", &[], "command kiro-cli chat --agent b", "lead", None).unwrap();
         let ws_str = ws.to_string_lossy().to_string();
         assert_eq!(crate::projects::spawned_by(Some(&ws_str), "b").as_deref(), Some("lead"));
         // Empty `by` (a human spawn) yields nobody to deliver to.
-        write_launch_recipe(&home, "kiro", &[], "command kiro-cli chat --agent b", "", None);
+        write_launch_recipe(&home, "kiro", &[], "command kiro-cli chat --agent b", "", None).unwrap();
         assert_eq!(crate::projects::spawned_by(Some(&ws_str), "b"), None);
         std::fs::remove_dir_all(&ws).ok();
     }

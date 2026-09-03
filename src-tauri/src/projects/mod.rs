@@ -474,8 +474,13 @@ pub fn delete(id: &str) -> Result<Value, String> {
         .ok_or_else(|| format!("no project with id '{id}'"))?;
     // Down first: killing the session while its declaration still exists is
     // what `down` is for, and it keeps the reconciler from re-creating windows
-    // for a project that is about to vanish.
-    let _ = down(id);
+    // for a project that is about to vanish. And down MUST succeed before
+    // anything is forgotten: a session that survives with its homes deleted
+    // and its row gone is an untracked session full of windows nobody owns,
+    // which `auto_adopt_once` re-adopts as a NEW project within 120 s —
+    // delete would resurrect what it was asked to forget. (`down` is Ok when
+    // the session is already gone.)
+    down(id).map_err(|e| format!("'{}' was not deleted — its session did not go down: {e}", project.name))?;
     let mut homes_removed = 0usize;
     let agents_root = std::path::Path::new(&project.path).join(".tmm").join("agents");
     if let Ok(entries) = std::fs::read_dir(&agents_root) {
@@ -525,7 +530,11 @@ pub fn agent_remove(session: &str, agent: &str) -> Result<Value, String> {
     if let Ok(panes) = crate::tmux::list_panes(session) {
         if let Some(p) = panes.iter().find(|p| p.window_name == agent) {
             if home.is_some() || declared {
-                let _ = crate::tmux::kill_window(&format!("{session}:{}", p.window));
+                // A window that will not die keeps the agent alive and the
+                // capture loop re-adopting it; removing the slot and home
+                // anyway would leave a running agent that is no longer ours.
+                crate::tmux::kill_window(&format!("{session}:{}", p.window))
+                    .map_err(|e| format!("'{agent}' was not removed — its window did not close: {e}"))?;
                 window_killed = true;
             }
         }
