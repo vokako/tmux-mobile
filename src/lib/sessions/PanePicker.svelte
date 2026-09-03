@@ -2,10 +2,16 @@
   // Shared pane picker popover: lists every tmux pane grouped by session and
   // calls onPick(pane) when one is chosen. Used by SplitView (assign a cell)
   // and by Terminal's single-pane window switcher (jump to any pane without
-  // returning to the Sessions page). The caller owns open/close and positions
-  // this via a wrapping element; we just render the panel + backdrop.
+  // returning to the Sessions page). The caller owns open/close; the panel is
+  // the app's ONE popover mechanism — a fixed layer placed by `menuPlacement`
+  // from the opener's rect, invisible until measured, dismissed by an outside
+  // pointerdown / Escape / any ancestor scroll / a resize. It used to be a
+  // `position:absolute` panel at a hard-coded offset inside the caller's
+  // wrapper, closed only by a backdrop button (review, 2026-09-03): a cell
+  // near the viewport edge clipped it, and Escape did nothing.
   import AgentChip from '../ui/AgentChip.svelte';
   import Icon from '../ui/Icon.svelte';
+  import { anchorOf, menuPlacement, viewBox, type AnchorRect } from '../ui/placement.ts';
   import { t } from '../core/i18n.svelte.ts';
   import { listSessionsWithPanes, newWindow } from '../core/ws.ts';
   import type { TmuxPane } from '../core/ws.ts';
@@ -21,13 +27,68 @@
     currentTarget = '',   // highlight the pane matching this target
     onPick = () => {},
     onClose = () => {},
-    align = 'left',       // which edge the panel anchors to
+    align = 'left',       // which edge of the anchor the panel hangs from
+    /** The element whose click opened the picker: the placement anchor by
+     * default, and never "outside" (so its own click can toggle the picker
+     * closed). Callers that render the picker right after their trigger may
+     * leave it unset — the previous element sibling is then the trigger. */
+    trigger = null,
+    /** An explicit placement rect when the trigger's own box is not where the
+     * panel should hang (SplitView's opener fills the whole cell). */
+    anchor = null,
   }: {
     currentTarget?: string;
     onPick?: (pane: TmuxPane) => void;
     onClose?: () => void;
     align?: 'left' | 'right';
+    trigger?: Element | null;
+    anchor?: AnchorRect | null;
   } = $props();
+
+  let el = $state<HTMLDivElement | null>(null);
+  let w = $state(0);
+  let h = $state(0);
+  let anchorRect = $state<AnchorRect | null>(null);
+  let opener: Element | null = null;
+  $effect(() => {
+    if (!el) return;
+    opener = trigger ?? el.previousElementSibling ?? el.parentElement;
+    anchorRect = anchor ?? (opener ? anchorOf(opener) : null);
+  });
+  // Measured before it is placed, like Select and ContextMenu: an unmeasured
+  // panel would be positioned from a zero height and jump.
+  const pos = $derived(anchorRect ? menuPlacement(anchorRect, { w, h }, viewBox(), 6, 8, align) : { x: 0, y: 0 });
+
+  // Dismissal, all four ways. "Any ancestor scroll" is literal here: only a
+  // scroller that CONTAINS the opener moves the subject away. A scroll inside
+  // the panel is the list scrolling, and a terminal viewport scrolling under
+  // the panel is output arriving — an agent printing a line must not close the
+  // picker mid-choice (this popover hangs over live terminals).
+  $effect(() => {
+    const onDown = (e: PointerEvent) => {
+      const tgt = e.target as Node | null;
+      if (tgt && (el?.contains(tgt) || opener?.contains(tgt))) return;
+      onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); }
+    };
+    const onScroll = (e: Event) => {
+      const scroller = e.target === document ? document.documentElement : e.target;
+      if (!(scroller instanceof Node) || !opener || !scroller.contains(opener)) return;
+      onClose();
+    };
+    window.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('keydown', onKey, true);
+    window.addEventListener('resize', onClose);
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      window.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('resize', onClose);
+      window.removeEventListener('scroll', onScroll, true);
+    };
+  });
 
   let loading = $state(true);
   let sessions = $state<SessionGroup[]>([]);
@@ -82,10 +143,9 @@
   }
 </script>
 
-<!-- Backdrop is a pointer affordance only; closing is also reachable via the picker's own buttons. -->
-<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-<div class="picker-backdrop" onclick={(e) => { e.stopPropagation(); onClose(); }}></div>
-<div class="picker" class:align-right={align === 'right'}>
+<div class="picker" class:ready={h > 0} role="dialog" aria-label={t('pickPane')} tabindex="-1"
+  style:left="{pos.x}px" style:top="{pos.y}px"
+  bind:this={el} bind:clientWidth={w} bind:clientHeight={h}>
   {#if loading}
     <div class="picker-empty">…</div>
   {:else if sessions.length === 0}
@@ -138,13 +198,13 @@
 {/snippet}
 
 <style>
-  .picker-backdrop { position: fixed; inset: 0; z-index: 30; }
+  /* Same popover dialect as Select / ContextMenu: fixed layer, --bg surface,
+     1px --border, panel radius, shadow; invisible until measured. */
   .picker {
-    position: absolute;
-    top: 36px; left: 6px;
-    z-index: 31;
-    max-width: calc(100% - 12px);
+    position: fixed;
+    z-index: 40;
     min-width: 200px;
+    max-width: min(360px, calc(100vw / var(--ui-zoom, 1) - 16px));
     max-height: calc(60vh / var(--ui-zoom, 1));
     overflow-y: auto;
     background: var(--bg);
@@ -152,8 +212,9 @@
     border-radius: var(--ui-radius-panel);
     box-shadow: 0 12px 40px rgba(0,0,0,0.4);
     padding: 6px;
+    opacity: 0; pointer-events: none;
   }
-  .picker.align-right { left: auto; right: 6px; }
+  .picker.ready { opacity: 1; pointer-events: auto; }
   /* Group dividers and per-session headers share one type treatment (size /
      weight / case / spacing); only colour marks the hierarchy — the
      Teams/Sessions dividers are accent-highlighted, individual session names

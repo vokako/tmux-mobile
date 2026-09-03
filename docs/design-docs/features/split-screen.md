@@ -25,7 +25,15 @@ multi-listener.
   keyed by a stable `cell.id` so re-assigning a cell's target rebuilds only that
   Terminal. Each cell has a header (an `AgentChip` label + a pane picker popover
   populated by `listSessionsWithPanes()` + a close button) over the Terminal
-  body. `min-width:0; min-height:0` on cell/body is required so grid children
+  body. The picker (`sessions/PanePicker.svelte`) is the app's one popover
+  mechanism since 2026-09-03: a fixed layer placed by `menuPlacement` from its
+  opener (`trigger`, defaulting to the previous element sibling — Terminal's
+  session chip), dismissed by outside pointerdown / Escape / resize / a scroll
+  of any scroller that CONTAINS the opener — not the list itself, and not a
+  terminal viewport scrolling under it as output arrives. SplitView passes an
+  explicit 30px top-strip `anchor` because its opener fills the whole cell.
+  It used to be `position:absolute; top:36px; left:6px` inside the caller's
+  wrapper with a backdrop button: clipped at the viewport edge, deaf to Escape. `min-width:0; min-height:0` on cell/body is required so grid children
   shrink and each xterm's `ResizeObserver` sees its real box.
 - **Focus / active cell**: clicking a cell sets `activeCellId` (visual border).
   Input routing is automatic — each Terminal has its own hidden xterm textarea;

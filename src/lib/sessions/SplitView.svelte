@@ -6,6 +6,7 @@
   // per-target listener registry is what lets them coexist.
   import Terminal from '../terminal/Terminal.svelte';
   import PanePicker from './PanePicker.svelte';
+  import { anchorOf, type AnchorRect } from '../ui/placement.ts';
   import Icon from '../ui/Icon.svelte';
   import { t } from '../core/i18n.svelte.ts';
   import type { TmuxPane } from '../core/ws.ts';
@@ -37,7 +38,17 @@
   // Which cell's pane picker is open (null = none). PanePicker (shared with
   // Terminal's single-pane switcher) fetches + renders the list.
   let pickerCellId = $state<number | null>(null);
-  function openPicker(cellId: number) { pickerCellId = cellId; }
+  // The opener fills the whole cell, so the picker hangs from a 30px strip at
+  // the cell's top (6px in from each side) — the spot it always occupied —
+  // and the shared placement flips/clamps it from there.
+  let pickerTrigger = $state<Element | null>(null);
+  let pickerAnchor = $state<AnchorRect | null>(null);
+  function openPicker(cellId: number, opener: Element) {
+    const r = anchorOf(opener);
+    pickerTrigger = opener;
+    pickerAnchor = { left: r.left + 6, right: r.right - 6, top: r.top, bottom: r.top + 30 };
+    pickerCellId = cellId;
+  }
   function closePicker() { pickerCellId = null; }
   function pickPane(cellId: number, p: TmuxPane) {
     onAssign(cellId, `${p.session}:${p.window}.${p.pane}`, p.session, p.current_command);
@@ -73,7 +84,7 @@
             />
           {/key}
         {:else}
-          <button class="cell-empty" onclick={(e) => { e.stopPropagation(); openPicker(cell.id); }}>
+          <button class="cell-empty" onclick={(e) => { e.stopPropagation(); openPicker(cell.id, e.currentTarget); }}>
             <Icon name="plus" size={20} />
             <span>{t('pickPane')}</span>
           </button>
@@ -83,6 +94,8 @@
       {#if pickerCellId === cell.id}
         <PanePicker
           currentTarget={cell.target}
+          trigger={pickerTrigger}
+          anchor={pickerAnchor}
           onPick={(p: TmuxPane) => pickPane(cell.id, p)}
           onClose={closePicker}
         />
