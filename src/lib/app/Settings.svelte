@@ -5,6 +5,8 @@
   import Icon from '../ui/Icon.svelte';
   import { copyText } from '../core/clipboard.ts';
   import { t } from '../core/i18n.svelte.ts';
+  import { flip } from 'svelte/animate';
+  import { moveMs } from '../ui/motion.ts';
 
   type HistoryEntry = { address: string; token: string };
 
@@ -161,13 +163,14 @@
         <div class="addr-wrap">
           <input type="text" bind:value={address} placeholder="ws://host:port" autocapitalize="off" autocomplete="off" />
           {#if history.length > 1}
-            <button class="hist-btn" onclick={() => showHistory = !showHistory}><Icon name="arrow-down" size={13} /></button>
+            <button class="hist-btn" class:open={showHistory} aria-expanded={showHistory}
+              onclick={() => showHistory = !showHistory}><span class="flip" class:on={showHistory}><Icon name="arrow-down" size={13} /></span></button>
           {/if}
         </div>
         {#if showHistory && history.length}
-          <div class="hist-list">
-            {#each history as h}
-              <div class="hist-row">
+          <div class="hist-list appear-rise">
+            {#each history as h (h.address)}
+              <div class="hist-row" animate:flip={{ duration: moveMs() }}>
                 <button class="hist-item" onclick={() => { address = h.address; token = h.token; showHistory = false; }}>{h.address}</button>
                 <button class="hist-del" onclick={(e) => { e.stopPropagation(); const addr = h.address; history = history.filter(x => x.address !== addr); localStorage.setItem('tmux_address_history', JSON.stringify(history)); try { const machines = JSON.parse(localStorage.getItem('tmux_machines') || '{}'); for (const mid in machines) { machines[mid] = machines[mid].filter((u: string) => u !== addr); if (!machines[mid].length) delete machines[mid]; } localStorage.setItem('tmux_machines', JSON.stringify(machines)); } catch {} }}><Icon name="x" size={11} /></button>
               </div>
@@ -194,7 +197,7 @@
     </div>
 
     {#if error}
-      <div class="error">{error}</div>
+      <div class="error appear">{error}</div>
     {/if}
 
     {#if connecting}
@@ -284,10 +287,14 @@
 
   .addr-wrap { position: relative; }
   .addr-wrap input { padding-right: 36px; }
+  /* Centred BY a transform, so the arrow's 180° turn lives on the inner .flip
+     wrapper, never on the button (motion.md: a resting transform is not a
+     thing to animate over). */
   .hist-btn {
     position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
     background: none; border: none; color: var(--text3); cursor: pointer;
     padding: 4px; display: flex; -webkit-tap-highlight-color: transparent;
+    transition: color var(--t-fast);
   }
   .hist-btn:active { color: var(--accent); }
   .hist-list {
@@ -306,11 +313,13 @@
     font-family: var(--font-mono);
     -webkit-tap-highlight-color: transparent;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    transition: background var(--t-fast), color var(--t-fast);
   }
   .hist-item:active { background: var(--accent-bg); color: var(--accent); }
   .hist-del {
     padding: 8px 10px; border: none; background: none;
     color: var(--text3); cursor: pointer; -webkit-tap-highlight-color: transparent;
+    transition: color var(--t-fast);
   }
   .hist-del:active { color: var(--danger); }
 
@@ -365,8 +374,13 @@
     position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
     background: none; border: none; color: var(--text3); cursor: pointer;
     padding: 4px; display: flex; -webkit-tap-highlight-color: transparent;
+    transition: color var(--t-fast);
   }
   .eye-btn:active { color: var(--accent); }
+  /* The press scale rides the inner svg: the button's own transform is its
+     vertical centring and must not be animated over. */
+  .eye-btn :global(svg) { transition: transform var(--t-fast); }
+  .eye-btn:active :global(svg) { transform: scale(0.9); }
 
   .connect-btn {
     width: 100%;
@@ -402,6 +416,7 @@
     background: none; color: var(--text2); font-size: var(--fs-ui); font-weight: 600;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
     display: flex; align-items: center; justify-content: center; gap: 6px;
+    transition: color var(--t-fast), border-color var(--t-fast), transform var(--t-fast);
   }
   .share-btn:active:not(:disabled) { transform: scale(0.98); color: var(--accent); border-color: var(--accent); }
   .share-btn:disabled { opacity: 0.4; cursor: default; }
@@ -409,6 +424,7 @@
     display: block; text-align: center; margin-top: 18px;
     color: var(--text3); font-size: var(--fs-ui); text-decoration: none;
     -webkit-tap-highlight-color: transparent;
+    transition: color var(--t-fast);
   }
   .about-link:active { color: var(--accent); }
   .cancel-btn {

@@ -79,3 +79,13 @@ rounded shape, muted idle state, and accent active state. Desktop Settings uses 
 - Multi-address reconnect: server machine_id tracks alternate addresses, auto-failover on disconnect
 - Tauri desktop auto-fills config from local `~/.config/tmux-mobile/config.toml`
 - Language auto-detected from `navigator.language` on first visit (zh → Chinese, else English)
+
+## Motion
+State changes on this page move on the app's one vocabulary
+([design-docs/features/motion.md](../../design-docs/features/motion.md)): the
+address-history arrow TURNS 180° (`.flip`) instead of swapping glyphs, the
+history list rises in and its rows `animate:flip` when an entry is removed,
+every error line fades in (`.appear`, opacity only — never height), segmented
+controls / address rows / the shortcut recorder cross-fade their selected
+clothes on `--t-fast`, and the server row's swap glyph turns while its
+popover is open. Popovers themselves do not animate.

@@ -31,6 +31,7 @@
   import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.ts';
   import { installExternalLinkHandler } from './lib/core/external-links.ts';
   import { isTauri, isTauriDesktop } from './lib/core/platform.ts';
+  import { flip } from 'svelte/animate';
   import { moveMs } from './lib/ui/motion.ts';
 
   // Tunable constants
@@ -1592,7 +1593,7 @@
     {#if page === 'prefs'}
     <div class="page-layer">
     <Preferences {connected} {theme} {fontSize} {debugMode} {serverInfo} {activeAddress} {pendingAddress} addresses={prefAddresses}
-      {serverName} onServers={connected && layout.isTouchDevice ? toggleServerMenu : null}
+      {serverName} onServers={connected && layout.isTouchDevice ? toggleServerMenu : null} serversOpen={serverMenuOpen}
       {optimizing} {linkCopied}
       onClose={togglePrefs}
       onTheme={setTheme}

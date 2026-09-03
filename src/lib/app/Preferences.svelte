@@ -45,6 +45,7 @@
     onConnectionSetup = () => {},
     serverName = '',
     onServers = null,
+    serversOpen = false,
   }: {
     connected?: boolean;
     theme?: string;
@@ -89,6 +90,9 @@
      *  at the top of the category list. The desktop rail has its own control,
      *  so App passes null there and the row does not render. */
     onServers?: ((e: MouseEvent) => void) | null;
+    /** Whether that popover is open: the row's swap glyph turns while it is
+     *  (trigger side only — the popover itself does not animate). */
+    serversOpen?: boolean;
   } = $props();
 
   const TAB_KEY = 'tmux_settings_tab';
@@ -313,9 +317,9 @@
            they matter most. A .side-row like the categories — swap icon, the
            current server's NAME — opening the same popover the rail opens. -->
       {#if onServers}
-        <button class="side-row server-row" title={t('serversTitle')} aria-haspopup="menu"
-          onclick={(e) => onServers?.(e)}>
-          <Icon name="swap-h" size={14} />
+        <button class="side-row server-row" class:open={serversOpen} title={t('serversTitle')} aria-haspopup="menu"
+          aria-expanded={serversOpen} onclick={(e) => onServers?.(e)}>
+          <span class="flip" class:on={serversOpen}><Icon name="swap-h" size={14} /></span>
           <span class="r-label">{serverName}</span>
         </button>
       {/if}
@@ -405,7 +409,7 @@
               <Select bind:value={uiFontInput} editable dense options={uiFont.common}
                 placeholder={t('fontFamilySystem')} ariaLabel={t('uiFontBody')}
                 onchange={() => saveUiFont()} />
-              {#if uiFontInvalid}<small class="font-error">{t('fontFamilyInvalid')}</small>{/if}
+              {#if uiFontInvalid}<small class="font-error appear">{t('fontFamilyInvalid')}</small>{/if}
             </div>
           </div>
           <div class="setting-row">
@@ -414,7 +418,7 @@
               <Select bind:value={displayFontInput} editable dense options={displayFont.common}
                 placeholder={t('fontFamilySystem')} ariaLabel={t('uiFontDisplay')}
                 onchange={() => saveDisplayFont()} />
-              {#if displayFontInvalid}<small class="font-error">{t('fontFamilyInvalid')}</small>{/if}
+              {#if displayFontInvalid}<small class="font-error appear">{t('fontFamilyInvalid')}</small>{/if}
             </div>
           </div>
           {#if showUiZoom}
@@ -456,7 +460,7 @@
               <Select bind:value={fontInput} editable dense options={fonts.common}
                 placeholder={t('fontFamilySystem')} ariaLabel={t('fontFamily')}
                 onchange={() => saveFont()} />
-              {#if fontInvalid}<small class="font-error">{t('fontFamilyInvalid')}</small>{/if}
+              {#if fontInvalid}<small class="font-error appear">{t('fontFamilyInvalid')}</small>{/if}
             </div>
           </div>
           <div class="setting-row">
@@ -489,7 +493,7 @@
             </div>
           {/each}
         </div>
-        {#if shortcutError}<div class="shortcut-error">{shortcutError}</div>{/if}
+        {#if shortcutError}<div class="shortcut-error appear">{shortcutError}</div>{/if}
         <button class="shortcut-reset" onclick={() => { shortcuts.reset(); shortcutError = ''; }}>{t('shortcutReset')}</button>
       {:else}
         <div class="setting-card">
@@ -545,7 +549,7 @@
                 {/if}
               </div>
             </div>
-            {#if hookError}<div class="hook-error">{hookError}</div>{/if}
+            {#if hookError}<div class="hook-error appear">{hookError}</div>{/if}
           {:else}
             <div class="empty-connection"><Icon name="link" size={20} /><span>{t('notConnected')}</span><button onclick={onConnectionSetup}>{t('connectionSetup')}</button></div>
           {/if}
@@ -610,7 +614,7 @@
      icon-btn — the 999px pills were this page's private language and are why
      it read as a different app (owner, 2026-08-25: "和其他页面画风不一样").
      Real pills stay for micro TAGS (.hook-backends) per the radius contract. */
-  .segmented button,.stepper button,.reset,.conn-actions button { height:var(--ui-control-height);border:1px solid var(--border2);background:transparent;color:var(--text3);padding:3px 8px;border-radius:var(--ui-radius-control);cursor:pointer;font-size:var(--ui-font-control);white-space:nowrap; }
+  .segmented button,.stepper button,.reset,.conn-actions button { height:var(--ui-control-height);border:1px solid var(--border2);background:transparent;color:var(--text3);padding:3px 8px;border-radius:var(--ui-radius-control);cursor:pointer;font-size:var(--ui-font-control);white-space:nowrap;transition:border-color var(--t-fast),background var(--t-fast),color var(--t-fast); }
   .segmented button.active { border-color:var(--accent);background:var(--accent-bg);color:var(--accent); }
   .segmented button:active,.stepper button:active,.reset:active,.conn-actions button:active { border-color:var(--accent);color:var(--accent); }
   .font-control{display:flex;flex-direction:column;align-items:flex-end;gap:3px}.font-error{color:var(--danger)}
@@ -624,14 +628,14 @@
   .range-wrap input::-moz-range-track { height:3px;border-radius:999px;background:var(--surface2);border:1px solid var(--border2); }
   .range-wrap input::-moz-range-thumb { width:10px;height:10px;border:2px solid var(--bg);border-radius:50%;background:var(--accent);box-shadow:0 0 0 1px var(--accent); }
   .range-wrap span{width:31px;font:10px var(--font-mono);color:var(--text2)}.reset{width:24px;padding:0}
-  .shortcut-key{min-width:74px;height:var(--ui-control-height);padding:3px 10px;border:1px solid var(--border2);border-radius:var(--ui-radius-control);background:var(--input-bg);color:var(--text);font:600 var(--fs-sub) var(--font-mono);cursor:pointer}.shortcut-key.recording{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}
+  .shortcut-key{min-width:74px;height:var(--ui-control-height);padding:3px 10px;border:1px solid var(--border2);border-radius:var(--ui-radius-control);background:var(--input-bg);color:var(--text);font:600 var(--fs-sub) var(--font-mono);cursor:pointer;transition:border-color var(--t-fast),background var(--t-fast),color var(--t-fast)}.shortcut-key.recording{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}
   .shortcut-error{max-width:720px;margin:7px auto 0;color:var(--danger);font-size:var(--fs-meta);text-align:center}.shortcut-reset{display:block;margin:8px auto;padding:5px 10px;border:1px solid var(--border2);border-radius:var(--ui-radius-control);background:transparent;color:var(--text3);font-size:var(--fs-sub);cursor:pointer}
   .connection-title{padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px}.connection-title>div:first-child{display:flex;flex-direction:column;gap:3px}.conn-actions{display:flex;gap:4px}.conn-actions button{display:flex;align-items:center;gap:4px}
-  .address-list{padding:0 12px 10px;display:flex;flex-direction:column;gap:3px}.address-list button{padding:7px 9px;border:1px solid var(--border2);border-radius:var(--ui-radius-control);background:var(--input-bg);color:var(--text3);font:var(--fs-sub) var(--font-mono);text-align:left;word-break:break-all;cursor:pointer}.address-list button.active{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}
+  .address-list{padding:0 12px 10px;display:flex;flex-direction:column;gap:3px}.address-list button{padding:7px 9px;border:1px solid var(--border2);border-radius:var(--ui-radius-control);background:var(--input-bg);color:var(--text3);font:var(--fs-sub) var(--font-mono);text-align:left;word-break:break-all;cursor:pointer;transition:border-color var(--t-fast),background var(--t-fast),color var(--t-fast)}.address-list button.active{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}
   .address-list button{display:flex;align-items:center;gap:8px}.addr-text{min-width:0}
-  .addr-dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--status-sleep)}
+  .addr-dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--status-sleep);transition:background var(--t-fast)}
   .address-list button.active .addr-dot,.address-list button.pending .addr-dot{background:var(--accent)}
-  .hook-row{border-top:1px solid var(--border2)}.hook-control{display:flex;align-items:center;gap:7px;flex-shrink:0}.hook-backends{display:flex;gap:3px}.hook-backends span{padding:2px 5px;border-radius:var(--ui-radius-pill);background:var(--surface2);color:var(--text3);font-size:var(--fs-micro)}.hook-backends span.on{background:var(--accent-bg);color:var(--accent)}.hook-action{height:var(--ui-control-height);padding:3px 8px;border:1px solid var(--border2);border-radius:var(--ui-radius-control);background:transparent;color:var(--text3);font-size:var(--ui-font-control);cursor:pointer}.hook-action.primary{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}.hook-action:disabled{opacity:.5}.hook-error{padding:0 12px 8px;color:var(--danger);font-size:var(--fs-meta)}
+  .hook-row{border-top:1px solid var(--border2)}.hook-control{display:flex;align-items:center;gap:7px;flex-shrink:0}.hook-backends{display:flex;gap:3px}.hook-backends span{padding:2px 5px;border-radius:var(--ui-radius-pill);background:var(--surface2);color:var(--text3);font-size:var(--fs-micro);transition:background var(--t-fast),color var(--t-fast)}.hook-backends span.on{background:var(--accent-bg);color:var(--accent)}.hook-action{height:var(--ui-control-height);padding:3px 8px;border:1px solid var(--border2);border-radius:var(--ui-radius-control);background:transparent;color:var(--text3);font-size:var(--ui-font-control);cursor:pointer;transition:border-color var(--t-fast),background var(--t-fast),color var(--t-fast)}.hook-action.primary{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}.hook-action:disabled{opacity:.5}.hook-error{padding:0 12px 8px;color:var(--danger);font-size:var(--fs-meta)}
   /* Lone danger dialect (design-language.md §3): quiet at rest — border2 box,
      red ink — and only hover raises the red border + wash. The always-red
      55% border was this button's own species. */
