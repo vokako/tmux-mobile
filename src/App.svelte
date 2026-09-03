@@ -29,6 +29,7 @@
   import { cycleItem, shortcutFromEvent } from './lib/app/shortcuts.ts';
   import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.ts';
   import { installExternalLinkHandler } from './lib/core/external-links.ts';
+  import { isTauri, isTauriDesktop } from './lib/core/platform.ts';
 
   // Tunable constants
   const KB_OPEN_THRESHOLD = 100; // px difference to detect keyboard open
@@ -178,7 +179,6 @@
   }
   let theme = $state(localStorage.getItem('tmux_theme') || 'system');
   let fontSize = $state(parseInt(localStorage.getItem('tmux_fontsize')) || 14);
-  const isTauriDesktop = !!window.__TAURI_INTERNALS__ && !/android/i.test(navigator.userAgent);
   const initialUiZoom = normalizeUiZoom(localStorage.getItem('tmux_ui_zoom'));
   let uiZoom = $state(initialUiZoom);
   let zoomApplyVersion = 0;
@@ -340,7 +340,7 @@
   // Remove the legacy CSS zoom. Desktop UI scaling now uses WKWebView's
   // native pageZoom through Tauri, so viewport geometry and visual scale stay
   // in the same coordinate system.
-  if (window.__TAURI_INTERNALS__) {
+  if (isTauri) {
     document.documentElement.style.zoom = '';
     localStorage.removeItem('tmux_zoom');
   }

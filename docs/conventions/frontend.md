@@ -12,11 +12,11 @@ new modules are written in TS; existing `.js` is converted file-by-file (rename 
 
 ### Platform checks
 
-`isTauri` (Tauri vs browser), `isAndroid` (Android vs macOS). Always check `isAndroid` first.
+`src/lib/core/platform.ts` is the ONE place the platform is decided; import its flags, never re-derive them from `window.__TAURI_INTERNALS__` or a `/android/i` test (until 2026-09-03 six files each had their own copy and the rule named symbols that existed nowhere, so it could not be tested). `isTauri` (inside any Tauri shell vs browser/PWA), `isAndroid` (the Android shell — implies `isTauri`), `isTauriDesktop` (the macOS shell). Always check `isAndroid` first: Android IS a Tauri shell, so a bare `isTauri` branch that reaches for a desktop plugin runs on the phone too. `detectPlatform(win, nav)` is the pure form for tests (`platform.test.ts`). `external-links.ts` keeps a window-parameterised `isTauriWindow` for its own tests, implemented on the same helper.
 
 ### Tauri plugins
 
-Always `await tauriReady` before use. Dynamic imports gated behind platform checks.
+Always `await tauriReady` (from `platform.ts`) before importing or calling a `@tauri-apps/*` plugin, inside an `isTauri` branch. Dynamic imports gated behind platform checks; a component that needs the plugin MODULES keeps its own promise chained on `tauriReady` (`tauriPlugins` in `Files.svelte`).
 
 ### Android file opening
 

@@ -1,3 +1,5 @@
+import { hasTauriInternals } from './platform.ts';
+
 type RuntimeOptions = {
   windowRef?: Window | null;
   loadTauriOpener?: () => Promise<{ openUrl: (url: string) => Promise<void> }>;
@@ -11,9 +13,10 @@ export function isExternalWebUrl(value: unknown): value is string {
   return typeof value === 'string' && /^https?:\/\//i.test(value);
 }
 
+// Takes the window as a parameter (tests pass fakes); the decision itself is
+// platform.ts's, not a second copy of it.
 export function isTauriWindow(windowRef: Window | null = browserWindow()): boolean {
-  const w = windowRef as (Window & { __TAURI__?: unknown; __TAURI_INTERNALS__?: unknown }) | null;
-  return !!(w?.__TAURI__ || w?.__TAURI_INTERNALS__);
+  return hasTauriInternals(windowRef);
 }
 
 export function externalWebUrlFromAnchor(anchor: HTMLAnchorElement | null | undefined): string | null {

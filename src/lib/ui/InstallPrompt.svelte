@@ -14,6 +14,7 @@
   // already running standalone (installed). Dismissals are remembered for a
   // cooldown window so we don't nag.
   import { t } from '../core/i18n.svelte.ts';
+  import { isTauri } from '../core/platform.ts';
 
   // Chromium-only event; not in TS DOM libs.
   interface BeforeInstallPromptEvent extends Event {
@@ -24,7 +25,6 @@
   const DISMISS_KEY = 'tmux_pwa_dismissed';
   const DISMISS_COOLDOWN_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
 
-  const isTauri = typeof window !== 'undefined' && !!(window.__TAURI__ || window.__TAURI_INTERNALS__);
 
   function isStandalone() {
     return (

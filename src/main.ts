@@ -12,6 +12,7 @@ import '@fontsource-variable/space-grotesk';
 import './app.css';
 import { mount } from 'svelte';
 import App from './App.svelte';
+import { isTauri } from './lib/core/platform.ts';
 
 // Text fonts come from the system (see the font-strategy comment in
 // index.html); only two symbol fonts are bundled in public/fonts/ and
@@ -25,7 +26,6 @@ const app = mount(App, { target: document.getElementById('app')! });
 // InstallPrompt.svelte). Skipped inside the Tauri shell — it's already a
 // native app — and only on secure origins (https / localhost), which the
 // Service Worker API requires.
-const isTauri = !!(window.__TAURI__ || window.__TAURI_INTERNALS__);
 if (!isTauri && 'serviceWorker' in navigator && window.isSecureContext) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch((err) => {

@@ -10,6 +10,7 @@
   // Markdown goes through the ONE safe renderer (rule 13: `&`/`<` escaped, so a
   // README's raw <img onerror> is inert text). It also owns marked + KaTeX.
   import { renderMarkdown } from '../core/markdown.ts';
+  import { isAndroid, isTauri, tauriReady } from '../core/platform.ts';
   import Icon from '../ui/Icon.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
@@ -22,16 +23,17 @@
   import { installExternalLinkHandler } from '../core/external-links.ts';
   import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsDownloadHttp, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref, fsConvert } from '../core/ws.ts';
 
-  // Tauri plugin imports (tree-shaken in browser builds)
+  // Tauri plugin imports (tree-shaken in browser builds). The platform flags
+  // come from the ONE module (rule 3); `tauriPlugins` is this file's own
+  // "modules are in" promise, chained on the shared `tauriReady` gate.
   let tauriFs, tauriDialog, tauriOpener, tauriPath, tauriWebview;
-  const isTauri = typeof window !== 'undefined' && !!(window.__TAURI__ || window.__TAURI_INTERNALS__);
-  const tauriReady = isTauri ? Promise.all([
+  const tauriPlugins = isTauri ? tauriReady.then(() => Promise.all([
     import('@tauri-apps/plugin-fs').then(m => tauriFs = m),
     import('@tauri-apps/plugin-dialog').then(m => tauriDialog = m),
     import('@tauri-apps/plugin-opener').then(m => tauriOpener = m),
     import('@tauri-apps/api/path').then(m => tauriPath = m),
     import('@tauri-apps/api/webview').then(m => tauriWebview = m),
-  ]) : Promise.resolve();
+  ])) : Promise.resolve();
 
   // ── Heavy preview libraries load on FIRST USE, never at startup ──────────
   // highlight.js (+15 grammars), mermaid and pdf.js are 1.5 MB of the app that
@@ -200,7 +202,6 @@
   // Drag the splitter to adjust the browser/preview width ratio (desktop only).
 
   // Android local files
-  const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
   let localFiles = $state([]);
   let localDir = $state('');
 
@@ -880,7 +881,7 @@
       if (isAndroid) {
         await openFileNative(downloadedPath);
       } else if (isTauri) {
-        await tauriReady;
+        await tauriPlugins;
         await tauriOpener.openPath(downloadedPath);
       }
       dismissDownload();
@@ -1052,7 +1053,7 @@
 
       // Write phase. dlProgress runs 95→100 as the write completes.
       if (isTauri && tauriFs) {
-        await tauriReady;
+        await tauriPlugins;
         if (isAndroid) {
           // Tauri 2's invoke supports Vec<u8> natively over its binary IPC
           // channel. Earlier we transcoded bytes → base64 → JSON IPC →
@@ -1148,7 +1149,7 @@
   // Tauri filesystem paths (the native picker, the webview's drag-drop event).
   async function uploadTauriPaths(paths) {
     const dir = cwd; // the batch's target, fixed at the gesture
-    await tauriReady;
+    await tauriPlugins;
     for (const filePath of paths) {
       try {
         const name = String(filePath).split('/').pop().split('\\').pop();
@@ -1161,7 +1162,7 @@
 
   async function handleUpload() {
     if (isTauri) {
-      await tauriReady;
+      await tauriPlugins;
       const selected = await tauriDialog.open({ multiple: true });
       if (!selected) return;
       await uploadTauriPaths(Array.isArray(selected) ? selected : [selected]);
@@ -1250,7 +1251,7 @@
     if (!isTauri || !visible) return;
     let unlisten = null, dead = false;
     (async () => {
-      await tauriReady;
+      await tauriPlugins;
       const un = await tauriWebview.getCurrentWebview().onDragDropEvent((ev) => {
         const t = ev.payload.type;
         if (t === 'leave') { dragOver = false; return; }
