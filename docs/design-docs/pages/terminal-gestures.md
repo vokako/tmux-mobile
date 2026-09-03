@@ -124,15 +124,16 @@ The xterm.js API is converted at the boundary:
 | From | Event | To | Action |
 |------|-------|----|--------|
 | locked | keyboard toggle button | unlocked | inputmode=text, focus textarea, 1.5s grace |
-| locked | tap on terminal | locked | no-op |
-| unlocked | tap on terminal | unlocked | no-op |
+| locked | double-tap on terminal (two clean `down` taps ≤300ms, ≤40px apart, no selection) | unlocked | `unlockKeyboard()`; the second touchend is `preventDefault`ed so no synthetic dblclick reaches xterm |
+| locked | single tap on terminal | locked | no-op |
+| unlocked | single tap on terminal | unlocked | no-op |
 | unlocked | textarea blur (150ms timer) | locked (or retry focus if in grace) | grace → re-focus; post-grace → inputmode=none |
 | unlocked | keyboard-shift kbH=0 (was >0, post-grace) | locked | inputmode=none, blur |
 | unlocked | keyboard toggle button | locked | blur |
 | unlocked | pane switch | locked | reset |
 
 ### Key Rules
-1. **Keyboard toggle button is the only way to open the keyboard.** Tapping the terminal never opens or closes it.
+1. **Two ways to open the keyboard, both through `unlockKeyboard()`: the toggle button and a double-tap on the terminal.** A single tap never opens or closes it. The double-tap is detected on `touchend` by `createDoubleTapDetector` (`terminal-keyboard.ts`) and fed ONLY from the clean-tap (`down`) branch — a scroll, scrollbar drag, long-press or handle drag between two taps resets the pair, and a tap that cancels a selection is spent on the cancel. (Until 2026-09-03 the docs promised this gesture while the toggle was the only caller; `Terminal.source.test.ts` now pins both callers.)
 2. **`endTouchScroll` does NOT change `kbLocked`** (was causing race conditions with delayed timers).
 3. **`endTouchScroll` is a no-op while a selection exists** — releasing `touchScrolling=false` would let writeToXterm clear+rewrite, wiping xterm's native highlight.
 4. **keyboard-shift kbH=0** locks only on the open→close falling edge.

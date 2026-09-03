@@ -206,3 +206,32 @@ test('kbLocked has exactly two writers: unlockKeyboard() and lockKeyboard()', ()
     assert.match(source, new RegExp(`lockKeyboard\\(\\); // ${label}`, 'u'), `caller "${label}" labelled`);
   }
 });
+
+test('double-tap is the ONE terminal-area gesture that opens the keyboard (review 2026-09-03)', () => {
+  // terminal-touch.md / terminal-keyboard.md promised "double-tap → keyboard,
+  // single tap does nothing" while the only caller of unlockKeyboard() was the
+  // toggle button. The detector is pure (terminal-keyboard.ts) and is fed from
+  // exactly one place: the clean-tap branch of onTouchEnd.
+  assert.match(source, /import \{ createDoubleTapDetector, encodeTerminalShortcut \} from '\.\/terminal-keyboard\.ts';/u);
+  const end = /const onTouchEnd = \(e\) => \{([\s\S]*?)\n    \};/u.exec(source)?.[1] ?? '';
+  assert.ok(end, 'onTouchEnd must exist');
+  const down = /if \(endedMode === 'down'\) \{([\s\S]*?)\n        return;\n      \}/u.exec(end)?.[1] ?? '';
+  assert.ok(down, 'the clean-tap branch must exist');
+  assert.match(down, /doubleTap\.tap\(\{ x: t0\.clientX, y: t0\.clientY, t: Date\.now\(\) \}\)/u, 'fed from the clean tap');
+  assert.match(down, /if \(selection\) \{\s*doubleTap\.reset\(\);/u, 'a tap that cancels a selection never starts a pair');
+  // The second tap suppresses the browser's synthetic dblclick, or xterm would
+  // word-select under the keyboard and onSelChange would adopt it.
+  assert.match(down, /if \(e\.cancelable\) e\.preventDefault\(\);\s*(?:[^\n]*\n\s*)*?unlockKeyboard\(\); \/\/ double-tap/u);
+  assert.match(source, /addEventListener\('touchend', onTouchEnd, \{ passive: false \}\)/u, 'preventDefault needs a non-passive touchend');
+  // Every non-tap gesture end breaks the pair.
+  assert.match(end, /if \(endedMode !== 'down'\) doubleTap\.reset\(\);/u);
+  const cancel = /const onTouchCancel = \(\) => \{([\s\S]*?)\n    \};/u.exec(source)?.[1] ?? '';
+  assert.match(cancel, /doubleTap\.reset\(\);/u);
+  // unlockKeyboard() has exactly two callers, each labelled.
+  const calls = [...source.matchAll(/unlockKeyboard\(\);(?: \/\/ ([^\n]*))?/gu)].map(m => m[1] ?? '');
+  assert.deepEqual(calls.sort(), ['double-tap', 'toggle: open half']);
+  // endTouchScroll stays out of the keyboard entirely.
+  const ets = /function endTouchScroll\(\) \{([\s\S]*?)\n    \}/u.exec(source)?.[1] ?? '';
+  assert.ok(ets, 'endTouchScroll must exist');
+  assert.doesNotMatch(ets, /kbLocked|lockKeyboard|unlockKeyboard/u);
+});

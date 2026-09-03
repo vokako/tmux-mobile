@@ -13,7 +13,7 @@ See [Terminal Gestures Design Doc](terminal-gestures.md) for the full gesture pr
 - Custom touch handlers for scroll, scrollbar drag, long-press word selection
 - Content updates paused during touch (`touchScrolling` flag), caught up via `endTouchScroll()` on release
 - iOS-like momentum physics with velocity smoothing
-- **Double-tap to open keyboard** — single tap does nothing on terminal area
+- **Double-tap to open keyboard** — single tap does nothing on terminal area. Two clean taps (`touchMode` was `down` at release, not scroll/long-press/drag) within 300ms and 40px; detected by `createDoubleTapDetector` (`terminal-keyboard.ts`) on `touchend`; the second `touchend` is `preventDefault`ed so xterm never sees a synthetic `dblclick` (which would word-select). Details: `terminal-keyboard.md` "Double-tap to open".
 - Keyboard toggle button as explicit open/close alternative
 - Keyboard controlled via `inputmode` attribute on xterm's hidden textarea + `kbLocked` flag
 - `visualViewport` API for mobile browser, native `OnGlobalLayoutListener` for Android WebView

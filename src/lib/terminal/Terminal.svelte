@@ -17,7 +17,7 @@
   import { computeCursorLayout } from './cursor-layout.ts';
   import { restoreViewportAfterPaneSwitch } from './terminal-viewport.ts';
   import { cycleItem } from '../app/shortcuts.ts';
-  import { encodeTerminalShortcut } from './terminal-keyboard.ts';
+  import { createDoubleTapDetector, encodeTerminalShortcut } from './terminal-keyboard.ts';
   import { openExternalUrl } from '../core/external-links.ts';
 
   // Timing constants
@@ -128,7 +128,9 @@
   // timer, the keyboard-shift close transition, and the toggle's close half —
   // are the sanctioned lock sites; `endTouchScroll` and every other timer path
   // must never lock, because a delayed timer racing a fresh unlock is how the
-  // keyboard used to vanish under the user's finger.
+  // keyboard used to vanish under the user's finger. unlockKeyboard() has two
+  // callers of its own — the toggle's open half and the double-tap — each
+  // labelled at the call site.
   function lockKeyboard() {
     kbLocked = true;
   }
@@ -889,6 +891,9 @@
     let edgeScrollDir = 0;   // -1 up / +1 down / 0 none
     let lastDragX = 0, lastDragY = 0; // latest compensated drag point (px)
     const stopMomentum = () => { if (momentumId) { cancelAnimationFrame(momentumId); momentumId = null; } };
+    // Double-tap → keyboard (terminal-keyboard.md). Fed ONLY from the clean-tap
+    // branch of onTouchEnd; every other gesture end resets it.
+    const doubleTap = createDoubleTapDetector();
 
     // Local input means "show me the live tail".
     //
@@ -1372,6 +1377,9 @@
     const onTouchEnd = (e) => {
       const endedMode = touchMode;
       if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+      // Only a clean tap can be half of a double-tap; a scroll, drag or
+      // long-press between two taps breaks the pair.
+      if (endedMode !== 'down') doubleTap.reset();
       if (endedMode === 'scrollbar') {
         touchMode = 'idle';
         onScrollbar = false;
@@ -1392,18 +1400,32 @@
       }
       // 'down' (clean tap) or 'scroll' (released after scroll)
       if (endedMode === 'down') {
-        // Clean tap. If a selection exists and the tap was outside it
-        // (and not on a handle/toolbar — those bailed at touchstart),
-        // cancel the selection. Otherwise no-op (keyboard never opens via
-        // terminal tap; the toolbar/copy is the only commit action).
+        touchMode = 'idle';
+        const t0 = e.changedTouches?.[0];
+        // Clean tap. If a selection exists and the tap was outside it (and
+        // not on a handle/toolbar — those bailed at touchstart), cancel the
+        // selection. That tap is spent on the cancel: it never starts a
+        // double-tap pair, so dismissing a selection cannot pop the keyboard.
         if (selection) {
-          const t0 = e.changedTouches?.[0];
+          doubleTap.reset();
           if (t0) {
             const { row, col } = touchToBufferCell(t0.clientX, t0.clientY);
             if (!isInsideSelection(row, col)) clearSelection();
           }
+          return;
         }
-        touchMode = 'idle';
+        // A single tap does nothing. The second clean tap of a double-tap
+        // opens the keyboard — the ONE terminal-area gesture that may.
+        if (t0 && doubleTap.tap({ x: t0.clientX, y: t0.clientY, t: Date.now() })) {
+          // Cancel the browser's synthetic mouse events for this touch
+          // (mousedown/mouseup/click/dblclick): xterm turns a dblclick into a
+          // word selection, which onSelChange would adopt as a stray
+          // selection right under the keyboard. touchend is registered
+          // non-passive for exactly this call.
+          if (e.cancelable) e.preventDefault();
+          window.__dbg?.('kb: double-tap → unlock');
+          unlockKeyboard(); // double-tap
+        }
         return;
       }
       // 'scroll' or anything that left touchScrolling=true
@@ -1450,6 +1472,7 @@
     };
     const onTouchCancel = () => {
       if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+      doubleTap.reset();
       onScrollbar = false;
       touchMode = 'idle';
       dragHandle = null;
@@ -1462,7 +1485,10 @@
     };
     termEl.addEventListener('touchstart', onTouchStart, { passive: true });
     termEl.addEventListener('touchmove', onTouchMove, { passive: false });
-    termEl.addEventListener('touchend', onTouchEnd, { passive: true });
+    // touchend is non-passive: the double-tap branch calls preventDefault()
+    // to suppress the synthetic dblclick (see onTouchEnd). It never blocks
+    // scrolling — that is touchmove's job.
+    termEl.addEventListener('touchend', onTouchEnd, { passive: false });
     termEl.addEventListener('touchcancel', onTouchCancel, { passive: true });
 
     // Adopt selections that originate outside our touch flow — double-tap,
@@ -1553,9 +1579,10 @@
     };
     document.addEventListener('visibilitychange', onVisible);
 
-    // Mobile keyboard: opened only via the keyboard toggle button.
-    // Tapping the terminal does NOT open the keyboard — users found stray taps
-    // while reading scrollback (or near the selection handles) surprising.
+    // Mobile keyboard: opened only via the keyboard toggle button or a
+    // DOUBLE-tap on the terminal (onTouchEnd). A single tap does NOT open it —
+    // users found stray taps while reading scrollback (or near the selection
+    // handles) surprising.
     // Single layer: kbLocked flag, enforced by onTaFocus (it blurs whenever
     // a focus lands while locked). inputmode is pinned to "text" — see init
     // for the InputMethodManager bug that motivated removing the toggle.
@@ -2234,7 +2261,7 @@
               const kbOpen = document.documentElement.classList.contains('keyboard-open');
               if (!kbOpen) {
                 window.__dbg?.('kb: toggle → open');
-                unlockKeyboard();
+                unlockKeyboard(); // toggle: open half
               } else {
                 window.__dbg?.('kb: toggle → close');
                 // Cancel any pending unlock-grace retries so the blur

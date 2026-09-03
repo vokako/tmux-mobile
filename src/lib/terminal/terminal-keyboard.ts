@@ -81,3 +81,47 @@ export function encodeTerminalShortcut(event: KeyboardEvent): string {
   if (event.altKey && event.key === 'Tab') return '\x1b\t';
   return '';
 }
+
+// --- Double-tap (terminal-keyboard.md "Double-tap to open") -----------------
+//
+// Two CLEAN taps (the gesture machine classified both as `down` → release, not
+// scroll / long-press / handle drag) within a short delay and a small distance
+// open the keyboard. Anything that is not a clean tap breaks the pair, so a
+// tap that lands right after a scroll cannot complete one.
+
+export const DOUBLE_TAP_MS = 300;
+export const DOUBLE_TAP_SLOP_PX = 40;
+
+export interface TapPoint {
+  x: number;
+  y: number;
+  /** Timestamp in ms (any monotonic clock, compared only to the previous tap). */
+  t: number;
+}
+
+export interface DoubleTapDetector {
+  /** Feed one clean tap. True when it completes a pair (the pair is then consumed). */
+  tap(p: TapPoint): boolean;
+  /** Forget the pending first tap — call for every non-tap gesture end. */
+  reset(): void;
+}
+
+export function createDoubleTapDetector(
+  maxDelayMs: number = DOUBLE_TAP_MS,
+  maxDistancePx: number = DOUBLE_TAP_SLOP_PX,
+): DoubleTapDetector {
+  let last: TapPoint | null = null;
+  return {
+    tap(p) {
+      if (last && p.t - last.t <= maxDelayMs && Math.hypot(p.x - last.x, p.y - last.y) <= maxDistancePx) {
+        last = null;
+        return true;
+      }
+      last = p;
+      return false;
+    },
+    reset() {
+      last = null;
+    },
+  };
+}
