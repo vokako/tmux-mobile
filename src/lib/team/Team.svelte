@@ -14,6 +14,8 @@
   import Icon from '../ui/Icon.svelte';
   import Select from '../ui/Select.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
+  import ContextMenu from '../ui/ContextMenu.svelte';
+  import { anchorOf } from '../ui/placement.ts';
   import AgentGrid from './AgentGrid.svelte';
   import CollabGraph from './CollabGraph.svelte';
   import DirPicker from '../files/DirPicker.svelte';
@@ -118,7 +120,26 @@
   let teams = $state([]);        // [{ room, workspace, session, started, agents }]
   let activeRoom = $state(readStoredActiveRoom());
   let newTeam = $state(false);   // true = showing the "new team" workspace picker
-  let switcherOpen = $state(false);
+  // The team switcher is the shared ContextMenu (the same left-aligned
+  // "name expanding downward" reading as the Hub's title caret, board #32):
+  // `switcherAt` is its anchor while open, null when closed. It was a
+  // hand-rolled position:absolute panel under a backdrop button — no Escape,
+  // no close on scroll/resize, clipped at the viewport edge (review, 2026-09-03).
+  let switcherAt = $state(null);
+  function toggleSwitcher(e) {
+    switcherAt = switcherAt ? null : { anchor: anchorOf(e.currentTarget), align: 'left', trigger: e.currentTarget };
+  }
+  const switcherItems = $derived([
+    ...(teams.length
+      ? teams.map((tm) => ({
+          label: tm.room,
+          hint: String(tm.agents),
+          checked: tm.room === activeRoom,
+          onselect: () => selectTeam(tm.room),
+        }))
+      : [{ label: t('teamNone'), disabled: true, onselect: () => {} }]),
+    { label: t('teamNew'), icon: 'plus', onselect: () => { newTeam = true; } },
+  ]);
   let employees = $state([]);    // active team's desired roster (grid cells)
   let roomGeneration = 0;
   let fullRefreshId = 0;
@@ -272,7 +293,7 @@
   // user tapped a specific team and landing in a different team's chat with no
   // signal is worse than an error. Surface it and stay where we were.
   export async function selectTeam(room) {
-    switcherOpen = false;
+    switcherAt = null;
     newTeam = false;
     if (room === activeRoom) return;
     setActiveRoom(room, false);
@@ -337,7 +358,7 @@
   // Close the active team (kill its agents); chat log persists server-side.
   async function closeActiveTeam() {
     if (!activeRoom) return;
-    switcherOpen = false;
+    switcherAt = null;
     const room = activeRoom;
     try { await teamCloseTeam(room); } catch {}
     setActiveRoom('');
@@ -537,28 +558,11 @@
        without consuming the entire chat viewport. -->
   <div class="team-header">
     <div class="team-pick">
-      <button class="team-pick-btn" onclick={() => switcherOpen = !switcherOpen}>
+      <button class="team-pick-btn" aria-haspopup="menu" aria-expanded={!!switcherAt} onclick={toggleSwitcher}>
         <span class="team-pick-name">{activeTeam ? activeTeam.room : (newTeam ? t('teamNew') : t('teamNone'))}</span>
         <Icon name="chevron-down" size={10} />
       </button>
-      {#if switcherOpen}
-        <button class="team-pick-backdrop" aria-label="close" onclick={() => switcherOpen = false}></button>
-        <div class="team-pick-menu">
-          {#each teams as tm}
-            <button class="team-pick-item" class:active={tm.room === activeRoom} onclick={() => selectTeam(tm.room)} title={tm.workspace}>
-              <span class="tp-dot" class:on={tm.agents > 0}></span>
-              <span class="tp-name">{tm.room}</span>
-              <span class="tp-count">{tm.agents}</span>
-            </button>
-          {/each}
-          {#if teams.length === 0}
-            <div class="team-pick-empty">{t('teamNone')}</div>
-          {/if}
-          <button class="team-pick-new" onclick={() => { newTeam = true; switcherOpen = false; }}>
-            <Icon name="plus" size={12} /> {t('teamNew')}
-          </button>
-        </div>
-      {/if}
+      <ContextMenu at={switcherAt} items={switcherItems} oncancel={() => (switcherAt = null)} />
     </div>
     {#if activeTeam}
       {#if !splitEligible}
@@ -850,27 +854,6 @@
   }
   .team-pick-btn:active { border-color: var(--accent); color: var(--accent); }
   .team-pick-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .team-pick-backdrop { position: fixed; inset: 0; z-index: 30; background: transparent; border: none; }
-  .team-pick-menu {
-    position: absolute; top: 28px; left: 0; z-index: 31;
-    min-width: 200px; max-width: 280px; max-height: calc(50vh / var(--ui-zoom, 1)); overflow-y: auto;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
-    box-shadow: 0 12px 40px rgba(0,0,0,0.4); padding: 4px;
-  }
-  .team-pick-item, .team-pick-new {
-    display: flex; align-items: center; gap: 8px; width: 100%;
-    padding: 7px 9px; border: none; border-radius: var(--ui-radius-control); background: transparent;
-    color: var(--text2); font-size: var(--fs-ui); cursor: pointer; text-align: left;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .team-pick-item:active, .team-pick-new:active { background: var(--surface2); }
-  .team-pick-item.active { background: var(--accent-bg); color: var(--accent); }
-  .tp-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text3); flex-shrink: 0; }
-  .tp-dot.on { background: var(--status-ok); }
-  .tp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-ui); }
-  .tp-count { color: var(--text3); font-size: var(--fs-sub); }
-  .team-pick-empty { padding: 8px 9px; color: var(--text3); font-size: var(--fs-ui); }
-  .team-pick-new { color: var(--accent); border-top: 1px solid var(--border2); border-radius: 0 0 7px 7px; margin-top: 2px; }
   .team-close, .team-swap, .team-hbtn {
     flex-shrink: 0; width: var(--ui-control-height); height: var(--ui-control-height); padding: 0;
     border: 1px solid var(--border2); border-radius: var(--ui-radius-pill);

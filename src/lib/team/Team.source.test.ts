@@ -27,3 +27,11 @@ test('the composer speaks the Hub rule: Enter sends, Shift+Enter is the newline 
   // The inverted rule must not come back.
   assert.doesNotMatch(fn, /e\.key === 'Enter' && \(e\.metaKey \|\| e\.ctrlKey\)/u);
 });
+
+test('the team switcher is the shared ContextMenu, not a backdrop panel (2026-09-03)', () => {
+  assert.match(source, /import ContextMenu from '\.\.\/ui\/ContextMenu\.svelte'/u);
+  assert.match(source, /<ContextMenu at=\{switcherAt\} items=\{switcherItems\}/u);
+  // Left-aligned like the Hub's title caret: the menu is the NAME expanding downward.
+  assert.match(source, /\{ anchor: anchorOf\(e\.currentTarget\), align: 'left', trigger: e\.currentTarget \}/u);
+  assert.doesNotMatch(source, /team-pick-backdrop|team-pick-menu|switcherOpen/u);
+});

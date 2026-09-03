@@ -148,8 +148,10 @@ all rooms.
   `team_message` push by each message's `room`, so the view never mixes teams.
 - **Agents** are launched with an `x-room` header for their team's room, so
   kiro/claude/codex each join the right chat.
-- **Team tab UI**: a header dropdown lists active teams (room · agent count),
-  "+ New team" opens the workspace picker, and "×" closes the active team
+- **Team tab UI**: the header's team pill opens the shared `ui/ContextMenu`
+  (left-aligned from the pill, like the Hub's title caret; the current team
+  `checked`, the agent count as the row `hint`, "+ New team" as the last row
+  — it was a hand-rolled backdrop panel until 2026-09-03), and "×" closes the active team
   (`team_close_team` kills its tmux session; the chat log persists in the db, so
   re-starting the same workspace+template pair resumes its history).
 
