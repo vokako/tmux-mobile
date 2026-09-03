@@ -259,6 +259,28 @@ test('elideTail truncates a long user message at the rear, marker inline', () =>
   assert.equal((fcut.match(/^```/gmu) ?? []).length % 2, 0, `fences balanced:\n${fcut}`);
 });
 
+test('feedBlocks is a pure function of its inputs — the per-object squash cache changes nothing', () => {
+  // Review C (2026-09-03): the echo↔message pairing squashes whitespace once
+  // per OBJECT now instead of once per PAIR per poll. Same objects twice, and
+  // fresh copies of the same data, must all render the same blocks.
+  const feed = [
+    { id: 'a', ts: 100, from: 'human', body: '@dev do the\n  thing' },
+    { id: 'b', ts: 150, from: 'human', body: '@dev and this' },
+    { id: 'c', ts: 300, from: 'dev', body: 'done' },
+  ];
+  const activity = [
+    ev({ ts: 200, kind: 'prompt', via: 'app', text: '[tmm chat 2026-09-03 10:00] human: @dev do the thing' }),
+    ev({ ts: 210, kind: 'tool', text: 'Edit x.rs' }),
+  ];
+  const once = feedBlocks(feed, activity, 'tools');
+  const twice = feedBlocks(feed, activity, 'tools');
+  const fresh = feedBlocks(JSON.parse(JSON.stringify(feed)), activity.map((e) => ({ ...e })), 'tools');
+  assert.deepEqual(twice, once);
+  assert.deepEqual(fresh, once);
+  const delivered = once.filter((b) => b.type === 'msg').map((b: any) => [b.msg.id, b.delivered]);
+  assert.deepEqual(delivered, [['a', true], ['b', false], ['c', false]]);
+});
+
 test('an echoed prompt marks its message delivered instead of repeating it', () => {
   const feed = [
     { ts: 100, from: 'human', body: '@dev ship it' },

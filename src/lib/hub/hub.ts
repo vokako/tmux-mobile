@@ -1180,6 +1180,24 @@ export function squashWs(s: string): string {
   return s.replace(/\s+/gu, '');
 }
 
+/** squashWs, once per OBJECT. feedBlocks pairs every app-echo with every
+ * message (P × M) and recomputed the regex per pair on every poll — with paged
+ * history that is 10⁵–10⁶ passes a tick (review C, 2026-09-03). Messages and
+ * events are stable objects across polls (`mergeMessages`/`mergeEvents` keep
+ * the existing ones), so a WeakMap keyed by the object caches the squash for
+ * its lifetime and costs nothing when the object goes. A body edit would
+ * produce a new object (the room is a log), so staleness cannot happen. */
+const squashed = new WeakMap<object, string>();
+function squashOf(obj: object | null | undefined, text: string | null | undefined): string {
+  if (!obj) return squashWs(text ?? '');
+  let v = squashed.get(obj);
+  if (v === undefined) {
+    v = squashWs(text ?? '');
+    squashed.set(obj, v);
+  }
+  return v;
+}
+
 /** Internal: a turn boundary that produces NO row — a delivery echo. The echo
  * is consumed as a receipt (rule 1) so it never renders, but it is still the
  * moment `userPromptSubmit` opened a new turn, and a new turn must not pour its
@@ -1327,11 +1345,11 @@ export function feedBlocks(
     // newline in the body does not survive that byte-for-byte (owner,
     // 2026-08-22: multi-line messages never confirmed).
     let hit = false;
-    const canonEcho = squashWs(e.text);
+    const canonEcho = squashOf(e, e.text);
     const truncated = echoTruncated(e.text);
     for (const m of msgs) {
       if (m.type !== 'msg' || m.delivered) continue;
-      const body = squashWs(m.msg?.body ?? '');
+      const body = squashOf(m.msg, m.msg?.body);
       if (body && m.ts <= e.ts && echoContains(canonEcho, body, truncated)) {
         m.delivered = true;
         hit = true;

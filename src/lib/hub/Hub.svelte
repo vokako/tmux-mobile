@@ -526,33 +526,45 @@
     // effect re-parks the tail (board #38).
     following = tailAfterScroll(visible, following, feedEl ? bottomGap(feedEl) : 0);
     if (!visible) return;
-    const top = feedEl?.scrollTop ?? 0;
-    // Near the top: reach for the previous page. 120px of runway starts the
-    // fetch before the reader actually hits the edge.
-    if (top < 120 && roomReady) loadOlder();
-    const delta = top - askScrollTop;
-    askScrollTop = top;
-    // Direction hysteresis: trackpad and touch momentum land 1–3px reversals at
-    // rest, and at the held boundary a direction flip re-picks the anchor — the
-    // reported flicker. A reversal only counts once it has travelled 16px.
-    if (delta !== 0) {
-      if ((delta > 0) === (askDir === 'down')) {
-        askDirTravel = 0;
-      } else {
-        askDirTravel += Math.abs(delta);
-        if (askDirTravel >= 16) {
-          askDir = delta > 0 ? 'down' : 'up';
+    // Everything below reads layout (syncAsk neutralizes the stickies, then
+    // reads every [data-ask] box; autoRefold queries each expanded key) and a
+    // scroll event fires several times per frame under momentum, so it is
+    // coalesced into ONE pending animation frame — the browser has to lay out
+    // once for the frame anyway (review C, 2026-09-03). Direction hysteresis
+    // works on the frame's net delta, which is what the 16px threshold meant.
+    if (scrollFrame) return;
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = 0;
+      if (!feedEl || !visible) return;
+      const top = feedEl.scrollTop;
+      // Near the top: reach for the previous page. 120px of runway starts the
+      // fetch before the reader actually hits the edge.
+      if (top < 120 && roomReady) loadOlder();
+      const delta = top - askScrollTop;
+      askScrollTop = top;
+      // Direction hysteresis: trackpad and touch momentum land 1–3px reversals at
+      // rest, and at the held boundary a direction flip re-picks the anchor — the
+      // reported flicker. A reversal only counts once it has travelled 16px.
+      if (delta !== 0) {
+        if ((delta > 0) === (askDir === 'down')) {
           askDirTravel = 0;
+        } else {
+          askDirTravel += Math.abs(delta);
+          if (askDirTravel >= 16) {
+            askDir = delta > 0 ? 'down' : 'up';
+            askDirTravel = 0;
+          }
         }
       }
-    }
-    syncAsk(askDir);
-    if (following) {
-      newBelow = false;
-      markSeen();
-    }
-    autoRefold();
+      syncAsk(askDir);
+      if (following) {
+        newBelow = false;
+        markSeen();
+      }
+      autoRefold();
+    });
   }
+  let scrollFrame = 0;
 
   /** One bubble, one continuous motion: select it while it is naturally inside
    * the viewport, then let CSS sticky catch that SAME element as it leaves in
@@ -1721,11 +1733,17 @@
     feed = mergeMessages(feed, [m]);
     lastTs = Math.max(lastTs, m.ts ?? 0);
     if (following) scrollFeed(); else newBelow = true;
-    loadAgents();
+    // A message is a turn edge — the sender's state just changed — so the
+    // roster is refreshed ahead of the 5 s poll; but a burst of 30 pushes was
+    // 30 hub_agents calls (review C, 2026-09-03). One trailing 300 ms window
+    // keeps the immediacy and collapses the burst into one call.
+    clearTimeout(agentsRefresh);
+    agentsRefresh = setTimeout(() => { agentsRefresh = 0; loadAgents(); }, 300);
   };
+  let agentsRefresh = 0;
   $effect(() => {
     addTeamMessageListener(onPush);
-    return () => removeTeamMessageListener(onPush);
+    return () => { removeTeamMessageListener(onPush); clearTimeout(agentsRefresh); agentsRefresh = 0; };
   });
   $effect(() => {
     if (!visible) return;

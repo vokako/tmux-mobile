@@ -9,6 +9,7 @@
 import { marked } from 'marked';
 import katex from 'katex';
 import './markedSafeUrl.ts';
+import { LruCache } from './lru.ts';
 
 // Strikethrough requires DOUBLE tildes here, unlike GFM, which also accepts
 // `~x~`. A single tilde is a range separator in everyday Chinese text — the
@@ -39,7 +40,12 @@ marked.use({
   },
 });
 
-const cache = new Map<string, string>();
+// Bounded LRU, not a clear-at-500 Map: past 500 distinct bodies the old bound
+// dropped EVERYTHING mid-render, and every poll re-parsed every message with
+// marked + KaTeX until the cache refilled (review C, 2026-09-03). The feed's
+// working set — the loaded pages, each body rendered once per poll — stays hot.
+const MARKDOWN_CACHE_MAX = 500;
+const cache = new LruCache<string, string>(MARKDOWN_CACHE_MAX);
 
 /** In the chat, rendered/raw is a view switch. Agents often wrap an entire
  * answer (or a quoted .md file inside an answer) in ```markdown even though the
@@ -125,7 +131,6 @@ export function renderMarkdown(body: string | null | undefined): string {
   try { html = marked.parse(escaped, { gfm: true, breaks: true }) as string; }
   catch { html = escaped; }
   html = html.replace(/\x00MATH(\d+)\x00/g, (_m, i) => mathHoles[Number(i)]!);
-  if (cache.size > 500) cache.clear(); // bound the cache
-  cache.set(src, html);
+  cache.set(src, html); // evicts the least recently used past the bound
   return html;
 }
