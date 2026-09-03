@@ -59,6 +59,16 @@ runs create → up → spawn, and hands the created project back; the caller onl
 navigates (Chat selects the conversation, Terminal jumps into the first
 pane). Sessions.svelte lost ~120 lines of duplicate form/picker with it.
 
+`src/lib/files/DirPicker.svelte` is THE directory picker, for the same reason.
+Team's "new team" workspace field had grown its own (`team/DirPicker.svelte`,
+camelCase `onPick/onNavigate/onClose`, a breadcrumb path, no race guard, but a
+new-folder affordance) beside the file browser's (`onpick/oncancel`, the
+newest-tap-wins `seq` guard, list kept on screen while loading). Merged
+2026-09-03 (review): one TypeScript component in `files/` with the guard AND
+the new-folder input AND an `onnavigate` step callback, one lowercase prop
+dialect; `CreateProjectDialog` and `Team` both use it.
+`DirPicker.source.test.ts` pins that exactly one exists.
+
 ## Every sidebar speaks the same language
 
 The Chat sidebar set the house style and the others follow it (owner,

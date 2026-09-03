@@ -16,7 +16,7 @@
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import AgentGrid from './AgentGrid.svelte';
   import CollabGraph from './CollabGraph.svelte';
-  import DirPicker from './DirPicker.svelte';
+  import DirPicker from '../files/DirPicker.svelte';
   import { renderMarkdown } from '../core/markdown.ts';
   import { t } from '../core/i18n.svelte.ts';
   import { layout } from '../app/layout.svelte.ts';
@@ -604,9 +604,9 @@
     </div>
     {#if showPicker}
       <DirPicker start={workspace || undefined}
-        onNavigate={(p) => { workspace = p; }}
-        onPick={(p) => { workspace = p; showPicker = false; }}
-        onClose={() => showPicker = false} />
+        onnavigate={(p) => { workspace = p; }}
+        onpick={(p) => { workspace = p; showPicker = false; }}
+        oncancel={() => showPicker = false} />
     {/if}
     <!-- Roster template picker: which named roster (A/B/…) this team uses. The
          shared Select — this was the first hand-rolled dropdown in the app (a

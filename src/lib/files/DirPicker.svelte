@@ -1,29 +1,52 @@
-<script>
-  // A directory picker over the SAME `fs_list` RPC the file browser uses —
-  // typing an absolute path from memory was the only way to start a project
-  // (owner: "路径选择复用下文件选择器"). Deliberately directories-only and
-  // read-only: this is a chooser, not a second file manager, so it does not
-  // grow preview/edit/upload. Callers get an absolute path back.
+<script lang="ts">
+  // THE directory picker (rule 6: one mechanism per UI job) — over the SAME
+  // `fs_list` RPC the file browser uses. Typing an absolute path from memory
+  // was the only way to start a project (owner: "路径选择复用下文件选择器");
+  // the Team workspace field wanted the same browse. Until 2026-09-03 there
+  // were two of these (files/ and team/), with different props and behaviour:
+  // one had the race guard, the other the new-folder affordance. This one has
+  // both. Deliberately directories-only: a chooser, not a second file manager,
+  // so it does not grow preview/edit/upload. Callers get an absolute path.
   import Icon from '../ui/Icon.svelte';
-  import { fsList } from '../core/ws.ts';
+  import { fsList, fsMkdir } from '../core/ws.ts';
   import { t } from '../core/i18n.svelte.ts';
 
-  let { start = '~', onpick, oncancel } = $props();
+  type DirEntry = { name: string; type: string; path: string };
+
+  let {
+    start = '~',
+    onpick,
+    oncancel,
+    onnavigate,
+  }: {
+    /** Directory to open at; `~` and relative paths are resolved by the server. */
+    start?: string;
+    /** The confirmed directory (the Use button). */
+    onpick?: (path: string) => void;
+    oncancel?: () => void;
+    /** Every browse step, so a caller's field can track the picker before confirm. */
+    onnavigate?: (path: string) => void;
+  } = $props();
 
   let cwd = $state('');
-  let dirs = $state([]);
+  let dirs = $state<DirEntry[]>([]);
   let ready = $state(false); // first answer arrived — before it there is nothing to keep
   let busy = $state(false);
   let error = $state('');
-  let listEl = $state(null);
+  let listEl = $state<HTMLElement | null>(null);
   let seq = 0;
+
+  // New-folder inline input.
+  let creating = $state(false);
+  let newName = $state('');
+  let createErr = $state('');
 
   // Navigation KEEPS the current list on screen and swaps it atomically when
   // the answer arrives — clearing first made every tap blank-then-repaint
   // (owner, 2026-08-28: "每次点击一个路径…先清空再重新刷新…要交互更流畅").
   // The rows stay tappable mid-load; `seq` makes the newest tap win, so a
   // slow earlier answer can never overwrite a later one.
-  async function open(path) {
+  async function open(path: string) {
     const my = ++seq;
     busy = true;
     error = '';
@@ -31,25 +54,43 @@
       const r = await fsList(path, false);
       if (my !== seq) return;
       cwd = r.path ?? path;
-      dirs = (r.entries ?? []).filter((e) => e.type === 'dir');
+      dirs = ((r.entries ?? []) as DirEntry[])
+        .filter((e) => e.type === 'dir')
+        .sort((a, b) => a.name.localeCompare(b.name));
       ready = true;
       if (listEl) listEl.scrollTop = 0; // a NEW directory starts at its top
+      onnavigate?.(cwd);
     } catch (e) {
       if (my !== seq) return;
-      error = e.message ?? String(e); // the old list stays — the error line says why
+      error = (e as Error)?.message ?? String(e); // the old list stays — the error line says why
     }
     busy = false;
   }
 
+  async function createFolder() {
+    const name = newName.trim();
+    if (!name || !cwd) return;
+    const dir = `${cwd.replace(/\/$/, '')}/${name}`;
+    try {
+      await fsMkdir(dir);
+      creating = false;
+      newName = '';
+      createErr = '';
+      await open(dir); // navigate into the new folder → it becomes the selection
+    } catch (e) {
+      createErr = (e as Error)?.message || 'failed';
+    }
+  }
+
   // The parent of an absolute path; '/' is its own parent (no climb past root).
-  function parentOf(path) {
+  function parentOf(path: string) {
     const trimmed = path.replace(/\/+$/, '');
     const cut = trimmed.lastIndexOf('/');
     if (cut <= 0) return '/';
     return trimmed.slice(0, cut);
   }
 
-  $effect(() => { open(start); });
+  $effect(() => { open(start || '~'); });
 </script>
 
 <div class="picker">
@@ -59,7 +100,20 @@
     </button>
     <span class="pk-path" title={cwd}>{cwd || '…'}</span>
     <button class="icon-btn" title={t('dirPickerHome')} onclick={() => open('~')}><Icon name="home" size={13} /></button>
+    <button class="icon-btn" class:on={creating} title={t('newFolder')} aria-label={t('newFolder')} disabled={!cwd}
+      onclick={() => { creating = !creating; createErr = ''; }}><Icon name="folder-plus" size={13} /></button>
   </div>
+
+  {#if creating}
+    <div class="pk-new">
+      <Icon name="folder-plus" size={13} />
+      <input class="pk-new-input" bind:value={newName} placeholder={t('newFolderName')}
+        autocapitalize="off" autocomplete="off"
+        onkeydown={(e) => { if (e.key === 'Enter') createFolder(); else if (e.key === 'Escape') { creating = false; newName = ''; } }} />
+      <button class="chip-btn primary" onclick={createFolder} disabled={!newName.trim()}>{t('create')}</button>
+    </div>
+    {#if createErr}<div class="pk-err">{createErr}</div>{/if}
+  {/if}
 
   {#if error}
     <div class="pk-err">{error}</div>
@@ -90,12 +144,21 @@
 <style>
   .picker { display: flex; flex-direction: column; min-height: 0; gap: 8px; }
   .pk-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .pk-head .icon-btn.on { color: var(--accent); background: var(--accent-bg); }
   .pk-path {
     flex: 1; min-width: 0; font-family: var(--font-mono); font-size: var(--fs-sub);
     color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     direction: rtl; text-align: left;   /* keep the TAIL of a long path visible */
   }
   .pk-err { color: var(--danger); font-size: var(--fs-meta); }
+  .pk-new { display: flex; align-items: center; gap: 6px; color: var(--text3); }
+  .pk-new-input {
+    flex: 1; min-width: 0; padding: 5px 8px;
+    border: 1px solid var(--input-border); border-radius: var(--ui-radius-control);
+    background: var(--input-bg); color: var(--text); font-size: var(--fs-ui);
+    font-family: var(--font-mono); outline: none;
+  }
+  .pk-new-input:focus { border-color: var(--accent); }
   .pk-list {
     flex: 1; min-height: 140px; max-height: calc(42vh / var(--ui-zoom, 1)); overflow-y: auto;
     border: 1px solid var(--border); border-radius: var(--ui-radius-control); background: var(--input-bg);
