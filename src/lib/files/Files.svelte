@@ -1843,8 +1843,6 @@
   .files.snap { transition: transform var(--t-fast); }
   .files.drill-fwd  { animation: drill-in-right 0.12s linear; }
   .files.drill-back { animation: drill-in-left 0.12s linear; }
-  @keyframes drill-in-right { from { transform: translateX(40%); } to { transform: none; } }
-  @keyframes drill-in-left  { from { transform: translateX(-40%); } to { transform: none; } }
   @media (prefers-reduced-motion: reduce) {
     .files.drill-fwd, .files.drill-back { animation: none; }
     .files.snap { transition: none; }

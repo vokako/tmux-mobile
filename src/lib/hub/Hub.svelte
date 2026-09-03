@@ -2979,7 +2979,7 @@
       <!-- Parked away from the tail: one tap back, with a dot when something
            arrived while you were reading. -->
       {#if !following}
-        <button class="to-tail to-bottom appear-pop" class:news={newBelow} title={t('hubToBottom')} aria-label={t('hubToBottom')} onclick={() => scrollFeed(true)}>
+        <button class="to-tail to-bottom" class:news={newBelow} title={t('hubToBottom')} aria-label={t('hubToBottom')} onclick={() => scrollFeed(true)}>
           <Icon name="arrow-down" size={16} />
         </button>
       {/if}
@@ -4314,7 +4314,6 @@
        transform is none, so the intro can own it. Exit is a cut. */
     animation: sheet-up var(--t-move) ease-out;
   }
-  @keyframes sheet-up { from { transform: translateY(100%); } }
   @media (prefers-reduced-motion: reduce) { .dlg-backdrop, .dlg.sheet { animation: none; } }
   .dlg.sheet .dlg-agents { max-height: calc(46vh / var(--ui-zoom, 1)); overflow-y: auto; }
   .dlg.sheet .agent-pick, .dlg.sheet input, .dlg.sheet .dlg-actions button { min-height: 44px; }

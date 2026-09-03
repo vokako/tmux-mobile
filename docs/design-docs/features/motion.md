@@ -88,7 +88,7 @@ vocabulary.
 | `.state-ctl` | a control's selected/active clothes cross-fade (border, background, colour, inset ring, opacity) | `--t-fast` |
 | `animate:flip={{ duration: moveMs() }}` | a keyed list reorders — the ONE Svelte directive in use (`ui/motion.ts`) | `--t-move` |
 | `.side-scrim` / `.dlg-backdrop` fade-in, `sheet-up` (`translateY(100%) → none`, only for a layer whose resting transform is none) | sheets rise with a scrim (design-language §1) | `--t-move` |
-| `drill-in-right` / `drill-in-left`, `slideInLeft/Right` | navigation, touch-only | 120ms linear |
+| `drill-in-right` / `drill-in-left` (app.css, one copy), `slideInLeft/Right` (App) | navigation, touch-only | 120ms linear |
 
 Usage: wrap the `<Icon>` in `<span class="chev" class:open={x}>`; put `.appear*`
 on the element that mounts inside `{#if}`; add `.state-ctl` to a segmented
@@ -164,9 +164,13 @@ sizes (owner declined).
 ## Rules and their reasons
 
 - **One vocabulary in app.css, components add a class** — five components had
-  five private spinners and Hub had a private caret transition; a second copy
-  is a second tempo waiting to drift. `ui/motion.source.test.ts` forbids a
-  component-level `.chev`/`.flip` rule and the intro keyframe names.
+  five private spinners, Hub had a private caret transition, and the compact
+  drill pair was declared in five components; a second copy is a second tempo
+  waiting to drift. A component references a global keyframe BY NAME (Svelte
+  scopes only keyframes declared locally), so `ui/motion.source.test.ts`
+  forbids a component-level `.chev`/`.flip` rule and any local declaration of
+  `fade-in`/`rise-in`/`pop-in`/`sheet-up`/`drill-in-*`. `.to-tail` carries its
+  own `pop-in` in app.css, so wearers add nothing.
 - **No `svelte/transition`** — the codebase was CSS-only before this doc;
   outros conflict with principle 5 and with the feed's scroll ownership; a
   Svelte intro on a keyed list replays for every row on a parent recreate

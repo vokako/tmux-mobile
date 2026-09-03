@@ -132,9 +132,9 @@ owns `transform`. The bookmark star swaps glyphs (`{#key}` + `.appear-pop`)
 because no rotation reads star → star-filled. Breadcrumbs are keyed by path
 and only the tip fades in. Git status rows are keyed by file and flip on
 `moveMs()`; the git diff drills in from the right and the list back from the
-left under 760px with the same `drill-in-*` keyframe pair Files declares
-(Svelte scoped styles cannot share a keyframe — the duplicate is deliberate
-and must stay in sync). The progress arc is still not transitioned (it
+left under 760px with the app.css `drill-in-*` keyframe pair (one copy: a
+component references a global keyframe by name; only a LOCAL `@keyframes`
+gets scoped). The progress arc is still not transitioned (it
 tracks the integer). Exits everywhere are cuts.
 
 ## Lessons Learned

@@ -2232,7 +2232,7 @@
       {/if}
     {/if}
     {#if !termAtBottom}
-      <button class="to-tail scroll-btn" class:news={hasNewContent} class:appear-pop={!termAtBottom} onclick={() => term?.scrollToBottom()} aria-label={hasNewContent ? t('newOutput') : t('scrollToBottom')}>
+      <button class="to-tail scroll-btn" class:news={hasNewContent} onclick={() => term?.scrollToBottom()} aria-label={hasNewContent ? t('newOutput') : t('scrollToBottom')}>
         <Icon name="arrow-down" size={16} />
       </button>
     {/if}

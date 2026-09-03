@@ -45,10 +45,10 @@ test('both records wear the shared class and keep only placement locally', async
   for (const [file, placeClass] of WEARERS) {
     const raw = await readFile(new URL(file, SRC), 'utf8');
     // The placement class, optionally followed by the intro atom (motion.md: the
-    // button mounts inside `{#if !following}`, so it pops in — .appear-pop).
-    assert.match(raw, /class="to-tail [a-z-]+(?: appear-pop)?" class:news=/u, `${file}: wears .to-tail with the news cue`);
-    assert.match(raw, /class="to-tail [a-z-]+(?: appear-pop)?"[\s\S]{0,220}?aria-label=/u, `${file}: the floating action is labelled`);
-    assert.match(raw, /class="to-tail [a-z-]+(?: appear-pop)?"[\s\S]{0,220}?<Icon name="arrow-down" size=\{16\} \/>/u,
+    // button mounts when the reader leaves the tail; app.css gives .to-tail its pop-in intro once).
+    assert.match(raw, /class="to-tail [a-z-]+" class:news=/u, `${file}: wears .to-tail with the news cue`);
+    assert.match(raw, /class="to-tail [a-z-]+"[\s\S]{0,220}?aria-label=/u, `${file}: the floating action is labelled`);
+    assert.match(raw, /class="to-tail [a-z-]+"[\s\S]{0,220}?<Icon name="arrow-down" size=\{16\} \/>/u,
       `${file}: one arrow, one size`);
     const style = /<style>([\s\S]*)<\/style>/.exec(raw)?.[1] ?? '';
     const css = style.replace(/\/\*[\s\S]*?\*\//gu, '');

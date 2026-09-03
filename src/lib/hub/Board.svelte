@@ -892,8 +892,6 @@
     .board.drill-fwd .detail { animation: drill-in-right 0.12s linear; }
     .board.drill-back .cols { animation: drill-in-left 0.12s linear; }
   }
-  @keyframes drill-in-right { from { transform: translateX(40%); } to { transform: none; } }
-  @keyframes drill-in-left  { from { transform: translateX(-40%); } to { transform: none; } }
   @media (prefers-reduced-motion: reduce) {
     .board.drill-fwd .detail, .board.drill-back .cols { animation: none; }
   }

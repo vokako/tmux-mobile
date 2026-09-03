@@ -344,16 +344,13 @@
   /* The delayed dim of the file list (Files.svelte) — a threshold, not a tempo. */
   .git-list.busy { opacity: 0.55; transition-delay: 0.15s; }
   /* One view at a time inside the host's column; the diff drills in from the
-     right and the list back from the left under 760px — the same keyframe
-     pair Files.svelte declares (scoped styles cannot share it; keep the two
-     in sync with the navigation grammar in design-language.md §1). */
+     right and the list back from the left under 760px — the app.css
+     `drill-in-right/left` pair (one copy; design-language.md §1). */
   .git-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
   @media (max-width: 760px) {
     .git-view.drill-fwd  { animation: drill-in-right 0.12s linear; }
     .git-view.drill-back { animation: drill-in-left 0.12s linear; }
   }
-  @keyframes drill-in-right { from { transform: translateX(40%); } to { transform: none; } }
-  @keyframes drill-in-left  { from { transform: translateX(-40%); } to { transform: none; } }
   @media (prefers-reduced-motion: reduce) {
     .git-view.drill-fwd, .git-view.drill-back { animation: none; }
     .git-list { transition: none; }

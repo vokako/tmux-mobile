@@ -48,7 +48,7 @@ test('no component re-implements an atom or reaches for svelte/transition', () =
     const src = readFileSync(file, 'utf8');
     const rel = file.slice(root.length);
     assert.doesNotMatch(src, /\n\s*\.(chev|flip)\s*\{/u, `${rel}: .chev/.flip are app.css atoms — add the class, do not redefine it`);
-    assert.doesNotMatch(src, /@keyframes\s+(fade-in|rise-in|pop-in)\b/u, `${rel}: the intro keyframes live in app.css`);
+    assert.doesNotMatch(src, /@keyframes\s+(fade-in|rise-in|pop-in|sheet-up|drill-in-right|drill-in-left)\b/u, `${rel}: the shared keyframes live in app.css — reference them by name`);
     assert.doesNotMatch(src, /from ['"]svelte\/transition['"]/u, `${rel}: intros are the .appear* classes, exits are a snap — no svelte/transition`);
     if (/animate:flip/u.test(src)) {
       assert.match(src, /moveMs\(\)/u, `${rel}: animate:flip takes its duration from moveMs() (reduced-motion gate)`);

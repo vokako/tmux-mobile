@@ -595,8 +595,6 @@
     .preferences.drill-fwd .pref-shell { animation: drill-in-right 0.12s linear; }
     .preferences.drill-back .sidebar { animation: drill-in-left 0.12s linear; }
   }
-  @keyframes drill-in-right { from { transform: translateX(40%); } to { transform: none; } }
-  @keyframes drill-in-left  { from { transform: translateX(-40%); } to { transform: none; } }
   @media (prefers-reduced-motion: reduce) {
     .preferences.drill-fwd .pref-shell, .preferences.drill-back .sidebar { animation: none; }
   }

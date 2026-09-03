@@ -783,8 +783,6 @@
     .agents-root.drill-fwd .mid { animation: drill-in-right 0.12s linear; }
     .agents-root.drill-back .sidebar { animation: drill-in-left 0.12s linear; }
   }
-  @keyframes drill-in-right { from { transform: translateX(40%); } to { transform: none; } }
-  @keyframes drill-in-left  { from { transform: translateX(-40%); } to { transform: none; } }
   @media (prefers-reduced-motion: reduce) {
     .agents-root.drill-fwd .mid, .agents-root.drill-back .sidebar { animation: none; }
   }

@@ -483,6 +483,9 @@ button:disabled {
   cursor: pointer; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
   -webkit-tap-highlight-color: transparent;
   transition: transform var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+  /* It mounts when the reader leaves the tail, so it pops in (motion.md) —
+     here once, not on each wearer. */
+  animation: pop-in var(--t-fast) ease-out;
 }
 .to-tail:hover { color: var(--accent); border-color: var(--accent); }
 .to-tail:active { transform: scale(0.9); }
@@ -507,7 +510,7 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
    STATE (stateDotColor) and the Board sidebar's column STATUS
    (boardStatusColor, board #39). Both speak the app's one status-colour
    language; the chip itself stays the same quiet mono text. */
-.side-win .side-win-dot { width: 5px; height: 5px; border-radius: 50%; flex: none; }
+.side-win .side-win-dot { width: 5px; height: 5px; border-radius: 50%; flex: none; transition: background var(--t-fast); }
 
 /* ── The TWO-LINE project row itself, shared by the Chat and Board sidebars
    (board #39: "board 侧边栏的样式也要和 chat terminal 的侧边栏对齐，我看
@@ -618,13 +621,17 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 @keyframes rise-in { from { opacity: 0; transform: translateY(6px); } }
 @keyframes pop-in { from { opacity: 0; transform: scale(0.6); } }
 @keyframes sheet-up { from { transform: translateY(100%); } }
+/* The navigation slide's compact drill pair (design-language §1) — one copy;
+   Preferences, Agents, Board, Files and GitPanel reference it by name. */
+@keyframes drill-in-right { from { transform: translateX(40%); } to { transform: none; } }
+@keyframes drill-in-left  { from { transform: translateX(-40%); } to { transform: none; } }
 .appear { animation: fade-in var(--t-fast) ease-out; }
 .appear-rise { animation: rise-in var(--t-move) ease-out; }
 .appear-pop { animation: pop-in var(--t-fast) ease-out; }
 .state-ctl { transition: border-color var(--t-fast), background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast), opacity var(--t-fast); }
 @media (prefers-reduced-motion: reduce) {
   .chev, .flip, .state-ctl { transition: none; }
-  .appear, .appear-rise, .appear-pop, .side-scrim, .to-tail.news::after { animation: none; }
+  .appear, .appear-rise, .appear-pop, .side-scrim, .to-tail, .to-tail.news::after { animation: none; }
 }
 
 /* ── iOS/macOS-style CONTINUOUS corners, app-wide ─────────────────────────
