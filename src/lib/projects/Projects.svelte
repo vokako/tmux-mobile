@@ -16,6 +16,8 @@
   } from '../core/ws.ts';
   import type { TmuxPane } from '../core/ws.ts';
   import type { ProjectRow } from './projects.ts';
+  import { flip } from 'svelte/animate';
+  import { moveMs } from '../ui/motion.ts';
   import { ageLabel, declaredWindowChips, liveWindowChips, shortPath, sortRows } from './projects.ts';
   import Icon from '../ui/Icon.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
@@ -182,7 +184,7 @@
         <span class="side-h-inline">{t('projects')}<span class="group-count">{sorted.length}</span></span>
       {:else}
         <button class="group-toggle" onclick={() => collapsed = !collapsed} aria-expanded={!collapsed}>
-          <Icon name={collapsed ? 'chevron-right' : 'chevron-down'} size={12} />
+          <span class="chev" class:open={!collapsed}><Icon name="chevron-right" size={12} /></span>
           {t('projects')}
           <span class="group-count">{sorted.length}</span>
         </button>
@@ -190,10 +192,15 @@
     </div>
 
     {#if !collapsed}
+      <!-- Keyed + animate:flip (motion.md): `sortRows` ranks live projects
+           first, so a project going up or down changes rank and its card
+           MOVES there instead of every card repainting. A card fades in when
+           it mounts (a new project, or the section expanding). -->
       {#each sorted as row (row.project.id)}
         {@const chips = chipsFor(row)}
-        <div class="proj" class:live={row.live}
+        <div class="proj appear" class:live={row.live}
           class:open={dense && !!activeTarget && activeTarget.startsWith(row.project.session + ':')}
+          animate:flip={{ duration: moveMs() }}
           role="group" aria-label={row.project.name}
           oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), row); }}
           use:longpress={{ onlongpress: (pt) => openCtx(pt, row) }}>
@@ -270,7 +277,7 @@
       {/each}
 
       {#if error}
-        <div class="err">{error}</div>
+        <div class="err appear">{error}</div>
       {/if}
     {/if}
   </section>
@@ -376,6 +383,8 @@
     display: flex; flex-direction: column; gap: 6px;
     background: var(--surface); border: 1px solid var(--border);
     border-radius: var(--ui-radius-panel, 8px); padding: 7px 8px;
+    /* Border (live), background (dense hover / open wash) cross-fade. */
+    transition: border-color var(--t-fast), background var(--t-fast);
   }
   .proj.live { border-color: var(--accent-bg); }
   .proj-top { display: flex; align-items: stretch; gap: 6px; }
@@ -386,6 +395,8 @@
   .dot {
     flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; margin-top: 5px;
     background: var(--border2);
+    /* A state dot changes COLOUR, never opacity (design-language.md §1). */
+    transition: background var(--t-fast), box-shadow var(--t-fast);
   }
   .dot.on { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
   .body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -403,6 +414,7 @@
     display: flex; flex-wrap: wrap; gap: 4px;
     padding-left: 15px;
   }
+  .wins { transition: opacity var(--t-move); }
   .wins.dim { opacity: 0.65; }
   .win {
     display: inline-flex; align-items: center; gap: 4px;
