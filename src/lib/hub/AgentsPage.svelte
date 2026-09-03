@@ -496,8 +496,8 @@
         </div>
       </div>
       <div class="editor">
-        {#if error}<div class="err">{error}</div>{/if}
-        {#if info}<p class="hint">{info}</p>{/if}
+        {#if error}<div class="err appear">{error}</div>{/if}
+        {#if info}<p class="hint appear">{info}</p>{/if}
         <label>{t('agentsName')}
           <input bind:value={editingSkill.name} disabled={!skillIsNew} placeholder="git-review" />
         </label>
@@ -562,7 +562,7 @@
         </div>
       </div>
       <div class="editor">
-        {#if error}<div class="err">{error}</div>{/if}
+        {#if error}<div class="err appear">{error}</div>{/if}
         <label>{t('agentsName')}
           <input bind:value={editingMcp.name} disabled={!mcpIsNew} placeholder="files" />
         </label>
@@ -584,7 +584,7 @@
         </div>
       </div>
       <div class="editor">
-        {#if error}<div class="err">{error}</div>{/if}
+        {#if error}<div class="err appear">{error}</div>{/if}
         <label>{t('teamsName')}
           <input bind:value={editingTeam.name} disabled={!teamIsNew} placeholder="dev-squad" />
         </label>
@@ -676,7 +676,7 @@
         </div>
       </div>
       <div class="editor">
-        {#if error}<div class="err">{error}</div>{/if}
+        {#if error}<div class="err appear">{error}</div>{/if}
 
         <label>{t('agentsName')}
           <input bind:value={editing.name} disabled={!isNew} placeholder="reviewer" />
@@ -716,7 +716,7 @@
           <button class="pick" class:sel={editing.can_hire} type="button"
             aria-pressed={editing.can_hire} title={t('agentsManagerHint')}
             onclick={() => editing.can_hire = !editing.can_hire}>
-            <Icon name={editing.can_hire ? 'check' : 'bot'} size={11} /><span class="m-badge">M</span>{t('agentsManager')}
+            {#key editing.can_hire}<span class="pick-glyph appear-pop"><Icon name={editing.can_hire ? 'check' : 'bot'} size={11} /></span>{/key}<span class="m-badge">M</span>{t('agentsManager')}
           </button>
         </div>
         <label>{t('agentsSystem')}
@@ -875,8 +875,9 @@
     display: flex; align-items: center; gap: 5px;
     background: var(--surface); border: 1px solid var(--border); border-radius: 999px;
     color: var(--text2); padding: 4px 10px; font-size: var(--fs-ui); cursor: pointer;
-    transition: border-color var(--t-fast), color var(--t-fast);
+    transition: border-color var(--t-fast), color var(--t-fast), background var(--t-fast);
   }
+  .pick-glyph { display: inline-flex; }
   .pick:hover { border-color: var(--input-border); }
   .pick.sel { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
   .md-preview { border-top: 1px solid var(--border2); margin-top: 6px; display: flex; flex-direction: column; gap: 8px; }

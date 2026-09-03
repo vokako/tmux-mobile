@@ -17,10 +17,20 @@
 
   let url = $state('');
   let failed = $state(false);
+  // The picture fades in once its bytes are there (motion.md: an image that
+  // pops from blank to painted is a cut the eye notices). `onload` sets it; a
+  // CACHED image can be complete before the handler is wired, so the effect
+  // below reads `complete` too. Reset per src.
+  let loaded = $state(false);
+  let imgEl = $state(null);
+  $effect(() => {
+    if (imgEl?.complete && imgEl.naturalWidth > 0) loaded = true;
+  });
 
   $effect(() => {
     const ref = src;
     failed = false;
+    loaded = false;
     if (!ref) { url = ''; return; }
     if (isDirectUrl(ref)) { url = ref; return; }
     url = '';
@@ -39,11 +49,11 @@
          2026-08-27: "注意图片查看是在我应用内的，不是说我点击图片去下载了一个
          图片"). The button can only open the Lightbox. -->
     <button class="ci-link" aria-label={alt || 'image'} onclick={() => onview(url)}>
-      <img class="ci" {alt} src={url} loading="lazy" onerror={() => failed = true} />
+      <img class="ci" class:loaded {alt} src={url} loading="lazy" bind:this={imgEl} onload={() => loaded = true} onerror={() => failed = true} />
     </button>
   {:else}
     <a class="ci-link" href={url} target="_blank" rel="noopener">
-      <img class="ci" {alt} src={url} loading="lazy" onerror={() => failed = true} />
+      <img class="ci" class:loaded {alt} src={url} loading="lazy" bind:this={imgEl} onload={() => loaded = true} onerror={() => failed = true} />
     </a>
   {/if}
 {:else}
@@ -60,11 +70,16 @@
     display: block; max-width: min(100%, 300px); max-height: 180px; width: auto; height: auto;
     border-radius: var(--ui-radius-control); border: 1px solid var(--border2); background: var(--surface2);
     cursor: zoom-in;
+    /* Fades in when loaded — opacity only, the box is already its size. */
+    opacity: 0; transition: opacity var(--t-move) ease-out;
   }
+  .ci.loaded { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { .ci { transition: none; } }
   .ci-ref {
     display: inline-block; font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub);
     color: var(--text3); border: 1px dashed var(--border); border-radius: 7px; padding: 4px 8px;
     max-width: 100%; overflow-wrap: anywhere;
+    transition: color var(--t-fast), border-color var(--t-fast);
   }
   .ci-ref.failed { color: var(--status-warn); border-color: var(--status-warn); }
 </style>
