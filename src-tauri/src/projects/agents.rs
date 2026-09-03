@@ -362,8 +362,9 @@ mod tests {
     fn without_an_id_we_resume_this_directory_where_the_cli_can() {
         assert_eq!(launch_line("kiro", None).as_deref(), Some("kiro-cli chat --resume"));
         assert_eq!(launch_line("claude", None).as_deref(), Some("claude --continue"));
-        // codex --last is machine-wide, so no id means a clean start rather
-        // than somebody else's conversation.
+        // The generic path shares ~/.codex: --last could cross projects, so
+        // no id means a clean start. Managed recipes use isolated CODEX_HOME
+        // and may safely use cwd-filtered `resume --last` (spawn.rs).
         assert_eq!(launch_line("codex", None).as_deref(), Some("codex"));
         assert_eq!(launch_line("kimi", None).as_deref(), Some("kimi"));
         assert_eq!(launch_line("kimi", Some("x")).as_deref(), Some("kimi"), "no resume flags known");

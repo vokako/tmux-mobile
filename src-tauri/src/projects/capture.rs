@@ -121,7 +121,21 @@ pub fn relative_cwd(cwd: &str, project_path: &str) -> String {
 /// Pure on purpose: every rule that decides what gets remembered is testable
 /// without a tmux server.
 pub fn merge(existing: &[Slot], observed: &[Observed], now: u64, settle_secs: u64) -> Merge {
-    let mut slots = Vec::with_capacity(observed.len());
+    merge_preserving(existing, observed, now, settle_secs, &std::collections::HashSet::new())
+}
+
+/// Fold while retaining named slots that deliberately outlive their window.
+/// The production caller supplies managed-agent names (their isolated homes
+/// are durable membership); ordinary shells and hand-started agents still
+/// obey the disappearance rule.
+pub fn merge_preserving(
+    existing: &[Slot],
+    observed: &[Observed],
+    now: u64,
+    settle_secs: u64,
+    keep_missing: &std::collections::HashSet<String>,
+) -> Merge {
+    let mut slots = Vec::with_capacity(observed.len() + keep_missing.len());
     let mut dirty = false;
 
     // A window's identity in the declaration IS its name (`up` matches by
@@ -190,9 +204,20 @@ pub fn merge(existing: &[Slot], observed: &[Observed], now: u64, settle_secs: u6
 
     for prev in existing {
         if !observed.iter().any(|o| o.window_name == prev.window_name) {
-            // A window that is gone simply leaves the declaration: it is no
-            // longer part of the workspace, so `up` must not recreate it.
-            dirty = true;
+            if keep_missing.contains(&prev.window_name) {
+                let mut kept = prev.clone();
+                let ord = slots.len() as i64;
+                if kept.ord != ord {
+                    kept.ord = ord;
+                    dirty = true;
+                }
+                slots.push(kept);
+            } else {
+                // An ordinary window that is gone simply leaves the
+                // declaration. Managed agents are the exception above: Stop
+                // pauses them, and Remove explicitly drops slot + home.
+                dirty = true;
+            }
         }
     }
 
@@ -291,6 +316,22 @@ mod tests {
             assert!(gone.slots.is_empty(), "up must not recreate a window you closed");
             assert!(gone.dirty);
         }
+    }
+
+    #[test]
+    fn a_stopped_managed_agent_keeps_its_slot_and_conversation() {
+        let mut agent = slot("claude", 2, 1_000, Some(1_120));
+        agent.kind = SlotKind::Agent;
+        agent.command = Some("claude".into());
+        agent.auto_run = true;
+        agent.agent_session_id = Some("conv-1".into());
+        let keep = std::collections::HashSet::from(["claude".to_string()]);
+
+        let stopped = merge_preserving(&[agent], &[], 1_300, 120, &keep);
+        assert_eq!(stopped.slots.len(), 1, "Stop pauses; only Remove ejects");
+        assert_eq!(stopped.slots[0].agent_session_id.as_deref(), Some("conv-1"));
+        assert_eq!(stopped.slots[0].ord, 0, "kept slots follow live windows");
+        assert!(stopped.dirty, "the normalized order must be persisted");
     }
 
     #[test]

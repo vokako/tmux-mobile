@@ -188,9 +188,11 @@ through `retarget` (pure, tested — only an exact session-name prefix moves, so
 **A window must survive `SETTLE_SECS` (120 s) before it becomes restorable.**
 The window you opened to grep one file and closed again must not reappear on
 every future `up`. Unsettled slots are still persisted — `first_seen_at` has to
-survive a server restart — but `up` skips them and the UI does not show them as
-windows it will restore. A window that disappears simply leaves the declaration:
-it is not part of the workspace any more.
+survive a server restart — but `up` skips them until they settle. An ordinary
+window that disappears simply leaves the declaration: it is not part of the
+workspace any more. A **managed agent is the deliberate exception**: its
+isolated home proves durable membership, so Stop removes only the window while
+capture retains the slot and conversation id; Remove explicitly deletes both.
 
 There is no history beyond that, on purpose. **The declaration IS the last
 observed state** — closing a project does not touch it (capture only reads live
@@ -230,20 +232,25 @@ conversation** it was in and `up` resumes it.
 
 Flags come from the installed CLIs' own `--help`, not from memory:
 
-| backend | exact conversation | newest in this directory |
+| backend | exact conversation | managed-home fallback when id is missing |
 |---|---|---|
 | kiro | `kiro-cli chat --resume-id <id>` | `kiro-cli chat --resume` |
 | claude | `claude --resume <id>` | `claude --continue` |
-| codex | `codex resume <id>` | — (see below) |
+| codex | `codex resume <id>` | `codex resume --last` |
+| grok | `grok --resume <id>` | `grok --continue` |
 
-`agents::launch_line` picks in that order: exact id → directory resume → clean
-start. Two decisions inside it are deliberate:
+The managed path (`spawn::relaunch_line`) picks exact id first, then recent in
+the agent's isolated home. `codex resume --last` is safe **only there**:
+`CODEX_HOME` belongs to one managed agent and Codex filters `--last` by cwd, so
+it cannot reopen another project's conversation. The generic
+`agents::launch_line` path uses shared `~/.codex` and deliberately starts Codex
+clean without an id; there `--last` could cross projects. Kimi/openclaw still
+get no resume flags because their dialects are unverified.
 
-- **`codex resume --last` is not used.** It continues the most recent recorded
-  session *machine-wide*, not per directory, so restoring project A could reopen
-  project B's conversation. Without a recorded id, codex starts fresh.
-- **kimi and openclaw get no resume flags** because theirs are unverified here.
-  Relaunching clean is honest; guessing a flag is not.
+The recent fallback is not cosmetic: hooks update the in-process id immediately,
+but capture reaches `state.db` only every 20 seconds. Restarting inside that
+window — or starting an agent whose slot was not settled yet — must resume the
+isolated home's newest cwd conversation rather than open blank.
 
 Where the id comes from: the agent lifecycle hooks already carry `session_id`
 (`agent_notifications.rs` has been normalising it into `agent_session_id` all
@@ -255,11 +262,10 @@ declares an `AgentSessions` trait and the hub implements it.
 
 The stamp is **sticky**. A hook only reports at the end of a turn, so an
 observation without an id must not erase what we know; a *different* id replaces
-it, and a window that stops being an agent drops it.
-
-Known edge: a slot has no id until a hook fires while the project is tracked. An
-agent that has been idle since the server started falls back to the
-directory-scoped resume — correct for kiro and claude, a clean start for codex.
+it, and a live window that stops being an agent drops it. Stop is different:
+the managed home remains, so capture keeps the absent agent slot and its last
+exact id. If no id was captured yet, the isolated-home fallback above resumes
+the newest cwd conversation.
 
 ## Storage
 
@@ -346,13 +352,13 @@ Each entry is a decision with the reason it was made; treat them as normative. T
 
 a project (`state.db`, `src-tauri/src/projects/`) is a directory + the windows it is made of; the tmux session is a disposable projection.
 
-**Every session is a project**: `auto_adopt_once` on the capture tick adopts anything untracked (that is also the migration for pre-existing sessions), guarded by a 120 s session age, the `tmm-team-` prefix (Team owns those), and "archived is never re-adopted". There is ONE create path — the `+` calls `project_create` + `project_up`, and its agent presets seed an agent slot rather than a raw command, because a shell command is observed-only and never replayed. `up` matches windows BY NAME and only creates what is missing (the session may be the one you're typing in), `down` kills the session and keeps the declaration, and the capture loop folds live tmux back in — nobody hand-writes a project. One rule keeps it honest: a window must survive 120 s to become restorable, and a vanished window just leaves the declaration. There is NO topology history — the declaration is the last observed state, which is what "restore what I had before closing/rebooting" means; a 20-deep snapshot list was removed as dead weight (its `restore` rewrote the declaration without projecting it, so a live project's next capture tick undid it).
+**Every session is a project**: `auto_adopt_once` on the capture tick adopts anything untracked (that is also the migration for pre-existing sessions), guarded by a 120 s session age, the `tmm-team-` prefix (Team owns those), and "archived is never re-adopted". There is ONE create path — the `+` calls `project_create` + `project_up`, and its agent presets seed an agent slot rather than a raw command, because a shell command is observed-only and never replayed. `up` matches windows BY NAME and only creates what is missing (the session may be the one you're typing in), `down` kills the session and keeps the declaration, and the capture loop folds live tmux back in — nobody hand-writes a project. One rule keeps it honest: a window must survive 120 s to become restorable, and an ordinary vanished window leaves the declaration; a managed agent's isolated home is durable membership, so Stop retains its absent slot/session id and only Remove ejects it. There is NO topology history — the declaration is the last observed state, which is what "restore what I had before closing/rebooting" means; a 20-deep snapshot list was removed as dead weight (its `restore` rewrote the declaration without projecting it, so a live project's next capture tick undid it).
 
 **Identity is the SESSION, not the path** — several sessions parked in `$HOME` is normal, so `UNIQUE` sits on `session`; the workspace dir comes from `pick_workspace` over ALL windows (most frequent, `$HOME` only as a last resort), never from the focused pane. Migrations MUST `PRAGMA foreign_keys=OFF`: libsqlite3-sys defaults them ON, so a table rebuild's `DROP TABLE` cascades the children away. Only agent slots are relaunched: an observed `npm run dev` is recorded, never replayed. `projects/agents.rs` is ONE table for detection and relaunch so they cannot disagree (earliest match in the pane text wins — a later match is a subprocess); for MANAGED windows `detect_managed` reads the backend off the launch recipe FIRST, because the sniff lies for our own spawns — the npm codex runs as `node` with nothing saying "codex" anywhere, so a spawned codex fell out of delivery/roster/vitals/recovery until the record beat the sniff (measured 2026-08-22). And there is ONE way to ask about a pane — `agents::detect_pane(ws, &pane)` over `agents::pane_text` (command, title, window name, child argv, shallow → deep) — because seven call sites used to assemble that haystack by hand and one did it differently (the capturer read `child_cmd` and not the window name; the roster, delivery, vitals and recovery read the window name and not `child_cmd`), so the declaration and the roster could disagree about whether the same window was an agent (2026-09-03 review).
 
-**An agent resumes its conversation, not a blank prompt**: the notify hooks already carry `session_id`, the hub keeps the last one per tmux window, the capturer stamps it onto the slot (sticky — a quiet cycle must not erase it), and `up` prefers `--resume-id`/`--resume <id>`/`codex resume <id>`/`grok --resume <id>` over the directory-scoped `kiro-cli chat --resume` / `claude --continue`.
+**An agent resumes its conversation, not a blank prompt**: the notify hooks already carry `session_id`, the hub keeps the last one per tmux window, the capturer stamps it onto the slot (sticky — a quiet cycle must not erase it), and managed `up` prefers `--resume-id`/`--resume <id>`/`codex resume <id>`/`grok --resume <id>`. If the exact id has not reached `state.db` before the 20-second capture tick, the isolated-home fallback is `kiro-cli chat --resume` / `claude --continue` / `grok --continue` / `codex resume --last`; the Codex form is safe only here because CODEX_HOME is per-agent and `--last` is cwd-filtered, while the generic shared-home path still starts clean.
 
-**A managed agent restarts with its FULL identity**: `spawn` persists a launch recipe (`launch.json` in the isolated home: env + identity command, kick stripped) and the restart path replays it (`spawn::relaunch_line`, used by `reconcile::slot_command_in`); `refresh_hooks` backfills the recipe for pre-recipe kiro agents. Without the recipe the restart ran the bare backend line — no KIRO_HOME, no `--agent` — i.e. the user-space config whose hooks NEVER fire, so a restarted agent kept answering but went observably deaf: no tool rows, no auto-post, every delivery "unconfirmed" (owner report 2026-08-18). `codex resume --last` is banned: it is machine-wide, so it would reopen another project's conversation. Desktop-only, `rusqlite` gate == `mod projects` gate; `team.db` stays the agora bus. See `docs/design-docs/features/projects.md`.
+**A managed agent restarts with its FULL identity**: `spawn` persists a launch recipe (`launch.json` in the isolated home: env + identity command, kick stripped) and the restart path replays it (`spawn::relaunch_line`, used by `reconcile::slot_command_in`); `refresh_hooks` backfills the recipe for pre-recipe kiro agents. Without the recipe the restart ran the bare backend line — no KIRO_HOME, no `--agent` — i.e. the user-space config whose hooks NEVER fire, so a restarted agent kept answering but went observably deaf: no tool rows, no auto-post, every delivery "unconfirmed" (owner report 2026-08-18). A restart whose slot is absent/unsettled goes through spawn's explicit `resume` mode, so re-rendering current config does not turn Start into a new conversation. Desktop-only, `rusqlite` gate == `mod projects` gate; `team.db` stays the agora bus. See `docs/design-docs/features/projects.md`.
 
 ### A project is named by its NAME, never by its folder
 

@@ -620,8 +620,8 @@ model, hooks fired, `tmm done` posted, state derived):
   fails on any real config ("expected nothing") and the catalog silently
   vanished. `[folder_trust] enabled = false` keeps the TUI from parking at
   a trust prompt nobody can see.
-- **Resume**: `--continue` is cwd-scoped (safe, unlike codex `--last`);
-  `--resume <id>` exact, id from the hooks' `sessionId`.
+- **Resume**: `--continue` is cwd-scoped; `--resume <id>` is exact, id from
+  the hooks' `sessionId`. Managed homes always use one of them on restart.
 - **Models**: `grok models` enumerates (bullet list, `*` marks the default),
   so grok ids validate like kiro's; custom models appear by name.
 - **Vitals**: its own dialect — a header line ends in the context RATIO
@@ -751,11 +751,14 @@ The owner asked for claude/codex/grok to match kiro's feature set ("都要和kir
   EMPTY reading on purpose: the CLI is not installed here, its furniture
   cannot be measured, and the old `_ => sniff_kiro` fallback read its pane
   with the wrong grammar.
-- **Resume**: managed codex restarts now resume — `relaunch_line` splices the
+- **Resume**: managed codex restarts resume — `relaunch_line` splices the
   SUBCOMMAND in (`command codex resume <id> <flags>`; verified that `resume`
   accepts the recipe's own flags). Appending like the flag backends would
-  have handed `resume` to the CLI as a prompt. Still never `--last`
-  (machine-wide).
+  have handed `resume` to the CLI as a prompt. If the exact id has not reached
+  `state.db` yet, the managed path uses `codex resume --last`: that is safe
+  here because this agent has its own CODEX_HOME and Codex filters `--last` by
+  cwd. The generic/shared `~/.codex` path still never uses `--last`, because it
+  could select another project.
 - **Palette**: per-backend command tables — see the slash-command section.
 - **Not aligned, with reasons** (also in `docs/unresolved.md`): claude vitals
   and palette (the CLI is installed and on Bedrock since later that day — see

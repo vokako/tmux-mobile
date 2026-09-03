@@ -719,7 +719,7 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
             }
             if !resumed {
                 let r = crate::projects::spawn::spawn(&crate::projects::spawn::SpawnRequest {
-                    session, agent, brief: "", by: "", ..Default::default()
+                    session, agent, brief: "", by: "", resume: true, ..Default::default()
                 });
                 if let Err(e) = r {
                     return Response::err(id, ERR_INTERNAL, format!("restart failed: {e}"));

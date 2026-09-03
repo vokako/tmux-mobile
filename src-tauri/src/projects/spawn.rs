@@ -52,11 +52,18 @@ pub struct SpawnRequest<'a> {
     /// The team this spawn belongs to; recorded in the launch recipe so the
     /// Hub can group the cards.
     pub team: Option<String>,
+    /// Restart fallback for a managed home whose slot is not currently
+    /// restorable. Normal hires start fresh; Start/Restart resumes this
+    /// isolated home's newest cwd conversation.
+    pub resume: bool,
 }
 
 impl Default for SpawnRequest<'_> {
     fn default() -> Self {
-        SpawnRequest { session: "", agent: "", brief: "", by: "", def: None, window_name: None, team: None }
+        SpawnRequest {
+            session: "", agent: "", brief: "", by: "", def: None,
+            window_name: None, team: None, resume: false,
+        }
     }
 }
 
@@ -175,10 +182,10 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
         .join(" ");
     // The launch line ends with the first prompt ONLY when a brief gave us
     // something for the agent to act on; otherwise the CLI opens and waits.
-    let launch_cmd = match first_prompt(req.brief) {
-        Some(p) => format!("{} {}", prepared.cmd, shared::shell_quote(&p)),
-        None => prepared.cmd.clone(),
-    };
+    // Restart fallback is different from a new hire: its isolated home already
+    // owns the conversation, so resume recent even when the slot/exact id raced
+    // the capture tick.
+    let launch_cmd = launch_command(&prepared.cmd, &def.backend, req.brief, req.resume);
     let full = format!("{} {}", prefix, launch_cmd);
     // NEVER send the full line via send-keys — see team/launch.rs: tty shims
     // swallow bursts ≳2KB. Source a script instead.
@@ -253,6 +260,7 @@ pub fn spawn_team(session: &str, team_name: &str, brief: &str, by: &str) -> Resu
                 def: Some(def),
                 window_name: Some(w.clone()),
                 team: Some(path.clone()),
+                resume: false,
             })
         });
         match result {
@@ -296,35 +304,47 @@ fn write_launch_recipe(home: &Path, backend: &str, env: &[(String, String)], cmd
     .map_err(|e| format!("write launch recipe {}: {e}", home.join("launch.json").display()))
 }
 
-/// The full relaunch line for a managed agent: recipe env + identity command +
-/// the backend's resume flag for the recorded conversation. `None` when this
-/// window has no recipe (a hand-started window, or a pre-recipe spawn).
+/// Add the backend's exact or safe-recent resume dialect to one persisted
+/// identity command. The caller separately replays the recipe environment.
+fn resume_command(cmd: &str, backend: &str, session_id: Option<&str>) -> String {
+    let exact = session_id.filter(|s| !s.is_empty());
+    match (backend, exact) {
+        ("kiro", Some(id)) => format!("{cmd} --resume-id {}", shared::shell_quote(id)),
+        ("claude" | "grok", Some(id)) => {
+            format!("{cmd} --resume {}", shared::shell_quote(id))
+        }
+        // codex's resume is a SUBCOMMAND, so it splices in after the binary
+        // instead of appending: `codex resume <id> <flags>`. The managed
+        // CODEX_HOME belongs to this one agent and `--last` is cwd-filtered,
+        // so the recent fallback cannot cross into another project/session.
+        ("codex", id) => match cmd.strip_prefix("command codex ") {
+            Some(rest) => {
+                let which = id
+                    .map(shared::shell_quote)
+                    .unwrap_or_else(|| "--last".to_string());
+                format!("command codex resume {which} {rest}")
+            }
+            // An unexpected recipe shape: relaunch without resume rather than
+            // guess at where the subcommand goes.
+            None => cmd.to_string(),
+        },
+        // The other three managed homes are isolated too; their native recent
+        // flags are cwd-scoped. This closes the window before the 20s capture
+        // tick has persisted an exact session id.
+        ("kiro", None) => format!("{cmd} --resume"),
+        ("claude" | "grok", None) => format!("{cmd} --continue"),
+        _ => cmd.to_string(),
+    }
+}
+
+/// Replay the persisted identity (env + backend command), preferring an exact
+/// conversation id and otherwise the isolated home's newest cwd conversation.
 pub fn relaunch_line(project_path: &str, window_name: &str, session_id: Option<&str>) -> Option<String> {
     let home = agent_home(project_path, window_name);
     let recipe: Value = serde_json::from_str(&std::fs::read_to_string(home.join("launch.json")).ok()?).ok()?;
-    let cmd = recipe.get("cmd")?.as_str()?.to_string();
+    let cmd = recipe.get("cmd")?.as_str()?;
     let backend = recipe.get("backend").and_then(|b| b.as_str()).unwrap_or("");
-    let cmd = match session_id.filter(|s| !s.is_empty()) {
-        Some(id) => match backend {
-            "kiro" => format!("{cmd} --resume-id {}", shared::shell_quote(id)),
-            "claude" => format!("{cmd} --resume {}", shared::shell_quote(id)),
-            "grok" => format!("{cmd} --resume {}", shared::shell_quote(id)),
-            // codex's resume is a SUBCOMMAND, so it splices in after the
-            // binary instead of appending: `codex resume <id> <flags>`.
-            // Verified on codex-cli 0.148.0 that `resume` accepts the same
-            // flags render_codex bakes into the recipe (-c overrides,
-            // --model, --dangerously-bypass-*). Never `--last`: that is
-            // machine-wide and could reopen another project's conversation.
-            "codex" => match cmd.strip_prefix("command codex ") {
-                Some(rest) => format!("command codex resume {} {rest}", shared::shell_quote(id)),
-                // An unexpected recipe shape: relaunch without resume rather
-                // than guess at where the subcommand goes.
-                None => cmd,
-            },
-            _ => cmd,
-        },
-        None => cmd,
-    };
+    let cmd = resume_command(cmd, backend, session_id);
     let env = recipe.get("env").and_then(|e| e.as_array()).map(|arr| {
         arr.iter()
             .filter_map(|kv| Some((kv.get(0)?.as_str()?, kv.get(1)?.as_str()?)))
@@ -363,9 +383,35 @@ fn first_prompt(brief: &str) -> Option<String> {
     Some(format!("[{}] {brief}", chrono::Local::now().format("%Y-%m-%d %H:%M")))
 }
 
+fn launch_command(identity_cmd: &str, backend: &str, brief: &str, resume: bool) -> String {
+    let identity_cmd = if resume {
+        resume_command(identity_cmd, backend, None)
+    } else {
+        identity_cmd.to_string()
+    };
+    match first_prompt(brief) {
+        Some(p) => format!("{} {}", identity_cmd, shared::shell_quote(&p)),
+        None => identity_cmd,
+    }
+}
+
 #[cfg(test)]
 mod relaunch_tests {
     use super::*;
+
+    #[test]
+    fn restart_spawn_resumes_but_a_new_hire_starts_fresh() {
+        let cmd = "command claude --settings /tmp/settings.json";
+        assert_eq!(launch_command(cmd, "claude", "", false), cmd);
+        assert_eq!(
+            launch_command(cmd, "claude", "", true),
+            "command claude --settings /tmp/settings.json --continue"
+        );
+        assert_eq!(
+            launch_command("command codex -c a=b", "codex", "", true),
+            "command codex resume --last -c a=b"
+        );
+    }
 
     #[test]
     fn relaunch_line_replays_env_identity_and_resume() {
@@ -392,12 +438,27 @@ mod relaunch_tests {
             "command kiro-cli chat --agent lead --model m --trust-all-tools",
             "",
         );
-        // No recorded conversation → plain identity relaunch, no resume flag.
-        let fresh = relaunch_line(ws.to_str().unwrap(), "lead", None).unwrap();
-        assert!(!fresh.contains("--resume"), "{fresh}");
+        // No recorded conversation yet: the managed home is isolated to this
+        // one agent, so relaunch the newest conversation instead of opening a
+        // blank prompt while the 20s capture tick catches up.
+        let recent = relaunch_line(ws.to_str().unwrap(), "lead", None).unwrap();
+        assert!(recent.ends_with("--resume"), "managed kiro resumes recent: {recent}");
         // A window with no recipe (hand-started) stays None — the caller falls
         // back to the generic backend line.
         assert!(relaunch_line(ws.to_str().unwrap(), "byhand", None).is_none());
+
+        for (name, backend, cmd, flag) in [
+            ("cl", "claude", "command claude --settings /tmp/settings.json", "--continue"),
+            ("gx", "grok", "command grok --always-approve --agent gx", "--continue"),
+        ] {
+            let ahome = agent_home(ws.to_str().unwrap(), name);
+            std::fs::create_dir_all(&ahome).unwrap();
+            write_launch_recipe(&ahome, backend, &[], cmd, "", None).unwrap();
+            let exact = relaunch_line(ws.to_str().unwrap(), name, Some("conv-1")).unwrap();
+            assert!(exact.ends_with("--resume conv-1"), "{backend} exact resume: {exact}");
+            let recent = relaunch_line(ws.to_str().unwrap(), name, None).unwrap();
+            assert!(recent.ends_with(flag), "{backend} recent resume: {recent}");
+        }
 
         // codex resumes via a SUBCOMMAND, so the id splices in after the
         // binary instead of appending (verified on codex-cli 0.148.0:
@@ -416,8 +477,11 @@ mod relaunch_tests {
             cx.contains("command codex resume 01a0-abc -c a=b --dangerously-bypass-approvals-and-sandbox"),
             "subcommand splice: {cx}"
         );
-        let cx_fresh = relaunch_line(ws.to_str().unwrap(), "cx", None).unwrap();
-        assert!(!cx_fresh.contains("resume"), "{cx_fresh}");
+        let cx_recent = relaunch_line(ws.to_str().unwrap(), "cx", None).unwrap();
+        assert!(
+            cx_recent.contains("command codex resume --last -c a=b --dangerously-bypass-approvals-and-sandbox"),
+            "isolated CODEX_HOME can safely resume its last cwd session: {cx_recent}"
+        );
         std::fs::remove_dir_all(&ws).ok();
     }
 }

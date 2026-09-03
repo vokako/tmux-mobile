@@ -1382,14 +1382,14 @@ pub fn capture_once() -> Result<Vec<String>, String> {
 
     // Phase 1 — no lock: which declared sessions are live, and what tmux shows.
     let mut seen: Vec<String> = Vec::new();
-    let mut observed: Vec<(String, Vec<capture::Observed>)> = Vec::new();
+    let mut observed: Vec<(String, String, Vec<capture::Observed>)> = Vec::new();
     for project in projects {
         if !tmux::session_exists(&project.session) {
             continue;
         }
         seen.push(project.id.clone());
         match capture::observe(&project.session, &project.path, sessions) {
-            Ok(o) => observed.push((project.id, o)),
+            Ok(o) => observed.push((project.id, project.path, o)),
             Err(_) => {} // session vanished mid-scan; next tick retries
         }
     }
@@ -1400,14 +1400,29 @@ pub fn capture_once() -> Result<Vec<String>, String> {
             store.mark_seen(id, ts)?;
         }
         let mut touched = Vec::new();
-        for (id, observed) in observed {
+        for (id, path, observed) in observed {
             // Deleted between the phases: nothing to fold into, and inserting
             // slots for a vanished project would fail the whole tick.
             if store.project(&id)?.is_none() {
                 continue;
             }
             let existing = store.slots(&id)?;
-            let merged = capture::merge(&existing, &observed, ts, capture::SETTLE_SECS);
+            // Stop is a pause for managed agents: their isolated home is the
+            // durable membership record, so a missing window keeps its slot
+            // and exact conversation id. Remove deletes both explicitly.
+            let keep_missing = existing
+                .iter()
+                .filter(|s| s.kind == store::SlotKind::Agent)
+                .filter(|s| is_managed_in(Some(&path), &s.window_name))
+                .map(|s| s.window_name.clone())
+                .collect();
+            let merged = capture::merge_preserving(
+                &existing,
+                &observed,
+                ts,
+                capture::SETTLE_SECS,
+                &keep_missing,
+            );
             if !merged.dirty {
                 continue;
             }
