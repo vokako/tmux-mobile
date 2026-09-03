@@ -427,3 +427,12 @@ test('the system-vitals corner mounts connected-desktop-only and can never occlu
   assert.ok(!/vitals-inset/u.test(source),
     'the layer-only inset is retired (it missed .page direct children)');
 });
+
+test('a typed address ends the running reconnect loop before it connects (review 2026-09-03)', () => {
+  // onAddress is a NEW intent. Without cancel() first, the machine's next
+  // attempt raced this socket; ws.ts superseded the loser, whose 'connection
+  // timeout' then marked a reachable address unreachable for two minutes.
+  assert.match(source,
+    /onAddress=\{\(address\) => \{[\s\S]{0,400}?reconnectMachine\.cancel\(\);\s*disconnect\(\);\s*connect\(address/u,
+    'cancel → disconnect → connect, in that order');
+});

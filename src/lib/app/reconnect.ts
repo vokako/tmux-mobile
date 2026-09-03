@@ -59,6 +59,13 @@ export function createReconnectMachine(deps: ReconnectDeps) {
   let label = '';
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let watchdog: ReturnType<typeof setTimeout> | null = null;
+  // Loop identity. `reconnecting` says whether SOME loop is running; `gen`
+  // says WHICH. Every async continuation (probe, connect, retry timer,
+  // watchdog) captures the generation it was started under and bails when it
+  // is not the current one — a boolean cannot tell "cancelled" from
+  // "cancelled and restarted", so a superseded chain's late timeout used to
+  // continue the NEW loop's counter and mark a reachable address unreachable.
+  let gen = 0;
 
   function emit() {
     onStateChange({ reconnecting, attempt, label });
@@ -78,8 +85,9 @@ export function createReconnectMachine(deps: ReconnectDeps) {
     // WebSocket hang), force-reset so the user can escape without killing
     // the app.
     if (watchdog) clearTimeoutFn(watchdog);
+    const myGen = gen;
     watchdog = setTimeoutFn(() => {
-      if (!reconnecting) return;
+      if (!reconnecting || gen !== myGen) return;
       debug('reconnect: watchdog fired — force reset');
       reconnecting = false;
       if (retryTimer) clearTimeoutFn(retryTimer);
@@ -99,8 +107,9 @@ export function createReconnectMachine(deps: ReconnectDeps) {
     } catch { return []; }
   }
 
-  async function tryAttempt(n: number): Promise<void> {
-    if (!reconnecting) return;
+  async function tryAttempt(n: number, myGen: number): Promise<void> {
+    const live = () => reconnecting && gen === myGen;
+    if (!live()) return;
     const primary = storage.getItem('tmux_address');
     const token = storage.getItem('tmux_token') || '';
     if (!primary) {
@@ -121,7 +130,7 @@ export function createReconnectMachine(deps: ReconnectDeps) {
       debug(`reconnect: probing ${allAddrs.length} addresses in parallel`);
       try {
         const best = await findBestAddress(allAddrs);
-        if (!reconnecting) return; // cancelled mid-probe
+        if (!live()) return; // cancelled (or restarted) mid-probe
         useAddr = best || allAddrs[0]!;
       } catch {
         useAddr = allAddrs[0]!;
@@ -149,14 +158,14 @@ export function createReconnectMachine(deps: ReconnectDeps) {
     const attemptTimeout = cls === 0 ? 2000 : cls === 1 ? 3000 : 5000;
 
     connect(useAddr, token, attemptTimeout).then(() => {
-      if (!reconnecting) return;
+      if (!live()) return;
       reconnecting = false;
       clearTimers();
       emit();
       debug('reconnect: success');
       onSuccess(useAddr, primary);
     }).catch((e: Error) => {
-      if (!reconnecting) return;
+      if (!live()) return;
       debug(`reconnect: failed (${e.message})`);
       // Reachability failures (timeout / refused, NOT auth errors) feed the
       // same cooldown memory the prober uses, so the next attempts skip
@@ -166,7 +175,7 @@ export function createReconnectMachine(deps: ReconnectDeps) {
       }
       if (n + 1 < maxAttempts) {
         const delay = Math.min(500 * (n + 1), 3000); // tighter backoff since timeouts are short
-        retryTimer = setTimeoutFn(() => { void tryAttempt(n + 1); }, delay);
+        retryTimer = setTimeoutFn(() => { void tryAttempt(n + 1, myGen); }, delay);
       } else {
         debug('reconnect: gave up');
         reconnecting = false;
@@ -178,15 +187,30 @@ export function createReconnectMachine(deps: ReconnectDeps) {
   }
 
   return {
-    /** Begin (or restart) the reconnect loop. Arms the watchdog. */
-    start() {
+    /**
+     * Begin the reconnect loop. Arms the watchdog. A no-op while a loop is
+     * already running: the disconnect callback, a foreground check and a
+     * failed address switch can all fire during one outage, and a second
+     * chain would race the first for the single socket — each superseding
+     * the other's connect(), each timing out, each marking a live address
+     * unreachable. To start over, cancel() first.
+     */
+    start(): boolean {
+      if (reconnecting) {
+        debug('reconnect: start ignored — a loop is already running');
+        return false;
+      }
+      gen++;
       reconnecting = true;
       emit();
       armWatchdog();
-      void tryAttempt(0);
+      void tryAttempt(0, gen);
+      return true;
     },
-    /** User-initiated abort. Resets all internal state and timers. */
+    /** User-initiated abort. Resets all internal state and timers; any
+     *  continuation of the old loop that lands later is discarded. */
     cancel() {
+      gen++;
       reconnecting = false;
       clearTimers();
       emit();

@@ -1523,6 +1523,10 @@
       onAddress={(address) => {
         localStorage.setItem('tmux_address', address);
         activeAddress = address;
+        // A typed address is a NEW intent: end any running reconnect loop
+        // before the direct connect, or its next attempt races this socket
+        // and the loser's timeout marks a reachable address unreachable.
+        reconnectMachine.cancel();
         disconnect();
         connect(address, localStorage.getItem('tmux_token') || '').then(() => {
           serverInfo = { hostname: getHostname() || '', machineId: getMachineId() || '' };

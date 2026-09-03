@@ -65,6 +65,17 @@ Custom WebSocket client (`ws.ts`) with auto-reconnect, pending promise cleanup, 
   recovery through the same one-shot disconnect callback as `onclose`.
   Repeated polling and keypresses cannot start duplicate reconnect loops; a
   deliberate `disconnect()` disables recovery before closing.
+- **One reconnect loop at a time, identified by generation.** `start()` is a
+  no-op while a loop runs (it returns `false`); `cancel()` ends the loop, and
+  every asynchronous continuation — probe, connect, retry timer, watchdog —
+  carries the generation it started under and is discarded when it is not the
+  current one. A boolean `reconnecting` could not tell "cancelled" from
+  "cancelled and restarted", so a superseded chain's late `connection timeout`
+  used to continue the new loop's counter and `noteAddressUnreachable` a
+  reachable address for two minutes (review, 2026-09-03). The disconnect
+  callback, the foreground check and a failed address switch may all call
+  `start()` during one outage; a typed address (`onAddress`) calls `cancel()`
+  first because it is a NEW intent. `reconnect.test.ts` pins both.
 - **Socket identity owns every callback, cipher, and asynchronous send.** A
   replaced socket's late close/message handler is ignored, AES-GCM counters
   live on that socket instead of in module-global state, and all encrypted RPC

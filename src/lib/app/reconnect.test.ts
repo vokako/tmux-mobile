@@ -193,3 +193,52 @@ test('missing stored address gives up immediately', async () => {
   await h.timers.advance(1);
   assert.ok(h.events.some(e => e.gaveUp));
 });
+
+test('start() while a loop is running is a no-op — one chain per outage (review 2026-09-03)', async () => {
+  // The disconnect callback, the foreground check and a failed address switch
+  // can all call start() during one outage. Two chains race for the single
+  // socket: each supersedes the other's connect(), each times out, each marks
+  // a reachable address unreachable.
+  let calls = 0;
+  const h = harness({
+    storage: makeStorage({ tmux_address: 'ws://9.9.9.9:1', tmux_token: 't' }),
+    connectImpl: () => { calls++; return new Promise(() => {}); }, // in flight
+  });
+  assert.equal(h.machine.start(), true);
+  await h.timers.advance(1);
+  assert.equal(h.machine.start(), false, 'the second start is refused');
+  assert.equal(h.machine.start(), false);
+  await h.timers.advance(1);
+  assert.equal(calls, 1, 'exactly one connect in flight');
+  assert.equal(h.events.filter(e => e.reconnecting === true && e.attempt === 1).length, 1, 'no duplicate attempt-1 state');
+});
+
+test('a superseded chain cannot continue a restarted loop or poison the cooldown', async () => {
+  // cancel() → start() is what a typed address (onAddress) does. The OLD
+  // chain's connect is still pending; when ws.ts supersedes its socket it
+  // rejects with 'connection timeout'. A boolean `reconnecting` is true again
+  // by then, so without a generation the old chain would (a) mark the address
+  // unreachable and (b) schedule ITS retry beside the new loop's.
+  const pending: Array<(e: Error) => void> = [];
+  let calls = 0;
+  const h = harness({
+    storage: makeStorage({ tmux_address: 'ws://192.168.1.2:9899', tmux_token: 't' }),
+    connectImpl: () => { calls++; return new Promise((_, rej) => { pending.push(rej); }); },
+    maxAttempts: 5,
+  });
+  h.machine.start();
+  await h.timers.advance(1);          // chain A: attempt 1 in flight
+  h.machine.cancel();
+  h.machine.start();                  // chain B
+  await h.timers.advance(1);          // chain B: attempt 1 in flight
+  assert.equal(calls, 2);
+  pending[0]!(new Error('connection timeout')); // A's late failure
+  await new Promise(r => setTimeout(r, 0));
+  assert.deepEqual(h.unreachable, [], 'the stale failure marks nothing unreachable');
+  await h.timers.advance(5000);       // A's retry, had it been scheduled, would fire here
+  assert.equal(calls, 2, 'no retry from the superseded chain');
+  assert.equal(h.machine.isActive(), true, 'the live chain is untouched');
+  pending[1]!(new Error('connection timeout')); // B's own failure counts
+  await new Promise(r => setTimeout(r, 0));
+  assert.deepEqual(h.unreachable, ['ws://192.168.1.2:9899']);
+});
