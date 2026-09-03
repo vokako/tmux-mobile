@@ -105,7 +105,11 @@
   }
 
   // Dismissal, on everything that means "I moved on": a click elsewhere,
-  // Escape, a scroll under the anchor, a resize.
+  // Escape, a scroll under the anchor, a resize. The scroll listener is a
+  // CAPTURE listener on window, which receives every element's scroll — the
+  // menu's own included — so the list scrolling is excluded explicitly: a
+  // long list (the model catalogue) closed the moment it was scrolled
+  // (review, 2026-09-03).
   $effect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
@@ -132,15 +136,19 @@
         else if (editable && e.key === 'Enter') { hide(); commitTyped(); }
       }
     };
+    const onScroll = (e: Event) => {
+      if (menuEl && e.target instanceof Node && menuEl.contains(e.target)) return;
+      hide();
+    };
     window.addEventListener('pointerdown', onDown, true);
     window.addEventListener('keydown', onKey, true);
     window.addEventListener('resize', hide);
-    window.addEventListener('scroll', hide, true);   // capture: any ancestor
+    window.addEventListener('scroll', onScroll, true);   // capture: any ancestor
     return () => {
       window.removeEventListener('pointerdown', onDown, true);
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('resize', hide);
-      window.removeEventListener('scroll', hide, true);
+      window.removeEventListener('scroll', onScroll, true);
     };
   });
 </script>

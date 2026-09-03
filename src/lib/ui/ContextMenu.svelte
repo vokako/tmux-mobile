@@ -88,17 +88,22 @@
         }
       }
     };
+    // Capture, so a scroll in ANY ancestor closes it — the menu is a fixed layer
+    // and would otherwise stay behind while its subject scrolls away. The
+    // menu's own scroll (a long list under max-height) is not "moving away".
+    const onScroll = (e) => {
+      if (el && e.target instanceof Node && el.contains(e.target)) return;
+      oncancel();
+    };
     window.addEventListener('pointerdown', outside, true);
     window.addEventListener('keydown', onKey, true);
     window.addEventListener('resize', oncancel);
-    // Capture, so a scroll in ANY ancestor closes it — the menu is a fixed layer
-    // and would otherwise stay behind while its subject scrolls away.
-    window.addEventListener('scroll', oncancel, true);
+    window.addEventListener('scroll', onScroll, true);
     return () => {
       window.removeEventListener('pointerdown', outside, true);
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('resize', oncancel);
-      window.removeEventListener('scroll', oncancel, true);
+      window.removeEventListener('scroll', onScroll, true);
     };
   });
 </script>

@@ -176,7 +176,10 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   1px `--border`, `--ui-radius-panel`, shadow, `--ui-font-control` rows;
   invisible until measured. Dismissal set: outside pointerdown, Escape, any
   ancestor scroll, resize — and every transient layer auto-hides after its
-  job (owner rule, 2026-08-22).
+  job (owner rule, 2026-08-22). "Ancestor scroll" is a CAPTURE listener on
+  window, which also hears the layer's own list scrolling — each layer spares
+  itself (a long Select closed the moment it was scrolled; review 2026-09-03;
+  `ui/popover.source.test.ts`).
 - A pick-one over a control that is NOT a field (an icon toggle, a header
   pill) is `ui/ContextMenu` with `checked` on the current row — Select's own
   trailing check, so a menu and a dropdown say "you are here" in one glyph;

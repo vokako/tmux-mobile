@@ -74,3 +74,4 @@ These tests `readFile` the component source and assert with regexes.
 | `hub/Board.source.test.ts` | the issue detail is a draft (explicit save, guarded exits), assignment is one dispatch, the layout hierarchy, sidebar order, notes as a timeline, columns scroll alone |
 | `system/system.source.test.ts` | the vitals corner takes its transport by injection, polls low-frequency and stops while hidden, fails soft, wears tokens |
 | `ui/totail.source.test.ts` | the to-tail atoms live in app.css once; both records wear the shared class |
+| `ui/popover.source.test.ts` | every fixed popover (Select, ContextMenu, PanePicker) dismisses on an outside ancestor scroll but never on its own list scrolling |
