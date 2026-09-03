@@ -274,7 +274,7 @@ button:disabled {
   background: var(--surface); border: 1px solid var(--border);
   color: var(--text2); border-radius: var(--ui-radius-control); padding: 5px 11px;
   font-size: var(--fs-ui); cursor: pointer;
-  transition: border-color var(--t-fast), color var(--t-fast);
+  transition: border-color var(--t-fast), color var(--t-fast), filter var(--t-fast);
   -webkit-tap-highlight-color: transparent;
 }
 .chip-btn:hover { border-color: var(--accent); color: var(--accent); }

@@ -87,7 +87,7 @@ vocabulary.
 | `.appear-pop` | a badge/dot/small chip enters: fade + scale from 0.6 | `--t-fast` |
 | `.state-ctl` | a control's selected/active clothes cross-fade (border, background, colour, inset ring, opacity) | `--t-fast` |
 | `animate:flip={{ duration: moveMs() }}` | a keyed list reorders — the ONE Svelte directive in use (`ui/motion.ts`) | `--t-move` |
-| `.side-scrim` / `.dlg-backdrop` fade-in, sheet `translateY(100%) → none` | sheets rise with a scrim (design-language §1) | `--t-move` |
+| `.side-scrim` / `.dlg-backdrop` fade-in, `sheet-up` (`translateY(100%) → none`, only for a layer whose resting transform is none) | sheets rise with a scrim (design-language §1) | `--t-move` |
 | `drill-in-right` / `drill-in-left`, `slideInLeft/Right` | navigation, touch-only | 120ms linear |
 
 Usage: wrap the `<Icon>` in `<span class="chev" class:open={x}>`; put `.appear*`
@@ -137,7 +137,23 @@ Board same-column cards, sidebar project rows, Sessions rows and MRU chips,
 terminal window chips, git status rows, Team roster chips, rail icons after a
 drag, Settings history rows.
 
-**Deliberately not done**: composer height (JS-measured per keystroke); fold
+**Done 2026-09-03, shell / Settings / ui pass** (App, Preferences, Settings,
+SystemStatus, ConfirmDialog, Select, SideHandle, InstallPrompt, Lightbox,
+app.css atoms): tab bar, gear (turns 30° while Settings is open), split
+toggle, reconnect banner, rail drop line and rail-slot flip after a drag,
+server-switcher and Settings server-row swap glyphs, page slides stilled;
+Preferences segmented/stepper/address/shortcut/hook controls and error
+lines; Settings history arrow, list rise, row flip, error box, eye/share/
+history buttons; the sysvitals first reading; ConfirmDialog scrim + sheet
+rise (`sheet-up` joined the vocabulary) + desktop fade; Select chevron;
+SideHandle opacity reveal; InstallPrompt on `--t-move`; Lightbox settle on
+`moveMs()`; `.m-acts button` and `.chip-btn` filter transitions.
+
+**Deliberately not done**: `body` and the scrollbar thumb keep their `0.3s`
+theme cross-fade (app.css) — that is the THEME changing under every pixel at
+once, a whole-screen event with no token of its own, and moving it to
+`--t-move` would make a theme switch read as a flash; composer height
+(JS-measured per keystroke); fold
 bodies and tool-lane bodies via slide (principle 10); desktop sidebar /
 rail content swaps (owner rule); PanePicker / Select / ContextMenu / agent
 menu open (popover rule — the two that fade on `.ready` are tolerated as the
