@@ -170,7 +170,9 @@ completion).
   composer stages files the same way (board #25): a clipboard carrying files
   (screenshot, copied file) goes through the identical pipeline and the
   default text insertion is suppressed — a copied file's path-as-text would
-  say the same thing twice; a text-only paste is untouched.
+  say the same thing twice; a text-only paste is untouched. A file that
+  cannot be staged (too large, upload failed) becomes an error chip with the
+  reason — removable, and send is blocked until it is removed.
 
 ## Drawer (three partitions, one width handle)
 - The header's terminal button (drawer on desktop, Terminal tab on the phone)

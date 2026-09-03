@@ -804,6 +804,10 @@
     // board #25). The button is disabled too — this entry guard covers the
     // keyboard's Enter and any future caller.
     if (attaching) return;
+    // A failed attachment stays a visible chip until the user removes it: a
+    // message that quietly left without the file it showed is the failure
+    // mode this exists to prevent (review, 2026-09-03).
+    if (failed) return;
     // A SLASH COMMAND goes to the agent's CLI, not to its model, so it is typed
     // verbatim — no `[tmm chat …] human:` stamp, no @address, nothing the TUI
     // would read as prose. It needs a target: an explicit `@name`, else the
@@ -989,16 +993,30 @@
   // PLACE, so the prompt keeps the image exactly where the words put it.
   // thumb is an object URL for the picked image — the chip shows the picture
   // itself, so "哪几张加上去了" is answered by looking.
+  // A FAILED attachment is a chip too (review, 2026-09-03: an oversized file
+  // or a failed upload only console.warned, so the user could not tell what
+  // the message would carry): `{ key, name, kind, error }` with no path, no
+  // token and no number — rendered in the error state with its reason,
+  // removable, and it BLOCKS send until removed. Nothing about an attachment
+  // is ever silent. `key` is the each-key: a path for a staged one, a fresh id
+  // for a failed one (two failures of the same file are two chips).
   let pending = $state([]);
   let attachSeq = 1;
   const attachToken = (a) => `[${a.kind === 'image' ? 'img' : 'file'}:${a.n}]`;
+  const failedAttachment = (f, error) => ({
+    key: `err-${imageId()}`, path: '', kind: f.type?.startsWith('image/') ? 'image' : 'file',
+    name: f.name, n: 0, thumb: '', error,
+  });
+  const errText = (err) => String(err?.message ?? err ?? '');
 
   function removeAttachment(i) {
     const a = pending[i];
     if (!a) return;
-    const tok = attachToken(a);
-    // Strip the token (and one adjacent space) wherever the user left it.
-    composerText = composerText.replace(new RegExp(`\\s?${tok.replace(/[[\\]]/g, '\\$&')}`), '');
+    if (a.n) {
+      const tok = attachToken(a);
+      // Strip the token (and one adjacent space) wherever the user left it.
+      composerText = composerText.replace(new RegExp(`\\s?${tok.replace(/[[\\]]/g, '\\$&')}`), '');
+    }
     if (a.thumb) URL.revokeObjectURL(a.thumb);
     pending = pending.filter((_, j) => j !== i);
     if (!pending.length) attachSeq = 1;
@@ -1009,7 +1027,11 @@
     pending = [];
     attachSeq = 1;
   }
-  const sendable = $derived(!!composerText.trim() || !!pending.length);
+  // A failed chip is not content: it does not make the composer sendable, and
+  // while one is staged nothing sends (send() and the button agree, the same
+  // two-gate rule as `attaching`) — the user removes it or re-attaches.
+  const failed = $derived(pending.some((a) => a.error));
+  const sendable = $derived(!!composerText.trim() || pending.some((a) => !a.error));
   const IMG_EDGE = 1568;
   const FILE_CAP = 32 * 1024 * 1024; // base64 over one RPC; beyond this, point the agent at the original path instead
 
@@ -1080,23 +1102,37 @@
       if (stale()) return;
       for (const f of files) {
         let item;
-        if (f.type.startsWith('image/')) {
-          // Images are re-encoded (webp, capped long edge) — 2(c).
-          const { b64, ext } = await encodeImage(f);
-          if (stale()) return;
-          const path = uploadImagePath(ws, imageId(), ext);
-          await fsUpload(path, b64);
-          if (stale()) return;
-          item = { path, kind: 'image', name: f.name, n: attachSeq++, thumb: URL.createObjectURL(f) };
-        } else {
-          // Everything else lands BYTE-IDENTICAL under its own name — 2(a)/3(a).
-          if (f.size > FILE_CAP) { console.warn('attach skipped (too large)', f.name, f.size); continue; }
-          const b64 = toB64(new Uint8Array(await f.arrayBuffer()));
-          if (stale()) return;
-          const path = uploadFilePath(ws, imageId(), f.name);
-          await fsUpload(path, b64);
-          if (stale()) return;
-          item = { path, kind: 'file', name: f.name, n: attachSeq++, thumb: '' };
+        // Per FILE: one bad file must not take the others down with it, and
+        // its failure must land as a chip the user can see and remove — never
+        // only in the console (review, 2026-09-03).
+        try {
+          if (f.type.startsWith('image/')) {
+            // Images are re-encoded (webp, capped long edge) — 2(c).
+            const { b64, ext } = await encodeImage(f);
+            if (stale()) return;
+            const path = uploadImagePath(ws, imageId(), ext);
+            await fsUpload(path, b64);
+            if (stale()) return;
+            item = { key: path, path, kind: 'image', name: f.name, n: attachSeq++, thumb: URL.createObjectURL(f) };
+          } else {
+            // Everything else lands BYTE-IDENTICAL under its own name — 2(a)/3(a).
+            if (f.size > FILE_CAP) {
+              // No await since the last check, so the verdict still holds.
+              pending = [...pending, failedAttachment(f, t('hubAttachTooLarge').replace('{mb}', String(FILE_CAP / 1024 / 1024)))];
+              continue;
+            }
+            const b64 = toB64(new Uint8Array(await f.arrayBuffer()));
+            if (stale()) return;
+            const path = uploadFilePath(ws, imageId(), f.name);
+            await fsUpload(path, b64);
+            if (stale()) return;
+            item = { key: path, path, kind: 'file', name: f.name, n: attachSeq++, thumb: '' };
+          }
+        } catch (err) {
+          // The throw came out of an await, so the room may have changed under
+          // it: a guard, not a return — the loop goes on to the next file.
+          if (!stale()) pending = [...pending, failedAttachment(f, t('hubAttachFailed').replace('{err}', errText(err)))];
+          continue;
         }
         // No await between the last check and these mutations — the commit
         // is atomic with the verdict that this job's room is still on screen.
@@ -1110,7 +1146,9 @@
       }
       composerEl?.focus();
     } catch (err) {
-      console.warn('attach failed', err);
+      // The uploads dir itself could not be prepared: every file of this job
+      // failed, and each says so as a chip (same staleness guard as above).
+      if (!stale()) pending = [...pending, ...files.map((f) => failedAttachment(f, t('hubAttachFailed').replace('{err}', errText(err))))];
     } finally {
       // Remove exactly THIS job's entry — never a blanket reset: a stale
       // job's finally must not unlock a job the new room started.
@@ -2988,8 +3026,22 @@
         ></textarea>
         {#if pending.length}
           <div class="pend-row">
-            {#each pending as a, i (a.path)}
-              {#if a.kind === 'image'}
+            {#each pending as a, i (a.key)}
+              {#if a.error}
+                <!-- A failed attachment, in the file chip's own clothes turned
+                     to the danger tone: name + reason, ✕ removes it. It blocks
+                     send while it stands — nothing leaves without what it
+                     showed (review, 2026-09-03). -->
+                <span class="pend-chip err" title={`${a.name} — ${a.error}`}>
+                  <Icon name="info" size={12} />
+                  <span class="pend-name">{a.name}</span>
+                  <span class="pend-why">{a.error}</span>
+                  <button class="pend-x" aria-label={t('hubRemoveAttachment')}
+                    onclick={() => removeAttachment(i)}>
+                    <Icon name="x" size={11} />
+                  </button>
+                </span>
+              {:else if a.kind === 'image'}
                 <span class="pend-thumb" title={`[img:${a.n}] ${a.name}`}>
                   <!-- Tap the thumb → the in-app viewer (owner, 2026-08-27:
                        "文本输入框…显示的图片…我可以点击放大查看…在我应用内的"). -->
@@ -3037,9 +3089,9 @@
         <button class="send-btn" class:muted={!sendable && !intArm && !recipientBusy} class:arm={intArm}
           class:busy={recipientBusy && !sendable && !intArm}
           onclick={() => (sendable ? send() : armInterrupt())}
-          title={intArm ? t('hubIntArmed').replace('{who}', intWho) : sendable ? t('hubSend') : t('hubIntHint')}
-          aria-label={intArm ? t('hubIntArmed').replace('{who}', intWho) : sendable ? t('hubSend') : t('hubIntHint')}
-          disabled={!selected || attaching || (!sendable && !intTargets.length)}>
+          title={failed ? t('hubAttachBlocked') : intArm ? t('hubIntArmed').replace('{who}', intWho) : sendable ? t('hubSend') : t('hubIntHint')}
+          aria-label={failed ? t('hubAttachBlocked') : intArm ? t('hubIntArmed').replace('{who}', intWho) : sendable ? t('hubSend') : t('hubIntHint')}
+          disabled={!selected || attaching || failed || (!sendable && !intTargets.length)}>
           {#if !sendable && (intArm || recipientBusy)}
             <!-- A stop square inside a slowly circling arc: the "mid-turn, tap
                  to cut it" glyph every chat product speaks. Armed keeps the
@@ -4056,6 +4108,15 @@
     background: var(--surface2); color: var(--text2); font-size: var(--fs-micro);
   }
   .pend-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The failed chip: same box, danger tone (token + 8% wash), room for the
+     reason. The name keeps its ellipsis; the reason ellipsizes after it. */
+  .pend-chip.err {
+    max-width: 340px; color: var(--status-danger); border-color: var(--status-danger);
+    background: color-mix(in srgb, var(--status-danger) 8%, var(--surface2));
+  }
+  .pend-chip.err .pend-name { flex: none; max-width: 120px; font-weight: 600; }
+  .pend-why { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.85; }
+  .pend-chip.err .pend-x { color: var(--status-danger); }
   .pend-view { display: block; width: 100%; height: 100%; padding: 0; margin: 0; border: 0; background: none; cursor: zoom-in; }
   .pend-thumb {
     position: relative; width: 44px; height: 44px; flex: none;

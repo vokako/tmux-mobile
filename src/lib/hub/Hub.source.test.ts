@@ -636,6 +636,25 @@ test('a stage job dies with its room, and nothing sends while one is in flight (
     'a failed command restores only into its own room');
 });
 
+test('a failed attachment is a chip that blocks send, never a console line', () => {
+  // Review, 2026-09-03: an oversized file or a failed upload only
+  // console.warned, so the user could not tell what the message would carry.
+  const stage = /async function stageFiles\(files\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
+  assert.ok(!/console\.warn/u.test(stage), 'staging reports to the user, not to the console');
+  assert.ok([...stage.matchAll(/failedAttachment\(/g)].length >= 3, 'too large, a per-file throw and a dir failure each become a chip');
+  assert.match(stage, /try \{[\s\S]*?\} catch \(err\) \{[\s\S]*?if \(!stale\(\)\) pending = \[\.\.\.pending, failedAttachment/u,
+    'the per-file catch guards staleness before it touches the room');
+  const sendFn = /async function send\(\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
+  assert.match(sendFn, /if \(failed\) return;/u, 'send() refuses while a failed chip stands');
+  assert.match(source, /disabled=\{!selected \|\| attaching \|\| failed \|\|/u, 'and the button is disabled too');
+  assert.match(source, /const sendable = \$derived\(!!composerText\.trim\(\) \|\| pending\.some\(\(a\) => !a\.error\)\);/u,
+    'a failed chip alone is not content');
+  assert.match(source, /\{#each pending as a, i \(a\.key\)\}\s*\n\s*\{#if a\.error\}/u, 'the error state renders first, keyed by key (a failed chip has no path)');
+  const err = rule('.pend-chip.err');
+  assert.match(err, /var\(--status-danger\)/u, 'the danger token, not a literal');
+  assert.ok(!/#[0-9a-f]{3,8}\b/iu.test(err), 'no literal colour');
+});
+
 test('the title caret expands the NAME — left-aligned on its real rect (board #32)', () => {
   // The project-actions menu used to right-align on the caret and could clip
   // at the right edge. It now anchors on the name element's REAL rect
