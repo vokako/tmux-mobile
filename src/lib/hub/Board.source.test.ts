@@ -263,6 +263,13 @@ test('the detail speaks board #15: project-named page, status slider, confirmed 
   // capture + move) or tap; nothing reaches the server until the ✓.
   assert.match(source, /onpointerdown=\{segDown\}/u, 'the track takes the pointer');
   assert.match(source, /onpointermove=\{\(e\) => segDrag && segPick\(e\)\}/u, 'sweeping slides the pick');
+  // The chosen stop is a SELECTED segment, not a CTA (review, 2026-09-03):
+  // design-language.md §3 says segmented active = accent border + wash, and
+  // --accent-fill is reserved for solid calls to action.
+  const on = /\.seg-b\.on \{([^}]*)\}/u.exec(source)?.[1] ?? '';
+  assert.match(on, /background: var\(--accent-bg\)/u, 'the wash');
+  assert.match(on, /var\(--accent-line\)/u, 'the outline');
+  assert.ok(!/accent-fill/u.test(on), 'never the solid CTA fill');
   assert.match(source, /onclick=\{\(\) => \(draft\.status = st\)\}/u, 'tapping a stop picks it — into the DRAFT');
   assert.ok(!source.includes('Select value={sel.status}'), 'the status Select is retired');
   // ③ The assignee edits the draft too — dirty raises the head\u2019s ✓/undo,

@@ -995,8 +995,12 @@
   .spacer { flex: 1; }
   .d-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   /* The status slider (board #15): one bordered track in the control dialect,
-     equal stops; the chosen stop fills accent (the app's selected-state ink).
-     touch-action none so the sweep is ours, not the page scroll's. */
+     equal stops; the chosen stop wears the segmented control's SELECTED look
+     from design-language.md §3 — accent outline + accent wash + accent ink,
+     the same as Preferences' `.segmented button.active` — never the solid
+     --accent-fill, which is the CTA dialect (review, 2026-09-03). The outline
+     is an inset ring because the stops share one bordered track. touch-action
+     none so the sweep is ours, not the page scroll's. */
   .seg {
     display: inline-flex; align-items: stretch;
     border: 1px solid var(--border); border-radius: var(--ui-radius-control);
@@ -1010,7 +1014,7 @@
     transition: background var(--t-fast), color var(--t-fast);
   }
   .seg-b + .seg-b { border-left: 1px solid var(--border); }
-  .seg-b.on { background: var(--accent-fill); color: var(--accent-fill-ink); }
+  .seg-b.on { background: var(--accent-bg); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-line); }
   .seg-b:not(.on):hover { background: var(--surface2); }
   .meta-bit { font-size: var(--fs-meta); color: var(--text3); }
   .meta-bit .m-name { color: var(--accent); font-weight: 650; }
