@@ -1199,6 +1199,37 @@ export function isSelfReport(e: HubActivityEvent): boolean {
   return sawTmm;
 }
 
+
+/** The server stores a prompt echo truncated to this many characters plus a
+ * `…` (telemetry.rs `MAX_PROMPT_CHARS`); the delivery MATCH there ran on the
+ * full prompt, so a long message is confirmed server-side while its stored
+ * echo can never contain its whole body. Board #78 (owner, 2026-09-03: a
+ * 1041-character paste "没有成功被确认已读" — the ring stayed hollow although
+ * the hook had acked it). */
+export const PROMPT_ECHO_MAX = 1024;
+export function echoTruncated(rawEcho: string): boolean {
+  return rawEcho.endsWith('…') && [...rawEcho].length > PROMPT_ECHO_MAX;
+}
+/** Whitespace-blind containment, truncation-aware: a truncated echo confirms a
+ * body when the body STARTS inside the echo and everything the echo still has
+ * after that point is a prefix of the body — the characters still have to
+ * match in order, so a different long message cannot be acked by accident.
+ * The lead-in probe is short (24 chars) so a body that begins right before the
+ * cut still finds its start. */
+export function echoContains(canonEcho: string, body: string, truncated: boolean): boolean {
+  if (canonEcho.includes(body)) return true;
+  if (!truncated) return false;
+  const echo = canonEcho.endsWith('…') ? canonEcho.slice(0, -1) : canonEcho;
+  const probe = body.slice(0, 24);
+  let idx = echo.indexOf(probe);
+  while (idx >= 0) {
+    const rest = echo.slice(idx);
+    if (rest.length < body.length && body.startsWith(rest)) return true;
+    idx = echo.indexOf(probe, idx + 1);
+  }
+  return false;
+}
+
 /**
  * Build the conversation from chat messages plus observed telemetry.
  *
@@ -1267,10 +1298,11 @@ export function feedBlocks(
     // 2026-08-22: multi-line messages never confirmed).
     let hit = false;
     const canonEcho = squashWs(e.text);
+    const truncated = echoTruncated(e.text);
     for (const m of msgs) {
       if (m.type !== 'msg' || m.delivered) continue;
       const body = squashWs(m.msg?.body ?? '');
-      if (body && m.ts <= e.ts && canonEcho.includes(body)) {
+      if (body && m.ts <= e.ts && echoContains(canonEcho, body, truncated)) {
         m.delivered = true;
         hit = true;
       }

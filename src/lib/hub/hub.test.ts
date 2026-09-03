@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, touchContextMenu, perLineOf, modelLabel } from './hub.ts';
+import { readFileSync } from 'node:fs';
+import { TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, touchContextMenu, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -1287,4 +1288,27 @@ test('modelLabel drops vendor and region prefixes, keeps the model id', () => {
   assert.equal(modelLabel('Fable 5.1'), 'Fable 5.1', 'a display name is not dotted-prefixed');
   assert.equal(modelLabel('gpt-5.6'), 'gpt-5.6', 'a version dot is not a prefix');
   assert.equal(modelLabel('openai.'), 'openai.', 'a bare prefix is left alone rather than emptied');
+});
+
+test('a long message confirms against its TRUNCATED echo (board #78)', () => {
+  // The server acks on the full prompt but stores the echo cut at
+  // PROMPT_ECHO_MAX chars + "…"; the feed must not demand the whole body.
+  const body = 'Review Info\n' + 'line of a long paste that keeps going and going\n'.repeat(40);
+  assert.ok(body.length > PROMPT_ECHO_MAX);
+  const typed = `[tmm chat 2026-09-03 07:04] human: @aws-expert ${body}`;
+  const stored = [...typed].slice(0, PROMPT_ECHO_MAX).join('') + '…';
+  assert.ok(echoTruncated(stored));
+  const feed = [{ id: 'm1', ts: 10, from: 'human', body }];
+  const blocks = feedBlocks(feed, [ev({ ts: 11, kind: 'prompt', via: 'app', text: stored })], 'chat');
+  assert.equal(blocks.length, 1);
+  assert.equal((blocks[0] as any).delivered, true, 'the ring closes');
+  // A different long message that merely shares the opening is NOT acked.
+  const other = body.replace('going and going', 'going and stopping');
+  assert.equal(echoContains(squashWs(stored), squashWs(other), true), false);
+  // A short echo that happens to END with "…" is not a truncation marker.
+  assert.equal(echoTruncated('human: 稍等…'), false);
+  assert.equal(echoContains(squashWs('human: 稍等…'), squashWs('稍等…完整版'), false), false);
+  // The client's cut point mirrors the server's constant — pin them together.
+  const telemetry = readFileSync(new URL('../../../src-tauri/src/projects/telemetry.rs', import.meta.url), 'utf8');
+  assert.match(telemetry, new RegExp(`const MAX_PROMPT_CHARS: usize = ${PROMPT_ECHO_MAX};`, 'u'));
 });
