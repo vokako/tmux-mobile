@@ -209,6 +209,9 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
             // has it (that is what makes a restore free), so the hiding happens
             // here, on the way out.
             let hidden = crate::projects::archived_ids(&room);
+            // Set by the since_ts branch below; false means "rows newer than the
+            // cursor may still lie behind this page".
+            let mut reached_cursor = true;
             if let Some(msgs) = history.get_mut("messages").and_then(|m| m.as_array_mut()) {
                 // The RAW page's oldest position, read BEFORE any filtering. It is
                 // the cursor of last resort: a page can lose every row to the
@@ -218,8 +221,18 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
                 // dead at a hidden run. The raw seq always advances, so the next
                 // request lands strictly further back.
                 let raw_oldest = msgs.first().and_then(|m| m.get("seq")).and_then(|v| v.as_i64());
+                let raw_oldest_ts = msgs.first().and_then(|m| m.get("ts")).and_then(|v| v.as_i64());
                 if since_ts > 0 {
                     msgs.retain(|m| m.get("ts").and_then(|t| t.as_i64()).unwrap_or(0) > since_ts);
+                    // An incremental poll asks "what is NEWER than since_ts", and
+                    // the page is the newest `limit` rows — so when more than
+                    // `limit` messages arrived since the cursor, the older ones are
+                    // simply not on it. `has_more` then means "newer-than-since_ts
+                    // rows remain behind this page": true only while the RAW page
+                    // did not reach back to since_ts (2026-09-03, review C — the
+                    // client took the page as complete and its cursor jumped past
+                    // the rest, a permanent hole in the feed).
+                    reached_cursor = raw_oldest_ts.is_none_or(|ts| ts <= since_ts);
                 }
                 if !hidden.is_empty() {
                     msgs.retain(|m| {
@@ -238,6 +251,12 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
                     if let Some(seq) = oldest {
                         obj.insert("oldest_seq".into(), serde_json::json!(seq));
                     }
+                }
+            }
+            if since_ts > 0 {
+                if let Some(obj) = history.as_object_mut() {
+                    let more = obj.get("has_more").and_then(|v| v.as_bool()).unwrap_or(false);
+                    obj.insert("has_more".into(), serde_json::json!(more && !reached_cursor));
                 }
             }
             Response::ok(id, history)
@@ -1829,6 +1848,57 @@ mod tests {
         let msgs = msgs.get("messages").and_then(|m| m.as_array()).unwrap();
         assert_eq!(msgs.len(), 1, "only the ts>100 message survives");
         assert_eq!(msgs[0].get("body").and_then(|b| b.as_str()), Some("new"));
+    }
+
+    /// Review C (2026-09-03): an incremental poll takes the newest `limit` rows
+    /// and THEN drops what is older than `since_ts`. When more than `limit`
+    /// messages arrived since the cursor, the older ones were never on the page
+    /// and the client's cursor jumped past them — a permanent hole. On a since_ts
+    /// query `has_more` therefore means "newer-than-since_ts rows remain behind
+    /// this page", and the client walks `before_seq` until it reaches the cursor.
+    #[test]
+    fn hub_log_since_ts_reports_when_the_page_did_not_reach_the_cursor() {
+        // 250 messages, ts = seq * 10. The client last saw ts 1000 (seq 100):
+        // 150 messages are newer, one page holds 100.
+        let b = Bridge::new().with_log("proj:blog", 250);
+        let r = handle_hub_request(
+            &req("hub_log", serde_json::json!({ "session": "blog", "since_ts": 1000, "limit": 100 })),
+            Some(&b),
+            None,
+        );
+        let v = r.result.expect("result");
+        let msgs = v["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 100, "the newest page, all newer than the cursor");
+        assert_eq!(msgs[0]["seq"], 151);
+        assert_eq!(v["has_more"], true, "seq 101..150 are newer than the cursor and NOT on this page");
+        assert_eq!(v["oldest_seq"], 151, "the cursor for the walk back");
+
+        // The walk back: the page behind seq 151, still bounded by since_ts.
+        let r = handle_hub_request(
+            &req("hub_log", serde_json::json!({ "session": "blog", "since_ts": 1000, "limit": 100, "before_seq": 151 })),
+            Some(&b),
+            None,
+        );
+        let v = r.result.expect("result");
+        let msgs = v["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 50, "seq 101..150 survive the since_ts filter");
+        assert_eq!(msgs[0]["seq"], 101);
+        assert_eq!(v["has_more"], false, "the raw page reached back past the cursor: nothing newer remains");
+
+        // A poll whose page reaches the cursor says so even when the room has
+        // plenty of older history behind it.
+        let r = handle_hub_request(
+            &req("hub_log", serde_json::json!({ "session": "blog", "since_ts": 2400, "limit": 100 })),
+            Some(&b),
+            None,
+        );
+        let v = r.result.expect("result");
+        assert_eq!(v["messages"].as_array().unwrap().len(), 10);
+        assert_eq!(v["has_more"], false, "everything newer than the cursor is on this page");
+
+        // And a first load (no since_ts) keeps the paging meaning: history remains.
+        let r = handle_hub_request(&req("hub_log", serde_json::json!({ "session": "blog", "limit": 100 })), Some(&b), None);
+        assert_eq!(r.result.expect("result")["has_more"], true);
     }
 
     #[test]

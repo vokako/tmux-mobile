@@ -1,11 +1,35 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, touchContextMenu, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
+import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, touchContextMenu, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
   ts: 0, window: 1, kind: 'tool', text: '', ...e,
+});
+
+test('gapWalkStep walks before_seq pages back to the poll cursor and no further', () => {
+  const m = (seq: number) => ({ id: `m${seq}`, seq, ts: seq * 10 });
+  const page = (from: number, to: number, has_more = true) => ({
+    messages: Array.from({ length: to - from + 1 }, (_, i) => m(from + i)), has_more, oldest_seq: from,
+  });
+  // The poll started at ts 1000 (seq 100); the newest page was 151..250.
+  // A page entirely newer than the cursor is all new, and the walk continues.
+  let step = gapWalkStep(page(151, 250), 1000);
+  assert.equal(step.newer.length, 100);
+  assert.equal(step.next, 151);
+  // A page that reaches the cursor keeps only the rows newer than it and stops.
+  step = gapWalkStep(page(51, 150), 1000);
+  assert.deepEqual(step.newer.map((x) => x.seq), Array.from({ length: 50 }, (_, i) => 101 + i));
+  assert.equal(step.next, null);
+  // The room's beginning stops the walk even when the page was all new.
+  step = gapWalkStep(page(1, 20, false), 0);
+  assert.equal(step.newer.length, 20);
+  assert.equal(step.next, null);
+  // Nothing on the page, no cursor, or no page at all: done, nothing new.
+  assert.deepEqual(gapWalkStep({ messages: [], has_more: true, oldest_seq: 5 }, 0), { newer: [], next: null });
+  assert.deepEqual(gapWalkStep({ messages: [m(3)], has_more: true }, 0), { newer: [m(3)], next: null });
+  assert.deepEqual(gapWalkStep(null, 0), { newer: [], next: null });
 });
 
 test('mergeMessages dedupes by id and by content triple, sorts by ts', () => {

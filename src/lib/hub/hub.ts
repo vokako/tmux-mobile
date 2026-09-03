@@ -108,6 +108,29 @@ export function mergeEvents<T extends { ts: number; id?: number; window?: number
   return [...existing, ...fresh].sort((a, b) => (a.ts - b.ts) || ((a.id ?? 0) - (b.id ?? 0)));
 }
 
+/** One step of the GAP WALK behind an incremental poll (review C, 2026-09-03).
+ *
+ * `hub_log(since_ts)` answers the newest page and drops what is older than the
+ * cursor; when more than a page arrived since the cursor (a room parked in
+ * `roomCache` for an hour of `@all` chatter — pushes for a non-selected room
+ * are not merged), the older new messages are not on it. The server says so
+ * with `has_more`, and the client walks `before_seq` pages backwards until a
+ * page reaches the cursor. This decides one step: which rows of the page are
+ * NEW (newer than `floorTs`, the cursor the poll started from) and where the
+ * next page is — `null` when the walk is done, because the page reached back
+ * to (or past) the cursor, came back empty, or the server has nothing older. */
+export function gapWalkStep<T extends { ts?: number }>(
+  page: { messages?: T[]; has_more?: boolean; oldest_seq?: number } | null | undefined,
+  floorTs: number,
+): { newer: T[]; next: number | null } {
+  const msgs = page?.messages ?? [];
+  const newer = msgs.filter((m) => (m.ts ?? 0) > floorTs);
+  const reached = !msgs.length || newer.length < msgs.length;
+  const cursor = page?.oldest_seq ?? 0;
+  const next = !reached && page?.has_more && cursor > 0 ? cursor : null;
+  return { newer, next };
+}
+
 /** Backend identity colors (the prototype's palette): consistent across
  * sidebar, cards and registry so a glance identifies who is who. */
 export function backendColor(backend: string | null | undefined): string {

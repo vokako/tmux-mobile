@@ -1421,6 +1421,17 @@ semantics when the new parameters are absent, so an older client is unaffected:
 - `has_more` is measured, not guessed — each store call asks for one row more than
   the caller wanted. Without it a client cannot tell "you have everything" from
   "your page ended exactly at the limit".
+- **An incremental poll can be MORE than a page behind** (review C, 2026-09-03).
+  `hub_log(since_ts)` takes the newest page and drops what is older than the
+  cursor; when more than `limit` messages arrived since it — a room parked in the
+  Hub's `roomCache` while the team talked, because pushes for a non-selected room
+  are not merged — the older new rows were simply not on the page, and the client's
+  cursor jumped past them for the rest of the session. So on a `since_ts` query
+  `has_more` means "newer-than-cursor rows remain behind this page" (true only while
+  the RAW page did not reach back to `since_ts`), and the client (`gapWalkStep`, pure
+  + tested) walks `before_seq` pages until one reaches the cursor, merging by id.
+  A first load (`since_ts` 0) keeps the paging meaning. Pinned by a 250-message
+  seeded walk on the server side.
 - **A page that loses every row still hands back a cursor.** `oldest_seq` prefers a
   surviving message's seq (what the user can actually see) and falls back to the
   RAW page's oldest position, because the archive filter and `since_ts` can empty a

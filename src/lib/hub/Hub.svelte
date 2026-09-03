@@ -32,7 +32,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, touchContextMenu, perLineOf, modelLabel } from './hub.ts';
+  import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, touchContextMenu, perLineOf, modelLabel } from './hub.ts';
   import { notifyNews, isAway, roomProjectName } from './notifications.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
@@ -341,12 +341,28 @@
       // cursor; every later call is the same incremental since_ts poll as
       // before (board #9).
       const first = lastTs === 0 && histSeq === 0;
+      const floorTs = lastTs;
       const res = await hubLog(s, lastTs, 100);
       if (selected !== s) return;
       const messages = res.messages;
       if (first) {
         histSeq = res.oldest_seq ?? 0;
         histMore = (res.has_more ?? false) && histSeq > 0;
+      } else if (res.has_more && (res.oldest_seq ?? 0) > 0) {
+        // More than a page arrived since the cursor (a room parked in
+        // roomCache while the team talked): the poll's page is the NEWEST 100
+        // and `has_more` says newer-than-cursor rows lie behind it. Walk them
+        // in before the cursor moves past them — the hole was permanent
+        // otherwise (review C, 2026-09-03). Bounded: 50 pages is 5000 messages
+        // in one absence, past which the first-load page is the honest answer.
+        let cursor = res.oldest_seq;
+        for (let i = 0; i < 50 && cursor; i++) {
+          const page = await hubLog(s, 0, 100, cursor);
+          if (selected !== s) return;
+          const { newer, next } = gapWalkStep(page, floorTs);
+          if (newer.length) feed = mergeMessages(feed, newer);
+          cursor = next;
+        }
       }
       if (messages?.length) {
         feed = mergeMessages(feed, messages);
