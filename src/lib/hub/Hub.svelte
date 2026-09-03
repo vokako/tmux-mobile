@@ -2999,7 +2999,7 @@
           <div class="win-list">
             {#each agents as a (a.window)}
               <button class="win-pill" class:cur={termTarget.startsWith(`${selected}:${a.window}.`)} onclick={() => pickWindow(a)}>
-                <span class="st" style:background={stateDotColor(a.agent ? a.state : 'shell')}></span>
+                <span class="st" class:live-dot={!!a.agent && stateIsLive(a.state)} style:background={stateDotColor(a.agent ? a.state : 'shell')}></span>
                 {a.window}:{a.name}{#if a.agent && !a.managed}<span class="direct-tag">{t('hubDirect')}</span>{/if}
               </button>
             {/each}

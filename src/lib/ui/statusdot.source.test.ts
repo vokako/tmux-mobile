@@ -158,6 +158,27 @@ test('the halo is FOCUSED: every layer blurred, none spread, extents capped', ()
   assert.ok(peak <= 1.35, `the breathe peaks at ${peak}× and swells the halo with it`);
 });
 
+test('every dot painted with stateDotColor also wears class:live-dot — colour alone is not the cue', async () => {
+  // The drawer's window pills carried the colour without the motion (review C,
+  // 2026-09-03): a running agent's pill read as a resting one. The rule is
+  // general — the two halves of the cue travel together on the SAME element.
+  const offenders: string[] = [];
+  const walk = async (dir: URL) => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const child = new URL(entry.name + (entry.isDirectory() ? '/' : ''), dir);
+      if (entry.isDirectory()) { await walk(child); continue; }
+      if (!/\.svelte$/u.test(entry.name)) continue;
+      const rel = child.href.slice(SRC.href.length);
+      const text = await readFile(child, 'utf8');
+      for (const m of text.matchAll(/<[^<>]*style:background=\{stateDotColor\([^<>]*>/gu)) {
+        if (!/class:live-dot=/u.test(m[0])) offenders.push(`${rel}: ${m[0].slice(0, 80)}`);
+      }
+    }
+  };
+  await walk(SRC);
+  assert.deepEqual(offenders, []);
+});
+
 test('no component re-implements the cue, and the retired fade stays retired', async () => {
   const offenders: string[] = [];
   const files: URL[] = [];

@@ -131,16 +131,15 @@ export function gapWalkStep<T extends { ts?: number }>(
   return { newer, next };
 }
 
-/** Backend identity colors (the prototype's palette): consistent across
- * sidebar, cards and registry so a glance identifies who is who. */
+/** Backend identity colors: consistent across sidebar, cards and registry so a
+ * glance identifies who is who. The VALUES live in app.css (`--backend-*`) with
+ * the other tokens — a literal colour in a component is a new visual species
+ * (design-language.md §Colour); this only names the token (review C, 2026-09-03). */
 export function backendColor(backend: string | null | undefined): string {
   switch (backend) {
-    case 'kiro': return '#a78bfa';
-    case 'claude': return '#fb923c';
-    case 'codex': return '#94a3b8';
-    case 'kimi': return '#4ade80';
-    case 'grok': return '#e2e8f0';
-    default: return '#818cf8';
+    case 'kiro': case 'claude': case 'codex': case 'kimi': case 'grok':
+      return `var(--backend-${backend})`;
+    default: return 'var(--backend-other)';
   }
 }
 

@@ -236,6 +236,12 @@ button:disabled {
 
 :root {
   --sidebar-w: 240px;
+  /* Backend IDENTITY colours — who is who, at a glance, on the avatar of an
+     agent whose backend has no icon. Theme-independent (identity, not state:
+     the state language is --status-* / .live-dot). Named by `backendColor()`
+     in hub.ts, which used to return these as literals (review C, 2026-09-03). */
+  --backend-kiro: #a78bfa; --backend-claude: #fb923c; --backend-codex: #94a3b8;
+  --backend-kimi: #4ade80; --backend-grok: #e2e8f0; --backend-other: #818cf8;
   /* Type scale + motion + metadata ink — APP-WIDE (born Hub-scoped, promoted
      2026-08-18: the settings/connect surfaces had re-grown ad-hoc values).
      The contract lives in tmm-cli.md "Design tokens"; a raw font-size or
