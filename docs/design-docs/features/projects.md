@@ -107,6 +107,19 @@ then performs an implicit `DELETE FROM` that cascades every child row away
 (slots, and the snapshots table that existed at the time). The migration test
 caught exactly that.
 
+The steps run in ONE transaction with the `user_version` stamp inside it
+(`Store::migrate` → `migrate_steps`, 2026-09-03 review). Before, each step
+autocommitted and the stamp was written last, so a failure after step k left
+the database half-migrated but still stamped old: the next open re-ran step k,
+hit "table already exists" (the plain `CREATE TABLE`s are deliberately not
+idempotent — a step is a one-time schema change, not a floor; `heal()` is the
+floor), and `Store::open` failed for ever. Now the database is either fully at
+`SCHEMA_VERSION` or exactly as it was, and `a_failed_migration_step_rolls_every_step_back`
+pins it. Two consequences: `init` sets `PRAGMA foreign_keys=OFF` BEFORE the
+transaction because SQLite ignores that pragma inside one, and no step may
+toggle it — the v7 step used to switch it back ON, which then applied to every
+later step's rebuild.
+
 The reverse direction, `capture.rs`, is why nobody hand-writes a project: a
 20-second loop folds live tmux back into the declaration.
 

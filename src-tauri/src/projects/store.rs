@@ -314,6 +314,39 @@ impl Store {
         if version >= SCHEMA_VERSION {
             return Ok(());
         }
+        // Every pending step and the version stamp in ONE transaction. Each
+        // step used to autocommit on its own and `user_version` was written
+        // last, so a failure after step k left a database that was HALF
+        // migrated but still stamped old: the next open re-ran step k, hit
+        // "table already exists" (the plain CREATEs are not idempotent) and
+        // `Store::open` failed for ever — every project and hub RPC with it.
+        // With the transaction the database is either fully at
+        // SCHEMA_VERSION or exactly as it was. `PRAGMA foreign_keys` is set by
+        // `init` BEFORE this point because SQLite ignores it inside a
+        // transaction, which is also why no step may toggle it.
+        self.conn
+            .execute_batch("BEGIN IMMEDIATE;")
+            .map_err(|e| format!("begin migration: {e}"))?;
+        let stamped = self.migrate_steps(version).and_then(|()| {
+            self.conn
+                .pragma_update(None, "user_version", SCHEMA_VERSION)
+                .map_err(|e| format!("set user_version: {e}"))
+        });
+        match stamped {
+            Ok(()) => self
+                .conn
+                .execute_batch("COMMIT;")
+                .map_err(|e| format!("commit migration: {e}")),
+            Err(e) => {
+                let _ = self.conn.execute_batch("ROLLBACK;");
+                Err(e)
+            }
+        }
+    }
+
+    /// The version steps, oldest first, each guarded by `version < N`. Runs
+    /// inside the transaction `migrate` opened — never call it directly.
+    fn migrate_steps(&self, version: i64) -> Result<(), String> {
         if version < 1 {
             self.conn
                 .execute_batch(
@@ -459,11 +492,14 @@ impl Store {
             // SOURCE they were imported from (local path or git url) plus
             // when it was last synced — the source is sync metadata, not the
             // thing agents load. ref_ carried the same string; rename + add
-            // the timestamp via rebuild.
+            // the timestamp via rebuild. (This batch used to toggle
+            // `PRAGMA foreign_keys` OFF then ON around the rebuild — the ON
+            // outlived the step, so every later step ran with enforcement on,
+            // and inside a transaction the pragma is a no-op anyway. `init`
+            // owns that pragma; steps do not touch it.)
             self.conn
                 .execute_batch(
-                    "PRAGMA foreign_keys=OFF;
-                     CREATE TABLE reg_skills_v7 (
+                    "CREATE TABLE reg_skills_v7 (
                        name        TEXT PRIMARY KEY,
                        source      TEXT NOT NULL,
                        description TEXT NOT NULL DEFAULT '',
@@ -473,8 +509,7 @@ impl Store {
                      INSERT INTO reg_skills_v7 (name, source, description, synced_at, updated_at)
                        SELECT name, ref_, description, NULL, updated_at FROM reg_skills;
                      DROP TABLE reg_skills;
-                     ALTER TABLE reg_skills_v7 RENAME TO reg_skills;
-                     PRAGMA foreign_keys=ON;",
+                     ALTER TABLE reg_skills_v7 RENAME TO reg_skills;",
                 )
                 .map_err(|e| format!("migrate to 7: {e}"))?;
         }
@@ -705,9 +740,7 @@ impl Store {
                 )
                 .map_err(|e| format!("migrate to 17: {e}"))?;
         }
-        self.conn
-            .pragma_update(None, "user_version", SCHEMA_VERSION)
-            .map_err(|e| format!("set user_version: {e}"))
+        Ok(())
     }
 
     // ---- archived messages ----------------------------------------------
@@ -2489,6 +2522,74 @@ mod tests {
         // v6 assets exist and are usable on a migrated db.
         store.skill_save(&RegSkill { name: "s".into(), source: "github.com/x/y".into(), description: String::new(), synced_at: None }, 1).unwrap();
         assert_eq!(store.skills_list().unwrap().len(), 1);
+        // The v7 step no longer flips foreign_keys back ON behind init's back:
+        // after open, enforcement is on because init turned it on, and a
+        // fresh in-memory open that migrates from scratch agrees.
+        let fk: i64 = store.conn.query_row("PRAGMA foreign_keys", [], |r| r.get(0)).unwrap();
+        assert_eq!(fk, 1, "init turns enforcement on after migrating");
+    }
+
+    /// The migration is ONE transaction: a step that fails leaves the database
+    /// exactly as it was — still stamped at the old version, with none of the
+    /// earlier steps' tables — instead of half-migrated and unopenable for
+    /// ever. Simulated here by planting a table a later step creates (`activity`,
+    /// v9, a plain CREATE) into a v4 database: v5–v8 succeed, v9 fails.
+    #[test]
+    fn a_failed_migration_step_rolls_every_step_back() {
+        let dir = std::env::temp_dir().join(format!("tmm-migrate-atomic-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("state.db");
+        let v4 = Connection::open(&path).unwrap();
+        v4.execute_batch(
+            "CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL,
+               icon TEXT, session TEXT NOT NULL UNIQUE, adopted INTEGER NOT NULL DEFAULT 0,
+               autostart INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL,
+               last_up_at INTEGER, last_seen_at INTEGER, archived_at INTEGER);
+             CREATE TABLE slots (id INTEGER PRIMARY KEY,
+               project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+               ord INTEGER NOT NULL, window_name TEXT NOT NULL, cwd TEXT NOT NULL DEFAULT '',
+               kind TEXT NOT NULL, command TEXT, auto_run INTEGER NOT NULL DEFAULT 0,
+               first_seen_at INTEGER NOT NULL, settled_at INTEGER, agent_session_id TEXT,
+               UNIQUE (project_id, window_name));
+             CREATE TABLE activity (planted INTEGER);
+             PRAGMA user_version = 4;",
+        )
+        .unwrap();
+        drop(v4);
+
+        let err = match Store::open(&path) {
+            Ok(_) => panic!("the planted table makes step 9 fail"),
+            Err(e) => e,
+        };
+        assert!(err.contains("migrate to 9"), "the failing step is named: {err}");
+
+        let raw = Connection::open(&path).unwrap();
+        let v: i64 = raw.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, 4, "the stamp did not move");
+        let tables: Vec<String> = raw
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert!(
+            !tables.iter().any(|t| t == "reg_agents"),
+            "step 5's table was rolled back with the rest: {tables:?}"
+        );
+        assert!(tables.iter().any(|t| t == "projects") && tables.iter().any(|t| t == "slots"), "{tables:?}");
+
+        // Remove the obstacle: the SAME database now migrates cleanly — nothing
+        // from the failed attempt is in the way.
+        let raw2 = Connection::open(&path).unwrap();
+        raw2.execute_batch("DROP TABLE activity;").unwrap();
+        drop(raw2);
+        drop(raw);
+        let store = Store::open(&path).expect("a rolled-back database is a clean v4 database");
+        let v: i64 = store.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
+        drop(store);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
