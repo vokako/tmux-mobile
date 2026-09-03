@@ -680,3 +680,35 @@ async fn plain_token_auth_delivers_rpc_responses() {
     assert_eq!(resp["result"].as_str(), Some("pong"));
 }
 
+
+/// Before auth a peer has proven nothing, so its frame budget is small: a
+/// text frame over the pre-auth cap closes the connection instead of being
+/// parsed. (The 80 MB allowance is for an authenticated `fs_upload`.)
+#[tokio::test]
+async fn an_oversized_frame_before_auth_closes_the_connection() {
+    let addr = spawn_server_once("preauth-cap-token").await;
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{}/", addr)).await.unwrap();
+    let _nonce = ws.next().await.unwrap().unwrap();
+    // A syntactically plausible auth request padded past 8 KB.
+    let padded = serde_json::json!({"method": "auth", "params": {"token": "x".repeat(9 * 1024)}});
+    ws.send(Message::Text(serde_json::to_string(&padded).unwrap().into())).await.unwrap();
+    let next = tokio::time::timeout(Duration::from_secs(3), ws.next())
+        .await
+        .expect("server should have closed the connection, not kept reading");
+    let closed = match next {
+        None => true,
+        Some(Ok(Message::Close(_))) => true,
+        Some(Err(_)) => true,
+        Some(Ok(other)) => panic!("expected close, got a frame: {other:?}"),
+    };
+    assert!(closed);
+    // And the same request under the cap is still parsed (rejected as a bad
+    // token, which proves it reached the auth handler).
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{}/", addr)).await.unwrap();
+    let _nonce = ws.next().await.unwrap().unwrap();
+    let small = serde_json::json!({"method": "auth", "params": {"token": "wrong"}});
+    ws.send(Message::Text(serde_json::to_string(&small).unwrap().into())).await.unwrap();
+    let reply = tokio::time::timeout(Duration::from_secs(3), ws.next()).await.unwrap().unwrap().unwrap();
+    let text = reply.into_text().unwrap();
+    assert!(text.contains("error"), "small frame must reach the auth handler: {text}");
+}

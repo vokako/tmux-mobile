@@ -162,7 +162,11 @@ impl AgentNotificationHub {
 
     pub async fn run(self: Arc<Self>) {
         loop {
-            self.consume_inbox();
+            // consume_inbox is synchronous end to end: directory scan, file
+            // reads, tmux subprocesses, bus posts. On the runtime it would
+            // stall every RPC sharing that worker for the duration.
+            let hub = self.clone();
+            let _ = tokio::task::spawn_blocking(move || hub.consume_inbox()).await;
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
         }
     }

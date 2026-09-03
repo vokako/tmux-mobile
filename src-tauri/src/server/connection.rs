@@ -28,6 +28,13 @@ use super::{AuthTracker, NotificationHub, OptTeam, Outbound, ResizeTracker,
 
 const WS_MAX_MESSAGE_BYTES: usize = 80 * 1024 * 1024;
 const WS_MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+/// Before auth a peer has proven nothing, so it gets a small budget: the
+/// handshake is two frames of a few hundred bytes, and a connection that has
+/// not authenticated within the deadline is closed. Without these, N idle
+/// sockets each hold a connection's tasks and an 80 MB message allowance on a
+/// port that listens on 0.0.0.0 by default.
+const PRE_AUTH_MAX_MESSAGE_BYTES: usize = 8 * 1024;
+const AUTH_DEADLINE_SECS: u64 = 10;
 
 /// Configure aggressive TCP keepalive on a freshly accepted connection.
 ///
@@ -364,9 +371,15 @@ where
         })
     };
 
+    let auth_deadline = tokio::time::sleep(std::time::Duration::from_secs(AUTH_DEADLINE_SECS));
+    tokio::pin!(auth_deadline);
     while let Some(msg) = tokio::select! {
         m = receiver.next() => m,
         _ = shutdown.notified() => None,  // send task died — tear down
+        _ = &mut auth_deadline, if !authenticated => {
+            eprintln!("⏱️  no auth within {}s from {} conn_id={}; closing", AUTH_DEADLINE_SECS, addr, conn_id);
+            None
+        }
     } {
         let msg = match msg {
             Ok(m) => m,
@@ -389,6 +402,10 @@ where
         // fall through to the inner match.
         let plaintext: Option<String> = match &msg {
             Message::Text(text) => {
+                if !authenticated && text.len() > PRE_AUTH_MAX_MESSAGE_BYTES {
+                    eprintln!("❌ {} byte frame before auth from {} conn_id={}; closing", text.len(), addr, conn_id);
+                    break;
+                }
                 if let Some(ref mut rc) = recv_cipher {
                     // Legacy: text + base64-encoded ciphertext + raw JSON
                     // plaintext. Kept for any old clients still using it;

@@ -51,6 +51,11 @@ commands invoke the helper through `/bin/sh` instead of executing it directly:
 macOS may attach `com.apple.provenance` to app-generated scripts and kill direct
 execution with status 137.
 
+The server side of the inbox (`AgentNotificationHub::run`) polls every 250 ms
+and runs `consume_inbox` on tokio's blocking pool: the scan is synchronous end
+to end (directory listing, file reads, tmux subprocesses, bus posts), and on a
+runtime worker it stalled every RPC sharing that thread for the duration.
+
 ## Backend Mapping
 
 - Claude Code: `Notification` maps permission/input/completion notification
