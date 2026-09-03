@@ -262,7 +262,7 @@
       else { page = pageBeforePrefs; slidePage('slide-in-left'); }
     } else {
       pageBeforePrefs = page; page = 'prefs'; slidePage('slide-in-right');
-      navPush(); prefsPushed = true;
+      prefsPushed = navPush();
     }
   }
   // Apply the persisted custom fonts (if any) before first paint — rewrites
@@ -1109,9 +1109,23 @@
   // landed.
   let jumpedFrom = $state(null);
 
-  function navPush() { history.pushState({ app: true }, ''); }
+  // The history dance exists for the PHONE's back gesture (app-shell.md): a
+  // seeded `{app:true}` entry, re-pushed on every consumed pop, so the gesture
+  // peels layers instead of leaving the app. A desktop browser has no gesture
+  // to protect, and the same dance made the app a page you could not Back out
+  // of (review, 2026-09-03). So the seed, every re-push and the popstate router
+  // are gated on the touch layout — live, because the layout mode is a
+  // setting. navPush reports whether it pushed, so a caller that later spends
+  // the entry with history.back() (the gear, Settings' drill) only does so
+  // when its push was real.
+  function navPush() {
+    if (!layout.isTouchDevice) return false;
+    history.pushState({ app: true }, '');
+    return true;
+  }
 
   $effect(() => {
+    if (!layout.isTouchDevice) return; // desktop: the browser's Back is the browser's
     const handler = (e) => {
       if (!e.state?.app) {
         // Reached bottom of our stack, re-push to prevent exit

@@ -446,3 +446,15 @@ test('a typed address ends the running reconnect loop before it connects (review
     /onAddress=\{\(address\) => \{[\s\S]{0,400}?reconnectMachine\.cancel\(\);\s*disconnect\(\);\s*connect\(address/u,
     'cancel → disconnect → connect, in that order');
 });
+
+test('the back-gesture history dance is the phone’s; a desktop browser keeps its Back (2026-09-03)', () => {
+  // The seed + re-push + popstate router protect the PHONE's back gesture
+  // (app-shell.md). On a desktop layout there is no gesture, and the same
+  // dance swallowed the browser's Back for good.
+  assert.match(source, /function navPush\(\) \{\s*if \(!layout\.isTouchDevice\) return false;\s*history\.pushState\(\{ app: true \}, ''\);\s*return true;\s*\}/u);
+  assert.match(source, /\$effect\(\(\) => \{\s*if \(!layout\.isTouchDevice\) return;[^]*?window\.addEventListener\('popstate', handler\);/u,
+    'the popstate router installs only on the touch layout, and re-evaluates when the layout mode changes');
+  // A caller only spends an entry it really pushed.
+  assert.match(source, /prefsPushed = navPush\(\);/u);
+  assert.doesNotMatch(source, /navPush\(\); prefsPushed = true;/u);
+});

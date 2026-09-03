@@ -67,7 +67,7 @@
     onOptimize?: () => void;
     onShare?: () => void;
     onGoBack?: ((fn: () => boolean) => void) | null;
-    onDrill?: () => void;
+    onDrill?: () => boolean | void;
     /** Touch only: the agent configuration is a CATEGORY here rather than a page
      *  of its own (nav-state's agentsLivesInSettings). The desktop rail keeps
      *  its own Agents page, so this stays false there. */
@@ -259,7 +259,10 @@
   });
 
   function selectTab(value: string) {
-    if (!catOpen && isCompact()) { drillAnim = 'fwd'; onDrill(); drillPushed = true; }
+    // onDrill reports whether App pushed a history entry (it does not on a
+    // desktop layout, where Back is the browser's); only a real push is
+    // spent with history.back() later.
+    if (!catOpen && isCompact()) { drillAnim = 'fwd'; drillPushed = !!onDrill(); }
     catOpen = true;
     tab = value;
     recordingShortcut = '';
