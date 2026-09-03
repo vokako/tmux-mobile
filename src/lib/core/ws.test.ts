@@ -289,6 +289,46 @@ test('a v2 server gets a v2 handshake: proof key, c2s and s2c are distinct keys'
   wsClient.disconnect();
 }));
 
+test('a frame that fails to decrypt disconnects at once — the counter cannot recover', () => withWebCrypto(async () => {
+  let disconnects = 0;
+  wsClient.setOnDisconnect(() => disconnects++);
+  const server = new FakeE2eServer('tok', 2);
+  const { socket } = await encryptedHandshake(server);
+  assert.equal(wsClient.isConnected(), true);
+
+  // Garbage where a ciphertext should be: AES-GCM rejects it, and the receive
+  // counter has already moved past this frame, so nothing later could decrypt.
+  socket.binary(new Uint8Array(48).buffer);
+  await until(() => !wsClient.isConnected());
+  assert.equal(disconnects, 1, 'recovery is requested immediately, not after the idle probe');
+  // Whatever the dead socket delivers afterwards is ignored.
+  socket.binary(await server.seal(JSON.stringify({ method: 'pane_output', params: { target: 's:0.0', content: 'late' } })));
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(disconnects, 1);
+}));
+
+test('encrypted frames are dispatched in arrival order even when decoding latency differs', () => withWebCrypto(async () => {
+  const server = new FakeE2eServer('tok', 2);
+  const { socket } = await encryptedHandshake(server);
+  const seen: string[] = [];
+  const listener = (_t: string, content: string) => { seen.push(content); };
+  wsClient.addPaneOutputListener('s:0.0', listener);
+
+  // Frame 1: a big snapshot, deflated on the wire → DecompressionStream, many
+  // microtasks. Frame 2: a tiny one, plain → synchronous TextDecoder. Without
+  // an ordered dispatch queue, frame 2 paints first and frame 1 overwrites it.
+  const big = 'x'.repeat(4000);
+  const first = await server.seal(JSON.stringify({ method: 'pane_output', params: { target: 's:0.0', content: big } }), true);
+  const second = await server.seal(JSON.stringify({ method: 'pane_output', params: { target: 's:0.0', content: 'small' } }));
+  socket.binary(first);
+  socket.binary(second);
+  await until(() => seen.length === 2);
+  assert.deepEqual(seen.map(s => s.length), [4000, 5], 'wire order is dispatch order');
+
+  wsClient.removePaneOutputListener('s:0.0', listener);
+  wsClient.disconnect();
+}));
+
 test('a server that does not advertise e2e gets the v1 handshake', () => withWebCrypto(async () => {
   const server = new FakeE2eServer('tok', 1);
   const { socket, auth } = await encryptedHandshake(server);

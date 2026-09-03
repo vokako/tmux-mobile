@@ -73,6 +73,18 @@ Custom WebSocket client (`ws.ts`) with auto-reconnect, pending promise cleanup, 
   cannot send through the new socket. This prevents an old connection from
   clearing or corrupting a successful in-app reconnect — the failure mode that
   previously required restarting the whole app process.
+- **Inbound frames are dispatched in wire order.** Decrypt + decode is async
+  and its latency depends on the frame (a ≥256-byte payload runs through
+  `DecompressionStream`, a small one through a synchronous `TextDecoder`), so
+  two handlers started back to back could finish in the other order — for
+  `pane_output` that painted snapshot N after N+1 and, since the server only
+  pushes on change, left the stale screen up. `_recvQueue`, the mirror of
+  `_sendQueue`, chains every frame's handler behind the previous one's.
+- **A decrypt failure is a disconnect, now.** The receive counter advances
+  before the frame is checked, so after one bad frame every later frame fails
+  too; the session is dead. Waiting for the idle probe's three timeouts meant
+  ~20 s of a silently frozen app before reconnect started. `forceDisconnect`
+  runs from the catch instead.
 - **Foreground recovery also handles an apparently-open socket.** Mobile
   WebViews can suspend with `WebSocket.readyState === OPEN`, then resume after
   pane pushes or xterm's live-tail state has gone stale. On every transition

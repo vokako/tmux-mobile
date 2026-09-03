@@ -48,9 +48,10 @@ export type RpcClientError = Error & { code?: number | string };
 // directions can never seal two frames under one (key, nonce) pair.
 type Cipher = { sendKey: CryptoKey; recvKey: CryptoKey; sendCounter: number; recvCounter: number };
 // The raw WebSocket plus our per-connection attachments (send serialization
-// queue, negotiated cipher, identity getters).
+// queue, receive dispatch queue, negotiated cipher, identity getters).
 interface AppSocket extends WebSocket {
   _sendQueue: Promise<void>;
+  _recvQueue: Promise<void>;
   _cipher: Cipher | null;
   _getMachineId?: () => string | null;
   _getHostname?: () => string | null;
@@ -396,6 +397,7 @@ export function connect(url: string, token: string, timeoutMs = CONNECT_TIMEOUT_
       // synchronously without a Blob → arrayBuffer round-trip per message.
       socket.binaryType = 'arraybuffer';
       socket._sendQueue = Promise.resolve();
+      socket._recvQueue = Promise.resolve();
       socket._cipher = null;
     } catch (e) {
       window.__dbg?.(`ws: connect error: ${(e as Error).message}`);
@@ -435,11 +437,27 @@ export function connect(url: string, token: string, timeoutMs = CONNECT_TIMEOUT_
     socket._getMachineId = () => machineId;
     socket._getHostname = () => hostname;
 
-    socket.onmessage = async (event) => {
+    // Frames are handled strictly in arrival order. Decrypt + wire-decode is
+    // async, and its latency depends on the frame: a ≥256-byte payload goes
+    // through DecompressionStream (several tasks), a small one through a
+    // synchronous TextDecoder — so two `await`s started back to back can
+    // finish in the other order. For pane_output that paints snapshot N
+    // after N+1 and, because the server only pushes on change, leaves the
+    // stale screen up until the next change. One per-socket promise chain,
+    // the mirror of `_sendQueue`, keeps dispatch order = wire order.
+    socket.onmessage = (event) => {
       if (ws !== socket) return;
       // Any inbound message resets the idle clock — the link is alive,
       // even if the message is just a handshake / push / heartbeat.
       lastInboundAt = Date.now();
+      const job = socket._recvQueue.then(() => handleMessage(event));
+      // A failed frame must not stall the chain; the handler already turned
+      // every failure it cares about into a disconnect or a dropped frame.
+      socket._recvQueue = job.catch(() => {});
+    };
+
+    async function handleMessage(event: MessageEvent) {
+      if (ws !== socket) return;
       // event.data is either a string (text frames: handshake, plain auth
       // path) or an ArrayBuffer (binary frames: encrypted messages).
       const isBinary = event.data instanceof ArrayBuffer;
@@ -502,7 +520,15 @@ export function connect(url: string, token: string, timeoutMs = CONNECT_TIMEOUT_
       if (authed && cipher) {
         if (!isBinary) return; // ignore unexpected text frames after encrypted auth
         let pt;
-        try { pt = await decryptMsg(event.data, cipher); } catch { return; }
+        try { pt = await decryptMsg(event.data, cipher); }
+        catch {
+          // The receive counter already advanced for this frame, so every
+          // later frame would fail too: the session is dead from here on.
+          // Say so now — waiting for the idle probe's three timeouts left the
+          // app silently frozen for ~20 s before reconnect kicked in.
+          if (ws === socket) forceDisconnect('decrypt failed');
+          return;
+        }
         if (ws !== socket) return;
         try { data = JSON.parse(pt); } catch { return; }
       }
@@ -543,7 +569,7 @@ export function connect(url: string, token: string, timeoutMs = CONNECT_TIMEOUT_
           rej(err);
         } else res(data.result);
       }
-    };
+    }
 
     socket.onclose = (ev) => {
       clearTimeout(timeout);
