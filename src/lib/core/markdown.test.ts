@@ -121,3 +121,16 @@ test('links and images only carry http(s), mailto or relative targets', () => {
   assert.match(renderMarkdown('![pic](https://x.y/p.png)'), /<img src="https:\/\/x\.y\/p\.png" alt="pic"/u);
 });
 
+test('inline code inside a dollar span is never swallowed as math', () => {
+  // Reproduced 2026-09-03: code is holed out to \x00CODE0\x00 BEFORE math runs,
+  // and the `$…$` body class matched across the placeholder — KaTeX got the
+  // placeholder, the code never came back.
+  const html = renderMarkdown('cost $5 and `code` is 3$ ok');
+  assert.ok(!html.includes('CODE0'), `placeholder leaked: ${html}`);
+  assert.match(html, /<code>code<\/code>/u, 'the code renders');
+  assert.ok(!html.includes('katex'), 'money around code is prose');
+  // The display and \( \) families hold the same line.
+  assert.ok(!renderMarkdown('$$ a `b` c $$').includes('CODE0'));
+  assert.ok(!renderMarkdown('\\( a `b` c \\)').includes('CODE0'));
+  assert.ok(!renderMarkdown('\\[ a `b` c \\]').includes('CODE0'));
+});

@@ -90,11 +90,14 @@ function renderMath(text: string, holes: string[]): string {
     holes.push(html);
     return `\x00MATH${holes.length - 1}\x00`;
   };
+  // No body may cross a `\x00` — that byte only ever marks a holed-out code
+  // span, and a formula that swallowed one rendered the placeholder as TeX
+  // while the code itself never came back (2026-09-03).
   return text
-    .replace(/\\\[([\s\S]+?)\\\]/g, hole(true))
-    .replace(/\\\(([\s\S]+?)\\\)/g, hole(false))
-    .replace(/\$\$([\s\S]+?)\$\$/g, hole(true))
-    .replace(/(?<![\w$])\$(?!\s)([^$\n]*?[^\s$])\$(?!\d)/g, hole(false));
+    .replace(/\\\[([^\x00]+?)\\\]/g, hole(true))
+    .replace(/\\\(([^\x00]+?)\\\)/g, hole(false))
+    .replace(/\$\$([^\x00]+?)\$\$/g, hole(true))
+    .replace(/(?<![\w$])\$(?!\s)([^$\n\x00]*?[^\s$\x00])\$(?!\d)/g, hole(false));
 }
 
 export function renderMarkdown(body: string | null | undefined): string {
