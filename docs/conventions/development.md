@@ -95,6 +95,21 @@ dangling case, or picking the newest APK across all `android-*` dirs, is how you
 end up shipping the wrong tree.
 
 
+## Android signing
+
+The release keystore is NOT in the repository. `gen/android/app/build.gradle.kts`
+reads `src-tauri/gen/android/key.properties` (gitignored; copy
+`key.properties.example` and fill in `storeFile`, `storePassword`, `keyAlias`,
+`keyPassword`; `storeFile` is relative to `gen/android/`). Without the file a
+release build still succeeds but the APK is unsigned, and gradle says so.
+
+Why: until 2026-09-03 `keystore.jks` and its passwords were committed in the
+gradle script. Anyone with the repository could sign an update that installed
+copies of `com.tmuxmobile.dev` would accept. The file was untracked that day; the
+key itself is still the one installed apps trust, so rotating it means users
+reinstall — an owner decision, not a build step. Until it is rotated, treat the
+history as containing a live signing key.
+
 ## Workflow
 
 - **Commit after every verified change** (owner's standing instruction): once a fix/feature is tested and its docs are updated, commit it right away — one logical change per commit. Don't let verified work sit uncommitted in the tree. Never commit `agent-team-page/` or other unrelated in-progress work without being asked.

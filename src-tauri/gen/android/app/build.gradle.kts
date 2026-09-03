@@ -13,6 +13,18 @@ val tauriProperties = Properties().apply {
     }
 }
 
+// Release signing comes from gen/android/key.properties (gitignored — the
+// keystore and its passwords were once committed here, which is a leaked
+// signing key; see docs/conventions/development.md "Android signing").
+// Keys: storeFile (relative to gen/android), storePassword, keyAlias, keyPassword.
+val keyProperties = Properties().apply {
+    val propFile = rootProject.file("key.properties")
+    if (propFile.exists()) {
+        propFile.inputStream().use { load(it) }
+    }
+}
+val hasReleaseKey = keyProperties.getProperty("storeFile") != null
+
 android {
     compileSdk = 36
     namespace = "com.tmuxmobile.dev"
@@ -25,11 +37,13 @@ android {
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
     }
     signingConfigs {
-        create("release") {
-            storeFile = file("../keystore.jks")
-            storePassword = "tmuxmobile"
-            keyAlias = "tmuxmobile"
-            keyPassword = "tmuxmobile"
+        if (hasReleaseKey) {
+            create("release") {
+                storeFile = rootProject.file(keyProperties.getProperty("storeFile"))
+                storePassword = keyProperties.getProperty("storePassword")
+                keyAlias = keyProperties.getProperty("keyAlias")
+                keyPassword = keyProperties.getProperty("keyPassword")
+            }
         }
     }
     buildTypes {
@@ -45,7 +59,11 @@ android {
             }
         }
         getByName("release") {
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseKey) {
+                signingConfig = signingConfigs.getByName("release")
+            } else {
+                logger.warn("tmux-mobile: gen/android/key.properties missing — release APK will be unsigned")
+            }
             isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }

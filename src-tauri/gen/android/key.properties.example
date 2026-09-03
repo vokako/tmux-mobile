@@ -1,0 +1,5 @@
+# Copy to key.properties (gitignored) and fill in. storeFile is relative to gen/android/.
+storeFile=keystore.jks
+storePassword=
+keyAlias=
+keyPassword=
