@@ -94,7 +94,6 @@
   let pendingRm = $state<{ i: number; name: string } | null>(null);
   let pendingDelTpl = $state(false);
   let teamWideOpen = $state(false);  // team-wide config section expanded
-  let pickerOpen = $state(false);    // mobile template dropdown open
 
   // Per-agent "advanced" (env / mcp / skills) expand state, keyed by index;
   // reset when switching templates.
@@ -104,7 +103,7 @@
     s.has(i) ? s.delete(i) : s.add(i);
     advSet = s;
   }
-  $effect(() => { selIdx; advSet = new Set(); pendingRm = null; pendingDelTpl = false; teamWideOpen = false; pickerOpen = false; });
+  $effect(() => { selIdx; advSet = new Set(); pendingRm = null; pendingDelTpl = false; teamWideOpen = false; });
 
   // env (object) ⇄ KEY=VALUE lines; skills (array) ⇄ one-per-line.
   const envToLines = (o: Record<string, string> | undefined) => (o && typeof o === 'object')
@@ -209,28 +208,22 @@
   </div>
 
   <!-- Mobile: a compact dropdown to switch templates instead of the strip
-       (the left-list sidebar is desktop-only). -->
+       (the left-list sidebar is desktop-only). The dropdown is the app's ONE
+       Select — it was a hand-rolled backdrop panel at `top: 100%` (no Escape,
+       no close on scroll/resize; review, 2026-09-03). "New template" is its
+       own button beside the field, not a row inside a pick-one list. -->
   <div class="tpl-picker">
     <span class="tpl-picker-label">{t('teamTplTag')}</span>
-    <button class="tpl-picker-btn" onclick={() => pickerOpen = !pickerOpen}>
-      <span class="tpl-picker-name">{sel?.name ?? '—'}</span>
-      <span class="tpl-count">{sel?.agents?.length ?? 0}</span>
-      <Icon name="chevron-down" size={12} />
-    </button>
-    {#if pickerOpen}
-      <button class="tpl-picker-backdrop" aria-label="close" onclick={() => pickerOpen = false}></button>
-      <div class="tpl-picker-menu">
-        {#each drafts as d, i}
-          <button class="tpl-picker-item" class:active={i === selIdx} onclick={() => { selIdx = i; pickerOpen = false; }}>
-            <span class="tpl-picker-name">{d.name}</span>
-            <span class="tpl-count">{d.agents?.length ?? 0}</span>
-          </button>
-        {/each}
-        <button class="tpl-picker-item tpl-picker-new" onclick={() => { addTemplate(); pickerOpen = false; }}>
-          <Icon name="plus" size={12} /> {t('teamNewTemplate')}
-        </button>
+    <div class="tpl-picker-row">
+      <div class="tpl-picker-sel">
+        <Select value={String(selIdx)} ariaLabel={t('teamTplTag')}
+          options={drafts.map((d, i) => ({ value: String(i), label: d.name, hint: String(d.agents?.length ?? 0) }))}
+          onchange={(v: string) => { selIdx = Number(v); }} />
       </div>
-    {/if}
+      <button class="tpl-add tpl-picker-add" onclick={addTemplate} title={t('teamNewTemplate')} aria-label={t('teamNewTemplate')}>
+        <Icon name="plus" size={12} />
+      </button>
+    </div>
   </div>
 
   <div class="tpl-body">
@@ -432,29 +425,12 @@
 
   /* Mobile template dropdown — hidden on desktop (the sidebar list is used). */
   .tpl-picker { display: none; }
-  .tpl-picker-btn {
-    display: flex; align-items: center; gap: 8px; width: 100%;
-    padding: 10px 12px; border: 1px solid var(--border2); border-radius: 9px;
-    background: var(--input-bg); color: var(--text); font-size: var(--fs-title); font-weight: 600;
-    cursor: pointer; -webkit-tap-highlight-color: transparent; font-family: var(--font-ui);
-  }
-  .tpl-picker-name { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tpl-picker-label { display: block; margin-bottom: 5px; font-size: var(--fs-meta); font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.4px; }
-  .tpl-picker-backdrop { position: fixed; inset: 0; z-index: 50; border: none; background: none; }
-  .tpl-picker-menu {
-    position: absolute; left: 14px; right: 14px; top: 100%; z-index: 51; margin-top: 2px;
-    max-height: calc(50vh / var(--ui-zoom, 1)); overflow-y: auto;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
-    box-shadow: 0 12px 30px rgba(0,0,0,0.4); padding: 4px;
-  }
-  .tpl-picker-item {
-    display: flex; align-items: center; gap: 8px; width: 100%;
-    padding: 11px 12px; border: none; border-radius: 7px;
-    background: none; color: var(--text2); font-size: var(--fs-title); cursor: pointer;
-    text-align: left; -webkit-tap-highlight-color: transparent; font-family: var(--font-ui);
-  }
-  .tpl-picker-item.active { color: var(--accent); background: var(--accent-bg); }
-  .tpl-picker-new { color: var(--text3); border-top: 1px solid var(--border2); border-radius: 0; margin-top: 2px; }
+  .tpl-picker-row { display: flex; align-items: stretch; gap: 8px; }
+  .tpl-picker-sel { flex: 1; min-width: 0; }
+  /* The same dashed add control the desktop strip ends with, squared to the
+     field's height so the row reads as one line. */
+  .tpl-picker-add { flex: none; padding: 0; width: 38px; justify-content: center; }
 
   .tpl-edit { flex: 1; min-width: 0; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
   .tpl-name-input {
@@ -565,7 +541,7 @@
     .tpl-body { flex-direction: column; }
     /* The horizontal strip is replaced by the compact dropdown on phones. */
     .tpl-list { display: none; }
-    .tpl-picker { display: block; position: relative; flex-shrink: 0; padding: 8px 14px; border-bottom: 1px solid var(--border); }
+    .tpl-picker { display: block; flex-shrink: 0; padding: 8px 14px; border-bottom: 1px solid var(--border); }
 
     /* iOS zooms the page when focusing an input below the threshold. */
     .ag-field, .sys-input, .tpl-name-input { font-size: var(--fs-input-touch); }

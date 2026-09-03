@@ -59,9 +59,10 @@ These tests `readFile` the component source and assert with regexes.
 |------|------|
 | `src/App.source.test.ts` | notification refresh on every connect path; terminal nav/page-layer structure |
 | `sessions/Sessions.source.test.ts` | notification-state import wiring |
-| `sessions/PanePicker.source.test.ts` | Team-dot suppression in the picker |
+| `sessions/PanePicker.source.test.ts` | Team-dot suppression in the picker; it is a fixed popover placed from its opener with the shared dismissal set |
 | `terminal/Terminal.source.test.ts` | Terminal chrome uses only Team-filtered queries |
-| `team/Team.source.test.ts` | roster chip wrap/overflow CSS contract |
+| `team/Team.source.test.ts` | roster chip wrap/overflow CSS contract; the composer's Enter rule; the team switcher is the shared ContextMenu and names teams by project |
+| `team/TeamTemplates.source.test.ts` | the phone's template picker is `ui/Select`, never a hand-rolled panel |
 | `ui/tokens.source.test.ts` | one type scale: no raw px font-size outside the listed exceptions |
 | `ui/confirm.source.test.ts` | every destructive verb goes through the shared confirmation |
 | `hub/Hub.source.test.ts` | a tool-lane row is one line (`nowrap`, never `pre`), the argument is never truncated (the lane pans instead), and the row cap stays expressed in rows |

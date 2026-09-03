@@ -44,7 +44,8 @@ server. See `docs/design-docs/features/team.md` for architecture.
   (tap-to-confirm), edits every agent field with clear labels, has a per-agent
   **advanced** section (env / extra MCP servers / skills) and a **Team-wide**
   section (env/mcp/skills/prompt). On phones it is a near-fullscreen sheet: the
-  template list collapses into a labelled dropdown and the global system prompt
+  template list collapses into a labelled dropdown (the shared `ui/Select`, with
+  a "new template" button beside it) and the global system prompt
   collapses. (`team_templates` / `team_template_save` / `team_template_delete`.)
 - An empty `model` uses the backend launcher's default: the server's Team model
   for Kiro, `sonnet` for Claude, and the global Codex configuration for Codex.
