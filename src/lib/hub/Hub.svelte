@@ -3145,7 +3145,7 @@
         {#if drawerView === 'term'}
           <div class="win-list">
             {#each agents as a (a.window)}
-              <button class="win-pill" class:cur={termTarget.startsWith(`${selected}:${a.window}.`)} onclick={() => pickWindow(a)}>
+              <button class="win-pill state-ctl" class:cur={termTarget.startsWith(`${selected}:${a.window}.`)} onclick={() => pickWindow(a)}>
                 <span class="st" class:live-dot={!!a.agent && stateIsLive(a.state)} style:background={stateDotColor(a.agent ? a.state : 'shell')}></span>
                 {a.window}:{a.name}{#if a.agent && !a.managed}<span class="direct-tag">{t('hubDirect')}</span>{/if}
               </button>
@@ -3467,7 +3467,11 @@
     align-items: stretch; justify-content: center; gap: 1px; overflow: hidden;
     min-height: 30px; background: var(--surface); border: 1px solid var(--border);
     border-radius: var(--ui-radius-row); padding: 3px 8px 3px 5px; cursor: pointer; text-align: left;
-    font-size: var(--fs-ui); color: var(--text2); transition: border-color var(--t-fast), color var(--t-fast);
+    font-size: var(--fs-ui); color: var(--text2);
+    /* Its clothes cross-fade (motion.md .state-ctl grammar): .sel's frame and
+       wash, .needs' ring, .off/.busy's opacity. A TRANSITION, never an
+       animation — waiting is not in motion (see .acard.needs). */
+    transition: border-color var(--t-fast), color var(--t-fast), background var(--t-fast), box-shadow var(--t-fast), opacity var(--t-fast);
     -webkit-tap-highlight-color: transparent;
   }
   /* The identity row — what the card used to be in its entirety. */
@@ -3536,7 +3540,7 @@
   .acard.busy { opacity: 0.35; pointer-events: none; }
   /* Identity layer: names wear the display face (--font-display), not mono. */
   .a-name { font-family: var(--font-display); font-weight: 600; max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .st { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .st { width: 6px; height: 6px; border-radius: 50%; flex: none; transition: background var(--t-fast); }
   .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--status-danger); flex: none; }
   .ava.dim { background: var(--surface2) !important; color: var(--text3); }
   /* The stopped card's ONE way back up: a real button in the .a-more dialect,
@@ -4040,6 +4044,7 @@
     background: var(--accent-bg); color: var(--accent); border: 1px solid transparent;
     border-radius: var(--ui-radius-control); padding: 0 9px; font-size: var(--fs-sub); font-weight: 650;
     cursor: pointer; max-width: min(34vw, 220px);
+    transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
   }
   /* Broadcast and room-note are NOT the default state, so they do not wear the
      accent: one interrupts everyone, the other reaches nobody live. */
