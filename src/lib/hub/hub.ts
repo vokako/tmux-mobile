@@ -47,6 +47,17 @@ export function stateIsLive(state: string): boolean {
   return state === 'running' || state === 'working';
 }
 
+/** Which states mean "a PERSON has to act" — the amber half of the status
+ * language (`stateDotColor` → --status-warn). The agent card wears a
+ * card-level cue for them (`.acard.needs`: amber frame + wash + a short
+ * label), because a 6px static dot was the weakest signal on the card while
+ * being the one that needs the human most (review, 2026-09-03). Static on
+ * purpose: `.live-dot`'s breathe says "a turn is open", and a waiting turn
+ * is suspended, not running. `blocked` is `tmm status`'s wider word for it. */
+export function stateNeedsYou(state: string): boolean {
+  return state === 'waiting' || state === 'blocked';
+}
+
 /**
  * The colour of the context-usage bar, as a THEME EXPRESSION rather than a
  * colour: every stop is one of the app's four status tokens, so the ramp is

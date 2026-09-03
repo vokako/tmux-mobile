@@ -92,6 +92,23 @@ test('the agent card speaks the three-stage machine: select, then options, dblcl
   assert.match(source, /if \(filterAgent\) \{ filterAgent = ''; return true; \}/u, 'back gesture exits the filter');
 });
 
+test('a waiting agent\u2019s card carries the cue, in the dot\u2019s own amber, without motion', () => {
+  // Review, 2026-09-03: running got a breathing halo, waiting a 6px static dot
+  // — the state that needs the human most was the weakest signal. The CARD
+  // wears it now (frame + wash + word), in the one status language: the same
+  // --status-warn token stateDotColor paints, chosen by stateNeedsYou (pinned
+  // against stateDotColor in hub.test.ts), and static — .live-dot's breathe
+  // means "a turn is open", which a suspended turn is not.
+  const live = source.slice(source.indexOf('class="acard" class:sel'), source.indexOf('class="acard off"'));
+  assert.match(live, /class:needs=\{stateNeedsYou\(a\.state\)\}/u, 'the card class comes from the ONE definition');
+  assert.match(live, /\{#if stateNeedsYou\(a\.state\)\}<span class="ac-needs">/u, 'and the word is gated by the same one');
+  const needs = rule('.acard.needs');
+  assert.match(needs, /var\(--status-warn\)/u, 'the frame is the dot\u2019s amber token');
+  assert.ok(!/animation/u.test(needs), 'no motion: waiting is not in motion');
+  assert.ok(!/#[0-9a-f]{3,8}\b/iu.test(needs), 'no literal colour — tokens only');
+  assert.match(rule('.ac-needs'), /var\(--status-warn\)/u, 'the word speaks the same token');
+});
+
 test('sidebar dots and roster cards drink from ONE state map (board #8)', () => {
   // Both pollers route through mergeStates: the roster poll overlays its
   // project's keys onto the shared map, and the rooms poll overlays the

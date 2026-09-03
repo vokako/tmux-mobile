@@ -32,7 +32,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, mentionedAgents, chipExtras, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, touchContextMenu, perLineOf, modelLabel } from './hub.ts';
+  import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, stateNeedsYou, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, mentionedAgents, chipExtras, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, touchContextMenu, perLineOf, modelLabel } from './hub.ts';
   import { notifyNews, isAway, roomProjectName } from './notifications.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
@@ -2347,7 +2347,14 @@
                  switches without hunting for the menu's first item (owner,
                  2026-08-26: "每次点击 project 里的 Agent 小卡片时 能自动帮我
                  切换到跟当前 Agent 的对话"). -->
-            <div class="acard" class:sel={recipient === a.name} role="button" tabindex="0"
+            <!-- WAITING is the state that needs the human most and it was the
+                 weakest signal on the card — a 6px static amber dot beside a
+                 running neighbour's breathing halo (review, 2026-09-03). The
+                 card itself now carries it: `.needs` = amber frame + wash +
+                 a short label, in the SAME status tokens the dot speaks
+                 (stateDotColor → --status-warn), and static — the breathe
+                 means "a turn is open", and a waiting turn is suspended. -->
+            <div class="acard" class:sel={recipient === a.name} class:needs={stateNeedsYou(a.state)} role="button" tabindex="0"
               title={[`${a.name} · ${stateLabel(a.state)}`, a.detail, vitalsLine(a.vitals)].filter(Boolean).join(' · ')}
               onclick={(e) => cardClick(a.name, e.currentTarget)}
               ondblclick={() => cardDbl(a.name)}
@@ -2358,6 +2365,7 @@
                 {#if backendIcon(a.agent)}<img class="ava" src={backendIcon(a.agent)} alt={a.agent} />{:else}<span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>{/if}
                 <span class="a-name">{a.name}</span>
                 <span class="st" class:live-dot={stateIsLive(a.state)} style:background={stateDotColor(a.state)}></span>
+                {#if stateNeedsYou(a.state)}<span class="ac-needs">{a.state === 'blocked' ? t('hubState_blocked') : t('hubNeedsYou')}</span>{/if}
                 {#if unread.has(a.name)}<span class="unread" title={t('hubUnread')}></span>{/if}
               </div>
               <!-- What the agent's own status line says, kept ON the card rather
@@ -3367,6 +3375,22 @@
   .ac-bar > i { display: block; height: 100%; transition: width var(--t-move), background var(--t-move); }
   .acard:hover { border-color: var(--input-border); color: var(--text); }
   .acard.sel { border-color: var(--accent-line); background: var(--accent-bg); color: var(--text); }
+  /* Needs a person: the card wears the dot's own amber as a frame (1px border
+     + 1px inset ring — inset, because the strip clips outward shadows) and a
+     wash, plus the .ac-needs word. Same --status-warn token as stateDotColor,
+     no motion (see stateNeedsYou). Selection keeps its accent frame on top;
+     the wash, word and dot still say waiting. */
+  .acard.needs {
+    border-color: var(--status-warn); color: var(--text);
+    background: color-mix(in srgb, var(--status-warn) 9%, var(--surface));
+    box-shadow: inset 0 0 0 1px var(--status-warn);
+  }
+  .acard.needs:hover { border-color: var(--status-warn); }
+  .acard.needs.sel { border-color: var(--accent-line); box-shadow: inset 0 0 0 1px var(--accent-line); }
+  .ac-needs {
+    color: var(--status-warn); font-size: var(--fs-micro); font-weight: 650;
+    text-transform: uppercase; letter-spacing: 0.4px; white-space: nowrap; flex: none;
+  }
   /* The add card rides INSIDE the strip as its last member, STICKY at the
      right edge: after the last card when everything fits, floating at the
      edge while the strip scrolls (the strip hides its scrollbar, so a

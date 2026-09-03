@@ -75,7 +75,9 @@ completion).
 
 ## Roster (agent cards)
 - One card per live window; managed agents carry the hook-derived state dot
-  (at-rest is achromatic grey; running wears the `.live-dot` halo + breathe),
+  (at-rest is achromatic grey; running wears the `.live-dot` halo + breathe;
+  waiting/blocked puts an amber frame + wash + `needs you` word on the whole
+  card — same `--status-warn` token, no motion),
   sniffed **vitals** (model + effort at `--fs-micro`, context% as a 2px
   bottom edge line), and a context menu (Watch / Interrupt / Stop / Restart /
   Remove / configure agent — rising consequence order). The card TAP menu
