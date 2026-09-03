@@ -11,9 +11,11 @@
   // - `onClose()`: user backed out of the panel root (host switches view).
   // - `goBack()` (instance export): host's back-navigation calls this first;
   //   returns true if the panel consumed the back (closed an open diff).
+  import { flip } from 'svelte/animate';
   import Icon from '../ui/Icon.svelte';
   import { t } from '../core/i18n.svelte.ts';
   import { gitCmd } from '../core/ws.ts';
+  import { moveMs } from '../ui/motion.ts';
 
   type GitFile = { status: string; file: string };
   type GitCommit = { hash: string; subject: string; date: string; author: string };
@@ -38,11 +40,18 @@
   let pushResult = $state('');
   let commitMsg = $state('');
   let showCommitInput = $state(false);
+  // Which way the last diff hop went: the view that mounts next drills in
+  // from that side (the navigation grammar, under 760px only — CSS gates it).
+  // '' on first mount: the host already slid the whole panel in.
+  let diffAnim = $state<'' | 'fwd' | 'back'>('');
 
   let gitRoot = '';
 
+  function closeDiff() { gitDiff = null; diffAnim = 'back'; }
+  function openDiff(d: GitDiff) { gitDiff = d; diffAnim = 'fwd'; }
+
   export function goBack() {
-    if (gitDiff) { gitDiff = null; return true; }
+    if (gitDiff) { closeDiff(); return true; }
     return false;
   }
 
@@ -98,8 +107,8 @@
         return;
       }
       const diff = await git('diff', ...(staged ? ['--cached'] : []), '--', file);
-      gitDiff = { file, diff: diff || '(no changes)', _root: gitRoot };
-    } catch (e) { gitDiff = { file, diff: (e as Error).message, _root: '' }; }
+      openDiff({ file, diff: diff || '(no changes)', _root: gitRoot });
+    } catch (e) { openDiff({ file, diff: (e as Error).message, _root: '' }); }
     gitLoading = false;
   }
 
@@ -107,8 +116,8 @@
     gitLoading = true;
     try {
       const diff = await git('show', '--stat', '--patch', hash);
-      gitDiff = { file: hash, diff, _root: gitRoot };
-    } catch (e) { gitDiff = { file: hash, diff: (e as Error).message, _root: '' }; }
+      openDiff({ file: hash, diff, _root: gitRoot });
+    } catch (e) { openDiff({ file: hash, diff: (e as Error).message, _root: '' }); }
     gitLoading = false;
   }
 
@@ -170,24 +179,25 @@
 </script>
 
 <div class="preview-header">
-  <button class="back-btn" onclick={() => { if (gitDiff) gitDiff = null; else onClose(); }}><Icon name="chevron-left" size={16} /></button>
+  <button class="back-btn" onclick={() => { if (gitDiff) closeDiff(); else onClose(); }}><Icon name="chevron-left" size={16} /></button>
   <span class="preview-name"><Icon name="git-branch" size={14} /> {gitBranch || 'Git'}</span>
   <div class="preview-actions">
     <button class="act-btn" onclick={() => { gitTab === 'status' ? loadGitStatus() : loadGitLog(); }}><Icon name="refresh" size={14} /></button>
   </div>
 </div>
 {#if pushResult}
-  <div class="git-push-result" class:git-error={pushResult.startsWith('✗')}>{pushResult}</div>
+  <div class="git-push-result appear" class:git-error={pushResult.startsWith('✗')}>{pushResult}</div>
 {/if}
 {#if !gitDiff}
   {@const stagedCount = gitStatus.filter(f => f.status[0] !== ' ' && f.status[0] !== '?').length}
+  <div class="git-view" class:drill-back={diffAnim === 'back'}>
   <div class="git-actions">
     <button class="git-act-btn" onclick={gitAddAll}>{t('addAll')}</button>
     <button class="git-act-btn" onclick={() => showCommitInput = !showCommitInput}>{t('commit')}{stagedCount ? ` (${stagedCount})` : ''}</button>
     <button class="git-act-btn" onclick={gitPush} disabled={gitLoading}>{t('push')}</button>
   </div>
   {#if showCommitInput}
-    <div class="git-commit-row">
+    <div class="git-commit-row appear-rise">
       <textarea bind:value={commitMsg} placeholder={t('commitMsg')} onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); gitCommit(); } }} rows="2"></textarea>
       <button class="git-commit-btn" onclick={gitCommit} disabled={!commitMsg.trim()}>OK</button>
     </div>
@@ -197,18 +207,21 @@
     <button class:active={gitTab === 'log'} onclick={() => { gitTab = 'log'; loadGitLog(); }}>{t('log')}</button>
   </div>
   {#if gitError}
-    <div class="git-error">{gitError}</div>
+    <div class="git-error appear">{gitError}</div>
   {/if}
-  {#if gitLoading}
+  <!-- A load KEEPS the rows and dims them after a beat (the file list's rule);
+       the placeholder is for the first answer only. Rows are keyed by path and
+       flip: staging does not reorder, but a refresh that does moves the row. -->
+  {#if gitLoading && !(gitTab === 'status' ? gitStatus.length : gitLog.length)}
     <div class="git-loading">{t('gitLoading')}</div>
   {:else if gitTab === 'status'}
-    <div class="git-list" bind:this={gitListEl}>
+    <div class="git-list" class:busy={gitLoading} bind:this={gitListEl}>
       {#if !gitStatus.length}
         <div class="empty">{t('cleanTree')}</div>
       {/if}
-      {#each gitStatus as f}
+      {#each gitStatus as f (f.file)}
         {@const staged = f.status[0] !== ' ' && f.status[0] !== '?'}
-        <div class="git-file-row">
+        <div class="git-file-row" animate:flip={{ duration: moveMs() }}>
           <button class="git-file" onclick={() => showFileDiff(f.file, staged)}>
             <span class="git-st" class:git-add={f.status.includes('A') || f.status.includes('?')} class:git-mod={f.status.includes('M')} class:git-del={f.status.includes('D')}>{f.status === '??' ? ' U' : f.status}</span>
             <span class="git-fname">{f.file}</span>
@@ -220,8 +233,8 @@
       {/each}
     </div>
   {:else}
-    <div class="git-list">
-      {#each gitLog as c}
+    <div class="git-list" class:busy={gitLoading}>
+      {#each gitLog as c (c.hash)}
         <button class="git-file" onclick={() => showCommitDiff(c.hash)}>
           <span class="git-hash">{c.hash}</span>
           <span class="git-fname">{c.subject}</span>
@@ -230,7 +243,9 @@
       {/each}
     </div>
   {/if}
+  </div>
 {:else}
+  <div class="git-view" class:drill-fwd={diffAnim === 'fwd'}>
   <div class="git-diff-header">
     <span class="git-diff-name">{gitDiff.file}</span>
     <button class="act-btn" onclick={() => {
@@ -242,6 +257,7 @@
     {#each gitDiff.diff.split('\n') as line}
       <div class="diff-line" class:diff-add={line.startsWith('+') && !line.startsWith('+++')} class:diff-del={line.startsWith('-') && !line.startsWith('---')} class:diff-hunk={line.startsWith('@@')} class:diff-meta={line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')}><span class="diff-text">{line}</span></div>
     {/each}
+  </div>
   </div>
 {/if}
 
@@ -255,6 +271,7 @@
   .back-btn {
     padding: 6px; border: none; border-radius: var(--ui-radius-control); background: var(--surface2);
     color: var(--text2); cursor: pointer; display: flex; -webkit-tap-highlight-color: transparent;
+    transition: color var(--t-fast), background var(--t-fast);
   }
   .preview-name {
     flex: 1; font-size: var(--fs-body); font-weight: 500; overflow: hidden;
@@ -264,6 +281,7 @@
   .act-btn {
     padding: 6px; border: none; border-radius: var(--ui-radius-control); background: none;
     color: var(--text3); cursor: pointer; display: flex; -webkit-tap-highlight-color: transparent;
+    transition: color var(--t-fast);
   }
   .act-btn:active { color: var(--accent); }
   .empty { padding: 40px; text-align: center; color: var(--text3); font-size: var(--fs-body); }
@@ -276,6 +294,7 @@
     padding: 6px 16px; border: none; border-radius: var(--ui-radius-control); background: transparent;
     color: var(--text3); font-size: var(--fs-ui); font-weight: 600; cursor: pointer;
     -webkit-tap-highlight-color: transparent;
+    transition: background var(--t-fast), color var(--t-fast);
   }
   .git-tabs button.active { background: var(--accent-bg); color: var(--accent); }
   .git-error { padding: 10px; color: var(--danger); font-size: var(--fs-ui); background: var(--danger-bg); }
@@ -288,6 +307,7 @@
     padding: 5px 12px; border: 1px solid var(--border); border-radius: var(--ui-radius-control);
     background: var(--surface2); color: var(--text2); font-size: var(--fs-ui); font-weight: 500;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
+    transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast), opacity var(--t-fast);
   }
   .git-act-btn:active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
   .git-act-btn:disabled { opacity: 0.4; }
@@ -304,6 +324,7 @@
     padding: 6px 14px; border: none; border-radius: var(--ui-radius-control);
     background: var(--accent-fill); color: var(--accent-fill-ink); font-size: var(--fs-ui); font-weight: 600;
     cursor: pointer; -webkit-tap-highlight-color: transparent;
+    transition: opacity var(--t-fast);
   }
   .git-commit-btn:disabled { opacity: 0.4; }
   .git-file-row { display: flex; align-items: center; border-bottom: 1px solid var(--border2); }
@@ -315,21 +336,41 @@
     background: none; color: var(--accent); font-size: var(--fs-title); font-weight: 600;
     cursor: pointer; display: flex; align-items: center; justify-content: center;
     flex-shrink: 0; -webkit-tap-highlight-color: transparent;
+    transition: background var(--t-fast);
   }
   .git-stage-btn:active { background: var(--accent-bg); }
   .git-loading { padding: 20px; text-align: center; color: var(--text3); font-size: var(--fs-body); }
-  .git-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .git-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; transition: opacity var(--t-fast) ease; }
+  /* The delayed dim of the file list (Files.svelte) — a threshold, not a tempo. */
+  .git-list.busy { opacity: 0.55; transition-delay: 0.15s; }
+  /* One view at a time inside the host's column; the diff drills in from the
+     right and the list back from the left under 760px — the same keyframe
+     pair Files.svelte declares (scoped styles cannot share it; keep the two
+     in sync with the navigation grammar in design-language.md §1). */
+  .git-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  @media (max-width: 760px) {
+    .git-view.drill-fwd  { animation: drill-in-right 0.12s linear; }
+    .git-view.drill-back { animation: drill-in-left 0.12s linear; }
+  }
+  @keyframes drill-in-right { from { transform: translateX(40%); } to { transform: none; } }
+  @keyframes drill-in-left  { from { transform: translateX(-40%); } to { transform: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .git-view.drill-fwd, .git-view.drill-back { animation: none; }
+    .git-list { transition: none; }
+  }
   .git-file {
     display: flex; align-items: center; gap: 8px; width: 100%;
     padding: 10px 12px; border: none; background: none;
     border-bottom: 1px solid var(--border2); cursor: pointer;
     text-align: left; color: var(--text); font-size: var(--fs-body);
     -webkit-tap-highlight-color: transparent;
+    transition: background var(--t-fast);
   }
   .git-file:active { background: var(--accent-bg); }
   .git-st {
     font-family: var(--font-mono); font-size: var(--fs-ui); font-weight: 600;
     min-width: 24px; color: var(--text3);
+    transition: color var(--t-fast);
   }
   .git-st.git-add { color: var(--status-ok); }
   .git-st.git-mod { color: var(--status-warn); }

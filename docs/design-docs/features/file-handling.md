@@ -116,6 +116,27 @@ Infer MIME from image file extension, not from parent markdown file's mime_hint.
 ### Every way out of the editor asks once — through one helper
 `Files.svelte` has ONE exit for the editor, `leaveEditor(run)`: with no unsaved edits the move runs at once; with edits it is parked as `pendingAct = { kind: 'leave', run }` behind the shared ConfirmDialog and runs on confirm. Cancel drops the move — nothing is queued. Until 2026-09-03 only the back button asked; the session/pane switch, the follow-the-real-cwd rule and the drawer's "look here" (`navRequest`) each set `view = 'list'` outright and the text was silently gone (review finding, highest priority). The decision is pure and unit-tested in `file-view-state.ts`: `leaveDecision({ view, edited })` and `cwdFollowStep(reported, lastSourceDir, guard)`. The follow step commits `lastSourceDir` BEFORE the dialog, so a cancelled follow is skipped for that event and the same cwd does not ask again on the next effect run (it would otherwise re-prompt every time the tab regains visibility). `leaveEditor` reads `view`/`isEdited` under `untrack` because its callers are `$effect`s that must not re-run on every keystroke. When a session switch and a cwd follow both want to move in the same event, the later (follow) replaces the earlier pending move — following the real cwd already outranks the parked position.
 
+## Motion
+
+The file browser follows [motion.md](motion.md). A directory load KEEPS the
+rows on screen and dims them (`.file-list.busy`, opacity 0.55) only after a
+150ms threshold — DirPicker's rule, so a fast listing never blinks and the
+"Loading…" placeholder appears only for the very first answer; GitPanel's
+lists do the same. Things that enter animate: the bookmarks/recent panel, the
+new-item/rename rows and the commit row `.appear-rise`; the drop hint, the
+error banners and the push-result banner `.appear`; the download toasts rise
+in, and the "Copied" flash is one local in+out keyframe (`toast-fade`, fade in
+over 10%, hold, fade out) because it is a one-shot, not an intro atom. The
+toasts centre with auto margins rather than `translateX(-50%)` so the intro
+owns `transform`. The bookmark star swaps glyphs (`{#key}` + `.appear-pop`)
+because no rotation reads star → star-filled. Breadcrumbs are keyed by path
+and only the tip fades in. Git status rows are keyed by file and flip on
+`moveMs()`; the git diff drills in from the right and the list back from the
+left under 760px with the same `drill-in-*` keyframe pair Files declares
+(Svelte scoped styles cannot share a keyframe — the duplicate is deliberate
+and must stay in sync). The progress arc is still not transitioned (it
+tracks the integer). Exits everywhere are cuts.
+
 ## Lessons Learned
 - Always reset loading/spinner states in catch blocks (e.g., `downloading = ''`)
 - Android `gen/` files need backup before `tauri android init`

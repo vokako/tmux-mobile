@@ -105,18 +105,18 @@
   </div>
 
   {#if creating}
-    <div class="pk-new">
+    <div class="pk-new appear-rise">
       <Icon name="folder-plus" size={13} />
       <input class="pk-new-input" bind:value={newName} placeholder={t('newFolderName')}
         autocapitalize="off" autocomplete="off"
         onkeydown={(e) => { if (e.key === 'Enter') createFolder(); else if (e.key === 'Escape') { creating = false; newName = ''; } }} />
       <button class="chip-btn primary" onclick={createFolder} disabled={!newName.trim()}>{t('create')}</button>
     </div>
-    {#if createErr}<div class="pk-err">{createErr}</div>{/if}
+    {#if createErr}<div class="pk-err appear">{createErr}</div>{/if}
   {/if}
 
   {#if error}
-    <div class="pk-err">{error}</div>
+    <div class="pk-err appear">{error}</div>
   {/if}
 
   <div class="pk-list subtle-scroll" class:busy bind:this={listEl}>
@@ -174,6 +174,7 @@
     background: none; color: var(--text2); font-size: var(--fs-ui); cursor: pointer;
     font-family: var(--font-ui); /* rows carry directory names — data, not chrome */
     -webkit-tap-highlight-color: transparent;
+    transition: color var(--t-fast);
   }
   .pk-row:last-child { border-bottom: none; }
   .pk-row:hover { color: var(--accent); }

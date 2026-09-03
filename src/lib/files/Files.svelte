@@ -1471,7 +1471,7 @@
         <Icon name="eye" size={13} />
       </button>
       <button class="tool-btn" class:starred={isBookmarked(cwd)} onclick={() => toggleBookmark(cwd)} title="Bookmark">
-        <Icon name={isBookmarked(cwd) ? 'star-filled' : 'star'} size={13} />
+        {#key isBookmarked(cwd)}<span class="tool-glyph appear-pop"><Icon name={isBookmarked(cwd) ? 'star-filled' : 'star'} size={13} /></span>{/key}
       </button>
       <button class="tool-btn" class:tool-active={showBookmarks} onclick={() => { showBookmarks = !showBookmarks; showRecent = false; }} title="Bookmarks">
         <Icon name="folder-star" size={13} />
@@ -1493,14 +1493,14 @@
     <!-- Path -->
     <div class="bc-path-row" bind:this={bcPathEl}>
       <button class="bc-seg" onclick={() => navTo('/')}>/</button>
-      {#each breadcrumbs as bc}
-        <button class="bc-seg" onclick={() => navTo(bc.path)}>{bc.name}</button>
+      {#each breadcrumbs as bc, i (bc.path)}
+        <button class="bc-seg" class:appear={i === breadcrumbs.length - 1} onclick={() => navTo(bc.path)}>{bc.name}</button>
         <span class="bc-sep">/</span>
       {/each}
     </div>
 
     {#if showBookmarks && bookmarks.length}
-      <div class="bookmarks-panel">
+      <div class="bookmarks-panel appear-rise">
         {#each bookmarks as bm}
           <div class="bm-row">
             <span class="bm-icon"><Icon name="star-filled" size={13} /></span>
@@ -1514,7 +1514,7 @@
     {/if}
 
     {#if showRecent && recentFiles.length}
-      <div class="bookmarks-panel">
+      <div class="bookmarks-panel appear-rise">
         {#each recentFiles as rf}
           <div class="bm-row">
             <span class="bm-icon"><Icon name="clock" size={13} /></span>
@@ -1529,7 +1529,7 @@
 
     <!-- New item input -->
     {#if newType}
-      <div class="new-item">
+      <div class="new-item appear-rise">
         <button class="new-type-btn" onclick={() => newType = newType === 'file' ? 'dir' : 'file'}>
           <Icon name={newType === 'dir' ? 'folder' : 'file'} size={13} />
         </button>
@@ -1548,7 +1548,7 @@
 
     <!-- Rename input -->
     {#if renaming}
-      <div class="new-item">
+      <div class="new-item appear-rise">
         <input
           type="text"
           bind:value={renameValue}
@@ -1562,19 +1562,24 @@
     {/if}
 
     {#if error}
-      <div class="error">{error}</div>
+      <div class="error appear">{error}</div>
     {/if}
 
     <!-- File list. Also the drop target for OS files (board #22): the browser
          path via the HTML5 events here, the compiled app via the webview's
          drag-drop event hit-testing this element's rect. -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="file-list" class:panel-open={showBookmarks || showRecent} class:drop-hot={dragOver}
+    <div class="file-list" class:panel-open={showBookmarks || showRecent} class:drop-hot={dragOver} class:busy={loading}
       bind:this={fileListEl}
       ondragover={onListDragOver} ondragleave={onListDragLeave} ondrop={onListDrop}>
       {#if dragOver}
-        <div class="drop-hint"><Icon name="upload" size={16} />{t('dropToUpload')}</div>
-      {/if}      {#if loading}
+        <div class="drop-hint appear"><Icon name="upload" size={16} />{t('dropToUpload')}</div>
+      {/if}
+      <!-- A directory load KEEPS the rows on screen and dims them after a beat
+           (DirPicker's rule, motion.md): swapping them for "Loading…" made
+           every tap blank-then-repaint. The placeholder is for the very first
+           answer only, when there is nothing to keep. -->
+      {#if loading && !entries.length}
         <div class="loading">{t('loading')}</div>
       {:else}
         {#each entries as entry}
@@ -1796,10 +1801,10 @@
     {/if}
   {/if}
   {#if copyToast}
-    <div class="copy-toast">{t('copied')}</div>
+    <div class="copy-toast flash">{t('copied')}</div>
   {/if}
   {#if downloading}
-    <div class="copy-toast download-toast">
+    <div class="copy-toast download-toast appear-rise">
       <svg class="dl-ring" width="28" height="28" viewBox="0 0 28 28">
         <circle cx="14" cy="14" r="11" fill="none" stroke="var(--border)" stroke-width="2.5" />
         <circle cx="14" cy="14" r="11" fill="none" stroke="var(--accent)" stroke-width="2.5"
@@ -1811,7 +1816,7 @@
       <span class="dl-name">{downloading}</span>
     </div>
   {:else if downloadToast}
-    <div class="copy-toast download-toast">
+    <div class="copy-toast download-toast appear-rise">
       {t('saved')} <span class="dl-path">{downloadToast}</span>
       {#if downloadedPath}
         <button class="toast-open" onclick={openDownloaded}>{t('open')}</button>
@@ -1880,7 +1885,9 @@
     font-size: var(--ui-font-control); display: flex; align-items: center; justify-content: center;
     flex-shrink: 0;
     -webkit-tap-highlight-color: transparent;
+    transition: background var(--t-fast), color var(--t-fast);
   }
+  .tool-glyph { display: flex; }
   .tool-btn:active { background: var(--accent-bg); color: var(--accent); }
   .tool-btn.tool-active { background: var(--accent-bg); color: var(--accent); }
   .tool-btn.starred { color: var(--accent); }
@@ -1895,6 +1902,7 @@
   .bc-seg {
     padding: 2px 4px; border: none; background: none; color: var(--text2);
     cursor: pointer; white-space: nowrap; font-size: var(--fs-ui); font-family: inherit;
+    transition: color var(--t-fast);
   }
   .bc-seg:last-of-type { color: var(--accent); }
   .bc-sep { color: var(--text3); font-size: var(--fs-sub); }
@@ -1917,12 +1925,14 @@
     cursor: pointer; text-align: left; overflow-x: auto;
     white-space: nowrap; scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
+    transition: color var(--t-fast);
   }
   .bm-path::-webkit-scrollbar { display: none; }
   .bm-path:active { color: var(--accent); }
   .bm-del {
     padding: 4px; border: none; border-radius: var(--ui-radius-control); background: none;
     color: var(--text3); cursor: pointer; display: flex;
+    transition: color var(--t-fast);
   }
   .bm-del:active { color: var(--danger); }
 
@@ -1948,7 +1958,14 @@
   }
 
   /* File list */
-  .file-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; position: relative; }
+  .file-list {
+    flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; position: relative;
+    transition: opacity var(--t-fast) ease;
+  }
+  /* In-flight cue that never flashes (DirPicker's rule): the dim starts only
+     after 150ms, so a fast listing — the normal case — navigates with no
+     visible blink. The delay is a threshold, not a tempo. */
+  .file-list.busy { opacity: 0.55; transition-delay: 0.15s; }
   /* The drop target speaks the attach-affordance dialect (dashed accent, like
      the composer's +): a frame over the listing while an OS drag hovers it,
      pointer-events none so dragleave/drop still land on the list itself. */
@@ -1971,6 +1988,7 @@
     border: none; background: none; color: var(--text); cursor: pointer; text-align: left;
     font-size: var(--fs-body); min-width: 0; -webkit-tap-highlight-color: transparent;
     font-family: var(--font-ui); /* file names are data, not chrome */
+    transition: background var(--t-fast);
   }
   .file-main:active { background: var(--input-bg); }
   /* Symlink badge — small ↗ arrow overlaid on the bottom-right of the
@@ -2014,6 +2032,7 @@
   .act-btn {
     padding: 6px; border: none; border-radius: var(--ui-radius-control); background: none;
     color: var(--text3); cursor: pointer; display: flex; -webkit-tap-highlight-color: transparent;
+    transition: opacity var(--t-fast), color var(--t-fast);
   }
   .act-btn:active { color: var(--accent); }
   .act-btn.on { color: var(--accent); }
@@ -2030,6 +2049,7 @@
   .back-btn {
     padding: 6px; border: none; border-radius: var(--ui-radius-control); background: var(--surface2);
     color: var(--text2); cursor: pointer; display: flex; -webkit-tap-highlight-color: transparent;
+    transition: color var(--t-fast), background var(--t-fast);
   }
   .preview-name {
     flex: 1; font-size: var(--fs-body); font-weight: 500; overflow: hidden;
@@ -2168,20 +2188,26 @@
     flex: 1; font-size: var(--fs-body); word-break: break-all; text-align: left;
     background: none; border: none; color: var(--text); cursor: pointer; padding: 0;
     display: flex; align-items: center; gap: 4px; -webkit-tap-highlight-color: transparent;
+    transition: color var(--t-fast);
   }
   .info-path:active { color: var(--accent); }
 
-  /* Copy toast */
+  /* Copy / download toasts. Centred with auto margins, NOT a translateX(-50%):
+     the rise-in intro owns `transform`, and a resting transform here would
+     be overridden for the 200ms it plays. */
   .copy-toast {
-    position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%);
+    position: absolute; bottom: 80px; left: 0; right: 0; margin: 0 auto; width: max-content; max-width: 90%;
+    box-sizing: border-box;
     background: var(--bg); border: 1px solid var(--border); color: var(--accent); padding: 8px 20px;
     border-radius: var(--ui-radius-row); font-size: var(--fs-body); font-weight: 500;
     box-shadow: 0 4px 16px rgba(0,0,0,0.3); pointer-events: none;
-    animation: toast-fade 1.2s ease forwards;
   }
+  /* The one-shot "Copied" flash fades in AND out — a local keyframe because it
+     is an in+out one-shot, not an intro atom. */
+  .copy-toast.flash { animation: toast-fade 1.2s ease forwards; }
   .download-toast {
     pointer-events: auto; display: flex; align-items: center; gap: 8px;
-    animation: none; max-width: 90%; font-size: var(--fs-ui);
+    font-size: var(--fs-ui);
   }
   .dl-path {
     flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -2213,8 +2239,12 @@
     cursor: pointer; display: flex; flex-shrink: 0;
   }
   @keyframes toast-fade {
-    0%, 60% { opacity: 1; }
+    0% { opacity: 0; }
+    10%, 60% { opacity: 1; }
     100% { opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .file-list { transition: none; }
   }
 
 </style>
