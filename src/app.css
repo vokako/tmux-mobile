@@ -604,6 +604,9 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
    · .state-ctl — a control whose selected/active clothes change
      (segmented buttons, tabs, address rows, pills): border, background,
      colour and the inset ring cross-fade on --t-fast.
+   · sheet-up — a phone SHEET rises from the bottom edge on --t-move (the
+     dialog half of "sheets slide with a scrim"; .side-scrim / .dlg-backdrop
+     fade in beside it). Only for a layer whose RESTING transform is none.
    · Reorder is `animate:flip` with `moveMs()` from ui/motion.ts — the one
      Svelte directive in use; svelte/transition stays out (see the doc).
    Popovers still do not animate; layout (height/width) is never animated.
@@ -614,6 +617,7 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 @keyframes fade-in { from { opacity: 0; } }
 @keyframes rise-in { from { opacity: 0; transform: translateY(6px); } }
 @keyframes pop-in { from { opacity: 0; transform: scale(0.6); } }
+@keyframes sheet-up { from { transform: translateY(100%); } }
 .appear { animation: fade-in var(--t-fast) ease-out; }
 .appear-rise { animation: rise-in var(--t-move) ease-out; }
 .appear-pop { animation: pop-in var(--t-fast) ease-out; }

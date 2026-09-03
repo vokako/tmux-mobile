@@ -104,3 +104,21 @@ App seeds/re-pushes `{app:true}` history entries and routes `popstate` to the vi
 ### Where you left off is persisted, and the tab is part of it
 
 `tmux_state` carries `{ page, terminalTarget, terminalSession, terminalCommand, splitLayout, splitCells }` and is written whenever `connected` — it used to be gated on `terminalTarget`, so reading the chat and refreshing dropped you on the device default (owner, 2026-08-19: "每次切换或者刷新都会变"). Restore is `restorePage` (`src/lib/app/nav-state.ts`, pure + tested): an unknown/stale name (a retired tab, an older build) falls back to `defaultPage` — terminal on touch, Hub on desktop — never to a page that no longer renders. The Hub's open project is `tmux_hub_project` via `hubPrefs.setProject`, verified against the current list on load (a project can be deleted between two visits) and only then falling back to the top row. Files is the deliberate exception: its cwd FOLLOWS the tmux session's cwd — but the SESSION it follows is whichever the user touched LAST (a terminal pane or the chat's selected project; it used to be terminal-only, so browsing a project in chat never moved Files — owner, 2026-08-22), and switching projects PARKS the in-Files browse position per session (in-memory, not a preference) and restores it on return, with the follow rule still outranking the parked position when that project's real cwd moved meanwhile. That parked map is MODULE-scoped in Files.svelte (owner, 2026-08-28: "每个 project 自己记录自己的 current路径"): every Files instance shares it and it outlives any one instance — which is what lets the Hub's drawer mount a fresh Files per open and still wake up where that project left off (a new instance restores its session's parked cwd at mount and parks on unmount).
+
+### Shell motion follows the one vocabulary (2026-09-03)
+
+Every state change in the shell moves on the tempo tokens and nothing else
+([motion.md](motion.md)): the tab bar and gear cross-fade colour on `--t-fast`
+and the gear TURNS 30° while Settings is open (a state is a movement, not a
+swap); the reconnect banner, the rail's insertion line and the vitals footer's
+first reading `.appear` (opacity only — never height, so the banner cannot
+push the page); the split toggle is a `.state-ctl`; the server switcher's swap
+glyph is a `.flip` that turns 180° while its popover is open (the popover
+itself does not animate — popover rule); the page slides still under
+`prefers-reduced-motion` like the compact drill pair. The rail's icons sit in
+a per-slot `.rail-slot` wrapper because Svelte's `animate:flip` must be the
+keyed each's only child: the wrapper carries the dragged icon's inline
+transform (no transition — the finger is the animation), so on release the
+flip measures from under the pointer and the icon SETTLES into its new slot
+on `moveMs()` instead of jumping back and sliding. `transform` is deliberately
+absent from `.rail-btn`'s transition list for the same reason.

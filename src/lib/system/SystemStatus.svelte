@@ -57,7 +57,7 @@
 {#if parts.length}
   <!-- Quiet chrome, not a message: micro type, meta ink, mono numbers. The
        title carries the same words for hover/assistive reading. -->
-  <div class="sysvitals" title={parts.map((p) => `${p.k} ${p.v}`).join(' · ')}>
+  <div class="sysvitals appear" title={parts.map((p) => `${p.k} ${p.v}`).join(' · ')}>
     {#each parts as p (p.k)}
       <span class="sv"><span class="sv-k">{p.k}</span><span class="sv-v">{p.v}</span></span>
     {/each}

@@ -31,6 +31,7 @@
   import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.ts';
   import { installExternalLinkHandler } from './lib/core/external-links.ts';
   import { isTauri, isTauriDesktop } from './lib/core/platform.ts';
+  import { moveMs } from './lib/ui/motion.ts';
 
   // Tunable constants
   const KB_OPEN_THRESHOLD = 100; // px difference to detect keyboard open
@@ -1453,18 +1454,36 @@
     >
       <img class="rail-brand" src={iconSrc} alt="" width="26" height="26" draggable="false" />
       {#each railSlots as slot (slot)}
+        <!-- One wrapper per slot so the list can `animate:flip` (Svelte wants
+             the animated element to be the each block's only child). It also
+             CARRIES the dragged icon: the inline transform follows the pointer
+             with no transition (motion.md §1.7), and on release the flip
+             measures from that translated rect, so the icon settles from
+             under the finger into its new slot instead of jumping back first. -->
+        <div
+          class="rail-slot"
+          class:rail-gap={slot === RAIL_GAP}
+          class:lifted={railDrag?.slot === slot}
+          style:transform={railDrag?.slot === slot ? `translateY(${railDrag.dy}px)` : null}
+          animate:flip={{ duration: moveMs() }}
+        >
         {#if slot === RAIL_GAP}
           <div class="rail-spacer" data-rail-slot={slot}></div>
           <!-- Server switcher (board #55): "右下角agent上边" — glued to the top
                of the rail's bottom (configure) group, above the agents icon in
                the shipped order. A CONTROL, not a page: never draggable, never
-               active, opens the registry popover. -->
+               active, opens the registry popover. Its swap glyph turns 180°
+               while the popover is open (trigger side only — the menu itself
+               does not animate). -->
           <button
             class="rail-btn rail-server"
+            class:open={serverMenuOpen}
             title={t('serversTitle')}
             aria-label={t('serversTitle')}
+            aria-haspopup="menu"
+            aria-expanded={serverMenuOpen}
             onclick={(e) => toggleServerMenu(e)}
-          ><Icon name="swap-h" size={17} /></button>
+          ><span class="flip" class:on={serverMenuOpen}><Icon name="swap-h" size={17} /></span></button>
         {:else}
           <button
             class="rail-btn"
@@ -1474,15 +1493,15 @@
             title={t(RAIL_ITEMS[slot].label)}
             aria-label={t(RAIL_ITEMS[slot].label)}
             aria-current={page === slot ? 'page' : undefined}
-            style:transform={railDrag?.slot === slot ? `translateY(${railDrag.dy}px)` : null}
             onpointerdown={(e) => railPointerDown(e, slot)}
             onclick={() => railActivate(slot)}
           ><Icon name={RAIL_ITEMS[slot].icon} size={17} /></button>
         {/if}
+        </div>
       {/each}
       {#if railDrag}
         <div
-          class="rail-drop"
+          class="rail-drop appear"
           style:top="{(railDropOffset(railDrag.rects, railDrag.idx) ?? railDrag.navTop) - railDrag.navTop}px"
           aria-hidden="true"
         ></div>
@@ -1533,7 +1552,7 @@
     onconfirm={serverRemoveConfirm} oncancel={() => (pendingServerRemove = null)} />
 
   {#if reconnecting && page !== 'settings'}
-    <div class="reconnect-bar">
+    <div class="reconnect-bar appear">
       <span class="reconnect-spinner"></span>
       <span>{t('reconnecting')}{#if reconnectAttempt} ({reconnectAttempt}/{RECONNECT_MAX_ATTEMPTS}{#if reconnectClass} · {reconnectClass}{/if}){/if}</span>
       <button class="reconnect-cancel" onclick={cancelReconnect}>{t('cancel')}</button>
@@ -1637,7 +1656,7 @@
                  win-bar to host it; cells have their own headers). In single-
                  pane mode the control lives in the Terminal's chip bar. -->
             <div class="split-control">
-              <button class="split-toggle" class:on={splitActive} title={t('split')} aria-label={t('split')}
+              <button class="split-toggle state-ctl" class:on={splitActive} title={t('split')} aria-label={t('split')}
                 aria-haspopup="menu" aria-expanded={!!splitMenuAt} onclick={toggleSplitMenu}>
                 <Icon name="layout" size={15} />
               </button>
@@ -1865,12 +1884,22 @@
     z-index: 12;
   }
   .rail-brand { border-radius: var(--ui-radius-control); margin-bottom: 8px; flex: none; }
+  /* The per-slot wrapper mirrors the rail's own column so the layout is the
+     one it had before the wrapper existed: a page slot is its 34px button,
+     the gap slot stretches (flex: 1) and stacks the spacer over the server
+     control with the rail's 4px gap. Lifted = carrying the dragged icon:
+     it paints over its neighbours. */
+  .rail-slot { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: none; }
+  .rail-slot.rail-gap { flex: 1; align-self: stretch; }
+  .rail-slot.lifted { position: relative; z-index: 2; }
   .rail-btn {
     width: 34px; height: 32px;
     display: grid; place-items: center;
     border: none; border-radius: var(--ui-radius-control); background: none;
     color: var(--text3); cursor: pointer;
-    transition: color var(--t-fast), background var(--t-fast);
+    /* transform is NOT in the list: the drag carries the icon by an inline
+       transform and must follow the pointer with no lag (motion.md §1.7). */
+    transition: color var(--t-fast), background var(--t-fast), box-shadow var(--t-fast);
     -webkit-tap-highlight-color: transparent;
   }
   .rail-btn:hover { color: var(--text); background: var(--surface2); }
@@ -1941,7 +1970,6 @@
   .rail.reordering .rail-btn:not(.dragging):hover { color: var(--text3); background: none; }
   .rail-btn.dragging {
     color: var(--accent); background: var(--accent-bg);
-    position: relative; z-index: 2;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
   }
   .rail-drop {
@@ -1972,6 +2000,7 @@
     color: var(--text3); cursor: pointer;
     font-size: var(--fs-meta);
     -webkit-tap-highlight-color: transparent;
+    transition: color var(--t-fast), transform var(--t-fast);
   }
   .tabbar button.active { color: var(--accent); }
   .tabbar button:active { transform: scale(0.95); }
@@ -1987,9 +2016,15 @@
     padding: 6px; border: none; border-radius: var(--ui-radius-control); background: none;
     color: var(--text3); cursor: pointer; display: flex;
     -webkit-tap-highlight-color: transparent;
+    transition: color var(--t-fast), background var(--t-fast);
   }
   .gear-btn:active { color: var(--accent); }
   .gear-btn.active { color: var(--accent); background: var(--accent-bg); }
+  /* The gear TURNS a notch while Settings is open — "settings is open" is a
+     state, and a state change is a movement (motion.md §1.4). */
+  .gear-btn :global(svg) { transition: transform var(--t-move) ease; }
+  .gear-btn.active :global(svg) { transform: rotate(30deg); }
+  @media (prefers-reduced-motion: reduce) { .gear-btn :global(svg) { transition: none; } }
 
 
   .brand {
@@ -2074,6 +2109,7 @@
   .page.slide-in-right  { animation: slideInRight 0.12s linear; }
   @keyframes slideInLeft  { from { transform: translateX(-40%); } to { transform: none; } }
   @keyframes slideInRight { from { transform: translateX(40%); } to { transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .page.slide-in-left, .page.slide-in-right { animation: none; } }
   .page-layer {
     position: absolute;
     inset: 0;

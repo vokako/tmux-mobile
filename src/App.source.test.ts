@@ -163,7 +163,7 @@ test('a drag shows what moves and where it lands, and can be abandoned', () => {
   assert.match(rail, /class:reordering=\{!!railDrag\}/u);
   assert.match(rail, /style:transform=\{railDrag\?\.slot === slot \? `translateY\(\$\{railDrag\.dy\}px\)` : null\}/u,
     'the carried icon follows the pointer by transform — it must not reflow the rail it is measuring');
-  assert.match(rail, /<div\s*class="rail-drop"/u, 'the insertion line');
+  assert.match(rail, /<div\s*class="rail-drop appear"/u, 'the insertion line — it fades in (motion.md), never grows');
   assert.match(rail, /railDropOffset\(railDrag\.rects, railDrag\.idx\)/u);
   const style = source.match(/<style>[\s\S]*<\/style>/u)?.[0] ?? '';
   assert.match(style, /\.rail-drop \{[^}]*position: absolute/u, 'absolute, so opening it cannot reflow the snapshotted rects');
