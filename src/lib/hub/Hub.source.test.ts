@@ -79,10 +79,10 @@ test('the agent card speaks the three-stage machine: select, then options, dblcl
   // the agent (reopened #3: as a feed-wrap sibling it rendered as a
   // full-height left column — feed-wrap is row flex), ✕ clears it, and the
   // back gesture peels it before the drawer.
-  assert.match(source, /class="filter-pill"/u, 'the filter pill lives inside the feed');
+  assert.match(source, /class="filter-pill appear"/u, 'the filter pill lives inside the feed');
   const wrapIdx = source.indexOf('<div class="feed-wrap">');
   const feedIdx = source.indexOf('<div class="feed subtle-scroll"');
-  const pillIdx = source.indexOf('class="filter-pill"');
+  const pillIdx = source.indexOf('class="filter-pill appear"');
   assert.ok(wrapIdx < feedIdx && feedIdx < pillIdx, 'the pill is a FEED child, never a feed-wrap sibling');
   const pill = /\.filter-pill \{([^}]*)\}/u.exec(source)?.[1] ?? '';
   assert.match(pill, /align-self: center/u, 'content width — it owns no column');
@@ -101,7 +101,7 @@ test('a waiting agent\u2019s card carries the cue, in the dot\u2019s own amber, 
   // means "a turn is open", which a suspended turn is not.
   const live = source.slice(source.indexOf('class="acard" class:sel'), source.indexOf('class="acard off"'));
   assert.match(live, /class:needs=\{stateNeedsYou\(a\.state\)\}/u, 'the card class comes from the ONE definition');
-  assert.match(live, /\{#if stateNeedsYou\(a\.state\)\}<span class="ac-needs">/u, 'and the word is gated by the same one');
+  assert.match(live, /\{#if stateNeedsYou\(a\.state\)\}<span class="ac-needs appear">/u, 'and the word is gated by the same one');
   const needs = rule('.acard.needs');
   assert.match(needs, /var\(--status-warn\)/u, 'the frame is the dot\u2019s amber token');
   assert.ok(!/animation/u.test(needs), 'no motion: waiting is not in motion');

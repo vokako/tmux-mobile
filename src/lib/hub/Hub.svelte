@@ -266,6 +266,15 @@
 
   const roomCache = new Map();
   let roomReady = $state(false);
+  /** Motion gates (motion.md principle 13: a whole list mounting at once never
+   * animates). `openedAt` is the newest block timestamp once the room's first
+   * load has landed — only a block NEWER than it rises in (`.appear-rise`);
+   * history, an older page and a cached room are already there. `rosterBase`
+   * is the set of agent names present at that same moment — a card that
+   * JOINS the roster later pops in, a project switch replays nothing. Both
+   * are reset to "nothing is fresh" while a room is loading. */
+  let openedAt = $state(Infinity);
+  let rosterBase = $state(null);
 
   async function selectProject(session) {
     // An unsent line belongs to the conversation it was written for. Park it on
@@ -275,6 +284,7 @@
     // Park the room too, so switching back is instant.
     if (selected) roomCache.set(selected, { feed, lastTs, activity, lastActivityTs, agents, histSeq, histMore, actCursor, actMore });
     selected = session;
+    openedAt = Infinity; rosterBase = null; // nothing is fresh until this room has settled
     composerText = hubPrefs.draft(session);
     clearAttachments(); // staged for one room; must not ride into another
     expanded = {};      // an unfold is a reading choice, scoped to its room
@@ -325,7 +335,12 @@
     following = true;
     if (feed.length) scrollFeed(true);
     await Promise.all([loadFeed(), loadAgents(), loadActivity()]);
-    if (selected === session) roomReady = true;
+    if (selected === session) {
+      roomReady = true;
+      // The room has settled: from here on, what arrives is news and moves.
+      openedAt = blocks.reduce((m, b) => Math.max(m, b.ts), 0);
+      rosterBase = new Set([...managedAgents.map((a) => a.name), ...stopped]);
+    }
     // A restored terminal partition may have had NO roster to pick from (a
     // first visit after reload restores before any cache exists) — seat it
     // once the fresh roster is in.
@@ -2240,7 +2255,7 @@
           </button>
           {#if trashOpen}
             {#each trash as r (r.project.id)}
-              <div class="side-row trash-row" title={r.project.path}>
+              <div class="side-row trash-row appear" title={r.project.path}>
                 <span class="p-name trash-name">{r.project.name}</span>
                 <button class="t-act" title={t('hubRestore')} aria-label={t('hubRestore')}
                   onclick={() => restoreProject(r)}>
@@ -2425,7 +2440,7 @@
                  a short label, in the SAME status tokens the dot speaks
                  (stateDotColor → --status-warn), and static — the breathe
                  means "a turn is open", and a waiting turn is suspended. -->
-            <div class="acard" class:sel={recipient === a.name} class:needs={stateNeedsYou(a.state)} role="button" tabindex="0"
+            <div class="acard" class:sel={recipient === a.name} class:needs={stateNeedsYou(a.state)} class:appear-pop={!!rosterBase && !rosterBase.has(a.name)} role="button" tabindex="0"
               title={[`${a.name} · ${stateLabel(a.state)}`, a.detail, vitalsLine(a.vitals)].filter(Boolean).join(' · ')}
               onclick={(e) => cardClick(a.name, e.currentTarget)}
               ondblclick={() => cardDbl(a.name)}
@@ -2436,8 +2451,8 @@
                 {#if backendIcon(a.agent)}<img class="ava" src={backendIcon(a.agent)} alt={a.agent} />{:else}<span class="ava" style:background={backendColor(a.agent)}>{a.name.slice(0, 1).toUpperCase()}</span>{/if}
                 <span class="a-name">{a.name}</span>
                 <span class="st" class:live-dot={stateIsLive(a.state)} style:background={stateDotColor(a.state)}></span>
-                {#if stateNeedsYou(a.state)}<span class="ac-needs">{a.state === 'blocked' ? t('hubState_blocked') : t('hubNeedsYou')}</span>{/if}
-                {#if unread.has(a.name)}<span class="unread" title={t('hubUnread')}></span>{/if}
+                {#if stateNeedsYou(a.state)}<span class="ac-needs appear">{a.state === 'blocked' ? t('hubState_blocked') : t('hubNeedsYou')}</span>{/if}
+                {#if unread.has(a.name)}<span class="unread appear-pop" title={t('hubUnread')}></span>{/if}
               </div>
               <!-- What the agent's own status line says, kept ON the card rather
                    than behind the menu ("这个直接常驻显示吧 可以字号小一点"). The
@@ -2485,7 +2500,7 @@
                  lives in the menu, because a stopped agent you are done with
                  has to be ejectable — the slot is what keeps `up` recreating
                  it (owner, 2026-08-19). -->
-            <div class="acard off" class:busy={acting} role="button" tabindex="0" aria-label={`${name} · ${t('hubStopped')}`}
+            <div class="acard off" class:busy={acting} class:appear-pop={!!rosterBase && !rosterBase.has(name)} role="button" tabindex="0" aria-label={`${name} · ${t('hubStopped')}`}
               onclick={(e) => toggleAgentMenu(name, e.currentTarget)}
               onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleAgentMenu(name, e.currentTarget); } }}
               oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), name, agentItems(name)); }}
@@ -2602,7 +2617,7 @@
              left COLUMN (feed-wrap is row flex; reopened #3). Sticky at the
              top so the mode stays visible while reading; content-width. -->
         {#if filterAgent}
-          <div class="filter-pill">
+          <div class="filter-pill appear">
             <Icon name="search" size={12} />
             <span class="f-label">{t('hubFilterOn')}</span>
             <span class="f-name">@{filterAgent}</span>
@@ -2641,7 +2656,7 @@
                  is the command itself in the composer's monospace — badge + args
                  read back as exactly the line that was typed. Hidden entirely at
                  the chat-only level (feedBlocks drops them). -->
-            <div class="sysline">
+            <div class="sysline" class:appear-rise={b.ts > openedAt}>
               {#each b.items as item, j (`${j}-${item}`)}
                 {@const bl = boardLine(item)}
                 {#if bl}
@@ -2715,7 +2730,10 @@
                    feed itself is the scroller now). It rejoins the anchor pool
                    when folded again. -->
               {@const pinned = isAsk && askKey === key && !expanded[key]}
-              <div class="msg" class:me={m.from === 'human'}
+              <!-- A block that arrives after the room settled rises in
+                   (motion.md principle 10: transform/opacity only — the tail
+                   math measures nothing different). -->
+              <div class="msg" class:me={m.from === 'human'} class:appear-rise={b.ts > openedAt}
                 class:ask-top={pinned && askEdge === 'top'}
                 class:ask-bottom={pinned && askEdge === 'bottom'}
                 class:held={pinned && askHeld}
@@ -2804,7 +2822,7 @@
                   </div>
                 </div>
                 {#if msgOpen === key}
-                  <div class="m-acts">
+                  <div class="m-acts appear">
                     <button onclick={() => copyMsg(m.body)}>
                       <Icon name="copy" size={11} />{copied === m.body ? t('hubCopied') : t('hubCopy')}
                     </button>
@@ -2818,7 +2836,7 @@
             <!-- The input half: what this agent was asked, which only the
                  userPromptSubmit hook can tell us. -->
             {@const pp = promptParts(b.text)}
-            <div class="prompt">
+            <div class="prompt" class:appear-rise={b.ts > openedAt}>
               <!-- The machine stamp comes OFF (owner, 2026-08-30): the sender
                    joins the head, and a board delivery wears the board
                    dialect — issue chip (+ review badge) — instead of raw
@@ -2835,7 +2853,7 @@
                  line the agent spoke, not as a telemetry row, and a blocked or
                  waiting note carries the colour of something that needs a
                  human. -->
-            <div class="prog" class:blocked={b.state === 'blocked' || b.state === 'waiting'}>
+            <div class="prog" class:blocked={b.state === 'blocked' || b.state === 'waiting'} class:appear-rise={b.ts > openedAt}>
               <span class="pg-bar" aria-hidden="true"></span>
               <span class="pg-who">{windowName(b.window)}</span>
               {#if b.state && b.state !== 'working'}<span class="pg-tag">{stateLabel(b.state)}</span>{/if}
@@ -2843,7 +2861,7 @@
               <span class="pg-ts">{fmtTime(b.ts)}</span>
             </div>
           {:else if b.type === 'note'}
-            <div class="note" class:warn={b.event.kind === 'warn'}>
+            <div class="note" class:warn={b.event.kind === 'warn'} class:appear-rise={b.ts > openedAt}>
               {#if b.event.kind === 'warn'}<Icon name="info" size={11} />{/if}
               <span class="n-who">{windowName(b.window)}</span>
               <span class="n-text">{activityLabel(b.event)}</span>
@@ -2854,7 +2872,7 @@
                  Open while the agent is working, closed once it is done, unless
                  the user has said otherwise for this group. -->
             {@const open = stepsOpen(b)}
-            <div class="steps" class:open>
+            <div class="steps" class:open class:appear-rise={b.ts > openedAt}>
               <button class="s-head" aria-expanded={open} onclick={() => toggleSteps(b, !open)}>
                 {#if isRunning(b)}
                   <span class="s-live live-dot" aria-hidden="true"></span>
@@ -2950,7 +2968,7 @@
       <!-- Parked away from the tail: one tap back, with a dot when something
            arrived while you were reading. -->
       {#if !following}
-        <button class="to-tail to-bottom" class:news={newBelow} title={t('hubToBottom')} aria-label={t('hubToBottom')} onclick={() => scrollFeed(true)}>
+        <button class="to-tail to-bottom appear-pop" class:news={newBelow} title={t('hubToBottom')} aria-label={t('hubToBottom')} onclick={() => scrollFeed(true)}>
           <Icon name="arrow-down" size={16} />
         </button>
       {/if}
@@ -2974,7 +2992,7 @@
                    is the one place that says where a line goes, and it used to
                    understate it (review, 2026-09-03). Accent even on the grey
                    note chip — this part IS a delivery. -->
-              {#if toExtras.length}<span class="to-extra">{toExtras.map((n) => '+@' + n).join(' ')}</span>{/if}
+              {#if toExtras.length}<span class="to-extra appear">{toExtras.map((n) => '+@' + n).join(' ')}</span>{/if}
               <!-- ONE arrow that TURNS (motion.md principle 4): it points up while
                    the menu is closed (the menu opens upward) and rotates to down
                    once it is open — never two glyphs swapped. -->
@@ -3036,7 +3054,7 @@
                      to the danger tone: name + reason, ✕ removes it. It blocks
                      send while it stands — nothing leaves without what it
                      showed (review, 2026-09-03). -->
-                <span class="pend-chip err" title={`${a.name} — ${a.error}`}>
+                <span class="pend-chip err appear-pop" title={`${a.name} — ${a.error}`}>
                   <Icon name="info" size={12} />
                   <span class="pend-name">{a.name}</span>
                   <span class="pend-why">{a.error}</span>
@@ -3046,7 +3064,7 @@
                   </button>
                 </span>
               {:else if a.kind === 'image'}
-                <span class="pend-thumb" title={`[img:${a.n}] ${a.name}`}>
+                <span class="pend-thumb appear-pop" title={`[img:${a.n}] ${a.name}`}>
                   <!-- Tap the thumb → the in-app viewer (owner, 2026-08-27:
                        "文本输入框…显示的图片…我可以点击放大查看…在我应用内的"). -->
                   <button class="pend-view" aria-label={a.name}
@@ -3060,7 +3078,7 @@
                   </button>
                 </span>
               {:else}
-                <span class="pend-chip" title={`[file:${a.n}] ${a.path}`}>
+                <span class="pend-chip appear-pop" title={`[file:${a.n}] ${a.path}`}>
                   <Icon name="file" size={12} />
                   <span class="pend-name">{a.name}</span>
                   <button class="pend-x" aria-label={t('hubRemoveAttachment')}
@@ -3077,7 +3095,7 @@
              CLICKABLE (grey, muted): the first tap arms it as a "send
              interrupt" button — amber, named — and the second fires. -->
         {#if intArm}
-          <div class="int-pill" role="status">{t('hubIntArmed').replace('{who}', intWho)}</div>
+          <div class="int-pill appear-rise" role="status">{t('hubIntArmed').replace('{who}', intWho)}</div>
         {/if}
         <input type="file" multiple hidden bind:this={fileEl} onchange={onPickFiles} />
         <button class="attach-btn" class:busy={attaching} title={t('hubAttach')} aria-label={t('hubAttach')}
@@ -3101,13 +3119,15 @@
                  to cut it" glyph every chat product speaks. Armed keeps the
                  same glyph on the amber ground — same object, hotter state —
                  instead of the lightning bolt nobody read as "interrupt". -->
-            <svg class="stop-spin" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+            <svg class="stop-spin appear-pop" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
               <circle class="ss-ring" cx="10" cy="10" r="8" fill="none" stroke="currentColor"
                 stroke-width="1.6" stroke-linecap="round" stroke-dasharray="37.7 12.6" />
               <rect x="6.6" y="6.6" width="6.8" height="6.8" rx="1.7" fill="currentColor" />
             </svg>
           {:else}
-            <Icon name="send-up" size={15} />
+            <!-- Arrow ↔ stop-square are unrelated glyphs, so they SWAP (motion.md
+                 principle 4) — the {#if} remounts and the newcomer pops in. -->
+            <span class="send-glyph appear-pop"><Icon name="send-up" size={15} /></span>
           {/if}
         </button>
         </div>
@@ -3180,14 +3200,14 @@
       {#if drawerView === 'files'}
         <!-- Per-project cwd is Files' own parked-position map (module-scoped,
              keyed by session), so each project wakes up where you left it. -->
-        <div class="files-body">
+        <div class="files-body appear">
           <Files session={selected} visible={visible} {fontSize} singlePane bind:currentDir={drawerFilesDir} />
         </div>
       {/if}
       {#if drawerView === 'board'}
         <!-- The task sidebar (board #13 follow-up): the REAL Board, embedded —
              no project sidebar, it follows this room's project. -->
-        <div class="board-body">
+        <div class="board-body appear">
           <Board session={selected} visible={visible && drawerView === 'board'} embedded issueRequest={drawerIssueReq} createRequest={drawerBoardNew} />
         </div>
       {/if}
@@ -4198,6 +4218,7 @@
      stays small, the tap target grows via an invisible overlay. (.to-tail
      brings its own ::before from app.css.) */
   .send-btn::after { content: ''; position: absolute; inset: -7px; }
+  .send-glyph { display: inline-flex; }
 
   /* Empty room: start from a preset — one agent, or a team. */
   .start { margin: auto; display: flex; flex-direction: column; gap: 8px; width: min(420px, 100%); }
@@ -4259,7 +4280,7 @@
      moved up here. */
   .d-count { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-meta); color: var(--text3); white-space: nowrap; margin-right: 2px; }
 
-  .dlg-backdrop { position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,0.45); }
+  .dlg-backdrop { position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,0.45); animation: fade-in var(--t-move) ease-out; }
   .dlg {
     position: fixed; z-index: 31; left: 50%; top: 50%; transform: translate(-50%, -50%);
     width: min(440px, calc(100vw / var(--ui-zoom, 1) - 32px)); max-height: calc(100vh / var(--ui-zoom, 1) - 48px); overflow-y: auto;
@@ -4273,7 +4294,12 @@
     width: 100%; max-width: none; max-height: calc(82vh / var(--ui-zoom, 1));
     border-radius: 18px 18px 0 0; border-left: none; border-right: none; border-bottom: none;
     padding: 16px 14px calc(16px + var(--sab, 0px)); /* var(--sab): env() is 0 in the APK */
+    /* Sheets rise with a scrim (design-language §1; motion.md): the resting
+       transform is none, so the intro can own it. Exit is a cut. */
+    animation: sheet-up var(--t-move) ease-out;
   }
+  @keyframes sheet-up { from { transform: translateY(100%); } }
+  @media (prefers-reduced-motion: reduce) { .dlg-backdrop, .dlg.sheet { animation: none; } }
   .dlg.sheet .dlg-agents { max-height: calc(46vh / var(--ui-zoom, 1)); overflow-y: auto; }
   .dlg.sheet .agent-pick, .dlg.sheet input, .dlg.sheet .dlg-actions button { min-height: 44px; }
   .dlg input { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: var(--ui-radius-control); color: var(--text); padding: 8px 12px; font-size: var(--fs-ui); outline: none; }
