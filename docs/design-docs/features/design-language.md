@@ -198,6 +198,10 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   equivalents (Enter/Space) on anything with role=button. A scrolling
   record's back-to-tail action is always global `.to-tail` (board #49), with
   component CSS limited to placement — never a page-specific redraw.
+- Keyboard reach: the ONE focus ring is app.css `button/input/textarea:
+  focus-visible` (accent outline, 2px offset). Navigation never opts out of
+  the Tab order with `tabindex="-1"`; only a container that is focused
+  programmatically (a `role=menu`/`listbox` layer) may carry it.
 
 ## 7 · Data honesty (the "verdict" rule)
 

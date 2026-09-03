@@ -39,6 +39,12 @@ legacy tmm-team-* sessions appear as plain sessions in the list.
 - The rail is `position: fixed`; content clears it via `main.with-rail
   { padding-left: 46px }` rather than a flex re-nest, so the page-layer
   keep-alive structure (Team/Files/Terminal/Hub stay mounted) is untouched.
+- Every nav item — rail icons, the rail's server control, the phone's tab
+  bar, the gear — is in the Tab order and shows the global
+  `button:focus-visible` ring (accent outline, 2px offset); the current page
+  is `aria-current="page"`. They all carried `tabindex="-1"` from v0.3.0 with
+  no recorded reason, which left the whole navigation unreachable by keyboard
+  (review, 2026-09-03). `App.source.test.ts` pins it.
 - Fixed overlays cannot assume a top bar anymore. `Preferences` used
   `inset: calc(49px + var(--sat)) 0 0`; it now reads
   `--shell-top` / `--shell-left`, which App sets per context (49px top when

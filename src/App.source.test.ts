@@ -25,7 +25,7 @@ test('Terminal navigation and page layer exist without an active target', () => 
   assert.doesNotMatch(source, /switchTab\('sessions'\)/u);
   assert.match(
     source,
-    /<button tabindex="-1" class:active=\{page === 'terminal'[\s\S]*?\{t\('terminal'\)\}[\s\S]*?<\/button>/u,
+    /<button class:active=\{page === 'terminal'[\s\S]*?\{t\('terminal'\)\}[\s\S]*?<\/button>/u,
   );
   assert.match(
     source,
@@ -457,4 +457,18 @@ test('the back-gesture history dance is the phone’s; a desktop browser keeps i
   // A caller only spends an entry it really pushed.
   assert.match(source, /prefsPushed = navPush\(\);/u);
   assert.doesNotMatch(source, /navPush\(\); prefsPushed = true;/u);
+});
+
+test('navigation is reachable by keyboard: no nav item opts out of the Tab order (2026-09-03)', () => {
+  // Rail icons, the server control, the tab bar and the gear were all
+  // tabindex="-1" — the whole navigation was unreachable by keyboard, with no
+  // documented reason. The focus ring is the global button:focus-visible.
+  const nav = source.match(/<nav class="topbar">[^]*?<\/nav>|<nav\s+class="rail"[^]*?<\/nav>|<nav class="tabbar">[^]*?<\/nav>/gu) ?? [];
+  assert.equal(nav.length, 3, 'top bar, rail and tab bar are all present');
+  for (const n of nav) assert.doesNotMatch(n, /tabindex="-1"/u, 'a nav item must stay in the Tab order');
+  // The current page is announced, not only coloured.
+  assert.match(source, /class="rail-btn"[^]*?aria-current=\{page === slot \? 'page' : undefined\}/u);
+  assert.match(source, /class:active=\{page === 'terminal'\} aria-current=\{page === 'terminal' \? 'page' : undefined\}/u);
+  const style = source.match(/<style>[^]*<\/style>/u)?.[0] ?? '';
+  assert.doesNotMatch(style, /\.(?:rail-btn|tabbar button|gear-btn)[^{]*\{[^}]*outline:\s*none/u, 'the ring must not be switched off');
 });

@@ -1401,7 +1401,10 @@
 </script>
 
 <main class:with-rail={connected && !layout.isTouchDevice}>
-  <!-- Shell chrome. Three shapes, one per context (docs/design-docs/features/app-shell.md):
+  <!-- Shell chrome. Every nav item is in the Tab order (no tabindex="-1" —
+       review, 2026-09-03: the whole nav was unreachable by keyboard) and wears
+       the global button:focus-visible ring; the current page is aria-current.
+       Three shapes, one per context (docs/design-docs/features/app-shell.md):
        · connected desktop  → a left icon RAIL (the whole top bar is gone —
          vertical space goes to the terminal, switching is one always-visible click)
        · connected mobile   → a bottom TAB BAR in thumb reach, hidden while the
@@ -1414,7 +1417,7 @@
         <span class="brand-text">tmux<span class="brand-accent">mobile</span></span>
       </div>
       <div class="nav-right">
-        <button tabindex="-1" class="gear-btn" class:active={page === 'prefs'} onclick={togglePrefs}><Icon name="gear" size={16} /></button>
+        <button class="gear-btn" class:active={page === 'prefs'} title={t('settings')} aria-label={t('settings')} onclick={togglePrefs}><Icon name="gear" size={16} /></button>
       </div>
     </nav>
   {:else if !layout.isTouchDevice}
@@ -1440,7 +1443,6 @@
                the shipped order. A CONTROL, not a page: never draggable, never
                active, opens the registry popover. -->
           <button
-            tabindex="-1"
             class="rail-btn rail-server"
             title={t('serversTitle')}
             aria-label={t('serversTitle')}
@@ -1448,12 +1450,13 @@
           ><Icon name="swap-h" size={17} /></button>
         {:else}
           <button
-            tabindex="-1"
             class="rail-btn"
             class:active={page === slot}
             class:dragging={railDrag?.slot === slot}
             data-rail-slot={slot}
             title={t(RAIL_ITEMS[slot].label)}
+            aria-label={t(RAIL_ITEMS[slot].label)}
+            aria-current={page === slot ? 'page' : undefined}
             style:transform={railDrag?.slot === slot ? `translateY(${railDrag.dy}px)` : null}
             onpointerdown={(e) => railPointerDown(e, slot)}
             onclick={() => railActivate(slot)}
@@ -1697,24 +1700,24 @@
     <nav class="tabbar">
 
       {#if hubEligible}
-        <button tabindex="-1" class:active={page === 'hub'} onclick={() => switchTab('hub')}>
+        <button class:active={page === 'hub'} aria-current={page === 'hub' ? 'page' : undefined} onclick={() => switchTab('hub')}>
           <Icon name="chat" size={19} /><span>{t('hub')}</span>
         </button>
-        <button tabindex="-1" class:active={page === 'board'} onclick={() => switchTab('board')}>
+        <button class:active={page === 'board'} aria-current={page === 'board' ? 'page' : undefined} onclick={() => switchTab('board')}>
           <Icon name="layout" size={19} /><span>{t('board')}</span>
         </button>
       {/if}
-      <button tabindex="-1" class:active={page === 'files'} onclick={() => switchTab('files')}>
+      <button class:active={page === 'files'} aria-current={page === 'files' ? 'page' : undefined} onclick={() => switchTab('files')}>
         <Icon name="files" size={19} /><span>{t('files')}</span>
       </button>
-      <button tabindex="-1" class:active={page === 'terminal'} onclick={() => switchTab('terminal')}>
+      <button class:active={page === 'terminal'} aria-current={page === 'terminal' ? 'page' : undefined} onclick={() => switchTab('terminal')}>
         <Icon name="terminal" size={19} /><span>{t('terminal')}</span>
       </button>
       <!-- No Agents icon here: on a phone the agent configuration is a CATEGORY
            OF SETTINGS (nav-state's agentsLivesInSettings), because this row had
            one tab too many (owner, 2026-08-29: "不用单独在底下一行展示了，现在
            看着有点多底下的标签"). The desktop rail keeps it as a page. -->
-      <button tabindex="-1" class:active={page === 'prefs'} onclick={togglePrefs}>
+      <button class:active={page === 'prefs'} aria-current={page === 'prefs' ? 'page' : undefined} onclick={togglePrefs}>
         <Icon name="gear" size={19} /><span>{t('settings')}</span>
       </button>
     </nav>
