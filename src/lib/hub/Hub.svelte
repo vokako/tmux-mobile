@@ -32,7 +32,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, mentionedAgents, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, touchContextMenu, perLineOf, modelLabel } from './hub.ts';
+  import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, mentionedAgents, chipExtras, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, touchContextMenu, perLineOf, modelLabel } from './hub.ts';
   import { notifyNews, isAway, roomProjectName } from './notifications.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
@@ -124,6 +124,10 @@
   // The names `deliver_mentions` can type into — the roster the room-note
   // verdict and the composer chip's `+@name` read against.
   const managedNames = $derived(managedAgents.map((a) => a.name));
+  // Who the BODY reaches past the chip's recipient (`@bob` mid-sentence is
+  // delivered too — deliver_mentions scans the whole body). Shown on the chip
+  // as `+@bob` so the chip never understates where a line is going.
+  const toExtras = $derived(chipExtras(composerText, recipient, managedNames));
   /** The roster in display order, same-team cards folded into ONE group at
    * the position of their first member (board #74: "视图上放到一个 group 里").
    * Solo agents are groups of one with no team. */
@@ -2873,10 +2877,16 @@
         {#if managedAgents.length}
           <div class="to-wrap" bind:clientWidth={toChipW}>
             <button class="to-chip" class:all={recipient === ALL_TARGET} class:note={!recipient}
-              title={recipient === ALL_TARGET ? t('hubToAllHint') : recipient ? '' : t('hubToRoomHint')}
+              title={toExtras.length ? t('hubToAlsoHint').replace('{names}', toExtras.map((n) => '@' + n).join(', '))
+                : recipient === ALL_TARGET ? t('hubToAllHint') : recipient ? '' : t('hubToRoomHint')}
               onclick={() => recipientOpen = !recipientOpen}>
               <span class="to-label">{t('hubTo')}</span>
               <span class="to-name">{recipient === ALL_TARGET ? t('hubEveryone') : recipient || t('hubRoomNote')}</span>
+              <!-- The body's own @mentions, live: `to: alice +@bob`. The chip
+                   is the one place that says where a line goes, and it used to
+                   understate it (review, 2026-09-03). Accent even on the grey
+                   note chip — this part IS a delivery. -->
+              {#if toExtras.length}<span class="to-extra">{toExtras.map((n) => '+@' + n).join(' ')}</span>{/if}
               <Icon name={recipientOpen ? 'chevron-down' : 'chevron-up'} size={11} />
             </button>
             {#if recipientOpen}
@@ -3898,6 +3908,7 @@
   .to-chip.note { background: var(--surface); color: var(--text2); border-color: var(--border); }
   .to-label { font-weight: 500; opacity: 0.7; font-size: var(--fs-meta); text-transform: uppercase; letter-spacing: 0.5px; }
   .to-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .to-extra { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--accent); font-weight: 600; font-size: var(--fs-meta); font-family: ui-monospace, Menlo, monospace; }
   .to-sep { height: 1px; background: var(--border2); margin: 4px 6px; }
   .to-opt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
   .to-opt small { font-size: var(--fs-meta); opacity: 0.65; }

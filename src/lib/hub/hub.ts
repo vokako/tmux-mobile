@@ -1160,6 +1160,19 @@ export function mentionedAgents(body: string, names: readonly string[]): string[
   return names.filter((n) => tokens.has(n));
 }
 
+/** What the recipient chip appends when the BODY reaches past the chosen
+ * recipient (review, 2026-09-03: the chip said `to: alice` while `@bob` in
+ * the body was delivered too, with no hint). `'all'` as the recipient already
+ * means everyone, so nothing is appended; an `@all` in the body collapses to
+ * the one token `all` rather than listing the roster; otherwise the managed
+ * agents the body addresses, minus the recipient, in roster order. Rendered
+ * as `+@name` after the chip's name. */
+export function chipExtras(body: string, recipient: string, names: readonly string[]): string[] {
+  if (recipient === 'all') return [];
+  if (mentionTokens(body).includes('all') && names.length) return ['all'];
+  return mentionedAgents(body, names).filter((n) => n !== recipient);
+}
+
 /** The feed narrowed to ONE agent (board #3: 双击卡片 "筛选跟某个agent有关的
  * 消息"). "Related" is defined here, once, and tested:
  * - a message FROM the agent (its replies, its `[tmm status]`/`[tmm done]`

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, touchContextMenu, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
+import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, touchContextMenu, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -1093,6 +1093,18 @@ test('mentionedAgents is the delivery verdict: who a body is typed into, in rost
   // Same tokenizer as mentionsAgent — the two readings cannot drift.
   assert.deepEqual(mentionTokens('hi @a, @b: and x@c.d'), ['a', 'b', 'c.d']);
   assert.equal(mentionsAgent('please @builder: now', 'builder'), mentionedAgents('please @builder: now', roster).includes('builder'));
+});
+
+test('the recipient chip appends the body\u2019s extra deliveries, live', () => {
+  const roster = ['alice', 'bob', 'carol'];
+  assert.deepEqual(chipExtras('fix it', 'alice', roster), [], 'no mention, nothing appended');
+  assert.deepEqual(chipExtras('ask @bob too', 'alice', roster), ['bob']);
+  assert.deepEqual(chipExtras('@alice and @bob, @carol', 'alice', roster), ['bob', 'carol'], 'the recipient itself is not an extra');
+  assert.deepEqual(chipExtras('@all standup', 'alice', roster), ['all'], '@all collapses to one token, not the roster');
+  assert.deepEqual(chipExtras('@bob @carol', 'all', roster), [], 'everyone already — nothing to add');
+  assert.deepEqual(chipExtras('@bob note', '', roster), ['bob'], 'a room note that @-mentions someone reaches them');
+  assert.deepEqual(chipExtras('x@bob.com @ghost', 'alice', roster), [], 'an email address or a stranger reaches nobody');
+  assert.deepEqual(chipExtras('@all', 'alice', []), [], '@all over an empty roster is nobody');
 });
 
 test('filterBlocks keeps one agent\u2019s world and nobody else\u2019s (board #3)', () => {
