@@ -16,12 +16,22 @@ a no-op service worker satisfy installability, and a small Svelte banner
 ## Pieces
 | File | Role |
 |------|------|
-| `public/manifest.webmanifest` | App metadata + icons (192/512 `any`, 512 `maskable`). `display: standalone`, theme/background `#0a0a0f` (dark bg). |
+| `public/manifest.webmanifest` | App metadata + icons (192/512 `any`, 512 `maskable`). `display: standalone`, theme/background `#0a0a0f` (dark bg). **No `orientation` member** — see below. |
 | `public/sw.js` | Service worker registered **only** to make the page installable. Network-passthrough `fetch` handler (no `respondWith`) — present purely because some Chromium versions gate installability on a fetch handler. `skipWaiting` + `clients.claim` so updates take over immediately. |
 | `public/pwa-192.png`, `pwa-512.png`, `pwa-maskable-512.png` | Generated from `src-tauri/icons/icon.png` (1024²) via `sips`. The maskable one scales the glyph to ~72% over an opaque black field so it survives Android's circular mask (the source icon has transparent rounded corners — unusable as maskable directly). |
 | `index.html` | `<link rel="manifest">` + `theme-color` + `apple-*` tags (iOS "Add to Home Screen" reads these; there's no JS install API on iOS). |
 | `src/main.ts` | Registers `/sw.js` — gated on `!isTauri && 'serviceWorker' in navigator && window.isSecureContext`. |
 | `src/lib/ui/InstallPrompt.svelte` | The banner. Mounted once in `App.svelte`. |
+
+## Why the manifest has no `orientation`
+The installed PWA must follow the phone's own auto-rotate switch, like every
+native app does. Chromium maps manifest `orientation: "any"` to Android's
+`SCREEN_ORIENTATION_FULL_SENSOR`, which rotates with the sensor even when the
+user has rotation locked — so the app kept turning while the rest of the phone
+stayed put (owner report, 2026-09-03). Leaving the member out yields
+`UNSPECIFIED`, which honours the system lock. The Tauri Android shell sets no
+`android:screenOrientation` for the same reason. Never add `"orientation"`
+back to the manifest, and do not call `screen.orientation.lock()`.
 
 ## Why no offline caching
 tmux-mobile is useless without a live WebSocket server — there's nothing
