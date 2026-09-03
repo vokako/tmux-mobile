@@ -7,15 +7,31 @@ JSON-RPC over WebSocket (`ws://` or `wss://`).
 
 ### Encrypted Auth (default, when Web Crypto available)
 ```
-← {"server_nonce": "<hex>"}                          // server sends nonce
-→ {"method": "auth", "params": {"client_nonce": "<hex>", "proof": "<hex>"}}
-← <binary AES-GCM frame containing the authenticated result>
+← {"server_nonce": "<hex>", "e2e": 2}                // nonce + newest handshake version
+→ {"method": "auth", "params": {"client_nonce": "<hex>", "proof": "<hex>", "e2e": 2}}
+← <binary AES-GCM frame: {"result": {"authenticated": true, "machine_id", "hostname", "e2e": 2}}>
 ```
-- Key derivation: HKDF-SHA256(token, server_nonce + client_nonce)
-- Proof: HMAC-SHA256(key, server_nonce)
-- All subsequent messages are binary AES-256-GCM frames using the derived key
+- IKM = token, salt = server_nonce ‖ client_nonce (16 + 16 bytes), HKDF-SHA256, 32-byte outputs
+- **v2** (current) derives THREE keys, one per job, by `info` label:
+  `tmux-mobile-e2e/v2/proof` (HMAC proof key), `tmux-mobile-e2e/v2/c2s`
+  (client→server AES-256-GCM key), `tmux-mobile-e2e/v2/s2c` (server→client key)
+- **v1** (legacy) derives ONE key with `info` = `tmux-mobile-e2e` and uses it as
+  proof key and as the cipher key in both directions. Both directions counting
+  from 0 under one key meant client message #n and server message #n shared a
+  (key, nonce) pair — the AES-GCM nonce-reuse failure. Kept only so peers that
+  predate v2 still connect.
+- Negotiation: the server advertises `e2e` in the nonce frame; the client asks
+  for a version in its auth params; the server derives with the version the
+  CLIENT asked for (no field = v1) and echoes it in the authenticated result. An
+  old client never sends `e2e` and gets v1; a new client against an old server
+  sees no `e2e` in the nonce frame and uses v1.
+- Proof: HMAC-SHA256(proof_key, server_nonce ‖ client_nonce) — both nonces, so a
+  captured proof cannot be replayed into a later handshake
+- All subsequent messages are binary AES-256-GCM frames; nonce = 4 zero bytes ‖ big-endian u64 counter
 - Decrypted payload starts with a one-byte framing tag: raw UTF-8 JSON or raw-deflate JSON (compression is used only when it reduces payload size)
-- Each direction uses a monotonic nonce counter; clients must serialize encrypted sends so wire order matches nonce order
+- Each direction uses its own monotonic counter; clients must serialize encrypted sends so wire order matches nonce order
+- Server and client derivations are pinned to shared test vectors
+  (`src-tauri/src/server/wire.rs` tests ↔ `src/lib/core/ws.test.ts`)
 
 ### Legacy Plain Auth (fallback, no Web Crypto)
 ```

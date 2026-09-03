@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { webcrypto } from 'node:crypto';
 
 class MockWebSocket {
   static CONNECTING = 0;
@@ -15,7 +16,7 @@ class MockWebSocket {
   onopen: ((ev?: unknown) => void) | null = null;
   onclose: ((ev: { code: number; reason: string; wasClean: boolean }) => void) | null = null;
   onerror: ((ev?: unknown) => void) | null = null;
-  onmessage: ((ev: { data: string }) => void) | null = null;
+  onmessage: ((ev: { data: unknown }) => void) | null = null;
 
   constructor(url: string) {
     this.url = url;
@@ -35,6 +36,11 @@ class MockWebSocket {
 
   message(data: unknown) {
     this.onmessage?.({ data: JSON.stringify(data) });
+  }
+
+  // An encrypted frame arrives as an ArrayBuffer (binaryType = 'arraybuffer').
+  binary(data: ArrayBuffer) {
+    this.onmessage?.({ data });
   }
 }
 
@@ -140,3 +146,159 @@ test('concurrent RPC frames preserve request order on one socket', async () => {
   await Promise.all([first, second]);
   wsClient.disconnect();
 });
+
+// ─── E2E handshake: real Web Crypto, fake server ────────────────────────
+// The tests above run the plain-token path (`crypto.subtle` is null). These
+// swap node's Web Crypto in for one test at a time and play the server side
+// of the handshake, so the client's key derivation, version negotiation and
+// per-direction ciphers are exercised against the documented protocol
+// (docs/requirements/api-contracts/websocket-rpc.md).
+
+const realCrypto = webcrypto as unknown as Crypto;
+async function withWebCrypto<T>(fn: () => Promise<T>): Promise<T> {
+  Object.defineProperty(globalThis, 'crypto', { configurable: true, value: realCrypto });
+  try { return await fn(); }
+  finally { Object.defineProperty(globalThis, 'crypto', { configurable: true, value: { subtle: null } }); }
+}
+
+const utf8 = new TextEncoder();
+const hex = (b: Uint8Array) => Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
+const unhex = (s: string) => Uint8Array.from(s.match(/../g)!.map(h => parseInt(h, 16)));
+async function until(cond: () => boolean, ticks = 400) {
+  for (let i = 0; i < ticks && !cond(); i++) await new Promise(resolve => setTimeout(resolve, 0));
+  assert.ok(cond(), 'condition never became true');
+}
+
+// Web Crypto's lib.dom types want `ArrayBuffer`-backed views; node's Uint8Array
+// is typed over ArrayBufferLike. One cast at the boundary, as ws.ts does.
+const buf = (b: Uint8Array) => b as BufferSource;
+async function hkdf(token: string, salt: Uint8Array, info: string): Promise<Uint8Array> {
+  const base = await realCrypto.subtle.importKey('raw', buf(utf8.encode(token)), 'HKDF', false, ['deriveBits']);
+  return new Uint8Array(await realCrypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: buf(salt), info: buf(utf8.encode(info)) }, base, 256));
+}
+function gcmNonce(counter: number): Uint8Array {
+  const n = new Uint8Array(12);
+  new DataView(n.buffer).setUint32(8, counter);
+  return n;
+}
+
+/** The server half of the handshake, speaking either version. */
+class FakeE2eServer {
+  serverNonce = realCrypto.getRandomValues(new Uint8Array(16));
+  negotiated = 0;
+  private token: string;
+  private version: 1 | 2;
+  private encKey!: CryptoKey;
+  private decKey!: CryptoKey;
+  private sendCounter = 0;
+  private recvCounter = 0;
+  constructor(token: string, version: 1 | 2) {
+    this.token = token;
+    this.version = version;
+  }
+
+  nonceFrame() {
+    return this.version === 2 ? { server_nonce: hex(this.serverNonce), e2e: 2 } : { server_nonce: hex(this.serverNonce) };
+  }
+
+  /** Verifies the proof the way connection.rs does: with the version the CLIENT asked for. */
+  async accept(auth: any): Promise<boolean> {
+    const clientNonce = unhex(auth.params.client_nonce);
+    const salt = new Uint8Array(32); salt.set(this.serverNonce, 0); salt.set(clientNonce, 16);
+    const requested = auth.params.e2e === 2 ? 2 : 1;
+    let proof: Uint8Array, enc: Uint8Array, dec: Uint8Array;
+    if (requested === 2) {
+      proof = await hkdf(this.token, salt, 'tmux-mobile-e2e/v2/proof');
+      enc = await hkdf(this.token, salt, 'tmux-mobile-e2e/v2/s2c');
+      dec = await hkdf(this.token, salt, 'tmux-mobile-e2e/v2/c2s');
+    } else {
+      proof = enc = dec = await hkdf(this.token, salt, 'tmux-mobile-e2e');
+    }
+    const mac = await realCrypto.subtle.importKey('raw', buf(proof), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
+    const msg = new Uint8Array(32); msg.set(this.serverNonce, 0); msg.set(clientNonce, 16);
+    if (!(await realCrypto.subtle.verify('HMAC', mac, buf(unhex(auth.params.proof)), buf(msg)))) return false;
+    this.encKey = await realCrypto.subtle.importKey('raw', buf(enc), { name: 'AES-GCM' }, false, ['encrypt']);
+    this.decKey = await realCrypto.subtle.importKey('raw', buf(dec), { name: 'AES-GCM' }, false, ['decrypt']);
+    this.negotiated = requested;
+    return true;
+  }
+
+  /** Encrypt one server→client frame; `deflate` picks the compressed wire tag. */
+  async seal(json: string, deflate = false): Promise<ArrayBuffer> {
+    let body = utf8.encode(json);
+    if (deflate) {
+      const stream = new Blob([body as unknown as BlobPart]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+      body = new Uint8Array(await new Response(stream).arrayBuffer());
+    }
+    const plain = new Uint8Array(1 + body.length);
+    plain[0] = deflate ? 0x01 : 0x00;
+    plain.set(body, 1);
+    return realCrypto.subtle.encrypt({ name: 'AES-GCM', iv: buf(gcmNonce(this.sendCounter++)) }, this.encKey, buf(plain));
+  }
+
+  /** Decrypt one client→server frame into its JSON text. */
+  async open(frame: unknown): Promise<string> {
+    const ct = frame as Uint8Array;
+    const plain = new Uint8Array(await realCrypto.subtle.decrypt({ name: 'AES-GCM', iv: buf(gcmNonce(this.recvCounter++)) }, this.decKey, buf(ct)));
+    assert.equal(plain[0], 0x00, 'small RPC frames are sent uncompressed');
+    return new TextDecoder().decode(plain.subarray(1));
+  }
+}
+
+async function encryptedHandshake(server: FakeE2eServer) {
+  const connecting = wsClient.connect('ws://test', 'tok');
+  const socket = MockWebSocket.instances.at(-1)!;
+  socket.readyState = MockWebSocket.OPEN;
+  socket.message(server.nonceFrame());
+  await until(() => socket.sent.length >= 1);
+  const auth = JSON.parse(socket.sent[0] as string);
+  assert.equal(await server.accept(auth), true, 'proof verifies under the negotiated version');
+  socket.binary(await server.seal(JSON.stringify({ result: { authenticated: true, machine_id: 'm', hostname: 'h', e2e: server.negotiated } })));
+  await connecting;
+  return { socket, auth };
+}
+
+test('the client derives the same E2E keys as the server (shared vectors)', () => withWebCrypto(async () => {
+  // Pinned to src-tauri/src/server/wire.rs `e2e_key_derivation_matches_the_client_vectors`.
+  const sn = Uint8Array.from({ length: 16 }, (_, i) => i);
+  const cn = Uint8Array.from({ length: 16 }, (_, i) => 16 + i);
+  const v1 = await wsClient.deriveE2eMaterial('tmm-test-token', sn, cn, 1);
+  assert.equal(hex(v1.proof), '3ed67f3af05161bcc3b7dfa90cdac9f122073ca497a2ed17061ef8228628d1c3');
+  assert.equal(v1.send, v1.proof, 'v1: one key for everything');
+  assert.equal(v1.recv, v1.proof);
+  const v2 = await wsClient.deriveE2eMaterial('tmm-test-token', sn, cn, 2);
+  assert.equal(hex(v2.proof), '3991dde940bf280c1b61ab909e69fd55371b88e9fbbb4dca564baf47fca8c3aa');
+  assert.equal(hex(v2.send), 'efb72f80e209dd1e24ea4e8091743df8c74e5d1105549bc1b8129d5e77061082');
+  assert.equal(hex(v2.recv), '5dee4968bc587b108b14a7c9d8fb9442e48c35ced0a6538fb1ce5418e48ba07d');
+}));
+
+test('a v2 server gets a v2 handshake: proof key, c2s and s2c are distinct keys', () => withWebCrypto(async () => {
+  const server = new FakeE2eServer('tok', 2);
+  const { socket, auth } = await encryptedHandshake(server);
+  assert.equal(auth.params.e2e, 2, 'the client asks for the version the server advertised');
+  assert.equal(server.negotiated, 2);
+  assert.equal(wsClient.isConnected(), true);
+
+  // An RPC goes out under c2s and its answer comes back under s2c.
+  const pending = wsClient.listSessions();
+  await until(() => socket.sent.length >= 2);
+  const req = JSON.parse(await server.open(socket.sent[1]));
+  assert.equal(req.method, 'list_sessions');
+  socket.binary(await server.seal(JSON.stringify({ id: req.id, result: [] })));
+  assert.deepEqual(await pending, []);
+  wsClient.disconnect();
+}));
+
+test('a server that does not advertise e2e gets the v1 handshake', () => withWebCrypto(async () => {
+  const server = new FakeE2eServer('tok', 1);
+  const { socket, auth } = await encryptedHandshake(server);
+  assert.equal(auth.params.e2e, 1);
+  assert.equal(server.negotiated, 1);
+
+  const pending = wsClient.listSessions();
+  await until(() => socket.sent.length >= 2);
+  const req = JSON.parse(await server.open(socket.sent[1]));
+  socket.binary(await server.seal(JSON.stringify({ id: req.id, result: [] })));
+  assert.deepEqual(await pending, []);
+  wsClient.disconnect();
+}));

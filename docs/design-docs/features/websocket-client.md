@@ -83,7 +83,14 @@ Custom WebSocket client (`ws.ts`) with auto-reconnect, pending promise cleanup, 
   pinned and only receives the new-output indicator. This recovery applies to
   Android, browser/PWA, and desktop WebViews through `visibilitychange`.
 - Multi-address failover: server `machine_id` tracks alternate addresses
-- Optional E2E encryption layer
+- Optional E2E encryption layer. **One key per direction (v2):** the server
+  advertises `e2e: 2` in its nonce frame, the client asks for it and derives a
+  proof key, a send key and a receive key from the token and both nonces with
+  three HKDF labels. Under v1 one key did all three jobs and both directions
+  counted nonces from 0, so client frame #n and server frame #n were sealed under
+  the same (key, nonce) — the AES-GCM nonce-reuse failure. A server that does not
+  advertise `e2e` still gets v1, so nothing older is locked out. Derivations on
+  both sides are pinned to shared vectors in `ws.test.ts` and `wire.rs`.
 - `JSON.parse` wrapped in try-catch in `onmessage`
 - Optional chaining on server push params (`data.params?.target`)
 

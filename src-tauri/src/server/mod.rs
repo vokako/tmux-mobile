@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 mod wire;
-pub use wire::{encode_wire_payload, decode_wire_payload, WIRE_PLAIN_JSON, WIRE_DEFLATE_JSON, COMPRESS_MIN_BYTES};
+pub use wire::{encode_wire_payload, decode_wire_payload, derive_session_keys, SessionKeys, E2E_VERSION, WIRE_PLAIN_JSON, WIRE_DEFLATE_JSON, COMPRESS_MIN_BYTES};
 use wire::HalfCipher;
 mod download;
 use download::{looks_like_dl_request, handle_http_download};

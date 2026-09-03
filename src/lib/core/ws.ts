@@ -43,7 +43,10 @@ export type PaneClosedCb = (target: string) => void;
 // for transport-level failures.
 export type RpcClientError = Error & { code?: number | string };
 
-type Cipher = { key: CryptoKey; sendCounter: number; recvCounter: number };
+// One key per direction. Under the v1 handshake both fields hold the same key
+// (kept for old servers); under v2 they are distinct HKDF outputs, so the two
+// directions can never seal two frames under one (key, nonce) pair.
+type Cipher = { sendKey: CryptoKey; recvKey: CryptoKey; sendCounter: number; recvCounter: number };
 // The raw WebSocket plus our per-connection attachments (send serialization
 // queue, negotiated cipher, identity getters).
 interface AppSocket extends WebSocket {
@@ -169,30 +172,55 @@ function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function deriveKey(token: string, serverNonce: Uint8Array, clientNonce: Uint8Array): Promise<CryptoKey> {
+// E2E handshake versions. The server advertises the newest it speaks in its
+// `server_nonce` frame (`e2e: 2`); we ask for that one in our auth params and
+// fall back to v1 for a server that never mentions it. Mirrors
+// `src-tauri/src/server/wire.rs` — the labels must match byte for byte.
+export const E2E_VERSION = 2;
+const E2E_INFO_V1 = 'tmux-mobile-e2e';
+const E2E_INFO_V2_PROOF = 'tmux-mobile-e2e/v2/proof';
+const E2E_INFO_V2_C2S = 'tmux-mobile-e2e/v2/c2s';
+const E2E_INFO_V2_S2C = 'tmux-mobile-e2e/v2/s2c';
+
+async function hkdfBits(token: string, serverNonce: Uint8Array, clientNonce: Uint8Array, info: string): Promise<ArrayBuffer> {
   const salt = new Uint8Array(32);
   salt.set(serverNonce, 0);
   salt.set(clientNonce, 16);
   const ikm = new TextEncoder().encode(token);
   const baseKey = await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt, info: new TextEncoder().encode('tmux-mobile-e2e') }, baseKey, 256);
-  return crypto.subtle.importKey('raw', bits, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+  return crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt, info: new TextEncoder().encode(info) }, baseKey, 256);
 }
 
-async function computeProof(token: string, serverNonce: Uint8Array, clientNonce: Uint8Array): Promise<Uint8Array> {
-  const salt = new Uint8Array(32);
-  salt.set(serverNonce, 0);
-  salt.set(clientNonce, 16);
-  const ikm = new TextEncoder().encode(token);
-  const baseKey = await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits']);
-  const keyBits = await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt, info: new TextEncoder().encode('tmux-mobile-e2e') }, baseKey, 256);
-  const hmacKey = await crypto.subtle.importKey('raw', keyBits, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+/// The raw session secrets for one handshake version: what we prove with,
+/// what we encrypt with (client→server), what we decrypt with (server→client).
+/// v1 is ONE key doing all three jobs — that is the defect v2 removes.
+/// Exported so the test suite can pin these bytes to the server's vectors.
+export async function deriveE2eMaterial(token: string, serverNonce: Uint8Array, clientNonce: Uint8Array, version: number): Promise<{ proof: Uint8Array; send: Uint8Array; recv: Uint8Array }> {
+  if (version === E2E_VERSION) {
+    const [proof, send, recv] = await Promise.all([
+      hkdfBits(token, serverNonce, clientNonce, E2E_INFO_V2_PROOF),
+      hkdfBits(token, serverNonce, clientNonce, E2E_INFO_V2_C2S),
+      hkdfBits(token, serverNonce, clientNonce, E2E_INFO_V2_S2C),
+    ]);
+    return { proof: new Uint8Array(proof), send: new Uint8Array(send), recv: new Uint8Array(recv) };
+  }
+  const one = new Uint8Array(await hkdfBits(token, serverNonce, clientNonce, E2E_INFO_V1));
+  return { proof: one, send: one, recv: one };
+}
+
+async function buildSession(token: string, serverNonce: Uint8Array, clientNonce: Uint8Array, version: number): Promise<{ proof: Uint8Array; cipher: Cipher }> {
+  const m = await deriveE2eMaterial(token, serverNonce, clientNonce, version);
+  const hmacKey = await crypto.subtle.importKey('raw', m.proof as BufferSource, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   // Bind proof to BOTH nonces (see server-side comment in handle auth).
   const msg = new Uint8Array(serverNonce.length + clientNonce.length);
   msg.set(serverNonce, 0);
   msg.set(clientNonce, serverNonce.length);
   const sig = await crypto.subtle.sign('HMAC', hmacKey, msg);
-  return new Uint8Array(sig);
+  const [sendKey, recvKey] = await Promise.all([
+    crypto.subtle.importKey('raw', m.send as BufferSource, { name: 'AES-GCM' }, false, ['encrypt']),
+    crypto.subtle.importKey('raw', m.recv as BufferSource, { name: 'AES-GCM' }, false, ['decrypt']),
+  ]);
+  return { proof: new Uint8Array(sig), cipher: { sendKey, recvKey, sendCounter: 0, recvCounter: 0 } };
 }
 
 function makeNonce(counter: number): Uint8Array {
@@ -257,7 +285,7 @@ async function encryptMsg(text: string, cipher: Cipher | null): Promise<string |
   if (!cipher) return text; // plain path: caller sends it as text
   const plaintext = await encodeWirePayload(text);
   const nonce = makeNonce(cipher.sendCounter++);
-  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce as BufferSource }, cipher.key, plaintext as BufferSource);
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce as BufferSource }, cipher.sendKey, plaintext as BufferSource);
   return new Uint8Array(ct);
 }
 
@@ -270,7 +298,7 @@ async function decryptMsg(buf: string | ArrayBuffer | Uint8Array, cipher: Cipher
   // decryptMsg with a cipher is only ever called with binary frames.
   const ctBytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf as ArrayBuffer);
   const nonce = makeNonce(cipher.recvCounter++);
-  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce as BufferSource }, cipher.key, ctBytes as BufferSource);
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce as BufferSource }, cipher.recvKey, ctBytes as BufferSource);
   return decodeWirePayload(new Uint8Array(pt));
 }
 
@@ -426,15 +454,17 @@ export function connect(url: string, token: string, timeoutMs = CONNECT_TIMEOUT_
       if (!authed && !serverNonce && data?.server_nonce) {
         serverNonce = hexToBytes(data.server_nonce);
         if (crypto.subtle) {
-          // Encrypted auth
+          // Encrypted auth. The server names the newest handshake it speaks;
+          // an older server sends no `e2e` and gets the v1 derivation.
+          const version = data.e2e === E2E_VERSION ? E2E_VERSION : 1;
           const clientNonce = crypto.getRandomValues(new Uint8Array(16));
-          const proof = await computeProof(token, serverNonce, clientNonce);
-          const key = await deriveKey(token, serverNonce, clientNonce);
+          const session = await buildSession(token, serverNonce, clientNonce, version);
           if (ws !== socket) return;
-          cipher = { key, sendCounter: 0, recvCounter: 0 };
+          cipher = session.cipher;
+          window.__dbg?.(`ws: e2e v${version} handshake`);
           socket.send(JSON.stringify({
             method: 'auth',
-            params: { client_nonce: bytesToHex(clientNonce), proof: bytesToHex(proof) }
+            params: { client_nonce: bytesToHex(clientNonce), proof: bytesToHex(session.proof), e2e: version }
           }));
         } else {
           // Fallback: plain token auth (http:// context, no Web Crypto)

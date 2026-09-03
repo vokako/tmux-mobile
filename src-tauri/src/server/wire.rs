@@ -97,15 +97,56 @@ pub fn decode_wire_payload(buf: &[u8]) -> Result<String, String> {
     }
 }
 
-/// Derives AES-256-GCM key from token + nonces using HKDF-SHA256.
-pub(super) fn derive_key(token: &str, server_nonce: &[u8; 16], client_nonce: &[u8; 16]) -> [u8; 32] {
+/// The current E2E protocol version. Advertised in the `server_nonce` frame,
+/// requested by the client in its `auth` params, echoed in the authenticated
+/// result. A peer that never mentions it speaks v1.
+pub const E2E_VERSION: u64 = 2;
+
+/// HKDF `info` labels. v1 has ONE label and used its output as the proof MAC
+/// key AND the cipher key for both directions — so client→server message #n
+/// and server→client message #n were sealed under the same (key, nonce),
+/// which AES-GCM forbids (it leaks the XOR of the plaintexts and the GHASH
+/// key). v2 keeps the same IKM (token) and salt (both nonces) and derives
+/// three DISTINCT keys; the labels are what separate them, so they must
+/// never be reused for anything else.
+pub const E2E_V1_INFO: &[u8] = b"tmux-mobile-e2e";
+pub const E2E_V2_INFO_PROOF: &[u8] = b"tmux-mobile-e2e/v2/proof";
+pub const E2E_V2_INFO_C2S: &[u8] = b"tmux-mobile-e2e/v2/c2s";
+pub const E2E_V2_INFO_S2C: &[u8] = b"tmux-mobile-e2e/v2/s2c";
+
+fn hkdf_expand(token: &str, server_nonce: &[u8; 16], client_nonce: &[u8; 16], info: &[u8]) -> [u8; 32] {
     let mut salt = [0u8; 32];
     salt[..16].copy_from_slice(server_nonce);
     salt[16..].copy_from_slice(client_nonce);
     let hk = Hkdf::<Sha256>::new(Some(&salt), token.as_bytes());
     let mut key = [0u8; 32];
-    hk.expand(b"tmux-mobile-e2e", &mut key).unwrap();
+    // 32 bytes is far below HKDF-SHA256's 8160-byte limit; expand cannot fail.
+    hk.expand(info, &mut key).unwrap();
     key
+}
+
+/// Derives the v1 session key (proof + both directions) from token + nonces.
+/// Kept byte-for-byte so a v1 client keeps authenticating.
+pub(super) fn derive_key(token: &str, server_nonce: &[u8; 16], client_nonce: &[u8; 16]) -> [u8; 32] {
+    hkdf_expand(token, server_nonce, client_nonce, E2E_V1_INFO)
+}
+
+/// The three secrets of one session: what the client proves knowledge of,
+/// what it encrypts with, what the server encrypts with. Each is used for
+/// exactly one purpose, in exactly one direction.
+pub struct SessionKeys {
+    pub proof: [u8; 32],
+    pub c2s: [u8; 32],
+    pub s2c: [u8; 32],
+}
+
+/// Derives the v2 session keys. Same inputs as v1, three labels.
+pub fn derive_session_keys(token: &str, server_nonce: &[u8; 16], client_nonce: &[u8; 16]) -> SessionKeys {
+    SessionKeys {
+        proof: hkdf_expand(token, server_nonce, client_nonce, E2E_V2_INFO_PROOF),
+        c2s: hkdf_expand(token, server_nonce, client_nonce, E2E_V2_INFO_C2S),
+        s2c: hkdf_expand(token, server_nonce, client_nonce, E2E_V2_INFO_S2C),
+    }
 }
 
 /// Unidirectional cipher half: after auth, the session splits into a
@@ -327,6 +368,70 @@ mod tests {
             json.len() as f64 / plaintext.len() as f64
         );
         assert!(plaintext.len() < json.len(), "wire payload should shrink");
+    }
+
+    // ─── E2E v2 key separation ──────────────────────────────────────────
+
+    const TEST_TOKEN: &str = "tmm-test-token";
+    fn test_nonces() -> ([u8; 16], [u8; 16]) {
+        let mut sn = [0u8; 16];
+        let mut cn = [0u8; 16];
+        for i in 0..16 {
+            sn[i] = i as u8;
+            cn[i] = 16 + i as u8;
+        }
+        (sn, cn)
+    }
+
+    /// Pinned against the SAME vectors in `src/lib/core/ws.test.ts`: the two
+    /// implementations must agree byte-for-byte or no client can connect.
+    #[test]
+    fn e2e_key_derivation_matches_the_client_vectors() {
+        let (sn, cn) = test_nonces();
+        assert_eq!(
+            bytes_to_hex(&derive_key(TEST_TOKEN, &sn, &cn)),
+            "3ed67f3af05161bcc3b7dfa90cdac9f122073ca497a2ed17061ef8228628d1c3"
+        );
+        let k = derive_session_keys(TEST_TOKEN, &sn, &cn);
+        assert_eq!(bytes_to_hex(&k.proof), "3991dde940bf280c1b61ab909e69fd55371b88e9fbbb4dca564baf47fca8c3aa");
+        assert_eq!(bytes_to_hex(&k.c2s), "efb72f80e209dd1e24ea4e8091743df8c74e5d1105549bc1b8129d5e77061082");
+        assert_eq!(bytes_to_hex(&k.s2c), "5dee4968bc587b108b14a7c9d8fb9442e48c35ced0a6538fb1ce5418e48ba07d");
+    }
+
+    #[test]
+    fn e2e_v2_keys_are_pairwise_distinct_and_none_is_the_v1_key() {
+        let (sn, cn) = test_nonces();
+        let v1 = derive_key(TEST_TOKEN, &sn, &cn);
+        let k = derive_session_keys(TEST_TOKEN, &sn, &cn);
+        assert_ne!(k.proof, k.c2s);
+        assert_ne!(k.proof, k.s2c);
+        assert_ne!(k.c2s, k.s2c);
+        assert_ne!(k.proof, v1);
+        assert_ne!(k.c2s, v1);
+        assert_ne!(k.s2c, v1);
+    }
+
+    /// The defect v2 exists to remove: under v1 both directions sealed their
+    /// message #0 with the same (key, nonce). Under v2 the same plaintext at
+    /// the same counter yields different ciphertext per direction.
+    #[test]
+    fn e2e_v2_directions_never_share_a_key_nonce_pair() {
+        let (sn, cn) = test_nonces();
+        let v1 = derive_key(TEST_TOKEN, &sn, &cn);
+        let plaintext = encode_wire_payload(r#"{"id":1,"method":"ping","params":{}}"#);
+        let a = HalfCipher::new(&v1).encrypt(&plaintext);
+        let b = HalfCipher::new(&v1).encrypt(&plaintext);
+        assert_eq!(a, b, "v1: same key, same counter, same ciphertext — the leak");
+
+        let k = derive_session_keys(TEST_TOKEN, &sn, &cn);
+        let c2s = HalfCipher::new(&k.c2s).encrypt(&plaintext);
+        let s2c = HalfCipher::new(&k.s2c).encrypt(&plaintext);
+        assert_ne!(c2s, s2c, "v2: distinct direction keys");
+        // And each direction still round-trips with its own half.
+        assert_eq!(HalfCipher::new(&k.c2s).decrypt(&c2s).unwrap(), plaintext);
+        assert_eq!(HalfCipher::new(&k.s2c).decrypt(&s2c).unwrap(), plaintext);
+        // A frame sealed for one direction is rejected by the other.
+        assert!(HalfCipher::new(&k.s2c).decrypt(&c2s).is_err());
     }
 }
 

@@ -21,7 +21,7 @@ use crate::tmux;
 use super::download::{handle_http_download, looks_like_dl_request};
 use super::rpc::{handle_request, handle_subscribe, handle_unsubscribe, Request, Response, Subscriptions, ERR_AUTH, ERR_INTERNAL, ERR_PARSE};
 use super::team_rpc::{handle_notification_request, handle_team_request, team_push_loop};
-use super::wire::{bytes_to_hex, decode_wire_payload, derive_key, encode_wire_payload, hex_to_bytes, provided_token_matches, HalfCipher};
+use super::wire::{bytes_to_hex, decode_wire_payload, derive_key, derive_session_keys, encode_wire_payload, hex_to_bytes, provided_token_matches, HalfCipher, E2E_VERSION};
 use super::{AuthTracker, NotificationHub, OptTeam, Outbound, ResizeTracker,
     AUTH_LOCKOUT_SECS, AUTH_TRACKER_GC_AFTER_SECS, CONN_ID_COUNTER, MAX_AUTH_FAILURES,
     MAX_CAPTURE_FAILURES, SUBSCRIPTION_POLL_MS};
@@ -319,11 +319,13 @@ where
         shutdown_tx.notify_waiters();
     });
 
-    // Step 1: Send server_nonce (plain, pre-cipher)
+    // Step 1: Send server_nonce (plain, pre-cipher). `e2e` advertises the
+    // newest handshake this server speaks; a client that understands it asks
+    // for it in its auth params, an older client ignores the field and gets v1.
     let mut server_nonce = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut server_nonce);
     {
-        let msg = serde_json::json!({ "server_nonce": bytes_to_hex(&server_nonce) });
+        let msg = serde_json::json!({ "server_nonce": bytes_to_hex(&server_nonce), "e2e": E2E_VERSION });
         if out_tx.send(Outbound::Plain(serde_json::to_string(&msg).unwrap())).is_err() {
             return;
         }
@@ -455,8 +457,21 @@ where
                         }
                         let mut cn = [0u8; 16];
                         cn.copy_from_slice(&client_nonce_bytes);
-                        let key = derive_key(&token, &server_nonce, &cn);
-                        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&key).unwrap();
+                        // The client picks the version it asked for; anything
+                        // but an explicit `e2e: 2` is the v1 handshake, where
+                        // one key served as proof key and both cipher keys.
+                        let e2e_version = match req.params.get("e2e").and_then(|v| v.as_u64()) {
+                            Some(E2E_VERSION) => E2E_VERSION,
+                            _ => 1,
+                        };
+                        let (proof_key, recv_key, send_key) = if e2e_version == E2E_VERSION {
+                            let k = derive_session_keys(&token, &server_nonce, &cn);
+                            (k.proof, k.c2s, k.s2c)
+                        } else {
+                            let k = derive_key(&token, &server_nonce, &cn);
+                            (k, k, k)
+                        };
+                        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&proof_key).unwrap();
                         // Bind proof to BOTH nonces so a captured proof from
                         // a previous handshake can't be replayed: each
                         // session has a fresh (server_nonce, client_nonce)
@@ -468,14 +483,16 @@ where
                             auth_tracker.lock().await.remove(&addr.ip());
                             // Split into two independent cipher halves — one
                             // for the receive path (this task), one for the
-                            // send path (send task).
-                            recv_cipher = Some(HalfCipher::new(&key));
+                            // send path (send task). Under v2 they hold
+                            // different keys, so the two directions can never
+                            // seal two frames under one (key, nonce).
+                            recv_cipher = Some(HalfCipher::new(&recv_key));
                             // The InitCipher message must be queued before
                             // any Encrypted message so the send task has its
                             // cipher ready. We enqueue it first, then the
                             // auth response.
-                            let _ = out_tx.send(Outbound::InitCipher(HalfCipher::new(&key)));
-                            let resp = serde_json::to_string(&serde_json::json!({"result":{"authenticated":true,"machine_id":*machine_id,"hostname":&hostname}})).unwrap();
+                            let _ = out_tx.send(Outbound::InitCipher(HalfCipher::new(&send_key)));
+                            let resp = serde_json::to_string(&serde_json::json!({"result":{"authenticated":true,"machine_id":*machine_id,"hostname":&hostname,"e2e":e2e_version}})).unwrap();
                             let _ = out_tx.send(Outbound::Encrypted(resp));
                             if let Some(ref a) = team {
                                 team_push_handle = Some(tokio::spawn(team_push_loop(out_tx.clone(), a.clone())));

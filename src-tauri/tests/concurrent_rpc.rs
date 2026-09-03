@@ -31,7 +31,8 @@ use tokio_tungstenite::tungstenite::Message;
 
 use tmux_mobile::agent_notifications::AgentNotificationHub;
 use tmux_mobile::server::{
-    decode_wire_payload, handle_connection, AuthTracker, ResizeTracker, ResizeTrackerInner,
+    decode_wire_payload, derive_session_keys, handle_connection, AuthTracker, ResizeTracker,
+    ResizeTrackerInner, E2E_VERSION,
 };
 
 // --- Test harness ---
@@ -107,40 +108,57 @@ fn make_nonce(counter: u64) -> [u8; 12] {
 }
 
 impl Client {
+    /// The v1 handshake: what every client shipped before the direction keys
+    /// speaks. Kept as the default so the whole suite doubles as the proof
+    /// that a v1 client is still served.
     async fn connect(addr: SocketAddr, token: &str) -> Self {
+        Self::connect_with(addr, token, 1).await
+    }
+
+    async fn connect_with(addr: SocketAddr, token: &str, version: u64) -> Self {
         let url = format!("ws://{}/", addr);
         let (mut ws, _) = tokio_tungstenite::connect_async(&url)
             .await
             .expect("ws connect");
 
-        // Step 1: receive server_nonce
+        // Step 1: receive server_nonce. The server advertises the newest
+        // handshake it speaks; a v2-capable client asks for it explicitly.
         let msg = ws.next().await.expect("no msg").expect("recv error");
         let text = match msg {
             Message::Text(t) => t.to_string(),
             other => panic!("expected text, got {:?}", other),
         };
         let v: serde_json::Value = serde_json::from_str(&text).expect("json");
+        assert_eq!(v["e2e"].as_u64(), Some(E2E_VERSION), "server advertises its E2E version");
         let server_nonce_hex = v["server_nonce"].as_str().expect("server_nonce");
         let server_nonce_vec = hex_decode(server_nonce_hex);
         let mut server_nonce = [0u8; 16];
         server_nonce.copy_from_slice(&server_nonce_vec);
 
-        // Step 2: compute client nonce + proof, derive key
+        // Step 2: compute client nonce + proof, derive the session keys.
+        // v1: one key for the proof and both directions. v2: three keys.
         let client_nonce: [u8; 16] = rand::random();
-        let key = derive_key(token, &server_nonce, &client_nonce);
-        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&key).unwrap();
+        let (proof_key, send_key, recv_key) = if version == E2E_VERSION {
+            let k = derive_session_keys(token, &server_nonce, &client_nonce);
+            (k.proof, k.c2s, k.s2c)
+        } else {
+            let k = derive_key(token, &server_nonce, &client_nonce);
+            (k, k, k)
+        };
+        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&proof_key).unwrap();
         mac.update(&server_nonce);
         mac.update(&client_nonce);
         let proof = mac.finalize().into_bytes();
 
-        // Step 3: send auth
-        let auth = serde_json::json!({
-            "method": "auth",
-            "params": {
-                "client_nonce": hex_encode(&client_nonce),
-                "proof": hex_encode(&proof),
-            }
+        // Step 3: send auth (a v1 client has no `e2e` field at all)
+        let mut params = serde_json::json!({
+            "client_nonce": hex_encode(&client_nonce),
+            "proof": hex_encode(&proof),
         });
+        if version == E2E_VERSION {
+            params["e2e"] = serde_json::json!(E2E_VERSION);
+        }
+        let auth = serde_json::json!({ "method": "auth", "params": params });
         ws.send(Message::Text(serde_json::to_string(&auth).unwrap().into()))
             .await
             .unwrap();
@@ -153,17 +171,18 @@ impl Client {
             Message::Binary(b) => b.to_vec(),
             other => panic!("expected encrypted binary frame, got {:?}", other),
         };
-        let recv_cipher = Aes256Gcm::new_from_slice(&key).unwrap();
+        let recv_cipher = Aes256Gcm::new_from_slice(&recv_key).unwrap();
         let wire = recv_cipher
             .decrypt(Nonce::from_slice(&make_nonce(0)), ct.as_ref())
             .expect("decrypt auth resp");
         let json = decode_wire_payload(&wire).expect("wire decode");
         let resp: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(resp["result"]["authenticated"].as_bool().unwrap_or(false));
+        assert_eq!(resp["result"]["e2e"].as_u64(), Some(version), "server echoes the negotiated version");
 
         Self {
             ws,
-            send_cipher: Aes256Gcm::new_from_slice(&key).unwrap(),
+            send_cipher: Aes256Gcm::new_from_slice(&send_key).unwrap(),
             send_counter: 0,
             recv_cipher,
             recv_counter: 1, // server already burned counter 0 on the auth response
@@ -427,6 +446,64 @@ async fn slow_rpc_does_not_block_fast_rpc() {
         "inconclusive: the download's frame ({download:?}) preceded every ping \
          (first at {first_ping:?}), which a concurrent server does too — arrivals: {arrivals:?}"
     );
+}
+
+// --- E2E v2: one key per direction ---
+
+#[tokio::test]
+async fn v2_handshake_round_trips_with_direction_keys() {
+    // A client that asks for v2 proves with the proof key, sends under c2s,
+    // and reads under s2c. If the server derived any of the three
+    // differently, either the proof is rejected or a decrypt fails here.
+    let addr = spawn_server_once("test-token-v2").await;
+    let mut client = Client::connect_with(addr, "test-token-v2", E2E_VERSION).await;
+    client.send_rpc(1, "ping").await;
+    let v = client.recv_response().await;
+    assert_eq!(v["id"].as_u64(), Some(1));
+    assert_eq!(v["result"].as_str(), Some("pong"));
+}
+
+#[tokio::test]
+async fn v1_client_is_still_served_after_v2() {
+    // The pre-v2 client: no `e2e` in its auth params, one key everywhere.
+    // The server must keep speaking v1 to it and say so in the result.
+    let addr = spawn_server_once("test-token-v1").await;
+    let mut client = Client::connect_with(addr, "test-token-v1", 1).await;
+    client.send_rpc(1, "ping").await;
+    let v = client.recv_response().await;
+    assert_eq!(v["result"].as_str(), Some("pong"));
+}
+
+#[tokio::test]
+async fn v2_proof_is_rejected_when_the_client_did_not_ask_for_v2() {
+    // The version is the CLIENT's request: a proof computed with the v2
+    // proof key but sent without `e2e: 2` must fail, because the server then
+    // verifies with the v1 key. Guards against a server that silently tries
+    // both derivations (which would let the field lie about the cipher keys).
+    let addr = spawn_server_once("test-token-v2x").await;
+    let url = format!("ws://{}/", addr);
+    let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    let msg = ws.next().await.unwrap().unwrap();
+    let text = match msg { Message::Text(t) => t.to_string(), _ => panic!("text expected") };
+    let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let mut server_nonce = [0u8; 16];
+    server_nonce.copy_from_slice(&hex_decode(v["server_nonce"].as_str().unwrap()));
+    let client_nonce: [u8; 16] = rand::random();
+    let k = derive_session_keys("test-token-v2x", &server_nonce, &client_nonce);
+    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(&k.proof).unwrap();
+    mac.update(&server_nonce);
+    mac.update(&client_nonce);
+    let proof = mac.finalize().into_bytes();
+    let auth = serde_json::json!({"method": "auth", "params": {
+        "client_nonce": hex_encode(&client_nonce), "proof": hex_encode(&proof)}});
+    ws.send(Message::Text(serde_json::to_string(&auth).unwrap().into())).await.unwrap();
+    match ws.next().await.unwrap().unwrap() {
+        Message::Text(t) => {
+            let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+            assert!(v["error"].is_object(), "expected rejection, got {:?}", v);
+        }
+        other => panic!("unexpected frame: {:?}", other),
+    }
 }
 
 #[tokio::test]
