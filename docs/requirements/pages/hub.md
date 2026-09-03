@@ -86,7 +86,9 @@ completion).
   from its left edge; same shared placement flip/clamp as the title menu);
   right-click/long-press keeps the pointer placement.
 - A **stopped** agent (slot, no window) keeps its card and menu (Start /
-  Remove). The `+ agent` card is the strip's sticky last card and renders
+  Remove). The card is dimmed and carries no "stopped" word — the dimming
+  says it, and the word made the card wide (owner, 2026-09-03); the state
+  stays in the card's aria-label. The `+ agent` card is the strip's sticky last card and renders
   for every selected project — empty roster and closed session included
   (spawn into a down project opens it).
 - Tapping a card makes that agent the composer's **recipient** (and the

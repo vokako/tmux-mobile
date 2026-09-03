@@ -2485,15 +2485,17 @@
                  lives in the menu, because a stopped agent you are done with
                  has to be ejectable — the slot is what keeps `up` recreating
                  it (owner, 2026-08-19). -->
-            <div class="acard off" class:busy={acting} role="button" tabindex="0" aria-label={name}
+            <div class="acard off" class:busy={acting} role="button" tabindex="0" aria-label={`${name} · ${t('hubStopped')}`}
               onclick={(e) => toggleAgentMenu(name, e.currentTarget)}
               onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleAgentMenu(name, e.currentTarget); } }}
               oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), name, agentItems(name)); }}
               use:longpress={{ onlongpress: (pt) => openCtx(pt, name, agentItems(name)) }}>
               <div class="ac-top">
                 <span class="ava dim">{name.slice(0, 1).toUpperCase()}</span>
+                <!-- No "stopped" word beside the name: the dimmed card already
+                     says it, and the word made the card wide (owner, 2026-09-03).
+                     It stays in the aria-label for screen readers. -->
                 <span class="a-name">{name}</span>
-                <span class="s-age">{t('hubStopped')}</span>
                 <button class="a-start" title={t('hubStartAgain')} aria-label={t('hubStartAgain')}
                   disabled={acting}
                   onclick={(e) => { e.stopPropagation(); startAgent(name); }}>
@@ -3512,7 +3514,6 @@
   .acard.busy { opacity: 0.35; pointer-events: none; }
   /* Identity layer: names wear the display face (--font-display), not mono. */
   .a-name { font-family: var(--font-display); font-weight: 600; max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .s-age { color: var(--text3); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; font-family: ui-monospace, Menlo, monospace; }
   .st { width: 6px; height: 6px; border-radius: 50%; flex: none; }
   .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--status-danger); flex: none; }
   .ava.dim { background: var(--surface2) !important; color: var(--text3); }
