@@ -107,7 +107,7 @@ fn migrate_legacy_json() {
         if let Some(parent) = yaml_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        if let Ok(yaml) = serde_yml::to_string(&val) {
+        if let Ok(yaml) = serde_yaml_ng::to_string(&val) {
             if std::fs::write(&yaml_path, yaml).is_ok() {
                 let _ = std::fs::rename(&p, p.with_extension("json.bak"));
                 println!("🜂 team: migrated legacy template '{}' → team.yaml", stem);
@@ -160,7 +160,7 @@ pub fn list_templates() -> Vec<String> {
 pub fn read_team_def(name: &str) -> Value {
     std::fs::read_to_string(template_yaml_path(name))
         .ok()
-        .and_then(|s| serde_yml::from_str::<Value>(&s).ok())
+        .and_then(|s| serde_yaml_ng::from_str::<Value>(&s).ok())
         .unwrap_or(Value::Null)
 }
 
@@ -216,7 +216,7 @@ pub fn save_template(name: &str, def: &Value) -> Result<(), String> {
         if !p.trim().is_empty() { out.insert("prompt".into(), Value::String(p.to_string())); }
     }
     out.insert("agents".into(), def.get("agents").cloned().unwrap_or(serde_json::json!([])));
-    let yaml = serde_yml::to_string(&Value::Object(out)).map_err(|e| e.to_string())?;
+    let yaml = serde_yaml_ng::to_string(&Value::Object(out)).map_err(|e| e.to_string())?;
     let path = template_yaml_path(name);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -240,7 +240,7 @@ mod tests {
     fn builtin_default_template_is_minimal_manager_worker() {
         // The default template is the minimal demo: a manager + one worker that
         // shows the delegate→report loop and can grow via the manager's hire().
-        let v: Value = serde_yml::from_str(BUILTIN_TEMPLATE).unwrap();
+        let v: Value = serde_yaml_ng::from_str(BUILTIN_TEMPLATE).unwrap();
         let agents = v["agents"].as_array().unwrap();
         assert_eq!(agents.len(), 2, "minimal demo = manager + worker");
         let names: Vec<&str> = agents.iter().filter_map(|a| a["name"].as_str()).collect();
@@ -253,7 +253,7 @@ mod tests {
     #[test]
     fn software_dev_template_roster_and_tools() {
         // The software-dev roster is a built-in (teams/software-dev/team.yaml).
-        let v: Value = serde_yml::from_str(SOFTWARE_DEV_TEMPLATE).unwrap();
+        let v: Value = serde_yaml_ng::from_str(SOFTWARE_DEV_TEMPLATE).unwrap();
         let agents = v["agents"].as_array().unwrap();
         assert_eq!(agents.len(), 8, "manager+product+architect+frontend+backend+reviewer+tester+devops");
         let names: Vec<&str> = agents.iter().filter_map(|a| a["name"].as_str()).collect();
@@ -316,7 +316,7 @@ mod tests {
 
         // Each built-in parses and every agent carries a substantive goal.
         for (name, body) in BUILTIN_TEMPLATES {
-            let v: Value = serde_yml::from_str(body).unwrap_or_else(|e| panic!("{name} bad yaml: {e}"));
+            let v: Value = serde_yaml_ng::from_str(body).unwrap_or_else(|e| panic!("{name} bad yaml: {e}"));
             let agents = v["agents"].as_array().unwrap_or_else(|| panic!("{name} has no agents"));
             assert!(!agents.is_empty(), "{name} empty roster");
             assert!(
@@ -331,7 +331,7 @@ mod tests {
 
     #[test]
     fn mixed_engineering_template_uses_all_backends_with_explicit_handoffs() {
-        let v: Value = serde_yml::from_str(MIXED_ENGINEERING_TEMPLATE).unwrap();
+        let v: Value = serde_yaml_ng::from_str(MIXED_ENGINEERING_TEMPLATE).unwrap();
         let agents = v["agents"].as_array().unwrap();
         assert_eq!(agents.len(), 3, "keep the mixed team lean");
 
@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn financial_research_template_has_lead_and_default_models() {
-        let v: Value = serde_yml::from_str(FINANCIAL_RESEARCH_TEMPLATE).unwrap();
+        let v: Value = serde_yaml_ng::from_str(FINANCIAL_RESEARCH_TEMPLATE).unwrap();
         let agents = v["agents"].as_array().unwrap();
         assert!(agents.len() >= 5, "a multi-analyst research team");
         let names: Vec<&str> = agents.iter().filter_map(|a| a["name"].as_str()).collect();

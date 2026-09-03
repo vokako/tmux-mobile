@@ -77,7 +77,7 @@ pub(crate) fn read_skill_meta(dir: &std::path::Path) -> (String, String) {
     if let Some(rest) = md.strip_prefix("---") {
         if let Some(end) = rest.find("\n---") {
             let fm = rest[..end].trim_start_matches('\n');
-            if let Ok(v) = serde_yml::from_str::<Value>(fm) {
+            if let Ok(v) = serde_yaml_ng::from_str::<Value>(fm) {
                 if let Some(n) = v.get("name").and_then(|x| x.as_str()) {
                     name = n.to_string();
                 }
