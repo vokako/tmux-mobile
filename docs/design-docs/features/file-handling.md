@@ -51,7 +51,12 @@ through `{@html}` — agent chat markdown, repository READMEs, mermaid SVG, KaTe
 and `withGlobalTauri` exposes IPC on `window`. Escaping is the first line of
 defence (`core/markdown.ts`); the CSP is the second: an escaping bug becomes a
 broken image, not a script with IPC access. Inline STYLES stay allowed because
-xterm, KaTeX and mermaid all emit them. `connect-src` allows any `ws:`/`wss:`/
+xterm, KaTeX and mermaid all emit them, and stylesheets and fonts may come from
+any http(s) host: the HTML preview is a `srcdoc` iframe, which INHERITS this
+policy, and a previewed report that links a CDN stylesheet or web font must
+still look like itself. Scripts in that iframe were never run (the sandbox has
+no `allow-scripts`), so the policy that matters — `script-src 'self'` — costs
+the preview nothing. `connect-src` allows any `ws:`/`wss:`/
 `http:`/`https:` host because the server address is user-entered, plus
 `ipc: http://ipc.localhost` for Tauri's IPC. Bundled index.html has no inline
 script (one `<script type="module" src>`), so nothing legitimate is blocked.
