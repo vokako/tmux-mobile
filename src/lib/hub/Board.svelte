@@ -18,6 +18,8 @@
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, countsOf, applyCounts, visibleBoards, boardTitle, assignNotes, chipCols, noteActsSet, noteActsCopyLanded, noteActsExpired, NOTE_ACTS_IDLE, type NoteActsState } from './board.ts';
   import { scrollFade } from '../core/scrollFade.ts';
+  import { flip } from 'svelte/animate';
+  import { moveMs } from '../ui/motion.ts';
 
   let { session = '', visible = true, onGoBack = null, issueRequest = null, embedded = false, createRequest = null, jumped = false }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null; issueRequest?: { session: string; id: number; n: number } | null; embedded?: boolean; createRequest?: { n: number } | null; jumped?: boolean } = $props();
 
@@ -149,6 +151,21 @@
   // view: the list, one issue (with its note thread), or the new-issue form.
   let sel = $state<BoardIssue | null>(null);
   let creating = $state(false);
+  // Drill motion (design-language.md §1 navigation grammar, motion.md): on a
+  // phone the detail takes the screen, so it enters from the right and the
+  // columns re-enter from the left — 120ms linear, same as AgentsPage, and
+  // inert on desktop (the swap is a content change there, not a navigation).
+  // Derived from ONE compound flag so every open/close path animates alike;
+  // switching from one issue to another does not replay it.
+  const drilled = $derived(!!sel || creating);
+  let drillAnim = $state('');
+  let wasDrilled = false;
+  $effect(() => { if (drilled !== wasDrilled) { drillAnim = drilled ? 'fwd' : 'back'; wasDrilled = drilled; } });
+  /** How many notes the open issue had when it was opened (motion.md
+   * principle 13): only a note that ARRIVES afterwards fades in — the
+   * thread itself is history. Notes append and are never removed in the
+   * UI, so the count is a stable gate. */
+  let notesBase = $state(0);
   let nTitle = $state('');
   let nBody = $state('');
   let nAssignee = $state('');
@@ -270,6 +287,7 @@
   async function openIssue(id: number) {
     try {
       sel = await boardGet(cur, id);
+      notesBase = Array.isArray(sel.notes) ? sel.notes.length : 0;
       draft = draftOf(sel);
       draftBase = draftOf(sel);
       acts = noteActsSet(acts, -1); // a different issue, a fresh slate (board #46)
@@ -624,7 +642,7 @@
     {/if}
   </div>
   {/if}
-  <div class="board">
+  <div class="board" class:drill-fwd={drillAnim === 'fwd'} class:drill-back={drillAnim === 'back'}>
   {#if !ready && !issues.length}
     <div class="empty">…</div>
   {:else if sel}
@@ -650,10 +668,10 @@
           <!-- Cancel ASKS (board #15: "当前状态没有保存，是否退出"): the same
                ConfirmDialog every guarded exit uses — confirming restores the
                base, so a slid status or picked assignee rolls back. -->
-          <button class="icon-btn" title={t('cancel')} aria-label={t('cancel')} disabled={busy} onclick={() => guard(() => {})}>
+          <button class="icon-btn appear-pop" title={t('cancel')} aria-label={t('cancel')} disabled={busy} onclick={() => guard(() => {})}>
             <Icon name="undo" size={14} />
           </button>
-          <button class="icon-btn go" title={t('save')} aria-label={t('save')} disabled={busy || !draftValid(draft)} onclick={saveDraft}>
+          <button class="icon-btn go appear-pop" title={t('save')} aria-label={t('save')} disabled={busy || !draftValid(draft)} onclick={saveDraft}>
             <Icon name="check" size={14} />
           </button>
         {/if}
@@ -708,8 +726,8 @@
            box below, so ragged name lengths stop pushing the text around. -->
       <div class="notes">
         {#if Array.isArray(sel.notes)}
-          {#each sel.notes as n, i}
-            <div class="note">
+          {#each sel.notes as n, i (`${i}:${n.at}`)}
+            <div class="note" class:appear={i >= notesBase}>
               <div class="n-head">
                 <span class="n-author">{n.author}</span>
                 <!-- The accessible route to the action row (board #46): the
@@ -725,7 +743,7 @@
                 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
                 <div class="n-text" onclick={() => toggleNoteActs(i)}>{n.body.trim()}</div>
                 {#if acts.open === i}
-                  <div class="m-acts">
+                  <div class="m-acts appear">
                     <button onclick={() => copyNote(n.body)}>
                       <Icon name="copy" size={11} />{acts.copied ? t('hubCopied') : t('hubCopy')}
                     </button>
@@ -803,7 +821,7 @@
           <div class="col-h">{statusLabel(s)}<span class="col-n">{items.length}</span></div>
           <div class="col-scroll subtle-scroll">
           {#each items as i (i.id)}
-            <button class="card" onclick={() => openIssue(i.id)}>
+            <button class="card" animate:flip={{ duration: moveMs() }} onclick={() => openIssue(i.id)}>
               <!-- Titleless issues (board #31) wear their body excerpt as the
                    title (issueRef); the preview line then stays EMPTY — the
                    same text twice reads as a rendering bug. -->
@@ -826,7 +844,7 @@
       <div class="empty">{t('boardEmpty')}</div>
     {/if}
   {/if}
-  {#if err}<div class="err">{err}</div>{/if}
+  {#if err}<div class="err appear">{err}</div>{/if}
   </div>
   </div>
   <ConfirmDialog open={!!pendingDiscard} danger={false} compact={narrowVp}
@@ -869,6 +887,15 @@
   @media (max-width: 760px) {
     .board-root { grid-template-columns: minmax(0, 1fr); }
     .side-toggle { display: inline-flex; }
+    /* Drill motion: same 120ms grammar as the app-level page slide and
+       AgentsPage. Desktop swaps the content in place — no motion. */
+    .board.drill-fwd .detail { animation: drill-in-right 0.12s linear; }
+    .board.drill-back .cols { animation: drill-in-left 0.12s linear; }
+  }
+  @keyframes drill-in-right { from { transform: translateX(40%); } to { transform: none; } }
+  @keyframes drill-in-left  { from { transform: translateX(-40%); } to { transform: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .board.drill-fwd .detail, .board.drill-back .cols { animation: none; }
   }
   /* The main column: the shared page-head on top, the padded board below —
      the head spans full width like Chat's, the padding belongs to the content. */
@@ -1011,7 +1038,7 @@
     border: none; background: none; cursor: pointer;
     font-size: var(--fs-meta); color: var(--text2);
     padding: 5px 12px; position: relative;
-    transition: background var(--t-fast), color var(--t-fast);
+    transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
   }
   .seg-b + .seg-b { border-left: 1px solid var(--border); }
   .seg-b.on { background: var(--accent-bg); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-line); }

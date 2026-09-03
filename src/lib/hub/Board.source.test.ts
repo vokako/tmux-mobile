@@ -151,7 +151,11 @@ test('create lives in the head, and compact gets the hamburger drawer (reopened 
     'the sheet parks off-canvas and slides — the shared motion grammar, in app.css');
   assert.ok(!/@media[^{]*\{[^{}]*\n\s*\.side-sheet \{/u.test(appCss),
     'the sheet is CLASS-driven, never media-gated — a media gate disagreed with the Hub\u2019s wider compact (owner, 2026-08-30)');
-  assert.ok(!style.includes('translateX'), 'the component does not re-declare the shared geometry');
+  // The SHEET's parked transform is the geometry that must not be copied; the
+  // compact drill keyframes (motion.md: detail from the right, columns from the
+  // left) are a different thing and live here like AgentsPage's.
+  assert.ok(!style.includes('translateX(-100%)'), 'the component does not re-declare the shared geometry');
+  assert.ok(!/\.sidebar[^{]*\{[^}]*transform/u.test(style), 'and gives its sidebar no transform of its own');
   assert.ok(!style.includes('.board-root.picked'), 'the second-page drilldown is retired');
 });
 
