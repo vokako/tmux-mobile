@@ -197,7 +197,7 @@
 - **Priority**: Medium (High for the gesture part)
 - **Area**: Frontend architecture
 - **Details**: 2026-07 audit findings, to be paid down in phases:
-  - `Terminal.svelte` (2374 lines after 2026-07 slices): top-level pure
+  - `Terminal.svelte` (2555 lines, 2026-09): top-level pure
     logic (selection model, cursor-layout math) extracted + tested; the
     touch-gesture state machine (~1300
     lines, `touchToCell` / `recomputeSelUI` / `applySelectionToXterm` / ...)
@@ -216,10 +216,16 @@
     component's style block~~ — done 2026-07: moved to `src/app.css`.
   - ~~`src/lib/` is a single flat directory of 60+ files~~ — done 2026-07:
     reorganized into `core/ app/ terminal/ files/ sessions/ team/ ui/`.
-  - Duplicated styles: light-theme `.scroll-btn` override copied in
-    ChatView + Terminal; markdown-render CSS copied in Files + ChatView +
-    Team. Fix via shared `ui/` primitives (e.g. MarkdownBody), not a
-    shared stylesheet.
+  - Duplicated styles: markdown-render CSS copied in Files + Team (the
+    ChatView copy went with ChatView, 2026-07; the renderer itself is now
+    shared — `core/markdown.ts`, 2026-09-03). Fix via a shared `ui/`
+    primitive (e.g. MarkdownBody), not a shared stylesheet.
+  - `Hub.svelte` (4094 lines, 2026-09): the seams are contiguous blocks —
+    Feed (ask-anchor machine, fold, loadOlder), Composer (text, recipient,
+    attachments, palette, interrupt arm), Roster + agent menu, Sidebar,
+    Drawer, Dialogs. The coupling state is `selected`, `agents`, `feed`,
+    `following`, `recipient`, `roomCache`; the `onGoBack` chain reads every
+    layer's flag and wants a layer-stack registry before any split.
   - `ws.ts` is a mutable module-level singleton (10 top-level `let`s);
     fine today, but a wall if split-screen ever needs two simultaneous
     server connections.
@@ -229,6 +235,57 @@
   viewMode plumbing, the chat i18n keys, and the ws.js send_command wrapper
   are all removed (recoverable from git history). The `send_command` RPC
   still exists server-side.
+
+## Code review 2026-09-03: found, verified, deliberately left
+
+The full-project review (board #80–#84 fixed the rest) confirmed these and
+left them, each for a stated reason:
+
+- **Android signing key was in git history** (`src-tauri/gen/android/keystore.jks`,
+  passwords in the gradle script until 60992d4). Untracked and moved to
+  `key.properties`; the key installed apps trust is still that one. Rotating
+  it forces every user to reinstall — owner decision. Until then the history
+  holds a live signing key.
+- **CSP needs a device smoke test.** `tauri.conf.json` now carries a policy
+  (`script-src 'self'`); this host has no webview to run it. First desktop or
+  Android build after f36ef13 should open a markdown file, a PDF, a mermaid
+  diagram, and the Hub. The browser/PWA build has no CSP header at all.
+- **`hub_rpc.rs` is one 750-line `match`** mixing dispatch, delivery and
+  board-notice policy; the `require_str → match → Response::err` boilerplate
+  repeats ~40× across `rpc.rs`/`hub_rpc.rs`/`team_rpc.rs` and would collapse
+  under a `?`-returning inner fn like `handle_project_request` already has.
+  Same class: `store.rs` 2665 / `projects/mod.rs` 2121 / `spawn.rs` 1888
+  lines with clean cuts (store → projects/registry/board/activity; mod.rs
+  skills block → `skills.rs`; spawn per-backend `render_*` → `spawn/backends.rs`).
+- **`list_panes` runs a full `ps -axo` per call** because `child_cmd` is a
+  detection clue (`agents::detect_pane` reads it deliberately). One `hub_post`
+  triggers it at least twice. Making it opt-in changes detection; measure first.
+- **`fs_*` and `/dl` accept any absolute path, and the git allowlist includes
+  `push`/`commit`/`add`/`restore`** — by design ("token = shell access"), but
+  the allowlist reads as a restriction it is not.
+- **`bin/tmm.rs` (1234 lines) has 3 tests**, all flag-parsing; `connection.rs`,
+  `fs.rs`, `server/mod.rs` have none. `Hub.svelte` is pinned only by a CSS
+  source test; `AgentsPage`, `Projects`, `Settings`, `GitPanel`, `ui/Select`
+  have no test.
+- **Some source tests pin implementation text, not invariants**
+  (`App.source.test.ts` requires whole literal statements; `Hub.source.test.ts`
+  `rule()` returns `''` on a missed selector and asserts against it). Upgrade
+  to render tests where the contract is visual.
+- **Dual package manager is live on the dev host**: `npm` is aliased to
+  `pnpm`, so `pnpm-lock.yaml` tracks `package.json` while the tracked
+  `package-lock.json` lags. `scripts/preflight.mjs` could fail fast on
+  `npm_config_user_agent`.
+- **Three shell quoters remain** (`agent_notifications.rs` — the only one
+  compiled on Android and pinned by hook files on disk; `tasks.rs::sh_quote`;
+  `team/backends.rs::shell_quote`). `reconcile.rs`'s copy is gone.
+- **`auto_adopt_with` still calls `adopt_in` (tmux work) under the store
+  lock** — rare path (only when a new session appears).
+- **`@all` as recipient is stored as `'all'` and not restored by `pickLead`**
+  (`Hub.svelte` setRecipient) — pre-existing, noted.
+- **`ws.ts` `hubLog` drops `since_ts` when `before_seq` is given**; the gap
+  walk filters client-side instead, so it is correct but does more work.
+- **`Files.svelte` markdown preview now escapes inline HTML** (badges,
+  centered logos in READMEs render as text) — the price of one safe renderer.
 
 ## Backend clippy: structural findings deferred (2026-07-22)
 

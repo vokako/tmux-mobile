@@ -45,7 +45,12 @@ These tests `readFile` the component source and assert with regexes.
   typed modules it exercises. Deliberately-partial test doubles are cast
   once at the boundary (`as unknown as X`) with a comment; don't build
   full fakes just to satisfy the checker.
-- No test file without a clear subject; no subject with two test files.
+- No test file without a clear subject; no subject with two test files of
+  the same kind. A component may have a `.source.test.ts` (regex over the
+  source) AND a `.render.test.ts` (the real component rendered through
+  vite's SSR pipeline, asserting on emitted markup — `Board.render.test.ts`
+  is the first); they answer different questions, and the render test is
+  the one to prefer when a contract is about what the user sees.
 - Every regression fix starts with a failing test that reproduces it.
 
 ## Current source-contract inventory
@@ -62,3 +67,9 @@ These tests `readFile` the component source and assert with regexes.
 | `hub/Hub.source.test.ts` | a tool-lane row is one line (`nowrap`, never `pre`), the argument is never truncated (the lane pans instead), and the row cap stays expressed in rows |
 | `ui/sidebar.source.test.ts` | one sidebar box: a section header takes its padding and type from `.side-h`, and `.side-h`/`.side-row` keep the same 10px inset |
 | `ui/statusdot.source.test.ts` | the running cue: `--status-sleep` stays achromatic, `.live-dot` is defined once in app.css (halo + `dot-breathe` scale, never an opacity fade) and stills under reduced motion, and no component re-implements it |
+| `app/preferences.source.test.ts` | Settings embeds the real AgentsPage (never a copy), the category exists only where Agents is not a page, back peels the embedded page first, one head at a time |
+| `files/Files.source.test.ts` | back retraces the user's steps; drag-drop uploads into the current directory; markdown preview goes through the ONE safe renderer (never a bare `marked.parse`); heavy preview libraries load on first use; the lined preview is capped |
+| `files/DirPicker.source.test.ts` | ONE directory picker under `src/lib` (rule 6); the newest listing wins; it can create the folder it picks |
+| `hub/Board.source.test.ts` | the issue detail is a draft (explicit save, guarded exits), assignment is one dispatch, the layout hierarchy, sidebar order, notes as a timeline, columns scroll alone |
+| `system/system.source.test.ts` | the vitals corner takes its transport by injection, polls low-frequency and stops while hidden, fails soft, wears tokens |
+| `ui/totail.source.test.ts` | the to-tail atoms live in app.css once; both records wear the shared class |
