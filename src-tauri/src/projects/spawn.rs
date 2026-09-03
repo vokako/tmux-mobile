@@ -110,6 +110,10 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
         Some(w) => w.clone(),
         None => uniquify(&def.name, &taken)?,
     };
+    // A def saved before names were validated, or an explicit window name
+    // from a caller, still has to be a plain word here: it is about to be a
+    // directory under `.tmm/agents/` and a tmux window name.
+    super::agents::valid_name(&window_name)?;
 
     let home = agent_home(&workspace, &window_name);
     std::fs::create_dir_all(&home).map_err(|e| format!("create agent home: {e}"))?;
@@ -418,8 +422,16 @@ struct Rendered {
     confirmation: Option<shared::StartupConfirmation>,
 }
 
+/// The isolated home for `name`. Callers reach this only with a name that
+/// passed `agents::valid_name` (spawn checks the window name up front, and
+/// every other name comes off a slot or a tmux window that `is_managed_in`
+/// already accepted), so a rejection here is a programming error, not a
+/// user-facing one — it falls back to a path that cannot exist rather than
+/// escape the agents directory.
 fn agent_home(workspace: &str, name: &str) -> PathBuf {
-    Path::new(workspace).join(".tmm").join("agents").join(name)
+    super::agents::home_dir(workspace, name).unwrap_or_else(|| {
+        Path::new(workspace).join(".tmm").join("agents").join("__invalid-name__")
+    })
 }
 
 /// `.tmm/` self-gitignores (same convention as team runtime homes).
@@ -630,7 +642,7 @@ fn grok_hooks(notify: &str) -> Value {
 /// comes up), so the app owns these configs rather than trusting whatever an
 /// older version wrote.
 pub fn refresh_hooks(project_path: &str, window_name: &str) -> bool {
-    let home = std::path::Path::new(project_path).join(".tmm").join("agents").join(window_name);
+    let Some(home) = super::agents::home_dir(project_path, window_name) else { return false };
     if !home.is_dir() {
         return false; // not a managed agent
     }

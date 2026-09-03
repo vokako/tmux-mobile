@@ -64,12 +64,11 @@ pub fn parse_members(team: &RegTeam) -> Result<Vec<Member>, String> {
 /// the project spawn cap, because a team that can never fully start is a
 /// trap, not a configuration.
 pub fn validate(team: &RegTeam, known: &[String], known_teams: &[String], cap: usize) -> Result<Vec<Member>, String> {
-    if team.name.trim().is_empty() {
-        return Err("team name must not be empty".into());
-    }
-    if team.name.contains('/') || team.name.contains(char::is_whitespace) {
-        return Err("team name must be one word without '/' — it becomes a path segment in the roster".into());
-    }
+    // A team name becomes a path segment in the roster and the `team` field
+    // of every member's recipe; a member name becomes a window name, a home
+    // directory and an @address. Same word rule as an agent, for the same
+    // reasons (`agents::valid_name`).
+    super::agents::valid_name(team.name.trim()).map_err(|e| e.replacen("agent name", "team name", 1))?;
     let members = parse_members(team)?;
     if members.is_empty() {
         return Err("a team needs at least one member".into());
@@ -96,9 +95,7 @@ pub fn validate(team: &RegTeam, known: &[String], known_teams: &[String], cap: u
         if n.is_empty() {
             return Err("every member needs a name".into());
         }
-        if n.contains(char::is_whitespace) || n.contains('@') {
-            return Err(format!("member name '{n}' must be one word without '@' — it becomes the window name and the @address"));
-        }
+        super::agents::valid_name(n).map_err(|e| e.replacen("agent name", "member name", 1))?;
         if !seen.insert(n.to_string()) {
             return Err(format!("member name '{n}' is used twice"));
         }
@@ -263,7 +260,10 @@ mod tests {
         assert!(validate(&team("[]"), &known, NO_TEAMS, 4).unwrap_err().contains("at least one"));
         assert!(validate(&team(r#"[{"name":"a","base":"nope"}]"#), &known, NO_TEAMS, 4).unwrap_err().contains("not in the registry"));
         assert!(validate(&team(r#"[{"name":"a","base":"claude"},{"name":"a","base":"codex"}]"#), &known, NO_TEAMS, 4).unwrap_err().contains("used twice"));
-        assert!(validate(&team(r#"[{"name":"two words","base":"claude"}]"#), &known, NO_TEAMS, 4).unwrap_err().contains("one word"));
+        // Member names obey the agent name rule — one word, a window name, a
+        // home directory and an @address (`agents::valid_name`).
+        assert!(validate(&team(r#"[{"name":"two words","base":"claude"}]"#), &known, NO_TEAMS, 4).unwrap_err().contains("member name"));
+        assert!(validate(&team(r#"[{"name":"../..","base":"claude"}]"#), &known, NO_TEAMS, 4).unwrap_err().contains("member name"));
         assert!(validate(&team(r#"[{"name":"a","base":"claude"},{"name":"b","base":"claude"},{"name":"c","base":"claude"}]"#), &known, NO_TEAMS, 2).unwrap_err().contains("at most 2"));
         // inline, team-only member: needs a real backend
         assert!(validate(&team(r#"[{"name":"x","agent":{"name":"","backend":"gpt"}}]"#), &known, NO_TEAMS, 4).unwrap_err().contains("backend must be"));
@@ -275,7 +275,7 @@ mod tests {
         assert!(validate(&team(r#"[{"team":"nope"}]"#), &known, &teams, 4).unwrap_err().contains("does not exist"));
         assert!(validate(&team(r#"[{"team":"dev-squad"}]"#), &known, &teams, 4).unwrap_err().contains("include itself"));
         assert!(validate(&team(r#"[{"team":"review"},{"team":"review"}]"#), &known, &teams, 4).unwrap_err().contains("included twice"));
-        assert!(validate(&named("a/b", r#"[{"team":"review"}]"#), &known, &teams, 4).unwrap_err().contains("path segment"));
+        assert!(validate(&named("a/b", r#"[{"team":"review"}]"#), &known, &teams, 4).unwrap_err().contains("team name"));
     }
 
     #[test]

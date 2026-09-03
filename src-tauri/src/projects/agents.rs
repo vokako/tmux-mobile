@@ -88,6 +88,58 @@ const KNOWN: &[KnownAgent] = &[
     },
 ];
 
+/// The longest agent name we accept — a tmux window name and a directory
+/// component; anything longer is a mistake, not an identity.
+pub const MAX_NAME_LEN: usize = 64;
+
+/// Is `name` something an agent may be called?
+///
+/// The name is reused in FOUR places with four parsers, and the rule is the
+/// intersection of what all of them treat as a plain word:
+///
+/// * a directory component under `<ws>/.tmm/agents/` — so no `/`, `\`, NUL,
+///   and never the components `.` or `..` (`agent_remove("../..")` resolved to
+///   the workspace itself, which `is_dir()`, and would have deleted it);
+/// * a tmux window name that also appears inside targets (`session:name.pane`)
+///   — so no `:` `.` `=` (tmux's target separators and exact-match prefix) and
+///   no whitespace or glob characters (`*` `?` `[`), which tmux matches as a
+///   pattern;
+/// * the first argv element after a flag on the CLI (`tmm agent remove <name>`)
+///   — so it cannot start with `-`;
+/// * an `@name` address in chat — so no whitespace or `@`.
+///
+/// A whitelist is the only shape of that rule that stays true when a fifth
+/// parser arrives: letters and digits (any script — a Chinese agent name is
+/// an ordinary name), `-` and `_`, starting with a letter or digit, at most
+/// `MAX_NAME_LEN` characters.
+pub fn valid_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("agent name must not be empty".into());
+    }
+    if name.chars().count() > MAX_NAME_LEN {
+        return Err(format!("agent name must be at most {MAX_NAME_LEN} characters"));
+    }
+    if !name.chars().next().is_some_and(char::is_alphanumeric) {
+        return Err(format!(
+            "agent name '{name}' must start with a letter or digit — it is a window name, a directory and an @address"
+        ));
+    }
+    if let Some(bad) = name.chars().find(|c| !(c.is_alphanumeric() || matches!(c, '-' | '_'))) {
+        return Err(format!(
+            "agent name '{name}' cannot contain '{bad}' — only letters, digits, '-' and '_' survive tmux targets, paths and @addresses unchanged"
+        ));
+    }
+    Ok(())
+}
+
+/// The isolated home of `name` under `workspace`, or `None` for a name that
+/// must never become a path (see `valid_name`). Every `<ws>/.tmm/agents/<x>`
+/// path in the projects module is built here, so no caller can skip the check.
+pub fn home_dir(workspace: &str, name: &str) -> Option<std::path::PathBuf> {
+    valid_name(name).ok()?;
+    Some(std::path::Path::new(workspace).join(".tmm").join("agents").join(name))
+}
+
 /// The agent running in a pane, or `None` for an ordinary shell.
 ///
 /// `text` must be ordered shallow → deep (`pane_current_command`, then the
@@ -123,9 +175,7 @@ pub fn detect_managed(
     window_name: &str,
     pane_text: &str,
 ) -> Option<&'static KnownAgent> {
-    if let Some(ws) = workspace {
-        let recipe = std::path::Path::new(ws)
-            .join(".tmm").join("agents").join(window_name).join("launch.json");
+    if let Some(recipe) = workspace.and_then(|ws| home_dir(ws, window_name)).map(|h| h.join("launch.json")) {
         if let Some(backend) = std::fs::read_to_string(recipe)
             .ok()
             .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
@@ -167,6 +217,35 @@ mod tests {
         // codex spawning a kiro-web-search MCP tool: "kiro" sits deeper.
         let a = detect("node codex /Users/me/.codex/bin kiro-web-search").unwrap();
         assert_eq!(a.backend, "codex");
+    }
+
+    /// The rule that keeps a name from becoming a path or a tmux pattern.
+    /// `../..` is the case that mattered: `agent_remove` joined it under
+    /// `<ws>/.tmm/agents/`, landed on the workspace itself, and
+    /// `remove_dir_all` would have taken the whole project.
+    #[test]
+    fn a_name_is_a_plain_word_or_nothing() {
+        for ok in ["lead", "builder-2", "cx_probe", "经理", "a", "Z9"] {
+            assert!(valid_name(ok).is_ok(), "{ok} is an ordinary name");
+        }
+        for bad in [
+            "", ".", "..", "../..", "a/b", "a\\b", "-flag", "_lead", "a b", "a.b", "a:b", "a=b",
+            "a*", "a?", "a[1]", "@lead", "a\0b", "a\nb",
+        ] {
+            assert!(valid_name(bad).is_err(), "{bad:?} must be rejected");
+        }
+        assert!(valid_name(&"x".repeat(MAX_NAME_LEN)).is_ok());
+        assert!(valid_name(&"x".repeat(MAX_NAME_LEN + 1)).is_err());
+    }
+
+    #[test]
+    fn an_invalid_name_has_no_home() {
+        assert!(home_dir("/tmp/ws", "../..").is_none());
+        assert!(home_dir("/tmp/ws", "").is_none());
+        assert_eq!(
+            home_dir("/tmp/ws", "lead").as_deref(),
+            Some(std::path::Path::new("/tmp/ws/.tmm/agents/lead"))
+        );
     }
 
     #[test]

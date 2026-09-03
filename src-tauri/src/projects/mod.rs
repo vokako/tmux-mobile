@@ -509,6 +509,10 @@ pub fn delete(id: &str) -> Result<Value, String> {
 /// The slot is what makes it a member of the project, so the slot is what
 /// authorizes the removal. `home_removed` reports whether there was a home.
 pub fn agent_remove(session: &str, agent: &str) -> Result<Value, String> {
+    // Before anything is looked up or killed: the name is about to be a
+    // `remove_dir_all` target under `.tmm/agents/`, and `managed_home` would
+    // answer "yes, a directory" for `..`.
+    agents::valid_name(agent)?;
     let project = project_for_session(session)?
         .ok_or_else(|| format!("no project for session '{session}'"))?;
     let home = managed_home(session, agent);
@@ -559,9 +563,9 @@ pub fn registry_list() -> Result<Value, String> {
 pub fn registry_save(def: &Value) -> Result<Value, String> {
     let agent: store::RegAgent =
         serde_json::from_value(def.clone()).map_err(|e| format!("invalid agent def: {e}"))?;
-    if agent.name.trim().is_empty() {
-        return Err("agent name must not be empty".into());
-    }
+    // The registry name becomes the window name and the isolated home's
+    // directory — one rule for both (`agents::valid_name`).
+    agents::valid_name(&agent.name)?;
     if !matches!(agent.backend.as_str(), "kiro" | "claude" | "codex" | "grok") {
         return Err(format!("backend must be kiro|claude|codex|grok, got '{}'", agent.backend));
     }
@@ -660,8 +664,7 @@ pub fn teams_delete(name: &str) -> Result<Value, String> {
 /// recipe — `None` for a solo agent or a pre-recipe home. The Hub groups
 /// same-team cards on this.
 pub fn team_of(workspace: Option<&str>, window_name: &str) -> Option<String> {
-    let ws = workspace?;
-    let recipe = std::path::Path::new(ws).join(".tmm").join("agents").join(window_name).join("launch.json");
+    let recipe = agents::home_dir(workspace?, window_name)?.join("launch.json");
     let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(recipe).ok()?).ok()?;
     let t = v.get("team")?.as_str()?.trim().to_string();
     (!t.is_empty()).then_some(t)
@@ -1207,21 +1210,23 @@ pub fn project_for_session(session: &str) -> Result<Option<store::Project>, Stri
 /// user started by hand can share a name with a registry agent, but it has no
 /// isolated home, and typing into it or publishing its replies would reach into
 /// a session this app does not own.
+///
+/// The name goes through `agents::home_dir`, so a window called `..` (or any
+/// other name that is not a plain word — see `agents::valid_name`) is never
+/// managed: `<ws>/.tmm/agents/../..` IS a directory — the workspace — and this
+/// function's answer is what authorises `agent_remove` to `remove_dir_all` it.
 pub fn managed_home(session: &str, window_name: &str) -> Option<std::path::PathBuf> {
     let project = project_for_session(session).ok().flatten()?;
-    let dir = std::path::Path::new(&project.path)
-        .join(".tmm")
-        .join("agents")
-        .join(window_name);
+    let dir = agents::home_dir(&project.path, window_name)?;
     dir.is_dir().then_some(dir)
 }
 
 /// Same question, when the caller already knows the workspace path (it is
 /// listing every window of one session and must not hit the store per row).
 pub fn is_managed_in(workspace: Option<&str>, window_name: &str) -> bool {
-    workspace.is_some_and(|ws| {
-        std::path::Path::new(ws).join(".tmm").join("agents").join(window_name).is_dir()
-    })
+    workspace
+        .and_then(|ws| agents::home_dir(ws, window_name))
+        .is_some_and(|dir| dir.is_dir())
 }
 
 /// Who spawned this managed agent, read off its launch recipe. `None` means
@@ -1229,12 +1234,7 @@ pub fn is_managed_in(workspace: Option<&str>, window_name: &str) -> bool {
 /// managed — and in every one of those cases there is nobody to deliver a
 /// done summary to, which is the only question this answers.
 pub fn spawned_by(workspace: Option<&str>, window_name: &str) -> Option<String> {
-    let ws = workspace?;
-    let recipe = std::path::Path::new(ws)
-        .join(".tmm")
-        .join("agents")
-        .join(window_name)
-        .join("launch.json");
+    let recipe = agents::home_dir(workspace?, window_name)?.join("launch.json");
     let text = std::fs::read_to_string(recipe).ok()?;
     let v: serde_json::Value = serde_json::from_str(&text).ok()?;
     let by = v.get("spawned_by")?.as_str()?.trim().to_string();
@@ -1745,6 +1745,34 @@ pub(crate) mod tests {
         assert!(!slots.iter().any(|s| s.window_name == "dev"), "slot is gone");
         // A name that was never ours is rejected rather than half-handled.
         assert!(agent_remove(&session, "nope").is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `agent_remove("../..")` used to resolve `<ws>/.tmm/agents/../..` — the
+    /// workspace itself, which `is_dir()` — and hand it to `remove_dir_all`.
+    /// The name rule (`agents::valid_name`) refuses before any lookup, and the
+    /// two "is it managed" gates answer no for the same names.
+    #[test]
+    fn a_name_that_is_a_path_removes_nothing() {
+        use_test_store();
+        let dir = std::env::temp_dir().join(format!("tmm-rmpath-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.to_string_lossy().to_string();
+        let made = create(&path, Some("rmpath"), None, None).unwrap();
+        let session = made["session"].as_str().unwrap().to_string();
+        std::fs::write(dir.join("user-file.txt"), "precious").unwrap();
+        let home = dir.join(".tmm").join("agents").join("dev");
+        std::fs::create_dir_all(&home).unwrap();
+
+        for bad in ["../..", "..", ".", "dev/../..", "a b", "-dev", "dev.json"] {
+            let err = agent_remove(&session, bad).unwrap_err();
+            assert!(err.contains("agent name"), "{bad:?} is refused by the name rule, got: {err}");
+            assert!(managed_home(&session, bad).is_none(), "{bad:?} is never a managed home");
+            assert!(!is_managed_in(Some(&path), bad), "{bad:?} is never managed");
+        }
+        assert!(dir.join("user-file.txt").exists(), "the workspace survived");
+        assert!(home.exists(), "the real agent's home survived");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
