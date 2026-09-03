@@ -627,7 +627,7 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
   .proj, .win, .act, .err, .error,
   /* Terminal + app shell */
   .input-bar, .sel-toolbar, .sel-toolbar-btn, .toast,
-  .win-split-menu, .win-split-opt, .rail-btn, .rail-brand, .gear-btn,
+  .rail-btn, .rail-brand, .gear-btn,
   .split-menu, .split-opt, .split-toggle, .reconnect-cancel, .debug-overlay,
   /* Files / Git */
   .act-btn, .back-btn, .bm-del, .copy-toast, .toast-open, .new-item button,

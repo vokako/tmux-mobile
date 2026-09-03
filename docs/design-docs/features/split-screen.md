@@ -43,8 +43,10 @@ multi-listener.
   `trigger` so the toggle's click closes as well as opens), one row per choice
   (single / 2 / 3 / 4 / 6 panes) with the current one `checked`. It was a
   hand-rolled `position:absolute` strip with a backdrop — no Escape, no close on
-  scroll/resize, no viewport clamp — the last such panel in App.svelte. (The
-  single-pane Terminal's chip-bar copy of this menu lives in `terminal/`.)
+  scroll/resize, no viewport clamp — the last such panel in App.svelte. The
+  single-pane Terminal's chip-bar copy of this menu (`terminal/Terminal.svelte`,
+  `.win-split-btn`) opens the same `ContextMenu` with the same rows; the two
+  toggles differ only in where they sit.
 - **`App.svelte` state**: `splitLayout` (1 = single, else 2/3/4/6),
   `splitCells [{id,target,session,command}]`, `activeCellId`. The pre-existing
   single `terminalTarget` stays the source of truth for the Files page, nav

@@ -6,6 +6,8 @@
   import Icon from '../ui/Icon.svelte';
   import AgentChip from '../ui/AgentChip.svelte';
   import PanePicker from '../sessions/PanePicker.svelte';
+  import ContextMenu from '../ui/ContextMenu.svelte';
+  import { anchorOf } from '../ui/placement.ts';
   import { t } from '../core/i18n.svelte.ts';
   import { detectAgent, paneIsAgent, paneAgent, AGENTS } from '../core/agents.ts';
   import { copyText } from '../core/clipboard.ts';
@@ -51,7 +53,21 @@
   // agent grid, where each cell is pinned to one agent's pane — there is
   // nothing to switch to, so the bar would only steal vertical space).
   let { target, session, command: initialCommand = '', fontSize = 14, embedded = false, active = true, chromeless = false, visible = true, onSwitchPane = null, onPaneExit = () => {}, onClose = null, onOpenSessions = null, splitEligible = false, splitActive = false, splitLayout = 1, onSetLayout = null } = $props();
-  let splitMenuOpen = $state(false);
+  // The chip bar's layout menu is the shared `ui/ContextMenu`, anchored to
+  // its toggle exactly like the shell's floating one in split mode (App.svelte).
+  // It was a hand-rolled `position:absolute` strip with a backdrop — no
+  // Escape, no close on scroll/resize, no viewport clamp (review, 2026-09-03).
+  let splitMenuAt = $state(null);
+  const SPLIT_CHOICES = [1, 2, 3, 4, 6];
+  const splitMenuItems = $derived(SPLIT_CHOICES.map((n) => ({
+    label: n === 1 ? t('splitSingle') : t('splitPanes').replace('{n}', String(n)),
+    checked: n === 1 ? !splitActive : (splitActive && splitLayout === n),
+    onselect: () => onSetLayout?.(n),
+  })));
+  function toggleSplitMenu(e) {
+    e.stopPropagation();
+    splitMenuAt = splitMenuAt ? null : { anchor: anchorOf(e.currentTarget), trigger: e.currentTarget };
+  }
 
   // svelte-ignore state_referenced_locally — intentional: seeded from the
   // prop (hence the name), then kept fresh by the $effect below and by
@@ -2133,18 +2149,10 @@
         {#if !embedded && splitEligible && onSetLayout}
           <div class="win-split">
             <button class="win-bar-collapse win-split-btn" class:on={splitActive} title={t('split')} aria-label={t('split')}
-              onclick={(e) => { e.stopPropagation(); splitMenuOpen = !splitMenuOpen; }}>
+              aria-haspopup="menu" aria-expanded={!!splitMenuAt} onclick={toggleSplitMenu}>
               <Icon name="layout" size={12} />
             </button>
-            {#if splitMenuOpen}
-              <button class="win-split-backdrop" aria-label="close" onclick={(e) => { e.stopPropagation(); splitMenuOpen = false; }}></button>
-              <div class="win-split-menu">
-                {#each [1, 2, 3, 4, 6] as n}
-                  <button class="win-split-opt" class:active={(n === 1 && !splitActive) || (splitActive && splitLayout === n)}
-                    onclick={(e) => { e.stopPropagation(); onSetLayout(n); splitMenuOpen = false; }}>{n}</button>
-                {/each}
-              </div>
-            {/if}
+            <ContextMenu at={splitMenuAt} items={splitMenuItems} oncancel={() => (splitMenuAt = null)} />
           </div>
         {/if}
         {#if embedded && onClose}
@@ -2357,22 +2365,6 @@
 
   .win-split { position: relative; flex-shrink: 0; display: flex; }
   .win-split-btn.on { color: var(--accent); }
-  .win-split-backdrop { position: fixed; inset: 0; z-index: 40; border: none; background: none; }
-  .win-split-menu {
-    position: absolute; top: 100%; right: 0; z-index: 41; margin-top: 4px;
-    display: flex; gap: 3px; padding: 4px;
-    background: var(--bg); border: 1px solid var(--border); border-radius: var(--ui-radius-panel);
-    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
-  }
-  .win-split-opt {
-    width: 26px; height: 26px; padding: 0;
-    border: 1px solid var(--border2); border-radius: var(--ui-radius-control);
-    background: var(--input-bg); color: var(--text2);
-    font-size: var(--fs-ui); font-weight: 600; cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .win-split-opt.active { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
-  .win-split-opt:active { border-color: var(--accent); }
 
 
   .term-wrap {
