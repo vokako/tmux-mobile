@@ -728,10 +728,17 @@ The owner asked for claude/codex/grok to match kiro's feature set ("都要和kir
   `last_assistant_message` on stop. Codex has NO StopFailure event (binary
   checked), so `failed` cannot be derived for it.
 - **Vitals**: codex has its own dialect now (`sniff_codex`, measured): the
-  persistent footer `<model> [<effort>] · <cwd>` (second segment must be an
-  absolute path, model token must carry a digit) and context as
-  `NN% context left` / the `/status` card's `NN% left (… used / …)` — codex
-  says LEFT where kiro says USED, so the vital is `100 − NN`. claude gets the
+  persistent footer is codex's `tui.status_line`; the inherited
+  `~/.codex/config.toml` configures `["model", "context-used", "current-dir"]`
+  (2026-09-03: `openai.gpt-5.6-sol · Context 5% used · /tmp/x`, and at 44
+  columns `… · /t…` — codex truncates, so context sits BEFORE the cwd and the
+  effort-less `model` item keeps the slug whole). Items are read by shape
+  (`Context NN% used|left`, a `/`-or-`~` cwd, a digit-bearing `<model>
+  [<effort>]` slug); the default `<model> [<effort>] · <cwd>` footer and the
+  `NN% context left` / `/status` card's `NN% left (… used / …)` spellings still
+  read — codex says LEFT where kiro says USED, so those are `100 − NN`. The
+  `openai.` prefix is REQUIRED on bedrock-mantle: `gpt-5.6-sol` alone gets
+  "Model metadata not found" and a 404 (codex 0.148.0 and 0.153.0, measured). claude gets the
   EMPTY reading on purpose: the CLI is not installed here, its furniture
   cannot be measured, and the old `_ => sniff_kiro` fallback read its pane
   with the wrong grammar.

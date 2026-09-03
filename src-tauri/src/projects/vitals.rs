@@ -525,15 +525,28 @@ fn grok_tokens(s: &str) -> Option<f64> {
     (n >= 0.0).then_some(n * mult)
 }
 
-/// codex's status furniture, measured on codex-cli 0.148.0 (2026-08-22).
+/// codex's status furniture, measured on codex-cli 0.148.0 (2026-08-22,
+/// re-measured 2026-09-03).
 ///
-/// The persistent footer is a `·`-joined line whose FIRST segment is
-/// `<model> [<effort>]` and whose SECOND is the cwd:
-/// `xai.grok-4.6 default · /local/home/cfu/work/projects/tmux-mobile`.
-/// Context is spelled `NN% context left` (the binary's own footer format
-/// string; "100% context left" is its zero-use rendering) or, in the /status
-/// card, `NN% left (21.5K used / 258K)` — both say LEFT where kiro says USED,
-/// so the reading is `100 - NN`.
+/// The persistent footer under the composer is the configurable
+/// `tui.status_line`: `·`-joined items in the order the config lists them.
+/// The inherited `~/.codex/config.toml` sets `["model", "context-used",
+/// "current-dir"]`, which paints
+/// `openai.gpt-5.6-sol · Context 5% used · /tmp/x` — and, at 44 columns,
+/// `openai.gpt-5.6-sol · Context 5% used · /t…` (codex TRUNCATES the line with
+/// `…`, it never wraps). The default footer (no `[tui]` section) is
+/// `<model> [<effort>] · <cwd>`, and `context-remaining` spells
+/// `Context 99% left`, so every item is found BY SHAPE, not by position:
+/// a `Context NN% used|left` segment is the context, a segment starting
+/// `/`/`~` is the cwd, and a 1–2-token segment whose first token carries a
+/// digit is `<model> [<effort>]`. A line counts as the footer only when it
+/// has a model segment AND (a cwd or a context segment) — prose with one
+/// mid-sentence `·` has neither anchor.
+///
+/// Context is also spelled `NN% context left` (codex's right-footer format
+/// string; `100% context left` is its zero-use rendering) and, in the
+/// `/status` card, `NN% left (21.5K used / 258K)` — both say LEFT where kiro
+/// says USED, so those readings are `100 - NN`.
 pub fn sniff_codex(pane: &str) -> Vitals {
     let mut v = Vitals::default();
     for line in pane.lines().rev() {
@@ -541,10 +554,13 @@ pub fn sniff_codex(pane: &str) -> Vitals {
         if line.trim().is_empty() {
             continue;
         }
-        if v.model.is_none() {
-            if let Some((m, e)) = codex_footer_model(line) {
-                v.model = Some(m);
-                v.effort = e;
+        if let Some(f) = codex_footer(line) {
+            if v.model.is_none() {
+                v.model = Some(f.model);
+                v.effort = f.effort;
+            }
+            if v.context_pct.is_none() {
+                v.context_pct = f.context_pct;
             }
         }
         if v.context_pct.is_none() {
@@ -559,37 +575,74 @@ pub fn sniff_codex(pane: &str) -> Vitals {
     v
 }
 
-/// `<model> [<effort>] · <cwd> [· …]` → (model, effort). The anchors: the
-/// second `·`-segment must be an absolute path (`/` or `~` — the footer's cwd,
-/// measured), and the model token must contain a digit (`xai.grok-4.6`,
-/// `gpt-5.2-codex` — every model id does), which keeps prose with a
-/// mid-sentence `·` from becoming a reading.
-fn codex_footer_model(line: &str) -> Option<(String, Option<String>)> {
-    let mut segs = line.trim().split('·').map(str::trim);
-    let first = segs.next()?;
-    let second = segs.next()?;
-    if !(second.starts_with('/') || second.starts_with('~')) {
-        return None;
+struct CodexFooter {
+    model: String,
+    effort: Option<String>,
+    context_pct: Option<u8>,
+}
+
+/// One `tui.status_line` paint → its readings, or `None` when the line does
+/// not have the footer's anchors (see `sniff_codex`).
+fn codex_footer(line: &str) -> Option<CodexFooter> {
+    let mut model: Option<(String, Option<String>)> = None;
+    let mut context_pct = None;
+    let mut cwd = false;
+    for seg in line.trim().split('\u{b7}').map(str::trim) {
+        if seg.starts_with('/') || seg.starts_with('~') {
+            cwd = true;
+        } else if let Some(pct) = codex_context_item(seg) {
+            context_pct = Some(pct);
+        } else if model.is_none() {
+            model = codex_model_item(seg);
+        }
     }
-    let mut toks = first.split_whitespace();
+    let (model, effort) = model?;
+    (cwd || context_pct.is_some()).then_some(CodexFooter { model, effort, context_pct })
+}
+
+/// `<model> [<effort>]` — the model token must contain a digit
+/// (`xai.grok-4.6`, `gpt-5.2-codex` — every model id does) and the effort,
+/// when present, is one plain lowercase word; a `…`-truncated word
+/// (`defa…`) is not an effort.
+fn codex_model_item(seg: &str) -> Option<(String, Option<String>)> {
+    let mut toks = seg.split_whitespace();
     let model = toks.next()?;
-    if !model.chars().any(|c| c.is_ascii_digit()) {
+    if !looks_like_model(model) || !model.chars().any(|c| c.is_ascii_digit()) {
         return None;
     }
-    let effort = toks.next().map(str::to_string);
-    // More than two tokens is not the footer's shape.
+    let effort = toks.next();
     if toks.next().is_some() {
         return None;
     }
+    let effort = match effort {
+        None => None,
+        Some(e) if !e.is_empty() && e.chars().all(|c| c.is_ascii_lowercase()) => Some(e.to_string()),
+        // A truncated word (`defa…`) is not an effort — the model still is.
+        Some(_) => None,
+    };
     Some((model.to_string(), effort))
 }
 
-/// `NN% context left` (footer) or `NN% left (… used / …)` (/status card) →
-/// share of the context USED (`100 - NN`), matching kiro's own wording for
-/// `Vitals::context_pct`. The trailing words are the anchor: a bare `NN%` is
-/// never accepted (same rule as kiro's pie-glyph requirement).
+/// `Context 5% used` (`context-used`) → 5; `Context 99% left`
+/// (`context-remaining`) → 1. The literal `Context` word is the anchor: a
+/// bare `5%` is never accepted.
+fn codex_context_item(seg: &str) -> Option<u8> {
+    let rest = seg.strip_prefix("Context")?.trim_start();
+    let (num, tail) = rest.split_once('%')?;
+    let n = num.trim().parse::<u16>().ok().filter(|n| *n <= 100)?;
+    match tail.trim() {
+        "used" => Some(n as u8),
+        "left" => Some((100 - n) as u8),
+        _ => None,
+    }
+}
+
+/// `NN% context left` (right footer) or `NN% left (… used / …)` (/status
+/// card) → share of the context USED (`100 - NN`), matching kiro's own
+/// wording for `Vitals::context_pct`. The trailing words are the anchor: a
+/// bare `NN%` is never accepted (same rule as kiro's pie-glyph requirement).
 fn codex_context_left(line: &str) -> Option<u8> {
-    let s = line.trim().trim_matches('│').trim();
+    let s = line.trim().trim_matches('\u{2502}').trim();
     let idx = s.find("% context left").or_else(|| {
         let i = s.find("% left (")?;
         // The /status shape must really be the context card, not prose.
@@ -973,10 +1026,10 @@ mod tests {
         assert!(after.is_empty());
     }
 
-    /// codex-cli 0.148.0, real pane capture (2026-08-22): the persistent
-    /// footer under the composer.
+    /// codex-cli 0.148.0, real pane capture (2026-08-22): the DEFAULT
+    /// footer (no `[tui]` section) under the composer.
     #[test]
-    fn codex_footer_reads_model_effort_and_nothing_else() {
+    fn codex_default_footer_reads_model_effort_and_nothing_else() {
         let pane = "\u{2022} ok\n\u{203a} Ask Codex to do anything\n  xai.grok-4.6 default \u{b7} /local/home/cfu/work/projects/tmux-mobile\n";
         let v = sniff_codex(pane);
         assert_eq!(v.model.as_deref(), Some("xai.grok-4.6"));
@@ -985,9 +1038,50 @@ mod tests {
         assert_eq!(v.branch, None);
     }
 
-    /// The context spellings: the binary's own footer format string renders
-    /// `100% context left` at zero use, and the /status card (captured live)
-    /// says `96% left (21.5K used / 258K)`. Both are LEFT; the vital is USED.
+    /// codex-cli 0.148.0, real captures (2026-09-03) with the inherited
+    /// `tui.status_line = ["model", "context-used", "current-dir"]`: the
+    /// 80-column paint, and the same footer in a 44-column pane, where codex
+    /// truncates the cwd with `…` rather than wrapping.
+    #[test]
+    fn codex_status_line_reads_model_and_context_wide_and_narrow() {
+        let wide = "\u{2022} ok\n\u{203a} Ask Codex to do anything\n  openai.gpt-5.6-sol \u{b7} Context 5% used \u{b7} /tmp/tmm-codex-ctx\n";
+        let v = sniff_codex(wide);
+        assert_eq!(v.model.as_deref(), Some("openai.gpt-5.6-sol"));
+        assert_eq!(v.effort, None, "the `model` item carries no effort");
+        assert_eq!(v.context_pct, Some(5));
+
+        let narrow = "\u{203a} Ask Codex to do anything\n  openai.gpt-5.6-sol \u{b7} Context 5% used \u{b7} /t\u{2026}\n";
+        let v = sniff_codex(narrow);
+        assert_eq!(v.model.as_deref(), Some("openai.gpt-5.6-sol"));
+        assert_eq!(v.context_pct, Some(5));
+    }
+
+    /// Other item orders the owner may configure (measured 2026-09-03):
+    /// context first with `model-with-reasoning`, and `context-remaining`,
+    /// which says LEFT. Every item is found by shape, so the order is free.
+    #[test]
+    fn codex_status_line_items_are_found_by_shape() {
+        let v = sniff_codex("  Context 1% used \u{b7} openai.gpt-5.6-sol default \u{b7} /tmp/tmm-codex-ctx\n");
+        assert_eq!(v.model.as_deref(), Some("openai.gpt-5.6-sol"));
+        assert_eq!(v.effort.as_deref(), Some("default"));
+        assert_eq!(v.context_pct, Some(1));
+
+        let v = sniff_codex("  openai.gpt-5.6-sol \u{b7} Context 99% left \u{b7} 13.8K used \u{b7} /tmp/tmm-codex-ctx\n");
+        assert_eq!(v.model.as_deref(), Some("openai.gpt-5.6-sol"));
+        assert_eq!(v.context_pct, Some(1));
+
+        // Narrow: the effort word is cut — a `…` word is not an effort, and
+        // the model + context still read.
+        let v = sniff_codex("  Context 1% used \u{b7} openai.gpt-5.6-sol defa\u{2026}\n");
+        assert_eq!(v.model.as_deref(), Some("openai.gpt-5.6-sol"));
+        assert_eq!(v.effort, None);
+        assert_eq!(v.context_pct, Some(1));
+    }
+
+    /// The context spellings outside the status line: the binary's own
+    /// right-footer format string renders `100% context left` at zero use,
+    /// and the /status card (captured live) says `96% left (21.5K used / 258K)`.
+    /// Both are LEFT; the vital is USED.
     #[test]
     fn codex_context_left_becomes_used() {
         assert_eq!(codex_context_left("  97% context left"), Some(3));
@@ -1001,19 +1095,26 @@ mod tests {
         assert_eq!(codex_context_left("97%"), None);
         assert_eq!(codex_context_left("3 tries left (2 used / x)"), None);
         assert_eq!(codex_context_left("101% context left"), None);
+        assert_eq!(codex_context_item("Context 101% used"), None);
+        assert_eq!(codex_context_item("Context 5%"), None);
+        assert_eq!(codex_context_item("5% used"), None);
     }
 
-    /// The footer anchors: second segment must be a path, model token must
-    /// carry a digit, exactly one optional effort token.
+    /// The footer anchors: a model segment (digit-bearing slug, at most one
+    /// effort word) plus a cwd or a context segment; prose with a
+    /// mid-sentence `·` has neither.
     #[test]
     fn codex_footer_rejects_prose_with_middots() {
-        assert_eq!(codex_footer_model("word \u{b7} another word"), None, "no path");
-        assert_eq!(codex_footer_model("plainmodel \u{b7} /tmp"), None, "no digit");
-        assert_eq!(codex_footer_model("a b c 4 \u{b7} /tmp"), None, "too many tokens");
-        assert_eq!(
-            codex_footer_model("gpt-5.2-codex medium \u{b7} ~/my-project"),
-            Some(("gpt-5.2-codex".into(), Some("medium".into())))
+        assert!(codex_footer("word \u{b7} another word").is_none(), "no anchor");
+        assert!(codex_footer("plainmodel \u{b7} /tmp").is_none(), "no digit");
+        assert!(codex_footer("a b c 4 \u{b7} /tmp").is_none(), "too many tokens");
+        assert!(codex_footer("gpt-5.2 is fast \u{b7} said nobody").is_none(), "no cwd, no context");
+        assert!(
+            codex_footer("2 files \u{b7} /tmp/x").is_none(),
+            "a bare count is not a model slug"
         );
+        let f = codex_footer("gpt-5.2-codex medium \u{b7} ~/my-project").unwrap();
+        assert_eq!((f.model.as_str(), f.effort.as_deref(), f.context_pct), ("gpt-5.2-codex", Some("medium"), None));
     }
 
     #[test]
