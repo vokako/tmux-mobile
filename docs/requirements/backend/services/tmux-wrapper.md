@@ -34,6 +34,24 @@ Rust wrapper around tmux CLI commands. File: `src-tauri/src/tmux.rs`
 - `is_server_running()` — check if tmux server is running
 
 ## Key Details
+- **A session name is an exact target.** tmux resolves a bare `-t name` as
+  exact name → prefix of a name → fnmatch glob, so with only `dev-2` alive
+  `has-session -t dev` succeeds and `kill-session -t dev` kills `dev-2`. Every
+  wrapper that takes a session NAME (`list_panes`, `session_exists`,
+  `new_session`'s conflict check, `kill_session`, `new_window`,
+  `rename_session`, `ensure_session`, `find_window_by_name`,
+  `list_named_windows`, `new_named_window`, `window_activity_times`) passes
+  `=name:` (`exact_session`): `=` for exact, the trailing `:` because
+  target-window/pane commands (`list-panes -s`, `new-window`,
+  `display-message`) otherwise read `=name` as a window name and fall back to
+  the prefix search. Exceptions, verified on tmux 3.6a: `set-option` and
+  `set-hook` reject an `=` target and get the bare name — safe there because the
+  exact session was just created and tmux tries the exact name first.
+- **A hook body is re-parsed by tmux.** `set_resize_hook` embeds the session
+  name in a command string; it is quoted with `tmux_quote` (double quotes, `\`
+  `"` `$` escaped), or a name with a space or `;` becomes extra commands.
+- **Named-key `send-keys` puts `--` before the key** so a key string that starts
+  with `-` can never be read as a send-keys flag.
 - capture_pane flags: `-p` (stdout), `-e` (ANSI escapes), `-J` (join soft-wrapped lines)
 - Custom socket path support via `-S` flag (global `RwLock`, set/get via `set_socket`/`get_socket`)
 - Scrollback lines configurable via `set_scrollback`/`get_scrollback` (default 500, atomic)

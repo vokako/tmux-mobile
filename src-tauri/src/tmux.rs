@@ -110,6 +110,39 @@ pub(crate) fn run_tmux(args: &[&str]) -> Result<String, String> {
     }
 }
 
+/// A session NAME as an exact `-t` target: `=name:`. tmux resolves a bare
+/// target as exact name, then PREFIX of a name, then fnmatch glob — so with
+/// only `dev-2` alive, `has-session -t dev` says yes and `kill-session -t dev`
+/// kills `dev-2`; a name holding `*` or `?` is a pattern. `=` turns that off,
+/// and the trailing `:` says "the session half of a target" — without it,
+/// commands that take a target-WINDOW/pane (`list-panes -s`, `new-window`,
+/// `display-message`) read `=dev` as a window name and fall back to the prefix
+/// search anyway. `=name:` is accepted uniformly by has-session, kill-session,
+/// rename-session, list-windows, list-panes, new-window and display-message
+/// (verified on tmux 3.6a). `set-option` and `set-hook` targets reject `=`,
+/// which is why `ensure_session`/`set_resize_hook` pass the bare name.
+fn exact_session(session: &str) -> String {
+    if session.starts_with('=') { session.to_string() } else { format!("={session}:") }
+}
+
+/// Quote a string for a tmux COMMAND LINE (a hook body, a key binding), where
+/// tmux's own parser splits on spaces and `;` and expands `$VAR`. Double quotes
+/// with `\`, `"` and `$` escaped survive that parser byte-for-byte (verified on
+/// tmux 3.6a); single quotes cannot carry an embedded `'`. Not needed for argv
+/// arguments — those go to tmux as separate strings and are never re-parsed.
+fn tmux_quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        if matches!(c, '\\' | '"' | '$') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out.push('"');
+    out
+}
+
 /// 列出所有 session
 pub fn list_sessions() -> Result<Vec<TmuxSession>, String> {
     // Delimiter: a printable token, NOT a control byte. tmux >= 3.4
@@ -186,10 +219,11 @@ pub fn session_created_times() -> Vec<(String, u64)> {
 /// The telemetry fallback signal: a backend with no tool hooks still shows
 /// "working" while its pane produces output.
 pub fn window_activity_times(session: &str) -> Vec<(usize, u64)> {
+    let target = exact_session(session);
     let out = match run_tmux(&[
         "list-windows",
         "-t",
-        session,
+        &target,
         "-F",
         "#{window_index}<TMM_SEP>#{window_activity}",
     ]) {
@@ -209,11 +243,12 @@ pub fn window_activity_times(session: &str) -> Vec<(usize, u64)> {
 
 /// 列出某个 session 的所有 pane
 pub fn list_panes(session: &str) -> Result<Vec<TmuxPane>, String> {
+    let target = exact_session(session);
     let output = run_tmux(&[
         "list-panes",
         "-s",
         "-t",
-        session,
+        &target,
         "-F",
         PANE_FORMAT,
     ])?;
@@ -598,7 +633,10 @@ fn c0_key_name(c: char) -> Option<&'static str> {
 /// it becomes one `M-C-x` key so no stray ESC leaks into the pane.
 pub fn send_keys(target: &str, keys: &str, literal: bool) -> Result<(), String> {
     if !literal {
-        run_tmux(&["send-keys", "-t", target, keys])?;
+        // `--` ends option parsing: a key string starting with `-` (`-R`,
+        // `-X`) is a key name — or literal text, tmux's fallback for a name it
+        // does not know — never a send-keys flag. Verified on tmux 3.6a.
+        run_tmux(&["send-keys", "-t", target, "--", keys])?;
         return Ok(());
     }
     let flush = |buf: &mut String| -> Result<(), String> {
@@ -615,14 +653,14 @@ pub fn send_keys(target: &str, keys: &str, literal: bool) -> Result<(), String> 
             if let Some(name) = chars.peek().copied().and_then(c0_key_name) {
                 chars.next();
                 flush(&mut buf)?;
-                run_tmux(&["send-keys", "-t", target, &format!("M-{name}")])?;
+                run_tmux(&["send-keys", "-t", target, "--", &format!("M-{name}")])?;
                 continue;
             }
         }
         match c0_key_name(c) {
             Some(name) => {
                 flush(&mut buf)?;
-                run_tmux(&["send-keys", "-t", target, name])?;
+                run_tmux(&["send-keys", "-t", target, "--", name])?;
             }
             None => buf.push(c),
         }
@@ -751,8 +789,9 @@ pub fn pane_cwd(target: &str) -> Result<String, String> {
 
 /// 创建新 session
 pub fn new_session(name: &str, path: Option<&str>, command: Option<&str>) -> Result<(), String> {
-    // Check if session name already exists to prevent grouped sessions
-    if run_tmux(&["has-session", "-t", name]).is_ok() {
+    // Check if session name already exists to prevent grouped sessions. Exact:
+    // with only `dev-2` alive, `dev` must be creatable.
+    if session_exists(name) {
         return Err(format!("session '{}' already exists", name));
     }
     let mut args = vec!["new-session", "-d", "-s", name];
@@ -784,21 +823,23 @@ pub fn new_session(name: &str, path: Option<&str>, command: Option<&str>) -> Res
 
 /// 关闭 session
 pub fn kill_session(name: &str) -> Result<(), String> {
-    run_tmux(&["kill-session", "-t", name])?;
+    // Exact, or with no `dev` alive this would kill `dev-2`.
+    run_tmux(&["kill-session", "-t", &exact_session(name)])?;
     Ok(())
 }
 
 /// 创建新 window（继承当前 pane 的工作目录）
 pub fn new_window(session: &str) -> Result<(), String> {
+    let target = exact_session(session);
     // Get the active pane's working directory so new window starts there
-    let cwd = run_tmux(&["display-message", "-t", session, "-p", "#{pane_current_path}"])
+    let cwd = run_tmux(&["display-message", "-t", &target, "-p", "#{pane_current_path}"])
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
     let dir = if cwd.is_empty() { home_dir() } else { cwd };
     if dir.is_empty() {
-        run_tmux(&["new-window", "-t", session])?;
+        run_tmux(&["new-window", "-t", &target])?;
     } else {
-        run_tmux(&["new-window", "-t", session, "-c", &dir])?;
+        run_tmux(&["new-window", "-t", &target, "-c", &dir])?;
     }
     Ok(())
 }
@@ -811,13 +852,13 @@ pub fn kill_window(target: &str) -> Result<(), String> {
 
 /// True if a tmux session with this exact name exists.
 pub fn session_exists(session: &str) -> bool {
-    run_tmux(&["has-session", "-t", session]).is_ok()
+    run_tmux(&["has-session", "-t", &exact_session(session)]).is_ok()
 }
 
 /// Rename a live session. `-t` is the exact current name; tmux refuses when the
 /// new name is already taken, which is why the caller picks a free one first.
 pub fn rename_session(from: &str, to: &str) -> Result<(), String> {
-    run_tmux(&["rename-session", "-t", from, to]).map(|_| ())
+    run_tmux(&["rename-session", "-t", &exact_session(from), to]).map(|_| ())
 }
 
 /// All tmux session names beginning with `prefix` (e.g. "tmm-team-"). Used on
@@ -837,7 +878,7 @@ pub fn list_team_sessions(prefix: &str) -> Vec<String> {
 /// Ensure `session` exists (detached), creating it at `cwd` if missing. Used by
 /// the in-process team supervisor before it spawns agent windows.
 pub fn ensure_session(session: &str, cwd: &str) -> Result<(), String> {
-    if run_tmux(&["has-session", "-t", session]).is_ok() {
+    if session_exists(session) {
         return Ok(());
     }
     let dir = if cwd.is_empty() { home_dir() } else { cwd.to_string() };
@@ -846,7 +887,9 @@ pub fn ensure_session(session: &str, cwd: &str) -> Result<(), String> {
     } else {
         run_tmux(&["new-session", "-d", "-s", session, "-c", &dir])?;
     }
-    // Deep scrollback so an agent's history survives in its window.
+    // Deep scrollback so an agent's history survives in its window. set-option
+    // rejects an `=` target; the exact session exists as of the line above, and
+    // tmux tries the exact name before any prefix, so the bare name is safe here.
     let _ = run_tmux(&["set-option", "-t", session, "history-limit", "100000"]);
     Ok(())
 }
@@ -856,7 +899,7 @@ pub fn ensure_session(session: &str, cwd: &str) -> Result<(), String> {
 /// launching a duplicate (idempotent across server restarts).
 pub fn find_window_by_name(session: &str, name: &str) -> Option<String> {
     let out = run_tmux(&[
-        "list-windows", "-t", session, "-F", "#{window_name}<TMM_SEP>#{pane_id}",
+        "list-windows", "-t", &exact_session(session), "-F", "#{window_name}<TMM_SEP>#{pane_id}",
     ])
     .ok()?;
     for line in out.lines() {
@@ -873,7 +916,7 @@ pub fn find_window_by_name(session: &str, name: &str) -> Option<String> {
 /// All `(window_name, pane_id)` pairs in `session`. Used by team recovery to
 /// nudge every agent window back online after a server restart.
 pub fn list_named_windows(session: &str) -> Vec<(String, String)> {
-    match run_tmux(&["list-windows", "-t", session, "-F", "#{window_name}<TMM_SEP>#{pane_id}"]) {
+    match run_tmux(&["list-windows", "-t", &exact_session(session), "-F", "#{window_name}<TMM_SEP>#{pane_id}"]) {
         Ok(out) => out
             .lines()
             .filter_map(|line| {
@@ -895,7 +938,8 @@ pub fn list_named_windows(session: &str) -> Vec<(String, String)> {
 /// pane by `window_name`.
 pub fn new_named_window(session: &str, name: &str, cwd: &str) -> Result<String, String> {
     let dir = if cwd.is_empty() { home_dir() } else { cwd.to_string() };
-    let mut args = vec!["new-window", "-t", session, "-n", name, "-P", "-F", "#{pane_id}"];
+    let target = exact_session(session);
+    let mut args = vec!["new-window", "-t", &target, "-n", name, "-P", "-F", "#{pane_id}"];
     if !dir.is_empty() {
         args.push("-c");
         args.push(&dir);
@@ -937,9 +981,13 @@ pub fn run_resize_window_auto(target: &str) -> Result<(), String> {
 pub fn set_resize_hook(session: &str) -> Result<(), String> {
     // client-session-changed fires when a client switches to this session.
     // The hook runs resize-window -A (auto-fit) then removes itself (one-shot).
+    // The hook body is a tmux COMMAND LINE that tmux re-parses when it fires,
+    // so the session name inside it is quoted — bare, a name with a space or
+    // `;` became extra commands. (set-hook's own `-t` is argv and needs no
+    // quoting; it does not accept an `=` prefix.)
     let hook_cmd = format!(
         "resize-window -A ; set-hook -u -t {} client-session-changed",
-        session
+        tmux_quote(session)
     );
     run_tmux(&["set-hook", "-t", session, "client-session-changed", &hook_cmd])?;
     Ok(())
@@ -953,6 +1001,60 @@ pub fn is_server_running() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exact_session_prefixes_once() {
+        assert_eq!(exact_session("dev"), "=dev:");
+        assert_eq!(exact_session("=dev:"), "=dev:", "an already-exact target is left alone");
+        assert_eq!(exact_session("a b"), "=a b:");
+    }
+
+    #[test]
+    fn tmux_quote_escapes_what_the_command_parser_expands() {
+        assert_eq!(tmux_quote("dev"), r#""dev""#);
+        assert_eq!(tmux_quote("a b"), r#""a b""#);
+        assert_eq!(tmux_quote("it's"), r#""it's""#, "an apostrophe needs no escape inside double quotes");
+        assert_eq!(tmux_quote(r#"say "hi""#), r#""say \"hi\"""#);
+        assert_eq!(tmux_quote("$HOME"), r#""\$HOME""#, "tmux expands $VAR inside double quotes");
+        assert_eq!(tmux_quote(r"a\b"), r#""a\\b""#);
+        assert_eq!(tmux_quote("x ; kill-server"), r#""x ; kill-server""#, "a quoted `;` is not a command separator");
+    }
+
+    /// Live against the running tmux: a session NAME resolves to itself and
+    /// never to a sibling that merely starts with it. The names are unique per
+    /// process so parallel suites sharing this tmux cannot collide.
+    #[test]
+    fn session_targets_are_exact_never_prefix_matches() {
+        let base = format!("tmm-exact-{}", std::process::id());
+        let sibling = format!("{base}-2");
+        let _ = run_tmux(&["kill-session", "-t", &exact_session(&base)]);
+        let _ = run_tmux(&["kill-session", "-t", &exact_session(&sibling)]);
+
+        run_tmux(&["new-session", "-d", "-s", &sibling]).expect("create sibling");
+        // Only `<base>-2` is alive. Bare `-t <base>` would prefix-match it.
+        assert!(!session_exists(&base), "prefix match leaked into session_exists");
+        assert!(list_panes(&base).is_err(), "list_panes answered for the sibling");
+        new_session(&base, None, None).expect("the exact name is free, creation must succeed");
+        assert!(session_exists(&base));
+        assert!(session_exists(&sibling));
+        assert_eq!(list_panes(&base).unwrap().len(), 1);
+
+        kill_session(&base).expect("kill base");
+        assert!(!session_exists(&base));
+        assert!(session_exists(&sibling), "kill_session took the sibling instead of the exact name");
+        // A glob in the name is a name, not a pattern.
+        assert!(!session_exists(&format!("{base}*")));
+
+        // A name with a space survives the hook body's re-parse.
+        let spaced = format!("{base} sp");
+        run_tmux(&["new-session", "-d", "-s", &spaced]).expect("create spaced");
+        set_resize_hook(&spaced).expect("set_resize_hook on a spaced name");
+        let hooks = run_tmux(&["show-hooks", "-t", &spaced]).unwrap_or_default();
+        assert!(hooks.contains(&format!("-t \"{spaced}\"")), "hook body keeps the name quoted: {hooks}");
+
+        kill_session(&spaced).expect("kill spaced");
+        kill_session(&sibling).expect("kill sibling");
+    }
 
     /// kiro-cli 2.18.1 screens as captured live (2026-09-03): the picker is
     /// recognised by its own footer, never by the turn's "esc to cancel".
