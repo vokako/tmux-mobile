@@ -158,3 +158,51 @@ test('the title never stretches the bar apart — chips follow the name (owner, 
   assert.match(source, /\.win-title \{ max-width: 22ch; flex: 0 1 auto; \}/u,
     'content-sized title — the chips strip takes the leftover space');
 });
+
+test('a font, theme or active change is a live option update, never an xterm rebuild (review 2026-09-03)', () => {
+  // The lifecycle effect owns dispose → new Terminal → resubscribe → capture
+  // → WebGL init → kbLocked. Its ONLY dependency is `target`: the body runs
+  // under untrack so the font size/family, line height, theme and `active`
+  // it reads synchronously cannot re-trigger it. Before this, a system
+  // light/dark auto-switch mid-sentence on the phone rebuilt the terminal
+  // and dropped the keyboard.
+  assert.match(source, /import \{ untrack \} from 'svelte';/u);
+  assert.match(
+    source,
+    /\$effect\(\(\) => \{\s*target;\s*return untrack\(\(\) => \{/u,
+    'the lifecycle effect reads target, then untracks its whole body',
+  );
+  // The live effects must read their reactive inputs BEFORE any `!term`
+  // early return: `term` is a plain let, so an effect that returned first
+  // tracked nothing and never ran again (both were dead before this test).
+  assert.match(
+    source,
+    /\$effect\(\(\) => \{\s*termGen;\s*const t = getTermTheme\(\);\s*if \(!term\) return;/u,
+    'theme effect: termGen + theme are read, then the instance guard',
+  );
+  assert.match(
+    source,
+    /\$effect\(\(\) => \{\s*termGen;\s*const size = fontSize;\s*const family = fonts\.stack;[^\n]*\n\s*const lh = terminalPrefs\.lineHeight;\s*if \(!term\) return;/u,
+    'font effect: termGen + fontSize + fonts.stack + lineHeight are read, then the instance guard',
+  );
+  // The handle those effects wait on is bumped once per build, inside the
+  // lifecycle effect, after the instance is complete.
+  assert.match(source, /let termGen = \$state\(0\);/u);
+  assert.match(source, /termGen\+\+;\s*subscribe\(target\);/u, 'bumped right before the pane is subscribed');
+});
+
+test('kbLocked has exactly two writers: unlockKeyboard() and lockKeyboard()', () => {
+  // terminal-keyboard.md: `endTouchScroll` and other delayed timers must never
+  // lock — a timer racing a fresh unlock is how the keyboard vanished under
+  // the user's finger. Every lock site (pane switch, blur timer, keyboard-shift
+  // close transition, toggle close half) goes through the one function so the
+  // list of callers is greppable.
+  const writes = [...source.matchAll(/^\s*kbLocked = (true|false);/gmu)].map(m => m[1]);
+  assert.deepEqual(writes.sort(), ['false', 'true'], 'one lock write and one unlock write');
+  assert.match(source, /function lockKeyboard\(\) \{\s*kbLocked = true;\s*\}/u);
+  assert.match(/function unlockKeyboard\(\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '', /kbLocked = false;/u);
+  // The known callers, each labelled at the call site.
+  for (const label of ['pane switch', 'blur timer', 'keyboard-shift', 'toggle: close half']) {
+    assert.match(source, new RegExp(`lockKeyboard\\(\\); // ${label}`, 'u'), `caller "${label}" labelled`);
+  }
+});

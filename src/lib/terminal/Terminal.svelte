@@ -1,4 +1,5 @@
 <script>
+  import { untrack } from 'svelte';
   import { subscribe, unsubscribe, addPaneOutputListener, removePaneOutputListener, addPaneClosedListener, removePaneClosedListener, sendKeys, pasteText, listPanes, capturePane, resizePane, newWindow } from '../core/ws.ts';
   import { Terminal } from '@xterm/xterm';
   import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -75,7 +76,13 @@
   // the agent icons — so "which apps are chat TUIs" is answered in one place.
   const keepRowsOnKeyboard = $derived(isMobile && !!detectAgent(command));
   let termEl;
+  // `term` is a plain let on purpose: it is read in hundreds of places and
+  // must not turn every effect that touches it into a dependency. The
+  // reactive HANDLE is `termGen` — bumped once per xterm build by the
+  // lifecycle effect — so an effect that wants "the current instance" reads
+  // `termGen` first and then `term`.
   let term;
+  let termGen = $state(0);
   let termAtBottom = $state(true);
   let hasNewContent = $state(false); // set when new output arrives while user is scrolled up
   // The newest frame for THIS target, component-scoped so the repaint-on-show
@@ -115,6 +122,16 @@
     target;
     ctrlArmed = false;
   });
+
+  // The ONLY two writers of `kbLocked` (terminal-keyboard.md): unlockKeyboard()
+  // opens, lockKeyboard() closes. Its four callers — pane switch, the blur
+  // timer, the keyboard-shift close transition, and the toggle's close half —
+  // are the sanctioned lock sites; `endTouchScroll` and every other timer path
+  // must never lock, because a delayed timer racing a fresh unlock is how the
+  // keyboard used to vanish under the user's finger.
+  function lockKeyboard() {
+    kbLocked = true;
+  }
 
   function unlockKeyboard() {
     clearTimeout(kbBlurTimer);
@@ -193,10 +210,16 @@
     return theme === 'light' ? lightTheme : darkTheme;
   }
 
-  // Sync theme when light/dark changes
+  // LIVE option updates. A theme / font / line-height change is an
+  // `term.options` write on the running instance — never a rebuild. These two
+  // effects read `termGen` FIRST: `term` itself is not reactive, and an effect
+  // that returned on `!term` before reading anything reactive tracked nothing
+  // and never ran again (the pre-2026-09-03 state: both were dead, and every
+  // such change fell through to the lifecycle effect's full teardown).
   $effect(() => {
-    if (!term) return;
+    termGen;
     const t = getTermTheme();
+    if (!term) return;
     term.options.theme = t;
     if (termEl) {
       termEl.style.background = t.background;
@@ -204,13 +227,21 @@
   });
 
   $effect(() => {
+    termGen;
+    const size = fontSize;
+    const family = fonts.stack; // follows the custom-font setting live
+    const lh = terminalPrefs.lineHeight;
     if (!term) return;
-    term.options.fontSize = fontSize;
-    term.options.fontFamily = fonts.stack; // follows the custom-font setting live
-    term.options.lineHeight = terminalPrefs.lineHeight;
+    // The lifecycle effect constructs xterm with the current values, so the
+    // run this triggers right after a build changes nothing and must not
+    // schedule a refit (which would send a redundant resize_pane).
+    if (term.options.fontSize === size && term.options.fontFamily === family && term.options.lineHeight === lh) return;
+    term.options.fontSize = size;
+    term.options.fontFamily = family;
+    term.options.lineHeight = lh;
     // xterm re-measures cell geometry on the next render, not synchronously.
     // Defer refit by two frames so calcFit reads the new cell width/height.
-    // doResizeRef is set by the main $effect after term is created.
+    // doResizeRef is set by the lifecycle effect after term is created.
     requestAnimationFrame(() => {
       requestAnimationFrame(() => doResizeRef?.());
     });
@@ -233,6 +264,7 @@
   // its xterm textarea so keystrokes route here. (Single-pane: active is
   // always true; the mousedown/mount focus covers it.)
   $effect(() => {
+    termGen;
     if (!embedded || isMobile || !active || !term) return;
     requestAnimationFrame(() => { try { term?.focus(); } catch {} });
   });
@@ -508,10 +540,23 @@
   }
 
   // xterm.js setup + subscription
+  // THE LIFECYCLE EFFECT: builds xterm for one pane, tears it down for the
+  // next. Its only dependency is `target` — read here, before the body — and
+  // the body runs under `untrack` so nothing it reads synchronously (the font
+  // size and family, the line height, the theme, `active`, any $state it
+  // resets) can re-trigger it. Those are live option updates owned by the
+  // small effects above; before this guard existed each of them tore the
+  // terminal down: dispose, resubscribe, capture_pane, WebGL re-init, and
+  // `kbLocked = true` — a system light/dark auto-switch mid-sentence on the
+  // phone dropped the keyboard (review, 2026-09-03).
+  // The body keeps its original indentation: it is 1300 lines, and the
+  // source tests match its functions by their closing brace column.
   $effect(() => {
+    target;
+    return untrack(() => {
     touchScrolling = false; // reset on pane switch
     pendingCols = 0; pendingRows = 0; pendingResizeTs = 0;
-    kbLocked = true;
+    lockKeyboard(); // pane switch
     selection = null; selUI = null;
     keyQueue = []; // queued keys belong to the previous pane
     lastContent = ''; lastCursor = null; // frames belong to the previous pane
@@ -1528,7 +1573,7 @@
             if (kbTa && !kbLocked && document.activeElement !== kbTa) kbTa.focus();
             return;
           }
-          kbLocked = true;
+          lockKeyboard(); // blur timer
           window.__dbg?.('kb: blur timer → lock');
         }, 150);
         window.__dbg?.('kb: textarea blur (timer scheduled)');
@@ -1676,7 +1721,7 @@
       // pad where IME never actually rose) must NOT re-lock — that would kill the keyboard
       // toggle the user just pressed.
       if (kbTa && kbH === 0 && lastKbHeight > 0 && Date.now() >= unlockUntil) {
-        kbLocked = true;
+        lockKeyboard(); // keyboard-shift: open → close transition
         if (document.activeElement === kbTa) kbTa.blur();
         window.__dbg?.('kb: keyboard-shift kbH=0 (was ' + lastKbHeight + ') → lock + blur');
       }
@@ -1764,6 +1809,10 @@
     addPaneOutputListener(target, onPaneOutputCb);
     addPaneClosedListener(target, onPaneClosedCb);
 
+    // The instance is complete: let the live-option / focus / refresh effects
+    // see it. (Written, never read, inside this effect — no self-dependency.)
+    termGen++;
+
     subscribe(target);
     capturePane(target).then(r => {
       if (lastContent) return; // subscription already delivered content
@@ -1814,12 +1863,14 @@
       copySelection = () => {};
       clearSelection = () => {};
     };
+    }); // untrack
   });
 
-  // Re-sync size when the terminal (re)appears
+  // One full repaint after each build, once the first layout has happened.
   $effect(() => {
+    termGen;
     if (term) {
-      requestAnimationFrame(() => term.refresh(0, term.rows - 1));
+      requestAnimationFrame(() => term?.refresh(0, term.rows - 1));
     }
   });
 
@@ -2190,7 +2241,7 @@
                 // timer doesn't bounce focus back. See 73957f5.
                 unlockUntil = 0;
                 unlockRetries = 0;
-                kbLocked = true;
+                lockKeyboard(); // toggle: close half
                 ta.blur();
               }
             }}><span><Icon name="keyboard" size={13} /></span></button>
