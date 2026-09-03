@@ -32,7 +32,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, touchContextMenu, perLineOf, modelLabel } from './hub.ts';
+  import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, mentionedAgents, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, touchContextMenu, perLineOf, modelLabel } from './hub.ts';
   import { notifyNews, isAway, roomProjectName } from './notifications.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
@@ -121,6 +121,9 @@
   const selectedRow = $derived(rows.find((r) => r.project.session === selected) ?? null);
   const liveSelected = $derived(!!selectedRow?.live);
   const managedAgents = $derived(agents.filter((a) => a.managed));
+  // The names `deliver_mentions` can type into — the roster the room-note
+  // verdict and the composer chip's `+@name` read against.
+  const managedNames = $derived(managedAgents.map((a) => a.name));
   /** The roster in display order, same-team cards folded into ONE group at
    * the position of their first member (board #74: "视图上放到一个 group 里").
    * Solo agents are groups of one with no team. */
@@ -2688,13 +2691,22 @@
                       onclick={(e) => { e.stopPropagation(); msgOpen = msgOpen === key ? '' : key; }}>
                       <span class="m-time">{fmtTime(m.ts)}</span>
                       {#if m.from === 'human'}
-                        <!-- Hollow does not mean failed: a busy agent QUEUES the
-                             line and accepts it when its turn ends, so the two
-                             states need two different explanations. -->
-                        <span class="m-state" class:ok={b.delivered}
-                          title={b.delivered ? t('hubDeliveredHint') : t('hubPendingHint')}>
-                          <Icon name={b.delivered ? 'circle-check' : 'circle'} size={11} />
-                        </span>
+                        <!-- Three readings, not two (review, 2026-09-03). Filled:
+                             the agent's prompt hook echoed the line. Hollow does
+                             not mean failed: a busy agent QUEUES the line and
+                             accepts it when its turn ends. And a ROOM NOTE —
+                             a body that addresses no managed agent — was typed
+                             into nobody's pane, so a ring that promises to fill
+                             in would wait for ever: it wears the recipient
+                             picker's own dashed note-dot instead, the glyph that
+                             already means "recorded, nobody interrupted". -->
+                        {#if b.delivered}
+                          <span class="m-state ok" title={t('hubDeliveredHint')}><Icon name="circle-check" size={11} /></span>
+                        {:else if !mentionedAgents(m.body ?? '', managedNames).length}
+                          <span class="m-state note" title={t('hubNoteHint')}><i class="st note-dot"></i></span>
+                        {:else}
+                          <span class="m-state" title={t('hubPendingHint')}><Icon name="circle" size={11} /></span>
+                        {/if}
                       {/if}
                     </button>
                   </div>
@@ -3576,6 +3588,9 @@
   .m-unfold :global(svg) { flex: none; }
   .m-state { display: inline-flex; opacity: 0.55; }
   .m-state.ok { color: var(--status-ok); opacity: 1; }
+  /* The room-note mark is the picker's .note-dot at the ring's size — one
+     glyph for "reaches nobody live", wherever it shows. */
+  .m-state.note .st { width: 9px; height: 9px; }
   .m-time { font-variant-numeric: tabular-nums; }
   .bubble .raw { margin: 0; font-family: var(--font-mono); font-size: var(--fs-sub); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text2); }
   /* What you can DO with a message, revealed by tapping it: the action row

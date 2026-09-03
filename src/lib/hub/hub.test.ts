@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, touchContextMenu, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
+import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, touchContextMenu, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -1076,6 +1076,23 @@ test('mentionsAgent parses addresses the way deliver_mentions does', () => {
   assert.ok(!mentionsAgent('@builder-2 yours', 'builder'), 'a longer name is a DIFFERENT agent');
   assert.ok(!mentionsAgent('mail me at x@builder.com... wait no', 'builder-2'));
   assert.ok(!mentionsAgent('no address here', 'builder'));
+});
+
+test('mentionedAgents is the delivery verdict: who a body is typed into, in roster order', () => {
+  // A room note is a message that reaches NOBODY live (hub-composer.md: the
+  // third destination). The feed used to hang the "typed into the pane,
+  // waiting for its turn to end" ring on it for ever (review, 2026-09-03).
+  const roster = ['lead', 'builder', 'builder-2'];
+  assert.deepEqual(mentionedAgents('a note for later', roster), [], 'no address → a room note');
+  assert.deepEqual(mentionedAgents('@builder fix it', roster), ['builder']);
+  assert.deepEqual(mentionedAgents('@lead ok, and @builder-2: yours', roster), ['lead', 'builder-2'], 'roster order, punctuation trimmed');
+  assert.deepEqual(mentionedAgents('@all standup', roster), roster, '@all reaches every managed agent');
+  assert.deepEqual(mentionedAgents('@builder @builder twice', roster), ['builder'], 'no duplicates');
+  assert.deepEqual(mentionedAgents('@ghost gone, mail x@builder.com', roster), [], 'a removed agent or an email address reaches nobody');
+  assert.deepEqual(mentionedAgents('@all nobody home', []), [], '@all over an empty roster types into nobody');
+  // Same tokenizer as mentionsAgent — the two readings cannot drift.
+  assert.deepEqual(mentionTokens('hi @a, @b: and x@c.d'), ['a', 'b', 'c.d']);
+  assert.equal(mentionsAgent('please @builder: now', 'builder'), mentionedAgents('please @builder: now', roster).includes('builder'));
 });
 
 test('filterBlocks keeps one agent\u2019s world and nobody else\u2019s (board #3)', () => {

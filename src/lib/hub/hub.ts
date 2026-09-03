@@ -1130,11 +1130,34 @@ export function mergeStates(
  * roster's double-click filter: "发给它的用户消息" means addressed, and a
  * substring match would collect `@builder-2` for `builder` (board #3). */
 export function mentionsAgent(body: string, name: string): boolean {
+  return mentionTokens(body).some((token) => token === name || token === 'all');
+}
+
+/** The `@` tokens of a body, exactly as `deliver_mentions` reads them: the
+ * run after each `@` up to whitespace, trailing punctuation trimmed. ONE
+ * tokenizer for every client-side reading of an address — the filter, the
+ * room-note verdict and the composer chip cannot disagree about what `@bob:`
+ * means. */
+export function mentionTokens(body: string): string[] {
   return body
     .split('@')
     .slice(1)
     .map((rest) => rest.split(/\s/, 1)[0]?.replace(/[,:;.!?]+$/u, '') ?? '')
-    .some((token) => token === name || token === 'all');
+    .filter(Boolean);
+}
+
+/** Which of `names` this body is TYPED INTO — the server's `deliver_mentions`
+ * verdict, read client-side: `@name` reaches that managed agent, `@all`
+ * reaches every one of them, and a token that names nobody on the roster
+ * (an email address, a removed agent, a direct window) reaches nobody.
+ * Roster order, no duplicates. An empty answer is a ROOM NOTE: recorded for
+ * the agents' next `tmm log`, typed into no pane — so the feed must not hang
+ * a "waiting for its turn to end" ring on it (review, 2026-09-03), and the
+ * composer chip can say `+@bob` when the body reaches past the recipient. */
+export function mentionedAgents(body: string, names: readonly string[]): string[] {
+  const tokens = new Set(mentionTokens(body));
+  if (tokens.has('all')) return [...names];
+  return names.filter((n) => tokens.has(n));
 }
 
 /** The feed narrowed to ONE agent (board #3: 双击卡片 "筛选跟某个agent有关的
