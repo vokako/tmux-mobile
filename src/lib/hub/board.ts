@@ -153,10 +153,10 @@ export function boardTitle(
   return rows.find((r) => r.project.session === session)?.project.name ?? null;
 }
 
-/** The note-line budget of an assignment brief (board #42). The body already
- * rides in the message under its own 400-char excerpt; the note thread gets
- * its own explicit total so a long discussion — or ONE giant note — can never
- * inject an unbounded wall of text into the agent's pane. */
+/** The note-line budget of an assignment brief (board #42). The complete
+ * original title/body already ride in the message; only the historical note
+ * thread gets its own explicit total so a long discussion — or ONE giant note
+ * — can never inject an unbounded wall of text into the agent's pane. */
 export const ASSIGN_NOTES_BUDGET = 1200;
 /** Below this many characters of remaining budget a partial note is not
  * worth a fragment — the truncation marker speaks for it instead. */

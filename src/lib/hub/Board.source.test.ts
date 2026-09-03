@@ -53,6 +53,12 @@ test('assignment is ONE dispatch — the detail picker and the create dialog sha
   // ride LAST — never between the issue and its thread.
   assert.match(source, /await hubPost\(cur, `@\$\{name\} \$\{msg\}\$\{assignNotes\(id, notes\)\}\\n\$\{take\}`\);/u,
     'the dispatch order: message, notes, then the take instructions last');
+  // The ORIGINAL issue body is the task input, not a notification preview:
+  // dispatch must carry all of it. The pane path uses paste-buffer and has no
+  // 400-char transport ceiling, so a frontend excerpt silently loses context.
+  assert.match(source, /const b = body\.trim\(\) \? ` — \$\{body\.trim\(\)\}\.` : '\.';/u,
+    'assignment carries the complete issue body');
+  assert.ok(!source.includes('const EXCERPT ='), 'assignment has no body excerpt budget');
   assert.match(source, /\.replace\('\{who\}', 'human'\)/u, 'the assigner is the subject at the front');
   assert.match(source, /const take = t\('boardAssignTake'\)\.replaceAll\('\{id\}', String\(id\)\);/u,
     'the instructions are their own i18n atom, filled per issue');

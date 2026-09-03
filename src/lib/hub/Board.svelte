@@ -297,18 +297,13 @@
   // ONE function carries that semantics; the detail Select and the create
   // dialog both route through it (board #11: create-with-assignee must
   // dispatch, never just write a label).
-  // The brief CARRIES the issue (owner, 2026-08-30: the message is the
-  // context, tightly budgeted — the agent starts without a lookup; a `…`
-  // means `tmm board show` has the rest).
-  const EXCERPT = 400;
-  const excerpt = (s: string) => {
-    const t = s.trim();
-    return t.length <= EXCERPT ? t : `${t.slice(0, EXCERPT).trimEnd()}…`;
-  };
+  // The brief CARRIES the issue (owner, 2026-08-30): the ORIGINAL title/body
+  // are the task input, so they ride in full and the agent starts without a
+  // lookup. Only the note thread has a separate explicit budget below.
   async function dispatchAssign(id: number, name: string, title = '', body = '', notes: { author: string; body: string; at: number }[] = []) {
     await boardSave(cur, { id, assignee: name });
     if (name) {
-      const b = body.trim() ? ` — ${excerpt(body)}.` : '.';
+      const b = body.trim() ? ` — ${body.trim()}.` : '.';
       // The {title} slot names the issue; with the body already riding in
       // {body}, a titleless issue is named by its id (not the body twice).
       // The SUBJECT leads (board #51: "前边有谁分给他一个主体名称"): who
