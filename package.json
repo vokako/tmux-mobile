@@ -46,7 +46,6 @@
     "@xterm/xterm": "6.0.0",
     "highlight.js": "^11.11.1",
     "katex": "^0.16.33",
-    "lucide-svelte": "^0.575.0",
     "marked": "^17.0.3",
     "mermaid": "^11.12.3",
     "pdfjs-dist": "^5.4.624"
