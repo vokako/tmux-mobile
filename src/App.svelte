@@ -26,6 +26,7 @@
   import { createReconnectMachine } from './lib/app/reconnect.ts';
   import { activateConnected, applySwitch, currentServerId, loadServers, migrateServers, recordServer, removeServer, renameServer } from './lib/app/servers.ts';
   import { anchorOf, menuPlacement, viewBox } from './lib/ui/placement.ts';
+  import ContextMenu from './lib/ui/ContextMenu.svelte';
   import { cycleItem, shortcutFromEvent } from './lib/app/shortcuts.ts';
   import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.ts';
   import { installExternalLinkHandler } from './lib/core/external-links.ts';
@@ -103,7 +104,20 @@
   let splitLayout = $state(1);
   let splitCells = $state([]);   // [{ id, target, session, command }]
   let activeCellId = $state(null);
-  let splitMenuOpen = $state(false);   // the top-right layout popover
+  // The top-right layout menu: `ui/ContextMenu` anchored to the toggle (right-
+  // aligned, like every dot menu). It was a hand-rolled `position:absolute`
+  // panel with a backdrop — no Escape, no close on scroll/resize, no viewport
+  // clamp (review, 2026-09-03); now it is the app's ONE popover mechanism.
+  let splitMenuAt = $state(null);
+  const SPLIT_CHOICES = [1, 2, 3, 4, 6];
+  const splitMenuItems = $derived(SPLIT_CHOICES.map((n) => ({
+    label: n === 1 ? t('splitSingle') : t('splitPanes').replace('{n}', String(n)),
+    checked: n === 1 ? !splitActive : (splitActive && splitLayout === n),
+    onselect: () => setLayout(n),
+  })));
+  function toggleSplitMenu(e) {
+    splitMenuAt = splitMenuAt ? null : { anchor: anchorOf(e.currentTarget), trigger: e.currentTarget };
+  }
   let nextCellId = 0;
   const SPLIT_MIN_WIDTH = 900;
   let wideEnough = $state(typeof window !== 'undefined' && window.innerWidth >= SPLIT_MIN_WIDTH);
@@ -1581,17 +1595,11 @@
                  win-bar to host it; cells have their own headers). In single-
                  pane mode the control lives in the Terminal's chip bar. -->
             <div class="split-control">
-              <button class="split-toggle" class:on={splitActive} title={t('split')} onclick={() => splitMenuOpen = !splitMenuOpen}>
+              <button class="split-toggle" class:on={splitActive} title={t('split')} aria-label={t('split')}
+                aria-haspopup="menu" aria-expanded={!!splitMenuAt} onclick={toggleSplitMenu}>
                 <Icon name="layout" size={15} />
               </button>
-              {#if splitMenuOpen}
-                <div class="split-menu">
-                  {#each [1, 2, 3, 4, 6] as n}
-                    <button class="split-opt" class:active={(n === 1 && !splitActive) || (splitActive && splitLayout === n)} onclick={() => { setLayout(n); splitMenuOpen = false; }}>{n}</button>
-                  {/each}
-                </div>
-                <button class="split-menu-backdrop" aria-label="close" onclick={() => splitMenuOpen = false}></button>
-              {/if}
+              <ContextMenu at={splitMenuAt} items={splitMenuItems} oncancel={() => (splitMenuAt = null)} />
             </div>
           {/if}
           {#if splitActive}
@@ -2052,7 +2060,8 @@
   .terminal-empty :global(svg) { opacity: 0.65; }
 
   /* Split-layout control: a single floating icon in the terminal's top-right
-     corner (no full-width toolbar row). Opens a small popover with 1/2/3/4/6. */
+     corner (no full-width toolbar row). Opens the shared ContextMenu with
+     single/2/3/4/6 panes, the current one checked. */
   .split-control { position: absolute; top: 6px; right: 8px; z-index: 12; }
   .split-toggle {
     width: 28px; height: 28px; padding: 0;
@@ -2064,21 +2073,6 @@
   }
   .split-toggle:hover { color: var(--text2); }
   .split-toggle.on { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
-  .split-menu {
-    position: absolute; top: 34px; right: 0; z-index: 13;
-    display: flex; gap: 2px; padding: 3px;
-    background: var(--bg); border: 1px solid var(--border); border-radius: var(--ui-radius-panel);
-    box-shadow: 0 8px 28px rgba(0,0,0,0.35);
-  }
-  .split-opt {
-    min-width: 28px; height: 28px;
-    border: none; border-radius: var(--ui-radius-control); background: transparent;
-    color: var(--text3); font-size: var(--fs-body); font-weight: 600; cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .split-opt:hover { background: var(--surface2); color: var(--text2); }
-  .split-opt.active { background: var(--accent-bg); color: var(--accent); }
-  .split-menu-backdrop { position: fixed; inset: 0; z-index: 12; background: transparent; border: none; cursor: default; }
   /* The vitals footer (board #56): IN FLOW, so it owns its row — .page is
      the column's flex:1 and shrinks above it, which shortens the absolute
      page layers (inset:0 tracks .page's box) and every direct child alike.

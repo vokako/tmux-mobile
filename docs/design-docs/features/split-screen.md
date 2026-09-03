@@ -30,6 +30,13 @@ multi-listener.
 - **Focus / active cell**: clicking a cell sets `activeCellId` (visual border).
   Input routing is automatic — each Terminal has its own hidden xterm textarea;
   only the focused one receives keys. `activeCellId` is purely the highlight.
+- **The layout menu is the shared `ui/ContextMenu`** (review, 2026-09-03):
+  the top-right toggle opens it right-aligned from its own rect (`anchorOf`,
+  `trigger` so the toggle's click closes as well as opens), one row per choice
+  (single / 2 / 3 / 4 / 6 panes) with the current one `checked`. It was a
+  hand-rolled `position:absolute` strip with a backdrop — no Escape, no close on
+  scroll/resize, no viewport clamp — the last such panel in App.svelte. (The
+  single-pane Terminal's chip-bar copy of this menu lives in `terminal/`.)
 - **`App.svelte` state**: `splitLayout` (1 = single, else 2/3/4/6),
   `splitCells [{id,target,session,command}]`, `activeCellId`. The pre-existing
   single `terminalTarget` stays the source of truth for the Files page, nav

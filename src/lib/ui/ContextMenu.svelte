@@ -11,15 +11,24 @@
   import { menuPlacement, pointAnchor, viewBox } from './placement.ts';
 
   /**
-   * @typedef {{ label: string, icon?: string, danger?: boolean, warn?: boolean, disabled?: boolean,
+   * @typedef {{ label: string, icon?: string, hint?: string, checked?: boolean,
+   *             danger?: boolean, warn?: boolean, disabled?: boolean,
    *             onselect: () => void }} MenuItem
+   *
+   * `checked` marks the CURRENT choice when the menu is a pick-one over a
+   * control that is not a field (the split layout, the Team switcher) — the
+   * same trailing check Select draws, so a menu and a dropdown say "you are
+   * here" in one glyph. `hint` is Select's secondary text (a count, a path).
    */
   let {
     /** Client coordinates of the pointer, or null when closed. May instead
      * carry `{ anchor, align }` — an element's AnchorRect (already
      * zoom-corrected via anchorOf) and 'left' for the dropdown reading, used
      * by the title caret (board #32). A plain `{x, y}` keeps the pointer
-     * default: right-aligned, exactly as every right-click/long-press was. */
+     * default: right-aligned, exactly as every right-click/long-press was.
+     * An optional `trigger` (the element whose click opened the menu) is not
+     * "outside": its pointerdown is left alone so the trigger's own click
+     * can TOGGLE the menu closed instead of closing-and-reopening it. */
     at = null,
     /** @type {MenuItem[]} */ items = [],
     /** Optional heading — usually the name of what was clicked. */
@@ -47,6 +56,7 @@
     // away on the press that starts somewhere else instead of waiting for its
     // release.
     const outside = (e) => {
+      if (at.trigger?.contains?.(e.target)) return;
       if (el && !el.contains(e.target)) oncancel();
     };
     const onKey = (e) => {
@@ -102,7 +112,9 @@
         disabled={it.disabled}
         onpointerenter={() => (cursor = i)}
         onclick={() => { it.onselect(); oncancel(); }}>
-        {#if it.icon}<Icon name={it.icon} size={12} />{/if}{it.label}
+        {#if it.icon}<Icon name={it.icon} size={12} />{/if}<span class="ctx-label">{it.label}</span>
+        {#if it.hint}<span class="ctx-hint">{it.hint}</span>{/if}
+        {#if it.checked}<span class="ctx-check"><Icon name="check" size={12} /></span>{/if}
       </button>
     {/each}
   </div>
@@ -139,6 +151,12 @@
   .ctx button.danger:hover, .ctx button.danger.cur { background: var(--danger-bg); }
   .ctx button:disabled { opacity: 0.45; cursor: default; }
   .ctx button :global(svg) { flex: none; }
+  .ctx-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Select's `.so-hint` / trailing check, so a pick-one menu reads as the
+     same species as a dropdown. */
+  .ctx-hint { margin-left: auto; font-size: var(--fs-meta); color: var(--text3); font-family: ui-monospace, Menlo, monospace; }
+  .ctx-check { margin-left: auto; display: flex; color: var(--accent); }
+  .ctx-hint + .ctx-check { margin-left: 0; }
   /* A phone needs a real target; the desktop stays compact. */
   @media (max-width: 760px) {
     .ctx button { min-height: 40px; font-size: var(--fs-body); }
