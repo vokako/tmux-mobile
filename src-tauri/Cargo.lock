@@ -4672,6 +4672,7 @@ dependencies = [
  "serde_yaml_ng",
  "sha2",
  "socket2 0.5.10",
+ "subtle",
  "sysinfo",
  "tauri",
  "tauri-build",

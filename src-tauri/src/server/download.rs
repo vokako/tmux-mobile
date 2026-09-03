@@ -18,10 +18,16 @@ pub(super) fn sign_download(token: &str, path: &str, ts: u64) -> String {
     hex::encode(mac.finalize().into_bytes())
 }
 
+/// The signature is verified by the MAC itself (`verify_slice` is constant
+/// time), never by comparing hex strings with `==`, which would return at the
+/// first wrong nibble and time-leak the expected signature byte by byte.
 fn verify_download(token: &str, path: &str, ts: u64, sig: &str) -> bool {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     if now.saturating_sub(ts) > DL_TOKEN_TTL_SECS { return false; }
-    sign_download(token, path, ts) == sig
+    let Ok(sig_bytes) = hex::decode(sig) else { return false };
+    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(token.as_bytes()).unwrap();
+    mac.update(format!("dl:{}:{}", path, ts).as_bytes());
+    mac.verify_slice(&sig_bytes).is_ok()
 }
 
 // WebSocket frame / message limits. A legitimate `fs_upload` can carry a
@@ -229,5 +235,25 @@ mod tests {
     fn header_end_detection() {
         assert_eq!(find_header_end(b"GET / HTTP/1.1\r\nHost: h\r\n\r\nbody"), Some(23));
         assert_eq!(find_header_end(b"GET / HTTP/1.1\r\nHost: h\r\n"), None);
+    }
+
+    #[test]
+    fn download_signature_verifies_only_the_exact_mac() {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        let sig = sign_download("tok", "/a/b.txt", now);
+        assert!(verify_download("tok", "/a/b.txt", now, &sig));
+        // Any change to the signed tuple, or to the signature, is rejected.
+        assert!(!verify_download("tok", "/a/c.txt", now, &sig), "path is bound");
+        assert!(!verify_download("tok", "/a/b.txt", now - 1, &sig), "ts is bound");
+        assert!(!verify_download("other", "/a/b.txt", now, &sig), "token is bound");
+        let mut flipped = sig.clone();
+        flipped.replace_range(0..1, if sig.starts_with('0') { "1" } else { "0" });
+        assert!(!verify_download("tok", "/a/b.txt", now, &flipped));
+        // Not hex, wrong length, empty: rejected without panicking.
+        assert!(!verify_download("tok", "/a/b.txt", now, "zz"));
+        assert!(!verify_download("tok", "/a/b.txt", now, &sig[..10]));
+        assert!(!verify_download("tok", "/a/b.txt", now, ""));
+        // Expired.
+        assert!(!verify_download("tok", "/a/b.txt", now - DL_TOKEN_TTL_SECS - 1, &sign_download("tok", "/a/b.txt", now - DL_TOKEN_TTL_SECS - 1)));
     }
 }

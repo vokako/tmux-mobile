@@ -1,6 +1,7 @@
 //! Wire encoding for the WebSocket path: length-tagged deflate framing,
-//! the token-derived AES-GCM session cipher, and constant-time token
-//! comparison. Split from server.rs 2026-07-22 — content unchanged.
+//! the token-derived AES-GCM session ciphers (v1 single key, v2 one key per
+//! job), and the constant-time plain-token comparison. Split from server.rs
+//! 2026-07-22.
 
 use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit, Nonce};
 use hkdf::Hkdf;
@@ -34,8 +35,16 @@ pub(super) fn hex_to_bytes(s: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
+/// Plain-token auth check. Constant time in the token's bytes: a `==` on
+/// strings returns at the first differing byte, which lets a remote guesser
+/// confirm a prefix one byte at a time by timing the rejection. The length
+/// comparison short-circuits, which reveals only the token's length — the
+/// configured token has a fixed length, so that leaks nothing useful.
 pub(super) fn provided_token_matches(provided: &str, token: &str) -> bool {
-    !provided.is_empty() && provided == token
+    use subtle::ConstantTimeEq;
+    !provided.is_empty()
+        && provided.len() == token.len()
+        && bool::from(provided.as_bytes().ct_eq(token.as_bytes()))
 }
 
 /// Encode a JSON string into the wire plaintext (pre-encryption) byte
@@ -368,6 +377,16 @@ mod tests {
             json.len() as f64 / plaintext.len() as f64
         );
         assert!(plaintext.len() < json.len(), "wire payload should shrink");
+    }
+
+    #[test]
+    fn plain_token_match_is_exact_and_rejects_empty() {
+        assert!(provided_token_matches("abc123", "abc123"));
+        assert!(!provided_token_matches("", ""), "an empty token never authenticates");
+        assert!(!provided_token_matches("", "abc123"));
+        assert!(!provided_token_matches("abc12", "abc123"), "prefix is not a match");
+        assert!(!provided_token_matches("abc1234", "abc123"));
+        assert!(!provided_token_matches("abc124", "abc123"));
     }
 
     // ─── E2E v2 key separation ──────────────────────────────────────────
