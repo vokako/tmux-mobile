@@ -29,6 +29,11 @@ directory, or the server's home directory when no session is open yet.
 - From info page → tap preview (eye) button to load preview on demand
 - Long file names in the list scroll horizontally on touch drag
 - Tap edit → open text editor
+- Leaving an editor with unsaved changes asks "Discard unsaved changes?" on
+  EVERY exit — the back button/gesture, a session or pane switch, the
+  follow-the-cwd move, and the Hub drawer's "look here" jump. Cancel keeps the
+  editor; a cancelled programmatic move (cwd follow) is skipped for that
+  event, not replayed later
 - Long-press / info button → file info panel
 - Star button → bookmark current directory
 - Refresh button in the toolbar → re-list current directory

@@ -107,6 +107,9 @@ pdf.js, mermaid and highlight.js (+15 grammars) are `import()`ed by memoized loa
 ### Markdown Image MIME
 Infer MIME from image file extension, not from parent markdown file's mime_hint.
 
+### Every way out of the editor asks once — through one helper
+`Files.svelte` has ONE exit for the editor, `leaveEditor(run)`: with no unsaved edits the move runs at once; with edits it is parked as `pendingAct = { kind: 'leave', run }` behind the shared ConfirmDialog and runs on confirm. Cancel drops the move — nothing is queued. Until 2026-09-03 only the back button asked; the session/pane switch, the follow-the-real-cwd rule and the drawer's "look here" (`navRequest`) each set `view = 'list'` outright and the text was silently gone (review finding, highest priority). The decision is pure and unit-tested in `file-view-state.ts`: `leaveDecision({ view, edited })` and `cwdFollowStep(reported, lastSourceDir, guard)`. The follow step commits `lastSourceDir` BEFORE the dialog, so a cancelled follow is skipped for that event and the same cwd does not ask again on the next effect run (it would otherwise re-prompt every time the tab regains visibility). `leaveEditor` reads `view`/`isEdited` under `untrack` because its callers are `$effect`s that must not re-run on every keystroke. When a session switch and a cwd follow both want to move in the same event, the later (follow) replaces the earlier pending move — following the real cwd already outranks the parked position.
+
 ## Lessons Learned
 - Always reset loading/spinner states in catch blocks (e.g., `downloading = ''`)
 - Android `gen/` files need backup before `tauri android init`

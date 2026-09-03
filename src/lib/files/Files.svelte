@@ -19,7 +19,8 @@
   import { t } from '../core/i18n.svelte.ts';
   import { layout } from '../app/layout.svelte.ts';
   import { copyText } from '../core/clipboard.ts';
-  import { directoryLoadState } from './file-view-state.ts';
+  import { untrack } from 'svelte';
+  import { directoryLoadState, leaveDecision, cwdFollowStep } from './file-view-state.ts';
   import { installExternalLinkHandler } from '../core/external-links.ts';
   import { fsCwd, fsList, fsStat, fsRead, fsWrite, fsMkdir, fsDelete, fsRename, fsDownload, fsDownloadHttp, fsUpload, getBookmarks, saveBookmarks, gitCmd, getPrefs, setPref, fsConvert } from '../core/ws.ts';
 
@@ -139,8 +140,8 @@
         navAnim('back'); view = 'list'; return true;
       }
       if (view === 'edit') {
-        if (isEdited) { pendingAct = { kind: 'leave', to: 'preview' }; return true; }
-        navAnim('back'); view = 'preview'; return true;
+        leaveEditor(() => { navAnim('back'); view = 'preview'; });
+        return true;
       }
       if (view === 'info') { navAnim('back'); view = fromGit ? (fromGit = false, 'git') : currentFile?.content != null ? 'preview' : 'list'; return true; }
       if (view === 'preview') { navAnim('back'); if (fromGit) { fromGit = false; view = 'git'; } else { view = 'list'; } currentFile = null; return true; }
@@ -292,12 +293,24 @@
   /** The destructive action awaiting confirmation:
    *   { kind: 'file', path }     — delete on the server, no trash, no undo
    *   { kind: 'local', name }    — delete a downloaded copy (had NO confirm)
-   *   { kind: 'leave', to }      — abandon unsaved edits (was a native confirm(),
-   *                                i.e. an OS dialog in the middle of our UI)
+   *   { kind: 'leave', run }     — abandon unsaved edits; `run` is the parked
+   *                                move (was a native confirm(), i.e. an OS
+   *                                dialog in the middle of our UI)
    * Tap-to-confirm is gone: it re-labelled the button for 3s, said nothing about
    * what is lost, and differed from every other destructive verb in the app. */
   let pendingAct = $state(null);
   let acting = $state(false);
+  /** EVERY way out of the editor goes through here — the back button/gesture,
+   *  a session switch, the cwd follow, the drawer's "look here". No edits:
+   *  `run` moves now. Unsaved edits: `run` waits behind the discard dialog and
+   *  fires on confirm; cancel DROPS it — a move is never queued. Until
+   *  2026-09-03 only the back button asked; the other three set view = 'list'
+   *  outright and the text was gone. `untrack` because the callers are
+   *  $effects that must not start re-running on every keystroke. */
+  function leaveEditor(run) {
+    if (untrack(() => leaveDecision({ view, edited: isEdited })) === 'go') { run(); return; }
+    pendingAct = { kind: 'leave', run };
+  }
   const ACT_COPY = {
     file:  { title: 'confirmDeleteFileTitle',  note: 'confirmDeleteFileNote',  go: 'delete' },
     local: { title: 'confirmDeleteFileTitle',  note: 'confirmDeleteFileNote',  go: 'delete' },
@@ -311,7 +324,7 @@
     try {
       if (act.kind === 'file') await handleDelete(act.path);
       else if (act.kind === 'local') await deleteLocalFile(act.name);
-      else view = act.to;
+      else act.run();
       pendingAct = null;
     } finally { acting = false; }
   }
@@ -556,9 +569,9 @@
       lastSourceDir = parked?.sourceDir ?? '';
       dirHist = []; // a session switch is a new entry point, not a step
       if (parked?.cwd) {
-        cwd = parked.cwd;
-        view = 'list';
-        loadDir(parked.cwd);
+        // An unsaved editor holds the switch behind the discard dialog
+        // (leaveEditor); the parked position is a hint, the text is not.
+        leaveEditor(() => { cwd = parked.cwd; view = 'list'; loadDir(parked.cwd); });
       }
     }
     if (cwd && !entries.length && !loading) loadDir(cwd); // restored park: list it
@@ -566,13 +579,18 @@
     // the server then reports the user's home directory. Once a terminal/team
     // session appears, its cwd differs from home and we follow it.
     fsCwd(session).then(r => {
-      if (r.path && r.path !== lastSourceDir) {
-        lastSourceDir = r.path;
+      // The follow is DISARMED before it asks (lastSourceDir moves first): a
+      // cancelled follow is skipped for this event, not queued — the next
+      // re-run sees the same cwd and stays quiet (file-view-state.test.ts).
+      const step = cwdFollowStep(r.path, lastSourceDir, untrack(() => ({ view, edited: isEdited })));
+      lastSourceDir = step.lastSourceDir;
+      if (step.move === 'none') return;
+      leaveEditor(() => {
         cwd = r.path;
         view = 'list';
         dirHist = []; // the follow rule moved us — a new entry point
         loadDir(r.path);
-      }
+      });
     }).catch(() => {
       if (!lastSourceDir) { lastSourceDir = '/'; cwd = '/'; loadDir('/'); }
     });
@@ -594,9 +612,12 @@
     if (!navRequest || navRequest.n === lastNav) return;
     lastNav = navRequest.n;
     if (navRequest.path) {
-      view = 'list';
-      dirHist = []; // a drawer/see-here handoff is a new entry point
-      loadDir(navRequest.path);
+      const to = navRequest.path;
+      leaveEditor(() => {
+        view = 'list';
+        dirHist = []; // a drawer/see-here handoff is a new entry point
+        loadDir(to);
+      });
       // Disarm the cwd-follow for the CURRENT real cwd: without this a
       // same-moment session switch re-follows the project root and stomps
       // the requested directory.
@@ -826,9 +847,8 @@
   }
 
   function backToPreview() {
-    navAnim('back');
-    if (isEdited) { pendingAct = { kind: 'leave', to: 'preview' }; return; }
-    view = 'preview';
+    // navAnim rides INSIDE the move: the dialog itself moves nothing.
+    leaveEditor(() => { navAnim('back'); view = 'preview'; });
   }
 
   async function handleDelete(path) {
