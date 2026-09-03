@@ -48,7 +48,7 @@ tmm task start <name> -- <cmd...>    detached in its own tmux window
 tmm task list                        every task in every session + state + age
 tmm task status <name>               running | exited:<code> | killed:<signal>
 tmm task logs <name> [--limit N] [--grep <text>]   last 50 lines by default
-tmm task stop <name>                 C-c → TERM → KILL; keeps the log
+tmm task stop <name>                 C-c → TERM → KILL to the process GROUP; keeps the log
 tmm task rm <name>                   close a finished task's window
 ```
 
@@ -224,7 +224,16 @@ So:
   the whole foreground process group, so `stop` collapses the process tree
   instead of orphaning its children (a `nohup`-ed `npm → tauri → vite + server`
   chain cannot be given that signal; `scripts/preflight.mjs` exists because
-  those orphans really happened).
+  those orphans really happened). The TERM/KILL escalation follows the same
+  rule (2026-09-03 review): it goes to the pane's process GROUP (`killpg`),
+  not to `#{pane_pid}` — that pid is the `sh -c` wrapper, and a TERM to it
+  alone let `npm run dev` or a pipeline run on headless while the pane went
+  dead and the task said `killed:term`. tmux starts every pane as a session
+  leader, so the wrapper's pgid is its own pid and the group is exactly the
+  tree the task started; `stop_ends_the_whole_process_group_not_just_the_wrapper`
+  pins it with a wrapper that ignores INT and a `nohup`-ed child — the kernel's
+  SIGHUP to the foreground group when the wrapper dies is exactly what such a
+  child shrugs off, which is why the pid-only version looked fine in casual use.
 
 `pm2` was rejected, not just as an extra dependency: **auto-restart lies to an
 agent.** From a log tail you cannot tell "running fine" from "crashed five

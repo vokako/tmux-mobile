@@ -61,6 +61,9 @@ sha2 = "0.10"
 subtle = "2"
 rand = "0.8"
 futures-util = "0.3"
+# `tmm task stop` signals the task's PROCESS GROUP (killpg), not just the
+# `sh -c` wrapper tmux runs — already in the graph through tokio/socket2.
+libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml_ng = "0.10"

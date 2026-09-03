@@ -223,8 +223,16 @@ pub fn logs(name: &str, limit: usize, grep: Option<&str>) -> Result<String> {
 
 /// Ask the task to stop, escalating only as far as it has to: C-c first (a real
 /// TTY, so the whole foreground process group gets it — this is what a
-/// `nohup`-ed process cannot be given), then TERM, then KILL on the pane's
-/// process. The window is left in place either way so the log survives.
+/// `nohup`-ed process cannot be given), then TERM, then KILL to the pane's
+/// PROCESS GROUP. The window is left in place either way so the log survives.
+///
+/// The group, not the pid: `#{pane_pid}` is the `sh -c` wrapper tmux runs the
+/// command with, and a TERM to the wrapper alone leaves its children — `npm run
+/// dev`, a pipeline, anything that did not `exec` — orphaned and running while
+/// the pane goes dead and the task reports `killed:term`. tmux starts every
+/// pane as a session leader, so the wrapper's pgid is its own pid and the group
+/// is exactly the process tree the task started (minus anything that `setsid`
+/// itself away, which is its own choice).
 pub fn stop(name: &str) -> Result<Task> {
     let task = need(name)?;
     if !task.is_running() {
@@ -234,12 +242,8 @@ pub fn stop(name: &str) -> Result<Task> {
     if let Some(t) = wait_dead(name, STOP_GRACE_MS) {
         return Ok(t);
     }
-    for sig in ["-TERM", "-KILL"] {
-        if !task.pid.is_empty() {
-            let _ = std::process::Command::new("kill")
-                .args([sig, &task.pid])
-                .output();
-        }
+    for sig in [libc::SIGTERM, libc::SIGKILL] {
+        signal_group(&task.pid, sig);
         if let Some(t) = wait_dead(name, SIGNAL_GRACE_MS) {
             return Ok(t);
         }
@@ -248,6 +252,36 @@ pub fn stop(name: &str) -> Result<Task> {
         "task '{name}' ignored C-c, TERM and KILL — inspect it with `tmux attach -t {}`",
         task.target()
     )))
+}
+
+/// Send `sig` to the process group of `pid` (the pane's shell), falling back
+/// to the pid alone when the group cannot be read. Never fails loudly: the
+/// caller polls the pane for the outcome, which is the only truth that matters.
+fn signal_group(pid: &str, sig: libc::c_int) {
+    let Ok(pid) = pid.trim().parse::<libc::pid_t>() else { return };
+    if pid <= 1 {
+        return; // never a real task; and never signal init or "everything"
+    }
+    let pgid = process_group(pid).unwrap_or(pid);
+    // SAFETY: killpg/kill are plain syscalls; both ids are positive integers
+    // read from tmux/ps for a process we started, and a stale id merely fails
+    // with ESRCH (or reaches an unrelated group only if the OS reused a pgid in
+    // the milliseconds since — the same window every `kill` on a pid has).
+    unsafe {
+        if libc::killpg(pgid, sig) != 0 {
+            libc::kill(pid, sig);
+        }
+    }
+}
+
+/// The process group of `pid`, via `ps` — portable across Linux and macOS,
+/// unlike /proc.
+fn process_group(pid: libc::pid_t) -> Option<libc::pid_t> {
+    let out = std::process::Command::new("ps")
+        .args(["-o", "pgid=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
 }
 
 /// Forget a finished task, closing its window. Refuses while it runs: removing
@@ -578,6 +612,58 @@ mod tests {
         // Bounded to the LAST matches, which is what a tail means.
         assert_eq!(tail_lines(text, 1, Some("error")), "error two");
         assert_eq!(tail_lines(text, 10, Some("nope")), "");
+    }
+
+    /// The bug: `stop` signalled `#{pane_pid}` — the `sh -c` wrapper — so a
+    /// child that survived C-c kept running after the pane went dead and the
+    /// task reported killed. Here the wrapper ignores INT (its child inherits
+    /// the ignore, so C-c cannot end either), which forces the signal path,
+    /// and the child is `nohup`-ed: when the wrapper alone dies the kernel's
+    /// SIGHUP to the foreground group is exactly what such a child shrugs
+    /// off, and it is what a daemonising dev server does. A signal to the
+    /// GROUP reaches it regardless. Needs a tmux server, like the rest of the
+    /// Rust suite.
+    #[test]
+    fn stop_ends_the_whole_process_group_not_just_the_wrapper() {
+        let name = format!("tmm-test-pg-{}", std::process::id());
+        let session = "tmm-test-tasks";
+        let argv: Vec<String> = ["bash", "-c", "trap '' INT; nohup sleep 300 >/dev/null 2>&1; echo never"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let task = start(&name, &argv, Some(session), true).expect("task starts");
+        assert!(task.is_running());
+        // Find the sleep: the wrapper's only child. Give bash a moment to fork it.
+        let mut child = String::new();
+        for _ in 0..30 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let out = std::process::Command::new("pgrep").args(["-P", &task.pid]).output().unwrap();
+            child = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !child.is_empty() {
+                break;
+            }
+        }
+        assert!(!child.is_empty(), "the wrapper (pid {}) forked its sleep", task.pid);
+        let alive = |pid: &str| {
+            std::process::Command::new("kill").args(["-0", pid]).output().map(|o| o.status.success()).unwrap_or(false)
+        };
+        assert!(alive(&child), "sleep {child} is running before stop");
+
+        let stopped = stop(&name).expect("stop reports the outcome");
+        assert!(!stopped.is_running(), "the pane went dead: {}", stopped.state_str());
+        // The point of the test: the child did not outlive the wrapper.
+        let mut gone = false;
+        for _ in 0..20 {
+            if !alive(&child) {
+                gone = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert!(gone, "sleep {child} was orphaned by stop — only the sh wrapper died");
+
+        let _ = remove(&name);
+        let _ = tmux::kill_session(session);
     }
 
     #[test]

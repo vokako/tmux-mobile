@@ -4664,6 +4664,7 @@ dependencies = [
  "hex",
  "hkdf",
  "hmac",
+ "libc",
  "rand 0.8.5",
  "rusqlite",
  "rustls-pemfile",
