@@ -7,29 +7,9 @@
 </script>
 
 <script>
-  import * as pdfjsLib from 'pdfjs-dist';
-  import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-  import { marked } from 'marked';
-  import '../core/markedSafeUrl.ts';
-  import katex from 'katex';
-  import 'katex/dist/katex.min.css';
-  import hljs from 'highlight.js/lib/core';
-  import javascript from 'highlight.js/lib/languages/javascript';
-  import typescript from 'highlight.js/lib/languages/typescript';
-  import python from 'highlight.js/lib/languages/python';
-  import rust from 'highlight.js/lib/languages/rust';
-  import css from 'highlight.js/lib/languages/css';
-  import json from 'highlight.js/lib/languages/json';
-  import bash from 'highlight.js/lib/languages/bash';
-  import xml from 'highlight.js/lib/languages/xml';
-  import yaml from 'highlight.js/lib/languages/yaml';
-  import sql from 'highlight.js/lib/languages/sql';
-  import go from 'highlight.js/lib/languages/go';
-  import java from 'highlight.js/lib/languages/java';
-  import ruby from 'highlight.js/lib/languages/ruby';
-  import markdown from 'highlight.js/lib/languages/markdown';
-  import 'highlight.js/styles/github-dark.min.css';
-  import mermaid from 'mermaid';
+  // Markdown goes through the ONE safe renderer (rule 13: `&`/`<` escaped, so a
+  // README's raw <img onerror> is inert text). It also owns marked + KaTeX.
+  import { renderMarkdown } from '../core/markdown.ts';
   import Icon from '../ui/Icon.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
@@ -53,35 +33,84 @@
     import('@tauri-apps/api/webview').then(m => tauriWebview = m),
   ]) : Promise.resolve();
 
-  hljs.registerLanguage('javascript', javascript);
-  hljs.registerLanguage('js', javascript);
-  hljs.registerLanguage('typescript', typescript);
-  hljs.registerLanguage('ts', typescript);
-  hljs.registerLanguage('python', python);
-  hljs.registerLanguage('rust', rust);
-  hljs.registerLanguage('css', css);
-  hljs.registerLanguage('json', json);
-  hljs.registerLanguage('bash', bash);
-  hljs.registerLanguage('sh', bash);
-  hljs.registerLanguage('html', xml);
-  hljs.registerLanguage('xml', xml);
-  hljs.registerLanguage('svg', xml);
-  hljs.registerLanguage('yaml', yaml);
-  hljs.registerLanguage('sql', sql);
-  hljs.registerLanguage('go', go);
-  hljs.registerLanguage('java', java);
-  hljs.registerLanguage('ruby', ruby);
-  hljs.registerLanguage('markdown', markdown);
+  // ── Heavy preview libraries load on FIRST USE, never at startup ──────────
+  // highlight.js (+15 grammars), mermaid and pdf.js are 1.5 MB of the app that
+  // most sessions never open; Files is statically imported by App and the Hub
+  // drawer, so a static import here landed all of it in the entry chunk of the
+  // primary (Android) target (2.30 MB before, review 2026-09-03). Each loader
+  // is idempotent and memoizes its promise; the highlighter is a $state so the
+  // preview it was loaded for re-renders highlighted once it arrives —
+  // until then the same lines show escaped and unhighlighted.
+  let hljs = $state(null);
+  let hljsLoading = null;
+  function loadHljs() {
+    if (hljsLoading) return hljsLoading;
+    hljsLoading = Promise.all([
+      import('highlight.js/lib/core'),
+      import('highlight.js/lib/languages/javascript'),
+      import('highlight.js/lib/languages/typescript'),
+      import('highlight.js/lib/languages/python'),
+      import('highlight.js/lib/languages/rust'),
+      import('highlight.js/lib/languages/css'),
+      import('highlight.js/lib/languages/json'),
+      import('highlight.js/lib/languages/bash'),
+      import('highlight.js/lib/languages/xml'),
+      import('highlight.js/lib/languages/yaml'),
+      import('highlight.js/lib/languages/sql'),
+      import('highlight.js/lib/languages/go'),
+      import('highlight.js/lib/languages/java'),
+      import('highlight.js/lib/languages/ruby'),
+      import('highlight.js/lib/languages/markdown'),
+      import('highlight.js/styles/github-dark.min.css'),
+    ]).then(([core, javascript, typescript, python, rust, css, json, bash, xml, yaml, sql, go, java, ruby, markdown]) => {
+      const h = core.default;
+      h.registerLanguage('javascript', javascript.default);
+      h.registerLanguage('js', javascript.default);
+      h.registerLanguage('typescript', typescript.default);
+      h.registerLanguage('ts', typescript.default);
+      h.registerLanguage('python', python.default);
+      h.registerLanguage('rust', rust.default);
+      h.registerLanguage('css', css.default);
+      h.registerLanguage('json', json.default);
+      h.registerLanguage('bash', bash.default);
+      h.registerLanguage('sh', bash.default);
+      h.registerLanguage('html', xml.default);
+      h.registerLanguage('xml', xml.default);
+      h.registerLanguage('svg', xml.default);
+      h.registerLanguage('yaml', yaml.default);
+      h.registerLanguage('sql', sql.default);
+      h.registerLanguage('go', go.default);
+      h.registerLanguage('java', java.default);
+      h.registerLanguage('ruby', ruby.default);
+      h.registerLanguage('markdown', markdown.default);
+      hljs = h;
+      return h;
+    }).catch(() => { hljsLoading = null; return null; }); // offline: retry next time
+    return hljsLoading;
+  }
 
-  marked.setOptions({
-    highlight(code, lang) {
-      if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value;
-      try { return hljs.highlightAuto(code).value; } catch { return code; }
-    }
-  });
+  let mermaidLoading = null;
+  function loadMermaid() {
+    if (mermaidLoading) return mermaidLoading;
+    mermaidLoading = import('mermaid').then(m => {
+      m.default.initialize({ startOnLoad: false, theme: 'dark' });
+      return m.default;
+    }).catch(() => { mermaidLoading = null; return null; });
+    return mermaidLoading;
+  }
 
-  mermaid.initialize({ startOnLoad: false, theme: 'dark' });
-  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+  let pdfjsLoading = null;
+  function loadPdfjs() {
+    if (pdfjsLoading) return pdfjsLoading;
+    pdfjsLoading = Promise.all([
+      import('pdfjs-dist'),
+      import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
+    ]).then(([lib, worker]) => {
+      lib.GlobalWorkerOptions.workerSrc = worker.default;
+      return lib;
+    }).catch(() => { pdfjsLoading = null; return null; });
+    return pdfjsLoading;
+  }
 
   let { session = '', onGoBack = null, visible = false, fontSize = 14, singlePane = false, navRequest = null, jumped = false, currentDir = $bindable('') } = $props();
 
@@ -446,6 +475,8 @@
 
   async function renderPdf(data) {
     if (!pdfContainer) return;
+    const pdfjsLib = await loadPdfjs();
+    if (!pdfjsLib || !pdfContainer) return;
     pdfContainer.innerHTML = '';
     const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
     const pdf = await pdfjsLib.getDocument({ data: bytes, verbosity: 0 }).promise;
@@ -637,6 +668,8 @@
         view = 'preview';
       } else if (stat.is_text && stat.size <= 512 * 1024) {
         const r = await fsRead(path);
+        if (mimeCategory(stat.mime_hint || '') !== 'markdown') loadHljs(); // lined view: highlight when it lands
+        showAllLines = false; // the cap is per file
         currentFile = { ...file, content: r.content };
         wrapLines = defaultWrapForMime(stat.mime_hint || '');
         view = 'preview';
@@ -704,6 +737,7 @@
   }
 
   function startEdit() {
+    loadHljs(); // the editor's highlight overlay follows the same lazy load
     editContent = currentFile.content;
     editOriginal = currentFile.content;
     undoStack = [];
@@ -1280,13 +1314,16 @@
     return map[mime] || null;
   }
 
+  // `hljs` is null until loadHljs() resolves; every highlighter degrades to
+  // the escaped source in the meantime and the $state flip re-renders it.
   function highlightCode(text, mime) {
     if (text == null) return '';
+    if (!hljs) return text.replace(/&/g, '&amp;').replace(/</g, '&lt;');
     const lang = hljsLang(mime);
     if (lang && hljs.getLanguage(lang)) {
       return hljs.highlight(text, { language: lang }).value;
     }
-    try { return hljs.highlightAuto(text).value; } catch { return text.replace(/</g, '&lt;'); }
+    try { return hljs.highlightAuto(text).value; } catch { return text.replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
   }
 
   // Highlight a SINGLE line for the per-line code views (preview + the gutter
@@ -1298,42 +1335,30 @@
   // their context, an acceptable trade for reliable alignment + wrapping.
   function highlightLine(line, mime) {
     if (!line) return '';
-    const lang = hljsLang(mime);
+    const lang = hljs ? hljsLang(mime) : null;
     if (lang && hljs.getLanguage(lang)) {
       try { return hljs.highlight(line, { language: lang }).value; } catch {}
     }
-    return line.replace(/</g, '&lt;');
+    return line.replace(/&/g, '&amp;').replace(/</g, '&lt;');
   }
 
-  function renderMarkdown(text) {
-    if (text == null) return '';
-    // Protect code blocks/inline code from KaTeX processing
-    const codeHoles = [];
-    let safe = text
-      .replace(/```[\s\S]*?```/g, m => { codeHoles.push(m); return `\x00CODE${codeHoles.length - 1}\x00`; })
-      .replace(/`[^`]+`/g, m => { codeHoles.push(m); return `\x00CODE${codeHoles.length - 1}\x00`; });
-
-    // KaTeX: replace $$ blocks and $ inline
-    safe = safe
-      .replace(/\$\$([^$]+?)\$\$/g, (_, math) => {
-        try { return katex.renderToString(math.trim(), { displayMode: true, throwOnError: false }); }
-        catch { return `<pre>${math}</pre>`; }
-      })
-      .replace(/\$([^$\n]+?)\$/g, (_, math) => {
-        try { return katex.renderToString(math.trim(), { displayMode: false, throwOnError: false }); }
-        catch { return `<code>${math}</code>`; }
-      });
-
-    // Restore code blocks
-    safe = safe.replace(/\x00CODE(\d+)\x00/g, (_, i) => codeHoles[i]);
-
-    return marked.parse(safe, { breaks: true, gfm: true });
-  }
+  // The lined code preview renders one DOM row per line with a per-line hljs
+  // call; a 512 KB log is 20k rows and a multi-second main-thread freeze on a
+  // phone. Show the head and let the reader ask for the rest.
+  const CODE_PREVIEW_MAX_LINES = 3000;
+  let showAllLines = $state(false);
+  let previewLines = $derived((currentFile?.content ?? '').split('\n'));
+  let shownLines = $derived(showAllLines || previewLines.length <= CODE_PREVIEW_MAX_LINES
+    ? previewLines
+    : previewLines.slice(0, CODE_PREVIEW_MAX_LINES));
 
   let mermaidId = 0;
   async function renderMermaidBlocks(container) {
     if (!container) return;
     const blocks = container.querySelectorAll('code.language-mermaid');
+    if (!blocks.length) return; // most markdown has no diagram: never load mermaid for it
+    const mermaid = await loadMermaid();
+    if (!mermaid) return;
     for (const block of blocks) {
       const pre = block.parentElement;
       const id = `mermaid-${++mermaidId}`;
@@ -1598,17 +1623,17 @@
         <div class="image-preview"><img src={currentFile.dataUrl} alt={currentFile.name} /></div>
       {:else if currentFile.convertedHtml}
         <div class="md-render">{@html currentFile.convertedHtml}</div>
-      {:else if mimeCategory(currentFile.stat?.mime_hint) === 'code'}
-        <div class="code-lined" class:wrap={wrapLines}>
-          {#each (currentFile.content ?? '').split('\n') as line, i}
-            <div class="cl-row"><span class="cl-num">{i + 1}</span><code class="cl-code">{@html highlightLine(line, currentFile.stat?.mime_hint) || '\u200b'}</code></div>
-          {/each}
-        </div>
       {:else}
+        <!-- 'code' and every other text: one lined view, capped (see shownLines) -->
         <div class="code-lined" class:wrap={wrapLines}>
-          {#each (currentFile.content ?? '').split('\n') as line, i}
+          {#each shownLines as line, i}
             <div class="cl-row"><span class="cl-num">{i + 1}</span><code class="cl-code">{@html highlightLine(line, currentFile.stat?.mime_hint) || '\u200b'}</code></div>
           {/each}
+          {#if shownLines.length < previewLines.length}
+            <button class="cl-more" onclick={() => { showAllLines = true; }}>
+              {t('previewShowAllLines').replace('{n}', String(previewLines.length))}
+            </button>
+          {/if}
         </div>
       {/if}
     </div>
@@ -2010,6 +2035,16 @@
   }
   .cl-code :global(code) { font-family: inherit; background: none; padding: 0; }
   .code-lined.wrap .cl-code { white-space: pre-wrap; word-break: break-word; }
+  /* The "show all N lines" tail of a capped preview: a text button in the
+     gutter's row grid, sticky like the numbers so it is reachable at any
+     horizontal scroll. */
+  .cl-more {
+    display: block; position: sticky; left: 0; margin: 8px 0 0 10px; padding: 6px 10px;
+    min-height: 44px; border: 1px solid var(--border); border-radius: var(--ui-radius-control);
+    background: var(--surface); color: var(--accent); font: inherit; cursor: pointer;
+    transition: background var(--t-fast);
+  }
+  .cl-more:hover { background: var(--surface2); }
   .html-preview {
     flex: 1; width: 100%; border: none; background: #fff; border-radius: 4px;
   }

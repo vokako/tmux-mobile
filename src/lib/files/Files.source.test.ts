@@ -93,3 +93,46 @@ test('below its own path, a tab visit climbs to the parent — never the termina
   assert.match(source, /if \(popDir\(\)\) return true;[\s\S]{0,900}?if \(!jumped && cwd && cwd !== '\/'\) \{\s*navAnim\('back'\);\s*navPush\(\);\s*loadDir\(cwd\.replace\(\/\\\/\[\^\/\]\+\\\/\?\$\/, ''\) \|\| '\/'\);\s*return true;\s*\}/u,
     'the climb sits under the user-path pop, replenishes app history, and loads without pushing dir history');
 });
+
+test('markdown preview goes through the ONE safe renderer — never a bare marked.parse (review 2026-09-03)', () => {
+  // A README in any cloned repo is untrusted input rendered with {@html} in
+  // the app origin, next to the token in localStorage. core/markdown.ts
+  // escapes `&`/`<` first (rule 13); Files had its own renderer that did not,
+  // so `<img src=x onerror=…>` in a README ran as script.
+  assert.match(source, /import \{ renderMarkdown \} from '\.\.\/core\/markdown\.ts';/u);
+  assert.doesNotMatch(source, /marked\.parse\(|from 'marked'|from 'katex'/u, 'no second markdown/KaTeX pipeline');
+  assert.match(source, /\{@html renderMarkdown\(currentFile\.content\)\}/u, 'the preview renders the shared output');
+});
+
+test('heavy preview libraries load on first use, never at startup', () => {
+  // Files is statically imported by App and the Hub drawer, so a static import
+  // here lands in the entry chunk of the primary (Android) target: pdf.js,
+  // mermaid and highlight.js + 15 grammars were 1.5 MB of a 2.3 MB main chunk
+  // that most sessions never open.
+  assert.doesNotMatch(source, /^\s*import [^\n]* from '(?:pdfjs-dist|mermaid|highlight\.js)/mu, 'no static import of a preview library');
+  assert.doesNotMatch(source, /^\s*import 'highlight\.js\/styles/mu, 'the highlighter CSS rides with the highlighter');
+  for (const loader of ['loadHljs', 'loadMermaid', 'loadPdfjs']) {
+    assert.match(source, new RegExp(`function ${loader}\\(\\) \\{\\s*if \\(\\w+Loading\\) return \\w+Loading;`, 'u'),
+      `${loader} memoizes its promise (idempotent)`);
+  }
+  assert.match(source, /import\('mermaid'\)/u);
+  assert.match(source, /import\('pdfjs-dist'\)/u);
+  assert.match(source, /import\('highlight\.js\/lib\/core'\)/u);
+  // A markdown file without a diagram must not pay for mermaid.
+  assert.match(source, /if \(!blocks\.length\) return;[^\n]*\n\s*const mermaid = await loadMermaid\(\);/u);
+  // Until the highlighter arrives, the same lines render escaped, not blank.
+  assert.match(source, /let hljs = \$state\(null\);/u);
+  assert.match(source, /const lang = hljs \? hljsLang\(mime\) : null;/u);
+});
+
+test('the lined code preview is capped, with the split out of the template', () => {
+  // One DOM row + one hljs call per line: a 512 KB log is 20k rows and a
+  // multi-second freeze on a phone. The head renders; the reader asks for the
+  // rest. The split lives in a $derived so a wrap toggle does not re-split.
+  assert.match(source, /const CODE_PREVIEW_MAX_LINES = \d+;/u);
+  assert.match(source, /let previewLines = \$derived\(\(currentFile\?\.content \?\? ''\)\.split\('\\n'\)\);/u);
+  assert.match(source, /\{#each shownLines as line, i\}/u, 'the template iterates the capped list');
+  assert.doesNotMatch(source, /\{#each \(currentFile\.content \?\? ''\)\.split/u, 'no inline split in the template');
+  assert.match(source, /\{#if shownLines\.length < previewLines\.length\}[\s\S]{0,200}?showAllLines = true;/u, 'the affordance lifts the cap');
+  assert.match(source, /showAllLines = false; \/\/ the cap is per file/u, 'a new file starts capped again');
+});

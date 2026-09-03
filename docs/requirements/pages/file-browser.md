@@ -12,7 +12,7 @@ directory, or the server's home directory when no session is open yet.
 - File/directory list with icons, size, modified date
 - Bookmark panel (star current dir, scrollable saved paths)
 - Recent files panel (last 20 opened files, scrollable, capped to 40vh)
-- File preview: Markdown (rendered + mermaid + KaTeX), CSV (table), code (syntax highlighted), HTML (sandboxed iframe), PDF (pdf.js), images
+- File preview: Markdown (rendered through the shared safe renderer, `core/markdown.ts`, + mermaid + KaTeX), CSV (table), code (syntax highlighted; the lined view shows the first 3000 lines with a "Show all N lines" button), HTML (sandboxed iframe), PDF (pdf.js), images. pdf.js, mermaid and highlight.js load on first use, not at startup.
 - Text editor with syntax highlighting, undo stack, save button
 - File operations: create file/folder, rename, delete, upload, download
 - File info panel: path (tap to copy), type, size, modified, permissions
@@ -84,6 +84,9 @@ Both rules are implemented once in `src/lib/files/persisted-list.ts`
 - Base64 upload uses chunked encoding (8192 bytes/chunk) to avoid stack overflow
 - Files > 5 MB (or not previewable by mime/name) open the info page instead of auto-loading preview; user confirms via preview button to avoid heavy transfers on mobile
 - Markdown preview resolves relative image paths, infers MIME from image extension (not parent file)
+- Markdown preview escapes raw HTML in the file (a README's `<img onerror>` is text, not script); inline HTML badges/logos therefore show as source
+- A text file over 3000 lines previews its head; "Show all N lines" renders the rest (one DOM row per line — the cap keeps a 512 KB log from freezing a phone)
+- Code highlighting arrives after the first-use load of highlight.js; the lines are readable (escaped, unhighlighted) in the meantime
 - HTML preview iframe: `allow-same-origin` only, NO `allow-scripts` (sandbox escape prevention)
 - HTML preview installs a parent-owned capture handler in the sandbox document
   so links open externally even though iframe click events cannot reach App
