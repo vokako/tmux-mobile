@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, touchContextMenu, perLineOf } from './hub.ts';
+import { TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, touchContextMenu, perLineOf, modelLabel } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -1276,4 +1276,15 @@ test('perLine is MEASURED from the real line, never assumed (board #53 review)',
   // a sliver of a column still shows words, a wall of glass still folds.
   assert.equal(perLineOf(40, 9), 16, 'floor: never fewer than 16 units');
   assert.equal(perLineOf(9000, 3), 240, 'cap: never more than 240 units');
+});
+
+test('modelLabel drops vendor and region prefixes, keeps the model id', () => {
+  assert.equal(modelLabel('openai.gpt-5.6-sol'), 'gpt-5.6-sol');
+  assert.equal(modelLabel('xai.grok-4.6'), 'grok-4.6');
+  assert.equal(modelLabel('global.anthropic.claude-fable-5-1'), 'claude-fable-5-1');
+  assert.equal(modelLabel('us.xai.grok-4.6'), 'grok-4.6');
+  assert.equal(modelLabel('gpt-5.6-sol'), 'gpt-5.6-sol', 'no prefix, unchanged');
+  assert.equal(modelLabel('Fable 5.1'), 'Fable 5.1', 'a display name is not dotted-prefixed');
+  assert.equal(modelLabel('gpt-5.6'), 'gpt-5.6', 'a version dot is not a prefix');
+  assert.equal(modelLabel('openai.'), 'openai.', 'a bare prefix is left alone rather than emptied');
 });

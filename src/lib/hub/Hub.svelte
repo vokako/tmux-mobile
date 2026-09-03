@@ -32,7 +32,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { sortRows } from '../projects/projects.ts';
-  import { TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, touchContextMenu, perLineOf } from './hub.ts';
+  import { TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, touchContextMenu, perLineOf, modelLabel } from './hub.ts';
   import { notifyNews, isAway, roomProjectName } from './notifications.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
@@ -1231,7 +1231,7 @@
   function vitalsLine(v) {
     if (!v) return '';
     const parts = [];
-    if (v.model) parts.push(v.model);
+    if (v.model) parts.push(modelLabel(v.model));
     if (v.context_pct != null) parts.push(`${v.context_pct}% ctx`);
     if (v.effort) parts.push(v.effort);
     if (v.branch) parts.push(v.branch);
@@ -1246,9 +1246,11 @@
    * menu's header line, next to context and branch (owner, 2026-08-26: "只展示
    * 模型名字就可以了 … Effort 只要在我点击额外展开时再去展示"); branch and cwd
    * are project-wide, so they too stay in the tooltip and the menu — repeating
-   * them on every card would be chrome, not data. */
+   * them on every card would be chrome, not data. The provider prefix
+   * (`openai.`, `xai.`) is dropped too — `modelLabel` — it is the route, not the
+   * model, and the card has no room for it (owner, 2026-09-03). */
   function cardVitals(v) {
-    return v?.model ?? '';
+    return v?.model ? modelLabel(v.model) : '';
   }
 
   // ── The card's interaction state machine (board #3, owner): a click on an

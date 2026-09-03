@@ -1565,3 +1565,20 @@ export function perLineOf(contentPx: number, glyphPx: number): number {
   if (!Number.isFinite(contentPx) || !Number.isFinite(glyphPx) || contentPx <= 0 || glyphPx <= 0) return 80;
   return Math.min(240, Math.max(16, Math.floor(contentPx / glyphPx)));
 }
+
+/** The model as the CARD shows it: the vendor/routing prefixes a provider id
+ * carries — `openai.gpt-5.6-sol`, `xai.grok-4.6`, `us.anthropic.claude-…`,
+ * `global.openai.gpt-5.6-luna` — are facts about the route, not the model, and
+ * on a 4-across phone row they eat the characters that tell models apart
+ * (owner, 2026-09-03: "agent卡片显示的前缀可以省略掉"). Only known vendor and
+ * region words are dropped, so `gpt-5.6-sol` and `Fable 5.1` pass unchanged
+ * and a dotted version (`gpt-5.6`) is never mistaken for a prefix. */
+const MODEL_PREFIXES = new Set(['openai', 'anthropic', 'xai', 'amazon', 'meta', 'us', 'eu', 'apac', 'global']);
+export function modelLabel(model: string): string {
+  let s = model.trim();
+  for (;;) {
+    const dot = s.indexOf('.');
+    if (dot <= 0 || !MODEL_PREFIXES.has(s.slice(0, dot)) || dot === s.length - 1) return s;
+    s = s.slice(dot + 1);
+  }
+}
