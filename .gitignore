@@ -55,3 +55,4 @@ crew/__pycache__/
 /agent-team-page/
 # NFS silly-rename leftovers from files deleted while open.
 .nfs.*
+/.claude/

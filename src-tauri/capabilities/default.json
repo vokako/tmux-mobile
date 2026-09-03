@@ -23,7 +23,14 @@
     "notification:default",
     {
       "identifier": "opener:allow-open-path",
-      "allow": [{ "path": "**" }]
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$DOWNLOAD/**" },
+        { "path": "$DOCUMENT/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$APPCACHE/**" },
+        { "path": "$TEMP/**" }
+      ]
     },
     {
       "identifier": "opener:allow-open-url",

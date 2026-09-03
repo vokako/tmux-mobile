@@ -43,6 +43,28 @@ Tauri opens links through `plugin-opener`; browser mode uses a separate
 `noopener` tab. A Tauri opener error is reported and never falls back to
 `window.open`, which could create another in-app WebView.
 
+### Content Security Policy and opener scope
+
+`tauri.conf.json` sets a CSP with `script-src 'self'` and no `'unsafe-inline'`
+for scripts (2026-09-03; it was `null`). The webview renders untrusted text
+through `{@html}` — agent chat markdown, repository READMEs, mermaid SVG, KaTeX —
+and `withGlobalTauri` exposes IPC on `window`. Escaping is the first line of
+defence (`core/markdown.ts`); the CSP is the second: an escaping bug becomes a
+broken image, not a script with IPC access. Inline STYLES stay allowed because
+xterm, KaTeX and mermaid all emit them. `connect-src` allows any `ws:`/`wss:`/
+`http:`/`https:` host because the server address is user-entered, plus
+`ipc: http://ipc.localhost` for Tauri's IPC. Bundled index.html has no inline
+script (one `<script type="module" src>`), so nothing legitimate is blocked.
+The policy governs only the Tauri webview; the browser/PWA build has no CSP
+header today.
+
+The opener capability (`capabilities/default.json`) was `path: "**"`. It exists
+for exactly one call — opening the file the user just saved through the save
+dialog — so it is now scoped to `$HOME`, `$DOWNLOAD`, `$DOCUMENT`, `$DESKTOP`,
+`$APPCACHE` and `$TEMP`. Android never uses it (`AndroidFileOpener`). A save
+outside those trees still succeeds; only the "open it" button reports an
+error, which is the right failure.
+
 ### Path Traversal
 All filenames from remote servers sanitized with `sanitize_filename()` (Rust `Path::file_name()`) before joining to download directory.
 
