@@ -123,6 +123,17 @@ later step's rebuild.
 The reverse direction, `capture.rs`, is why nobody hand-writes a project: a
 20-second loop folds live tmux back into the declaration.
 
+That tick is blocking work — tmux subprocesses (and the `ps` behind
+`list_panes`), a `launch.json` read per window, SQLite — so `capture_loop` runs
+it on tokio's blocking pool, and `capture_once` splits it in two (2026-09-03
+review): observe every live session FIRST with no lock held, then take the store
+lock once to fold. Every RPC goes through the same `with_store` mutex, so
+observing under the lock stalled each of them for the length of the tmux walk;
+now the lock covers a few statements per project. A project deleted between the
+two phases is skipped rather than failing the tick. `models::list` follows the
+same rule for its cache: the ~3 s `--list-models` fetch runs outside the lock,
+because every registry save validates through it.
+
 ### Renaming moves the session too, and never the room
 
 `project_rename` (RPC, `projects::rename`, `tmm project rename <session> --name`)

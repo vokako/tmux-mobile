@@ -28,19 +28,25 @@ fn cache() -> &'static Cache {
 }
 
 /// The model ids `backend` accepts, or `None` when we cannot find out.
+///
+/// The cache lock is held for the lookup and for the insert, never across
+/// `fetch`: that is a ~3 s CLI round trip, and every registry save validates
+/// through here, so one hung `--list-models` used to serialise every save
+/// behind it. Two concurrent misses may both fetch — a rare 3 s, not a bug.
 pub fn list(backend: &str) -> Option<Vec<String>> {
-    if let Ok(mut c) = cache().lock() {
+    if let Ok(c) = cache().lock() {
         if let Some((_, at, models)) = c.iter().find(|(b, ..)| b == backend) {
             if at.elapsed() < TTL {
                 return Some(models.clone());
             }
         }
-        let fetched = fetch(backend)?;
+    }
+    let fetched = fetch(backend)?;
+    if let Ok(mut c) = cache().lock() {
         c.retain(|(b, ..)| b != backend);
         c.push((backend.to_string(), Instant::now(), fetched.clone()));
-        return Some(fetched);
     }
-    fetch(backend)
+    Some(fetched)
 }
 
 /// Reject a model the backend would silently ignore. An empty model means
