@@ -417,17 +417,21 @@
   }
 
   function onKeydown(e) {
-    // Cmd/Ctrl+Enter sends. A bare Enter inserts a newline (multi-line input),
-    // and crucially does NOTHING while an IME is composing — a Chinese IME uses
-    // Enter to confirm a candidate, and intercepting it would both eat that
-    // confirmation and fire a premature send. `isComposing` (and the legacy
-    // keyCode 229) guard against that.
+    // The SAME rule as the Hub composer: Enter sends, Shift+Enter is the
+    // newline, Cmd/Ctrl+Enter also sends. This composer shipped inverted (Enter
+    // = newline, Cmd/Ctrl+Enter = send) against its own requirements doc, so
+    // the two chat inputs disagreed about the most-pressed key (review,
+    // 2026-09-03). On a touch device a bare Enter stays a newline — the soft
+    // keyboard has no modifier and the send button is the primary path there.
+    // Nothing happens while an IME is composing: a Chinese IME uses Enter to
+    // confirm a candidate, and intercepting it would both eat that
+    // confirmation and fire a premature send (`isComposing`, legacy 229).
     if (e.isComposing || e.keyCode === 229) return;
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      send();
-    }
-    // bare Enter → default behavior (newline); textarea auto-grows via autogrow.
+    if (e.key !== 'Enter') return;
+    if (e.metaKey || e.ctrlKey) { e.preventDefault(); send(); return; }
+    if (e.shiftKey || layout.isTouchDevice) return; // newline
+    e.preventDefault();
+    send();
   }
 
   // Grow with content. Desktop keeps the user's dragged base height; mobile

@@ -66,6 +66,16 @@ top-edge resize separator; its base height persists in
 `localStorage.tmux_team_composeh`. Mobile ignores that preference so the soft
 keyboard always gets the compact auto-growing composer.
 
+Its keys are the Hub composer's keys, not a dialect of their own: **Enter
+sends, Shift+Enter inserts the newline, Cmd/Ctrl+Enter also sends**, and a
+composing IME Enter (`isComposing` / keyCode 229) is never intercepted. On a
+touch device a bare Enter stays a newline — the soft keyboard has no modifier
+and the round send button is the primary path there (same as the Hub's
+`compact` branch). This composer shipped inverted (Enter = newline,
+Cmd/Ctrl+Enter = send) against `docs/requirements/pages/team.md`; two chat
+inputs that disagree about the most-pressed key is the kind of seam the design
+language exists to remove (review, 2026-09-03). `Team.source.test.ts` pins it.
+
 The decisive choice: **vendor agora as an in-process, desktop-only sub-crate and
 share ONE `Bus` between the agents' MCP daemon and the phone's WS server.**
 
