@@ -132,7 +132,13 @@ auth branch — do not rely on the send task's silent fallback.
   (each half by exactly one task) and funnel work through a channel.
 - `tokio::task::spawn` around a `spawn_blocking(...).await` is the
   pattern — it lets the async receiver return immediately while the
-  blocking work happens on the blocking threadpool.
+  blocking work happens on the blocking threadpool. It applies to EVERY
+  synchronous handler, not just `handle_request`: the `team_`, `hub_` and
+  `agent_notifications_`/`agent_hooks_` arms do rusqlite reads, spawn
+  tmux, and `send_command` sleeps 200 ms per delivery — run inline in the
+  business task they parked a worker thread for the whole `@all` fan-out,
+  stalling every other connection's pushes (found in the 2026-09-03
+  review; only the subscription-map edits, which do no I/O, stay async).
 - The send task must receive an explicit `InitCipher` message rather
   than reading a shared cipher via `Arc<Mutex<...>>`: the latter
   re-introduces the ordering problem. The former guarantees that by the

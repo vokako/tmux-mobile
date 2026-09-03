@@ -545,7 +545,16 @@ where
                 let team_c = team.clone();
                 let notifications_c = notifications.clone();
                 tokio::spawn(async move {
-                    let response = match req.method.as_str() {
+                    // Every handler below that touches SQLite, spawns tmux, or
+                    // sleeps (send_command settles 200 ms per delivery) is
+                    // synchronous and runs on the blocking pool: a worker
+                    // thread that sits in `tmux send-keys` for an `@all`
+                    // delivery would otherwise stall every connection's
+                    // pushes and pings for the duration. Only the subscription
+                    // map edits stay on the async side — they hold an async
+                    // mutex and do no I/O.
+                    let method = req.method.clone();
+                    let response = match method.as_str() {
                         "subscribe" => {
                             let mut map = subs_c.lock().await;
                             handle_subscribe(&req.params, &mut map)
@@ -554,9 +563,15 @@ where
                             let mut map = subs_c.lock().await;
                             handle_unsubscribe(&req.params, &mut map)
                         }
-                        m if m.starts_with("team_") => handle_team_request(&req, team_c.as_deref()),
-                        m if m.starts_with("hub_") => super::hub_rpc::handle_hub_request(&req, team_c.as_deref(), Some(&notifications_c)),
-                        m if m.starts_with("agent_notifications_") || m.starts_with("agent_hooks_") => handle_notification_request(&req, &notifications_c),
+                        m if m.starts_with("team_") => tokio::task::spawn_blocking(move || handle_team_request(&req, team_c.as_deref()))
+                            .await
+                            .unwrap_or_else(|e| Response::err(None, ERR_INTERNAL, format!("task panic: {}", e))),
+                        m if m.starts_with("hub_") => tokio::task::spawn_blocking(move || super::hub_rpc::handle_hub_request(&req, team_c.as_deref(), Some(&notifications_c)))
+                            .await
+                            .unwrap_or_else(|e| Response::err(None, ERR_INTERNAL, format!("task panic: {}", e))),
+                        m if m.starts_with("agent_notifications_") || m.starts_with("agent_hooks_") => tokio::task::spawn_blocking(move || handle_notification_request(&req, &notifications_c))
+                            .await
+                            .unwrap_or_else(|e| Response::err(None, ERR_INTERNAL, format!("task panic: {}", e))),
                         "resize_pane" => {
                             let id = req.id;
                             let p = &req.params;
