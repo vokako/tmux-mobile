@@ -5,29 +5,18 @@ import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('./Terminal.svelte', import.meta.url), 'utf8');
 
-test('WebKit Escape-cancel blur gives focus straight back to the terminal', () => {
-  // WebKit's default action for Escape blurs the focused element and IGNORES
-  // preventDefault — the first Esc sent \x1b but dropped focus, and every key
-  // after it landed nowhere (owner, 2026-08-26, drawer AND standalone page).
-  // The guard's signature is load-bearing: blur + no relatedTarget (nobody
-  // took the focus) + a fresh Escape keydown.
-  assert.match(source, /if \(e\.relatedTarget \|\| Date\.now\(\) - lastEscAt > 250\) return;/u);
-  assert.match(source, /if \(e\.key === 'Escape'\) lastEscAt = Date\.now\(\);/u);
-});
-
-test('bare Escape is CLAIMED in capture and encoded by hand (board #20)', () => {
-  // Whether the \x1b reached the pane used to depend on whose keydown ran
-  // before WebKit's un-preventable Escape blur — "esc 没有发送到后端，而是
-  // 让当前框失去焦点" (owner, 2026-08-30). The hardware-capture handler now
-  // claims the bare key exactly like the Ctrl/Alt combos, so the send never
-  // depends on where focus lands; mid-IME Escape stays with the composition.
+test('bare Escape is CLAIMED in capture and encoded by hand; no focus guards (board #20, closed)', () => {
+  // The hardware-capture handler claims the bare key exactly like the
+  // Ctrl/Alt combos, so the \x1b send never depends on whose keydown runs
+  // first; mid-IME Escape stays with the composition.
   assert.match(source, /!event\.isComposing && event\.key === 'Escape'/u, 'claimed in onHardwareKeydown');
   assert.match(source, /&& !event\.ctrlKey && !event\.altKey && !event\.metaKey/u, 'bare only — combos keep their encoder');
-  // The claim's stopImmediatePropagation KILLS the blur guard's own keydown
-  // recorder (same node, same phase, registered later), so the claim must
-  // stamp lastEscAt itself — or WebKit's un-preventable blur reads as "not
-  // Escape's doing" and focus is never given back (the #20 reopen).
-  assert.match(source, /if \(bareEsc\) lastEscAt = Date\.now\(\);/u, 'the claim feeds the blur guard');
+  // "Esc 让当前框失去焦点" (2026-08-26 … 09-03) was chased through three rounds
+  // of blur guards and one native (objc2) patch before the owner traced it to
+  // a browser EXTENSION blurring inputs on Esc. All of it is gone (owner:
+  // "避免我们过度修复了"); this pins the absence so it does not creep back.
+  assert.doesNotMatch(source, /lastEscAt|onEscBlur|onEscKeydown|escGuardTa|hasFocus\(\)/u, 'no Escape focus guard');
+  assert.match(source, /BROWSER EXTENSION/u, 'the cause is recorded where the next reader looks');
 });
 
 test('the retired unread-notification dots stay retired (2026-09-01)', () => {

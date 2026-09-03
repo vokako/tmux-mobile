@@ -754,27 +754,22 @@
     // Touch capability is not a reliable hardware-keyboard test: desktop
     // Chromium and WKWebView may expose touch APIs, and phones can have a
     // physical keyboard. App shortcuts run first in window capture.
-    // Shared with the WebKit blur guard below: the capture claim STOPS the
-    // guard's own keydown recorder (same node, same phase, registered later),
-    // so the claim must stamp the time itself — or the un-preventable blur
-    // that follows reads as "not Escape's doing" and focus is never returned
-    // (board #20 reopen: the byte was sent, the focus still dropped).
-    let lastEscAt = 0;
     const onHardwareKeydown = (event) => {
-      // Bare Escape is claimed HERE, same as the Ctrl/Alt combos: WebKit
-      // (Safari, the macOS app's WKWebView) gives Escape a DEFAULT ACTION
-      // that ignores preventDefault — it "cancels" the focused element,
-      // blurring xterm's hidden textarea — and whether the \x1b even got
-      // sent first depended on whose keydown ran before the blur (board
-      // #20: "esc 没有发送到后端，而是让当前框失去焦点"). Claiming the key
-      // in window-capture and encoding it by hand takes the browser's
-      // default out of the loop entirely: the send never depends on where
-      // focus lands. IME composition keeps its Escape (cancelling the
-      // composition is what the user meant); the blur guard below stays as
-      // the safety net for anything else WebKit invents.
+      // Bare Escape is claimed HERE, same as the Ctrl/Alt combos, and encoded
+      // by hand — the send never depends on whose keydown runs first or on
+      // where focus lands afterwards. IME composition keeps its Escape
+      // (cancelling the composition is what the user meant).
+      //
+      // History (board #20, three rounds 2026-08-26 … 09-03): "Esc 让当前框失去
+      // 焦点" on the desktop was chased as a WebKit default action, then as a
+      // native first-responder loss — and finally traced by the owner to a
+      // BROWSER EXTENSION on their machine (the classic: a keyboard-navigation
+      // extension blurs the focused input on Esc, before the page sees the
+      // key). Nothing in this file can or should defend against that; the
+      // blur guards were removed (owner: "避免我们过度修复了"). If Esc drops
+      // focus again, check the browser's extensions before this code.
       const bareEsc = !event.isComposing && event.key === 'Escape'
         && !event.ctrlKey && !event.altKey && !event.metaKey;
-      if (bareEsc) lastEscAt = Date.now();
       const data = bareEsc ? '\x1b' : encodeTerminalShortcut(event);
       if (!data) return;
       event.preventDefault();
@@ -785,9 +780,6 @@
     termEl.addEventListener('keydown', onHardwareKeydown, { capture: true });
 
     let focusTerm = null;
-    let escGuardTa = null;
-    let onEscKeydown = null;
-    let onEscBlur = null;
     if (!isMobile) {
       // Desktop has no on-screen keyboard / toggle, so focus the xterm sink
       // on click so ordinary typing (and our handler) works. Auto-focus on
@@ -796,25 +788,6 @@
       focusTerm = () => { try { term.focus(); } catch {} };
       termEl.addEventListener('mousedown', focusTerm);
       if (active) requestAnimationFrame(focusTerm);
-
-      // WebKit (Safari, the macOS app's WKWebView) gives Escape a DEFAULT
-      // ACTION that ignores preventDefault: it "cancels" the focused element,
-      // i.e. blurs xterm's hidden textarea. The first Esc still sends \x1b,
-      // but focus is gone and every key after it lands nowhere — pressing Esc
-      // read as "exiting the terminal" (owner, 2026-08-26, drawer AND page).
-      // Chromium never does this (verified live: focus survives, ^[ arrives).
-      // Detect the signature — a blur immediately after an Escape keydown
-      // with relatedTarget null (nobody TOOK the focus, it was dropped) —
-      // and give the focus straight back. A real focus move (click into the
-      // composer, Tab) always has a relatedTarget or no fresh Escape.
-      onEscKeydown = (e) => { if (e.key === 'Escape') lastEscAt = Date.now(); };
-      onEscBlur = (e) => {
-        if (e.relatedTarget || Date.now() - lastEscAt > 250) return;
-        requestAnimationFrame(() => { try { term?.focus(); } catch {} });
-      };
-      escGuardTa = termEl.querySelector('.xterm-helper-textarea');
-      termEl.addEventListener('keydown', onEscKeydown, { capture: true });
-      escGuardTa?.addEventListener('blur', onEscBlur);
     }
 
     // Uses outer endTouchScrollTimer so unlockKeyboard() and effect cleanup can clear it.
@@ -1832,8 +1805,6 @@
       termEl.removeEventListener('keydown', onHardwareKeydown, { capture: true });
       if (onTextInsert) termEl.removeEventListener('input', onTextInsert, { capture: true });
       if (focusTerm) termEl.removeEventListener('mousedown', focusTerm);
-      if (onEscKeydown) termEl.removeEventListener('keydown', onEscKeydown, { capture: true });
-      if (onEscBlur) escGuardTa?.removeEventListener('blur', onEscBlur);
       // Server's resize_tracker auto-restores this window via `resize-window -A` on WS disconnect
       unsubscribe(target);
       removePaneOutputListener(target, onPaneOutputCb);
