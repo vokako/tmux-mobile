@@ -130,7 +130,7 @@ test('collapsing the switcher hides the chips, not the desktop page head', () =>
   // The collapsed state is the DEFAULT (tmux_winswitcher unset), so dropping
   // the bar entirely made a fresh desktop install the only page in the app
   // with no header (measured 2026-08-19: no .win-bar, xterm at top 0).
-  assert.match(source, /\{#if isMobile\}\s*<div class="win-collapsed-anchor">/u);
+  assert.match(source, /\{#if isMobile\}\s*<div class="win-collapsed-anchor appear">/u);
   const desktopCollapsed = /\{:else\}\s*<div class="win-bar page-head">[\s\S]*?<\/div>/u.exec(source)?.[0] ?? '';
   assert.match(desktopCollapsed, /<h1 class="win-title"/u);
   assert.match(desktopCollapsed, /chevron="left"/u, 'the chip stays the expand control');

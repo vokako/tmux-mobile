@@ -8,6 +8,8 @@
   import PanePicker from '../sessions/PanePicker.svelte';
   import ContextMenu from '../ui/ContextMenu.svelte';
   import { anchorOf } from '../ui/placement.ts';
+  import { flip } from 'svelte/animate';
+  import { moveMs } from '../ui/motion.ts';
   import { t } from '../core/i18n.svelte.ts';
   import { detectAgent, paneIsAgent, paneAgent, AGENTS } from '../core/agents.ts';
   import { copyText } from '../core/clipboard.ts';
@@ -2045,7 +2047,7 @@
 
 <div class="terminal">
   {#if toastMsg}
-    <div class="toast">{toastMsg}</div>
+    <div class="toast appear">{toastMsg}</div>
   {/if}
   {#if showSwitcher}
     {#if showWindowCmd || embedded}
@@ -2101,8 +2103,12 @@
             onClose={() => showPanePicker = false}
           />
         {/if}
-        <div class="win-bar-scroll">
-          {#each windows as w}
+        <!-- Motion (motion.md): the strip fades in when the bar expands; a
+             chip fades in when its window appears and MOVES when tmux
+             renumbers or reorders (keyed by window index, animate:flip).
+             Nothing here touches .term-wrap — only the chrome moves. -->
+        <div class="win-bar-scroll appear">
+          {#each windows as w (w.window)}
             {@const wAgent = paneAgent(w)}
             <!-- An agent window used to render as a bare icon, which told you
                  a kiro was there but not WHICH agent — unreadable in a project
@@ -2110,19 +2116,21 @@
                  `<index>:<name>`, the same coordinate the project drawer's
                  pills use; the icon stays as the backend's mark. A shell keeps
                  its command as the name, which is what identifies it. -->
-            <AgentChip
-              agent={wAgent}
-              label={`${w.window}:${wAgent ? w.window_name : (w.current_command || w.window_name)}`}
-              variant={String(w.window) === currentWindow ? 'active' : 'default'}
-              title={`${w.window}: ${w.window_name}${w.current_command ? ` · ${w.current_command}` : ''}`}
-              onclick={(e) => {
-                e.stopPropagation();
-                if (String(w.window) !== currentWindow && onSwitchPane) {
-                  preparePaneSwitch();
-                  onSwitchPane(`${w.session}:${w.window}.${w.pane}`, w.current_command);
-                }
-              }}
-            />
+            <div class="win-chip appear" animate:flip={{ duration: moveMs() }}>
+              <AgentChip
+                agent={wAgent}
+                label={`${w.window}:${wAgent ? w.window_name : (w.current_command || w.window_name)}`}
+                variant={String(w.window) === currentWindow ? 'active' : 'default'}
+                title={`${w.window}: ${w.window_name}${w.current_command ? ` · ${w.current_command}` : ''}`}
+                onclick={(e) => {
+                  e.stopPropagation();
+                  if (String(w.window) !== currentWindow && onSwitchPane) {
+                    preparePaneSwitch();
+                    onSwitchPane(`${w.session}:${w.window}.${w.pane}`, w.current_command);
+                  }
+                }}
+              />
+            </div>
           {/each}
 
           <AgentChip
@@ -2185,7 +2193,7 @@
         terminal needs every pixel of height.
       -->
       {#if isMobile}
-        <div class="win-collapsed-anchor">
+        <div class="win-collapsed-anchor appear">
           <AgentChip
             agent={curAgent}
             label={curAgent ? '' : (cur?.current_command || cur?.window_name || '?')}
@@ -2212,19 +2220,19 @@
     <div class="xterm-wrap" class:keep-rows={keepRowsOnKeyboard} bind:this={termEl}></div>
     {#if isMobile && selection && selUI}
       {#if selUI.startInView}
-        <div class="sel-handle sel-handle-start" style="left: {selUI.startX}px; top: {selUI.startY}px; --cell-h: {selUI.cellH}px; --dot-shift-x: {selUI.startDotShiftX}px;" aria-hidden="true"></div>
+        <div class="sel-handle sel-handle-start appear" style="left: {selUI.startX}px; top: {selUI.startY}px; --cell-h: {selUI.cellH}px; --dot-shift-x: {selUI.startDotShiftX}px;" aria-hidden="true"></div>
       {/if}
       {#if selUI.endInView}
-        <div class="sel-handle sel-handle-end" style="left: {selUI.endX}px; top: {selUI.endY}px; --cell-h: {selUI.cellH}px; --dot-shift-x: {selUI.endDotShiftX}px;" aria-hidden="true"></div>
+        <div class="sel-handle sel-handle-end appear" style="left: {selUI.endX}px; top: {selUI.endY}px; --cell-h: {selUI.cellH}px; --dot-shift-x: {selUI.endDotShiftX}px;" aria-hidden="true"></div>
       {/if}
       {#if selUI.toolbarVisible}
-        <div class="sel-toolbar" class:below={selUI.toolbarBelow} style="left: {selUI.toolbarX}px; top: {selUI.toolbarY}px;">
+        <div class="sel-toolbar appear" class:below={selUI.toolbarBelow} style="left: {selUI.toolbarX}px; top: {selUI.toolbarY}px;">
           <button class="sel-toolbar-btn" onpointerdown={(e) => { e.stopPropagation(); e.preventDefault(); copySelection(); }}>{t('copy')}</button>
         </div>
       {/if}
     {/if}
     {#if !termAtBottom}
-      <button class="to-tail scroll-btn" class:news={hasNewContent} onclick={() => term?.scrollToBottom()} aria-label={hasNewContent ? t('newOutput') : t('scrollToBottom')}>
+      <button class="to-tail scroll-btn" class:news={hasNewContent} class:appear-pop={!termAtBottom} onclick={() => term?.scrollToBottom()} aria-label={hasNewContent ? t('newOutput') : t('scrollToBottom')}>
         <Icon name="arrow-down" size={16} />
       </button>
     {/if}
@@ -2311,6 +2319,10 @@
     right: 4px;
     z-index: 10;
   }
+  /* The flip wrapper around a chip: a box for animate:flip to move (the chip
+     itself is a component). Same flex posture as the chip so the strip does
+     not change shape. */
+  .win-chip { display: flex; flex: none; }
 
   /* Expanded: horizontal tab bar pinned to the top of the Terminal view.
      Holds current-session windows; chip visuals live in AgentChip.
@@ -2360,6 +2372,7 @@
     cursor: pointer;
     display: flex; align-items: center; justify-content: center;
     -webkit-tap-highlight-color: transparent;
+    transition: color var(--t-fast), background var(--t-fast);
   }
   .win-bar-collapse:active { color: var(--accent); background: var(--surface2); }
 
@@ -2393,9 +2406,10 @@
     pointer-events: none;
   }
 
+  /* No transition here, ever: this is xterm's container (motion.md
+     principle 9). The old `margin-top 0.15s` had one writer, which set 0. */
   .xterm-wrap {
     height: 100%;
-    transition: margin-top 0.15s ease;
   }
   /* Keyboard as an overlay (agent TUIs only — see keepRowsOnKeyboard).
      `html.keyboard-open` is toggled by App.svelte in the same layout pass that
@@ -2596,6 +2610,10 @@
     -webkit-tap-highlight-color: transparent;
     display: flex; align-items: center; justify-content: center;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+    /* Colour cross-fades (covers the armed Ctrl pill and the keyboard
+       toggle's highlight); `transform` is deliberately NOT in the list so
+       the press translateY(1px) lands instantly under the finger. */
+    transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
   }
   .shortcuts button:active,
   .shortcuts :global(button.pressed) {

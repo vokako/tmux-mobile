@@ -25,3 +25,7 @@ with `extended-keys on`, tmux DROPS raw C0 bytes (`send-keys -l $'\x03'`) sent t
 ### xterm DA filtering
 
 Filter device attribute responses before forwarding to tmux.
+
+### Motion: the terminal's box never animates, only the chrome around it
+
+[motion.md](../features/motion.md) principle 9. `.term-wrap`, `.xterm-wrap` and a split `.cell`'s body carry no transform, transition or animation — a resting transform makes them a containing block (every fixed popover breaks) and a transitioning size makes the fit run on a mid-flight measurement; the retired `.xterm-wrap { transition: margin-top }` had one writer and it set 0. What moves is the chrome: the toast, the selection handles and toolbar and the expanded chip strip fade in (`.appear`; their positions stay inline and instant), the to-tail button pops (`.appear-pop`), the shortcut pills cross-fade colour on `--t-fast` with `transform` kept OUT of the list so the press `translateY(1px)` lands under the finger, and the window chips are keyed by window index with `animate:flip` on `moveMs()` so a renumbering moves the chip instead of repainting it. The collapse control is still a cut: the expanded bar and the collapsed chip are two different elements in two `{#if}` branches (pinned by `Terminal.source.test.ts`), so there is no one glyph to turn. A split cell's frame (`SplitView .cell`) cross-fades only its border colour and ring — colour is neither a containing block nor a size.
