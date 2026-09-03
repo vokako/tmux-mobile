@@ -774,7 +774,13 @@
       // the safety net for anything else WebKit invents.
       const bareEsc = !event.isComposing && event.key === 'Escape'
         && !event.ctrlKey && !event.altKey && !event.metaKey;
-      if (bareEsc) lastEscAt = Date.now();
+      if (bareEsc) {
+        lastEscAt = Date.now();
+        // keyCode 229 = WebKit says the INPUT METHOD answered this key
+        // (EventHandler::keyEvent) — the case preventDefault cannot reach.
+        window.__dbg?.(`kb: esc claimed keyCode=${event.keyCode} pageFocus=${document.hasFocus()}`);
+        armEscFocusWatch?.();
+      }
       const data = bareEsc ? '\x1b' : encodeTerminalShortcut(event);
       if (!data) return;
       event.preventDefault();
@@ -786,8 +792,10 @@
 
     let focusTerm = null;
     let escGuardTa = null;
-    let onEscKeydown = null;
     let onEscBlur = null;
+    let onEscWindowBlur = null;
+    let armEscFocusWatch = null;
+    let escWatchTimers = [];
     if (!isMobile) {
       // Desktop has no on-screen keyboard / toggle, so focus the xterm sink
       // on click so ordinary typing (and our handler) works. Auto-focus on
@@ -797,24 +805,67 @@
       termEl.addEventListener('mousedown', focusTerm);
       if (active) requestAnimationFrame(focusTerm);
 
-      // WebKit (Safari, the macOS app's WKWebView) gives Escape a DEFAULT
-      // ACTION that ignores preventDefault: it "cancels" the focused element,
-      // i.e. blurs xterm's hidden textarea. The first Esc still sends \x1b,
-      // but focus is gone and every key after it lands nowhere — pressing Esc
-      // read as "exiting the terminal" (owner, 2026-08-26, drawer AND page).
-      // Chromium never does this (verified live: focus survives, ^[ arrives).
-      // Detect the signature — a blur immediately after an Escape keydown
-      // with relatedTarget null (nobody TOOK the focus, it was dropped) —
-      // and give the focus straight back. A real focus move (click into the
-      // composer, Tab) always has a relatedTarget or no fresh Escape.
-      onEscKeydown = (e) => { if (e.key === 'Escape') lastEscAt = Date.now(); };
-      onEscBlur = (e) => {
-        if (e.relatedTarget || Date.now() - lastEscAt > 250) return;
-        requestAnimationFrame(() => { try { term?.focus(); } catch {} });
+      // Escape on desktop WebKit (the macOS app's WKWebView) — the fourth
+      // round, and the first that reads the evidence right. What Escape
+      // drops is NOT the DOM focus: AppKit turns the key into a
+      // `cancelOperation:` command, WebKit hands the key to the input method
+      // BEFORE the DOM sees it (so preventDefault cannot stop the command —
+      // WebCore says so in EventHandler::keyEvent), the command walks the
+      // native responder chain and the webview stops being the window's
+      // first responder. WebKit then fires `blur` on the focused element with
+      // relatedTarget null — the same signature as a DOM blur — while
+      // document.activeElement STAYS the textarea. That is why three rounds
+      // of `term.focus()` changed nothing: focusing the already-focused
+      // element is a no-op, and it cannot restore native focus anyway.
+      //
+      // The command is now answered natively (src-tauri lib.rs,
+      // escape_stays_in_webview) so the walk never starts. This guard is the
+      // safety net for anything else that unfocuses the PAGE after an
+      // Escape: it watches `document.hasFocus()` (false = the webview lost
+      // native focus, whatever the DOM says) at two points after the claim
+      // and on the page-level `blur`, and reclaims through Tauri's
+      // `Webview.setFocus()` (makeFirstResponder on the webview) BEFORE the
+      // DOM focus. Bounded per Escape so a genuine window switch right after
+      // an Escape cannot loop. Everything it sees goes to the debug panel.
+      const ESC_WATCH_MS = 400;
+      const ESC_RECLAIM_MAX = 3;
+      let escReclaims = 0;
+      const nativeFocus = window.__TAURI_INTERNALS__
+        ? () => import('@tauri-apps/api/webview').then(({ getCurrentWebview }) => getCurrentWebview().setFocus())
+        : null;
+      const escRecent = () => Date.now() - lastEscAt <= ESC_WATCH_MS;
+      const reclaimFocus = (why) => {
+        if (!escRecent() || escReclaims >= ESC_RECLAIM_MAX) return;
+        escReclaims++;
+        const pageFocused = document.hasFocus();
+        const ta = termEl?.querySelector('.xterm-helper-textarea');
+        window.__dbg?.(`kb: esc reclaim #${escReclaims} (${why}) pageFocus=${pageFocused} active=${document.activeElement === ta ? 'terminal' : document.activeElement?.tagName}`);
+        const domFocus = () => requestAnimationFrame(() => { try { term?.focus(); } catch {} });
+        if (!pageFocused && nativeFocus) nativeFocus().then(domFocus, domFocus);
+        else domFocus();
       };
+      const escCheck = (label) => () => {
+        if (!escRecent()) return;
+        const ta = termEl?.querySelector('.xterm-helper-textarea');
+        const ok = document.hasFocus() && document.activeElement === ta;
+        window.__dbg?.(`kb: esc check ${label} ok=${ok}`);
+        if (!ok) reclaimFocus(`check ${label}`);
+      };
+      armEscFocusWatch = () => {
+        escReclaims = 0;
+        for (const t of escWatchTimers) clearTimeout(t);
+        escWatchTimers = [setTimeout(escCheck('60ms'), 60), setTimeout(escCheck('300ms'), 300)];
+      };
+      // The DOM-level signature (blur, nobody took the focus, fresh Escape)
+      // and the page-level one (window blur) both reclaim the same way.
+      onEscBlur = (e) => {
+        if (e.relatedTarget || !escRecent()) return;
+        reclaimFocus('textarea blur');
+      };
+      onEscWindowBlur = () => { if (escRecent()) reclaimFocus('window blur'); };
       escGuardTa = termEl.querySelector('.xterm-helper-textarea');
-      termEl.addEventListener('keydown', onEscKeydown, { capture: true });
       escGuardTa?.addEventListener('blur', onEscBlur);
+      window.addEventListener('blur', onEscWindowBlur);
     }
 
     // Uses outer endTouchScrollTimer so unlockKeyboard() and effect cleanup can clear it.
@@ -1832,8 +1883,9 @@
       termEl.removeEventListener('keydown', onHardwareKeydown, { capture: true });
       if (onTextInsert) termEl.removeEventListener('input', onTextInsert, { capture: true });
       if (focusTerm) termEl.removeEventListener('mousedown', focusTerm);
-      if (onEscKeydown) termEl.removeEventListener('keydown', onEscKeydown, { capture: true });
       if (onEscBlur) escGuardTa?.removeEventListener('blur', onEscBlur);
+      if (onEscWindowBlur) window.removeEventListener('blur', onEscWindowBlur);
+      for (const t of escWatchTimers) clearTimeout(t);
       // Server's resize_tracker auto-restores this window via `resize-window -A` on WS disconnect
       unsubscribe(target);
       removePaneOutputListener(target, onPaneOutputCb);

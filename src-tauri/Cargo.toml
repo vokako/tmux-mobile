@@ -44,7 +44,7 @@ default = ["gui"]
 #
 # `tauri-build` stays a plain build-dependency: it is pure Rust, and build.rs
 # needs it whenever `gui` is on.
-gui = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-fs", "dep:tauri-plugin-opener", "dep:tauri-plugin-notification"]
+gui = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-fs", "dep:tauri-plugin-opener", "dep:tauri-plugin-notification", "dep:objc2"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -84,6 +84,14 @@ tauri-plugin-notification = { version = "2", optional = true }
 # `projects` (state.db) is desktop-only for the same reason: the phone is a
 # client of a desktop server, so it never needs SQLite compiled in. Version
 # pinned to agora's so both link ONE bundled SQLite.
+# macOS only: the Objective-C runtime, to answer AppKit's `cancelOperation:`
+# (Escape) on the WKWebView so it stops there instead of walking the responder
+# chain and dropping the webview's first-responder status (terminal-keyboard.md
+# § Escape on desktop WebKit). Already a transitive dependency of tauri/wry, so
+# this adds no crate; unused (and unbuilt) for `--bin server`.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6", optional = true }
+
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 agora = { path = "crates/agora" }
 rusqlite = { version = "0.32", features = ["bundled"] }
