@@ -77,3 +77,47 @@ test('LaTeX renders in every dialect agents emit; money and code stay prose', ()
   // Placeholders never leak into the output.
   assert.ok(!renderMarkdown('mix `code` and $v=1$ and $$w=2$$').includes('MATH'), 'holes restored');
 });
+
+test('a quote in a bare URL cannot break out of the href attribute', () => {
+  // Reproduced 2026-09-03: `&`/`<` escaping makes TEXT inert, but an href is an
+  // ATTRIBUTE, and a `"` there ends it — the rest of the URL became onclick=.
+  const html = renderMarkdown('see https://a.b/x"onclick="alert(1) now');
+  assert.ok(!/<a[^>]*\bonclick=/u.test(html), `attribute injection: ${html}`);
+  // Still a link, with the quote percent-encoded the way marked's own autolink does.
+  assert.match(html, /<a href="https:\/\/a\.b\/x%22onclick=%22alert\(1\)">/u);
+});
+
+test('links and images only carry http(s), mailto or relative targets', () => {
+  // marked v17 does not sanitize schemes: a javascript: link is a click away
+  // from script in the app origin (the token lives in localStorage).
+  const bads = [
+    'javascript:alert(1)', 'JavaScript:alert(1)', 'vbscript:msgbox',
+    'data:text/html,<script>alert(1)</script>', ' javascript:alert(1)',
+    'java\tscript:alert(1)',
+  ];
+  for (const bad of bads) {
+    const html = renderMarkdown(`[click](${bad})`);
+    assert.ok(!/<a\b/u.test(html), `no anchor for ${JSON.stringify(bad)}: ${html}`);
+    assert.ok(html.includes('click'), `the text survives for ${JSON.stringify(bad)}: ${html}`);
+  }
+  // Entity-encoded colons: the chat path's `&` escape already defuses them
+  // (the browser decodes `&amp;#58;` ONCE, to the literal `&#58;`), and the
+  // scheme guard reads them the way a browser would for any renderer that does
+  // not pre-escape. Either way, what the browser sees is never `javascript:`.
+  for (const bad of ['javascript&#58;alert(1)', 'javascript&#x3a;alert(1)', 'javascript&colon;alert(1)']) {
+    const html = renderMarkdown(`[click](${bad})`);
+    const href = /href="([^"]*)"/u.exec(html)?.[1] ?? '';
+    const seen = href.replace(/&amp;/g, '&');
+    assert.ok(!/^[\s\u0000-\u0020]*javascript:/iu.test(seen), `browser-visible href ${JSON.stringify(seen)} for ${JSON.stringify(bad)}`);
+  }
+  // An image is a reference (rule 13): bytes and scripts are not references.
+  const img = renderMarkdown('![shot](data:image/png;base64,AAAA) and ![x](javascript:alert(1))');
+  assert.ok(!img.includes('<img'), `no image for a non-reference: ${img}`);
+  assert.ok(img.includes('shot'), 'the alt text survives');
+  // Ordinary targets are untouched, including a query string with `&`.
+  assert.match(renderMarkdown('[a](https://x.y/z?p=1&q=2)'), /<a href="https:\/\/x\.y\/z\?p=1&amp;q=2">a<\/a>/u);
+  assert.match(renderMarkdown('[m](mailto:a@b.c)'), /<a href="mailto:a@b\.c">/u);
+  assert.match(renderMarkdown('[rel](docs/x.md)'), /<a href="docs\/x\.md">/u);
+  assert.match(renderMarkdown('![pic](https://x.y/p.png)'), /<img src="https:\/\/x\.y\/p\.png" alt="pic"/u);
+});
+

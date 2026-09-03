@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { marked } from 'marked';
-import './markedSafeUrl.ts'; // side-effect: registers the extension
+import { safeLinkTarget } from './markedSafeUrl.ts'; // side-effect: registers the extension
 
 test('bare URLs stop at CJK / fullwidth characters', () => {
   const html = marked.parse('见 https://host/admin（密码：xyz）') as string;
@@ -12,6 +12,37 @@ test('bare URLs stop at CJK / fullwidth characters', () => {
 test('trailing sentence punctuation is dropped from the link', () => {
   const html = marked.parse('see https://example.com/path.') as string;
   assert.match(html, /<a href="https:\/\/example\.com\/path">/);
+});
+
+test('a quote inside a bare URL is percent-encoded, never an attribute break', () => {
+  const html = marked.parse('see https://a.b/x"onclick="alert(1) now') as string;
+  assert.ok(!/<a[^>]*\bonclick=/u.test(html), html);
+  assert.match(html, /<a href="https:\/\/a\.b\/x%22onclick=%22alert\(1\)">/u);
+});
+
+test('safeLinkTarget reads the scheme the way a browser reads an attribute', () => {
+  for (const ok of ['https://x.y', 'http://x.y/a?b=1&c=2', 'mailto:a@b.c', 'docs/x.md', '#top', '/abs', '']) {
+    assert.ok(safeLinkTarget(ok), `link ${JSON.stringify(ok)}`);
+  }
+  for (const bad of [
+    'javascript:alert(1)', 'JAVASCRIPT:alert(1)', ' javascript:alert(1)', 'java\tscript:alert(1)',
+    'java\nscript:alert(1)', 'javascript&#58;alert(1)', 'javascript&#x3A;alert(1)', 'javascript&colon;alert(1)',
+    'vbscript:x', 'data:text/html,hi', 'file:///etc/passwd', 'C:\\Users', null, undefined,
+  ]) {
+    assert.ok(!safeLinkTarget(bad as any), `link ${JSON.stringify(bad)}`);
+  }
+  // An image may not even be mailto: — it is a reference to bytes elsewhere.
+  assert.ok(safeLinkTarget('https://x.y/p.png', 'image'));
+  assert.ok(safeLinkTarget('shots/p.png', 'image'));
+  assert.ok(!safeLinkTarget('mailto:a@b.c', 'image'));
+  assert.ok(!safeLinkTarget('data:image/png;base64,AAAA', 'image'));
+});
+
+test('a disallowed link renders its text; a disallowed image renders its alt', () => {
+  assert.equal((marked.parse('[click **here**](javascript:alert(1))') as string).trim(), '<p>click <strong>here</strong></p>');
+  assert.equal((marked.parse('![a <b> & c](data:x)') as string).trim(), '<p>a &lt;b&gt; &amp; c</p>');
+  // The default renderer still handles allowed targets, title included.
+  assert.match(marked.parse('[t](https://x.y "hint")') as string, /<a href="https:\/\/x\.y" title="hint">t<\/a>/u);
 });
 
 test('ordinary ASCII URLs are linked whole', () => {
