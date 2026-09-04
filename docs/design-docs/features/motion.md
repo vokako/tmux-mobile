@@ -190,20 +190,36 @@ PanePicker, the Hub agent menu, the server menu and the hover card wear
 
 **Wave 7 — the highlight travels** (#86): phone tab bar (bar), desktop rail
 (vertical bar), Preferences segmented controls and the Board status slider
-(pill), Files/Git tabs, the Hub drawer's view toggle.
+(pill), Files/Git tabs ✓, the Hub drawer's view toggle. Done 2026-09-04 in
+the terminal/Sessions/Files/Projects/Team pass: GitPanel's Status/Log tabs
+and TeamTemplates' template list (both `.slide-pill`). Skipped on purpose:
+the Terminal chip strip (scrolling AgentChips), the Sessions MRU chips and
+the Team header toggles — none is a segmented control.
 
 **Wave 8 — loads unfold** (#86): Hub room switch (skeleton bubbles + cards
 after 150ms for an uncached room, then `.reveal-tail` on the feed and
-`.reveal` on the roster), Board columns, Sessions list, Files listing (the
-dim-then-reveal), Projects cards, Agents list, Settings categories on first
-paint.
+`.reveal` on the roster), Board columns, Sessions list ✓, Files listing (the
+dim-then-reveal) ✓, Projects cards ✓, Agents list, Settings categories on
+first paint. Done 2026-09-04: Sessions (four `.skel` rows in a `.skel-wrap`,
+then `.reveal` on the first fill), Files and DirPicker (rows keyed by path;
+`.reveal` when a DIFFERENT directory lands, nothing on a same-dir refresh),
+Projects (first fill), the Team roster strip (once per room, dropped after
+the stagger so joiners still pop) and TeamTemplates' list on open.
 
 **Wave 9 — hover explains** (#86): agent cards (state, model, context,
 last activity, cwd), sidebar project rows (path, agents, last message),
 rail icons and tab bar (name + shortcut), sessions and panes (command, size,
-last activity), file rows (size, modified, kind), board cards (reporter,
+last activity) ✓, file rows (size, modified, kind) ✓, board cards (reporter,
 assignee, updated), settings rows where the label is terse. Native `title`
-is removed wherever the card takes over; `aria-label` stays.
+is removed wherever the card takes over; `aria-label` stays. Done
+2026-09-04: session and pane rows, Terminal window chips (on the `.win-chip`
+wrapper) and its to-tail note, file rows / breadcrumbs / bookmarks / recent
+files / git status rows (`files/git-status.ts` puts the porcelain code in
+words), project cards (path, "n live · n stopped", state, age) and Team
+roster chips (state, role, backend, model, room) — every card through the
+row's EXISTING formatter. Open: AgentChip still falls back to its label as a
+native `title`, so the Terminal chip shows both until `ui/AgentChip` learns
+to go without one.
 
 **Landed 2026-09-04, shell / Settings / ui pass** (App, Preferences,
 SystemStatus, ui): wave 6 — the server menu wears `.pop-layer` (done in the
