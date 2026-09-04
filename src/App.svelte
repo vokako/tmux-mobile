@@ -124,10 +124,10 @@
   const SPLIT_MIN_WIDTH = 900;
   let wideEnough = $state(typeof window !== 'undefined' && window.innerWidth >= SPLIT_MIN_WIDTH);
   let splitEligible = $derived(!layout.isTouchDevice && (layout.forceDesktop || wideEnough));
-  // The vitals corner's ONE flag (board #56): it gates the mount AND the
-  // .page bottom inset that reserves the corner's strip — tied together so
-  // there is never dead space without a corner, or a corner over content.
-  let sysMounted = $derived(connected && !layout.isTouchDevice);
+  // ONE status sampler for the connected client (board #85). Desktop keeps
+  // it visible in the primary sidebar; touch CSS reveals the same instance
+  // only while a shared .side-sheet is open — never one poller per page.
+  let sysMounted = $derived(connected);
   // Shared sidebar width (ui-unification.md): the shell owns the geometry,
   // pages consume var(--sidebar-w), SideHandle is the only other writer.
   $effect(() => {
@@ -1419,7 +1419,7 @@
   });
 </script>
 
-<main class:with-rail={connected && !layout.isTouchDevice}>
+<main class:with-rail={connected && !layout.isTouchDevice} class:touch-layout={connected && layout.isTouchDevice}>
   <!-- Shell chrome. Every nav item is in the Tab order (no tabindex="-1" —
        review, 2026-09-03: the whole nav was unreachable by keyboard) and wears
        the global button:focus-visible ring; the current page is aria-current.
@@ -1510,12 +1510,10 @@
     </nav>
   {/if}
 
-  <!-- Server system vitals (board #85): ONE shell-level instance, visually
-       and geometrically confined to the primary desktop sidebar. Every
-       primary sidebar reserves this exact height below, so the fixed strip
-       occupies sidebar space rather than covering its final row. The page
-       itself keeps the full viewport height — no footer track crosses or
-       shortens the terminal/content column. -->
+  <!-- Server system vitals (board #85): ONE shell-level instance. Desktop
+       keeps it in the primary sidebar; on touch it is hidden until a shared
+       side-sheet opens, then occupies the same drawer width and its reserved
+       bottom space. No copy per page, no second poll timer. -->
   {#if sysMounted}
     <aside class="sys-sidebar" aria-label="Server system status">
       <SystemStatus load={systemStatus} visible={connected} />
@@ -1832,6 +1830,7 @@
   main, nav { transition: background-color 0.3s ease, color 0.3s ease; }
 
   main {
+    --sys-sidebar-h: 24px;
     display: flex;
     flex-direction: column;
     height: calc(var(--app-height, 100dvh) / var(--ui-zoom, 1));
@@ -1975,10 +1974,7 @@
     background: var(--accent); border-radius: 1px;
     z-index: 1; pointer-events: none;
   }
-  main.with-rail {
-    --sys-sidebar-h: 24px;
-    padding-left: 46px;
-  }
+  main.with-rail { padding-left: 46px; }
 
   /* The singleton status strip sits over RESERVED sidebar space only. These
      are the three primary sidebar shells used by Chat/Board/Agents/Settings,
@@ -2003,6 +1999,24 @@
     border-top: 1px solid var(--border);
     border-right: 1px solid var(--border);
     z-index: 11;
+  }
+
+  /* Touch keeps the SAME singleton but parks it until one of the shared
+     drawers is actually open. It then becomes the drawer's final reserved
+     row, above the scrim and below dialogs; safe-area padding keeps the
+     reading clear of the home indicator. */
+  .touch-layout .sys-sidebar {
+    display: none;
+    left: 0;
+    width: min(300px, 86vw);
+    height: calc(var(--sys-sidebar-h) + var(--sab));
+    padding: 4px 8px calc(4px + var(--sab));
+    border-right: none;
+    z-index: 27;
+  }
+  .touch-layout:has(:global(.page-layer:not(.hidden) .side-sheet.open)) .sys-sidebar { display: flex; }
+  .touch-layout:has(:global(.page-layer:not(.hidden) .side-sheet.open)) :global(.side-sheet.open) {
+    padding-bottom: calc(var(--sys-sidebar-h) + var(--sab));
   }
 
   /* Connected mobile: bottom tab bar in thumb reach. Hidden while the

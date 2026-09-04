@@ -27,7 +27,7 @@ You're running [Kiro CLI](https://kiro.dev), Claude Code, or any coding agent in
 - **Settings** — terminal font/family/line-spacing controls, native desktop interface scaling, light/dark/auto theme, language switching (EN/中文), connection info, and diagnostics
 - **Named servers** — save several server machines, switch from the desktop rail, and restore each server's own page/terminal state; each machine still keeps its LAN/Tailscale/WAN failover addresses together
 - **Message alerts** — an away running client can play a cue and, when permitted, use system Web Notifications; replay/history batches are deduplicated
-- **Server vitals** — connected desktop clients show low-frequency CPU, memory, and root-disk readings in a coloured strip reserved inside the primary sidebar
+- **Server vitals** — low-frequency CPU, memory, and root-disk readings stay inside the primary sidebar on desktop and appear when that drawer opens on a phone
 
 The server runs on your Mac, the UI runs in any browser or as a native app (macOS, Android).
 

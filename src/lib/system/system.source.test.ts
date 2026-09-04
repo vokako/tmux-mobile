@@ -48,6 +48,9 @@ test('the sidebar monitor uses quiet token dots and readable value ink', () => {
   assert.match(source, /--sv-hue: var\(--status-purple\)/u, 'MEM uses the theme violet');
   assert.match(source, /--sv-hue: var\(--status-ok\)/u, 'DISK uses the theme green');
   const metricRule = source.match(/\.sv \{[^}]*\}/u)?.[0] ?? '';
+  assert.match(metricRule, /flex: 0 1 auto/u,
+    'metrics keep natural width and flow from the left — never equal thirds');
+  assert.ok(!/flex:\s*1\b/u.test(metricRule), 'no equal-column flex growth');
   assert.ok(!/\b(?:background|border|padding):/u.test(metricRule),
     'metrics are one quiet readout — no per-item card surface, border or padding');
   assert.match(source, /\.sv::before \{[^}]*width: 4px[^}]*height: 4px[^}]*background: var\(--sv-hue\)/u,

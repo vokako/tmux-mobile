@@ -81,7 +81,7 @@
   }
   .sv {
     --sv-hue: var(--accent);
-    flex: 1 1 0;
+    flex: 0 1 auto;
     min-width: 0;
     display: inline-flex;
     align-items: center;

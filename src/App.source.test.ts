@@ -407,30 +407,38 @@ test('removing a saved server goes through the shared ConfirmDialog (board #55)'
     'the shared dialog, cancel drops the capture');
 });
 
-test('the system-vitals strip mounts connected-desktop-only inside reserved sidebar space (board #85)', () => {
+test('one system-vitals strip serves desktop sidebar and an open phone drawer (board #85)', () => {
   // ONE component (src/lib/system/), transport injected from ws.ts — App
-  // wires, it does not re-implement.
+  // wires, it does not re-implement or mount one poller per page.
   assert.match(source, /import SystemStatus from '\.\/lib\/system\/SystemStatus\.svelte'/u,
     'the shared component, not a second rendering');
   assert.match(source, /import \{[^}]*\bsystemStatus\b[^}]*\} from '\.\/lib\/core\/ws\.ts'/u,
     'the typed wrapper is the injected transport');
+  assert.equal((source.match(/<SystemStatus\b/gu) ?? []).length, 1, 'exactly one sampler component');
   assert.match(source, /load=\{systemStatus\}/u, 'load is INJECTED — the component never imports ws');
-  // Desktop + connected only, ONE flag: a phone never mounts it and a
-  // disconnected client must not poll a socket that is not there.
-  assert.match(source, /sysMounted = \$derived\(connected && !layout\.isTouchDevice\)/u,
-    'one flag: connected desktop');
+  assert.match(source, /sysMounted = \$derived\(connected\)/u,
+    'connected clients share one sampler; layout only decides visibility');
+  assert.match(source, /<main[^>]*class:touch-layout=\{connected && layout\.isTouchDevice\}/u,
+    'touch mode is explicit on the shell');
   assert.match(source, /\{#if sysMounted\}[\s\S]{0,500}<aside class="sys-sidebar"[\s\S]{0,100}<SystemStatus/u,
     'mount gate wraps the sidebar strip');
   assert.match(source, /<SystemStatus[^/]*visible=\{connected\}/u,
-    'visible tracks the connection so a drop stops the timer');
-  // Board #85: no footer row under main content. The strip is exactly the
-  // shared sidebar width, starts after the 46px rail, and every PRIMARY
-  // sidebar shell reserves the same named height beneath its own content.
+    'a disconnect stops the singleton timer');
+  // Desktop: exact sidebar column and exact reservation, never a main footer.
   assert.match(source, /\.sys-sidebar \{[^}]*position: fixed[^}]*left: 46px[^}]*width: var\(--sidebar-w\)/u,
-    'the strip is confined to the primary sidebar column');
+    'desktop strip is confined to the primary sidebar column');
   assert.match(source, /--sys-sidebar-h: 24px/u, 'one compact named height owns geometry');
   assert.match(source, /\.with-rail :global\(\.sidebar\),\s*\.with-rail \.term-side,\s*\.with-rail :global\(\.files-left\) \{[^}]*padding-bottom: var\(--sys-sidebar-h\)/u,
-    'every primary sidebar reserves the exact strip height');
+    'every desktop primary sidebar reserves the exact strip height');
+  // Touch: hidden at rest, shown only with the shared drawer's real OPEN
+  // class, identical width/z-layer, and the open drawer reserves safe-area
+  // inclusive bottom space so its final row stays reachable.
+  assert.match(source, /\.touch-layout \.sys-sidebar \{[^}]*display: none[^}]*left: 0[^}]*width: min\(300px, 86vw\)[^}]*z-index: 27/u,
+    'phone strip is parked and shares the drawer geometry');
+  assert.match(source, /\.touch-layout:has\(:global\(\.page-layer:not\(\.hidden\) \.side-sheet\.open\)\) \.sys-sidebar \{ display: flex; \}/u,
+    'an actually open shared drawer reveals it');
+  assert.match(source, /\.touch-layout:has\(:global\(\.page-layer:not\(\.hidden\) \.side-sheet\.open\)\) :global\(\.side-sheet\.open\) \{[^}]*padding-bottom: calc\(var\(--sys-sidebar-h\) \+ var\(--sab\)\)/u,
+    'the open drawer reserves status plus safe area');
   assert.ok(!/sys-footer/u.test(source), 'the retired full-width footer cannot regrow');
 });
 

@@ -74,10 +74,11 @@ concurrent work.
 null>` — whose `catch(() => null)` absorbs EVERY failure including an older
 or mobile server's method-not-found: null is the reading the component
 already treats as "keep what I have / say nothing", so no error can escape
-into the page. App mounts the corner once, gated by ONE derived flag
-(`sysMounted = connected && !layout.isTouchDevice` — a phone's server is
-remote and its corners belong to the bottom bar), with `visible={connected}`
-so a dropped connection stops the timer even before the unmount.
+into the page. App mounts exactly one sampler whenever connected
+(`sysMounted = connected`) and passes `visible={connected}`, so a dropped
+connection stops the timer. Layout changes only where that singleton paints:
+desktop keeps it in the primary sidebar; touch parks it until the current
+visible page contains an open shared `.side-sheet`.
 
 **The strip belongs to the primary sidebar, never the main column.** Board
 #85 replaced the full-width flow footer after the owner reported that the
@@ -95,12 +96,23 @@ their last row remains visible and scrollable. The strip is singleton rather
 than copied into every page, preserving one poll timer and one CPU sampling
 window. Its z-index sits below the icon rail and popovers.
 
+On touch, the same shell instance is hidden by default. A relational gate on
+`.page-layer:not(.hidden) .side-sheet.open` reveals it at `left: 0`, the
+shared drawer's exact `min(300px, 86vw)` width, and z27 (one step above the
+drawer's z26). That open drawer reserves the same 24px plus `--sab`, and the
+strip includes that safe-area padding, so the final list row and the reading
+both clear the home indicator. Restricting the gate to the visible page
+prevents an open-state class parked in a kept-alive hidden page from leaking a
+status row onto another tab. One component means one 20s timer, not one per
+page.
+
 Visual hierarchy is a quiet system-monitor readout, not three cards. The
 shared sidebar background continues uninterrupted; each metric has no local
 fill, border, radius, or padding. A restrained 4px accent/purple/green dot is
 the only category colour, labels use `--text2`, and the actual readings use
-full `--text` ink plus the mono data face. Both themes therefore stay legible
-without making telemetry compete with the work.
+full `--text` ink plus the mono data face. Metrics use natural width and flow
+from the left rather than stretching into three equal columns. Both themes
+therefore stay legible without making telemetry compete with the work.
 
 ## Tests
 
@@ -119,4 +131,4 @@ Each entry is a decision with the reason it was made; treat them as normative. T
 
 ### Server vitals occupy reserved sidebar space; they never enter the main column
 
-(board #56, refined by #85): desktop `system_status` samples CPU/MEM/root disk in-process through exact-pinned, desktop-gated `sysinfo`; the 20s client poll is the CPU delta window and first CPU is null. `SystemStatus` keeps the last good reading and stops hidden. App mounts one connected-desktop strip at the primary sidebar's exact x/width; `.sidebar`, `.term-side`, and `.files-left` reserve the same named height below their own content. The main page remains full-height and receives no footer row. A fixed strip without matching sidebar reservation, a full-width footer, pointer-through claims, and layer-only insets are all forbidden.
+(board #56, refined by #85): desktop `system_status` samples CPU/MEM/root disk in-process through exact-pinned, desktop-gated `sysinfo`; the 20s client poll is the CPU delta window and first CPU is null. `SystemStatus` keeps the last good reading. App mounts one connected-client sampler: desktop places it at the primary sidebar's exact x/width and `.sidebar`, `.term-side`, `.files-left` reserve its named height; touch reveals that same instance only under the current visible page's open shared side drawer, whose bottom reservation includes the safe area. Metrics are natural-width and left-aligned. The main page remains full-height and receives no footer row. A fixed strip without matching sidebar reservation, duplicate per-page samplers, a full-width footer, pointer-through claims, and layer-only insets are forbidden.
