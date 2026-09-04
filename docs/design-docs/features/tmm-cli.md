@@ -37,6 +37,9 @@ tmm project rename <session> --name "New name"   the LABEL only (session unchang
 tmm registry list                    centrally-defined agents
 tmm registry save --name <n> --backend <b> [--system <text>] [--model m] [--effort <level>] [--skills a,b] [--mcp <json>] [--can-hire]
 tmm registry delete <name>
+tmm prompt show|path                # the app-wide agent instructions (<config>/AGENTS.md)
+tmm prompt set <text> | --file <p>  # prepended to EVERY managed agent's system prompt at spawn
+tmm prompt clear                    # (a running agent picks a change up on restart)
 tmm skills list|save|delete          central skill assets (name → ref)
 tmm mcp list|save|delete             central MCP server defs
 tmm spawn <agent> [--brief <text>]   spawn a registry agent into this project
@@ -492,6 +495,34 @@ legacy row in the table is the only part that is neither written nor migrated
 any more — `team::workspace` still *reads* `.tmm/kiro-home` so an old team keeps
 working, and new teams go to `.tmm/teams/<team-id>/`. Deleting the legacy paths
 on a workspace whose teams have been re-created costs nothing.
+
+## The app-wide instructions: `<config>/AGENTS.md` (2026-09-04)
+
+A managed agent's home is isolated (agents-overview.md), so the user's own
+global memory — `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, kiro's global
+config — is deliberately never read: nothing leaks in or out. The owner met
+the consequence ("我发现现在我启动的 kiro claude 啊 这些好像都没有这种全局的系统
+提示词了") and asked for the replacement to be a setting of THIS software.
+`projects/global_prompt.rs`: ONE markdown file, `<config>/AGENTS.md` (beside
+`config.toml`, `prefs.json`, `skills/`), read at SPAWN time and prepended by
+`spawn::build_prompt` as the FIRST block of every managed agent's system
+prompt — before the agent's own persona (a house rule outranks a role), on
+every backend through the same path each already uses (kiro's agent-config
+`prompt`, claude's `--append-system-prompt`, codex's `developer_instructions`,
+grok likewise). Empty or absent → the prompt is byte-for-byte what it was
+before the feature (a spawn test pins both orders).
+
+Rules and reasons: it is a FILE, not a database row, because it is the
+human's markdown — `cat`, diff, back up, edit with any editor, exactly like a
+CLAUDE.md — and the RPC (`global_prompt_get`/`global_prompt_set`) plus the CLI
+(`tmm prompt show|path|set|clear`) are the two doors onto that one file
+(rule 14, CLI/UI parity: an agent may set the house rules too). An empty
+write DELETES the file, so "cleared" and "never written" are one state.
+24 KB ceiling: the text rides on a launch line (`--append-system-prompt`, the
+codex config override) that tmux `send-keys` has to carry. A change reaches
+agents spawned AFTER it; a running agent keeps the prompt it started with,
+because its launch recipe is replayed verbatim — restart it to pick the new
+text up (the CLI says so after every `set`).
 
 ## The model belongs in the agent config, not on the launch line
 

@@ -86,6 +86,9 @@ USAGE (human or agent — self-management):
   tmm registry save --name <n> --backend <kiro|claude|codex> [--system <text>]
                     [--model m] [--effort low|medium|high|…] [--skills a,b] [--mcp <json>] [--can-hire]
   tmm registry delete <name>
+  tmm prompt show|path                the app-wide agent instructions (<config>/AGENTS.md),
+  tmm prompt set <text> | --file <p>  prepended to EVERY managed agent's system prompt at spawn;
+  tmm prompt clear                    a running agent picks a change up on restart
   tmm skills list|delete|refresh <name>   app-managed skill store
   tmm skills save --name <n> --source <abs dir|github url>  (imports the files)
   tmm skills import <url|abs dir>     install EVERYTHING a source contains
@@ -659,6 +662,48 @@ async fn main() {
             };
             let r = rpc(&ctx, "registry_delete", json!({ "name": name })).await;
             if ctx.json { println!("{r}"); } else { println!("✓ deleted {name}"); }
+        }
+        // The app-wide agent instructions (`<config>/AGENTS.md`): the one
+        // software-level system prompt, prepended to every managed agent's at
+        // spawn. CLI/UI parity (CLAUDE.md rule 14): what the Settings editor
+        // does, an agent can do too.
+        ("prompt", rest) => {
+            match rest.first().map(String::as_str) {
+                Some("show") | None => {
+                    let r = rpc(&ctx, "global_prompt_get", json!({})).await;
+                    if ctx.json { println!("{r}"); } else {
+                        let text = r.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                        if text.is_empty() {
+                            eprintln!("(no global instructions — `tmm prompt set <text>` or edit {})", r.get("path").and_then(|v| v.as_str()).unwrap_or("<config>/AGENTS.md"));
+                        } else {
+                            println!("{text}");
+                        }
+                    }
+                }
+                Some("path") => {
+                    let r = rpc(&ctx, "global_prompt_get", json!({})).await;
+                    if ctx.json { println!("{r}"); } else { println!("{}", r.get("path").and_then(|v| v.as_str()).unwrap_or("")); }
+                }
+                Some("set") => {
+                    let text = match flags.get("file").cloned().flatten() {
+                        Some(f) => std::fs::read_to_string(&f).unwrap_or_else(|e| fail(EXIT_USAGE, &format!("cannot read {f}: {e}"))),
+                        None => {
+                            let t = rest[1..].join(" ");
+                            if t.trim().is_empty() {
+                                fail(EXIT_USAGE, "prompt set needs the text or --file <path>:\n  tmm prompt set \"Answer in Chinese. Never force-push.\"\n  tmm prompt set --file ./AGENTS.md");
+                            }
+                            t
+                        }
+                    };
+                    let r = rpc(&ctx, "global_prompt_set", json!({ "text": text })).await;
+                    if ctx.json { println!("{r}"); } else { println!("✓ global instructions set ({} bytes) — applies to agents spawned from now on; restart a running one to pick it up", r.get("bytes").and_then(|v| v.as_u64()).unwrap_or(0)); }
+                }
+                Some("clear") => {
+                    let r = rpc(&ctx, "global_prompt_set", json!({ "text": "" })).await;
+                    if ctx.json { println!("{r}"); } else { println!("✓ global instructions cleared"); }
+                }
+                Some(other) => fail(EXIT_USAGE, &format!("unknown prompt verb {other}: tmm prompt show|path|set|clear")),
+            }
         }
         _ => {
             eprint!("{USAGE}");

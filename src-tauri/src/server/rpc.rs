@@ -486,6 +486,7 @@ pub(super) fn handle_request(req: &Request, token: &str) -> Response {
         "project_list" | "project_create" | "project_adopt" | "project_up" | "project_down"
         | "project_archive" | "project_delete" | "project_autostart" | "project_rename"
         | "registry_list" | "registry_save" | "registry_delete" | "models_list"
+        | "global_prompt_get" | "global_prompt_set"
         | "teams_list" | "teams_save" | "teams_delete"
         | "skills_list" | "skills_save" | "skills_delete" | "skills_refresh" | "skills_read"
         | "skills_import" | "skills_files" | "skills_file"
@@ -566,6 +567,13 @@ fn handle_project_request(method: &str, id: Option<u64>, p: &serde_json::Value) 
             None => Err("missing required param: def".into()),
         },
         "registry_delete" => need_id("name").and_then(|n| projects::registry_delete(&n)),
+        // The app-wide agent instructions (`<config>/AGENTS.md`): one file,
+        // prepended to every managed agent's prompt at spawn.
+        "global_prompt_get" => projects::global_prompt_get(),
+        "global_prompt_set" => match p.get("text").and_then(|v| v.as_str()) {
+            Some(text) => projects::global_prompt_set(text),
+            None => Err("missing required param: text".into()),
+        },
         // Agent teams (board #74): a named list of members derived from
         // registry agents (+ role) or defined inline for this team only.
         "teams_list" => projects::teams_list(),

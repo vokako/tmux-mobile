@@ -126,7 +126,9 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
     std::fs::create_dir_all(&home).map_err(|e| format!("create agent home: {e}"))?;
     ensure_gitignore(&workspace);
 
-    let system_prompt = build_prompt(&def, &window_name, req.session, req.brief, req.by);
+    // The software-wide instructions (`<config>/AGENTS.md`) lead every prompt,
+    // on every backend — read now, so a spawn always carries the current text.
+    let system_prompt = build_prompt(&def, &window_name, req.session, req.brief, req.by, &super::global_prompt::read());
     let skills = resolve_skill_refs(&def, &home);
     // MCP is ONE door now (owner, 2026-08-28): registry defs seed the shared
     // workspace config that `tmm mcp` reads per call — never a backend's
@@ -515,8 +517,14 @@ fn ensure_gitignore(workspace: &str) {
 
 /// Persona + tmm usage + brief. The tmm paragraph is the ENTIRE integration —
 /// that is the point of the CLI-only substrate.
-fn build_prompt(def: &RegAgent, name: &str, session: &str, brief: &str, by: &str) -> String {
+fn build_prompt(def: &RegAgent, name: &str, session: &str, brief: &str, by: &str, global: &str) -> String {
     let mut s = String::new();
+    // House rules before the role: the app-wide AGENTS.md (global_prompt.rs)
+    // is the first block, then the agent's own persona.
+    if !global.trim().is_empty() {
+        s += global.trim();
+        s += "\n\n";
+    }
     if !def.system.trim().is_empty() {
         s += def.system.trim();
         s += "\n\n";
@@ -1387,7 +1395,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tmm-spawn-kiro-{}", uuid::Uuid::new_v4()));
         let mut d = def("kiro");
         d.model = "claude-haiku-4.5".into();
-        let r = render_kiro(&d, "tester", &dir, &build_prompt(&d, "tester", "proj", "fix the bug", "lead"), &[]).unwrap();
+        let r = render_kiro(&d, "tester", &dir, &build_prompt(&d, "tester", "proj", "fix the bug", "lead", ""), &[]).unwrap();
         assert!(r.env.iter().any(|(k, v)| k == "KIRO_HOME" && v.contains("tmm-spawn-kiro")), "home must be the isolated dir");
         let conf: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("agents/tester.json")).unwrap()).unwrap();
@@ -1569,7 +1577,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("tmm-spawn-grok-{}", uuid::Uuid::new_v4()));
         let mut d = def("grok");
         d.model = "grok-4.6".into();
-        let r = render_grok(&d, "tester", &dir, &build_prompt(&d, "tester", "proj", "fix the bug", "lead"), &[]).unwrap();
+        let r = render_grok(&d, "tester", &dir, &build_prompt(&d, "tester", "proj", "fix the bug", "lead", ""), &[]).unwrap();
         assert!(r.env.iter().any(|(k, v)| k == "GROK_HOME" && v.contains("tmm-spawn-grok")), "home must be the isolated dir");
         assert!(r.cmd.contains("--agent tester"), "identity via --agent: {}", r.cmd);
         assert!(r.cmd.contains("--always-approve"), "no interactive permission prompts: {}", r.cmd);
@@ -1794,7 +1802,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
             let dir = std::env::temp_dir().join(format!("tmm-spawn-{backend}-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(&dir).unwrap();
             let d = def(backend);
-            let prompt = build_prompt(&d, "tester", "proj", "", "");
+            let prompt = build_prompt(&d, "tester", "proj", "", "", "");
             let r = match backend {
                 "claude" => render_claude(&d, "tester", &dir, &dir, &prompt, &[]).unwrap(),
                 _ => render_codex(&d, "tester", &dir, &prompt, &[]).unwrap(),
@@ -1845,7 +1853,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         std::fs::create_dir_all(&dir).unwrap();
         let mut d = def("kiro");
         d.effort = "high".into();
-        let prompt = build_prompt(&d, "t", "p", "", "");
+        let prompt = build_prompt(&d, "t", "p", "", "", "");
         assert!(render_kiro(&d, "t", &dir, &prompt, &[]).unwrap().cmd.ends_with("--effort high"));
         d.backend = "claude".into();
         assert!(render_claude(&d, "t", &dir, &dir, &prompt, &[]).unwrap().cmd.contains(" --effort high "));
@@ -1920,9 +1928,20 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
     }
 
     #[test]
+    fn global_instructions_lead_the_prompt_on_every_backend() {
+        let d = def("kiro");
+        let p = build_prompt(&d, "b", "proj", "", "", "# House rules\nAnswer in Chinese.\n");
+        assert!(p.starts_with("# House rules\nAnswer in Chinese.\n\nPersona text."), "global block first, then the persona: {p}");
+        assert!(p.contains("agent \"b\" in project \"proj\""));
+        // Absent → the prompt is exactly what it was before the feature.
+        assert_eq!(build_prompt(&d, "b", "proj", "", "", "  "), build_prompt(&d, "b", "proj", "", "", ""));
+        assert!(build_prompt(&d, "b", "proj", "", "", "").starts_with("Persona text."));
+    }
+
+    #[test]
     fn prompt_carries_identity_project_and_rules() {
         let d = def("kiro");
-        let p = build_prompt(&d, "rev-2", "blog", "review the branch", "lead");
+        let p = build_prompt(&d, "rev-2", "blog", "review the branch", "lead", "");
         assert!(p.starts_with("Persona text."));
         assert!(p.contains("agent \"rev-2\" in project \"blog\""));
         assert!(p.contains("tmm done"));
@@ -1948,10 +1967,10 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         // "your teammate" left the agent with nobody to report back to — the
         // briefer's NAME is what lets a builder answer its lead.
         let d = def("kiro");
-        let p = build_prompt(&d, "b", "proj", "fix it", "lead");
+        let p = build_prompt(&d, "b", "proj", "fix it", "lead", "");
         assert!(p.contains("briefed by your teammate lead"), "names the briefer: {p}");
         assert!(p.contains("delivered to whoever briefed you"), "explains the feedback loop: {p}");
-        let ph = build_prompt(&d, "b", "proj", "fix it", "");
+        let ph = build_prompt(&d, "b", "proj", "fix it", "", "");
         assert!(ph.contains("briefed by the operator"), "human brief stays the operator: {ph}");
 
         // The recipe carries the feedback edge, and `spawned_by` reads it back

@@ -10,6 +10,7 @@
 
 pub mod agents;
 pub mod capture;
+pub mod global_prompt;
 pub mod models;
 pub mod reconcile;
 pub mod recovery;
@@ -677,6 +678,16 @@ pub fn team_of(workspace: Option<&str>, window_name: &str) -> Option<String> {
     let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(recipe).ok()?).ok()?;
     let t = v.get("team")?.as_str()?.trim().to_string();
     (!t.is_empty()).then_some(t)
+}
+
+/// The app-wide agent instructions (`<config>/AGENTS.md`, projects::global_prompt).
+pub fn global_prompt_get() -> Result<Value, String> {
+    Ok(json!({ "text": global_prompt::read(), "path": global_prompt::path().to_string_lossy(), "max_bytes": global_prompt::MAX_BYTES }))
+}
+
+pub fn global_prompt_set(text: &str) -> Result<Value, String> {
+    global_prompt::write(text)?;
+    Ok(json!({ "ok": true, "bytes": text.trim().len() }))
 }
 
 pub fn registry_delete(name: &str) -> Result<Value, String> {

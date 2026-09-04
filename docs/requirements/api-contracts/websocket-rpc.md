@@ -177,6 +177,8 @@ server start (`source = "builtin"`; save/delete refuse their names).
 | `registry_list` | — | `{agents: [{name, backend, model, effort, system, skills, mcp, can_hire}]}` |
 | `registry_save` | `def` | Validates backend, model id (against the backend's own CLI) and effort enum |
 | `registry_delete` | `name` | OK |
+| `global_prompt_get` | — | `{text, path, max_bytes}` — the app-wide agent instructions (`<config>/AGENTS.md`), prepended to every managed agent's system prompt at spawn |
+| `global_prompt_set` | `text` | `{ok, bytes}`; empty text deletes the file; > 24 KB rejected |
 | `skills_list` | — | `{skills: [{name, source, description, synced_at}]}` |
 | `skills_save` | `name`, `source`, `description?` | Imports/re-syncs the files from `source` (abs dir, github url, or `builtin`) |
 | `skills_import` | `url` (or abs dir) | `{imported: [names]}` — walks the fetched tree for EVERY dir holding a SKILL.md (claude plugins/marketplaces work as-is); each row's source points at its own subdir; frontmatter names, built-in names skipped |
