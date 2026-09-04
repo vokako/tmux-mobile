@@ -1047,7 +1047,7 @@ fn need_agent(ctx: &Ctx) -> String {
 fn split_flags(args: &[String]) -> (std::collections::HashMap<String, Option<String>>, Vec<String>, Vec<(String, String)>) {
     const VALUED: &[&str] = &["project", "agent", "server", "output", "since", "limit", "brief",
                           "name", "session", "with-agent", "backend", "model", "effort", "system", "skills", "mcp",
-                          "ref", "source", "description", "def", "grep", "image", "body", "assignee", "team"];
+                          "ref", "source", "description", "def", "grep", "image", "body", "assignee", "team", "file"];
     let mut flags = std::collections::HashMap::new();
     let mut pos = Vec::new();
     let mut repeats: Vec<(String, String)> = Vec::new();
