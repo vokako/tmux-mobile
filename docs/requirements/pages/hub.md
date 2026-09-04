@@ -64,9 +64,16 @@ completion).
 
 ## Sidebar (projects)
 - Ordered by **conversation recency** (newest message per room), live-only
-  projects without talk underneath; each row shows the last-reply age and
-  the project's agents as quiet mono chips with state dots (shared atoms
-  with the Terminal sidebar — `.side-*` in app.css).
+  projects without talk underneath. Chat and Terminal show the SAME updated
+  age from `projectAgeLabel`: conversation time first, tmux activity only when
+  the project has never spoken; one source and one formatter prevent the two
+  sidebars disagreeing. Each row shows the project's agents as quiet mono chips
+  with state dots (shared atoms with the Terminal sidebar — `.side-*` in
+  app.css).
+- Every Chat project row has a permanently visible borderless `icon-btn` dots
+  affordance; click and row right-click/long-press all open the SAME
+  `projectItems` ContextMenu, so the menu is discoverable without duplicating
+  its verbs.
 - Create (`+`) requires a name; the path comes from the DirPicker (never
   typed from memory). Delete goes through the **recycle bin** (archive →
   restore is free; the confirmed delete is the only irreversible step).
@@ -98,9 +105,14 @@ completion).
   as one unit of the strip. The empty-room preset lists configured teams as
   one-tap starts beside the single agents, and the "Start a team" picker
   offers them above the ad-hoc pick (the brief applies to every member).
-  The Agents page's first row, "Instructions for every agent", edits the
-  app-wide `<config>/AGENTS.md` that leads every managed agent's system
-  prompt (also `tmm prompt`).
+  On the desktop the Agents page is a category page like Settings: the
+  sidebar lists Instructions for every agent · Agents · Teams · Skills · MCP
+  servers (with counts), the main column shows the chosen category's rows
+  and a "+" in its head, and picking a row opens its editor there (the
+  chosen category persists). On the phone each category is its own Settings
+  page (`section`) whose list IS the screen. "Instructions for every agent"
+  edits the app-wide `<config>/AGENTS.md` that leads every managed agent's
+  system prompt (also `tmm prompt`).
   Teams are configured on the Agents page (Teams section): a member derives
   from a registry agent plus a role supplement, or is defined for the team
   only, or another team included whole (nesting — drawn as a group inside the

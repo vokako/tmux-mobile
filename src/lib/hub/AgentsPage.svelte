@@ -13,6 +13,7 @@
   import { backendColor } from '../hub/hub.ts';
   import { backendIcon } from '../core/agents.ts';
   import { moveMs, revealMs } from '../ui/motion.ts';
+  import { hoverInfo } from '../ui/hover.ts';
   import Select from '../ui/Select.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
@@ -31,7 +32,10 @@
   // `section` narrows the page to ONE kind — 'agents' | 'teams' | 'skills' |
   // 'mcp' — for the phone's Settings, where each is its own second-level page
   // (owner, 2026-09-02: "把 team agent mcp skill 分开几个二级设置页面吧，在手机
-  // 上"). null = the desktop page with every section in one sidebar.
+  // 上"). null = the desktop page: the sidebar lists the CATEGORIES (global
+  // instructions, agents, teams, skills, MCP) and the main column shows the
+  // chosen one's rows, then its editor (owner, 2026-09-04: "左边侧边栏先写配置
+  // 条目 右边展示详细内容 不要全堆在一起了").
   let { visible = false, onGoBack = null, editRequest = null, onDrilled = null, section = null } = $props();
   const SECTION_META = {
     agents: ['agentsTitle', 'agentsHint'],
@@ -39,7 +43,32 @@
     skills: ['skillsTitle', 'skillsHint'],
     mcp: ['mcpTitle', 'mcpHint'],
   };
-  const shows = (kind) => !section || section === kind;
+  // The desktop's categories (the sidebar's rows). `count` feeds the row's
+  // trailing figure; `start` is the "+" in the category page's head.
+  const CAT_KEY = 'tmux_agents_cat';
+  const CAT_META = {
+    global: { label: 'agentsGlobal', hint: 'settingsGlobalHint', add: 'edit', start: () => startGlobal() },
+    agents: { label: 'agentsTitle', hint: 'settingsAgentsHint', add: 'agentsNew', start: (x) => startEdit(x) },
+    teams: { label: 'teamsTitle', hint: 'settingsTeamsHint', add: 'teamsNew', start: (x) => startTeam(x) },
+    skills: { label: 'skillsTitle', hint: 'settingsSkillsHint', add: 'skillsNew', start: (x) => startSkill(x) },
+    mcp: { label: 'mcpTitle', hint: 'settingsMcpHint', add: 'mcpNew', start: (x) => startMcp(x) },
+  };
+  const CATS = $derived([
+    { id: 'global', label: 'agentsGlobal', hint: 'settingsGlobalHint', count: null },
+    { id: 'agents', label: 'agentsTitle', hint: 'settingsAgentsHint', count: () => String(defs.length) },
+    { id: 'teams', label: 'teamsTitle', hint: 'settingsTeamsHint', count: () => String(teams.length) },
+    { id: 'skills', label: 'skillsTitle', hint: 'settingsSkillsHint', count: () => String(skills.length) },
+    { id: 'mcp', label: 'mcpTitle', hint: 'settingsMcpHint', count: () => String(mcps.length) },
+  ]);
+  const storedCat = typeof localStorage !== 'undefined' ? localStorage.getItem(CAT_KEY) : null;
+  let cat = $state(storedCat && storedCat in CAT_META ? storedCat : 'agents');
+  function pickCat(id) {
+    if (cat !== id) closeAll();
+    cat = id;
+    try { localStorage.setItem(CAT_KEY, id); } catch {}
+    // The instructions category IS its editor — there is no list to show first.
+    if (id === 'global' && !editingGlobal) startGlobal();
+  }
   // Switching category closes whatever editor the previous one had open — the
   // page-head above already names the new category, an editor from the old
   // one would contradict it.
@@ -173,6 +202,8 @@
     const def = defs.find((d) => d.name === req.name);
     if (!def) return;
     editReqDone = req.n;
+    // An agent opened from the Hub lands in the Agents category on the desktop.
+    if (!section && cat !== 'agents') { cat = 'agents'; try { localStorage.setItem(CAT_KEY, 'agents'); } catch {} }
     startEdit(def);
   });
 
@@ -452,18 +483,20 @@
   }
 </script>
 
-<div class="agents-root" class:editing={drilled} class:drill-fwd={drillAnim === 'fwd'} class:drill-back={drillAnim === 'back'}>
-  <aside class="sidebar">
-    <SideHandle />
-    <div class="side-scroll subtle-scroll" class:reveal={justLoaded} use:scrollFade>
-      {#if shows('agents')}
-      {#if !section}<div class="side-h">{t('agentsTitle')}</div>{/if}
-      <!-- The house rules row: what EVERY agent below is told first. -->
+{#snippet rows(kind)}
+  <!-- One kind's definitions as rows — the phone's sidebar list (narrowed by
+       `section`) and the desktop's main list (the chosen category) render the
+       SAME markup, so the two cannot drift apart. -->
+      {#if kind === 'agents'}
+      <!-- The house rules row: what EVERY agent below is told first. On the
+           desktop it is a CATEGORY of its own (the sidebar's first row). -->
+      {#if section}
       <button class="side-row" class:open={!!editingGlobal} onclick={startGlobal}>
         <span class="ava global"><Icon name="file" size={13} /></span>
         <span class="r-name">{t('agentsGlobal')}</span>
         <span class="r-backend">AGENTS.md</span>
       </button>
+      {/if}
       {#each defs as d (d.name)}
         <button class="side-row" class:open={editing?.name === d.name && !isNew} onclick={() => startEdit(d)}>
           {#if backendIcon(d.backend)}<img class="ava" src={backendIcon(d.backend)} alt={d.backend} />{:else}<span class="ava" style:background={backendColor(d.backend)}>{d.name.slice(0, 1).toUpperCase()}</span>{/if}
@@ -481,8 +514,7 @@
 
       <!-- Agent TEAMS (board #74): a named set of the agents above, each with
            a role. Same row dialect; the second line names the members. -->
-      {#if shows('teams')}
-      {#if !section}<div class="side-h">{t('teamsTitle')}</div>{/if}
+      {#if kind === 'teams'}
       {#each teams as tm (tm.name)}
         <button class="side-row team-row" class:open={editingTeam?.name === tm.name && !teamIsNew} onclick={() => startTeam(tm)}>
           <Icon name="collab" size={13} />
@@ -494,8 +526,7 @@
       </button>
       {/if}
 
-      {#if shows('skills')}
-      {#if !section}<div class="side-h">{t('skillsTitle')}</div>{/if}
+      {#if kind === 'skills'}
       {#each skills as sk (sk.name)}
         <button class="side-row" class:open={editingSkill?.name === sk.name && !skillIsNew} onclick={() => startSkill(sk)}>
           <Icon name="zap" size={13} />
@@ -507,8 +538,7 @@
       </button>
       {/if}
 
-      {#if shows('mcp')}
-      {#if !section}<div class="side-h">{t('mcpTitle')}</div>{/if}
+      {#if kind === 'mcp'}
       {#each mcps as m (m.name)}
         <button class="side-row" class:open={editingMcp?.name === m.name && !mcpIsNew} onclick={() => startMcp(m)}>
           <Icon name="link" size={13} />
@@ -518,6 +548,27 @@
       <button class="side-row add" onclick={() => startMcp(null)}>
         <Icon name="plus" size={13} />{t('mcpNew')}
       </button>
+      {/if}
+{/snippet}
+
+<div class="agents-root" class:editing={drilled} class:drill-fwd={drillAnim === 'fwd'} class:drill-back={drillAnim === 'back'}>
+  <aside class="sidebar">
+    <SideHandle />
+    <div class="side-scroll subtle-scroll" class:reveal={justLoaded} use:scrollFade>
+      {#if section}
+        {@render rows(section)}
+      {:else}
+        <!-- Desktop (owner, 2026-09-04: "左边侧边栏先写配置条目 右边展示详细
+             内容 不要全堆在一起了"): the sidebar lists the CATEGORIES, like
+             Settings' — no icons, the words carry it (owner, 2026-08-25) — and
+             the main column shows the chosen category's rows, then its editor. -->
+        {#each CATS as c (c.id)}
+          <button class="side-row" class:open={cat === c.id} onclick={() => pickCat(c.id)}
+            use:hoverInfo={() => ({ title: t(c.label), text: t(c.hint) })}>
+            <span class="r-name">{t(c.label)}</span>
+            {#if c.count}<span class="r-backend">{c.count()}</span>{:else}<span class="r-backend">AGENTS.md</span>{/if}
+          </button>
+        {/each}
       {/if}
     </div>
   </aside>
@@ -818,6 +869,25 @@
           {/if}
         </div>
       </div>
+    {:else if !section}
+      <!-- Desktop, nothing being edited: the chosen category's own page —
+           its rows and a "+" in the head. The global instructions category
+           has no rows, only its editor, so it opens straight into it. -->
+      <div class="page-head">
+        <h1>{t(CAT_META[cat].label)}</h1>
+        <span class="spacer"></span>
+        <div class="head-acts">
+          {#if cat === 'global'}
+            <button class="icon-btn" title={t('edit')} aria-label={t('edit')} onclick={startGlobal}><Icon name="edit" size={14} /></button>
+          {:else}
+            <button class="icon-btn" title={t(CAT_META[cat].add)} aria-label={t(CAT_META[cat].add)} onclick={() => CAT_META[cat].start(null)}><Icon name="plus" size={14} /></button>
+          {/if}
+        </div>
+      </div>
+      <div class="cat-list subtle-scroll">
+        <p class="hint wide">{t(CAT_META[cat].hint)}</p>
+        {#if cat !== 'global'}{@render rows(cat)}{/if}
+      </div>
     {:else}
       <div class="page-head"><h1>{t(SECTION_META[section]?.[0] ?? 'agentsTitle')}</h1></div>
       <div class="placeholder">
@@ -863,6 +933,10 @@
   .m-badge { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border: 1px solid var(--accent); border-radius: 4px; color: var(--accent); font-size: var(--fs-micro); font-weight: 700; line-height: 1; }
 
   .mid { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  /* The desktop category page: the kind's rows in the main column, the same
+     .side-row dialect the phone's list uses, capped like the editor. */
+  .cat-list { flex: 1; overflow-y: auto; padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 2px; max-width: 720px; }
+  .cat-list > .hint { margin: 0 0 8px; }
   .spacer { flex: 1; }
   /* The head actions move as ONE block: on a phone they wrap under the
      title together instead of scattering one button per row. */
