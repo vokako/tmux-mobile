@@ -112,7 +112,44 @@ history as containing a live signing key.
 
 ## Workflow
 
-- **Commit after every verified change** (owner's standing instruction): once a fix/feature is tested and its docs are updated, commit it right away — one logical change per commit. Don't let verified work sit uncommitted in the tree. Never commit `agent-team-page/` or other unrelated in-progress work without being asked.
+### Agent worktree isolation
+
+- **Develop in a dedicated worktree, never in the launch checkout.** Before the
+  first tracked-file edit for a task, a coding agent creates or reuses one task
+  branch in a separate `git worktree`. The checkout where the agent was launched
+  is for reading, coordination and final integration only. A session already
+  launched inside its task worktree uses that worktree; read-only work needs no
+  extra checkout.
+- Keep one task per worktree. The local default is
+  `~/work/worktrees/<repo>/<agent>-<task>` with a branch such as
+  `agent/<agent>/<task>`, based on the intended integration HEAD. Use the
+  worktree's **absolute path** for every file tool, test, build and Git command;
+  a relative path from an agent process may still resolve to the launch
+  checkout.
+- Verify and commit on the task branch. Only then fast-forward/cherry-pick the
+  verified commit into the intended branch from the integration checkout. Keep
+  the worktree until integration is confirmed, then remove it with
+  `git worktree remove`; never absorb, clean or overwrite another dirty
+  checkout. A fresh worktree has its own ignored files and dependencies, so run
+  the documented setup there when a check needs them.
+- The supervised dev stack on this host serves the launch checkout, not every
+  linked worktree. Validate inside the worktree with its tests/build (or a
+  separate free-port preview); do not mistake the existing server's UI for the
+  worktree's code and do not restart the supervised server.
+
+### Commits and AI attribution
+
+- **Commit after every verified change** (owner's standing instruction): once a
+  fix/feature is tested and its docs are updated, commit it right away — one
+  logical change per commit. Don't let verified work sit uncommitted in the
+  tree. Never commit `agent-team-page/` or other unrelated in-progress work
+  without being asked.
+- Preserve the human's configured Git author. Kiro-authored commits add exactly
+  one final trailer, after a blank line:
+  `Co-authored-by: Kiro Agent <244629292+kiro-agent@users.noreply.github.com>`.
+  This is the public Kiro Agent GitHub identity; Kiro remains a co-author rather
+  than replacing the user's author. Do not add it when Kiro only reviewed or
+  integrated someone else's commit; other agents use their own identity.
 
 ## Testing
 
