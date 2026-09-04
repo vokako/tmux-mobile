@@ -40,7 +40,7 @@
   import { longpress } from '../ui/longpress.ts';
   import { hoverInfo } from '../ui/hover.ts';
   import { flip } from 'svelte/animate';
-  import { moveMs } from '../ui/motion.ts';
+  import { moveMs, revealMs } from '../ui/motion.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
   import { renderMarkdown } from '../core/markdown.ts';
   import CreateProjectDialog from '../projects/CreateProjectDialog.svelte';
@@ -298,7 +298,7 @@
   function unfold() {
     clearTimeout(justLoadedTimer);
     justLoaded = true;
-    justLoadedTimer = setTimeout(() => { justLoaded = false; }, moveMs() + 260);
+    justLoadedTimer = setTimeout(() => { justLoaded = false; }, revealMs());
   }
 
   async function selectProject(session) {

@@ -12,7 +12,7 @@
   import { renderMarkdown } from '../core/markdown.ts';
   import { backendColor } from '../hub/hub.ts';
   import { backendIcon } from '../core/agents.ts';
-  import { moveMs } from '../ui/motion.ts';
+  import { moveMs, revealMs } from '../ui/motion.ts';
   import Select from '../ui/Select.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
@@ -152,7 +152,7 @@
     if (!painted) {
       painted = true;
       justLoaded = true;
-      setTimeout(() => { justLoaded = false; }, moveMs() + 260);
+      setTimeout(() => { justLoaded = false; }, revealMs());
     }
   }
   $effect(() => { if (visible) reload(); });

@@ -12,7 +12,7 @@
   // disabled) makes the team_* RPCs reject with method-not-found; we surface
   // that as an "unavailable" state and the App hides the tab.
   import { flip } from 'svelte/animate';
-  import { moveMs } from '../ui/motion.ts';
+  import { moveMs, revealMs } from '../ui/motion.ts';
   import { hoverInfo } from '../ui/hover.ts';
   import Icon from '../ui/Icon.svelte';
   import Select from '../ui/Select.svelte';
@@ -234,7 +234,7 @@
   function revealRoster() {
     rosterReveal = true;
     clearTimeout(rosterRevealTimer);
-    rosterRevealTimer = setTimeout(() => { rosterReveal = false; }, moveMs() * 4);
+    rosterRevealTimer = setTimeout(() => { rosterReveal = false; }, revealMs());
   }
 
   function scrollToBottom() {

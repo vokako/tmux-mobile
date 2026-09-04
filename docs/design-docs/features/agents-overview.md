@@ -60,6 +60,6 @@ Owner, 2026-09-02: "除了定制 agent 之外，我们可以定义 agent team，
 
 **UI.** Agents page → Teams section: list rows (name + members) and an editor — name, description, members (name, "Derives from" Select over the registry with a "Custom — this team only" option that opens backend/model/effort/persona inline, role text, add/remove, cap). Hub roster: `rosterGroups` folds same-team cards into one `.tgroup` (dashed row-radius frame, micro label) rendered through the one card snippet; the preset panel and the picker dialog list teams as one-tap starts.
 
-**Motion (Agents page).** Per [motion.md](motion.md): the sidebar list unfolds on its FIRST paint only — `reload()` sets `justLoaded` once (`painted`), `.reveal` on `.side-scroll` staggers rows 30ms from the top, and a timer clears it after `moveMs() + 260` so a saved or imported row later mounts plain; a revisit is a cut. The compact editor drill keeps its 120ms linear slide.
+**Motion (Agents page).** Per [motion.md](motion.md): the sidebar list unfolds on its FIRST paint only — `reload()` sets `justLoaded` once (`painted`), `.reveal` on `.side-scroll` staggers rows 30ms from the top, and a timer clears it after `revealMs()` so a saved or imported row later mounts plain; a revisit is a cut. The compact editor drill keeps its 120ms linear slide.
 
 **Why not the desktop Team feature.** That is a different thing — an agora room with its own sessions (`tmm-team-*`), templates and bus. Agent teams are a REGISTRY concept inside a project's ordinary roster; they reuse everything the Hub already has.

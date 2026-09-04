@@ -31,3 +31,16 @@ export function moveMs(): number {
 export function fastMs(): number {
   return reducedMotion() ? 0 : T_FAST_MS;
 }
+
+/** The stagger the `.reveal*` atoms add to their last rows (app.css: 7 × 30ms). */
+export const REVEAL_STAGGER_MS = 210;
+
+/**
+ * How long a `.reveal` / `.reveal-tail` class may stay on a container after a
+ * load lands: one move + the longest stagger + a margin. The class is then
+ * dropped, because the atoms animate every child that MOUNTS while present
+ * (motion.md principle 13 — an older page prepended later must not rise).
+ */
+export function revealMs(): number {
+  return reducedMotion() ? 0 : T_MOVE_MS + REVEAL_STAGGER_MS + 50;
+}

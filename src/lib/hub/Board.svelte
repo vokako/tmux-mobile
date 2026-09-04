@@ -19,7 +19,7 @@
   import { draftOf, draftDirty, draftValid, draftPatch, rebaseDraft, issueRef, countsOf, applyCounts, visibleBoards, boardTitle, assignNotes, chipCols, noteActsSet, noteActsCopyLanded, noteActsExpired, NOTE_ACTS_IDLE, type NoteActsState } from './board.ts';
   import { scrollFade } from '../core/scrollFade.ts';
   import { flip } from 'svelte/animate';
-  import { moveMs } from '../ui/motion.ts';
+  import { moveMs, revealMs } from '../ui/motion.ts';
   import { hoverInfo } from '../ui/hover.ts';
   import { slideIndicator } from '../ui/indicator.ts';
 
@@ -159,7 +159,7 @@
   function unfold() {
     if (justLoadedTimer) clearTimeout(justLoadedTimer);
     justLoaded = true;
-    justLoadedTimer = setTimeout(() => { justLoaded = false; }, moveMs() + 260);
+    justLoadedTimer = setTimeout(() => { justLoaded = false; }, revealMs());
   }
   let err = $state('');
   // view: the list, one issue (with its note thread), or the new-issue form.

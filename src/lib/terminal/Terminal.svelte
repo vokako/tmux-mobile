@@ -2130,10 +2130,11 @@
                  pills use; the icon stays as the backend's mark. A shell keeps
                  its command as the name, which is what identifies it. -->
             <!-- The hover card (use:hoverInfo) carries the window's facts; the
-                 chip's own title prop is left unset so it adds no second line. -->
+                 chip gets title={null}: the card speaks, no native tooltip beside it. -->
             <div class="win-chip appear" animate:flip={{ duration: moveMs() }} use:hoverInfo={() => windowInfo(w)}>
               <AgentChip
                 agent={wAgent}
+                title={null}
                 label={`${w.window}:${wAgent ? w.window_name : (w.current_command || w.window_name)}`}
                 variant={String(w.window) === currentWindow ? 'active' : 'default'}
                 onclick={(e) => {

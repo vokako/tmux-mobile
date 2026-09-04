@@ -674,6 +674,8 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 .reveal > :nth-child(6), .reveal-tail > :nth-last-child(6) { animation-delay: 150ms; }
 .reveal > :nth-child(7), .reveal-tail > :nth-last-child(7) { animation-delay: 180ms; }
 .reveal > :nth-child(n+8), .reveal-tail > :nth-last-child(n+8) { animation-delay: 210ms; }
+/* The travelling highlight is not a row: it is born in place, it does not rise. */
+.reveal > .slide-pill, .reveal > .slide-ind, .reveal-tail > .slide-pill, .reveal-tail > .slide-ind { animation: none; }
 @keyframes shimmer { to { background-position: -200% 0; } }
 .skel {
   position: relative; overflow: hidden; border-radius: var(--ui-radius-control);

@@ -120,7 +120,7 @@ vocabulary.
 | `drill-in-right` / `drill-in-left` (app.css, one copy), `slideInLeft/Right` (App) | navigation, touch-only | 120ms linear |
 | `.pop-layer` + `.ready`, `--pop-origin` from `popOrigin()` | a placed popover grows from its anchor corner (opacity + scale 0.96→1); exit is a cut | `--t-fast` |
 | `.slide-ind` (bar) / `.slide-pill` (filled pill) + `use:slideIndicator` | the one travelling highlight of a tab bar / rail / segmented control (`--ind-x/y/w/h` written by the action from client rects ÷ `uiZoom()`, so a nested or zoomed item measures right; `.ready` after the first measure so it is born in place; `hidden: true` collapses it while the container is being rearranged). A segmented row is `ui/Segmented`, which carries its own pill | `--t-move` |
-| `.reveal` / `.reveal-tail` on a container | a loaded list unfolds, rows staggered 30ms from the top / from the newest at the bottom; backwards fill only | `--t-move` + stagger |
+| `.reveal` / `.reveal-tail` on a container, dropped after `revealMs()` | a loaded list unfolds, rows staggered 30ms from the top / from the newest at the bottom; backwards fill only; the class is cleared after one move + the longest stagger so a row that mounts later does not rise (`ui/motion.ts` `revealMs()`) | `--t-move` + stagger |
 | `.skel` (+ `.skel-wrap`) | a loading placeholder of the coming shape with a slow shimmer, invisible for the first 150ms | 1.4s loop, stilled |
 | `use:hoverInfo={() => info}` + `ui/HoverCard` | the one hover card (title / text / label→value rows / note), 380ms dwell, 60ms hop, pointer + keyboard focus only | `--t-fast` intro |
 
@@ -217,9 +217,8 @@ wrapper) and its to-tail note, file rows / breadcrumbs / bookmarks / recent
 files / git status rows (`files/git-status.ts` puts the porcelain code in
 words), project cards (path, "n live · n stopped", state, age) and Team
 roster chips (state, role, backend, model, room) — every card through the
-row's EXISTING formatter. Open: AgentChip still falls back to its label as a
-native `title`, so the Terminal chip shows both until `ui/AgentChip` learns
-to go without one.
+row's EXISTING formatter. AgentChip accepts `title={null}` ("no native
+title"), which the Terminal chip passes so the card is not doubled.
 
 **Landed 2026-09-04, shell / Settings / ui pass** (App, Preferences,
 SystemStatus, ui): wave 6 — the server menu wears `.pop-layer` (done in the

@@ -61,7 +61,7 @@ test('an uncached room unfolds: skeletons while it loads, then the feed from its
   // Only an UNCACHED load sets it, and a timer clears it: the atoms animate
   // whatever mounts while the class is on, and an older page must not.
   assert.match(source, /if \(!c\) unfold\(\);\s*\n\s*roomReady = true;/u, 'the unfold is the uncached first fill\u2019s');
-  assert.match(source, /justLoadedTimer = setTimeout\(\(\) => \{ justLoaded = false; \}, moveMs\(\) \+ 260\);/u, 'cleared after one move plus the longest stagger');
+  assert.match(source, /justLoadedTimer = setTimeout\(\(\) => \{ justLoaded = false; \}, revealMs\(\)\);/u, 'cleared after one move plus the longest stagger');
   assert.match(source, /clearTimeout\(justLoadedTimer\); justLoaded = false; \/\/ an unfold belongs to the room that loaded/u, 'a switch mid-unfold cancels it');
   // The feed skeleton is parked at the tail and never overflows — no parked
   // scrollTop for loadFeed's scrollFeed() to fight.

@@ -122,7 +122,7 @@ test('a board\u2019s first fill unfolds its columns; a poll is a cut (motion.md 
   assert.match(source, /<div class="col-scroll subtle-scroll" class:reveal=\{justLoaded\}>/u, 'each column\u2019s card list wears .reveal');
   assert.match(source, /if \(!ready\) unfold\(\); \/\/ the first answer for this board, not a poll\s*\n\s*issues = r\.issues;\s*\n\s*ready = true;/u,
     'only the first answer after a project switch unfolds');
-  assert.match(source, /justLoadedTimer = setTimeout\(\(\) => \{ justLoaded = false; \}, moveMs\(\) \+ 260\);/u, 'cleared after one move plus the longest stagger');
+  assert.match(source, /justLoadedTimer = setTimeout\(\(\) => \{ justLoaded = false; \}, revealMs\(\)\);/u, 'cleared after one move plus the longest stagger');
   assert.match(source, /ready = false; issues = \[\];[^\n]*\n\s*if \(justLoadedTimer\) clearTimeout\(justLoadedTimer\); justLoaded = false;/u, 'a switch mid-unfold cancels it');
 });
 

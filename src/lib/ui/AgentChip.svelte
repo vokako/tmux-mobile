@@ -26,7 +26,7 @@
     variant = 'default',
     iconName = '',        // Lucide icon name, used by 'add' and collapsed chip
     chevron = '',         // Small indicator appended at end
-    title = '',           // HTML title attribute
+    title = '',           // HTML title attribute; null = none (a hover card speaks instead)
     onclick = () => {},
   }: {
     agent?: Agent | null;
@@ -35,16 +35,16 @@
     variant?: 'default' | 'active' | 'add';
     iconName?: string;
     chevron?: '' | 'up' | 'down';
-    title?: string;
+    title?: string | null;
     onclick?: (e: MouseEvent) => void;
   } = $props();
 </script>
 
 <button
   class="chip chip-{variant}"
-  title={title || (agents.length
+  title={title === null ? undefined : (title || (agents.length
     ? `${label ? `${label} · ` : ''}${agents.map(item => `${item.agent.tag}${item.count > 1 ? ` ×${item.count}` : ''}`).join(', ')}`
-    : label || agent?.tag || '')}
+    : label || agent?.tag || ''))}
   onclick={(e) => onclick(e)}
 >
   <span class="chip-content">
