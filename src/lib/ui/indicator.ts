@@ -86,6 +86,7 @@ export function slideIndicator(node: HTMLElement, params: IndicatorParams = {}) 
   let sel = params.active ?? DEFAULT_ACTIVE;
   let hidden = !!params.hidden;
   let settle: ReturnType<typeof setTimeout> | null = null;
+  let frame = 0;
   const ind = () => node.querySelector<HTMLElement>(':scope > .slide-pill');
   const measure = () => {
     const el = hidden ? null : node.querySelector<HTMLElement>(sel);
@@ -94,6 +95,12 @@ export function slideIndicator(node: HTMLElement, params: IndicatorParams = {}) 
     const box = el && el.offsetParent
       ? boxFromOffsets(el as unknown as OffsetLike, node as unknown as OffsetLike, { left: node.clientLeft, top: node.clientTop })
       : null;
+    // No active item while NOT hidden is a moment between two template
+    // effects (the old tab has dropped `.active`, the new one has not gained
+    // it yet) — hold the last box rather than collapse to the origin, which
+    // read as the pill darting to the first tab (owner, 2026-09-04: "board 到
+    // file 从 chat 跳了一下").
+    if (!box && !hidden) return;
     for (const [k, v] of Object.entries(indicatorVars(box))) node.style.setProperty(k, v);
     // Enable the glide only after the first placement (the next frame, so the
     // first vars are painted without a transition).
@@ -107,7 +114,11 @@ export function slideIndicator(node: HTMLElement, params: IndicatorParams = {}) 
     update(p: IndicatorParams = {}) {
       sel = p.active ?? DEFAULT_ACTIVE;
       hidden = !!p.hidden;
-      measure();
+      // Measure on the next frame, after every sibling's class/attribute effect
+      // for this change has landed — an action's update is not ordered after
+      // them, so a same-tick read can still see the OLD active item.
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => { frame = 0; measure(); });
       // A second read after the move tempo: a layout that is still settling
       // (a slot added by a flip, a label that wrapped) answers its final box
       // only then.
@@ -116,6 +127,7 @@ export function slideIndicator(node: HTMLElement, params: IndicatorParams = {}) 
     },
     destroy() {
       if (settle) clearTimeout(settle);
+      if (frame) cancelAnimationFrame(frame);
       ro?.disconnect();
     },
   };

@@ -643,7 +643,7 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
      chosen item glides to the next one on --t-move instead of each item
      lighting up in place. `.soft` drops the ring (an icon bar wants only the
      wash — owner 2026-09-04: "直接用 icon 上面的背景阴影来滑动"), `.inset`
-     shrinks the pill by --ind-inset on every side so it hugs the icon rather
+     shrinks the pill by --ind-inset (or --ind-inset-x/-y per axis) so it hugs the icon rather
      than the whole cell. The bar variant is retired (same day: "线条都去掉").
      The atom is absolutely positioned with no in-flow siblings, which is why
      its width/height MAY transition here and nowhere else.
@@ -666,8 +666,10 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 }
 .slide-pill.soft { box-shadow: none; }
 .slide-pill.inset {
-  width: calc(var(--ind-w, 0px) - 2 * var(--ind-inset, 6px)); height: calc(var(--ind-h, 0px) - 2 * var(--ind-inset, 6px));
-  transform: translate(calc(var(--ind-x, 0px) + var(--ind-inset, 6px)), calc(var(--ind-y, 0px) + var(--ind-inset, 6px)));
+  /* Per-axis insets (--ind-inset-x / --ind-inset-y) fall back to --ind-inset. */
+  --ix: var(--ind-inset-x, var(--ind-inset, 6px)); --iy: var(--ind-inset-y, var(--ind-inset, 6px));
+  width: calc(var(--ind-w, 0px) - 2 * var(--ix)); height: calc(var(--ind-h, 0px) - 2 * var(--iy));
+  transform: translate(calc(var(--ind-x, 0px) + var(--ix)), calc(var(--ind-y, 0px) + var(--iy)));
 }
 .slide-pill.ready { transition: transform var(--t-move) ease-out, width var(--t-move) ease-out, height var(--t-move) ease-out; }
 .reveal > *, .reveal-tail > * { animation: rise-in var(--t-move) ease-out backwards; }

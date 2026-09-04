@@ -1787,7 +1787,7 @@
       <!-- The one travelling highlight (motion.md §1.14): the wash behind the
            active tab glides between tabs, inset so it hugs icon + label; the
            buttons' own colour still cross-fades. No bar (owner, 2026-09-04). -->
-      <span class="slide-pill soft inset" aria-hidden="true"></span>
+      <span class="slide-pill soft inset" style:--ind-inset-x="10px" style:--ind-inset-y="2px" aria-hidden="true"></span>
       {#if hubEligible}
         <button class:active={page === 'hub'} aria-current={page === 'hub' ? 'page' : undefined} onclick={() => switchTab('hub')}>
           <Icon name="chat" size={19} /><span>{t('hub')}</span>

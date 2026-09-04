@@ -513,7 +513,8 @@ test('the tab bar and the rail carry ONE travelling highlight each (motion.md §
   // the icon, no bar (owner, 2026-09-04: "线条都去掉，直接用 icon 上面的背景阴影
   // 来滑动"). The tab bar's hugs icon + label (.inset); both drop the ring.
   assert.match(tabbar, /^<nav class="tabbar" use:slideIndicator=\{\{ key: page, active: '\.active' \}\}>/u);
-  assert.match(tabbar, /<span class="slide-pill soft inset" aria-hidden="true"><\/span>/u);
+  assert.match(tabbar, /<span class="slide-pill soft inset" style:--ind-inset-x="10px" style:--ind-inset-y="2px" aria-hidden="true"><\/span>/u,
+    'the phone pill keeps air around icon + label (2px above and below — the owner saw it cut at the text)');
   assert.ok(!source.includes('slide-ind'), 'no bar indicator anywhere in the shell');
   assert.match(rail, /use:slideIndicator=\{\{ key: page, active: '\.rail-btn\.active', hidden: !!railDrag \}\}/u,
     'the rail hides the marker while an icon is being dragged (slots are mid-transform) and re-measures on release');
