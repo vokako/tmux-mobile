@@ -8,6 +8,7 @@
   import Select from '../ui/Select.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import { t } from '../core/i18n.svelte.ts';
+  import { slideIndicator } from '../ui/indicator.ts';
 
   export interface TplAgent {
     name: string;
@@ -228,7 +229,10 @@
 
   <div class="tpl-body">
     <!-- Left: template list -->
-    <div class="tpl-list">
+    <!-- The chosen template is ONE pill that glides (motion.md principle 14);
+         the list unfolds when the sheet opens (principle 15). -->
+    <div class="tpl-list reveal" use:slideIndicator={{ key: selIdx, active: '.active' }}>
+      <span class="slide-pill" aria-hidden="true"></span>
       {#each drafts as d, i}
         <button class="tpl-item" class:active={i === selIdx} onclick={() => selIdx = i}>
           {d.name} <span class="tpl-count">{d.agents?.length ?? 0}</span>
@@ -406,8 +410,10 @@
   .tpl-list {
     width: 160px; flex-shrink: 0; border-right: 1px solid var(--border);
     padding: 8px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto;
+    position: relative; /* the .slide-pill's frame */
   }
   .tpl-item {
+    position: relative; z-index: 1; /* above the travelling pill */
     display: flex; align-items: center; justify-content: space-between; gap: 6px;
     padding: 7px 9px; border: 1px solid var(--border2); border-radius: 8px;
     background: var(--input-bg); color: var(--text2); font-size: var(--fs-ui); cursor: pointer;
@@ -415,7 +421,8 @@
     font-family: var(--font-ui);
     transition: border-color var(--t-fast), color var(--t-fast), background var(--t-fast);
   }
-  .tpl-item.active { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+  /* The accent frame and wash are the shared .slide-pill under it — the item only changes colour. */
+  .tpl-item.active { border-color: transparent; color: var(--accent); background: transparent; }
   .tpl-count { color: var(--text3); font-size: var(--fs-sub); }
   .tpl-add {
     padding: 7px 9px; border: 1px dashed var(--border2); border-radius: 8px;

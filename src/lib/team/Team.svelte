@@ -13,6 +13,7 @@
   // that as an "unavailable" state and the App hides the tab.
   import { flip } from 'svelte/animate';
   import { moveMs } from '../ui/motion.ts';
+  import { hoverInfo } from '../ui/hover.ts';
   import Icon from '../ui/Icon.svelte';
   import Select from '../ui/Select.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
@@ -212,6 +213,30 @@
     return roster.find(a => a.name === name)?.status || 'offline';
   }
 
+  // A roster chip's facts for the hover card (motion.md principle 16): the
+  // roster row (state, role) plus the desired roster's launcher spec for the
+  // same name (backend, model) — data the grid already holds, no new RPC.
+  function rosterInfo(a) {
+    const spec = employees.find(e => e.name === a.name)?.spec || {};
+    const lines = [{ label: t('hoverState'), value: a.status, tone: TEAM_LIVE.has(a.status) ? 'accent' : undefined }];
+    if (a.role) lines.push({ label: t('teamRole'), value: a.role });
+    if (spec.backend) lines.push({ label: t('teamBackend'), value: spec.backend });
+    if (spec.model) lines.push({ label: t('hoverModel'), value: spec.model });
+    if (activeRoom) lines.push({ label: t('hoverRoom'), value: activeRoom });
+    return { title: a.name, lines };
+  }
+
+  // The roster strip unfolds once per room (motion.md principle 15): `.reveal`
+  // is worn from the room's first roster until the stagger has played, then
+  // dropped so a later joiner pops in (`.appear-pop`) instead of rising.
+  let rosterReveal = $state(false);
+  let rosterRevealTimer = null;
+  function revealRoster() {
+    rosterReveal = true;
+    clearTimeout(rosterRevealTimer);
+    rosterRevealTimer = setTimeout(() => { rosterReveal = false; }, moveMs() * 4);
+  }
+
   function scrollToBottom() {
     requestAnimationFrame(() => { if (listEl) listEl.scrollTop = listEl.scrollHeight; });
   }
@@ -264,6 +289,7 @@
         messages = h?.messages || [];
         roster = r?.roster || [];
         employees = e?.employees || [];
+        if (roster.length) revealRoster();
       } else {
         if (!isCurrent()) return;
         messages = []; roster = []; employees = [];
@@ -600,9 +626,10 @@
          Chips wrap inside their own bounded strip. Hidden when the graph is
          visible (desktop grid, or mobile panel open) — agents show there. -->
     {#if !newTeam && activeRoom && !splitEligible && !collabOpen}
-      <div class="team-header-scroll">
+      <div class="team-header-scroll" class:reveal={rosterReveal}>
         {#each agents as a (a.name)}
-          <button class="roster-chip appear-pop" animate:flip={{ duration: moveMs() }} onclick={() => previewAgent(a.name)} title={a.role || a.name}>
+          <button class="roster-chip appear-pop" animate:flip={{ duration: moveMs() }} onclick={() => previewAgent(a.name)}
+            use:hoverInfo={() => rosterInfo(a)}>
             <span class="roster-dot status-{a.status}" class:live-dot={TEAM_LIVE.has(a.status)}></span>
             <span class="roster-name">{a.name}</span>
           </button>
