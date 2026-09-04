@@ -1871,6 +1871,14 @@
   let menuAnchor = $state(null);   // trigger rect, in CSS px
   let menuW = $state(0);
   let menuH = $state(0);
+  /** The composer's two upward popovers wear the same `.pop-layer` gate as the
+   * fixed menus (motion.md principle 8): measured invisible, then grown from
+   * the corner touching the chip (`bottom left`). The heights reset when a
+   * menu closes so the NEXT opening is measured — and animated — again. */
+  let toMenuH = $state(0);
+  let cmdMenuH = $state(0);
+  $effect(() => { if (!recipientOpen) toMenuH = 0; });
+  $effect(() => { if (!palette?.items.length) cmdMenuH = 0; });
 
   // ── Right-click on the desktop, long press on a phone. One menu component, one
   // piece of state, three subjects (owner, 2026-08-20: "还有很多地方增加右键点击操
@@ -3011,7 +3019,7 @@
               <span class="flip" class:on={recipientOpen}><Icon name="chevron-up" size={11} /></span>
             </button>
             {#if recipientOpen}
-              <div class="to-menu">
+              <div class="to-menu pop-layer" class:ready={toMenuH > 0} style:--pop-origin="bottom left" bind:clientHeight={toMenuH}>
                 {#each managedAgents as a (a.window)}
                   <button class:sel={recipient === a.name} onclick={() => setRecipient(a.name)}>
                     <span class="st" class:live-dot={stateIsLive(a.state)} style:background={stateDotColor(a.state)}></span>{a.name}
@@ -3036,7 +3044,7 @@
           <!-- Completion for a `/command`, opening UPWARD so the on-screen
                keyboard never covers it — the same rule as the recipient menu, and
                the same popover dialect. -->
-          <div class="cmd-menu" role="listbox" tabindex="-1">
+          <div class="cmd-menu pop-layer" class:ready={cmdMenuH > 0} style:--pop-origin="bottom left" role="listbox" tabindex="-1" bind:clientHeight={cmdMenuH}>
             {#each palette.items as it, i (it.value)}
               <button class="cmd-opt" class:cur={i === paletteIdx} role="option"
                 aria-selected={i === paletteIdx}

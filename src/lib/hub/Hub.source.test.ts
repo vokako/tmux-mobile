@@ -51,6 +51,23 @@ test('the composer stacks above every feed layer, so its popovers are never buri
 
 });
 
+test('the composer\u2019s two upward menus grow from the chip like every other popover (motion.md wave 6)', () => {
+  // Both are absolutely positioned above the capsule, so the corner touching
+  // their trigger is the bottom-left one; the atom only touches opacity /
+  // transform / pointer-events, and rests with `transform: none`, so the
+  // menus' own `position: absolute; bottom: calc(100% + 6px)` still places them.
+  for (const menu of ['to-menu', 'cmd-menu']) {
+    const re = new RegExp(`<div class="${menu} pop-layer" class:ready=\\{(\\w+) > 0\\} style:--pop-origin="bottom left"[^>]*bind:clientHeight=\\{\\1\\}`, 'u');
+    assert.match(source, re, `.${menu} is measured, then grows from bottom left`);
+  }
+  // A closed menu forgets its height, so the NEXT opening is measured (and
+  // animated) again instead of appearing already `.ready`.
+  assert.match(source, /if \(!recipientOpen\) toMenuH = 0;/u, 'the recipient menu re-measures per opening');
+  assert.match(source, /if \(!palette\?\.items\.length\) cmdMenuH = 0;/u, 'the palette re-measures per opening');
+  assert.match(rule('.to-menu'), /position: absolute; bottom: calc\(100% \+ 6px\)/u, 'the recipient menu keeps its own placement');
+  assert.match(rule('.cmd-menu'), /position: absolute; bottom: calc\(100% \+ 6px\)/u, 'the palette keeps its own placement');
+});
+
 test('the agent card speaks the three-stage machine: select, then options, dblclick filters', () => {
   // Board #3: a click on an UNSELECTED card must only select; the menu is the
   // SECOND click's job; a double click enters the one-agent filter with the
