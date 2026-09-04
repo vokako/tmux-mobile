@@ -119,7 +119,7 @@ vocabulary.
 | `.side-scrim` / `.dlg-backdrop` fade-in, `sheet-up` (`translateY(100%) → none`, only for a layer whose resting transform is none) | sheets rise with a scrim (design-language §1) | `--t-move` |
 | `drill-in-right` / `drill-in-left` (app.css, one copy), `slideInLeft/Right` (App) | navigation, touch-only | 120ms linear |
 | `.pop-layer` + `.ready`, `--pop-origin` from `popOrigin()` | a placed popover grows from its anchor corner (opacity + scale 0.96→1); exit is a cut | `--t-fast` |
-| `.slide-ind` (bar) / `.slide-pill` (filled pill) + `use:slideIndicator` | the one travelling highlight of a tab bar / rail / segmented control (`--ind-x/y/w/h` written by the action; `.ready` after the first measure so it is born in place) | `--t-move` |
+| `.slide-ind` (bar) / `.slide-pill` (filled pill) + `use:slideIndicator` | the one travelling highlight of a tab bar / rail / segmented control (`--ind-x/y/w/h` written by the action from client rects ÷ `uiZoom()`, so a nested or zoomed item measures right; `.ready` after the first measure so it is born in place; `hidden: true` collapses it while the container is being rearranged). A segmented row is `ui/Segmented`, which carries its own pill | `--t-move` |
 | `.reveal` / `.reveal-tail` on a container | a loaded list unfolds, rows staggered 30ms from the top / from the newest at the bottom; backwards fill only | `--t-move` + stagger |
 | `.skel` (+ `.skel-wrap`) | a loading placeholder of the coming shape with a slow shimmer, invisible for the first 150ms | 1.4s loop, stilled |
 | `use:hoverInfo={() => info}` + `ui/HoverCard` | the one hover card (title / text / label→value rows / note), 380ms dwell, 60ms hop, pointer + keyboard focus only | `--t-fast` intro |
@@ -204,6 +204,24 @@ rail icons and tab bar (name + shortcut), sessions and panes (command, size,
 last activity), file rows (size, modified, kind), board cards (reporter,
 assignee, updated), settings rows where the label is terse. Native `title`
 is removed wherever the card takes over; `aria-label` stays.
+
+**Landed 2026-09-04, shell / Settings / ui pass** (App, Preferences,
+SystemStatus, ui): wave 6 — the server menu wears `.pop-layer` (done in the
+foundation commit, verified); wave 7 — the phone tab bar's bar, the rail's
+vertical bar (hidden during an icon drag, re-measured on release — the
+action now measures by client rects ÷ `uiZoom()` and re-reads after the move
+tempo, `boxFromRects` pure + tested), and every Preferences segmented row
+through the new `ui/Segmented` (the pill); wave 8 — the Settings category
+list on first paint and the keyed `.pref-content` on a category switch;
+wave 9 — rail icons (name + live shortcut), the server switcher (server,
+address, state), the gear, the split toggle, Settings category rows (one
+`settings*Hint` line each) and address rows (address + state), the vitals
+corner (`sysDetail`: full CPU/memory/disk numbers + poll tempo). Not done
+here, with reasons: the tab bar gets no hover card (touch-only, no hover);
+address rows show no "last used" (no timestamp is stored for an address);
+the vitals card has no load average / uptime (not on the `system_status`
+wire); the server menu's rows do not `.reveal` (a popover already grows).
+Settings has no `.git-tabs`-like tab row — its categories are `.side-row`s.
 
 **Deliberately not done**: `body` and the scrollbar thumb keep their `0.3s`
 theme cross-fade (app.css) — that is the THEME changing under every pixel at
