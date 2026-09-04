@@ -732,7 +732,7 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
   /* Hub — conversation */
   .bubble, .compose-shell, .send-btn, .m-acts button, .sysline, .shots,
   .steps, .s-head, .arow, .ar-acts button, .a-menu, .a-menu button, .to-menu,
-  .to-menu button, .start-row, .to-chip, .acard, .ac-bar, .a-more, .arch-bar,
+  .to-menu button, .start-row, .to-chip, .acard, .ac-bar, .arch-bar,
   .s-all, .h1-edit, .h1-pen, .cmd-menu, .cmd-opt, .win-pill, .agent-pick,
   .pg-tag, .p-tag, .m-note-state, .sr-cap, .direct-tag, .r-cap,
   /* Sessions / Projects */

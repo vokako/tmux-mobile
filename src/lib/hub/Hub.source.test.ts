@@ -207,23 +207,24 @@ test('the filter and the detail level are reachable from menus, not only from a 
   assert.ok(!source.includes('cycleFeedLevel'), 'the dead cycle control stays gone');
 });
 
-test('every agent card exposes More, and a live agent can restart from that menu (board #89)', async () => {
+test('agent cards keep their space and the existing menu can restart (board #89)', async () => {
   const live = source.slice(source.indexOf('class="acard" class:sel'), source.indexOf('{/snippet}', source.indexOf('class="acard" class:sel')));
-  assert.match(
-    live,
-    /<button class="a-more" title=\{t\('hubMore'\)\} aria-label=\{t\('hubMore'\)\}[\s\S]*?e\.stopPropagation\(\); toggleAgentMenu\(a\.name, e\.currentTarget\)[\s\S]*?<Icon name="dots"/u,
-    'a visible dots button opens the live card menu without also selecting the card',
-  );
   const off = source.slice(source.indexOf('class="acard off"'), source.indexOf('{/each}', source.indexOf('class="acard off"')));
-  assert.match(off, /class="a-more"[\s\S]*?toggleAgentMenu\(name, e\.currentTarget\)[\s\S]*?name="dots"/u,
-    'stopped cards expose the same discoverable menu');
+  assert.doesNotMatch(live, /class="a-more"|name="dots"/u,
+    'the live card has no redundant dots control');
+  assert.doesNotMatch(off, /class="a-more"|name="dots"/u,
+    'the stopped card spends no width on dots either');
+  assert.match(live, /onclick=\{\(e\) => cardClick\(a\.name, e\.currentTarget\)\}/u,
+    'the live card surface still reaches its menu interaction');
+  assert.match(off, /onclick=\{\(e\) => toggleAgentMenu\(name, e\.currentTarget\)\}/u,
+    'the stopped card surface opens its menu without restarting');
 
   const items = source.slice(source.indexOf('function agentItems'), source.indexOf('function projectItems'));
   assert.match(items, /label: t\('hubRestart'\), icon: 'refresh', onselect: \(\) => restartAgent\(name\)/u,
-    'right-click and long-press use the same restart action');
+    'right-click and long-press keep the same restart action');
   const tapMenu = source.slice(source.indexOf('{#if menuFor}'), source.indexOf('<div class="feed-wrap">'));
   assert.match(tapMenu, /restartAgent\(n\)[\s\S]*?t\('hubRestart'\)/u,
-    'the card tap/dots menu exposes Restart too');
+    'the card menu still exposes Restart');
 
   const action = source.slice(source.indexOf('async function restartAgent'), source.indexOf('// Live pushes'));
   assert.match(action, /await hubAgentRestart\(selected, name\)/u, 'Restart calls the existing lifecycle RPC');

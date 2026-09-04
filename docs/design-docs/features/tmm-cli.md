@@ -1240,7 +1240,7 @@ What remains, deliberately:
 gesture — "tell me what I can do to THIS" — so they share one mechanism rather than
 growing a menu per surface:
 
-- `ui/ContextMenu.svelte` is the menu. Same popover dialect as the agent dot menu
+- `ui/ContextMenu.svelte` is the menu. Same popover dialect as the agent card menu
   and the shared `Select` (a fixed layer placed by `menuPlacement`, dismissed by an
   outside pointerdown / Escape / any ancestor scroll / a resize, hover and the
   keyboard cursor sharing ONE highlight), because a second menu language would read
@@ -1335,10 +1335,11 @@ the declaration yet, so there is a fallback to a fresh `spawn` — a new
 conversation, but better than an agent that does not come back. The reply carries
 `resumed` so the caller can tell which happened.
 
-Restart works for both states. A running Agent card's explicit More dots button
-(board #89) opens the shared card/context menu and offers Restart; a stopped
-card keeps its direct Resume button and the same discoverable More menu. Restart
-is an explicit menu choice and runs immediately; Stop still asks first because
+Restart works for both states. A running Agent card's existing card/context
+menu offers Restart; the card itself is the trigger and carries no separate dots
+control (board #89), preserving roster space. A stopped card keeps its direct
+Resume button and opens the same card menu from its surface. Restart is an
+explicit menu choice and runs immediately; Stop still asks first because
 the process may be mid-task and a phone mis-tap must not close it. Both post a
 `[tmm] stopped <name>` / `[tmm] restarted <name>` line, because the room is the
 record.
@@ -1779,7 +1780,7 @@ reachable from both the chat UI and `tmm` — the CLI is not a subset (owner:
 "所有的 Agent 也可以通过 TMM 命令直接交互所有的操作"), because an agent that
 can only be managed by a human cannot manage a teammate:
 
-| Agent | `tmm agent interrupt\|stop\|restart\|remove <name>` | roster More/context menu: Watch / Interrupt / Restart / Stop / Remove |
+| Agent | `tmm agent interrupt\|stop\|restart\|remove <name>` | roster card/context menu: Watch / Interrupt / Restart / Stop / Remove |
 | Project | `tmm project up\|down\|archive\|delete <session>` | header: Open / Close / Delete (archive is the list's own action) |
 
 `remove` is the eject button next to stop's pause button: it kills the window,
@@ -2296,24 +2297,20 @@ Other language fences and unclosed Markdown fences remain code. Fence length is
 respected, so a four-backtick Markdown wrapper may contain ordinary triple-
 backtick code blocks.
 
-The roster is one
-line per agent (avatar, name, state dot, elapsed, unread dot) with everything
-secondary behind a dot menu. That menu is a CONTEXT MENU next to the chip, in a
-`position: fixed` layer placed from the trigger's client rect — fixed because the
-roster scrolls horizontally and a popover positioned inside that scroll container
-is clipped by it, which is why the first version was a full-width bar under the
-roster instead ("是不是应该类似右键菜单一样，在旁边会比较好", 2026-08-19). The
-placement is a pure function (`menuPlacement`): right-aligned to the trigger and
-below it, flipped above when the room underneath is smaller than the menu,
-clamped to the viewport on both axes, and skipping the flip while the height is
-still unmeasured — the menu stays invisible for that one frame rather than
-jumping. Under CSS `zoom` the trigger's rect is divided by `--ui-zoom` first: a
-client rect is in visual pixels while a fixed child's `left` is in its own zoomed
-pixels. It dismisses itself on an outside pointerdown, Escape, a roster scroll or
-a resize, and every action closes it as its first act — a menu you have to close
-by hand is a menu you forget to close. A stopped agent's menu carries the only
-two verbs that apply to it (Start again / Remove); Watch, Interrupt and Stop all
-need a live pane.
+The roster is one line per agent (avatar, name, state dot, model reading,
+unread dot and context edge) with secondary actions behind the card menu. The card
+itself is the trigger — no separate dots control consumes width (board #89). The
+menu is a `position: fixed` layer placed from the card's client rect — fixed
+because the roster scrolls horizontally and a popover inside that scroll container
+would be clipped, which is why the first version was a full-width bar under the
+roster ("是不是应该类似右键菜单一样，在旁边会比较好", 2026-08-19). The shared
+`menuPlacement` left-aligns the tap menu to the card, flips it above when needed,
+and clamps it to the viewport; right-click/long-press keeps pointer placement.
+Under CSS `zoom` the trigger rect is divided by `--ui-zoom` first. It dismisses on
+outside pointerdown, Escape, roster scroll or resize, and every action closes it.
+A stopped card keeps its direct Resume control; its surface menu offers retained
+history/configuration/removal, while Watch, Interrupt, Restart and Stop require a
+live pane.
 
 No emoji anywhere in this surface: state is carried by colour, a rotating
 chevron, a pulsing dot and stroked SVG icons. Lifecycle lines the server posts

@@ -1955,7 +1955,7 @@
   /** A pointer event as a plain client point. */
   const pointOf = (e) => ({ x: e.clientX ?? 0, y: e.clientY ?? 0 });
 
-  /** An agent's verbs — the same ones its dot menu carries. */
+  /** An agent's verbs — shared by its card and context menus. */
   /** One order for every agent menu — rising consequence, destructive last
    * (owner, 2026-08-25: "停止删除应该靠后"), interrupt in the warn tone. */
   function agentItems(name) {
@@ -2053,9 +2053,9 @@
   $effect(() => {
     if (!menuFor) return;
     const close = () => { menuFor = ''; };
-    // Both the card and its explicit dots button are triggers: a pointerdown
-    // on either must not pre-close the menu, or the click's toggle would reopen
-    // it — the toggle itself owns same-card close and other-card switch.
+    // The card is the trigger: a pointerdown on it must not pre-close the
+    // menu, or the click's toggle would reopen it — the toggle itself owns
+    // same-card close and other-card switch.
     const onDown = (e) => { if (!e.target?.closest?.('.a-menu, .acard:not(.add)')) close(); };
     const onKey = (e) => { if (e.key === 'Escape') { close(); e.stopPropagation(); } };
     window.addEventListener('pointerdown', onDown, true);
@@ -2120,7 +2120,7 @@
   // group so re-renders can't lose it.
   let stepsChoice = $state({});
   let stepsAll = $state({});        // group key → lift the 10-row cap
-  let menuFor = $state('');         // agent name whose dot menu is open
+  let menuFor = $state('');         // agent name whose card menu is open
   let msgOpen = $state('');         // message key whose action row is open
   // Native touch selection may emit a compatibility click after contextmenu.
   // Consume that one click per bubble before it can open the action row.
@@ -2581,13 +2581,12 @@
                team GROUP (board #74) can wrap several without a second copy
                of the card. -->
           {#snippet card(a)}
-            <!-- A div, not a button: the dot menu inside contains real buttons,
-                 and a button inside a button is invalid HTML the browser
-                 silently reshuffles. -->
-            <!-- The whole card keeps its quick interaction, and board #89 adds
-                 an explicit dots button so the options are discoverable without
-                 knowing that a second tap / right-click / long-press opens them.
-                 A card tap ALSO makes this agent the recipient: tapping a
+            <!-- A div, not a button: the card is a menu trigger and may
+                 contain real controls; a button inside a button would be invalid
+                 HTML that the browser silently reshuffles. -->
+            <!-- The card itself reaches the options without spending width on a
+                 redundant dots control (owner clarification, board #89). A card
+                 tap ALSO makes this agent the recipient: tapping a
                  card means "I want to talk to this one", so the conversation
                  switches without hunting for the menu's first item (owner,
                  2026-08-26: "每次点击 project 里的 Agent 小卡片时 能自动帮我
@@ -2616,10 +2615,6 @@
                 <span class="st" class:live-dot={stateIsLive(a.state)} style:background={stateDotColor(a.state)}></span>
                 {#if stateNeedsYou(a.state)}<span class="ac-needs appear">{a.state === 'blocked' ? t('hubState_blocked') : t('hubNeedsYou')}</span>{/if}
                 {#if unread.has(a.name)}<span class="unread appear-pop" title={t('hubUnread')}></span>{/if}
-                <button class="a-more" title={t('hubMore')} aria-label={t('hubMore')}
-                  onclick={(e) => { e.stopPropagation(); toggleAgentMenu(a.name, e.currentTarget); }}>
-                  <Icon name="dots" size={12} />
-                </button>
               </div>
               <!-- What the agent's own status line says, kept ON the card rather
                    than behind the menu ("这个直接常驻显示吧 可以字号小一点"). The
@@ -2659,8 +2654,8 @@
                Starting one resumes its conversation, so it stays on the roster
                instead of vanishing from the room it belongs to. -->
           {#each stopped as name (name)}
-            <!-- A div for the same reason as the live card: the dot menu inside
-                 holds real buttons. The card SURFACE is inert — restarting is
+            <!-- A div for the same reason as the live card: it contains the
+                 direct Resume control. The card SURFACE is inert — restarting is
                  the refresh button's job alone (owner, 2026-08-24: "已经停止的
                  agent我只要点击就自动重启了 并没有点到重启的那个圆圈箭头上" —
                  a card-wide click restarted agents by accident). Removing it
@@ -2684,10 +2679,6 @@
                   disabled={acting}
                   onclick={(e) => { e.stopPropagation(); startAgent(name); }}>
                   <Icon name="refresh" size={11} />
-                </button>
-                <button class="a-more" title={t('hubMore')} aria-label={t('hubMore')}
-                  onclick={(e) => { e.stopPropagation(); toggleAgentMenu(name, e.currentTarget); }}>
-                  <Icon name="dots" size={12} />
                 </button>
               </div>
             </div>
@@ -3751,14 +3742,13 @@
   .st { width: 6px; height: 6px; border-radius: 50%; flex: none; transition: background var(--t-fast); }
   .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--status-danger); flex: none; }
   .ava.dim { background: var(--surface2) !important; color: var(--text3); }
-  /* Small card actions share the borderless icon-button dialect. Resume is the
-     stopped card's direct constructive action; dots opens the same menu the
-     card surface / context gesture reaches, now visibly (board #89). */
-  .a-start, .a-more {
+  /* The stopped card's direct constructive action: a small borderless
+     Resume control. The surrounding card surface opens its menu (board #89). */
+  .a-start {
     display: grid; place-items: center; width: 20px; height: 22px; border-radius: 6px;
     background: none; border: none; padding: 0; cursor: pointer; color: var(--text3); flex: none;
   }
-  .a-start:hover:not(:disabled), .a-more:hover { color: var(--accent); background: var(--surface2); }
+  .a-start:hover:not(:disabled) { color: var(--accent); background: var(--surface2); }
   .a-start:disabled { opacity: 0.5; cursor: default; }
   /* The agent action menu: a fixed popover, positioned in JS from the trigger's
      rect (see toggleAgentMenu). It speaks the same dialect as .to-menu — same
