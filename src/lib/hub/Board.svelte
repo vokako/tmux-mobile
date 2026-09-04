@@ -22,6 +22,7 @@
   import { moveMs, revealMs } from '../ui/motion.ts';
   import { hoverInfo } from '../ui/hover.ts';
   import { slideIndicator } from '../ui/indicator.ts';
+  import { selectionClickGuard } from '../ui/native-context-menu.ts';
 
   let { session = '', visible = true, onGoBack = null, issueRequest = null, embedded = false, createRequest = null, jumped = false }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null; issueRequest?: { session: string; id: number; n: number } | null; embedded?: boolean; createRequest?: { n: number } | null; jumped?: boolean } = $props();
 
@@ -467,7 +468,9 @@
   // acts.gen makes the Copy beat's timeout self-scoped (review blocker:
   // a global boolean let Copy A's stale timeout close Copy B's row).
   let acts = $state<NoteActsState>(NOTE_ACTS_IDLE);
+  const noteSelectionClicks = selectionClickGuard();
   function toggleNoteActs(i: number) {
+    if (noteSelectionClicks.consume(i)) return;
     // A drag-selection's tail click must not steal the selection — the note
     // text is swipe-selectable (#43); the action row is for a plain tap.
     if (typeof getSelection === 'function' && !(getSelection()?.isCollapsed ?? true)) return;
@@ -780,7 +783,7 @@
                    BUBBLE's corner, never the full row's far right. -->
               <div class="n-wrap">
                 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-                <div class="n-text" onclick={() => toggleNoteActs(i)}>{n.body.trim()}</div>
+                <div class="n-text" oncontextmenu={(e) => { noteSelectionClicks.mark(e, i); }} onclick={() => toggleNoteActs(i)}>{n.body.trim()}</div>
                 {#if acts.open === i}
                   <div class="m-acts appear">
                     <button onclick={() => copyNote(n.body)}>

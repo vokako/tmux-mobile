@@ -110,7 +110,7 @@ test('notes are a timeline: author + time header, content box below (reopened #1
   // trigger) but keeps its place and clothes: right of the author, one line.
   assert.match(source, /<div class="n-head">\s*<span class="n-author">\{n\.author\}<\/span>[\s\S]*?<button class="n-at"/u,
     'author left, time right, one header line');
-  assert.match(source, /<div class="n-text" onclick=\{\(\) => toggleNoteActs\(i\)\}>\{n\.body\.trim\(\)\}<\/div>/u,
+  assert.match(source, /<div class="n-text"[\s\S]*?onclick=\{\(\) => toggleNoteActs\(i\)\}>\{n\.body\.trim\(\)\}<\/div>/u,
     'the content is its own box below, trimmed');
   const style = source.slice(source.indexOf('<style>'));
   assert.match(style, /\.n-at \{[^}]*margin-left: auto/u, 'the time right-aligns');
@@ -751,17 +751,21 @@ test('a note bubble reveals ONE Copy action in Chat\u2019s own dialect (board #4
   assert.match(source, /<div class="n-wrap">/u, 'and the markup wears it');
 });
 
-test('a note never intercepts contextmenu — long-press selection is the system\u2019s (board #48)', () => {
-  // Owner: "类似对于board里的每条也适用" (2026-09-01) — the Board's notes must
-  // keep the phone's native long-press selection. They conform today by
-  // ABSENCE: no contextmenu handler anywhere in Board.svelte, so an Android
-  // long-press over .n-text reaches the system untouched (the text is
-  // explicitly selectable and the #46 isCollapsed guard already swallows a
-  // selection's tail click). This pin keeps the absence deliberate: a future
-  // context menu on this page must route through the same touch gate the chat
-  // bubble wears, never an unconditional preventDefault.
-  assert.ok(!/oncontextmenu/u.test(source),
-    'Board.svelte intercepts no contextmenu — the system owns the long-press');
+test('a Board note long-press stays native and never opens its Copy overlay (board #48)', () => {
+  // Owner: "类似对于board里的每条也适用" (2026-09-01). Like Chat, a Board
+  // note must leave touch/pen contextmenu native, then consume Android/WebKit's
+  // following compatibility click before toggleNoteActs can open `.m-acts`.
+  // mark() never preventDefaults, so selection remains the system's gesture.
+  assert.match(source, /import \{ selectionClickGuard \} from '\.\.\/ui\/native-context-menu\.ts';/u);
+  assert.match(source, /const noteSelectionClicks = selectionClickGuard\(\);/u);
+  assert.match(source,
+    /<div class="n-text" oncontextmenu=\{\(e\) => \{ noteSelectionClicks\.mark\(e, i\); \}\} onclick=\{\(\) => toggleNoteActs\(i\)\}>/u,
+    'the note only marks contextmenu; it never preventDefaults the native hold');
+  const toggle = source.match(/function toggleNoteActs\(i: number\) \{[\s\S]*?\n  \}/u)?.[0] ?? '';
+  assert.match(toggle, /if \(noteSelectionClicks\.consume\(i\)\) return;/u,
+    'the following click is consumed before the selection fallback and overlay toggle');
+  assert.match(toggle, /getSelection\(\)\?\.isCollapsed/u,
+    'a genuine non-collapsed selection remains an independent fallback');
 });
 
 test('the \u2713 answers the edit: save returns to the board, and sits RIGHTMOST (board #48 v2)', () => {

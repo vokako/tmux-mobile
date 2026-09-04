@@ -39,7 +39,7 @@
   import { anchorOf, menuPlacement, popOrigin, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
   import { longpress } from '../ui/longpress.ts';
-  import { systemOwnsContextMenu } from '../ui/native-context-menu.ts';
+  import { selectionClickGuard } from '../ui/native-context-menu.ts';
   import { hoverInfo } from '../ui/hover.ts';
   import { flip } from 'svelte/animate';
   import { moveMs, revealMs } from '../ui/motion.ts';
@@ -2122,6 +2122,9 @@
   let stepsAll = $state({});        // group key → lift the 10-row cap
   let menuFor = $state('');         // agent name whose dot menu is open
   let msgOpen = $state('');         // message key whose action row is open
+  // Native touch selection may emit a compatibility click after contextmenu.
+  // Consume that one click per bubble before it can open the action row.
+  const msgSelectionClicks = selectionClickGuard();
   let rawOpen = $state('');         // message key showing its raw source
   let copied = $state('');          // body just copied, for the button label
 
@@ -2938,8 +2941,8 @@
                      button below. -->
                 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
                 <div class="bubble md"
-                  oncontextmenu={(e) => { if (systemOwnsContextMenu(e)) return; e.preventDefault(); openCtx(pointOf(e), m.from, msgItems(m)); }}
-                  onclick={() => { if (typeof getSelection === 'function' && !(getSelection()?.isCollapsed ?? true)) return; msgOpen = msgOpen === key ? '' : key; }}>
+                  oncontextmenu={(e) => { if (msgSelectionClicks.mark(e, key)) return; e.preventDefault(); openCtx(pointOf(e), m.from, msgItems(m)); }}
+                  onclick={() => { if (msgSelectionClicks.consume(key)) return; if (typeof getSelection === 'function' && !(getSelection()?.isCollapsed ?? true)) return; msgOpen = msgOpen === key ? '' : key; }}>
                   {#if m.from !== 'human'}
                     <!-- A status note keeps the ordinary bubble, but its header
                          says what the words are ABOUT. The first cut was

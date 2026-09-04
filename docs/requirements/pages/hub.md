@@ -145,9 +145,12 @@ completion).
   explicitly enables selection while message head/meta stay chrome. Android's
   touch/pen long-press `contextmenu` returns before `preventDefault` and opens
   no app menu; mouse right-click and the keyboard menu key still open Copy /
-  Raw. A non-collapsed selection wins over the following bubble click, so
-  finishing a drag/long-press never reveals the action row. Board note text
-  follows the same rule and intercepts no contextmenu; a plain tap still opens
+  Raw. A touch-owned `contextmenu` arms a one-shot guard for that message, so
+  Android/WebKit's following compatibility click is consumed even if the DOM
+  selection is temporarily collapsed; a genuinely non-collapsed selection
+  independently wins over any bubble click. Finishing a drag/long-press therefore
+  never reveals the action row. Board note text uses the same passive marker and
+  one-shot click guard without preventing contextmenu; a plain tap still opens
   its Copy overlay.
 - Feed levels: chat-only / +status / +tools, chosen in Settings or from the
   project title's menu (the current one ticked). Receipts and warnings are

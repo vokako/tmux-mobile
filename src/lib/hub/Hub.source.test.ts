@@ -854,19 +854,21 @@ test('leaving at the tail means returning to the tail — and ONLY then (board #
 
 test('long-press on a message is the system selection gesture, never our menu (board #48)', () => {
   // Owner: "在chat页面长按消息选中文字的时候 不应该出现选项卡 应该走手机系统本身
-  // 默认选中文字的逻辑" (2026-09-01). On Android a long-press over text fires
-  // contextmenu; the bubble's handler must route through the pure gate and
-  // RETURN — without preventDefault — for a touch-sourced event, so the
-  // native selection proceeds. A mouse right-click keeps the menu.
+  // 默认选中文字的逻辑" (2026-09-01, reaffirmed 2026-09-04). On Android a
+  // long-press over text fires contextmenu and then a compatibility click. The
+  // selection can be briefly collapsed by click time, so checking isCollapsed
+  // alone is not enough: mark the touch-owned contextmenu without preventDefault,
+  // then consume exactly that message's following click before it can open .m-acts.
   assert.match(source,
-    /oncontextmenu=\{\(e\) => \{ if \(systemOwnsContextMenu\(e\)\) return; e\.preventDefault\(\); openCtx\(pointOf\(e\), m\.from, msgItems\(m\)\); \}\}/u,
-    'the bubble contextmenu shares the global platform gate before preventDefault');
-  // The selection's tail click must not toggle the action row — the same
-  // isCollapsed guard the Board notes wear (#46). Without it, finishing a
-  // selection ALSO pops the overlay the owner just asked to keep away.
+    /oncontextmenu=\{\(e\) => \{ if \(msgSelectionClicks\.mark\(e, key\)\) return; e\.preventDefault\(\); openCtx\(pointOf\(e\), m\.from, msgItems\(m\)\); \}\}/u,
+    'touch contextmenu arms the compatibility-click guard and stays native');
   assert.match(source,
-    /onclick=\{\(\) => \{ if \(typeof getSelection === 'function' && !\(getSelection\(\)\?\.isCollapsed \?\? true\)\) return; msgOpen = msgOpen === key \? '' : key; \}\}/u,
-    'a non-collapsed selection swallows the bubble tap');
+    /onclick=\{\(\) => \{ if \(msgSelectionClicks\.consume\(key\)\) return; if \(typeof getSelection === 'function' && !\(getSelection\(\)\?\.isCollapsed \?\? true\)\) return; msgOpen = msgOpen === key \? '' : key; \}\}/u,
+    'the synthetic click is consumed before the selection fallback and action toggle');
+  // A genuine selection still wins independently, including desktop selection.
+  assert.match(source,
+    /if \(typeof getSelection === 'function' && !\(getSelection\(\)\?\.isCollapsed \?\? true\)\) return;/u,
+    'a non-collapsed selection swallows an ordinary bubble tap too');
   // For the system gesture to have anything to select, the message body must
   // be selectable at all — the app shell's global user-select:none reaches it
   // otherwise (the Board's .n-text re-enable is the precedent).

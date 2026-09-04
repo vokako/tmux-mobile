@@ -1275,11 +1275,13 @@ Wired to the agent card and sidebar project row, each offering the verbs it
 already has elsewhere — a context menu with its own action set is a second
 source of truth waiting to disagree. The message bubble is the deliberate
 text exception: mouse right-click offers Copy / Raw, but touch/pen long-press
-is native selection and a non-collapsed selection also swallows the following
-click so no action row appears. `.m-body` explicitly enables text selection;
-its head/meta stay chrome. Board notes intercept no contextmenu at all, keep
-selectable `.n-text`, and use the same selection-before-tap rule for their Copy
-overlay.
+is native selection. Its touch-owned `contextmenu` marks the message and the
+short-lived `selectionClickGuard` consumes exactly the compatibility click
+Android/WebKit emits next, even if selection is temporarily collapsed; a real
+non-collapsed selection independently swallows any bubble click. `.m-body`
+explicitly enables text selection; its head/meta stay chrome. Board notes use
+the same passive contextmenu marker + one-shot click guard for their Copy
+overlay, never call `preventDefault`, and keep selectable `.n-text`.
 
 ## Who a message goes to
 
