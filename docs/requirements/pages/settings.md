@@ -55,6 +55,7 @@ rounded shape, muted idle state, and accent active state. Desktop Settings uses 
 - Switch language → immediate UI text update, persisted to localStorage
 - Switch theme → immediate CSS variable transition
 - Switch settings tab → remember the last tab in localStorage and restore it on the next open
+- Rest a pointer on a category row (desktop) → the shared hover card shows the category's name and a one-line description of what is inside (`settings*Hint`); on an address row → the address and its state (current / connecting / alternate). Touch shows no card; the rows' `aria-label`s and visible text are unchanged
 - A previously saved Terminal tab migrates to Appearance
 - Adjust interface scale → updates the complete Tauri desktop WebView; terminal grid refits after the native zoom settles
 - Adjust terminal font size → updates Terminal view without changing the surrounding UI

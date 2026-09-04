@@ -18,7 +18,9 @@
   // not ask" is not "there is nothing", the roster's lesson), and nothing at
   // all renders until the first successful reading (the verdict rule — no
   // flash of zeros).
-  import { sysParts, SYS_POLL_MS, SYS_POLL_MIN_MS, type SystemStatus } from './system.ts';
+  import { sysDetail, sysParts, SYS_POLL_MS, SYS_POLL_MIN_MS, type SystemStatus } from './system.ts';
+  import { hoverInfo } from '../ui/hover.ts';
+  import { t } from '../core/i18n.svelte.ts';
 
   let {
     load,
@@ -33,6 +35,14 @@
   let status = $state<SystemStatus | null>(null);
   const parts = $derived(sysParts(status));
   const tempo = $derived(Math.max(SYS_POLL_MIN_MS, interval));
+  // The full reading rides the ONE hover card (motion.md §1.16), not a native
+  // title: exact fractions and the poll tempo, read at open time.
+  const LABELS: Record<string, () => string> = { CPU: () => 'CPU', MEM: () => t('sysMemory'), DISK: () => t('sysDisk') };
+  const detail = () => ({
+    title: t('sysVitals'),
+    lines: sysDetail(status).map((r) => ({ label: (LABELS[r.k] ?? (() => r.k))(), value: r.v })),
+    note: t('sysRefresh').replace('{s}', String(Math.round(tempo / 1000))),
+  });
 
   async function tick() {
     try {
@@ -57,8 +67,8 @@
 {#if parts.length}
   <!-- A quiet monitor readout, not three attention-seeking cards: tiny
        categorical dots aid scanning, muted labels orient, and only the mono
-       readings use full ink. The title keeps the complete hover reading. -->
-  <div class="sysvitals appear" title={parts.map((p) => `${p.k} ${p.v}`).join(' · ')}>
+       readings use full ink. The hover card carries the complete reading. -->
+  <div class="sysvitals appear" use:hoverInfo={detail}>
     {#each parts as p (p.k)}
       <span class="sv" class:cpu={p.k === 'CPU'} class:mem={p.k === 'MEM'} class:disk={p.k === 'DISK'}>
         <span class="sv-k">{p.k}</span><span class="sv-v">{p.v}</span>

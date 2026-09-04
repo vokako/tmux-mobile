@@ -67,6 +67,15 @@ concurrent work.
 - **Formatting**: `fmtPair` puts used/total in the TOTAL's unit so the pair
   reads as a fraction (`210/473G`), one decimal only under 10. Labels
   CPU/MEM/DISK are universal abbreviations — no i18n entries needed.
+- **The full reading is the hover card** (motion.md §1.16, board #86): the
+  corner wears `use:hoverInfo` and the ONE shared card spells what the
+  abbreviation drops — CPU to one decimal, memory and disk as two-decimal
+  fractions with a percentage (`sysDetail`, pure, same drop-the-unknowable
+  rule as `sysParts`) and the poll tempo as the note. The native `title`
+  that used to carry this is gone: a second tooltip beside the card is the
+  species the rule forbids. Load average and uptime are NOT on the wire
+  (`system_status` returns cpu/mem/disk only), so the card does not invent
+  them.
 
 ## Integration (App, board #56 final phase)
 

@@ -486,6 +486,21 @@ test('the server registry has an entry on the touch layout (2026-09-03)', () => 
   assert.doesNotMatch(source, /closest\?\.\('\.server-menu, \.rail-server'\)/u);
 });
 
+test('the rail explains itself with the one hover card, and no native title beside it (motion.md §1.16, board #86)', () => {
+  // A page icon: its name + its shortcut (read live from the bindings). The
+  // switcher: the current server, its address and state. aria-labels stay —
+  // the card is pointer-only, the label is for everyone.
+  assert.match(rail, /aria-label=\{t\(RAIL_ITEMS\[slot\]\.label\)\}\s*use:hoverInfo=\{\(\) => railInfo\(slot\)\}/u);
+  assert.match(rail, /aria-label=\{t\('serversTitle'\)\}\s*use:hoverInfo=\{serverCardInfo\}/u);
+  assert.doesNotMatch(rail, /title=/u, 'no native title on the rail — the card took over');
+  assert.match(source, /function railInfo\(slot\) \{[\s\S]*?shortcuts\.get\(RAIL_SHORTCUT\[slot\]\)[\s\S]*?note: key \? shortcutLabel\(key\) : undefined/u);
+  assert.match(source, /function serverCardInfo\(\) \{[\s\S]*?title: serverName,[\s\S]*?label: t\('address'\), value: activeAddress/u);
+  // The gear and the split toggle: name on the card, label for the reader.
+  assert.match(source, /class="gear-btn"[^>]*aria-label=\{t\('settings'\)\} use:hoverInfo=\{\(\) => \(\{ title: t\('settings'\) \}\)\}/u);
+  assert.match(source, /class="split-toggle state-ctl"[^>]*aria-label=\{t\('split'\)\} use:hoverInfo=\{\(\) => \(\{ title: t\('split'\) \}\)\}/u);
+  assert.doesNotMatch(source, /class="(?:gear-btn|split-toggle state-ctl)"[^>]*title=/u);
+});
+
 test('the tab bar and the rail carry ONE travelling highlight each (motion.md §1.14, board #86)', () => {
   // The marker for "chosen" is a single atom that glides between items
   // (ui/indicator.ts), not each button lighting up in place. The tab bar's is

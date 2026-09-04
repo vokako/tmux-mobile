@@ -80,6 +80,20 @@ test('a tapped address wears the running cue until the socket settles (2026-09-0
   assert.match(style, /\.address-list button\.active \.addr-dot,\.address-list button\.pending \.addr-dot\{background:var\(--accent\)\}/u);
 });
 
+test('category and address rows explain themselves with the one hover card (motion.md §1.16, board #86)', () => {
+  // A category row's label is terse; the card says what is inside (one i18n
+  // hint per category, kept OUTSIDE `tabs` so the pinned list shape holds).
+  assert.match(source, /class="side-row" class:open=\{tab === item\.id\} onclick=\{\(\) => selectTab\(item\.id\)\}\s*use:hoverInfo=\{\(\) => \(\{ title: item\.label\(\), text: TAB_HINTS\[item\.id\]/u);
+  for (const id of ['appearance', 'notifications', 'terminal', 'shortcuts', 'agents', 'teams', 'skills', 'mcp', 'connection']) {
+    assert.match(source, new RegExp(`${id}: 'settings[A-Za-z]+Hint'`, 'u'), `${id} has a hint`);
+  }
+  // An address row: the address and its state (current / dialing / alternate);
+  // the dialing cue used to be a native title — the card replaces it.
+  const addr = source.match(/<button class:active=\{address === activeAddress\} class:pending[\s\S]*?onclick=/u)?.[0] ?? '';
+  assert.match(addr, /use:hoverInfo=\{\(\) => \(\{ title: address, lines: \[pending/u);
+  assert.doesNotMatch(addr, /title=/u);
+});
+
 test('the phone reaches the server registry from the top of Settings (2026-09-03)', () => {
   // The row exists only when App hands over the opener (touch layout); it is a
   // .side-row like the categories, not a new species, and it opens the SAME

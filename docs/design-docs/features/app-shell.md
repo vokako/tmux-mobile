@@ -146,3 +146,17 @@ icon switching off and another on. Two mechanics matter:
 
 `App.source.test.ts` pins both indicators and that the atom's look stays in
 app.css (App only positions it).
+
+### The rail explains itself on hover (2026-09-04, #86)
+
+A rail icon, the server switcher, the gear and the split toggle wear
+`use:hoverInfo` (motion.md §1.16): resting a pointer opens the ONE shared
+card — a page's name with its shortcut as the note (read live from
+`shortcuts`, so a rebinding shows at once; only Terminal and Files have one),
+the switcher's current server with its address and connection state, the
+gear's and the split toggle's names. Their native `title`s were removed: a
+browser tooltip next to the card is a second tooltip species, which is the
+thing the rule forbids. `aria-label`s stay — the card is pointer/keyboard-
+focus only and the label is for everyone; on touch there is no card and
+nothing was lost, since touch never showed a title either. The phone's tab
+bar gets no card for the same reason.

@@ -4,6 +4,7 @@
   import { scrollFade } from '../core/scrollFade.ts';
   import Select from '../ui/Select.svelte';
   import Segmented from '../ui/Segmented.svelte';
+  import { hoverInfo } from '../ui/hover.ts';
   import { t, i18n, setLocale } from '../core/i18n.svelte.ts';
   import { layout } from './layout.svelte.ts';
   import { fonts, uiFont, displayFont } from './fonts.svelte.ts';
@@ -160,6 +161,14 @@
     ] : []),
     { id: 'connection', label: () => t('settingsConnection') },
   ]);
+  /** One line per category for the desktop's hover card (motion.md §1.16) —
+   *  the row's label is terse, the card says what is inside. Kept apart from
+   *  `tabs` so the list stays the shape the source tests pin. */
+  const TAB_HINTS: Record<string, string> = {
+    appearance: 'settingsAppearanceHint', notifications: 'settingsNotificationsHint', terminal: 'settingsTerminalHint',
+    shortcuts: 'settingsShortcutsHint', agents: 'settingsAgentsHint', teams: 'settingsTeamsHint',
+    skills: 'settingsSkillsHint', mcp: 'settingsMcpHint', connection: 'settingsConnectionHint',
+  };
   const shortcutActions: [ShortcutAction, string][] = [
     ['previousPage', 'shortcutPreviousPage'],
     ['nextPage', 'shortcutNextPage'],
@@ -325,7 +334,8 @@
         </button>
       {/if}
       {#each tabs as item}
-        <button class="side-row" class:open={tab === item.id} onclick={() => selectTab(item.id)}>
+        <button class="side-row" class:open={tab === item.id} onclick={() => selectTab(item.id)}
+          use:hoverInfo={() => ({ title: item.label(), text: TAB_HINTS[item.id] ? t(TAB_HINTS[item.id]!) : undefined })}>
           <span class="r-label">{item.label()}</span>
         </button>
       {/each}
@@ -503,8 +513,11 @@
             <div class="address-list">
               {#each (addresses.length ? addresses : [activeAddress]) as address}
                 {@const pending = address === pendingAddress}
-                <button class:active={address === activeAddress} class:pending
-                  title={pending ? t('connecting') : undefined} aria-busy={pending || undefined}
+                <button class:active={address === activeAddress} class:pending aria-busy={pending || undefined}
+                  use:hoverInfo={() => ({ title: address, lines: [pending
+                    ? { label: t('status'), value: t('connecting'), tone: 'warn' }
+                    : address === activeAddress ? { label: t('status'), value: t('serverCurrent'), tone: 'accent' }
+                    : { label: t('status'), value: t('addressAlternate') }] })}
                   onclick={() => address !== activeAddress && onAddress(address)}>
                   <span class="addr-dot" class:live-dot={pending}></span><span class="addr-text">{address}</span>
                 </button>

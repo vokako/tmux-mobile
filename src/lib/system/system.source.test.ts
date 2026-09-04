@@ -39,6 +39,12 @@ test('fail-soft: a failed load keeps the last reading; nothing renders before th
   assert.match(source, /\{#if parts\.length\}/u, 'renders nothing until a first reading');
 });
 
+test('the full reading is the ONE hover card, never a native title (motion.md §1.16, board #86)', () => {
+  assert.match(source, /<div class="sysvitals appear" use:hoverInfo=\{detail\}>/u, 'the corner wears the shared hover card');
+  assert.ok(!/title=/u.test(source), 'no native title beside the card — a second tooltip species');
+  assert.match(source, /sysDetail\(status\)/u, 'the card spells the full numbers the corner abbreviates');
+});
+
 test('the sidebar monitor uses quiet token dots and readable value ink', () => {
   assert.ok(!/font-size:\s*\d/u.test(source), 'no raw px font-size (tokens contract)');
   assert.match(source, /var\(--fs-micro\)/u, 'micro chrome step');

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fmtBytes, fmtPair, sysParts, SYS_POLL_MS, SYS_POLL_MIN_MS } from './system.ts';
+import { fmtBytes, fmtPair, fmtPairFull, sysDetail, sysParts, SYS_POLL_MS, SYS_POLL_MIN_MS } from './system.ts';
 
 const G = 1024 ** 3;
 
@@ -59,4 +59,16 @@ test('the poll tempo is LOW and floored', () => {
   // very interval, so a fast poll would be both cost and noise.
   assert.ok(SYS_POLL_MS >= 10000, `default ${SYS_POLL_MS} is a low-frequency tempo`);
   assert.ok(SYS_POLL_MIN_MS >= 2000, 'a floor exists so no caller wires a hot loop');
+});
+
+test('sysDetail: the hover card’s full reading — one decimal CPU, two-decimal fractions with a percentage', () => {
+  assert.deepEqual(sysDetail({ cpu_pct: 23.46, mem_used: 12.5 * G, mem_total: 64 * G, disk_used: 210 * G, disk_total: 473 * G }), [
+    { k: 'CPU', v: '23.5%' },
+    { k: 'MEM', v: '12.50/64.00G · 20%' },
+    { k: 'DISK', v: '210.00/473.00G · 44%' },
+  ]);
+  // Same drop rule as sysParts: no cpu on the first sample, nothing at all for null.
+  assert.deepEqual(sysDetail(null), []);
+  assert.equal(sysDetail({ cpu_pct: null, mem_used: G, mem_total: 2 * G, disk_used: 0, disk_total: 0 }).map((r) => r.k).join(','), 'MEM');
+  assert.equal(fmtPairFull(5, 0), '');
 });

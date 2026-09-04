@@ -71,3 +71,33 @@ export function sysParts(s: SystemStatus | null | undefined): { k: string; v: st
   if (s.disk_total > 0) parts.push({ k: 'DISK', v: fmtPair(s.disk_used, s.disk_total) });
   return parts;
 }
+
+/** One row per byte quantity with two decimals in the total's unit — "12.33/64.00G". */
+export function fmtPairFull(used: number, total: number): string {
+  if (!Number.isFinite(total) || total <= 0) return '';
+  let v = total;
+  let u = 0;
+  while (v >= 1024 && u < UNITS.length - 1) {
+    v /= 1024;
+    u++;
+  }
+  const scale = 1024 ** u;
+  const one = (x: number) => (u > 0 ? (x / scale).toFixed(2) : String(Math.round(x / scale)));
+  return `${one(Math.max(0, used))}/${one(total)}${UNITS[u]}`;
+}
+
+/** The FULL reading for the hover card (motion.md §1.16): what the compact
+ * corner abbreviates, spelled out — CPU to one decimal, memory and disk as a
+ * two-decimal fraction plus the percentage. Same keys as `sysParts`, same
+ * drop-the-unknowable rule, so the two never disagree about what exists. */
+export function sysDetail(s: SystemStatus | null | undefined): { k: string; v: string }[] {
+  if (!s) return [];
+  const rows: { k: string; v: string }[] = [];
+  if (s.cpu_pct !== null && s.cpu_pct !== undefined && Number.isFinite(s.cpu_pct)) {
+    rows.push({ k: 'CPU', v: `${Math.min(100, Math.max(0, s.cpu_pct)).toFixed(1)}%` });
+  }
+  const pct = (used: number, total: number) => `${Math.round((Math.max(0, used) / total) * 100)}%`;
+  if (s.mem_total > 0) rows.push({ k: 'MEM', v: `${fmtPairFull(s.mem_used, s.mem_total)} · ${pct(s.mem_used, s.mem_total)}` });
+  if (s.disk_total > 0) rows.push({ k: 'DISK', v: `${fmtPairFull(s.disk_used, s.disk_total)} · ${pct(s.disk_used, s.disk_total)}` });
+  return rows;
+}

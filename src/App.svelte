@@ -28,13 +28,14 @@
   import { anchorOf, menuPlacement, popOrigin, viewBox } from './lib/ui/placement.ts';
   import HoverCard from './lib/ui/HoverCard.svelte';
   import ContextMenu from './lib/ui/ContextMenu.svelte';
-  import { cycleItem, shortcutFromEvent } from './lib/app/shortcuts.ts';
+  import { cycleItem, shortcutFromEvent, shortcutLabel } from './lib/app/shortcuts.ts';
   import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.ts';
   import { installExternalLinkHandler } from './lib/core/external-links.ts';
   import { isTauri, isTauriDesktop } from './lib/core/platform.ts';
   import { flip } from 'svelte/animate';
   import { moveMs } from './lib/ui/motion.ts';
   import { slideIndicator } from './lib/ui/indicator.ts';
+  import { hoverInfo } from './lib/ui/hover.ts';
 
   // Tunable constants
   const KB_OPEN_THRESHOLD = 100; // px difference to detect keyboard open
@@ -1211,6 +1212,27 @@
     prefs:    { icon: 'gear',     label: 'settings' },
   };
   let railOrder = $state(parseRailOrder(localStorage.getItem(RAIL_ORDER_KEY)));
+  // The rail explains itself on a pointer (motion.md §1.16): the ONE hover
+  // card shows a page's name and its shortcut, and the switcher's server with
+  // its address and state. The native `title`s went with it — a second
+  // tooltip beside the card is the thing the rule forbids. Getters, so the
+  // card reads the CURRENT binding / server when it opens.
+  const RAIL_SHORTCUT = { terminal: 'openTerminal', files: 'openFiles' };
+  function railInfo(slot) {
+    const key = RAIL_SHORTCUT[slot] ? shortcuts.get(RAIL_SHORTCUT[slot]) : '';
+    return { title: t(RAIL_ITEMS[slot].label), note: key ? shortcutLabel(key) : undefined };
+  }
+  function serverCardInfo() {
+    return {
+      title: serverName,
+      lines: [
+        { label: t('address'), value: activeAddress },
+        reconnecting
+          ? { label: t('status'), value: t('reconnecting'), tone: 'warn' }
+          : { label: t('status'), value: t('connected'), tone: 'ok' },
+      ],
+    };
+  }
   // Only what is AVAILABLE is rendered, but the order keeps every page: hub /
   // board / agents need the server bus, and a page the bus turned off must come
   // back where the user put it rather than at the default position.
@@ -1438,7 +1460,7 @@
         <span class="brand-text">tmux<span class="brand-accent">mobile</span></span>
       </div>
       <div class="nav-right">
-        <button class="gear-btn" class:active={page === 'prefs'} title={t('settings')} aria-label={t('settings')} onclick={togglePrefs}><Icon name="gear" size={16} /></button>
+        <button class="gear-btn" class:active={page === 'prefs'} aria-label={t('settings')} use:hoverInfo={() => ({ title: t('settings') })} onclick={togglePrefs}><Icon name="gear" size={16} /></button>
       </div>
     </nav>
   {:else if !layout.isTouchDevice}
@@ -1487,8 +1509,8 @@
           <button
             class="rail-btn rail-server"
             class:open={serverMenuOpen}
-            title={t('serversTitle')}
             aria-label={t('serversTitle')}
+            use:hoverInfo={serverCardInfo}
             aria-haspopup="menu"
             aria-expanded={serverMenuOpen}
             onclick={(e) => toggleServerMenu(e)}
@@ -1499,8 +1521,8 @@
             class:active={page === slot}
             class:dragging={railDrag?.slot === slot}
             data-rail-slot={slot}
-            title={t(RAIL_ITEMS[slot].label)}
             aria-label={t(RAIL_ITEMS[slot].label)}
+            use:hoverInfo={() => railInfo(slot)}
             aria-current={page === slot ? 'page' : undefined}
             onpointerdown={(e) => railPointerDown(e, slot)}
             onclick={() => railActivate(slot)}
@@ -1675,7 +1697,7 @@
                  win-bar to host it; cells have their own headers). In single-
                  pane mode the control lives in the Terminal's chip bar. -->
             <div class="split-control">
-              <button class="split-toggle state-ctl" class:on={splitActive} title={t('split')} aria-label={t('split')}
+              <button class="split-toggle state-ctl" class:on={splitActive} aria-label={t('split')} use:hoverInfo={() => ({ title: t('split') })}
                 aria-haspopup="menu" aria-expanded={!!splitMenuAt} onclick={toggleSplitMenu}>
                 <Icon name="layout" size={15} />
               </button>
