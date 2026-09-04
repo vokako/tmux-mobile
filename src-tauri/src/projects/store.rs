@@ -16,6 +16,17 @@ use std::path::Path;
 /// steps. Stored in SQLite's own `user_version` pragma.
 const SCHEMA_VERSION: i64 = 17;
 
+const LEGACY_DEFAULT_KIRO_SYSTEM: &str = "You are a powerful 10x developer running on Kiro CLI who can handle any task with decisive execution and minimal words.";
+const DEFAULT_KIRO_SYSTEM: &str = concat!(
+    "You are a powerful 10x developer running on Kiro CLI who can handle any task with decisive execution and minimal words.",
+    "\n\nGit workflow:\n",
+    "- Before changing tracked files, create or reuse a dedicated Git worktree and task branch. If this session already runs inside that task worktree, use it; otherwise keep the launch checkout for reading, coordination, and final integration only.\n",
+    "- Use the worktree's absolute path for every file edit, test, build, and Git command. Verify and commit in the worktree before integrating.\n",
+    "- Preserve the user's configured Git author. Every commit you materially author must end with exactly one trailer, separated from the body by a blank line:\n",
+    "  Co-authored-by: Kiro Agent <244629292+kiro-agent@users.noreply.github.com>\n",
+    "- Do not add the Kiro trailer when you only review or integrate someone else's commit."
+);
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
     pub id: String,
@@ -1466,6 +1477,16 @@ impl Store {
             .query_row("SELECT COUNT(*) FROM reg_agents", [], |r| r.get(0))
             .map_err(|e| e.to_string())?;
         if count > 0 {
+            // Upgrade only the untouched legacy Kiro persona. Existing installs
+            // often customize model/effort/skills/MCP while leaving the seeded
+            // system text alone; a narrow SQL update preserves every one of
+            // those fields. A genuinely custom persona must never be overwritten.
+            self.conn
+                .execute(
+                    "UPDATE reg_agents SET system=?1, updated_at=?2 WHERE name='kiro' AND system=?3",
+                    params![DEFAULT_KIRO_SYSTEM, now as i64, LEGACY_DEFAULT_KIRO_SYSTEM],
+                )
+                .map_err(|e| format!("upgrade default Kiro agent: {e}"))?;
             return Ok(());
         }
         let seeds = [
@@ -1474,7 +1495,7 @@ impl Store {
                 backend: "kiro".into(),
                 model: String::new(),
                 effort: String::new(),
-                system: "You are a powerful 10x developer running on Kiro CLI who can handle any task with decisive execution and minimal words.".into(),
+                system: DEFAULT_KIRO_SYSTEM.into(),
                 skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
                 mcp: "[]".into(),
                 can_hire: true,
@@ -2453,6 +2474,16 @@ mod tests {
         );
         assert!(seeded.iter().all(|a| a.can_hire), "every default is a Manager");
         assert!(seeded.iter().all(|a| a.skills == r#"["tmm-cli","mem","mcp-cli"]"#));
+        assert!(
+            seeded[0].system.contains("dedicated Git worktree"),
+            "the default Kiro persona requires isolated worktree development"
+        );
+        assert!(
+            seeded[0]
+                .system
+                .contains("Co-authored-by: Kiro Agent <244629292+kiro-agent@users.noreply.github.com>"),
+            "the default Kiro persona carries the exact co-author identity"
+        );
         assert_eq!(seeded[0].mcp, "[]", "Kiro uses its built-in web search");
         assert!(seeded[1..].iter().all(|a| a.mcp.contains("kiro-web-search")));
         assert!(!seeded.iter().any(|a| matches!(a.name.as_str(), "docs" | "reviewer")));
@@ -2489,6 +2520,44 @@ mod tests {
         assert!(store.reg_delete("aaa-custom").unwrap());
         assert!(!store.reg_delete("aaa-custom").unwrap(), "second delete is a no-op");
         assert_eq!(store.reg_list().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn registry_seed_upgrades_only_the_legacy_kiro_system() {
+        let store = Store::open_memory().unwrap();
+        let legacy = "You are a powerful 10x developer running on Kiro CLI who can handle any task with decisive execution and minimal words.";
+        let mut kiro = RegAgent {
+            name: "kiro".into(),
+            backend: "kiro".into(),
+            model: "gpt-5.6-sol".into(),
+            effort: "high".into(),
+            system: legacy.into(),
+            skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
+            mcp: "[]".into(),
+            can_hire: true,
+        };
+        store.reg_save(&kiro, 100).unwrap();
+
+        store.reg_seed(200).unwrap();
+        let upgraded = store.reg_get("kiro").unwrap().unwrap();
+        assert!(upgraded.system.contains("dedicated Git worktree"));
+        assert!(upgraded
+            .system
+            .contains("Co-authored-by: Kiro Agent <244629292+kiro-agent@users.noreply.github.com>"));
+        assert_eq!(upgraded.model, "gpt-5.6-sol", "a prompt upgrade preserves the chosen model");
+        assert_eq!(upgraded.effort, "high", "a prompt upgrade preserves effort");
+        assert_eq!(upgraded.skills, kiro.skills, "a prompt upgrade preserves skills");
+        assert_eq!(upgraded.mcp, kiro.mcp, "a prompt upgrade preserves MCP");
+        assert!(upgraded.can_hire, "a prompt upgrade preserves Manager status");
+
+        kiro.system = "My deliberately customized Kiro persona.".into();
+        store.reg_save(&kiro, 300).unwrap();
+        store.reg_seed(400).unwrap();
+        assert_eq!(
+            store.reg_get("kiro").unwrap().unwrap().system,
+            "My deliberately customized Kiro persona.",
+            "seeding never overwrites a custom system prompt"
+        );
     }
 
     #[test]
