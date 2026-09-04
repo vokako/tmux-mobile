@@ -282,11 +282,22 @@ test('the detail speaks board #15: project-named page, status slider, confirmed 
   assert.match(source, /onpointermove=\{\(e\) => segDrag && segPick\(e\)\}/u, 'sweeping slides the pick');
   // The chosen stop is a SELECTED segment, not a CTA (review, 2026-09-03):
   // design-language.md §3 says segmented active = accent border + wash, and
-  // --accent-fill is reserved for solid calls to action.
+  // --accent-fill is reserved for solid calls to action. Since motion.md
+  // principle 14 the wash and outline are carried by the ONE travelling
+  // .slide-pill behind the stops (app.css atom), and the stop keeps only the
+  // accent ink — so the highlight glides instead of switching.
+  const pill = /\n\.slide-pill \{([^}]*)\}/u.exec(appCss)?.[1] ?? '';
+  assert.match(pill, /background: var\(--accent-bg\)/u, 'the wash (on the pill)');
+  assert.match(pill, /var\(--accent-line\)/u, 'the outline (on the pill)');
   const on = /\.seg-b\.on \{([^}]*)\}/u.exec(source)?.[1] ?? '';
-  assert.match(on, /background: var\(--accent-bg\)/u, 'the wash');
-  assert.match(on, /var\(--accent-line\)/u, 'the outline');
-  assert.ok(!/accent-fill/u.test(on), 'never the solid CTA fill');
+  assert.match(on, /color: var\(--accent\)/u, 'the stop keeps the accent ink');
+  assert.ok(!/background|box-shadow/u.test(on), 'and paints no wash or ring of its own — the pill carries them');
+  assert.ok(!/accent-fill/u.test(on) && !/accent-fill/u.test(pill), 'never the solid CTA fill');
+  assert.match(source, /<div class="seg"[^>]*\n\s*bind:this=\{segEl\}\n\s*use:slideIndicator=\{\{ key: draft\.status, active: '\.on' \}\}/u, 'the track re-measures on the draft status');
+  assert.match(source, /<div class="seg"[\s\S]{0,600}?<span class="slide-pill" aria-hidden="true"><\/span>\s*\{#each STATUSES/u, 'one pill, first child of the track');
+  const seg = /\.seg \{([^}]*)\}/u.exec(source)?.[1] ?? '';
+  assert.match(seg, /position: relative/u, 'the track is the pill\u2019s offset parent');
+  assert.match(/\.seg-b \{([^}]*)\}/u.exec(source)?.[1] ?? '', /position: relative; z-index: 1;/u, 'the stops sit above the pill');
   assert.match(source, /onclick=\{\(\) => \(draft\.status = st\)\}/u, 'tapping a stop picks it — into the DRAFT');
   assert.ok(!source.includes('Select value={sel.status}'), 'the status Select is retired');
   // ③ The assignee edits the draft too — dirty raises the head\u2019s ✓/undo,

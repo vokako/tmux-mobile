@@ -21,6 +21,7 @@
   import { flip } from 'svelte/animate';
   import { moveMs } from '../ui/motion.ts';
   import { hoverInfo } from '../ui/hover.ts';
+  import { slideIndicator } from '../ui/indicator.ts';
 
   let { session = '', visible = true, onGoBack = null, issueRequest = null, embedded = false, createRequest = null, jumped = false }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null; issueRequest?: { session: string; id: number; n: number } | null; embedded?: boolean; createRequest?: { n: number } | null; jumped?: boolean } = $props();
 
@@ -714,12 +715,17 @@
         <!-- The status is a SLIDER (board #15): sweep the track or tap a
              stop. It edits the draft — the head's ✓ is what saves, and
              cancel asks before losing the change. -->
+        <!-- ONE highlight that travels (motion.md principle 14): the wash and
+             ring belong to the .slide-pill behind the stops, and it glides to
+             the chosen one; the stop itself only changes its ink. -->
         <div class="seg" role="radiogroup" tabindex="-1" aria-label={statusLabel(draft.status || sel.status)}
           bind:this={segEl}
+          use:slideIndicator={{ key: draft.status, active: '.on' }}
           onpointerdown={segDown}
           onpointermove={(e) => segDrag && segPick(e)}
           onpointerup={() => (segDrag = false)}
           onpointercancel={() => (segDrag = false)}>
+          <span class="slide-pill" aria-hidden="true"></span>
           {#each STATUSES as st (st)}
             <button class="seg-b" class:on={draft.status === st} role="radio" aria-checked={draft.status === st}
               onclick={() => (draft.status = st)}>{statusLabel(st)}</button>
@@ -1046,19 +1052,24 @@
      is an inset ring because the stops share one bordered track. touch-action
      none so the sweep is ours, not the page scroll's. */
   .seg {
-    display: inline-flex; align-items: stretch;
+    display: inline-flex; align-items: stretch; position: relative; /* the pill's frame */
     border: 1px solid var(--border); border-radius: var(--ui-radius-control);
     background: var(--surface); overflow: hidden;
     touch-action: none; user-select: none;
   }
+  /* The stops sit ABOVE the pill (z-index 1 over the atom's 0) and paint no
+     wash of their own — the wash + inset ring are the .slide-pill's (app.css),
+     so the highlight is ONE thing that moves (motion.md principle 14). The
+     divider beside the chosen stop steps aside so the pill's ring reads whole. */
   .seg-b {
     border: none; background: none; cursor: pointer;
     font-size: var(--fs-meta); color: var(--text2);
-    padding: 5px 12px; position: relative;
-    transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast);
+    padding: 5px 12px; position: relative; z-index: 1;
+    transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
   }
   .seg-b + .seg-b { border-left: 1px solid var(--border); }
-  .seg-b.on { background: var(--accent-bg); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-line); }
+  .seg-b.on, .seg-b.on + .seg-b { border-left-color: transparent; }
+  .seg-b.on { color: var(--accent); }
   .seg-b:not(.on):hover { background: var(--surface2); }
   .meta-bit { font-size: var(--fs-meta); color: var(--text3); }
   .meta-bit .m-name { color: var(--accent); font-weight: 650; }
