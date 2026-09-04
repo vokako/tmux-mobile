@@ -20,6 +20,7 @@
   import { scrollFade } from '../core/scrollFade.ts';
   import { flip } from 'svelte/animate';
   import { moveMs } from '../ui/motion.ts';
+  import { hoverInfo } from '../ui/hover.ts';
 
   let { session = '', visible = true, onGoBack = null, issueRequest = null, embedded = false, createRequest = null, jumped = false }: { session?: string; visible?: boolean; onGoBack?: ((fn: () => boolean) => void) | null; issueRequest?: { session: string; id: number; n: number } | null; embedded?: boolean; createRequest?: { n: number } | null; jumped?: boolean } = $props();
 
@@ -544,6 +545,24 @@
   const cols = $derived(chipCols(winsW, Math.max(...chipWs), CHIP_GAP_X));
   const col = (s: string) => issues.filter((i) => i.status === s);
   const noteCount = (i: BoardIssue) => (typeof i.notes === 'number' ? i.notes : i.notes.length);
+  /** The card's hover card (motion.md principle 16): the facts the card
+   * abbreviates, in full, through the same formatters (`ago`, statusLabel).
+   * The body preview follows the card's own rule — only when there is a real
+   * title, since a titleless issue already wears its body as the title. */
+  function cardInfo(i: BoardIssue) {
+    const body = i.body && i.title?.trim() ? i.body.trim().replace(/\s+/gu, ' ') : '';
+    return {
+      title: `#${i.id} ${issueRef(i)}`,
+      text: body.length > 140 ? `${body.slice(0, 140)}…` : body || undefined,
+      lines: [
+        { label: t('boardHoverReporter'), value: i.created_by || '—' },
+        { label: t('boardHoverAssignee'), value: i.assignee ? `@${i.assignee}` : t('boardUnassigned'), tone: i.assignee ? ('accent' as const) : undefined },
+        { label: t('boardHoverStatus'), value: statusLabel(i.status) },
+        { label: t('boardHoverUpdated'), value: ago(i.updated_at) },
+        { label: t('boardHoverNotes'), value: String(noteCount(i)) },
+      ],
+    };
+  }
   const ago = (ts: number) => {
     const d = Math.max(0, Date.now() / 1000 - ts);
     return d < 3600 ? `${Math.max(1, Math.round(d / 60))}m` : d < 86400 ? `${Math.round(d / 3600)}h` : `${Math.round(d / 86400)}d`;
@@ -821,7 +840,7 @@
           <div class="col-h">{statusLabel(s)}<span class="col-n">{items.length}</span></div>
           <div class="col-scroll subtle-scroll">
           {#each items as i (i.id)}
-            <button class="card" animate:flip={{ duration: moveMs() }} onclick={() => openIssue(i.id)}>
+            <button class="card" animate:flip={{ duration: moveMs() }} onclick={() => openIssue(i.id)} use:hoverInfo={() => cardInfo(i)}>
               <!-- Titleless issues (board #31) wear their body excerpt as the
                    title (issueRef); the preview line then stays EMPTY — the
                    same text twice reads as a rendering bug. -->

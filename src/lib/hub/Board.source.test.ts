@@ -118,6 +118,19 @@ test('notes are a timeline: author + time header, content box below (reopened #1
     'the opened-by name is highlighted too');
 });
 
+test('a card opens the one hover card with the facts it abbreviates (motion.md wave 9)', () => {
+  assert.match(source, /<button class="card" animate:flip=\{\{ duration: moveMs\(\) \}\} onclick=\{\(\) => openIssue\(i\.id\)\} use:hoverInfo=\{\(\) => cardInfo\(i\)\}>/u,
+    'the card wears use:hoverInfo');
+  const info = /function cardInfo\(i: BoardIssue\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
+  assert.match(info, /title: `#\$\{i\.id\} \$\{issueRef\(i\)\}`/u, '#N title');
+  for (const k of ['boardHoverReporter', 'boardHoverAssignee', 'boardHoverStatus', 'boardHoverUpdated', 'boardHoverNotes']) {
+    assert.ok(info.includes(`t('${k}')`), `${k} row`);
+  }
+  assert.match(info, /ago\(i\.updated_at\)/u, 'the age goes through the file\u2019s one formatter');
+  assert.match(info, /i\.body && i\.title\?\.trim\(\)/u, 'the body preview follows the card\u2019s own titleless rule');
+  assert.ok(!/<button class="card"[^>]*\stitle=/u.test(source), 'no native title beside the card');
+});
+
 test('columns scroll alone; the page holds still (reopened #11)', () => {
   const style = source.slice(source.indexOf('<style>'));
   assert.match(style, /\.board \{[^}]*overflow: hidden/u, 'the page is not the scroller');

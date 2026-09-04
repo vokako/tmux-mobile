@@ -51,6 +51,29 @@ test('the composer stacks above every feed layer, so its popovers are never buri
 
 });
 
+test('hover explains: cards, rows, pills and the chip open the ONE hover card and carry no native title (motion.md wave 9)', () => {
+  // The card's getter runs at open time (live state) and reuses the page's
+  // own formatters; a native `title` beside it would be a second tooltip
+  // species. The aria-label keeps the one-line reading for screen readers.
+  const live = source.slice(source.indexOf('class="acard" class:sel'), source.indexOf('class="acard off"'));
+  assert.match(live, /use:hoverInfo=\{\(\) => cardInfo\(a\)\}/u, 'the live card opens the hover card');
+  assert.match(live, /aria-label=\{\[`\$\{a\.name\} · \$\{stateLabel\(a\.state\)\}`, a\.detail, vitalsLine\(a\.vitals\)\]/u, 'its one-line reading is the aria-label');
+  assert.ok(!/<div class="acard" class:sel[^>]*\stitle=/u.test(live), 'no native title on the live card');
+  const off = source.slice(source.indexOf('class="acard off"'), source.indexOf('{/each}', source.indexOf('class="acard off"')));
+  assert.match(off, /use:hoverInfo=\{\(\) => offCardInfo\(name\)\}/u, 'the stopped card too');
+  assert.match(source, /class="side-row proj-row"[\s\S]{0,600}?use:hoverInfo=\{\(\) => rowInfo\(row\)\}/u, 'the sidebar row');
+  assert.match(source, /class="win-pill state-ctl"[\s\S]{0,200}?use:hoverInfo=\{\(\) => pillInfo\(a\)\}/u, 'the drawer window pill');
+  const chip = /<button class="to-chip"[\s\S]*?>/u.exec(source)?.[0] ?? '';
+  assert.match(chip, /use:hoverInfo=\{toChipInfo\}/u, 'the recipient chip explains its destination');
+  assert.ok(!/\stitle=/u.test(chip), 'and carries no native title');
+  // The tone of the state row is the SAME family the dot paints — no second
+  // colour language (rule 6).
+  assert.match(source, /function stateTone\(state\) \{\s*switch \(stateDotColor\(state\)\)/u, 'the hover tone derives from stateDotColor');
+  for (const fmt of ['modelLabel(a.vitals.model)', 'fmtElapsed(a.since, tick)', 'agoShort(rowTalk(row), tick)']) {
+    assert.ok(source.includes(fmt), `the hover card reuses ${fmt} — no second formatter`);
+  }
+});
+
 test('the composer\u2019s two upward menus grow from the chip like every other popover (motion.md wave 6)', () => {
   // Both are absolutely positioned above the capsule, so the corner touching
   // their trigger is the bottom-left one; the atom only touches opacity /

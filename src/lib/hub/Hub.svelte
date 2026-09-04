@@ -38,6 +38,7 @@
   import { anchorOf, menuPlacement, popOrigin, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
   import { longpress } from '../ui/longpress.ts';
+  import { hoverInfo } from '../ui/hover.ts';
   import { flip } from 'svelte/animate';
   import { moveMs } from '../ui/motion.ts';
   import { hubPrefs } from './hub-prefs.svelte.ts';
@@ -2153,6 +2154,76 @@
     return label.startsWith('hubState_') ? state : label;
   }
 
+  // ── Hover explains (motion.md principle 16, wave 9). ONE shared card
+  // (`use:hoverInfo`, ui/HoverCard) on a pointer device only — the action
+  // ignores touch, where the long-press menu is the "more" gesture. Every
+  // getter runs at OPEN time, so the card reads the current state; every
+  // value goes through the formatter the page already uses (stateLabel,
+  // modelLabel, fmtElapsed for the epoch-seconds `since`, agoShort for ms
+  // timestamps) — a second formatter would be a second clock.
+  /** The state's tone in the card is the SAME family stateDotColor paints. */
+  function stateTone(state) {
+    switch (stateDotColor(state)) {
+      case 'var(--accent)': return 'accent';
+      case 'var(--status-warn)': return 'warn';
+      case 'var(--status-danger)': return 'danger';
+      default: return undefined;
+    }
+  }
+  function cardInfo(a) {
+    const lines = [{ label: t('hubHoverState'), value: [stateLabel(a.state), a.detail].filter(Boolean).join(' · '), tone: stateTone(a.state) }];
+    const model = [a.agent, a.vitals?.model ? modelLabel(a.vitals.model) : ''].filter(Boolean).join(' · ');
+    if (model) lines.push({ label: t('hubHoverModel'), value: model });
+    if (a.vitals?.context_pct != null) lines.push({ label: t('hubHoverCtx'), value: `${a.vitals.context_pct}%` });
+    if (a.since) lines.push({ label: t('hubHoverSince'), value: fmtElapsed(a.since, tick) });
+    lines.push({ label: t('hubHoverTarget'), value: `${selected}:${a.window}` });
+    if (selectedRow?.project.path) lines.push({ label: t('hubHoverPath'), value: selectedRow.project.path });
+    return { title: a.name, lines, note: t('hubHoverCardNote') };
+  }
+  function offCardInfo(name) {
+    const slot = (selectedRow?.slots ?? []).find((x) => x.window_name === name);
+    const lines = [{ label: t('hubHoverState'), value: t('hubStopped') }];
+    if (slot?.command) lines.push({ label: t('hubHoverModel'), value: slot.command });
+    if (selectedRow?.project.path) lines.push({ label: t('hubHoverPath'), value: selectedRow.project.path });
+    return { title: name, lines, note: t('hubHoverOffNote') };
+  }
+  /** Live vs stopped agents of a row — the full count, where the row's chips
+   * stop at four. Declared slots are the roster; a live window is one of them
+   * (or an ad hoc addition) that is actually running. */
+  function rowAgentCounts(row) {
+    const declared = (row.slots ?? []).filter((x) => String(x.kind ?? '').toLowerCase() === 'agent').map((x) => x.window_name);
+    if (!row.live) return { live: 0, stopped: declared.length };
+    const running = new Set();
+    for (const p of panes) {
+      if (p.session === row.project.session && p.active && paneAgent(p)) running.add(p.window_name);
+    }
+    return { live: running.size, stopped: declared.filter((n) => !running.has(n)).length };
+  }
+  function rowInfo(row) {
+    const n = rowAgentCounts(row);
+    const lines = [{ label: t('hubHoverPath'), value: row.project.path }];
+    if (n.live || n.stopped) {
+      lines.push({ label: t('hubHoverAgents'), value: t('hubHoverAgentsCount').replace('{live}', String(n.live)).replace('{stopped}', String(n.stopped)), tone: n.live ? 'accent' : undefined });
+    }
+    if (rowTalk(row)) lines.push({ label: t('hubHoverLastMsg'), value: agoShort(rowTalk(row), tick) });
+    if (row.project.session === selected && unread.size) lines.push({ label: t('hubHoverUnread'), value: String(unread.size), tone: 'accent' });
+    return { title: row.project.name, lines };
+  }
+  function pillInfo(a) {
+    const lines = [{ label: t('hubHoverCommand'), value: a.command || '—' }];
+    const n = panes.filter((p) => p.session === selected && p.window === a.window).length;
+    if (n) lines.push({ label: t('hubHoverPanes'), value: String(n) });
+    if (a.agent) lines.push({ label: t('hubHoverState'), value: stateLabel(a.state), tone: stateTone(a.state) });
+    return { title: `${a.window}:${a.name}`, lines };
+  }
+  /** The chip's meaning under the three-destination model (hub-composer.md):
+   * one pane, every managed pane, or the record alone. */
+  function toChipInfo() {
+    const text = recipient === ALL_TARGET ? t('hubToAllLong') : recipient ? t('hubToDmLong').replace('{name}', recipient) : t('hubToRoomLong');
+    const note = toExtras.length ? t('hubToAlsoHint').replace('{names}', toExtras.map((n) => '@' + n).join(', ')) : undefined;
+    return { text, note };
+  }
+
   // A clock for the elapsed readouts. One timer for the whole page, and only
   // while the tab is on screen — a "running 2m14s" that ticks in a hidden tab
   // is pure wakeups.
@@ -2235,7 +2306,8 @@
             animate:flip={{ duration: moveMs() }}
             onclick={() => { selectProject(row.project.session); sideOpen = false; }}
             oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), row.project.name, projectItems(row)); }}
-            use:longpress={{ onlongpress: (pt) => openCtx(pt, row.project.name, projectItems(row)) }}>
+            use:longpress={{ onlongpress: (pt) => openCtx(pt, row.project.name, projectItems(row)) }}
+            use:hoverInfo={() => rowInfo(row)}>
             <span class="dot" class:off={!row.live}></span>
             <span class="p-main">
               <span class="p-top">
@@ -2458,8 +2530,12 @@
                  a short label, in the SAME status tokens the dot speaks
                  (stateDotColor → --status-warn), and static — the breathe
                  means "a turn is open", and a waiting turn is suspended. -->
+            <!-- No native title: the hover card is the tooltip (motion.md
+                 principle 16) and shows the same facts, live, as rows. The
+                 aria-label keeps the one-line reading for screen readers. -->
             <div class="acard" class:sel={recipient === a.name} class:needs={stateNeedsYou(a.state)} class:appear-pop={!!rosterBase && !rosterBase.has(a.name)} role="button" tabindex="0"
-              title={[`${a.name} · ${stateLabel(a.state)}`, a.detail, vitalsLine(a.vitals)].filter(Boolean).join(' · ')}
+              aria-label={[`${a.name} · ${stateLabel(a.state)}`, a.detail, vitalsLine(a.vitals)].filter(Boolean).join(' · ')}
+              use:hoverInfo={() => cardInfo(a)}
               onclick={(e) => cardClick(a.name, e.currentTarget)}
               ondblclick={() => cardDbl(a.name)}
               oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), a.name, agentItems(a.name)); }}
@@ -2523,7 +2599,8 @@
               onclick={(e) => toggleAgentMenu(name, e.currentTarget)}
               onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleAgentMenu(name, e.currentTarget); } }}
               oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), name, agentItems(name)); }}
-              use:longpress={{ onlongpress: (pt) => openCtx(pt, name, agentItems(name)) }}>
+              use:longpress={{ onlongpress: (pt) => openCtx(pt, name, agentItems(name)) }}
+              use:hoverInfo={() => offCardInfo(name)}>
               <div class="ac-top">
                 <span class="ava dim">{name.slice(0, 1).toUpperCase()}</span>
                 <!-- No "stopped" word beside the name: the dimmed card already
@@ -3002,9 +3079,11 @@
              text-indent) and wrapped lines run full width beneath it. -->
         {#if managedAgents.length}
           <div class="to-wrap" bind:clientWidth={toChipW}>
+            <!-- What the current destination MEANS is the hover card's job
+                 (toChipInfo — the three-destination model in one sentence,
+                 the body's +@ extras as its note); no native title beside it. -->
             <button class="to-chip" class:all={recipient === ALL_TARGET} class:note={!recipient}
-              title={toExtras.length ? t('hubToAlsoHint').replace('{names}', toExtras.map((n) => '@' + n).join(', '))
-                : recipient === ALL_TARGET ? t('hubToAllHint') : recipient ? '' : t('hubToRoomHint')}
+              use:hoverInfo={toChipInfo}
               onclick={() => recipientOpen = !recipientOpen}>
               <span class="to-label">{t('hubTo')}</span>
               <span class="to-name">{recipient === ALL_TARGET ? t('hubEveryone') : recipient || t('hubRoomNote')}</span>
@@ -3165,7 +3244,8 @@
         {#if drawerView === 'term'}
           <div class="win-list">
             {#each agents as a (a.window)}
-              <button class="win-pill state-ctl" class:cur={termTarget.startsWith(`${selected}:${a.window}.`)} onclick={() => pickWindow(a)}>
+              <button class="win-pill state-ctl" class:cur={termTarget.startsWith(`${selected}:${a.window}.`)} onclick={() => pickWindow(a)}
+                use:hoverInfo={() => pillInfo(a)}>
                 <span class="st" class:live-dot={!!a.agent && stateIsLive(a.state)} style:background={stateDotColor(a.agent ? a.state : 'shell')}></span>
                 {a.window}:{a.name}{#if a.agent && !a.managed}<span class="direct-tag">{t('hubDirect')}</span>{/if}
               </button>
