@@ -407,7 +407,7 @@ test('removing a saved server goes through the shared ConfirmDialog (board #55)'
     'the shared dialog, cancel drops the capture');
 });
 
-test('the system-vitals corner mounts connected-desktop-only and can never occlude (board #56)', () => {
+test('the system-vitals strip mounts connected-desktop-only inside reserved sidebar space (board #85)', () => {
   // ONE component (src/lib/system/), transport injected from ws.ts — App
   // wires, it does not re-implement.
   assert.match(source, /import SystemStatus from '\.\/lib\/system\/SystemStatus\.svelte'/u,
@@ -419,23 +419,19 @@ test('the system-vitals corner mounts connected-desktop-only and can never occlu
   // disconnected client must not poll a socket that is not there.
   assert.match(source, /sysMounted = \$derived\(connected && !layout\.isTouchDevice\)/u,
     'one flag: connected desktop');
-  assert.match(source, /\{#if sysMounted\}[\s\S]{0,200}<footer class="sys-footer">[\s\S]{0,100}<SystemStatus/u,
-    'mount gate wraps the footer');
+  assert.match(source, /\{#if sysMounted\}[\s\S]{0,500}<aside class="sys-sidebar"[\s\S]{0,100}<SystemStatus/u,
+    'mount gate wraps the sidebar strip');
   assert.match(source, /<SystemStatus[^/]*visible=\{connected\}/u,
     'visible tracks the connection so a drop stops the timer');
-  // The no-occlusion contract, v3 (lead's #56 review chain: a fixed overlay
-  // covered pixels; a layer-only inset missed .page's DIRECT children like
-  // <Settings>): the footer is IN FLOW after .page in main's column flex, so
-  // .page — layers and direct children alike — ends above it by layout, on
-  // every current and future page. No fixed positioning, no z-index.
-  assert.match(source, /\{#if sysMounted\}\s*<footer class="sys-footer">[\s\S]{0,200}?<\/footer>\s*\{\/if\}\s*<\/main>/u,
-    'the footer is main\'s LAST flow child — .page (flex:1) shrinks above it');
-  assert.match(source, /\.sys-footer \{[^}]*flex: 0 0 auto/u,
-    'the footer owns its flex row (flow reservation, not overlay)');
-  assert.ok(!/\.sys-footer \{[^}]*position: fixed/u.test(source),
-    'never a fixed overlay again');
-  assert.ok(!/vitals-inset/u.test(source),
-    'the layer-only inset is retired (it missed .page direct children)');
+  // Board #85: no footer row under main content. The strip is exactly the
+  // shared sidebar width, starts after the 46px rail, and every PRIMARY
+  // sidebar shell reserves the same named height beneath its own content.
+  assert.match(source, /\.sys-sidebar \{[^}]*position: fixed[^}]*left: 46px[^}]*width: var\(--sidebar-w\)/u,
+    'the strip is confined to the primary sidebar column');
+  assert.match(source, /--sys-sidebar-h: 34px/u, 'one named height owns geometry');
+  assert.match(source, /\.with-rail :global\(\.sidebar\),\s*\.with-rail \.term-side,\s*\.with-rail :global\(\.files-left\) \{[^}]*padding-bottom: var\(--sys-sidebar-h\)/u,
+    'every primary sidebar reserves the exact strip height');
+  assert.ok(!/sys-footer/u.test(source), 'the retired full-width footer cannot regrow');
 });
 
 test('a typed address ends the running reconnect loop before it connects (review 2026-09-03)', () => {

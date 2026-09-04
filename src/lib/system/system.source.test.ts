@@ -39,7 +39,15 @@ test('fail-soft: a failed load keeps the last reading; nothing renders before th
   assert.match(source, /\{#if parts\.length\}/u, 'renders nothing until a first reading');
 });
 
-test('the corner wears tokens, not raw type', () => {
+test('the sidebar strip wears tokenized category colour and readable value ink', () => {
   assert.ok(!/font-size:\s*\d/u.test(source), 'no raw px font-size (tokens contract)');
   assert.match(source, /var\(--fs-micro\)/u, 'micro chrome step');
+  assert.match(source, /class:cpu=\{p\.k === 'CPU'\}[\s\S]*class:mem=\{p\.k === 'MEM'\}[\s\S]*class:disk=\{p\.k === 'DISK'\}/u,
+    'the three categories are explicit, not positional guesses');
+  assert.match(source, /--sv-hue: var\(--accent\)/u, 'CPU uses the brand accent');
+  assert.match(source, /--sv-hue: var\(--status-purple\)/u, 'MEM uses the theme violet');
+  assert.match(source, /--sv-hue: var\(--status-ok\)/u, 'DISK uses the theme green');
+  assert.match(source, /\.sv-v \{[^}]*color: var\(--text\)/u,
+    'numbers use primary ink — the all-text3 grey regression is retired');
+  assert.ok(!/#[0-9a-f]{3,8}\b/iu.test(source), 'no raw component colour');
 });

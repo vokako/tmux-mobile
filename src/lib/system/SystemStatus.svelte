@@ -55,37 +55,60 @@
 </script>
 
 {#if parts.length}
-  <!-- Quiet chrome, not a message: micro type, meta ink, mono numbers. The
-       title carries the same words for hover/assistive reading. -->
+  <!-- One compact strip inside the desktop PRIMARY sidebar. Each metric gets
+       a categorical hue, while the number itself uses full-strength ink: the
+       previous all-text3 row was too grey to read in either theme. The title
+       keeps the same complete reading for hover/assistive inspection. -->
   <div class="sysvitals appear" title={parts.map((p) => `${p.k} ${p.v}`).join(' · ')}>
     {#each parts as p (p.k)}
-      <span class="sv"><span class="sv-k">{p.k}</span><span class="sv-v">{p.v}</span></span>
+      <span class="sv" class:cpu={p.k === 'CPU'} class:mem={p.k === 'MEM'} class:disk={p.k === 'DISK'}>
+        <span class="sv-k">{p.k}</span><span class="sv-v">{p.v}</span>
+      </span>
     {/each}
   </div>
 {/if}
 
 <style>
   .sysvitals {
+    width: 100%;
+    min-width: 0;
     display: flex;
-    gap: 10px;
-    align-items: baseline;
+    gap: 4px;
+    align-items: center;
     font-size: var(--fs-micro);
-    color: var(--text3);
     line-height: 1;
     user-select: none;
     white-space: nowrap;
   }
   .sv {
+    --sv-hue: var(--accent);
+    flex: 1 1 0;
+    min-width: 0;
     display: inline-flex;
+    justify-content: center;
     gap: 4px;
     align-items: baseline;
+    padding: 4px 5px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--sv-hue) 24%, transparent);
+    border-radius: var(--ui-radius-control);
+    background: color-mix(in srgb, var(--sv-hue) 9%, transparent);
   }
+  .sv.mem { --sv-hue: var(--status-purple); }
+  .sv.disk { --sv-hue: var(--status-ok); }
   .sv-k {
+    flex: none;
+    color: var(--sv-hue);
+    font-weight: 650;
     letter-spacing: 0.04em;
-    opacity: 0.75;
   }
   .sv-v {
-    font-family: var(--mono, ui-monospace, monospace);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-weight: 550;
     font-variant-numeric: tabular-nums;
   }
 </style>

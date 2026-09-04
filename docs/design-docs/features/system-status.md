@@ -79,24 +79,26 @@ into the page. App mounts the corner once, gated by ONE derived flag
 remote and its corners belong to the bottom bar), with `visible={connected}`
 so a dropped connection stops the timer even before the unmount.
 
-**The corner is a FLOW footer; it never floats over content.** Two earlier
-cuts each failed the lead/builder-3 review geometry: a fixed overlay with
-`pointer-events: none` visually covered the rail and the sidebar's last row
-(pass-through clicks do not un-hide pixels), and a `.page-layer`-only bottom
-inset missed `.page`'s DIRECT children — `<Settings>` renders straight into
-`.page`, not into a layer. The footer is now the LAST flow child of `main`'s
-column flex: `.page` is the `flex: 1` row and shrinks above it, which
-shortens the absolute layers (`inset: 0` tracks `.page`'s box) AND every
-direct child alike — zero visual intersection on every current and FUTURE
-page, by layout rather than by policing. `main.with-rail`'s `padding-left`
-starts it right of the rail; no fixed positioning, no z-index, no
-pointer-events games, and the hover tooltip survives.
+**The strip belongs to the primary sidebar, never the main column.** Board
+#85 replaced the full-width flow footer after the owner reported that the
+grey horizontal row still read as crossing the work area. App keeps ONE
+polling instance in a shell-level `.sys-sidebar`: fixed at `left: 46px`
+(after the icon rail), `width: var(--sidebar-w)`, with a single named 34px
+height. The page keeps the full viewport height; no footer track, colour,
+border, or empty reservation extends under the terminal/content column.
 
-Verifying "no overlap" needs a CLIP-AWARE intersection test:
-`getBoundingClientRect` ignores overflow clipping, so a row half-scrolled
-out of its `overflow: hidden` scroller has a rect crossing the footer
-boundary while painting nothing there — intersect each rect with every
-clipping ancestor first, then test overlap.
+Fixed is safe here because space is reserved, not hand-waved: the three
+shared primary-sidebar shells (`.sidebar`, `.term-side`, `.files-left`) get
+bottom padding of that exact named height while the desktop rail layout is
+active. Global `border-box` makes their content area end above the strip, so
+their last row remains visible and scrollable. The strip is singleton rather
+than copied into every page, preserving one poll timer and one CPU sampling
+window. Its z-index sits below the icon rail and popovers.
+
+Visual hierarchy is deliberately no longer all-grey. CPU/MEM/DISK wear
+low-chroma token-mixed accent/purple/green category surfaces and labels; the
+actual readings use full `--text` ink and the mono data face. Both themes
+therefore get contrast from their own tokens, with no raw component colours.
 
 ## Tests
 
@@ -113,6 +115,6 @@ clipping ancestor first, then test overlap.
 
 Each entry is a decision with the reason it was made; treat them as normative. They lived in the root `CLAUDE.md` until 2026-09-02 (board #73), when that file became an index and the rules moved next to the design they belong to.
 
-### Server vitals occupy space; they never overlay it
+### Server vitals occupy reserved sidebar space; they never enter the main column
 
-(board #56): desktop `system_status` samples CPU/MEM/root disk in-process through exact-pinned, desktop-gated `sysinfo`; the 20s client poll is the CPU delta window and first CPU is null. `SystemStatus` keeps the last good reading and stops hidden. App mounts it only on a connected desktop as `main`'s LAST flow footer; `.page` shrinks above it, covering absolute page layers and direct children such as Settings. Fixed overlays, pointer-through claims, and layer-only insets are retired — independent Chromium found each of those can still hide pixels.
+(board #56, refined by #85): desktop `system_status` samples CPU/MEM/root disk in-process through exact-pinned, desktop-gated `sysinfo`; the 20s client poll is the CPU delta window and first CPU is null. `SystemStatus` keeps the last good reading and stops hidden. App mounts one connected-desktop strip at the primary sidebar's exact x/width; `.sidebar`, `.term-side`, and `.files-left` reserve the same named height below their own content. The main page remains full-height and receives no footer row. A fixed strip without matching sidebar reservation, a full-width footer, pointer-through claims, and layer-only insets are all forbidden.

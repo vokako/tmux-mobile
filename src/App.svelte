@@ -1510,6 +1510,17 @@
     </nav>
   {/if}
 
+  <!-- Server system vitals (board #85): ONE shell-level instance, visually
+       and geometrically confined to the primary desktop sidebar. Every
+       primary sidebar reserves this exact height below, so the fixed strip
+       occupies sidebar space rather than covering its final row. The page
+       itself keeps the full viewport height — no footer track crosses or
+       shortens the terminal/content column. -->
+  {#if sysMounted}
+    <aside class="sys-sidebar" aria-label="Server system status">
+      <SystemStatus load={systemStatus} visible={connected} />
+    </aside>
+  {/if}
 
   {#if serverMenuOpen}
     <!-- The server registry popover (board #55). Same popover mechanics as the
@@ -1761,20 +1772,6 @@
     </nav>
   {/if}
 
-  <!-- Server system vitals (board #56): a FLOW footer, not an overlay.
-       main is a column flex and .page is its flex:1 row, so this footer takes
-       its own 20px row and .page — with EVERYTHING inside it: the absolute
-       page layers AND direct children like <Settings> — ends above it, on
-       every current and future page (lead review: the first fixed cut covered
-       the rail and sidebar pixels; the second, a layer-only inset, missed
-       .page's direct children). main.with-rail's padding-left starts it right
-       of the rail. Desktop + connected only; a phone's corners belong to the
-       bottom bar. -->
-  {#if sysMounted}
-    <footer class="sys-footer">
-      <SystemStatus load={systemStatus} visible={connected} />
-    </footer>
-  {/if}
 </main>
 
 <style>
@@ -1978,7 +1975,35 @@
     background: var(--accent); border-radius: 1px;
     z-index: 1; pointer-events: none;
   }
-  main.with-rail { padding-left: 46px; }
+  main.with-rail {
+    --sys-sidebar-h: 34px;
+    padding-left: 46px;
+  }
+
+  /* The singleton status strip sits over RESERVED sidebar space only. These
+     are the three primary sidebar shells used by Chat/Board/Agents/Settings,
+     Terminal/Sessions and Files respectively. Padding shrinks their own
+     content box (global border-box), so no last row is hidden; the main
+     content column receives neither padding nor a footer track. */
+  .with-rail :global(.sidebar),
+  .with-rail .term-side,
+  .with-rail :global(.files-left) {
+    padding-bottom: var(--sys-sidebar-h);
+  }
+  .sys-sidebar {
+    position: fixed;
+    left: 46px;
+    bottom: 0;
+    width: var(--sidebar-w);
+    height: var(--sys-sidebar-h);
+    display: flex;
+    align-items: center;
+    padding: 4px 6px;
+    background: var(--bg2);
+    border-top: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    z-index: 11;
+  }
 
   /* Connected mobile: bottom tab bar in thumb reach. Hidden while the
      keyboard is up so immersive typing (terminal, editor) costs nothing —
@@ -2153,16 +2178,4 @@
   }
   .split-toggle:hover { color: var(--text2); }
   .split-toggle.on { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
-  /* The vitals footer (board #56): IN FLOW, so it owns its row — .page is
-     the column's flex:1 and shrinks above it, which shortens the absolute
-     page layers (inset:0 tracks .page's box) and every direct child alike.
-     Overlap with ANY page content is impossible by construction; no
-     pointer-events games, no z-index, and the tooltip survives. */
-  .sys-footer {
-    flex: 0 0 auto;
-    height: 20px;
-    display: flex;
-    align-items: center;
-    padding: 0 8px calc(var(--sab, 0px) / 2);
-  }
 </style>

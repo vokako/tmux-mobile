@@ -110,7 +110,7 @@ App seeds/re-pushes `{app:true}` history entries and routes `popstate` to the vi
 Every state change in the shell moves on the tempo tokens and nothing else
 ([motion.md](motion.md)): the tab bar and gear cross-fade colour on `--t-fast`
 and the gear TURNS 30° while Settings is open (a state is a movement, not a
-swap); the reconnect banner, the rail's insertion line and the vitals footer's
+swap); the reconnect banner, the rail's insertion line and the vitals sidebar strip's
 first reading `.appear` (opacity only — never height, so the banner cannot
 push the page); the split toggle is a `.state-ctl`; the server switcher's swap
 glyph is a `.flip` that turns 180° while its popover is open (the popover
