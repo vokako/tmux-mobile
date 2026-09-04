@@ -207,6 +207,34 @@ test('the filter and the detail level are reachable from menus, not only from a 
   assert.ok(!source.includes('cycleFeedLevel'), 'the dead cycle control stays gone');
 });
 
+test('every agent card exposes More, and a live agent can restart from that menu (board #89)', async () => {
+  const live = source.slice(source.indexOf('class="acard" class:sel'), source.indexOf('{/snippet}', source.indexOf('class="acard" class:sel')));
+  assert.match(
+    live,
+    /<button class="a-more" title=\{t\('hubMore'\)\} aria-label=\{t\('hubMore'\)\}[\s\S]*?e\.stopPropagation\(\); toggleAgentMenu\(a\.name, e\.currentTarget\)[\s\S]*?<Icon name="dots"/u,
+    'a visible dots button opens the live card menu without also selecting the card',
+  );
+  const off = source.slice(source.indexOf('class="acard off"'), source.indexOf('{/each}', source.indexOf('class="acard off"')));
+  assert.match(off, /class="a-more"[\s\S]*?toggleAgentMenu\(name, e\.currentTarget\)[\s\S]*?name="dots"/u,
+    'stopped cards expose the same discoverable menu');
+
+  const items = source.slice(source.indexOf('function agentItems'), source.indexOf('function projectItems'));
+  assert.match(items, /label: t\('hubRestart'\), icon: 'refresh', onselect: \(\) => restartAgent\(name\)/u,
+    'right-click and long-press use the same restart action');
+  const tapMenu = source.slice(source.indexOf('{#if menuFor}'), source.indexOf('<div class="feed-wrap">'));
+  assert.match(tapMenu, /restartAgent\(n\)[\s\S]*?t\('hubRestart'\)/u,
+    'the card tap/dots menu exposes Restart too');
+
+  const action = source.slice(source.indexOf('async function restartAgent'), source.indexOf('// Live pushes'));
+  assert.match(action, /await hubAgentRestart\(selected, name\)/u, 'Restart calls the existing lifecycle RPC');
+  assert.match(action, /Promise\.all\(\[reload\(\), loadAgents\(\), loadFeed\(\)\]\)/u,
+    'the roster and lifecycle line refresh after restart');
+
+  const i18n = await readFile(new URL('../core/i18n.svelte.ts', import.meta.url), 'utf8');
+  assert.match(i18n, /hubRestart: 'Restart'/u);
+  assert.match(i18n, /hubRestart: '重启'/u);
+});
+
 test('sidebar dots and roster cards drink from ONE state map (board #8)', () => {
   // Both pollers route through mergeStates: the roster poll overlays its
   // project's keys onto the shared map, and the rooms poll overlays the

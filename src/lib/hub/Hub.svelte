@@ -1799,10 +1799,10 @@
     } catch (e) { console.warn('purge project failed', e); }
   }
 
-  /** Bring a stopped agent back. Same RPC as a restart — it tolerates there
-   * being no window — so "start again" and "restart" are one code path, and it
-   * resumes the agent's own conversation rather than opening a blank prompt. */
-  async function startAgent(name) {
+  /** Restart a live agent, or bring a stopped one back. The RPC tolerates there
+   * being no window, so both labels share one implementation and both resume
+   * the agent's own conversation rather than opening a blank prompt. */
+  async function restartAgent(name, failure = 'restart failed') {
     if (!selected || acting) return;
     acting = true;
     try {
@@ -1810,11 +1810,12 @@
       await Promise.all([reload(), loadAgents(), loadFeed()]);
       setRecipient(name);
     } catch (e) {
-      console.warn('start failed', e);
+      console.warn(failure, e);
     } finally {
       acting = false;
     }
   }
+  const startAgent = (name) => restartAgent(name, 'start failed');
 
   // Live pushes + polling while visible.
   const onPush = (m) => {
@@ -1976,6 +1977,7 @@
       filterItem(name),
       ...config,
       { label: t('hubInterrupt'), icon: 'x', warn: true, onselect: () => interrupt(name) },
+      { label: t('hubRestart'), icon: 'refresh', onselect: () => restartAgent(name) },
       { label: t('hubStop'), icon: 'stop', danger: true, onselect: () => askAction('stop', name) },
       { label: t('hubRemove'), icon: 'trash', danger: true, onselect: () => askAction('remove', name) },
     ];
@@ -2051,9 +2053,9 @@
   $effect(() => {
     if (!menuFor) return;
     const close = () => { menuFor = ''; };
-    // .acard is the trigger now (the dots are gone): a pointerdown on a card
-    // must not pre-close the menu, or the click's toggle would reopen it —
-    // the toggle itself owns same-card close and other-card switch.
+    // Both the card and its explicit dots button are triggers: a pointerdown
+    // on either must not pre-close the menu, or the click's toggle would reopen
+    // it — the toggle itself owns same-card close and other-card switch.
     const onDown = (e) => { if (!e.target?.closest?.('.a-menu, .acard:not(.add)')) close(); };
     const onKey = (e) => { if (e.key === 'Escape') { close(); e.stopPropagation(); } };
     window.addEventListener('pointerdown', onDown, true);
@@ -2579,10 +2581,10 @@
             <!-- A div, not a button: the dot menu inside contains real buttons,
                  and a button inside a button is invalid HTML the browser
                  silently reshuffles. -->
-            <!-- ONE tap surface: the whole card opens the agent menu — the
-                 dots duplicated it for no gain ("交互上就是直接点击卡片出来
-                 选项就行，好像没必要单独点击三个点", owner 2026-08-25).
-                 And the tap ALSO makes this agent the recipient: tapping a
+            <!-- The whole card keeps its quick interaction, and board #89 adds
+                 an explicit dots button so the options are discoverable without
+                 knowing that a second tap / right-click / long-press opens them.
+                 A card tap ALSO makes this agent the recipient: tapping a
                  card means "I want to talk to this one", so the conversation
                  switches without hunting for the menu's first item (owner,
                  2026-08-26: "每次点击 project 里的 Agent 小卡片时 能自动帮我
@@ -2611,6 +2613,10 @@
                 <span class="st" class:live-dot={stateIsLive(a.state)} style:background={stateDotColor(a.state)}></span>
                 {#if stateNeedsYou(a.state)}<span class="ac-needs appear">{a.state === 'blocked' ? t('hubState_blocked') : t('hubNeedsYou')}</span>{/if}
                 {#if unread.has(a.name)}<span class="unread appear-pop" title={t('hubUnread')}></span>{/if}
+                <button class="a-more" title={t('hubMore')} aria-label={t('hubMore')}
+                  onclick={(e) => { e.stopPropagation(); toggleAgentMenu(a.name, e.currentTarget); }}>
+                  <Icon name="dots" size={12} />
+                </button>
               </div>
               <!-- What the agent's own status line says, kept ON the card rather
                    than behind the menu ("这个直接常驻显示吧 可以字号小一点"). The
@@ -2676,6 +2682,10 @@
                   onclick={(e) => { e.stopPropagation(); startAgent(name); }}>
                   <Icon name="refresh" size={11} />
                 </button>
+                <button class="a-more" title={t('hubMore')} aria-label={t('hubMore')}
+                  onclick={(e) => { e.stopPropagation(); toggleAgentMenu(name, e.currentTarget); }}>
+                  <Icon name="dots" size={12} />
+                </button>
               </div>
             </div>
           {/each}
@@ -2706,8 +2716,8 @@
              a full-width bar under the roster until 2026-08-19). Same popover
              dialect as the recipient menu — one menu language in this file.
 
-             A stopped agent gets the two verbs that mean anything to it: start
-             it again, or eject it. Watch/Interrupt/Stop all need a live pane. -->
+             A stopped agent can resume, filter/configure its retained identity,
+             or leave the project. Watch/Interrupt/Restart/Stop need a live pane. -->
         <div class="a-menu pop-layer" class:ready={menuH > 0} role="menu" tabindex="-1"
           style:left="{menuPos.x}px" style:top="{menuPos.y}px"
           style:--pop-origin={menuAnchor ? popOrigin(menuAnchor, menuPos, 'left') : undefined}
@@ -2759,6 +2769,9 @@
           {#if !stopped.includes(menuFor)}
             <button role="menuitem" class="warn" title={t('hubInterruptHint')} onclick={() => { const n = menuFor; menuFor = ''; interrupt(n); }}>
               <Icon name="x" size={12} />{t('hubInterrupt')}
+            </button>
+            <button role="menuitem" onclick={() => { const n = menuFor; menuFor = ''; restartAgent(n); }}>
+              <Icon name="refresh" size={12} />{t('hubRestart')}
             </button>
             <button role="menuitem" class="danger" onclick={() => { const n = menuFor; menuFor = ''; askAction('stop', n); }}>
               <Icon name="stop" size={12} />{t('hubStop')}
@@ -3735,14 +3748,14 @@
   .st { width: 6px; height: 6px; border-radius: 50%; flex: none; transition: background var(--t-fast); }
   .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--status-danger); flex: none; }
   .ava.dim { background: var(--surface2) !important; color: var(--text3); }
-  /* The stopped card's ONE way back up: a real button in the .a-more dialect,
-     accent-leaning so it reads as the card's action. The card surface around
-     it is inert — see the stopped-card comment in the markup. */
-  .a-start {
+  /* Small card actions share the borderless icon-button dialect. Resume is the
+     stopped card's direct constructive action; dots opens the same menu the
+     card surface / context gesture reaches, now visibly (board #89). */
+  .a-start, .a-more {
     display: grid; place-items: center; width: 20px; height: 22px; border-radius: 6px;
     background: none; border: none; padding: 0; cursor: pointer; color: var(--text3); flex: none;
   }
-  .a-start:hover:not(:disabled) { color: var(--accent); background: var(--surface2); }
+  .a-start:hover:not(:disabled), .a-more:hover { color: var(--accent); background: var(--surface2); }
   .a-start:disabled { opacity: 0.5; cursor: default; }
   /* The agent action menu: a fixed popover, positioned in JS from the trigger's
      rect (see toggleAgentMenu). It speaks the same dialect as .to-menu — same

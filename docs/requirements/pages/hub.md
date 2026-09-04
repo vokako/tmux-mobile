@@ -90,9 +90,11 @@ completion).
   waiting/blocked puts an amber frame + wash + `needs you` word on the whole
   card — same `--status-warn` token, no motion),
   sniffed **vitals** (model + effort at `--fs-micro`, context% as a 2px
-  bottom edge line), and a context menu (Message / Watch / Only its messages
-  — the one-agent feed filter, also a double-click on the card / configure
-  agent / Interrupt / Stop / Restart / Remove — rising consequence order). The card TAP menu
+  bottom edge line), and an explicit borderless **More** dots button opening
+  the same context menu as card tap/right-click/long-press (Message / Watch /
+  Only its messages — the one-agent feed filter, also a double-click on the
+  card / configure agent / Interrupt / Restart / Stop / Remove — rising
+  consequence order). The card TAP menu
   aligns to the card's LEFT edge (board #47 — the card reads name-first
   from its left edge; same shared placement flip/clamp as the title menu);
   right-click/long-press keeps the pointer placement.

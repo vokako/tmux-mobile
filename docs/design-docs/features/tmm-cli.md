@@ -1333,14 +1333,13 @@ the declaration yet, so there is a fallback to a fresh `spawn` — a new
 conversation, but better than an agent that does not come back. The reply carries
 `resumed` so the caller can tell which happened.
 
-Restart also works when nothing is running, and that is the only way the UI uses
-it: a running agent gets ONE control (stop), and a stopped chip gets "start
-again" (owner call — a restart button on a running agent just combines two steps
-nobody asked to combine). Stopping asks first, because the process may be
-mid-task and on a phone the button is a thumb away from the chip you meant to
-tap; starting something that is not running destroys nothing, so it just
-happens. Both post a `[tmm] stopped <name>` / `[tmm] restarted <name>` line,
-because the room is the record.
+Restart works for both states. A running Agent card's explicit More dots button
+(board #89) opens the shared card/context menu and offers Restart; a stopped
+card keeps its direct Resume button and the same discoverable More menu. Restart
+is an explicit menu choice and runs immediately; Stop still asks first because
+the process may be mid-task and a phone mis-tap must not close it. Both post a
+`[tmm] stopped <name>` / `[tmm] restarted <name>` line, because the room is the
+record.
 
 ## Spawn: the starter pistol
 
@@ -1778,7 +1777,7 @@ reachable from both the chat UI and `tmm` — the CLI is not a subset (owner:
 "所有的 Agent 也可以通过 TMM 命令直接交互所有的操作"), because an agent that
 can only be managed by a human cannot manage a teammate:
 
-| Agent | `tmm agent interrupt\|stop\|restart\|remove <name>` | roster dot menu (context menu): Watch / Interrupt / Stop / Remove |
+| Agent | `tmm agent interrupt\|stop\|restart\|remove <name>` | roster More/context menu: Watch / Interrupt / Restart / Stop / Remove |
 | Project | `tmm project up\|down\|archive\|delete <session>` | header: Open / Close / Delete (archive is the list's own action) |
 
 `remove` is the eject button next to stop's pause button: it kills the window,
