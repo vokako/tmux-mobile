@@ -31,13 +31,14 @@
     hubPost, hubCommand, modelsList, hubLog, hubRooms, hubAgents, fsMkdir, fsUpload, hubSpawn, hubSpawnTeam, teamsList, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
-  import { sortRows } from '../projects/projects.ts';
-  import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, stateNeedsYou, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, mentionedAgents, chipExtras, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, touchContextMenu, perLineOf, modelLabel } from './hub.ts';
+  import { projectAgeLabel, sortRows } from '../projects/projects.ts';
+  import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, stateNeedsYou, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, mentionedAgents, chipExtras, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, perLineOf, modelLabel } from './hub.ts';
   import { notifyNews, isAway, roomProjectName } from './notifications.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, popOrigin, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
   import { longpress } from '../ui/longpress.ts';
+  import { systemOwnsContextMenu } from '../ui/native-context-menu.ts';
   import { hoverInfo } from '../ui/hover.ts';
   import { flip } from 'svelte/animate';
   import { moveMs, revealMs } from '../ui/motion.ts';
@@ -181,10 +182,8 @@
 
   // ── Sidebar row summary ──────────────────────────────────────────────────
   // Each row answers two questions at a glance — "when did this project last
-  // speak" (the same map that ORDERS the list, so the time explains the order)
-  // and "who is in it, doing what" (owner, 2026-08-24: "上次回复的时间 …
-  // 当前几个 Agent 的简单 logo 状态").
-  const rowTalk = (row) => talkMap[row.project.room ?? `proj:${row.project.session}`] ?? 0;
+  // update" (conversation first, tmux activity as the no-chat fallback, via
+  // the same helper Terminal uses) and "who is in it, doing what".
   // A LIVE project reads its real windows — the same agent detection the
   // window switcher uses — each coloured by the hook-derived state from
   // hub_rooms (absence = idle: a window with no hook facts is at rest). A
@@ -2227,7 +2226,8 @@
     if (n.live || n.stopped) {
       lines.push({ label: t('hubHoverAgents'), value: t('hubHoverAgentsCount').replace('{live}', String(n.live)).replace('{stopped}', String(n.stopped)), tone: n.live ? 'accent' : undefined });
     }
-    if (rowTalk(row)) lines.push({ label: t('hubHoverLastMsg'), value: agoShort(rowTalk(row), tick) });
+    const age = projectAgeLabel(row, talkMap, tick);
+    if (age) lines.push({ label: t('hoverActivity'), value: age });
     if (row.project.session === selected && unread.size) lines.push({ label: t('hubHoverUnread'), value: String(unread.size), tone: 'accent' });
     return { title: row.project.name, lines };
   }
@@ -2323,32 +2323,41 @@
                conversation — is unchanged. The list is ordered by the
                CONVERSATION, so a row that moves MOVES (animate:flip on
                moveMs(), motion.md wave 5); a project that joins fades in. -->
-          <button class="side-row proj-row" class:open={row.project.session === selected}
+          <div class="side-row proj-row" role="group" aria-label={row.project.name} class:open={row.project.session === selected}
             class:appear={!!rowsBase && !rowsBase.has(row.project.id)}
             animate:flip={{ duration: moveMs() }}
-            onclick={() => { selectProject(row.project.session); sideOpen = false; }}
             oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), row.project.name, projectItems(row)); }}
             use:longpress={{ onlongpress: (pt) => openCtx(pt, row.project.name, projectItems(row)) }}
             use:hoverInfo={() => rowInfo(row)}>
-            <span class="dot" class:off={!row.live}></span>
-            <span class="p-main">
-              <span class="p-top">
-                <span class="p-name">{row.project.name}</span>
-                {#if rowTalk(row)}<span class="side-age">{agoShort(rowTalk(row), tick)}</span>{/if}
-              </span>
-              {#if rowAgents(row).length}
-                <span class="side-wins" class:dim={!row.live}>
-                  {#each rowAgents(row) as a (a.name)}
-                    <span class="side-win">
-                      {#if a.icon}<img src={a.icon} alt="" width="11" height="11" />{/if}
-                      <span class="side-win-name">{a.name}</span>
-                      {#if a.state}<span class="side-win-dot" class:live-dot={stateIsLive(a.state)} style:background={stateDotColor(a.state)}></span>{/if}
-                    </span>
-                  {/each}
+            <button class="proj-pick"
+              onclick={() => { selectProject(row.project.session); sideOpen = false; }}>
+              <span class="dot" class:off={!row.live}></span>
+              <span class="p-main">
+                <span class="p-top">
+                  <span class="p-name">{row.project.name}</span>
+                  <span class="side-age">{projectAgeLabel(row, talkMap, tick)}</span>
                 </span>
-              {/if}
-            </span>
-          </button>
+                {#if rowAgents(row).length}
+                  <span class="side-wins" class:dim={!row.live}>
+                    {#each rowAgents(row) as a (a.name)}
+                      <span class="side-win">
+                        {#if a.icon}<img src={a.icon} alt="" width="11" height="11" />{/if}
+                        <span class="side-win-name">{a.name}</span>
+                        {#if a.state}<span class="side-win-dot" class:live-dot={stateIsLive(a.state)} style:background={stateDotColor(a.state)}></span>{/if}
+                      </span>
+                    {/each}
+                  </span>
+                {/if}
+              </span>
+            </button>
+            <button class="icon-btn row-menu" aria-label={t('hubProjectMenu')}
+              onclick={(e) => {
+                e.stopPropagation();
+                openCtx({ anchor: anchorOf(e.currentTarget), trigger: e.currentTarget }, row.project.name, projectItems(row));
+              }}>
+              <Icon name="dots" size={13} />
+            </button>
+          </div>
         {/each}
         <button class="side-row add" onclick={() => { createOpen = true; sideOpen = false; }}>
           <Icon name="plus" size={13} />{t('projectNew')}
@@ -2891,7 +2900,7 @@
                      button below. -->
                 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
                 <div class="bubble md"
-                  oncontextmenu={(e) => { if (touchContextMenu(e.pointerType)) return; e.preventDefault(); openCtx(pointOf(e), m.from, msgItems(m)); }}
+                  oncontextmenu={(e) => { if (systemOwnsContextMenu(e)) return; e.preventDefault(); openCtx(pointOf(e), m.from, msgItems(m)); }}
                   onclick={() => { if (typeof getSelection === 'function' && !(getSelection()?.isCollapsed ?? true)) return; msgOpen = msgOpen === key ? '' : key; }}>
                   {#if m.from !== 'human'}
                     <!-- A status note keeps the ordinary bubble, but its header
@@ -3546,7 +3555,15 @@
   .h1-edit:focus { outline: none; }
   /* The two-line project row (.proj-row/.dot/.p-*) is the SHARED skeleton in
      app.css since board #39 — Board wears it too, so a scoped copy here would
-     be the silent-override drift the sidebar source test forbids. */
+     be the silent-override drift the sidebar source test forbids. The row has
+     two controls now: its content opens the conversation, the borderless
+     icon-btn opens the SAME projectItems menu as right-click/long-press. */
+  .proj-pick {
+    display: flex; align-items: flex-start; gap: 8px; flex: 1; min-width: 0;
+    padding: 0; border: 0; background: none; color: inherit; text-align: left;
+    font: inherit; cursor: pointer;
+  }
+  .row-menu { width: 24px; height: 24px; padding: 0; flex: none; align-self: center; color: var(--text3); }
 
   .sidebar { position: relative; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
   /* Phone: the project list slides over the conversation instead of taking a

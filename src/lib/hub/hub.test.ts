@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, touchContextMenu, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
+import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -1289,23 +1289,6 @@ test('tail intent is a bottom GAP, and hidden scroll noise cannot flip it (board
   // reader who left at the tail, nor GRANT it to one who left in history.
   assert.equal(tailAfterScroll(false, true, 9999), true, 'hidden noise cannot pollute following');
   assert.equal(tailAfterScroll(false, false, 0), false, 'hidden settling cannot fake a return to the tail');
-});
-
-test('a touch long-press leaves the context menu to the SYSTEM (board #48)', () => {
-  // The owner's report: long-pressing a chat message to select text popped
-  // OUR menu instead of the phone's native selection ("不应该出现选项卡 应该走
-  // 手机系统本身默认选中文字的逻辑"). On Android a long-press over text FIRES
-  // contextmenu, and an unconditional preventDefault kills the selection.
-  // The gate: only a touch-sourced event belongs to the system.
-  assert.equal(touchContextMenu('touch'), true, 'finger long-press → native selection');
-  assert.equal(touchContextMenu('pen'), true, 'a stylus hold is the same gesture');
-  // A mouse has a right button — that IS the menu request, never a selection.
-  assert.equal(touchContextMenu('mouse'), false);
-  // Chromium's keyboard menu key reports an empty pointerType; a browser that
-  // predates PointerEvent contextmenu reports undefined. Neither is a finger,
-  // and neither can be mid-text-selection — the menu stays available.
-  assert.equal(touchContextMenu(''), false);
-  assert.equal(touchContextMenu(undefined), false);
 });
 
 test('the fold budget is CHARACTERS, not source lines (board #53)', () => {

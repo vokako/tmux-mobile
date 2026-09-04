@@ -36,6 +36,7 @@
   import { moveMs } from './lib/ui/motion.ts';
   import { slideIndicator } from './lib/ui/indicator.ts';
   import { hoverInfo } from './lib/ui/hover.ts';
+  import { installNativeContextMenuGuard } from './lib/ui/native-context-menu.ts';
 
   // Tunable constants
   const KB_OPEN_THRESHOLD = 100; // px difference to detect keyboard open
@@ -45,6 +46,11 @@
   const OPTIMIZE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
   let page = $state('settings');
+
+  // Desktop/browser right-click must never expose browser chrome: a surface
+  // either opens its app ContextMenu or does nothing. Touch/pen long-press is
+  // deliberately exempt so selectable prose keeps the system selection UI.
+  $effect(() => installNativeContextMenuGuard(window));
   let connected = $state(false);
   let terminalTarget = $state('');
   let terminalSession = $state('');

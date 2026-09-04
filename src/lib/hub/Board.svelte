@@ -7,8 +7,8 @@
      would fork the language. Lives in the Hub drawer as a partition, like the
      terminal and Files. */
   import { boardList, boardGet, boardSave, boardNote, boardDelete, boardCounts, projectList, hubAgents, hubPost, hubRooms, type BoardIssue, type BoardCountRow, type HubAgent } from '../core/ws.ts';
-  import { sortRows } from '../projects/projects.ts';
-  import { agoShort, boardStatusColor } from './hub.ts';
+  import { projectAgeLabel, sortRows } from '../projects/projects.ts';
+  import { boardStatusColor } from './hub.ts';
   import type { ProjectRow } from '../projects/projects.ts';
   import { t } from '../core/i18n.svelte.ts';
   import { untrack } from 'svelte';
@@ -77,8 +77,7 @@
     guard(() => { sel = null; creating = true; });
   });
   let talkMap = $state<Record<string, number>>({});
-  const rowTalk = (r: { project: { room?: string; session: string } }) =>
-    talkMap[r.project.room || `proj:${r.project.session}`] ?? 0;
+  let projectTick = $state(Date.now());
   // The FULL non-archived list vs what the sidebar shows (board #39: "如果该
   // 项目完全为空 则直接不显示该 project"): the rows are filtered by the bulk
   // counts — total>0 — but allProjects stays whole, because the CURRENT board
@@ -115,7 +114,8 @@
     if (!visible) return;
     loadProjects();
     const iv = setInterval(loadProjects, 20000);
-    return () => clearInterval(iv);
+    const ageIv = setInterval(() => { projectTick = Date.now(); }, 1000);
+    return () => { clearInterval(iv); clearInterval(ageIv); };
   });
   function pick(s: string) {
     guard(() => {
@@ -624,7 +624,7 @@
           <span class="p-main">
             <span class="p-top">
               <span class="p-name">{p.project.name}</span>
-              {#if rowTalk(p)}<span class="side-age">{agoShort(rowTalk(p), Date.now())}</span>{/if}
+              <span class="side-age">{projectAgeLabel(p, talkMap, projectTick)}</span>
             </span>
             <span class="side-wins grid" style:grid-template-columns={`repeat(${cols}, minmax(0, 1fr))`}>
               {#each STATUSES as st (st)}

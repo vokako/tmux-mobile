@@ -211,6 +211,11 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   click toggles instead of closing-and-reopening.
 - Right-click and long-press are ONE gesture (`ui/ContextMenu` +
   `ui/longpress`), offering the verbs the surface already has elsewhere.
+  **Desktop browser chrome never surfaces**: App installs one capture-phase
+  `contextmenu` guard; a surface with app verbs opens its shared ContextMenu,
+  and a surface without one simply does nothing instead of showing the browser
+  menu. The guard yields to touch/pen (including legacy synthetic mouse events
+  with `firesTouchEvents`) so native selection is untouched.
   **Selectable prose is the exception**: a touch/pen hold belongs to native
   text selection (never `preventDefault` its `contextmenu`); only mouse/
   keyboard contextmenu opens the app menu, and selection beats the tail click.

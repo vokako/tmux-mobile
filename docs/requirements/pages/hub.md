@@ -271,7 +271,8 @@ completion).
   该项目完全为空 则直接不显示该 project"), fed by ONE bulk `hub_board_counts`
   read alongside `project_list`/`hub_rooms` — never a per-project
   `hub_board_list` walk. Each row is the Chat sidebar's two-line shape (the
-  shared `.proj-row` skeleton: dot + name + last-reply age) with the four
+  shared `.proj-row` skeleton: dot + name + the same conversation-first updated
+  age Chat and Terminal use) with the four
   column counts as the quiet second line — fixed todo/doing/review/done
   order, zeros included, each chip coloured by the one board status
   language. Because the set is always four, Board alone adds the shared

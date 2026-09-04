@@ -97,7 +97,8 @@ test('the sidebar orders by conversation, and rows are summaries (reopened #11)'
     'sortRows over the talk map, archived rows dropped');
   assert.match(source, /hubRooms\(\)\.catch/u, 'the talk map comes from hub_rooms, fail-soft');
   const row = source.slice(source.indexOf('class="side-row proj-row"'), source.indexOf('</aside>'));
-  assert.match(row, /class="side-age"/u, 'rows carry the last-reply age');
+  assert.match(row, /class="side-age">\{projectAgeLabel\(p, talkMap, projectTick\)\}/u,
+    'rows carry the same updated age as Chat and Terminal');
   // The second line is COLUMN COUNTS in the shared chip dress — never the
   // Chat row's agent chips (board #39 kept the summary rule: no roster here).
   assert.ok(!row.includes('a.icon'), 'no agent chips — the Board row summarises the BOARD, not the roster');

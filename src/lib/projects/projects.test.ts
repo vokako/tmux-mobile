@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ageLabel, declaredWindowChips, liveWindowChips, shortPath, sortRows, type ChipPane, type ProjectRow, type Slot } from './projects.ts';
+import { ageLabel, declaredWindowChips, liveWindowChips, projectAgeLabel, projectUpdatedMs, shortPath, sortRows, type ChipPane, type ProjectRow, type Slot } from './projects.ts';
 
 function slot(name: string, ord: number, extra: Partial<Slot> = {}): Slot {
   return {
@@ -104,6 +104,19 @@ test('a project with no recorded activity falls back to its creation time', () =
   fresh.project.created_at = 9999;
   const rows = sortRows([row('old', false, 500), fresh]);
   assert.deepEqual(rows.map((r) => r.project.id), ['fresh', 'old']);
+});
+
+test('Chat and Terminal project rows share one updated time and one label', () => {
+  const p = row('shared', true, 900);
+  p.project.room = 'room:shared';
+  const talk = { 'room:shared': 1_000_000_000 };
+
+  assert.equal(projectUpdatedMs(p, talk), 1_000_000_000,
+    'a conversation timestamp is the project update on both surfaces');
+  assert.equal(projectAgeLabel(p, talk, 1_000_000_000 + 10 * 60_000), '10m');
+  assert.equal(projectUpdatedMs(p, {}), 900_000,
+    'without conversation history both surfaces fall back to tmux activity');
+  assert.equal(projectAgeLabel(p, {}, 900_000 + 2 * 3600_000), '2h');
 });
 
 test('the conversation orders the sidebar, not whichever session tmux touched last', () => {

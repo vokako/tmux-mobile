@@ -118,6 +118,25 @@ export function declaredWindowChips(slots: Slot[]): WindowChip[] {
     });
 }
 
+/** One project update clock for every Projects list. Conversation activity is
+ * the user-visible change; projects with no room history fall back to tmux's
+ * last observation/up/creation time. Bus timestamps are ms, project rows sec. */
+export function projectUpdatedMs(row: ProjectRow, talk: Record<string, number> = {}): number {
+  const room = row.project.room ?? `proj:${row.project.session}`;
+  return talk[room]
+    ?? (row.project.last_seen_at ?? row.project.last_up_at ?? row.project.created_at ?? 0) * 1000;
+}
+
+/** The same source and formatter for Chat and Terminal sidebar rows. */
+export function projectAgeLabel(
+  row: ProjectRow,
+  talk: Record<string, number> = {},
+  nowMs = Date.now(),
+): string {
+  const updated = projectUpdatedMs(row, talk);
+  return updated ? ageLabel(updated / 1000, nowMs / 1000) : '';
+}
+
 /**
  * Order projects by the CONVERSATION, newest first — "把我们最近的对话默认排在最上
  * 面" (owner, 2026-08-19). `talk` maps room id → newest message timestamp (ms),
@@ -133,8 +152,8 @@ export function declaredWindowChips(slots: Slot[]): WindowChip[] {
  * when tmux last had the session, then creation): there is no conversation to
  * order them by, and they should not outrank one that exists.
  *
- * The `talk` argument is optional so the Projects page — which is about tmux and
- * declarations, not conversations — keeps its own ordering.
+ * The `talk` argument stays optional for project-only servers without Hub
+ * support; production Chat, Terminal and Board all pass the same grouped map.
  */
 export function sortRows(rows: ProjectRow[], talk: Record<string, number> = {}): ProjectRow[] {
   // seconds in the projects table, milliseconds on the bus: normalise before any

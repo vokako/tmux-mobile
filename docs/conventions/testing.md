@@ -58,6 +58,7 @@ These tests `readFile` the component source and assert with regexes.
 | File | Pins |
 |------|------|
 | `src/App.source.test.ts` | notification refresh on every connect path; terminal nav/page-layer structure |
+| `projects/Projects.source.test.ts` | Terminal Projects consumes the same conversation-first update clock/formatter as Chat |
 | `sessions/Sessions.source.test.ts` | notification-state import wiring |
 | `sessions/PanePicker.source.test.ts` | Team-dot suppression in the picker; it is a fixed popover placed from its opener with the shared dismissal set |
 | `terminal/Terminal.source.test.ts` | Terminal chrome uses only Team-filtered queries |

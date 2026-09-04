@@ -87,9 +87,28 @@ test('hover reports facts with no gesture tutorial (board #87)', () => {
   // The tone of the state row is the SAME family the dot paints — no second
   // colour language (rule 6).
   assert.match(source, /function stateTone\(state\) \{\s*switch \(stateDotColor\(state\)\)/u, 'the hover tone derives from stateDotColor');
-  for (const fmt of ['modelLabel(a.vitals.model)', 'fmtElapsed(a.since, tick)', 'agoShort(rowTalk(row), tick)']) {
+  for (const fmt of ['modelLabel(a.vitals.model)', 'fmtElapsed(a.since, tick)', 'projectAgeLabel(row, talkMap, tick)']) {
     assert.ok(source.includes(fmt), `the hover card reuses ${fmt} — no second formatter`);
   }
+});
+
+test('Chat project rows share Terminal time and expose one borderless project menu', () => {
+  assert.match(source, /import \{ projectAgeLabel, sortRows \} from '\.\.\/projects\/projects\.ts';/u,
+    'Chat imports the shared project update formatter');
+  const start = source.indexOf('{#each rows as row (row.project.id)}');
+  const row = source.slice(start, source.indexOf('<button class="side-row add"', start));
+  assert.match(row, /<div class="side-row proj-row"/u, 'the row can hold two sibling controls');
+  assert.match(row, /<button class="proj-pick"/u, 'the main area still opens the conversation');
+  assert.match(row, /projectAgeLabel\(row, talkMap, tick\)/u,
+    'the visible age uses the same source and formatter as Terminal');
+  assert.match(row, /<button class="icon-btn row-menu" aria-label=\{t\('hubProjectMenu'\)\}/u,
+    'the familiar dots affordance is the global borderless icon-button dialect');
+  assert.match(row, /<Icon name="dots" size=\{13\} \/>/u);
+  assert.match(row, /oncontextmenu=\{\(e\) => \{ e\.preventDefault\(\); openCtx\(pointOf\(e\), row\.project\.name, projectItems\(row\)\); \}\}/u,
+    'right-click uses the same projectItems source');
+  assert.match(row, /openCtx\(\{ anchor: anchorOf\(e\.currentTarget\), trigger: e\.currentTarget \}, row\.project\.name, projectItems\(row\)\)/u,
+    'the dots use the same source, trigger-anchored');
+  assert.doesNotMatch(rule('.row-menu'), /border/u, 'local CSS only places the already-borderless icon-btn');
 });
 
 test('the composer\u2019s two upward menus grow from the chip like every other popover (motion.md wave 6)', () => {
@@ -97,6 +116,7 @@ test('the composer\u2019s two upward menus grow from the chip like every other p
   // their trigger is the bottom-left one; the atom only touches opacity /
   // transform / pointer-events, and rests with `transform: none`, so the
   // menus' own `position: absolute; bottom: calc(100% + 6px)` still places them.
+
   for (const menu of ['to-menu', 'cmd-menu']) {
     const re = new RegExp(`<div class="${menu} pop-layer" class:ready=\\{(\\w+) > 0\\} style:--pop-origin="bottom left"[^>]*bind:clientHeight=\\{\\1\\}`, 'u');
     assert.match(source, re, `.${menu} is measured, then grows from bottom left`);
@@ -722,12 +742,12 @@ test('the title caret expands the NAME — left-aligned on its real rect (board 
   assert.match(source, /<span class="h1-text" bind:this=\{titleNameEl\}>/u, 'the name span is the anchor');
   assert.match(source, /openCtx\(\{ anchor: anchorOf\(titleNameEl \?\? e\.currentTarget\), align: 'left' \}/u,
     'the title entry alone chooses the left alignment');
-  // Every OTHER context menu keeps the pointer default (right-aligned):
-  // exactly one opener passes an anchor/align.
+  // Every OTHER context menu keeps the right-aligned default — pointer or
+  // trigger anchor. Exactly one opener explicitly asks for left alignment.
   const opens = [...source.matchAll(/openCtx\((?!at, who)/g)].length; // call sites, not the definition
-  const aligned = [...source.matchAll(/openCtx\(\{ anchor:/g)].length;
-  assert.equal(aligned, 1, 'ONE left-aligned entry');
-  assert.equal(opens - aligned, 7, 'the seven pointer entries stay pointer-anchored');
+  const leftAligned = [...source.matchAll(/openCtx\(\{ anchor:[^}]*align: 'left'/g)].length;
+  assert.equal(leftAligned, 1, 'ONE left-aligned entry');
+  assert.equal(opens - leftAligned, 8, 'the other eight entries keep right alignment');
   assert.ok(!/getBoundingClientRect\(\)[^]{0,80}openCtx/u.test(source),
     'no raw client rect reaches openCtx — anchorOf owns the zoom correction');
   // The narrowed caret resets the BROWSER's button padding (Chromium: 1px 6px,
@@ -797,8 +817,8 @@ test('long-press on a message is the system selection gesture, never our menu (b
   // RETURN — without preventDefault — for a touch-sourced event, so the
   // native selection proceeds. A mouse right-click keeps the menu.
   assert.match(source,
-    /oncontextmenu=\{\(e\) => \{ if \(touchContextMenu\(e\.pointerType\)\) return; e\.preventDefault\(\); openCtx\(pointOf\(e\), m\.from, msgItems\(m\)\); \}\}/u,
-    'the bubble contextmenu yields to the system on touch, before preventDefault');
+    /oncontextmenu=\{\(e\) => \{ if \(systemOwnsContextMenu\(e\)\) return; e\.preventDefault\(\); openCtx\(pointOf\(e\), m\.from, msgItems\(m\)\); \}\}/u,
+    'the bubble contextmenu shares the global platform gate before preventDefault');
   // The selection's tail click must not toggle the action row — the same
   // isCollapsed guard the Board notes wear (#46). Without it, finishing a
   // selection ALSO pops the overlay the owner just asked to keep away.

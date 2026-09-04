@@ -8,6 +8,12 @@ import { readFile } from 'node:fs/promises';
 
 const source = await readFile(new URL('./App.svelte', import.meta.url), 'utf8');
 
+test('desktop browser context menus are globally suppressed while touch selection stays native', () => {
+  assert.match(source, /import \{ installNativeContextMenuGuard \} from '\.\/lib\/ui\/native-context-menu\.ts';/u);
+  assert.match(source, /\$effect\(\(\) => installNativeContextMenuGuard\(window\)\);/u,
+    'one app-shell capture listener owns the policy for every page');
+});
+
 test('the retired unread-notification store stays retired (2026-09-01)', () => {
   // The old agent-notification dots (unread.json inbox + per-window attention
   // marks) were replaced by the project room's auto-post + read cursor and the

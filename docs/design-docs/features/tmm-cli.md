@@ -1264,10 +1264,12 @@ growing a menu per surface:
   SCROLL (`isScroll`, pure and tested), a second finger cancels it, and the
   click that follows the release is swallowed once so a row does not both
   open its menu and activate itself. Android does emit `contextmenu` for a
-  long-press on selectable text; message bubbles therefore use
-  `touchContextMenu(pointerType)` at their native handler instead: touch/pen
-  return BEFORE `preventDefault` and belong to system selection, while mouse
-  right-click and the keyboard menu key keep the app menu (board #48).
+  long-press on selectable text. One app-shell capture guard suppresses every
+  mouse/keyboard native browser context menu; message bubbles call the same
+  `systemOwnsContextMenu(event)` classifier before their own handler instead:
+  touch/pen (including legacy `firesTouchEvents`) return BEFORE
+  `preventDefault` and belong to system selection, while mouse right-click and
+  the keyboard menu key keep the app menu (board #48).
 
 Wired to the agent card and sidebar project row, each offering the verbs it
 already has elsewhere — a context menu with its own action set is a second

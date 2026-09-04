@@ -9,6 +9,7 @@
   // same method-not-found contract the Team tab uses.
   import {
     listPanes,
+    hubRooms,
     projectArchive,
     projectDown,
     projectList,
@@ -18,7 +19,7 @@
   import type { ProjectRow } from './projects.ts';
   import { flip } from 'svelte/animate';
   import { moveMs } from '../ui/motion.ts';
-  import { ageLabel, declaredWindowChips, liveWindowChips, shortPath, sortRows } from './projects.ts';
+  import { declaredWindowChips, liveWindowChips, projectAgeLabel, shortPath, sortRows } from './projects.ts';
   import Icon from '../ui/Icon.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import ContextMenu from '../ui/ContextMenu.svelte';
@@ -47,6 +48,8 @@
   } = $props();
 
   let rows = $state<ProjectRow[]>([]);
+  let talkMap = $state<Record<string, number>>({});
+  let tick = $state(Date.now());
   let supported = $state(true);
   let error = $state('');
   let busy = $state<Record<string, boolean>>({});
@@ -82,7 +85,7 @@
   }
   let collapsed = $state(false);
 
-  const sorted = $derived(sortRows(rows));
+  const sorted = $derived(sortRows(rows, talkMap));
 
   // Live windows beat the declaration while the session exists: they are what
   // you can actually tap into, including a window that has not settled yet.
@@ -93,7 +96,8 @@
   }
 
   // The card's facts for the hover card (motion.md principle 16), through the
-  // card's OWN helpers — ageLabel for the age, chipsFor for the live windows —
+  // card's OWN helpers — projectAgeLabel for the shared updated age, chipsFor
+  // for the live windows —
   // never a second formatter. Agents: declared agent slots, split into the
   // ones with a live agent pane and the rest.
   function projectInfo(row: ProjectRow): HoverInfo {
@@ -106,7 +110,7 @@
     if (declared || live) {
       lines.push({ label: t('hoverAgents'), value: t('hoverAgentsCount').replace('{live}', String(live)).replace('{stopped}', String(Math.max(0, declared - live))) });
     }
-    const age = ageLabel(row.project.last_seen_at ?? row.project.last_up_at);
+    const age = projectAgeLabel(row, talkMap, tick);
     if (age) lines.push({ label: t('hoverActivity'), value: age });
     return { title: row.project.name, lines };
   }
@@ -117,8 +121,12 @@
 
   async function load() {
     try {
-      const res = await projectList();
+      const [res, rooms] = await Promise.all([
+        projectList(),
+        hubRooms().catch(() => null),
+      ]);
       rows = res?.projects ?? [];
+      if (rooms) talkMap = rooms.rooms ?? {};
       if (rows.length) firstFill = true;
       supported = true;
       error = '';
@@ -146,6 +154,12 @@
   // capturer) may have changed the declaration while we were away.
   $effect(() => {
     if (visible) void load();
+  });
+
+  $effect(() => {
+    if (!visible) return;
+    const timer = setInterval(() => { tick = Date.now(); }, 1000);
+    return () => clearInterval(timer);
   });
 
   async function run(id: string, fn: () => Promise<unknown>) {
@@ -236,7 +250,7 @@
               <span class="body">
                 <span class="line">
                   <span class="name">{row.project.name}</span>
-                  <span class={dense ? 'side-age' : 'age'}>{ageLabel(row.project.last_seen_at ?? row.project.last_up_at)}</span>
+                  <span class={dense ? 'side-age' : 'age'}>{projectAgeLabel(row, talkMap, tick)}</span>
                 </span>
                 {#if !dense}
                   <!-- The path is what tells two same-named folders apart, so a
