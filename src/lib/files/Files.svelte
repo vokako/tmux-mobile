@@ -15,6 +15,7 @@
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import GitPanel from './GitPanel.svelte';
+  import { hoverInfo } from '../ui/hover.ts';
   import { createPersistedList } from './persisted-list.ts';
   import { t } from '../core/i18n.svelte.ts';
   import { layout } from '../app/layout.svelte.ts';
@@ -625,6 +626,11 @@
     }
   });
 
+  // A DIFFERENT directory's rows unfold (motion.md principle 15): the rows are
+  // keyed by path, so a navigation remounts them all and `.reveal` staggers
+  // them in under the dim that was already there; a refresh of the same
+  // directory keeps its nodes and gets no animation at all.
+  let revealDir = $state('');
   let loadSeq = 0;
   async function loadDir(path, purpose = 'navigate') {
     const my = ++loadSeq; // several callers can navigate concurrently around a
@@ -633,6 +639,7 @@
     try {
       const r = await fsList(path, showHidden);
       if (my !== loadSeq) return;
+      revealDir = path !== cwd ? path : '';
       entries = r.entries;
       cwd = path;
       ({ view, currentFile } = directoryLoadState({ view, currentFile }, purpose));
@@ -1312,6 +1319,20 @@
     return new Date(ts * 1000).toLocaleString();
   }
 
+  // The row's facts for the hover card (motion.md principle 16), through the
+  // SAME formatters the info view uses — never a second one.
+  function entryKind(entry) {
+    if (entry.type === 'broken') return t('kindBroken');
+    const target = entry.type === 'dir' ? t('kindDir') : t('kindFile');
+    return entry.is_symlink ? `${t('kindSymlink')} → ${entry.link_target || target}` : target;
+  }
+  function entryInfo(entry) {
+    const lines = [{ label: t('type'), value: entryKind(entry) }];
+    if (entry.type !== 'dir') lines.push({ label: t('size'), value: formatSize(entry.size) });
+    if (entry.modified) lines.push({ label: t('modified'), value: formatDate(entry.modified) });
+    return { title: entry.name, lines };
+  }
+
   function fileIcon(entry) {
     if (entry.type === 'dir') return 'folder';
     return 'file';
@@ -1494,7 +1515,8 @@
     <div class="bc-path-row" bind:this={bcPathEl}>
       <button class="bc-seg" onclick={() => navTo('/')}>/</button>
       {#each breadcrumbs as bc, i (bc.path)}
-        <button class="bc-seg" class:appear={i === breadcrumbs.length - 1} onclick={() => navTo(bc.path)}>{bc.name}</button>
+        <button class="bc-seg" class:appear={i === breadcrumbs.length - 1} onclick={() => navTo(bc.path)}
+          use:hoverInfo={() => ({ title: bc.name, text: bc.path })}>{bc.name}</button>
         <span class="bc-sep">/</span>
       {/each}
     </div>
@@ -1504,7 +1526,7 @@
         {#each bookmarks as bm}
           <div class="bm-row">
             <span class="bm-icon"><Icon name="star-filled" size={13} /></span>
-            <button class="bm-path" onclick={() => { navTo(bm); showBookmarks = false; }} use:scrollEnd>
+            <button class="bm-path" onclick={() => { navTo(bm); showBookmarks = false; }} use:scrollEnd use:hoverInfo={() => ({ text: bm })}>
               {bm}
             </button>
             <button class="bm-del" onclick={() => toggleBookmark(bm)}><Icon name="x" size={12} /></button>
@@ -1518,7 +1540,8 @@
         {#each recentFiles as rf}
           <div class="bm-row">
             <span class="bm-icon"><Icon name="clock" size={13} /></span>
-            <button class="bm-path" onclick={() => { showRecent = false; openEntry({ type: 'file', path: rf.path, name: rf.name }); }} use:scrollEnd>
+            <button class="bm-path" onclick={() => { showRecent = false; openEntry({ type: 'file', path: rf.path, name: rf.name }); }} use:scrollEnd
+              use:hoverInfo={() => ({ title: rf.name, text: rf.path })}>
               <span style="color:var(--text3);font-size:var(--fs-meta)">{rf.path.replace(/\/[^/]+$/, '')}/</span>{rf.name}
             </button>
             <button class="bm-del" onclick={() => { recentFiles = recentFiles.filter(f => f.path !== rf.path); setPref('recentFiles', recentFiles).catch(() => {}); }}><Icon name="x" size={12} /></button>
@@ -1569,7 +1592,7 @@
          path via the HTML5 events here, the compiled app via the webview's
          drag-drop event hit-testing this element's rect. -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="file-list" class:panel-open={showBookmarks || showRecent} class:drop-hot={dragOver} class:busy={loading}
+    <div class="file-list" class:panel-open={showBookmarks || showRecent} class:drop-hot={dragOver} class:busy={loading} class:reveal={!!revealDir}
       bind:this={fileListEl}
       ondragover={onListDragOver} ondragleave={onListDragLeave} ondrop={onListDrop}>
       {#if dragOver}
@@ -1582,9 +1605,9 @@
       {#if loading && !entries.length}
         <div class="loading">{t('loading')}</div>
       {:else}
-        {#each entries as entry}
+        {#each entries as entry (entry.path)}
           <div class="file-row" class:broken={entry.type === 'broken'}>
-            <button class="file-main" onclick={() => openEntry(entry)}>
+            <button class="file-main" onclick={() => openEntry(entry)} use:hoverInfo={() => entryInfo(entry)}>
               <span class="file-icon" class:is-link={entry.is_symlink}>
                 <Icon name={fileIcon(entry)} size={16} />
               </span>
@@ -1592,7 +1615,6 @@
                 class="file-name"
                 class:dir-name={entry.type === 'dir'}
                 class:link-name={entry.is_symlink}
-                title={entry.is_symlink && entry.link_target ? `→ ${entry.link_target}` : entry.name}
               >{entry.name}</span>
               {#if entry.type !== 'dir'}
                 <span class="file-size">{formatSize(entry.size)}</span>

@@ -137,6 +137,21 @@ component references a global keyframe by name; only a LOCAL `@keyframes`
 gets scoped). The progress arc is still not transitioned (it
 tracks the integer). Exits everywhere are cuts.
 
+Hover / unfold / highlight (#86, 2026-09-04): a file row's hover card
+(`use:hoverInfo` on `.file-main`, principle 16) shows kind (folder / file /
+symlink → target / broken link), size and modified through the SAME
+`formatSize`/`formatDate` the info view uses; a breadcrumb's card is the full
+path, a bookmark's or recent file's its path, and a git status row's the
+porcelain code in words ("modified, staged · modified, unstaged",
+`files/git-status.ts`, tested). The native `title` on the file name is gone.
+A DIFFERENT directory's rows unfold: the rows are keyed by path, so a
+navigation remounts them all and `.reveal` (set by `loadDir` only when the
+path changes) staggers them in under the dim that was already there, while a
+same-directory refresh keeps its nodes and animates nothing; DirPicker's
+keyed rows do the same on every browse step. GitPanel's Status/Log tabs are
+the ONE travelling highlight (`use:slideIndicator` + `.slide-pill`): the pill
+glides, the buttons only change colour.
+
 ## Lessons Learned
 - Always reset loading/spinner states in catch blocks (e.g., `downloading = ''`)
 - Android `gen/` files need backup before `tauri android init`

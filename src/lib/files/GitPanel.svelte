@@ -16,6 +16,9 @@
   import { t } from '../core/i18n.svelte.ts';
   import { gitCmd } from '../core/ws.ts';
   import { moveMs } from '../ui/motion.ts';
+  import { slideIndicator } from '../ui/indicator.ts';
+  import { hoverInfo } from '../ui/hover.ts';
+  import { gitStatusMeaning } from './git-status.ts';
 
   type GitFile = { status: string; file: string };
   type GitCommit = { hash: string; subject: string; date: string; author: string };
@@ -202,7 +205,10 @@
       <button class="git-commit-btn" onclick={gitCommit} disabled={!commitMsg.trim()}>OK</button>
     </div>
   {/if}
-  <div class="git-tabs">
+  <!-- ONE highlight that travels (motion.md principle 14): the pill glides
+       from Status to Log; the buttons only cross-fade their text colour. -->
+  <div class="git-tabs" use:slideIndicator={{ key: gitTab, active: '.active' }}>
+    <span class="slide-pill" aria-hidden="true"></span>
     <button class:active={gitTab === 'status'} onclick={() => { gitTab = 'status'; loadGitStatus(); }}>{t('status')}</button>
     <button class:active={gitTab === 'log'} onclick={() => { gitTab = 'log'; loadGitLog(); }}>{t('log')}</button>
   </div>
@@ -222,7 +228,8 @@
       {#each gitStatus as f (f.file)}
         {@const staged = f.status[0] !== ' ' && f.status[0] !== '?'}
         <div class="git-file-row" animate:flip={{ duration: moveMs() }}>
-          <button class="git-file" onclick={() => showFileDiff(f.file, staged)}>
+          <button class="git-file" onclick={() => showFileDiff(f.file, staged)}
+            use:hoverInfo={() => ({ title: f.file, lines: [{ label: t('status'), value: gitStatusMeaning(f.status, t) }] })}>
             <span class="git-st" class:git-add={f.status.includes('A') || f.status.includes('?')} class:git-mod={f.status.includes('M')} class:git-del={f.status.includes('D')}>{f.status === '??' ? ' U' : f.status}</span>
             <span class="git-fname">{f.file}</span>
           </button>
@@ -288,15 +295,17 @@
 
   .git-tabs {
     display: flex; gap: 2px; padding: 6px 10px; border-bottom: 1px solid var(--border);
-    background: var(--pill-bg); flex-shrink: 0;
+    background: var(--pill-bg); flex-shrink: 0; position: relative; /* the .slide-pill's frame */
   }
   .git-tabs button {
+    position: relative; z-index: 1; /* above the travelling pill */
     padding: 6px 16px; border: none; border-radius: var(--ui-radius-control); background: transparent;
     color: var(--text3); font-size: var(--fs-ui); font-weight: 600; cursor: pointer;
     -webkit-tap-highlight-color: transparent;
     transition: background var(--t-fast), color var(--t-fast);
   }
-  .git-tabs button.active { background: var(--accent-bg); color: var(--accent); }
+  /* The fill is the shared .slide-pill under it — the button only changes colour. */
+  .git-tabs button.active { color: var(--accent); }
   .git-error { padding: 10px; color: var(--danger); font-size: var(--fs-ui); background: var(--danger-bg); }
   .git-push-result { padding: 8px 12px; font-size: var(--fs-ui); color: var(--status-ok); background: var(--accent-bg); flex-shrink: 0; }
   .git-push-result.git-error { color: var(--danger); background: var(--danger-bg); }

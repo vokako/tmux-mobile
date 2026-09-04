@@ -119,7 +119,9 @@
     <div class="pk-err appear">{error}</div>
   {/if}
 
-  <div class="pk-list subtle-scroll" class:busy bind:this={listEl}>
+  <!-- Rows are keyed by path, so a new directory remounts them all and they
+       unfold under the dim (motion.md principle 15). -->
+  <div class="pk-list subtle-scroll" class:busy class:reveal={ready} bind:this={listEl}>
     {#if !ready}
       <div class="pk-empty">…</div>
     {:else if !dirs.length}
