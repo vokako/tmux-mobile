@@ -385,33 +385,33 @@
       {#if tab === 'appearance'}
         <div class="setting-card">
           <div class="setting-row">
-            <div><strong>{t('theme')}</strong><small>{t('themeHint')}</small></div>
+            <div><strong>{t('theme')}</strong></div>
             <Segmented value={theme} onchange={onTheme} ariaLabel={t('theme')}
               options={[{ value: 'system', label: t('themeAuto') }, { value: 'light', label: t('themeLight') }, { value: 'dark', label: t('themeDark') }]} />
           </div>
           <div class="setting-row">
-            <div><strong>{t('language')}</strong><small>{t('languageHint')}</small></div>
+            <div><strong>{t('language')}</strong></div>
             <Segmented value={i18n.lang as 'en' | 'zh'} onchange={(l) => setLocale(l)} ariaLabel={t('language')}
               options={[{ value: 'en', label: 'EN' }, { value: 'zh', label: '中文' }]} />
           </div>
           <div class="setting-row">
-            <div><strong>{t('layout')}</strong><small>{t('layoutHint')}</small></div>
+            <div><strong>{t('layout')}</strong></div>
             <Segmented value={layout.mode} onchange={(m) => layout.set(m)} ariaLabel={t('layout')}
               options={[{ value: 'auto', label: t('layoutAuto') }, { value: 'desktop', label: t('layoutDesktop') }, { value: 'mobile', label: t('layoutMobile') }]} />
           </div>
           <div class="setting-row">
-            <div><strong>{t('hubFeedLevel')}</strong><small>{t('hubFeedLevelHint')}</small></div>
+            <div><strong>{t('hubFeedLevel')}</strong></div>
             <Segmented value={hubPrefs.feedLevel} onchange={(l) => hubPrefs.setFeedLevel(l)} ariaLabel={t('hubFeedLevel')}
               options={[{ value: 'chat', label: t('hubFeedChat') }, { value: 'status', label: t('hubFeedStatus') }, { value: 'tools', label: t('hubFeedTools') }]} />
           </div>
           <div class="setting-row">
-            <div><strong>{t('hubStepsRows')}</strong><small>{t('hubStepsRowsHint')}</small></div>
+            <div><strong>{t('hubStepsRows')}</strong></div>
             <div class="stepper">
               <button onclick={() => hubPrefs.setStepsRows(hubPrefs.stepsRows - 1)}>−</button><span>{hubPrefs.stepsRows}</span><button onclick={() => hubPrefs.setStepsRows(hubPrefs.stepsRows + 1)}>+</button>
             </div>
           </div>
           <div class="setting-row">
-            <div><strong>{t('uiFontBody')}</strong><small>{t('uiFontBodyHint')}</small></div>
+            <div><strong>{t('uiFontBody')}</strong></div>
             <div class="font-control">
               <Select bind:value={uiFontInput} editable dense options={uiFont.common}
                 placeholder={t('fontFamilySystem')} ariaLabel={t('uiFontBody')}
@@ -420,7 +420,7 @@
             </div>
           </div>
           <div class="setting-row">
-            <div><strong>{t('uiFontDisplay')}</strong><small>{t('uiFontDisplayHint')}</small></div>
+            <div><strong>{t('uiFontDisplay')}</strong></div>
             <div class="font-control">
               <Select bind:value={displayFontInput} editable dense options={displayFont.common}
                 placeholder={t('fontFamilySystem')} ariaLabel={t('uiFontDisplay')}
@@ -430,7 +430,7 @@
           </div>
           {#if showUiZoom}
             <div class="setting-row">
-              <div><strong>{t('uiZoom')}</strong><small>{t('uiZoomHint')}</small></div>
+              <div><strong>{t('uiZoom')}</strong></div>
               <div class="stepper">
                 <button onclick={() => onUiZoom(uiZoom - 0.1)}>−</button><span>{Math.round(uiZoom * 100)}%</span><button onclick={() => onUiZoom(uiZoom + 0.1)}>+</button>
               </div>
@@ -440,24 +440,24 @@
       {:else if tab === 'notifications'}
         <div class="setting-card">
           <div class="setting-row">
-            <div><strong>{t('hubNotify')}</strong><small>{notifyPerm === 'denied' ? t('hubNotifyDenied') : notifyPerm === 'unsupported' ? t('hubNotifySoundOnly') : t('hubNotifyHint')}</small></div>
+            <div><strong>{t('hubNotify')}</strong>{#if notifyPerm === 'denied'}<small>{t('hubNotifyDenied')}</small>{:else if notifyPerm === 'unsupported'}<small>{t('hubNotifySoundOnly')}</small>{/if}</div>
             <Segmented value={notifyOn} onchange={(on) => setNotify(on)} ariaLabel={t('hubNotify')}
               options={[{ value: true, label: t('on') }, { value: false, label: t('off') }]} />
           </div>
           <div class="setting-row">
-            <div><strong>{t('hubNotifyLevel')}</strong><small>{t('hubNotifyLevelHint')}</small></div>
+            <div><strong>{t('hubNotifyLevel')}</strong></div>
             <Segmented value={notifyLvl} onchange={setLevel} ariaLabel={t('hubNotifyLevel')}
               options={NOTIFY_LEVELS.map((l) => ({ value: l, label: t('hubNotifyLevel_' + l) }))} />
           </div>
           <div class="setting-row">
-            <div><strong>{t('hubNotifyTest')}</strong><small>{t('hubNotifyTestHint')}</small></div>
+            <div><strong>{t('hubNotifyTest')}</strong></div>
             <button class="reset" onclick={testNotify}>{notifyTested ? t('hubNotifyTestSent') : t('hubNotifyTestAction')}</button>
           </div>
         </div>
       {:else if tab === 'terminal'}
         <div class="setting-card">
           <div class="setting-row">
-            <div><strong>{t('fontFamily')}</strong><small>{t('fontFamilyHint')}</small></div>
+            <div><strong>{t('fontFamily')}</strong></div>
             <div class="font-control">
               <Select bind:value={fontInput} editable dense options={fonts.common}
                 placeholder={t('fontFamilySystem')} ariaLabel={t('fontFamily')}
@@ -466,13 +466,13 @@
             </div>
           </div>
           <div class="setting-row">
-            <div><strong>{t('font')}</strong><small>{t('fontSizeHint')}</small></div>
+            <div><strong>{t('font')}</strong></div>
             <div class="stepper">
               <button onclick={() => onFontSize(fontSize - 1)}>−</button><span>{fontSize}px</span><button onclick={() => onFontSize(fontSize + 1)}>+</button>
             </div>
           </div>
           <div class="setting-row">
-            <div><strong>{t('lineHeight')}</strong><small>{t('lineHeightHint')}</small></div>
+            <div><strong>{t('lineHeight')}</strong></div>
             <div class="range-wrap">
               <input type="range" min={LINE_HEIGHT_MIN} max={LINE_HEIGHT_MAX} step="0.05" value={terminalPrefs.lineHeight} oninput={(e) => setLineHeight(+e.currentTarget.value)} />
               <span>{terminalPrefs.lineHeight.toFixed(2)}</span>
@@ -484,7 +484,7 @@
         <div class="setting-card shortcut-card">
           {#each shortcutActions as [action, label]}
             <div class="setting-row">
-              <div><strong>{t(label)}</strong><small>{t(action.includes('Window') ? 'shortcutTerminalScope' : 'shortcutGlobalScope')}</small></div>
+              <div><strong>{t(label)}</strong></div>
               <button
                 class="shortcut-key"
                 class:recording={recordingShortcut === action}
@@ -500,7 +500,7 @@
       {:else}
         <div class="setting-card">
           <div class="setting-row">
-            <div><strong>{t('debug')}</strong><small>{t('debugHint')}</small></div>
+            <div><strong>{t('debug')}</strong></div>
             <Segmented value={debugMode} onchange={onDebug} ariaLabel={t('debug')}
               options={[{ value: false, label: t('off') }, { value: true, label: t('on') }]} />
           </div>
@@ -531,10 +531,7 @@
               {/each}
             </div>
             <div class="setting-row hook-row">
-              <div>
-                <strong>{t('agentNotifications')}</strong>
-                <small>{t('agentNotificationsHint')}</small>
-              </div>
+              <div><strong>{t('agentNotifications')}</strong></div>
               <div class="hook-control">
                 {#if hookStatus}
                   <span class="hook-backends">

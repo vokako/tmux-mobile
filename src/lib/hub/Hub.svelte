@@ -2200,14 +2200,14 @@
     if (a.since) lines.push({ label: t('hubHoverSince'), value: fmtElapsed(a.since, tick) });
     lines.push({ label: t('hubHoverTarget'), value: `${selected}:${a.window}` });
     if (selectedRow?.project.path) lines.push({ label: t('hubHoverPath'), value: selectedRow.project.path });
-    return { title: a.name, lines, note: t('hubHoverCardNote') };
+    return { title: a.name, lines };
   }
   function offCardInfo(name) {
     const slot = (selectedRow?.slots ?? []).find((x) => x.window_name === name);
     const lines = [{ label: t('hubHoverState'), value: t('hubStopped') }];
     if (slot?.command) lines.push({ label: t('hubHoverModel'), value: slot.command });
     if (selectedRow?.project.path) lines.push({ label: t('hubHoverPath'), value: selectedRow.project.path });
-    return { title: name, lines, note: t('hubHoverOffNote') };
+    return { title: name, lines };
   }
   /** Live vs stopped agents of a row — the full count, where the row's chips
    * stop at four. Declared slots are the roster; a live window is one of them
@@ -3148,15 +3148,14 @@
                   </button>
                 {/each}
                 <div class="to-sep"></div>
-                <!-- Broadcast: every agent is interrupted. Labelled with what
-                     it costs, not just with who it reaches. -->
+                <!-- Broadcast and room note are destinations, not lessons. -->
                 <button class:sel={recipient === ALL_TARGET} onclick={() => setRecipient(ALL_TARGET)}>
                   <span class="st all-dot"></span>
-                  <span class="to-opt"><span>{t('hubEveryone')}</span><small>{t('hubToAllHint')}</small></span>
+                  <span>{t('hubEveryone')}</span>
                 </button>
                 <button class:sel={!recipient} onclick={() => setRecipient('')}>
                   <span class="st note-dot"></span>
-                  <span class="to-opt"><span>{t('hubRoomNote')}</span><small>{t('hubToRoomHint')}</small></span>
+                  <span>{t('hubRoomNote')}</span>
                 </button>
               </div>
             {/if}
@@ -4203,8 +4202,6 @@
   .to-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .to-extra { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--accent); font-weight: 600; font-size: var(--fs-meta); font-family: ui-monospace, Menlo, monospace; }
   .to-sep { height: 1px; background: var(--border2); margin: 4px 6px; }
-  .to-opt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-  .to-opt small { font-size: var(--fs-meta); opacity: 0.65; }
   .note-dot { border: 1px dashed var(--text3); background: none; }
   .to-menu {
     position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 12;

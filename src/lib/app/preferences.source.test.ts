@@ -113,3 +113,20 @@ test('the phone reaches the server registry from the top of Settings (2026-09-03
   assert.match(source, /<span class="r-label">\{serverName\}<\/span>/u, 'the NAME, never the raw address');
   assert.match(source, /onServers = null,/u, 'off by default — the desktop rail has its own control');
 });
+
+
+test('settings controls use labels and values, not a subtitle under every row (board #87)', () => {
+  for (const key of [
+    'themeHint', 'languageHint', 'layoutHint', 'hubFeedLevelHint', 'hubStepsRowsHint',
+    'uiFontBodyHint', 'uiFontDisplayHint', 'uiZoomHint', 'hubNotifyHint',
+    'hubNotifyLevelHint', 'hubNotifyTestHint', 'fontFamilyHint', 'fontSizeHint',
+    'lineHeightHint', 'shortcutGlobalScope', 'shortcutTerminalScope', 'debugHint',
+    'agentNotificationsHint',
+  ]) {
+    assert.doesNotMatch(source, new RegExp(`<small>\\{t\\('${key}'\\)\\}<\\/small>`, 'u'),
+      `${key} must not become persistent tutorial copy`);
+  }
+  assert.match(source, /notifyPerm === 'denied'[\s\S]{0,120}<small>\{t\('hubNotifyDenied'\)\}<\/small>/u,
+    'an actual permission problem still explains itself');
+  assert.match(source, /class="font-error appear"/u, 'validation errors remain visible');
+});

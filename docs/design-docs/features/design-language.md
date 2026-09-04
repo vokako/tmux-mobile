@@ -230,14 +230,32 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   the Tab order with `tabindex="-1"`; only a container that is focused
   programmatically (a `role=menu`/`listbox` layer) may carry it.
 
-## 7 · Data honesty (the "verdict" rule)
+## 7 · Copy is a label, not a tutorial
+
+The interface explains itself through hierarchy, state, placement and familiar
+controls. Visible copy names the object, value, state or consequence; it does
+not narrate the design or teach ordinary gestures. `Click: address`,
+`Right-click: menu`, “tap again”, implementation details about panes/hooks,
+and a subtitle that merely repeats the controls beside it are regressions.
+
+- Hover cards report live facts (state, model, path, shortcut), never a footer
+  explaining click/right-click/long-press.
+- Settings rows need a label and their value/control. Persistent helper text is
+  reserved for an actual warning, validation failure or non-obvious constraint.
+- Empty states are verdicts (`No messages`, `No issues`), not onboarding prose.
+- Form help may state an input format briefly. Storage/materialization details
+  belong in docs, not below the field.
+- Destructive confirmations are the exception: say concisely what is lost and
+  what survives. Accessibility labels remain even when visible prose is cut.
+
+## 8 · Data honesty (the "verdict" rule)
 
 "Empty" and states are VERDICTS, not defaults: render nothing until the first
 answer arrives (`roomReady`, `listReady`), keep last-known data on a failed
 poll ("could not ask" ≠ "there is nothing"), and cache-restore on switches so
 nothing flashes.
 
-## 8 · New-feature checklist
+## 9 · New-feature checklist
 
 sizes from `--fs-*` · fonts by role · colours by token · radius from the scale
 · controls from §3 · hover from §4 · popovers from §5 · 760 compact + onGoBack
@@ -252,6 +270,14 @@ Each entry is a decision with the reason it was made; treat them as normative. T
 ### The design language is a CONTRACT
 
 (`docs/design-docs/features/design-language.md`, owner 2026-08-25: "设定好一套规范 让以后的新功能也能完美和谐统一"): six type steps + three font roles + the radius scale + the two hover families (bordered controls: accent border; rows/menu items: surface2 wash — icon-only buttons are BORDERLESS and hover in the wash family, like the rail; owner 2026-08-28) + ONE popover mechanism + rising-consequence menu order + `--t-fast/--t-move` motion + 760px compact with sheet-or-drilldown + 44px touch overlays. New surfaces REUSE the dialects in §3 or retire an old one — a new species is a regression. The doc lists what the source tests already enforce.
+
+### Copy names facts; it never narrates the interaction
+
+(board #87): labels, values, state, and consequence are UI copy. Ordinary
+gestures and implementation mechanisms are not. Hover cards may add current
+facts but never `Click: … / Right-click: …`; Settings does not put a subtitle
+under a self-explanatory control; empty states stay verdicts. Brief format help
+and destructive consequences remain, as do all accessibility labels.
 
 ### One dropdown, and it is ours
 

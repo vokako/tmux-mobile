@@ -536,7 +536,6 @@
         {#if editingSkill.synced_at}
           <p class="hint">{t('skillsSynced')} {new Date(editingSkill.synced_at * 1000).toLocaleString()}</p>
         {/if}
-        <p class="hint">{t('skillsHint')}</p>
         {#if !skillIsNew && skFiles.length}
           <div class="md-preview">
             <div class="side-h">{t('skillsFilesTitle')}</div>
@@ -581,7 +580,6 @@
         <label>{t('mcpDef')}
           <textarea class="mono" rows="10" bind:value={editingMcp.defText} spellcheck="false"></textarea>
         </label>
-        <p class="hint">{t('mcpHint')}</p>
       </div>
     {:else if editingTeam}
       <div class="page-head">
@@ -673,7 +671,6 @@
             <p class="hint">{t('teamsMax').replace('{n}', String(TEAM_MAX))}</p>
           {/if}
         </div>
-        <p class="hint">{t('teamsHint')}</p>
       </div>
     {:else if editing}
       <div class="page-head">

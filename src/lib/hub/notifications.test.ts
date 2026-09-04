@@ -312,7 +312,8 @@ test('the permission request and the audio unlock ride the SETTINGS toggle, neve
   // the Tauri shim reports `denied` before the first ask.
   const notif = readFileSync(join(here, 'notifications.ts'), 'utf8');
   assert.match(notif, /Notification\.permission !== 'granted'\) \{\s*\n\s*await Notification\.requestPermission\(\)/u);
-  assert.match(prefs, /notifyPerm === 'unsupported' \? t\('hubNotifySoundOnly'\)/u, 'the caption tells a webview user the sound is the whole channel');
+  assert.match(prefs, /\{:else if notifyPerm === 'unsupported'\}<small>\{t\('hubNotifySoundOnly'\)\}<\/small>/u,
+    'an unsupported webview explicitly says sound is the whole channel');
 });
 
 test('the placeholder cue asset exists where CUE_SRC points', () => {

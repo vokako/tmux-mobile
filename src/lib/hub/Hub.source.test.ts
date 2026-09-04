@@ -68,16 +68,17 @@ test('an uncached room unfolds: skeletons while it loads, then the feed from its
   assert.match(rule('.sk-feed'), /margin-top: auto/u, 'the skeleton sits where the tail will be');
 });
 
-test('hover explains: cards, rows, pills and the chip open the ONE hover card and carry no native title (motion.md wave 9)', () => {
-  // The card's getter runs at open time (live state) and reuses the page's
-  // own formatters; a native `title` beside it would be a second tooltip
-  // species. The aria-label keeps the one-line reading for screen readers.
+test('hover reports facts with no gesture tutorial (board #87)', () => {
+  // Live facts belong in the card; click/right-click instructions do not.
+  // The aria-label keeps the one-line reading for screen readers.
   const live = source.slice(source.indexOf('class="acard" class:sel'), source.indexOf('class="acard off"'));
   assert.match(live, /use:hoverInfo=\{\(\) => cardInfo\(a\)\}/u, 'the live card opens the hover card');
   assert.match(live, /aria-label=\{\[`\$\{a\.name\} · \$\{stateLabel\(a\.state\)\}`, a\.detail, vitalsLine\(a\.vitals\)\]/u, 'its one-line reading is the aria-label');
   assert.ok(!/<div class="acard" class:sel[^>]*\stitle=/u.test(live), 'no native title on the live card');
   const off = source.slice(source.indexOf('class="acard off"'), source.indexOf('{/each}', source.indexOf('class="acard off"')));
   assert.match(off, /use:hoverInfo=\{\(\) => offCardInfo\(name\)\}/u, 'the stopped card too');
+  const cardFns = source.slice(source.indexOf('function cardInfo'), source.indexOf('function rowAgentCounts'));
+  assert.doesNotMatch(cardFns, /\bnote\s*:/u, 'agent cards carry facts, never a click/right-click footer');
   assert.match(source, /class="side-row proj-row"[\s\S]{0,600}?use:hoverInfo=\{\(\) => rowInfo\(row\)\}/u, 'the sidebar row');
   assert.match(source, /class="win-pill state-ctl"[\s\S]{0,200}?use:hoverInfo=\{\(\) => pillInfo\(a\)\}/u, 'the drawer window pill');
   const chip = /<button class="to-chip"[\s\S]*?>/u.exec(source)?.[0] ?? '';
@@ -752,15 +753,14 @@ test('the composer scrollbar exists exactly while overflowing, and placeholders 
   assert.equal([...cInput.matchAll(/overflow-y/g)].length, 1, 'one overflow-y in .c-input, the hidden base');
   assert.ok(!/\.c-input[^}]*scrollbar-width:\s*none/su.test(source), 'the real scrollbar is never masked away');
 
-  // The placeholders name the reach and stop (the recipient MENU keeps the
-  // explanatory small hints — hubToAllHint/hubToRoomHint still render there).
+  // The placeholders name the reach; the menu labels the destinations once.
   const i18n = await readFile(new URL('../core/i18n.svelte.ts', import.meta.url), 'utf8');
   assert.equal([...i18n.matchAll(/hubComposerAll: 'Message every agent…',/g)].length, 1, 'EN all is short');
   assert.equal([...i18n.matchAll(/hubComposerRoom: 'Leave a note…',/g)].length, 1, 'EN room is short');
   assert.equal([...i18n.matchAll(/hubComposerAll: '发给所有 agent…',/g)].length, 1, 'zh all is short');
   assert.equal([...i18n.matchAll(/hubComposerRoom: '留一句话…',/g)].length, 1, 'zh room is short');
-  assert.match(source, /<small>\{t\('hubToAllHint'\)\}<\/small>/u, 'the menu hint stays');
-  assert.match(source, /<small>\{t\('hubToRoomHint'\)\}<\/small>/u, 'the menu hint stays');
+  assert.doesNotMatch(source, /t\('hubTo(?:All|Room)Hint'\)/u,
+    'destination labels need no explanatory subtitle');
 });
 
 test('leaving at the tail means returning to the tail — and ONLY then (board #38)', () => {

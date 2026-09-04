@@ -711,7 +711,7 @@
       <div class="collab-wrap appear-rise" style="height:{collabHeight}px">
         <CollabGraph {agents} event={lastEvent} />
         <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="collab-resize" onmousedown={startCollabResize} ontouchstart={startCollabResize} title="Drag to resize"></div>
+        <div class="collab-resize" onmousedown={startCollabResize} ontouchstart={startCollabResize} title={t('teamResizeMessage')}></div>
       </div>
     {/if}
 
@@ -795,7 +795,7 @@
           {@render chatPane()}
         </div>
         <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="team-splitter" onmousedown={startDrag} title="Drag to resize"></div>
+        <div class="team-splitter" onmousedown={startDrag} title={t('teamResizeMessage')}></div>
         <div class="team-grid-pane" style="flex: {gridFrac} 1 0;">
           {#key activeRoom}
             <AgentGrid {teamSession} {employees} {fontSize} {visible} collab={true} collabAgents={agents} collabEvent={lastEvent} />
@@ -808,7 +808,7 @@
           {/key}
         </div>
         <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="team-splitter" onmousedown={startDrag} title="Drag to resize"></div>
+        <div class="team-splitter" onmousedown={startDrag} title={t('teamResizeMessage')}></div>
         <div class="team-chat-pane" style="flex: {1 - gridFrac} 1 0;">
           {@render chatPane()}
         </div>
