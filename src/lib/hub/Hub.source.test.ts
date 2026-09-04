@@ -51,6 +51,23 @@ test('the composer stacks above every feed layer, so its popovers are never buri
 
 });
 
+test('an uncached room unfolds: skeletons while it loads, then the feed from its tail and the roster from the left (motion.md wave 8)', () => {
+  // The skeletons stand in ONLY while the room is not ready (an uncached
+  // room; a cached one is ready at once and stays a cut) and are aria-hidden.
+  assert.match(source, /\{#if selected && !roomReady\}\s*<div class="skel-wrap sk-feed" aria-hidden="true">/u, 'the feed\u2019s bubble skeletons');
+  assert.match(source, /\{#if !roomReady\}\s*<div class="skel-wrap sk-cards" aria-hidden="true">/u, 'the roster\u2019s card skeletons');
+  assert.match(source, /class="feed subtle-scroll" class:reveal-tail=\{justLoaded\}/u, 'the feed unfolds from its newest row');
+  assert.match(source, /class="cards" class:chips=\{compact\} class:reveal=\{justLoaded\}/u, 'the roster unfolds from the left');
+  // Only an UNCACHED load sets it, and a timer clears it: the atoms animate
+  // whatever mounts while the class is on, and an older page must not.
+  assert.match(source, /if \(!c\) unfold\(\);\s*\n\s*roomReady = true;/u, 'the unfold is the uncached first fill\u2019s');
+  assert.match(source, /justLoadedTimer = setTimeout\(\(\) => \{ justLoaded = false; \}, moveMs\(\) \+ 260\);/u, 'cleared after one move plus the longest stagger');
+  assert.match(source, /clearTimeout\(justLoadedTimer\); justLoaded = false; \/\/ an unfold belongs to the room that loaded/u, 'a switch mid-unfold cancels it');
+  // The feed skeleton is parked at the tail and never overflows — no parked
+  // scrollTop for loadFeed's scrollFeed() to fight.
+  assert.match(rule('.sk-feed'), /margin-top: auto/u, 'the skeleton sits where the tail will be');
+});
+
 test('hover explains: cards, rows, pills and the chip open the ONE hover card and carry no native title (motion.md wave 9)', () => {
   // The card's getter runs at open time (live state) and reuses the page's
   // own formatters; a native `title` beside it would be a second tooltip

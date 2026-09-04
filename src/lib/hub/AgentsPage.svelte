@@ -12,6 +12,7 @@
   import { renderMarkdown } from '../core/markdown.ts';
   import { backendColor } from '../hub/hub.ts';
   import { backendIcon } from '../core/agents.ts';
+  import { moveMs } from '../ui/motion.ts';
   import Select from '../ui/Select.svelte';
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
 
@@ -134,6 +135,12 @@
     return () => { live = false; };
   });
 
+  /** The list unfolds on its FIRST paint only (motion.md principle 15,
+   * `.reveal` on the sidebar list): a revisit or a save's reload is a cut.
+   * Cleared by a timer (one --t-move + the atom's 210ms stagger + margin) so
+   * a row added later does not rise as if it were part of the first fill. */
+  let justLoaded = $state(false);
+  let painted = false;
   async function reload() {
     // "I could not ask" is not "there is nothing": keep the last known lists
     // on a failed RPC (same rule as the Hub roster). Wiping them meant one
@@ -142,6 +149,11 @@
     try { teams = (await teamsList()).teams ?? []; } catch { /* keep last */ }
     try { skills = (await skillsList()).skills ?? []; } catch { /* keep last */ }
     try { mcps = (await mcpList()).mcp ?? []; } catch { /* keep last */ }
+    if (!painted) {
+      painted = true;
+      justLoaded = true;
+      setTimeout(() => { justLoaded = false; }, moveMs() + 260);
+    }
   }
   $effect(() => { if (visible) reload(); });
 
@@ -411,7 +423,7 @@
 <div class="agents-root" class:editing={drilled} class:drill-fwd={drillAnim === 'fwd'} class:drill-back={drillAnim === 'back'}>
   <aside class="sidebar">
     <SideHandle />
-    <div class="side-scroll subtle-scroll" use:scrollFade>
+    <div class="side-scroll subtle-scroll" class:reveal={justLoaded} use:scrollFade>
       {#if shows('agents')}
       {#if !section}<div class="side-h">{t('agentsTitle')}</div>{/if}
       {#each defs as d (d.name)}

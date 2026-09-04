@@ -149,6 +149,18 @@
 
   let issues = $state<BoardIssue[]>([]);
   let ready = $state(false);
+  /** The FIRST fill of a project's board unfolds its columns (motion.md
+   * principle 15: `.reveal` on each .col-scroll); a poll that refreshes the
+   * same board is a cut, and a card that moves has animate:flip. Cleared by a
+   * timer (one --t-move + the atom's 210ms stagger + margin) so a card that
+   * arrives on a later poll does not rise as if it were part of the fill. */
+  let justLoaded = $state(false);
+  let justLoadedTimer: ReturnType<typeof setTimeout> | null = null;
+  function unfold() {
+    if (justLoadedTimer) clearTimeout(justLoadedTimer);
+    justLoaded = true;
+    justLoadedTimer = setTimeout(() => { justLoaded = false; }, moveMs() + 260);
+  }
   let err = $state('');
   // view: the list, one issue (with its note thread), or the new-issue form.
   let sel = $state<BoardIssue | null>(null);
@@ -210,6 +222,7 @@
     try {
       const r = await boardList(s);
       if (cur !== s) return;
+      if (!ready) unfold(); // the first answer for this board, not a poll
       issues = r.issues;
       ready = true;
       err = '';
@@ -248,6 +261,7 @@
   $effect(() => {
     void cur;
     sel = null; creating = false; ready = false; issues = []; noteText = ''; nTitle = ''; nBody = ''; nAssignee = ''; pendingDiscard = null; pendingDelete = null;
+    if (justLoadedTimer) clearTimeout(justLoadedTimer); justLoaded = false; // the unfold belongs to the board that loaded
     // untrack: this effect runs on `cur` — reading acts to bump its gen
     // would ALSO subscribe the effect to acts, and writing it back loops
     // the effect to death (caught live: effect_update_depth_exceeded).
@@ -844,7 +858,7 @@
              2/4-column grids (flex properties do nothing for grid items). -->
         <div class="colm" class:sparse={items.length <= 1}>
           <div class="col-h">{statusLabel(s)}<span class="col-n">{items.length}</span></div>
-          <div class="col-scroll subtle-scroll">
+          <div class="col-scroll subtle-scroll" class:reveal={justLoaded}>
           {#each items as i (i.id)}
             <button class="card" animate:flip={{ duration: moveMs() }} onclick={() => openIssue(i.id)} use:hoverInfo={() => cardInfo(i)}>
               <!-- Titleless issues (board #31) wear their body excerpt as the

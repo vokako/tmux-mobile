@@ -118,6 +118,14 @@ test('notes are a timeline: author + time header, content box below (reopened #1
     'the opened-by name is highlighted too');
 });
 
+test('a board\u2019s first fill unfolds its columns; a poll is a cut (motion.md wave 8)', () => {
+  assert.match(source, /<div class="col-scroll subtle-scroll" class:reveal=\{justLoaded\}>/u, 'each column\u2019s card list wears .reveal');
+  assert.match(source, /if \(!ready\) unfold\(\); \/\/ the first answer for this board, not a poll\s*\n\s*issues = r\.issues;\s*\n\s*ready = true;/u,
+    'only the first answer after a project switch unfolds');
+  assert.match(source, /justLoadedTimer = setTimeout\(\(\) => \{ justLoaded = false; \}, moveMs\(\) \+ 260\);/u, 'cleared after one move plus the longest stagger');
+  assert.match(source, /ready = false; issues = \[\];[^\n]*\n\s*if \(justLoadedTimer\) clearTimeout\(justLoadedTimer\); justLoaded = false;/u, 'a switch mid-unfold cancels it');
+});
+
 test('a card opens the one hover card with the facts it abbreviates (motion.md wave 9)', () => {
   assert.match(source, /<button class="card" animate:flip=\{\{ duration: moveMs\(\) \}\} onclick=\{\(\) => openIssue\(i\.id\)\} use:hoverInfo=\{\(\) => cardInfo\(i\)\}>/u,
     'the card wears use:hoverInfo');
@@ -136,7 +144,7 @@ test('columns scroll alone; the page holds still (reopened #11)', () => {
   assert.match(style, /\.board \{[^}]*overflow: hidden/u, 'the page is not the scroller');
   assert.match(style, /\.cols \{[^}]*flex: 1;\s*\n\s*min-height: 0;/u, 'the column grid takes the available height');
   assert.match(style, /\.col-scroll \{\s*\n\s*overflow-y: auto;/u, 'each column\u2019s cards area is its own scroller');
-  assert.match(source, /<div class="col-scroll subtle-scroll">/u, 'the scroller wraps the cards, not the header');
+  assert.match(source, /<div class="col-scroll subtle-scroll"( class:reveal=\{justLoaded\})?>\s*\{#each items/u, 'the scroller wraps the cards, not the header');
   assert.match(style, /\.detail \{[^}]*overflow-y: auto/u, 'the detail view brings its own scroller');
 });
 

@@ -282,6 +282,24 @@
    * are reset to "nothing is fresh" while a room is loading. */
   let openedAt = $state(Infinity);
   let rosterBase = $state(null);
+  /** A load unfolds (motion.md principle 15, wave 8): while an UNCACHED room
+   * loads (`!roomReady`) the feed and roster show skeletons of the coming
+   * shape (`.skel-wrap` keeps them invisible for 150ms, so a fast answer never
+   * flashes one); when the room settles, `justLoaded` puts `.reveal-tail` on
+   * the feed and `.reveal` on the roster for ONE unfold. It is cleared by a
+   * timer rather than left on: the atoms animate every child that MOUNTS
+   * while the class is present, and an older page prepended by `loadOlder`
+   * (or the empty-room panel) must not rise (principle 13) — the timer runs
+   * one --t-move plus the atom's longest stagger (210ms) and a margin, and is
+   * zero-plus-margin under reduced motion, where the atom is inert anyway.
+   * A cached room never sets it: its content is already there. */
+  let justLoaded = $state(false);
+  let justLoadedTimer = null;
+  function unfold() {
+    clearTimeout(justLoadedTimer);
+    justLoaded = true;
+    justLoadedTimer = setTimeout(() => { justLoaded = false; }, moveMs() + 260);
+  }
 
   async function selectProject(session) {
     // An unsent line belongs to the conversation it was written for. Park it on
@@ -292,6 +310,7 @@
     if (selected) roomCache.set(selected, { feed, lastTs, activity, lastActivityTs, agents, histSeq, histMore, actCursor, actMore });
     selected = session;
     openedAt = Infinity; rosterBase = null; // nothing is fresh until this room has settled
+    clearTimeout(justLoadedTimer); justLoaded = false; // an unfold belongs to the room that loaded
     composerText = hubPrefs.draft(session);
     clearAttachments(); // staged for one room; must not ride into another
     expanded = {};      // an unfold is a reading choice, scoped to its room
@@ -343,6 +362,9 @@
     if (feed.length) scrollFeed(true);
     await Promise.all([loadFeed(), loadAgents(), loadActivity()]);
     if (selected === session) {
+      // An uncached room's first fill unfolds (the skeleton has been standing
+      // in for it); a cached one was already on screen and stays a cut.
+      if (!c) unfold();
       roomReady = true;
       // The room has settled: from here on, what arrives is news and moves.
       openedAt = blocks.reduce((m, b) => Math.max(m, b.ts), 0);
@@ -2507,7 +2529,15 @@
              `tmux::ensure_session` itself, so spawning into a project that is
              down OPENS it. -->
         <div class="roster">
-        <div class="cards" class:chips={compact} bind:this={cardsEl}>
+        <div class="cards" class:chips={compact} class:reveal={justLoaded} bind:this={cardsEl}>
+          <!-- The coming roster's shape while an uncached room loads: three
+               card-sized skeletons (aria-hidden; .skel-wrap hides them for
+               the first 150ms). -->
+          {#if !roomReady}
+            <div class="skel-wrap sk-cards" aria-hidden="true">
+              <span class="skel sk-card"></span><span class="skel sk-card"></span><span class="skel sk-card"></span>
+            </div>
+          {/if}
           <!-- ONE card markup, rendered per agent through a snippet, so a
                team GROUP (board #74) can wrap several without a second copy
                of the card. -->
@@ -2707,7 +2737,7 @@
       {/if}
 
       <div class="feed-wrap">
-      <div class="feed subtle-scroll" bind:this={feedEl} onscroll={onFeedScroll}>
+      <div class="feed subtle-scroll" class:reveal-tail={justLoaded} bind:this={feedEl} onscroll={onFeedScroll}>
         <!-- The double-click filter is a MODE, so it says so (board #3, owner:
              "注意ui上体现我们现在的筛选状态，以及可以再退出"): a compact pill
              INSIDE the feed — as a feed-wrap sibling it became a full-height
@@ -2732,6 +2762,19 @@
                event, so the walk needs a hand-hold too (#9 review). Same
                whisper voice; scrolling near the top still auto-loads. -->
           <button class="older-hint older-more" onclick={loadOlder}>{t('hubOlderMore')}</button>
+        {/if}
+        <!-- An uncached room's stand-in (principle 15): three bubble-shaped
+             skeletons, alternating sides, parked at the TAIL where the eye
+             lands (margin-top: auto in the column). A cached room is ready
+             at once and never shows them. Nothing scrolls yet — the block is
+             shorter than the viewport — so no scrollTop is parked; loadFeed's
+             own scrollFeed() lands the real blocks at the tail as before. -->
+        {#if selected && !roomReady}
+          <div class="skel-wrap sk-feed" aria-hidden="true">
+            <span class="skel sk-msg"></span>
+            <span class="skel sk-msg me"></span>
+            <span class="skel sk-msg"></span>
+          </div>
         {/if}
         {#each blocks as b, i (blockKey(b, i))}
           <!-- A new calendar day gets a centred date pill before its first
@@ -3553,6 +3596,13 @@
      with a reading, not a panel. */
   .roster { display: flex; align-items: stretch; padding: 6px 14px; border-bottom: 1px solid var(--border2); min-width: 0; }
   .cards { display: flex; gap: 5px; overflow-x: auto; scrollbar-width: none; flex: 1 1 auto; min-width: 0; }
+  /* Skeletons of the coming shape (app.css .skel/.skel-wrap): card-sized in
+     the roster, bubble-sized and side-alternating in the feed. */
+  .sk-cards { display: flex; gap: 5px; flex: none; }
+  .sk-card { width: 96px; min-height: 30px; border-radius: var(--ui-radius-row); }
+  .sk-feed { margin-top: auto; display: flex; flex-direction: column; gap: 10px; }
+  .sk-msg { height: 44px; width: min(62%, 420px); border-radius: 18px 18px 18px 6px; align-self: flex-start; }
+  .sk-msg.me { height: 34px; width: min(44%, 300px); border-radius: 18px 18px 6px 18px; align-self: flex-end; }
   .cards::-webkit-scrollbar { display: none; }
   /* A team group (board #74): same-team cards in one dashed frame wearing the
      row radius, the team name as a micro label above them. The frame is
