@@ -122,3 +122,27 @@ transform (no transition — the finger is the animation), so on release the
 flip measures from under the pointer and the icon SETTLES into its new slot
 on `moveMs()` instead of jumping back and sliding. `transform` is deliberately
 absent from `.rail-btn`'s transition list for the same reason.
+
+### The chosen tab is marked by ONE highlight that travels (2026-09-04, #86)
+
+The tab bar and the rail each hold a single `.slide-ind` (motion.md §1.14,
+`ui/indicator.ts`): a 2px accent bar under the active phone tab, a vertical
+bar on the rail's left edge beside the active icon. When the page changes the
+bar GLIDES to the new item on `--t-move` while the buttons' own colour still
+cross-fades on `--t-fast` — the change reads as a movement rather than one
+icon switching off and another on. Two mechanics matter:
+
+- **Measured by rects, not offsets.** A rail button is not a direct child of
+  the nav (it sits in the `.rail-slot` flip wrapper), and the root may wear a
+  CSS `zoom`; `offsetLeft/Top` would answer relative to the wrapper. The action
+  therefore reads the active item's client rect against the container's and
+  divides by `uiZoom()` (`boxFromRects`, pure and tested), the same correction
+  every fixed popover applies.
+- **Hidden during a drag, re-placed on release.** While `railDrag` is set the
+  slots carry inline transforms, so the marker collapses (`hidden: !!railDrag`
+  → `--ind-h: 0`) and the drop line is the only cue; on release the action
+  measures again — twice, immediately and after the move tempo, because a rect
+  read mid-`animate:flip` is the item's OLD place.
+
+`App.source.test.ts` pins both indicators and that the atom's look stays in
+app.css (App only positions it).

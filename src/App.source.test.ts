@@ -93,7 +93,7 @@ test('the session list lives inside the Terminal page, sheeted on a phone', () =
 // the gesture, which one must NOT, and that the phone is untouched — is pinned
 // here by matching the source.
 const rail = source.match(/<nav\n?\s*class="rail"[\s\S]*?<\/nav>/u)?.[0] ?? '';
-const tabbar = source.match(/<nav class="tabbar">[\s\S]*?<\/nav>/u)?.[0] ?? '';
+const tabbar = source.match(/<nav class="tabbar"[^>]*>[\s\S]*?<\/nav>/u)?.[0] ?? '';
 
 test('the rail renders the SAVED order, not a hardcoded sequence', () => {
   assert.ok(rail, 'the desktop rail must still be there');
@@ -467,7 +467,7 @@ test('navigation is reachable by keyboard: no nav item opts out of the Tab order
   // Rail icons, the server control, the tab bar and the gear were all
   // tabindex="-1" — the whole navigation was unreachable by keyboard, with no
   // documented reason. The focus ring is the global button:focus-visible.
-  const nav = source.match(/<nav class="topbar">[^]*?<\/nav>|<nav\s+class="rail"[^]*?<\/nav>|<nav class="tabbar">[^]*?<\/nav>/gu) ?? [];
+  const nav = source.match(/<nav class="topbar">[^]*?<\/nav>|<nav\s+class="rail"[^]*?<\/nav>|<nav class="tabbar"[^>]*>[^]*?<\/nav>/gu) ?? [];
   assert.equal(nav.length, 3, 'top bar, rail and tab bar are all present');
   for (const n of nav) assert.doesNotMatch(n, /tabindex="-1"/u, 'a nav item must stay in the Tab order');
   // The current page is announced, not only coloured.
@@ -484,4 +484,19 @@ test('the server registry has an entry on the touch layout (2026-09-03)', () => 
   // The popover's outside-dismissal spares whichever control opened it.
   assert.match(source, /serverMenuTrigger\?\.contains\?\.\(e\.target\)/u);
   assert.doesNotMatch(source, /closest\?\.\('\.server-menu, \.rail-server'\)/u);
+});
+
+test('the tab bar and the rail carry ONE travelling highlight each (motion.md §1.14, board #86)', () => {
+  // The marker for "chosen" is a single atom that glides between items
+  // (ui/indicator.ts), not each button lighting up in place. The tab bar's is
+  // the horizontal bar; the rail's is the vertical bar on its edge.
+  assert.match(tabbar, /^<nav class="tabbar" use:slideIndicator=\{\{ key: page, active: '\.active' \}\}>/u);
+  assert.match(tabbar, /<span class="slide-ind" aria-hidden="true"><\/span>/u);
+  assert.match(rail, /use:slideIndicator=\{\{ key: page, active: '\.rail-btn\.active', hidden: !!railDrag \}\}/u,
+    'the rail hides the marker while an icon is being dragged (slots are mid-transform) and re-measures on release');
+  assert.match(rail, /<span class="slide-ind vertical" aria-hidden="true"><\/span>/u);
+  const style = source.match(/<style>[^]*<\/style>/u)?.[0] ?? '';
+  assert.match(style, /\.tabbar \{\s*position: relative;/u, 'the tab bar is the indicator’s containing block');
+  // The atom's look lives in app.css; App only positions it.
+  assert.doesNotMatch(style, /\.slide-ind[^{]*\{[^}]*(background|width|height|transition)/u);
 });

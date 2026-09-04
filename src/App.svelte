@@ -34,6 +34,7 @@
   import { isTauri, isTauriDesktop } from './lib/core/platform.ts';
   import { flip } from 'svelte/animate';
   import { moveMs } from './lib/ui/motion.ts';
+  import { slideIndicator } from './lib/ui/indicator.ts';
 
   // Tunable constants
   const KB_OPEN_THRESHOLD = 100; // px difference to detect keyboard open
@@ -1453,7 +1454,13 @@
       onpointermove={railPointerMove}
       onpointerup={railPointerUp}
       onpointercancel={railCancelDrag}
+      use:slideIndicator={{ key: page, active: '.rail-btn.active', hidden: !!railDrag }}
     >
+      <!-- The ONE travelling highlight (motion.md §1.14): a vertical accent bar
+           on the rail's edge glides to the active icon. Measured by rects, since
+           the button sits inside .rail-slot; collapsed while an icon is being
+           dragged (the slots are mid-transform) and re-placed on release. -->
+      <span class="slide-ind vertical" aria-hidden="true"></span>
       <img class="rail-brand" src={iconSrc} alt="" width="26" height="26" draggable="false" />
       {#each railSlots as slot (slot)}
         <!-- One wrapper per slot so the list can `animate:flip` (Svelte wants
@@ -1747,8 +1754,11 @@
   <InstallPrompt />
   <HoverCard />
   {#if connected && layout.isTouchDevice}
-    <nav class="tabbar">
-
+    <nav class="tabbar" use:slideIndicator={{ key: page, active: '.active' }}>
+      <!-- The one travelling highlight (motion.md §1.14): a 2px accent bar
+           under the active tab glides between tabs; the buttons' own colour
+           still cross-fades. -->
+      <span class="slide-ind" aria-hidden="true"></span>
       {#if hubEligible}
         <button class:active={page === 'hub'} aria-current={page === 'hub' ? 'page' : undefined} onclick={() => switchTab('hub')}>
           <Icon name="chat" size={19} /><span>{t('hub')}</span>
@@ -1905,6 +1915,10 @@
   .rail-btn:hover { color: var(--text); background: var(--surface2); }
   .rail-btn.active { color: var(--accent); background: var(--accent-bg); }
   .rail-spacer { flex: 1; }
+  /* The rail is position: fixed, so it is the containing block of its
+     .slide-ind.vertical; the bar rides the rail's left edge (app.css owns
+     the atom — this only lifts it over the slots). */
+  .rail > :global(.slide-ind) { z-index: 1; }
 
   /* Server switcher (board #55): the rail entry is an ordinary rail-btn (a
      control, never .active — no page answers to it), separated a touch from
@@ -2025,6 +2039,7 @@
      keyboard is up so immersive typing (terminal, editor) costs nothing —
      the ONLY writer of that class is App's viewport handler. */
   .tabbar {
+    position: relative; /* the .slide-ind's containing block */
     display: flex;
     align-items: stretch;
     flex-shrink: 0;
