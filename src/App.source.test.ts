@@ -509,15 +509,19 @@ test('the rail explains itself with the one hover card, and no native title besi
 
 test('the tab bar and the rail carry ONE travelling highlight each (motion.md §1.14, board #86)', () => {
   // The marker for "chosen" is a single atom that glides between items
-  // (ui/indicator.ts), not each button lighting up in place. The tab bar's is
-  // the horizontal bar; the rail's is the vertical bar on its edge.
+  // (ui/indicator.ts), not each button lighting up in place: the WASH behind
+  // the icon, no bar (owner, 2026-09-04: "线条都去掉，直接用 icon 上面的背景阴影
+  // 来滑动"). The tab bar's hugs icon + label (.inset); both drop the ring.
   assert.match(tabbar, /^<nav class="tabbar" use:slideIndicator=\{\{ key: page, active: '\.active' \}\}>/u);
-  assert.match(tabbar, /<span class="slide-ind" aria-hidden="true"><\/span>/u);
+  assert.match(tabbar, /<span class="slide-pill soft inset" aria-hidden="true"><\/span>/u);
+  assert.ok(!source.includes('slide-ind'), 'no bar indicator anywhere in the shell');
   assert.match(rail, /use:slideIndicator=\{\{ key: page, active: '\.rail-btn\.active', hidden: !!railDrag \}\}/u,
     'the rail hides the marker while an icon is being dragged (slots are mid-transform) and re-measures on release');
-  assert.match(rail, /<span class="slide-ind vertical" aria-hidden="true"><\/span>/u);
+  assert.match(rail, /<span class="slide-pill soft" aria-hidden="true"><\/span>/u);
   const style = source.match(/<style>[^]*<\/style>/u)?.[0] ?? '';
+  // The buttons keep only their ink: the pill carries the active wash.
+  assert.match(style, /\.rail-btn\.active \{ color: var\(--accent\); \}/u);
   assert.match(style, /\.tabbar \{\s*position: relative;/u, 'the tab bar is the indicator’s containing block');
   // The atom's look lives in app.css; App only positions it.
-  assert.doesNotMatch(style, /\.slide-ind[^{]*\{[^}]*(background|width|height|transition)/u);
+  assert.doesNotMatch(style, /\.slide-pill[^{]*\{[^}]*(background|width|height|transition)/u);
 });

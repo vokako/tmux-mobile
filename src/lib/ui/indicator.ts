@@ -4,12 +4,13 @@
  * item instead of each item lighting up in place.
  *
  * Usage — the container is `position: relative` (or fixed) and holds one
- * indicator element wearing `.slide-ind` (a 2px bar) or `.slide-pill` (a
- * filled pill behind the item); the action measures the active descendant
- * and writes the geometry as CSS variables the atom's transform reads:
+ * indicator element wearing `.slide-pill` (the filled wash behind the item —
+ * the owner retired the 2px bar, 2026-09-04: "线条都去掉，直接用 icon 上面的
+ * 背景阴影来滑动"); the action measures the active descendant and writes the
+ * geometry as CSS variables the atom's transform reads:
  *
  *   <nav class="tabbar" use:slideIndicator={{ key: page, active: '.active' }}>
- *     <span class="slide-ind" aria-hidden="true"></span>
+ *     <span class="slide-pill" aria-hidden="true"></span>
  *     <button class:active={…}>…</button>
  *   </nav>
  *
@@ -23,22 +24,18 @@
  * once `.ready` is set — after the first measure — so the indicator is born in
  * place and never slides in from the corner.
  *
- * Geometry comes from client rects (the active box relative to the
- * container's box, divided by the root's CSS zoom), never from offsetLeft/Top:
- * an offset is relative to the nearest positioned ancestor, which for a
- * nested button is its wrapper, not the container. Because a rect includes a
- * transform in flight (a neighbour mid-`animate:flip`), an update measures
- * twice — now, and once the move tempo has elapsed — so the marker settles
- * where the item actually lands.
+ * Geometry is LAYOUT (the `offsetParent` chain walked from both the item and
+ * the container, see `boxFromOffsets`), never a client rect: a rect carries
+ * every transform on the way — the tab's press scale, a slot mid-flip, the
+ * root zoom — and the marker glided wrong and corrected itself. An update
+ * still measures twice — now, and once the move tempo has elapsed — for a
+ * layout that is itself still settling.
  */
 import { moveMs } from './motion.ts';
-import { uiZoom } from './placement.ts';
 
 export interface IndicatorParams { key?: unknown; active?: string; hidden?: boolean }
 
 export interface IndicatorBox { offsetLeft: number; offsetTop: number; offsetWidth: number; offsetHeight: number }
-
-export interface RectLike { left: number; top: number; width: number; height: number }
 
 export const DEFAULT_ACTIVE = '[aria-current], .active, .on, .sel, [aria-selected="true"]';
 
@@ -53,26 +50,35 @@ export function indicatorVars(box: IndicatorBox | null): Record<string, string> 
   };
 }
 
+/** The offset-chain face of an element (what `offsetParent` walks). */
+export interface OffsetLike {
+  offsetLeft: number; offsetTop: number; offsetWidth: number; offsetHeight: number;
+  offsetParent: OffsetLike | null;
+}
+
 /**
- * The active item's box in the container's padding-box coordinates (where an
- * absolutely positioned indicator's `top: 0; left: 0` sits), from the two
- * client rects. `zoom` is the root's CSS zoom (client rects are visual pixels,
- * the indicator's variables are the container's own CSS pixels); `border` is
- * the container's top/left border width, which a client rect includes and the
- * padding box does not. Pure, so the arithmetic is tested without a DOM.
+ * The active item's LAYOUT box inside the container, walking `offsetParent`
+ * from both ends up to their common ancestor (or the root). Offsets, not
+ * client rects, on purpose: a rect is distorted by whatever transform is on
+ * the way — the tab's press `scale(0.95)` while the finger is still down, a
+ * rail slot mid-`animate:flip`, the root's CSS `zoom` — and a marker measured
+ * through one of those glided somewhere wrong and then corrected itself (the
+ * "乱滑" the owner saw on the phone, 2026-09-04). The layout box is where the
+ * item WILL rest, so the pill goes straight there.
  */
-export function boxFromRects(
-  container: RectLike,
-  item: RectLike,
-  zoom = 1,
-  border: { left: number; top: number } = { left: 0, top: 0 },
-): IndicatorBox {
-  const z = zoom || 1;
+export function boxFromOffsets(item: OffsetLike, container: OffsetLike, border: { left: number; top: number } = { left: 0, top: 0 }): IndicatorBox {
+  const abs = (el: OffsetLike) => {
+    let x = 0, y = 0;
+    for (let e: OffsetLike | null = el; e; e = e.offsetParent) { x += e.offsetLeft; y += e.offsetTop; }
+    return { x, y };
+  };
+  const a = abs(item);
+  const c = abs(container);
   return {
-    offsetLeft: (item.left - container.left) / z - border.left,
-    offsetTop: (item.top - container.top) / z - border.top,
-    offsetWidth: item.width / z,
-    offsetHeight: item.height / z,
+    offsetLeft: a.x - c.x - border.left,
+    offsetTop: a.y - c.y - border.top,
+    offsetWidth: item.offsetWidth,
+    offsetHeight: item.offsetHeight,
   };
 }
 
@@ -80,11 +86,13 @@ export function slideIndicator(node: HTMLElement, params: IndicatorParams = {}) 
   let sel = params.active ?? DEFAULT_ACTIVE;
   let hidden = !!params.hidden;
   let settle: ReturnType<typeof setTimeout> | null = null;
-  const ind = () => node.querySelector<HTMLElement>(':scope > .slide-ind, :scope > .slide-pill');
+  const ind = () => node.querySelector<HTMLElement>(':scope > .slide-pill');
   const measure = () => {
     const el = hidden ? null : node.querySelector<HTMLElement>(sel);
+    // Offsets are relative to the CONTAINER's padding box once the border is
+    // taken off; `offsetParent` is null for a display:none item.
     const box = el && el.offsetParent
-      ? boxFromRects(node.getBoundingClientRect(), el.getBoundingClientRect(), uiZoom(), { left: node.clientLeft, top: node.clientTop })
+      ? boxFromOffsets(el as unknown as OffsetLike, node as unknown as OffsetLike, { left: node.clientLeft, top: node.clientTop })
       : null;
     for (const [k, v] of Object.entries(indicatorVars(box))) node.style.setProperty(k, v);
     // Enable the glide only after the first placement (the next frame, so the
@@ -100,9 +108,9 @@ export function slideIndicator(node: HTMLElement, params: IndicatorParams = {}) 
       sel = p.active ?? DEFAULT_ACTIVE;
       hidden = !!p.hidden;
       measure();
-      // A second read after the move tempo: a rect measured mid-flip is the
-      // OLD place (the inverse transform is still on), so the marker would
-      // otherwise glide to where the item was.
+      // A second read after the move tempo: a layout that is still settling
+      // (a slot added by a flip, a label that wrapped) answers its final box
+      // only then.
       if (settle) clearTimeout(settle);
       settle = setTimeout(() => { settle = null; measure(); }, moveMs() + 20);
     },

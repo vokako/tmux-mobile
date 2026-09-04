@@ -1484,11 +1484,12 @@
       onpointercancel={railCancelDrag}
       use:slideIndicator={{ key: page, active: '.rail-btn.active', hidden: !!railDrag }}
     >
-      <!-- The ONE travelling highlight (motion.md §1.14): a vertical accent bar
-           on the rail's edge glides to the active icon. Measured by rects, since
-           the button sits inside .rail-slot; collapsed while an icon is being
-           dragged (the slots are mid-transform) and re-placed on release. -->
-      <span class="slide-ind vertical" aria-hidden="true"></span>
+      <!-- The ONE travelling highlight (motion.md §1.14): the accent wash
+           behind the active icon glides to the next one (no bar — owner,
+           2026-09-04). Measured by layout offsets, so the .rail-slot wrapper
+           and a mid-flip transform do not enter; collapsed while an icon is
+           being dragged and re-placed on release. -->
+      <span class="slide-pill soft" aria-hidden="true"></span>
       <img class="rail-brand" src={iconSrc} alt="" width="26" height="26" draggable="false" />
       {#each railSlots as slot (slot)}
         <!-- One wrapper per slot so the list can `animate:flip` (Svelte wants
@@ -1783,10 +1784,10 @@
   <HoverCard />
   {#if connected && layout.isTouchDevice}
     <nav class="tabbar" use:slideIndicator={{ key: page, active: '.active' }}>
-      <!-- The one travelling highlight (motion.md §1.14): a 2px accent bar
-           under the active tab glides between tabs; the buttons' own colour
-           still cross-fades. -->
-      <span class="slide-ind" aria-hidden="true"></span>
+      <!-- The one travelling highlight (motion.md §1.14): the wash behind the
+           active tab glides between tabs, inset so it hugs icon + label; the
+           buttons' own colour still cross-fades. No bar (owner, 2026-09-04). -->
+      <span class="slide-pill soft inset" aria-hidden="true"></span>
       {#if hubEligible}
         <button class:active={page === 'hub'} aria-current={page === 'hub' ? 'page' : undefined} onclick={() => switchTab('hub')}>
           <Icon name="chat" size={19} /><span>{t('hub')}</span>
@@ -1939,14 +1940,14 @@
        transform and must follow the pointer with no lag (motion.md §1.7). */
     transition: color var(--t-fast), background var(--t-fast), box-shadow var(--t-fast);
     -webkit-tap-highlight-color: transparent;
+    position: relative; z-index: 1; /* above the travelling pill */
   }
   .rail-btn:hover { color: var(--text); background: var(--surface2); }
-  .rail-btn.active { color: var(--accent); background: var(--accent-bg); }
+  /* The active wash is the travelling .slide-pill behind the button (the rail
+     is position: fixed, so it is the pill's containing block); the button
+     keeps only its ink. */
+  .rail-btn.active { color: var(--accent); }
   .rail-spacer { flex: 1; }
-  /* The rail is position: fixed, so it is the containing block of its
-     .slide-ind.vertical; the bar rides the rail's left edge (app.css owns
-     the atom — this only lifts it over the slots). */
-  .rail > :global(.slide-ind) { z-index: 1; }
 
   /* Server switcher (board #55): the rail entry is an ordinary rail-btn (a
      control, never .active — no page answers to it), separated a touch from
@@ -2067,7 +2068,7 @@
      keyboard is up so immersive typing (terminal, editor) costs nothing —
      the ONLY writer of that class is App's viewport handler. */
   .tabbar {
-    position: relative; /* the .slide-ind's containing block */
+    position: relative; /* the .slide-pill's containing block */
     display: flex;
     align-items: stretch;
     flex-shrink: 0;
@@ -2086,6 +2087,7 @@
     font-size: var(--fs-meta);
     -webkit-tap-highlight-color: transparent;
     transition: color var(--t-fast), transform var(--t-fast);
+    position: relative; z-index: 1; /* above the travelling pill */
   }
   .tabbar button.active { color: var(--accent); }
   .tabbar button:active { transform: scale(0.95); }

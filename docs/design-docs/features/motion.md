@@ -83,7 +83,9 @@ vocabulary.
     with `class:appear={fresh}` so two hundred rows do not fade in together.
 14. **One highlight that travels.** A tab bar, a rail, a segmented control
     has ONE marker for "chosen", and when the choice changes the marker
-    glides to the new item (`.slide-ind` / `.slide-pill`, `ui/indicator.ts`)
+    glides to the new item (`.slide-pill`, `ui/indicator.ts` — the wash behind
+    the item, never a bar: owner 2026-09-04, "线条都去掉，直接用 icon 上面的背景
+    阴影来滑动")
     instead of one item switching off and another switching on. The items'
     own colour still cross-fades (`.state-ctl`); the travelling marker is
     what makes the change read as a movement (owner, 2026-09-04: "点击不同的
@@ -119,7 +121,7 @@ vocabulary.
 | `.side-scrim` / `.dlg-backdrop` fade-in, `sheet-up` (`translateY(100%) → none`, only for a layer whose resting transform is none) | sheets rise with a scrim (design-language §1) | `--t-move` |
 | `drill-in-right` / `drill-in-left` (app.css, one copy), `slideInLeft/Right` (App) | navigation, touch-only | 120ms linear |
 | `.pop-layer` + `.ready`, `--pop-origin` from `popOrigin()` | a placed popover grows from its anchor corner (opacity + scale 0.96→1); exit is a cut | `--t-fast` |
-| `.slide-ind` (bar) / `.slide-pill` (filled pill) + `use:slideIndicator` | the one travelling highlight of a tab bar / rail / segmented control (`--ind-x/y/w/h` written by the action from client rects ÷ `uiZoom()`, so a nested or zoomed item measures right; `.ready` after the first measure so it is born in place; `hidden: true` collapses it while the container is being rearranged). A segmented row is `ui/Segmented`, which carries its own pill | `--t-move` |
+| `.slide-pill` (+ `.soft` no ring, `.inset` hugs the icon) + `use:slideIndicator` | the one travelling highlight of a tab bar / rail / segmented control — the WASH behind the item glides; the bar variant is retired (owner, 2026-09-04). `--ind-x/y/w/h` are written by the action from LAYOUT OFFSETS (`boxFromOffsets`, the `offsetParent` chain from both ends), never client rects: a rect carries the tab's press `scale(0.95)`, a slot's mid-flip transform and the root zoom, and a marker measured through them glided wrong and then corrected itself (the phone's "乱滑"). `.ready` after the first measure so it is born in place; `hidden: true` collapses it while the container is being rearranged. A segmented row is `ui/Segmented`, which carries its own pill | `--t-move` |
 | `.reveal` / `.reveal-tail` on a container, dropped after `revealMs()` | a loaded list unfolds, rows staggered 30ms from the top / from the newest at the bottom; backwards fill only; the class is cleared after one move + the longest stagger so a row that mounts later does not rise (`ui/motion.ts` `revealMs()`) | `--t-move` + stagger |
 | `.skel` (+ `.skel-wrap`) | a loading placeholder of the coming shape with a slow shimmer, invisible for the first 150ms | 1.4s loop, stilled |
 | `use:hoverInfo={() => info}` + `ui/HoverCard` | the one hover card (title / text / label→value rows / note), 380ms dwell, 60ms hop, pointer + keyboard focus only | `--t-fast` intro |

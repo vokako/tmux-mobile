@@ -125,28 +125,27 @@ absent from `.rail-btn`'s transition list for the same reason.
 
 ### The chosen tab is marked by ONE highlight that travels (2026-09-04, #86)
 
-The tab bar and the rail each hold a single `.slide-ind` (motion.md §1.14,
-`ui/indicator.ts`): a 2px accent bar under the active phone tab, a vertical
-bar on the rail's left edge beside the active icon. When the page changes the
-bar GLIDES to the new item on `--t-move` while the buttons' own colour still
+The tab bar and the rail each hold a single `.slide-pill` (motion.md §1.14,
+`ui/indicator.ts`): the accent WASH behind the active phone tab (inset so it
+hugs icon + label) and behind the active rail icon. When the page changes the
+wash GLIDES to the new item on `--t-move` while the buttons' own ink still
 cross-fades on `--t-fast` — the change reads as a movement rather than one
-icon switching off and another on. Two mechanics matter:
+icon switching off and another on. The buttons themselves paint no active
+background any more; the pill carries it. There is no bar: the first cut drew
+a 2px line under the tab / beside the icon, and the owner retired it the same
+day ("线条都去掉，直接用 icon 上面的背景阴影来滑动"). Two mechanics matter:
 
-- **Measured by rects, not offsets.** A rail button is not a direct child of
-  the nav (it sits in the `.rail-slot` flip wrapper), and the root may wear a
-  CSS `zoom`; `offsetLeft/Top` would answer relative to the wrapper. The action
-  therefore reads the active item's client rect against the container's and
-  divides by `uiZoom()` (`boxFromRects`, pure and tested), the same correction
-  every fixed popover applies.
-- **Hidden during a drag, re-placed on release.** While `railDrag` is set the
-  slots carry inline transforms, so the marker collapses (`hidden: !!railDrag`
-  → `--ind-h: 0`) and the drop line is the only cue; on release the action
-  measures again — twice, immediately and after the move tempo, because a rect
-  read mid-`animate:flip` is the item's OLD place.
-
-`App.source.test.ts` pins both indicators and that the atom's look stays in
-app.css (App only positions it).
-
+- **Measured by layout offsets, never client rects.** The first cut read
+  `getBoundingClientRect()` and divided by `uiZoom()`; on the phone the marker
+  "乱滑" — it slid somewhere wrong, then corrected itself. A rect includes
+  every transform on the way: the tab's press `scale(0.95)` while the finger is
+  still down, a `.rail-slot` mid-`animate:flip`, the root's CSS `zoom`. The
+  action now walks `offsetParent` from the item and from the container to
+  their common root and subtracts (`boxFromOffsets`, pure and tested): the
+  layout box is where the item WILL rest, so the pill goes straight there.
+- **Hidden while the rail is being rearranged.** `hidden: !!railDrag`
+  collapses the pill during an icon drag and re-measures on release, with a
+  second read after `moveMs()` for a layout that is still settling.
 ### The rail explains itself on hover (2026-09-04, #86)
 
 A rail icon, the server switcher, the gear and the split toggle wear
