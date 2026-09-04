@@ -759,13 +759,12 @@
   let serverMenuH = $state(0);
   let serverRenaming = $state('');   // entry id whose name is an input
   let serverRenameDraft = $state('');
-  // The current server's NAME, for the phone's Settings row (review,
-  // 2026-09-03: the registry had no entry at all on the touch layout — the
-  // switcher rode the desktop rail only, so named servers were invisible on
-  // the device the app is for). Registry state is read at boot and whenever
-  // the menu opens/renames, so the name follows a rename without a reload.
+  // The current connected HOSTNAME, for the rail hover card and the phone's
+  // Settings row. The registry's user-editable name is not the connection
+  // identity this control switches; before auth, hostLabel still strips the
+  // scheme/port/path instead of exposing the raw URL.
   const serverName = $derived(
-    serverList.find((x) => x.id === serverCurId)?.name || hostLabel(activeAddress),
+    serverInfo.hostname || hostLabel(activeAddress),
   );
   function loadServerRegistry() {
     serverList = loadServers(localStorage);
@@ -1510,9 +1509,9 @@
           <!-- Server switcher (board #55): "右下角agent上边" — glued to the top
                of the rail's bottom (configure) group, above the agents icon in
                the shipped order. A CONTROL, not a page: never draggable, never
-               active, opens the registry popover. Its swap glyph turns 180°
-               while the popover is open (trigger side only — the menu itself
-               does not animate). -->
+               active, opens the registry popover. The 180°-symmetric swap
+               glyph turns 90° while open, so the state change is visible
+               (trigger side only — the menu itself does not animate). -->
           <button
             class="rail-btn rail-server"
             class:open={serverMenuOpen}
@@ -1521,7 +1520,7 @@
             aria-haspopup="menu"
             aria-expanded={serverMenuOpen}
             onclick={(e) => toggleServerMenu(e)}
-          ><span class="flip" class:on={serverMenuOpen}><Icon name="swap-h" size={17} /></span></button>
+          ><span class="quarter-turn" class:on={serverMenuOpen}><Icon name="swap-h" size={17} /></span></button>
         {:else}
           <button
             class="rail-btn"

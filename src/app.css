@@ -595,9 +595,10 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
    A state change is a MOVEMENT, not a swap (owner, 2026-09-03: "一些状态的
    切换 位置的变换 都可以有动画交互"). Four atoms, transform/opacity only,
    on the two tempo tokens; a component adds a class, never its own copy.
-   · .chev / .flip — a glyph that TURNS between two readings is ONE glyph
-     rotated, never two glyphs swapped: .chev.open = disclosure caret 90°,
-     .flip.on = up↔down arrow 180°. Wrap the <Icon>, toggle the modifier.
+   · .chev / .flip / .quarter-turn — a glyph that TURNS between two readings
+     is ONE glyph, never two glyphs swapped: .chev.open = disclosure caret 90°,
+     .flip.on = up↔down arrow 180°, .quarter-turn.on = symmetric swap trigger
+     90°. Wrap the <Icon>, toggle the modifier.
    · .appear / .appear-rise / .appear-pop — something that ENTERS (a chip,
      a badge, a banner, an error line, a fresh feed block) fades in, rises
      6px in, or pops from 0.6. Intro only: leaving is a snap on purpose
@@ -614,9 +615,10 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
      Svelte directive in use; svelte/transition stays out (see the doc).
    Popovers still do not animate; layout (height/width) is never animated.
    Everything here stills under prefers-reduced-motion. */
-.chev, .flip { display: inline-flex; flex: none; transition: transform var(--t-move) ease; }
+.chev, .flip, .quarter-turn { display: inline-flex; flex: none; transition: transform var(--t-move) ease; }
 .chev.open { transform: rotate(90deg); }
 .flip.on { transform: rotate(180deg); }
+.quarter-turn.on { transform: rotate(90deg); }
 @keyframes fade-in { from { opacity: 0; } }
 @keyframes rise-in { from { opacity: 0; transform: translateY(6px); } }
 @keyframes pop-in { from { opacity: 0; transform: scale(0.6); } }
@@ -694,7 +696,7 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
 }
 .skel-wrap { animation: fade-in var(--t-fast) ease-out backwards; animation-delay: 150ms; }
 @media (prefers-reduced-motion: reduce) {
-  .chev, .flip, .state-ctl, .pop-layer.ready, .slide-pill.ready { transition: none; }
+  .chev, .flip, .quarter-turn, .state-ctl, .pop-layer.ready, .slide-pill.ready { transition: none; }
   .appear, .appear-rise, .appear-pop, .side-scrim, .to-tail, .to-tail.news::after,
   .reveal > *, .reveal-tail > *, .skel::after, .skel-wrap { animation: none; }
 }

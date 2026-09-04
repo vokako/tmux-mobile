@@ -112,9 +112,10 @@ Every state change in the shell moves on the tempo tokens and nothing else
 and the gear TURNS 30° while Settings is open (a state is a movement, not a
 swap); the reconnect banner, the rail's insertion line and the vitals sidebar strip's
 first reading `.appear` (opacity only — never height, so the banner cannot
-push the page); the split toggle is a `.state-ctl`; the server switcher's swap
-glyph is a `.flip` that turns 180° while its popover is open (the popover
-itself does not animate — popover rule); the page slides still under
+push the page); the split toggle is a `.state-ctl`; the server switcher's
+180°-symmetric swap glyph is a `.quarter-turn` that turns 90° while its
+popover is open (180° would look unchanged; the popover itself uses the
+shared popover intro); the page slides still under
 `prefers-reduced-motion` like the compact drill pair. The rail's icons sit in
 a per-slot `.rail-slot` wrapper because Svelte's `animate:flip` must be the
 keyed each's only child: the wrapper carries the dragged icon's inline

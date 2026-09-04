@@ -26,7 +26,8 @@ vocabulary.
    appears grows nothing — it fades or rises 6px into a slot that is already
    its size.
 4. **A glyph turns, it is never swapped.** An arrow that reads up then down,
-   a caret that reads closed then open, is ONE glyph rotated (180° / 90°). Two
+   a caret that reads closed then open, is ONE glyph rotated (180° / 90°); a
+   180°-symmetric swap icon uses a quarter-turn so the movement remains visible. Two
    glyphs swapped is a cut, not a movement, and it is the thing the owner
    noticed first ("上箭头变成下箭头 可以用旋转过渡"). Unrelated glyphs (trash →
    caret, copy → check) may still swap: there is no rotation that means it.
@@ -113,6 +114,7 @@ vocabulary.
 |---|---|---|
 | `.chev` + `.open` | disclosure caret turns 90° (closed ▸ → open ▾) | `--t-move` |
 | `.flip` + `.on` | up↔down arrow turns 180° | `--t-move` |
+| `.quarter-turn` + `.on` | a 180°-symmetric swap trigger turns a visible 90° | `--t-move` |
 | `.appear` | something enters: fade in | `--t-fast` |
 | `.appear-rise` | a block/banner enters: fade + rise 6px | `--t-move` |
 | `.appear-pop` | a badge/dot/small chip enters: fade + scale from 0.6 | `--t-fast` |
@@ -149,7 +151,7 @@ TeamTemplates) guarded; Hub's private `.chev` promoted to the atom.
 fold/unfold caret, tool-lane caret (already), Settings address-history arrow,
 Select trigger chevron, Projects/TeamTemplates/Sessions disclosure carets,
 AgentChip's `chevron` prop, the terminal chip-bar collapse chevron, the
-server-switcher trigger.
+server-switcher trigger (`.quarter-turn`, 90° — 180° is visually identical).
 
 **Wave 3 — things that enter** (`.appear*`): fresh feed blocks (gated on
 `ts > openedAt`), attachment / recipient-extra / unread / needs-you chips,
@@ -177,7 +179,7 @@ drag, Settings history rows.
 SystemStatus, ConfirmDialog, Select, SideHandle, InstallPrompt, Lightbox,
 app.css atoms): tab bar, gear (turns 30° while Settings is open), split
 toggle, reconnect banner, rail drop line and rail-slot flip after a drag,
-server-switcher and Settings server-row swap glyphs, page slides stilled;
+server-switcher and Settings server-row swap glyphs (90° quarter-turn), page slides stilled;
 Preferences segmented/stepper/address/shortcut/hook controls and error
 lines; Settings history arrow, list rise, row flip, error box, eye/share/
 history buttons; the sysvitals first reading; ConfirmDialog scrim + sheet

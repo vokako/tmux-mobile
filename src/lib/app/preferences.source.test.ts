@@ -110,7 +110,9 @@ test('the phone reaches the server registry from the top of Settings (2026-09-03
   // registry popover the desktop rail opens.
   assert.match(source, /\{#if onServers\}\s*<button class="side-row server-row"[^>]*aria-haspopup="menu"/u);
   assert.match(source, /onclick=\{\(e\) => onServers\?\.\(e\)\}/u);
-  assert.match(source, /<span class="r-label">\{serverName\}<\/span>/u, 'the NAME, never the raw address');
+  assert.match(source, /<span class="quarter-turn" class:on=\{serversOpen\}><Icon name="swap-h" size=\{14\} \/><\/span>/u,
+    'the symmetric swap glyph turns 90°, not an invisible 180°');
+  assert.match(source, /<span class="r-label">\{serverName\}<\/span>/u, 'the authenticated/fallback HOSTNAME, never the raw address');
   assert.match(source, /onServers = null,/u, 'off by default — the desktop rail has its own control');
 });
 

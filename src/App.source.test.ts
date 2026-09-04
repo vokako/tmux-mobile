@@ -325,6 +325,9 @@ test('the rail server switcher sits above the configure group and only places (b
   assert.match(gapBranch, /class="rail-btn rail-server"/u, 'the switcher lives in the gap branch');
   assert.ok(!/rail-server[^>]*data-rail-slot/u.test(source), 'a control, not a draggable slot');
   assert.match(source, /onclick=\{\(e\) => toggleServerMenu\(e\)\}/u, 'it opens the registry popover');
+  assert.match(gapBranch, /class="quarter-turn" class:on=\{serverMenuOpen\}><Icon name="swap-h"/u,
+    'the symmetric swap glyph makes a visible quarter turn');
+  assert.doesNotMatch(gapBranch, /class="flip"/u, '180° leaves swap-h looking unchanged');
 });
 
 test('a server switch fully drops the old socket, applies the plan, and reboots (board #55)', () => {
@@ -486,7 +489,8 @@ test('navigation is reachable by keyboard: no nav item opts out of the Tab order
 test('the server registry has an entry on the touch layout (2026-09-03)', () => {
   assert.match(source, /onServers=\{connected && layout\.isTouchDevice \? toggleServerMenu : null\}/u,
     'Settings gets the opener only where the rail (and its switcher) does not exist');
-  assert.match(source, /const serverName = \$derived\(\s*serverList\.find\(\(x\) => x\.id === serverCurId\)\?\.name \|\| hostLabel\(activeAddress\),/u);
+  assert.match(source, /const serverName = \$derived\(\s*serverInfo\.hostname \|\| hostLabel\(activeAddress\),/u,
+    'the switch control names the connected host, never a registry alias or raw URL');
   // The popover's outside-dismissal spares whichever control opened it.
   assert.match(source, /serverMenuTrigger\?\.contains\?\.\(e\.target\)/u);
   assert.doesNotMatch(source, /closest\?\.\('\.server-menu, \.rail-server'\)/u);

@@ -86,14 +86,14 @@
     onAddress?: (address: string) => void;
     onDisconnect?: () => void;
     onConnectionSetup?: () => void;
-    /** The current server's registry name (board #55). */
+    /** The current connected hostname (auth result; URL host before auth). */
     serverName?: string;
     /** Touch layout only: opens App's server registry popover from the row
      *  at the top of the category list. The desktop rail has its own control,
      *  so App passes null there and the row does not render. */
     onServers?: ((e: MouseEvent) => void) | null;
-    /** Whether that popover is open: the row's swap glyph turns while it is
-     *  (trigger side only — the popover itself does not animate). */
+    /** The symmetric swap glyph turns 90° while the popover is open; 180°
+     *  would leave the icon looking unchanged. */
     serversOpen?: boolean;
   } = $props();
 
@@ -333,7 +333,7 @@
       {#if onServers}
         <button class="side-row server-row" class:open={serversOpen} title={t('serversTitle')} aria-haspopup="menu"
           aria-expanded={serversOpen} onclick={(e) => onServers?.(e)}>
-          <span class="flip" class:on={serversOpen}><Icon name="swap-h" size={14} /></span>
+          <span class="quarter-turn" class:on={serversOpen}><Icon name="swap-h" size={14} /></span>
           <span class="r-label">{serverName}</span>
         </button>
       {/if}

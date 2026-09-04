@@ -58,7 +58,7 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   open" (send button), breathe ≈ 1.3–5s (presence). Every looping animation
   stills under `prefers-reduced-motion`. **Micro-motion** (owner, 2026-09-03:
   a state change is a movement, not a swap): a glyph that reads two ways
-  TURNS (`.chev`/`.flip`), things that enter fade or rise in (`.appear*`),
+  TURNS (`.chev`/`.flip`/`.quarter-turn`), things that enter fade or rise in (`.appear*`),
   a control's selected clothes cross-fade (`.state-ctl`), a keyed list
   reorders with `animate:flip` on `moveMs()`; exits are cuts, layout is never
   animated, `svelte/transition` is not used. The full principles, vocabulary

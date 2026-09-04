@@ -25,8 +25,9 @@ rounded shape, muted idle state, and accent active state. Desktop Settings uses 
   ONE entry (the failover map `tmux_machines` stays the address authority). A
   successful connect upserts by machineId; the desktop rail carries a
   switcher above the configure group, and on the phone a row at the top of
-  the Settings category list (swap icon + current server name) opens the same
-  switcher — current entry marked, click switches
+  the Settings category list (swap icon + authenticated hostname, falling back
+  to the host portion of the address before auth) opens the same switcher —
+  current entry marked, click switches
   (full socket teardown + reload through the one boot path, per-server
   `tmux_state`/`tmux_machine_id` parked and restored so restore targets never
   cross servers), double-click renames, non-current rows removable, `+` row
@@ -90,7 +91,8 @@ every error line fades in (`.appear`, opacity only — never height), address
 rows / the shortcut recorder cross-fade their selected clothes on `--t-fast`,
 every segmented row is `ui/Segmented` whose accent pill GLIDES to the chosen
 option on `--t-move` (the buttons only cross-fade their ink), and the server
-row's swap glyph turns while its popover is open. The server popover grows
+row's 180°-symmetric swap glyph uses `.quarter-turn` to rotate 90° while its
+popover is open (a 180° turn would look unchanged). The server popover grows
 from its anchor (`.pop-layer`). The category list unfolds on first paint and a
 switched category's pane is keyed on the category so its cards rise in
 staggered (`.reveal`) rather than swapping in as a finished wall — on the

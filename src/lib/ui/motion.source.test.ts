@@ -28,9 +28,10 @@ test('the tempo tokens and the JS mirror agree', () => {
 });
 
 test('the four atoms exist once, on the tokens, and still under reduced motion', () => {
-  assert.match(appCss, /\.chev,\s*\.flip\s*\{[^}]*transition:\s*transform var\(--t-move\)/u, 'a turning glyph moves on --t-move');
+  assert.match(appCss, /\.chev,\s*\.flip,\s*\.quarter-turn\s*\{[^}]*transition:\s*transform var\(--t-move\)/u, 'a turning glyph moves on --t-move');
   assert.match(appCss, /\.chev\.open\s*\{\s*transform:\s*rotate\(90deg\)/u);
   assert.match(appCss, /\.flip\.on\s*\{\s*transform:\s*rotate\(180deg\)/u);
+  assert.match(appCss, /\.quarter-turn\.on\s*\{\s*transform:\s*rotate\(90deg\)/u);
   for (const kf of ['fade-in', 'rise-in', 'pop-in']) {
     assert.match(appCss, new RegExp(`@keyframes ${kf}\\s*\\{\\s*from\\s*\\{[^}]*\\}\\s*\\}`, 'u'), `${kf} is an intro-only keyframe`);
     assert.doesNotMatch(appCss, new RegExp(`@keyframes ${kf}[^}]*(height|width|top|left|margin)`, 'u'), `${kf} animates transform/opacity only`);
@@ -39,7 +40,7 @@ test('the four atoms exist once, on the tokens, and still under reduced motion',
   assert.match(appCss, /\.appear-rise\s*\{\s*animation:\s*rise-in var\(--t-move\)/u);
   assert.match(appCss, /\.appear-pop\s*\{\s*animation:\s*pop-in var\(--t-fast\)/u);
   assert.match(appCss, /\.state-ctl\s*\{\s*transition:[^}]*border-color var\(--t-fast\)[^}]*background var\(--t-fast\)[^}]*color var\(--t-fast\)/u);
-  const still = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.chev,\s*\.flip,\s*\.state-ctl[^{]*\{\s*transition:\s*none;\s*\}\s*\.appear,\s*\.appear-rise,\s*\.appear-pop[^}]*\{\s*animation:\s*none;/u;
+  const still = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.chev,\s*\.flip,\s*\.quarter-turn,\s*\.state-ctl[^{]*\{\s*transition:\s*none;\s*\}\s*\.appear,\s*\.appear-rise,\s*\.appear-pop[^}]*\{\s*animation:\s*none;/u;
   assert.match(appCss, still, 'the atoms still under prefers-reduced-motion');
 });
 
@@ -80,7 +81,7 @@ test('no component re-implements an atom or reaches for svelte/transition', () =
   for (const file of components) {
     const src = readFileSync(file, 'utf8');
     const rel = file.slice(root.length);
-    assert.doesNotMatch(src, /\n\s*\.(chev|flip)\s*\{/u, `${rel}: .chev/.flip are app.css atoms — add the class, do not redefine it`);
+    assert.doesNotMatch(src, /\n\s*\.(chev|flip|quarter-turn)\s*\{/u, `${rel}: turning glyphs are app.css atoms — add the class, do not redefine it`);
     assert.doesNotMatch(src, /@keyframes\s+(fade-in|rise-in|pop-in|sheet-up|drill-in-right|drill-in-left)\b/u, `${rel}: the shared keyframes live in app.css — reference them by name`);
     assert.doesNotMatch(src, /from ['"]svelte\/transition['"]/u, `${rel}: intros are the .appear* classes, exits are a snap — no svelte/transition`);
     if (/animate:flip/u.test(src)) {

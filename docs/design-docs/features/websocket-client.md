@@ -160,10 +160,12 @@ doc already describes. Design decisions, in the order they bit:
 - **The phone's entry is a row at the top of Settings** (review, 2026-09-03):
   the rail does not exist on the touch layout, so the registry had no door
   there at all — named servers were invisible on the device the app is for.
-  App passes `onServers` (= `toggleServerMenu`) and the current entry's
-  `serverName` to Preferences only when `connected && layout.isTouchDevice`;
-  Preferences renders a `.side-row` (swap icon + NAME, never the raw address)
-  above the category list that opens the SAME popover, anchored to the row.
+  App passes `onServers` (= `toggleServerMenu`) and the connected machine's
+  authenticated hostname (`serverInfo.hostname`, falling back to
+  `hostLabel(activeAddress)` before auth) to Preferences only when
+  `connected && layout.isTouchDevice`; Preferences renders a `.side-row`
+  (swap icon + HOSTNAME, never the registry alias or raw address) above the
+  category list that opens the SAME popover, anchored to the row.
   The popover's outside-dismissal spares whichever control opened it
   (`serverMenuTrigger`), not a class name, so both doors toggle cleanly. The
   registry is read at boot and on open/rename, so the name follows a rename.
