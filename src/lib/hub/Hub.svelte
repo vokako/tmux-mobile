@@ -39,7 +39,6 @@
   import { anchorOf, menuPlacement, popOrigin, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
   import { longpress } from '../ui/longpress.ts';
-  import { selectionClickGuard } from '../ui/native-context-menu.ts';
   import { hoverInfo } from '../ui/hover.ts';
   import { flip } from 'svelte/animate';
   import { moveMs, revealMs } from '../ui/motion.ts';
@@ -340,8 +339,6 @@
     recipientOpen = false;
     menuFor = '';
     filterAgent = ''; // a filter is a reading choice, scoped to its room
-    msgOpen = '';
-    rawOpen = '';
     // The drawer follows the project (board #23, owner: "chat的右侧边栏打开
     // 哪个的状态前端帮我记住，这样我切换不同的 project 回来原来的视图还在"):
     // whichever partition was open when the user LEFT this room reopens on
@@ -2018,14 +2015,9 @@
     }));
   }
 
-  /** A message's verbs: the same two its own overlay offers. No delete —
-   * the room is the record (owner, 2026-08-21). */
-  function msgItems(m) {
-    return [
-      { label: t('hubCopy'), icon: 'copy', onselect: () => copyMsg(m.body) },
-      { label: t('hubRaw'), icon: 'command', onselect: () => { rawOpen = rawOpen === m.id ? '' : m.id; } },
-    ];
-  }
+  /** No message verbs: a bubble is selectable prose, the system's own text
+   * selection does the copying (owner, 2026-09-04), and no delete — the room
+   * is the record (owner, 2026-08-21). */
 
   function toggleAgentMenu(name, trigger) {
     if (menuFor === name) { menuFor = ''; return; }
@@ -2070,20 +2062,16 @@
     };
   });
 
-  // The SAME rule for the other two transient layers — the message action row
-  // (copy/raw under a tapped bubble) and the recipient picker. Both used to
-  // stay up until something happened to replace them, so a tapped message
-  // kept its buttons through scrolling, composing and sending (owner,
+  // The SAME rule for the other transient layer — the recipient picker. It
+  // used to stay up until something happened to replace it (owner,
   // 2026-08-22: "在其他操作之后应该自动隐藏 不应该一直常驻显示"). A tap
-  // anywhere outside the layer (or Escape) closes them; the toggles
-  // themselves and clicks INSIDE the layer are excluded so choosing an
-  // option is not also "outside". Raw view is not a popup — an opened raw
-  // source stays until retoggled or the project changes.
+  // anywhere outside the layer (or Escape) closes it; the toggle itself and
+  // clicks INSIDE the layer are excluded so choosing an option is not also
+  // "outside".
   $effect(() => {
-    if (!msgOpen && !recipientOpen && !palette) return;
+    if (!recipientOpen && !palette) return;
     const onDown = (e) => {
       const t = e.target;
-      if (msgOpen && !t?.closest?.('.m-acts, .bubble')) msgOpen = '';
       if (recipientOpen && !t?.closest?.('.to-wrap')) recipientOpen = false;
       // A tap outside the composer parks the palette exactly like Escape:
       // paletteOff resets on the next text change, so typing brings it back.
@@ -2091,7 +2079,6 @@
     };
     const onKey = (e) => {
       if (e.key !== 'Escape') return;
-      if (msgOpen) { msgOpen = ''; e.stopPropagation(); }
       if (recipientOpen) { recipientOpen = false; e.stopPropagation(); }
     };
     window.addEventListener('pointerdown', onDown, true);
@@ -2121,24 +2108,7 @@
   let stepsChoice = $state({});
   let stepsAll = $state({});        // group key → lift the 10-row cap
   let menuFor = $state('');         // agent name whose card menu is open
-  let msgOpen = $state('');         // message key whose action row is open
-  // Native touch selection may emit a compatibility click after contextmenu.
-  // Consume that one click per bubble before it can open the action row.
-  const msgSelectionClicks = selectionClickGuard();
-  let rawOpen = $state('');         // message key showing its raw source
-  let copied = $state('');          // body just copied, for the button label
 
-  /** Copy a message as the agent wrote it — markdown, image refs and all. */
-  async function copyMsg(body) {
-    try {
-      await navigator.clipboard.writeText(body ?? '');
-      copied = body;
-      // Show the "Copied" confirmation, then put the row away — copying IS
-      // the operation the row was opened for, so it should not stay resident
-      // afterwards (owner, 2026-08-22: "在其他操作之后应该自动隐藏").
-      setTimeout(() => { if (copied === body) { copied = ''; msgOpen = ''; } }, 1500);
-    } catch (e) { console.warn('copy failed', e); }
-  }
   const isRunning = (b) =>
     b.key === newestSteps[b.window] &&
     ['running', 'working'].includes(agents.find((a) => a.window === b.window)?.state);
@@ -2925,15 +2895,12 @@
                      text, sharing the last line when it fits and dropping to
                      its own right-aligned line when it doesn't. Never a
                      separate row or column outside the bubble. -->
-                <!-- The bubble is TEXT to assistive tech (role="button" made
-                     every message announce as one giant button and Tab walk
-                     the whole transcript); its click is a pointer convenience.
-                     The accessible path to copy/raw is the meta-trailer
-                     button below. -->
-                <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-                <div class="bubble md"
-                  oncontextmenu={(e) => { if (msgSelectionClicks.mark(e, key)) return; e.preventDefault(); openCtx(pointOf(e), m.from, msgItems(m)); }}
-                  onclick={() => { if (msgSelectionClicks.consume(key)) return; if (typeof getSelection === 'function' && !(getSelection()?.isCollapsed ?? true)) return; msgOpen = msgOpen === key ? '' : key; }}>
+                <!-- The bubble is TEXT — to assistive tech AND to the pointer
+                     (owner, 2026-09-04: "我要在消息里手动选择文字，使用系统
+                     自带的选择文字菜单，不要你们交互的这个菜单了"). No click,
+                     no contextmenu, no app menu: selecting and copying is the
+                     system's own gesture, on every input type. -->
+                <div class="bubble md">
                   {#if m.from !== 'human'}
                     <!-- A status note keeps the ordinary bubble, but its header
                          says what the words are ABOUT. The first cut was
@@ -2947,18 +2914,14 @@
                   {/if}
                   <div class="m-body">
                     {#if parts.text}
-                      {#if rawOpen === key}
-                        <pre class="raw">{m.body}</pre>
-                      {:else}
-                        <!-- Folded: the start of the message, cut where the
-                             budget runs out, …… glued to the last kept line.
-                             Raw view and agent messages render in full. -->
-                        {@html markLeadingMention(renderMarkdown(folded ? foldBody(parts.text) : parts.text))}
-                      {/if}
+                      <!-- Folded: the start of the message, cut where the
+                           budget runs out, …… glued to the last kept line.
+                           Agent messages render in full. -->
+                      {@html markLeadingMention(renderMarkdown(folded ? foldBody(parts.text) : parts.text))}
                       {#if foldable}
                         <!-- The way to the whole message and back. A button, because
                              this is the one thing you might want from a folded
-                             message; the bubble's own click still opens copy/raw.
+                             message — the bubble itself is inert prose.
                              ONE button for both directions so its caret can TURN
                              (motion.md principle 4) — the body itself is a cut,
                              never a slide (principle 10: the feed owns its scroll). -->
@@ -2978,8 +2941,7 @@
                         {/each}
                       </div>
                     {/if}
-                    <button class="m-meta" aria-label={t('hubMsgActions')}
-                      onclick={(e) => { e.stopPropagation(); msgOpen = msgOpen === key ? '' : key; }}>
+                    <span class="m-meta">
                       <span class="m-time">{fmtTime(m.ts)}</span>
                       {#if m.from === 'human'}
                         <!-- Three readings, not two (review, 2026-09-03). Filled:
@@ -2999,19 +2961,9 @@
                           <span class="m-state" title={t('hubPendingHint')}><Icon name="circle" size={11} /></span>
                         {/if}
                       {/if}
-                    </button>
+                    </span>
                   </div>
                 </div>
-                {#if msgOpen === key}
-                  <div class="m-acts appear">
-                    <button onclick={() => copyMsg(m.body)}>
-                      <Icon name="copy" size={11} />{copied === m.body ? t('hubCopied') : t('hubCopy')}
-                    </button>
-                    <button class:on={rawOpen === key} onclick={() => { rawOpen = rawOpen === key ? '' : key; }}>
-                      <Icon name="command" size={11} />{t('hubRaw')}
-                    </button>
-                  </div>
-                {/if}
               </div>
           {:else if b.type === 'prompt'}
             <!-- The input half: what this agent was asked, which only the
@@ -3487,8 +3439,8 @@
        readable gutter that says "a message, not a document"; 1360px still
        stops a full-screen ultrawide from producing 200-char prose lines. */
     --msg-max: min(84%, 1360px);
-    /* --bubble-in moved to :root in app.css with the shared .m-acts atoms
-       (board #46) — one definition, every wearer. */
+    /* --bubble-in moved to :root in app.css with the Board note's shared
+       action atoms (board #46) — one definition, every wearer. */
     --bubble-out: color-mix(in srgb, var(--bg) 84%, var(--accent) 16%);
     --bubble-line: color-mix(in srgb, var(--border) 72%, var(--text3) 28%);
   
@@ -3920,13 +3872,13 @@
   .m-body :global(.m-to) { font-weight: 600; color: color-mix(in srgb, var(--accent) 62%, var(--text)); }
   .m-body :global(.katex-display) { overflow-x: auto; overflow-y: hidden; margin: 8px 0; padding: 2px 0; }
   .m-body :global(.katex) { font-size: 1.06em; }
-  /* A real <button>: the accessible route to copy/raw (the bubble itself is
-     text). Styled to stay a quiet trailer. */
+  /* A passive stamp: time (+ delivery state on your own bubbles) floated at
+     the end of the text. Not a control — the message menu is retired (owner,
+     2026-09-04): copying is the system selection menu's job. */
   .m-meta {
     float: right; display: inline-flex; align-items: center; gap: 3px;
     margin: 7px 0 0 8px; color: var(--meta-ink); font-size: var(--fs-meta); line-height: 1;
-    user-select: none; background: none; border: none; padding: 0;
-    font-family: inherit; cursor: pointer;
+    user-select: none;
   }
   /* "Show the rest": a quiet inline control inside the bubble, not a chip on
      top of it — the bubble is complete, this is part of its content. */
@@ -3943,11 +3895,6 @@
      glyph for "reaches nobody live", wherever it shows. */
   .m-state.note .st { width: 9px; height: 9px; }
   .m-time { font-variant-numeric: tabular-nums; }
-  .bubble .raw { margin: 0; font-family: var(--font-mono); font-size: var(--fs-sub); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text2); }
-  /* What you can DO with a message, revealed by tapping it: the action row
-     (.m-acts) is a SHARED atom in app.css since board #46 — the Board's note
-     bubbles wear the same row, and a scoped copy here is the dialect drift
-     the source tests forbid. */
   /* Referenced images, under the text they came with. */
   .shots { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; border-radius: var(--ui-radius-control); overflow: hidden; clear: both; }
   .m-body > .shots:first-child { margin-top: 2px; }

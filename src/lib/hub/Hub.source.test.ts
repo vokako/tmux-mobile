@@ -201,7 +201,7 @@ test('the filter and the detail level are reachable from menus, not only from a 
   assert.match(source, /function toggleFilter\(name\) \{\s*\n\s*menuFor = '';\s*\n\s*filterAgent = filterAgent === name \? '' : name;/u,
     'the menu toggle is the double-click\u2019s rule, minus the recipient change');
   assert.match(source, /projectItems\(selectedRow, true\)/u, 'the title caret asks for the view rows');
-  const lv = source.slice(source.indexOf('function feedLevelItems'), source.indexOf('function msgItems'));
+  const lv = source.slice(source.indexOf('function feedLevelItems'), source.indexOf('function toggleAgentMenu'));
   assert.match(lv, /hubPrefs\.feedLevel === level \? 'check' : 'circle'/u, 'radio semantics through the menu\u2019s own icons');
   assert.match(lv, /hubPrefs\.setFeedLevel\(level\)/u, 'and it writes the one pref Settings reads');
   assert.ok(!source.includes('cycleFeedLevel'), 'the dead cycle control stays gone');
@@ -790,7 +790,7 @@ test('the title caret expands the NAME — left-aligned on its real rect (board 
   const opens = [...source.matchAll(/openCtx\((?!at, who)/g)].length; // call sites, not the definition
   const leftAligned = [...source.matchAll(/openCtx\(\{ anchor:[^}]*align: 'left'/g)].length;
   assert.equal(leftAligned, 1, 'ONE left-aligned entry');
-  assert.equal(opens - leftAligned, 8, 'the other eight entries keep right alignment');
+  assert.equal(opens - leftAligned, 7, 'the other seven entries keep right alignment (the message bubble\u2019s opener is retired, board #48)');
   assert.ok(!/getBoundingClientRect\(\)[^]{0,80}openCtx/u.test(source),
     'no raw client rect reaches openCtx — anchorOf owns the zoom correction');
   // The narrowed caret resets the BROWSER's button padding (Chromium: 1px 6px,
@@ -853,28 +853,27 @@ test('leaving at the tail means returning to the tail — and ONLY then (board #
     'entering a room still lands at its tail');
 });
 
-test('long-press on a message is the system selection gesture, never our menu (board #48)', () => {
-  // Owner: "在chat页面长按消息选中文字的时候 不应该出现选项卡 应该走手机系统本身
-  // 默认选中文字的逻辑" (2026-09-01, reaffirmed 2026-09-04). On Android a
-  // long-press over text fires contextmenu and then a compatibility click. The
-  // selection can be briefly collapsed by click time, so checking isCollapsed
-  // alone is not enough: mark the touch-owned contextmenu without preventDefault,
-  // then consume exactly that message's following click before it can open .m-acts.
-  assert.match(source,
-    /oncontextmenu=\{\(e\) => \{ if \(msgSelectionClicks\.mark\(e, key\)\) return; e\.preventDefault\(\); openCtx\(pointOf\(e\), m\.from, msgItems\(m\)\); \}\}/u,
-    'touch contextmenu arms the compatibility-click guard and stays native');
-  assert.match(source,
-    /onclick=\{\(\) => \{ if \(msgSelectionClicks\.consume\(key\)\) return; if \(typeof getSelection === 'function' && !\(getSelection\(\)\?\.isCollapsed \?\? true\)\) return; msgOpen = msgOpen === key \? '' : key; \}\}/u,
-    'the synthetic click is consumed before the selection fallback and action toggle');
-  // A genuine selection still wins independently, including desktop selection.
-  assert.match(source,
-    /if \(typeof getSelection === 'function' && !\(getSelection\(\)\?\.isCollapsed \?\? true\)\) return;/u,
-    'a non-collapsed selection swallows an ordinary bubble tap too');
+test('a message bubble is inert prose — native selection only, no app menu (board #48)', () => {
+  // Owner: "在chat页面长按消息选中文字的时候 不应该出现选项卡" (2026-09-01), then
+  // 2026-09-04: "点击消息气泡，还是会呼出一个类似右键的 Copy 选项卡菜单……其实
+  // 我们都不要了。我要在消息里手动选择文字，使用系统自带的选择文字菜单" —
+  // the tap-revealed action row, the message context menu, the raw view and
+  // the meta-trailer toggle are ALL retired. The bubble carries no pointer
+  // handlers: selecting and copying text is the system's job end to end.
+  const bubble = source.slice(source.indexOf('<div class="bubble md"'),
+    source.indexOf('<div class="m-body">'));
+  assert.ok(!bubble.includes('onclick'), 'the bubble has no click handler');
+  assert.ok(!bubble.includes('oncontextmenu'), 'and no contextmenu handler');
+  for (const gone of ['msgSelectionClicks', 'msgItems', 'msgOpen', 'rawOpen', 'copyMsg', 'm-acts', 'selectionClickGuard']) {
+    assert.ok(!source.includes(gone), `${gone} is retired with the menu`);
+  }
   // For the system gesture to have anything to select, the message body must
   // be selectable at all — the app shell's global user-select:none reaches it
   // otherwise (the Board's .n-text re-enable is the precedent).
   assert.match(source, /\.m-body \{[^}]*user-select: text;[^}]*-webkit-user-select: text;/u,
     'bubble text is selectable — both vendor forms, like the Board notes');
+  // The time trailer is a passive stamp again, never a control to a menu.
+  assert.match(source, /<span class="m-meta">/u, 'the meta trailer is plain text, not a button');
 });
 
 test('the fold measures its own line — perLine is never assumed (board #53 review)', () => {

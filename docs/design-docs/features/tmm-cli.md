@@ -382,8 +382,9 @@ can get wrong to save three characters.
   issue id/title and a bounded excerpt. Unassigned, human-assigned, self-note,
   unmanaged or offline cases degrade to the persisted note — never an RPC
   failure, shell injection, self-prompt, or duplicate delivery. On the Board
-  page a note bubble also wears Chat's ONE shared `.m-acts` overlay (board
-  #46): tap reveals Copy, raw body goes to the clipboard, text selection wins,
+  page a note bubble wears the ONE shared `.m-acts` overlay (board
+  #46; Chat's former dialect, Board-only since the message menu retired,
+  board #48): tap reveals Copy, raw body goes to the clipboard, text selection wins,
   and the timestamp is the accessible trigger. The overlay is absolute and
   transient (outside/Escape/context/Copied close). Its pure
   `{open,copied,gen}` transitions guard both sides of the async boundary — the
@@ -1273,14 +1274,12 @@ growing a menu per surface:
 
 Wired to the agent card and sidebar project row, each offering the verbs it
 already has elsewhere — a context menu with its own action set is a second
-source of truth waiting to disagree. The message bubble is the deliberate
-text exception: mouse right-click offers Copy / Raw, but touch/pen long-press
-is native selection. Its touch-owned `contextmenu` marks the message and the
-short-lived `selectionClickGuard` consumes exactly the compatibility click
-Android/WebKit emits next, even if selection is temporarily collapsed; a real
-non-collapsed selection independently swallows any bubble click. `.m-body`
-explicitly enables text selection; its head/meta stay chrome. Board notes use
-the same passive contextmenu marker + one-shot click guard for their Copy
+source of truth waiting to disagree. The message bubble deliberately has NO
+menu (board #48; owner, 2026-09-04): no context menu, no tap-revealed action
+row. `.m-body` explicitly enables text selection; its head/meta stay chrome;
+selecting and copying message text is the system selection menu's job on
+every input type. Board notes keep the passive contextmenu marker + one-shot
+`selectionClickGuard` click guard for their Copy
 overlay, never call `preventDefault`, and keep selectable `.n-text`.
 
 ## Who a message goes to
@@ -2033,10 +2032,9 @@ place instead of hiding in a stylesheet:
   minimum with ≥8px gaps instead: inflating them to 44px would destroy the
   density that page exists for. The recipient chip cannot expand upward or
   rightward — it would steal taps from the textarea's first line.
-- Screen readers: a message bubble is TEXT, not a control. The copy/raw
-  toggle rides the meta trailer (a real `<button>` with an i18n aria-label);
-  the bubble's own click handler is a pointer convenience, not the accessible
-  path — do not put `role="button"` back on the bubble (it made every message
+- Screen readers: a message bubble is TEXT, not a control. It carries no
+  click handler and no menu (board #48); the meta trailer is a passive time
+  stamp — do not put `role="button"` back on the bubble (it made every message
   announce as one giant button and Tab walk through the whole transcript).
 
 
@@ -2139,11 +2137,9 @@ ILLEGIBLE: the pill wears reading ink (`--text2`, `--fs-sub`), because
 centred date pill (`Today` / `Yesterday` / a local date) before the first block
 of each new LOCAL day (`sameDay()`, pure + tested — the times alone never said
 which day a message was from, 2026-08-20); it is not sticky, because a pinned
-rect would fight the ask-anchor's edge math. The tap-revealed copy/raw actions are an absolutely-positioned OVERLAY on
-the bubble's bottom-right corner, not a row in the flow: opening them must not
-push the conversation around or change the scroll height the anchor math
-depends on. The bubble itself carries a text cursor, not a pointer — it is
-selectable prose first; the tap affordance needs no hand.
+rect would fight the ask-anchor's edge math. The bubble carries a text cursor, not a pointer — it is
+selectable prose, with no tap affordance at all (board #48): copying message
+text goes through the system's own selection menu.
 
 The composer is one rounded capsule at every width, and everything lives inside
 it. The recipient chip is pinned to the capsule's top-left; the textarea's FIRST
