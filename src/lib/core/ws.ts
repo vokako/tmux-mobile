@@ -986,6 +986,10 @@ export interface RegAgent {
 export const registryList = () => call<{ agents: RegAgent[] }>('registry_list');
 export const registrySave = (def: RegAgent) => call('registry_save', { def });
 export const registryDelete = (name: string) => call('registry_delete', { name });
+/** The app-wide agent instructions (`<config>/AGENTS.md`): prepended to every
+ * managed agent's system prompt at spawn (tmm-cli.md § The app-wide instructions). */
+export const globalPromptGet = () => call<{ text: string; path: string; max_bytes: number }>('global_prompt_get');
+export const globalPromptSet = (text: string) => call('global_prompt_set', { text });
 /** An agent TEAM (board #74): members derive from a registry agent (`base`)
  * plus a `role` supplement, or carry a team-only inline `agent` definition.
  * `members` is the JSON text of `TeamMember[]`, like an agent's `skills`. */

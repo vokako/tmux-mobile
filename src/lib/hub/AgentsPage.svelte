@@ -8,7 +8,7 @@
   import SideHandle from '../ui/SideHandle.svelte';
   import { scrollFade } from '../core/scrollFade.ts';
   import { t } from '../core/i18n.svelte.ts';
-  import { registryList, registrySave, registryDelete, modelsList, skillsList, skillsSave, skillsDelete, skillsRefresh, skillsImport, skillsFiles, skillsFile, mcpList, mcpSave, mcpDelete, teamsList, teamsSave, teamsDelete } from '../core/ws.ts';
+  import { registryList, registrySave, registryDelete, modelsList, skillsList, skillsSave, skillsDelete, skillsRefresh, skillsImport, skillsFiles, skillsFile, mcpList, mcpSave, mcpDelete, teamsList, teamsSave, teamsDelete, globalPromptGet, globalPromptSet } from '../core/ws.ts';
   import { renderMarkdown } from '../core/markdown.ts';
   import { backendColor } from '../hub/hub.ts';
   import { backendIcon } from '../core/agents.ts';
@@ -61,8 +61,13 @@
   let editingMcp = $state(null);
   // A TEAM working copy (board #74): { name, description, members: TeamMember[] }.
   let editingTeam = $state(null);
+  // The app-wide instructions (`<config>/AGENTS.md`, tmm-cli.md § The app-wide
+  // instructions): ONE text every managed agent's prompt starts with. It is
+  // edited HERE — the Agents page is where an agent's words are configured —
+  // as the first row of the list, above the agents it applies to.
+  let editingGlobal = $state(null); // { text, path, max_bytes, loading } working copy or null
   let teamIsNew = $state(false);
-  const drilled = $derived(!!editing || !!editingSkill || !!editingMcp || !!editingTeam);
+  const drilled = $derived(!!editing || !!editingSkill || !!editingMcp || !!editingTeam || !!editingGlobal);
   let drillAnim = $state('');
   let wasDrilled = false;
   let mcpIsNew = $state(false);
@@ -172,8 +177,35 @@
   });
 
   function closeAll() {
-    editing = null; editingSkill = null; editingMcp = null; editingTeam = null;
+    editing = null; editingSkill = null; editingMcp = null; editingTeam = null; editingGlobal = null;
     error = ''; info = '';
+  }
+
+  // ── The app-wide instructions ─────────────────────────────────────────
+  async function startGlobal() {
+    closeAll();
+    editingGlobal = { text: '', path: '', max_bytes: 24 * 1024, loading: true };
+    try {
+      const r = await globalPromptGet();
+      if (editingGlobal) editingGlobal = { text: r.text ?? '', path: r.path ?? '', max_bytes: r.max_bytes ?? 24 * 1024, loading: false };
+    } catch (e) {
+      error = String(e?.message ?? e);
+      if (editingGlobal) editingGlobal.loading = false;
+    }
+  }
+  let savingGlobal = $state(false);
+  const globalBytes = $derived(editingGlobal ? new TextEncoder().encode(editingGlobal.text.trim()).length : 0);
+  async function saveGlobal() {
+    if (!editingGlobal || savingGlobal) return;
+    savingGlobal = true; error = ''; info = '';
+    try {
+      await globalPromptSet(editingGlobal.text);
+      editingGlobal = null;
+    } catch (e) {
+      error = String(e?.message ?? e);
+    } finally {
+      savingGlobal = false;
+    }
   }
 
   // ── Agent teams (board #74) ───────────────────────────────────────────
@@ -426,6 +458,12 @@
     <div class="side-scroll subtle-scroll" class:reveal={justLoaded} use:scrollFade>
       {#if shows('agents')}
       {#if !section}<div class="side-h">{t('agentsTitle')}</div>{/if}
+      <!-- The house rules row: what EVERY agent below is told first. -->
+      <button class="side-row" class:open={!!editingGlobal} onclick={startGlobal}>
+        <span class="ava global"><Icon name="file" size={13} /></span>
+        <span class="r-name">{t('agentsGlobal')}</span>
+        <span class="r-backend">AGENTS.md</span>
+      </button>
       {#each defs as d (d.name)}
         <button class="side-row" class:open={editing?.name === d.name && !isNew} onclick={() => startEdit(d)}>
           {#if backendIcon(d.backend)}<img class="ava" src={backendIcon(d.backend)} alt={d.backend} />{:else}<span class="ava" style:background={backendColor(d.backend)}>{d.name.slice(0, 1).toUpperCase()}</span>{/if}
@@ -485,7 +523,24 @@
   </aside>
 
   <main class="mid">
-    {#if editingSkill}
+    {#if editingGlobal}
+      <div class="page-head">
+        <h1>{t('agentsGlobal')}</h1>
+        <span class="spacer"></span>
+        <div class="head-acts">
+        <button class="icon-btn" title={t('cancel')} aria-label={t('cancel')} onclick={() => editingGlobal = null}><Icon name="x" size={14} /></button>
+        <button class="icon-btn go" disabled={editingGlobal.loading || savingGlobal || globalBytes > editingGlobal.max_bytes}
+          title={t('save')} aria-label={t('save')} onclick={saveGlobal}><Icon name="check" size={14} /></button>
+        </div>
+      </div>
+      <div class="editor">
+        {#if error}<div class="err appear">{error}</div>{/if}
+        <p class="hint wide">{t('agentsGlobalHint').replace('{path}', editingGlobal.path || '<config>/AGENTS.md')}</p>
+        <textarea class="mono" rows="16" bind:value={editingGlobal.text} spellcheck="false"
+          disabled={editingGlobal.loading} placeholder={t('agentsGlobalPh')}></textarea>
+        <p class="hint" class:over={globalBytes > editingGlobal.max_bytes}>{t('agentsGlobalBytes').replace('{n}', String(globalBytes)).replace('{max}', String(editingGlobal.max_bytes))}</p>
+      </div>
+    {:else if editingSkill}
       <div class="page-head">
         <h1>{skillIsNew ? t('skillsNew') : editingSkill.name}</h1>
         <span class="spacer"></span>
@@ -834,6 +889,10 @@
   .f-size { margin-left: auto; flex: none; color: var(--text3); font-size: var(--fs-micro); }
   .placeholder { flex: 1; display: grid; place-items: center; }
   .hint { color: var(--text3); font-size: var(--fs-meta); margin: 0; line-height: 1.5; max-width: 420px; }
+  .hint.wide { max-width: 640px; }
+  .hint.over { color: var(--danger); }
+  /* The house-rules row's glyph: a document, not a backend — quiet grey. */
+  .ava.global { display: grid; place-items: center; background: var(--surface2); color: var(--text2); }
   /* Description at rest: the text itself, whole and wrapped; the wash on
      hover says "tap to edit" without drawing an input around reading. */
   .desc-view {

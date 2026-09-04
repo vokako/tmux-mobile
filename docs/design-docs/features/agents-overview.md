@@ -34,6 +34,17 @@ the supervised server can have a service-only PATH even when the user's CLIs are
 
 **Managed Claude trust is per explicit workspace, never global**: `ensure_claude_state` merges Claude's documented `projects[repo_root].hasTrustDialogAccepted=true` into the isolated `.claude.json` before launch/restart, preserving all other state and mode 0600; the Down→Enter prompt confirmer is fallback only. On this host Bedrock has no built-in WebSearch, so local Claude defaults carry pinned `kiro-web-search==0.1.3` native MCP; its `KIRO_API_KEY` remains private local config/state and never enters the repo.
 
+### The app-wide instructions lead every prompt (2026-09-04)
+
+An isolated home never reads the user's own `~/.claude/CLAUDE.md` /
+`~/.codex/AGENTS.md` / kiro global config — by design — so the software
+carries its own: `<config>/AGENTS.md` (`projects/global_prompt.rs`) is the
+FIRST block `spawn::build_prompt` writes, before the agent's persona, on every
+backend. Edited on the Agents page (the first row, "Instructions for every
+agent") or with `tmm prompt show|path|set|clear` (`global_prompt_get/set`);
+read at spawn, so a running agent picks a change up on restart. Full rules:
+[tmm-cli.md § The app-wide instructions](tmm-cli.md#the-app-wide-instructions-configagentsmd-2026-09-04).
+
 ### A managed agent's MODEL lives in its config, never on the launch line
 
 `render_kiro` writes `"model": <id>` into `.tmm/agents/<name>/agents/<name>.json` (a real field of kiro's agent schema) and the line carries only `--agent`. Reason: kiro-cli's TUI answers an unknown `--model` with a warning above the splash and then runs its DEFAULT model, so `claude-sonnet-4-5` (one character off `claude-sonnet-4.5`) produced an agent answering happily on the wrong model, with the id invisible in the config the owner reads (owner report, 2026-08-19; in `--no-interactive` the same flag is a hard error, which is why no script ever caught it). In the config a bad id is reported as a real error on the first turn instead, and every start path (`up`, restart, `--resume-id`) reads it because they all pass `--agent` — the pre-recipe backfill in `refresh_hooks` used to drop the model entirely on restart. An empty model omits the key (= the BACKEND default, which is what the editor's placeholder promises; the old line pinned a hardcoded `claude-sonnet-4.6`). `projects::models` asks `kiro-cli chat --list-models -f json` (cached 10 min, never hardcoded — ids change weekly) and `registry_save` + `spawn` reject an unknown id listing the valid ones; `models_list` feeds the editor a datalist.

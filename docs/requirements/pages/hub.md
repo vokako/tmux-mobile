@@ -98,6 +98,9 @@ completion).
   as one unit of the strip. The empty-room preset lists configured teams as
   one-tap starts beside the single agents, and the "Start a team" picker
   offers them above the ad-hoc pick (the brief applies to every member).
+  The Agents page's first row, "Instructions for every agent", edits the
+  app-wide `<config>/AGENTS.md` that leads every managed agent's system
+  prompt (also `tmm prompt`).
   Teams are configured on the Agents page (Teams section): a member derives
   from a registry agent plus a role supplement, or is defined for the team
   only, or another team included whole (nesting — drawn as a group inside the
