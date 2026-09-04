@@ -10,6 +10,7 @@
   import { anchorOf } from '../ui/placement.ts';
   import { flip } from 'svelte/animate';
   import { moveMs } from '../ui/motion.ts';
+  import { hoverInfo } from '../ui/hover.ts';
   import { t } from '../core/i18n.svelte.ts';
   import { detectAgent, paneIsAgent, paneAgent, AGENTS } from '../core/agents.ts';
   import { copyText } from '../core/clipboard.ts';
@@ -315,6 +316,18 @@
   });
 
   let currentWindow = $derived(target.split(':')[1]?.split('.')[0] || '');
+
+  // A chip's facts for the hover card (motion.md principle 16): the same
+  // pane data the strip is built from. Chrome only — the card is a fixed
+  // layer of its own and nothing here touches xterm's box (principle 9).
+  function windowInfo(w) {
+    const agent = paneAgent(w);
+    const lines = [];
+    if (w.current_command) lines.push({ label: t('hoverCommand'), value: w.child_cmd || w.current_command });
+    lines.push({ label: t('hoverPanes'), value: String(windowPanes.filter(p => p.window === w.window).length) });
+    if (agent) lines.push({ label: t('hoverAgent'), value: agent.tag, tone: 'accent' });
+    return { title: `${w.window}:${w.window_name}`, lines };
+  }
 
   // Group panes by window. Representative pane preference:
   //   agent pane > active pane > first listed.
@@ -2116,12 +2129,13 @@
                  `<index>:<name>`, the same coordinate the project drawer's
                  pills use; the icon stays as the backend's mark. A shell keeps
                  its command as the name, which is what identifies it. -->
-            <div class="win-chip appear" animate:flip={{ duration: moveMs() }}>
+            <!-- The hover card (use:hoverInfo) carries the window's facts; the
+                 chip's own title prop is left unset so it adds no second line. -->
+            <div class="win-chip appear" animate:flip={{ duration: moveMs() }} use:hoverInfo={() => windowInfo(w)}>
               <AgentChip
                 agent={wAgent}
                 label={`${w.window}:${wAgent ? w.window_name : (w.current_command || w.window_name)}`}
                 variant={String(w.window) === currentWindow ? 'active' : 'default'}
-                title={`${w.window}: ${w.window_name}${w.current_command ? ` · ${w.current_command}` : ''}`}
                 onclick={(e) => {
                   e.stopPropagation();
                   if (String(w.window) !== currentWindow && onSwitchPane) {
@@ -2232,7 +2246,8 @@
       {/if}
     {/if}
     {#if !termAtBottom}
-      <button class="to-tail scroll-btn" class:news={hasNewContent} onclick={() => term?.scrollToBottom()} aria-label={hasNewContent ? t('newOutput') : t('scrollToBottom')}>
+      <button class="to-tail scroll-btn" class:news={hasNewContent} onclick={() => term?.scrollToBottom()} aria-label={hasNewContent ? t('newOutput') : t('scrollToBottom')}
+        use:hoverInfo={() => ({ note: t('hoverToTailOutput') })}>
         <Icon name="arrow-down" size={16} />
       </button>
     {/if}
