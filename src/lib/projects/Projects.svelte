@@ -23,6 +23,8 @@
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import ContextMenu from '../ui/ContextMenu.svelte';
   import { longpress } from '../ui/longpress.ts';
+  import { hoverInfo } from '../ui/hover.ts';
+  import type { HoverInfo, HoverLine } from '../ui/hover.svelte.ts';
   import { t } from '../core/i18n.svelte.ts';
 
   let { visible = false, openTerminal, panes = {}, onTracked = () => {}, onReady = () => {}, dense = false, activeTarget = '' }: {
@@ -90,10 +92,34 @@
     return live.length ? liveWindowChips(live) : declaredWindowChips(row.slots);
   }
 
+  // The card's facts for the hover card (motion.md principle 16), through the
+  // card's OWN helpers — ageLabel for the age, chipsFor for the live windows —
+  // never a second formatter. Agents: declared agent slots, split into the
+  // ones with a live agent pane and the rest.
+  function projectInfo(row: ProjectRow): HoverInfo {
+    const declared = row.slots.filter((s) => s.kind === 'agent').length;
+    const live = row.live ? chipsFor(row).filter((c) => c.agentTag).length : 0;
+    const lines: HoverLine[] = [
+      { label: t('path'), value: row.project.path },
+      { label: t('hoverState'), value: row.live ? t('hoverLive') : t('hoverStopped'), tone: row.live ? 'accent' : undefined },
+    ];
+    if (declared || live) {
+      lines.push({ label: t('hoverAgents'), value: t('hoverAgentsCount').replace('{live}', String(live)).replace('{stopped}', String(Math.max(0, declared - live))) });
+    }
+    const age = ageLabel(row.project.last_seen_at ?? row.project.last_up_at);
+    if (age) lines.push({ label: t('hoverActivity'), value: age });
+    return { title: row.project.name, lines };
+  }
+
+  /** First fill (motion.md principle 15): the cards unfold once, when the
+   * first answer lands; later loads keep the keyed cards' nodes. */
+  let firstFill = $state(false);
+
   async function load() {
     try {
       const res = await projectList();
       rows = res?.projects ?? [];
+      if (rows.length) firstFill = true;
       supported = true;
       error = '';
       onTracked(rows.map((r) => r.project.session));
@@ -174,7 +200,7 @@
 </script>
 
 {#if supported && sorted.length > 0}
-  <section class="projects" class:dense>
+  <section class="projects" class:dense class:reveal={firstFill}>
     <div class="group-label" class:side-h={dense}>
       {#if dense}
         <!-- A sidebar section header is a LABEL, not a control: the Chat
@@ -205,7 +231,7 @@
           oncontextmenu={(e) => { e.preventDefault(); openCtx(pointOf(e), row); }}
           use:longpress={{ onlongpress: (pt) => openCtx(pt, row) }}>
           <div class="proj-top">
-            <button class="proj-main" onclick={() => open(row)} title={row.project.path}>
+            <button class="proj-main" onclick={() => open(row)} use:hoverInfo={() => projectInfo(row)}>
               <span class="dot" class:on={row.live}></span>
               <span class="body">
                 <span class="line">
@@ -216,7 +242,7 @@
                   <!-- The path is what tells two same-named folders apart, so a
                        full-page card shows it. A sidebar row is one line like
                        every other sidebar row; the path lives in the row's
-                       title instead. -->
+                       hover card instead (use:hoverInfo above). -->
                   <span class="line sub">
                     <span class="path">{shortPath(row.project.path)}</span>
                   </span>

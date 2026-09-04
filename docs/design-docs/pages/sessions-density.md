@@ -295,3 +295,17 @@ disclosure caret on a session row (the row has no such glyph, and adding one
 would be a new element), so the expand has nothing to turn. A split `.cell`
 cross-fades only its border colour and ring — never a transform or a flip: it
 is an xterm ancestor (principle 9).
+
+Hover / unfold / highlight (#86, 2026-09-04): a session row's hover card
+(`use:hoverInfo`, principle 16) shows windows, attached/detached, last
+activity (tmux's `session_activity` — that is what the `created` field
+carries, see `tmux.rs`), last opened and the summary command; a pane row's
+shows command, cols×rows, title and path. Both go through `relTime` and
+`sessionSummary`, never a second formatter, and the native `title`s on the
+name and the ⋯ buttons are gone (`aria-label` stays). The FIRST list load
+shows four `.skel` rows in a `.skel-wrap` (invisible for 150ms) and the rows
+then unfold — `.reveal` on a `display: contents` wrapper around the untracked
+rows, gated by `listReady` as the first-fill flag; the periodic refresh keeps
+the keyed rows' nodes, so nothing replays, and the Projects section above has
+its own unfold. The MRU chips are AgentChips in a scrolling strip, not a
+segmented control, so no highlight travels there.

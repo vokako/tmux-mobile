@@ -10,6 +10,8 @@
   import ConfirmDialog from '../ui/ConfirmDialog.svelte';
   import ContextMenu from '../ui/ContextMenu.svelte';
   import { longpress } from '../ui/longpress.ts';
+  import { hoverInfo } from '../ui/hover.ts';
+  import type { HoverInfo, HoverLine } from '../ui/hover.svelte.ts';
   import { flip } from 'svelte/animate';
   import { moveMs } from '../ui/motion.ts';
   import { sessionHasAgent, paneAgent, AGENTS } from '../core/agents.ts';
@@ -127,6 +129,32 @@
       cmd: p.current_command || '',
       agents: sessionAgents(s.name),
     };
+  }
+
+  // The hover card's facts (motion.md principle 16), through the row's OWN
+  // formatters — relTime for both ages, sessionSummary for the command — never
+  // a second one. `created` carries tmux's session_activity (tmux.rs), so it
+  // is labelled as the last activity, not the birth.
+  function sessionInfo(s: TmuxSession): HoverInfo {
+    const sum = sessionSummary(s);
+    const activity = Number(s.created);
+    const lines: HoverLine[] = [
+      { label: t('hoverWindows'), value: String(s.windows) },
+      { label: t('hoverState'), value: s.attached ? t('hoverAttached') : t('hoverDetached'), tone: s.attached ? 'accent' : undefined },
+    ];
+    if (activity) lines.push({ label: t('hoverActivity'), value: relTime(activity) });
+    if (s.last_opened) lines.push({ label: t('hoverLastOpened'), value: relTime(s.last_opened) });
+    if (sum.cmd) lines.push({ label: t('hoverCommand'), value: sum.cmd });
+    return { title: isTeamSession(s.name) ? teamLabel(s.name) : s.name, lines };
+  }
+  function paneInfo(p: TmuxPane): HoverInfo {
+    const lines: HoverLine[] = [
+      { label: t('hoverCommand'), value: p.child_cmd || p.current_command },
+      { label: t('size'), value: `${p.width}×${p.height}` },
+    ];
+    if (p.pane_title && p.pane_title !== p.current_command) lines.push({ label: t('hoverTitle'), value: p.pane_title });
+    if (p.current_path) lines.push({ label: t('path'), value: p.current_path });
+    return { title: `${p.session}:${p.window}.${p.pane}`, lines };
   }
 
   // ─── Data loading ──────────────────────────────────────
@@ -447,9 +475,10 @@
         onkeydown={(e) => e.key === 'Enter' && activateSession(s)}
         oncontextmenu={(e) => { if (team) return; e.preventDefault(); openSessionMenu(pointOf(e), s); }}
         use:longpress={{ onlongpress: (pt) => { if (!team) openSessionMenu(pt, s); } }}
+        use:hoverInfo={() => sessionInfo(s)}
       >
         <span class="dot" class:attached={s.attached}></span>
-        <span class="name" class:name-grow={team} title={team ? s.name : null}>{team ? teamLabel(s.name) : s.name}</span>
+        <span class="name" class:name-grow={team}>{team ? teamLabel(s.name) : s.name}</span>
         <!-- Team rows show only the title. Regular rows keep a short cmd/AI
              marker, but NOT the cwd path — in the cramped row it was squeezed
              to the point of being unreadable. The full path lives on the
@@ -484,7 +513,6 @@
               class="kill"
               onclick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); openSessionMenu({ x: r.right, y: r.bottom }, s); }}
               aria-label={t('hubProjectMenu')}
-              title={t('hubProjectMenu')}
             >
               <Icon name="dots" size={13} />
             </button>
@@ -498,7 +526,7 @@
             {@const pAi = paneAgent(p)?.tag || ''}
             {@const isPaneActive = activeTarget === `${p.session}:${p.window}.${p.pane}`}
             <div class="pane-row" class:active-pane={isPaneActive}>
-              <button class="pane" onclick={() => openPane(s, p)}>
+              <button class="pane" onclick={() => openPane(s, p)} use:hoverInfo={() => paneInfo(p)}>
                 <span class="pane-id">{p.window}.{p.pane}</span>
                 <span class="pane-cmd">{p.current_command}</span>
                 {#if p.current_path}
@@ -512,7 +540,6 @@
                 class="pane-kill"
                 onclick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); openWindowMenu({ x: r.right, y: r.bottom }, s, p); }}
                 aria-label={t('hubProjectMenu')}
-                title={t('hubProjectMenu')}
               >
                 <Icon name="dots" size={12} />
               </button>
@@ -562,11 +589,22 @@
         <Icon name="plus" size={13} />{t('projectNew')}
       </button>
     {/if}
+    <!-- The FIRST load unfolds (motion.md principle 15): until the list has
+         answered once, four rows of the coming shape shimmer here — invisible
+         for 150ms, so a fast answer never flashes them — and when the rows
+         land they rise in staggered. listReady is the first-fill gate: the
+         periodic refresh keeps the keyed rows' nodes, so nothing replays. -->
+    {#if !listReady}
+      <div class="skel-wrap skel-rows" aria-hidden="true">
+        {#each { length: 4 } as _}<div class="skel skel-row"></div>{/each}
+      </div>
+    {/if}
     <!-- The untracked list waits for Projects to report once: before that,
          every TRACKED session would render here as "untracked" and visibly
          migrate up a beat later (same disease as the Hub's empty-room flash;
          owner, 2026-08-25). -->
     {#if trackedReady}
+    <div class="rows" class:reveal={listReady}>
     {#if grouped}
       <div class="group-label" class:side-h={!chips}>
         <Icon name="bot" size={12} />
@@ -621,6 +659,7 @@
         {/if}
       </div>
     {/if}
+    </div>
     {/if}
   </div>
 
@@ -840,6 +879,12 @@
     flex-direction: column;
     gap: 4px;
   }
+  /* The reveal wrapper is not a box: the rows stay direct flex items of .list
+     (same gap), and the Projects section above it is left out of the stagger. */
+  .rows { display: contents; }
+  .skel-rows { display: flex; flex-direction: column; gap: 4px; }
+  .skel-row { height: 40px; }
+  .sessions.sidebar-mode .skel-row { height: 32px; }
   .session {
     border: 1px solid transparent;
     border-radius: var(--ui-radius-panel);
