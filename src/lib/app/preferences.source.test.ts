@@ -94,6 +94,16 @@ test('category and address rows explain themselves with the one hover card (moti
   assert.doesNotMatch(addr, /title=/u);
 });
 
+test('the category list and a switched category unfold instead of flashing (motion.md §1.15, board #86)', () => {
+  // First paint only for the list: on compact the drill display-toggles the
+  // sidebar, and a re-shown list must not replay the unfold over the
+  // drill-back slide (one motion per view).
+  assert.match(source, /<div class="side-scroll subtle-scroll" class:reveal=\{!drillAnim\} use:scrollFade>/u);
+  // The pane is keyed on the category so a switch remounts it and its cards rise in.
+  assert.match(source, /\{#key tab\}\s*<div class="pref-content reveal">/u);
+  assert.match(source, /<\/div>\s*\{\/key\}\s*\{\/if\}\s*<\/div>\s*<\/section>/u, 'the key closes with the pane');
+});
+
 test('the phone reaches the server registry from the top of Settings (2026-09-03)', () => {
   // The row exists only when App hands over the opener (touch layout); it is a
   // .side-row like the categories, not a new species, and it opens the SAME

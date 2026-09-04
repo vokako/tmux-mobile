@@ -91,4 +91,9 @@ rows / the shortcut recorder cross-fade their selected clothes on `--t-fast`,
 every segmented row is `ui/Segmented` whose accent pill GLIDES to the chosen
 option on `--t-move` (the buttons only cross-fade their ink), and the server
 row's swap glyph turns while its popover is open. The server popover grows
-from its anchor (`.pop-layer`).
+from its anchor (`.pop-layer`). The category list unfolds on first paint and a
+switched category's pane is keyed on the category so its cards rise in
+staggered (`.reveal`) rather than swapping in as a finished wall — on the
+phone the unfold plays inside the drill slide only on the way in; a re-shown
+list does not replay it. On a pointer device the category and address rows
+open the shared hover card (name + description / address + state).

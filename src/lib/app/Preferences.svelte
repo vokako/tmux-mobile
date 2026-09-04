@@ -319,7 +319,11 @@
 <section class="preferences" class:cat-open={catOpen} class:drill-fwd={drillAnim === 'fwd'} class:drill-back={drillAnim === 'back'} aria-label={t('settings')}>
   <aside class="sidebar">
     <SideHandle />
-    <div class="side-scroll subtle-scroll" use:scrollFade>
+    <!-- The category list unfolds on first paint (motion.md §1.15, .reveal:
+         rows rise in with a 30ms stagger). Only then: on compact the sidebar
+         is display-toggled by the drill, and a re-shown list must not replay
+         the unfold on top of the drill-back slide (one motion per view). -->
+    <div class="side-scroll subtle-scroll" class:reveal={!drillAnim} use:scrollFade>
       <div class="side-h">{t('settings')}</div>
       <!-- The phone's way to the server registry (review, 2026-09-03): the
            desktop rail carries the switcher above its configure group; on the
@@ -374,7 +378,10 @@
         />
       </div>
     {:else}
-    <div class="pref-content">
+    <!-- Keyed on the category so a switch REMOUNTS the pane and its cards
+         unfold (.reveal) instead of swapping in as a finished wall. -->
+    {#key tab}
+    <div class="pref-content reveal">
       {#if tab === 'appearance'}
         <div class="setting-card">
           <div class="setting-row">
@@ -553,6 +560,7 @@
         {#if connected}<button class="disconnect" onclick={onDisconnect}>{t('disconnect')}</button>{/if}
       {/if}
     </div>
+    {/key}
     {/if}
   </div>
 </section>
