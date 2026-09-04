@@ -1,7 +1,7 @@
 // The popover placement contract — pure geometry, no browser.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { menuPlacement, pointAnchor } from './placement.ts';
+import { menuPlacement, pointAnchor, popOrigin } from './placement.ts';
 
 test('menuPlacement puts a context menu beside its trigger, inside the viewport', () => {
   const view = { w: 1200, h: 800 };
@@ -74,4 +74,12 @@ test('left alignment expands a NAME downward — same clamp, same flip (board #3
     if (hadDoc) g.document = oldDoc; else delete g.document;
     if (hadGcs) g.getComputedStyle = oldGcs; else delete g.getComputedStyle;
   }
+});
+
+test('popOrigin names the corner a popover grows from', () => {
+  const anchor = { left: 420, right: 460, top: 300, bottom: 330 };
+  assert.equal(popOrigin(anchor, { x: 280, y: 336 }), 'top right', 'below, right-aligned → grows from its top right');
+  assert.equal(popOrigin(anchor, { x: 420, y: 336 }, 'left'), 'top left');
+  assert.equal(popOrigin(anchor, { x: 280, y: 94 }), 'bottom right', 'flipped above → grows from its bottom edge');
+  assert.equal(popOrigin(anchor, { x: 420, y: 94 }, 'left'), 'bottom left');
 });

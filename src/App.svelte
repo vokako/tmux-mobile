@@ -25,7 +25,8 @@
   import { RAIL_DRAG_THRESHOLD, RAIL_GAP, RAIL_ORDER_KEY, parseRailOrder, railDropAt, railDropIndex, railDropOffset, railOrderToStore, visibleRailSlots } from './lib/app/nav-order.ts';
   import { createReconnectMachine } from './lib/app/reconnect.ts';
   import { activateConnected, applySwitch, currentServerId, hostLabel, loadServers, migrateServers, recordServer, removeServer, renameServer } from './lib/app/servers.ts';
-  import { anchorOf, menuPlacement, viewBox } from './lib/ui/placement.ts';
+  import { anchorOf, menuPlacement, popOrigin, viewBox } from './lib/ui/placement.ts';
+  import HoverCard from './lib/ui/HoverCard.svelte';
   import ContextMenu from './lib/ui/ContextMenu.svelte';
   import { cycleItem, shortcutFromEvent } from './lib/app/shortcuts.ts';
   import { isShortcutInputTarget, shortcuts } from './lib/app/shortcuts.svelte.ts';
@@ -744,7 +745,7 @@
   let serverMenuOpen = $state(false);
   let serverList = $state([]);
   let serverCurId = $state('');
-  let serverMenuAnchor = null;
+  let serverMenuAnchor = $state(null); // read by the menu's --pop-origin in the template
   let serverMenuTrigger = null;      // the control that opened it — not "outside"
   let serverMenuW = $state(0);
   let serverMenuH = $state(0);
@@ -1524,8 +1525,9 @@
     <!-- The server registry popover (board #55). Same popover mechanics as the
          Hub's agent menu: fixed layer, menuPlacement from the trigger's rect,
          invisible until measured, outside-pointerdown/Escape/resize dismiss. -->
-    <div class="server-menu" class:ready={serverMenuH > 0} role="menu" tabindex="-1"
+    <div class="server-menu pop-layer" class:ready={serverMenuH > 0} role="menu" tabindex="-1"
       style:left="{serverMenuPos.x}px" style:top="{serverMenuPos.y}px"
+      style:--pop-origin={serverMenuAnchor ? popOrigin(serverMenuAnchor, serverMenuPos) : undefined}
       bind:clientWidth={serverMenuW} bind:clientHeight={serverMenuH}>
       <div class="sm-title">{t('serversTitle')}</div>
       {#each serverList as s (s.id)}
@@ -1743,6 +1745,7 @@
   {/if}
 
   <InstallPrompt />
+  <HoverCard />
   {#if connected && layout.isTouchDevice}
     <nav class="tabbar">
 
@@ -1914,9 +1917,8 @@
     background: var(--bg); border: 1px solid var(--border); border-radius: var(--ui-radius-panel);
     box-shadow: 0 12px 34px rgba(0,0,0,0.45); padding: 5px;
     display: flex; flex-direction: column; gap: 2px;
-    opacity: 0; transition: opacity var(--t-fast) ease;
+    /* Visibility and the intro are the shared .pop-layer atom (app.css). */
   }
-  .server-menu.ready { opacity: 1; }
   .sm-title {
     font-family: var(--font-display); font-weight: 600; font-size: var(--fs-micro);
     color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em;

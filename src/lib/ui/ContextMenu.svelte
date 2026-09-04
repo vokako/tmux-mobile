@@ -8,7 +8,7 @@
   // second menu language would read as a second kind of menu. The only difference
   // is what it is anchored to: a pointer instead of a trigger's rect.
   import Icon from './Icon.svelte';
-  import { menuPlacement, pointAnchor, viewBox } from './placement.ts';
+  import { menuPlacement, pointAnchor, popOrigin, viewBox } from './placement.ts';
 
   /**
    * @typedef {{ label: string, icon?: string, hint?: string, checked?: boolean, title?: string,
@@ -109,8 +109,9 @@
 </script>
 
 {#if at && items.length}
-  <div class="ctx" class:ready={h > 0} bind:this={el} role="menu" tabindex="-1"
+  <div class="ctx pop-layer" class:ready={h > 0} bind:this={el} role="menu" tabindex="-1"
     style:left="{pos.x}px" style:top="{pos.y}px"
+    style:--pop-origin={at ? popOrigin(at.anchor ?? pointAnchor(at.x, at.y), pos, at.align ?? 'right') : undefined}
     bind:clientWidth={w} bind:clientHeight={h}>
     {#if who}<div class="ctx-who">{who}</div>{/if}
     {#each items as it, i (it.label)}
@@ -132,10 +133,9 @@
     background: var(--bg); border: 1px solid var(--border); border-radius: var(--ui-radius-panel);
     box-shadow: 0 14px 38px rgba(0, 0, 0, 0.45); padding: 5px;
     display: flex; flex-direction: column; gap: 1px;
-    /* Invisible until measured, so it cannot be seen at the wrong place. */
-    opacity: 0; pointer-events: none;
+    /* Invisible until measured, then grows from its anchor corner: the shared
+       .pop-layer atom (app.css) owns opacity/pointer-events/transform. */
   }
-  .ctx.ready { opacity: 1; pointer-events: auto; }
   .ctx-who {
     padding: 3px 9px 5px; font-size: var(--fs-meta); color: var(--text3);
     font-family: ui-monospace, Menlo, monospace;

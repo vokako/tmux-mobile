@@ -75,4 +75,5 @@ These tests `readFile` the component source and assert with regexes.
 | `system/system.source.test.ts` | the vitals corner takes its transport by injection, polls low-frequency and stops while hidden, fails soft, wears tokens |
 | `ui/totail.source.test.ts` | the to-tail atoms live in app.css once; both records wear the shared class |
 | `ui/motion.source.test.ts` | the micro-motion vocabulary (motion.md): `.chev`/`.flip`, the three intro keyframes and `.state-ctl` live once in app.css on the two tempo tokens and still under reduced motion; `ui/motion.ts` mirrors the tokens; no component redefines an atom, imports `svelte/transition`, uses `animate:flip` without `moveMs()`, or runs an `infinite` loop without a reduced-motion rule |
+| `ui/indicator.test.ts`, `ui/hover.test.ts` | the sliding indicator's box→variables mapping and the hover card's dwell/hop timing (pure halves of `ui/indicator.ts` / `ui/hover.ts`) |
 | `ui/popover.source.test.ts` | every fixed popover (Select, ContextMenu, PanePicker) dismisses on an outside ancestor scroll but never on its own list scrolling |

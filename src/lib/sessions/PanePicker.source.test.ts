@@ -12,7 +12,7 @@ test('the retired unread-notification dots stay retired (2026-09-01)', () => {
 
 test('the picker is the one popover mechanism, not a backdrop panel (2026-09-03)', () => {
   assert.doesNotMatch(source, /picker-backdrop/u, 'no backdrop button — dismissal is the shared set');
-  assert.match(source, /import \{ anchorOf, menuPlacement, viewBox, type AnchorRect \} from '\.\.\/ui\/placement\.ts'/u);
+  assert.match(source, /import \{ anchorOf, menuPlacement, popOrigin, viewBox, type AnchorRect \} from '\.\.\/ui\/placement\.ts'/u);
   assert.match(source, /menuPlacement\(anchorRect, \{ w, h \}, viewBox\(\), 6, 8, align\)/u, 'placed from the opener, flipped and clamped by the shared math');
   const style = source.match(/<style>[\s\S]*<\/style>/u)?.[0] ?? '';
   assert.match(style, /\.picker \{[^}]*position: fixed/u, 'a fixed layer — a scrolling or overflow:hidden caller cannot clip it');

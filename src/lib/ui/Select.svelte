@@ -10,7 +10,7 @@
   // placed from the trigger's rect, because these fields live inside scrolling
   // panels and an absolutely-positioned menu would be clipped by them.
   import Icon from './Icon.svelte';
-  import { anchorOf, menuPlacement, viewBox, type AnchorRect } from './placement.ts';
+  import { anchorOf, menuPlacement, popOrigin, viewBox, type AnchorRect } from './placement.ts';
 
   interface Option { value: string; label?: string; hint?: string; icon?: string }
 
@@ -183,8 +183,9 @@
 {/if}
 
 {#if open && shown.length}
-  <div class="sel-menu" class:ready={menuH > 0} role="listbox" tabindex="-1" id="sel-combo-list"
+  <div class="sel-menu pop-layer" class:ready={menuH > 0} role="listbox" tabindex="-1" id="sel-combo-list"
     style:left="{pos.x}px" style:top="{pos.y}px" style:width="{fieldW}px"
+    style:--pop-origin={anchor ? popOrigin(anchor, pos) : undefined}
     bind:this={menuEl} bind:clientHeight={menuH}>
     {#each shown as o, i (o.value)}
       <button class="sel-opt" class:sel={o.value === value} class:cur={i === cursor}
@@ -246,9 +247,8 @@
     background: var(--bg); border: 1px solid var(--border); border-radius: var(--ui-radius-panel);
     box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45); padding: 5px;
     display: flex; flex-direction: column; gap: 2px;
-    opacity: 0; transition: opacity var(--t-fast) ease;
+    /* Visibility and the intro are the shared .pop-layer atom (app.css). */
   }
-  .sel-menu.ready { opacity: 1; }
   .sel-opt {
     display: flex; align-items: center; gap: 8px; min-height: 36px; width: 100%; text-align: left;
     background: none; border: none; border-radius: var(--ui-radius-control); color: var(--text2);

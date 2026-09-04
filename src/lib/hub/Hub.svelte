@@ -35,7 +35,7 @@
   import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, stateNeedsYou, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, mentionedAgents, chipExtras, fmtElapsed, agoShort, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, touchContextMenu, perLineOf, modelLabel } from './hub.ts';
   import { notifyNews, isAway, roomProjectName } from './notifications.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
-  import { anchorOf, menuPlacement, viewBox } from '../ui/placement.ts';
+  import { anchorOf, menuPlacement, popOrigin, viewBox } from '../ui/placement.ts';
   import ContextMenu from '../ui/ContextMenu.svelte';
   import { longpress } from '../ui/longpress.ts';
   import { flip } from 'svelte/animate';
@@ -2559,8 +2559,9 @@
 
              A stopped agent gets the two verbs that mean anything to it: start
              it again, or eject it. Watch/Interrupt/Stop all need a live pane. -->
-        <div class="a-menu" class:ready={menuH > 0} role="menu" tabindex="-1"
+        <div class="a-menu pop-layer" class:ready={menuH > 0} role="menu" tabindex="-1"
           style:left="{menuPos.x}px" style:top="{menuPos.y}px"
+          style:--pop-origin={menuAnchor ? popOrigin(menuAnchor, menuPos, 'left') : undefined}
           bind:clientWidth={menuW} bind:clientHeight={menuH}>
           <div class="am-who">{menuFor}</div>
           <!-- State + running time live HERE, not on the card: the elapsed
@@ -3573,9 +3574,8 @@
     background: var(--bg); border: 1px solid var(--border); border-radius: var(--ui-radius-panel);
     box-shadow: 0 12px 34px rgba(0,0,0,0.45); padding: 5px;
     display: flex; flex-direction: column; gap: 2px;
-    opacity: 0; transition: opacity var(--t-fast) ease;
+    /* Visibility and the intro are the shared .pop-layer atom (app.css). */
   }
-  .a-menu.ready { opacity: 1; }
   .am-who {
     font-family: var(--font-display); font-weight: 600;
     font-size: var(--fs-meta); color: var(--text3);

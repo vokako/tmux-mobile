@@ -11,7 +11,7 @@
   // near the viewport edge clipped it, and Escape did nothing.
   import AgentChip from '../ui/AgentChip.svelte';
   import Icon from '../ui/Icon.svelte';
-  import { anchorOf, menuPlacement, viewBox, type AnchorRect } from '../ui/placement.ts';
+  import { anchorOf, menuPlacement, popOrigin, viewBox, type AnchorRect } from '../ui/placement.ts';
   import { t } from '../core/i18n.svelte.ts';
   import { listSessionsWithPanes, newWindow } from '../core/ws.ts';
   import type { TmuxPane } from '../core/ws.ts';
@@ -143,7 +143,8 @@
   }
 </script>
 
-<div class="picker" class:ready={h > 0} role="dialog" aria-label={t('pickPane')} tabindex="-1"
+<div class="picker pop-layer" class:ready={h > 0} role="dialog" aria-label={t('pickPane')} tabindex="-1"
+  style:--pop-origin={anchorRect ? popOrigin(anchorRect, pos, align) : undefined}
   style:left="{pos.x}px" style:top="{pos.y}px"
   bind:this={el} bind:clientWidth={w} bind:clientHeight={h}>
   {#if loading}
@@ -212,9 +213,8 @@
     border-radius: var(--ui-radius-panel);
     box-shadow: 0 12px 40px rgba(0,0,0,0.4);
     padding: 6px;
-    opacity: 0; pointer-events: none;
+    /* Visibility and the intro are the shared .pop-layer atom (app.css). */
   }
-  .picker.ready { opacity: 1; pointer-events: auto; }
   /* Group dividers and per-session headers share one type treatment (size /
      weight / case / spacing); only colour marks the hierarchy — the
      Teams/Sessions dividers are accent-highlighted, individual session names

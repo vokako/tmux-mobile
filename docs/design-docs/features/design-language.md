@@ -81,8 +81,10 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   because it is centred BY a transform that no keyframe may fight. A
   sheet's directional shadow belongs to its OPEN state only: a parked
   `translateX(-100%)` layer is still painted, so a persistent blur leaks back
-  onto the page's left edge. POPOVERS (menus, selects) do not animate — they
-  are placed, measured, shown. A transform hint (`will-change`) may exist only
+  onto the page's left edge. POPOVERS (menus, selects, pickers, the hover
+  card) are placed and measured invisible, THEN grow from their anchor corner
+  on `--t-fast` (`.pop-layer`, owner 2026-09-04 #86; before that they did not
+  animate at all). A transform hint (`will-change`) may exist only
   WHILE a slide runs:
   a resting transform turns the page into a containing block and breaks
   every fixed popover. A SHEET is the one sanctioned standing hint, and it is

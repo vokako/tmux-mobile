@@ -38,6 +38,21 @@ export function menuPlacement(
   return { x, y };
 }
 
+/**
+ * Where a placed popover GROWS from (motion.md §2 "popover intro"): the corner
+ * that touches its anchor. Below the anchor it grows from its top edge, flipped
+ * above it grows from its bottom edge; the horizontal side follows `align`.
+ * Pure, so the intro's origin is tested with the placement it belongs to.
+ */
+export function popOrigin(
+  anchor: AnchorRect,
+  pos: { x: number; y: number },
+  align: 'right' | 'left' = 'right',
+): string {
+  const v = pos.y < anchor.top ? 'bottom' : 'top';
+  return `${v} ${align}`;
+}
+
 /** The root's CSS `zoom` (the web/Android interface scaling). 1 on the Tauri
  * desktop path, where the webview zooms instead and rects need no correction. */
 export function uiZoom(): number {

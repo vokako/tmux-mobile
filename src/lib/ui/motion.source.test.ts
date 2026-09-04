@@ -39,8 +39,38 @@ test('the four atoms exist once, on the tokens, and still under reduced motion',
   assert.match(appCss, /\.appear-rise\s*\{\s*animation:\s*rise-in var\(--t-move\)/u);
   assert.match(appCss, /\.appear-pop\s*\{\s*animation:\s*pop-in var\(--t-fast\)/u);
   assert.match(appCss, /\.state-ctl\s*\{\s*transition:[^}]*border-color var\(--t-fast\)[^}]*background var\(--t-fast\)[^}]*color var\(--t-fast\)/u);
-  const still = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.chev,\s*\.flip,\s*\.state-ctl\s*\{\s*transition:\s*none;\s*\}\s*\.appear,\s*\.appear-rise,\s*\.appear-pop[^}]*\{\s*animation:\s*none;/u;
+  const still = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.chev,\s*\.flip,\s*\.state-ctl[^{]*\{\s*transition:\s*none;\s*\}\s*\.appear,\s*\.appear-rise,\s*\.appear-pop[^}]*\{\s*animation:\s*none;/u;
   assert.match(appCss, still, 'the atoms still under prefers-reduced-motion');
+});
+
+test('the wave-2 atoms: popover intro, sliding indicator, reveal, skeleton', () => {
+  assert.match(appCss, /\.pop-layer\s*\{[^}]*opacity:\s*0;[^}]*transform:\s*scale\(0\.96\);[^}]*transform-origin:\s*var\(--pop-origin/u, 'a popover is invisible and slightly small until placed');
+  assert.match(appCss, /\.pop-layer\.ready\s*\{[^}]*transform:\s*none;[^}]*transition:[^}]*var\(--t-fast\)/u, 'it grows on --t-fast and rests with no transform');
+  assert.match(appCss, /\.slide-ind\.ready,\s*\.slide-pill\.ready\s*\{\s*transition:[^}]*transform var\(--t-move\)/u, 'the indicator glides on --t-move, only once placed');
+  assert.match(appCss, /\.reveal > \*,\s*\.reveal-tail > \*\s*\{\s*animation:\s*rise-in var\(--t-move\) ease-out backwards;/u, 'a loaded list unfolds with backwards fill only');
+  assert.match(appCss, /\.reveal-tail > :nth-last-child\(2\)/u, 'a feed unfolds from its newest row');
+  assert.match(appCss, /\.skel::after\s*\{[^}]*animation:\s*shimmer/u);
+  assert.match(appCss, /\.skel-wrap\s*\{[^}]*animation-delay:\s*150ms/u, 'a skeleton waits 150ms so a fast load never flashes one');
+  const still = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[^@]*\.pop-layer\.ready,\s*\.slide-ind\.ready,\s*\.slide-pill\.ready\s*\{\s*transition:\s*none;[^@]*\.reveal > \*,\s*\.reveal-tail > \*,\s*\.skel::after,\s*\.skel-wrap\s*\{\s*animation:\s*none;/u;
+  assert.match(appCss, still, 'the wave-2 atoms still under prefers-reduced-motion');
+});
+
+test('every placed popover wears .pop-layer and no component keeps a private opacity gate', () => {
+  const popovers = ['src/lib/ui/ContextMenu.svelte', 'src/lib/ui/Select.svelte', 'src/lib/sessions/PanePicker.svelte', 'src/lib/ui/HoverCard.svelte'];
+  for (const rel of popovers) {
+    const src = readFileSync(join(root, rel), 'utf8');
+    assert.match(src, /class="[^"]*\bpop-layer\b[^"]*" class:ready=/u, `${rel}: the placed layer wears .pop-layer with the ready gate`);
+    assert.match(src, /style:--pop-origin=/u, `${rel}: tells the atom which corner it grows from`);
+  }
+  for (const rel of ['src/lib/hub/Hub.svelte', 'src/App.svelte']) {
+    const src = readFileSync(join(root, rel), 'utf8');
+    assert.match(src, /class="(a-menu|server-menu) pop-layer" class:ready=/u, `${rel}: its menu wears .pop-layer`);
+  }
+  for (const file of components) {
+    const src = readFileSync(file, 'utf8');
+    const rel = file.slice(root.length);
+    assert.doesNotMatch(src, /\.(ctx|sel-menu|a-menu|server-menu|picker|hover-card)\.ready\s*\{\s*opacity:\s*1/u, `${rel}: the .ready opacity gate is the atom's, not the component's`);
+  }
 });
 
 test('no component re-implements an atom or reaches for svelte/transition', () => {

@@ -45,10 +45,16 @@ vocabulary.
    transition only plays on release (spring back on `--t-fast`, commit on the
    navigation slide). Files' edge-swipe and the rail's icon drag are the
    references.
-8. **Popovers do not animate; navigation has one slide; sheets slide with a
-   scrim.** These three are already law in design-language.md §1 and stay so.
-   A menu is placed, measured, shown. Page-level slides are touch-only.
-   Desktop rails and sidebars have no motion behind them.
+8. **A popover is placed first, then grows from its anchor; navigation has
+   one slide; sheets slide with a scrim.** A menu, select, picker or hover
+   card is measured invisible, positioned, and only THEN plays a short
+   opacity + scale(0.96 → 1) intro from the corner that touches its trigger
+   (`.pop-layer`, `popOrigin()`), so it is never seen at the wrong place and
+   still feels like it came from where you clicked (owner, 2026-09-04 #86:
+   "右键或者长按出来的选项卡出现什么的，都可以加动效" — this replaces the
+   earlier "popovers do not animate"). Its exit is a cut. Page-level slides
+   are touch-only. Desktop rails and sidebars have no motion behind them —
+   but the HIGHLIGHT that marks the chosen tab glides (principle 14).
 9. **Never touch the terminal's box.** No transform, transition or animation
    on `.term-wrap`, `.xterm-wrap`, a split `.cell`, or any ancestor of an
    xterm instance: a resting transform turns it into a containing block and
@@ -75,6 +81,29 @@ vocabulary.
     intro class is on the element that mounts so a remount restarts it, and
     a whole list mounting at once (history load, project switch) is gated
     with `class:appear={fresh}` so two hundred rows do not fade in together.
+14. **One highlight that travels.** A tab bar, a rail, a segmented control
+    has ONE marker for "chosen", and when the choice changes the marker
+    glides to the new item (`.slide-ind` / `.slide-pill`, `ui/indicator.ts`)
+    instead of one item switching off and another switching on. The items'
+    own colour still cross-fades (`.state-ctl`); the travelling marker is
+    what makes the change read as a movement (owner, 2026-09-04: "点击不同的
+    标签页面，过度的一些选项卡高亮过度的时候，都可以有动效").
+15. **A load unfolds, it never flashes.** Content that arrives after a
+    switch does not pop in as a finished wall: while it loads, the slot
+    shows either the PREVIOUS content dimmed (stale-while-revalidate, Files'
+    pattern) or, when there is nothing previous, a skeleton of the right
+    shape that appears only after 150ms (`.skel-wrap`); when the data lands
+    the rows unfold with a ~30ms stagger (`.reveal` from the top,
+    `.reveal-tail` from the newest message at the bottom). Never a blank
+    frame followed by everything at once (owner, 2026-09-04: "切换过去然后
+    看到东西闪出来 … 像一个东西在你面前展开一样加载").
+16. **Hover explains.** On a pointer device, resting on a thing that has
+    more to say (an agent card, a project row, a rail icon, a session, a
+    file) opens ONE shared hover card (`use:hoverInfo`, `ui/HoverCard`) after
+    a short dwell, instantly when hopping between neighbours, with the
+    thing's live facts — never a second tooltip species and never a native
+    `title` beside it. Touch has no hover: there the long-press menu is the
+    "more" gesture, and the card is not shown.
 
 ## 2 · Vocabulary (app.css, one copy)
 
@@ -89,6 +118,11 @@ vocabulary.
 | `animate:flip={{ duration: moveMs() }}` | a keyed list reorders — the ONE Svelte directive in use (`ui/motion.ts`) | `--t-move` |
 | `.side-scrim` / `.dlg-backdrop` fade-in, `sheet-up` (`translateY(100%) → none`, only for a layer whose resting transform is none) | sheets rise with a scrim (design-language §1) | `--t-move` |
 | `drill-in-right` / `drill-in-left` (app.css, one copy), `slideInLeft/Right` (App) | navigation, touch-only | 120ms linear |
+| `.pop-layer` + `.ready`, `--pop-origin` from `popOrigin()` | a placed popover grows from its anchor corner (opacity + scale 0.96→1); exit is a cut | `--t-fast` |
+| `.slide-ind` (bar) / `.slide-pill` (filled pill) + `use:slideIndicator` | the one travelling highlight of a tab bar / rail / segmented control (`--ind-x/y/w/h` written by the action; `.ready` after the first measure so it is born in place) | `--t-move` |
+| `.reveal` / `.reveal-tail` on a container | a loaded list unfolds, rows staggered 30ms from the top / from the newest at the bottom; backwards fill only | `--t-move` + stagger |
+| `.skel` (+ `.skel-wrap`) | a loading placeholder of the coming shape with a slow shimmer, invisible for the first 150ms | 1.4s loop, stilled |
+| `use:hoverInfo={() => info}` + `ui/HoverCard` | the one hover card (title / text / label→value rows / note), 380ms dwell, 60ms hop, pointer + keyboard focus only | `--t-fast` intro |
 
 Usage: wrap the `<Icon>` in `<span class="chev" class:open={x}>`; put `.appear*`
 on the element that mounts inside `{#if}`; add `.state-ctl` to a segmented
@@ -148,6 +182,28 @@ history buttons; the sysvitals first reading; ConfirmDialog scrim + sheet
 rise (`sheet-up` joined the vocabulary) + desktop fade; Select chevron;
 SideHandle opacity reveal; InstallPrompt on `--t-move`; Lightbox settle on
 `moveMs()`; `.m-acts button` and `.chip-btn` filter transitions.
+
+**Wave 6 — popovers grow from their anchor** (#86): ContextMenu, Select,
+PanePicker, the Hub agent menu, the server menu and the hover card wear
+`.pop-layer`; the composer's recipient and command menus and any remaining
+`opacity: 0 → .ready` gate join them.
+
+**Wave 7 — the highlight travels** (#86): phone tab bar (bar), desktop rail
+(vertical bar), Preferences segmented controls and the Board status slider
+(pill), Files/Git tabs, the Hub drawer's view toggle.
+
+**Wave 8 — loads unfold** (#86): Hub room switch (skeleton bubbles + cards
+after 150ms for an uncached room, then `.reveal-tail` on the feed and
+`.reveal` on the roster), Board columns, Sessions list, Files listing (the
+dim-then-reveal), Projects cards, Agents list, Settings categories on first
+paint.
+
+**Wave 9 — hover explains** (#86): agent cards (state, model, context,
+last activity, cwd), sidebar project rows (path, agents, last message),
+rail icons and tab bar (name + shortcut), sessions and panes (command, size,
+last activity), file rows (size, modified, kind), board cards (reporter,
+assignee, updated), settings rows where the label is terse. Native `title`
+is removed wherever the card takes over; `aria-label` stays.
 
 **Deliberately not done**: `body` and the scrollbar thumb keep their `0.3s`
 theme cross-fade (app.css) — that is the THEME changing under every pixel at
