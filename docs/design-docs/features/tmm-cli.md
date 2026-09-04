@@ -1897,8 +1897,13 @@ ellipsizing — the owner's three rules verbatim ("展示得下完整展示 / �
 隐藏 / 支持滑动查看，不要省略号", 2026-08-20). The scrollbar is hidden (one
 quiet line), a `wheelX` action pans it with a mouse's vertical wheel (a
 non-passive listener, because it has to preventDefault; it lets the wheel
-through when the path fits), and the full path stays in `title`. Desktop only,
-as before — the phone header never showed the path.
+through when the path fits), and the full path stays in `title`. It remains
+read-only prose rather than a fake button, but explicitly overrides the app
+shell's `user-select:none` (`user-select:text`, including WebKit) so a mouse drag
+can select any substring. Double-click selects the whole path span and sends
+the exact untruncated value through the shared `copyText` helper (including its
+plain-HTTP `execCommand` fallback), so the off-screen portion is copied too.
+Desktop only, as before — the phone header never showed the path.
 
 `project_create` also had to change: the session name follows the NAME when
 one is given (`session ?? name ?? basename(path)`). It previously fell

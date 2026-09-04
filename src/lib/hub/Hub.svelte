@@ -20,6 +20,7 @@
   import Board from './Board.svelte';
   import SideHandle from '../ui/SideHandle.svelte';
   import { scrollFade } from '../core/scrollFade.ts';
+  import { copyText } from '../core/clipboard.ts';
   import ChatImage from './ChatImage.svelte';
   import Lightbox from '../ui/Lightbox.svelte';
   import 'katex/dist/katex.min.css';
@@ -2286,6 +2287,30 @@
     return d.toLocaleDateString(i18n.lang === 'zh' ? 'zh-CN' : 'en-US', opts);
   };
 
+  /** The header path remains prose: drag selects it, while a double-click
+   * copies the complete value (including the off-screen part) through the
+   * app's clipboard helper. An action keeps the span's read-only semantics —
+   * it is not a fake button — and lets the browser perform its normal text
+   * selection before we expand the highlight to the whole copied path. */
+  function doubleClickCopy(el, initialValue) {
+    let value = initialValue;
+    const onDoubleClick = () => {
+      if (!value) return;
+      void copyText(value);
+      const selection = window.getSelection();
+      if (!selection || !el.isConnected) return;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    };
+    el.addEventListener('dblclick', onDoubleClick);
+    return {
+      update(nextValue) { value = nextValue; },
+      destroy() { el.removeEventListener('dblclick', onDoubleClick); },
+    };
+  }
+
   /** Vertical wheel pans the header path horizontally — the path scrolls
    * instead of ellipsizing, and a mouse has no horizontal axis of its own.
    * An action (not `onwheel`) because preventDefault needs a non-passive
@@ -2481,7 +2506,7 @@
              fits, and when it doesn't the box scrolls (wheel included) instead
              of ellipsizing — "不要直接用省略号" (owner, 2026-08-20). Desktop
              only, same as before. -->
-        {#if !compact}<span class="path" use:wheelX title={selectedRow?.project.path ?? ''}>{selectedRow?.project.path ?? ''}</span>{/if}
+        {#if !compact}<span class="path" use:wheelX use:doubleClickCopy={selectedRow?.project.path ?? ''} title={selectedRow?.project.path ?? ''}>{selectedRow?.project.path ?? ''}</span>{/if}
         <span class="spacer"></span>
         <!-- Header actions are ONE dialect: icon-only .icon-btn, the label on
              hover via title (and aria-label for readers). Mixed text-and-icon
@@ -3601,6 +3626,7 @@
        keeping the toggles right-aligned. */
     min-width: 0; flex: 0 1000 auto;
     scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    user-select: text; -webkit-user-select: text; cursor: text;
   }
   .path::-webkit-scrollbar { display: none; }
   .spacer { flex: 1; }

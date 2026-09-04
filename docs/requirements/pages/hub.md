@@ -27,6 +27,10 @@ completion).
   rect, zoom-corrected), and the shared placement clamp keeps it whole
   inside the viewport — never clipped at the right edge. Every other
   context menu keeps the right-aligned pointer placement.
+- The desktop header path remains the complete project path: it scrolls instead
+  of ellipsizing when space runs out, explicitly supports mouse text selection,
+  and a double-click selects and copies the complete value (including its
+  off-screen portion) through the shared clipboard fallback.
 - The composer's scrollbar exists exactly while there is something to
   scroll (board #34): hidden at rest and while the text fits, auto only
   when the natural height exceeds the max — decided in growComposer's one

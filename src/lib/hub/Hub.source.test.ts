@@ -579,6 +579,20 @@ test('the ⋯ is grouped WITH the name, so the row gap cannot separate them (own
   assert.ok(!h1.includes('name="chevron-down"'), 'the caret sits beside the h1, never inside it');
 });
 
+test('the Chat header path is selectable prose and a double-click copies the full value (board #88)', () => {
+  const headPath = source.slice(source.indexOf('<!-- The FULL path'), source.indexOf('<span class="spacer"></span>'));
+  assert.match(source, /import \{ copyText \} from '\.\.\/core\/clipboard\.ts';/u,
+    'the shared clipboard helper keeps HTTP and WebView fallback behavior');
+  assert.match(headPath, /<span class="path" use:wheelX use:doubleClickCopy=\{selectedRow\?\.project\.path \?\? ''\}/u,
+    'the visible full path owns the double-click copy action');
+  const action = source.slice(source.indexOf('function doubleClickCopy'), source.indexOf('</script>'));
+  assert.match(action, /el\.addEventListener\('dblclick', onDoubleClick\)/u, 'double-click is attached without turning prose into a button');
+  assert.match(action, /void copyText\(value\)/u, 'the exact untruncated project path is copied');
+  const css = rule('.path');
+  assert.match(css, /user-select:\s*text/u, 'mouse drag selection explicitly overrides the app shell');
+  assert.match(css, /-webkit-user-select:\s*text/u, 'WebKit selection is explicit too');
+  assert.match(css, /cursor:\s*text/u, 'the cursor advertises selectable prose');
+});
 test('a delivered prompt sheds its stamp and board deliveries wear the dialect (board #18)', () => {
   assert.match(source, /\{@const pp = promptParts\(b\.text\)\}/u, 'every prompt row goes through the reader');
   assert.match(source, /\{#if pp\.from\}<span class="p-from">\{pp\.from\}<\/span>\{\/if\}/u,
