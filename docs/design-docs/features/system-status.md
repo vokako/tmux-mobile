@@ -83,7 +83,7 @@ so a dropped connection stops the timer even before the unmount.
 #85 replaced the full-width flow footer after the owner reported that the
 grey horizontal row still read as crossing the work area. App keeps ONE
 polling instance in a shell-level `.sys-sidebar`: fixed at `left: 46px`
-(after the icon rail), `width: var(--sidebar-w)`, with a single named 34px
+(after the icon rail), `width: var(--sidebar-w)`, with a single named 24px
 height. The page keeps the full viewport height; no footer track, colour,
 border, or empty reservation extends under the terminal/content column.
 
@@ -95,10 +95,12 @@ their last row remains visible and scrollable. The strip is singleton rather
 than copied into every page, preserving one poll timer and one CPU sampling
 window. Its z-index sits below the icon rail and popovers.
 
-Visual hierarchy is deliberately no longer all-grey. CPU/MEM/DISK wear
-low-chroma token-mixed accent/purple/green category surfaces and labels; the
-actual readings use full `--text` ink and the mono data face. Both themes
-therefore get contrast from their own tokens, with no raw component colours.
+Visual hierarchy is a quiet system-monitor readout, not three cards. The
+shared sidebar background continues uninterrupted; each metric has no local
+fill, border, radius, or padding. A restrained 4px accent/purple/green dot is
+the only category colour, labels use `--text2`, and the actual readings use
+full `--text` ink plus the mono data face. Both themes therefore stay legible
+without making telemetry compete with the work.
 
 ## Tests
 

@@ -1976,7 +1976,7 @@
     z-index: 1; pointer-events: none;
   }
   main.with-rail {
-    --sys-sidebar-h: 34px;
+    --sys-sidebar-h: 24px;
     padding-left: 46px;
   }
 

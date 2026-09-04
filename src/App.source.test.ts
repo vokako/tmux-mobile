@@ -428,7 +428,7 @@ test('the system-vitals strip mounts connected-desktop-only inside reserved side
   // sidebar shell reserves the same named height beneath its own content.
   assert.match(source, /\.sys-sidebar \{[^}]*position: fixed[^}]*left: 46px[^}]*width: var\(--sidebar-w\)/u,
     'the strip is confined to the primary sidebar column');
-  assert.match(source, /--sys-sidebar-h: 34px/u, 'one named height owns geometry');
+  assert.match(source, /--sys-sidebar-h: 24px/u, 'one compact named height owns geometry');
   assert.match(source, /\.with-rail :global\(\.sidebar\),\s*\.with-rail \.term-side,\s*\.with-rail :global\(\.files-left\) \{[^}]*padding-bottom: var\(--sys-sidebar-h\)/u,
     'every primary sidebar reserves the exact strip height');
   assert.ok(!/sys-footer/u.test(source), 'the retired full-width footer cannot regrow');

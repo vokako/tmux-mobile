@@ -18,10 +18,10 @@ MACHINE THE SERVER RUNS ON (not the phone, not the browser):
   reserved space at the bottom of the primary sidebar (`--sidebar-w`) after
   the icon rail. It never draws, borders, or reserves a row under the main
   terminal/content area, and it remains absent on touch layouts.
-- **Readable categorical colour.** CPU, MEM, and DISK use restrained
-  theme-token accent/purple/green treatments; values use primary text ink and
-  the mono data face. The strip must remain legible in both light and dark
-  themes rather than rendering the whole reading in muted grey.
+- **Compact, quiet monitor treatment.** The whole strip is 24px high. CPU,
+  MEM, and DISK are one unboxed readout with only restrained 4px
+  accent/purple/green dots, muted labels, and clear mono values. There are no
+  per-metric coloured cards, borders, or fills competing with project work.
 - **Low refresh.** One reading every ~20 seconds. This is a glanceable
   number, not a monitor; the tempo is also the CPU measurement window (see
   design doc).
