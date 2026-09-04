@@ -166,7 +166,12 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   `ui/Select` is the ONE dropdown (its `editable` mode is the one combobox);
   a native `<select>`/`<datalist>` is a regression.
 - Segmented rows / steppers (Preferences) — `--ui-control-height`,
-  `--ui-radius-control`, `--ui-font-control`; active = accent border + wash.
+  `--ui-radius-control`, `--ui-font-control`. A segmented row is
+  `ui/Segmented` (`options` / `value` / `onchange`), never hand-rolled: the
+  accent wash + ring is ONE `.slide-pill` that travels to the chosen option
+  (motion.md §1.14), the buttons keep only their ink (`.state-ctl` cross-fade)
+  and the chosen one drops its own border so the pill's ring shows.
+  `ui/segmented.source.test.ts` pins it.
 - Dialogs — `ui/ConfirmDialog` for every confirm; phone = bottom sheet with
   44px buttons that rises on `sheet-up` under a fading scrim, desktop = a
   centred card that fades. Solid red confirm per above.

@@ -305,7 +305,8 @@ test('the permission request and the audio unlock ride the SETTINGS toggle, neve
   assert.ok(appearance.length > 0 && !appearance.includes('hubNotify'), 'no notification row under Appearance');
   assert.match(prefs, /storedTab === 'notifications'/u, 'the category is restorable');
   assert.match(prefs, /systemNotify\(\{ title: t\('hubNotifyTestTitle'\)/u, 'a test row — the real alert only fires while you are NOT looking');
-  assert.match(prefs, /\{#each NOTIFY_LEVELS as l \(l\)\}/u, 'the level row is driven by the ONE list, in its order');
+  assert.match(prefs, /options=\{NOTIFY_LEVELS\.map\(\(l\) => \(\{ value: l, label: t\('hubNotifyLevel_' \+ l\) \}\)\)\}/u,
+    'the level row (a ui/Segmented) is driven by the ONE list, in its order');
   assert.match(prefs, /setNotifyLevel\(l\)/u);
   // Asking whenever not yet granted is what reaches Android's runtime prompt:
   // the Tauri shim reports `denied` before the first ask.

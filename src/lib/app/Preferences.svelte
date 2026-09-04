@@ -3,6 +3,7 @@
   import SideHandle from '../ui/SideHandle.svelte';
   import { scrollFade } from '../core/scrollFade.ts';
   import Select from '../ui/Select.svelte';
+  import Segmented from '../ui/Segmented.svelte';
   import { t, i18n, setLocale } from '../core/i18n.svelte.ts';
   import { layout } from './layout.svelte.ts';
   import { fonts, uiFont, displayFont } from './fonts.svelte.ts';
@@ -368,34 +369,23 @@
         <div class="setting-card">
           <div class="setting-row">
             <div><strong>{t('theme')}</strong><small>{t('themeHint')}</small></div>
-            <div class="segmented">
-              <button class:active={theme === 'system'} onclick={() => onTheme('system')}>{t('themeAuto')}</button>
-              <button class:active={theme === 'light'} onclick={() => onTheme('light')}>{t('themeLight')}</button>
-              <button class:active={theme === 'dark'} onclick={() => onTheme('dark')}>{t('themeDark')}</button>
-            </div>
+            <Segmented value={theme} onchange={onTheme} ariaLabel={t('theme')}
+              options={[{ value: 'system', label: t('themeAuto') }, { value: 'light', label: t('themeLight') }, { value: 'dark', label: t('themeDark') }]} />
           </div>
           <div class="setting-row">
             <div><strong>{t('language')}</strong><small>{t('languageHint')}</small></div>
-            <div class="segmented">
-              <button class:active={i18n.lang === 'en'} onclick={() => setLocale('en')}>EN</button>
-              <button class:active={i18n.lang === 'zh'} onclick={() => setLocale('zh')}>中文</button>
-            </div>
+            <Segmented value={i18n.lang as 'en' | 'zh'} onchange={(l) => setLocale(l)} ariaLabel={t('language')}
+              options={[{ value: 'en', label: 'EN' }, { value: 'zh', label: '中文' }]} />
           </div>
           <div class="setting-row">
             <div><strong>{t('layout')}</strong><small>{t('layoutHint')}</small></div>
-            <div class="segmented">
-              <button class:active={layout.mode === 'auto'} onclick={() => layout.set('auto')}>{t('layoutAuto')}</button>
-              <button class:active={layout.mode === 'desktop'} onclick={() => layout.set('desktop')}>{t('layoutDesktop')}</button>
-              <button class:active={layout.mode === 'mobile'} onclick={() => layout.set('mobile')}>{t('layoutMobile')}</button>
-            </div>
+            <Segmented value={layout.mode} onchange={(m) => layout.set(m)} ariaLabel={t('layout')}
+              options={[{ value: 'auto', label: t('layoutAuto') }, { value: 'desktop', label: t('layoutDesktop') }, { value: 'mobile', label: t('layoutMobile') }]} />
           </div>
           <div class="setting-row">
             <div><strong>{t('hubFeedLevel')}</strong><small>{t('hubFeedLevelHint')}</small></div>
-            <div class="segmented">
-              <button class:active={hubPrefs.feedLevel === 'chat'} onclick={() => hubPrefs.setFeedLevel('chat')}>{t('hubFeedChat')}</button>
-              <button class:active={hubPrefs.feedLevel === 'status'} onclick={() => hubPrefs.setFeedLevel('status')}>{t('hubFeedStatus')}</button>
-              <button class:active={hubPrefs.feedLevel === 'tools'} onclick={() => hubPrefs.setFeedLevel('tools')}>{t('hubFeedTools')}</button>
-            </div>
+            <Segmented value={hubPrefs.feedLevel} onchange={(l) => hubPrefs.setFeedLevel(l)} ariaLabel={t('hubFeedLevel')}
+              options={[{ value: 'chat', label: t('hubFeedChat') }, { value: 'status', label: t('hubFeedStatus') }, { value: 'tools', label: t('hubFeedTools') }]} />
           </div>
           <div class="setting-row">
             <div><strong>{t('hubStepsRows')}</strong><small>{t('hubStepsRowsHint')}</small></div>
@@ -434,18 +424,13 @@
         <div class="setting-card">
           <div class="setting-row">
             <div><strong>{t('hubNotify')}</strong><small>{notifyPerm === 'denied' ? t('hubNotifyDenied') : notifyPerm === 'unsupported' ? t('hubNotifySoundOnly') : t('hubNotifyHint')}</small></div>
-            <div class="segmented" role="group" aria-label={t('hubNotify')}>
-              <button class:active={notifyOn} aria-pressed={notifyOn} onclick={() => setNotify(true)}>{t('on')}</button>
-              <button class:active={!notifyOn} aria-pressed={!notifyOn} onclick={() => setNotify(false)}>{t('off')}</button>
-            </div>
+            <Segmented value={notifyOn} onchange={(on) => setNotify(on)} ariaLabel={t('hubNotify')}
+              options={[{ value: true, label: t('on') }, { value: false, label: t('off') }]} />
           </div>
           <div class="setting-row">
             <div><strong>{t('hubNotifyLevel')}</strong><small>{t('hubNotifyLevelHint')}</small></div>
-            <div class="segmented" role="group" aria-label={t('hubNotifyLevel')}>
-              {#each NOTIFY_LEVELS as l (l)}
-                <button class:active={notifyLvl === l} aria-pressed={notifyLvl === l} onclick={() => setLevel(l)}>{t('hubNotifyLevel_' + l)}</button>
-              {/each}
-            </div>
+            <Segmented value={notifyLvl} onchange={setLevel} ariaLabel={t('hubNotifyLevel')}
+              options={NOTIFY_LEVELS.map((l) => ({ value: l, label: t('hubNotifyLevel_' + l) }))} />
           </div>
           <div class="setting-row">
             <div><strong>{t('hubNotifyTest')}</strong><small>{t('hubNotifyTestHint')}</small></div>
@@ -499,10 +484,8 @@
         <div class="setting-card">
           <div class="setting-row">
             <div><strong>{t('debug')}</strong><small>{t('debugHint')}</small></div>
-            <div class="segmented">
-              <button class:active={!debugMode} onclick={() => onDebug(false)}>Off</button>
-              <button class:active={debugMode} onclick={() => onDebug(true)}>On</button>
-            </div>
+            <Segmented value={debugMode} onchange={onDebug} ariaLabel={t('debug')}
+              options={[{ value: false, label: t('off') }, { value: true, label: t('on') }]} />
           </div>
         </div>
         <div class="setting-card">
@@ -607,14 +590,13 @@
   .setting-row { min-height:52px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:16px; }
   .setting-row+.setting-row { border-top:1px solid var(--border2); } .setting-row>div:first-child{display:flex;flex-direction:column;gap:4px;min-width:0;}
   strong{font-size:var(--fs-ui);} small{font-size:var(--fs-meta);color:var(--text3);font-weight:400;line-height:1.35;}
-  .segmented { display:flex;gap:4px;flex-shrink:0; }
   /* App control dialect: --ui-radius-control squares like every chip-btn/
      icon-btn — the 999px pills were this page's private language and are why
      it read as a different app (owner, 2026-08-25: "和其他页面画风不一样").
-     Real pills stay for micro TAGS (.hook-backends) per the radius contract. */
-  .segmented button,.stepper button,.reset,.conn-actions button { height:var(--ui-control-height);border:1px solid var(--border2);background:transparent;color:var(--text3);padding:3px 8px;border-radius:var(--ui-radius-control);cursor:pointer;font-size:var(--ui-font-control);white-space:nowrap;transition:border-color var(--t-fast),background var(--t-fast),color var(--t-fast); }
-  .segmented button.active { border-color:var(--accent);background:var(--accent-bg);color:var(--accent); }
-  .segmented button:active,.stepper button:active,.reset:active,.conn-actions button:active { border-color:var(--accent);color:var(--accent); }
+     Real pills stay for micro TAGS (.hook-backends) per the radius contract.
+     The segmented rows are ui/Segmented (the same dialect, plus the pill). */
+  .stepper button,.reset,.conn-actions button { height:var(--ui-control-height);border:1px solid var(--border2);background:transparent;color:var(--text3);padding:3px 8px;border-radius:var(--ui-radius-control);cursor:pointer;font-size:var(--ui-font-control);white-space:nowrap;transition:border-color var(--t-fast),background var(--t-fast),color var(--t-fast); }
+  .stepper button:active,.reset:active,.conn-actions button:active { border-color:var(--accent);color:var(--accent); }
   .font-control{display:flex;flex-direction:column;align-items:flex-end;gap:3px}.font-error{color:var(--danger)}
   .font-control :global(.sel-combo){width:min(230px,42vw)}
   .font-control :global(.sel-trigger.combo){width:100%;font-family:var(--font-mono)}
@@ -644,6 +626,6 @@
      private 640, so a narrow window wore desktop clothes here after every
      other page had switched. The old `inset` hack predates the page-layer
      and positioned nothing. */
-  @media(max-width:760px){.pref-content{padding:12px}.setting-row{min-height:50px;padding:8px 10px;gap:10px}.font-control :global(.sel-combo){width:min(220px,48vw)}.range-wrap{min-width:min(250px,52vw)}.connection-title{align-items:flex-start;flex-direction:column}.conn-actions{width:100%}.conn-actions button{flex:1;justify-content:center}.hook-row{align-items:flex-start;flex-direction:column}.hook-control{width:100%;justify-content:space-between}.segmented button,.stepper button,.hook-action{min-height:32px}}
-  @media(max-width:420px){.setting-row{align-items:flex-start;flex-direction:column;gap:7px}.setting-row>div:last-child,.range-wrap{width:100%;min-width:0}.font-control{align-items:flex-start}.font-control :global(.sel-combo){width:100%}.segmented button{flex:1}}
+  @media(max-width:760px){.pref-content{padding:12px}.setting-row{min-height:50px;padding:8px 10px;gap:10px}.font-control :global(.sel-combo){width:min(220px,48vw)}.range-wrap{min-width:min(250px,52vw)}.connection-title{align-items:flex-start;flex-direction:column}.conn-actions{width:100%}.conn-actions button{flex:1;justify-content:center}.hook-row{align-items:flex-start;flex-direction:column}.hook-control{width:100%;justify-content:space-between}.stepper button,.hook-action{min-height:32px}}
+  @media(max-width:420px){.setting-row{align-items:flex-start;flex-direction:column;gap:7px}.setting-row>div:last-child,.range-wrap{width:100%;min-width:0}.font-control{align-items:flex-start}.font-control :global(.sel-combo){width:100%}}
 </style>

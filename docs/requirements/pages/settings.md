@@ -35,9 +35,9 @@ rounded shape, muted idle state, and accent active state. Desktop Settings uses 
 - Server info: hostname, machine ID, address; the address list marks the
   current address and shows a connecting cue on a tapped address until the
   switch settles
-- Language selector: EN / 中文 (pill buttons)
-- Theme selector: Auto / Light / Dark (pill buttons)
-- Message notifications (own category): On / Off (pill buttons, persisted to localStorage `tmux_notify`); turning it on is the one user gesture that previews the cue and requests system-notification permission (Android's runtime prompt inside the app); the caption says when only the sound can play (not permitted, or no Notification API). A Test row plays the cue and posts one notification so the device can be checked. Moved here from the Hub header (board #72).
+- Language selector: EN / 中文 (`ui/Segmented`, the travelling pill)
+- Theme selector: Auto / Light / Dark (`ui/Segmented`)
+- Message notifications (own category): On / Off (`ui/Segmented`, persisted to localStorage `tmux_notify`); turning it on is the one user gesture that previews the cue and requests system-notification permission (Android's runtime prompt inside the app); the caption says when only the sound can play (not permitted, or no Notification API). A Test row plays the cue and posts one notification so the device can be checked. Moved here from the Hub header (board #72).
 - Desktop interface scale (60%–180%, persisted to localStorage `tmux_ui_zoom`; Cmd/Ctrl `+`, `-`, and `0` use the same value)
 - Terminal font size control (+/−), independent from interface scale
 - Terminal font family (editable list of common locally-installed fonts; accepts another family typed by the user; only a valid local font is applied and persisted to localStorage `tmux_font`; empty = system default)
@@ -85,7 +85,9 @@ State changes on this page move on the app's one vocabulary
 ([design-docs/features/motion.md](../../design-docs/features/motion.md)): the
 address-history arrow TURNS 180° (`.flip`) instead of swapping glyphs, the
 history list rises in and its rows `animate:flip` when an entry is removed,
-every error line fades in (`.appear`, opacity only — never height), segmented
-controls / address rows / the shortcut recorder cross-fade their selected
-clothes on `--t-fast`, and the server row's swap glyph turns while its
-popover is open. Popovers themselves do not animate.
+every error line fades in (`.appear`, opacity only — never height), address
+rows / the shortcut recorder cross-fade their selected clothes on `--t-fast`,
+every segmented row is `ui/Segmented` whose accent pill GLIDES to the chosen
+option on `--t-move` (the buttons only cross-fade their ink), and the server
+row's swap glyph turns while its popover is open. The server popover grows
+from its anchor (`.pop-layer`).
