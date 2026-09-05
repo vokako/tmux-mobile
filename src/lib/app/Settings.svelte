@@ -235,7 +235,13 @@
   .card {
     width: 100%;
     max-width: 380px;
-    background: var(--bg);
+    /* A raised surface, never canvas-on-canvas (owner, 2026-09-05: "第一次
+       启动的时候，选项的卡片后面没有阴影"): the card used to paint var(--bg)
+       on the var(--bg) page, and dark mode's black drop shadow is invisible
+       on the near-black canvas — elevation there comes from the surface
+       lift every other card wears. The shadow stays for light, where it
+       reads. */
+    background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 16px;
     padding: 32px 24px;

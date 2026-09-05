@@ -496,6 +496,21 @@ test('the server registry has an entry on the touch layout (2026-09-03)', () => 
   assert.doesNotMatch(source, /closest\?\.\('\.server-menu, \.rail-server'\)/u);
 });
 
+test('the connect card is a raised surface, never canvas-on-canvas (owner, 2026-09-05)', async () => {
+  // "应用第一次启动的时候，选项的卡片后面没有阴影" — the card painted itself
+  // var(--bg) on the var(--bg) page, and dark mode's black drop shadow is
+  // invisible on the near-black canvas, so the first screen read as a flat
+  // outline. Dark elevation in this app comes from SURFACE LIFT (app.css:
+  // "surface elevation — not from repainting"), the dialect every card
+  // (.acard and friends) already wears; the drop shadow stays for the light
+  // theme, where it does read.
+  const settings = await readFile(new URL('./lib/app/Settings.svelte', import.meta.url), 'utf8');
+  const card = settings.match(/\.card \{[\s\S]*?\n  \}/u)?.[0] ?? '';
+  assert.match(card, /background: var\(--surface\);/u, 'the card lifts off the canvas');
+  assert.doesNotMatch(card, /background: var\(--bg\);/u, 'canvas-on-canvas cannot regrow');
+  assert.match(card, /box-shadow: 0 8px 32px/u, 'the drop shadow stays for the light theme');
+});
+
 test('the rail explains itself with the one hover card, and no native title beside it (motion.md §1.16, board #86)', () => {
   // A page icon: its name + its shortcut (read live from the bindings). The
   // switcher: the current server, its address and state. aria-labels stay —

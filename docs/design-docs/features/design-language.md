@@ -159,6 +159,12 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   its consequence.
 - `.side-row` — sidebar list row; hover `--surface2`, open/selected
   `--accent-bg`.
+- A resting CARD on the page canvas (agent cards, the connect card) wears
+  `--surface` + 1px `--border`: dark-theme elevation is the surface lift,
+  never a black drop shadow alone — `--bg`-on-`--bg` with a black shadow
+  reads flat on the near-black canvas (owner, 2026-09-05: "第一次启动的
+  时候，选项的卡片后面没有阴影"). A drop shadow may ride along for the
+  light theme, where it does show.
 - `.pick` / `.agent-pick` / `.pchip` — stadium toggle chips for MEMBERSHIP
   (skills, roster picks); selected = `--accent-line` border + `--accent-bg`.
 - Inputs — the dense field dialect: `--input-bg`, 1px `--input-border`,
