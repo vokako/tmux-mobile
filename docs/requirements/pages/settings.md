@@ -7,13 +7,20 @@ The gear button opens Settings as a full-window workspace below the app nav,
 not a small popover. The workspace avoids redundant page/section headings and
 uses the compact tab navigation as its only title row. The tab bar and choice
 controls reuse Terminal's 24px outlined chip language, including its spacing,
-rounded shape, muted idle state, and accent active state. Desktop Settings uses three tabs (mobile hides Shortcuts):
+rounded shape, muted idle state, and accent active state. The category list
+reads as TWO labelled groups where both exist (owner, 2026-09-05: app-level
+settings, then Agent-level settings; a lone group hides its label — desktop,
+where Agents is a page of its own, reads as one plain list):
 
+**App** — about the application itself; Connection ends the group as its way out
 - **Appearance** — theme, language, responsive layout, chat detail, desktop interface scale, terminal font and spacing
 - **Notifications** — message notifications On/Off, the level (Finished / Replies / Everything) and a test row
-- **Agents / Teams / Skills / MCP servers** (phone only, where Agents is not a page of its own) — four second-level pages, each the real AgentsPage narrowed to one section (owner, 2026-09-02)
-- **Shortcuts** — configurable desktop navigation and Terminal window bindings
+- **Terminal** — terminal font family/size and line spacing
+- **Shortcuts** — configurable desktop navigation and Terminal window bindings (desktop only)
 - **Connection** — current server/addresses, optimize/share/disconnect, debug
+
+**Agent** (phone only, where Agents is not a page of its own)
+- **Agents / Teams / Skills / MCP servers** — four second-level pages, each the real AgentsPage narrowed to one section (owner, 2026-09-02)
 
 ## Components
 - Address field: `ws://host:port` or `wss://host:port`

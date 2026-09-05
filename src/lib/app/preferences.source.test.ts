@@ -28,17 +28,39 @@ test('the category exists only where Agents is not a page of its own', () => {
   // the desktop rail keeps Agents as a page with its own draggable icon.
   assert.match(source, /showAgents = false/u, 'off by default, so a host that says nothing gets the old Settings');
   // Four rows on the phone (owner, 2026-09-02: "把 team agent mcp skill 分开几个
-  // 二级设置页面吧"), each the REAL page narrowed by `section`.
-  assert.match(source, /\.\.\.\(showAgents \? \[\s*\{ id: 'agents', label: \(\) => t\('agentsTitle'\) \},\s*\{ id: 'teams', label: \(\) => t\('teamsTitle'\) \},\s*\{ id: 'skills', label: \(\) => t\('skillsTitle'\) \},\s*\{ id: 'mcp', label: \(\) => t\('mcpTitle'\) \},\s*\] : \[\]\)/u,
-    'four rows, each labelled with its section’s own name');
+  // 二级设置页面吧"), each the REAL page narrowed by `section` — since
+  // 2026-09-05 as their own labelled AGENT group.
+  assert.match(source, /\.\.\.\(showAgents \? \[\{\s*id: 'agent', label: \(\) => t\('settingsGroupAgent'\), rows: \[\s*\{ id: 'agents', label: \(\) => t\('agentsTitle'\) \},\s*\{ id: 'teams', label: \(\) => t\('teamsTitle'\) \},\s*\{ id: 'skills', label: \(\) => t\('skillsTitle'\) \},\s*\{ id: 'mcp', label: \(\) => t\('mcpTitle'\) \},\s*\],\s*\}\] : \[\]\)/u,
+    'four rows, each labelled with its section’s own name, in one AGENT group');
   assert.match(source, /<AgentsPage\s+section=\{tab\}/u, 'the one instance is narrowed by the category, never copied');
-  // Connection stays LAST — it is the way out (disconnect lives there).
-  const list = source.match(/const tabs = \$derived\(\[[\s\S]*?\]\);/u)?.[0] ?? '';
-  assert.ok(list.indexOf("id: 'agents'") < list.indexOf("id: 'connection'"), 'Agents sits before Connection');
+  // The two-group order (owner, 2026-09-05: "分成两组：1. 关于本身应用层面的
+  // 一些设置 2. 关于 Agent 层面的设置"): the APP group — Appearance,
+  // Notifications, Terminal, (Shortcuts,) Connection — precedes the AGENT
+  // group. Connection ends the APP group as its way out; it no longer trails
+  // the agent rows (the pre-group "Connection stays last" rule, superseded).
+  const list = source.match(/const groups = \$derived\(\[[\s\S]*?\]\);/u)?.[0] ?? '';
+  const order = ['appearance', 'notifications', 'terminal', 'shortcuts', 'connection', 'agents', 'teams', 'skills', 'mcp']
+    .map((id) => list.indexOf(`id: '${id}'`));
+  assert.ok(order.every((i) => i >= 0), 'every category sits in the grouped list');
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'app group first, Connection last inside it, then the agent group');
+  assert.match(source, /const tabs = \$derived\(groups\.flatMap\(\(g\) => g\.rows\)\);/u,
+    'the flat list every consumer reads is derived FROM the groups — one source of order');
   // A restored category that does not exist here must not leave a blank pane.
   assert.match(source, /if \(!showAgents && AGENT_TABS\.includes\(tab\)\) \{ tab = 'appearance';/u);
   assert.doesNotMatch(source, /if \(!showAgents && AGENT_TABS\.includes\(tab\)\) selectTab/u,
     'a correction must not DRILL into a category the user never tapped');
+});
+
+test('groups label themselves only when there are two, in the sidebar\u2019s own header voice (owner, 2026-09-05)', () => {
+  // "分成两组" — the labels exist FOR the contrast: a desktop list with no
+  // agent group is one group, and one labelled group is noise. The label is
+  // the shared .side-h dialect (group-label like Sessions/Projects), never a
+  // new species; no scoped rule may re-declare its box or type
+  // (ui/sidebar.source.test.ts owns that drift).
+  assert.match(source, /\{#each groups as g \(g\.id\)\}\s*\{#if groups\.length > 1\}<div class="group-label side-h">\{g\.label\(\)\}<\/div>\{\/if\}/u,
+    'a label per group, only when a second group exists');
+  assert.match(source, /\{#each g\.rows as item \(item\.id\)\}/u, 'the rows render inside their group');
+  assert.doesNotMatch(style, /\.group-label/u, 'no scoped .group-label rule — .side-h owns the box and type');
 });
 
 test('the category is restorable, and it opens on request', () => {

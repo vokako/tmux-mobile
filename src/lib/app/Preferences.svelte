@@ -114,7 +114,8 @@
   // Agents is a category only where it is not a page: on a phone the bottom bar
   // had one icon too many (owner, 2026-08-29), so the agent configuration moved
   // in here — as the REAL AgentsPage embedded below, never a second copy of it.
-  // It sits before Connection, which stays last as the way out.
+  // The four agent categories are their own labelled group AFTER the app group
+  // (owner, 2026-09-05; see `groups` below).
   // Message notifications (board #57 → #72): their OWN category, not a row
   // under Appearance (owner, 2026-09-02: "应该在一个单独的 notification 二级
   // 页面"), and not the Hub header. The switch's click is the ONE user gesture
@@ -148,19 +149,34 @@
     setTimeout(() => { notifyTested = false; }, 1500);
   }
 
-  const tabs = $derived([
-    { id: 'appearance', label: () => t('settingsAppearance') },
-    { id: 'notifications', label: () => t('settingsNotifications') },
-    { id: 'terminal', label: () => t('settingsTerminal') },
-    ...(showShortcuts ? [{ id: 'shortcuts', label: () => t('settingsShortcuts') }] : []),
-    ...(showAgents ? [
-      { id: 'agents', label: () => t('agentsTitle') },
-      { id: 'teams', label: () => t('teamsTitle') },
-      { id: 'skills', label: () => t('skillsTitle') },
-      { id: 'mcp', label: () => t('mcpTitle') },
-    ] : []),
-    { id: 'connection', label: () => t('settingsConnection') },
+  /** Two labelled groups (owner, 2026-09-05: "从上到下这些设置的顺序没有任何
+   *  逻辑，看起来很乱…分成两组：1. 关于本身应用层面的一些设置 2. 关于 Agent
+   *  层面的设置"): the APP group — Appearance, Notifications, Terminal,
+   *  (Shortcuts,) Connection — then the AGENT group's four embedded
+   *  AgentsPage sections. Connection ends the APP group as its way out; the
+   *  pre-group "Connection stays last in the whole list" rule is superseded.
+   *  The flat `tabs` every consumer reads derives FROM the groups, so there
+   *  is one source of order. */
+  const groups = $derived([
+    {
+      id: 'app', label: () => t('settingsGroupApp'), rows: [
+        { id: 'appearance', label: () => t('settingsAppearance') },
+        { id: 'notifications', label: () => t('settingsNotifications') },
+        { id: 'terminal', label: () => t('settingsTerminal') },
+        ...(showShortcuts ? [{ id: 'shortcuts', label: () => t('settingsShortcuts') }] : []),
+        { id: 'connection', label: () => t('settingsConnection') },
+      ],
+    },
+    ...(showAgents ? [{
+      id: 'agent', label: () => t('settingsGroupAgent'), rows: [
+        { id: 'agents', label: () => t('agentsTitle') },
+        { id: 'teams', label: () => t('teamsTitle') },
+        { id: 'skills', label: () => t('skillsTitle') },
+        { id: 'mcp', label: () => t('mcpTitle') },
+      ],
+    }] : []),
   ]);
+  const tabs = $derived(groups.flatMap((g) => g.rows));
   /** One line per category for the desktop's hover card (motion.md §1.16) —
    *  the row's label is terse, the card says what is inside. Kept apart from
    *  `tabs` so the list stays the shape the source tests pin. */
@@ -337,11 +353,14 @@
           <span class="r-label">{serverName}</span>
         </button>
       {/if}
-      {#each tabs as item}
-        <button class="side-row" class:open={tab === item.id} onclick={() => selectTab(item.id)}
-          use:hoverInfo={() => ({ title: item.label(), text: TAB_HINTS[item.id] ? t(TAB_HINTS[item.id]!) : undefined })}>
-          <span class="r-label">{item.label()}</span>
-        </button>
+      {#each groups as g (g.id)}
+        {#if groups.length > 1}<div class="group-label side-h">{g.label()}</div>{/if}
+        {#each g.rows as item (item.id)}
+          <button class="side-row" class:open={tab === item.id} onclick={() => selectTab(item.id)}
+            use:hoverInfo={() => ({ title: item.label(), text: TAB_HINTS[item.id] ? t(TAB_HINTS[item.id]!) : undefined })}>
+            <span class="r-label">{item.label()}</span>
+          </button>
+        {/each}
       {/each}
     </div>
   </aside>
