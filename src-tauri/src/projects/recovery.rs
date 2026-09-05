@@ -45,8 +45,13 @@
 //! paints indented under a stamp or a `●` bullet head): a hit is a block that
 //! OPENS with the error's own header and carries a transient marker, a block
 //! containing the `[tmm chat …]` stamp is never a hit (that is somebody
-//! QUOTING an error, not having one), and an indented tail whose head
-//! scrolled off the capture is dropped, never guessed at. A missed real error
+//! QUOTING an error, not having one), and an indented tail whose head sits
+//! above the capture is never guessed at — when that tail carries a transient
+//! marker it earns ONE deeper capture (`DEEP_CAPTURE_LINES` of scrollback) so
+//! the head is READ: a tall error paint plus the prompt redraw pushes the
+//! header off a short pane's fold with the agent stalled right under it
+//! (2026-09-05, the kirocrew miss), while a quote's or tool dump's recovered
+//! head still disqualifies its block. A missed real error
 //! costs one manual `continue`; a false positive types into a working agent's
 //! conversation.
 
@@ -100,6 +105,12 @@ pub fn scan_tail(text: &str) -> bool {
     error_signature(text).is_some()
 }
 
+/// How far past the visible screen the ONE follow-up capture reaches when the
+/// screen opens mid-block (see `headless_error_tail`). kiro's tallest observed
+/// error paint is ~25 physical lines; 200 keeps the head in reach even after
+/// several prompt redraws without trawling ancient history.
+pub const DEEP_CAPTURE_LINES: usize = 200;
+
 /// The IDENTITY of what is on the screen: `None` when no transient error is
 /// visible, else `"<hits>|<sorted request_ids>"`. Two ticks that see the SAME
 /// painted error produce the same signature; a SECOND error (the resumed turn
@@ -109,8 +120,19 @@ pub fn scan_tail(text: &str) -> bool {
 /// lines below the header (board #24's paint) — even split mid-id, which is
 /// why the block is de-wrapped (joined without separators) before the scan.
 pub fn error_signature(text: &str) -> Option<String> {
+    signature_within(text, 40)
+}
+
+/// The same scan over a DEEP capture (visible screen + scrollback): the
+/// window covers everything the follow-up capture brought back, so a block
+/// head that sits above the viewport is read rather than guessed at.
+pub fn deep_error_signature(text: &str) -> Option<String> {
+    signature_within(text, DEEP_CAPTURE_LINES + 120)
+}
+
+fn signature_within(text: &str, window: usize) -> Option<String> {
     let lines: Vec<&str> = {
-        let mut v: Vec<&str> = text.lines().rev().take(40).collect();
+        let mut v: Vec<&str> = text.lines().rev().take(window).collect();
         v.reverse();
         v
     };
@@ -176,6 +198,43 @@ fn extract_request_id(line: &str) -> Option<String> {
         .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
         .collect();
     (!id.is_empty()).then_some(id)
+}
+
+/// Does the capture OPEN mid-block — its first paint an indented continuation
+/// whose head sits above the viewport — and does that orphan run look like a
+/// transient error's tail? kiro's error paint is ~25 physical lines; on a
+/// short pane the prompt redraw pushes the HEADER off the screen while the
+/// agent sits stalled right under the block (the 2026-09-05 kirocrew miss:
+/// 57×36 pane, header one line above the fold, incident invisible). A `true`
+/// here earns ONE deeper capture so the head is READ — never guessed: the
+/// deep rescan still drops a block whose recovered head is a `[tmm chat …]`
+/// stamp or a `●` tool bullet.
+pub fn headless_error_tail(text: &str) -> bool {
+    let mut orphan = String::new();
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            // Leading blanks before any content are the fold itself; a blank
+            // AFTER the orphan run ends the paint block.
+            if orphan.is_empty() {
+                continue;
+            }
+            break;
+        }
+        if !line.starts_with(' ') {
+            break; // a column-zero line: the screen opens with a whole block
+        }
+        orphan.push_str(line.trim());
+    }
+    if orphan.is_empty() {
+        return false;
+    }
+    let c = canonical(&orphan);
+    // A stamp INSIDE the orphan is already a quote; the deep rescan handles
+    // the stamp-above-the-fold case by reading the real head.
+    if c.contains("tmmchat") {
+        return false;
+    }
+    TRANSIENT.iter().any(|m| c.contains(m)) || orphan.contains("request_id")
 }
 
 #[derive(Default)]
@@ -341,7 +400,21 @@ pub fn check_once() {
             }
             let target = format!("{}:{}.{}", project.session, p.window, p.pane);
             let Ok(tail) = crate::tmux::capture_pane_plain(&target, Some(0)) else { continue };
-            let Some(sig) = error_signature(&tail) else {
+            // The screen may open MID-BLOCK: a tall error paint plus the
+            // prompt redraw pushes the block's header above a short pane's
+            // fold, and a headless tail alone is never trusted. ONE deeper
+            // capture brings the head back into view so it can be read
+            // (2026-09-05: the kirocrew agent sat stalled under exactly such
+            // a paint for half an hour).
+            let sig = error_signature(&tail).or_else(|| {
+                if !headless_error_tail(&tail) {
+                    return None;
+                }
+                crate::tmux::capture_pane_plain(&target, Some(DEEP_CAPTURE_LINES))
+                    .ok()
+                    .and_then(|deep| deep_error_signature(&deep))
+            });
+            let Some(sig) = sig else {
                 // The error left the screen: the incident (if any) is over.
                 // Dropping the record here is what scopes "one incident" to
                 // one CONTINUOUS sighting — a fresh error later starts fresh.
@@ -467,6 +540,66 @@ mod tests {
         // so only the block's own head can tell it apart from a real paint.
         let tooled = "● Shell tmm board show 24\n  #24 [doing] auto recovery 优化\n  An unexpected error occurred during the response stream:\n    CodewhispererChatResponseStream(ServiceError(ServiceError\n    reason: Some(ModelTemporarilyUnavailable), please try again\n    (request_id: c25ab1c3-0214-49c3-9ff7-798665a0bb27)\n";
         assert!(!scan_tail(tooled), "quoted error in tool output must not trigger");
+    }
+
+    /// The 2026-09-05 kirocrew miss: on a 57×36 pane the ~25-line error paint
+    /// plus the prompt redraw pushed the HEADER above the fold — the visible
+    /// screen opened mid-block, the orphan was dropped, the incident became
+    /// invisible and the agent sat stalled for half an hour.
+    fn visible_mid_block() -> String {
+        // REAL_WRAPPED without its first (header) line, as the fold cut it.
+        let headless: String = REAL_WRAPPED
+            .lines()
+            .skip(1)
+            .map(|l| format!("{l}\n"))
+            .collect();
+        format!("{headless}\n╭───╮\n│ ❯ │\n╰───╯\nkiro · model · ◑ 38%\n")
+    }
+
+    #[test]
+    fn a_header_above_the_fold_is_invisible_to_the_visible_scan() {
+        let visible = visible_mid_block();
+        assert_eq!(error_signature(&visible), None, "the orphan tail alone is never a hit");
+        assert!(headless_error_tail(&visible), "but it earns the one deeper capture");
+    }
+
+    #[test]
+    fn the_deep_capture_reads_the_head_and_detects_the_incident() {
+        let deep = format!("agent output above\n{REAL_WRAPPED}\n\n╭───╮\n│ ❯ │\n╰───╯\nkiro · model · ◑ 38%\n");
+        assert_eq!(
+            deep_error_signature(&deep),
+            Some("1|c25ab1c3-0214-49c3-9ff7-798665a0bb27".into()),
+            "the recovered head opens the block, so the deep scan hits"
+        );
+        // Deeper than error_signature's 40-line staleness window: pad the
+        // history ABOVE the block past 40 lines and the deep scan still hits.
+        let padded = format!("{}{deep}", "old line\n".repeat(120));
+        assert!(deep_error_signature(&padded).is_some(), "the deep window covers the whole follow-up capture");
+    }
+
+    #[test]
+    fn a_headless_quote_or_tool_tail_resolves_to_its_real_head_and_stays_silent() {
+        // The fold hides a `[tmm chat …]` stamp (or a `●` tool bullet): the
+        // orphan may look like an error tail, but the deep capture recovers
+        // the real head and the block is disqualified — read, not guessed.
+        let quote_tail = "  An unexpected error occurred during the response stream:\n  reason: Some(ModelTemporarilyUnavailable), please try\n  again. (request_id: aa22)\n\n╭───╮\n│ ❯ │\n╰───╯\n";
+        assert!(headless_error_tail(quote_tail), "the tail alone cannot tell — it asks for the deep look");
+        let deep_quote = format!("────────\n  [tmm chat 2026-09-05 11:40] human: @kiro look at this\n{quote_tail}");
+        assert_eq!(deep_error_signature(&deep_quote), None, "the recovered stamp head disqualifies the block");
+        let deep_tool = format!("● Shell tmm board show 24\n{quote_tail}");
+        assert_eq!(deep_error_signature(&deep_tool), None, "the recovered tool head disqualifies the block");
+    }
+
+    #[test]
+    fn an_ordinary_mid_block_screen_never_asks_for_the_deep_capture() {
+        // Indented continuations with no transient marker (prose, tool
+        // output) stay below the gate; so does a screen opening on a
+        // column-zero line, a stamped quote, or plain blank space.
+        assert!(!headless_error_tail("  plain wrapped prose\n  more prose\n"));
+        assert!(!headless_error_tail("column-zero output\n  indented under it\n"));
+        assert!(!headless_error_tail("  [tmm chat 2026-09-05 11:40] human: try again please\n"));
+        assert!(!headless_error_tail("\n\n"));
+        assert!(!headless_error_tail(""));
     }
 
     #[test]
