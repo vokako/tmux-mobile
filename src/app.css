@@ -640,13 +640,14 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
      only once `.ready` (placed), so nothing is ever seen at the wrong place,
      and the exit is still a cut. At rest the transform is `none`, so the
      layer is never a containing block for its own fixed children.
-   · .slide-pill — the ONE moving highlight of a tab bar, rail or segmented
-     control (ui/indicator.ts writes --ind-x/y/w/h): the wash behind the
-     chosen item glides to the next one on --t-move instead of each item
-     lighting up in place. `.soft` drops the ring (an icon bar wants only the
-     wash — owner 2026-09-04: "直接用 icon 上面的背景阴影来滑动"), `.inset`
-     shrinks the pill by --ind-inset (or --ind-inset-x/-y per axis) so it hugs the icon rather
-     than the whole cell. The bar variant is retired (same day: "线条都去掉").
+   · .slide-pill — the ONE moving highlight of a rail or segmented control
+     (ui/indicator.ts writes --ind-x/y/w/h): the wash behind the chosen item
+     glides to the next one on --t-move instead of each item lighting up in
+     place. `.soft` drops the ring (an icon bar wants only the wash — owner
+     2026-09-04: "直接用 icon 上面的背景阴影来滑动"). The bar variant is
+     retired (same day: "线条都去掉"), and so is the phone tab bar's `.inset`
+     wash (owner, 2026-09-05: the tab bar selects by ink alone, no
+     background — the WeChat/Alipay dialect).
      The atom is absolutely positioned with no in-flow siblings, which is why
      its width/height MAY transition here and nowhere else.
    · .reveal / .reveal-tail — a list that has just LOADED unfolds: each child
@@ -667,12 +668,6 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
   transform: translate(var(--ind-x, 0px), var(--ind-y, 0px)); z-index: 0;
 }
 .slide-pill.soft { box-shadow: none; }
-.slide-pill.inset {
-  /* Per-axis insets (--ind-inset-x / --ind-inset-y) fall back to --ind-inset. */
-  --ix: var(--ind-inset-x, var(--ind-inset, 6px)); --iy: var(--ind-inset-y, var(--ind-inset, 6px));
-  width: calc(var(--ind-w, 0px) - 2 * var(--ix)); height: calc(var(--ind-h, 0px) - 2 * var(--iy));
-  transform: translate(calc(var(--ind-x, 0px) + var(--ix)), calc(var(--ind-y, 0px) + var(--iy)));
-}
 .slide-pill.ready { transition: transform var(--t-move) ease-out, width var(--t-move) ease-out, height var(--t-move) ease-out; }
 .reveal > *, .reveal-tail > * { animation: rise-in var(--t-move) ease-out backwards; }
 .reveal > :nth-child(2), .reveal-tail > :nth-last-child(2) { animation-delay: 30ms; }

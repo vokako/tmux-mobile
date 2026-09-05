@@ -82,15 +82,20 @@ vocabulary.
     intro class is on the element that mounts so a remount restarts it, and
     a whole list mounting at once (history load, project switch) is gated
     with `class:appear={fresh}` so two hundred rows do not fade in together.
-14. **One highlight that travels.** A tab bar, a rail, a segmented control
-    has ONE marker for "chosen", and when the choice changes the marker
-    glides to the new item (`.slide-pill`, `ui/indicator.ts` — the wash behind
-    the item, never a bar: owner 2026-09-04, "线条都去掉，直接用 icon 上面的背景
+14. **One highlight that travels.** A rail, a segmented control has ONE
+    marker for "chosen", and when the choice changes the marker glides to
+    the new item (`.slide-pill`, `ui/indicator.ts` — the wash behind the
+    item, never a bar: owner 2026-09-04, "线条都去掉，直接用 icon 上面的背景
     阴影来滑动")
     instead of one item switching off and another switching on. The items'
     own colour still cross-fades (`.state-ctl`); the travelling marker is
     what makes the change read as a movement (owner, 2026-09-04: "点击不同的
-    标签页面，过度的一些选项卡高亮过度的时候，都可以有动效").
+    标签页面，过度的一些选项卡高亮过度的时候，都可以有动效"). EXCEPTION —
+    the phone TAB BAR selects by ink alone (owner, 2026-09-05: "保持没有背景
+    色，只有前景色的一个高亮样式…没有选中灰色 选中后前景有颜色" — the
+    WeChat/Alipay dialect): grey at rest, accent when chosen, no wash, no
+    marker; its first paint and its post-tap state are one look by
+    construction.
 15. **A load unfolds, it never flashes.** Content that arrives after a
     switch does not pop in as a finished wall: while it loads, the slot
     shows either the PREVIOUS content dimmed (stale-while-revalidate, Files'
@@ -123,7 +128,7 @@ vocabulary.
 | `.side-scrim` / `.dlg-backdrop` fade-in, `sheet-up` (`translateY(100%) → none`, only for a layer whose resting transform is none) | sheets rise with a scrim (design-language §1) | `--t-move` |
 | `drill-in-right` / `drill-in-left` (app.css, one copy), `slideInLeft/Right` (App) | navigation, touch-only | 120ms linear |
 | `.pop-layer` + `.ready`, `--pop-origin` from `popOrigin()` | a placed popover grows from its anchor corner (opacity + scale 0.96→1); exit is a cut | `--t-fast` |
-| `.slide-pill` (+ `.soft` no ring, `.inset` hugs the icon) + `use:slideIndicator` | the one travelling highlight of a tab bar / rail / segmented control — the WASH behind the item glides; the bar variant is retired (owner, 2026-09-04). `--ind-x/y/w/h` are written by the action from LAYOUT OFFSETS (`boxFromOffsets`, the `offsetParent` chain from both ends), never client rects: a rect carries the tab's press `scale(0.95)`, a slot's mid-flip transform and the root zoom, and a marker measured through them glided wrong and then corrected itself (the phone's "乱滑"). `.ready` after the first measure so it is born in place; `hidden: true` collapses it while the container is being rearranged. A segmented row is `ui/Segmented`, which carries its own pill | `--t-move` |
+| `.slide-pill` (+ `.soft` no ring) + `use:slideIndicator` | the one travelling highlight of a rail / segmented control — the WASH behind the item glides; the bar variant is retired (owner, 2026-09-04), and the phone tab bar's `.inset` wash with it (owner, 2026-09-05: the tab bar selects by ink alone). `--ind-x/y/w/h` are written by the action from LAYOUT OFFSETS (`boxFromOffsets`, the `offsetParent` chain from both ends), never client rects: a rect carries the tab's press `scale(0.95)`, a slot's mid-flip transform and the root zoom, and a marker measured through them glided wrong and then corrected itself (the phone's "乱滑"). `.ready` after the first measure so it is born in place; `hidden: true` collapses it while the container is being rearranged. A segmented row is `ui/Segmented`, which carries its own pill | `--t-move` |
 | `.reveal` / `.reveal-tail` on a container, dropped after `revealMs()` | a loaded list unfolds, rows staggered 30ms from the top / from the newest at the bottom; backwards fill only; the class is cleared after one move + the longest stagger so a row that mounts later does not rise (`ui/motion.ts` `revealMs()`) | `--t-move` + stagger |
 | `.skel` (+ `.skel-wrap`) | a loading placeholder of the coming shape with a slow shimmer, invisible for the first 150ms | 1.4s loop, stilled |
 | `use:hoverInfo={() => info}` + `ui/HoverCard` | the one hover card (title / text / label→value rows / note), 380ms dwell, 60ms hop, pointer + keyboard focus only | `--t-fast` intro |
@@ -192,13 +197,15 @@ PanePicker, the Hub agent menu, the server menu and the hover card wear
 `.pop-layer`; the composer's recipient and command menus and any remaining
 `opacity: 0 → .ready` gate join them.
 
-**Wave 7 — the highlight travels** (#86): phone tab bar (bar), desktop rail
-(vertical bar), Preferences segmented controls and the Board status slider
+**Wave 7 — the highlight travels** (#86): desktop rail (vertical bar),
+Preferences segmented controls and the Board status slider
 (pill), Files/Git tabs ✓, the Hub drawer's view toggle. Done 2026-09-04 in
 the terminal/Sessions/Files/Projects/Team pass: GitPanel's Status/Log tabs
 and TeamTemplates' template list (both `.slide-pill`). Skipped on purpose:
 the Terminal chip strip (scrolling AgentChips), the Sessions MRU chips and
-the Team header toggles — none is a segmented control.
+the Team header toggles — none is a segmented control. RETIRED 2026-09-05:
+the phone tab bar's wash (`.slide-pill.inset`) — the tab bar selects by ink
+alone (§1.14's exception).
 
 **Wave 8 — loads unfold** (#86): Hub room switch (skeleton bubbles + cards
 after 150ms for an uncached room, then `.reveal-tail` on the feed and

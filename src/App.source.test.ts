@@ -526,22 +526,25 @@ test('the rail explains itself with the one hover card, and no native title besi
   assert.doesNotMatch(source, /class="(?:gear-btn|split-toggle state-ctl)"[^>]*title=/u);
 });
 
-test('the tab bar and the rail carry ONE travelling highlight each (motion.md §1.14, board #86)', () => {
-  // The marker for "chosen" is a single atom that glides between items
-  // (ui/indicator.ts), not each button lighting up in place: the WASH behind
-  // the icon, no bar (owner, 2026-09-04: "线条都去掉，直接用 icon 上面的背景阴影
-  // 来滑动"). The tab bar's hugs icon + label (.inset); both drop the ring.
-  assert.match(tabbar, /^<nav class="tabbar" use:slideIndicator=\{\{ key: page, active: '\.active' \}\}>/u);
-  assert.match(tabbar, /<span class="slide-pill soft inset" style:--ind-inset-x="10px" style:--ind-inset-y="2px" aria-hidden="true"><\/span>/u,
-    'the phone pill keeps air around icon + label (2px above and below — the owner saw it cut at the text)');
+test('the rail keeps the ONE travelling highlight; the tab bar is foreground-only (motion.md §1.14, owner 2026-09-05)', () => {
+  // The phone bar's wash was retired the day after it arrived (owner,
+  // 2026-09-05: "保持没有背景色，只有前景色的一个高亮样式…没有选中灰色 选中后
+  // 前景有颜色" — the WeChat/Alipay dialect; its first paint also differed
+  // from the post-tap state). Selection on the tab bar is the ink cross-fade
+  // alone: grey at rest, accent when chosen, no background. The desktop rail
+  // keeps the travelling wash (board #86).
+  assert.match(tabbar, /^<nav class="tabbar">/u, 'no slideIndicator on the tab bar');
+  assert.ok(!tabbar.includes('slide-pill'), 'no pill inside the tab bar');
   assert.ok(!source.includes('slide-ind'), 'no bar indicator anywhere in the shell');
   assert.match(rail, /use:slideIndicator=\{\{ key: page, active: '\.rail-btn\.active', hidden: !!railDrag \}\}/u,
     'the rail hides the marker while an icon is being dragged (slots are mid-transform) and re-measures on release');
   assert.match(rail, /<span class="slide-pill soft" aria-hidden="true"><\/span>/u);
   const style = source.match(/<style>[^]*<\/style>/u)?.[0] ?? '';
-  // The buttons keep only their ink: the pill carries the active wash.
+  // The buttons keep only their ink; on the tab bar the ink IS the state.
   assert.match(style, /\.rail-btn\.active \{ color: var\(--accent\); \}/u);
-  assert.match(style, /\.tabbar \{\s*position: relative;/u, 'the tab bar is the indicator’s containing block');
+  assert.match(style, /\.tabbar button\.active \{ color: var\(--accent\); \}/u);
+  assert.match(style, /\.tabbar button \{[^}]*color: var\(--text3\);/u, 'unchosen tabs rest grey');
+  assert.doesNotMatch(style, /\.tabbar[^{]*\{[^}]*\.slide-pill/u);
   // The atom's look lives in app.css; App only positions it.
   assert.doesNotMatch(style, /\.slide-pill[^{]*\{[^}]*(background|width|height|transition)/u);
 });

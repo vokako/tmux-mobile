@@ -1782,11 +1782,13 @@
   <InstallPrompt />
   <HoverCard />
   {#if connected && layout.isTouchDevice}
-    <nav class="tabbar" use:slideIndicator={{ key: page, active: '.active' }}>
-      <!-- The one travelling highlight (motion.md §1.14): the wash behind the
-           active tab glides between tabs, inset so it hugs icon + label; the
-           buttons' own colour still cross-fades. No bar (owner, 2026-09-04). -->
-      <span class="slide-pill soft inset" style:--ind-inset-x="10px" style:--ind-inset-y="2px" aria-hidden="true"></span>
+    <nav class="tabbar">
+      <!-- Foreground-only selection (owner, 2026-09-05: "保持没有背景色，只有
+           前景色的一个高亮样式…没有选中灰色 选中后前景有颜色" — the WeChat/
+           Alipay dialect): the 2026-09-04 travelling wash is retired here —
+           it read as a smudge on the phone and its first paint differed from
+           the post-tap state. The buttons' ink cross-fade IS the state; the
+           desktop rail keeps its travelling wash (motion.md §1.14). -->
       {#if hubEligible}
         <button class:active={page === 'hub'} aria-current={page === 'hub' ? 'page' : undefined} onclick={() => switchTab('hub')}>
           <Icon name="chat" size={19} /><span>{t('hub')}</span>
@@ -2067,7 +2069,6 @@
      keyboard is up so immersive typing (terminal, editor) costs nothing —
      the ONLY writer of that class is App's viewport handler. */
   .tabbar {
-    position: relative; /* the .slide-pill's containing block */
     display: flex;
     align-items: stretch;
     flex-shrink: 0;
@@ -2086,7 +2087,6 @@
     font-size: var(--fs-meta);
     -webkit-tap-highlight-color: transparent;
     transition: color var(--t-fast), transform var(--t-fast);
-    position: relative; z-index: 1; /* above the travelling pill */
   }
   .tabbar button.active { color: var(--accent); }
   .tabbar button:active { transform: scale(0.95); }

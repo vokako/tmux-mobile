@@ -50,7 +50,7 @@ test('the wave-2 atoms: popover intro, sliding indicator, reveal, skeleton', () 
   assert.match(appCss, /\.slide-pill\.ready\s*\{\s*transition:[^}]*transform var\(--t-move\)/u, 'the indicator glides on --t-move, only once placed');
   assert.doesNotMatch(appCss, /\.slide-ind\b/u, 'the bar indicator is retired — the wash behind the item travels (owner, 2026-09-04)');
   assert.match(appCss, /\.slide-pill\.soft \{ box-shadow: none; \}/u, 'an icon bar wants only the wash');
-  assert.match(appCss, /\.slide-pill\.inset \{[^}]*--ind-inset/u, 'the inset pill hugs icon + label');
+  assert.doesNotMatch(appCss, /\.slide-pill\.inset/u, 'the inset pill retired with the tab bar wash — ink-only selection there (owner, 2026-09-05)');
   assert.match(appCss, /\.reveal > \*,\s*\.reveal-tail > \*\s*\{\s*animation:\s*rise-in var\(--t-move\) ease-out backwards;/u, 'a loaded list unfolds with backwards fill only');
   assert.match(appCss, /\.reveal-tail > :nth-last-child\(2\)/u, 'a feed unfolds from its newest row');
   assert.match(appCss, /\.skel::after\s*\{[^}]*animation:\s*shimmer/u);
