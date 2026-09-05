@@ -207,6 +207,24 @@ test('the filter and the detail level are reachable from menus, not only from a 
   assert.ok(!source.includes('cycleFeedLevel'), 'the dead cycle control stays gone');
 });
 
+test('a stopped agent keeps its backend face, greyed — not an anonymous letter (owner, 2026-09-05)', () => {
+  // "关闭的 Agent 卡片是灰色的，但它的头像…只是一个字母头像。这个头像应该
+  // 使用我们正常设定的 Agent 头像，并且变成灰色" — the slot declares its
+  // backend (`command`), so the stopped card can wear the SAME icon the live
+  // card wears; grey comes from a filter, never a second icon set. The
+  // letter tile remains only as the fallback a backend without an icon
+  // already has.
+  assert.match(source, /const slotBackend = \(name\) => \(selectedRow\?\.slots \?\? \[\]\)\.find\(\(s\) => s\.window_name === name\)\?\.command;/u,
+    'the declared slot is the identity source');
+  assert.match(source, /\{#each stopped as name \(name\)\}\s*\{@const backend = slotBackend\(name\)\}/u,
+    'each stopped card resolves its declared backend');
+  assert.match(source,
+    /\{#if backendIcon\(backend\)\}<img class="ava dim" src=\{backendIcon\(backend\)\} alt=\{backend\} \/>\{:else\}<span class="ava dim">\{name\.slice\(0, 1\)\.toUpperCase\(\)\}<\/span>\{\/if\}/u,
+    'the stopped card resolves the icon exactly like the live card, with the letter tile as fallback');
+  assert.match(source, /img\.ava\.dim \{ background: none !important; filter: grayscale\(1\); opacity: 0\.55; \}/u,
+    'the icon greys by filter — identity stays, colour goes');
+});
+
 test('agent cards keep their space and the existing menu can restart (board #89)', async () => {
   const live = source.slice(source.indexOf('class="acard" class:sel'), source.indexOf('{/snippet}', source.indexOf('class="acard" class:sel')));
   const off = source.slice(source.indexOf('class="acard off"'), source.indexOf('{/each}', source.indexOf('class="acard off"')));

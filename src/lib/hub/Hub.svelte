@@ -178,6 +178,11 @@
   });
   // Declared but not running — a stopped agent still belongs to the room.
   const stopped = $derived(stoppedAgents(selectedRow?.slots, managedAgents));
+  /** A stopped slot's declared backend — the SAME face the live card wears,
+   * greyed, not an anonymous letter (owner, 2026-09-05: "头像应该使用我们
+   * 正常设定的 Agent 头像，并且变成灰色"). Slots carry the backend in
+   * `command`, the way rowAgents' closed-project chips already read it. */
+  const slotBackend = (name) => (selectedRow?.slots ?? []).find((s) => s.window_name === name)?.command;
   const working = $derived(managedAgents.filter((a) => a.state === 'working').length);
 
   // ── Sidebar row summary ──────────────────────────────────────────────────
@@ -2624,6 +2629,7 @@
                Starting one resumes its conversation, so it stays on the roster
                instead of vanishing from the room it belongs to. -->
           {#each stopped as name (name)}
+            {@const backend = slotBackend(name)}
             <!-- A div for the same reason as the live card: it contains the
                  direct Resume control. The card SURFACE is inert — restarting is
                  the refresh button's job alone (owner, 2026-08-24: "已经停止的
@@ -2640,7 +2646,7 @@
               use:longpress={{ onlongpress: (pt) => openCtx(pt, name, agentItems(name)) }}
               use:hoverInfo={() => offCardInfo(name)}>
               <div class="ac-top">
-                <span class="ava dim">{name.slice(0, 1).toUpperCase()}</span>
+                {#if backendIcon(backend)}<img class="ava dim" src={backendIcon(backend)} alt={backend} />{:else}<span class="ava dim">{name.slice(0, 1).toUpperCase()}</span>{/if}
                 <!-- No "stopped" word beside the name: the dimmed card already
                      says it, and the word made the card wide (owner, 2026-09-03).
                      It stays in the aria-label for screen readers. -->
@@ -3694,6 +3700,10 @@
   .st { width: 6px; height: 6px; border-radius: 50%; flex: none; transition: background var(--t-fast); }
   .unread { width: 7px; height: 7px; border-radius: 50%; background: var(--status-danger); flex: none; }
   .ava.dim { background: var(--surface2) !important; color: var(--text3); }
+  /* The stopped card's ICON avatar: identity stays, colour goes (owner,
+     2026-09-05). The letter tile above keeps its surface; the img drops it —
+     the live img.ava wears none either. */
+  img.ava.dim { background: none !important; filter: grayscale(1); opacity: 0.55; }
   /* The stopped card's direct constructive action: a small borderless
      Resume control. The surrounding card surface opens its menu (board #89). */
   .a-start {

@@ -101,7 +101,10 @@ completion).
 - A **stopped** agent (slot, no window) keeps its card and menu (Start /
   Remove). The card is dimmed and carries no "stopped" word — the dimming
   says it, and the word made the card wide (owner, 2026-09-03); the state
-  stays in the card's aria-label. The `+ agent` card is the strip's sticky last card and renders
+  stays in the card's aria-label. Its avatar is the SAME backend icon the
+  live card wears — read from the slot's declared backend, greyed by filter
+  (owner, 2026-09-05); the letter tile remains only for a backend without
+  an icon. The `+ agent` card is the strip's sticky last card and renders
   for every selected project — empty roster and closed session included
   (spawn into a down project opens it).
 - Tapping a card makes that agent the composer's **recipient** (and the
