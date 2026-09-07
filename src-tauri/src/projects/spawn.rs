@@ -545,6 +545,8 @@ fn build_prompt(def: &RegAgent, name: &str, session: &str, brief: &str, by: &str
          - Unaddressed — `tmm send \"message\"` with no @: recorded in the room only, interrupts NOBODY; teammates see it at their next `tmm log`. Use it for context worth keeping that nobody needs right now.\n\
          - The room remembers: `tmm log --limit 30` reads recent chat, `tmm agent list` shows who is here and their state. You only ever RECEIVE what is addressed or briefed to you — read the log to catch up on everything else.\n\
          \n\
+         When a message is UNCLEAR — missing background, referencing work you never saw, or possibly misaddressed (humans mistype recipients) — do NOT guess and do NOT silently act. Verify first: read the room history for the context you lack (`tmm log --limit 50`; raise the limit or pipe through grep to search further back), and ask the sender or the teammate who owns that context directly (`tmm send \"@name question\"`). Verifying costs one command; acting on a misread costs everyone a turn. If a message clearly belongs to someone else, say so instead of doing their task.\n\
+         \n\
          Keep your work visible:\n\
          - `tmm status working \"<what you are doing right now>\"` — KEEP THIS CURRENT. Your turn boundaries are observed automatically, but nobody can see WHAT you are working on unless you say it. Send one when you start the task, again whenever you move to a different part of it, and again if a single step runs long. One short line, no ceremony — it appears in the chat as your current activity, and it is how the operator follows a long task without interrupting you\n\
          - `tmm status waiting|blocked \"why\"` — when you are stuck on something outside your control (a credential, an answer, another agent). This one asks for attention, so keep it for the real thing\n\
@@ -2228,6 +2230,13 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         assert!(p.contains("interrupts NOBODY"), "unaddressed send is room-only: {p}");
         assert!(p.contains("@human"), "names the operator address: {p}");
         assert!(p.contains("delivered back to YOU"), "spawn briefs know the feedback edge: {p}");
+        // Unclear context is a VERIFY-first situation (owner, 2026-09-07: "我
+        // 容易发错消息" — a misaddressed or under-specified message must send
+        // the agent to the room history and to the sender, not into a guess).
+        assert!(p.contains("When a message is UNCLEAR"), "teaches the verify-first rule: {p}");
+        assert!(p.contains("do NOT guess"), "forbids guessing: {p}");
+        assert!(p.contains("tmm log --limit 50"), "points at the history: {p}");
+        assert!(p.contains("ask the sender"), "points at direct agent-to-agent questions: {p}");
     }
 
     #[test]
