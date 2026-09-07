@@ -1074,7 +1074,13 @@ hook-derived state, never in place of it — hooks are facts, this is a reading 
 somebody else's screen. Each backend is its own dialect: `sniff_remembered`
 dispatches on the backend `agents::detect` reported — `sniff_kiro` for kiro's
 `·`-joined status line, `sniff_grok` for grok's header ratio + boxed footer
-(see the grok backend notes above) — because reading one CLI's screen with
+(see the grok backend notes above), `sniff_omp` for omp's π-marked input-box
+top border (`╭── π  > ⬢ <model> · ◒ <level> > 📁 <cwd> > $<cost> ▶─NN%─┃1M──╮`,
+measured on 18.0.6 — the line is RESPONSIVE, a narrow pane drops the model
+segment and a fresh session has no gauge, so segments are read by MARK: `⬢`
+heads the model with the thinking level as its `·` sub-segment, `▶…┃` frames
+the used-context percentage, and `backfill` carries a wide reading across a
+narrow capture) — because reading one CLI's screen with
 another CLI's grammar yields confident nonsense, which is worse than nothing.
 
 Claude 2.1.258 uses its OFFICIAL `statusLine` extension rather than reverse-
