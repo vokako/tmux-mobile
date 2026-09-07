@@ -21,6 +21,15 @@ const SCHEMA_VERSION: i64 = 18;
 /// drift.
 const DEFAULT_OMP_SYSTEM: &str = "You are a powerful 10x developer running on OMP (oh-my-pi) who can handle any task with decisive execution and minimal words.";
 
+/// The omp default's model (owner, 2026-09-07: "设定默认的 omp agent 模型为
+/// fable 5.1"). `bedrock-extra` is the provider the user's `~/.omp/agent/
+/// models.yml` declares (the bundled omp catalog lacks Fable 5.1 on Bedrock);
+/// `render_omp` carries that file into every isolated home, so the selector
+/// resolves for spawned agents. On a machine without the catalog entry, omp
+/// warns and falls back to its own default — the same soft degradation the
+/// claude seed's Bedrock pin relies on.
+const DEFAULT_OMP_MODEL: &str = "bedrock-extra/global.anthropic.claude-fable-5-1";
+
 const LEGACY_DEFAULT_KIRO_SYSTEM: &str = "You are a powerful 10x developer running on Kiro CLI who can handle any task with decisive execution and minimal words.";
 const VERBOSE_DEFAULT_KIRO_SYSTEM: &str = concat!(
     "You are a powerful 10x developer running on Kiro CLI who can handle any task with decisive execution and minimal words.",
@@ -774,11 +783,11 @@ impl Store {
             self.conn
                 .execute(
                     "INSERT INTO reg_agents (name, backend, model, effort, system, skills, mcp, can_hire, created_at, updated_at)
-                     SELECT 'omp', 'omp', '', '', ?1, '[\"tmm-cli\",\"mem\",\"mcp-cli\"]', '[]', 1,
+                     SELECT 'omp', 'omp', ?2, '', ?1, '[\"tmm-cli\",\"mem\",\"mcp-cli\"]', '[]', 1,
                             CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER)
                      WHERE (SELECT COUNT(*) FROM reg_agents) > 0
                        AND NOT EXISTS (SELECT 1 FROM reg_agents WHERE name = 'omp')",
-                    [DEFAULT_OMP_SYSTEM],
+                    rusqlite::params![DEFAULT_OMP_SYSTEM, DEFAULT_OMP_MODEL],
                 )
                 .map_err(|e| format!("migrate to 18: {e}"))?;
         }
@@ -1570,7 +1579,7 @@ impl Store {
             RegAgent {
                 name: "omp".into(),
                 backend: "omp".into(),
-                model: String::new(),
+                model: DEFAULT_OMP_MODEL.into(),
                 effort: String::new(),
                 system: DEFAULT_OMP_SYSTEM.into(),
                 skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
@@ -2636,6 +2645,7 @@ mod tests {
             let store = Store::init(Connection::open(&path).unwrap()).unwrap();
             let omp = store.reg_get("omp").unwrap().expect("v18 backfills the omp default");
             assert_eq!(omp.system, DEFAULT_OMP_SYSTEM);
+            assert_eq!(omp.model, DEFAULT_OMP_MODEL, "the backfill pins Fable 5.1 like the seed");
             assert!(omp.can_hire, "the default is a Manager like its four siblings");
             assert_eq!(omp.skills, r#"["tmm-cli","mem","mcp-cli"]"#);
             // Deleting the default now sticks: the stamp is v18, the insert

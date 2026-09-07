@@ -26,7 +26,7 @@ the project hub (`hub_*` RPCs, `src-tauri/src/server/hub_rpc.rs`, room `proj:<se
 
 ### Registry defaults are exactly the five backend-native Managers
 
-`kiro`, `codex`, `claude`, `grok`, `omp` — five backend-native Managers with `can_hire=true` and built-in `tmm-cli`/`mem`/`mcp-cli`. All keep the terse 10x-developer sentence; Kiro adds only one short Git rule: code changes use a dedicated worktree instead of the launch checkout, preserve the user's Git author, and add the exact `Co-authored-by: Kiro Agent <244629292+kiro-agent@users.noreply.github.com>` trailer. `reg_seed` upgrades only either known former Kiro default (the original terse sentence or the first verbose Git version), preserving every other field; a custom persona is never overwritten. The `claude` seed pins `global.anthropic.claude-fable-5-1[1m]` (owner, 2026-09-02) while the others leave the model empty (= backend default); Kiro and OMP use their built-in search (omp ships a native `web_search` tool) and the other three seed pinned `kiro-web-search==0.1.3` inline (the local registry may replace it with its secret-bearing central def). `reg_list` fixes those names in that order before alphabetizing custom agents, so AgentsPage, spawn pickers and CLI all agree. Retired `docs`/`reviewer`, `*-default`, and `cc_builder` must not return as seeds or examples.
+`kiro`, `codex`, `claude`, `grok`, `omp` — five backend-native Managers with `can_hire=true` and built-in `tmm-cli`/`mem`/`mcp-cli`. All keep the terse 10x-developer sentence; Kiro adds only one short Git rule: code changes use a dedicated worktree instead of the launch checkout, preserve the user's Git author, and add the exact `Co-authored-by: Kiro Agent <244629292+kiro-agent@users.noreply.github.com>` trailer. `reg_seed` upgrades only either known former Kiro default (the original terse sentence or the first verbose Git version), preserving every other field; a custom persona is never overwritten. The `claude` seed pins `global.anthropic.claude-fable-5-1[1m]` (owner, 2026-09-02) and the `omp` seed pins `bedrock-extra/global.anthropic.claude-fable-5-1` (owner, 2026-09-07 — the provider the user's `models.yml` declares, carried into every isolated omp home; a machine without it degrades soft to omp's own default) while kiro/codex/grok leave the model empty (= backend default); Kiro and OMP use their built-in search (omp ships a native `web_search` tool) and the other three seed pinned `kiro-web-search==0.1.3` inline (the local registry may replace it with its secret-bearing central def). `reg_list` fixes those names in that order before alphabetizing custom agents, so AgentsPage, spawn pickers and CLI all agree. Retired `docs`/`reviewer`, `*-default`, and `cc_builder` must not return as seeds or examples.
 
 ### Managed agent launch PATH is part of the recipe
 
@@ -43,9 +43,17 @@ relocates (its settings docs; verified live on omp 18.0.6). So
 `render_omp` needs no per-file plumbing: the isolated home IS that
 directory. Four decisions, each measured rather than guessed:
 
-* **Auth carries as `agent.db`** — the grok `auth.json` lesson: an isolated
-  home without the credential store is a logged-out agent. Env-keyed
-  providers (Bedrock bearer tokens) need nothing and lose nothing.
+* **Auth carries as `agent.db`, the model catalog as `models.yml`** — the
+  grok lessons (auth.json, config.toml catalog): an isolated home without
+  the credential store is a logged-out agent, and one without the user's
+  `models.yml` cannot resolve a registry model that lives there. On this
+  host that file declares the Bedrock trio under `bedrock-extra`
+  (fable-5-1 / opus-5 / gpt-5.6-sol — the bundled catalog lacks Fable 5.1,
+  and its own gpt-5.6 entries 400 on Bedrock because the converse-stream
+  transport sends the Anthropic `thinking` block to reasoning-marked
+  models, measured 2026-09-07; the gpt entry is `reasoning: false` for
+  exactly that reason). Env-keyed providers (Bedrock bearer tokens) need
+  nothing and lose nothing. UI prefs and hooks deliberately do NOT carry.
 * **The prompt is APPENDED, never replaced** — `--append-system-prompt
   <home>/system-prompt.md` (a file path; verified the contents reach the
   prompt). omp's builtin prompt teaches its own tool harness (hashline

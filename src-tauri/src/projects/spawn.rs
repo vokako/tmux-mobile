@@ -1370,6 +1370,17 @@ fn render_omp(
     if user_db.is_file() {
         let _ = std::fs::copy(&user_db, home.join("agent.db"));
     }
+    // Model-catalog carry (grok's config.toml lesson, in omp's dialect): the
+    // user's `models.yml` declares the custom providers/models the bundled
+    // catalog lacks — on this host the Bedrock trio (fable-5-1/opus/gpt-5.6)
+    // under `bedrock-extra` — and a registry def may name exactly such a
+    // model. An isolated home without the catalog cannot resolve it, so the
+    // file carries; UI prefs and hooks deliberately do NOT (that is what
+    // isolation is for).
+    let user_models = omp_user_agent_dir().join("models.yml");
+    if user_models.is_file() {
+        let _ = std::fs::copy(&user_models, home.join("models.yml"));
+    }
 
     // config.yml: the model is identity, so it lives in the config the owner
     // can read, not on the launch line (kiro's lesson). Empty = omp default.
