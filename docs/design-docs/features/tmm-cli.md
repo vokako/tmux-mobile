@@ -25,6 +25,9 @@ background tasks with local tmux only and never opens a socket. See
 # agent-facing (context from $TMM_PROJECT / $TMM_AGENT, exported by the launcher)
 tmm send "<text>"                    post to the project chat; @name addresses
 tmm log [--since <ts>] [--limit N] [-f]   read chat; --since is exclusive (ms)
+tmm log --grep <text> [--grep …] [--global] [--limit N]   search the FULL history
+                                     (any-match term list, case-insensitive, body+sender;
+                                      --global = every project's room, hits name their room)
 tmm status <working|waiting|blocked> [note]
 tmm done [summary]                   completion; also posts "✔ done — summary"
 

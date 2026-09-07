@@ -367,6 +367,16 @@ impl TeamBridge for TeamManager {
         serde_json::to_value(msg).ok()
     }
 
+    /// Straight to the store, like `room_latest` and for the same reason: search
+    /// has to cover rooms whose Team is not running (nearly all project hubs),
+    /// so the room-registration gate that guards the live-bus paths does not
+    /// apply here — and the global scope is by definition not one room's bus.
+    fn search_messages(&self, room: Option<&str>, terms: &[String], limit: i64) -> serde_json::Value {
+        let conn = self.conn.lock().unwrap();
+        let msgs = agora::store::search(&conn, room, terms, limit.clamp(1, 500)).unwrap_or_default();
+        serde_json::json!({ "messages": msgs })
+    }
+
     fn roster(&self, room: &str) -> serde_json::Value {
         let roster = self.room_bus(room).and_then(|b| b.roster().ok()).unwrap_or_default();
         serde_json::json!({ "roster": roster })
@@ -780,6 +790,21 @@ mod tests {
         m.ensure_room("beta", "/tmp/shared", "triad").unwrap();
         m.post("alpha", "human", "hello alpha", false).unwrap();
         m.post("beta", "human", "hello beta", false).unwrap();
+
+        // Search respects the same walls — and `room = None` is the one read
+        // that deliberately crosses them, naming each hit's room.
+        let bodies = |v: &serde_json::Value| -> Vec<String> {
+            v["messages"].as_array().unwrap().iter()
+                .map(|x| x["body"].as_str().unwrap_or("").to_string()).collect()
+        };
+        let scoped = m.search_messages(Some("alpha"), &["HELLO".into()], 50);
+        assert_eq!(bodies(&scoped), vec!["hello alpha"], "case-insensitive, one room only");
+        let global = m.search_messages(None, &["hello".into()], 50);
+        assert_eq!(bodies(&global).len(), 2, "global search crosses rooms");
+        let rooms: Vec<&str> = global["messages"].as_array().unwrap().iter()
+            .map(|x| x["room"].as_str().unwrap_or("")).collect();
+        assert!(rooms.contains(&"alpha") && rooms.contains(&"beta"), "each hit names its room: {rooms:?}");
+
         m.room_bus("alpha")
             .unwrap()
             .seed_employee("worker", &serde_json::json!({ "role": "alpha" }))

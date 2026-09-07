@@ -40,6 +40,8 @@ USAGE (agent):
                     [--image <path|url>]   attach an image by REFERENCE (repeatable);
                                       a local path is resolved by the client
   tmm log [--since <ts>] [--limit N] [-f]   read chat; --since is exclusive, -f follows
+                    [--grep <text>]   search the FULL history instead (repeatable = any-match)
+                    [--global]        …across EVERY project's room, hits name their room
   tmm status <working|waiting|blocked> "<note>"   say what you are doing NOW
                                       (the note is the point — it shows in the chat)
   tmm done [summary]                  declare completion
@@ -237,7 +239,25 @@ async fn main() {
             let session = need_project(&ctx);
             let since = flags.get("since").cloned().flatten().and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
             let limit = flags.get("limit").cloned().flatten().and_then(|s| s.parse::<i64>().ok()).unwrap_or(100);
-            if flags.contains_key("f") || flags.contains_key("follow") {
+            // `--grep` is repeatable — a term LIST, any-match — and turns the
+            // read into a search over the room's FULL history (paging cursors
+            // don't apply). `--global` widens it to every project's room.
+            let terms: Vec<String> = repeated
+                .iter()
+                .filter(|(k, _)| k == "grep")
+                .map(|(_, v)| v.clone())
+                .collect();
+            let global = flags.contains_key("global");
+            if !terms.is_empty() {
+                if flags.contains_key("f") || flags.contains_key("follow") {
+                    fail(EXIT_USAGE, "--grep searches history; it does not combine with -f");
+                }
+                let limit = flags.get("limit").cloned().flatten().and_then(|s| s.parse::<i64>().ok()).unwrap_or(50);
+                let r = rpc(&ctx, "hub_search", json!({ "session": session, "grep": terms, "global": global, "limit": limit })).await;
+                print_log_with_rooms(&ctx, &r, global);
+            } else if global {
+                fail(EXIT_USAGE, "--global needs --grep: tmm log --grep \"deploy\" --global");
+            } else if flags.contains_key("f") || flags.contains_key("follow") {
                 follow_log(&ctx, &session, since, limit).await;
             } else {
                 let r = rpc(&ctx, "hub_log", json!({ "session": session, "since_ts": since, "limit": limit })).await;
@@ -1162,6 +1182,12 @@ async fn read_reply(
 }
 
 fn print_log(ctx: &Ctx, r: &Value) {
+    print_log_with_rooms(ctx, r, false);
+}
+
+/// Search output across projects names the room per line — `[proj:blog]` —
+/// because a hit means nothing if you cannot tell WHERE it was said.
+fn print_log_with_rooms(ctx: &Ctx, r: &Value, with_room: bool) {
     if ctx.json {
         println!("{r}");
         return;
@@ -1171,7 +1197,12 @@ fn print_log(ctx: &Ctx, r: &Value) {
         let from = m.get("from").and_then(|v| v.as_str()).unwrap_or("?");
         let body = m.get("body").and_then(|v| v.as_str()).unwrap_or("");
         let ts = m.get("ts").and_then(|v| v.as_i64()).unwrap_or(0);
-        println!("[{}] {from}: {body}", local_stamp(ts));
+        if with_room {
+            let room = m.get("room").and_then(|v| v.as_str()).unwrap_or("?");
+            println!("[{}] [{room}] {from}: {body}", local_stamp(ts));
+        } else {
+            println!("[{}] {from}: {body}", local_stamp(ts));
+        }
     }
 }
 

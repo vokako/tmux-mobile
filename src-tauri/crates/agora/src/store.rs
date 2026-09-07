@@ -189,6 +189,41 @@ pub fn max_seq(conn: &Connection, room: &str) -> Result<i64> {
     Ok(seq.unwrap_or(0))
 }
 
+/// The newest `limit` messages whose body or sender contains ANY of `terms`
+/// (substring, ASCII-case-insensitive — SQLite's LIKE), oldest first like every
+/// other history read. `room = None` searches EVERY room; the `room` field on
+/// each hit says where it was said. Terms are LIKE-escaped, so `50%` finds the
+/// literal string, not "anything starting with 50".
+pub fn search(conn: &Connection, room: Option<&str>, terms: &[String], limit: i64) -> Result<Vec<Message>> {
+    let terms: Vec<&String> = terms.iter().filter(|t| !t.trim().is_empty()).collect();
+    if terms.is_empty() {
+        return Ok(Vec::new());
+    }
+    let like_one = |i: usize| format!("(body LIKE ?{i} ESCAPE '\\' OR sender LIKE ?{i} ESCAPE '\\')");
+    // ?1 = room (may be NULL), ?2..?n+1 = patterns, ?n+2 = limit.
+    let likes: Vec<String> = (0..terms.len()).map(|i| like_one(i + 2)).collect();
+    let sql = format!(
+        "SELECT * FROM (
+            SELECT seq,id,ts,room,sender,to_json,kind,body
+            FROM messages
+            WHERE (?1 IS NULL OR room=?1) AND ({})
+            ORDER BY seq DESC LIMIT ?{}
+         ) ORDER BY seq ASC",
+        likes.join(" OR "),
+        terms.len() + 2
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    params.push(Box::new(room.map(str::to_string)));
+    for t in &terms {
+        let escaped = t.trim().replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+        params.push(Box::new(format!("%{escaped}%")));
+    }
+    params.push(Box::new(limit));
+    let rows = stmt.query_map(rusqlite::params_from_iter(params.iter().map(|p| p.as_ref())), row_to_message)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 /// Recent messages sent by `sender`, newest first (used to re-surface an unanswered @).
 pub fn messages_from(conn: &Connection, room: &str, sender: &str, limit: i64) -> Result<Vec<Message>> {
     let mut stmt = conn.prepare(
@@ -454,4 +489,65 @@ pub fn delete_messages(conn: &Connection, room: &str, ids: &[String]) -> Result<
 pub fn clear_room(conn: &Connection, room: &str) -> Result<()> {
     conn.execute("DELETE FROM messages WHERE room=?1", params![room])?;
     clear_runtime_state(conn, room)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn seed(conn: &Connection) {
+        append(conn, "proj:blog", "human", &[], Kind::Msg, "deploy the site tonight").unwrap();
+        append(conn, "proj:blog", "builder", &[], Kind::Msg, "Deploy done, 50% faster").unwrap();
+        append(conn, "proj:shop", "qa", &[], Kind::Msg, "cart bug reproduced").unwrap();
+        append(conn, "proj:shop", "human", &[], Kind::Msg, "ship it").unwrap();
+    }
+
+    #[test]
+    fn search_matches_any_term_case_insensitively_within_one_room() {
+        let conn = open_in_memory().unwrap();
+        seed(&conn);
+        let hits = search(&conn, Some("proj:blog"), &["DEPLOY".into()], 50).unwrap();
+        assert_eq!(hits.len(), 2, "LIKE is case-insensitive; both deploys hit");
+        assert!(hits.iter().all(|m| m.room == "proj:blog"), "the other room stays out");
+        // Oldest first, like every history read.
+        assert!(hits[0].seq < hits[1].seq);
+        // A term list is ANY-match: either word suffices.
+        let hits = search(&conn, Some("proj:shop"), &["cart".into(), "ship".into()], 50).unwrap();
+        assert_eq!(hits.len(), 2, "two terms, one message each");
+    }
+
+    #[test]
+    fn search_without_a_room_covers_every_room_and_names_it() {
+        let conn = open_in_memory().unwrap();
+        seed(&conn);
+        let hits = search(&conn, None, &["human".into()], 50).unwrap();
+        assert_eq!(hits.len(), 2, "sender matches too, across rooms");
+        let rooms: Vec<&str> = hits.iter().map(|m| m.room.as_str()).collect();
+        assert!(rooms.contains(&"proj:blog") && rooms.contains(&"proj:shop"), "each hit says where: {rooms:?}");
+    }
+
+    #[test]
+    fn search_escapes_like_wildcards_and_ignores_empty_terms() {
+        let conn = open_in_memory().unwrap();
+        seed(&conn);
+        // `50%` is a literal, not "50 followed by anything".
+        let hits = search(&conn, None, &["50%".into()], 50).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].body.contains("50% faster"));
+        let hits = search(&conn, None, &["5_%".into()], 50).unwrap();
+        assert!(hits.is_empty(), "escaped _ does not wildcard-match '0'");
+        // All-blank terms answer nothing rather than everything.
+        assert!(search(&conn, None, &["  ".into(), String::new()], 50).unwrap().is_empty());
+    }
+
+    #[test]
+    fn search_keeps_only_the_newest_limit_hits() {
+        let conn = open_in_memory().unwrap();
+        for i in 0..5 {
+            append(&conn, "proj:blog", "a", &[], Kind::Msg, &format!("ping {i}")).unwrap();
+        }
+        let hits = search(&conn, Some("proj:blog"), &["ping".into()], 2).unwrap();
+        assert_eq!(hits.len(), 2);
+        assert!(hits[1].body.ends_with('4'), "the newest hits survive the cap: {:?}", hits.iter().map(|m| &m.body).collect::<Vec<_>>());
+    }
 }

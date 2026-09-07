@@ -262,6 +262,49 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
             Response::ok(id, history)
         }
 
+        // Keyword search over the room's FULL history — `hub_log` pages, this
+        // finds (owner, 2026-09-07: "log是不是也加上关键字搜索能力…也可以加一个
+        // --global 跨项目会话全局搜索"). `grep` is a term LIST, any-match,
+        // substring, ASCII-case-insensitive, against body and sender.
+        // `global: true` widens the scope to EVERY room; each hit carries its
+        // `room` field so a cross-project answer stays readable. Newest `limit`
+        // hits, oldest first, archived messages filtered out per room on the
+        // way — same one-way mirror as `hub_log`.
+        "hub_search" => {
+            let terms: Vec<String> = p
+                .get("grep")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+            if terms.iter().all(|t| t.trim().is_empty()) {
+                return Response::err(id, ERR_INVALID_PARAMS, "grep must be a non-empty array of search terms".into());
+            }
+            let global = p.get("global").and_then(|v| v.as_bool()).unwrap_or(false);
+            let limit = p.get("limit").and_then(|v| v.as_i64()).unwrap_or(50).clamp(1, 500);
+            let scope = if global { None } else { Some(room.as_str()) };
+            let mut result = bus.search_messages(scope, &terms, limit);
+            if let Some(msgs) = result.get_mut("messages").and_then(|m| m.as_array_mut()) {
+                // Archived = hidden everywhere, including from search. The ids
+                // are per room, so a global result set asks once per room it
+                // actually touched.
+                let rooms: std::collections::BTreeSet<String> = msgs
+                    .iter()
+                    .filter_map(|m| m.get("room").and_then(|v| v.as_str()).map(str::to_string))
+                    .collect();
+                for r in rooms {
+                    let hidden = crate::projects::archived_ids(&r);
+                    if hidden.is_empty() {
+                        continue;
+                    }
+                    msgs.retain(|m| {
+                        m.get("room").and_then(|v| v.as_str()) != Some(r.as_str())
+                            || !m.get("id").and_then(|v| v.as_str()).is_some_and(|i| hidden.iter().any(|h| h == i))
+                    });
+                }
+            }
+            Response::ok(id, result)
+        }
+
         // Deleting a message is TWO steps, because a transcript is a record and a
         // misclick on a record should be recoverable (owner, 2026-08-19): archive
         // hides it — reversibly, the message never leaves the room's store — and
@@ -1302,7 +1345,15 @@ mod tests {
             serde_json::json!({ "proj:blog": 200 })
         }
 
-        fn history(&self, room: &str, _limit: i64) -> serde_json::Value {
+        fn history(&self, room: &str, limit: i64) -> serde_json::Value {
+            // Seeded log first, like `history_page`: the newest `limit` rows,
+            // oldest first. The fixed two-row answer below is what every test
+            // without a seed has always seen.
+            let all = self.log.lock().unwrap().clone();
+            if !all.is_empty() {
+                let start = all.len().saturating_sub(limit.max(1) as usize);
+                return serde_json::json!({ "messages": all[start..].to_vec() });
+            }
             serde_json::json!({ "messages": [
                 { "room": room, "seq": 41, "ts": 100, "from": "a", "body": "old" },
                 { "room": room, "seq": 42, "ts": 200, "from": "b", "body": "new" },
@@ -1462,6 +1513,61 @@ mod tests {
             None,
         );
         assert_eq!(r.result.expect("result")["messages"].as_array().unwrap().len(), 2);
+    }
+
+    /// `hub_search` finds instead of paging (owner, 2026-09-07): a term list,
+    /// any-match, over the room's history — and the archive mirror applies to
+    /// search exactly as it does to `hub_log`, or a hidden message would come
+    /// back the moment someone greps for it.
+    #[test]
+    fn hub_search_matches_terms_validates_them_and_hides_the_archived() {
+        crate::projects::tests::use_test_store();
+        let session = format!("srch-{}", uuid::Uuid::new_v4());
+        let room = format!("proj:{session}");
+        let b = Bridge::new();
+        // No terms (or all-blank terms) is a caller error, not "match everything".
+        for bad in [serde_json::json!({ "session": session }),
+                    serde_json::json!({ "session": session, "grep": ["  "] })] {
+            let r = handle_hub_request(&req("hub_search", bad), Some(&b), None);
+            assert!(r.error.is_some(), "empty grep must be rejected");
+        }
+        // Any-match over the double's history ("old" by a, "new" by b): one term
+        // hits one message; two terms hit both; a sender name is searchable too.
+        let search = |grep: serde_json::Value| {
+            let r = handle_hub_request(
+                &req("hub_search", serde_json::json!({ "session": session, "grep": grep })),
+                Some(&b), None,
+            );
+            r.result.expect("result")["messages"].as_array().unwrap().clone()
+        };
+        assert_eq!(search(serde_json::json!(["OLD"])).len(), 1, "case-insensitive body match");
+        assert_eq!(search(serde_json::json!(["old", "new"])).len(), 2, "a term list is any-match");
+        assert_eq!(search(serde_json::json!(["b"])).len(), 1, "the sender matches too");
+        // Archiving hides from search as it does from the log. The double's rows
+        // carry no id, so archive by the id the real page would carry — then a
+        // seeded log row with that id must not surface.
+        let b = Bridge::new().with_log(&room, 2);
+        crate::projects::archive_msg(&room, "m2", 20, "human", "body2").unwrap();
+        let r = handle_hub_request(
+            &req("hub_search", serde_json::json!({ "session": session, "grep": ["body"] })),
+            Some(&b), None,
+        );
+        let msgs = r.result.expect("result")["messages"].as_array().unwrap().clone();
+        assert_eq!(msgs.len(), 1, "the archived hit is filtered: {msgs:?}");
+        assert_eq!(msgs[0]["id"], "m1");
+    }
+
+    /// The global scope through a bridge that cannot enumerate rooms answers
+    /// empty rather than wrong — the real bridge (team_bridge) queries the
+    /// store across rooms; the trait default has no room list to walk.
+    #[test]
+    fn hub_search_global_on_a_pageless_bridge_degrades_to_empty() {
+        let b = Bridge::new();
+        let r = handle_hub_request(
+            &req("hub_search", serde_json::json!({ "session": "blog", "grep": ["old"], "global": true })),
+            Some(&b), None,
+        );
+        assert_eq!(r.result.expect("result")["messages"].as_array().unwrap().len(), 0);
     }
 
     /// The activity feed's half of the same contract. The durable log keeps every

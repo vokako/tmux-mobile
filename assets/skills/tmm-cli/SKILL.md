@@ -24,6 +24,8 @@ tmm send "@name message"        # post to the project chat; @name types into
                                 #   @human addresses the operator
 tmm send "..." --image <path|url>   # attach an image by REFERENCE (repeatable)
 tmm log [--since <ts>] [--limit N] [-f]   # read chat; -f follows
+tmm log --grep <text> [--grep …] [--global]  # search the FULL history (any-match
+                                #   terms; --global = across every project)
 tmm status working|waiting|blocked "<note>"  # what you are doing NOW — the
                                 #   note is the point, it shows in the chat
 tmm done "summary"              # declare the briefed task complete

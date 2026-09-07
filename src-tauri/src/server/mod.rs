@@ -70,6 +70,34 @@ pub trait TeamBridge: Send + Sync {
             .find(|m| m.get("id").and_then(|v| v.as_str()) == Some(id))
             .cloned()
     }
+    /// The newest `limit` messages matching ANY of `terms` (substring,
+    /// ASCII-case-insensitive, body or sender), oldest first:
+    /// `{ "messages": [...] }`. `room = None` searches EVERY room — each hit's
+    /// `room` field says where it was said, which is what makes a cross-project
+    /// answer readable.
+    ///
+    /// Defaulted like `history_page`: a bridge that cannot search scans the
+    /// newest page of the one room it was asked about, and answers empty for
+    /// the global scope it has no way to enumerate.
+    fn search_messages(&self, room: Option<&str>, terms: &[String], limit: i64) -> serde_json::Value {
+        let Some(room) = room else {
+            return serde_json::json!({ "messages": [] });
+        };
+        let hit = |m: &serde_json::Value| {
+            let field = |k: &str| m.get(k).and_then(|v| v.as_str()).unwrap_or("").to_ascii_lowercase();
+            let (body, from) = (field("body"), field("from"));
+            terms.iter().map(|t| t.trim().to_ascii_lowercase()).filter(|t| !t.is_empty())
+                .any(|t| body.contains(&t) || from.contains(&t))
+        };
+        let msgs: Vec<serde_json::Value> = self
+            .history(room, 1000)
+            .get("messages")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter(|m| hit(m)).cloned().collect())
+            .unwrap_or_default();
+        let skip = msgs.len().saturating_sub(limit.max(1) as usize);
+        serde_json::json!({ "messages": msgs[skip..] })
+    }
     /// Roster + presence for `room`: `{ "roster": [...] }`.
     fn roster(&self, room: &str) -> serde_json::Value;
     /// Post as a participant in `room`. Returns the stored message JSON.
