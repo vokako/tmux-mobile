@@ -1365,6 +1365,14 @@ test('modelLabel drops vendor and region prefixes, keeps the model id', () => {
   assert.equal(modelLabel('Fable 5.1'), 'Fable 5.1', 'a display name is not dotted-prefixed');
   assert.equal(modelLabel('gpt-5.6'), 'gpt-5.6', 'a version dot is not a prefix');
   assert.equal(modelLabel('openai.'), 'openai.', 'a bare prefix is left alone rather than emptied');
+  // A trailing parenthetical is route/window furniture, not identity —
+  // omp's display names wear it (owner, 2026-09-07: "(Bedrock, 1M) 这个可以
+  // 省略吧，不用再卡片首页展示").
+  assert.equal(modelLabel('Fable 5.1 (Bedrock, 1M)'), 'Fable 5.1');
+  assert.equal(modelLabel('Opus 4.8 (US)'), 'Opus 4.8');
+  assert.equal(modelLabel('GPT 5.6 Sol (Bedrock, 1M)'), 'GPT 5.6 Sol');
+  assert.equal(modelLabel('(experimental)'), '(experimental)', 'a name that is only a parenthetical stays whole');
+  assert.equal(modelLabel('claude (new) opus'), 'claude (new) opus', 'only a TRAILING group is furniture');
 });
 
 test('a long message confirms against its TRUNCATED echo (board #78)', () => {
