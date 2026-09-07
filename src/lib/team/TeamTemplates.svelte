@@ -47,7 +47,9 @@
     onClose?: () => void;
   } = $props();
 
-  const BACKENDS = ['kiro', 'claude', 'codex'];
+  // The spawnable-backend list (agents::SPAWNABLE_BACKENDS server-side);
+  // teams validate inline members against the same set.
+  const BACKENDS = ['kiro', 'claude', 'codex', 'grok', 'omp'];
 
   // Local editable copy so edits aren't lost on the 1s status poll re-render.
   // NOTE: `templates` is a Svelte $state proxy — structuredClone() throws a

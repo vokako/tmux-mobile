@@ -14,7 +14,12 @@ use std::path::Path;
 
 /// Bumped when the schema changes; `migrate` is the only place that knows the
 /// steps. Stored in SQLite's own `user_version` pragma.
-const SCHEMA_VERSION: i64 = 17;
+const SCHEMA_VERSION: i64 = 18;
+
+/// The `omp` default's system text — shared by `reg_seed` (fresh installs)
+/// and the v18 backfill migration (existing installs), so the two cannot
+/// drift.
+const DEFAULT_OMP_SYSTEM: &str = "You are a powerful 10x developer running on OMP (oh-my-pi) who can handle any task with decisive execution and minimal words.";
 
 const LEGACY_DEFAULT_KIRO_SYSTEM: &str = "You are a powerful 10x developer running on Kiro CLI who can handle any task with decisive execution and minimal words.";
 const VERBOSE_DEFAULT_KIRO_SYSTEM: &str = concat!(
@@ -755,6 +760,27 @@ impl Store {
                      );",
                 )
                 .map_err(|e| format!("migrate to 17: {e}"))?;
+        }
+        if version < 18 {
+            // A new backend default joins EXISTING installs exactly once.
+            // `reg_seed` only plants on an empty table (so a deliberately
+            // deleted default never resurrects at restart) — which also
+            // meant every already-seeded install would never see the new
+            // `omp` Manager. A one-shot migration is the mechanism that
+            // threads that needle: rows > 0 gates out fresh databases
+            // (reg_seed will plant all five right after open), NOT EXISTS
+            // respects a user's own `omp` definition, and once stamped v18
+            // the insert never runs again, so deleting it sticks.
+            self.conn
+                .execute(
+                    "INSERT INTO reg_agents (name, backend, model, effort, system, skills, mcp, can_hire, created_at, updated_at)
+                     SELECT 'omp', 'omp', '', '', ?1, '[\"tmm-cli\",\"mem\",\"mcp-cli\"]', '[]', 1,
+                            CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER)
+                     WHERE (SELECT COUNT(*) FROM reg_agents) > 0
+                       AND NOT EXISTS (SELECT 1 FROM reg_agents WHERE name = 'omp')",
+                    [DEFAULT_OMP_SYSTEM],
+                )
+                .map_err(|e| format!("migrate to 18: {e}"))?;
         }
         Ok(())
     }
@@ -1546,7 +1572,7 @@ impl Store {
                 backend: "omp".into(),
                 model: String::new(),
                 effort: String::new(),
-                system: "You are a powerful 10x developer running on OMP (oh-my-pi) who can handle any task with decisive execution and minimal words.".into(),
+                system: DEFAULT_OMP_SYSTEM.into(),
                 skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
                 // omp ships its own web_search tool — no MCP search shim needed.
                 mcp: "[]".into(),
@@ -2586,6 +2612,62 @@ mod tests {
             "My deliberately customized Kiro persona.",
             "seeding never overwrites a custom system prompt"
         );
+    }
+
+    /// v18: an already-seeded registry (any pre-omp install) gains the `omp`
+    /// default exactly once. Once stamped, deleting it sticks — the insert
+    /// never re-runs — and a user's own `omp` definition is never overwritten.
+    #[test]
+    fn v18_backfills_omp_into_an_already_seeded_registry() {
+        let dir = std::env::temp_dir().join(format!("tmm-migrate-omp-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("state.db");
+
+        // A fresh store, seeded, then rewound to look like a v17 install:
+        // the omp row gone, the stamp pre-backfill.
+        {
+            let store = Store::init(Connection::open(&path).unwrap()).unwrap();
+            store.reg_seed(1).unwrap();
+            store.conn.execute("DELETE FROM reg_agents WHERE name='omp'", []).unwrap();
+            store.conn.pragma_update(None, "user_version", 17).unwrap();
+        }
+        // Reopening migrates: the four-default registry gains omp once.
+        {
+            let store = Store::init(Connection::open(&path).unwrap()).unwrap();
+            let omp = store.reg_get("omp").unwrap().expect("v18 backfills the omp default");
+            assert_eq!(omp.system, DEFAULT_OMP_SYSTEM);
+            assert!(omp.can_hire, "the default is a Manager like its four siblings");
+            assert_eq!(omp.skills, r#"["tmm-cli","mem","mcp-cli"]"#);
+            // Deleting the default now sticks: the stamp is v18, the insert
+            // is history.
+            assert!(store.reg_delete("omp").unwrap());
+        }
+        {
+            let store = Store::init(Connection::open(&path).unwrap()).unwrap();
+            assert!(store.reg_get("omp").unwrap().is_none(), "a deleted default never resurrects");
+            // A user's own `omp` definition survives a re-run of the step.
+            let custom = RegAgent {
+                name: "omp".into(),
+                backend: "omp".into(),
+                model: String::new(),
+                effort: String::new(),
+                system: "My own omp persona.".into(),
+                skills: "[]".into(),
+                mcp: "[]".into(),
+                can_hire: false,
+            };
+            store.reg_save(&custom, 2).unwrap();
+            store.conn.pragma_update(None, "user_version", 17).unwrap();
+        }
+        {
+            let store = Store::init(Connection::open(&path).unwrap()).unwrap();
+            assert_eq!(
+                store.reg_get("omp").unwrap().unwrap().system,
+                "My own omp persona.",
+                "NOT EXISTS respects a custom definition"
+            );
+        }
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

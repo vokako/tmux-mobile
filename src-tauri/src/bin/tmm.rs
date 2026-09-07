@@ -72,7 +72,7 @@ USAGE (human or agent — self-management):
   tmm agent stop|restart <name>       stop it, or bring it back resuming its conversation
   tmm agent remove <name>             eject it: stop + forget its slot + delete its home
   tmm project list                    all projects
-  tmm project create <path> [--name n] [--session s] [--with-agent kiro|claude|codex|grok]
+  tmm project create <path> [--name n] [--session s] [--with-agent kiro|claude|codex|grok|omp]
   tmm project up <session>            bring a project's tmux session up
   tmm project rename <session> --name "New name"   rename the label (session unchanged)
   tmm project delete <session>        forget the project and delete its agents' homes
@@ -83,7 +83,7 @@ USAGE (human or agent — self-management):
   tmm teams save --name <n> --def '<members json>' [--description <text>]
                                       members: [{"name","base","role"[,"model","effort"]} | {"name","role","agent":{…}} | {"team":"<other team>"[,"role"]}]
   tmm teams delete <name>
-  tmm registry save --name <n> --backend <kiro|claude|codex> [--system <text>]
+  tmm registry save --name <n> --backend <kiro|claude|codex|grok|omp> [--system <text>]
                     [--model m] [--effort low|medium|high|…] [--skills a,b] [--mcp <json>] [--can-hire]
   tmm registry delete <name>
   tmm prompt show|path                the app-wide agent instructions (<config>/AGENTS.md),
@@ -518,7 +518,7 @@ async fn main() {
         // interface. can_hire stays a resource gate on spawn only.
         ("project", rest) if rest.first().map(String::as_str) == Some("create") => {
             let Some(path) = rest.get(1).cloned() else {
-                fail(EXIT_USAGE, "project create needs a path: tmm project create /path/to/dir [--name n] [--session s] [--with-agent kiro|claude|codex|grok]");
+                fail(EXIT_USAGE, "project create needs a path: tmm project create /path/to/dir [--name n] [--session s] [--with-agent kiro|claude|codex|grok|omp]");
             };
             let mut params = json!({ "path": path });
             for (flag, key) in [("name", "name"), ("session", "session"), ("with-agent", "agent")] {

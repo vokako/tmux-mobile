@@ -101,8 +101,12 @@ pub fn validate(team: &RegTeam, known: &[String], known_teams: &[String], cap: u
         }
         if m.base.trim().is_empty() {
             let a = m.agent.as_ref().ok_or_else(|| format!("member '{n}' has neither a base agent nor an inline definition"))?;
-            if !matches!(a.backend.as_str(), "kiro" | "claude" | "codex" | "grok") {
-                return Err(format!("member '{n}': backend must be kiro|claude|codex|grok, got '{}'", a.backend));
+            if !super::agents::SPAWNABLE_BACKENDS.contains(&a.backend.as_str()) {
+                return Err(format!(
+                    "member '{n}': backend must be {}, got '{}'",
+                    super::agents::SPAWNABLE_BACKENDS.join("|"),
+                    a.backend
+                ));
             }
         } else if !known.iter().any(|k| k == m.base.trim()) {
             return Err(format!("member '{n}' derives from '{}', which is not in the registry", m.base));

@@ -106,6 +106,14 @@ const KNOWN: &[KnownAgent] = &[
     },
 ];
 
+/// The backends `spawn` can materialize an isolated home for — the ONE list
+/// `registry_save`, team validation and the CLI help read, so adding a
+/// backend cannot miss a validator again (omp did, 2026-09-07: the render
+/// arm existed while `registry_save` still said "must be kiro|claude|codex|
+/// grok"). Detection (`KNOWN`) is wider: kimi/openclaw are recognized in
+/// panes but not spawnable.
+pub const SPAWNABLE_BACKENDS: &[&str] = &["kiro", "claude", "codex", "grok", "omp"];
+
 /// The longest agent name we accept — a tmux window name and a directory
 /// component; anything longer is a mistake, not an identity.
 pub const MAX_NAME_LEN: usize = 64;
@@ -370,6 +378,15 @@ mod tests {
         assert_eq!(detect("sh title /home/u/.local/bin/omp --continue").map(|a| a.backend), Some("omp"));
         assert!(detect("docker-compose up").is_none());
         assert!(detect("node component-lab").is_none());
+    }
+
+    /// Every spawnable backend must also be detectable/relaunchable: the
+    /// KNOWN table is what `up`, restart and adoption read.
+    #[test]
+    fn every_spawnable_backend_is_known() {
+        for b in SPAWNABLE_BACKENDS {
+            assert!(KNOWN.iter().any(|a| a.backend == *b), "{b} missing from KNOWN");
+        }
     }
 
     /// The boundary rule protects every short needle: a window named after

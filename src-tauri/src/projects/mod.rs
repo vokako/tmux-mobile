@@ -576,8 +576,12 @@ pub fn registry_save(def: &Value) -> Result<Value, String> {
     // The registry name becomes the window name and the isolated home's
     // directory — one rule for both (`agents::valid_name`).
     agents::valid_name(&agent.name)?;
-    if !matches!(agent.backend.as_str(), "kiro" | "claude" | "codex" | "grok") {
-        return Err(format!("backend must be kiro|claude|codex|grok, got '{}'", agent.backend));
+    if !agents::SPAWNABLE_BACKENDS.contains(&agent.backend.as_str()) {
+        return Err(format!(
+            "backend must be {}, got '{}'",
+            agents::SPAWNABLE_BACKENDS.join("|"),
+            agent.backend
+        ));
     }
     // Validate the JSON columns now, not at spawn time.
     serde_json::from_str::<Vec<String>>(&agent.skills).map_err(|e| format!("skills must be a JSON array of refs: {e}"))?;
