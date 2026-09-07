@@ -803,12 +803,15 @@ test('the title caret expands the NAME — left-aligned on its real rect (board 
   assert.match(source, /<span class="h1-text" bind:this=\{titleNameEl\}>/u, 'the name span is the anchor');
   assert.match(source, /openCtx\(\{ anchor: anchorOf\(titleNameEl \?\? e\.currentTarget\), align: 'left' \}/u,
     'the title entry alone chooses the left alignment');
-  // Every OTHER context menu keeps the right-aligned default — pointer or
-  // trigger anchor. Exactly one opener explicitly asks for left alignment.
+  // Every OTHER opener relies on ContextMenu's anchor-kind defaults: the six
+  // pointer entries (right-click / long-press) land TOP-LEFT at the click
+  // (owner, 2026-09-07, pinned in ui/popover.source.test.ts) and the card
+  // caret's trigger rect keeps the right-aligned dialect. Exactly one opener
+  // explicitly asks for left alignment.
   const opens = [...source.matchAll(/openCtx\((?!at, who)/g)].length; // call sites, not the definition
   const leftAligned = [...source.matchAll(/openCtx\(\{ anchor:[^}]*align: 'left'/g)].length;
-  assert.equal(leftAligned, 1, 'ONE left-aligned entry');
-  assert.equal(opens - leftAligned, 7, 'the other seven entries keep right alignment (the message bubble\u2019s opener is retired, board #48)');
+  assert.equal(leftAligned, 1, 'ONE explicitly left-aligned entry');
+  assert.equal(opens - leftAligned, 7, 'the other seven entries carry no explicit align — the anchor kind decides (the message bubble\u2019s opener is retired, board #48)');
   assert.ok(!/getBoundingClientRect\(\)[^]{0,80}openCtx/u.test(source),
     'no raw client rect reaches openCtx — anchorOf owns the zoom correction');
   // The narrowed caret resets the BROWSER's button padding (Chromium: 1px 6px,

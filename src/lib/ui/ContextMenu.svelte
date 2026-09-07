@@ -44,8 +44,15 @@
 
   // Measured before it is placed: an unmeasured menu would be positioned from a
   // zero height and jump. Hidden for that one frame, exactly like the agent menu.
+  //
+  // Alignment defaults by ANCHOR KIND: a menu on a trigger RECT right-aligns
+  // to it (the dot-menu dialect), but a menu on a POINT puts its TOP-LEFT
+  // corner at the pointer — the OS convention (owner, 2026-09-07: "选项卡展示
+  // 的都是点击点位是选项卡的右上点…应该都为左上角点"). A caller may still
+  // say `align` explicitly either way.
+  const align = $derived(at ? (at.align ?? (at.anchor ? 'right' : 'left')) : 'right');
   const pos = $derived(at
-    ? menuPlacement(at.anchor ?? pointAnchor(at.x, at.y), { w, h }, viewBox(), 6, 8, at.align ?? 'right')
+    ? menuPlacement(at.anchor ?? pointAnchor(at.x, at.y), { w, h }, viewBox(), 6, 8, align)
     : { x: 0, y: 0 });
 
   $effect(() => {
@@ -111,7 +118,7 @@
 {#if at && items.length}
   <div class="ctx pop-layer" class:ready={h > 0} bind:this={el} role="menu" tabindex="-1"
     style:left="{pos.x}px" style:top="{pos.y}px"
-    style:--pop-origin={at ? popOrigin(at.anchor ?? pointAnchor(at.x, at.y), pos, at.align ?? 'right') : undefined}
+    style:--pop-origin={at ? popOrigin(at.anchor ?? pointAnchor(at.x, at.y), pos, align) : undefined}
     bind:clientWidth={w} bind:clientHeight={h}>
     {#if who}<div class="ctx-who">{who}</div>{/if}
     {#each items as it, i (it.label)}

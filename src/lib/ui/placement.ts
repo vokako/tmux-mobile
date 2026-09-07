@@ -64,9 +64,11 @@ export function uiZoom(): number {
  * A POINT as an anchor, for a menu opened by a right-click or a long press.
  *
  * The pointer is a zero-size rect, so `menuPlacement` treats it exactly like a
- * trigger: the menu's right edge lands on the pointer and it flips above when
- * there is no room below. That is one rule for both kinds of menu instead of two
- * placement functions that drift apart.
+ * trigger — one rule for both kinds of menu instead of two placement functions
+ * that drift apart. ContextMenu aligns a point LEFT by default (the click is
+ * the menu's top-left corner, the OS convention; owner, 2026-09-07), while a
+ * trigger rect keeps its right-aligned dot-menu dialect; both flip above when
+ * there is no room below.
  *
  * `x`/`y` are client coordinates (a pointer event gives visual pixels, the same
  * as a client rect), so they take the same zoom correction.

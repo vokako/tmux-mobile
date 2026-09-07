@@ -78,7 +78,7 @@
       { label: t('projectArchive'), icon: 'x', danger: true, onselect: () => (pending = { kind: 'archive', id: row.project.id, name: row.project.name }) },
     ];
   }
-  function openCtx(at: { x: number; y: number }, row: ProjectRow) {
+  function openCtx(at: { x: number; y: number; align?: 'left' | 'right' }, row: ProjectRow) {
     ctxWho = row.project.name;
     ctxItems = rowItems(row);
     ctxAt = at;
@@ -269,7 +269,7 @@
                    menu right-click/long-press already speak (rising consequence:
                    Open/Close, then Remove), and the destructive ones confirm. -->
               <button class="icon-btn row-menu" disabled={busy[row.project.id]} title={t('hubProjectMenu')} aria-label={t('hubProjectMenu')}
-                onclick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); openCtx({ x: r.right, y: r.bottom }, row); }}>
+                onclick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); openCtx({ x: r.right, y: r.bottom, align: 'right' }, row); }}>
                 <Icon name="dots" size={13} />
               </button>
             {:else}
