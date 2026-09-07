@@ -144,15 +144,20 @@ completion).
   resize and drawer regrids re-measure/re-cut inside `withReadingAnchor`
   before restoring tail or history position (board #53). Images render as
   thumbnails and open the in-app Lightbox; markdown + LaTeX render in bubbles.
-- **Message text belongs to the system, on every input type** (board #48;
-  owner, 2026-09-04: "我要在消息里手动选择文字，使用系统自带的选择文字菜单，
-  不要你们交互的这个菜单了"): `.m-body` explicitly enables selection while
-  message head/meta stay chrome. The bubble carries NO click or contextmenu
-  handler — no tap-revealed action row, no message context menu, no raw view.
-  Selecting and copying message text is done with the system's own selection
-  menu. Board note text stays selectable too, and a plain tap still opens the
-  note's Copy overlay (its one-shot compatibility-click guard keeps a
-  long-press from opening it).
+- **A tapped bubble reveals its Copy / Raw row; long-press selection stays
+  the system's** (board #48; owner, 2026-09-07: "我只要消息气泡下边的这两个
+  按钮，不要出现右键那种选项卡"): `.m-body` explicitly enables selection
+  while message head/meta stay chrome. A plain tap (or the meta-trailer
+  button, the accessible route) toggles the absolute `.m-acts` row under the
+  bubble — **Copy** writes the raw body and dismisses after the Copied beat;
+  **Raw** swaps the rendered markdown for the message's source until
+  retoggled. There is NO message context menu: the bubble's `contextmenu`
+  handler never prevents default — it only arms a one-shot guard so a
+  touch/pen long-press stays the system's selection gesture and its
+  compatibility click cannot open the row; a genuinely non-collapsed
+  selection also wins over any bubble tap. The row closes on outside tap,
+  Escape, or project switch. Board note text stays selectable too, and a
+  plain tap still opens the note's Copy overlay (same guard).
 - Feed levels: chat-only / +status / +tools, chosen in Settings or from the
   project title's menu (the current one ticked). Receipts and warnings are
   always visible.
@@ -237,9 +242,8 @@ completion).
   scroll horizontally, hiding what came before) — one line at rest, Enter
   sends, Shift+Enter inserts a newline, an IME composition's Enter never
   sends, and a sent note shrinks the box back; the send button rides the
-  last line. Tapping a historical note reveals the absolute `.m-acts`
-  action row (Chat's former dialect, now worn by the Board alone), with one
-  **Copy** verb that writes the note's
+  last line. Tapping a historical note reveals the same absolute `.m-acts`
+  action row Chat bubbles use, with one **Copy** verb that writes the note's
   raw body; selection drags do not trigger it, the time is the accessible
   action trigger, and outside/Escape/issue switch or the brief Copied beat
   dismisses it without changing detail scroll height (board #46). Copy state

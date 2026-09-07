@@ -871,27 +871,41 @@ test('leaving at the tail means returning to the tail — and ONLY then (board #
     'entering a room still lands at its tail');
 });
 
-test('a message bubble is inert prose — native selection only, no app menu (board #48)', () => {
-  // Owner: "在chat页面长按消息选中文字的时候 不应该出现选项卡" (2026-09-01), then
-  // 2026-09-04: "点击消息气泡，还是会呼出一个类似右键的 Copy 选项卡菜单……其实
-  // 我们都不要了。我要在消息里手动选择文字，使用系统自带的选择文字菜单" —
-  // the tap-revealed action row, the message context menu, the raw view and
-  // the meta-trailer toggle are ALL retired. The bubble carries no pointer
-  // handlers: selecting and copying text is the system's job end to end.
+test('a tapped bubble reveals Copy/Raw under it — and still never an app context menu (board #48)', () => {
+  // The owner's arc: "长按消息选中文字的时候 不应该出现选项卡" (2026-09-01) —
+  // a touch hold is the SYSTEM's selection gesture; 2026-09-04 retired the
+  // action row together with the right-click card; then 2026-09-07: "我只要
+  // 消息气泡下边的这两个按钮，不要出现右键那种选项卡" — the tap-revealed
+  // .m-acts row (Copy / Raw) RETURNS, the ContextMenu card stays retired.
   const bubble = source.slice(source.indexOf('<div class="bubble md"'),
     source.indexOf('<div class="m-body">'));
-  assert.ok(!bubble.includes('onclick'), 'the bubble has no click handler');
-  assert.ok(!bubble.includes('oncontextmenu'), 'and no contextmenu handler');
-  for (const gone of ['msgSelectionClicks', 'msgItems', 'msgOpen', 'rawOpen', 'copyMsg', 'm-acts', 'selectionClickGuard']) {
-    assert.ok(!source.includes(gone), `${gone} is retired with the menu`);
-  }
+  // A plain tap toggles the row — after the one-shot compatibility-click
+  // guard (a long-press's echo click) and the live-selection fallback.
+  assert.match(bubble,
+    /onclick=\{\(\) => \{ if \(msgSelectionClicks\.consume\(key\)\) return; if \(typeof getSelection === 'function' && !\(getSelection\(\)\?\.isCollapsed \?\? true\)\) return; msgOpen = msgOpen === key \? '' : key; \}\}/u,
+    'the synthetic click is consumed before the selection fallback and the row toggle');
+  // The contextmenu handler only MARKS a touch-owned hold: no preventDefault,
+  // no menu — native selection proceeds on touch, and a mouse right-click is
+  // a no-op (the App-level guard suppresses browser chrome).
+  assert.match(bubble, /oncontextmenu=\{\(e\) => \{ msgSelectionClicks\.mark\(e, key\); \}\}/u,
+    'contextmenu stays native — it only arms the compatibility-click guard');
+  assert.ok(!bubble.includes('openCtx'), 'a bubble never opens the ContextMenu card');
+  assert.ok(!source.includes('msgItems'), 'no message verbs feed any context menu');
+  // The row itself: the shared .m-acts atom with exactly Copy and Raw.
+  assert.match(source, /\{#if msgOpen === key\}\n\s*<div class="m-acts appear">/u,
+    'the action row is the shared .m-acts overlay, revealed per message');
+  assert.match(source, /copyMsg\(m\.body\)/u, 'Copy writes the raw body');
+  assert.match(source, /rawOpen = rawOpen === key \? '' : key/u, 'Raw toggles the source view');
+  assert.match(source, /<pre class="raw">\{m\.body\}<\/pre>/u, 'raw view shows the bytes as written');
   // For the system gesture to have anything to select, the message body must
   // be selectable at all — the app shell's global user-select:none reaches it
   // otherwise (the Board's .n-text re-enable is the precedent).
   assert.match(source, /\.m-body \{[^}]*user-select: text;[^}]*-webkit-user-select: text;/u,
     'bubble text is selectable — both vendor forms, like the Board notes');
-  // The time trailer is a passive stamp again, never a control to a menu.
-  assert.match(source, /<span class="m-meta">/u, 'the meta trailer is plain text, not a button');
+  // The time trailer is a real button again: the accessible route to the row
+  // (the bubble is TEXT to assistive tech, its click a pointer convenience).
+  assert.match(source, /<button class="m-meta" aria-label=\{t\('hubMsgActions'\)\}/u,
+    'the meta trailer is the accessible actions trigger');
 });
 
 test('the fold measures its own line — perLine is never assumed (board #53 review)', () => {
