@@ -10,7 +10,7 @@ here: when you verify a change, update that design doc and commit together.
 
 Tauri 2 cross-platform app (Rust + Svelte 5) for monitoring and controlling
 tmux sessions from a phone, and — through the **Hub** — for running and
-talking to AI coding agents (kiro, codex, claude, grok) inside those sessions.
+talking to AI coding agents (kiro, codex, claude, grok, omp) inside those sessions.
 WebSocket JSON-RPC with token auth + optional E2E encryption. Targets: Android
 (primary), macOS desktop, browser/PWA.
 

@@ -32,18 +32,28 @@ export const AGENTS: Agent[] = [
   // can fire: a kimi pane's child chain typically contains its
   // "kiro-web-search" helper, and "kimi" in current_command always sits
   // earlier in the pane text than any child-chain "kiro".
-  { tag: 'Kimi',     match: /kimi/i,     icon: '/assets/kimi.svg',     iconSize: 14 },
-  { tag: 'Kiro',     match: /kiro/i,     icon: '/assets/kiro.svg',     iconSize: 14 },
+  //
+  // Every needle is WORD-BOUNDED (\b): these are short brand names that ride
+  // inside ordinary words — "omp" lives in "compose", "kiro" in a window
+  // named after the kirocrew project — and a substring hit painted plain
+  // shells as agents. `-`, `.` and `/` are boundaries, so `kiro-cli-chat`,
+  // `codex.js` and `/bin/omp` still match.
+  { tag: 'Kimi',     match: /\bkimi\b/i,     icon: '/assets/kimi.svg',     iconSize: 14 },
+  { tag: 'Kiro',     match: /\bkiro\b/i,     icon: '/assets/kiro.svg',     iconSize: 14 },
   // Claude Code's binary is a version-named symlink
   // (~/.local/share/claude/versions/2.1.141), so pane_current_command
   // reports "2.1.141" — no "claude" anywhere. The pane_title carries
   // "Claude Code" only when the shell doesn't overwrite the title (many
   // setups pin it to the hostname). Detect EITHER the word or a bare
   // semver-looking process name at the start of the command field.
-  { tag: 'Claude',   match: /claude|^\d+\.\d+\.\d+(?:\s|$)/i, icon: '/assets/claude.svg', iconSize: 14 },
-  { tag: 'Codex',    match: /codex/i,    icon: '/assets/codex.svg',    iconSize: 14 },
-  { tag: 'Grok',     match: /grok/i,     icon: '/assets/grok.svg',     iconSize: 14 },
-  { tag: 'OpenClaw', match: /openclaw/i, icon: '/assets/openclaw.svg', iconSize: 14 },
+  { tag: 'Claude',   match: /\bclaude\b|^\d+\.\d+\.\d+(?:\s|$)/i, icon: '/assets/claude.svg', iconSize: 14 },
+  { tag: 'Codex',    match: /\bcodex\b/i,    icon: '/assets/codex.svg',    iconSize: 14 },
+  { tag: 'Grok',     match: /\bgrok\b/i,     icon: '/assets/grok.svg',     iconSize: 14 },
+  { tag: 'OpenClaw', match: /\bopenclaw\b/i, icon: '/assets/openclaw.svg', iconSize: 14 },
+  // oh-my-pi's CLI: a single `omp` binary (ELF, so pane_current_command says
+  // "omp" directly). The word boundary is what keeps docker-compose panes
+  // from wearing its icon.
+  { tag: 'OMP',      match: /\bomp\b/i,      icon: '/assets/omp.svg',      iconSize: 14 },
 ];
 
 // Backend id → the backend's avatar icon, for agent AVATARS (roster cards,
@@ -58,6 +68,7 @@ export function backendIcon(backend: string | null | undefined): string | null {
     case 'codex': return '/assets/codex.svg';
     case 'grok': return '/assets/grok.svg';
     case 'kimi': return '/assets/kimi.svg';
+    case 'omp': return '/assets/omp.svg';
     case 'openclaw': return '/assets/openclaw.svg';
     default: return null;
   }

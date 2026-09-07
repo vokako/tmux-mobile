@@ -63,6 +63,9 @@ pub fn effort_values(backend: &str) -> &'static [&'static str] {
         "kiro" | "claude" => &["low", "medium", "high", "xhigh", "max"],
         "grok" => &["low", "medium", "high", "xhigh"],
         "codex" => &["minimal", "low", "medium", "high", "xhigh"],
+        // omp 18.0.6 `--thinking` (its own --help): "off, minimal, low,
+        // medium, high, xhigh, max, auto".
+        "omp" => &["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"],
         _ => &[],
     }
 }

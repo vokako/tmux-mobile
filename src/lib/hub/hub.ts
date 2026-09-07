@@ -148,7 +148,7 @@ export function gapWalkStep<T extends { ts?: number }>(
  * (design-language.md §Colour); this only names the token (review C, 2026-09-03). */
 export function backendColor(backend: string | null | undefined): string {
   switch (backend) {
-    case 'kiro': case 'claude': case 'codex': case 'kimi': case 'grok':
+    case 'kiro': case 'claude': case 'codex': case 'kimi': case 'grok': case 'omp':
       return `var(--backend-${backend})`;
     default: return 'var(--backend-other)';
   }

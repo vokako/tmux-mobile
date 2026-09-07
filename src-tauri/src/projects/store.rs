@@ -1376,7 +1376,8 @@ impl Store {
                     WHEN 'codex' THEN 1
                     WHEN 'claude' THEN 2
                     WHEN 'grok' THEN 3
-                    ELSE 4
+                    WHEN 'omp' THEN 4
+                    ELSE 5
                   END, name"
             )
             .map_err(|e| e.to_string())?;
@@ -1472,7 +1473,7 @@ impl Store {
             .map_err(|e| e.to_string())
     }
 
-    /// Seed the four backend-native Manager defaults once (empty table only).
+    /// Seed the five backend-native Manager defaults once (empty table only).
     /// `docs` / `reviewer` and `*-default` aliases are deliberately retired:
     /// one obvious entry per backend, with the defaults pinned to the top of
     /// every registry consumer by `reg_list`.
@@ -1538,6 +1539,17 @@ impl Store {
                 system: "You are a powerful 10x developer running on Grok who can handle any task with decisive execution and minimal words.".into(),
                 skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
                 mcp: r#"[{"name":"kiro-web-search","command":"uvx","args":["kiro-web-search==0.1.3"]}]"#.into(),
+                can_hire: true,
+            },
+            RegAgent {
+                name: "omp".into(),
+                backend: "omp".into(),
+                model: String::new(),
+                effort: String::new(),
+                system: "You are a powerful 10x developer running on OMP (oh-my-pi) who can handle any task with decisive execution and minimal words.".into(),
+                skills: r#"["tmm-cli","mem","mcp-cli"]"#.into(),
+                // omp ships its own web_search tool — no MCP search shim needed.
+                mcp: "[]".into(),
                 can_hire: true,
             },
         ];
@@ -2479,8 +2491,8 @@ mod tests {
         let seeded = store.reg_list().unwrap();
         assert_eq!(
             seeded.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
-            ["kiro", "codex", "claude", "grok"],
-            "the four backend defaults are the fixed leading group"
+            ["kiro", "codex", "claude", "grok", "omp"],
+            "the five backend defaults are the fixed leading group"
         );
         assert!(seeded.iter().all(|a| a.can_hire), "every default is a Manager");
         assert!(seeded.iter().all(|a| a.skills == r#"["tmm-cli","mem","mcp-cli"]"#));
@@ -2491,12 +2503,13 @@ mod tests {
         );
         assert_eq!(seeded[0].system, expected_kiro_system, "the default Kiro persona stays concise");
         assert_eq!(seeded[0].mcp, "[]", "Kiro uses its built-in web search");
-        assert!(seeded[1..].iter().all(|a| a.mcp.contains("kiro-web-search")));
+        assert_eq!(seeded[4].mcp, "[]", "OMP ships its own web_search tool");
+        assert!(seeded[1..4].iter().all(|a| a.mcp.contains("kiro-web-search")));
         assert!(!seeded.iter().any(|a| matches!(a.name.as_str(), "docs" | "reviewer")));
 
         // Seeding twice must not duplicate.
         store.reg_seed(200).unwrap();
-        assert_eq!(store.reg_list().unwrap().len(), 4);
+        assert_eq!(store.reg_list().unwrap().len(), 5);
 
         // A custom definition alphabetically before the defaults stays AFTER
         // their fixed group; the rest of the list is alphabetical.
@@ -2513,7 +2526,7 @@ mod tests {
         store.reg_save(&custom, 250).unwrap();
         assert_eq!(
             store.reg_list().unwrap().iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
-            ["kiro", "codex", "claude", "grok", "aaa-custom"]
+            ["kiro", "codex", "claude", "grok", "omp", "aaa-custom"]
         );
 
         // Upsert edits in place.
@@ -2521,11 +2534,11 @@ mod tests {
         kiro.model = "gpt-5.6-sol".into();
         store.reg_save(&kiro, 300).unwrap();
         assert_eq!(store.reg_get("kiro").unwrap().unwrap().model, "gpt-5.6-sol");
-        assert_eq!(store.reg_list().unwrap().len(), 5, "save by name is an upsert");
+        assert_eq!(store.reg_list().unwrap().len(), 6, "save by name is an upsert");
 
         assert!(store.reg_delete("aaa-custom").unwrap());
         assert!(!store.reg_delete("aaa-custom").unwrap(), "second delete is a no-op");
-        assert_eq!(store.reg_list().unwrap().len(), 4);
+        assert_eq!(store.reg_list().unwrap().len(), 5);
     }
 
     #[test]
@@ -2596,10 +2609,10 @@ mod tests {
         let store = Store::init(conn).unwrap();
         store.reg_seed(1).unwrap();
         let seeded = store.reg_list().unwrap();
-        assert_eq!(seeded.len(), 4);
+        assert_eq!(seeded.len(), 5);
         assert_eq!(
             seeded.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
-            ["kiro", "codex", "claude", "grok"]
+            ["kiro", "codex", "claude", "grok", "omp"]
         );
         let v: i64 = store.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
         assert_eq!(v, SCHEMA_VERSION);

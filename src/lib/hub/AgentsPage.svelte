@@ -19,7 +19,7 @@
 
   /** The backends a registry agent can run on — the same list the server
    * validates against in `registry_save`. */
-  const BACKENDS = ['kiro', 'claude', 'codex', 'grok'];
+  const BACKENDS = ['kiro', 'claude', 'codex', 'grok', 'omp'];
   // Reasoning-effort levels each backend's CLI accepts — mirrors the server's
   // models::effort_values (measured per CLI, 2026-08-22). '' = backend default.
   const EFFORTS = {

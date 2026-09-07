@@ -39,6 +39,11 @@ use crate::tmux::TmuxPane;
 ///   deliberately NOT used: it continues the most recent recorded session
 ///   machine-wide, so restoring project A could reopen project B's
 ///   conversation. Without a recorded id, codex starts fresh.
+/// * `omp --continue` — oh-my-pi's own session docs (`SessionManager.
+///   continueRecent(cwd, sessionDir)`): the breadcrumb/most-recent lookup is
+///   scoped to the current cwd's session directory (verified on disk: sessions
+///   live under `~/.omp/agent/sessions/<encoded-cwd>/`), so it cannot cross
+///   projects; `omp --resume <id>` resumes one exact session by id prefix.
 /// * kimi / openclaw — no resume wired up because their flags are unverified
 ///   here; they relaunch clean rather than guess.
 const KNOWN: &[KnownAgent] = &[
@@ -87,6 +92,17 @@ const KNOWN: &[KnownAgent] = &[
         launch: "openclaw",
         resume_recent: None,
         resume_id: None,
+    },
+    KnownAgent {
+        // oh-my-pi: one `omp` ELF binary, so pane_current_command says "omp"
+        // directly. The needle only fires on WORD matches (see `find_word`) —
+        // "omp" is a substring of docker-compose and half the words in a
+        // build log.
+        backend: "omp",
+        needle: "omp",
+        launch: "omp",
+        resume_recent: Some("omp --continue"),
+        resume_id: Some("omp --resume {id}"),
     },
 ];
 
@@ -142,6 +158,29 @@ pub fn home_dir(workspace: &str, name: &str) -> Option<std::path::PathBuf> {
     Some(std::path::Path::new(workspace).join(".tmm").join("agents").join(name))
 }
 
+/// The first WORD occurrence of `needle` in `haystack`: both neighbours must
+/// be non-word bytes (`-`, `.`, `/`, space … all count as boundaries, so
+/// `kiro-cli-chat`, `codex.js` and `/bin/omp` match). Substring matching
+/// painted plain shells as agents — "omp" lives inside docker-compose, and a
+/// window named after the kirocrew project contained "kiro". Mirrors the
+/// frontend's `\b`-bounded regexes in `core/agents.ts`, underscore included.
+fn find_word(haystack: &str, needle: &str) -> Option<usize> {
+    let bytes = haystack.as_bytes();
+    let is_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let mut from = 0;
+    while let Some(rel) = haystack[from..].find(needle) {
+        let idx = from + rel;
+        let end = idx + needle.len();
+        let before_ok = idx == 0 || !is_word(bytes[idx - 1]);
+        let after_ok = end >= bytes.len() || !is_word(bytes[end]);
+        if before_ok && after_ok {
+            return Some(idx);
+        }
+        from = idx + 1;
+    }
+    None
+}
+
 /// The agent running in a pane, or `None` for an ordinary shell.
 ///
 /// `text` must be ordered shallow → deep (`pane_current_command`, then the
@@ -153,7 +192,7 @@ pub fn detect(text: &str) -> Option<&'static KnownAgent> {
     let lower = text.to_lowercase();
     let mut best: Option<(usize, &'static KnownAgent)> = None;
     for agent in KNOWN {
-        if let Some(idx) = lower.find(agent.needle) {
+        if let Some(idx) = find_word(&lower, agent.needle) {
             if best.is_none_or(|(prev, _)| idx < prev) {
                 best = Some((idx, agent));
             }
@@ -322,6 +361,26 @@ mod tests {
         assert_eq!(a.backend, "kimi");
     }
 
+    /// "omp" is a substring of everyday process text; only the WORD is the
+    /// agent. `-`, `.` and `/` are boundaries, so the real launch spellings
+    /// keep matching.
+    #[test]
+    fn omp_matches_as_a_word_never_inside_compose() {
+        assert_eq!(detect("omp").map(|a| a.backend), Some("omp"));
+        assert_eq!(detect("sh title /home/u/.local/bin/omp --continue").map(|a| a.backend), Some("omp"));
+        assert!(detect("docker-compose up").is_none());
+        assert!(detect("node component-lab").is_none());
+    }
+
+    /// The boundary rule protects every short needle: a window named after
+    /// the kirocrew project is not a Kiro agent.
+    #[test]
+    fn needles_are_word_bounded_on_every_backend() {
+        assert!(detect("bash kirocrew-in-agentcore").is_none());
+        assert_eq!(detect("kiro-cli-chat").map(|a| a.backend), Some("kiro"));
+        assert_eq!(detect("node x node_modules/codex/bin/codex.js").map(|a| a.backend), Some("codex"));
+    }
+
     #[test]
     fn claude_is_found_through_its_version_named_binary_path() {
         let a = detect("2.1.141  /Users/me/.local/share/claude/versions/2.1.141").unwrap();
@@ -368,6 +427,10 @@ mod tests {
         assert_eq!(launch_line("codex", None).as_deref(), Some("codex"));
         assert_eq!(launch_line("kimi", None).as_deref(), Some("kimi"));
         assert_eq!(launch_line("kimi", Some("x")).as_deref(), Some("kimi"), "no resume flags known");
+        // omp's --continue is cwd-scoped (sessions live per encoded cwd), so
+        // the recent fallback is safe; an exact id wins when recorded.
+        assert_eq!(launch_line("omp", None).as_deref(), Some("omp --continue"));
+        assert_eq!(launch_line("omp", Some("abc-123")).as_deref(), Some("omp --resume abc-123"));
         assert_eq!(launch_line("", Some("x")), None);
     }
 

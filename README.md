@@ -23,7 +23,7 @@ You're running [Kiro CLI](https://kiro.dev), Claude Code, or any coding agent in
 - **Terminal view** — watch and interact with your tmux session right from your phone, with touch scrolling, on-screen shortcut keys, and quick window switching
 - **File browser** — browse, preview, and edit project files from the phone, bookmark the directories you visit often, and run common git actions in place
 - **Sessions** — browse all tmux sessions/windows/panes, create or kill sessions, pull-to-refresh
-- **Team (multi-agent)** — spin up a roster of coding agents (Kiro / Claude Code / Codex / Grok) that collaborate in a shared group chat; watch them work live, tap any agent to preview its pane
+- **Team (multi-agent)** — spin up a roster of coding agents (Kiro / Claude Code / Codex / Grok / OMP) that collaborate in a shared group chat; watch them work live, tap any agent to preview its pane
 - **Settings** — terminal font/family/line-spacing controls, native desktop interface scaling, light/dark/auto theme, language switching (EN/中文), connection info, and diagnostics
 - **Named servers** — save several server machines, switch from the desktop rail, and restore each server's own page/terminal state; each machine still keeps its LAN/Tailscale/WAN failover addresses together
 - **Message alerts** — an away running client can play a cue and, when permitted, use system Web Notifications; replay/history batches are deduplicated
