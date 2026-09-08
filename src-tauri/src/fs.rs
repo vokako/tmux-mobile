@@ -287,7 +287,8 @@ pub fn stat_file(path: &str) -> Result<FileStat, String> {
     // First check if it's a symlink (lstat). If yes, capture target for
     // diagnostics and try to follow for the actual stat. Broken symlinks
     // are surfaced with the link's own metadata + "broken" file_type.
-    let link_meta = fs::symlink_metadata(&p).map_err(|e| format!("stat error: {}", e))?;
+    let link_meta = fs::symlink_metadata(&p)
+        .map_err(|e| format!("stat error: {} — {}", e, p.display()))?;
     let is_symlink = link_meta.file_type().is_symlink();
     let link_target = if is_symlink {
         fs::read_link(&p)
@@ -301,7 +302,7 @@ pub fn stat_file(path: &str) -> Result<FileStat, String> {
     let (meta, broken) = match fs::metadata(&p) {
         Ok(m) => (m, false),
         Err(_) if is_symlink => (link_meta.clone(), true),
-        Err(e) => return Err(format!("stat error: {}", e)),
+        Err(e) => return Err(format!("stat error: {} — {}", e, p.display())),
     };
 
     let name = p

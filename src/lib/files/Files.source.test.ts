@@ -185,4 +185,13 @@ test('navRequest can ask for a FILE: land in its directory with the preview open
   assert.match(source, /loadDir\(parent\)/u, 'the list lands in the parent directory');
   assert.match(source, /openEntry\(\{ type: 'file', name, path: file \}\)/u,
     'and the preview opens through the one openEntry path (stat, recents, nav history)');
+  // Round two (owner: "文件侧边栏上有一个报错 stat error… 然后弹出了一个新的
+  // 页面"): the markdown PREVIEW renders anchors too, and a path href there
+  // used to be a raw navigation — the webview left the app. The preview now
+  // intercepts its own path links: relative refs resolve against the
+  // PREVIEWED FILE's directory, and the target opens through openEntry like
+  // any row tap. Real URLs keep the browser's behaviour.
+  assert.match(source, /function mdLinkClick\(e\)/u, 'the preview link handler exists');
+  assert.match(source, /onclick=\{mdLinkClick\}/u, 'and the md-render container wears it');
+  assert.match(source, /function absJoin\(base, rel\)/u, 'relative refs resolve against the document');
 });

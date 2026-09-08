@@ -766,6 +766,33 @@
     previewLoading = false;
   }
 
+  /** `a/b/../c` → `/a/c`: resolve a document-relative ref without touching
+   * the server. Used by the markdown preview's own path links (board #99). */
+  function absJoin(base, rel) {
+    const out = [];
+    for (const p of `${base}/${rel}`.split('/')) {
+      if (!p || p === '.') continue;
+      if (p === '..') out.pop(); else out.push(p);
+    }
+    return '/' + out.join('/');
+  }
+
+  /** A path link inside a PREVIEWED markdown file (board #99 round two): the
+   * renderer emits a plain anchor, and a schemeless href used to be a raw
+   * navigation — the webview left the app. Ours = exactly what a browser
+   * cannot follow; relative refs mean "next to this document". */
+  function mdLinkClick(e) {
+    const a = e.target?.closest?.('a');
+    if (!a) return;
+    const href = a.getAttribute('href') ?? '';
+    if (!href || href.startsWith('#') || href.startsWith('//') || /^[a-zA-Z][a-zA-Z0-9+.-]*:/u.test(href)) return;
+    e.preventDefault();
+    const ref = href.split('#')[0];
+    const docDir = currentFile?.path ? currentFile.path.slice(0, currentFile.path.lastIndexOf('/')) : cwd;
+    const abs = ref.startsWith('/') || ref.startsWith('~') ? ref : absJoin(docDir, ref);
+    openEntry({ type: 'file', name: abs.slice(abs.lastIndexOf('/') + 1), path: abs });
+  }
+
   async function openEntry(entry) {
     if (entry.type === 'dir') {
       navPush();
@@ -1711,7 +1738,8 @@
     </div>
     <div class="preview-body" style="--file-font-size:{fontSize}px">
       {#if mimeCategory(currentFile.stat?.mime_hint) === 'markdown'}
-        <div class="md-render" bind:this={previewEl}>{@html renderMarkdown(currentFile.content)}</div>
+        <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+        <div class="md-render" bind:this={previewEl} onclick={mdLinkClick}>{@html renderMarkdown(currentFile.content)}</div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'csv'}
         <div class="csv-render">{@html renderCsv(currentFile.content)}</div>
       {:else if mimeCategory(currentFile.stat?.mime_hint) === 'html'}
