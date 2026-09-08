@@ -597,17 +597,17 @@ fn build_prompt(def: &RegAgent, name: &str, session: &str, _brief: &str, _by: &s
         s += "\n\n";
     }
     s += &format!(
-        "你是项目 \"{session}\" 中的 agent \"{name}\"，运行在 tmux-mobile 管理的 tmux session 中。\n\
+        "You are agent \"{name}\" in project \"{session}\" (a tmux session managed by tmux-mobile).\n\
          \n\
-         tmm 协作流程：\n\
-         - 发给你的消息以 `[tmm chat YYYY-MM-DD HH:MM] <sender>: <text>` 输入 pane；工作中的消息会排队，在当前回合结束后送达。\n\
-         - 正常 final response 由 hooks 自动记录到项目房间；若本轮由另一个 agent 发起，结果还会自动送回对方。不要再用 `tmm send` 重复回复。\n\
-         - 主动提问、通知或交接时使用 `tmm send \"@name message\"`；可同时 @多人，`@all` 发给所有 agent，`@human` 发给操作者。无收件人的普通 send 会被拒绝。\n\
-         - 中间进度可用 `tmm send \"当前进度\" --status` 记录到房间，不打扰其他人，也不影响 final response。\n\
-         - 用 `tmm log --limit 50` 查看近期消息，`tmm log --grep <text> [--global]` 搜索历史，`tmm agent list` 查看成员。收到积压消息先全部读完再合并处理；上下文不清楚时先查记录或询问相关人。\n\
-         - 收到 board issue 后用 `tmm board take <id>` 接手，`tmm board note <id> \"...\"` 记录进展，完成后 `tmm board move <id> review` 交给 reporter 验收。\n\
-         - 独立并行工作可用 `tmm spawn <agent> --brief \"...\"` 或 `tmm spawn --team <team> --brief \"...\"` 委派；brief 写清目标、输入、输出和完成标准，结果会自动返回。\n\
-         - 没有消息时等待。tmm 暂时不可用时继续本地工作；其他命令用 `tmm --help` 查询。"
+         tmm collaboration flow:\n\
+         - Messages arrive in your pane as `[tmm chat YYYY-MM-DD HH:MM] <sender>: <text>`. Messages received while you work are queued and delivered after the current turn.\n\
+         - Hooks automatically record your normal final response in the project room. If another agent initiated the turn, the result is also delivered back to that agent. Do not repeat it with `tmm send`.\n\
+         - Use `tmm send \"@name message\"` only to start a new question, notification, or handoff. One message may address several names; `@all` reaches every agent and `@human` reaches the operator. An ordinary send without a recipient is rejected.\n\
+         - Use `tmm send \"current progress\" --status` for optional ambient progress. It records in the room without interrupting anyone or suppressing your final response.\n\
+         - Use `tmm log --limit 50` for recent messages, `tmm log --grep <text> [--global]` to search history, and `tmm agent list` for participants. Read a queued backlog in full before replying once; when context is unclear, check the log or ask the relevant person.\n\
+         - For a board issue, run `tmm board take <id>`, record progress with `tmm board note <id> \"...\"`, and hand off completed work with `tmm board move <id> review`.\n\
+         - Delegate independent parallel work with `tmm spawn <agent> --brief \"...\"` or `tmm spawn --team <team> --brief \"...\"`. State the objective, inputs, outputs, and completion criteria; results return automatically.\n\
+         - With no message, wait. If tmm is temporarily unavailable, continue local work. Use `tmm --help` for the remaining commands."
     );
     s
 }
@@ -2272,7 +2272,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         let d = def("kiro");
         let p = build_prompt(&d, "b", "proj", "", "", "# House rules\nAnswer in Chinese.\n");
         assert!(p.starts_with("# House rules\nAnswer in Chinese.\n\nPersona text."), "global block first, then the persona: {p}");
-        assert!(p.contains("项目 \"proj\" 中的 agent \"b\""));
+        assert!(p.contains("agent \"b\" in project \"proj\""));
         // Absent → the prompt is exactly what it was before the feature.
         assert_eq!(build_prompt(&d, "b", "proj", "", "", "  "), build_prompt(&d, "b", "proj", "", "", ""));
         assert!(build_prompt(&d, "b", "proj", "", "", "").starts_with("Persona text."));
@@ -2283,17 +2283,17 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         let d = def("kiro");
         let p = build_prompt(&d, "rev-2", "blog", "review the branch", "lead", "");
         assert!(p.starts_with("Persona text."));
-        assert!(p.contains("项目 \"blog\" 中的 agent \"rev-2\""));
+        assert!(p.contains("agent \"rev-2\" in project \"blog\""));
         assert!(!p.contains("tmm done"));
         assert!(!p.contains("tmm status"));
         assert!(!p.contains("review the branch"), "brief is a real first message: {p}");
         assert!(p.contains("[tmm chat YYYY-MM-DD HH:MM]"), "prompt explains message stamps: {p}");
         assert!(p.contains("final response"), "explains automatic replies: {p}");
-        assert!(p.contains("自动送回对方"), "explains the reply edge: {p}");
+        assert!(p.contains("delivered back to that agent"), "explains the reply edge: {p}");
         assert!(p.contains("--status"), "explains ambient progress: {p}");
         assert!(p.contains("@human"), "names the operator address: {p}");
         assert!(p.contains("tmm log --limit 50"), "points at the history: {p}");
-        assert!(p.contains("先全部读完再合并处理"), "consolidates backlog answers: {p}");
+        assert!(p.contains("Read a queued backlog in full"), "consolidates backlog answers: {p}");
         assert!(p.contains("tmm board move <id> review"), "explains board handoff: {p}");
     }
 
