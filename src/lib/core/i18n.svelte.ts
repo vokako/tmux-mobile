@@ -454,6 +454,7 @@ const msgs: Record<string, Record<string, string>> = {
     path: 'Path',
     type: 'Type',
     size: 'Size',
+    fileMissing: 'File not found',
     modified: 'Modified',
     // Hover card rows (motion.md principle 16): terse labels and one-word values.
     hoverWindows: 'Windows',
@@ -982,6 +983,7 @@ const msgs: Record<string, Record<string, string>> = {
     path: '路径',
     type: '类型',
     size: '大小',
+    fileMissing: '文件不存在',
     modified: '修改时间',
     hoverWindows: '窗口',
     hoverPanes: '面板',

@@ -194,4 +194,8 @@ test('navRequest can ask for a FILE: land in its directory with the preview open
   assert.match(source, /function mdLinkClick\(e\)/u, 'the preview link handler exists');
   assert.match(source, /onclick=\{mdLinkClick\}/u, 'and the md-render container wears it');
   assert.match(source, /function absJoin\(base, rel\)/u, 'relative refs resolve against the document');
+  // A dead reference fails in WORDS, not errno (round four: "即使路径不对，
+  // 应该友好的提示，不要弹出新的窗口" — the window half is path-link-net.ts).
+  assert.match(source, /error = \/No such file\|os error 2\/iu\.test\(e\.message \?\? ''\) \? `\$\{t\('fileMissing'\)\}: \$\{entry\.path\}` : e\.message;/u,
+    'ENOENT on a file open reads as a sentence with the path');
 });

@@ -827,7 +827,10 @@
       }
     } catch (e) {
       pendingViewSlide = '';
-      error = e.message;
+      // A dead path reference is an EXPECTED miss (a chat link may outlive
+      // its file) — say so in words, not in errno (board #99: "即使路径不对，
+      // 应该友好的提示").
+      error = /No such file|os error 2/iu.test(e.message ?? '') ? `${t('fileMissing')}: ${entry.path}` : e.message;
       previewLoading = false;
       return;
     }

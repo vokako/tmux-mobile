@@ -37,6 +37,7 @@
   import { slideIndicator } from './lib/ui/indicator.ts';
   import { hoverInfo } from './lib/ui/hover.ts';
   import { installNativeContextMenuGuard } from './lib/ui/native-context-menu.ts';
+  import { installPathLinkNet } from './lib/ui/path-link-net.ts';
 
   // Tunable constants
   const KB_OPEN_THRESHOLD = 100; // px difference to detect keyboard open
@@ -51,6 +52,7 @@
   // either opens its app ContextMenu or does nothing. Touch/pen long-press is
   // deliberately exempt so selectable prose keeps the system selection UI.
   $effect(() => installNativeContextMenuGuard(window));
+  $effect(() => installPathLinkNet(window));
   let connected = $state(false);
   let terminalTarget = $state('');
   let terminalSession = $state('');
