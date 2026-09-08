@@ -1189,6 +1189,14 @@ fn render_claude(
     } else {
         format!("{}\n\n{}", system_prompt, crate::team::skills::skills_index_text(skills))
     };
+    // The prompt is a FILE, like every other backend now (owner, 2026-09-08:
+    // "类似的 Claude omp grok 是不是也是这种文件形式的，保证更加稳定"):
+    // claude reads the user-memory `CLAUDE.md` from CLAUDE_CONFIG_DIR — this
+    // isolated home — verified live (claude 2.1.239 quoted a marker from a
+    // relocated dir's CLAUDE.md and obeyed its instruction). The old
+    // `--append-system-prompt <6 KB literal>` was the last launch line bigger
+    // than a send-keys burst; every start path is a short line now.
+    std::fs::write(home.join("CLAUDE.md"), &full_prompt).map_err(|e| e.to_string())?;
     // An empty model means the BACKEND default — with Bedrock that is the
     // inherited env's ANTHROPIC_MODEL, so no `--model` is passed (the old
     // hardcoded `sonnet` alias overrode the env and does not resolve on
@@ -1201,12 +1209,11 @@ fn render_claude(
     Ok(Rendered {
         env: vec![("CLAUDE_CONFIG_DIR".into(), home.to_string_lossy().to_string())],
         cmd: format!(
-            "command claude --mcp-config {} --strict-mcp-config --settings {}{}{} --dangerously-skip-permissions --append-system-prompt {}",
+            "command claude --mcp-config {} --strict-mcp-config --settings {}{}{} --dangerously-skip-permissions",
             shared::shell_quote(&mcpfile.to_string_lossy()),
             shared::shell_quote(&settingsfile.to_string_lossy()),
             model_arg,
             effort_flag(def),
-            shared::shell_quote(&full_prompt),
         ),
         confirmation: Some(shared::StartupConfirmation {
             markers: shared::CLAUDE_FOLDER_TRUST_MARKERS.to_vec(),
@@ -2191,6 +2198,14 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
                 // env's ANTHROPIC_MODEL) decides; the old `--model sonnet`
                 // alias overrode it and does not resolve on Bedrock.
                 assert!(!r.cmd.contains("--model"), "{}", r.cmd);
+                // The prompt is a FILE (owner, 2026-09-08): CLAUDE.md in the
+                // isolated CLAUDE_CONFIG_DIR — verified live that a relocated
+                // dir's CLAUDE.md is read and obeyed. The launch line was the
+                // last one bigger than a send-keys burst; keep it under.
+                let claude_md = std::fs::read_to_string(dir.join("CLAUDE.md")).unwrap();
+                assert_eq!(claude_md, prompt, "the whole prompt lands in CLAUDE.md");
+                assert!(!r.cmd.contains("--append-system-prompt"), "{}", r.cmd);
+                assert!(r.cmd.len() < 2000, "launch line must fit one send-keys burst: {} bytes", r.cmd.len());
             }
             std::fs::remove_dir_all(&dir).ok();
         }

@@ -512,7 +512,7 @@ the consequence ("我发现现在我启动的 kiro claude 啊 这些好像都没
 `spawn::build_prompt` as the FIRST block of every managed agent's system
 prompt — before the agent's own persona (a house rule outranks a role), on
 every backend through the same path each already uses (kiro's agent-config
-`prompt`, claude's `--append-system-prompt`, codex's isolated
+`prompt`, claude's isolated `CLAUDE.md`, codex's isolated
 `CODEX_HOME/AGENTS.md` file, grok likewise). Empty or absent → the prompt is
 byte-for-byte what it was before the feature (a spawn test pins both orders).
 
@@ -522,8 +522,9 @@ CLAUDE.md — and the RPC (`global_prompt_get`/`global_prompt_set`) plus the CLI
 (`tmm prompt show|path|set|clear`) are the two doors onto that one file
 (rule 14, CLI/UI parity: an agent may set the house rules too). An empty
 write DELETES the file, so "cleared" and "never written" are one state.
-24 KB ceiling: the text rides on a launch line (`--append-system-prompt`, the
-codex config override) that tmux `send-keys` has to carry. A change reaches
+24 KB ceiling: a sane bound for text prepended to EVERY managed agent's
+prompt (since 2026-09-08 every backend takes it as a file in the isolated
+home, so no launch line grows with it). A change reaches
 agents spawned AFTER it; a running agent keeps the prompt it started with,
 because its launch recipe is replayed verbatim — restart it to pick the new
 text up (the CLI says so after every `set`).

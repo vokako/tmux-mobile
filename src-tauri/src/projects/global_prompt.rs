@@ -26,10 +26,11 @@ pub fn path() -> PathBuf {
     crate::config::config_dir().join("AGENTS.md")
 }
 
-/// A ceiling, because the text rides on claude's `--append-system-prompt`
-/// argument: a novel there is a launch line that no longer fits a tmux
-/// `send-keys` (codex escaped this class by moving to a CODEX_HOME/AGENTS.md
-/// file, 2026-09-08). 24 KB is ~6k tokens.
+/// A ceiling kept for the reader, not a tty anymore: every backend now takes
+/// the prompt as a FILE in its isolated home (kiro config `prompt`, codex
+/// AGENTS.md, claude CLAUDE.md, grok agent .md, omp a file path on the line),
+/// so no launch line grows with this text (2026-09-08). 24 KB is ~6k tokens —
+/// a sane bound for something prepended to EVERY agent's prompt.
 pub const MAX_BYTES: usize = 24 * 1024;
 
 /// The current text, trimmed; empty when the file is absent or blank.
