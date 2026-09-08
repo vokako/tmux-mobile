@@ -389,6 +389,20 @@ impl TeamBridge for TeamManager {
             .map_err(|e| e.to_string())
     }
 
+    fn post_routed(
+        &self,
+        room: &str,
+        from: &str,
+        body: &str,
+        to: &[String],
+        requires_reply: bool,
+    ) -> Result<serde_json::Value, String> {
+        let bus = self.room_bus(room).ok_or_else(|| format!("unknown team '{room}'"))?;
+        bus.post_routed(from, body, to, requires_reply)
+            .map(|message| serde_json::to_value(message).unwrap_or(serde_json::Value::Null))
+            .map_err(|error| error.to_string())
+    }
+
     fn room_latest(&self) -> serde_json::Value {
         // Deliberately not via `room_bus`: ordering projects by their conversation
         // has to work for rooms whose Team is not running, which is nearly all of

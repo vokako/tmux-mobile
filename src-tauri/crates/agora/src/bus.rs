@@ -238,6 +238,40 @@ impl Bus {
         Ok(msg)
     }
 
+    /// Post a message with server-known recipients that are not encoded in the
+    /// body. The route survives in the transcript while the visible body stays
+    /// natural. This is also how a project Hub addresses managed agents that
+    /// are not members of the Agora roster.
+    pub fn post_routed(
+        &self,
+        from: &str,
+        body: &str,
+        to: &[String],
+        requires_reply: bool,
+    ) -> Result<Message> {
+        let msg = {
+            let conn = self.lock();
+            let recipients = self.resolve_recipients(&conn, from, to)?;
+            let requires_reply = requires_reply
+                || to.iter().any(|name| name.eq_ignore_ascii_case("all"));
+            let msg = store::append(&conn, &self.room, from, to, Kind::Msg, body)?;
+            for creditor in store::owes(&conn, &self.room, from)? {
+                if to.iter().any(|target| target.eq_ignore_ascii_case(&creditor)) {
+                    store::clear_obligation(&conn, &self.room, from, &creditor)?;
+                }
+            }
+            for recipient in recipients {
+                if requires_reply && store::get_agent(&conn, &self.room, &recipient)?.is_some() {
+                    store::add_obligation(&conn, &self.room, &recipient, from, &msg.id)?;
+                }
+            }
+            store::touch(&conn, &self.room, from)?;
+            msg
+        };
+        let _ = self.tx.send(msg.clone());
+        Ok(msg)
+    }
+
     /// Block until new messages arrive, or until timeout. Once caught up, refuses to
     /// idle while you still owe someone a reply.
     pub async fn wait(&self, agent: &str, timeout: Option<Duration>) -> Result<WaitOutcome> {

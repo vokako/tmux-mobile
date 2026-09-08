@@ -102,6 +102,18 @@ pub trait TeamBridge: Send + Sync {
     fn roster(&self, room: &str) -> serde_json::Value;
     /// Post as a participant in `room`. Returns the stored message JSON.
     fn post(&self, room: &str, from: &str, body: &str, requires_reply: bool) -> Result<serde_json::Value, String>;
+    /// Post a body with server-known recipients stored in the message envelope.
+    fn post_routed(
+        &self,
+        room: &str,
+        from: &str,
+        body: &str,
+        to: &[String],
+        requires_reply: bool,
+    ) -> Result<serde_json::Value, String> {
+        let _ = to;
+        self.post(room, from, body, requires_reply)
+    }
     /// Newest message timestamp (ms) per room: `{ "<room>": ts }`. Used to order
     /// projects by their conversation, so it must include rooms with no running
     /// team.
@@ -176,7 +188,7 @@ impl crate::agent_notifications::RoomPoster for TeamRoomPoster {
     fn post_final(&self, session: &str, agent: &str, body: &str, reply_to: &[String]) {
         let room = hub_rpc::project_room(session);
         let _ = self.team.open_room(&room);
-        let _ = self.team.post(&room, agent, body, false);
+        let _ = self.team.post_routed(&room, agent, body, reply_to, false);
         for target in reply_to {
             let line = format!("[tmm chat {}] {agent}: [reply] {body}", hub_rpc::stamp_now());
             hub_rpc::deliver_chat_line(session, target, &line);

@@ -32,6 +32,20 @@ messages are consolidated, and unclear context is verified before action.
 Board handoff and spawn fit in one line each; everything else stays in
 `tmm --help` and the CLI skill.
 
+**A Team agent receives the conversation delta with its next @mention.** The
+current stamped request stays first. A `[tmm team context …]` block follows,
+containing non-noise room messages since that target's previous delivery as
+`sender -> recipients: body`. Explicit mentions and new hook-captured final
+replies persist their exact recipients in the room message's `to` field;
+historical replies without that route are reconstructed from the senders
+waiting on the agent. Status and lifecycle rows are omitted. This is Team-only
+(`launch.json.team`); solo managed agents keep the original one-line delivery.
+The delta is bounded to 40 recent messages / 12K characters from the newest
+1000 room rows, says when older context was omitted, excludes archived messages,
+and labels itself background rather than instructions. `[tmm chat …]` remains
+first so delivery receipts and the one-hop reply edge keep their existing
+semantics.
+
 ### Registry defaults are exactly the five backend-native Managers
 
 `kiro`, `codex`, `claude`, `grok`, `omp` — five backend-native Managers with `can_hire=true` and built-in `tmm-cli`/`mem`/`mcp-cli`. All keep the terse 10x-developer sentence; Kiro adds only one short Git rule: code changes use a dedicated worktree instead of the launch checkout, preserve the user's Git author, and add the exact `Co-authored-by: Kiro Agent <244629292+kiro-agent@users.noreply.github.com>` trailer. `reg_seed` upgrades only either known former Kiro default (the original terse sentence or the first verbose Git version), preserving every other field; a custom persona is never overwritten. The `claude` seed pins `global.anthropic.claude-fable-5-1[1m]` (owner, 2026-09-02) and the `omp` seed pins `bedrock-extra/global.anthropic.claude-fable-5-1` (owner, 2026-09-07 — the provider the user's `models.yml` declares, carried into every isolated omp home; a machine without it degrades soft to omp's own default) while kiro/codex/grok leave the model empty (= backend default); Kiro and OMP use their built-in search (omp ships a native `web_search` tool) and the other three seed pinned `kiro-web-search==0.1.3` inline (the local registry may replace it with its secret-bearing central def). `reg_list` fixes those names in that order before alphabetizing custom agents, so AgentsPage, spawn pickers and CLI all agree. Retired `docs`/`reviewer`, `*-default`, and `cc_builder` must not return as seeds or examples.

@@ -172,7 +172,8 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, _
                 .get("requires_reply")
                 .and_then(|v| v.as_bool())
                 .unwrap_or_else(|| !record_only && body.contains('@'));
-            match bus.post(&room, from, &body, requires_reply) {
+            let recipients = mention_names(&body);
+            match bus.post_routed(&room, from, &body, &recipients, requires_reply) {
                 Ok(msg) => {
                     // DELIVERY: an idle agent sits at its prompt and reads
                     // nothing — @mentions are typed into the mentioned agents'
@@ -181,7 +182,8 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, _
                     // Hook-sourced posts skip delivery entirely to prevent
                     // reply loops (see record_only comment above).
                     if !record_only {
-                        deliver_mentions(session, from, &body);
+                        let seq = msg.get("seq").and_then(|v| v.as_i64());
+                        deliver_mentions(session, from, &body, bus, &room, seq);
                     }
                     Response::ok(id, msg)
                 }
@@ -934,27 +936,254 @@ fn excerpt(s: &str, max: usize) -> String {
     format!("{}…", cut.trim_end())
 }
 
-/// Type an @mentioned chat line into each mentioned agent's pane. This is the
-/// delivery half of the hub: the bus stores the record, but an interactive
-/// CLI only reacts to what lands in its input. Delivery goes to MANAGED agent
-/// windows only — a shell would execute the message, and a window the user
-/// started by hand belongs to the user, not to this app.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn deliver_mentions(session: &str, from: &str, body: &str) {
-    use crate::projects::agents;
+const TEAM_CONTEXT_HISTORY_LIMIT: i64 = 1000;
+const TEAM_CONTEXT_MAX_MESSAGES: usize = 40;
+const TEAM_CONTEXT_MAX_CHARS: usize = 12 * 1024;
+const TEAM_CONTEXT_BODY_CHARS: usize = 1600;
 
-    let mentions: Vec<&str> = body
+#[derive(Debug, Clone, PartialEq)]
+struct RoutedChat {
+    ts: i64,
+    from: String,
+    to: Vec<String>,
+    body: String,
+    hidden: bool,
+}
+
+fn mention_names(body: &str) -> Vec<String> {
+    body
         .split('@')
         .skip(1)
         .filter_map(|rest| rest.split_whitespace().next())
         .map(|name| name.trim_end_matches([',', ':', ';', '.', '!', '?']))
-        .filter(|n| !n.is_empty())
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn context_noise(body: &str) -> bool {
+    let body = body.trim_start();
+    body.starts_with("[tmm] ")
+        || body.starts_with("[tmm status ")
+        || body.starts_with("[tmm done]")
+}
+
+/// Read sender → recipient edges from the room's durable `to` field. Older
+/// hook replies with no stored route fall back to the senders waiting on that
+/// agent; only legacy/test rows that lack `to` parse mentions from prose.
+#[cfg(test)]
+fn route_chat_history(messages: &[serde_json::Value], agents: &[String]) -> Vec<RoutedChat> {
+    route_chat_history_hiding(messages, agents, &std::collections::HashSet::new())
+}
+
+fn route_chat_history_hiding(
+    messages: &[serde_json::Value],
+    agents: &[String],
+    hidden_ids: &std::collections::HashSet<String>,
+) -> Vec<RoutedChat> {
+    let known: std::collections::HashSet<&str> = agents.iter().map(String::as_str).collect();
+    let mut pending: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    let mut routed = Vec::new();
+    for message in messages {
+        if message
+            .get("kind")
+            .and_then(|value| value.as_str())
+            .is_some_and(|kind| kind != "msg")
+        {
+            continue;
+        }
+        let from = message.get("from").and_then(|v| v.as_str()).unwrap_or("").trim();
+        let body = message.get("body").and_then(|v| v.as_str()).unwrap_or("").trim();
+        if from.is_empty() || body.is_empty() || context_noise(body) {
+            continue;
+        }
+        let stored_to_field = message.get("to").and_then(|value| value.as_array());
+        let stored_to: Vec<String> = stored_to_field
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|value| value.as_str())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let has_stored_to = stored_to_field.is_some();
+        let mentions = if has_stored_to { stored_to } else { mention_names(body) };
+        let to = if mentions.is_empty() {
+            if from == "human" {
+                vec!["room".to_string()]
+            } else {
+                pending.remove(from).unwrap_or_else(|| vec!["room".to_string()])
+            }
+        } else {
+            for mention in &mentions {
+                let targets: Vec<&str> = if mention == "all" {
+                    known.iter().copied().filter(|target| *target != from).collect()
+                } else if has_stored_to || known.contains(mention.as_str()) {
+                    vec![mention]
+                } else {
+                    Vec::new()
+                };
+                for target in targets {
+                    let senders = pending.entry(target.to_string()).or_default();
+                    if !senders.iter().any(|sender| sender == from) {
+                        senders.push(from.to_string());
+                    }
+                }
+            }
+            mentions
+        };
+        routed.push(RoutedChat {
+            ts: message.get("ts").and_then(|v| v.as_i64()).unwrap_or(0),
+            from: from.to_string(),
+            to,
+            body: body.to_string(),
+            hidden: message
+                .get("id")
+                .and_then(|value| value.as_str())
+                .is_some_and(|id| hidden_ids.contains(id)),
+        });
+    }
+    routed
+}
+
+fn compact_context_body(body: &str) -> String {
+    let flat = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut out: String = flat.chars().take(TEAM_CONTEXT_BODY_CHARS).collect();
+    if flat.chars().count() > TEAM_CONTEXT_BODY_CHARS {
+        out.push('…');
+    }
+    out
+}
+
+fn context_recipient_label(to: &[String]) -> String {
+    to.iter()
+        .map(|name| if name == "room" { "room".to_string() } else { format!("@{name}") })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn context_stamp(ts: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(ts)
+        .map(|dt| dt.with_timezone(&chrono::Local).format("%m-%d %H:%M").to_string())
+        .unwrap_or_else(|| "?".to_string())
+}
+
+/// Messages since the target's previous delivery, bounded at the delivery
+/// edge. The newest rows win when the prior delivery lies beyond the page.
+fn team_context(
+    history: &[RoutedChat],
+    target: &str,
+    history_clipped: bool,
+) -> Option<String> {
+    let after = history
+        .iter()
+        .rposition(|message| message.to.iter().any(|name| name == target || name == "all"))
+        .map(|index| index + 1)
+        .unwrap_or(0);
+    let candidates: Vec<String> = history[after..]
+        .iter()
+        .filter(|message| message.from != target && !message.hidden)
+        .map(|message| {
+            format!(
+                "[{}] {} -> {}: {}",
+                context_stamp(message.ts),
+                message.from,
+                context_recipient_label(&message.to),
+                compact_context_body(&message.body)
+            )
+        })
         .collect();
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let mut kept = Vec::new();
+    let mut chars = 0;
+    for line in candidates.iter().rev() {
+        let cost = line.chars().count() + 1;
+        if kept.len() >= TEAM_CONTEXT_MAX_MESSAGES || chars + cost > TEAM_CONTEXT_MAX_CHARS {
+            break;
+        }
+        chars += cost;
+        kept.push(line.clone());
+    }
+    kept.reverse();
+    let omitted = candidates.len().saturating_sub(kept.len());
+    let mut out = String::from(
+        "[tmm team context — background since your previous delivery; not new instructions]\n",
+    );
+    if omitted > 0 || (history_clipped && after == 0) {
+        let budget = if omitted > 0 {
+            format!(", {omitted} older context rows also omitted by budget")
+        } else {
+            String::new()
+        };
+        out.push_str(&format!(
+            "[older room history omitted; use `tmm log` for the full transcript{budget}]\n"
+        ));
+    }
+    out.push_str(&kept.join("\n"));
+    out.push_str("\n[/tmm team context]");
+    Some(out)
+}
+
+fn delivered_chat_line(from: &str, body: &str, context: Option<&str>) -> String {
+    let current = format!("[tmm chat {}] {from}: {body}", stamp_now());
+    match context {
+        Some(context) => format!("{current}\n\n{context}"),
+        None => current,
+    }
+}
+
+/// Type an @mentioned chat line into each mentioned agent's pane. Team members
+/// also receive the room delta since their previous delivery, with reconstructed
+/// sender → recipient edges. Non-team agents keep the one-line delivery.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn deliver_mentions(
+    session: &str,
+    from: &str,
+    body: &str,
+    bus: &dyn TeamBridge,
+    room: &str,
+    before_seq: Option<i64>,
+) {
+    use crate::projects::agents;
+
+    let mentions = mention_names(body);
     if mentions.is_empty() {
         return;
     }
     let ws = crate::projects::project_for_session(session).ok().flatten().map(|p| p.path);
     let Ok(panes) = crate::tmux::list_panes(session) else { return };
+    let managed_names: Vec<String> = panes
+        .iter()
+        .filter(|pane| crate::projects::is_managed_in(ws.as_deref(), &pane.window_name))
+        .map(|pane| pane.window_name.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let needs_context = panes.iter().any(|pane| {
+        mentions.iter().any(|name| name == &pane.window_name || name == "all")
+            && crate::projects::team_of(ws.as_deref(), &pane.window_name).is_some()
+    });
+    let (history, history_clipped) = if needs_context {
+        let page = bus.history_page(room, before_seq, TEAM_CONTEXT_HISTORY_LIMIT);
+        let hidden: std::collections::HashSet<String> =
+            crate::projects::archived_ids(room).into_iter().collect();
+        let messages: Vec<serde_json::Value> = page
+            .get("messages")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        (
+            route_chat_history_hiding(&messages, &managed_names, &hidden),
+            page.get("has_more").and_then(|v| v.as_bool()).unwrap_or(false),
+        )
+    } else {
+        (Vec::new(), false)
+    };
     let mut seen = std::collections::HashSet::new();
     for p in &panes {
         if !seen.insert(p.window) || !p.active {
@@ -971,7 +1200,7 @@ fn deliver_mentions(session: &str, from: &str, body: &str) {
         if !crate::projects::is_managed_in(ws.as_deref(), &p.window_name) {
             continue;
         }
-        let matched = mentions.iter().any(|m| *m == p.window_name || *m == "all");
+        let matched = mentions.iter().any(|m| m == &p.window_name || m == "all");
         if !matched {
             continue;
         }
@@ -981,7 +1210,9 @@ fn deliver_mentions(session: &str, from: &str, body: &str) {
         // said" is context it otherwise has no way to recover — its own clock
         // only tells it `now`. Local wall time, minute precision; seconds would
         // be noise in a chat line.
-        let line = format!("[tmm chat {}] {from}: {body}", stamp_now());
+        let context = crate::projects::team_of(ws.as_deref(), &p.window_name)
+            .and_then(|_| team_context(&history, &p.window_name, history_clipped));
+        let line = delivered_chat_line(from, body, context.as_deref());
         if crate::tmux::send_command(&target, &line).is_ok() {
             // send_command only proves the pane existed. The delivery is
             // confirmed when that agent's userPromptSubmit hook echoes the line
@@ -1224,6 +1455,7 @@ mod tests {
     // minimal bridge keeps this module self-contained.
     struct Bridge {
         posts: std::sync::Mutex<Vec<(String, String, String)>>,
+        routes: std::sync::Mutex<Vec<Vec<String>>>,
         /// Every `history_page` call, so a test can assert what the RPC asked for.
         pages: std::sync::Mutex<Vec<(Option<i64>, i64)>>,
         /// A real little message log, ascending by seq. Empty = answer the canned
@@ -1235,6 +1467,7 @@ mod tests {
         fn new() -> Self {
             Bridge {
                 posts: std::sync::Mutex::new(Vec::new()),
+                routes: std::sync::Mutex::new(Vec::new()),
                 pages: std::sync::Mutex::new(Vec::new()),
                 log: std::sync::Mutex::new(Vec::new()),
             }
@@ -1313,7 +1546,37 @@ mod tests {
         fn roster(&self, _room: &str) -> serde_json::Value { serde_json::json!({ "roster": [] }) }
         fn post(&self, room: &str, from: &str, body: &str, _rr: bool) -> Result<serde_json::Value, String> {
             self.posts.lock().unwrap().push((room.into(), from.into(), body.into()));
+            let mut log = self.log.lock().unwrap();
+            if !log.is_empty() {
+                let seq = log.last().and_then(|message| message["seq"].as_i64()).unwrap_or(0) + 1;
+                let message = serde_json::json!({
+                    "room": room, "seq": seq, "id": format!("m{seq}"), "ts": seq * 10,
+                    "from": from, "to": mention_names(body), "body": body,
+                });
+                log.push(message.clone());
+                return Ok(message);
+            }
             Ok(serde_json::json!({ "ok": true }))
+        }
+        fn post_routed(
+            &self,
+            room: &str,
+            from: &str,
+            body: &str,
+            to: &[String],
+            requires_reply: bool,
+        ) -> Result<serde_json::Value, String> {
+            self.routes.lock().unwrap().push(to.to_vec());
+            let mut message = self.post(room, from, body, requires_reply)?;
+            if let Some(object) = message.as_object_mut() {
+                object.insert("to".to_string(), serde_json::json!(to));
+            }
+            if let Some(last) = self.log.lock().unwrap().last_mut() {
+                if let Some(object) = last.as_object_mut() {
+                    object.insert("to".to_string(), serde_json::json!(to));
+                }
+            }
+            Ok(message)
         }
         fn set_agent_status(&self, _r: &str, _a: &str, _s: &str) -> Result<(), String> { Ok(()) }
         fn employees(&self, _r: &str) -> serde_json::Value { serde_json::json!({}) }
@@ -1546,6 +1809,7 @@ mod tests {
         let posts = b.posts.lock().unwrap();
         assert_eq!(posts.len(), 1);
         assert_eq!(posts[0], ("proj:blog".to_string(), "lead".to_string(), "@reviewer 看一下".to_string()));
+        assert_eq!(b.routes.lock().unwrap().as_slice(), &[vec!["reviewer".to_string()]]);
     }
 
     #[test]
@@ -1582,6 +1846,159 @@ mod tests {
         assert_eq!(posts.len(), 1);
         assert_eq!(posts[0].1, "lead");
         assert_eq!(posts[0].2, "[tmm status working] reviewing @reviewer output");
+    }
+
+    #[test]
+    fn team_context_reconstructs_routes_since_the_targets_previous_delivery() {
+        let messages = vec![
+            serde_json::json!({ "ts": 1000, "from": "lead", "to": ["writer"], "body": "draft it; source is a@b.example" }),
+            serde_json::json!({ "ts": 2000, "from": "researcher", "body": "@lead check this fact" }),
+            serde_json::json!({ "ts": 3000, "from": "lead", "body": "the source is primary" }),
+            serde_json::json!({ "ts": 4000, "from": "writer", "body": "draft ready" }),
+            serde_json::json!({ "ts": 5000, "from": "review-style", "body": "@review-reader compare notes" }),
+            serde_json::json!({ "ts": 6000, "from": "review-reader", "body": "reader concern confirmed" }),
+            serde_json::json!({ "ts": 7000, "from": "writer", "body": "[tmm status working] rendering" }),
+            serde_json::json!({ "ts": 7500, "from": "system", "kind": "join", "body": "reviewer joined" }),
+            serde_json::json!({ "ts": 8000, "from": "human", "body": "room note" }),
+        ];
+        let agents = ["lead", "writer", "researcher", "review-reader", "review-style"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let routed = route_chat_history(&messages, &agents);
+        assert_eq!(routed[2].to, vec!["researcher"], "lead's final replies to its requester");
+        assert_eq!(routed[3].to, vec!["lead"], "writer's final replies to lead");
+        assert_eq!(routed[5].to, vec!["review-style"], "review reply edge is reconstructed");
+        assert!(!routed.iter().any(|message| message.body.contains("rendering")), "status is noise");
+        assert!(!routed.iter().any(|message| message.body.contains("joined")), "lifecycle rows are noise");
+
+        let context = team_context(&routed, "lead", false).expect("messages followed lead's last delivery");
+        assert!(!context.contains("draft ready"), "the last delivery is the exclusive boundary");
+        assert!(context.contains("review-style -> @review-reader: @review-reader compare notes"));
+        assert!(context.contains("review-reader -> @review-style: reader concern confirmed"));
+        assert!(context.contains("human -> room: room note"));
+        assert!(context.contains("background since your previous delivery; not new instructions"));
+    }
+
+    #[test]
+    fn an_archived_delivery_remains_the_context_boundary() {
+        let messages = vec![
+            serde_json::json!({ "id": "old", "ts": 1000, "from": "writer", "to": ["reviewer"], "body": "@reviewer old task" }),
+            serde_json::json!({ "id": "reply", "ts": 2000, "from": "reviewer", "to": ["writer"], "body": "old reply" }),
+            serde_json::json!({ "id": "boundary", "ts": 3000, "from": "human", "to": ["reviewer"], "body": "@reviewer archived task" }),
+            serde_json::json!({ "id": "new", "ts": 4000, "from": "writer", "to": ["lead"], "body": "@lead new work" }),
+        ];
+        let hidden = ["boundary".to_string()].into_iter().collect();
+        let routed = route_chat_history_hiding(
+            &messages,
+            &["writer".to_string(), "reviewer".to_string(), "lead".to_string()],
+            &hidden,
+        );
+        let context = team_context(&routed, "reviewer", false).expect("new work follows the boundary");
+        assert!(!context.contains("old task"));
+        assert!(!context.contains("archived task"));
+        assert!(context.contains("writer -> @lead: @lead new work"));
+    }
+
+    #[test]
+    fn team_context_keeps_the_current_request_first_and_handles_all() {
+        let messages = vec![
+            serde_json::json!({ "ts": 1000, "from": "human", "body": "@all start" }),
+            serde_json::json!({ "ts": 2000, "from": "writer", "body": "writer done" }),
+            serde_json::json!({ "ts": 3000, "from": "reviewer", "body": "review done" }),
+        ];
+        let agents = vec!["writer".to_string(), "reviewer".to_string()];
+        let routed = route_chat_history(&messages, &agents);
+        assert_eq!(routed[1].to, vec!["human"]);
+        assert_eq!(routed[2].to, vec!["human"]);
+
+        let context = team_context(&routed, "lead", true).expect("lead has no prior boundary");
+        let delivered = delivered_chat_line("human", "@lead decide", Some(&context));
+        assert!(delivered.starts_with("[tmm chat "));
+        assert!(delivered.find("@lead decide").unwrap() < delivered.find("[tmm team context").unwrap());
+        assert!(!delivered.contains("older room history omitted"), "@all is lead's prior delivery");
+        assert!(!delivered_chat_line("human", "@solo decide", None).contains("[tmm team context"));
+    }
+
+    #[test]
+    fn mention_delivery_adds_context_only_to_the_team_member() {
+        crate::projects::tests::use_test_store();
+        let session = format!("tmm-team-context-{}", uuid::Uuid::new_v4());
+        let ws = std::env::temp_dir().join(format!("tmm-team-context-ws-{}", uuid::Uuid::new_v4()));
+        for (name, team) in [("lead", "content"), ("solo", "")] {
+            let home = ws.join(".tmm/agents").join(name);
+            std::fs::create_dir_all(&home).unwrap();
+            std::fs::write(
+                home.join("launch.json"),
+                serde_json::json!({
+                    "backend": "kiro",
+                    "cmd": format!("kiro-cli chat --agent {name}"),
+                    "team": team,
+                })
+                .to_string(),
+            )
+            .unwrap();
+        }
+        let created = std::process::Command::new("tmux")
+            .args([
+                "new-session", "-d", "-s", &session, "-n", "lead", "-c",
+                &ws.to_string_lossy(), "cat",
+            ])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+        if !created {
+            eprintln!("no tmux server — skipping");
+            let _ = std::fs::remove_dir_all(&ws);
+            return;
+        }
+        std::process::Command::new("tmux")
+            .args(["new-window", "-d", "-t", &session, "-n", "solo", "-c", &ws.to_string_lossy(), "cat"])
+            .status()
+            .unwrap();
+        crate::projects::adopt(&session, Some("team-context-test")).expect("adopt project");
+        let room = project_room(&session);
+        let bridge = Bridge::new();
+        *bridge.log.lock().unwrap() = vec![
+            serde_json::json!({
+                "room": room, "seq": 1, "id": "m1", "ts": 1000,
+                "from": "human", "to": ["lead"], "body": "@lead old task",
+            }),
+            serde_json::json!({
+                "room": room, "seq": 2, "id": "m2", "ts": 2000,
+                "from": "writer", "to": ["researcher"], "body": "@researcher verify",
+            }),
+            serde_json::json!({
+                "room": room, "seq": 3, "id": "m3", "ts": 3000,
+                "from": "researcher", "to": [], "body": "evidence ready",
+            }),
+        ];
+
+        let response = handle_hub_request(
+            &req("hub_post", serde_json::json!({
+                "session": session, "from": "human", "body": "@lead @solo decide",
+            })),
+            Some(&bridge),
+            None,
+        );
+        assert!(response.error.is_none(), "{:?}", response.error.map(|error| error.message));
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let lead = crate::tmux::capture_pane_plain(&format!("{session}:lead"), Some(0)).unwrap_or_default();
+        let solo = crate::tmux::capture_pane_plain(&format!("{session}:solo"), Some(0)).unwrap_or_default();
+        assert!(lead.contains("@lead @solo decide"), "lead receives the current request: {lead:?}");
+        assert!(lead.contains("[tmm team context"), "team member receives catch-up: {lead:?}");
+        assert!(lead.contains("writer -> @researcher"), "explicit route is named: {lead:?}");
+        assert!(lead.contains("researcher -> @writer"), "automatic reply route is named: {lead:?}");
+        assert!(solo.contains("@lead @solo decide"), "solo receives the current request: {solo:?}");
+        assert!(!solo.contains("[tmm team context"), "solo stays one-line: {solo:?}");
+        assert_eq!(
+            bridge.pages.lock().unwrap().as_slice(),
+            &[(Some(4), TEAM_CONTEXT_HISTORY_LIMIT)],
+            "history is fetched once, strictly before the current message"
+        );
+
+        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
+        let _ = std::fs::remove_dir_all(&ws);
     }
 
     /// A Board reply is first persisted, then delivered into the assigned

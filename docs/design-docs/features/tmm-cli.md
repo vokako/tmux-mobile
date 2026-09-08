@@ -310,7 +310,10 @@ can get wrong to save three characters.
 `connection.rs` exactly like `team_*`:
 
 - `hub_post { session, from, body, status?, requires_reply? }` — room auto-opens;
-  `status=true` records `[tmm status working]` without pane delivery.
+  `status=true` records `[tmm status working]` without pane delivery. An
+  addressed Team member receives the current line plus the bounded,
+  sender→recipient room delta since its previous delivery; other recipients
+  receive only the current line.
 - `hub_log { session, since_ts?, limit? }` — incremental cursor filters on
   message `ts` (epoch ms) in our layer.
 - `hub_agents { session }` — one row per live window: name, command, agent

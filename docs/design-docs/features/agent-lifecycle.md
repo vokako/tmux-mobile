@@ -61,6 +61,14 @@ was a bug we already paid for:
    a database. Managed windows only: `@all` must never type into a kiro the user
    started by hand.
 
+For a Team member, delivery appends a background-only context block after the
+current line. It contains routed conversation since that member's prior
+delivery, so an agent woken after other teammates talked can see both the
+messages and their sender→recipient edges. The current request stays first;
+non-Team agents, hook replies and Board notices do not gain this block.
+Hook final replies store their exact reply targets in the room envelope's
+`to` field without changing the visible body.
+
 Three recipients, three different costs — a name interrupts one agent, `@all`
 interrupts everyone, and no recipient interrupts nobody (the room keeps it for
 their next `tmm log`).

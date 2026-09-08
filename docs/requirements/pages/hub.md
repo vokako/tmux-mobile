@@ -48,7 +48,10 @@ completion).
   its pane; the captured final reply is recorded and returned once to the
   agent that opened the turn; addressed sends (`@name`) start a new question
   or handoff; `send --status` records ambient progress. `tmm log` is the room
-  memory.
+  memory. When the addressed recipient belongs to an agent team, its prompt
+  also carries the routed room delta since its previous delivery, identifying
+  who sent each message to whom. Non-team recipients keep the addressed line
+  alone.
 - **The task board** is the project's plan of record: the human writes
   issues here, agents keep them current via `tmm board`
   (todo/doing/review/done, fixed vocabulary).

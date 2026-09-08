@@ -143,6 +143,32 @@ async fn reply_does_not_ping_pong() {
 }
 
 #[tokio::test]
+async fn routed_reply_keeps_natural_body_and_discharges_without_ping_pong() {
+    let bus = new_bus();
+    bus.join("lead", None).unwrap();
+    bus.join("worker", None).unwrap();
+
+    let request = bus
+        .post_routed("lead", "do X", &["worker".to_string()], true)
+        .unwrap();
+    assert_eq!(request.to, vec!["worker"]);
+    let delivered = bus.wait("worker", Some(Duration::from_millis(200))).await.unwrap();
+    assert!(matches!(delivered, WaitOutcome::Delivered { .. }));
+    let blocked = bus.wait("worker", Some(Duration::from_millis(200))).await.unwrap();
+    assert!(matches!(blocked, WaitOutcome::Blocked { .. }), "routed requests retain reply debt");
+
+    let reply = bus
+        .post_routed("worker", "done X", &["lead".to_string()], false)
+        .unwrap();
+    assert_eq!(reply.body, "done X", "routing metadata is not written into prose");
+    assert_eq!(reply.to, vec!["lead"], "the durable envelope names the recipient");
+    let worker = bus.wait("worker", Some(Duration::from_millis(200))).await.unwrap();
+    assert!(!matches!(worker, WaitOutcome::Blocked { .. }), "the reply discharges worker");
+    let lead = bus.wait("lead", Some(Duration::from_millis(200))).await.unwrap();
+    assert!(!matches!(lead, WaitOutcome::Blocked { .. }), "the reply creates no reverse debt");
+}
+
+#[tokio::test]
 async fn can_discharge_debt_to_unregistered_human() {
     // Regression: the human operator is never a registered agent. When the
     // human's directed message obligates an agent, the agent MUST be able to
