@@ -608,7 +608,7 @@ pub fn team_get(name: &str) -> Result<Option<store::RegTeam>, String> {
 }
 
 /// Save a team. Validation happens here, not at spawn: a base that is not in
-/// the registry, a duplicate member name, an inline member on an unknown
+/// the registry, a duplicate member name, a bare member on an unknown
 /// backend or with a model the backend rejects — each would otherwise be
 /// discovered by the human the moment they try to start the team.
 pub fn teams_save(def: &Value) -> Result<Value, String> {
@@ -638,7 +638,7 @@ pub fn teams_save(def: &Value) -> Result<Value, String> {
     }
     for m in &members {
         if !m.team.trim().is_empty() { continue; }
-        // A derived member's model/effort override is checked against the
+        // A custom-agent member's model/effort override is checked against the
         // BASE's backend — the same rule registry_save applies, for the same
         // reason (a bad id runs the default model and says so in a line
         // nobody reads).

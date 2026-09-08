@@ -1,12 +1,10 @@
 //! Agent TEAMS (owner, 2026-09-02, board #74): "除了定制 agent 之外，我们可以
 //! 定义 agent team，可以看作是 agent 加上一个特定的角色补充设定，组成一个小组".
 //!
-//! A team is a named list of members. Each member is ONE of:
-//! - a registry agent plus a role supplement (`base` = the agent's name,
-//!   `role` = what this member does in this team) — the common case: the
-//!   owner's own agents, derived, not redefined;
-//! - a team-only agent (`agent` = a full inline definition) — "我专门重新定义
-//!   只有这个 team 才有的一个 agent".
+//! A team is a named list of members. Each member has ONE source:
+//! - a bare coding agent (`agent` = full inline backend/model/prompt/Skills/MCP);
+//! - a custom registry agent inherited through `base`, plus a team role;
+//! - another team inherited through `team`, plus an enclosing brief.
 //!
 //! A member may also be another TEAM (`team` = its name; owner, 2026-09-02:
 //! "应该在 dev 里直接加 review 小组…设计成可以嵌套的"): `expand` flattens the
@@ -31,8 +29,8 @@ pub struct Member {
     /// against the project if taken) and its `@name`. Empty for a `team` ref.
     #[serde(default)]
     pub name: String,
-    /// Registry agent this member derives from. Empty = `agent` carries the
-    /// whole definition (or `team` names a sub-team).
+    /// Custom registry agent inherited whole. Empty = `agent` carries a bare
+    /// coding-agent definition (or `team` names a sub-team).
     #[serde(default)]
     pub base: String,
     /// Another team, included whole (nesting). Its members are spawned as if
@@ -50,8 +48,8 @@ pub struct Member {
     pub model: String,
     #[serde(default)]
     pub effort: String,
-    /// Team-only definition (used when `base` is empty). Its `name` is ignored
-    /// in favour of the member name.
+    /// Complete definition for a bare coding agent. Its `name` is ignored in
+    /// favour of the member name. Registry and sub-team members leave it empty.
     #[serde(default)]
     pub agent: Option<RegAgent>,
 }
@@ -331,11 +329,13 @@ mod tests {
 
     #[test]
     fn effective_def_inline_member_ignores_the_inline_name() {
-        let t = team(r#"[{"name":"critic","role":"find holes","agent":{"name":"whatever","backend":"grok","system":"Be harsh."}}]"#);
+        let t = team(r#"[{"name":"critic","role":"find holes","agent":{"name":"whatever","backend":"grok","system":"Be harsh.","skills":"[\"eli5\"]","mcp":"[\"search\"]"}}]"#);
         let d = effective_def(&flat_of(&t, 0), None, "critic", &[("critic".into(), "find holes".into(), "dev-squad".into())]).unwrap();
         assert_eq!(d.name, "critic");
         assert_eq!(d.backend, "grok");
         assert!(d.system.starts_with("Be harsh."));
+        assert_eq!(d.skills, r#"["eli5"]"#, "bare Skills reach the ordinary spawn path");
+        assert_eq!(d.mcp, r#"["search"]"#, "bare MCP reaches the ordinary spawn path");
         assert!(!d.system.contains("teammates"), "a one-member team has no roster block");
         let gone = Flat { member: Member { name: "x".into(), base: "gone".into(), team: String::new(), role: String::new(), model: String::new(), effort: String::new(), agent: None }, team: t.clone(), path: t.name.clone(), briefs: vec![] };
         assert!(effective_def(&gone, None, "x", &[]).is_err());

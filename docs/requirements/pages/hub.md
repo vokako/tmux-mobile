@@ -121,10 +121,11 @@ completion).
   page (`section`) whose list IS the screen. "Instructions for every agent"
   edits the app-wide `<config>/AGENTS.md` that leads every managed agent's
   system prompt (also `tmm prompt`).
-  Teams are configured on the Agents page (Teams section): a member derives
-  from a registry agent plus a role supplement, or is defined for the team
-  only, or another team included whole (nesting — drawn as a group inside the
-  group); at most 8 agents once sub-teams are expanded (the spawn cap).
+  Teams are configured on the Agents page (Teams section). Each member chooses
+  one source: a bare coding agent configured here (backend/model/effort,
+  prompt, Skills, MCP), a custom registry agent inherited whole, or a sub-team
+  inherited whole. The latter two expose no prompt/Skills/MCP fields in the
+  team editor. At most 8 agents after sub-team expansion (the spawn cap).
 
 ## Feed (the conversation)
 - Telegram-like bubbles: name header, floated time trailer, delivery ring on

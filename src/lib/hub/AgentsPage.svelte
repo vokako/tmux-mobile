@@ -250,21 +250,33 @@
   }
 
   // ── Agent teams (board #74) ───────────────────────────────────────────
-  // A team is a set of members with roles. A member DERIVES from one of the
-  // registry agents (base + role supplement) — the owner's own agents, not
-  // redefined — or is CUSTOM to this team (an inline definition: backend,
-  // model, effort, persona). Skills/MCP for a custom member are the built-ins;
-  // anything richer is a registry agent, which is what `base` is for.
+  // A member has exactly one source: a BARE coding backend configured here, a
+  // registry agent inherited whole, or a sub-team inherited whole. Only the
+  // bare source owns prompt / Skills / MCP in this editor.
   const TEAM_MAX = 8; // mirrors the server's spawn cap (validated there too, on the EXPANSION)
   const blankMember = () => ({ name: '', base: defs[0]?.name ?? '', team: '', role: '', model: '', effort: '', agent: null });
-  const blankCustom = () => ({ name: '', backend: 'claude', model: '', effort: '', system: '', skills: '[]', mcp: '[]', can_hire: false });
+  function bareEditor(agent = {}) {
+    const skillEntries = parseRefs(agent.skills);
+    const mcpEntries = parseRefs(agent.mcp);
+    return {
+      name: agent.name ?? '',
+      backend: agent.backend ?? 'kiro',
+      model: agent.model ?? '',
+      effort: agent.effort ?? '',
+      system: agent.system ?? '',
+      can_hire: false,
+      skillSel: skillEntries.filter((x) => typeof x === 'string'),
+      mcpSel: mcpEntries.filter((x) => typeof x === 'string'),
+      mcpExtra: mcpEntries.filter((x) => typeof x !== 'string'),
+    };
+  }
   function startTeam(team) {
     closeAll();
     teamIsNew = !team;
     let members = [];
     if (team) { try { members = JSON.parse(team.members) ?? []; } catch { members = []; } }
     editingTeam = team
-      ? { name: team.name, description: team.description ?? '', members: members.map((m) => ({ name: m.name ?? '', base: m.base ?? '', team: m.team ?? '', role: m.role ?? '', model: m.model ?? '', effort: m.effort ?? '', agent: m.agent ?? null })) }
+      ? { name: team.name, description: team.description ?? '', members: members.map((m) => ({ name: m.name ?? '', base: m.base ?? '', team: m.team ?? '', role: m.role ?? '', model: m.model ?? '', effort: m.effort ?? '', agent: m.agent ? bareEditor(m.agent) : null })) }
       : { name: '', description: '', members: [blankMember()] };
   }
   function addMember() {
@@ -275,16 +287,17 @@
     if (!editingTeam) return;
     editingTeam.members = editingTeam.members.filter((_, k) => k !== i);
   }
-  /** The kind Select's value: a registry agent name, `team:<name>` for a
-   * nested team (owner, 2026-09-02: "设计成可以嵌套的"), or '' for custom.
-   * Switching to custom seeds an inline def; switching away drops it. */
+  /** The source Select's value: '' for a bare backend, a registry agent name,
+   * or `team:<name>` for a nested team. Switching source drops fields owned by
+   * the previous source so prompt / Skills / MCP cannot leak onto an inherited
+   * agent or team. */
   const kindOf = (m) => (m.team ? `team:${m.team}` : m.base);
   function setBase(i, v) {
     const m = editingTeam.members[i];
     if (v.startsWith('team:')) { m.team = v.slice(5); m.base = ''; m.agent = null; return; }
     m.team = '';
     m.base = v;
-    m.agent = v ? null : (m.agent ?? blankCustom());
+    m.agent = v ? null : (m.agent ?? bareEditor());
   }
   /** Teams offerable as a member: every OTHER team (the server also refuses
    * cycles through longer chains). */
@@ -316,7 +329,13 @@
         members: JSON.stringify(editingTeam.members.map((m) => ({
           name: m.team ? '' : m.name.trim(), base: m.team ? '' : m.base, team: m.team ?? '', role: m.role.trim(),
           model: m.base && !m.team ? (m.model ?? '').trim() : '', effort: m.base && !m.team ? (m.effort ?? '') : '',
-          agent: m.base || m.team ? null : { ...m.agent, name: m.name.trim(), model: (m.agent?.model ?? '').trim() },
+          agent: m.base || m.team ? null : {
+            name: m.name.trim(), backend: m.agent.backend, model: (m.agent.model ?? '').trim(),
+            effort: m.agent.effort ?? '', system: m.agent.system ?? '',
+            skills: JSON.stringify(m.agent.skillSel ?? []),
+            mcp: JSON.stringify([...(m.agent.mcpSel ?? []), ...(m.agent.mcpExtra ?? [])]),
+            can_hire: false,
+          },
         }))),
       });
       editingTeam = null;
@@ -752,9 +771,9 @@
                 {/if}
                 <Select value={kindOf(m)} dense ariaLabel={t('teamsBase')}
                   options={[
-                    ...defs.map((d) => ({ value: d.name, label: d.name, icon: backendIcon(d.backend) ?? undefined })),
+                    { value: '', label: t('teamsBare') },
+                    ...defs.map((d) => ({ value: d.name, label: `${t('teamsCustomAgent')}: ${d.name}`, icon: backendIcon(d.backend) ?? undefined })),
                     ...subTeams.map((x) => ({ value: `team:${x.name}`, label: `${t('teamsSubTeam')}: ${x.name}` })),
-                    { value: '', label: t('teamsCustom') },
                   ]}
                   onchange={(v) => setBase(i, v)} />
                 <button class="icon-btn danger" title={t('teamsRemoveMember')} aria-label={t('teamsRemoveMember')} disabled={editingTeam.members.length <= 1} onclick={() => removeMember(i)}><Icon name="x" size={13} /></button>
@@ -776,7 +795,9 @@
                 </div>
               {/if}
               {#if !m.base && !m.team && m.agent}
-                <!-- A team-only member: the agent editor's identity fields, inline. -->
+                <!-- Bare coding agent: this team owns its complete definition.
+                     Registry agents and sub-teams inherit theirs and never
+                     expose prompt / Skills / MCP here. -->
                 <div class="row2">
                   <label>{t('agentsBackend')}
                     <Select bind:value={m.agent.backend} dense ariaLabel={t('agentsBackend')}
@@ -798,6 +819,39 @@
                 <label>{t('agentsSystem')}
                   <textarea rows="3" bind:value={m.agent.system} placeholder={t('agentsSystemPh')}></textarea>
                 </label>
+                <div class="pick-block">
+                  <span class="pick-label">{t('agentsSkills')}</span>
+                  {#if skills.length}
+                    <div class="pick-row">
+                      {#each skills as sk (sk.name)}
+                        <button type="button" class="pick" class:sel={m.agent.skillSel.includes(sk.name)}
+                          onclick={() => m.agent.skillSel = toggleSel(m.agent.skillSel, sk.name)}>
+                          <Icon name="zap" size={11} />{sk.name}
+                        </button>
+                      {/each}
+                    </div>
+                  {:else}
+                    <p class="hint">{t('agentsNoSkills')}</p>
+                  {/if}
+                </div>
+                <div class="pick-block">
+                  <span class="pick-label">{t('agentsMcp')}</span>
+                  {#if mcps.length}
+                    <div class="pick-row">
+                      {#each mcps as server (server.name)}
+                        <button type="button" class="pick" class:sel={m.agent.mcpSel.includes(server.name)}
+                          onclick={() => m.agent.mcpSel = toggleSel(m.agent.mcpSel, server.name)}>
+                          <Icon name="link" size={11} />{server.name}
+                        </button>
+                      {/each}
+                    </div>
+                  {:else}
+                    <p class="hint">{t('agentsNoMcp')}</p>
+                  {/if}
+                  {#if m.agent.mcpExtra.length}
+                    <p class="hint">{t('agentsMcpExtra').replace('{n}', String(m.agent.mcpExtra.length))}</p>
+                  {/if}
+                </div>
               {/if}
               <label>{m.team ? t('teamsSubBrief') : t('teamsRole')}
                 <textarea rows="2" bind:value={m.role} placeholder={m.team ? t('teamsSubBriefPh') : t('teamsRolePh')}></textarea>

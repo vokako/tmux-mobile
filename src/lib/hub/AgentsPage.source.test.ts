@@ -29,3 +29,18 @@ test('the desktop config page has THREE levels: categories | rows | editor (boar
   // The rows moved OUT of the main column — the old in-mid list stays retired.
   assert.ok(!source.includes('cat-list'), 'no rows in the editor column');
 });
+
+test('team members have exactly three sources, and only bare agents own prompt, Skills and MCP', () => {
+  assert.match(source,
+    /\{ value: '', label: t\('teamsBare'\) \}[\s\S]{0,400}?\.\.\.defs\.map\([\s\S]{0,220}?teamsCustomAgent[\s\S]{0,400}?\.\.\.subTeams\.map/u,
+    'the source picker offers bare backend, custom registry agent, then sub-team');
+  assert.match(source,
+    /\{#if !m\.base && !m\.team && m\.agent\}[\s\S]*?bind:value=\{m\.agent\.system\}[\s\S]*?m\.agent\.skillSel[\s\S]*?m\.agent\.mcpSel[\s\S]*?\{\/if\}/u,
+    'the bare branch owns prompt, Skills and MCP controls');
+  assert.match(source,
+    /skills: JSON\.stringify\(m\.agent\.skillSel \?\? \[\]\)[\s\S]{0,180}?mcp: JSON\.stringify\(\[\.\.\.\(m\.agent\.mcpSel \?\? \[\]\), \.\.\.\(m\.agent\.mcpExtra \?\? \[\]\)\]\)/u,
+    'bare selections serialize into the inline RegAgent');
+  assert.match(source,
+    /if \(v\.startsWith\('team:'\)\)[\s\S]{0,160}?m\.agent = null[\s\S]{0,160}?m\.agent = v \? null : \(m\.agent \?\? bareEditor\(\)\)/u,
+    'switching to inherited sources drops bare-only configuration');
+});

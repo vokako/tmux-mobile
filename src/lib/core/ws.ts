@@ -990,9 +990,8 @@ export const registryDelete = (name: string) => call('registry_delete', { name }
  * managed agent's system prompt at spawn (tmm-cli.md § The app-wide instructions). */
 export const globalPromptGet = () => call<{ text: string; path: string; max_bytes: number }>('global_prompt_get');
 export const globalPromptSet = (text: string) => call('global_prompt_set', { text });
-/** An agent TEAM (board #74): members derive from a registry agent (`base`)
- * plus a `role` supplement, or carry a team-only inline `agent` definition.
- * `members` is the JSON text of `TeamMember[]`, like an agent's `skills`. */
+/** An agent TEAM (board #74): each member is a bare coding agent configured
+ * inline, a custom registry agent inherited through `base`, or a sub-team. */
 export interface TeamMember {
   name: string;
   base: string;
@@ -1003,6 +1002,8 @@ export interface TeamMember {
   /** Model / effort overrides for a derived member; empty = the base's. */
   model?: string;
   effort?: string;
+  /** Complete definition for the bare source. Registry/sub-team sources leave
+   * this null and inherit their prompt, Skills and MCP unchanged. */
   agent?: RegAgent | null;
 }
 export interface RegTeam {
