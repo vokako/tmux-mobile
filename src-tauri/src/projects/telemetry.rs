@@ -1,7 +1,7 @@
 //! Agent telemetry: the passive half of the v2 dual channel.
 //!
-//! What an agent SAYS goes through the `tmm` CLI (hub_post / hub_status /
-//! hub_done). What we OBSERVE arrives here: hook notifications (it stopped, it
+//! What an agent SAYS goes through `hub_post`; what we OBSERVE arrives here:
+//! hook notifications (it stopped, it
 //! wants permission), the prompts it accepted, and tmux window activity. Status
 //! is DERIVED from those facts at read time — an agent never fills in a form,
 //! and a backend with poor hook coverage (codex) degrades to pane-activity
@@ -31,9 +31,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Tool activity within this window means "working".
 const ACTIVE_SECS: u64 = 30;
-/// An explicit `tmm status` declaration expires after this long so a crashed
-/// agent cannot stay "working" forever on its own last words.
-const EXPLICIT_TTL_SECS: u64 = 30 * 60;
 /// How long a line we typed into a pane may wait for its `userPromptSubmit`
 /// echo before we call the delivery unconfirmed. Typing is `send-keys`, which
 /// succeeds as long as the pane exists — it says nothing about whether the CLI
@@ -60,10 +57,6 @@ const TOOL_DEDUPE_SECS: u64 = 5;
 
 #[derive(Debug, Clone, Default)]
 struct Rec {
-    /// Explicit declaration via `tmm status <state> [note]`: (state, note, ts).
-    explicit: Option<(String, String, u64)>,
-    /// `tmm done [summary]`: (summary, ts). Also ENDS the turn.
-    done: Option<(String, u64)>,
     /// Turn START: the `userPromptSubmit` hook. The agent accepted a prompt, so
     /// a turn is open from here until an end arrives.
     prompt: Option<u64>,
@@ -94,8 +87,8 @@ pub struct AgentStatus {
     /// agent accepted a prompt and has not stopped), `waiting` (blocked on the
     /// human), `idle` (no turn open) or `failed`.
     pub state: String,
-    /// Human line explaining the state (explicit note, what it asked for, the
-    /// last observed tool call, or a `tmm done` summary).
+    /// Human line explaining the state (what it asked for or the last observed
+    /// tool call).
     pub detail: String,
     /// When the state began — the turn's start for `running`, so a client can
     /// render "running 2m14s" without keeping its own clock.
@@ -325,6 +318,27 @@ pub fn recent_events(session: &str, since_ts: u64) -> Vec<ActivityEvent> {
     events_page(session, since_ts, None, LOAD_EVENTS).0
 }
 
+/// The prompt newer than this window's last turn end. The durable path lets a
+/// stop hook recover its reply edge after the server restarted mid-turn.
+pub fn current_turn_prompt(session: &str, window: usize) -> Option<String> {
+    if !cfg!(test) {
+        return super::with_store(|s| s.current_turn_prompt(session, window))
+            .ok()
+            .flatten();
+    }
+    let map = events().lock().unwrap();
+    let rows = map.get(session)?;
+    for event in rows.iter().rev().filter(|event| event.window == window) {
+        if event.kind == "prompt" {
+            return Some(event.text.clone());
+        }
+        if event.kind == "notif" && matches!(event.text.as_str(), "completed" | "failed") {
+            return None;
+        }
+    }
+    None
+}
+
 /// How much trace this session has: (events, oldest ts, newest ts). For the
 /// client's "N of M loaded" and for anyone auditing what we keep.
 pub fn events_stats(session: &str) -> (usize, u64, u64) {
@@ -468,33 +482,6 @@ fn hydrate(session: &str, window: Option<usize>) {
     }
 }
 
-/// `tmm status <state> [note]` — explicit declaration by the agent.
-///
-/// The NOTE is the point of this call. Turn boundaries are observed for free
-/// (hooks), so a state word tells us nothing we did not know; what the hooks
-/// cannot see is what the agent is actually doing, and that only exists if the
-/// agent says it (owner, 2026-08-19: "经常一直在做但是没有同步状态").
-///
-/// The note is no longer an event: `hub_status` POSTS it to the room as a message
-/// from the agent, which is what the owner asked for ("status要用agent发送消息的
-/// 形式显示") and also what makes it durable — the room is the record, and an
-/// event was a thing that vanished on restart. What stays here is the part only
-/// this record can answer: the explicit claim, which `derive_from` uses for
-/// `waiting`/`blocked`.
-pub fn record_status(session: &str, window: usize, state: &str, note: &str) {
-    let (state, note, ts) = (state.to_string(), note.to_string(), now());
-    with_rec(session, window, |r| r.explicit = Some((state, note, ts)));
-}
-
-/// `tmm done [summary]` — completion declared by the agent. Ends the turn.
-pub fn record_done(session: &str, window: usize, summary: &str) {
-    let (summary, ts) = (summary.to_string(), now());
-    with_rec(session, window, |r| {
-        r.done = Some((summary, ts));
-        r.explicit = None; // done supersedes any earlier declaration
-    });
-}
-
 /// A hook notification consumed by the AgentNotificationHub. Two different
 /// facts arrive here and they are stored apart: a stop ENDS the turn, a
 /// permission/input prompt means the agent is blocked on the human while the
@@ -523,17 +510,13 @@ pub fn record_notification(session: &str, window: usize, kind: &str, ts: u64) {
 /// not landed (owner, 2026-08-29). Resetting first makes the effect visible in
 /// the gap, and a real turn that starts afterwards is a fact of its own.
 ///
-/// Same shape as a `completed` stop, plus the two supersessions a stop cannot
-/// make: `ask` goes (a cancelled turn is not still asking) and the agent's
-/// explicit claim goes (a `blocked` note from before the interrupt would
-/// outrank the end in `derive_from` when they share a second, and it describes
-/// a turn that no longer exists).
+/// Same shape as a `completed` stop, with `ask` cleared because a cancelled
+/// turn is not still asking.
 pub fn record_interrupt(session: &str, window: usize) {
     let ts = now();
     with_rec(session, window, |r| {
         r.end = Some(("completed".to_string(), ts));
         r.ask = None;
-        r.explicit = None;
     });
 }
 
@@ -636,7 +619,6 @@ pub fn record_prompt(session: &str, window: usize, prompt: &str) -> bool {
         // signal: pane activity cannot be it, because an agent TUI repaints its
         // prompt (spinner, status line, cursor) long after it finished.
         r.prompt = Some(ts);
-        r.explicit = None; // a new turn supersedes the last turn's words
     });
     for line in &settled {
         forget_delivery(session, window, line);
@@ -684,12 +666,7 @@ fn overdue_lines(rec: &Rec, now: u64) -> Vec<String> {
     if matches!(derive_from(rec, 0, now).state.as_str(), "running" | "waiting") {
         return Vec::new();
     }
-    let turn_end = rec
-        .end
-        .as_ref()
-        .map(|(_, t)| *t)
-        .unwrap_or(0)
-        .max(rec.done.as_ref().map(|(_, t)| *t).unwrap_or(0));
+    let turn_end = rec.end.as_ref().map(|(_, t)| *t).unwrap_or(0);
     rec.pending
         .iter()
         .filter(|(_, typed_ts)| {
@@ -830,15 +807,14 @@ pub fn all_states() -> Vec<(String, usize, String)> {
 }
 
 /// The state machine, in one place. A turn is a bracket: `userPromptSubmit`
-/// opens it, `stop` / `tmm done` closes it, tool calls happen inside it, and a
+/// opens it, `stop` closes it, tool calls happen inside it, and a
 /// permission prompt suspends it. So the rule is simply *which boundary is the
 /// most recent fact*, and the four states fall out of that:
 ///
 /// | newest fact                    | state   | since        |
 /// |--------------------------------|---------|--------------|
 /// | a failed stop                  | failed  | the stop     |
-/// | an explicit `tmm status`       | that    | the claim    |
-/// | a turn end (stop / done)       | idle    | the end      |
+/// | a turn end (stop)              | idle    | the end      |
 /// | an ask (permission / input)    | waiting | the ask      |
 /// | a turn start (prompt / tool)   | running | the START    |
 ///
@@ -853,18 +829,17 @@ pub fn all_states() -> Vec<(String, usize, String)> {
 /// because for them the alternative is no signal at all.
 fn derive_from(rec: &Rec, activity_ts: u64, now: u64) -> AgentStatus {
     let (end_kind, end_ts) = rec.end.clone().unwrap_or_default();
-    let done_ts = rec.done.as_ref().map(|(_, t)| *t).unwrap_or(0);
     let ask_ts = rec.ask.as_ref().map(|(_, t)| *t).unwrap_or(0);
     let tool_ts = rec.tool.as_ref().map(|(_, t)| *t).unwrap_or(0);
     let prompt_ts = rec.prompt.unwrap_or(0);
 
     let turn_start = prompt_ts.max(tool_ts);
-    let turn_end = end_ts.max(done_ts);
+    let turn_end = end_ts;
     let newest = turn_start.max(turn_end).max(ask_ts);
 
     // No hook has ever spoken for this window: fall back to pane activity,
     // which is all a hookless backend gives us.
-    if newest == 0 && rec.explicit.is_none() {
+    if newest == 0 {
         let state = if now.saturating_sub(activity_ts) < ACTIVE_SECS { "running" } else { "idle" };
         return AgentStatus { state: state.into(), detail: String::new(), since: activity_ts };
     }
@@ -875,29 +850,9 @@ fn derive_from(rec: &Rec, activity_ts: u64, now: u64) -> AgentStatus {
         return AgentStatus { state: "failed".into(), detail: "failed".into(), since: end_ts };
     }
 
-    // The agent's own words. What they are good for is the part we CANNOT
-    // observe: "blocked on a credential", "waiting for the API spec". A claim of
-    // `working` adds nothing — the turn bracket already knows a turn is open —
-    // so it contributes its note and nothing else. That keeps one class of lie
-    // out of the system: an agent cannot declare itself busy while its stop hook
-    // says the turn is over.
-    if let Some((state, note, ts)) = &rec.explicit {
-        let claims_block = matches!(state.as_str(), "waiting" | "blocked");
-        if claims_block && now.saturating_sub(*ts) < EXPLICIT_TTL_SECS && *ts >= newest {
-            return AgentStatus { state: "waiting".into(), detail: note.clone(), since: *ts };
-        }
-    }
-
-    // A turn that ended is rest, not distress: direct agents fire stop after
-    // every exchange and never call `tmm done`.
+    // A turn that ended is rest, not distress.
     if turn_end >= turn_start && turn_end >= ask_ts {
-        let summary = rec
-            .done
-            .as_ref()
-            .filter(|(_, t)| *t == turn_end)
-            .map(|(s, _)| s.clone())
-            .unwrap_or_default();
-        return AgentStatus { state: "idle".into(), detail: summary, since: turn_end };
+        return AgentStatus { state: "idle".into(), detail: String::new(), since: turn_end };
     }
 
     // Blocked on the human, and nothing has happened since.
@@ -906,20 +861,13 @@ fn derive_from(rec: &Rec, activity_ts: u64, now: u64) -> AgentStatus {
         return AgentStatus { state: "waiting".into(), detail: kind, since: ask_ts };
     }
 
-    // A turn is open. `since` is when it opened; the detail is the agent's own
-    // note if it left one this turn, else the last thing we saw it do.
-    let note = rec
-        .explicit
+    // A turn is open. Its last observed tool explains what it is doing.
+    let detail = rec
+        .tool
         .as_ref()
-        .filter(|(_, note, ts)| !note.is_empty() && *ts >= prompt_ts)
-        .map(|(_, note, _)| note.clone());
-    let detail = note.unwrap_or_else(|| {
-        rec.tool
-            .as_ref()
-            .filter(|(_, t)| *t >= prompt_ts)
-            .map(|(l, _)| l.clone())
-            .unwrap_or_default()
-    });
+        .filter(|(_, t)| *t >= prompt_ts)
+        .map(|(l, _)| l.clone())
+        .unwrap_or_default();
     let since = if prompt_ts > 0 { prompt_ts } else { tool_ts };
     AgentStatus { state: "running".into(), detail, since }
 }
@@ -951,14 +899,11 @@ mod tests {
     /// A human interrupt closes the turn itself, because nothing else will: the
     /// backend fires no stop hook for a turn cancelled from outside, so the
     /// newest fact would stay the `userPromptSubmit` and the agent would read
-    /// `running` for ever. The reset also supersedes a `blocked` claim from the
-    /// turn that no longer exists — otherwise the explicit branch outranks the
-    /// end when the two share a second.
+    /// `running` for ever.
     #[test]
     fn an_interrupt_closes_the_turn_it_cancelled() {
         record_prompt("int-a", 1, "do the long thing");
-        record_status("int-a", 1, "blocked", "waiting on a credential");
-        assert_eq!(derive("int-a", 1, 0).state, "waiting", "a claimed block stands");
+        assert_eq!(derive("int-a", 1, 0).state, "running");
 
         record_interrupt("int-a", 1);
         let after = derive("int-a", 1, 0);
@@ -1177,19 +1122,6 @@ mod tests {
     }
 
     #[test]
-    fn done_is_idle_and_carries_its_summary() {
-        let mut r = rec();
-        r.prompt = Some(1000);
-        r.done = Some(("PR 已提交".into(), 1100));
-        let s = derive_from(&r, 0, 2000);
-        assert_eq!((s.state.as_str(), s.detail.as_str(), s.since), ("idle", "PR 已提交", 1100));
-        // A NEW turn after done is running again, and does not keep the summary.
-        r.prompt = Some(1200);
-        let s = derive_from(&r, 0, 2000);
-        assert_eq!((s.state.as_str(), s.detail.as_str(), s.since), ("running", "", 1200));
-    }
-
-    #[test]
     fn a_failed_stop_is_the_one_distress_signal() {
         let mut r = rec();
         r.prompt = Some(900);
@@ -1198,39 +1130,6 @@ mod tests {
         // Only a new turn clears it.
         r.prompt = Some(1100);
         assert_eq!(derive_from(&r, 0, 1200).state, "running");
-    }
-
-    /// What an agent says about itself is only trusted where we cannot observe:
-    /// a block. A claim of `working` contributes its NOTE and no state, because
-    /// the turn bracket already answers "is it running" and a self-declared
-    /// state could contradict the hooks.
-    #[test]
-    fn an_explicit_claim_speaks_only_for_what_we_cannot_observe() {
-        let mut r = rec();
-        r.prompt = Some(1000);
-        // waiting / blocked: unobservable, so the claim stands (and `blocked`
-        // reads as waiting — the CLI's vocabulary is wider than the UI's).
-        r.explicit = Some(("waiting".into(), "等接口定稿".into(), 1100));
-        let s = derive_from(&r, 0, 1200);
-        assert_eq!((s.state.as_str(), s.detail.as_str(), s.since), ("waiting", "等接口定稿", 1100));
-        r.explicit = Some(("blocked".into(), "no creds".into(), 1100));
-        assert_eq!(derive_from(&r, 0, 1200).state, "waiting");
-        // A claim of working does NOT set the state; the open turn does, and the
-        // note becomes the line the user reads.
-        r.explicit = Some(("working".into(), "重写状态机".into(), 1100));
-        let s = derive_from(&r, 0, 1200);
-        assert_eq!((s.state.as_str(), s.detail.as_str(), s.since), ("running", "重写状态机", 1000),
-            "state from the bracket, words from the agent, since = the turn start");
-        // And it cannot outlive the turn: a stop is a newer fact.
-        r.end = Some(("completed".into(), 1150));
-        assert_eq!(derive_from(&r, 0, 1200).state, "idle");
-        // A stale block expires, so a crashed agent does not wait forever.
-        r.end = None;
-        r.explicit = Some(("blocked".into(), "no creds".into(), 1100));
-        assert_eq!(derive_from(&r, 0, 1100 + EXPLICIT_TTL_SECS + 1).state, "running",
-            "the open turn still explains it");
-        r.prompt = None;
-        assert_eq!(derive_from(&r, 0, 1100 + EXPLICIT_TTL_SECS + 1).state, "idle");
     }
 
     #[test]
@@ -1525,13 +1424,13 @@ mod tests {
 
     #[test]
     fn store_roundtrip_and_window_retention() {
-        record_status("tsess", 1, "waiting", "note");
-        record_status("tsess", 2, "waiting", "");
+        record_prompt("tsess", 1, "one");
+        record_prompt("tsess", 2, "two");
         retain_windows("tsess", &[2]);
         let s1 = derive("tsess", 1, 0);
         assert_eq!(s1.state, "idle", "dropped window's record must be gone");
         let s2 = derive("tsess", 2, 0);
-        assert_eq!(s2.state, "waiting", "the surviving record still answers");
+        assert_eq!(s2.state, "running", "the surviving record still answers");
         retain_windows("tsess", &[]);
     }
 }

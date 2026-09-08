@@ -23,18 +23,12 @@ const OWNER_MARKER: &str = "tmux-mobile-agent-notify";
 
 // ── Room poster ──────────────────────────────────────────────────────────────
 
-/// Minimal posting interface injected into the hub so hook-sourced replies can
-/// land in the project room without naming the agora bus or the TeamBridge.
-///
-/// **INVARIANT**: implementations MUST set `record_only = true` on every call
-/// that originates from a hook. Hook-sourced text must never trigger delivery
-/// (typed into agent panes), or addressed replies create ping-pong loops.
-/// The flag is enforced at the hub_post call site, not here.
+/// Minimal posting interface injected into the hook consumer so final replies
+/// can be recorded and delivered without naming the agora bus or TeamBridge.
 pub trait RoomPoster: Send + Sync {
-    /// Post `body` into the project room for `session` on behalf of `agent`.
-    /// `record_only`: when true, the message is stored but NOT delivered
-    /// (typed) into any agent's pane, regardless of @-mentions in the body.
-    fn post_to_room(&self, session: &str, agent: &str, body: &str, record_only: bool);
+    /// Record `body` in the room, then deliver it once to each reply target.
+    /// `[reply]` deliveries create no reverse edge, preventing ping-pong.
+    fn post_final(&self, session: &str, agent: &str, body: &str, reply_to: &[String]);
 }
 
 #[derive(Debug, Deserialize)]
@@ -66,20 +60,10 @@ struct State {
     /// the capturer stamps with it (`src-tauri/src/projects`), because that is
     /// what has to survive the reboot which loses tmux in the first place.
     sessions: HashMap<String, String>,
-    /// window key → true when the agent issued a `tmm send` during the current
-    /// turn. Reset at `userPromptSubmit` (turn start). Used to suppress the
-    /// automatic stop-hook post so a turn that already SPOKE its content into
-    /// the room does not produce a second copy of it.
-    sent_this_turn: HashMap<String, bool>,
-    /// window key → the summary the agent passed to `tmm done` in the current
-    /// turn. A done is NOT a `tmm send`: the summary is a report about the work,
-    /// the final reply is the work's answer, and suppressing the reply because a
-    /// summary exists is what made every completed turn end in a one-line
-    /// `[tmm done]` with the answer itself nowhere in the chat (owner,
-    /// 2026-08-21: "kiro grok 都好像没看到最后返回的消息"). It is kept only to
-    /// catch the one case that IS a duplicate — an agent whose summary is
-    /// verbatim its whole answer.
-    done_this_turn: HashMap<String, String>,
+    /// window key → senders whose addressed request opened the current turn.
+    /// Parsed from the stamped input at `userPromptSubmit`; `[reply]` and
+    /// legacy `[done]` envelopes deliberately create no reverse edge.
+    reply_targets: HashMap<String, Vec<String>>,
     /// Injected by the server after the team bus is ready. `None` on mobile.
     /// Box'd pointer stored here so it shares the Mutex with the rest of state.
     poster: Option<Arc<dyn RoomPoster>>,
@@ -119,33 +103,23 @@ impl AgentNotificationHub {
         self.state.lock().unwrap().poster = Some(poster);
     }
 
-    /// Called by `tmm send` to record that this window's current turn already
-    /// produced an explicit message. The stop hook will skip the automatic
-    /// post for this turn.
-    pub fn mark_sent_this_turn(&self, session: &str, window: usize) {
-        self.state.lock().unwrap().sent_this_turn.insert(window_key(session, window), true);
+    /// Record who should receive this turn's final reply. Human requests need
+    /// no pane delivery; the Hub already shows the room.
+    fn start_turn(&self, session: &str, window: usize, prompt: &str) {
+        self.state.lock().unwrap().reply_targets.insert(
+            window_key(session, window),
+            reply_targets(prompt),
+        );
     }
 
-    /// Called by `tmm done` with the summary the agent gave. Deliberately NOT
-    /// the same as `mark_sent_this_turn`: a done summary is a report ABOUT the
-    /// work, while the stop hook carries the answer itself — both belong in the
-    /// room. The summary is kept only so a reply that IS the summary verbatim
-    /// can be recognized as a duplicate and skipped.
-    pub fn mark_done_this_turn(&self, session: &str, window: usize, summary: &str) {
-        self.state
-            .lock()
-            .unwrap()
-            .done_this_turn
-            .insert(window_key(session, window), summary.trim().to_string());
-    }
-
-    /// Called by the `userPromptSubmit` hook to mark the start of a new turn.
-    /// Clears the per-turn flags so the upcoming stop can auto-post.
-    pub fn reset_sent_this_turn(&self, session: &str, window: usize) {
-        let mut state = self.state.lock().unwrap();
+    fn take_reply_targets(&self, session: &str, window: usize) -> Vec<String> {
         let key = window_key(session, window);
-        state.sent_this_turn.remove(&key);
-        state.done_this_turn.remove(&key);
+        if let Some(targets) = self.state.lock().unwrap().reply_targets.remove(&key) {
+            return targets;
+        }
+        crate::projects::telemetry::current_turn_prompt(session, window)
+            .map(|prompt| reply_targets(&prompt))
+            .unwrap_or_default()
     }
 
     /// The agent conversation id last reported by a hook in this tmux window,
@@ -206,16 +180,15 @@ impl AgentNotificationHub {
             }
             return Ok(());
         }
-        // userPromptSubmit marks the start of a new turn: clear the
-        // "sent this turn" flag so the upcoming stop can auto-post, and record
-        // the prompt itself — the input half of the transcript, and the receipt
-        // for anything `deliver_mentions` typed into this pane.
+        // userPromptSubmit marks the start of a turn. Its stamped envelope
+        // identifies who should receive the final reply; the prompt itself is
+        // also the input half of the transcript and the delivery receipt.
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         if is_user_prompt_submit(&envelope) {
             let (session, window, _) = tmux::resolve_pane_id(&envelope.pane_id)?;
-            self.reset_sent_this_turn(&session, window);
             if let Some(prompt) = envelope.payload.get("prompt").and_then(Value::as_str) {
                 if !prompt.trim().is_empty() {
+                    self.start_turn(&session, window, prompt);
                     crate::projects::telemetry::record_prompt(&session, window, prompt);
                 }
             }
@@ -239,6 +212,14 @@ impl AgentNotificationHub {
         let normalized = normalize(&envelope)?;
         let (session, window, pane) = tmux::resolve_pane_id(&envelope.pane_id)?;
         let timestamp = unix_seconds();
+        // Resolve the reply edge BEFORE recording this stop. On a server
+        // restart the in-memory edge is gone, so the durable activity log
+        // recovers the prompt newer than the previous turn end.
+        let reply_to = if normalized.kind == "completed" {
+            self.take_reply_targets(&session, window)
+        } else {
+            Vec::new()
+        };
         // Feed the telemetry channel BEFORE dedupe: dedupe is a notification-UI
         // concern; status derivation wants every observed fact.
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -249,17 +230,15 @@ impl AgentNotificationHub {
             crate::projects::vitals::sniff_window_soon(&session, window);
         }
 
-        // Stop hook auto-post: post the agent's final reply to the project
-        // room when all conditions are met:
+        // Stop hook final: record the answer and deliver it to the sender whose
+        // addressed request opened this turn:
         //   1. Only managed windows (constraint 3): a .tmm/agents/<name> dir
         //      must exist, so direct or adopted agents never auto-post.
-        //   2. Skip if the agent already sent an explicit tmm send/done this
-        //      turn (constraint 1 — same-turn dedup).
-        //   3. There must be a reply body worth posting.
-        //   4. The post is record-only (constraint 2): never typed into panes.
+        //   2. There must be a reply body worth posting.
+        //   3. `[reply]` inputs create no reverse edge, so delivery is one hop.
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         if normalized.kind == "completed" {
-            self.maybe_auto_post(&session, window, &normalized);
+            self.maybe_auto_post(&session, window, &normalized, &reply_to);
         }
 
         // Remember the agent's own conversation id (even across duplicate
@@ -279,14 +258,16 @@ impl AgentNotificationHub {
         Ok(())
     }
 
-    /// Post the agent's final reply to the project room when the window is
-    /// managed, the agent hasn't already sent this turn, and there is a body.
-    ///
-    /// **INVARIANT**: always called with `record_only = true`. This function
-    /// must never pass `false`; delivery of hook-sourced text into agent panes
-    /// creates ping-pong reply loops.
+    /// Record a managed agent's final reply and deliver it along this turn's
+    /// reply edge.
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    fn maybe_auto_post(&self, session: &str, window: usize, normalized: &Normalized) {
+    fn maybe_auto_post(
+        &self,
+        session: &str,
+        window: usize,
+        normalized: &Normalized,
+        reply_to: &[String],
+    ) {
         // Nothing to post — skip.
         let reply = normalized.full_reply.as_deref().unwrap_or_default();
         if reply.is_empty() {
@@ -304,47 +285,12 @@ impl AgentNotificationHub {
         if crate::projects::managed_home(session, &window_name).is_none() {
             return;
         }
-        // Constraint 1: same-turn dedup. A `tmm send` already spoke into the
-        // room; a `tmm done` only suppresses when its summary IS the reply.
-        if self.already_sent_this_turn(session, window)
-            || self.reply_is_the_done_summary(session, window, reply)
-        {
-            return;
-        }
-        // Constraint 4: truncate at the chat-path budget.
+        // Truncate at the chat-path budget.
         let body = truncate(reply, MAX_REPLY_CHARS);
-        // Constraint 2: record_only = true. The poster implementation enforces
-        // this at hub_post: no @-mention delivery, no pane typing.
         let poster = self.state.lock().unwrap().poster.clone();
         if let Some(p) = poster {
-            p.post_to_room(session, &window_name, &body, true);
+            p.post_final(session, &window_name, &body, reply_to);
         }
-    }
-
-    /// Constraint 1 (same-turn dedup): skip the automatic post when the agent
-    /// already spoke this turn via `tmm send`.
-    fn already_sent_this_turn(&self, session: &str, window: usize) -> bool {
-        self.state
-            .lock()
-            .unwrap()
-            .sent_this_turn
-            .get(&window_key(session, window))
-            .copied()
-            .unwrap_or(false)
-    }
-
-    /// The one case where a `tmm done` makes the auto-post a duplicate: the
-    /// agent put its WHOLE answer into the summary, so `[tmm done] <text>` and
-    /// the auto-posted reply would be the same message twice. A summary that
-    /// merely overlaps the reply (the normal case — a one-line report about a
-    /// long answer) does not suppress anything.
-    fn reply_is_the_done_summary(&self, session: &str, window: usize, reply: &str) -> bool {
-        self.state
-            .lock()
-            .unwrap()
-            .done_this_turn
-            .get(&window_key(session, window))
-            .is_some_and(|summary| !summary.is_empty() && summary == reply.trim())
     }
 
 
@@ -676,6 +622,33 @@ fn string_field(map: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<S
             .filter(|s| !s.is_empty())
             .map(str::to_owned)
     })
+}
+
+/// Senders of stamped chat requests in a submitted prompt. Automatic
+/// `[reply]` and legacy `[done]` deliveries are results, not new requests.
+fn reply_targets(prompt: &str) -> Vec<String> {
+    let mut targets = Vec::new();
+    for line in prompt.lines() {
+        let Some(after_stamp) = line
+            .strip_prefix("[tmm chat] ")
+            .or_else(|| line.strip_prefix("[tmm chat ").and_then(|s| s.split_once("] ").map(|(_, rest)| rest)))
+        else {
+            continue;
+        };
+        let Some((sender, body)) = after_stamp.split_once(": ") else { continue };
+        let sender = sender.trim();
+        let body = body.trim_start();
+        if sender.is_empty()
+            || sender == "human"
+            || body.starts_with("[reply]")
+            || body.starts_with("[done]")
+            || targets.iter().any(|s| s == sender)
+        {
+            continue;
+        }
+        targets.push(sender.to_string());
+    }
+    targets
 }
 
 fn truncate(input: &str, max: usize) -> String {
@@ -1456,10 +1429,8 @@ mod tests {
 
     /// The whole auto-post path, end to end: a real tmux window, a real managed
     /// home, a real inbox file carrying a real kiro `stop` payload — and the
-    /// agent's final answer must land in the room, record-only, with no
-    /// `tmm send` anywhere. This is the behaviour the owner reported missing;
-    /// the cause was a config on disk written before `userPromptSubmit` existed
-    /// (see `spawn::refresh_hooks`), not this path.
+    /// agent's final answer must land in the room and carry the turn's reply
+    /// edge.
     #[test]
     fn a_stop_payload_posts_the_agents_final_answer_to_the_room() {
         crate::projects::tests::use_test_store();
@@ -1484,10 +1455,12 @@ mod tests {
         ).unwrap().trim().to_string();
 
         // A poster that records what it was asked to post.
-        struct Spy(std::sync::Mutex<Vec<(String, String, String, bool)>>);
+        struct Spy(std::sync::Mutex<Vec<(String, String, String, Vec<String>)>>);
         impl RoomPoster for Spy {
-            fn post_to_room(&self, session: &str, agent: &str, body: &str, record_only: bool) {
-                self.0.lock().unwrap().push((session.into(), agent.into(), body.into(), record_only));
+            fn post_final(&self, session: &str, agent: &str, body: &str, reply_to: &[String]) {
+                self.0.lock().unwrap().push((
+                    session.into(), agent.into(), body.into(), reply_to.to_vec()
+                ));
             }
         }
         let spy = std::sync::Arc::new(Spy(std::sync::Mutex::new(Vec::new())));
@@ -1495,6 +1468,8 @@ mod tests {
         let root = std::env::temp_dir().join(format!("tmm-auto-hub-{}", uuid::Uuid::new_v4()));
         let hub = AgentNotificationHub::load_at(root.clone());
         hub.set_room_poster(spy.clone());
+        let (_, win, _) = crate::tmux::resolve_pane_id(&pane_id).expect("pane resolves");
+        hub.start_turn(&session, win, "[tmm chat 2026-09-08 08:00] lead: @dev fix it");
         std::fs::create_dir_all(root.join("inbox")).unwrap();
         // Exactly the payload measured from kiro-cli 2.16.2.
         std::fs::write(
@@ -1515,31 +1490,14 @@ mod tests {
         if adopted {
             let posts = spy.0.lock().unwrap();
             assert_eq!(posts.len(), 1, "the final answer is posted exactly once");
-            let (s, agent, body, record_only) = &posts[0];
+            let (s, agent, body, reply_to) = &posts[0];
             assert_eq!(s, &session);
             assert_eq!(agent, "dev", "posted as the agent, by window name");
             assert!(body.contains("Fixed the flaky test"), "the answer itself: {body:?}");
-            assert!(*record_only, "hook-sourced text must never be delivered into panes");
+            assert_eq!(reply_to, &vec!["lead".to_string()]);
         } else {
             eprintln!("could not adopt a project — skipped the assertions");
         }
-
-        // Same turn, second stop after an explicit send: no second message.
-        // The window index comes from the pane, not from an assumed 0 — this
-        // machine runs `base-index 1`, and marking the wrong window made the
-        // suppression silently miss.
-        let (_, win, _) = crate::tmux::resolve_pane_id(&pane_id).expect("pane resolves");
-        hub.mark_sent_this_turn(&session, win);
-        std::fs::write(
-            root.join("inbox").join("2-stop.json"),
-            serde_json::to_vec(&json!({
-                "backend": "kiro",
-                "pane_id": pane_id,
-                "payload": { "hook_event_name": "stop", "assistant_response": "again" }
-            })).unwrap(),
-        ).unwrap();
-        hub.consume_inbox();
-        assert_eq!(spy.0.lock().unwrap().len(), if adopted { 1 } else { 0 }, "one turn, one message");
 
         let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
         let _ = std::fs::remove_dir_all(&ws);
@@ -1547,61 +1505,31 @@ mod tests {
     }
 
     #[test]
-    fn turn_start_clears_the_sent_flag_so_later_turns_still_auto_post() {
-        let root = std::env::temp_dir().join(format!("tmm-agent-turn-{}", uuid::Uuid::new_v4()));
-        let hub = AgentNotificationHub::load_at(root.clone());
-        assert!(!hub.already_sent_this_turn("work", 2));
-        // Turn N: the agent reports progress itself, so its stop must be mute.
-        hub.mark_sent_this_turn("work", 2);
-        assert!(hub.already_sent_this_turn("work", 2), "same turn must not post twice");
-        // Turn N+1 begins. The userPromptSubmit envelope the helper delivers is
-        // the ONLY reset — recognizing it is what keeps the flag from sticking.
-        let turn_start = InboxEnvelope {
-            backend: "kiro".into(),
-            pane_id: "%1".into(),
-            payload: json!({"hook_event_name": "userPromptSubmit"}),
-        };
-        assert!(is_user_prompt_submit(&turn_start), "turn start must be recognized");
-        hub.reset_sent_this_turn("work", 2);
-        assert!(
-            !hub.already_sent_this_turn("work", 2),
-            "a send in one turn must not suppress the auto-post of every later turn"
+    fn reply_targets_are_addressed_once_and_replies_do_not_loop() {
+        assert_eq!(
+            reply_targets(
+                "[tmm chat 2026-09-08 08:00] lead: @dev fix it\n\
+                 [tmm chat 2026-09-08 08:01] reviewer: @dev check it\n\
+                 [tmm chat 2026-09-08 08:02] lead: @dev one more thing"
+            ),
+            vec!["lead", "reviewer"]
         );
-        let _ = std::fs::remove_dir_all(root);
+        assert!(reply_targets("[tmm chat 2026-09-08 08:03] human: @dev ship it").is_empty());
+        assert!(reply_targets("[tmm chat 2026-09-08 08:04] lead: [reply] looks good").is_empty());
+        assert!(reply_targets("[tmm chat 2026-09-08 08:05] worker: [done] old completion").is_empty());
     }
 
     #[test]
-    fn a_done_summary_only_suppresses_a_verbatim_duplicate_reply() {
-        let root = std::env::temp_dir().join(format!("tmm-agent-done-{}", uuid::Uuid::new_v4()));
-        let hub = AgentNotificationHub::load_at(root.clone());
-        // The regression (owner, 2026-08-21): `tmm done` used to set the same
-        // flag as `tmm send`, so every turn that ended with the REQUIRED done
-        // lost its auto-posted final reply — the chat showed a one-line
-        // `[tmm done]` and the answer itself nowhere.
-        hub.mark_done_this_turn("work", 2, "修好了 roster 按钮");
-        assert!(
-            !hub.already_sent_this_turn("work", 2),
-            "a done is not a send: the final reply must still auto-post"
+    fn a_restart_recovers_the_reply_edge_from_prompt_activity() {
+        let session = format!("reply-restart-{}", uuid::Uuid::new_v4());
+        crate::projects::telemetry::record_prompt(
+            &session,
+            2,
+            "[tmm chat 2026-09-08 08:06] lead: @worker finish it",
         );
-        assert!(
-            !hub.reply_is_the_done_summary("work", 2, "详细的最终回复，比 summary 长得多。"),
-            "a summary ABOUT the reply does not suppress the reply"
-        );
-        // The one real duplicate: the whole answer was the summary.
-        assert!(
-            hub.reply_is_the_done_summary("work", 2, "修好了 roster 按钮"),
-            "a verbatim duplicate is skipped"
-        );
-        assert!(
-            hub.reply_is_the_done_summary("work", 2, "  修好了 roster 按钮\n"),
-            "trim before comparing — hooks carry trailing newlines"
-        );
-        // Turn start clears the summary along with the sent flag.
-        hub.reset_sent_this_turn("work", 2);
-        assert!(!hub.reply_is_the_done_summary("work", 2, "修好了 roster 按钮"));
-        // An empty summary (bare `tmm done`) suppresses nothing.
-        hub.mark_done_this_turn("work", 3, "  ");
-        assert!(!hub.reply_is_the_done_summary("work", 3, ""));
+        let root = std::env::temp_dir().join(format!("tmm-reply-edge-{}", uuid::Uuid::new_v4()));
+        let restarted = AgentNotificationHub::load_at(root.clone());
+        assert_eq!(restarted.take_reply_targets(&session, 2), vec!["lead"]);
         let _ = std::fs::remove_dir_all(root);
     }
 

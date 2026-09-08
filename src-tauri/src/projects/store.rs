@@ -910,6 +910,26 @@ impl Store {
         self.activity_page(session, since_ts, None, limit).map(|(rows, _)| rows)
     }
 
+    /// The prompt that opened the currently unclosed turn, if any. Used to
+    /// recover an automatic reply edge after a server restart.
+    pub fn current_turn_prompt(&self, session: &str, window: usize) -> Result<Option<String>, String> {
+        self.conn
+            .query_row(
+                "SELECT text FROM activity
+                 WHERE session = ?1 AND window = ?2 AND kind = 'prompt'
+                   AND id > COALESCE((
+                     SELECT MAX(id) FROM activity
+                     WHERE session = ?1 AND window = ?2 AND kind = 'notif'
+                       AND text IN ('completed', 'failed')
+                   ), 0)
+                 ORDER BY id DESC LIMIT 1",
+                rusqlite::params![session, window as i64],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| format!("query current turn prompt: {e}"))
+    }
+
     /// One page of the activity log, always returned OLDEST FIRST so a caller can
     /// append it to a feed without re-sorting.
     ///
@@ -2820,6 +2840,20 @@ mod tests {
         assert_eq!(left.len(), 2);
         assert_eq!(left[0].ts, 1003);
         assert_eq!(store.activity_since("s2", 0, 100).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn current_turn_prompt_survives_the_server_process() {
+        let store = Store::open_memory().unwrap();
+        store.insert_activity("s", 2, 1000, "notif", "completed", "", "", "").unwrap();
+        store.insert_activity("s", 2, 1100, "prompt", "[tmm chat] lead: work", "", "app", "").unwrap();
+        store.insert_activity("s", 2, 1200, "tool", "file.rs", "Edit", "", "").unwrap();
+        assert_eq!(
+            store.current_turn_prompt("s", 2).unwrap().as_deref(),
+            Some("[tmm chat] lead: work")
+        );
+        store.insert_activity("s", 2, 1300, "notif", "completed", "", "", "").unwrap();
+        assert_eq!(store.current_turn_prompt("s", 2).unwrap(), None);
     }
 
     /// Paging backwards through a complete log (board #9). The cursor is (ts, id)

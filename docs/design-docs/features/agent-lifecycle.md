@@ -88,9 +88,9 @@ be the coloured, scannable column and nobody has to re-split a string on a space
 that a path or a shell command can contain.
 
 The client (`hub.ts::feedBlocks`) folds a window's consecutive tool events into
-one collapsible group; a message, a status declaration or a lifecycle event ends
+one collapsible group; a message, progress note or lifecycle event ends
 the run, which is what makes a group mean *between these two replies*. The
-agent's own `tmm send/status/done/log/spawn` calls are filtered out
+agent's own `tmm send/log/spawn` calls are filtered out
 (`isSelfReport`): their effect is already a row.
 
 Ordering is not free, and it took three things: the inbox is consumed in
@@ -100,36 +100,20 @@ before the message (a reply is what ends a turn).
 
 ## 5 · The turn ends
 
-`stop` carries `assistant_response` — measured on kiro-cli 2.16.2, and the only
-hook that carries the agent's answer. `maybe_auto_post` posts it to the room
-under four gates, each of which exists because of a specific failure:
+`stop` carries `assistant_response` — the only hook payload containing the
+answer. At `userPromptSubmit`, the stamped `[tmm chat …] sender:` envelope
+establishes this turn's reply edge. Human senders need no pane delivery;
+automatic `[reply]` and legacy `[done]` envelopes establish no edge.
 
-1. **Managed only** (`managed_home`) — otherwise a hand-started kiro starts
-   posting into project rooms.
-2. **Not already sent this turn** — an agent that called `tmm send` would
-   otherwise produce two messages for one turn. The flag is reset by
-   `userPromptSubmit`, which is why that hook must exist in every config that can
-   auto-post. `tmm done` deliberately does NOT set it: its summary is a report
-   ABOUT the work while the stop hook carries the answer itself, and treating
-   done as send made every turn ending in the REQUIRED done lose its final reply
-   (owner, 2026-08-21). The summary is recorded instead, and the auto-post is
-   skipped only when the reply IS the summary verbatim — the one real duplicate.
-3. **`record_only = true`** — an auto-post whose body addresses a peer would be
-   typed into that peer's pane, whose stop hook would post back. Forever.
-4. **`MAX_REPLY_CHARS = 6144`** — the chat budget, not the 240-char notification
-   budget.
+`maybe_auto_post` gates on `managed_home`, caps the answer at 6144 characters
+and records it in the room. `TeamRoomPoster` then types
+`[tmm chat <ts>] <agent>: [reply] <answer>` into each stored sender's pane
+using the ordinary delivery receipt path. Consuming `[reply]` cannot create a
+reverse edge, so the result travels exactly one hop and cannot ping-pong.
 
-`tmm done` remains a state transition (and ends the turn explicitly); its summary
-can be one line, because the answer itself still auto-posts to the room.
-
-**And the summary reports UP the spawn edge** (owner, 2026-08-29): `tmm spawn`
-records `spawned_by` in the launch recipe, and `hub_done` delivers a non-empty
-summary into the live managed spawner's pane (`[tmm chat <ts>] <name>:
-[done] <summary>`, same delivery bookkeeping as an @mention). Every other
-completion channel is record-only, so a lead that spawned two builders never
-learned they finished. Targeted — one line, one pane, once per turn end, and
-the chain terminates at the human — so it cannot ping-pong; invariants 2 and 3
-above are untouched.
+There is no explicit done transition. The stop hook ends the turn, carries the
+one final message and returns it to the requester. A proactive `tmm send`
+starts a separate question or handoff and does not suppress that final reply.
 
 **A turn cancelled from OUTSIDE has no edge of its own**: interrupt
 (`hub_agent_interrupt` / the composer's armed empty-send / `tmm agent
@@ -145,9 +129,8 @@ stays the `userPromptSubmit` that opened the cancelled turn and the card reads
 
 The rule is "which turn boundary is the newest fact", and `since` is what a
 client counts from — for `running` it is the turn's START, so "running 2m14s" is
-the turn's age. `tmm status` is trusted only for what we cannot observe (blocked
-on a credential, on an answer, on another agent); a claim of `working` sets no
-state and contributes only its note.
+the turn's age. Agents do not declare state; `send --status` is only an ambient
+room message.
 
 ## What survives what
 
@@ -158,7 +141,7 @@ state and contributes only its note.
 | Isolated homes, hooks, prompts (`<ws>/.tmm/agents/`) | ✅ | ✅ | ✅ |
 | Per-window conversation-id memory | ✅ | ❌ (re-learned from the next hook) | ❌ |
 | Telemetry: tool rows, prompt rows, warnings | ✅ | ❌ | ❌ |
-| `sent_this_turn`, pending deliveries | ✅ | ❌ | ❌ |
+| Reply targets (activity recovery), pending deliveries | ✅ | ✅ | ❌ (turn gone) |
 | The agent process itself | ✅ (tmux outlives us) | ✅ | ❌ |
 
 The asymmetry in the last three rows is the honest summary of this design: **the

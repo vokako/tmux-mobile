@@ -1,5 +1,5 @@
 //! tmm — the agent's hands, and the geek's. CLI front for the tmux-mobile
-//! project hub (agents-v2): send/read project chat, declare status, list
+//! project hub (agents-v2): send/read project chat, report progress, list
 //! agents and projects. See docs/exec-plans/agents-v2.md §4.4 and
 //! docs/design-docs/features/tmm-cli.md.
 //!
@@ -36,15 +36,13 @@ const RPC_TIMEOUT: Duration = Duration::from_secs(10);
 const USAGE: &str = r#"tmm — talk to the tmux-mobile project hub
 
 USAGE (agent):
-  tmm send <text>                     post to the project chat (@name to address)
+  tmm send "@name message"            send a message to one or more recipients
+  tmm send <text> --status            record ambient progress in the project room
                     [--image <path|url>]   attach an image by REFERENCE (repeatable);
                                       a local path is resolved by the client
   tmm log [--since <ts>] [--limit N] [-f]   read chat; --since is exclusive, -f follows
                     [--grep <text>]   search the FULL history instead (repeatable = any-match)
                     [--global]        …across EVERY project's room, hits name their room
-  tmm status <working|waiting|blocked> "<note>"   say what you are doing NOW
-                                      (the note is the point — it shows in the chat)
-  tmm done [summary]                  declare completion
   tmm spawn <agent> [--brief <text>]  spawn a registry agent into this project
   tmm spawn --team <team> [--brief <text>]  start a configured agent team (all members)
   tmm board [list]                    the project task board (kanban)
@@ -206,6 +204,7 @@ async fn main() {
     match (cmd.as_str(), pos) {
         ("send", rest) => {
             let text = rest.join(" ");
+            let is_status = flags.contains_key("status");
             // `--image` may repeat. An image is sent as a REFERENCE (an http(s)
             // URL, or a path on the machine the server runs on) appended as
             // markdown; the client resolves a local path through the file
@@ -226,9 +225,14 @@ async fn main() {
                 }
                 body.push_str(&format!("![]({src})"));
             }
+            if !is_status && !has_address(&body) {
+                fail(EXIT_USAGE, "send needs a recipient such as @name, @all, or @human; use --status for ambient progress");
+            }
             let session = need_project(&ctx);
             let from = ctx.agent.clone().unwrap_or_else(|| "human".into());
-            let r = rpc(&ctx, "hub_post", json!({ "session": session, "from": from, "body": body })).await;
+            let r = rpc(&ctx, "hub_post", json!({
+                "session": session, "from": from, "body": body, "status": is_status
+            })).await;
             if ctx.json {
                 println!("{r}");
             } else {
@@ -263,23 +267,6 @@ async fn main() {
                 let r = rpc(&ctx, "hub_log", json!({ "session": session, "since_ts": since, "limit": limit })).await;
                 print_log(&ctx, &r);
             }
-        }
-        ("status", rest) => {
-            let session = need_project(&ctx);
-            let agent = need_agent(&ctx);
-            let Some(state) = rest.first().cloned() else {
-                fail(EXIT_USAGE, "status needs a state: tmm status waiting \"等接口定稿\"");
-            };
-            let note = rest[1..].join(" ");
-            let r = rpc(&ctx, "hub_status", json!({ "session": session, "agent": agent, "state": state, "note": note })).await;
-            if ctx.json { println!("{r}"); } else { println!("✓ {state}"); }
-        }
-        ("done", rest) => {
-            let session = need_project(&ctx);
-            let agent = need_agent(&ctx);
-            let summary = rest.join(" ");
-            let r = rpc(&ctx, "hub_done", json!({ "session": session, "agent": agent, "summary": summary })).await;
-            if ctx.json { println!("{r}"); } else { println!("✓ done"); }
         }
         // The project task board: the human writes issues on the board page,
         // agents keep their status current here. Identity = the caller
@@ -1053,10 +1040,12 @@ fn need_project(ctx: &Ctx) -> String {
     })
 }
 
-fn need_agent(ctx: &Ctx) -> String {
-    ctx.agent.clone().unwrap_or_else(|| {
-        fail(EXIT_USAGE, "no agent identity: set $TMM_AGENT or pass --agent <name>")
-    })
+fn has_address(body: &str) -> bool {
+    body.split('@')
+        .skip(1)
+        .filter_map(|rest| rest.split_whitespace().next())
+        .map(|name| name.trim_end_matches([',', ':', ';', '.', '!', '?']))
+        .any(|name| !name.is_empty())
 }
 
 /// `--flag value` / `--flag` / `-f` → map; the rest are positionals.
@@ -1263,6 +1252,19 @@ mod tests {
         assert_eq!(flags.get("image").cloned().flatten().as_deref(), Some("b.png"), "map keeps the last");
         let images: Vec<&str> = repeated.iter().filter(|(k, _)| k == "image").map(|(_, v)| v.as_str()).collect();
         assert_eq!(images, vec!["a.png", "b.png"], "both reach the sender");
+    }
+
+    #[test]
+    fn send_distinguishes_addressed_messages_from_ambient_status() {
+        assert!(has_address("@reviewer please check"));
+        assert!(has_address("please check @reviewer."));
+        assert!(!has_address("progress without a recipient"));
+
+        let args: Vec<String> =
+            ["send", "compiling", "--status"].iter().map(|s| s.to_string()).collect();
+        let (flags, pos, _) = split_flags(&args);
+        assert!(flags.contains_key("status"));
+        assert_eq!(pos, vec!["send", "compiling"]);
     }
 
     #[test]

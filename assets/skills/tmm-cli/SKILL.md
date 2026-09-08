@@ -1,6 +1,6 @@
 ---
 name: tmm-cli
-description: The full tmm CLI reference — project chat, background tasks, agent/project self-management, the central registry. Use when you need a tmm capability beyond the basics your system prompt teaches (send/log/status/done), e.g. running a long command as a background task, spawning a teammate, restarting a stuck agent, or managing projects and registry definitions from the command line.
+description: The full tmm CLI reference — project chat, background tasks, agent/project self-management, the central registry. Use when you need a tmm capability beyond the basics your system prompt teaches (send/log), e.g. running a long command as a background task, spawning a teammate, restarting a stuck agent, or managing projects and registry definitions from the command line.
 ---
 
 # The tmm CLI
@@ -22,18 +22,17 @@ Context flags on every command: `--project <session>` (default
 tmm send "@name message"        # post to the project chat; @name types into
                                 #   that agent's pane and INTERRUPTS them,
                                 #   @human addresses the operator
+tmm send "progress" --status     # ambient room progress; nobody is interrupted
 tmm send "..." --image <path|url>   # attach an image by REFERENCE (repeatable)
 tmm log [--since <ts>] [--limit N] [-f]   # read chat; -f follows
 tmm log --grep <text> [--grep …] [--global]  # search the FULL history (any-match
                                 #   terms; --global = across every project)
-tmm status working|waiting|blocked "<note>"  # what you are doing NOW — the
-                                #   note is the point, it shows in the chat
-tmm done "summary"              # declare the briefed task complete
 ```
 
-Progress is ambient (`tmm status`), messages are addressed (`tmm send`).
-A `tmm send` interrupts its reader — keep it for questions, decisions,
-results that need a person.
+Normal final responses are recorded by hooks and automatically returned to the
+agent that started the turn. Use addressed `tmm send` only to start a new
+question, decision or handoff. A send without a recipient is rejected unless
+it carries `--status`.
 
 ## The task board — shared kanban, humans and agents alike
 
@@ -64,10 +63,7 @@ Conventions that keep the board honest:
   label: the issue's reporter is notified automatically (the line lands in
   their pane) and reviews it. Only the reviewer moves it to `done`; if it
   needs fixes they `note` what to fix and move it back to `doing`.
-- Board status is the ISSUE's lifecycle; `tmm status` is YOUR live turn.
-  They are different axes — an agent can be `running` on something else
-  while its issue sits in `review`. Keep both current: `tmm status` for
-  what you are doing right now, the board for where the work stands.
+- Board status is the ISSUE's lifecycle; live agent state comes from hooks.
 - Every status change is recorded in the room (`[tmm] board #N a → b`),
   so the chat shows the flow without anyone narrating it.
 

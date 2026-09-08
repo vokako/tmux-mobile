@@ -16,9 +16,9 @@ This is a **running-client** notification path for browser/PWA/webview. It does 
 
 Settings → Notifications carries a level, persisted to `tmux_notify_level`, three nested rungs:
 
-- **Finished** (`done`): `[tmm done]` summaries and an agent's board move to review/done only.
+- **Finished** (`done`): an agent's board move to review/done, plus historical `[tmm done]` rows.
 - **Replies** (`replies`, default): Finished plus every agent reply.
-- **Everything** (`all`): Replies plus ambient `[tmm status working|waiting|blocked]` progress notes.
+- **Everything** (`all`): Replies plus ambient `[tmm status working]` progress notes.
 
 App narration and the human's own messages are never news at any level. An unknown stored value reads as the default.
 
@@ -30,8 +30,8 @@ A message may alert only when the reader is away from that conversation: the doc
 
 - Initial room loads, history pages, cache restores, and inclusive-poll replays never alert.
 - Every observed message is remembered by server id, falling back to its `(from, ts, body)` identity. The same message alerts at most once.
-- Human-authored messages, nameless rows, `[tmm]` lifecycle narration, and ambient `[tmm status working|blocked]` updates do not alert.
-- Agent replies, `[tmm done]` summaries, and an agent's board move to review or done ("who finished what": `#N → review · title`) are news. Moves to doing, spawns, and the human's own moves are not.
+- Human-authored messages, nameless rows, `[tmm]` lifecycle narration, and ambient `[tmm status working]` updates do not alert below `all`.
+- Agent replies, historical `[tmm done]` summaries, and an agent's board move to review or done ("who finished what": `#N → review · title`) are news. Moves to doing, spawns, and the human's own moves are not.
 - Batches produce at most one cue and one system notification; the cue has a short cooldown.
 - Messages observed while looking or muted are still remembered, so leaving the page or unmuting cannot backfill old alerts.
 

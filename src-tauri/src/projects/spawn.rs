@@ -111,7 +111,7 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
     }
 
     // Window name = agent name, uniquified if taken (lead, lead-2, …). The
-    // window name is the agent's identity for telemetry and tmm status.
+    // Window name is the agent's identity for telemetry and tmm messages.
     let taken: std::collections::HashSet<&str> = panes.iter().map(|p| p.window_name.as_str()).collect();
     let window_name = match &req.window_name {
         Some(w) => w.clone(),
@@ -140,7 +140,7 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
     // Restart fallback is different from a new hire: its isolated home already
     // owns the conversation, so resume recent even when the slot/exact id raced
     // the capture tick.
-    let launch_cmd = launch_command(&m.cmd, &def.backend, req.brief, req.resume);
+    let launch_cmd = launch_command(&m.cmd, &def.backend, req.brief, req.by, req.resume);
     let full = format!("{} {}", prefix, launch_cmd);
     // NEVER send the full line via send-keys — see team/launch.rs: tty shims
     // swallow bursts ≳2KB. Source a script instead.
@@ -261,7 +261,7 @@ pub fn refresh_agent(project_path: &str, session: &str, window_name: &str) -> bo
 }
 
 /// Window name = agent name, uniquified if taken (lead, lead-2, …). The window
-/// name is the agent's identity for telemetry and tmm status.
+/// name is the agent's identity for telemetry and tmm messages.
 fn uniquify(name: &str, taken: &std::collections::HashSet<&str>) -> Result<String, String> {
     if !taken.contains(name) {
         return Ok(name.to_string());
@@ -346,10 +346,8 @@ fn write_launch_recipe(home: &Path, backend: &str, env: &[(String, String)], cmd
     // that separately), so the recipe stores it verbatim. It used to strip a
     // trailing quoted argument to remove the kick — a guess that would have
     // eaten a legitimate quoted flag the day a backend ended with one.
-    // `spawned_by` is the feedback edge: `hub_done` delivers the agent's done
-    // summary back into this window's pane, which is what lets a lead SCHEDULE —
-    // a record-only room line wakes nobody, so a lead that spawned two builders
-    // never learned they finished (owner, 2026-08-29). Empty = the human.
+    // `spawned_by` records who created the slot; the first stamped brief carries
+    // the live reply edge. Empty = the human.
     // `team` (board #74): the configured team this window was spawned as part
     // of, so the Hub can group the cards; absent for a solo spawn.
     let recipe = json!({
@@ -442,21 +440,25 @@ pub fn relaunch_line(project_path: &str, window_name: &str, session_id: Option<&
 /// assignment from the operator or a teammate, so it is delivered as the first
 /// message, stamped like every later one.
 
-fn first_prompt(brief: &str) -> Option<String> {
+fn first_prompt(brief: &str, by: &str) -> Option<String> {
     let brief = brief.trim();
     if brief.is_empty() {
         return None;
     }
-    Some(format!("[{}] {brief}", chrono::Local::now().format("%Y-%m-%d %H:%M")))
+    let sender = if by.trim().is_empty() { "human" } else { by.trim() };
+    Some(format!(
+        "[tmm chat {}] {sender}: {brief}",
+        chrono::Local::now().format("%Y-%m-%d %H:%M")
+    ))
 }
 
-fn launch_command(identity_cmd: &str, backend: &str, brief: &str, resume: bool) -> String {
+fn launch_command(identity_cmd: &str, backend: &str, brief: &str, by: &str, resume: bool) -> String {
     let identity_cmd = if resume {
         resume_command(identity_cmd, backend, None)
     } else {
         identity_cmd.to_string()
     };
-    match first_prompt(brief) {
+    match first_prompt(brief, by) {
         Some(p) => format!("{} {}", identity_cmd, shared::shell_quote(&p)),
         None => identity_cmd,
     }
@@ -469,13 +471,13 @@ mod relaunch_tests {
     #[test]
     fn restart_spawn_resumes_but_a_new_hire_starts_fresh() {
         let cmd = "command claude --settings /tmp/settings.json";
-        assert_eq!(launch_command(cmd, "claude", "", false), cmd);
+        assert_eq!(launch_command(cmd, "claude", "", "", false), cmd);
         assert_eq!(
-            launch_command(cmd, "claude", "", true),
+            launch_command(cmd, "claude", "", "", true),
             "command claude --settings /tmp/settings.json --continue"
         );
         assert_eq!(
-            launch_command("command codex -c a=b", "codex", "", true),
+            launch_command("command codex -c a=b", "codex", "", "", true),
             "command codex resume --last -c a=b"
         );
     }
@@ -580,9 +582,9 @@ fn ensure_gitignore(workspace: &str) {
     }
 }
 
-/// Persona + tmm usage + brief. The tmm paragraph is the ENTIRE integration —
-/// that is the point of the CLI-only substrate.
-fn build_prompt(def: &RegAgent, name: &str, session: &str, brief: &str, by: &str, global: &str) -> String {
+/// Persona + the complete tmm collaboration flow. The brief is a real first
+/// user message, never duplicated into this replayed system prompt.
+fn build_prompt(def: &RegAgent, name: &str, session: &str, _brief: &str, _by: &str, global: &str) -> String {
     let mut s = String::new();
     // House rules before the role: the app-wide AGENTS.md (global_prompt.rs)
     // is the first block, then the agent's own persona.
@@ -595,49 +597,18 @@ fn build_prompt(def: &RegAgent, name: &str, session: &str, brief: &str, by: &str
         s += "\n\n";
     }
     s += &format!(
-        "You are agent \"{name}\" in project \"{session}\" (a tmux session managed by tmux-mobile).\n\
+        "你是项目 \"{session}\" 中的 agent \"{name}\"，运行在 tmux-mobile 管理的 tmux session 中。\n\
          \n\
-         How messages MOVE here — route information deliberately:\n\
-         - INTO you: every message arrives as a prompt typed into your pane, stamped `[tmm chat YYYY-MM-DD HH:MM] <sender>: <text>` — from the human, from a teammate's @mention, or a teammate's `[done]` report. One that arrives mid-turn QUEUES and lands when your turn ends; nothing is lost.\n\
-         - OUT of you, automatically: your final reply each turn is captured and posted to the project room — as a RECORD, not a delivery: it is typed into nobody's pane, and a teammate waiting on it only meets it at their next `tmm log`. Your `tmm done` summary IS delivered, to whoever briefed you — never repeat the summary with `tmm send`.\n\
-         - Answering a TEAMMATE: address them — `tmm send \"@name here is what you asked for\"` — and several @names in ONE message reach several teammates at once. Whenever a specific someone needs your answer, prefer one addressed send over an unaddressed turn-end reply; the human reads the room either way.\n\
-         - A BACKLOG lands all at once when your turn ends (queued messages wait, nothing is lost). Read the WHOLE backlog before answering, then answer ONCE — one consolidated reply, or one addressed send per person who still needs something — never one reply per stale message: the newest messages usually resolve the older ones. Optionally, `tmm agent list` shows who is mid-turn before you ping someone busy.\n\
-         - Addressed — `tmm send \"@name message\"`: types into that agent's pane and starts (or queues) a turn there. It INTERRUPTS the reader, so use it when someone must ACT: a question, a decision, a handoff. `@all` reaches every agent at once; `@human` addresses the operator.\n\
-         - Unaddressed — `tmm send \"message\"` with no @: recorded in the room only, interrupts NOBODY; teammates see it at their next `tmm log`. Use it for context worth keeping that nobody needs right now.\n\
-         - The room remembers: `tmm log --limit 30` reads recent chat, `tmm agent list` shows who is here and their state. You only ever RECEIVE what is addressed or briefed to you — read the log to catch up on everything else.\n\
-         \n\
-         When a message is UNCLEAR — missing background, referencing work you never saw, or possibly misaddressed (humans mistype recipients) — do NOT guess and do NOT silently act. Verify first: read the room history for the context you lack (`tmm log --limit 50`; `tmm log --grep <text>` searches the FULL history — repeat --grep for more terms, add --global to search every project), and ask the sender or the teammate who owns that context directly (`tmm send \"@name question\"`). Verifying costs one command; acting on a misread costs everyone a turn. If a message clearly belongs to someone else, say so instead of doing their task.\n\
-         \n\
-         Keep your work visible:\n\
-         - `tmm status working \"<what you are doing right now>\"` — KEEP THIS CURRENT. Your turn boundaries are observed automatically, but nobody can see WHAT you are working on unless you say it. Send one when you start the task, again whenever you move to a different part of it, and again if a single step runs long. One short line, no ceremony — it appears in the chat as your current activity, and it is how the operator follows a long task without interrupting you\n\
-         - `tmm status waiting|blocked \"why\"` — when you are stuck on something outside your control (a credential, an answer, another agent). This one asks for attention, so keep it for the real thing\n\
-         - `tmm done \"summary\"` — REQUIRED when you finish the briefed task. One or two lines — the verdict and what changed; it reports back for you, and your full reply is posted separately, so never paste the reply's text into the summary\n\
-         - `tmm board` — the project's task board (todo/doing/review/done), shared with the human's board page. `tmm board take <id>` claims an issue (assignee = you, status = doing), `tmm board note <id> \"...\"` records progress and decisions ON the issue, `tmm board show <id>` reads one issue with its notes. When YOUR part is done, `tmm board move <id> review` — that HANDS IT OFF: the issue's reporter is notified automatically and reviews it; only the reviewer moves it to done. The board tracks the ISSUE's lifecycle; `tmm status` tracks your live turn — keep both current, they answer different questions\n\
-         You can also manage the workspace itself when the task calls for it:\n\
-         - `tmm spawn <registry-name> --brief \"...\"` — bring in a teammate (see `tmm registry list`); `tmm spawn --team <team> --brief \"...\"` starts a configured team at once (`tmm teams list`). The brief lands as their first prompt, and their `tmm done` summary is delivered back to YOU — so brief with the finish line in it: what done means, and how to verify\n\
-         - `tmm project create|up|down|archive` — set up or tear down whole projects\n\
-         - `tmm registry save --name .. --backend .. --system \"..\"` — define NEW kinds of agents, then spawn them\n\
-         When you start with no message waiting, just WAIT at your prompt — nothing is expected of you until someone writes. \
-         Every real request arrives as a prompt stamped `[YYYY-MM-DD HH:MM]`, which is also how you learn the current time \
-         (this system prompt cannot carry a date: it is replayed on every restart). \
-         If a task was briefed to you it appears below — do it when you are asked to start, and run `tmm done \"summary\"` when it is complete.\n\
-         Rules: keep `tmm status` flowing DURING a long turn so the work is visible before it ends. \
-         If tmm fails (server down), keep working — it is telemetry, never a blocker. \
-         Run `tmm --help` for the full command list."
+         tmm 协作流程：\n\
+         - 发给你的消息以 `[tmm chat YYYY-MM-DD HH:MM] <sender>: <text>` 输入 pane；工作中的消息会排队，在当前回合结束后送达。\n\
+         - 正常 final response 由 hooks 自动记录到项目房间；若本轮由另一个 agent 发起，结果还会自动送回对方。不要再用 `tmm send` 重复回复。\n\
+         - 主动提问、通知或交接时使用 `tmm send \"@name message\"`；可同时 @多人，`@all` 发给所有 agent，`@human` 发给操作者。无收件人的普通 send 会被拒绝。\n\
+         - 中间进度可用 `tmm send \"当前进度\" --status` 记录到房间，不打扰其他人，也不影响 final response。\n\
+         - 用 `tmm log --limit 50` 查看近期消息，`tmm log --grep <text> [--global]` 搜索历史，`tmm agent list` 查看成员。收到积压消息先全部读完再合并处理；上下文不清楚时先查记录或询问相关人。\n\
+         - 收到 board issue 后用 `tmm board take <id>` 接手，`tmm board note <id> \"...\"` 记录进展，完成后 `tmm board move <id> review` 交给 reporter 验收。\n\
+         - 独立并行工作可用 `tmm spawn <agent> --brief \"...\"` 或 `tmm spawn --team <team> --brief \"...\"` 委派；brief 写清目标、输入、输出和完成标准，结果会自动返回。\n\
+         - 没有消息时等待。tmm 暂时不可用时继续本地工作；其他命令用 `tmm --help` 查询。"
     );
-    if !brief.trim().is_empty() {
-        // Name the briefer: "your teammate" left the agent with nobody to
-        // report back to, and the report-back sentence tells it the feedback
-        // loop is AUTOMATIC — a long done summary re-told the whole reply
-        // (both are posted), so the summary is cast as the one-line verdict.
-        let briefer = if by.trim().is_empty() { "the operator".to_string() } else { format!("your teammate {}", by.trim()) };
-        s += &format!(
-            "\n\nYour task, briefed by {briefer}:\n{}\n\n\
-             When it is complete, `tmm done \"summary\"` reports back for you: the summary is delivered to whoever briefed you automatically, so do not repeat it with `tmm send`. \
-             Keep it to one or two lines — the verdict and what changed — because your full final reply is posted to the room separately.",
-            brief.trim()
-        );
-    }
     s
 }
 
@@ -855,7 +826,7 @@ pub fn refresh_hooks(project_path: &str, window_name: &str) -> bool {
                 shared::shell_quote(window_name),
             ),
             // A backfilled recipe cannot know who spawned the agent — the
-            // feedback edge simply does not exist for pre-recipe spawns.
+            // provenance simply does not exist for pre-recipe spawns.
             "", None)
         .is_ok();
     }
@@ -1705,7 +1676,7 @@ mod tests {
         assert!(!r.cmd.contains("--model"), "no model on the launch line: {}", r.cmd);
         let prompt = conf.get("prompt").and_then(|p| p.as_str()).unwrap();
         assert!(prompt.contains("tmm send"), "the tmm paragraph IS the integration");
-        assert!(prompt.contains("fix the bug"), "brief must reach the prompt");
+        assert!(!prompt.contains("fix the bug"), "brief is delivered as the first user message");
         // The prompt must NOT carry a date: it is replayed every time the window
         // is restored, so a baked-in "today" becomes a lie. The KICK carries it.
         let year = chrono::Local::now().format("%Y").to_string();
@@ -1713,12 +1684,13 @@ mod tests {
         // NOTHING is sent to an agent that was spawned without a brief: an
         // invented first prompt is a message the user never wrote, and it made
         // agents reason about nothing (owner, 2026-08-18).
-        assert!(first_prompt("").is_none(), "no brief, no prompt");
-        assert!(first_prompt("   ").is_none(), "whitespace is not a brief");
+        assert!(first_prompt("", "").is_none(), "no brief, no prompt");
+        assert!(first_prompt("   ", "").is_none(), "whitespace is not a brief");
         // A brief IS something to consume: delivered as the first message,
         // stamped like every later one.
-        let p = first_prompt("fix the flaky test").unwrap();
-        assert!(p.starts_with(&format!("[{year}-")), "a delivered brief is stamped: {p}");
+        let p = first_prompt("fix the flaky test", "lead").unwrap();
+        assert!(p.starts_with(&format!("[tmm chat {year}-")), "a delivered brief is stamped: {p}");
+        assert!(p.contains("] lead: "), "the reply edge names the briefer: {p}");
         assert!(p.ends_with("fix the flaky test"), "the brief is the message: {p}");
         assert!(conf.get("mcpServers").and_then(|m| m.get("files")).is_some(), "registry MCP def must materialize");
         // Tool hooks feed telemetry.
@@ -1886,7 +1858,7 @@ mod tests {
         assert!(agent_md.starts_with("---\nname: tester\n"), "frontmatter first: {agent_md}");
         assert!(agent_md.contains("model: grok-4.6"), "model pinned in frontmatter");
         assert!(agent_md.contains("tmm send"), "the tmm paragraph IS the integration");
-        assert!(agent_md.contains("fix the bug"), "brief must reach the prompt");
+        assert!(!agent_md.contains("fix the bug"), "brief is delivered as the first user message");
 
         let hooks: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("hooks/tmux-mobile.json")).unwrap()).unwrap();
@@ -1922,7 +1894,7 @@ mod tests {
 
         let prompt = std::fs::read_to_string(dir.join("system-prompt.md")).unwrap();
         assert!(prompt.contains("tmm send"), "the tmm paragraph IS the integration");
-        assert!(prompt.contains("fix the bug"), "brief must reach the prompt");
+        assert!(!prompt.contains("fix the bug"), "brief is delivered as the first user message");
 
         let cfg = std::fs::read_to_string(dir.join("config.yml")).unwrap();
         assert!(cfg.contains("default: anthropic/claude-opus-4-6"), "model pinned in modelRoles: {cfg}");
@@ -2300,7 +2272,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         let d = def("kiro");
         let p = build_prompt(&d, "b", "proj", "", "", "# House rules\nAnswer in Chinese.\n");
         assert!(p.starts_with("# House rules\nAnswer in Chinese.\n\nPersona text."), "global block first, then the persona: {p}");
-        assert!(p.contains("agent \"b\" in project \"proj\""));
+        assert!(p.contains("项目 \"proj\" 中的 agent \"b\""));
         // Absent → the prompt is exactly what it was before the feature.
         assert_eq!(build_prompt(&d, "b", "proj", "", "", "  "), build_prompt(&d, "b", "proj", "", "", ""));
         assert!(build_prompt(&d, "b", "proj", "", "", "").starts_with("Persona text."));
@@ -2311,73 +2283,44 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         let d = def("kiro");
         let p = build_prompt(&d, "rev-2", "blog", "review the branch", "lead", "");
         assert!(p.starts_with("Persona text."));
-        assert!(p.contains("agent \"rev-2\" in project \"blog\""));
-        assert!(p.contains("tmm done"));
-        // The standing instructions the kick used to carry now live HERE.
-        assert!(p.contains("just WAIT at your prompt"), "prompt tells it to idle: {p}");
-        assert!(p.contains("[YYYY-MM-DD HH:MM]"), "prompt explains message stamps: {p}");
-        assert!(p.contains("review the branch"));
-        // The communication topology is TAUGHT, not implied (owner, 2026-08-29:
-        // "说明一下人和agent通信以及agent和agent之间通信的方式，让信息可以自由流动"):
-        // what reaches the agent, what leaves it automatically, and the
-        // difference between an addressed send (interrupts) and an
-        // unaddressed one (room-only).
-        assert!(p.contains("How messages MOVE"), "teaches the topology: {p}");
-        assert!(p.contains("INTO you"), "explains inbound: {p}");
-        assert!(p.contains("OUT of you, automatically"), "explains the auto channels: {p}");
-        assert!(p.contains("interrupts NOBODY"), "unaddressed send is room-only: {p}");
+        assert!(p.contains("项目 \"blog\" 中的 agent \"rev-2\""));
+        assert!(!p.contains("tmm done"));
+        assert!(!p.contains("tmm status"));
+        assert!(!p.contains("review the branch"), "brief is a real first message: {p}");
+        assert!(p.contains("[tmm chat YYYY-MM-DD HH:MM]"), "prompt explains message stamps: {p}");
+        assert!(p.contains("final response"), "explains automatic replies: {p}");
+        assert!(p.contains("自动送回对方"), "explains the reply edge: {p}");
+        assert!(p.contains("--status"), "explains ambient progress: {p}");
         assert!(p.contains("@human"), "names the operator address: {p}");
-        assert!(p.contains("delivered back to YOU"), "spawn briefs know the feedback edge: {p}");
-        // Unclear context is a VERIFY-first situation (owner, 2026-09-07: "我
-        // 容易发错消息" — a misaddressed or under-specified message must send
-        // the agent to the room history and to the sender, not into a guess).
-        assert!(p.contains("When a message is UNCLEAR"), "teaches the verify-first rule: {p}");
-        assert!(p.contains("do NOT guess"), "forbids guessing: {p}");
         assert!(p.contains("tmm log --limit 50"), "points at the history: {p}");
-        assert!(p.contains("ask the sender"), "points at direct agent-to-agent questions: {p}");
-        // The turn-end capture is a RECORD, not a delivery (owner, 2026-09-08,
-        // from the agentcore-memory postmortem: five stale one-per-message
-        // replies, and answers that never reached the waiting peer's pane):
-        // teammate answers go ADDRESSED — several @names in one message is
-        // fine — and a queued backlog is answered once, consolidated.
-        assert!(p.contains("typed into nobody's pane"), "captured reply is record-only: {p}");
-        assert!(p.contains("several @names in ONE message"), "multi-recipient sends are taught: {p}");
-        assert!(p.contains("Read the WHOLE backlog"), "backlog is read before answering: {p}");
-        assert!(p.contains("never one reply per stale message"), "consolidated answers: {p}");
-        assert!(p.contains("never paste the reply's text into the summary"), "done stays one line: {p}");
+        assert!(p.contains("先全部读完再合并处理"), "consolidates backlog answers: {p}");
+        assert!(p.contains("tmm board move <id> review"), "explains board handoff: {p}");
     }
 
     #[test]
-    fn prompt_names_the_briefer_and_recipe_records_the_spawner() {
-        // "your teammate" left the agent with nobody to report back to — the
-        // briefer's NAME is what lets a builder answer its lead.
+    fn first_prompt_names_the_briefer_and_recipe_keeps_provenance() {
         let d = def("kiro");
         let p = build_prompt(&d, "b", "proj", "fix it", "lead", "");
-        assert!(p.contains("briefed by your teammate lead"), "names the briefer: {p}");
-        assert!(p.contains("delivered to whoever briefed you"), "explains the feedback loop: {p}");
-        let ph = build_prompt(&d, "b", "proj", "fix it", "", "");
-        assert!(ph.contains("briefed by the operator"), "human brief stays the operator: {ph}");
+        assert!(!p.contains("fix it"), "brief is not duplicated into the system prompt");
+        let first = first_prompt("fix it", "lead").unwrap();
+        assert!(first.contains("] lead: fix it"), "the hook can recover the reply edge: {first}");
 
-        // The recipe carries the feedback edge, and `spawned_by` reads it back
-        // through the same path hub_done uses.
+        // The recipe retains who created the slot as provenance across refresh.
         let ws = std::env::temp_dir().join(format!("tmm-spawnedby-{}", std::process::id()));
         let home = ws.join(".tmm").join("agents").join("b");
         std::fs::create_dir_all(&home).unwrap();
         write_launch_recipe(&home, "kiro", &[], "command kiro-cli chat --agent b", "lead", None).unwrap();
-        let ws_str = ws.to_string_lossy().to_string();
-        assert_eq!(crate::projects::spawned_by(Some(&ws_str), "b").as_deref(), Some("lead"));
-        // Empty `by` (a human spawn) yields nobody to deliver to.
-        write_launch_recipe(&home, "kiro", &[], "command kiro-cli chat --agent b", "", None).unwrap();
-        assert_eq!(crate::projects::spawned_by(Some(&ws_str), "b"), None);
+        let recipe: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(home.join("launch.json")).unwrap()).unwrap();
+        assert_eq!(recipe["spawned_by"], "lead");
         std::fs::remove_dir_all(&ws).ok();
     }
 
     /// Restart means "come back up to date": the recipe replay is verbatim, so
     /// `refresh_agent` re-materializes the home from the CURRENT def first
     /// (owner, 2026-09-08: restarting an agent did NOT pick up new prompt
-    /// text — global_prompt.rs promised it would). The spawner survives (it is
-    /// the done-summary feedback edge) and the original brief does not (the
-    /// conversation is resumed; the brief is history).
+    /// text — global_prompt.rs promised it would). Spawner provenance survives,
+    /// while the original brief does not (the conversation is resumed).
     #[test]
     fn refresh_agent_rematerializes_from_the_current_def_and_keeps_the_spawner() {
         super::super::tests::use_test_store();
@@ -2406,7 +2349,7 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         assert!(!prompt.contains("Old persona."));
         assert!(!prompt.contains("fix the login bug"), "the spawn brief is history, not part of a refresh");
         let recipe = read(&agent_home(&ws_str, name).join("launch.json"));
-        assert_eq!(recipe["spawned_by"], "lead", "the feedback edge survives");
+        assert_eq!(recipe["spawned_by"], "lead", "spawner provenance survives");
 
         // No def / no recipe = no refresh — those windows replay verbatim.
         assert!(!refresh_agent(&ws_str, "proj", "no-such-def"));
@@ -2416,4 +2359,3 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         std::fs::remove_dir_all(&ws).ok();
     }
 }
-

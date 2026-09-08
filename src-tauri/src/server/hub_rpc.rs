@@ -30,7 +30,7 @@ pub(super) fn project_room(session: &str) -> String {
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, notifications: Option<&crate::agent_notifications::AgentNotificationHub>) -> Response {
+pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, _notifications: Option<&crate::agent_notifications::AgentNotificationHub>) -> Response {
     use crate::projects::telemetry;
 
     let id = req.id;
@@ -72,7 +72,7 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
     // Renaming a project renames its tmux session, but a running agent carries
     // `TMM_PROJECT` from the moment it started — and half of these methods reach
     // straight into tmux (`window_of_agent`, `list_panes`), where a stale name
-    // finds nothing. Measured the hard way: right after a rename, `tmm status`
+    // finds nothing. Measured the hard way: right after a rename, a tmm call
     // answered "no window named 'builder-2' in session 'tmm-tasks'" — the deaf
     // agent again, one layer below the project lookup that already handled it.
     let current = crate::projects::project_for_session(asked)
@@ -146,18 +146,25 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
         }
 
         "hub_post" => {
-            let body = match require_str(p, "body") {
+            let raw_body = match require_str(p, "body") {
                 Ok(s) => s,
                 Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
             };
             let from = p.get("from").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or("human");
+            let is_status = p.get("status").and_then(|v| v.as_bool()).unwrap_or(false);
+            let body = if is_status {
+                format!("[tmm status working] {raw_body}")
+            } else {
+                raw_body.to_string()
+            };
             // record_only = true means the message is stored but NEVER typed
             // into any agent's pane. Required for hook-sourced auto-replies:
             // if an automatic post addresses a peer, delivery would type into
             // that peer's pane, triggering their own stop hook, which then
             // auto-posts back — a ping-pong loop. The caller is responsible
             // for setting this when the origin is a hook.
-            let record_only = p.get("record_only").and_then(|v| v.as_bool()).unwrap_or(false);
+            let record_only =
+                is_status || p.get("record_only").and_then(|v| v.as_bool()).unwrap_or(false);
             if let Err(e) = bus.open_room(&room) {
                 return Response::err(id, ERR_INTERNAL, e);
             }
@@ -165,7 +172,7 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
                 .get("requires_reply")
                 .and_then(|v| v.as_bool())
                 .unwrap_or_else(|| !record_only && body.contains('@'));
-            match bus.post(&room, from, body, requires_reply) {
+            match bus.post(&room, from, &body, requires_reply) {
                 Ok(msg) => {
                     // DELIVERY: an idle agent sits at its prompt and reads
                     // nothing — @mentions are typed into the mentioned agents'
@@ -174,14 +181,7 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
                     // Hook-sourced posts skip delivery entirely to prevent
                     // reply loops (see record_only comment above).
                     if !record_only {
-                        deliver_mentions(session, from, body);
-                        // Mark that this agent sent an explicit message this
-                        // turn, so the stop hook won't auto-post a duplicate.
-                        if let Some(hub) = notifications {
-                            if let Some(w) = window_of_agent(session, from) {
-                                hub.mark_sent_this_turn(session, w);
-                            }
-                        }
+                        deliver_mentions(session, from, &body);
                     }
                     Response::ok(id, msg)
                 }
@@ -375,81 +375,6 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
                 })
                 .collect();
             Response::ok(id, serde_json::json!({ "messages": rows }))
-        }
-
-        // Explicit status declaration: `tmm status waiting "等接口定稿"`.
-        // Resolved to a window index because that is telemetry's key (hook
-        // notifications arrive by window, not by name).
-        "hub_status" | "hub_done" => {
-            let agent = match require_str(p, "agent") {
-                Ok(s) => s,
-                Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
-            };
-            let Some(window) = window_of_agent(session, agent) else {
-                return Response::err(id, ERR_INVALID_PARAMS, format!("no window named '{agent}' in session '{session}'"));
-            };
-            if req.method == "hub_done" {
-                let summary = p.get("summary").and_then(|v| v.as_str()).unwrap_or("");
-                telemetry::record_done(session, window, summary);
-                // A completion is a message too — the room is the record. With a
-                // summary it is the AGENT speaking (what it finished is its own
-                // report, and the marker keeps it out of the app-narration
-                // treatment: `[tmm] ` folds into a grey sys row and the chat-only
-                // level drops it entirely, so the text vanished exactly where a
-                // reader looks). Bare `done` has nothing to say and stays a
-                // lifecycle line.
-                if bus.open_room(&room).is_ok() {
-                    let body = if summary.trim().is_empty() {
-                        "[tmm] done".to_string()
-                    } else {
-                        format!("[tmm done] {summary}")
-                    };
-                    let _ = bus.post(&room, agent, &body, false);
-                }
-                // Record the summary for dedup — NOT mark_sent_this_turn: a
-                // done is a report about the work, the stop hook carries the
-                // answer itself, and blanket suppression is what made every
-                // turn ending in the required `tmm done` lose its final reply
-                // (owner, 2026-08-21: "kiro grok 都好像没看到最后返回的消息").
-                // The auto-post is skipped only when the reply IS the summary.
-                if let Some(hub) = notifications {
-                    hub.mark_done_this_turn(session, window, summary);
-                }
-                // The summary CLOSES the loop with whoever briefed the agent:
-                // a lead that spawned a builder cannot schedule on a
-                // record-only room line — nothing wakes it, so it never
-                // learned its builders finished (owner, 2026-08-29). Deliver
-                // the summary into the SPAWNER's pane like any chat line.
-                // This is a TARGETED delivery, never a mention scan, so
-                // invariant 2 of the hook-sourced posts is untouched; and it
-                // cannot ping-pong — one line, one target, once per turn end,
-                // and the spawned_by chain terminates at the human.
-                if !summary.trim().is_empty() {
-                    deliver_done_to_spawner(session, agent, summary);
-                }
-            } else {
-                let state = match require_str(p, "state") {
-                    Ok(s) => s,
-                    Err(e) => return Response::err(id, ERR_INVALID_PARAMS, e),
-                };
-                if !matches!(state, "working" | "waiting" | "blocked") {
-                    return Response::err(id, ERR_INVALID_PARAMS, format!("state must be working|waiting|blocked, got '{state}'"));
-                }
-                let note = p.get("note").and_then(|v| v.as_str()).unwrap_or("");
-                telemetry::record_status(session, window, state, note);
-                // A status note is a MESSAGE from the agent, not a telemetry row
-                // ("status要用agent发送消息的形式显示"): the room is the record, so
-                // it survives a restart, and it reads as the agent speaking
-                // because that is what it is. Record-only — an @name inside a note
-                // must never type into a peer's pane (that loop is invariant 2 of
-                // the hook-sourced posts). A note-less claim posts nothing: the
-                // derived state already knows a turn is open, so a bare word would
-                // be an empty message.
-                if !note.trim().is_empty() && bus.open_room(&room).is_ok() {
-                    let _ = bus.post(&room, agent, &format!("[tmm status {state}] {note}"), false);
-                }
-            }
-            Response::ok(id, serde_json::json!({ "ok": true, "window": window }))
         }
 
         // Derived agent states for a session: one row per live window, agent
@@ -884,7 +809,7 @@ pub(super) fn stamp_now() -> String {
 /// item comes next. That is how this file broke the Android build once
 /// (see the `projects_readers_are_desktop_gated` test below).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn deliver_chat_line(session: &str, target_name: &str, line: &str) -> bool {
+pub(super) fn deliver_chat_line(session: &str, target_name: &str, line: &str) -> bool {
     use crate::projects::agents;
 
     let ws = crate::projects::project_for_session(session).ok().flatten().map(|p| p.path);
@@ -1007,23 +932,6 @@ fn excerpt(s: &str, max: usize) -> String {
     }
     let cut: String = t.chars().take(max).collect();
     format!("{}…", cut.trim_end())
-}
-
-/// Deliver a done summary into the pane of the agent that SPAWNED this one —
-/// the feedback half of `tmm spawn --brief`. Quiet on every miss: a human
-/// spawner, a dead window, or a pre-recipe agent has nobody to wake.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn deliver_done_to_spawner(session: &str, from: &str, summary: &str) {
-    let ws = crate::projects::project_for_session(session).ok().flatten().map(|p| p.path);
-    let Some(spawner) = crate::projects::spawned_by(ws.as_deref(), from) else { return };
-    if spawner == from {
-        return;
-    }
-    // `[done]` in the body tells the reader WHAT this line is — the brief's
-    // outcome, not a new request — while the stamp and sender keep the shape
-    // of every other delivered chat line.
-    let line = format!("[tmm chat {}] {from}: [done] {summary}", stamp_now());
-    deliver_chat_line(session, &spawner, &line);
 }
 
 /// Type an @mentioned chat line into each mentioned agent's pane. This is the
@@ -1658,6 +1566,24 @@ mod tests {
         assert_eq!(posts[0].2, "@reviewer 自动结果");
     }
 
+    #[test]
+    fn hub_post_status_is_an_ambient_agent_message() {
+        let b = Bridge::new();
+        let r = handle_hub_request(
+            &req("hub_post", serde_json::json!({
+                "session": "blog", "from": "lead",
+                "body": "reviewing @reviewer output", "status": true
+            })),
+            Some(&b),
+            None,
+        );
+        assert!(r.error.is_none(), "{}", r.error.map(|e| e.message).unwrap_or_default());
+        let posts = b.posts.lock().unwrap();
+        assert_eq!(posts.len(), 1);
+        assert_eq!(posts[0].1, "lead");
+        assert_eq!(posts[0].2, "[tmm status working] reviewing @reviewer output");
+    }
+
     /// A Board reply is first persisted, then delivered into the assigned
     /// managed pane. This real-tmux edge pins the part a pure decision test
     /// cannot: the note actually reaches INPUT through `deliver_chat_line`.
@@ -1759,98 +1685,6 @@ mod tests {
             assert!(msg.contains("not an agent this app started"), "{method}: got {msg:?}");
         }
         assert!(b.posts.lock().unwrap().is_empty(), "nothing announced, nothing killed");
-    }
-
-    /// A status NOTE is a message from the agent — the owner's requirement, and
-    /// what makes it durable (the room is the record; an event was not).
-    #[test]
-    fn a_status_note_is_posted_as_the_agents_own_message() {
-        crate::projects::tests::use_test_store();
-        let session = format!("tmm-note-{}", std::process::id());
-        let created = std::process::Command::new("tmux")
-            .args(["new-session", "-d", "-s", &session, "-n", "dev", "sleep 60"])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if !created {
-            eprintln!("no tmux server — skipping");
-            return;
-        }
-        let b = Bridge::new();
-        let r = handle_hub_request(
-            &req("hub_status", serde_json::json!({
-                "session": session, "agent": "dev", "state": "blocked",
-                "note": "waiting for the API spec",
-            })),
-            Some(&b),
-            None,
-        );
-        assert!(r.error.is_none(), "{:?}", r.error.map(|e| e.message));
-        {
-            let posts = b.posts.lock().unwrap();
-            assert_eq!(posts.len(), 1, "one message, from the agent");
-            assert_eq!(posts[0].1, "dev", "the agent is the sender, not the app");
-            assert_eq!(posts[0].2, "[tmm status blocked] waiting for the API spec");
-        }
-        // A note-less claim posts NOTHING: the derived state already knows a turn
-        // is open, so a bare state word would be an empty message.
-        let r2 = handle_hub_request(
-            &req("hub_status", serde_json::json!({
-                "session": session, "agent": "dev", "state": "working", "note": "   ",
-            })),
-            Some(&b),
-            None,
-        );
-        assert!(r2.error.is_none());
-        assert_eq!(b.posts.lock().unwrap().len(), 1, "still just the one");
-        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
-    }
-
-    /// A `tmm done` SUMMARY is the agent's own report, so it is a message. A
-    /// summary-less done has nothing to read and stays a lifecycle line.
-    #[test]
-    fn a_done_summary_is_a_message_and_a_bare_done_is_not() {
-        crate::projects::tests::use_test_store();
-        let session = format!("tmm-done-{}", std::process::id());
-        let created = std::process::Command::new("tmux")
-            .args(["new-session", "-d", "-s", &session, "-n", "dev", "sleep 60"])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if !created {
-            eprintln!("no tmux server — skipping");
-            return;
-        }
-        let b = Bridge::new();
-        let with = handle_hub_request(
-            &req("hub_done", serde_json::json!({
-                "session": session, "agent": "dev", "summary": "shipped the palette",
-            })),
-            Some(&b),
-            None,
-        );
-        assert!(with.error.is_none(), "{:?}", with.error.map(|e| e.message));
-        {
-            let posts = b.posts.lock().unwrap();
-            assert_eq!(posts.len(), 1);
-            assert_eq!(posts[0].1, "dev", "the agent is the sender");
-            assert_eq!(
-                posts[0].2, "[tmm done] shipped the palette",
-                "not `[tmm] `: that marker folds into a grey sys row and the chat level drops it"
-            );
-        }
-        let bare = handle_hub_request(
-            &req("hub_done", serde_json::json!({ "session": session, "agent": "dev" })),
-            Some(&b),
-            None,
-        );
-        assert!(bare.error.is_none());
-        {
-            let posts = b.posts.lock().unwrap();
-            assert_eq!(posts.len(), 2);
-            assert_eq!(posts[1].2, "[tmm] done", "nothing was said, so the app narrates");
-        }
-        let _ = std::process::Command::new("tmux").args(["kill-session", "-t", &session]).status();
     }
 
     /// The kill path, against real tmux: a managed window disappears and the
@@ -2014,19 +1848,6 @@ mod tests {
         assert_eq!(r.result.expect("result")["has_more"], true);
     }
 
-    #[test]
-    fn hub_status_rejects_unknown_states_and_missing_windows() {
-        let b = Bridge::new();
-        let bad_state = handle_hub_request(
-            &req("hub_status", serde_json::json!({ "session": "no-such-session-xyz", "agent": "a", "state": "napping" })),
-            Some(&b),
-            None,
-        );
-        // The window lookup fails first for a nonexistent session — either
-        // error is INVALID_PARAMS, which is the contract that matters.
-        assert_eq!(bad_state.error.as_ref().map(|e| e.code), Some(ERR_INVALID_PARAMS));
-    }
-
     /// `crate::projects` is compiled out on android/ios, so every top-level
     /// function in this file that reads it MUST carry the desktop cfg gate.
     /// Nothing in the normal loop catches a missing one: `cargo test`, `cargo
@@ -2036,7 +1857,7 @@ mod tests {
     /// was inserted directly beneath `deliver_mentions`' `#[cfg]`, adopted the
     /// gate (a doc comment between an attribute and its item is legal, so the
     /// attribute binds to whatever item follows), and left `deliver_mentions`
-    /// and `deliver_done_to_spawner` ungated — 10 errors, two commits before
+    /// ungated — 10 errors, two commits before
     /// anyone noticed.
     ///
     /// So the guard is a source contract, checked on the desktop where it is

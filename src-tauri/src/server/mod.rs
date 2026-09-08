@@ -163,9 +163,9 @@ pub type NotificationHub = Arc<AgentNotificationHub>;
 // (a background task without a per-request context). This adapter bridges the
 // `RoomPoster` trait to the `TeamBridge` without exposing bus types.
 //
-// INVARIANT: `post_to_room` is called from `consume_file` only for STOP events
-// on managed windows, always with `record_only = true`.
-// The hub_post handler enforces that record_only posts never trigger delivery.
+// A final reply is recorded once, then delivered only along the reply edge
+// captured when the turn opened. The delivered `[reply]` envelope does not
+// create a reverse edge, preventing ping-pong.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 struct TeamRoomPoster {
     team: Arc<dyn TeamBridge>,
@@ -173,24 +173,14 @@ struct TeamRoomPoster {
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl crate::agent_notifications::RoomPoster for TeamRoomPoster {
-    fn post_to_room(&self, session: &str, agent: &str, body: &str, record_only: bool) {
+    fn post_final(&self, session: &str, agent: &str, body: &str, reply_to: &[String]) {
         let room = hub_rpc::project_room(session);
         let _ = self.team.open_room(&room);
-        // record_only means: store in room, do NOT deliver (type) into panes.
-        // We encode this as requires_reply = false and rely on hub_post's
-        // record_only gate. Since we call bus.post directly (bypassing the RPC
-        // layer), we must not call deliver_mentions — which is exactly what
-        // record_only = true prevents in handle_hub_request. Direct bus call is
-        // safe here because we never deliver; the RPC path's deliver_mentions
-        // is the only thing we're skipping.
         let _ = self.team.post(&room, agent, body, false);
-        // Delivery suppression: requires_reply=false means the agora bus
-        // records the message but does not alert anyone. The record_only
-        // parameter is not forwarded to the bus itself (it has no such concept);
-        // it is purely a gate in handle_hub_request to prevent deliver_mentions.
-        // Since we bypass handle_hub_request here, `record_only` is honoured
-        // structurally: we never call deliver_mentions.
-        let _ = record_only; // documented above; suppress unused-variable warning
+        for target in reply_to {
+            let line = format!("[tmm chat {}] {agent}: [reply] {body}", hub_rpc::stamp_now());
+            hub_rpc::deliver_chat_line(session, target, &line);
+        }
     }
 }
 
@@ -425,4 +415,3 @@ pub(super) mod test_util {
         Request { id: Some(1), method: method.to_string(), params }
     }
 }
-

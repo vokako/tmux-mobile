@@ -3,8 +3,8 @@
 ## What this is
 
 `tmm` (binary at `src-tauri/src/bin/tmm.rs`) is the CLI front for the project
-hub: one chat room per project, agent status declarations, derived agent
-states. It is the **only active interface an agent has** to the rest of the
+hub: one chat room per project and hook-derived agent states. It is the
+**only active interface an agent has** to the rest of the
 system — the CLI-only substrate decision from
 `docs/exec-plans/agents-v2.md` §4.1: what an agent *says* goes through `tmm`,
 what we *observe* arrives through hooks into `projects::telemetry`, and the
@@ -23,13 +23,12 @@ background tasks with local tmux only and never opens a socket. See
 
 ```
 # agent-facing (context from $TMM_PROJECT / $TMM_AGENT, exported by the launcher)
-tmm send "<text>"                    post to the project chat; @name addresses
+tmm send "@name <text>"              send to one or more recipients
+tmm send "<text>" --status           ambient progress; room-only
 tmm log [--since <ts>] [--limit N] [-f]   read chat; --since is exclusive (ms)
 tmm log --grep <text> [--grep …] [--global] [--limit N]   search the FULL history
                                      (any-match term list, case-insensitive, body+sender;
                                       --global = every project's room, hits name their room)
-tmm status <working|waiting|blocked> [note]
-tmm done [summary]                   completion; also posts "✔ done — summary"
 
 # human-facing AND agent-facing — self-management
 tmm agent list                       windows + agent detection + derived state
@@ -310,22 +309,10 @@ can get wrong to save three characters.
 `hub_*` RPCs in `src-tauri/src/server/hub_rpc.rs`, dispatched by prefix in
 `connection.rs` exactly like `team_*`:
 
-- `hub_post { session, from, body, requires_reply? }` — room auto-opens.
+- `hub_post { session, from, body, status?, requires_reply? }` — room auto-opens;
+  `status=true` records `[tmm status working]` without pane delivery.
 - `hub_log { session, since_ts?, limit? }` — incremental cursor filters on
   message `ts` (epoch ms) in our layer.
-- `hub_status { session, agent, state, note? }` — resolves the agent NAME to
-  a window index (telemetry's key) via the window-name match; rejects unknown
-  states/names with invalid-params.
-- `hub_done { session, agent, summary? }` — records completion AND posts a
-  `✔ done` line to the room: the chat is the record. A non-empty summary is
-  also DELIVERED into the pane of the agent that spawned this one (the
-  `spawned_by` field `tmm spawn` records in the launch recipe): a record-only
-  room line wakes nobody, so a lead that spawned two builders never learned
-  they finished (owner, 2026-08-29). The line lands as
-  `[tmm chat <ts>] <name>: [done] <summary>` with the same `record_delivery`
-  bookkeeping as an @mention; targeted, one recipient, once per turn end —
-  the chain terminates at the human (empty `spawned_by`), so it cannot loop,
-  and hook-sourced posts stay record-only.
 - `hub_agents { session }` — one row per live window: name, command, agent
   detection (`projects::agents::detect`), derived state.
 - `hub_board_list/get/save/note/delete` — the project TASK BOARD (owner,
@@ -366,8 +353,8 @@ can get wrong to save three characters.
   non-todo status, Agent authorship, or Agent notes. The detail renders locked
   title/body and every note as selectable static text, not fake editors.
   **Two axes, joined at
-  events**: the board is the issue's lifecycle, `tmm status` the window's
-  live turn. Every status change posts a `[tmm] board #N a → b` room line,
+  events**: the board is the issue's lifecycle; the window's live turn is
+  hook-derived. Every status change posts a `[tmm] board #N a → b` room line,
   and a move TO `review` is a handoff — the REPORTER gets the line typed
   into its pane (`deliver_chat_line`, shared with the done-summary edge;
   a human reporter reads the board itself, the actor is never told of its
@@ -430,14 +417,13 @@ granularity as a hook notification and a project slot.
 
 A turn is a bracket, and the hooks now report all four of its edges:
 `userPromptSubmit` opens it, tool calls happen inside it, a permission prompt
-suspends it, `stop` / `tmm done` closes it. So the whole machine is *which
+suspends it, and `stop` closes it. So the whole machine is *which
 boundary is the most recent fact*, and there are exactly four states:
 
 | newest fact | state | `since` |
 |---|---|---|
 | a failed stop (StopFailure) | `failed` | the stop |
-| an explicit `tmm status waiting\|blocked`, still fresh (30 min TTL) | `waiting` | the claim |
-| a turn end (`stop` / `tmm done`) | `idle` | the end (detail = done summary) |
+| a turn end (`stop`) | `idle` | the end |
 | an ask (`permission_required` / `input_required` — a real question; Claude's 60 s `idle_prompt` nudge is dropped before it can become one, board #75) | `waiting` | the ask |
 | a turn start (`userPromptSubmit`, or a tool call) | `running` | **the START** |
 | no hook has ever spoken for this window | pane activity < 30 s | `running` else `idle` |
@@ -445,17 +431,8 @@ boundary is the most recent fact*, and there are exactly four states:
 `since` for `running` is the turn's start, not the newest event, so a client
 renders "running 2m14s" and means the turn's age.
 
-**What `tmm status` is still for, now that turns are observed.** Only the part
-we cannot see: being stuck on something outside the agent's control (a
-credential, an answer, another agent). `waiting` and `blocked` both set
-`waiting` and keep the note. A claim of `working` sets NOTHING — the turn
-bracket already answers "is it running" — and contributes only its note as the
-detail line. That removes a whole class of contradiction where an agent declared
-itself busy while its own stop hook said the turn was over, and it is why the
-seeded system prompt now tells agents not to announce that they are working.
-
-Four words is the whole set. A state nobody can point at an observation for is a
-state nobody should trust.
+Agents never declare state. `tmm send "…" --status` is an optional room message
+about progress; it does not alter the hook-derived state.
 
 ## What lives in `<workspace>/.tmm` — three generations, one directory
 
@@ -484,7 +461,7 @@ managed agent, and its shape is dictated by the backend it wraps:
 
 The directory name is the **tmux window name**, not the registry def name:
 spawning `builder` twice gives windows `builder` and `builder-2`, hence two
-homes. That name is the agent's identity everywhere — telemetry, `tmm status`,
+homes. That name is the agent's identity everywhere — telemetry, messages,
 `@mentions` — and `projects::managed_home` / `is_managed_in` is the ONE function
 that turns it back into this path (see "Managed vs direct windows").
 
@@ -591,11 +568,9 @@ each backend's own knob: a `--effort` launch flag for kiro/claude/grok
 
 Hooks are how we observe an agent at all, so a config on disk must never be
 older than the build reading its events. It was: agents spawned before
-`userPromptSubmit` existed kept a three-hook config, and because that hook is the
-only reset of the same-turn dedup flag, their first `tmm send` silently killed
-the stop-hook auto-post for the rest of the window's life — the owner-visible
-symptom being "the agent's final reply never shows up" (2026-08-16, three live
-agents on the dev machine all had `[postToolUse, preToolUse, stop]`).
+`userPromptSubmit` existed kept a three-hook config, so delivered messages had
+no receipt and the final hook could not recover the requester for its reply
+edge.
 
 `spawn::refresh_hooks(project_path, window_name)` rewrites the `hooks` key in
 place — kiro's `agents/<name>.json`, claude's `settings.json`, codex's
@@ -631,7 +606,7 @@ for.
 
 The fourth backend, aligned with kiro's shape and verified live (an isolated
 home spawned from the hub answered a real turn on the owner's Bedrock custom
-model, hooks fired, `tmm done` posted, state derived):
+model, hooks fired, final response posted, state derived):
 
 - **Isolation**: `GROK_HOME=<ws>/.tmm/agents/<name>/`, like KIRO_HOME.
 - **Identity**: `agents/<name>.md` — YAML frontmatter (`name`, `description`,
@@ -641,7 +616,7 @@ model, hooks fired, `tmm done` posted, state derived):
   compact index, like claude.
 - **Telemetry**: `hooks/tmux-mobile.json` in the home — that home's "global"
   hook scope, always trusted. Five events: UserPromptSubmit (prompt +
-  same-turn-dedup reset; payload wraps the text in `<user_query>` tags),
+  reply-edge reset; payload wraps the text in `<user_query>` tags),
   Pre/PostToolUse (camelCase keys: `toolName`/`toolInput`), Stop,
   StopFailure. **A grok `stop` is a completion ONLY with
   `reason: "end_turn"`** — a second observe-only stop fires at session
@@ -761,10 +736,9 @@ The owner asked for claude/codex/grok to match kiro's feature set ("都要和kir
 我们现在支持的特性能对齐"). What was actually missing, and what was done:
 
 - **Turn-start hooks**: `claude_hooks` and `codex_hooks` registered
-  Pre/PostToolUse + Stop but NOT `UserPromptSubmit` — the only reset of the
-  same-turn dedup flag and the only carrier of the submitted `prompt`. Their
-  agents therefore lost the stop-hook auto-post forever after their first
-  `tmm send`, and every line `deliver_mentions` typed stayed "unconfirmed".
+  Pre/PostToolUse + Stop but NOT `UserPromptSubmit`, the carrier of the
+  submitted `prompt`. Their delivered lines stayed "unconfirmed", and the
+  reply edge could not identify the requester.
   Both now register it, `is_user_prompt_submit` recognizes their spelling
   (snake key, `"UserPromptSubmit"` value), and `refresh_hooks` backfills
   every already-spawned agent on its next start. Codex payloads were measured
@@ -1385,8 +1359,8 @@ rooms.
 Measured after the change: a brief-less kiro agent's launch line ends at
 `--trust-all-tools` and its pane sits idle with no turn at all; the same agent
 answered immediately when a real `tmm send` arrived; a briefed agent received
-`[2026-08-18 17:10] 回一句：收到 brief` as its first prompt, answered, and
-called `tmm done` itself.
+`[tmm chat 2026-08-18 17:10] human: 回一句：收到 brief` as its first prompt
+and answered.
 
 ## The activity feed (telemetry in the chat timeline)
 
@@ -1580,33 +1554,31 @@ is single-line math. The lane's `--lane-indent`/`--lane-pad-r`/`--lane-bg` stay 
 `.steps` with one value each; `.s-body` is `overflow-x: hidden`.
 
 Four event kinds: `tool`, `notif`, `prompt` (a prompt the agent accepted,
-`via: app | local`) and `warn` (a line that was never echoed back). A `tmm status`
+`via: app | local`) and `warn` (a line that was never echoed back). A progress
 note is NOT among them — see below.
 
-**A `tmm status` note is a MESSAGE from the agent.** The hooks bracket a turn but
+**A `tmm send "…" --status` note is a MESSAGE from the agent.** The hooks bracket a turn but
 say nothing about what it is FOR, and the owner's symptom was exactly that: "经常
 一直在做但是没有同步状态" (2026-08-19). So the note — not the state word — is the
-payload, and the form it takes is the agent speaking: `hub_status` posts
-`[tmm status <state>] <note>` to the room from the AGENT ("status要用agent发送消息
+payload, and the form it takes is the agent speaking: `hub_post` posts
+`[tmm status working] <note>` to the room from the AGENT ("status要用agent发送消息
 的形式显示", 2026-08-19). That is not only what it looks like, it is what makes it
 last: the room is the record, so a note outlives a restart the way a reply does,
 and there is exactly ONE copy of it (it is no longer also an event, which would
 have shown the same sentence twice).
 
-Three things make the form safe. The post is **record-only**, so `deliver_mentions`
+Two things make the form safe. The post is **record-only**, so `deliver_mentions`
 never runs on it — an `@name` inside a note must not type into a peer's pane, which
-is invariant 2 of the hook-sourced posts. A **note-less claim posts nothing**:
-`running`/`idle` is derived from observation and beats a word the agent typed, so a
-bare state word would be an empty message. And the marker is deliberately not
+prevents accidental interruption. The marker is deliberately not
 `[tmm] `: that prefix means "the app is narrating" and folds into a grey `sys` row,
 which is the treatment this note was moved out of.
 
-**A `tmm done` SUMMARY is the same kind of thing**, and it was the worse case:
+**Historical `tmm done` summaries remain readable.** They used to be
 `[tmm] done — <summary>` folded into a grey `sys` row and the chat-only level drops
 those entirely, so the agent's own account of what it finished vanished exactly
 where a reader looks (owner, 2026-08-19: "返回的状态信息要用消息的形式展示在对话
-里"). It is now `[tmm done] <summary>` from the agent. A done with NO summary stays
-a lifecycle line, because nothing was said.
+里"). Persisted `[tmm done] <summary>` rows still render, but the command no
+longer exists: the final response is the one completion message.
 
 Client side the marker comes off (`statusNote()`, pure, tested) and the bubble is
 exactly the bubble any other message gets ("status 消息的样式要和普通消息一样就
@@ -1636,28 +1608,22 @@ an addressee ("像是这个 Agent 给另外一个 working 的人发的", same da
 dotted pill reads as "entered this state" instead. What the note is ABOUT
 belongs to the header, and the words stay an ordinary message. The raw view
 still shows the stored body, marker included, because raw means exact.
-`record_status` keeps the explicit claim in the status record: that is the part
-only it can answer, and `derive_from` needs it for `waiting`.
+The progress note never changes `derive_from`; states come only from hooks.
 
 The other half is the prompt, since a channel nobody is told to use stays empty.
 `build_prompt` opens with the communication TOPOLOGY itself (owner, 2026-08-29:
 "说明一下人和agent通信以及agent和agent之间通信的方式，让信息可以自由流动") — a
 "How messages MOVE" section spelling out the flows: what arrives INTO the
 agent (every message is a stamped prompt typed into its pane, queued if
-mid-turn), what leaves it AUTOMATICALLY (the captured final reply — a room
-RECORD typed into nobody's pane — and the done summary delivered to its
-briefer), an ADDRESSED `tmm send "@name …"` (types into that pane — it
-interrupts, so it is for something the reader must act on; several @names in
-one message reach several teammates, and an answer a teammate is waiting on
-goes this way, never as a turn-end reply), an UNADDRESSED send (room-only,
-interrupts nobody, read at the next `tmm log`), a BACKLOG rule (queued
+mid-turn), what leaves it AUTOMATICALLY (the captured final reply is recorded
+and returned once to the agent that opened the turn), an ADDRESSED
+`tmm send "@name …"` for a new question or handoff, `tmm send "…" --status`
+for ambient progress, a BACKLOG rule (queued
 messages are read whole and answered once, consolidated — never one reply per
 stale message), and the room's memory (`tmm log` / `tmm agent list` — an agent
 only ever RECEIVES what is addressed to it; the log is how it catches up on
-the rest). Then `tmm status working "<what you are doing right now>"` with
-when to send one (at the start, when the work moves to a different part, when
-a step runs long). That ordering is the convention: progress is ambient,
-messages are addressed. NOTE: an agent
+the rest). An unaddressed ordinary send is rejected; the normal reply needs no
+CLI call. NOTE: an agent
 already spawned keeps the prompt it was given — see the def-drift entry in
 `docs/unresolved.md` — so the new convention reaches existing windows only when
 they are re-spawned.
@@ -1737,7 +1703,7 @@ normalizes both generations, and everything downstream (the colour column, the
 collapsed peek, the self-report filter) reads through it.
 
 Self-report filtering is segment-wise: agents chain the report onto one shell
-line (`tmm send "…" 2>&1; tmm status working "…"`), so a command is invisible
+line (`tmm send "@lead …" 2>&1; tmm send "…" --status`), so a command is invisible
 only when EVERY `;`/`&&`/`||` segment is a `tmm` self-report — the `tmm send`
 the room already shows as a message never prints again as a tool row, while
 `tmm send "done" && make deploy` keeps its row because the deploy has no other
@@ -1870,8 +1836,8 @@ read as nothing ("我看打断是闪电，看着好像不是那么容易理解",
 2026-08-25). Idle and failed recipients keep the plain grey arrow — an ended
 turn has nothing to interrupt. The
 interrupt goes to whoever the composer is addressing — the recipient, or all
-managed agents for `@all`; an unaddressed room note arms nothing, because a
-room note interrupts nobody. An armed button stands down on its own: 3 s
+managed agents for `@all`; a status note arms nothing, because it interrupts
+nobody. An armed button stands down on its own: 3 s
 unfired, any typing, Escape, or switching projects — an armed cancel must not
 lie in wait or follow the user into another room.
 

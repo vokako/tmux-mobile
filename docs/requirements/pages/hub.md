@@ -44,12 +44,11 @@ completion).
 - **What an agent SAYS** goes through the `tmm` CLI; **what we OBSERVE**
   arrives via hooks (turn open, tool calls, ask, stop) and status is
   **derived** (`running | waiting | idle | failed`).
-- **Messages move five ways** (taught to every agent in its system prompt):
-  into an agent as stamped prompts typed into its pane (queued mid-turn);
-  out of it automatically (captured final reply + `tmm done` summary
-  delivered to whoever briefed it); addressed sends (`@name` — interrupts);
-  unaddressed sends (room-only, nobody interrupted); and the room memory
-  (`tmm log` — an agent only receives what is addressed to it).
+- **Messages move four ways** (taught to every agent): stamped prompts enter
+  its pane; the captured final reply is recorded and returned once to the
+  agent that opened the turn; addressed sends (`@name`) start a new question
+  or handoff; `send --status` records ambient progress. `tmm log` is the room
+  memory.
 - **The task board** is the project's plan of record: the human writes
   issues here, agents keep them current via `tmm board`
   (todo/doing/review/done, fixed vocabulary).
@@ -129,7 +128,7 @@ completion).
 
 ## Feed (the conversation)
 - Telegram-like bubbles: name header, floated time trailer, delivery ring on
-  own messages; `[tmm status]` / `[tmm done]` markers render as ordinary
+  own messages; `[tmm status]` and historical `[tmm done]` markers render as ordinary
   bubbles with a state badge; `[tmm] ` lifecycle lines fold into one sys
   capsule (dropped at the chat-only detail level); tool calls fold into one
   lane per turn (configurable row cap, middle column scrolls, never
@@ -181,7 +180,7 @@ completion).
   Notification permission. Initial/history/cache loads and poll replays never
   alert; seen ids (or `from/ts/body`) dedupe, watched/muted batches never
   backfill, and own/sys/ambient-status rows are filtered while agent replies
-  and `[tmm done]` remain news. Unsupported notification/audio paths fail soft;
+  and historical `[tmm done]` rows remain news. Unsupported notification/audio paths fail soft;
   this is not remote push after the app has closed.
 
 ## Composer

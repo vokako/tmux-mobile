@@ -77,7 +77,7 @@ inbox 写一个信封 → `consume_file`（`agent_notifications.rs`）转成
 
 客户端（`hub.ts::feedBlocks`）把同一个窗口连续的工具事件折成一组；一条消息、
 一次状态声明或一个生命周期事件都会断开这个 run —— 这正是"一组 = 两次回复之间"
-的含义。agent 自己的 `tmm send/status/done/log/spawn` 会被过滤掉
+的含义。agent 自己的 `tmm send/log/spawn` 会被过滤掉
 （`isSelfReport`）：它们的**效果本身**已经是一行了。
 
 顺序不是免费的，需要三件事同时对：inbox 按文件名顺序消费（事件是**消费时**打
@@ -86,35 +86,21 @@ inbox 写一个信封 → `consume_file`（`agent_notifications.rs`）转成
 
 ## 5 · 一轮结束
 
-`stop` 带 `assistant_response` —— 在 kiro-cli 2.16.2 上实测过，也是唯一带着
-agent 答案的 hook。`maybe_auto_post` 在四道门禁下把它发进房间，每一道都对应一个
-具体的事故：
+`stop` 带 `assistant_response`，也是唯一带答案的 hook。`userPromptSubmit`
+会从 `[tmm chat …] sender:` 信封中记录本轮的回复目标；`[reply]` 和旧
+`[done]` 信封不建立反向边。
 
-1. **只有托管 agent**（`managed_home`）—— 否则用户手工起的 kiro 会开始往项目
-   房间里发东西。
-2. **这一轮没自己说过话** —— 否则调用过 `tmm send` 的 agent 一轮会产生两条消息。
-   这个标志由 `userPromptSubmit` 清零，所以那个 hook 必须存在于**每一个可能自动
-   回帖的配置**里。`tmm done` 刻意**不**设置它：摘要是对工作的汇报，stop hook
-   带的才是答案本身——把 done 当 send 处理，导致每一轮以（必须调用的）done 结束
-   的对话都丢掉了最终回复（owner，2026-08-21）。现在只记录摘要，仅当回复与摘要
-   一字不差时才跳过自动回帖——那才是真正的重复。
-3. **`record_only = true`** —— 自动回帖的正文里如果 @ 了别人，那行会被打进对方的
-   pane，对方的 stop hook 又会回帖。无穷循环。
-4. **`MAX_REPLY_CHARS = 6144`** —— 聊天的预算，不是通知那 240 字的预算。
+`maybe_auto_post` 只处理托管 agent，把 final response 记录进房间，并由
+`TeamRoomPoster` 以 `[tmm chat <ts>] <agent>: [reply] <answer>` 投递给本轮
+发送者。`[reply]` 不再产生反向回复边，因此结果只走一跳，不会 ping-pong。
+最终回复上限仍是 6144 字符。
 
-`tmm done` 仍然是一次状态转移（并且显式结束这一轮）；它的摘要可以只有一行，
-因为答案本身仍会自动回帖到房间里。
-
-**摘要还会沿 spawn 边向上汇报**（owner，2026-08-29）：`tmm spawn` 把
-`spawned_by` 记进 launch recipe，`hub_done` 把非空摘要投递进还活着的受管
-spawner 的 pane（`[tmm chat <ts>] <name>: [done] <summary>`，与 @mention 相同
-的投递记账）。其他所有完成通道都是只记录的，所以派了两个 builder 的 lead 从来
-不知道它们完工了。定向投递——一行、一个 pane、每轮一次，链条终点是人——不可能
-ping-pong；上面的不变量 2 和 3 原封不动。
+不再有显式 done 状态。stop hook 同时结束回合、记录最终消息并把它返回请求者。
+主动 `tmm send` 是新的提问或交接，不会抑制 final response。
 
 **被外部取消的 turn 没有自己的边界**：打断（`hub_agent_interrupt` /
 composer 的空输入两拍 / `tmm agent interrupt`）会**先**重置派生状态
-（`record_interrupt`：end = 立即 completed，清掉 ask 和显式声明 → 马上读作
+（`record_interrupt`：end = 立即 completed，清掉 ask → 马上读作
 `idle`），然后才把命名的 `Escape` 键打进 pane。不先重置的话，最新事实一直是
 打开那个被取消 turn 的 `userPromptSubmit`，卡片会一直显示 `running`
 （owner，2026-08-29）。
@@ -125,8 +111,7 @@ composer 的空输入两拍 / `tmm agent interrupt`）会**先**重置派生状�
 
 规则就是"**哪条回合边界是最新的事实**"，而 `since` 是客户端计时的起点——
 `running` 时它是这一轮的**开始**，所以"running 2m14s"说的是这一轮跑了多久。
-`tmm status` 只在"我们观测不到"的地方被采信（卡在凭证、卡在一个回答、卡在另一个
-agent 身上）；声称 `working` 不设置任何状态，只贡献它那句备注。
+agent 不声明状态；`send --status` 只是一条不打扰其他人的房间进度消息。
 
 ## 什么能活下来
 
@@ -137,7 +122,7 @@ agent 身上）；声称 `working` 不设置任何状态，只贡献它那句备
 | 隔离 home、hooks、prompt（`<ws>/.tmm/agents/`） | ✅ | ✅ | ✅ |
 | 每窗口会话 id 记忆 | ✅ | ❌（下一个 hook 重新学到） | ❌ |
 | 遥测：工具行、输入行、警告 | ✅ | ❌ | ❌ |
-| `sent_this_turn`、待确认投递 | ✅ | ❌ | ❌ |
+| 回复目标（activity 恢复）、待确认投递 | ✅ | ✅ | ❌（turn 已消失） |
 | agent 进程本身 | ✅（tmux 比我们活得久） | ✅ | ❌ |
 
 最后三行的不对称就是这套设计最诚实的总结：**对话是持久的，观测不是。**
