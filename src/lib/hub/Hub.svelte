@@ -1426,6 +1426,15 @@
     // new intent, so the button stands down (same rule as switching projects).
     intArm = false;
     if (selected) hubPrefs.setLead(selected, name);
+    // An OPEN terminal partition follows the selection (board #91): choosing
+    // an agent is also choosing whose pane you are watching — the same reading
+    // openDrawer makes when it seats the recipient's window (board #76). The
+    // lookup is by roster name, so @all and the room skip naturally; a closed
+    // drawer stays closed — this retargets, it never opens.
+    if (termOpen && drawerView === 'term') {
+      const a = agents.find((x) => x.name === name);
+      if (a) pickWindow(a);
+    }
   }
 
   // Terminal drawer: pick a window (any window — this is where direct

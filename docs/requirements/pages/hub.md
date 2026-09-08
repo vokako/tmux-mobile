@@ -209,7 +209,10 @@ completion).
 ## Drawer (three partitions, one width handle)
 - The header's terminal button (drawer on desktop, Terminal tab on the phone)
   opens the window of the agent you are TALKING TO — the composer's recipient
-  — before falling back to the first managed agent (board #76).
+  — before falling back to the first managed agent (board #76). While the
+  terminal partition is OPEN, selecting another agent (card click, composer
+  picker, "talk to") switches it to that agent's window (board #91); a closed
+  drawer never springs open.
 - **Terminal**: the selected agent's live pane (embedded xterm), window
   pills with state dots. Esc inside `.xterm` goes to the pane.
 - **Files**: the real Files component in single-pane mode, per-project

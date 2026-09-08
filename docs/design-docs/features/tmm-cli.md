@@ -1779,7 +1779,13 @@ actions; the statusline's only unique content was the roster count, which
 moved into the bar. The embedded `Terminal` stays `chromeless`, so its own
 window-switcher never appears here either — one bar, one place to switch.
 `statuslineWindows()` and its test went with the footer rather than lingering
-as dead code.
+as dead code. The pills are not the only thing that switches: while the
+partition is open, selecting an agent in the chat (card click, composer
+picker, "talk to") retargets it to that agent's window via the same
+`pickWindow` (board #91) — choosing who you talk to is choosing whose pane
+you watch, the reading `openDrawer` already makes when it seats the
+recipient's window first (board #76). It only follows a name that matches a
+roster window (@all and the room do not), and it never opens a closed drawer.
 
 #### Deleting, and CLI/UI parity
 

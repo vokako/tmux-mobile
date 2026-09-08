@@ -170,6 +170,19 @@ test('the agent card speaks the three-stage machine: select, then options, dblcl
   assert.match(source, /if \(filterAgent\) \{ filterAgent = ''; return true; \}/u, 'back gesture exits the filter');
 });
 
+test('selecting an agent retargets an OPEN terminal partition (board #91)', () => {
+  // Choosing who you talk to is also choosing whose pane you are watching:
+  // when the drawer's terminal partition is open, clicking an agent card (and
+  // every other setRecipient path — the composer picker, "talk to", restart)
+  // switches the embedded terminal to that agent's window. The lookup is by
+  // roster name, so @all and the room (which match no agent) naturally skip;
+  // a CLOSED drawer must not spring open — this follows, it never opens.
+  const body = source.slice(source.indexOf('function setRecipient'), source.indexOf('async function interrupt'));
+  assert.match(body, /if \(termOpen && drawerView === 'term'\) \{\s*\n\s*const a = agents\.find\(\(x\) => x\.name === name\);\s*\n\s*if \(a\) pickWindow\(a\);/u,
+    'an open terminal partition follows the new recipient');
+  assert.ok(!body.includes('termOpen = true'), 'following never opens a closed drawer');
+});
+
 test('a waiting agent\u2019s card carries the cue, in the dot\u2019s own amber, without motion', () => {
   // Review, 2026-09-03: running got a breathing halo, waiting a 6px static dot
   // — the state that needs the human most was the weakest signal. The CARD
