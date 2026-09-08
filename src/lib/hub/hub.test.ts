@@ -1432,8 +1432,15 @@ test('pathRef: a chat link to a file path is recognised; real URLs are left to t
   assert.equal(pathRef('temp/AGENTS.global.draft.md'), 'temp/AGENTS.global.draft.md');
   assert.equal(pathRef('./docs/design-docs/features/fonts.md'), './docs/design-docs/features/fonts.md');
   assert.equal(pathRef('~/notes.md'), '~/notes.md');
-  assert.equal(pathRef('src/lib/hub/Hub.svelte#L123'), 'src/lib/hub/Hub.svelte#L123'.split('#')[0],
+  assert.equal(pathRef('src/lib/hub/Hub.svelte#L123'), 'src/lib/hub/Hub.svelte'.split('#')[0],
     'a line-anchor suffix is dropped from the path');
+  // Agents also write grep-style line refs — path:line and path:line:col
+  // (board #99 round three: "spawn.rs:587" reached fsStat as-is and ENOENT'd).
+  assert.equal(pathRef('/local/home/cfu/work/projects/tmux-mobile/src-tauri/src/projects/spawn.rs:587'),
+    '/local/home/cfu/work/projects/tmux-mobile/src-tauri/src/projects/spawn.rs');
+  assert.equal(pathRef('src/lib/hub/hub.ts:12:5'), 'src/lib/hub/hub.ts');
+  assert.equal(pathRef('temp/notes:2026.md'), 'temp/notes:2026.md',
+    'a colon inside a NAME survives — only a trailing :digits suffix is a line ref');
   // Not ours:
   assert.equal(pathRef('https://example.com/a.md'), '');
   assert.equal(pathRef('http://example.com'), '');

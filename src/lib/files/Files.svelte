@@ -787,7 +787,7 @@
     const href = a.getAttribute('href') ?? '';
     if (!href || href.startsWith('#') || href.startsWith('//') || /^[a-zA-Z][a-zA-Z0-9+.-]*:/u.test(href)) return;
     e.preventDefault();
-    const ref = href.split('#')[0];
+    const ref = href.split('#')[0].replace(/:\d+(?::\d+)?$/u, ''); // grep-style :line[:col] means the file
     const docDir = currentFile?.path ? currentFile.path.slice(0, currentFile.path.lastIndexOf('/')) : cwd;
     const abs = ref.startsWith('/') || ref.startsWith('~') ? ref : absJoin(docDir, ref);
     openEntry({ type: 'file', name: abs.slice(abs.lastIndexOf('/') + 1), path: abs });
