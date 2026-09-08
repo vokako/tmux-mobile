@@ -29,11 +29,11 @@
   import { t, i18n, hanLang } from '../core/i18n.svelte.ts';
   import {
     projectList, projectUp, projectDown, projectDelete, projectArchive, projectCreate, projectRename, listSessionsWithPanes,
-    hubPost, hubCommand, modelsList, hubLog, hubRooms, hubAgents, fsMkdir, fsUpload, hubSpawn, hubSpawnTeam, teamsList, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
+    hubPost, hubCommand, modelsList, hubLog, hubRooms, hubAgents, fsMkdir, fsUpload, fsCwd, hubSpawn, hubSpawnTeam, teamsList, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { projectAgeLabel, sortRows } from '../projects/projects.ts';
-  import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, stateNeedsYou, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, mentionedAgents, chipExtras, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, perLineOf, modelLabel } from './hub.ts';
+  import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, stateNeedsYou, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, mentionedAgents, chipExtras, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, perLineOf, modelLabel, pathRef } from './hub.ts';
   import { notifyNews, isAway, roomProjectName } from './notifications.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, popOrigin, viewBox } from '../ui/placement.ts';
@@ -114,6 +114,31 @@
   // would resize the pane and make the agent repaint, the .keep-rows story).
   let drawerView = $state('term');
   let drawerIssueReq = $state(null); // a feed board-line tap on desktop: open the issue in the drawer
+  let drawerFilesReq = $state(null); // a feed path-reference tap: preview the file in the drawer (board #99)
+
+  /** A click inside a bubble that landed on a PATH link (board #99). Returns
+   * true when the click is ours — the caller stops the bubble's own toggle. */
+  function openPathRef(e) {
+    const a = e.target?.closest?.('a');
+    if (!a) return false;
+    const raw = pathRef(a.getAttribute('href'));
+    if (!raw) return false; // a real URL keeps the browser's behaviour
+    e.preventDefault();
+    e.stopPropagation();
+    routePathRef(raw);
+    return true;
+  }
+  async function routePathRef(raw) {
+    let file = raw.replace(/^\.\//u, '');
+    // A relative reference is relative to the PROJECT — the same base the
+    // agents' own paths mean. (~ passes through; the server expands it.)
+    if (!file.startsWith('/') && !file.startsWith('~')) {
+      try { const r = await fsCwd(selected); if (r.path) file = `${r.path}/${file}`; } catch {}
+    }
+    if (mobile || compact) { openFilesTab?.(selected, '', file); return; }
+    drawerFilesReq = { file, n: (drawerFilesReq?.n ?? 0) + 1 };
+    drawerView = 'files'; openDrawer();
+  }
   let drawerBoardNew = $state(null); // the drawer head's + (board #23): new issue, requested into the embedded Board
   let drawerFilesDir = $state(''); // where the drawer's Files is — the jump hands it over
   let termTarget = $state('');
@@ -2962,7 +2987,7 @@
                 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
                 <div class="bubble md"
                   oncontextmenu={(e) => { msgSelectionClicks.mark(e, key); }}
-                  onclick={() => { if (msgSelectionClicks.consume(key)) return; if (typeof getSelection === 'function' && !(getSelection()?.isCollapsed ?? true)) return; msgOpen = msgOpen === key ? '' : key; }}>
+                  onclick={(e) => { if (openPathRef(e)) return; if (msgSelectionClicks.consume(key)) return; if (typeof getSelection === 'function' && !(getSelection()?.isCollapsed ?? true)) return; msgOpen = msgOpen === key ? '' : key; }}>
                   {#if m.from !== 'human'}
                     <!-- A status note keeps the ordinary bubble, but its header
                          says what the words are ABOUT. The first cut was
@@ -3422,7 +3447,7 @@
         <!-- Per-project cwd is Files' own parked-position map (module-scoped,
              keyed by session), so each project wakes up where you left it. -->
         <div class="files-body appear">
-          <Files session={selected} visible={visible} {fontSize} singlePane bind:currentDir={drawerFilesDir} />
+          <Files session={selected} visible={visible} {fontSize} singlePane navRequest={drawerFilesReq} bind:currentDir={drawerFilesDir} />
         </div>
       {/if}
       {#if drawerView === 'board'}

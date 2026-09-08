@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
+import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX, pathRef } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -1420,4 +1420,27 @@ test('a long message confirms against its TRUNCATED echo (board #78)', () => {
   // The client's cut point mirrors the server's constant — pin them together.
   const telemetry = readFileSync(new URL('../../../src-tauri/src/projects/telemetry.rs', import.meta.url), 'utf8');
   assert.match(telemetry, new RegExp(`const MAX_PROMPT_CHARS: usize = ${PROMPT_ECHO_MAX};`, 'u'));
+});
+
+test('pathRef: a chat link to a file path is recognised; real URLs are left to the browser (board #99)', () => {
+  // Owner: "对于对话里出现的 [temp/AGENTS.global.draft.md](/local/home/…/temp/
+  // AGENTS.global.draft.md) 这种路径引用，最好能够点击直接右侧侧边栏文件预览
+  // 打开". A path-like href — no scheme — is OURS; anything a browser can
+  // follow (http/https/mailto, #anchor, protocol-relative) is not.
+  assert.equal(pathRef('/local/home/cfu/work/projects/tmux-mobile/temp/AGENTS.global.draft.md'),
+    '/local/home/cfu/work/projects/tmux-mobile/temp/AGENTS.global.draft.md');
+  assert.equal(pathRef('temp/AGENTS.global.draft.md'), 'temp/AGENTS.global.draft.md');
+  assert.equal(pathRef('./docs/design-docs/features/fonts.md'), './docs/design-docs/features/fonts.md');
+  assert.equal(pathRef('~/notes.md'), '~/notes.md');
+  assert.equal(pathRef('src/lib/hub/Hub.svelte#L123'), 'src/lib/hub/Hub.svelte#L123'.split('#')[0],
+    'a line-anchor suffix is dropped from the path');
+  // Not ours:
+  assert.equal(pathRef('https://example.com/a.md'), '');
+  assert.equal(pathRef('http://example.com'), '');
+  assert.equal(pathRef('mailto:a@b.c'), '');
+  assert.equal(pathRef('#heading'), '');
+  assert.equal(pathRef('//example.com/x'), '');
+  assert.equal(pathRef('javascript:alert(1)'), '');
+  assert.equal(pathRef(''), '');
+  assert.equal(pathRef(null), '');
 });

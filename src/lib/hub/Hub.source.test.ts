@@ -934,10 +934,12 @@ test('a tapped bubble reveals Copy/Raw under it — and still never an app conte
   // .m-acts row (Copy / Raw) RETURNS, the ContextMenu card stays retired.
   const bubble = source.slice(source.indexOf('<div class="bubble md"'),
     source.indexOf('<div class="m-body"'));
-  // A plain tap toggles the row — after the one-shot compatibility-click
-  // guard (a long-press's echo click) and the live-selection fallback.
+  // A plain tap toggles the row — after the path-reference route (board #99:
+  // a tapped file link opens the preview, it must not ALSO flip the row), the
+  // one-shot compatibility-click guard (a long-press's echo click) and the
+  // live-selection fallback.
   assert.match(bubble,
-    /onclick=\{\(\) => \{ if \(msgSelectionClicks\.consume\(key\)\) return; if \(typeof getSelection === 'function' && !\(getSelection\(\)\?\.isCollapsed \?\? true\)\) return; msgOpen = msgOpen === key \? '' : key; \}\}/u,
+    /onclick=\{\(e\) => \{ if \(openPathRef\(e\)\) return; if \(msgSelectionClicks\.consume\(key\)\) return; if \(typeof getSelection === 'function' && !\(getSelection\(\)\?\.isCollapsed \?\? true\)\) return; msgOpen = msgOpen === key \? '' : key; \}\}/u,
     'the synthetic click is consumed before the selection fallback and the row toggle');
   // The contextmenu handler only MARKS a touch-owned hold: no preventDefault,
   // no menu — native selection proceeds on touch, and a mouse right-click is
@@ -1018,4 +1020,22 @@ test('the agent-card menu opens on the CARD’s left edge (board #47)', () => {
   // long-press context menu stays pointer-anchored (pinned in the #32 test).
   assert.match(source, /menuPlacement\(menuAnchor, \{ w: menuW, h: menuH \}, viewBox\(\), 6, 8, 'left'\)/u,
     'the card tap menu is left-aligned via the shared placement math');
+});
+
+test('a path reference in a bubble opens the file preview, not the void (board #99)', async () => {
+  const source = await readFile(new URL('./Hub.svelte', import.meta.url), 'utf8');
+  // The bubble's click handler routes an anchor whose href is a PATH through
+  // openPathRef; real URLs keep the browser's own behaviour.
+  assert.match(source, /function openPathRef/u, 'the opener exists');
+  assert.match(source, /pathRef\(/u, 'recognition is the tested pure function, not an inline regex');
+  // Desktop: the RIGHT DRAWER's embedded Files gets an imperative file request
+  // (the drawerIssueReq pattern); compact jumps to the Files PAGE like every
+  // other drawer feature does.
+  assert.match(source, /drawerFilesReq = \{ file, n: \(drawerFilesReq\?\.n \?\? 0\) \+ 1 \}/u,
+    'the drawer request carries the file and a bumped n');
+  assert.match(source, /drawerView = 'files'; openDrawer\(\);/u, 'and the files drawer opens');
+  assert.match(source, /openFilesTab\?\.\(selected, [^)]*file[^)]*\)/u, 'compact hands off to the Files page');
+  assert.match(source, /navRequest=\{drawerFilesReq\}/u, 'the drawer embed is wired to receive it');
+  // A relative path resolves against the project's cwd before it travels.
+  assert.match(source, /fsCwd\(/u, 'relative refs resolve against the project cwd');
 });

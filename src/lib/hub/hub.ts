@@ -1717,3 +1717,18 @@ export function modelLabel(model: string): string {
   const bare = s.replace(/\s*\([^()]*\)$/u, '');
   return bare === '' ? s : bare;
 }
+
+/** A chat link whose href is a file PATH, not a URL (board #99: "对于对话里
+ * 出现的 [temp/AGENTS.global.draft.md](/local/…) 这种路径引用，最好能够点击
+ * 直接右侧侧边栏文件预览打开"). Ours = no scheme, not an in-page #anchor,
+ * not protocol-relative — i.e. exactly the hrefs a browser would 404 on.
+ * Returns the path with any #line-anchor suffix dropped, or '' when the
+ * link is the browser's business (http/https/mailto pass safeLinkTarget and
+ * keep their native behaviour). */
+export function pathRef(href: string | null | undefined): string {
+  if (!href) return '';
+  if (href.startsWith('#') || href.startsWith('//')) return '';
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/u.test(href)) return '';
+  const path = href.split('#')[0] ?? '';
+  return path;
+}

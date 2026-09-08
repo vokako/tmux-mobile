@@ -1624,7 +1624,7 @@
            switches. Desktop-eligible only (needs width + the bus): mobile
            keeps the tab layout untouched. -->
       <div class="page-layer" class:hidden={page !== 'hub'}>
-        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onSelectSession={(s) => { if (s) filesSession = s; }} onGoBack={(fn) => hubGoBack = fn} openAgentConfig={(name) => openAgentsConfig(name)} openFilesTab={(s, path) => { if (s) filesSession = s; if (path) filesNavReq = { path, n: (filesNavReq?.n ?? 0) + 1 }; switchTab('files'); jumpedFrom = 'hub'; }} openBoardTab={(s, issue) => { if (s) filesSession = s; if (issue) boardIssueReq = { session: s, id: issue, n: (boardIssueReq?.n ?? 0) + 1 }; switchTab('board'); jumpedFrom = 'hub'; }} />
+        <Hub visible={page === 'hub'} {fontSize} mobile={layout.isTouchDevice} openTerminal={(s, tgt, cmd) => openTerminal(s, tgt, cmd)} onSelectSession={(s) => { if (s) filesSession = s; }} onGoBack={(fn) => hubGoBack = fn} openAgentConfig={(name) => openAgentsConfig(name)} openFilesTab={(s, path, file) => { if (s) filesSession = s; if (path || file) filesNavReq = { path, file, n: (filesNavReq?.n ?? 0) + 1 }; switchTab('files'); jumpedFrom = 'hub'; }} openBoardTab={(s, issue) => { if (s) filesSession = s; if (issue) boardIssueReq = { session: s, id: issue, n: (boardIssueReq?.n ?? 0) + 1 }; switchTab('board'); jumpedFrom = 'hub'; }} />
       </div>
     {/if}
     <!-- The Agents PAGE exists where Agents is a page: the desktop rail. On

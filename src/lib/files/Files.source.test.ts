@@ -24,7 +24,7 @@ test('back retraces the USER\u2019s steps — a history, not a parent walk (boar
     'the UNGATED history-pushing parent walk stays retired (goUp/navTo would bounce)');
   // External moves are new ENTRY POINTS, not steps: they reset the history.
   const resets = source.split('dirHist = []').length - 1;
-  assert.equal(resets, 4, 'the declaration + session switch, cwd follow rule, and navRequest handoff resets');
+  assert.equal(resets, 5, 'the declaration + session switch, cwd follow rule, and the two navRequest handoff forms (dir / file, board #99) reset');
 });
 
 test('a directory\u2019s entrance is ONE beat, at answer time (board #93)', () => {
@@ -160,4 +160,15 @@ test('the lined code preview is capped, with the split out of the template', () 
   assert.doesNotMatch(source, /\{#each \(currentFile\.content \?\? ''\)\.split/u, 'no inline split in the template');
   assert.match(source, /\{#if shownLines\.length < previewLines\.length\}[\s\S]{0,200}?showAllLines = true;/u, 'the affordance lifts the cap');
   assert.match(source, /showAllLines = false; \/\/ the cap is per file/u, 'a new file starts capped again');
+});
+
+test('navRequest can ask for a FILE: land in its directory with the preview open (board #99)', async () => {
+  const source = await readFile(new URL('./Files.svelte', import.meta.url), 'utf8');
+  // The imperative "go there" grew a file form: the list shows the file's
+  // parent (so back lands somewhere sensible) and the preview opens on the
+  // file itself — one request, both halves.
+  assert.match(source, /if \(navRequest\.file\)/u, 'the file form exists');
+  assert.match(source, /loadDir\(parent\)/u, 'the list lands in the parent directory');
+  assert.match(source, /openEntry\(\{ type: 'file', name, path: file \}\)/u,
+    'and the preview opens through the one openEntry path (stat, recents, nav history)');
 });

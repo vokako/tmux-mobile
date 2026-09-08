@@ -619,7 +619,23 @@
   $effect(() => {
     if (!navRequest || navRequest.n === lastNav) return;
     lastNav = navRequest.n;
-    if (navRequest.path) {
+    if (navRequest.file) {
+      // A FILE request (board #99: a chat path reference): the list lands in
+      // the file's parent — so back and the crumbs mean something — and the
+      // preview opens on the file itself through the one openEntry path
+      // (stat, previewability, recents, nav history).
+      const file = navRequest.file;
+      const cut = file.lastIndexOf('/');
+      const parent = cut > 0 ? file.slice(0, cut) : '/';
+      const name = file.slice(cut + 1);
+      leaveEditor(() => {
+        view = 'list';
+        dirHist = []; // a drawer/see-here handoff is a new entry point
+        loadDir(parent);
+        openEntry({ type: 'file', name, path: file });
+      });
+      fsCwd(session).then((r) => { if (r.path) lastSourceDir = r.path; }).catch(() => {});
+    } else if (navRequest.path) {
       const to = navRequest.path;
       leaveEditor(() => {
         view = 'list';
