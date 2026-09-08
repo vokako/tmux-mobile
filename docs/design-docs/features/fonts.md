@@ -75,6 +75,21 @@ now carries its own language: `hanLang(text)` (i18n.svelte.ts, pure,
 chat bubble body (`.m-body`) and Board note text (`.n-text`) render
 `lang={hanLang(...)}`. SC is this product's Han default; other surfaces
 adopt the same tagger if the complaint reaches them.
+
+**Round three (same day): SC by NAME, before the system slot.** With the
+document lang right AND the content tagged, the owner's browser still drew
+骨/感 as Japanese variants in bubbles while the composer was correct. The
+culprit is `-apple-system`: the system-font slot does not "fall through"
+for Han — it resolves CJK through the OS's own language-preference cascade
+(page lang notwithstanding), so with Japanese preferred anywhere in the
+system settings the page text landed on JP shapes before CSS ever consulted
+'PingFang SC' further down the stack. The composer differed because the
+form/IME path picks by input language. Fix: the SC families moved AHEAD of
+`-apple-system`/`BlinkMacSystemFont`/'Segoe UI' in both stacks (latin still
+resolves at the bundled Inter / Space Grotesk in front), plus 'Hiragino
+Sans GB' and Adobe's 'Source Han Sans CN' naming for older macs and Adobe
+installs. `fonts.source.test.ts` pins the order AND that the
+fonts.svelte.ts literals mirror app.css byte-for-byte.
 - The UI/display stacks named only PingFang (macOS), YaHei (Windows) and
   Noto SC; a Linux desktop or non-Google Android often carries the Adobe
   naming instead. `'Source Han Sans SC', 'WenQuanYi Micro Hei'` now sit at

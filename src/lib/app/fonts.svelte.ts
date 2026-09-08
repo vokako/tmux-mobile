@@ -72,12 +72,14 @@ const SYSTEM_STACK =
 // declarations: the override rewrites the var inline, and an out-of-sync
 // default would silently change the un-customized rendering.
 const UI_STACK =
-  "'Inter Variable', -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', " +
-  "'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC', 'WenQuanYi Micro Hei', sans-serif";
+  "'Inter Variable', 'Inter', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', " +
+  "'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC', 'Source Han Sans CN', 'WenQuanYi Micro Hei', " +
+  "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 
 const DISPLAY_STACK =
-  "'Space Grotesk Variable', 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', " +
-  "'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC', 'WenQuanYi Micro Hei', sans-serif";
+  "'Space Grotesk Variable', 'Inter Variable', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', " +
+  "'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC', 'Source Han Sans CN', 'WenQuanYi Micro Hei', " +
+  "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 
 function quote(name: string): string {
   // Wrap in single quotes for CSS; strip any quotes the user typed.
