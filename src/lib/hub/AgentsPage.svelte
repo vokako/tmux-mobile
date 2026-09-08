@@ -254,7 +254,7 @@
   // registry agent inherited whole, or a sub-team inherited whole. Only the
   // bare source owns prompt / Skills / MCP in this editor.
   const TEAM_MAX = 8; // mirrors the server's spawn cap (validated there too, on the EXPANSION)
-  const blankMember = () => ({ name: '', base: defs[0]?.name ?? '', team: '', role: '', model: '', effort: '', agent: null });
+  const blankMember = () => ({ name: '', base: defs[0]?.name ?? '', team: '', role: '', model: '', effort: '', agent: null, expanded: true });
   function bareEditor(agent = {}) {
     const skillEntries = parseRefs(agent.skills);
     const mcpEntries = parseRefs(agent.mcp);
@@ -276,7 +276,7 @@
     let members = [];
     if (team) { try { members = JSON.parse(team.members) ?? []; } catch { members = []; } }
     editingTeam = team
-      ? { name: team.name, description: team.description ?? '', members: members.map((m) => ({ name: m.name ?? '', base: m.base ?? '', team: m.team ?? '', role: m.role ?? '', model: m.model ?? '', effort: m.effort ?? '', agent: m.agent ? bareEditor(m.agent) : null })) }
+      ? { name: team.name, description: team.description ?? '', members: members.map((m, i) => ({ name: m.name ?? '', base: m.base ?? '', team: m.team ?? '', role: m.role ?? '', model: m.model ?? '', effort: m.effort ?? '', agent: m.agent ? bareEditor(m.agent) : null, expanded: i === 0 })) }
       : { name: '', description: '', members: [blankMember()] };
   }
   function addMember() {
@@ -294,10 +294,11 @@
   const kindOf = (m) => (m.team ? `team:${m.team}` : m.base);
   function setBase(i, v) {
     const m = editingTeam.members[i];
-    if (v.startsWith('team:')) { m.team = v.slice(5); m.base = ''; m.agent = null; return; }
+    if (v.startsWith('team:')) { m.team = v.slice(5); m.base = ''; m.agent = null; m.expanded = true; return; }
     m.team = '';
     m.base = v;
     m.agent = v ? null : (m.agent ?? bareEditor());
+    m.expanded = true;
   }
   /** Teams offerable as a member: every OTHER team (the server also refuses
    * cycles through longer chains). */
@@ -759,107 +760,131 @@
         <label>{t('teamsDesc')}
           <textarea rows="2" bind:value={editingTeam.description} placeholder={t('teamsDescPh')}></textarea>
         </label>
-        <div class="pick-block">
-          <span class="pick-label">{t('teamsMembers')}</span>
+        <div class="pick-block team-members">
+          <div class="members-head">
+            <span class="pick-label">{t('teamsMembers')}</span>
+            <span class="members-count">{editingTeam.members.length}/{TEAM_MAX}</span>
+          </div>
           {#each editingTeam.members as m, i (i)}
-            <div class="member">
+            <div class="member" class:open={m.expanded}>
               <div class="member-head">
                 {#if m.team}
-                  <span class="member-team"><Icon name="collab" size={12} />{t('teamsSubTeam')}</span>
+                  <span class="member-team"><Icon name="collab" size={12} />{m.team}</span>
                 {:else}
                   <input class="member-name" bind:value={m.name} placeholder="dev" aria-label={t('teamsMemberName')} />
                 {/if}
-                <Select value={kindOf(m)} dense ariaLabel={t('teamsBase')}
-                  options={[
-                    { value: '', label: t('teamsBare') },
-                    ...defs.map((d) => ({ value: d.name, label: `${t('teamsCustomAgent')}: ${d.name}`, icon: backendIcon(d.backend) ?? undefined })),
-                    ...subTeams.map((x) => ({ value: `team:${x.name}`, label: `${t('teamsSubTeam')}: ${x.name}` })),
-                  ]}
-                  onchange={(v) => setBase(i, v)} />
-                <button class="icon-btn danger" title={t('teamsRemoveMember')} aria-label={t('teamsRemoveMember')} disabled={editingTeam.members.length <= 1} onclick={() => removeMember(i)}><Icon name="x" size={13} /></button>
+                <div class="member-source">
+                  <Select value={kindOf(m)} dense ariaLabel={t('teamsBase')}
+                    options={[
+                      { value: '', label: t('teamsBare') },
+                      ...defs.map((d) => ({ value: d.name, label: `${t('teamsCustomAgent')}: ${d.name}`, icon: backendIcon(d.backend) ?? undefined })),
+                      ...subTeams.map((x) => ({ value: `team:${x.name}`, label: `${t('teamsSubTeam')}: ${x.name}` })),
+                    ]}
+                    onchange={(v) => setBase(i, v)} />
+                </div>
+                <div class="member-actions">
+                  <button class="icon-btn" type="button" aria-expanded={m.expanded}
+                    title={t(m.expanded ? 'teamsCollapseMember' : 'teamsExpandMember')}
+                    aria-label={t(m.expanded ? 'teamsCollapseMember' : 'teamsExpandMember')}
+                    onclick={() => m.expanded = !m.expanded}>
+                    <span class="flip" class:on={m.expanded}><Icon name="chevron-down" size={12} /></span>
+                  </button>
+                  <button class="icon-btn danger" type="button" title={t('teamsRemoveMember')} aria-label={t('teamsRemoveMember')}
+                    disabled={editingTeam.members.length <= 1} onclick={() => removeMember(i)}><Icon name="x" size={13} /></button>
+                </div>
               </div>
-              {#if m.base && !m.team}
-                <!-- A derived member may still pick its OWN model/effort (owner,
-                     2026-09-02: kiro's many no-quota models → one base, four
-                     reviewers on four models). Empty = the base's. -->
-                <div class="row2">
-                  <label>{t('agentsModel')}
-                    <Select bind:value={m.model} editable dense options={modelsByBackend[baseBackend(m)] ?? []}
-                      placeholder={t('teamsInherit')} ariaLabel={t('agentsModel')} />
-                  </label>
-                  <label>{t('agentsEffort')}
-                    <Select bind:value={m.effort} dense
-                      options={[{ value: '', label: t('teamsInherit') }, ...(EFFORTS[baseBackend(m)] ?? [])]}
-                      ariaLabel={t('agentsEffort')} />
-                  </label>
+              {#if m.expanded}
+                <div class="member-body appear">
+                  {#if m.base && !m.team}
+                    <!-- A custom agent inherits its definition. Only explicit
+                         runtime overrides and the team role live here. -->
+                    <section class="member-section">
+                      <div class="member-section-title">{t('teamsOverrides')}</div>
+                      <div class="row2">
+                        <label>{t('agentsModel')}
+                          <Select bind:value={m.model} editable dense options={modelsByBackend[baseBackend(m)] ?? []}
+                            placeholder={t('teamsInherit')} ariaLabel={t('agentsModel')} />
+                        </label>
+                        <label>{t('agentsEffort')}
+                          <Select bind:value={m.effort} dense
+                            options={[{ value: '', label: t('teamsInherit') }, ...(EFFORTS[baseBackend(m)] ?? [])]}
+                            ariaLabel={t('agentsEffort')} />
+                        </label>
+                      </div>
+                    </section>
+                  {/if}
+                  {#if !m.base && !m.team && m.agent}
+                    <!-- Bare coding agent: this team owns its complete definition.
+                         Registry agents and sub-teams inherit theirs and never
+                         expose prompt / Skills / MCP here. -->
+                    <section class="member-section">
+                      <div class="member-section-title">{t('teamsBareConfig')}</div>
+                      <div class="row3">
+                        <label>{t('agentsBackend')}
+                          <Select bind:value={m.agent.backend} dense ariaLabel={t('agentsBackend')}
+                            options={BACKENDS.map((b) => ({ value: b, icon: backendIcon(b) ?? undefined }))} />
+                        </label>
+                        <label>{t('agentsModel')}
+                          <Select bind:value={m.agent.model} editable dense options={modelsByBackend[m.agent.backend] ?? []}
+                            placeholder={t('agentsModelDefault')} ariaLabel={t('agentsModel')} />
+                        </label>
+                        <label>{t('agentsEffort')}
+                          <Select bind:value={m.agent.effort} dense
+                            options={[{ value: '', label: t('agentsModelDefault') }, ...(EFFORTS[m.agent.backend] ?? [])]}
+                            ariaLabel={t('agentsEffort')} />
+                        </label>
+                      </div>
+                      <label>{t('agentsSystem')}
+                        <textarea rows="4" bind:value={m.agent.system} placeholder={t('agentsSystemPh')}></textarea>
+                      </label>
+                      <div class="member-assets">
+                        <div class="pick-block">
+                          <span class="pick-label">{t('agentsSkills')}</span>
+                          {#if skills.length}
+                            <div class="pick-row">
+                              {#each skills as sk (sk.name)}
+                                <button type="button" class="pick" class:sel={m.agent.skillSel.includes(sk.name)}
+                                  onclick={() => m.agent.skillSel = toggleSel(m.agent.skillSel, sk.name)}>
+                                  <Icon name="zap" size={11} />{sk.name}
+                                </button>
+                              {/each}
+                            </div>
+                          {:else}
+                            <p class="hint">{t('agentsNoSkills')}</p>
+                          {/if}
+                        </div>
+                        <div class="pick-block">
+                          <span class="pick-label">{t('agentsMcp')}</span>
+                          {#if mcps.length}
+                            <div class="pick-row">
+                              {#each mcps as server (server.name)}
+                                <button type="button" class="pick" class:sel={m.agent.mcpSel.includes(server.name)}
+                                  onclick={() => m.agent.mcpSel = toggleSel(m.agent.mcpSel, server.name)}>
+                                  <Icon name="link" size={11} />{server.name}
+                                </button>
+                              {/each}
+                            </div>
+                          {:else}
+                            <p class="hint">{t('agentsNoMcp')}</p>
+                          {/if}
+                          {#if m.agent.mcpExtra.length}
+                            <p class="hint">{t('agentsMcpExtra').replace('{n}', String(m.agent.mcpExtra.length))}</p>
+                          {/if}
+                        </div>
+                      </div>
+                    </section>
+                  {/if}
+                  <section class="member-section role-section">
+                    <label>{m.team ? t('teamsSubBrief') : t('teamsRole')}
+                      <textarea rows="3" bind:value={m.role} placeholder={m.team ? t('teamsSubBriefPh') : t('teamsRolePh')}></textarea>
+                    </label>
+                  </section>
                 </div>
               {/if}
-              {#if !m.base && !m.team && m.agent}
-                <!-- Bare coding agent: this team owns its complete definition.
-                     Registry agents and sub-teams inherit theirs and never
-                     expose prompt / Skills / MCP here. -->
-                <div class="row2">
-                  <label>{t('agentsBackend')}
-                    <Select bind:value={m.agent.backend} dense ariaLabel={t('agentsBackend')}
-                      options={BACKENDS.map((b) => ({ value: b, icon: backendIcon(b) ?? undefined }))} />
-                  </label>
-                  <label>{t('agentsModel')}
-                    <Select bind:value={m.agent.model} editable dense options={modelsByBackend[m.agent.backend] ?? []}
-                      placeholder={t('agentsModelDefault')} ariaLabel={t('agentsModel')} />
-                  </label>
-                </div>
-                <div class="row2">
-                  <label>{t('agentsEffort')}
-                    <Select bind:value={m.agent.effort} dense
-                      options={[{ value: '', label: t('agentsModelDefault') }, ...(EFFORTS[m.agent.backend] ?? [])]}
-                      ariaLabel={t('agentsEffort')} />
-                  </label>
-                  <div></div>
-                </div>
-                <label>{t('agentsSystem')}
-                  <textarea rows="3" bind:value={m.agent.system} placeholder={t('agentsSystemPh')}></textarea>
-                </label>
-                <div class="pick-block">
-                  <span class="pick-label">{t('agentsSkills')}</span>
-                  {#if skills.length}
-                    <div class="pick-row">
-                      {#each skills as sk (sk.name)}
-                        <button type="button" class="pick" class:sel={m.agent.skillSel.includes(sk.name)}
-                          onclick={() => m.agent.skillSel = toggleSel(m.agent.skillSel, sk.name)}>
-                          <Icon name="zap" size={11} />{sk.name}
-                        </button>
-                      {/each}
-                    </div>
-                  {:else}
-                    <p class="hint">{t('agentsNoSkills')}</p>
-                  {/if}
-                </div>
-                <div class="pick-block">
-                  <span class="pick-label">{t('agentsMcp')}</span>
-                  {#if mcps.length}
-                    <div class="pick-row">
-                      {#each mcps as server (server.name)}
-                        <button type="button" class="pick" class:sel={m.agent.mcpSel.includes(server.name)}
-                          onclick={() => m.agent.mcpSel = toggleSel(m.agent.mcpSel, server.name)}>
-                          <Icon name="link" size={11} />{server.name}
-                        </button>
-                      {/each}
-                    </div>
-                  {:else}
-                    <p class="hint">{t('agentsNoMcp')}</p>
-                  {/if}
-                  {#if m.agent.mcpExtra.length}
-                    <p class="hint">{t('agentsMcpExtra').replace('{n}', String(m.agent.mcpExtra.length))}</p>
-                  {/if}
-                </div>
-              {/if}
-              <label>{m.team ? t('teamsSubBrief') : t('teamsRole')}
-                <textarea rows="2" bind:value={m.role} placeholder={m.team ? t('teamsSubBriefPh') : t('teamsRolePh')}></textarea>
-              </label>
             </div>
           {/each}
           {#if editingTeam.members.length < TEAM_MAX}
-            <button class="pick" type="button" onclick={addMember}><Icon name="plus" size={11} />{t('teamsAddMember')}</button>
+            <button class="chip-btn team-add" type="button" onclick={addMember}><Icon name="plus" size={12} />{t('teamsAddMember')}</button>
           {:else}
             <p class="hint">{t('teamsMax').replace('{n}', String(TEAM_MAX))}</p>
           {/if}
@@ -1068,7 +1093,7 @@
   }
   .desc-view:hover { background: var(--surface2); }
 
-  .editor { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; max-width: 720px; }
+  .editor { flex: 1; overflow-y: auto; padding: 14px 18px 24px; display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 860px; box-sizing: border-box; }
   .err { color: var(--danger); font-size: var(--fs-ui); background: var(--danger-bg); border-radius: var(--ui-radius-row); padding: 8px 12px; }
   /* Field captions are QUIET — the field carries the content, the label only
      names it (the dialog dialect's .dlg-note voice). fs-ui labels over
@@ -1087,13 +1112,37 @@
   textarea { resize: vertical; line-height: 1.5; }
   textarea.mono { font-family: var(--font-mono); }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  /* A team member is one bordered panel in the editor's own dialect (board
-     #74): the head row is name + base + remove, the body the role (and, for a
-     custom member, the agent identity fields). */
-  .member { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--ui-radius-row); background: var(--surface); }
-  .member-head { display: grid; grid-template-columns: minmax(80px, 1fr) minmax(140px, 1.4fr) auto; gap: 8px; align-items: center; }
-  .member-name { min-width: 0; }
-  .member-team { display: inline-flex; align-items: center; gap: 5px; min-width: 0; color: var(--text2); font-size: var(--fs-ui); }
+  .row3 { display: grid; grid-template-columns: 0.8fr 1.25fr 0.8fr; gap: 10px; }
+  .team-members { gap: 8px; }
+  .members-head { display: flex; align-items: center; gap: 8px; min-height: 22px; }
+  .members-count { margin-left: auto; color: var(--text3); font: 500 var(--fs-micro)/1 var(--font-mono); }
+  /* One repeated member card, compact at rest and unframed within: sections
+     use dividers instead of cards-inside-cards. */
+  .member {
+    display: flex; flex-direction: column; overflow: hidden;
+    border: 1px solid var(--border); border-radius: var(--ui-radius-row); background: var(--surface);
+    transition: border-color var(--t-fast), background var(--t-fast);
+  }
+  .member.open { border-color: var(--border2); }
+  .member-head {
+    display: grid; grid-template-columns: minmax(120px, 1fr) minmax(190px, 1.35fr) auto;
+    gap: 8px; align-items: center; min-height: 44px; padding: 8px 10px;
+  }
+  .member-name { min-width: 0; width: 100%; }
+  .member-team {
+    display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+    color: var(--text); font-size: var(--fs-ui); font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .member-source { min-width: 0; }
+  .member-actions { display: flex; align-items: center; gap: 2px; }
+  .member-actions .flip { display: inline-flex; }
+  .member-body { display: flex; flex-direction: column; border-top: 1px solid var(--border2); }
+  .member-section { display: flex; flex-direction: column; gap: 10px; padding: 11px 12px; }
+  .member-section + .member-section { border-top: 1px solid var(--border2); }
+  .member-section-title { color: var(--text2); font-size: var(--fs-meta); font-weight: 600; }
+  .member-assets { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+  .team-add { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; margin-top: 2px; }
   .team-row { align-items: flex-start; }
   .r-col { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
   .r-sub { font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1109,6 +1158,14 @@
   .pick-glyph { display: inline-flex; }
   .pick:hover { border-color: var(--input-border); }
   .pick.sel { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+  @media (max-width: 760px) {
+    .editor { max-width: none; padding: 12px 12px 22px; }
+    .member-head { grid-template-columns: minmax(0, 1fr) auto; }
+    .member-source { grid-column: 1 / -1; grid-row: 2; }
+    .member-actions { grid-column: 2; grid-row: 1; }
+    .row2, .row3, .member-assets { grid-template-columns: minmax(0, 1fr); }
+    .member-section { padding: 11px 10px; }
+  }
   .md-preview { border-top: 1px solid var(--border2); margin-top: 6px; display: flex; flex-direction: column; gap: 8px; }
   .file-pre {
     margin: 0; padding: 8px 10px; overflow: auto; max-height: 60vh;

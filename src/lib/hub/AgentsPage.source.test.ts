@@ -44,3 +44,20 @@ test('team members have exactly three sources, and only bare agents own prompt, 
     /if \(v\.startsWith\('team:'\)\)[\s\S]{0,160}?m\.agent = null[\s\S]{0,160}?m\.agent = v \? null : \(m\.agent \?\? bareEditor\(\)\)/u,
     'switching to inherited sources drops bare-only configuration');
 });
+
+test('the team editor keeps a compact member summary and responsive expanded details', () => {
+  assert.match(source, /class="member" class:open=\{m\.expanded\}/u, 'each member has one stable card');
+  assert.match(source, /aria-expanded=\{m\.expanded\}[\s\S]{0,520}?class:on=\{m\.expanded\}/u,
+    'one icon control names and turns with the disclosure state');
+  assert.match(source, /\{#if m\.expanded\}[\s\S]{0,120}?<div class="member-body appear">/u,
+    'details mount only while expanded');
+  assert.match(source, /class="member-section"[\s\S]{0,220}?teamsOverrides/u,
+    'custom-agent overrides have a clear section');
+  assert.match(source, /class="member-section"[\s\S]{0,220}?teamsBareConfig/u,
+    'bare-agent configuration has a clear section');
+  assert.match(source, /class="chip-btn team-add"/u, 'Add member is a command, not a membership chip');
+  assert.match(source, /\.member-head \{[\s\S]{0,180}?grid-template-columns: minmax\(120px, 1fr\) minmax\(190px, 1\.35fr\) auto/u,
+    'desktop summaries reserve stable tracks for name, source and actions');
+  assert.match(source, /@media \(max-width: 760px\) \{[\s\S]*?\.member-source \{ grid-column: 1 \/ -1; grid-row: 2; \}[\s\S]*?\.row2, \.row3, \.member-assets \{ grid-template-columns: minmax\(0, 1fr\); \}/u,
+    'compact moves source below the name and returns every detail grid to one column');
+});
