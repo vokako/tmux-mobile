@@ -753,10 +753,17 @@ pub(super) fn handle_hub_request(req: &Request, team: Option<&dyn TeamBridge>, n
             // which is still better than an agent that does not come back.
             let mut resumed = false;
             if let Ok(Some(project)) = crate::projects::project_for_session(session) {
-                // Bring its hooks up to date with this build first: the config
-                // was written by whatever version spawned it, and a stale hook
-                // set is exactly how observation goes quiet.
-                crate::projects::spawn::refresh_hooks(&project.path, agent);
+                // Bring the agent's materials up to date with the CURRENT
+                // definition + app-wide AGENTS.md first: the recipe replay is
+                // verbatim, so whatever is on disk now is what the agent will
+                // be. `refresh_agent` re-materializes prompt/config/recipe
+                // when the window name resolves to a registry def; when it
+                // cannot (a uniquified teammate, a team-role synthetic), the
+                // hooks refresh below still repairs observation, exactly as
+                // before.
+                if !crate::projects::spawn::refresh_agent(&project.path, session, agent) {
+                    crate::projects::spawn::refresh_hooks(&project.path, agent);
+                }
                 resumed = crate::projects::up(&project.id).is_ok()
                     && window_of_agent(session, agent).is_some();
             }

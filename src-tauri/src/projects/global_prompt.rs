@@ -11,10 +11,13 @@
 //! before the agent's own persona, because a house rule outranks a role.
 //!
 //! It is a FILE, not a database row, because it is markdown the human writes
-//! and wants to `cat`, diff and back up like a CLAUDE.md. Read at SPAWN time:
-//! a change reaches every agent started after it; a running agent keeps the
-//! prompt it was started with (its launch recipe is replayed verbatim), so
-//! `tmm agent restart` is how an existing one picks the new text up.
+//! and wants to `cat`, diff and back up like a CLAUDE.md. Read when an agent's
+//! home is MATERIALIZED: a change reaches every agent started after it, and
+//! `tmm agent restart` re-materializes a registry-named agent
+//! (`spawn::refresh_agent`) so it comes back with the current text. The one
+//! exception is a window whose name resolves to no registry def (a uniquified
+//! teammate like `lead-2`, a team-role synthetic): its recipe replays the
+//! spawn-time snapshot verbatim, and a fresh spawn is how it picks up changes.
 
 use std::path::PathBuf;
 

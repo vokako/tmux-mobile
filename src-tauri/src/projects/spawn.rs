@@ -122,33 +122,88 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
     // directory under `.tmm/agents/` and a tmux window name.
     super::agents::valid_name(&window_name)?;
 
-    let home = agent_home(&workspace, &window_name);
+    let m = materialize(&def, &window_name, req.session, &workspace, req.brief, req.by, req.team.as_deref())?;
+    let home = m.home;
+    let env = m.env;
+
+    tmux::ensure_session(req.session, &workspace)?;
+    let pane = tmux::new_named_window(req.session, &window_name, &workspace)?;
+    std::thread::sleep(std::time::Duration::from_millis(800));
+
+    let prefix = env
+        .iter()
+        .map(|(k, v)| format!("{}={}", k, shared::shell_quote(v)))
+        .collect::<Vec<_>>()
+        .join(" ");
+    // The launch line ends with the first prompt ONLY when a brief gave us
+    // something for the agent to act on; otherwise the CLI opens and waits.
+    // Restart fallback is different from a new hire: its isolated home already
+    // owns the conversation, so resume recent even when the slot/exact id raced
+    // the capture tick.
+    let launch_cmd = launch_command(&m.cmd, &def.backend, req.brief, req.resume);
+    let full = format!("{} {}", prefix, launch_cmd);
+    // NEVER send the full line via send-keys — see team/launch.rs: tty shims
+    // swallow bursts ≳2KB. Source a script instead.
+    let script = shared::write_launch_script(&home, &window_name, &full)?;
+    tmux::send_command(&pane, &format!(". {}", shared::shell_quote(&script.to_string_lossy())))?;
+    if let Some(confirmation) = m.confirmation {
+        shared::confirm_startup_prompt(pane.clone(), confirmation);
+    }
+
+    Ok(json!({ "window_name": window_name, "pane": pane, "backend": def.backend }))
+}
+
+/// Everything an agent IS on disk: its isolated home, rendered backend
+/// config, launch command, environment, and the recipe that replays them.
+struct Materialized {
+    home: PathBuf,
+    cmd: String,
+    env: Vec<(String, String)>,
+    confirmation: Option<shared::StartupConfirmation>,
+}
+
+/// Materialize (or RE-materialize) an agent's home from its definition:
+/// prompt, backend config, skills, MCP seed, hooks, and the launch recipe —
+/// everything but the tmux window. `spawn` calls it before opening the
+/// window; `refresh_agent` calls it again at restart, so a replayed recipe
+/// launches the CURRENT definition and app-wide instructions instead of the
+/// spawn-time snapshot.
+fn materialize(
+    def: &RegAgent,
+    window_name: &str,
+    session: &str,
+    workspace: &str,
+    brief: &str,
+    by: &str,
+    team: Option<&str>,
+) -> Result<Materialized, String> {
+    let home = agent_home(workspace, window_name);
     std::fs::create_dir_all(&home).map_err(|e| format!("create agent home: {e}"))?;
-    ensure_gitignore(&workspace);
+    ensure_gitignore(workspace);
 
     // The software-wide instructions (`<config>/AGENTS.md`) lead every prompt,
     // on every backend — read now, so a spawn always carries the current text.
-    let system_prompt = build_prompt(&def, &window_name, req.session, req.brief, req.by, &super::global_prompt::read());
-    let skills = resolve_skill_refs(&def, &home);
+    let system_prompt = build_prompt(def, window_name, session, brief, by, &super::global_prompt::read());
+    let skills = resolve_skill_refs(def, &home);
     // MCP is ONE door now (owner, 2026-08-28): registry defs seed the shared
     // workspace config that `tmm mcp` reads per call — never a backend's
     // native config, which loads once at CLI start and made every server
     // change a restart.
-    let mcp_config = seed_mcp_config(Path::new(&workspace), &mcp_defs(&def))?;
+    let mcp_config = seed_mcp_config(Path::new(workspace), &mcp_defs(def))?;
 
     let prepared = match def.backend.as_str() {
-        "kiro" => render_kiro(&def, &window_name, &home, &system_prompt, &skills)?,
-        "claude" => render_claude(&def, &window_name, &home, Path::new(&workspace), &system_prompt, &skills)?,
-        "codex" => render_codex(&def, &window_name, &home, &system_prompt, &skills)?,
-        "grok" => render_grok(&def, &window_name, &home, &system_prompt, &skills)?,
-        "omp" => render_omp(&def, &window_name, &home, &system_prompt, &skills)?,
+        "kiro" => render_kiro(def, window_name, &home, &system_prompt, &skills)?,
+        "claude" => render_claude(def, window_name, &home, Path::new(workspace), &system_prompt, &skills)?,
+        "codex" => render_codex(def, window_name, &home, &system_prompt, &skills)?,
+        "grok" => render_grok(def, window_name, &home, &system_prompt, &skills)?,
+        "omp" => render_omp(def, window_name, &home, &system_prompt, &skills)?,
         other => return Err(format!("unknown backend '{other}'")),
     };
 
     // Env every spawned agent gets: its identity for tmm.
     let mut env = prepared.env;
-    env.push(("TMM_PROJECT".into(), req.session.to_string()));
-    env.push(("TMM_AGENT".into(), window_name.clone()));
+    env.push(("TMM_PROJECT".into(), session.to_string()));
+    env.push(("TMM_AGENT".into(), window_name.to_string()));
     // The MCP config is findable from ANY cwd, not just under the workspace.
     env.push(("TMM_MCP_CONFIG".into(), mcp_config.to_string_lossy().to_string()));
     // tmm sits next to the server binary, while user-installed backends and
@@ -172,33 +227,37 @@ pub fn spawn(req: &SpawnRequest) -> Result<Value, String> {
     // replays it). Written here, before the window exists, so a write failure
     // is a spawn failure with nothing left running — not a live agent that
     // restarts deaf on the generic launch path.
-    write_launch_recipe(&home, &def.backend, &env, &prepared.cmd, req.by, req.team.as_deref())?;
+    write_launch_recipe(&home, &def.backend, &env, &prepared.cmd, by, team)?;
+    Ok(Materialized { home, cmd: prepared.cmd, env, confirmation: prepared.confirmation })
+}
 
-    tmux::ensure_session(req.session, &workspace)?;
-    let pane = tmux::new_named_window(req.session, &window_name, &workspace)?;
-    std::thread::sleep(std::time::Duration::from_millis(800));
-
-    let prefix = env
-        .iter()
-        .map(|(k, v)| format!("{}={}", k, shared::shell_quote(v)))
-        .collect::<Vec<_>>()
-        .join(" ");
-    // The launch line ends with the first prompt ONLY when a brief gave us
-    // something for the agent to act on; otherwise the CLI opens and waits.
-    // Restart fallback is different from a new hire: its isolated home already
-    // owns the conversation, so resume recent even when the slot/exact id raced
-    // the capture tick.
-    let launch_cmd = launch_command(&prepared.cmd, &def.backend, req.brief, req.resume);
-    let full = format!("{} {}", prefix, launch_cmd);
-    // NEVER send the full line via send-keys — see team/launch.rs: tty shims
-    // swallow bursts ≳2KB. Source a script instead.
-    let script = shared::write_launch_script(&home, &window_name, &full)?;
-    tmux::send_command(&pane, &format!(". {}", shared::shell_quote(&script.to_string_lossy())))?;
-    if let Some(confirmation) = prepared.confirmation {
-        shared::confirm_startup_prompt(pane.clone(), confirmation);
+/// Re-materialize an existing managed agent from its CURRENT definition and
+/// the current app-wide AGENTS.md, preserving the recipe's spawner and team.
+/// This is what makes `restart` mean "come back up to date": the recipe replay
+/// itself is verbatim, so without this an agent restarted forever with its
+/// spawn-time prompt (global_prompt.rs promised otherwise — owner noticed,
+/// 2026-09-08). `false` when the window is not one we can refresh — no recipe
+/// on disk, or a name that resolves to no registry def (a uniquified teammate
+/// like `lead-2`, a team-role synthetic) — those keep replaying their
+/// spawn-time snapshot, exactly as before.
+pub fn refresh_agent(project_path: &str, session: &str, window_name: &str) -> bool {
+    let Ok(Some(def)) = super::registry_get(window_name) else { return false };
+    let home = agent_home(project_path, window_name);
+    let Ok(recipe) = std::fs::read_to_string(home.join("launch.json")) else { return false };
+    let recipe: Value = match serde_json::from_str(&recipe) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    // A def edited into an invalid model must not brick the restart: keep the
+    // old materials rather than write a config the backend will refuse.
+    if super::models::validate(&def.backend, &def.model).is_err()
+        || super::models::validate_effort(&def.backend, &def.effort).is_err()
+    {
+        return false;
     }
-
-    Ok(json!({ "window_name": window_name, "pane": pane, "backend": def.backend }))
+    let by = recipe.get("spawned_by").and_then(|v| v.as_str()).unwrap_or("");
+    let team = recipe.get("team").and_then(|v| v.as_str()).filter(|t| !t.is_empty());
+    materialize(&def, window_name, session, project_path, "", by, team).is_ok()
 }
 
 /// Window name = agent name, uniquified if taken (lead, lead-2, …). The window
@@ -2273,6 +2332,50 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         // Empty `by` (a human spawn) yields nobody to deliver to.
         write_launch_recipe(&home, "kiro", &[], "command kiro-cli chat --agent b", "", None).unwrap();
         assert_eq!(crate::projects::spawned_by(Some(&ws_str), "b"), None);
+        std::fs::remove_dir_all(&ws).ok();
+    }
+
+    /// Restart means "come back up to date": the recipe replay is verbatim, so
+    /// `refresh_agent` re-materializes the home from the CURRENT def first
+    /// (owner, 2026-09-08: restarting an agent did NOT pick up new prompt
+    /// text — global_prompt.rs promised it would). The spawner survives (it is
+    /// the done-summary feedback edge) and the original brief does not (the
+    /// conversation is resumed; the brief is history).
+    #[test]
+    fn refresh_agent_rematerializes_from_the_current_def_and_keeps_the_spawner() {
+        super::super::tests::use_test_store();
+        let ws = std::env::temp_dir().join(format!("tmm-refresh-{}", uuid::Uuid::new_v4()));
+        let ws_str = ws.to_string_lossy().to_string();
+        let name = "rfagent";
+        let save = |persona: &str| {
+            super::super::registry_save(&json!({
+                "name": name, "backend": "kiro", "model": "", "effort": "",
+                "system": persona, "skills": "[]", "mcp": "[]", "can_hire": false
+            }))
+            .unwrap()
+        };
+        save("Old persona.");
+        let def = super::super::registry_get(name).unwrap().expect("saved def");
+        materialize(&def, name, "proj", &ws_str, "fix the login bug", "lead", None).unwrap();
+        let cfg = agent_home(&ws_str, name).join("agents").join(format!("{name}.json"));
+        let read = |p: &Path| -> Value { serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap() };
+        assert!(read(&cfg)["prompt"].as_str().unwrap().contains("Old persona."));
+
+        // The def evolves after the spawn; restart must launch THIS text.
+        save("New persona.");
+        assert!(refresh_agent(&ws_str, "proj", name), "a registry-named agent refreshes");
+        let prompt = read(&cfg)["prompt"].as_str().unwrap().to_string();
+        assert!(prompt.contains("New persona."), "current def text: {prompt}");
+        assert!(!prompt.contains("Old persona."));
+        assert!(!prompt.contains("fix the login bug"), "the spawn brief is history, not part of a refresh");
+        let recipe = read(&agent_home(&ws_str, name).join("launch.json"));
+        assert_eq!(recipe["spawned_by"], "lead", "the feedback edge survives");
+
+        // No def / no recipe = no refresh — those windows replay verbatim.
+        assert!(!refresh_agent(&ws_str, "proj", "no-such-def"));
+        std::fs::remove_dir_all(agent_home(&ws_str, name)).unwrap();
+        assert!(!refresh_agent(&ws_str, "proj", name), "a home without a recipe is not ours to rewrite");
+        super::super::registry_delete(name).ok();
         std::fs::remove_dir_all(&ws).ok();
     }
 }
