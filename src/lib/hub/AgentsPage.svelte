@@ -191,6 +191,16 @@
   }
   $effect(() => { if (visible) reload(); });
 
+  // The rows column's width survives reload the same way App restores
+  // --sidebar-w and Hub its --hub-drawer-w: SideHandle is the only other
+  // writer (board #94).
+  $effect(() => {
+    const saved = parseInt(localStorage.getItem('tmux_agents_rows_w') || '', 10);
+    if (saved >= 180 && saved <= 420) {
+      document.documentElement.style.setProperty('--agents-rows-w', saved + 'px');
+    }
+  });
+
   // The Hub's agent menu can ask for one agent's editor ("configure agent" —
   // the model's home is here, not quoted in the menu; owner, 2026-08-25).
   // Depends on `defs` too: the request usually arrives WITH the tab switch,
@@ -551,7 +561,7 @@
       {/if}
 {/snippet}
 
-<div class="agents-root" class:editing={drilled} class:drill-fwd={drillAnim === 'fwd'} class:drill-back={drillAnim === 'back'}>
+<div class="agents-root" class:editing={drilled} class:with-rows={!section} class:drill-fwd={drillAnim === 'fwd'} class:drill-back={drillAnim === 'back'}>
   <aside class="sidebar">
     <SideHandle />
     <div class="side-scroll subtle-scroll" class:reveal={justLoaded} use:scrollFade>
@@ -560,8 +570,9 @@
       {:else}
         <!-- Desktop (owner, 2026-09-04: "左边侧边栏先写配置条目 右边展示详细
              内容 不要全堆在一起了"): the sidebar lists the CATEGORIES, like
-             Settings' — no icons, the words carry it (owner, 2026-08-25) — and
-             the main column shows the chosen category's rows, then its editor. -->
+             Settings' — no icons, the words carry it (owner, 2026-08-25).
+             The category's rows are the SECOND column (board #94), and the
+             main column holds the editor. -->
         {#each CATS as c (c.id)}
           <button class="side-row" class:open={cat === c.id} onclick={() => pickCat(c.id)}
             use:hoverInfo={() => ({ title: t(c.label), text: t(c.hint) })}>
@@ -572,6 +583,28 @@
       {/if}
     </div>
   </aside>
+
+  {#if !section}
+    <!-- The desktop's SECOND level (board #94: "右侧拆分成两级"): the chosen
+         category's rows are their own column, so an open editor no longer
+         REPLACES them — the list stays beside what it selected, the same
+         master-detail every other desktop page speaks. The global
+         instructions have no roster, only the one document, so their level
+         is that single row. Compact keeps the drill — this column is
+         desktop-only. -->
+    <aside class="cat-rows">
+      <SideHandle varName="--agents-rows-w" storeKey="tmux_agents_rows_w" min={180} max={420} def={240} label={t(CAT_META[cat].label)} />
+      <div class="rows-scroll subtle-scroll" class:reveal={justLoaded} use:scrollFade>
+        {#if cat === 'global'}
+          <button class="side-row" class:open={!!editingGlobal} onclick={startGlobal}>
+            <span class="r-name">AGENTS.md</span>
+          </button>
+        {:else}
+          {@render rows(cat)}
+        {/if}
+      </div>
+    </aside>
+  {/if}
 
   <main class="mid">
     {#if editingGlobal}
@@ -870,9 +903,9 @@
         </div>
       </div>
     {:else if !section}
-      <!-- Desktop, nothing being edited: the chosen category's own page —
-           its rows and a "+" in the head. The global instructions category
-           has no rows, only its editor, so it opens straight into it. -->
+      <!-- Desktop, nothing being edited: the rows live in their own column
+           now (board #94), so the main column is the category's front page —
+           its name, the "+", and the hint that used to sit above the rows. -->
       <div class="page-head">
         <h1>{t(CAT_META[cat].label)}</h1>
         <span class="spacer"></span>
@@ -884,9 +917,8 @@
           {/if}
         </div>
       </div>
-      <div class="cat-list subtle-scroll">
-        <p class="hint wide">{t(CAT_META[cat].hint)}</p>
-        {#if cat !== 'global'}{@render rows(cat)}{/if}
+      <div class="placeholder">
+        <p class="hint">{t(CAT_META[cat].hint)}</p>
       </div>
     {:else}
       <div class="page-head"><h1>{t(SECTION_META[section]?.[0] ?? 'agentsTitle')}</h1></div>
@@ -905,8 +937,16 @@
 
 <style>
   .agents-root { height: 100%; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 0; background: var(--bg); }
+  /* The desktop's three levels (board #94): categories | the category's rows |
+     the editor. The rows column has its own remembered width, same SideHandle
+     dialect as every other divider. */
+  .agents-root.with-rows { grid-template-columns: var(--sidebar-w) var(--agents-rows-w, 240px) minmax(0, 1fr); }
+  .cat-rows { position: relative; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+  .rows-scroll { flex: 1; overflow-y: auto; padding: 8px; }
   @media (max-width: 760px) {
-    .agents-root { grid-template-columns: minmax(0, 1fr); }
+    .agents-root, .agents-root.with-rows { grid-template-columns: minmax(0, 1fr); }
+    /* Compact keeps the two-level drill: the rows column is desktop-only. */
+    .cat-rows { display: none; }
     /* Compact: the list is the page; editing takes the screen. A full-width
        list has no column beside it, so its divider would sit at the screen's
        right edge as a stray line (owner, 2026-08-27). */
@@ -933,10 +973,6 @@
   .m-badge { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border: 1px solid var(--accent); border-radius: 4px; color: var(--accent); font-size: var(--fs-micro); font-weight: 700; line-height: 1; }
 
   .mid { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-  /* The desktop category page: the kind's rows in the main column, the same
-     .side-row dialect the phone's list uses, capped like the editor. */
-  .cat-list { flex: 1; overflow-y: auto; padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 2px; max-width: 720px; }
-  .cat-list > .hint { margin: 0 0 8px; }
   .spacer { flex: 1; }
   /* The head actions move as ONE block: on a phone they wrap under the
      title together instead of scattering one button per row. */
