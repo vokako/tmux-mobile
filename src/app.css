@@ -785,7 +785,8 @@ button.side-win:hover { background: var(--surface2); color: var(--text); }
   /* Settings / Preferences / Agents editor */
   .card, .connect-btn, .cancel-btn, .share-btn, .hist-list, .setting-card,
   .text-input, .address-list button, .disconnect, .empty-connection button,
-  .agents-root input, .agents-root textarea, .md-doc,
+  .agents-root input, .agents-root textarea, .agents-root .member,
+  .agents-root .member-ava, .md-doc,
   /* shared ui components */
   .sel-trigger, .sel-menu, .sel-opt, .ctx, .ctx button, .dlg, .dlg input,
   .picker, .picker-add, .pk-list, .install-banner, .install-icon

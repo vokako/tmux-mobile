@@ -110,6 +110,33 @@
   let pending = $state(null);
   let removing = $state(false);
 
+  /** Grow long prompts to their CSS max-height, then scroll within the field.
+   * The expanded member card should reveal writing, not another keyhole-sized
+   * control. CSS owns the responsive min/max; the action only follows it. */
+  function autoGrow(node) {
+    let frame = 0;
+    const fit = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        node.style.height = 'auto';
+        const max = Number.parseFloat(getComputedStyle(node).maxHeight);
+        const height = Number.isFinite(max) ? Math.min(node.scrollHeight, max) : node.scrollHeight;
+        node.style.height = `${height}px`;
+        node.style.overflowY = node.scrollHeight > height + 1 ? 'auto' : 'hidden';
+      });
+    };
+    node.addEventListener('input', fit);
+    window.addEventListener('resize', fit);
+    fit();
+    return {
+      destroy() {
+        cancelAnimationFrame(frame);
+        node.removeEventListener('input', fit);
+        window.removeEventListener('resize', fit);
+      },
+    };
+  }
+
   // The phone's back gesture peels this page's layers like Files does its
   // views (owner, 2026-08-24): dialog first, then an open editor (compact:
   // "the list is the page; editing takes the screen"), then the floor.
@@ -281,11 +308,27 @@
   }
   function addMember() {
     if (!editingTeam || editingTeam.members.length >= TEAM_MAX) return;
-    editingTeam.members = [...editingTeam.members, blankMember()];
+    editingTeam.members = [
+      ...editingTeam.members.map((member) => ({ ...member, expanded: false })),
+      blankMember(),
+    ];
   }
   function removeMember(i) {
     if (!editingTeam) return;
-    editingTeam.members = editingTeam.members.filter((_, k) => k !== i);
+    const removedWasOpen = editingTeam.members[i]?.expanded;
+    const members = editingTeam.members.filter((_, k) => k !== i);
+    if (removedWasOpen && members.length && !members.some((member) => member.expanded)) {
+      members[Math.min(i, members.length - 1)].expanded = true;
+    }
+    editingTeam.members = members;
+  }
+  function toggleMember(i) {
+    if (!editingTeam) return;
+    const opening = !editingTeam.members[i]?.expanded;
+    editingTeam.members = editingTeam.members.map((member, k) => ({
+      ...member,
+      expanded: opening && k === i,
+    }));
   }
   /** The source Select's value: '' for a bare backend, a registry agent name,
    * or `team:<name>` for a nested team. Switching source drops fields owned by
@@ -312,6 +355,13 @@
     modelsList(backend).then((r) => { modelsByBackend[backend] = r.models ?? []; }).catch(() => {});
   }
   const baseBackend = (m) => defs.find((d) => d.name === m.base)?.backend ?? '';
+  const memberBackend = (m) => m.team ? '' : (m.base ? baseBackend(m) : (m.agent?.backend ?? ''));
+  const memberName = (m) => m.team || m.name.trim() || t('teamsUnnamedMember');
+  const memberSource = (m) => m.team
+    ? `${t('teamsSubTeam')} · ${m.team}`
+    : m.base
+      ? `${t('teamsCustomAgent')} · ${m.base}`
+      : `${t('teamsBare')} · ${m.agent?.backend ?? 'kiro'}`;
   $effect(() => {
     for (const m of editingTeam?.members ?? []) {
       if (!m.base && m.agent) ensureModels(m.agent.backend);
@@ -752,14 +802,17 @@
         <button class="icon-btn go" disabled={!teamSavable} title={t('save')} aria-label={t('save')} onclick={saveTeam}><Icon name="check" size={14} /></button>
         </div>
       </div>
-      <div class="editor">
+      <div class="editor team-editor">
         {#if error}<div class="err appear">{error}</div>{/if}
-        <label>{t('teamsName')}
-          <input bind:value={editingTeam.name} disabled={!teamIsNew} placeholder="dev-squad" />
-        </label>
-        <label>{t('teamsDesc')}
-          <textarea rows="2" bind:value={editingTeam.description} placeholder={t('teamsDescPh')}></textarea>
-        </label>
+        <div class="team-basics">
+          <label>{t('teamsName')}
+            <input bind:value={editingTeam.name} disabled={!teamIsNew} placeholder="dev-squad" />
+          </label>
+          <label class="team-rules">{t('teamsDesc')}
+            <textarea class="rules-editor" rows="6" bind:value={editingTeam.description}
+              placeholder={t('teamsDescPh')} use:autoGrow></textarea>
+          </label>
+        </div>
         <div class="pick-block team-members">
           <div class="members-head">
             <span class="pick-label">{t('teamsMembers')}</span>
@@ -768,33 +821,59 @@
           {#each editingTeam.members as m, i (i)}
             <div class="member" class:open={m.expanded}>
               <div class="member-head">
-                {#if m.team}
-                  <span class="member-team"><Icon name="collab" size={12} />{m.team}</span>
-                {:else}
-                  <input class="member-name" bind:value={m.name} placeholder="dev" aria-label={t('teamsMemberName')} />
-                {/if}
-                <div class="member-source">
-                  <Select value={kindOf(m)} dense ariaLabel={t('teamsBase')}
-                    options={[
-                      { value: '', label: t('teamsBare') },
-                      ...defs.map((d) => ({ value: d.name, label: `${t('teamsCustomAgent')}: ${d.name}`, icon: backendIcon(d.backend) ?? undefined })),
-                      ...subTeams.map((x) => ({ value: `team:${x.name}`, label: `${t('teamsSubTeam')}: ${x.name}` })),
-                    ]}
-                    onchange={(v) => setBase(i, v)} />
-                </div>
+                <button class="member-summary" type="button" aria-expanded={m.expanded}
+                  aria-label={`${memberName(m)} · ${memberSource(m)} · ${t(m.expanded ? 'teamsCollapseMember' : 'teamsExpandMember')}`}
+                  title={t(m.expanded ? 'teamsCollapseMember' : 'teamsExpandMember')}
+                  onclick={() => toggleMember(i)}>
+                  {#if m.team}
+                    <span class="member-ava collab"><Icon name="collab" size={15} /></span>
+                  {:else if backendIcon(memberBackend(m))}
+                    <img class="member-ava" src={backendIcon(memberBackend(m))} alt={memberBackend(m)} />
+                  {:else}
+                    <span class="member-ava fallback" style:background={backendColor(memberBackend(m) || 'kiro')}
+                      >{memberName(m).slice(0, 1).toUpperCase()}</span>
+                  {/if}
+                  <span class="member-copy">
+                    <span class="member-title">{memberName(m)}</span>
+                    <span class="member-source">{memberSource(m)}</span>
+                    {#if m.role.trim()}<span class="member-role">{m.role.trim()}</span>{/if}
+                  </span>
+                  <span class="flip member-chevron" class:on={m.expanded}>
+                    <Icon name="chevron-down" size={13} />
+                  </span>
+                </button>
                 <div class="member-actions">
-                  <button class="icon-btn" type="button" aria-expanded={m.expanded}
-                    title={t(m.expanded ? 'teamsCollapseMember' : 'teamsExpandMember')}
-                    aria-label={t(m.expanded ? 'teamsCollapseMember' : 'teamsExpandMember')}
-                    onclick={() => m.expanded = !m.expanded}>
-                    <span class="flip" class:on={m.expanded}><Icon name="chevron-down" size={12} /></span>
-                  </button>
                   <button class="icon-btn danger" type="button" title={t('teamsRemoveMember')} aria-label={t('teamsRemoveMember')}
                     disabled={editingTeam.members.length <= 1} onclick={() => removeMember(i)}><Icon name="x" size={13} /></button>
                 </div>
               </div>
               {#if m.expanded}
                 <div class="member-body appear">
+                  <section class="member-section identity-section">
+                    <div class="member-section-title">{t('teamsMemberSetup')}</div>
+                    <div class="member-identity" class:single={!!m.team}>
+                      {#if !m.team}
+                        <label>{t('teamsMemberName')}
+                          <input class="member-name" bind:value={m.name} placeholder="dev" />
+                        </label>
+                      {/if}
+                      <label>{t('teamsBase')}
+                        <Select value={kindOf(m)} dense ariaLabel={t('teamsBase')}
+                          options={[
+                            { value: '', label: t('teamsBare') },
+                            ...defs.map((d) => ({ value: d.name, label: `${t('teamsCustomAgent')}: ${d.name}`, icon: backendIcon(d.backend) ?? undefined })),
+                            ...subTeams.map((x) => ({ value: `team:${x.name}`, label: `${t('teamsSubTeam')}: ${x.name}` })),
+                          ]}
+                          onchange={(v) => setBase(i, v)} />
+                      </label>
+                    </div>
+                  </section>
+                  <section class="member-section role-section">
+                    <label>{m.team ? t('teamsSubBrief') : t('teamsRole')}
+                      <textarea class="role-editor" rows="6" bind:value={m.role}
+                        placeholder={m.team ? t('teamsSubBriefPh') : t('teamsRolePh')} use:autoGrow></textarea>
+                    </label>
+                  </section>
                   {#if m.base && !m.team}
                     <!-- A custom agent inherits its definition. Only explicit
                          runtime overrides and the team role live here. -->
@@ -835,7 +914,8 @@
                         </label>
                       </div>
                       <label>{t('agentsSystem')}
-                        <textarea rows="4" bind:value={m.agent.system} placeholder={t('agentsSystemPh')}></textarea>
+                        <textarea class="agent-prompt" rows="12" bind:value={m.agent.system}
+                          placeholder={t('agentsSystemPh')} use:autoGrow></textarea>
                       </label>
                       <div class="member-assets">
                         <div class="pick-block">
@@ -874,11 +954,6 @@
                       </div>
                     </section>
                   {/if}
-                  <section class="member-section role-section">
-                    <label>{m.team ? t('teamsSubBrief') : t('teamsRole')}
-                      <textarea rows="3" bind:value={m.role} placeholder={m.team ? t('teamsSubBriefPh') : t('teamsRolePh')}></textarea>
-                    </label>
-                  </section>
                 </div>
               {/if}
             </div>
@@ -1094,6 +1169,7 @@
   .desc-view:hover { background: var(--surface2); }
 
   .editor { flex: 1; overflow-y: auto; padding: 14px 18px 24px; display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 860px; box-sizing: border-box; }
+  .editor.team-editor { max-width: 980px; gap: 16px; }
   .err { color: var(--danger); font-size: var(--fs-ui); background: var(--danger-bg); border-radius: var(--ui-radius-row); padding: 8px 12px; }
   /* Field captions are QUIET — the field carries the content, the label only
      names it (the dialog dialect's .dlg-note voice). fs-ui labels over
@@ -1113,34 +1189,60 @@
   textarea.mono { font-family: var(--font-mono); }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .row3 { display: grid; grid-template-columns: 0.8fr 1.25fr 0.8fr; gap: 10px; }
-  .team-members { gap: 8px; }
+  .team-basics { display: flex; flex-direction: column; gap: 12px; }
+  .rules-editor { min-height: 140px; max-height: 320px; }
+  .team-members { gap: 10px; }
   .members-head { display: flex; align-items: center; gap: 8px; min-height: 22px; }
   .members-count { margin-left: auto; color: var(--text3); font: 500 var(--fs-micro)/1 var(--font-mono); }
-  /* One repeated member card, compact at rest and unframed within: sections
-     use dividers instead of cards-inside-cards. */
+  /* Each member is a readable summary first. Clicking the broad summary
+     opens one full-width editor and closes the previous member, so a long
+     prompt never competes with a stack of open forms. */
   .member {
     display: flex; flex-direction: column; overflow: hidden;
     border: 1px solid var(--border); border-radius: var(--ui-radius-row); background: var(--surface);
-    transition: border-color var(--t-fast), background var(--t-fast);
+    box-shadow: 0 4px 14px color-mix(in srgb, var(--text) 5%, transparent);
+    transition: border-color var(--t-fast), background var(--t-fast), box-shadow var(--t-fast);
   }
-  .member.open { border-color: var(--border2); }
+  .member.open { border-color: var(--accent-line); box-shadow: 0 7px 22px color-mix(in srgb, var(--text) 8%, transparent); }
   .member-head {
-    display: grid; grid-template-columns: minmax(120px, 1fr) minmax(190px, 1.35fr) auto;
-    gap: 8px; align-items: center; min-height: 44px; padding: 8px 10px;
+    display: flex; align-items: stretch; min-height: 64px;
   }
-  .member-name { min-width: 0; width: 100%; }
-  .member-team {
-    display: inline-flex; align-items: center; gap: 6px; min-width: 0;
-    color: var(--text); font-size: var(--fs-ui); font-weight: 600;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  .member-summary {
+    min-width: 0; flex: 1; display: grid; grid-template-columns: 32px minmax(0, 1fr) auto;
+    align-items: center; gap: 10px; padding: 9px 10px;
+    border: 0; background: none; color: var(--text); text-align: left; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background var(--t-fast);
   }
-  .member-source { min-width: 0; }
-  .member-actions { display: flex; align-items: center; gap: 2px; }
-  .member-actions .flip { display: inline-flex; }
+  .member-summary:hover { background: var(--surface2); }
+  .member-ava {
+    width: 32px; height: 32px; border-radius: 8px; object-fit: cover; flex: none;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 72%, transparent);
+  }
+  .member-ava.collab, .member-ava.fallback {
+    display: grid; place-items: center; color: var(--text);
+    font: 700 var(--fs-sub)/1 var(--font-display);
+  }
+  .member-ava.collab { background: var(--surface2); color: var(--accent); }
+  .member-copy { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); gap: 2px 9px; min-width: 0; align-items: baseline; }
+  .member-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 var(--fs-body)/1.3 var(--font-display); }
+  .member-source { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text3); font: 500 var(--fs-micro)/1.3 var(--font-mono); }
+  .member-role {
+    grid-column: 1 / -1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--text2); font-size: var(--fs-sub); line-height: 1.4;
+  }
+  .member-chevron { display: inline-flex; color: var(--text3); }
+  .member-actions { display: flex; align-items: center; padding: 0 7px 0 2px; }
+  .member-actions .icon-btn { width: 38px; height: 38px; }
   .member-body { display: flex; flex-direction: column; border-top: 1px solid var(--border2); }
   .member-section { display: flex; flex-direction: column; gap: 10px; padding: 11px 12px; }
   .member-section + .member-section { border-top: 1px solid var(--border2); }
   .member-section-title { color: var(--text2); font-size: var(--fs-meta); font-weight: 600; }
+  .member-identity { display: grid; grid-template-columns: minmax(150px, 0.8fr) minmax(220px, 1.2fr); gap: 10px; }
+  .member-identity.single { grid-template-columns: minmax(0, 1fr); }
+  .member-name { min-width: 0; width: 100%; }
+  .role-editor { min-height: 150px; max-height: 340px; }
+  .agent-prompt { min-height: 240px; max-height: 65vh; }
   .member-assets { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
   .team-add { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; margin-top: 2px; }
   .team-row { align-items: flex-start; }
@@ -1160,11 +1262,19 @@
   .pick.sel { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
   @media (max-width: 760px) {
     .editor { max-width: none; padding: 12px 12px 22px; }
-    .member-head { grid-template-columns: minmax(0, 1fr) auto; }
-    .member-source { grid-column: 1 / -1; grid-row: 2; }
-    .member-actions { grid-column: 2; grid-row: 1; }
-    .row2, .row3, .member-assets { grid-template-columns: minmax(0, 1fr); }
-    .member-section { padding: 11px 10px; }
+    .editor.team-editor { gap: 14px; }
+    .row2, .row3, .member-assets, .member-identity { grid-template-columns: minmax(0, 1fr); }
+    .rules-editor { min-height: 180px; max-height: 42vh; }
+    .member-head { min-height: 72px; }
+    .member-summary { grid-template-columns: 34px minmax(0, 1fr) auto; min-height: 72px; padding: 10px 8px 10px 10px; }
+    .member-ava { width: 34px; height: 34px; }
+    .member-copy { grid-template-columns: minmax(0, 1fr); gap: 1px; }
+    .member-role { grid-column: 1; }
+    .member-actions { padding-right: 4px; }
+    .member-actions .icon-btn { width: 44px; height: 44px; }
+    .member-section { padding: 12px 10px; }
+    .role-editor { min-height: 190px; max-height: 46vh; }
+    .agent-prompt { min-height: 260px; max-height: 62vh; }
   }
   .md-preview { border-top: 1px solid var(--border2); margin-top: 6px; display: flex; flex-direction: column; gap: 8px; }
   .file-pre {

@@ -128,7 +128,11 @@ completion).
   one source: a bare coding agent configured here (backend/model/effort,
   prompt, Skills, MCP), a custom registry agent inherited whole, or a sub-team
   inherited whole. The latter two expose no prompt/Skills/MCP fields in the
-  team editor. At most 8 agents after sub-team expansion (the spawn cap).
+  team editor. Shared guidance is labelled **Team rules** and is injected into
+  every member. Member cards are readable summaries that expand one at a time;
+  the expanded bare-agent prompt uses a full-width editor, and compact layouts
+  stack every field into one column. At most 8 agents after sub-team expansion
+  (the spawn cap).
 
 ## Feed (the conversation)
 - Telegram-like bubbles: name header, floated time trailer, delivery ring on
