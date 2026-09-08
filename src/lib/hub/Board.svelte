@@ -673,7 +673,7 @@
     {#if !sel && !creating}
       <!-- New issue lives in the page head's top-right (reopened #11:
            "不应该放到最下方…手机操作更友好"). -->
-      <button class="icon-btn go" title={t('boardNew')} aria-label={t('boardNew')} onclick={() => (creating = true)}>
+      <button class="icon-btn" title={t('boardNew')} aria-label={t('boardNew')} onclick={() => (creating = true)}>
         <Icon name="plus" size={16} />
       </button>
     {/if}

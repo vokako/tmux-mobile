@@ -823,20 +823,24 @@ test('the \u2713 answers the edit: save returns to the board, and sits RIGHTMOST
     `order is trash < undo < \u2713 (got ${trashAt}, ${undoAt}, ${checkAt})`);
 });
 
-test('an armed confirm is GREEN and bold — the one .go rule, app-wide (board #98)', async () => {
-  // Owner (#98): "对勾…能点击的时候绿色加粗，让我知道那个是能点击的" — the
-  // attention problem is real, so the affirmative action declares itself.
-  // The rule lives in app.css next to .icon-btn, in the status colour
-  // language (--status-ok, achromatic only at REST — an armed confirm is not
-  // at rest), and "bold" for a stroke icon is a heavier stroke.
-  assert.match(appCss, /\.icon-btn\.go:not\(:disabled\) \{[^}]*color: var\(--status-ok\)/u,
-    'a clickable ✓ is green');
-  assert.match(appCss, /\.icon-btn\.go:not\(:disabled\) (?:\{|svg \{)[^}]*stroke-width/u,
-    'a clickable ✓ is bold (heavier stroke)');
-  assert.match(appCss, /\.icon-btn\.go:not\(:disabled\):hover \{[^}]*--status-ok/u,
-    'hover answers in the same green, not the accent');
-  // ONE mechanism: the AgentsPage local accent override is gone — every
-  // .icon-btn.go speaks the shared rule.
+test('an armed confirm is a FILLED accent button — the one .go rule, confirms only (board #98)', async () => {
+  // Owner (#98): the armed ✓ must be unmissable. Round two: "绿色好像是有点
+  // 丑了，可以用带背景色的按钮…不要用单独的线条了，颜色也调回以前的颜色。
+  // 加号按钮不用调整" — so: solid accent FILL (the grammar
+  // .chip-btn.primary.danger already speaks), page-background ink, hover by
+  // brightness; and .go is worn by confirms only.
+  assert.match(appCss, /\.icon-btn\.go:not\(:disabled\) \{[^}]*background: var\(--accent\); color: var\(--bg\)/u,
+    'a clickable ✓ is a filled accent button');
+  assert.match(appCss, /\.icon-btn\.go:not\(:disabled\):hover \{[^}]*brightness/u,
+    'hover answers with brightness, not a colour change');
+  assert.ok(!/\.icon-btn\.go[^}]*stroke-width/u.test(appCss),
+    'the lone-stroke treatment is retired (round two: 不要用单独的线条了)');
+  // The boardNew + OPENS a form — not a confirm, not a .go (owner: 加号保持
+  // 以前的样式). Neither entry point wears the class.
+  assert.ok(!/class="icon-btn go" title=\{t\('boardNew'\)\}/u.test(source), 'Board\'s + is a plain icon-btn');
+  const hub = await readFile(new URL('./Hub.svelte', import.meta.url), 'utf8');
+  assert.ok(!/class="icon-btn go" title=\{t\('boardNew'\)\}/u.test(hub), 'Hub\'s + is a plain icon-btn');
+  // ONE mechanism: no page redefines the go colour locally.
   const agents = await readFile(new URL('./AgentsPage.svelte', import.meta.url), 'utf8');
   assert.ok(!/\.icon-btn\.go[^}]*var\(--accent\)/u.test(agents),
     'no page redefines the go colour locally');

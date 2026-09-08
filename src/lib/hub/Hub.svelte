@@ -3396,7 +3396,7 @@
                this head already carries. -->
           <span class="d-files"><Icon name="layout" size={13} />{t('board')} — {selected}</span>
           <span class="spacer"></span>
-          <button class="icon-btn go" title={t('boardNew')} aria-label={t('boardNew')}
+          <button class="icon-btn" title={t('boardNew')} aria-label={t('boardNew')}
             onclick={() => (drawerBoardNew = { n: (drawerBoardNew?.n ?? 0) + 1 })}>
             <Icon name="plus" size={14} />
           </button>
