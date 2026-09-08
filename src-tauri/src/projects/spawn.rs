@@ -540,7 +540,9 @@ fn build_prompt(def: &RegAgent, name: &str, session: &str, brief: &str, by: &str
          \n\
          How messages MOVE here — route information deliberately:\n\
          - INTO you: every message arrives as a prompt typed into your pane, stamped `[tmm chat YYYY-MM-DD HH:MM] <sender>: <text>` — from the human, from a teammate's @mention, or a teammate's `[done]` report. One that arrives mid-turn QUEUES and lands when your turn ends; nothing is lost.\n\
-         - OUT of you, automatically: your final reply each turn is captured and posted to the project room, and your `tmm done` summary is delivered to whoever briefed you. Finishing your turn IS answering — never repeat your reply with `tmm send`.\n\
+         - OUT of you, automatically: your final reply each turn is captured and posted to the project room — as a RECORD, not a delivery: it is typed into nobody's pane, and a teammate waiting on it only meets it at their next `tmm log`. Your `tmm done` summary IS delivered, to whoever briefed you — never repeat the summary with `tmm send`.\n\
+         - Answering a TEAMMATE: address them — `tmm send \"@name here is what you asked for\"` — and several @names in ONE message reach several teammates at once. Whenever a specific someone needs your answer, prefer one addressed send over an unaddressed turn-end reply; the human reads the room either way.\n\
+         - A BACKLOG lands all at once when your turn ends (queued messages wait, nothing is lost). Read the WHOLE backlog before answering, then answer ONCE — one consolidated reply, or one addressed send per person who still needs something — never one reply per stale message: the newest messages usually resolve the older ones. Optionally, `tmm agent list` shows who is mid-turn before you ping someone busy.\n\
          - Addressed — `tmm send \"@name message\"`: types into that agent's pane and starts (or queues) a turn there. It INTERRUPTS the reader, so use it when someone must ACT: a question, a decision, a handoff. `@all` reaches every agent at once; `@human` addresses the operator.\n\
          - Unaddressed — `tmm send \"message\"` with no @: recorded in the room only, interrupts NOBODY; teammates see it at their next `tmm log`. Use it for context worth keeping that nobody needs right now.\n\
          - The room remembers: `tmm log --limit 30` reads recent chat, `tmm agent list` shows who is here and their state. You only ever RECEIVE what is addressed or briefed to you — read the log to catch up on everything else.\n\
@@ -550,7 +552,7 @@ fn build_prompt(def: &RegAgent, name: &str, session: &str, brief: &str, by: &str
          Keep your work visible:\n\
          - `tmm status working \"<what you are doing right now>\"` — KEEP THIS CURRENT. Your turn boundaries are observed automatically, but nobody can see WHAT you are working on unless you say it. Send one when you start the task, again whenever you move to a different part of it, and again if a single step runs long. One short line, no ceremony — it appears in the chat as your current activity, and it is how the operator follows a long task without interrupting you\n\
          - `tmm status waiting|blocked \"why\"` — when you are stuck on something outside your control (a credential, an answer, another agent). This one asks for attention, so keep it for the real thing\n\
-         - `tmm done \"summary\"` — REQUIRED when you finish the briefed task. One or two lines — the verdict and what changed; it reports back for you, and your full reply is posted separately\n\
+         - `tmm done \"summary\"` — REQUIRED when you finish the briefed task. One or two lines — the verdict and what changed; it reports back for you, and your full reply is posted separately, so never paste the reply's text into the summary\n\
          - `tmm board` — the project's task board (todo/doing/review/done), shared with the human's board page. `tmm board take <id>` claims an issue (assignee = you, status = doing), `tmm board note <id> \"...\"` records progress and decisions ON the issue, `tmm board show <id>` reads one issue with its notes. When YOUR part is done, `tmm board move <id> review` — that HANDS IT OFF: the issue's reporter is notified automatically and reviews it; only the reviewer moves it to done. The board tracks the ISSUE's lifecycle; `tmm status` tracks your live turn — keep both current, they answer different questions\n\
          You can also manage the workspace itself when the task calls for it:\n\
          - `tmm spawn <registry-name> --brief \"...\"` — bring in a teammate (see `tmm registry list`); `tmm spawn --team <team> --brief \"...\"` starts a configured team at once (`tmm teams list`). The brief lands as their first prompt, and their `tmm done` summary is delivered back to YOU — so brief with the finish line in it: what done means, and how to verify\n\
@@ -2237,6 +2239,16 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
         assert!(p.contains("do NOT guess"), "forbids guessing: {p}");
         assert!(p.contains("tmm log --limit 50"), "points at the history: {p}");
         assert!(p.contains("ask the sender"), "points at direct agent-to-agent questions: {p}");
+        // The turn-end capture is a RECORD, not a delivery (owner, 2026-09-08,
+        // from the agentcore-memory postmortem: five stale one-per-message
+        // replies, and answers that never reached the waiting peer's pane):
+        // teammate answers go ADDRESSED — several @names in one message is
+        // fine — and a queued backlog is answered once, consolidated.
+        assert!(p.contains("typed into nobody's pane"), "captured reply is record-only: {p}");
+        assert!(p.contains("several @names in ONE message"), "multi-recipient sends are taught: {p}");
+        assert!(p.contains("Read the WHOLE backlog"), "backlog is read before answering: {p}");
+        assert!(p.contains("never one reply per stale message"), "consolidated answers: {p}");
+        assert!(p.contains("never paste the reply's text into the summary"), "done stays one line: {p}");
     }
 
     #[test]
