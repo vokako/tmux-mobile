@@ -977,9 +977,8 @@
   /* The head actions move as ONE block: on a phone they wrap under the
      title together instead of scattering one button per row. */
   .head-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
-  /* The confirm among equals: same borderless button, accent ink says "go". */
-  .head-acts :global(.icon-btn.go:not(:disabled)) { color: var(--accent); }
-  .head-acts :global(.icon-btn.go:not(:disabled):hover) { background: var(--accent-bg); }
+  /* The confirm among equals wears the shared armed-go rule (app.css,
+     board #98): green + bold when clickable. No local colour here. */
   /* Skill files as a quiet list — rows in the wash hover family, the
      selected one in the accent wash (same states the sidebar rows speak). */
   .file-list {

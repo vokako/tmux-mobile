@@ -331,6 +331,15 @@ button:disabled {
 .icon-btn:hover { background: var(--surface2); color: var(--text); }
 .icon-btn:active { background: var(--accent-bg); color: var(--accent); }
 .icon-btn.danger:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+/* The confirm among equals, ARMED: a clickable ✓/go action is green and
+   bold so the eye finds it (owner, board #98: "对勾…能点击的时候绿色加粗，
+   让我知道那个是能点击的"). Green is --status-ok from the one status colour
+   language — "at rest is achromatic" holds because an armed confirm is not
+   at rest, it is asking to be pressed; disabled it falls back to the quiet
+   grey below. Bold for a stroke icon is a heavier stroke, not font-weight. */
+.icon-btn.go:not(:disabled) { color: var(--status-ok); }
+.icon-btn.go:not(:disabled) svg { stroke-width: 2.75; }
+.icon-btn.go:not(:disabled):hover { background: color-mix(in srgb, var(--status-ok) 14%, transparent); color: var(--status-ok); }
 /* The border used to keep a disabled button visible; the wash cannot. */
 .icon-btn:disabled { opacity: 0.4; cursor: default; background: none; color: var(--text2); }
 

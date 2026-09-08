@@ -161,7 +161,14 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   (AgentsPage) speak it too — save/cancel/delete/refresh are icon-only with
   the label on hover (owner, 2026-08-28: "能用图标就不用文字了…鼠标移在上边
   才有小的文字alt标签"); the confirming action is `.go`, the same borderless
-  button in accent ink (hover = accent wash) — emphasis by colour, not by a
+  button — and when a `.go` is CLICKABLE it is green and bold
+  (`--status-ok` ink + 2.75 stroke, hover = green wash; app.css, one
+  app-wide rule): the owner could not spot the armed ✓ (board #98, "能点击
+  的时候绿色加粗，让我知道那个是能点击的"). "At rest is achromatic" holds —
+  an armed confirm is not at rest, it is asking to be pressed; disabled it
+  drops to the shared quiet grey. No page redefines the go colour locally
+  (the old AgentsPage accent ink retired into this rule) — emphasis by
+  colour, not by a
   frame. Dialog CTAs keep their text chips: a destructive confirm must read
   its consequence.
 - `.side-row` — sidebar list row; hover `--surface2`, open/selected

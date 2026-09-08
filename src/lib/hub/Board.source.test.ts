@@ -822,3 +822,22 @@ test('the \u2713 answers the edit: save returns to the board, and sits RIGHTMOST
   assert.ok(trashAt < undoAt && undoAt < checkAt,
     `order is trash < undo < \u2713 (got ${trashAt}, ${undoAt}, ${checkAt})`);
 });
+
+test('an armed confirm is GREEN and bold — the one .go rule, app-wide (board #98)', async () => {
+  // Owner (#98): "对勾…能点击的时候绿色加粗，让我知道那个是能点击的" — the
+  // attention problem is real, so the affirmative action declares itself.
+  // The rule lives in app.css next to .icon-btn, in the status colour
+  // language (--status-ok, achromatic only at REST — an armed confirm is not
+  // at rest), and "bold" for a stroke icon is a heavier stroke.
+  assert.match(appCss, /\.icon-btn\.go:not\(:disabled\) \{[^}]*color: var\(--status-ok\)/u,
+    'a clickable ✓ is green');
+  assert.match(appCss, /\.icon-btn\.go:not\(:disabled\) (?:\{|svg \{)[^}]*stroke-width/u,
+    'a clickable ✓ is bold (heavier stroke)');
+  assert.match(appCss, /\.icon-btn\.go:not\(:disabled\):hover \{[^}]*--status-ok/u,
+    'hover answers in the same green, not the accent');
+  // ONE mechanism: the AgentsPage local accent override is gone — every
+  // .icon-btn.go speaks the shared rule.
+  const agents = await readFile(new URL('./AgentsPage.svelte', import.meta.url), 'utf8');
+  assert.ok(!/\.icon-btn\.go[^}]*var\(--accent\)/u.test(agents),
+    'no page redefines the go colour locally');
+});
