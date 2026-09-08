@@ -950,8 +950,10 @@
     overflow: hidden;
     padding: 14px clamp(10px, 3vw, 28px);
     gap: 10px;
-    max-width: 1100px;
-    margin: 0 auto;
+    /* Full width (board #96: "四个区域…左右占满"): the columns use whatever
+       the window gives — an 1100px cap centred the board and wasted the
+       margins on a wide screen. The issue DETAIL keeps a reading cap of its
+       own below; prose and form fields do not improve by stretching. */
     width: 100%;
     box-sizing: border-box;
     min-width: 0;
@@ -1055,7 +1057,7 @@
 
 
   /* ── detail / new form ── */
-  .detail { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: 1; overflow-y: auto; }
+  .detail { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: 1; overflow-y: auto; max-width: 1100px; margin: 0 auto; width: 100%; box-sizing: border-box; }
   .d-head { display: flex; align-items: center; gap: 6px; }
   .d-id { font-family: var(--ui-font-mono, monospace); font-size: var(--fs-meta); color: var(--text3); }
   .d-title { font-size: var(--fs-ui); font-weight: 600; color: var(--text); overflow-wrap: anywhere; }

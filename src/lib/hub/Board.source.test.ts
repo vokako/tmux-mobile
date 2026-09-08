@@ -315,6 +315,17 @@ test('the detail speaks board #15: project-named page, status slider, confirmed 
   assert.match(source, /onchange=\{\(v: string\) => \(draft\.assignee = v\)\}/u, 'changing it is an edit, not a write');
 });
 
+test('the four areas use the whole width; only the detail keeps a reading cap (board #96)', () => {
+  // "四个区域…左右占满": an 1100px cap on .board centred the columns and wasted
+  // the margins of a wide screen. The cap moved to the DETAIL view, where
+  // prose and form fields genuinely read better bounded.
+  const board = /\.board \{([^}]*)\}/su.exec(source)?.[1] ?? '';
+  assert.ok(!/max-width/u.test(board), 'the board container is uncapped — the columns take the window');
+  assert.ok(!/margin: 0 auto/u.test(board), 'and is not centred against a cap');
+  const detail = /\n  \.detail \{([^}]*)\}/u.exec(source)?.[1] ?? '';
+  assert.match(detail, /max-width: 1100px; margin: 0 auto; width: 100%;/u, 'the detail keeps the reading width, centred');
+});
+
 test('the slider\u2019s thumb is NESTED in the track (board #95)', () => {
   // "边缘线条都出框了…要像是真的一个滑块": the pill used to slide flush against
   // the track's own border — full control radius plus a 1px ring grinding on
