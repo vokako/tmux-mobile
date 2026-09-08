@@ -3611,7 +3611,7 @@
   /* Glued to the name (2px, inside the h1's flex) and never shrinking with
      it — the retired rename pencil's exact geometry. */
   .h1-edit {
-    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-family: var(--font-mono);
     font-size: var(--fs-title); font-weight: 600; color: var(--text);
     min-width: 0; flex: 0 1 auto; width: 22ch; max-width: 100%;
     background: var(--bg2); border: 1px solid var(--accent-line); border-radius: var(--ui-radius-control);
@@ -3657,7 +3657,7 @@
      first while the path yields, and the hidden scrollbar keeps the header one
      quiet line. */
   .path {
-    font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text3);
+    font-family: var(--font-mono); font-size: var(--fs-sub); color: var(--text3);
     white-space: nowrap; overflow-x: auto; overflow-y: hidden;
     /* THE dynamic region: shrinks below its content first (min-width: 0 +
        scroll) while the buttons stay whole; the shrink weight of 1000 against
@@ -3690,7 +3690,7 @@
      row radius, the team name as a micro label above them. The frame is
      `flex: none` like a card so the strip scrolls it as one unit. */
   .tgroup { flex: none; display: flex; flex-direction: column; gap: 2px; padding: 2px 4px 4px; border: 1px dashed var(--border2); border-radius: var(--ui-radius-row); }
-  .tg-label { display: inline-flex; align-items: center; gap: 3px; font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-micro); color: var(--text3); padding: 0 2px; line-height: 1.4; }
+  .tg-label { display: inline-flex; align-items: center; gap: 3px; font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--text3); padding: 0 2px; line-height: 1.4; }
   .tg-cards { display: flex; gap: 5px; }
   .tava { display: inline-grid; place-items: center; background: var(--accent-bg); color: var(--accent); }
   .ap-go { margin-left: auto; font-size: var(--fs-micro); color: var(--accent); }
@@ -3716,7 +3716,7 @@
      2026-08-26). Cards size to content, so short readings stay tight. */
   .ac-vitals {
     font-size: var(--fs-micro); color: var(--meta-ink); line-height: 1.35;
-    font-family: ui-monospace, Menlo, monospace; padding: 0 1px 1px 5px;
+    font-family: var(--font-mono); padding: 0 1px 1px 5px;
     max-width: 26ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   /* One thin horizontal line at the card's bottom edge. Absolute, so it costs no
@@ -3811,7 +3811,7 @@
   .a-menu button {
     display: flex; align-items: center; gap: 8px; min-height: 36px; width: 100%; text-align: left;
     background: none; border: none; border-radius: var(--ui-radius-control); color: var(--text2);
-    padding: 6px 10px; font-size: var(--ui-font-control); cursor: pointer; font-family: ui-monospace, Menlo, monospace;
+    padding: 6px 10px; font-size: var(--ui-font-control); cursor: pointer; font-family: var(--font-mono);
   }
   /* Touch contract: a menu row is a tap target, so the phone keeps 44px rows
      even though the type got smaller. */
@@ -4025,7 +4025,7 @@
      day, which also stripped the verb badge down to dot + word). */
   .sysline .sys-cmd {
     min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-family: var(--font-mono);
     color: color-mix(in srgb, var(--accent) 62%, var(--text));
     background: var(--code-bg);
     border-radius: 4px; padding: 0.1em 0.45em;
@@ -4063,7 +4063,7 @@
      ink, the issue chip in the sys-who mono dialect, the review badge in the
      status-badge dialect — the same vocabulary the sysline speaks. */
   .prompt .p-from { color: var(--accent); font-weight: 650; }
-  .prompt .p-chip { font-family: ui-monospace, Menlo, monospace; color: var(--accent); font-weight: 650; margin-right: 6px; }
+  .prompt .p-chip { font-family: var(--font-mono); color: var(--accent); font-weight: 650; margin-right: 6px; }
   .prompt .p-badge {
     display: inline-flex; align-items: center; gap: 4px; margin-right: 6px;
     font-size: var(--fs-micro); font-weight: 650;
@@ -4073,7 +4073,7 @@
 
   .prompt { align-self: flex-start; max-width: var(--msg-max); border-left: 2px solid var(--border); padding-left: 9px; margin: 1px 6px; }
   .p-head { display: flex; align-items: baseline; gap: 7px; font-size: var(--fs-meta); color: var(--text3); margin-bottom: 2px; }
-  .p-head .p-who { font-family: ui-monospace, Menlo, monospace; font-weight: 600; color: var(--text2); }
+  .p-head .p-who { font-family: var(--font-mono); font-weight: 600; color: var(--text2); }
   .p-tag { text-transform: uppercase; letter-spacing: 0.8px; font-size: var(--fs-micro); color: var(--text3); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
   .p-body { font-size: var(--fs-ui); color: var(--text2); white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; max-height: 7.5em; overflow: hidden; }
 
@@ -4102,7 +4102,7 @@
     flex: none; align-self: stretch; width: 2px; min-height: 1em;
     background: var(--accent); opacity: 0.55; border-radius: 2px; margin-right: 2px;
   }
-  .pg-who { flex: none; font-family: ui-monospace, Menlo, monospace; font-weight: 650; color: var(--text3); }
+  .pg-who { flex: none; font-family: var(--font-mono); font-weight: 650; color: var(--text3); }
   .pg-tag {
     flex: none; font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.6px;
     color: var(--status-warn); border: 1px solid var(--status-warn); border-radius: 4px; padding: 0 3px;
@@ -4139,7 +4139,7 @@
     display: flex; align-items: center; gap: 7px; width: 100%; text-align: left;
     background: none; border: none; border-radius: 0;
     padding: 5px 10px; cursor: pointer; color: var(--text3);
-    font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub);
+    font-family: var(--font-mono); font-size: var(--fs-sub);
     transition: color var(--t-fast);
   }
   .steps:hover { border-color: var(--input-border); }
@@ -4185,13 +4185,13 @@
   }
   .s-all {
     align-self: flex-start; background: none; border: none; color: var(--text3);
-    font-size: var(--fs-meta); cursor: pointer; font-family: ui-monospace, Menlo, monospace;
+    font-size: var(--fs-meta); cursor: pointer; font-family: var(--font-mono);
     padding: 2px var(--lane-pad-r) 5px var(--lane-indent);
   }
   .s-all:hover { color: var(--accent); }
   .step {
     display: flex; align-items: baseline; gap: 8px; line-height: 1.5;
-    font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text3);
+    font-family: var(--font-mono); font-size: var(--fs-sub); color: var(--text3);
   }
   /* The tool name: the part the eye scans down a column. A plain flex child —
      it sits OUTSIDE the scroller, so the argument cannot be panned under it. */
@@ -4251,7 +4251,7 @@
     color: var(--text2); font-size: var(--fs-meta);
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
   }
-  .filter-pill .f-name { color: var(--accent); font-weight: 650; font-family: ui-monospace, Menlo, monospace; }
+  .filter-pill .f-name { color: var(--accent); font-weight: 650; font-family: var(--font-mono); }
 
   .compose-shell {
     flex: 1; min-width: 0; position: relative;
@@ -4267,7 +4267,7 @@
      and measuring mono text with a proportional font misplaces the send
      button's collision zone. */
   .compose-shell.cmd { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 6%, var(--bubble-in)); }
-  .compose-shell.cmd .c-input, .compose-shell.cmd :global(.c-mirror) { font-family: ui-monospace, Menlo, monospace; }
+  .compose-shell.cmd .c-input, .compose-shell.cmd :global(.c-mirror) { font-family: var(--font-mono); }
   /* Recipient control: who this message goes to, with a menu that opens
      UPWARD so the on-screen keyboard never covers it. */
   /* Pinned to the capsule's top-left; the textarea's first line is indented
@@ -4286,7 +4286,7 @@
   .to-chip.note { background: var(--surface); color: var(--text2); border-color: var(--border); }
   .to-label { font-weight: 500; opacity: 0.7; font-size: var(--fs-meta); text-transform: uppercase; letter-spacing: 0.5px; }
   .to-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .to-extra { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--accent); font-weight: 600; font-size: var(--fs-meta); font-family: ui-monospace, Menlo, monospace; }
+  .to-extra { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--accent); font-weight: 600; font-size: var(--fs-meta); font-family: var(--font-mono); }
   .to-sep { height: 1px; background: var(--border2); margin: 4px 6px; }
   .note-dot { border: 1px dashed var(--text3); background: none; }
   .to-menu {
@@ -4298,12 +4298,12 @@
   .to-menu button {
     display: flex; align-items: center; gap: 7px; min-height: 36px; width: 100%; text-align: left;
     background: none; border: none; border-radius: var(--ui-radius-control); color: var(--text2);
-    padding: 6px 10px; font-size: var(--ui-font-control); cursor: pointer; font-family: ui-monospace, Menlo, monospace;
+    padding: 6px 10px; font-size: var(--ui-font-control); cursor: pointer; font-family: var(--font-mono);
   }
   .to-menu button:hover { background: var(--surface2); color: var(--text); }
   .am-vitals {
     padding: 0 9px 6px; margin-top: -3px; font-size: var(--fs-meta); color: var(--text3);
-    font-family: ui-monospace, Menlo, monospace; max-width: 240px;
+    font-family: var(--font-mono); max-width: 240px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   /* The slash-command palette: the recipient menu's surface, full capsule width
@@ -4319,7 +4319,7 @@
     display: flex; align-items: baseline; gap: 10px; width: 100%; text-align: left;
     background: none; border: none; border-radius: var(--ui-radius-control); color: var(--text2);
     padding: 6px 10px; font-size: var(--ui-font-control); cursor: pointer;
-    font-family: ui-monospace, Menlo, monospace;
+    font-family: var(--font-mono);
   }
   /* Hover and the keyboard cursor are the SAME highlight — two would read as two
      selections. */
@@ -4386,7 +4386,7 @@
   .pend-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .pend-n {
     position: absolute; left: 0; bottom: 0; padding: 0 4px;
-    font-size: var(--fs-micro); line-height: 14px; font-family: ui-monospace, Menlo, monospace;
+    font-size: var(--fs-micro); line-height: 14px; font-family: var(--font-mono);
     color: #fff; background: rgba(0,0,0,0.55); border-top-right-radius: 5px;
   }
   .pend-x.on-img {
@@ -4468,8 +4468,8 @@
   }
   .start-row:hover { border-color: var(--accent); background: var(--accent-bg); }
   .start-row:disabled { opacity: 0.5; }
-  .sr-name { font-family: ui-monospace, Menlo, monospace; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sr-backend { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text3); margin-left: auto; }
+  .sr-name { font-family: var(--font-mono); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sr-backend { font-family: var(--font-mono); font-size: var(--fs-sub); color: var(--text3); margin-left: auto; }
   /* The Manager atom (board #7) — same declaration as AgentsPage's, pinned. */
   .m-badge { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border: 1px solid var(--accent); border-radius: 4px; color: var(--accent); font-size: var(--fs-micro); font-weight: 700; line-height: 1; }
 
@@ -4488,7 +4488,7 @@
   .drawer-head { display: flex; align-items: center; gap: 8px; min-height: 42px; box-sizing: border-box; padding: 6px 10px; border-bottom: 1px solid var(--border); }
   .win-list { display: flex; gap: 5px; overflow-x: auto; scrollbar-width: none; }
   .win-list::-webkit-scrollbar { display: none; }
-  .win-pill { display: flex; align-items: center; gap: 5px; flex: none; background: var(--surface); border: 1px solid var(--border); border-radius: var(--ui-radius-control); color: var(--text2); padding: 4px 9px; font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); cursor: pointer; }
+  .win-pill { display: flex; align-items: center; gap: 5px; flex: none; background: var(--surface); border: 1px solid var(--border); border-radius: var(--ui-radius-control); color: var(--text2); padding: 4px 9px; font-family: var(--font-mono); font-size: var(--fs-sub); cursor: pointer; }
   .win-pill.cur { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
   .direct-tag { font-size: var(--fs-micro); color: var(--text3); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; margin-left: 3px; }
   .term-body { flex: 1; min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; }
@@ -4507,7 +4507,7 @@
      contract too: whatever a prop/HMR/child-path drift might leak, a second
      header can neither show nor keep its height here. */
   .board-body :global(.page-head) { display: none; }
-  .d-files { display: flex; align-items: center; gap: 6px; font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .d-files { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: var(--fs-sub); color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* ONE switcher for the drawer. It used to have two: these pills on top and
      a tmux-style statusline underneath, both listing the same windows and both
@@ -4515,7 +4515,7 @@
      The pills won — they carry the state dot, the direct-window tag and the
      actions — and the statusline's only unique content, the roster count,
      moved up here. */
-  .d-count { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-meta); color: var(--text3); white-space: nowrap; margin-right: 2px; }
+  .d-count { font-family: var(--font-mono); font-size: var(--fs-meta); color: var(--text3); white-space: nowrap; margin-right: 2px; }
 
   .dlg-backdrop { position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,0.45); animation: fade-in var(--t-move) ease-out; }
   .dlg {

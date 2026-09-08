@@ -36,4 +36,46 @@ test('the fonts.svelte.ts literals mirror app.css exactly (the sync the comments
   };
   assert.equal(lit('UI_STACK'), cssVar('--font-ui'), 'UI_STACK === --font-ui');
   assert.equal(lit('DISPLAY_STACK'), cssVar('--font-display'), 'DISPLAY_STACK === --font-display');
+  assert.equal(lit('SYSTEM_STACK'), cssVar('--font-mono'), 'SYSTEM_STACK === --font-mono');
+});
+
+// Round 4: the mono stack. No monospace face carries Han, so a Chinese
+// character in the terminal, a code span, a path or a chip reached the
+// generic `monospace` and was drawn by the OS cascade — the same Japanese
+// variants, one surface over. The SC families close the mono stack (after
+// the bundled symbol fillers, whose position the line-box trap fixes; before
+// the generic keyword), and every data surface goes through var(--font-mono)
+// so it inherits both the user's terminal font and the SC tail.
+test('the mono stack ends with the SC families, after the symbol fillers AND the generic', () => {
+  const stack = cssVar('--font-mono');
+  const sym = stack.indexOf("'Symbols Nerd Font Mono'");
+  const gen = stack.indexOf(', monospace,');
+  const sc = stack.indexOf("'PingFang SC'");
+  assert.ok(sym >= 0 && gen > sym, 'the generic comes after the symbol fillers');
+  // The generic BEFORE the SC families is what keeps latin monospace on a
+  // platform that has none of the named monos: an SC face carries latin too
+  // and, placed before the generic, would take the whole terminal line.
+  assert.ok(sc > gen, 'SC families come after the generic monospace, never before it');
+  assert.ok(stack.trimEnd().endsWith("'WenQuanYi Micro Hei'"), 'the SC tail closes the stack');
+  assert.ok(stack.indexOf('ui-monospace') === 0, 'the platform mono is still the first (line-box) font');
+});
+
+test('no component spells its own mono stack — data surfaces wear var(--font-mono)', async () => {
+  const { readdir } = await import('node:fs/promises');
+  const root = new URL('../', import.meta.url);
+  const walk = async (dir: URL): Promise<string[]> => {
+    const out: string[] = [];
+    for (const e of await readdir(dir, { withFileTypes: true })) {
+      const u = new URL(e.name + (e.isDirectory() ? '/' : ''), dir);
+      if (e.isDirectory()) out.push(...(await walk(u)));
+      else if (e.name.endsWith('.svelte')) out.push(u.pathname);
+    }
+    return out;
+  };
+  for (const f of await walk(root)) {
+    const src = await readFile(f, 'utf8');
+    assert.doesNotMatch(src, /ui-monospace|Menlo/u, `${f.slice(f.indexOf('/src/'))} spells a raw mono stack`);
+  }
+  const rules = appCss.replace(/\/\*[\s\S]*?\*\//gu, '').replace(cssVar('--font-mono'), '');
+  assert.doesNotMatch(rules, /ui-monospace|Menlo/u, 'app.css rules use the var');
 });

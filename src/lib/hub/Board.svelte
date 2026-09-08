@@ -1059,7 +1059,7 @@
   /* ── detail / new form ── */
   .detail { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: 1; overflow-y: auto; max-width: 1100px; margin: 0 auto; width: 100%; box-sizing: border-box; }
   .d-head { display: flex; align-items: center; gap: 6px; }
-  .d-id { font-family: var(--ui-font-mono, monospace); font-size: var(--fs-meta); color: var(--text3); }
+  .d-id { font-family: var(--font-mono); font-size: var(--fs-meta); color: var(--text3); }
   .d-title { font-size: var(--fs-ui); font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
   .spacer { flex: 1; }
   .d-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

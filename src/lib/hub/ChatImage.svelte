@@ -76,7 +76,7 @@
   .ci.loaded { opacity: 1; }
   @media (prefers-reduced-motion: reduce) { .ci { transition: none; } }
   .ci-ref {
-    display: inline-block; font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub);
+    display: inline-block; font-family: var(--font-mono); font-size: var(--fs-sub);
     color: var(--text3); border: 1px dashed var(--border); border-radius: 7px; padding: 4px 8px;
     max-width: 100%; overflow-wrap: anywhere;
     transition: color var(--t-fast), border-color var(--t-fast);

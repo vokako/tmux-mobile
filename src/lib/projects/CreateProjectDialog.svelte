@@ -125,7 +125,7 @@
   .dlg.sheet .agent-pick, .dlg.sheet input, .dlg.sheet .dlg-actions button { min-height: 44px; }
   .dlg input { background: var(--input-bg); border: 1px solid var(--input-border); border-radius: var(--ui-radius-control); color: var(--text); padding: 8px 12px; font-size: var(--fs-ui); outline: none; }
   .dlg input:focus { border-color: var(--accent); }
-  .dlg-h { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-meta); text-transform: uppercase; letter-spacing: 1.4px; color: var(--text3); margin-top: 4px; }
+  .dlg-h { font-family: var(--font-mono); font-size: var(--fs-meta); text-transform: uppercase; letter-spacing: 1.4px; color: var(--text3); margin-top: 4px; }
   .dlg-agents { display: flex; flex-direction: column; gap: 5px; }
   .dlg-note { margin: 0; color: var(--text3); font-size: var(--fs-ui); }
   .err { margin: 0; color: var(--danger); font-size: var(--fs-ui); }

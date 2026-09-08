@@ -410,7 +410,7 @@
   .projects.dense .proj:focus-within .acts { opacity: 1; }
   .projects.dense .side-h-inline {
     display: inline-flex; align-items: baseline; gap: 6px;
-    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-family: var(--font-mono);
   }
   /* Windows stay — they are what the project is made of, and picking one is
      why this sidebar exists. Their LOOK is the shared `.side-win` dialect in

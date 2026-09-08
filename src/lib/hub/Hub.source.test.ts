@@ -502,7 +502,7 @@ test('a lifecycle group is one row per line, in one who/action/detail grammar', 
   // another size read as fragments ("带参数的渲染好像不是很好", 2026-08-24).
   assert.match(source, /class="sys-cmd">\{p\.text \? `\$\{p\.verb\} \$\{p\.text\}` : p\.verb\}<\/span>/u);
   const cmd = rule('.sysline .sys-cmd');
-  assert.match(cmd, /ui-monospace/u);
+  assert.match(cmd, /var\(--font-mono\)/u);
   assert.match(cmd, /var\(--code-bg\)/u, 'the wash is the inline-code dialect, not a drawn frame');
   assert.doesNotMatch(cmd, /border:/u, 'no border on the command capsule');
   assert.match(cmd, /text-overflow:\s*ellipsis/u, 'a long command clips itself, not its neighbours');
@@ -539,7 +539,7 @@ test('a command-shaped draft styles the composer, with the mirror in step', () =
   // send button's collision zone is measured in the wrong font.
   assert.match(
     source,
-    /\.compose-shell\.cmd \.c-input, \.compose-shell\.cmd :global\(\.c-mirror\) \{ font-family: ui-monospace/u,
+    /\.compose-shell\.cmd \.c-input, \.compose-shell\.cmd :global\(\.c-mirror\) \{ font-family: var\(--font-mono\)/u,
   );
   // And the height re-measures when the font flips, not just when text changes.
   assert.match(source, /void composerIsCmd;/u);

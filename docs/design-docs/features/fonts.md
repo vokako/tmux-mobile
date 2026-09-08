@@ -155,8 +155,43 @@ The default stack (App.svelte `--font-mono`, mirrored in
 ```
 ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', Consolas,
 'Roboto Mono', 'Droid Sans Mono', 'Noto Sans Mono',
-'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', monospace
+'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', monospace,
+'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC',
+'Noto Sans SC', 'Source Han Sans SC', 'Source Han Sans CN', 'WenQuanYi Micro Hei'
 ```
+
+**Round four of #97 (2026-09-08): the SC families close the mono stack too,
+and every data surface goes through `var(--font-mono)`.** No monospace face
+carries Han, so a Chinese character in the terminal, an inline code span, a
+path, an id or a window chip reached the generic `monospace` and was drawn
+by the OS cascade — the same Japanese variants the UI stack had just been
+cured of, one surface over. The SC families now close the stack AFTER the
+generic `monospace`, in app.css AND `SYSTEM_STACK` (`fonts.source.test.ts`
+pins the mirror and the order). The generic in the middle is deliberate and
+verified in headless Chromium: a family list keeps matching past a generic
+for the glyphs the resolved font lacks, so latin always resolves at A
+monospace (on a bare Linux with none of the named monos, that is the
+generic's DejaVu Sans Mono) and only Han travels on to the SC faces. With
+the SC faces BEFORE the generic, that same box rendered the whole line —
+`ls -la` included — in Noto Sans SC, because an SC face carries latin too;
+the terminal would have stopped being monospace. (A `@font-face` alias
+with `local()` + `unicode-range` was the other candidate; `local()` did not
+match a variable SC font by family name in the same test, so it was
+dropped.) The 39 component rules that spelled their own
+`ui-monospace, Menlo, monospace` were drift from design-language §"three
+font roles" (`--font-mono` = data: terminal, code, paths, ids, chips): they
+now wear `var(--font-mono)`, which is what gives them the SC tail — and,
+as the contract always said, the user's terminal font. The test forbids a
+raw mono literal in any component.
+
+A note on diagnosis, for the next time a glyph "looks Japanese": Blink
+renders a `<textarea>` and a `<p>` with the same stack through the same
+font selection (verified with CDP `CSS.getPlatformFontsForNode`), and the
+element's `lang` does not change which font the generic fallback picks
+(only which variant a *multi-locale* face like Noto Sans CJK draws). The
+fix is always a NAMED SC family in the stack that reaches that surface;
+DevTools → Computed → "Rendered Fonts" tells you which font actually drew
+the run.
 
 Bundled (public/fonts/, @font-face in index.html):
 

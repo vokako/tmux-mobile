@@ -55,7 +55,8 @@ const COMMON_SANS = [
 ];
 
 // Symbol fillers + per-platform fallbacks. The generic `monospace` keyword
-// stays last so an unknown/typo'd custom family degrades safely.
+// follows every mono family so an unknown/typo'd custom family degrades
+// safely; only the Han-only SC tail comes after it (see below).
 // The bundled symbol fonts must come AFTER the text families: the CSS line
 // box (strut) — and xterm's fontBoundingBox cell measurement — derive from
 // the FIRST available font in the stack, and 'Noto Sans Symbols 2' carries a
@@ -63,10 +64,21 @@ const COMMON_SANS = [
 // block cursor protrude far below the text. Symbol codepoints missing from
 // the text families still fall through to the bundled files (per-codepoint
 // font matching), so only glyphs a text font actually has change source.
+// The SC families close the stack, AFTER the generic `monospace` (board #97):
+// no mono face carries Han, and a Han glyph that fell off the end of the
+// list was chosen by the OS's language cascade — Japanese variants on a Mac
+// that prefers Japanese. Named SC families make 骨/直/门 deterministic in
+// the terminal and on every data surface. They come after the generic so
+// latin can never land on them: on a platform with none of the named monos
+// the generic still resolves latin to A monospace, and only the glyphs it
+// lacks (Han) travel on. The line box is unaffected (the first available
+// font is still the mono).
 const SYSTEM_STACK =
   "ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', Consolas, " +
   "'Roboto Mono', 'Droid Sans Mono', 'Noto Sans Mono', " +
-  "'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', monospace";
+  "'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', monospace, " +
+  "'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', " +
+  "'Source Han Sans SC', 'Source Han Sans CN', 'WenQuanYi Micro Hei'";
 
 // These two literals MUST mirror app.css's --font-ui / --font-display
 // declarations: the override rewrites the var inline, and an out-of-sync

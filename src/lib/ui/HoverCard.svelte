@@ -58,7 +58,7 @@
   .hc-text { color: var(--text2); line-height: 1.35; }
   .hc-rows { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0; }
   .hc-rows dt { color: var(--text3); font-size: var(--fs-meta); white-space: nowrap; }
-  .hc-rows dd { margin: 0; color: var(--text2); font-size: var(--fs-meta); font-family: ui-monospace, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hc-rows dd { margin: 0; color: var(--text2); font-size: var(--fs-meta); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hc-rows dd.ok { color: var(--status-ok); }
   .hc-rows dd.warn { color: var(--status-warn); }
   .hc-rows dd.danger { color: var(--danger); }

@@ -964,7 +964,7 @@
   .sidebar { position: relative; background: var(--bg2); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
   .side-scroll { flex: 1; overflow-y: auto; padding: 8px; }
   .r-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; }
-  .r-backend { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text3); flex: none; }
+  .r-backend { font-family: var(--font-mono); font-size: var(--fs-sub); color: var(--text3); flex: none; }
   /* A wash, not a drawn frame: borders on inner micro atoms read as chrome
      (owner, 2026-08-24 audit; same rule as the sys-line atoms). */
   /* The Manager atom (board #7): a boxed M, shared verbatim with Hub.svelte
@@ -989,7 +989,7 @@
   .file-row {
     display: flex; align-items: center; gap: 8px; padding: 4px 10px;
     background: none; border: none; cursor: pointer; text-align: left;
-    font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub); color: var(--text);
+    font-family: var(--font-mono); font-size: var(--fs-sub); color: var(--text);
     transition: background var(--t-fast), color var(--t-fast);
     -webkit-tap-highlight-color: transparent;
   }
@@ -1032,7 +1032,7 @@
   input:focus, textarea:focus { border-color: var(--accent); }
   input:disabled { opacity: 0.5; }
   textarea { resize: vertical; line-height: 1.5; }
-  textarea.mono { font-family: ui-monospace, Menlo, monospace; }
+  textarea.mono { font-family: var(--font-mono); }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   /* A team member is one bordered panel in the editor's own dialect (board
      #74): the head row is name + base + remove, the body the role (and, for a
@@ -1043,7 +1043,7 @@
   .member-team { display: inline-flex; align-items: center; gap: 5px; min-width: 0; color: var(--text2); font-size: var(--fs-ui); }
   .team-row { align-items: flex-start; }
   .r-col { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
-  .r-sub { font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-micro); color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .r-sub { font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pick-block { display: flex; flex-direction: column; gap: 6px; }
   .pick-label { color: var(--text); font-size: var(--fs-ui); font-weight: 600; }
   .pick-row { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -1059,7 +1059,7 @@
   .md-preview { border-top: 1px solid var(--border2); margin-top: 6px; display: flex; flex-direction: column; gap: 8px; }
   .file-pre {
     margin: 0; padding: 8px 10px; overflow: auto; max-height: 60vh;
-    font-family: ui-monospace, Menlo, monospace; font-size: var(--fs-sub);
+    font-family: var(--font-mono); font-size: var(--fs-sub);
     color: var(--text); background: var(--code-bg, var(--surface));
     border-radius: var(--ui-radius-control); white-space: pre;
   }

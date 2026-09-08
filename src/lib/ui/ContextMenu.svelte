@@ -145,7 +145,7 @@
   }
   .ctx-who {
     padding: 3px 9px 5px; font-size: var(--fs-meta); color: var(--text3);
-    font-family: ui-monospace, Menlo, monospace;
+    font-family: var(--font-mono);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .ctx button {
@@ -167,7 +167,7 @@
   .ctx-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* Select's `.so-hint` / trailing check, so a pick-one menu reads as the
      same species as a dropdown. */
-  .ctx-hint { margin-left: auto; font-size: var(--fs-meta); color: var(--text3); font-family: ui-monospace, Menlo, monospace; }
+  .ctx-hint { margin-left: auto; font-size: var(--fs-meta); color: var(--text3); font-family: var(--font-mono); }
   .ctx-check { margin-left: auto; display: flex; color: var(--accent); }
   .ctx-hint + .ctx-check { margin-left: 0; }
   /* A phone needs a real target; the desktop stays compact. */

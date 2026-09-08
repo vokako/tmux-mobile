@@ -260,7 +260,7 @@
     display: flex; align-items: center; gap: 8px; min-height: 36px; width: 100%; text-align: left;
     background: none; border: none; border-radius: var(--ui-radius-control); color: var(--text2);
     padding: 6px 10px; font-size: var(--ui-font-control); cursor: pointer;
-    font-family: ui-monospace, Menlo, monospace;
+    font-family: var(--font-mono);
   }
   /* Hover and the keyboard cursor are the SAME highlight — two different ones
      read as two selections. */
