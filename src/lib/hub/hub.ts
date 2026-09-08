@@ -326,6 +326,29 @@ export function pastedFiles(dt: {
   return Array.from(dt.files ?? []);
 }
 
+/** A paste that carries BOTH text and only-image files is, almost always, a
+ * rendering of the text: PowerPoint, Word, Excel, Keynote, Numbers and every
+ * browser put a PNG of the selection on the clipboard next to the words
+ * (owner, 2026-09-08: "从 ppt 上粘贴过来的文字，总是被粘贴为了一个图片"). The
+ * words are what the user copied; the picture is a by-product — so the text
+ * wins and the default insertion runs. The three pastes where the FILE is the
+ * point all fail this test: a screenshot has no text at all; a Finder /
+ * Explorer file copy carries only the file's own name or path as text (one
+ * token, and it names one of the files); a web page's "Copy image" carries at
+ * most the image URL (one URL token). Anything non-image (a pdf beside a
+ * caption) is a file paste — no app renders a document as a pdf. */
+export function textIsThePaste(text: string | null | undefined, files: readonly { name?: string; type?: string }[]): boolean {
+  if (!files.length) return true;
+  const t = (text ?? '').trim();
+  if (!t) return false;
+  if (!files.every((f) => (f.type ?? '').startsWith('image/'))) return false;
+  if (/\s/u.test(t)) return true; // words, not a name
+  if (/^(?:[a-z][a-z0-9+.-]*:|\/|~\/|[a-z]:\\)/iu.test(t)) return false; // a URL or a path
+  const base = t.split(/[\\/]/u).pop() ?? t;
+  if (files.some((f) => f.name && (f.name === t || f.name === base))) return false; // the file's own name
+  return true;
+}
+
 /** Collision-safe enough for a temp dir, sortable by time, no ceremony. */
 export function imageId(): string {
   const rand = (globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)).slice(0, 8);

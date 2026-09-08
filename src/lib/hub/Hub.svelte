@@ -33,7 +33,7 @@
     addTeamMessageListener, removeTeamMessageListener,
   } from '../core/ws.ts';
   import { projectAgeLabel, sortRows } from '../projects/projects.ts';
-  import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, stateNeedsYou, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, mentionedAgents, chipExtras, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, perLineOf, modelLabel } from './hub.ts';
+  import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, markLeadingMention, stateDotColor, stateIsLive, stateNeedsYou, mergeMessages, mergeEvents, backendColor, feedBlocks, filterBlocks, mergeStates, pickLead, addressed, mentionedAgents, chipExtras, fmtElapsed, unreadSenders, splitImages, stoppedAgents, toolColor, pickAnchor, toolEventParts, elideTail, foldLines, slashCommand, commandPalette, ctxColor, statusNote, noteStateColor, sysParts, sysVerbColor, boardLine, boardStatusColor, promptParts, sameDay, readlineEdit, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, perLineOf, modelLabel } from './hub.ts';
   import { notifyNews, isAway, roomProjectName } from './notifications.ts';
   import { backendIcon, paneAgent } from '../core/agents.ts';
   import { anchorOf, menuPlacement, popOrigin, viewBox } from '../ui/placement.ts';
@@ -1129,10 +1129,15 @@
    * the caret. Files WIN over text riding the same clipboard (a copied file
    * also carries its path as text — inserting it beside the staged chip
    * would say the same thing twice), so the default insertion is suppressed
-   * exactly when there are files to stage; a plain text paste is untouched. */
+   * exactly when there are files to stage; a plain text paste is untouched.
+   * ONE exception, decided by `textIsThePaste`: words riding beside an
+   * image-only file set are the paste and the image is a rendering of them
+   * (PowerPoint/Word/Excel/Keynote/browsers all ship that PNG), so the text
+   * is inserted and the picture dropped (owner, 2026-09-08). */
   function onComposerPaste(e) {
     const files = pastedFiles(e.clipboardData);
     if (!files.length) return; // text-only paste: the textarea's own business
+    if (textIsThePaste(e.clipboardData?.getData('text/plain'), files)) return; // a picture OF the text: take the words
     e.preventDefault();
     stageFiles(files);
   }

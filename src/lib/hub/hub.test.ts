@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
+import { gapWalkStep, TAIL_GAP, bottomGap, tailAfterScroll, uploadImagePath, uploadFilePath, imageId, pastedFiles, textIsThePaste, isSessionStart, STEPS_ROWS, clampStepsRows, markLeadingMention, mergeMessages, stateDotColor, stateIsLive, stateNeedsYou, feedBlocks, systemLine, sysParts, sysVerbColor, pickLead, addressed, isSelfReport, toolEventParts, splitImages, isDirectUrl, fmtElapsed, agoShort, unreadSenders, stoppedAgents, toolColor, pickAnchor, elideTail, ELIDE, slashCommand, commandPalette, KIRO_COMMANDS, OFFERED_COMMANDS, ctxColor, statusNote, noteStateColor, fuzzyRank, sameDay, draftUpdate, DRAFT_MAX, readlineEdit, squashWs, mentionsAgent, mentionTokens, mentionedAgents, chipExtras, filterBlocks, foldLines, PHONE_FOLD_LINES, mergeStates, mergeEvents , boardLine, boardStatusColor, promptParts, perLineOf, modelLabel, echoContains, echoTruncated, PROMPT_ECHO_MAX } from './hub.ts';
 import type { HubActivityEvent, HubAgent } from '../core/ws.ts';
 
 const ev = (e: Partial<HubActivityEvent>): HubActivityEvent => ({
@@ -1055,6 +1055,30 @@ test('composer uploads land under the project .tmm with a random id', () => {
   assert.equal(uploadFilePath('/w/s', 'id1', 'a/b\\c:d?.txt'), '/w/s/.tmm/uploads/id1-cd.txt', 'separators and reserved chars stripped');
   assert.equal(uploadFilePath('/w/s', 'id1', '   '), '/w/s/.tmm/uploads/id1-file', 'nothing left → generic');
   assert.notEqual(imageId(), imageId(), 'random half differs');
+});
+
+test('textIsThePaste: words beside an image-only file set are the paste; a screenshot, a file copy or a copied image are not (2026-09-08)', () => {
+  const png = { name: 'image.png', type: 'image/png' };
+  const pdf = { name: 'report.pdf', type: 'application/pdf' };
+  // PowerPoint / Word / Keynote / a web page: the PNG is a rendering of the words.
+  assert.equal(textIsThePaste('第三季度 目标\n· 增长 20%', [png]), true, 'multi-word text beside a PNG → the text');
+  assert.equal(textIsThePaste('Hello', [png]), true, 'one word that is not a name or URL → still the text');
+  assert.equal(textIsThePaste('  \n', [png]), false, 'whitespace-only text is no text (a screenshot on some engines)');
+  assert.equal(textIsThePaste('', [png]), false, 'a screenshot: no text');
+  assert.equal(textIsThePaste(null, [png]), false, 'no text/plain at all');
+  // Finder / Explorer file copy: the text is the file's own name or path.
+  assert.equal(textIsThePaste('image.png', [png]), false, 'the file name');
+  assert.equal(textIsThePaste('/Users/me/Desktop/image.png', [png]), false, 'a path (also: names the file)');
+  assert.equal(textIsThePaste('C:\\Users\\me\\image.png', [png]), false, 'a Windows path');
+  assert.equal(textIsThePaste('~/Pictures/photo.png', [png]), false, 'a home-relative path');
+  // A web page's "Copy image": at most the image URL rides along.
+  assert.equal(textIsThePaste('https://example.com/a/b.png', [png]), false, 'a URL');
+  assert.equal(textIsThePaste('data:image/png;base64,AAAA', [png]), false, 'a data URL');
+  // Anything non-image is a file paste whatever the text says.
+  assert.equal(textIsThePaste('see attached report', [pdf]), false, 'a pdf beside a caption');
+  assert.equal(textIsThePaste('see attached', [png, pdf]), false, 'mixed set: files');
+  // No files: trivially the text (the caller never asks, but the answer is coherent).
+  assert.equal(textIsThePaste('anything', []), true);
 });
 
 test('pastedFiles pulls the files out of a paste, or [] for plain text (board #25)', () => {

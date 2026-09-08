@@ -733,6 +733,12 @@ test('paste and the + button stage attachments through ONE pipeline (board #25)'
   const handler = /function onComposerPaste\(e\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
   assert.match(handler, /pastedFiles\(e\.clipboardData\)/u, 'files come from the pure extractor');
   assert.match(handler, /preventDefault/u, 'a file paste suppresses the default text insertion');
+  // Office/browser pastes ship a PNG rendering beside the words; the words are
+  // the paste. The decision is the pure textIsThePaste and it runs BEFORE the
+  // default insertion is suppressed (owner, 2026-09-08: "从 ppt 上粘贴过来的文字，
+  // 总是被粘贴为了一个图片").
+  assert.match(handler, /if \(textIsThePaste\(e\.clipboardData\?\.getData\('text\/plain'\), files\)\) return;[\s\S]*preventDefault/u,
+    'text beside an image-only set wins, decided before preventDefault');
   assert.match(handler, /stageFiles\(files\)/u, 'staging is the shared pipeline');
   const picker = /async function onPickFiles\(e\) \{([\s\S]*?)\n  \}/u.exec(source)?.[1] ?? '';
   assert.match(picker, /stageFiles\(files\)/u, 'the + button goes through the same pipeline');
