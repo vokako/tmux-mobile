@@ -151,7 +151,7 @@ test('columns scroll alone; the page holds still (reopened #11)', () => {
 
 test('create lives in the head, and compact gets the hamburger drawer (reopened #11)', () => {
   const head = source.slice(source.indexOf('<div class="page-head">'), source.indexOf('</div>', source.indexOf('boardNew')));
-  assert.match(head, /class="icon-btn go" title=\{t\('boardNew'\)\}/u, 'new-issue is the head\u2019s top-right action');
+  assert.match(head, /class="icon-btn" title=\{t\('boardNew'\)\}/u, 'new-issue is the head\u2019s top-right action (plain since #98 round two: the + is not a confirm)');
   assert.ok(!source.includes('class="new-issue"'), 'the bottom button is gone');
   // The drawer speaks the Chat/Terminal dialect: hamburger toggle, sheet,
   // scrim, and the back gesture closes the drawer FIRST.
