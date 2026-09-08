@@ -40,8 +40,22 @@ test('a directory\u2019s entrance is ONE beat, at answer time (board #93)', () =
     'the unfold plays for a navigation or a first fill — a same-dir refresh is a cut');
   assert.match(source, /revealTimer = setTimeout\(\(\) => \{ revealDir = ''; \}, revealMs\(\)\);/u,
     'the class is dropped after the stagger — a later mount never rises (the atom\u2019s contract)');
-  // The directions: deeper is fwd, up/back is back; view switches (preview,
-  // editor) still slide at tap time — they swap instantly.
+  // The directions: deeper is fwd, up/back is back; instant view switches
+  // (preview→editor and back) still slide at tap time — they swap in the
+  // same frame. But a FILE OPEN is async like a directory (round three,
+  // owner: "打开新的文件，看到的是当前的目录文件动画加载了一遍，然后又才打开
+  // 文件" — the tap-time slide replayed over the STILL-VISIBLE list): it
+  // records pendingViewSlide and the slide fires only when the view actually
+  // swaps to the answer (enterView), never over the list it is leaving.
+  assert.match(source, /pendingViewSlide = 'fwd';/u, 'a file open records its slide');
+  assert.ok(!/navAnim\('fwd'\); \/\/ a file preview swaps views now/u.test(source),
+    'the tap-time file slide is retired');
+  assert.match(source, /function enterView\(v\) \{\s*\n\s*if \(pendingViewSlide\) \{ navAnim\(pendingViewSlide\); pendingViewSlide = ''; \}\s*\n\s*view = v;/u,
+    'the swap fires the recorded slide exactly once');
+  assert.match(source, /enterView\('info'\);/u, 'the unpreviewable path swaps through the same gate');
+  assert.match(source, /enterView\('preview'\);/u, 'the preview swap goes through the same gate');
+  assert.ok(!/view = 'preview';(?![\s\S]*loadPreviewContent)/u.test(source.slice(source.indexOf('async function loadPreviewContent'), source.indexOf('async function reloadPreview'))),
+    'no preview branch bypasses the gate');
   assert.match(source, /pendingSlide = 'back';\s*\n\s*loadDir\(prev\);/u, 'the history pop rides its answer');
   assert.ok(!/function goBack\(\) \{\s*\n\s*navAnim\('back'\);/u.test(source),
     'goBack has no blanket tap-time slide — only its instant view branches');

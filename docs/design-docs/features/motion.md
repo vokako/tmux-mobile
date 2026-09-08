@@ -212,11 +212,17 @@ after 150ms for an uncached room, then `.reveal-tail` on the feed and
 `.reveal` on the roster), Board columns, Sessions list ✓, Files listing (the
 dim-then-reveal) ✓, Projects cards ✓, Agents list, Settings categories on
 first paint. Done 2026-09-04: Sessions (four `.skel` rows in a `.skel-wrap`,
-then `.reveal` on the first fill), Files (board #93 twice: first the
+then `.reveal` on the first fill), Files (board #93 three times: first the
 tap-time slide + answer-time unfold read as two detached beats — a flash —
 so the entrance is now ONE beat at answer time: `pendingSlide` records the
 direction and the drill slide starts WITH the unfold when the directory
-lands; `.reveal` still drops after `revealMs()`), DirPicker (one-shot
+lands; `.reveal` still drops after `revealMs()`; round three, 2026-09-08,
+the same beat for FILE opens — the tap-time `navAnim('fwd')` replayed the
+drill over the STILL-VISIBLE list before the preview landed ("打开新的文件，
+看到的是当前的目录文件动画加载了一遍，然后又才打开文件"), so `openEntry`
+records `pendingViewSlide` and `enterView()` fires it exactly when the view
+swaps to the answer; instant swaps like preview→editor keep their tap-time
+slide — they happen in the same frame), DirPicker (one-shot
 `reveal` on the first answer only),
 Projects (first fill), the Team roster strip (once per room, dropped after
 the stagger so joiners still pop) and TeamTemplates' list on open.

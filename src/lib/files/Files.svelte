@@ -459,6 +459,14 @@
     navAnimClass = '';
     requestAnimationFrame(() => { navAnimClass = dir; });
   }
+  // A FILE open's slide waits for its answer like a directory's (board #93
+  // round three): openEntry records it here, and the view swap that shows
+  // the answer fires it — never the list the tap is leaving.
+  let pendingViewSlide = '';
+  function enterView(v) {
+    if (pendingViewSlide) { navAnim(pendingViewSlide); pendingViewSlide = ''; }
+    view = v;
+  }
 
   // ── BACK is a HISTORY, not a parent walk (board #17) ─────────────────
   // "实现一个类似于'后退'的逻辑": every navigation the USER makes inside the
@@ -734,24 +742,25 @@
       if (stat.mime_hint === 'application/pdf') {
         const r = await fsDownload(path);
         currentFile = { ...file, pdfData: r.data };
-        view = 'preview';
+        enterView('preview');
       } else if (stat.mime_hint.startsWith('image/')) {
         const r = await fsDownload(path);
         currentFile = { ...file, dataUrl: `data:${stat.mime_hint};base64,${r.data}` };
-        view = 'preview';
+        enterView('preview');
       } else if (stat.is_text && stat.size <= 512 * 1024) {
         const r = await fsRead(path);
         if (mimeCategory(stat.mime_hint || '') !== 'markdown') loadHljs(); // lined view: highlight when it lands
         showAllLines = false; // the cap is per file
         currentFile = { ...file, content: r.content };
         wrapLines = defaultWrapForMime(stat.mime_hint || '');
-        view = 'preview';
+        enterView('preview');
       } else if (/\.pptx$/i.test(name)) {
         const r = await fsConvert(path);
         currentFile = { ...file, convertedHtml: r.html };
-        view = 'preview';
+        enterView('preview');
       }
     } catch (e) {
+      pendingViewSlide = '';
       error = e.message;
     }
     previewLoading = false;
@@ -763,8 +772,12 @@
       navTo(entry.path, 'fwd');
       return;
     }
-    navAnim('fwd'); // a file preview swaps views now; only a directory's entrance waits for its answer
+    // A file open is async like a directory: record the slide, fire it when
+    // the view swaps to the ANSWER (board #93 round three — the tap-time
+    // slide replayed over the still-visible list before the preview landed).
+    pendingViewSlide = 'fwd';
     if (entry.type === 'broken') {
+      pendingViewSlide = '';
       // Dangling symlink — nothing to preview, surface a clear error.
       const tgt = entry.link_target ? ` → ${entry.link_target}` : '';
       error = `Broken symlink: ${entry.name}${tgt}`;
@@ -781,11 +794,12 @@
       addRecent(entry.path, entry.name);
       navPush();
       if (stat.size > PREVIEW_SIZE_LIMIT || !isPreviewable(stat, entry.name)) {
-        view = 'info';
+        enterView('info');
         previewLoading = false;
         return;
       }
     } catch (e) {
+      pendingViewSlide = '';
       error = e.message;
       previewLoading = false;
       return;
