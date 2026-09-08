@@ -179,6 +179,8 @@ const msgs: Record<string, Record<string, string>> = {
     hubTerminal: 'Terminal',
     hubWatch: 'Watch in terminal',
     hubDirect: 'direct',
+    hubWinMore: 'Show {n} more windows',
+    hubWinLess: 'Show agent windows only',
     hubComposerDm: 'Message {name}…',
     // The hover card's labels (motion.md principle 16) — terse, they sit in a
     // label → value grid.
@@ -707,6 +709,8 @@ const msgs: Record<string, Record<string, string>> = {
     hubTerminal: 'Terminal',
     hubWatch: '在 terminal 里看',
     hubDirect: '直接',
+    hubWinMore: '显示另外 {n} 个窗口',
+    hubWinLess: '只显示 agent 窗口',
     hubComposerDm: '发给 {name}…',
     hubHoverState: '状态',
     hubHoverModel: '模型',

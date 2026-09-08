@@ -214,7 +214,10 @@ completion).
   picker, "talk to") switches it to that agent's window (board #91); a closed
   drawer never springs open.
 - **Terminal**: the selected agent's live pane (embedded xterm), window
-  pills with state dots. Esc inside `.xterm` goes to the pane.
+  pills with state dots. The pills show agent windows only — shells and
+  other windows fold behind a `+N` pill that expands on tap (board #92); the
+  window currently on screen always keeps its pill. Esc inside `.xterm` goes
+  to the pane.
 - **Files**: the real Files component in single-pane mode, per-project
   parked cwd, maximize hands off to the Files tab. Esc inside is the
   browser's own.

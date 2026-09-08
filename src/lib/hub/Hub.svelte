@@ -118,6 +118,15 @@
   let drawerFilesDir = $state(''); // where the drawer's Files is — the jump hands it over
   let termTarget = $state('');
   let termCommand = $state('');
+  // The switcher bar folds non-agent windows (board #92: "只 filter 出当前有效
+  // 的 agent window，其他 window 可以帮我折叠起来"): shells and other windows
+  // hide behind a +N pill so they never push the agent pills out of the bar.
+  // The one exception is the window the terminal is SHOWING — the bar may
+  // never hide the current pane, so it stays a pill even when folded-class.
+  let winsExpanded = $state(false);
+  const winPills = $derived(winsExpanded ? agents
+    : agents.filter((a) => a.agent || termTarget.startsWith(`${selected}:${a.window}.`)));
+  const winsFolded = $derived(agents.length - winPills.length);
 
   // New-project dialog.
   let createOpen = $state(false);
@@ -355,8 +364,9 @@
     const dv = compact ? '' : hubPrefs.drawer(session);
     if (dv) drawerView = dv;
     termOpen = !!dv;
-    // The old room's pane must never leak into this one's terminal partition.
-    termTarget = ''; termCommand = '';
+    // The old room's pane must never leak into this one's terminal partition
+    // — and the unfold is a transient reading of THAT room's bar (board #92).
+    termTarget = ''; termCommand = ''; winsExpanded = false;
     if (dv === 'term') {
       const pick = agents.find((x) => x.managed) ?? agents[0];
       if (pick) pickWindow(pick);
@@ -3340,13 +3350,22 @@
       <div class="drawer-head">
         {#if drawerView === 'term'}
           <div class="win-list">
-            {#each agents as a (a.window)}
+            {#each winPills as a (a.window)}
               <button class="win-pill state-ctl" class:cur={termTarget.startsWith(`${selected}:${a.window}.`)} onclick={() => pickWindow(a)}
                 use:hoverInfo={() => pillInfo(a)}>
                 <span class="st" class:live-dot={!!a.agent && stateIsLive(a.state)} style:background={stateDotColor(a.agent ? a.state : 'shell')}></span>
                 {a.window}:{a.name}{#if a.agent && !a.managed}<span class="direct-tag">{t('hubDirect')}</span>{/if}
               </button>
             {/each}
+            {#if winsFolded > 0 || winsExpanded}
+              <button class="win-pill state-ctl more"
+                title={winsExpanded ? t('hubWinLess') : t('hubWinMore').replace('{n}', String(winsFolded))}
+                aria-label={winsExpanded ? t('hubWinLess') : t('hubWinMore').replace('{n}', String(winsFolded))}
+                aria-expanded={winsExpanded}
+                onclick={() => (winsExpanded = !winsExpanded)}>
+                {winsExpanded ? '−' : `+${winsFolded}`}
+              </button>
+            {/if}
           </div>
           <span class="spacer"></span>
           <!-- The roster count the retired statusline carried. Everything else it

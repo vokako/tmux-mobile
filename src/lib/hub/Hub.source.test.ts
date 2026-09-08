@@ -170,6 +170,29 @@ test('the agent card speaks the three-stage machine: select, then options, dblcl
   assert.match(source, /if \(filterAgent\) \{ filterAgent = ''; return true; \}/u, 'back gesture exits the filter');
 });
 
+test('the drawer pills show AGENT windows; the rest fold behind +N (board #92)', () => {
+  // The switcher is for watching agents; shells and other windows are noise
+  // that pushed the agent pills out of the bar ("只 filter 出当前有效的 agent
+  // window，其他 window 可以帮我折叠起来"). Folded windows stay one tap away
+  // behind a +N pill of the same family; the window currently ON SCREEN is
+  // always a pill even when it belongs to the folded set — the bar may never
+  // hide what the terminal is showing.
+  assert.match(source, /const winPills = \$derived\(winsExpanded \? agents\s*\n\s*: agents\.filter\(\(a\) => a\.agent \|\| termTarget\.startsWith\(`\$\{selected\}:\$\{a\.window\}\.`\)\)\);/u,
+    'collapsed = agent windows plus the one on screen; expanded = everything');
+  assert.match(source, /const winsFolded = \$derived\(agents\.length - winPills\.length\);/u,
+    'the +N counts what is hidden');
+  assert.match(source, /\{#each winPills as a \(a\.window\)\}/u, 'the pill loop reads the filtered list');
+  assert.match(source, /\{#if winsFolded > 0 \|\| winsExpanded\}/u,
+    'the toggle appears only when something is (or was) folded');
+  const toggle = /<button class="win-pill state-ctl more"[\s\S]{0,600}?<\/button>/u.exec(source)?.[0] ?? '';
+  assert.match(toggle, /onclick=\{\(\) => \(winsExpanded = !winsExpanded\)\}/u, 'one tap folds and unfolds');
+  assert.match(toggle, /winsExpanded \? t\('hubWinLess'\) : t\('hubWinMore'\)\.replace\('\{n\}', String\(winsFolded\)\)/u,
+    'the toggle explains itself in words, not just a glyph');
+  // A room switch clears the transient unfold with the rest of the drawer state.
+  assert.match(source, /termTarget = ''; termCommand = ''; winsExpanded = false;/u,
+    'entering a room folds the bar back');
+});
+
 test('selecting an agent retargets an OPEN terminal partition (board #91)', () => {
   // Choosing who you talk to is also choosing whose pane you are watching:
   // when the drawer's terminal partition is open, clicking an agent card (and

@@ -1779,7 +1779,14 @@ actions; the statusline's only unique content was the roster count, which
 moved into the bar. The embedded `Terminal` stays `chromeless`, so its own
 window-switcher never appears here either — one bar, one place to switch.
 `statuslineWindows()` and its test went with the footer rather than lingering
-as dead code. The pills are not the only thing that switches: while the
+as dead code. The bar shows AGENT windows only (board #92: "只 filter 出当前
+有效的 agent window，其他 window 可以帮我折叠起来"): shells and other windows
+fold behind a `+N` pill of the same family — they are noise that pushed the
+agent pills out of the bar — and one tap unfolds them (the same pill becomes
+`−`); a room switch folds the bar back. The one exception is the window the
+terminal is currently SHOWING: it stays a pill even when it belongs to the
+folded set, because the bar may never hide the current pane. The pills are
+not the only thing that switches: while the
 partition is open, selecting an agent in the chat (card click, composer
 picker, "talk to") retargets it to that agent's window via the same
 `pickWindow` (board #91) — choosing who you talk to is choosing whose pane
