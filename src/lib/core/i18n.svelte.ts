@@ -195,7 +195,7 @@ const msgs: Record<string, Record<string, string>> = {
     hubHoverCommand: 'command',
     hubHoverPanes: 'panes',
     hubToDmLong: 'To {name}',
-    hubToAllLong: 'To everyone',
+    hubToAllLong: 'To all',
     hubToRoomLong: 'Room note',
     boardHoverReporter: 'reporter',
     boardHoverAssignee: 'assignee',
