@@ -430,19 +430,19 @@
             </div>
           </div>
           <div class="setting-row">
-            <div><strong>{t('uiFontBody')}</strong></div>
+            <div use:hoverInfo={() => ({ title: t('uiFontBody'), text: t('uiFontBodyHint') })}><strong>{t('uiFontBody')}</strong></div>
             <div class="font-control">
-              <Select bind:value={uiFontInput} editable dense options={uiFont.common}
-                placeholder={t('fontFamilySystem')} ariaLabel={t('uiFontBody')}
+              <Select bind:value={uiFontInput} editable dense fontPreview options={uiFont.common}
+                placeholder={t('fontFamilySystem')} ariaLabel={`${t('uiFontBody')} — ${t('uiFontBodyHint')}`}
                 onchange={() => saveUiFont()} />
               {#if uiFontInvalid}<small class="font-error appear">{t('fontFamilyInvalid')}</small>{/if}
             </div>
           </div>
           <div class="setting-row">
-            <div><strong>{t('uiFontDisplay')}</strong></div>
+            <div use:hoverInfo={() => ({ title: t('uiFontDisplay'), text: t('uiFontDisplayHint') })}><strong>{t('uiFontDisplay')}</strong></div>
             <div class="font-control">
-              <Select bind:value={displayFontInput} editable dense options={displayFont.common}
-                placeholder={t('fontFamilySystem')} ariaLabel={t('uiFontDisplay')}
+              <Select bind:value={displayFontInput} editable dense fontPreview options={displayFont.common}
+                placeholder={t('fontFamilySystem')} ariaLabel={`${t('uiFontDisplay')} — ${t('uiFontDisplayHint')}`}
                 onchange={() => saveDisplayFont()} />
               {#if displayFontInvalid}<small class="font-error appear">{t('fontFamilyInvalid')}</small>{/if}
             </div>
@@ -476,10 +476,10 @@
       {:else if tab === 'terminal'}
         <div class="setting-card">
           <div class="setting-row">
-            <div><strong>{t('fontFamily')}</strong></div>
+            <div use:hoverInfo={() => ({ title: t('fontFamily'), text: t('fontFamilyHint') })}><strong>{t('fontFamily')}</strong></div>
             <div class="font-control">
-              <Select bind:value={fontInput} editable dense options={fonts.common}
-                placeholder={t('fontFamilySystem')} ariaLabel={t('fontFamily')}
+              <Select bind:value={fontInput} editable dense fontPreview options={fonts.common}
+                placeholder={t('fontFamilySystem')} ariaLabel={`${t('fontFamily')} — ${t('fontFamilyHint')}`}
                 onchange={() => saveFont()} />
               {#if fontInvalid}<small class="font-error appear">{t('fontFamilyInvalid')}</small>{/if}
             </div>

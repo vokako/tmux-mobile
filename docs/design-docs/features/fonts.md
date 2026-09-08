@@ -52,6 +52,36 @@ subset is exactly what the 2026-07 un-bundling below traded away. The
 terminal and all `--font-mono` surfaces are untouched by design — the
 monospace story is the rest of this document.
 
+## Simplified glyphs need the document's language (board #97, 2026-09-08)
+
+"中文字体显示很怪异，不像是标准的简体中文字" had two causes, both about
+FALLBACK resolution rather than the stacks' intent:
+
+- `index.html` ships `lang="en"` and nothing updated it: Han-unified
+  codepoints rendered by a fallback face pick their REGIONAL glyph variant
+  from the document language, so platforms without a named SC family (or
+  with a JP-preferring fontconfig default, typical on Linux) drew
+  Japanese-variant shapes (直/骨/门…). `i18n.svelte.ts` now writes
+  `document.documentElement.lang` (`zh-CN`/`en`) at init and on every
+  `setLocale` — the module stays node-loadable behind a `typeof document`
+  guard, and `i18n.test.ts` pins the behaviour.
+- The UI/display stacks named only PingFang (macOS), YaHei (Windows) and
+  Noto SC; a Linux desktop or non-Google Android often carries the Adobe
+  naming instead. `'Source Han Sans SC', 'WenQuanYi Micro Hei'` now sit at
+  the tail of `--font-ui`/`--font-display` (app.css + the mirrored literals
+  in fonts.svelte.ts).
+
+The three Settings font pickers are SELF-DEMONSTRATING since the same
+review ("最好选择的字体本身就有样式，我好理解去选择"): `ui/Select` grew an
+opt-in `fontPreview` mode — each option renders in the family it names and
+the combo field wears the current value's face; a family the device lacks
+falls through to the app stack, which is also the honest answer. Which
+surfaces each role paints is explained by the row's hover card
+(`fontFamilyHint`/`uiFontBodyHint`/`uiFontDisplayHint` — the #87 dialect,
+never a persistent subtitle) and the picker's aria-label; the terminal
+row's label is now "Terminal font"/"终端字体", not the ambiguous "Font
+name"/"字体".
+
 ## Context
 
 The terminal (xterm.js) and all mono UI (`--font-mono`) need a monospace

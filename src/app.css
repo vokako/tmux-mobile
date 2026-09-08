@@ -30,7 +30,7 @@ html {
      look like code. The terminal NEVER takes --font-ui: it stays on the
      monospace stack by construction. */
   --font-mono: ui-monospace, 'SF Mono', Menlo, 'Cascadia Mono', Consolas, 'Roboto Mono', 'Droid Sans Mono', 'Noto Sans Mono', 'Noto Sans Symbols 2', 'Symbols Nerd Font Mono', monospace;
-  --font-ui: 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif;
+  --font-ui: 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC', 'WenQuanYi Micro Hei', sans-serif;
   /* The third role, added on request ("标题 名称等特殊 字体可以更特别一点",
      2026-08-25): the IDENTITY layer — page titles, sidebar section headers,
      the brand, agent/project names. Space Grotesk grew out of Space Mono,
@@ -38,7 +38,7 @@ html {
      ONLY those surfaces take it; body prose, controls and data stay
      --font-ui / --font-mono, so the count of voices stays at three with
      one job each. CJK falls through to the same native CJK as --font-ui. */
-  --font-display: 'Space Grotesk Variable', 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif;
+  --font-display: 'Space Grotesk Variable', 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC', 'WenQuanYi Micro Hei', sans-serif;
 
   /* Shared UI metrics */
   --ui-bar-height: 31px;

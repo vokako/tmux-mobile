@@ -28,6 +28,12 @@
      * model field, which used a native <datalist> — the OS popup this
      * component exists to remove (owner, 2026-08-24: "模型选择下拉框明显不对"). */
     editable = false,
+    /** FONT-PREVIEW mode (board #97: "最好选择的字体本身就有样式"): each
+     * option renders IN the family it names, and the field wears the current
+     * value's face — the choice demonstrates itself. A family the device
+     * lacks falls through to the app stack, which is also the honest answer:
+     * what you see is what picking it gets you. */
+    fontPreview = false,
     placeholder = '',
     ariaLabel = '',
     onchange = (_v: string) => {},
@@ -160,6 +166,7 @@
   <span class="sel-combo">
     <input class="sel-trigger combo" class:open class:dense bind:this={inputEl}
       {disabled} {placeholder} bind:value
+      style:font-family={fontPreview && value.trim() ? `'${value.trim().replace(/['"]/g, '')}'` : undefined}
       role="combobox" aria-haspopup="listbox" aria-expanded={open} aria-controls="sel-combo-list"
       aria-label={ariaLabel || undefined}
       autocomplete="off" autocapitalize="off" spellcheck="false"
@@ -192,7 +199,7 @@
         role="option" aria-selected={o.value === value} type="button"
         onclick={() => pick(o.value)} onpointerenter={() => (cursor = i)}>
         {#if o.icon}<img class="so-ico" src={o.icon} alt="" />{/if}
-        <span class="so-label">{o.label ?? o.value}</span>
+        <span class="so-label" style:font-family={fontPreview && o.value ? `'${o.value.replace(/['"]/g, '')}'` : undefined}>{o.label ?? o.value}</span>
         {#if o.hint}<span class="so-hint">{o.hint}</span>{/if}
         {#if o.value === value}<Icon name="check" size={12} />{/if}
       </button>

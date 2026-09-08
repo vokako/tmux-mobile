@@ -4,9 +4,21 @@ const i18n = $state({ lang: localStorage.getItem('tmux_locale') || (navigator.la
 
 export { i18n };
 
+/** The document speaks the UI's language (board #97): index.html ships
+ * `lang="en"`, and Han-unified codepoints rendered by a FALLBACK font pick
+ * their regional glyph variant by that tag — with `en` (or a JP-preferring
+ * fontconfig default) Chinese text drew Japanese-variant shapes ("不像是标准
+ * 的简体中文字"). `zh-CN` makes every fallback resolve to Simplified forms;
+ * the guard keeps the module loadable under node --test. */
+function applyDocLang(l: string) {
+  if (typeof document !== 'undefined') document.documentElement.lang = l === 'zh' ? 'zh-CN' : 'en';
+}
+applyDocLang(i18n.lang);
+
 export function setLocale(l: 'en' | 'zh') {
   i18n.lang = l;
   localStorage.setItem('tmux_locale', l);
+  applyDocLang(l);
 }
 
 const msgs: Record<string, Record<string, string>> = {
@@ -283,9 +295,12 @@ const msgs: Record<string, Record<string, string>> = {
     themeLight: 'Light',
     themeDark: 'Dark',
     font: 'Font',
-    fontFamily: 'Font name',
+    fontFamily: 'Terminal font',
+    fontFamilyHint: 'Terminal and code — monospace',
     uiFontBody: 'Content font',
+    uiFontBodyHint: 'Messages, documents, input text',
     uiFontDisplay: 'Interface font',
+    uiFontDisplayHint: 'Titles, names, buttons',
     fontFamilySystem: 'System default',
     settings: 'Settings',
     settingsHint: 'Appearance, terminal, and connection preferences',
@@ -811,9 +826,12 @@ const msgs: Record<string, Record<string, string>> = {
     themeLight: '浅色',
     themeDark: '深色',
     font: '字号',
-    fontFamily: '字体',
+    fontFamily: '终端字体',
+    fontFamilyHint: '终端与代码 — 等宽字体',
     uiFontBody: '正文字体',
+    uiFontBodyHint: '聊天消息、文档与输入框',
     uiFontDisplay: '界面字体',
+    uiFontDisplayHint: '标题、名称与按钮',
     fontFamilySystem: '系统默认',
     settings: '设置',
     settingsHint: '外观、终端与连接偏好',

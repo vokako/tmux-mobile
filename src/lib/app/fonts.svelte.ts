@@ -50,6 +50,8 @@ const COMMON_SANS = [
   'IBM Plex Sans',
   'PingFang SC',
   'Microsoft YaHei',
+  'Noto Sans SC',
+  'Source Han Sans SC',
 ];
 
 // Symbol fillers + per-platform fallbacks. The generic `monospace` keyword
@@ -71,11 +73,11 @@ const SYSTEM_STACK =
 // default would silently change the un-customized rendering.
 const UI_STACK =
   "'Inter Variable', -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', " +
-  "'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif";
+  "'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC', 'WenQuanYi Micro Hei', sans-serif";
 
 const DISPLAY_STACK =
   "'Space Grotesk Variable', 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', " +
-  "'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', sans-serif";
+  "'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC', 'WenQuanYi Micro Hei', sans-serif";
 
 function quote(name: string): string {
   // Wrap in single quotes for CSS; strip any quotes the user typed.

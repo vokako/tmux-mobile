@@ -154,3 +154,24 @@ test('settings controls use labels and values, not a subtitle under every row (b
     'an actual permission problem still explains itself');
   assert.match(source, /class="font-error appear"/u, 'validation errors remain visible');
 });
+
+test('the three font pickers demonstrate themselves and name their scope (board #97)', async () => {
+  // "我其实没看懂设置的到底是哪里的字体，最好选择的字体本身就有样式": every
+  // font Select renders its options IN the family each names (fontPreview),
+  // and each row explains WHICH surfaces its role paints through the hover
+  // card (the #87 dialect — never a persistent subtitle) + the aria-label.
+  for (const [sel, hint] of [
+    [/bind:value=\{fontInput\} editable dense fontPreview/u, /use:hoverInfo=\{\(\) => \(\{ title: t\('fontFamily'\), text: t\('fontFamilyHint'\) \}\)\}/u],
+    [/bind:value=\{uiFontInput\} editable dense fontPreview/u, /use:hoverInfo=\{\(\) => \(\{ title: t\('uiFontBody'\), text: t\('uiFontBodyHint'\) \}\)\}/u],
+    [/bind:value=\{displayFontInput\} editable dense fontPreview/u, /use:hoverInfo=\{\(\) => \(\{ title: t\('uiFontDisplay'\), text: t\('uiFontDisplayHint'\) \}\)\}/u],
+  ] as const) {
+    assert.match(source, sel, `the picker previews: ${sel}`);
+    assert.match(source, hint, `its scope is explained on hover: ${hint}`);
+  }
+  // The mechanism lives in the ONE Select (rule 6), opt-in per instance.
+  const select = await readFile(new URL('../ui/Select.svelte', import.meta.url), 'utf8');
+  assert.match(select, /style:font-family=\{fontPreview && o\.value \? `'\$\{o\.value\.replace\(\/\['"\]\/g, ''\)\}'` : undefined\}/u,
+    'each option wears the family it names');
+  assert.match(select, /style:font-family=\{fontPreview && value\.trim\(\) \? `'\$\{value\.trim\(\)\.replace\(\/\['"\]\/g, ''\)\}'` : undefined\}/u,
+    'the combo field wears the current value\u2019s face');
+});
