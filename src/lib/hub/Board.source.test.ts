@@ -315,6 +315,26 @@ test('the detail speaks board #15: project-named page, status slider, confirmed 
   assert.match(source, /onchange=\{\(v: string\) => \(draft\.assignee = v\)\}/u, 'changing it is an edit, not a write');
 });
 
+test('the slider\u2019s thumb is NESTED in the track (board #95)', () => {
+  // "边缘线条都出框了…要像是真的一个滑块": the pill used to slide flush against
+  // the track's own border — full control radius plus a 1px ring grinding on
+  // a 1px frame, and full-height stop dividers running into it — which read
+  // as lines escaping the box. A real slider nests: padded track, thumb on
+  // the INNER radius (outer minus inset — the nesting rule), and short
+  // centre detents that yield around the thumb.
+  const seg = /\.seg \{([^}]*)\}/u.exec(source)?.[1] ?? '';
+  assert.match(seg, /padding: 3px;/u, 'the track is padded — the thumb floats inside the frame');
+  assert.match(source, /\.seg :global\(\.slide-pill\) \{ border-radius: calc\(var\(--ui-radius-control\) - 3px\); \}/u,
+    'the thumb wears the nested radius (scoped — the rail/tab pills keep the atom\u2019s)');
+  assert.match(/\.seg-b \{([^}]*)\}/u.exec(source)?.[1] ?? '', /border-radius: calc\(var\(--ui-radius-control\) - 3px\)/u,
+    'the stops share the nested radius, so hover matches the thumb');
+  assert.match(source, /\.seg-b \+ \.seg-b::before \{[^}]*top: 25%; height: 50%;/u,
+    'detents are short centre lines, never touching the frame');
+  assert.ok(!/\.seg-b \+ \.seg-b \{ border-left/u.test(source), 'the full-height dividers stay retired');
+  assert.match(source, /\.seg-b\.on::before, \.seg-b\.on \+ \.seg-b::before \{ background: transparent; \}/u,
+    'the pair flanking the thumb steps aside');
+});
+
 test('the bar IS Chat\u2019s page-head, and the name appears once (board #15 reopen)', () => {
   // The shared app.css dialect carries height/padding/border/type — the
   // component may not re-style it (the drift that split the sidebars once).

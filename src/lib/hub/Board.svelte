@@ -1067,27 +1067,42 @@
      the same as Preferences' `.segmented button.active` — never the solid
      --accent-fill, which is the CTA dialect (review, 2026-09-03). The outline
      is an inset ring because the stops share one bordered track. touch-action
-     none so the sweep is ours, not the page scroll's. */
+     none so the sweep is ours, not the page scroll's.
+     The thumb is NESTED (board #95: "边缘线条都出框了…像是真的一个滑块"):
+     the track carries 3px padding, so the pill floats INSIDE the frame with
+     the nested radius (outer minus inset) instead of grinding its ring
+     against the track's border; the dividers are short centre detents that
+     never touch the frame and step aside around the thumb. */
   .seg {
     display: inline-flex; align-items: stretch; position: relative; /* the pill's frame */
     border: 1px solid var(--border); border-radius: var(--ui-radius-control);
-    background: var(--surface); overflow: hidden;
+    background: var(--surface); overflow: hidden; padding: 3px;
     touch-action: none; user-select: none;
   }
   /* The stops sit ABOVE the pill (z-index 1 over the atom's 0) and paint no
      wash of their own — the wash + inset ring are the .slide-pill's (app.css),
-     so the highlight is ONE thing that moves (motion.md principle 14). The
-     divider beside the chosen stop steps aside so the pill's ring reads whole. */
+     so the highlight is ONE thing that moves (motion.md principle 14). */
   .seg-b {
     border: none; background: none; cursor: pointer;
     font-size: var(--fs-meta); color: var(--text2);
-    padding: 5px 12px; position: relative; z-index: 1;
+    padding: 3px 12px; position: relative; z-index: 1;
+    border-radius: calc(var(--ui-radius-control) - 3px);
     transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
   }
-  .seg-b + .seg-b { border-left: 1px solid var(--border); }
-  .seg-b.on, .seg-b.on + .seg-b { border-left-color: transparent; }
+  /* Detents: a short centre line between stops (a pseudo, not a border — a
+     border would run the stop's full height into the rounded frame). The
+     pair flanking the chosen stop yields to the thumb's ring. */
+  .seg-b + .seg-b::before {
+    content: ''; position: absolute; left: -0.5px; top: 25%; height: 50%;
+    width: 1px; background: var(--border);
+    transition: background var(--t-fast);
+  }
+  .seg-b.on::before, .seg-b.on + .seg-b::before { background: transparent; }
   .seg-b.on { color: var(--accent); }
   .seg-b:not(.on):hover { background: var(--surface2); }
+  /* The nested thumb: same wash and ring, the inner radius (atom override —
+     scoped to this track; the rail and tab pills keep the atom's own). */
+  .seg :global(.slide-pill) { border-radius: calc(var(--ui-radius-control) - 3px); }
   .meta-bit { font-size: var(--fs-meta); color: var(--text3); }
   .meta-bit .m-name { color: var(--accent); font-weight: 650; }
   /* The hierarchy (board #11): one compact title LINE, then the body as the
