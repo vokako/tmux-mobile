@@ -144,16 +144,20 @@ symlink → target / broken link), size and modified through the SAME
 path, a bookmark's or recent file's its path, and a git status row's the
 porcelain code in words ("modified, staged · modified, unstaged",
 `files/git-status.ts`, tested). The native `title` on the file name is gone.
-The FIRST fill's rows unfold; navigation swaps rows atomically (board #93):
-the rows are keyed by path, so a navigation remounts them all — remounting
-under a lingering `.reveal` blanked every row behind rise-in's backwards
-fill (30–210ms stagger delays), and each dir tap flashed near-empty after
-the drill/dim before the rows rose back in ("先动完动画后，又闪了一下").
-`loadDir` sets the reveal only when there was nothing on screen to keep and
-drops it after `revealMs()` (the atom's contract), so a later mount — an
-upload landing, hidden files toggled on, the next navigation — never rises;
-a same-directory refresh keeps its nodes and animates nothing. DirPicker
-follows the same rule via a one-shot `reveal` flag on its first answer.
+A directory's ENTRANCE is one beat, at answer time (board #93, owner: "旧的
+页面滑出去，新的页面进来。同时新的页面应该从上到下按行显示过渡加载。新页面加
+载和滑入是同时进行的，有可能加载慢就可能慢半拍"): the navigation records its
+direction (`pendingSlide` — deeper is `fwd`; up, crumbs and the history pop
+are `back`), and when the answer lands the drill slide and the top-to-bottom
+row unfold start TOGETHER. The tap-time slide was the flash: it finished
+over the OLD rows and the swap then read as a detached blink. A slow answer
+starts its entrance late — the honest reading — with the busy dim (150ms
+threshold) covering the wait. The unfold (`revealDir`, dropped after
+`revealMs()` per the atom's contract) also plays for a first fill and for
+slide-less navigations (the desktop split, an external jump), where it IS
+the whole entrance; a same-directory refresh keeps its nodes and animates
+nothing; view switches (preview, editor) still slide at tap time — they
+swap instantly. DirPicker keeps its one-shot first-answer `reveal`.
 GitPanel's Status/Log tabs are
 the ONE travelling highlight (`use:slideIndicator` + `.slide-pill`): the pill
 glides, the buttons only change colour.

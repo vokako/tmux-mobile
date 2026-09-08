@@ -212,11 +212,12 @@ after 150ms for an uncached room, then `.reveal-tail` on the feed and
 `.reveal` on the roster), Board columns, Sessions list ✓, Files listing (the
 dim-then-reveal) ✓, Projects cards ✓, Agents list, Settings categories on
 first paint. Done 2026-09-04: Sessions (four `.skel` rows in a `.skel-wrap`,
-then `.reveal` on the first fill), Files and DirPicker (rows keyed by path;
-`.reveal` on the FIRST fill only, dropped after `revealMs()` — board #93
-retired the per-navigation unfold: remounting under a lingering `.reveal`
-blanked the rows behind the backwards fill and flashed every hop; navigation
-keeps rows and swaps them atomically under the dim),
+then `.reveal` on the first fill), Files (board #93 twice: first the
+tap-time slide + answer-time unfold read as two detached beats — a flash —
+so the entrance is now ONE beat at answer time: `pendingSlide` records the
+direction and the drill slide starts WITH the unfold when the directory
+lands; `.reveal` still drops after `revealMs()`), DirPicker (one-shot
+`reveal` on the first answer only),
 Projects (first fill), the Team roster strip (once per room, dropped after
 the stagger so joiners still pop) and TeamTemplates' list on open.
 

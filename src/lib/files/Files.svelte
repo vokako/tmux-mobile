@@ -162,7 +162,7 @@
       // falls through (App re-pushes). A chat-jumped visit stands aside:
       // its floor is the conversation, App's return slot below.
       if (!jumped && cwd && cwd !== '/') {
-        navAnim('back');
+        pendingSlide = 'back';
         navPush();
         loadDir(cwd.replace(/\/[^/]+\/?$/, '') || '/');
         return true;
@@ -469,23 +469,25 @@
   // Below the stack, a tab visit climbs parent directories to / (board #47);
   // only a chat-jumped visit leaves the page, via App's return slot.
   let dirHist = [];
-  function navTo(path) {
+  function navTo(path, slide = '') {
     if (cwd && path !== cwd) dirHist.push(cwd);
+    pendingSlide = slide;
     loadDir(path);
   }
   function popDir() {
     const prev = dirHist.pop();
     if (prev == null) return false;
-    navAnim('back');
+    pendingSlide = 'back';
     loadDir(prev);
     return true;
   }
 
   function goBack() {
-    navAnim('back');
-    if (view === 'edit') { view = 'preview'; }
-    else if (view === 'info') { view = fromGit ? (fromGit = false, 'git') : currentFile?.content != null ? 'preview' : 'list'; }
-    else if (view === 'preview') { if (fromGit) { fromGit = false; view = 'git'; } else { view = 'list'; } currentFile = null; }
+    // The view branches slide NOW (they swap instantly); the directory pop's
+    // slide rides its answer (board #93 — the entrance is one beat).
+    if (view === 'edit') { navAnim('back'); view = 'preview'; }
+    else if (view === 'info') { navAnim('back'); view = fromGit ? (fromGit = false, 'git') : currentFile?.content != null ? 'preview' : 'list'; }
+    else if (view === 'preview') { navAnim('back'); if (fromGit) { fromGit = false; view = 'git'; } else { view = 'list'; } currentFile = null; }
     else popDir();
   }
 
@@ -631,16 +633,19 @@
     }
   });
 
-  // The FIRST fill unfolds (motion.md principle 15, DirPicker's `ready`):
-  // before it there is nothing to keep, so the rows may rise in. Navigation
-  // swaps rows ATOMICALLY under the dim instead — the rows are keyed by path,
-  // so a navigation remounts them all, and remounting under `.reveal` blanked
-  // every row behind rise-in's backwards fill (30–210ms stagger delays): each
-  // dir tap flashed near-empty before the rows rose back in (board #93,
-  // "先动完动画后，又闪了一下"). Keep-and-swap is the whole point of the dim
-  // rule; the unfold is for the answer that had no predecessor.
+  // The ENTRANCE is ONE beat, at answer time (board #93, owner: "旧的页面滑
+  // 出去，新的页面进来。同时新的页面应该从上到下按行显示过渡加载。新页面加载和
+  // 滑入是同时进行的"): the drill slide and the top-to-bottom unfold start
+  // TOGETHER when the new directory lands. The tap-time slide was the flash —
+  // it finished over the OLD rows, and the swap then read as a detached blink.
+  // A slow answer starts its entrance late (the owner's "慢半拍" — that is the
+  // honest reading); the busy dim (150ms threshold) covers the wait. The
+  // unfold also plays for a first fill and for slide-less navigations (the
+  // desktop split, an external jump), where it IS the whole entrance; a
+  // same-directory refresh keeps its nodes and animates nothing.
   let revealDir = $state('');
   let revealTimer = null;
+  let pendingSlide = ''; // 'fwd' | 'back' — set by the navigation, consumed when its answer lands
   let loadSeq = 0;
   async function loadDir(path, purpose = 'navigate') {
     const my = ++loadSeq; // several callers can navigate concurrently around a
@@ -649,10 +654,12 @@
     try {
       const r = await fsList(path, showHidden);
       if (my !== loadSeq) return;
-      revealDir = entries.length ? '' : path;
+      const navigated = path !== cwd;
+      if (navigated && pendingSlide) navAnim(pendingSlide);
+      revealDir = navigated || !entries.length ? path : '';
       // The atom's contract (motion.md): the class is DROPPED once the
       // stagger has played, so a row that mounts later — an upload landing,
-      // hidden files toggled on, the next navigation's remount — never rises.
+      // hidden files toggled on — never rises.
       if (revealDir) {
         clearTimeout(revealTimer);
         revealTimer = setTimeout(() => { revealDir = ''; }, revealMs());
@@ -664,6 +671,7 @@
       if (my !== loadSeq) return;
       error = e.message;
     }
+    pendingSlide = '';
     loading = false;
   }
 
@@ -677,9 +685,8 @@
   });
 
   function goUp() {
-    navAnim('back');
     const parent = cwd.replace(/\/[^/]+\/?$/, '') || '/';
-    navTo(parent);
+    navTo(parent, 'back');
   }
 
   function scrollEnd(el) { el.scrollLeft = el.scrollWidth; }
@@ -735,12 +742,12 @@
   }
 
   async function openEntry(entry) {
-    navAnim('fwd');
     if (entry.type === 'dir') {
       navPush();
-      navTo(entry.path);
+      navTo(entry.path, 'fwd');
       return;
     }
+    navAnim('fwd'); // a file preview swaps views now; only a directory's entrance waits for its answer
     if (entry.type === 'broken') {
       // Dangling symlink — nothing to preview, surface a clear error.
       const tgt = entry.link_target ? ` → ${entry.link_target}` : '';
@@ -1530,9 +1537,9 @@
 
     <!-- Path -->
     <div class="bc-path-row" bind:this={bcPathEl}>
-      <button class="bc-seg" onclick={() => navTo('/')}>/</button>
+      <button class="bc-seg" onclick={() => navTo('/', 'back')}>/</button>
       {#each breadcrumbs as bc, i (bc.path)}
-        <button class="bc-seg" class:appear={i === breadcrumbs.length - 1} onclick={() => navTo(bc.path)}
+        <button class="bc-seg" class:appear={i === breadcrumbs.length - 1} onclick={() => navTo(bc.path, 'back')}
           use:hoverInfo={() => ({ title: bc.name, text: bc.path })}>{bc.name}</button>
         <span class="bc-sep">/</span>
       {/each}
@@ -1543,7 +1550,7 @@
         {#each bookmarks as bm}
           <div class="bm-row">
             <span class="bm-icon"><Icon name="star-filled" size={13} /></span>
-            <button class="bm-path" onclick={() => { navTo(bm); showBookmarks = false; }} use:scrollEnd use:hoverInfo={() => ({ text: bm })}>
+            <button class="bm-path" onclick={() => { navTo(bm, 'fwd'); showBookmarks = false; }} use:scrollEnd use:hoverInfo={() => ({ text: bm })}>
               {bm}
             </button>
             <button class="bm-del" onclick={() => toggleBookmark(bm)}><Icon name="x" size={12} /></button>

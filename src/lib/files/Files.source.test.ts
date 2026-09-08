@@ -6,14 +6,14 @@ const source = await readFile(new URL('./Files.svelte', import.meta.url), 'utf8'
 
 test('back retraces the USER\u2019s steps — a history, not a parent walk (board #17)', () => {
   // Every user navigation pushes where they WERE…
-  assert.match(source, /function navTo\(path\) \{\s*\n\s*if \(cwd && path !== cwd\) dirHist\.push\(cwd\);/u,
+  assert.match(source, /function navTo\(path, slide = ''\) \{\s*\n\s*if \(cwd && path !== cwd\) dirHist\.push\(cwd\);/u,
     'one navigate-with-history helper');
   for (const site of [
-    /navTo\(entry\.path\);/u,          // entering a directory
-    /navTo\(parent\);/u,               // the up button
-    /onclick=\{\(\) => navTo\('\/'\)\}/u, // the root crumb
-    /navTo\(bc\.path\)/u,              // a crumb
-    /navTo\(bm\);/u,                   // a bookmark
+    /navTo\(entry\.path, 'fwd'\);/u,   // entering a directory
+    /navTo\(parent, 'back'\);/u,       // the up button
+    /onclick=\{\(\) => navTo\('\/', 'back'\)\}/u, // the root crumb
+    /navTo\(bc\.path, 'back'\)/u,      // a crumb
+    /navTo\(bm, 'fwd'\);/u,            // a bookmark
   ]) assert.match(source, site, `user navigation pushes: ${site}`);
   // …back pops exactly that path FIRST; the user's own steps always outrank
   // the parent climb below them (board #47 reopened the climb — see the next
@@ -27,18 +27,24 @@ test('back retraces the USER\u2019s steps — a history, not a parent walk (boar
   assert.equal(resets, 4, 'the declaration + session switch, cwd follow rule, and navRequest handoff resets');
 });
 
-test('navigation swaps rows atomically; the unfold is for the FIRST fill only (board #93)', () => {
-  // "先动完动画后，又闪了一下，然后才显示好": the per-navigation unfold blanked
-  // every remounted row behind rise-in's backwards fill (30–210ms stagger
-  // delays), so each dir tap flashed near-empty right after the drill/dim
-  // before the rows rose in. DirPicker's rule — keep rows, swap atomically —
-  // reserves the unfold for the first answer, when there is nothing to keep.
-  assert.match(source, /revealDir = entries\.length \? '' : path;/u,
-    'the unfold plays only when the pane had nothing on screen');
-  assert.ok(!source.includes("revealDir = path !== cwd ? path : ''"),
-    'the per-navigation unfold stays retired — it was the flash');
+test('a directory\u2019s entrance is ONE beat, at answer time (board #93)', () => {
+  // Owner: "旧的页面滑出去，新的页面进来。同时新的页面应该从上到下按行显示过渡
+  // 加载。新页面加载和滑入是同时进行的，有可能加载慢就可能慢半拍。" The
+  // tap-time slide was the flash: it finished over the OLD rows and the swap
+  // then read as a detached blink. Now the navigation only RECORDS its
+  // direction (pendingSlide), and the slide + the top-to-bottom unfold start
+  // together when the answer lands.
+  assert.match(source, /const navigated = path !== cwd;\s*\n\s*if \(navigated && pendingSlide\) navAnim\(pendingSlide\);/u,
+    'the slide fires when the answer lands, in the recorded direction');
+  assert.match(source, /revealDir = navigated \|\| !entries\.length \? path : '';/u,
+    'the unfold plays for a navigation or a first fill — a same-dir refresh is a cut');
   assert.match(source, /revealTimer = setTimeout\(\(\) => \{ revealDir = ''; \}, revealMs\(\)\);/u,
     'the class is dropped after the stagger — a later mount never rises (the atom\u2019s contract)');
+  // The directions: deeper is fwd, up/back is back; view switches (preview,
+  // editor) still slide at tap time — they swap instantly.
+  assert.match(source, /pendingSlide = 'back';\s*\n\s*loadDir\(prev\);/u, 'the history pop rides its answer');
+  assert.ok(!/function goBack\(\) \{\s*\n\s*navAnim\('back'\);/u.test(source),
+    'goBack has no blanket tap-time slide — only its instant view branches');
   // Found in the same investigation: the restored-park branch tracked
   // entries/loading, so an EMPTY directory re-listed itself forever (each
   // load toggles the deps and re-arms the effect). One shot is the intent.
@@ -109,7 +115,7 @@ test('below its own path, a tab visit climbs to the parent — never the termina
   // so it must replenish the APP entry consumed by this pop; otherwise a
   // deep path stalls after the pre-existing entries run out. Only a
   // chat-jumped visit falls through to App's return slot (the conversation).
-  assert.match(source, /if \(popDir\(\)\) return true;[\s\S]{0,900}?if \(!jumped && cwd && cwd !== '\/'\) \{\s*navAnim\('back'\);\s*navPush\(\);\s*loadDir\(cwd\.replace\(\/\\\/\[\^\/\]\+\\\/\?\$\/, ''\) \|\| '\/'\);\s*return true;\s*\}/u,
+  assert.match(source, /if \(popDir\(\)\) return true;[\s\S]{0,900}?if \(!jumped && cwd && cwd !== '\/'\) \{\s*pendingSlide = 'back';\s*navPush\(\);\s*loadDir\(cwd\.replace\(\/\\\/\[\^\/\]\+\\\/\?\$\/, ''\) \|\| '\/'\);\s*return true;\s*\}/u,
     'the climb sits under the user-path pop, replenishes app history, and loads without pushing dir history');
 });
 
