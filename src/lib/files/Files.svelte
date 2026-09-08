@@ -16,6 +16,7 @@
   import SideHandle from '../ui/SideHandle.svelte';
   import GitPanel from './GitPanel.svelte';
   import { hoverInfo } from '../ui/hover.ts';
+  import { revealMs } from '../ui/motion.ts';
   import { createPersistedList } from './persisted-list.ts';
   import { t } from '../core/i18n.svelte.ts';
   import { layout } from '../app/layout.svelte.ts';
@@ -575,7 +576,11 @@
         leaveEditor(() => { cwd = parked.cwd; view = 'list'; loadDir(parked.cwd); });
       }
     }
-    if (cwd && !entries.length && !loading) loadDir(cwd); // restored park: list it
+    // Restored park: list it ONCE. The guard is loadSeq (non-reactive on
+    // purpose): this effect tracks entries/loading, so without it an EMPTY
+    // directory re-armed the branch on its own completion and re-listed
+    // itself forever (board #93's investigation).
+    if (cwd && !entries.length && !loading && !loadSeq) loadDir(cwd);
     // session may be '' when Files is opened before any terminal pane exists —
     // the server then reports the user's home directory. Once a terminal/team
     // session appears, its cwd differs from home and we follow it.
@@ -626,11 +631,16 @@
     }
   });
 
-  // A DIFFERENT directory's rows unfold (motion.md principle 15): the rows are
-  // keyed by path, so a navigation remounts them all and `.reveal` staggers
-  // them in under the dim that was already there; a refresh of the same
-  // directory keeps its nodes and gets no animation at all.
+  // The FIRST fill unfolds (motion.md principle 15, DirPicker's `ready`):
+  // before it there is nothing to keep, so the rows may rise in. Navigation
+  // swaps rows ATOMICALLY under the dim instead — the rows are keyed by path,
+  // so a navigation remounts them all, and remounting under `.reveal` blanked
+  // every row behind rise-in's backwards fill (30–210ms stagger delays): each
+  // dir tap flashed near-empty before the rows rose back in (board #93,
+  // "先动完动画后，又闪了一下"). Keep-and-swap is the whole point of the dim
+  // rule; the unfold is for the answer that had no predecessor.
   let revealDir = $state('');
+  let revealTimer = null;
   let loadSeq = 0;
   async function loadDir(path, purpose = 'navigate') {
     const my = ++loadSeq; // several callers can navigate concurrently around a
@@ -639,7 +649,14 @@
     try {
       const r = await fsList(path, showHidden);
       if (my !== loadSeq) return;
-      revealDir = path !== cwd ? path : '';
+      revealDir = entries.length ? '' : path;
+      // The atom's contract (motion.md): the class is DROPPED once the
+      // stagger has played, so a row that mounts later — an upload landing,
+      // hidden files toggled on, the next navigation's remount — never rises.
+      if (revealDir) {
+        clearTimeout(revealTimer);
+        revealTimer = setTimeout(() => { revealDir = ''; }, revealMs());
+      }
       entries = r.entries;
       cwd = path;
       ({ view, currentFile } = directoryLoadState({ view, currentFile }, purpose));

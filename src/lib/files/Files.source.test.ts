@@ -27,6 +27,25 @@ test('back retraces the USER\u2019s steps — a history, not a parent walk (boar
   assert.equal(resets, 4, 'the declaration + session switch, cwd follow rule, and navRequest handoff resets');
 });
 
+test('navigation swaps rows atomically; the unfold is for the FIRST fill only (board #93)', () => {
+  // "先动完动画后，又闪了一下，然后才显示好": the per-navigation unfold blanked
+  // every remounted row behind rise-in's backwards fill (30–210ms stagger
+  // delays), so each dir tap flashed near-empty right after the drill/dim
+  // before the rows rose in. DirPicker's rule — keep rows, swap atomically —
+  // reserves the unfold for the first answer, when there is nothing to keep.
+  assert.match(source, /revealDir = entries\.length \? '' : path;/u,
+    'the unfold plays only when the pane had nothing on screen');
+  assert.ok(!source.includes("revealDir = path !== cwd ? path : ''"),
+    'the per-navigation unfold stays retired — it was the flash');
+  assert.match(source, /revealTimer = setTimeout\(\(\) => \{ revealDir = ''; \}, revealMs\(\)\);/u,
+    'the class is dropped after the stagger — a later mount never rises (the atom\u2019s contract)');
+  // Found in the same investigation: the restored-park branch tracked
+  // entries/loading, so an EMPTY directory re-listed itself forever (each
+  // load toggles the deps and re-arms the effect). One shot is the intent.
+  assert.match(source, /if \(cwd && !entries\.length && !loading && !loadSeq\) loadDir\(cwd\);/u,
+    'the restored park lists once — an empty directory is not a retry');
+});
+
 test('an OS drag onto the listing uploads into the CURRENT directory (board #22)', () => {
   // ONE destination rule for every upload entry point — and the DIR is a
   // PARAMETER bound at the gesture, never a live read: navigating away while

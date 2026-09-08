@@ -213,7 +213,10 @@ after 150ms for an uncached room, then `.reveal-tail` on the feed and
 dim-then-reveal) ✓, Projects cards ✓, Agents list, Settings categories on
 first paint. Done 2026-09-04: Sessions (four `.skel` rows in a `.skel-wrap`,
 then `.reveal` on the first fill), Files and DirPicker (rows keyed by path;
-`.reveal` when a DIFFERENT directory lands, nothing on a same-dir refresh),
+`.reveal` on the FIRST fill only, dropped after `revealMs()` — board #93
+retired the per-navigation unfold: remounting under a lingering `.reveal`
+blanked the rows behind the backwards fill and flashed every hop; navigation
+keeps rows and swaps them atomically under the dim),
 Projects (first fill), the Team roster strip (once per room, dropped after
 the stagger so joiners still pop) and TeamTemplates' list on open.
 

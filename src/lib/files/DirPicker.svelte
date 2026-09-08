@@ -8,6 +8,7 @@
   // both. Deliberately directories-only: a chooser, not a second file manager,
   // so it does not grow preview/edit/upload. Callers get an absolute path.
   import Icon from '../ui/Icon.svelte';
+  import { revealMs } from '../ui/motion.ts';
   import { fsList, fsMkdir } from '../core/ws.ts';
   import { t } from '../core/i18n.svelte.ts';
 
@@ -31,6 +32,8 @@
   let cwd = $state('');
   let dirs = $state<DirEntry[]>([]);
   let ready = $state(false); // first answer arrived — before it there is nothing to keep
+  let reveal = $state(false); // wears .reveal for that first answer only, dropped after revealMs()
+  let revealTimer: ReturnType<typeof setTimeout> | undefined;
   let busy = $state(false);
   let error = $state('');
   let listEl = $state<HTMLElement | null>(null);
@@ -57,6 +60,16 @@
       dirs = ((r.entries ?? []) as DirEntry[])
         .filter((e) => e.type === 'dir')
         .sort((a, b) => a.name.localeCompare(b.name));
+      // The unfold is for the FIRST answer only, and the class is dropped
+      // once the stagger has played (motion.md; board #93): the rows are
+      // keyed by path, so a navigation remounts them all — remounting under
+      // a lingering `.reveal` blanked every row behind rise-in's backwards
+      // fill and flashed the list on every hop. Navigation keeps rows and
+      // swaps them atomically; that is this picker's own rule.
+      if (!ready) {
+        reveal = true;
+        revealTimer = setTimeout(() => { reveal = false; }, revealMs());
+      }
       ready = true;
       if (listEl) listEl.scrollTop = 0; // a NEW directory starts at its top
       onnavigate?.(cwd);
@@ -121,7 +134,7 @@
 
   <!-- Rows are keyed by path, so a new directory remounts them all and they
        unfold under the dim (motion.md principle 15). -->
-  <div class="pk-list subtle-scroll" class:busy class:reveal={ready} bind:this={listEl}>
+  <div class="pk-list subtle-scroll" class:busy class:reveal bind:this={listEl}>
     {#if !ready}
       <div class="pk-empty">…</div>
     {:else if !dirs.length}

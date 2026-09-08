@@ -144,11 +144,17 @@ symlink → target / broken link), size and modified through the SAME
 path, a bookmark's or recent file's its path, and a git status row's the
 porcelain code in words ("modified, staged · modified, unstaged",
 `files/git-status.ts`, tested). The native `title` on the file name is gone.
-A DIFFERENT directory's rows unfold: the rows are keyed by path, so a
-navigation remounts them all and `.reveal` (set by `loadDir` only when the
-path changes) staggers them in under the dim that was already there, while a
-same-directory refresh keeps its nodes and animates nothing; DirPicker's
-keyed rows do the same on every browse step. GitPanel's Status/Log tabs are
+The FIRST fill's rows unfold; navigation swaps rows atomically (board #93):
+the rows are keyed by path, so a navigation remounts them all — remounting
+under a lingering `.reveal` blanked every row behind rise-in's backwards
+fill (30–210ms stagger delays), and each dir tap flashed near-empty after
+the drill/dim before the rows rose back in ("先动完动画后，又闪了一下").
+`loadDir` sets the reveal only when there was nothing on screen to keep and
+drops it after `revealMs()` (the atom's contract), so a later mount — an
+upload landing, hidden files toggled on, the next navigation — never rises;
+a same-directory refresh keeps its nodes and animates nothing. DirPicker
+follows the same rule via a one-shot `reveal` flag on its first answer.
+GitPanel's Status/Log tabs are
 the ONE travelling highlight (`use:slideIndicator` + `.slide-pill`): the pill
 glides, the buttons only change colour.
 

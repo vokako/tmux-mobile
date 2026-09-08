@@ -49,3 +49,13 @@ test('the picker can create the folder it is about to pick, and the caller can t
   assert.match(source, /onnavigate\?: \(path: string\) => void;/u);
   assert.doesNotMatch(source, /onPick|onClose|onNavigate/u, 'no second (camelCase) dialect');
 });
+
+test('the unfold plays for the FIRST answer only, then the class drops (board #93)', () => {
+  // The rows are keyed by path, so a hop remounts them all — remounting under
+  // a lingering `.reveal` blanked every row behind rise-in's backwards fill
+  // and flashed the list. Keep-and-swap is this picker's own rule; the unfold
+  // is for the answer that had no predecessor.
+  assert.match(source, /if \(!ready\) \{\s*\n\s*reveal = true;\s*\n\s*revealTimer = setTimeout\(\(\) => \{ reveal = false; \}, revealMs\(\)\);\s*\n\s*\}/u,
+    'one-shot reveal, dropped after the stagger');
+  assert.match(source, /class:busy class:reveal bind:this=\{listEl\}/u, 'the list wears the transient flag, not ready');
+});
