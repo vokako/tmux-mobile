@@ -512,9 +512,9 @@ the consequence ("我发现现在我启动的 kiro claude 啊 这些好像都没
 `spawn::build_prompt` as the FIRST block of every managed agent's system
 prompt — before the agent's own persona (a house rule outranks a role), on
 every backend through the same path each already uses (kiro's agent-config
-`prompt`, claude's `--append-system-prompt`, codex's `developer_instructions`,
-grok likewise). Empty or absent → the prompt is byte-for-byte what it was
-before the feature (a spawn test pins both orders).
+`prompt`, claude's `--append-system-prompt`, codex's isolated
+`CODEX_HOME/AGENTS.md` file, grok likewise). Empty or absent → the prompt is
+byte-for-byte what it was before the feature (a spawn test pins both orders).
 
 Rules and reasons: it is a FILE, not a database row, because it is the
 human's markdown — `cat`, diff, back up, edit with any editor, exactly like a

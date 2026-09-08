@@ -27,8 +27,9 @@ pub fn path() -> PathBuf {
 }
 
 /// A ceiling, because the text rides on claude's `--append-system-prompt`
-/// argument and codex's `developer_instructions` override: a novel there is a
-/// launch line that no longer fits a tmux `send-keys`. 24 KB is ~6k tokens.
+/// argument: a novel there is a launch line that no longer fits a tmux
+/// `send-keys` (codex escaped this class by moving to a CODEX_HOME/AGENTS.md
+/// file, 2026-09-08). 24 KB is ~6k tokens.
 pub const MAX_BYTES: usize = 24 * 1024;
 
 /// The current text, trimmed; empty when the file is absent or blank.

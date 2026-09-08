@@ -177,10 +177,34 @@ fn run_slot_command(project: &Project, slot: &Slot, target: &str) -> Result<(), 
             } else {
                 cmd
             };
-            tmux::send_command(target, &prefixed)
+            // NEVER send a long line via send-keys — tty shims swallow bursts
+            // ≳2KB (team/launch.rs), and a managed recipe can carry a big
+            // identity (claude's --append-system-prompt rides the cmd). Spawn
+            // learned this first and sources a script; the restart replay
+            // broke the same way when codex's ~6 KB line hit the pane half
+            // typed (owner, 2026-09-08: "codex 重启好像有点问题"). Same cure:
+            // stage the line as a script in the agent's home and source THAT.
+            let staged = (slot.kind == SlotKind::Agent)
+                .then(|| stage_relaunch_script(&project.path, &slot.window_name, &prefixed))
+                .flatten();
+            tmux::send_command(target, staged.as_deref().unwrap_or(&prefixed))
         }
         None => Ok(()),
     }
+}
+
+/// Write `full` as a launch script in the managed agent's home and hand back
+/// the short `. <script>` line to type instead. `None` when the window has no
+/// isolated home (an adopted agent slot) or the write fails — the caller then
+/// types the line directly, which is the old behaviour and fine for the short
+/// generic launch lines those windows have.
+fn stage_relaunch_script(project_path: &str, window_name: &str, full: &str) -> Option<String> {
+    let home = super::agents::home_dir(project_path, window_name)?;
+    if !home.is_dir() {
+        return None;
+    }
+    let script = crate::team::backends_shared::write_launch_script(&home, window_name, full).ok()?;
+    Some(format!(". {}", shell_quote(&script.to_string_lossy())))
 }
 
 /// Take a project down: kill the session, keep the declaration.
@@ -326,5 +350,27 @@ mod tests {
         assert!(!tmux::session_exists(&p.session));
         down(&p).unwrap_or_else(|e| panic!("down must be idempotent: {e}"));
         let _ = std::fs::remove_dir_all(&path);
+    }
+
+    /// The restart replay must never send-keys a long line (tty bursts ≳2KB
+    /// get mangled — how codex's ~6 KB relaunch broke, owner 2026-09-08): a
+    /// managed agent's line is staged as a script in its home and SOURCED.
+    /// Windows without an isolated home keep the direct send, unchanged.
+    #[test]
+    fn a_managed_relaunch_is_staged_as_a_script_not_a_burst() {
+        let ws = std::env::temp_dir().join(format!("tmm-stage-{}", uuid::Uuid::new_v4()));
+        let home = ws.join(".tmm").join("agents").join("dev");
+        std::fs::create_dir_all(&home).unwrap();
+        let ws_str = ws.to_string_lossy().to_string();
+        let long_line = format!("TMM_PROJECT=p TMM_AGENT=dev command codex {}", "x".repeat(6000));
+        let staged = stage_relaunch_script(&ws_str, "dev", &long_line).expect("managed home stages");
+        assert!(staged.starts_with(". "), "a source line, not the payload: {staged}");
+        assert!(staged.len() < 200, "short enough for one burst: {}", staged.len());
+        let script_path = staged.trim_start_matches(". ").trim_matches('\'').to_string();
+        let script = std::fs::read_to_string(&script_path).unwrap();
+        assert!(script.contains(&long_line), "the script carries the full line");
+        // No isolated home → no staging, the caller types the line directly.
+        assert!(stage_relaunch_script(&ws_str, "byhand", "kiro-cli chat").is_none());
+        std::fs::remove_dir_all(&ws).ok();
     }
 }

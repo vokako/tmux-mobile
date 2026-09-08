@@ -1286,7 +1286,17 @@ fn render_codex(
     } else {
         format!("{}\n\n{}", system_prompt, crate::team::skills::skills_index_text(skills))
     };
-    config_args.push(shared::codex_config_override("developer_instructions", Value::String(full_prompt)));
+    // The prompt is a FILE, not a launch argument (owner, 2026-09-08: "能类似
+    // 通过 kiro 那样一个文件注入进去吗…这样更优雅一些"). codex reads the
+    // global `AGENTS.md` from CODEX_HOME on every start, and this home is
+    // ISOLATED — ours to write, never the user's (config.toml here is a
+    // symlink into the user's real home; AGENTS.md is deliberately not
+    // inherited). The old `-c developer_instructions=…` override put ~6 KB on
+    // the launch line, which spawn survives (it sources a script) but the
+    // restart replay typed into the pane — and a tty burst ≳2KB is exactly
+    // what send-keys mangles (team/launch.rs). A restart also re-materializes
+    // this file (refresh_agent), so the text stays current.
+    std::fs::write(codex_home.join("AGENTS.md"), &full_prompt).map_err(|e| e.to_string())?;
     std::fs::write(
         codex_home.join("hooks.json"),
         serde_json::to_vec_pretty(&json!({
@@ -2143,6 +2153,18 @@ hooks = [ { type = "command", command = "/opt/guard.sh" } ]
             // The prompt does NOT teach `tmm mcp` — the CLI door is a SKILL
             // an agent opts into, never the native path (owner, 2026-08-28).
             assert!(!prompt.contains("tmm mcp"), "prompt must not teach the MCP CLI");
+            if backend == "codex" {
+                // The prompt is a FILE in the isolated CODEX_HOME (owner,
+                // 2026-09-08), not a launch argument: the ~6 KB
+                // developer_instructions override made the recipe line bigger
+                // than a tty can take in one send-keys burst (≳2KB), which is
+                // exactly how the restart replay mangled it. The launch line
+                // must stay under that budget.
+                let agents_md = std::fs::read_to_string(dir.join("codex").join("AGENTS.md")).unwrap();
+                assert_eq!(agents_md, prompt, "the whole prompt lands in AGENTS.md");
+                assert!(!r.cmd.contains("developer_instructions"), "{}", r.cmd);
+                assert!(r.cmd.len() < 2000, "launch line must fit one send-keys burst: {} bytes", r.cmd.len());
+            }
             if backend == "claude" {
                 // The isolated home is claude's KIRO_HOME (measured on claude
                 // 2.1.239: CLAUDE_CONFIG_DIR relocates state AND the user
