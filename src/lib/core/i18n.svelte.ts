@@ -21,6 +21,17 @@ export function setLocale(l: 'en' | 'zh') {
   applyDocLang(l);
 }
 
+/** CONTENT language for a piece of user/agent text (board #97, round two):
+ * a Chinese message in an ENGLISH UI still rendered Japanese-variant Han
+ * (骨/直/门…), because the document lang says `en` and the glyph variant of a
+ * fallback face follows the nearest lang. Content that contains Han is
+ * therefore tagged itself — `lang={hanLang(text)}` — independent of the UI
+ * language. SC is this product's Han default; `undefined` leaves non-Han
+ * text untagged so the attribute only appears where it says something. */
+export function hanLang(s: string): 'zh-CN' | undefined {
+  return /\p{Script=Han}/u.test(s) ? 'zh-CN' : undefined;
+}
+
 const msgs: Record<string, Record<string, string>> = {
   en: {
     sessions: 'Sessions',

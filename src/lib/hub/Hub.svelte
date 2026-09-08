@@ -26,7 +26,7 @@
   import 'katex/dist/katex.min.css';
   import Icon from '../ui/Icon.svelte';
   import { tick as settled } from 'svelte';
-  import { t, i18n } from '../core/i18n.svelte.ts';
+  import { t, i18n, hanLang } from '../core/i18n.svelte.ts';
   import {
     projectList, projectUp, projectDown, projectDelete, projectArchive, projectCreate, projectRename, listSessionsWithPanes,
     hubPost, hubCommand, modelsList, hubLog, hubRooms, hubAgents, fsMkdir, fsUpload, hubSpawn, hubSpawnTeam, teamsList, hubAgentStop, hubAgentRestart, hubActivity, hubAgentRemove, hubAgentInterrupt, registryList,
@@ -2969,7 +2969,7 @@
                          "entered this state", not "sent to working". -->
                     <div class="m-head">{m.from}{#if note}<span class="m-note-state" style:color={noteStateColor(note.state)}><span class="mns-dot" aria-hidden="true"></span>{stateLabel(note.state)}</span>{/if}</div>
                   {/if}
-                  <div class="m-body">
+                  <div class="m-body" lang={hanLang(m.body ?? '')}>
                     {#if parts.text}
                       {#if rawOpen === key}
                         <pre class="raw">{m.body}</pre>

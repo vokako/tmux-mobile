@@ -193,6 +193,16 @@ test('the drawer pills show AGENT windows; the rest fold behind +N (board #92)',
     'entering a room folds the bar back');
 });
 
+test('a Han-bearing bubble declares its OWN language (board #97, round two)', () => {
+  // A Chinese message in an ENGLISH UI drew Japanese-variant glyphs (骨/直/
+  // 门…): glyph variants of a fallback face follow the nearest lang, and the
+  // document said `en`. The content tags itself, UI language notwithstanding.
+  assert.match(source, /<div class="m-body" lang=\{hanLang\(m\.body \?\? ''\)\}>/u,
+    'the bubble body carries hanLang of its own text');
+  assert.match(source, /import \{ t, i18n, hanLang \} from '\.\.\/core\/i18n\.svelte\.ts';/u,
+    'the ONE tagger from i18n — no second Han detector');
+});
+
 test('selecting an agent retargets an OPEN terminal partition (board #91)', () => {
   // Choosing who you talk to is also choosing whose pane you are watching:
   // when the drawer's terminal partition is open, clicking an agent card (and
@@ -917,7 +927,7 @@ test('a tapped bubble reveals Copy/Raw under it — and still never an app conte
   // 消息气泡下边的这两个按钮，不要出现右键那种选项卡" — the tap-revealed
   // .m-acts row (Copy / Raw) RETURNS, the ContextMenu card stays retired.
   const bubble = source.slice(source.indexOf('<div class="bubble md"'),
-    source.indexOf('<div class="m-body">'));
+    source.indexOf('<div class="m-body"'));
   // A plain tap toggles the row — after the one-shot compatibility-click
   // guard (a long-press's echo click) and the live-selection fallback.
   assert.match(bubble,

@@ -65,6 +65,16 @@ FALLBACK resolution rather than the stacks' intent:
   `document.documentElement.lang` (`zh-CN`/`en`) at init and on every
   `setLocale` — the module stays node-loadable behind a `typeof document`
   guard, and `i18n.test.ts` pins the behaviour.
+
+**Round two (same day): the CONTENT tags itself.** The document-lang fix
+only covers a CHINESE UI — the owner runs the ENGLISH UI, and a Chinese
+message inside it still drew 骨 with the Japanese variant, because the
+bubble's nearest lang was the document's `en`. Han-bearing user/agent text
+now carries its own language: `hanLang(text)` (i18n.svelte.ts, pure,
+`\p{Script=Han}` test, unit-tested) returns `zh-CN`/`undefined`, and the
+chat bubble body (`.m-body`) and Board note text (`.n-text`) render
+`lang={hanLang(...)}`. SC is this product's Han default; other surfaces
+adopt the same tagger if the complaint reaches them.
 - The UI/display stacks named only PingFang (macOS), YaHei (Windows) and
   Noto SC; a Linux desktop or non-Google Android often carries the Adobe
   naming instead. `'Source Han Sans SC', 'WenQuanYi Micro Hei'` now sit at

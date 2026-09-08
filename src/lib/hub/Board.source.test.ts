@@ -790,7 +790,7 @@ test('a Board note long-press stays native and never opens its Copy overlay (boa
   assert.match(source, /import \{ selectionClickGuard \} from '\.\.\/ui\/native-context-menu\.ts';/u);
   assert.match(source, /const noteSelectionClicks = selectionClickGuard\(\);/u);
   assert.match(source,
-    /<div class="n-text" oncontextmenu=\{\(e\) => \{ noteSelectionClicks\.mark\(e, i\); \}\} onclick=\{\(\) => toggleNoteActs\(i\)\}>/u,
+    /<div class="n-text" lang=\{hanLang\(n\.body\)\} oncontextmenu=\{\(e\) => \{ noteSelectionClicks\.mark\(e, i\); \}\} onclick=\{\(\) => toggleNoteActs\(i\)\}>/u,
     'the note only marks contextmenu; it never preventDefaults the native hold');
   const toggle = source.match(/function toggleNoteActs\(i: number\) \{[\s\S]*?\n  \}/u)?.[0] ?? '';
   assert.match(toggle, /if \(noteSelectionClicks\.consume\(i\)\) return;/u,

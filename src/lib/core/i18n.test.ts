@@ -6,7 +6,17 @@ import assert from 'node:assert/strict';
 (globalThis as any).document = { documentElement: { lang: 'en' } };
 // Node >= 21 ships a read-only global navigator with a real language.
 
-const { i18n, t, setLocale } = await import('./i18n.svelte.ts');
+const { i18n, t, setLocale, hanLang } = await import('./i18n.svelte.ts');
+
+test('content that contains Han tags itself zh-CN, whatever the UI speaks (board #97)', () => {
+  // A Chinese message in an ENGLISH UI rendered Japanese-variant glyphs
+  // (骨/直/门…) — the document lang said en, and a fallback face picks its
+  // regional variant from the nearest lang. The content carries its own.
+  assert.equal(hanLang('骨头汤怎么做'), 'zh-CN');
+  assert.equal(hanLang('mixed 中文 and english'), 'zh-CN');
+  assert.equal(hanLang('plain english only'), undefined);
+  assert.equal(hanLang(''), undefined);
+});
 
 test('the document speaks the UI\u2019s language — SC glyphs need zh-CN (board #97)', () => {
   // index.html ships lang="en"; Han-unified codepoints rendered by a fallback

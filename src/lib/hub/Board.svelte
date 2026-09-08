@@ -10,7 +10,7 @@
   import { projectAgeLabel, sortRows } from '../projects/projects.ts';
   import { boardStatusColor } from './hub.ts';
   import type { ProjectRow } from '../projects/projects.ts';
-  import { t } from '../core/i18n.svelte.ts';
+  import { t, hanLang } from '../core/i18n.svelte.ts';
   import { untrack } from 'svelte';
   import Icon from '../ui/Icon.svelte';
   import Select from '../ui/Select.svelte';
@@ -783,7 +783,7 @@
                    BUBBLE's corner, never the full row's far right. -->
               <div class="n-wrap">
                 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-                <div class="n-text" oncontextmenu={(e) => { noteSelectionClicks.mark(e, i); }} onclick={() => toggleNoteActs(i)}>{n.body.trim()}</div>
+                <div class="n-text" lang={hanLang(n.body)} oncontextmenu={(e) => { noteSelectionClicks.mark(e, i); }} onclick={() => toggleNoteActs(i)}>{n.body.trim()}</div>
                 {#if acts.open === i}
                   <div class="m-acts appear">
                     <button onclick={() => copyNote(n.body)}>
