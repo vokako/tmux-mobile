@@ -159,14 +159,22 @@ where
     // closed) backend connection, surfacing as intermittent 502s on the
     // next download.
     let range_start = parse_range_start(&req).filter(|&s| s > 0 && s < size);
+    // Images declare their REAL type: a chat `<img>` streams through /dl, and
+    // SVG never renders from `application/octet-stream` (browsers do not
+    // sniff SVG — the dashed fallback frame in every bubble, 2026-09-08).
+    // `Content-Disposition: attachment` stays on everything, so a top-level
+    // navigation still downloads instead of rendering — an SVG's scripts
+    // never execute from an <img> context, and never get a document here.
+    // Everything non-image keeps octet-stream: downloads, not documents.
+    let ctype = image_content_type(&name);
     let header = match range_start {
         Some(start) => format!(
-            "HTTP/1.1 206 Partial Content\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"{}\"\r\nContent-Length: {}\r\nContent-Range: bytes {}-{}/{}\r\nAccept-Ranges: bytes\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges\r\nConnection: close\r\n\r\n",
-            name, size - start, start, size - 1, size
+            "HTTP/1.1 206 Partial Content\r\nContent-Type: {}\r\nContent-Disposition: attachment; filename=\"{}\"\r\nContent-Length: {}\r\nContent-Range: bytes {}-{}/{}\r\nAccept-Ranges: bytes\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges\r\nConnection: close\r\n\r\n",
+            ctype, name, size - start, start, size - 1, size
         ),
         None => format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"{}\"\r\nContent-Length: {}\r\nAccept-Ranges: bytes\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges\r\nConnection: close\r\n\r\n",
-            name, size
+            "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Disposition: attachment; filename=\"{}\"\r\nContent-Length: {}\r\nAccept-Ranges: bytes\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges\r\nConnection: close\r\n\r\n",
+            ctype, name, size
         ),
     };
     if stream.write_all(header.as_bytes()).await.is_err() { return; }
@@ -195,9 +203,40 @@ where
     let _ = stream.flush().await;
 }
 
+/// The Content-Type for /dl: image extensions get their real type so a chat
+/// `<img>` can render them (SVG hard-requires `image/svg+xml`; bitmaps are
+/// sniffed but say the truth anyway). Everything else stays octet-stream —
+/// /dl serves DOWNLOADS, not documents (html/js/css must never render off
+/// this endpoint: same-origin + a token-signed URL would be an XSS gift).
+fn image_content_type(name: &str) -> &'static str {
+    let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        _ => "application/octet-stream",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn images_declare_their_real_type_everything_else_stays_a_download() {
+        // SVG is the load-bearing case: an <img> never renders it from
+        // octet-stream (the dashed fallback in every chat bubble, 2026-09-08).
+        assert_eq!(image_content_type("harness-layers.svg"), "image/svg+xml");
+        assert_eq!(image_content_type("SHOT.PNG"), "image/png");
+        assert_eq!(image_content_type("a.b.jpeg"), "image/jpeg");
+        // Documents and executables must never render off /dl.
+        assert_eq!(image_content_type("index.html"), "application/octet-stream");
+        assert_eq!(image_content_type("report.pdf"), "application/octet-stream");
+        assert_eq!(image_content_type("noext"), "application/octet-stream");
+    }
 
     #[test]
     fn range_header_open_ended_parses() {
