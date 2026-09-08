@@ -3,11 +3,20 @@
 // The rule that must not rot: the SC families sit BEFORE the system-font
 // cascade. `-apple-system` does not "fall through" for Han — the system font
 // slot resolves CJK through the OS's own language-preference cascade (page
-// lang notwithstanding), so with Japanese anywhere in the system preferences
-// a Chinese bubble drew 骨/感 in their Japanese variants while the composer
-// (IME/form path) drew them right. With the named SC families ahead of it,
-// Han deterministically hits PingFang SC / YaHei / Noto SC by NAME; latin
-// still resolves at the bundled Inter/Space Grotesk in front.
+// lang notwithstanding). With the named SC families ahead of it, Han
+// deterministically hits PingFang SC / YaHei / Noto SC by NAME; latin still
+// resolves at the bundled Inter/Space Grotesk in front.
+//
+// Round 5 found the bug the owner actually saw (#97, 2026-09-08): with both
+// surfaces already drawing Han in PingFang SC (DevTools "Rendered Fonts"),
+// bubbles still showed centred punctuation and Traditional 骨/感 while the
+// composer was right. The one difference left was body's raw
+// `font-feature-settings: 'cv05' 1, 'cv08' 1` (Inter's l/I alternates): a
+// cvNN tag means whatever each font says, PingFang SC answers 5 and 8 with
+// its Traditional forms, and a <textarea>'s UA `font:` shorthand resets the
+// property — which is why the composer was immune. Font-specific features
+// are therefore declared in @font-feature-values, scoped to the family, and
+// a raw font-feature-settings is forbidden in the codebase.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -78,4 +87,28 @@ test('no component spells its own mono stack — data surfaces wear var(--font-m
   }
   const rules = appCss.replace(/\/\*[\s\S]*?\*\//gu, '').replace(cssVar('--font-mono'), '');
   assert.doesNotMatch(rules, /ui-monospace|Menlo/u, 'app.css rules use the var');
+});
+
+test("Inter's alternates are family-scoped; no raw font-feature-settings anywhere (#97 round 5)", async () => {
+  assert.match(appCss, /@font-feature-values 'Inter Variable' \{\s*@character-variant \{ disambiguated-l: 5; disambiguated-i: 8; \}/u);
+  assert.match(appCss, /font-variant-alternates: character-variant\(disambiguated-l, disambiguated-i\)/u);
+  // The UA `font:` shorthand on form controls resets font-variant-alternates;
+  // inputs opt back in — safe now that the feature can only reach Inter.
+  assert.match(appCss, /input, textarea, select \{ font-family: inherit; font-variant-alternates: inherit; \}/u);
+  const { readdir } = await import('node:fs/promises');
+  const root = new URL('../../', import.meta.url);
+  const walk = async (dir: URL): Promise<string[]> => {
+    const out: string[] = [];
+    for (const e of await readdir(dir, { withFileTypes: true })) {
+      const u = new URL(e.name + (e.isDirectory() ? '/' : ''), dir);
+      if (e.isDirectory()) out.push(...(await walk(u)));
+      else if (/\.(svelte|css|ts)$/u.test(e.name) && !e.name.endsWith('.test.ts')) out.push(u.pathname);
+    }
+    return out;
+  };
+  for (const f of await walk(root)) {
+    // Comments may name the property (this rule's own rationale does); rules may not.
+    const src = (await readFile(f, 'utf8')).replace(/\/\*[\s\S]*?\*\//gu, '').replace(/^\s*\/\/.*$/gmu, '');
+    assert.doesNotMatch(src, /font-feature-settings/u, `${f.slice(f.indexOf('/src/'))}: a cvNN/ssNN tag is font-specific — declare it in @font-feature-values for ONE family`);
+  }
 });

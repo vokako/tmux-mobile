@@ -20,7 +20,9 @@ quantized them to 500/700, which is part of why the UI read as undesigned.
 One face, not two: a display face for titles was considered and dropped
 ("字体选择不要太多"). Body text also enables Inter's `cv05`/`cv08`
 character variants (disambiguated `l`/`I` — this UI is full of ids and
-hashes); fonts without the features ignore them.
+hashes) — through `@font-feature-values 'Inter Variable'` +
+`font-variant-alternates`, never a raw `font-feature-settings`: see "The
+feature that was the bug" below for the two weeks that cost.
 
 ## The display face: Space Grotesk Variable, the identity layer (2026-08-25)
 
@@ -83,8 +85,9 @@ culprit is `-apple-system`: the system-font slot does not "fall through"
 for Han — it resolves CJK through the OS's own language-preference cascade
 (page lang notwithstanding), so with Japanese preferred anywhere in the
 system settings the page text landed on JP shapes before CSS ever consulted
-'PingFang SC' further down the stack. The composer differed because the
-form/IME path picks by input language. Fix: the SC families moved AHEAD of
+'PingFang SC' further down the stack. (The composer's immunity was read at
+the time as "the form/IME path picks by input language"; round five found
+the real reason — see below.) Fix: the SC families moved AHEAD of
 `-apple-system`/`BlinkMacSystemFont`/'Segoe UI' in both stacks (latin still
 resolves at the bundled Inter / Space Grotesk in front), plus 'Hiragino
 Sans GB' and Adobe's 'Source Han Sans CN' naming for older macs and Adobe
@@ -106,6 +109,49 @@ surfaces each role paints is explained by the row's hover card
 never a persistent subtitle) and the picker's aria-label; the terminal
 row's label is now "Terminal font"/"终端字体", not the ambiguous "Font
 name"/"字体".
+
+## The feature that was the bug: `font-feature-settings` reaches every font (board #97, round 5, 2026-09-08)
+
+After rounds one to four both surfaces drew Han in **PingFang SC** (the
+owner read it off DevTools → Computed → Rendered Fonts for the bubble AND the
+composer) and the bubble was still wrong — and now visibly so in a
+side-by-side: every 中文 punctuation mark in the bubble sat CENTRED in its
+box (the Taiwan/Hong Kong convention) while the composer's sat bottom-left
+(mainland), and 骨/感 wore their Traditional shapes. Same font file, two
+sets of forms: that can only be a feature switch.
+
+The switch was ours. Since 2026-08-25 `body` carried
+`font-feature-settings: 'cv05' 1, 'cv08' 1` for Inter's l/I alternates. A
+`cvNN`/`ssNN` tag has NO cross-font meaning — each font defines what its
+numbered Character Variants do — and `font-feature-settings` applies to
+every font that draws a glyph in the element, fallbacks included. PingFang
+SC defines 5 and 8, and answers them with its Traditional forms. The
+composer was immune for a reason that had nothing to do with IMEs: the UA
+stylesheet gives `textarea`/`input` a `font: -webkit-small-control`
+shorthand, and the `font` shorthand resets `font-feature-settings` to
+normal; app.css only re-inherited `font-family`. Turning the one line off
+(with Inter restored) fixed every bubble on the owner's Mac in one refresh
+("哇 现在好了，这可是一个深藏的 bug").
+
+The fix keeps the alternates and makes them unable to reach anything but
+Inter: app.css declares `@font-feature-values 'Inter Variable' {
+@character-variant { disambiguated-l: 5; disambiguated-i: 8; } }` and body
+asks for `font-variant-alternates: character-variant(disambiguated-l,
+disambiguated-i)`. `@font-feature-values` is keyed by family, so the
+feature is applied only to glyph runs actually drawn by Inter Variable;
+PingFang / YaHei / Noto SC never see the numbers. Inputs opt back in
+(`font-variant-alternates: inherit`) — safe now. Chrome 111+, Safari,
+Firefox support it; an older WebView simply loses the l/I tails.
+
+**Rule (owner, 2026-09-08: "你一定记好，以后我们开发要注意"):** a raw
+`font-feature-settings` is forbidden in the codebase — `fonts.source.test.ts`
+scans every `.svelte`/`.css`/`.ts`. A font-specific feature (`cvNN`, `ssNN`,
+`salt`, anything whose meaning the font decides) goes in
+`@font-feature-values` for ONE named family; a generic typographic need uses
+the `font-variant-*` property that names it (`font-variant-numeric:
+tabular-nums`, `font-variant-ligatures`), which every font interprets the
+same way. And when a glyph "looks foreign" while Rendered Fonts names the
+right file, look for a feature, not a font.
 
 ## Context
 

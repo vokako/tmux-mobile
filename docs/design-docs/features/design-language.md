@@ -22,6 +22,13 @@ this file is the contract. `src/lib/ui/tokens.source.test.ts` and
   `--font-display` (Space Grotesk Variable) = identity: page titles, `.side-h`
   headers, names, the brand, and every `button` that is chrome.
   `--font-mono` = data: terminal, code, paths, ids, readings, window chips.
+  Every mono surface wears `var(--font-mono)` — no private `ui-monospace`
+  stack — and no rule anywhere sets a raw `font-feature-settings`: a
+  `cvNN`/`ssNN` tag means something different in every fallback font, and
+  Inter's l/I alternates on `body` made PingFang SC draw Traditional
+  punctuation and glyphs in every bubble for two weeks (#97; fonts.md "The
+  feature that was the bug"). Font-specific features live in
+  `@font-feature-values` for one family; generic needs use `font-variant-*`.
   A data-carrying button (file row, dropdown value) opts back out of the
   button rule with an explicit font-family.
 - **Radius scale**: `--ui-radius-control 10` (buttons, inputs, selects) ·

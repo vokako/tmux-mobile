@@ -150,15 +150,28 @@ html[data-theme="light"] {
 
 /* ─── Base elements ────────────────────────────────────────────────────── */
 
+/* Inter's character-variant alternates, the quiet half of the "科技感":
+   cv05/cv08 give l and I their disambiguating tails/serifs (this app is full
+   of ids, flags and hashes). They are declared HERE, scoped to the family,
+   and referenced by name from body — NEVER as a raw `font-feature-settings`.
+   A cvNN/ssNN tag means whatever each font says it means: a raw
+   `font-feature-settings: 'cv05' 1, 'cv08' 1` on body reached every font in
+   the run, and PingFang SC answered those two numbers with its Traditional
+   forms — centred punctuation, 骨/感 in their non-mainland shapes — in every
+   bubble while the composer (whose UA `font:` shorthand resets the property)
+   stayed correct. Board #97, 2026-09-08, three rounds of stack surgery
+   before the culprit. @font-feature-values applies only to glyph runs drawn
+   by the named family, so the fallbacks — CJK included — are untouched by
+   construction. tnum is NOT set globally — columns that need it ask for
+   font-variant-numeric: tabular-nums locally. */
+@font-feature-values 'Inter Variable' {
+  @character-variant { disambiguated-l: 5; disambiguated-i: 8; }
+}
+
 body {
   margin: 0;
   font-family: var(--font-ui);
-  /* Inter's character-variant alternates, the quiet half of the "科技感":
-     cv05/cv08 give l and I their disambiguating tails/serifs (this app is
-     full of ids, flags and hashes), tnum is NOT set globally — columns that
-     need it (times, counters) already ask for tabular-nums locally. A font
-     without these features ignores them, so the fallbacks lose nothing. */
-  font-feature-settings: 'cv05' 1, 'cv08' 1;
+  font-variant-alternates: character-variant(disambiguated-l, disambiguated-i);
   background: var(--bg);
   color: var(--text);
   overflow: hidden;
@@ -181,7 +194,7 @@ input, textarea { user-select: text; -webkit-user-select: text; }
    system), so without this every <button>/<input>/<select> would ignore
    --font-ui. Inherit it; the few controls that must be monospace (command
    inputs, path fields, code editor) set --font-mono explicitly themselves. */
-input, textarea, select { font-family: inherit; }
+input, textarea, select { font-family: inherit; font-variant-alternates: inherit; }
 /* A button is CHROME, so it speaks the display face (owner, 2026-08-25:
    "按钮等字体都要特别字体，总之就三类"): the three roles are --font-ui for
    content (prose, inputs), --font-display for chrome (titles, buttons,
